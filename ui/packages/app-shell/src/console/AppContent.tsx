@@ -40,6 +40,7 @@ import { useSignedInUserLocale } from '../hooks/useUserLocale.js';
 import { resolveRecordFormTarget, resolveRecordFormModalLayout, resolveFormViewChrome, selectRecordFormView, resolveNavigateCreateUrl, resolveNavigateEditUrl, resolvePostCreateTarget, recordFormCreateValues, readRecordFormCreateValues, RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.js';
 import { deriveRecordSurface, deriveRecordFlowSurface } from '@object-ui/plugin-view';
 import { isPhoneViewportNow } from '../hooks/usePhoneViewport.js';
+import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import { RECORD_DRAWER_PARAM, RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM } from '../urlParams.js';
 import { appAddressSegment, appRouteSegment, canonicalAppPathname, matchAppBySegment } from '../utils/appRoute.js';
 import { resolveHref, type NavTemplateContext } from '@object-ui/layout';
@@ -1006,11 +1007,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // (`recordSaveMessage` in `@object-ui/i18n`), read through the object being
   // saved.
   const recordSaveMessage = useCallback((saved: any): string => buildRecordSaveMessage(t, {
-    label: formObjectDef ? objectLabel(formObjectDef as any) : t('common.record', { defaultValue: 'Record' }),
+    label: formObjectDef ? servedObjectLabel(formObjectDef, language, objectLabel) : t('common.record', { defaultValue: 'Record' }),
     objectDef: formObjectDef,
     saved,
     mode: editingRecord ? 'edit' : 'create',
-  }), [editingRecord, formObjectDef, objectLabel, t]);
+  }), [editingRecord, formObjectDef, objectLabel, language, t]);
 
   // objectstack-ai/objectstack#27999 — the open record form reports its own
   // write's advisory warnings: while the overlay is open, the write-warning
@@ -1102,7 +1103,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
       const originPath = `${location.pathname}${originQs ? `?${originQs}` : ''}`;
       // The origin is a list of the object's records, so the back link names
       // it with the plural, as ObjectView's row navigation does (objectui#11733).
-      const originLabel = objectPluralLabel(currentObjectDef);
+      const originLabel = servedObjectPluralLabel(currentObjectDef, language, objectPluralLabel);
       navigate(target.url, {
         replace: true,
         state: originLabel ? { from: { pathname: originPath, label: originLabel } } : undefined,
@@ -1110,7 +1111,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
       return;
     }
     navigate(target.url, { replace: true });
-  }, [handleCrudSuccess, recordSaveMessage, isChildFormTask, editingRecord, currentObjectDef, appSegment, location.pathname, navigate, closeRecordForm, objectPluralLabel, formObjectDef?.name, storedRequireMfa, t]);
+  }, [handleCrudSuccess, recordSaveMessage, isChildFormTask, editingRecord, currentObjectDef, appSegment, location.pathname, navigate, closeRecordForm, objectPluralLabel, language, formObjectDef?.name, storedRequireMfa, t]);
 
   // Track recent items on route change. The hook matches `appName` against the
   // pathname's app segment, so it takes the ROUTE SEGMENT: handed
@@ -1746,8 +1747,8 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                   editingRecord ? 'edit' : 'create',
                 ),
                 title: editingRecord
-                  ? t('form.editTitle', { object: objectLabel(formObjectDef as any) })
-                  : t('form.createTitle', { object: objectLabel(formObjectDef as any) }),
+                  ? t('form.editTitle', { object: servedObjectLabel(formObjectDef, language, objectLabel) })
+                  : t('form.createTitle', { object: servedObjectLabel(formObjectDef, language, objectLabel) }),
                 ...(organizationMfaNotice ? { description: organizationMfaNotice } : {}),
                 open: isDialogOpen,
                 onOpenChange: (open: boolean) => { if (!open) closeRecordForm(); },

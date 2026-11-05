@@ -97,6 +97,7 @@ import {
 import { shortcutKeycaps, useAdvertiseShortcut, type AdvertisedShortcut, type ShortcutChord, type ShortcutLabelTranslate } from '../chrome/advertisedShortcuts.js';
 import { nativeShare } from '@object-ui/mobile';
 import { useActionModal } from '../hooks/useActionModal.js';
+import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import { resolveCascadeDeleteLabels } from '../hooks/useObjectActions.js';
 import { useRecentItems } from '../hooks/useRecentItems.js';
 import { useObjectPresence } from '../hooks/useObjectPresence.js';
@@ -2275,9 +2276,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       // A related list is a list of the child's records, so the multi-FK
       // title it composes names it with the plural, as the single-FK title
       // below does (objectui#11733).
-      listLabel: (child) => objectPluralLabel({ name: child.name, label: child.label || child.name, pluralLabel: child.pluralLabel }),
+      listLabel: (child) => servedObjectPluralLabel(child, language, objectPluralLabel, child.name),
     }),
-    [objectDef, objects, canOnObject, permissionsLoaded, objectPluralLabel],
+    [objectDef, objects, canOnObject, permissionsLoaded, objectPluralLabel, language],
   );
 
   // [objectui#12244] A write to a CHILD re-reads this record, in place.
@@ -4076,7 +4077,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       // records, so it is named as that object's list page is (objectui#11733).
       const localizedTitle = titleOverride
         || (childObjectDef
-          ? objectPluralLabel({ name: childObjectDef.name, label: childObjectDef.label || childLabel, pluralLabel: childObjectDef.pluralLabel })
+          ? servedObjectPluralLabel(childObjectDef, language, objectPluralLabel, childLabel)
           : childLabel);
       return {
         title: localizedTitle,
@@ -4149,7 +4150,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // the panel's headline is the pending one. (The decision actions no longer
   // ride this list at all — objectui#3055 moved them to the declared-action
   // bar, which reads the pending row directly.)
-  }, [objectDef?.name, childRelations, t, objectPluralLabel, objects, approvals.available, approvals.pendingRequest, approvals.requests, user?.id]);
+  }, [objectDef?.name, childRelations, t, objectPluralLabel, language, objects, approvals.available, approvals.pendingRequest, approvals.requests, user?.id]);
   // objectstack#30344 — whether this record page shows the record's field
   // history: the history gate, AND this reader's audit read answered. A read
   // the server refuses (or that fails) answers nothing, so the stream offers
@@ -4217,7 +4218,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const phoneBackClass =
     'inline-flex min-h-[44px] min-w-0 items-center gap-0.5 rounded-md py-1 pr-2 text-sm font-medium text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
   const phoneBack = phonePage ? (() => {
-    const plural = objectDef ? objectPluralLabel(objectDef) : objectName;
+    const plural = objectDef ? servedObjectPluralLabel(objectDef, language, objectPluralLabel) : objectName;
     const parent = pageTrail.length > 0 ? pageTrail[pageTrail.length - 1] : undefined;
     const label = parent
       ? parent.t || shortRecordId(parent.i)
@@ -4382,7 +4383,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           </div>
           <EmptyTitle>
             {t('empty.recordAccessDenied', {
-              object: objectLabel({ name: objectName!, label: objectDef?.label || objectName! }),
+              object: servedObjectLabel({ name: objectName!, label: objectDef?.label }, language, objectLabel, objectName!),
               defaultValue: 'You don’t have access to {{object}} records',
             })}
           </EmptyTitle>
@@ -4643,14 +4644,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           const deleteDeps = {
             objectName: objectName!,
             t,
-            label: objectLabel({ name: objectName!, label: objectDef?.label || objectName! }),
+            label: servedObjectLabel({ name: objectName!, label: objectDef?.label }, language, objectLabel, objectName!),
             objectDef,
           };
           const deleteTarget =
             (readablePageRecord as Record<string, unknown> | null | undefined) ?? { id: pureRecordId };
           // objectstack#28472 — and names the objects the delete cascades into.
           const cascadeLabels = await resolveCascadeDeleteLabels(dataSource, objectName!, (name) =>
-            objectLabel(objects.find((o: any) => o.name === name) ?? { name, label: name }));
+            servedObjectLabel(objects.find((o: any) => o.name === name) ?? { name }, language, objectLabel, name));
           const copy = recordDelete.confirmCopy({ ...deleteDeps, cascadeLabels }, { record: deleteTarget });
           // objectui#11001 — asked through this page's own confirm runtime,
           // the in-app `ActionConfirmDialog` the list view's delete asks
@@ -4830,14 +4831,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           return (
             <span key={`${index}:${entry.o}:${entry.i}`} className="flex min-w-0 items-center gap-1">
               <Link to={buildRecordTrailHref(appName ? `/apps/${appName}` : '', entry, pageTrail.slice(0, index))} className={crumbClass}>
-                {entryDef ? objectLabel(entryDef) : entry.o}{' '}
+                {entryDef ? servedObjectLabel(entryDef, language, objectLabel) : entry.o}{' '}
                 <span className="font-medium text-foreground">{entry.t || shortRecordId(entry.i)}</span>
               </Link>
               <ChevronRight className="h-3 w-3 shrink-0" aria-hidden="true" />
             </span>
           );
         })}
-        <span className="truncate" aria-current="page">{objectDef ? objectLabel(objectDef) : objectName}</span>
+        <span className="truncate" aria-current="page">{objectDef ? servedObjectLabel(objectDef, language, objectLabel) : objectName}</span>
       </nav>
     </>
   ) : (
@@ -4847,7 +4848,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       data-testid="record-page-crumb"
     >
       {(() => {
-        const plural = objectDef ? objectPluralLabel(objectDef) : objectName;
+        const plural = objectDef ? servedObjectPluralLabel(objectDef, language, objectPluralLabel) : objectName;
         const objectCrumbClass = cn(crumbClass, 'shrink-0');
         if (pageReturn.toList) {
           return (
@@ -4896,7 +4897,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         const entryDef = objectDefOf(entry.o);
         const face = (
           <>
-            {entryDef ? objectLabel(entryDef) : entry.o}{' '}
+            {entryDef ? servedObjectLabel(entryDef, language, objectLabel) : entry.o}{' '}
             <span className="font-medium text-foreground">{entry.t || shortRecordId(entry.i)}</span>
           </>
         );
@@ -4914,7 +4915,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           </span>
         );
       })}
-      <span className="shrink-0" aria-current="page">{objectDef ? objectLabel(objectDef) : objectName}</span>
+      <span className="shrink-0" aria-current="page">{objectDef ? servedObjectLabel(objectDef, language, objectLabel) : objectName}</span>
     </nav>
   ) : null;
   const pageBar = embedded ? null : phonePage ? (

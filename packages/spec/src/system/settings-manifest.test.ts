@@ -303,6 +303,46 @@ describe('Specifier.valueDomain — a declared standard domain is the boundary, 
   });
 });
 
+describe('Specifier.confirmOffText — a toggle asks before it goes off (#30418, ruling 6657805240)', () => {
+  const toggle = { type: 'toggle', key: 'email_password_enabled', label: 'Enable email/password login' } as const;
+
+  it('is accepted on a toggle and keeps its text', () => {
+    const parsed = SpecifierSchema.parse({ ...toggle, confirmOffText: 'People will need another way in.' });
+    expect(parsed.confirmOffText).toBe('People will need another way in.');
+  });
+
+  it('accepts an inline locale map, as every other I18nLabel does', () => {
+    const text = { en: 'People will need another way in.', 'zh-CN': '用户将需要其他登录方式。' };
+    expect(SpecifierSchema.parse({ ...toggle, confirmOffText: text }).confirmOffText).toEqual(text);
+  });
+
+  it('absent still parses, and asks nothing', () => {
+    const parsed = SpecifierSchema.parse(toggle);
+    expect(parsed.confirmOffText).toBeUndefined();
+  });
+
+  // One value-bearing input type, one select, two layout types: each is refused
+  // at the key, by a message that names the key and the type it sits on.
+  for (const spec of [
+    { type: 'text', key: 'smtp_host', label: 'Host' },
+    { type: 'select', key: 'provider', label: 'Provider', options: [{ value: 'smtp', label: 'SMTP' }] },
+    { type: 'group', label: 'Email and password' },
+    { type: 'action_button', id: 'test', label: 'Send test email', handler: { kind: 'navigate', url: '/x' } },
+  ] as const) {
+    it(`is refused on a '${spec.type}' specifier, at the key, naming the key and the type`, () => {
+      expect(SpecifierSchema.safeParse(spec).success, 'control: the bare specifier parses').toBe(true);
+      const result = SpecifierSchema.safeParse({ ...spec, confirmOffText: 'Sure?' });
+      expect(result.success).toBe(false);
+      const issues = result.success ? [] : result.error.issues;
+      expect(issues).toHaveLength(1);
+      expect(issues[0].code).toBe('custom');
+      expect(issues[0].path).toEqual(['confirmOffText']);
+      expect(issues[0].message).toContain(`'${spec.type}'`);
+      expect(issues[0].message).toContain(`'confirmOffText'`);
+    });
+  }
+});
+
 describe('`visible` — the settings visibility grammar, narrowed to what the save-time evaluator runs', () => {
   const withVisible = (visible: unknown) =>
     SpecifierSchema.safeParse({ type: 'text', key: 'smtp_host', label: 'Host', visible });

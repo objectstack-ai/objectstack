@@ -288,6 +288,18 @@ describe('authSettingsManifest', () => {
       expect(keys[key].help, `${key} help`).toBe(spec.description);
     }
   });
+
+  // #30418 (ruling 6657805240 (3)): turning email and password sign-in off is
+  // asked about first, in the #30299 sentence. The declaration parses, keeps
+  // its text, and the en bundle carries the same text at the toggle's address.
+  it('email_password_enabled asks before it goes off, and the en bundle carries the same text', () => {
+    const parsed = SettingsManifestSchema.parse(authSettingsManifest);
+    const toggle = parsed.specifiers.find((s) => s.key === 'email_password_enabled');
+    expect(toggle?.type).toBe('toggle');
+    expect(toggle?.confirmOffText).toBe('People who sign in with a password will need another way in.');
+    const keys = (en.settings as any).auth.keys;
+    expect(keys.email_password_enabled.confirmOffText).toBe(toggle?.confirmOffText);
+  });
 });
 
 /**

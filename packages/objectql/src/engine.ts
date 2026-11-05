@@ -46,7 +46,6 @@ import {
 // Seek pagination for the walks that must read EVERY row — the autonumber seed
 // scan is one (#6249). Shared with `summary-backfill` rather than re-rolled:
 // the cursor merge is the part that is easy to get subtly wrong.
-import { keysetWalk, type KeysetPageQuery } from '@objectstack/types';
 // [#25522 cut 1] The validation-message localisation helpers; the methods of the
 // same names below hand each body the members it reads (`ValidationMessageHost`).
 import { negotiatedMessageLocale, objectDisplayLabel, validationMessageContext } from './engine-validation-messages.js';
@@ -119,7 +118,6 @@ import { buildDriverOptions, driverReadScope, driverWriteTarget, engineLayer0Ver
 // methods of the same names below hand each body the members it reads (`MigrationFlagsHost`).
 import { announceOpenMigrationGates, isOrganizationOwnershipCertified, isValueShapesMigrationVerified, noteAdmittedValueShapeViolation, readFileReferencesFlagRow, readMigrationFlagVerified, supplyTenantKeyCertifiedResolver, wasDatastoreCreatedFromEmpty } from './engine-migration-flags.js';
 import { ExecutionContext, ExecutionContextSchema, type InstalledPackageSource } from '@objectstack/spec/kernel';
-import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 // [#27884] The stored-row read gate, registered on the family's tables below.
 import { STORED_METADATA_TYPE_READ_GATE_OBJECTS, storedMetadataTypeReadGate } from './stored-metadata-type-read-gate.js';
 // Imported from spec directly rather than through `@objectstack/core`'s
@@ -182,7 +180,6 @@ import { resolveAllowDriverConnectFailure } from '@objectstack/types';
 // `code === '42P01'` test here is load-bearing, not stylistic: a second
 // vocabulary of "benign driver error" is the exact debt that module exists to
 // retire, and `check:durability-log-level` exempts only this declared name.
-import { isMissingTableError } from '@objectstack/metadata/errors';
 // [#25522 cut 17] The registration door's forward conversion, the
 // nested-plugin registration and its navigation resolution; the methods of the
 // same names below hand each body the members it reads
@@ -292,7 +289,6 @@ import { resolveMasterDetailRelation } from './master-detail.js';
 // [#6457] The master-detail header a `parent`-scoped predicate reads is made
 // total over the MASTER's declared fields before it leaves this engine — the
 // same helper every other server seam materialises with (#1871/#4649/#4953).
-import { materializeDeclaredFields } from './declared-fields.js';
 // [#21571] The declared column set — the read verbs' default projection, their
 // explicit-projection filter and the write path's undeclared-key door, one list.
 import {
@@ -359,23 +355,21 @@ import { bindHookNotice } from './hook-notice.js';
 import { lowerRelationConditions, resolveSearchQueryableFields, resolveWhereTokens } from './engine-query-lowering.js';
 import {
   auditDanglingReferences,
-  type AuditableObject,
   type DanglingReferenceAuditOptions,
   type DanglingReferenceReport,
 } from './integrity/dangling-reference-audit.js';
 // [#29986 codemod] The top-level declarations that moved whole to `engine-top-level.ts`, as this file still reads them.
 import {
-  AUTONUMBER_SEED_PAGE_SIZE, DISPATCHABLE_HOOK_EVENTS, ENGINE_DELETE_OPTION_KEYS, ENGINE_FIND_OPTION_KEYS,
-  ENGINE_QUERY_SLOTS, ENGINE_UPDATE_OPTION_KEYS, ENGINE_WHERE_SLOTS, ENGINE_WIRE_ONLY_SLOTS,
-  SECURITY_SERVICE_SOURCE_SLOT, WRITE_PRECONDITION_OPTION, applyFormulaPlan, applyStoredExpressionsToPatch,
-  assertDispatchableHookEvent, assertHookScopeNotSelfCancelling, assertOrderByIsMaterializable,
-  assertProjectionHasNoDottedPaths, assertValidHookExcludeObjects, assertValidHookObject,
-  assertValidUnscopedMultiWriteFlag, autonumberFieldNames, callerKeySets, callerSuppliedRow, computeStoredExpressions,
-  declaredDatetimeLowering, declaredMultiValued, droppedFieldEvents, foldEngineOptionAliases, formulaPlanEntry,
-  handBackWithheldInsertReadonly, hookMatchesObject, hydrateWriteFormulas, insertStaticReadonlySubject,
-  lowerWhereFilterArray, masterIdOf, mergeReadContext, organizationPredicateDeleteRefusal,
-  packageBodyCollectionRefusal, packageBodyObjectAndAppOwnerStampRefusal, packageBodySeedDataRefusal,
-  planFormulaProjection, planStoredExpressions, readStoredAutonumberCounter, recomputeAutonumberReaders,
+  DISPATCHABLE_HOOK_EVENTS, ENGINE_DELETE_OPTION_KEYS, ENGINE_FIND_OPTION_KEYS, ENGINE_QUERY_SLOTS,
+  ENGINE_UPDATE_OPTION_KEYS, ENGINE_WHERE_SLOTS, ENGINE_WIRE_ONLY_SLOTS, SECURITY_SERVICE_SOURCE_SLOT,
+  WRITE_PRECONDITION_OPTION, applyFormulaPlan, applyStoredExpressionsToPatch, assertDispatchableHookEvent,
+  assertHookScopeNotSelfCancelling, assertOrderByIsMaterializable, assertProjectionHasNoDottedPaths,
+  assertValidHookExcludeObjects, assertValidHookObject, assertValidUnscopedMultiWriteFlag, autonumberFieldNames,
+  callerKeySets, callerSuppliedRow, computeStoredExpressions, declaredDatetimeLowering, droppedFieldEvents,
+  foldEngineOptionAliases, formulaPlanEntry, handBackWithheldInsertReadonly, hookMatchesObject, hydrateWriteFormulas,
+  insertStaticReadonlySubject, lowerWhereFilterArray, masterIdOf, mergeReadContext,
+  organizationPredicateDeleteRefusal, packageBodyCollectionRefusal, packageBodyObjectAndAppOwnerStampRefusal,
+  packageBodySeedDataRefusal, planFormulaProjection, planStoredExpressions, recomputeAutonumberReaders,
   rejectUnknownEngineOptions, replacedStoredExpressionFields, rowsWithoutFormulaWidening, settleBulkStoredExpressions,
   shouldSkipStateMachine, staticReadonlyStoredView, storedExpressionsReading, stripComputedWriteFields,
   undeclaredWriteFieldErrors, updateStaticReadonlySubject, withFileOwnerKey, withholdInsertReadonlyFromHooks,
@@ -469,6 +463,7 @@ export interface ObjectQLStaticsHost {
   readonly mediaFieldPresence: (typeof ObjectQL)['mediaFieldPresence'];
   readonly organizationCountContext: (typeof ObjectQL)['organizationCountContext'];
   readonly outlivesOrganization: (typeof ObjectQL)['outlivesOrganization'];
+  readonly referenceCheckContext: (typeof ObjectQL)['referenceCheckContext'];
   readonly remainderAfterMemberRemoval: (typeof ObjectQL)['remainderAfterMemberRemoval'];
   readonly storedReferenceIncludes: (typeof ObjectQL)['storedReferenceIncludes'];
 }
@@ -2215,157 +2210,15 @@ export class ObjectQL implements IObjectQLEngine {
     return DefaultsAndAutonumbersFacet.warnAutonumberReadersUnserved.call(defaultsAndAutonumbersHost.of(this), object, plan, driver);
   }
 
-  /**
-   * Seed the autonumber counter from the current max in store, scoped to
-   * `prefix`. With a non-empty prefix (date/field formats) only rows in the
-   * same scope count.
-   *
-   * # Locating the counter inside a stored value (#6468)
-   *
-   * `renderAutonumber` composes `prefix + zero-padded(seq) + suffix`, and
-   * `suffix` is a DECLARED return value: every token after the `{0..0}` slot
-   * renders behind the counter (`{000}-{YYYY}` → `001-2026`). So the counter is
-   * NOT "the digits at the end of the string" — reading it that way took the
-   * year for the counter and seeded `2026` against a true counter of `1`, which
-   * jumps the next issued number to `2027-2026` and burns the band in between.
-   *
-   * Both the rendered `prefix` and the rendered `suffix` therefore come in from
-   * the caller (they are `renderAutonumber`'s own output — this method does not
-   * re-derive any format understanding of its own, and neither does the SQL
-   * driver's `scanMaxNumericTail`, which is handed the same two strings):
-   *
-   *   - **Either one declared ⇒ the slot is ANCHORED**: the counter is the digit
-   *     run at the START of what follows the prefix, after removing the declared
-   *     suffix when this row carries it. That half is spec's
-   *     `readAutonumberCounter` — the declared inverse of `renderAutonumber`,
-   *     which the SQL driver's scan calls too, so one edit moves both sides
-   *     (#6560).
-   *   - **Neither declared ⇒ UNANCHORED**: the legacy reading is kept — the LAST
-   *     digit run of the whole value. A format with no `{0..0}` slot renders a
-   *     bare trailing counter, and values predating any format have no anchor to
-   *     read from, so this stays exactly as it was. The SQL driver's legacy
-   *     reading of this case differs on purpose, which is why it stays per-side.
-   *
-   * The two together are {@link readStoredAutonumberCounter}, module-level
-   * rather than inline, because #6806's resync must read an exempt writer's
-   * supplied value by exactly these rules.
-   *
-   * The suffix is *stripped when it matches*, never *required* to match: a
-   * dynamic suffix renders differently per row (`{000}-{YYYY}` is `-2025` on
-   * last year's rows) while the counter scope is the rendered PREFIX — here `''`
-   * — so those rows share this very counter and must still be counted. Skipping
-   * them would seed BELOW the real max, which is the duplicate-record-number
-   * harm #6249 fixed on the scan side. Reading the leading digit run gets them
-   * right regardless; the strip only adds precision when a suffix begins with a
-   * digit (`{0000}{YYYY}`, whose values are ambiguous by construction — the
-   * compile lint nudges authors to a delimiter).
-   *
-   * # Why this walks every row in the scope (#6249)
-   *
-   * The seed used to be one `find` with `limit: 5000`, no `orderBy` and no
-   * filter: the max of an ARBITRARY 5000-row window (on SQL, typically the
-   * oldest 5000 rows), which for any object past that size — or any scope
-   * whose rows sit outside the window because other scopes filled it — seeds
-   * BELOW the real MAX. The counter then issues numbers from an already-taken
-   * band, and on a `unique` record-number field that is a duplicate business
-   * identifier: a value written wrong, which no retry and no restart repairs
-   * (the same class of harm as the read-outage half fixed in #5979/#6114).
-   *
-   * The scan is therefore complete rather than windowed, in the shape the
-   * SQL driver's own seeding already uses (`scanMaxNumericTail` pushes
-   * `like 'prefix%'` down with NO limit). Two deliberate choices:
-   *
-   *   - **The numeric max is computed here, never delegated to an ORDER BY or
-   *     an aggregate `max`.** Both of those rank the stored value as TEXT, and
-   *     lexicographic order equals numeric order only when every value in the
-   *     scope is zero-padded to one fixed width — which the format language
-   *     does not guarantee (`{0}` pads to nothing, and any width OVERFLOWS
-   *     once the counter passes it, putting `CASE-99999` above `CASE-100000`).
-   *     The empty-prefix legacy path, which reads the LAST digit run of the
-   *     whole value, has no lexicographic reading at all. Parsing every value
-   *     keeps one code path correct for every format instead of a fast path
-   *     guarded by assumptions a format author can silently break.
-   *   - **Seek pagination, not `offset`** — `keysetWalk`'s own rationale
-   *     (#4363): an offset walk cannot promise it visited every row, and a
-   *     row it skips is exactly a number this seed must not miss.
-   *
-   * `prefix` is pushed down as `$startsWith` so a date/`{field}` scope reads
-   * its own rows instead of paging through every other scope's. The JS-side
-   * `startsWith` re-check below is kept as the authority: a driver whose
-   * matching is LOOSER (a case-insensitive `LIKE`) must not be able to inflate
-   * the max with another scope's rows.
-   */
-  private async seedAutonumber(
+  private seedAutonumber(
     object: string,
     field: string,
     prefix: string,
     suffix: string,
     execCtx?: ExecutionContext,
   ): Promise<number> {
-    try {
-      // Canonical `fields`, not the wire spelling `select` — this call sat on
-      // the exact #4371 silent drop (the projection never applied; the scan
-      // worked only because an unprojected row still carries `field`), and the
-      // catch below would have swallowed the guard's rejection into "seed
-      // from 0", i.e. duplicate autonumbers.
-      const walk = keysetWalk<Record<string, unknown>>(
-        (q: KeysetPageQuery) => this.find(object, {
-          ...q,
-          fields: ['id', field],
-          context: execCtx,
-        } as any),
-        {
-          where: prefix ? { [field]: { $startsWith: prefix } } : undefined,
-          pageSize: AUTONUMBER_SEED_PAGE_SIZE,
-        },
-      );
-      let max = 0;
-      for await (const page of walk.pages()) {
-        for (const r of page) {
-          const v = r?.[field];
-          if (v == null) continue;
-          // The reading itself lives in `readStoredAutonumberCounter` (the
-          // section above describes it) because #6806's adopt-on-exempt-write
-          // resync must read a supplied value by the SAME rules this scan reads
-          // a stored one — two copies of it would drift into two different
-          // answers for one row, which is a duplicate record number. Its
-          // anchored half is spec's `readAutonumberCounter`, the one the SQL
-          // driver's own scan calls (#6560).
-          const counter = readStoredAutonumberCounter(String(v), prefix, suffix);
-          if (counter != null) max = Math.max(max, counter);
-        }
-      }
-      // The walk is unbounded (no `max`), so truncation here means the scan
-      // could not COMPLETE: a row carried no `id` to seek past, or the reader
-      // never applied the seek predicate. Either way rows were left unread, and
-      // the max over what was read is a floor, not the max. Answering with it
-      // is the "seed below the real MAX" defect this method was fixed for, so
-      // it fails loudly instead — the same disposition #6114 gave the read
-      // outage: allocate nothing, write nothing.
-      if (walk.truncated) {
-        throw new Error(
-          `Cannot seed the autonumber counter for "${object}.${field}": the seeding scan ` +
-            `could not visit every stored row (it stopped after ${walk.scanned} rows without ` +
-            `reaching the end). Seeding from a partial scan would issue record numbers that ` +
-            `collide with existing ones, so no number was allocated.`,
-        );
-      }
-      return max;
-    } catch (error) {
-      // [#5979] Discriminate by error TYPE. Seeding from 0 is the truth for
-      // exactly ONE failure reason — the table has not been provisioned, so
-      // there are genuinely no rows and number 1 collides with nothing.
-      if (isMissingTableError(error, object)) return 0;
-      // Every other failure (connection drop, timeout, permission denial,
-      // query error) means the rows may well exist and simply were not seen.
-      // Answering 0 there restarts the sequence at 1 against a table already
-      // holding N rows and issues autonumbers that COLLIDE with existing ones
-      // — a value written wrong, which no retry and no restart repairs. So the
-      // read failure propagates and the caller allocates nothing: the write
-      // fails loudly instead of succeeding with a forged business identifier.
-      // This is the hazard the #4371 comment above the read already named.
-      throw error;
-    }
+    // [#29986 codemod] The body moved to `engine-defaults-and-autonumbers.ts`, its docblock with it (see `DefaultsAndAutonumbersHost`).
+    return DefaultsAndAutonumbersFacet.seedAutonumber.call(defaultsAndAutonumbersHost.of(this), object, field, prefix, suffix, execCtx);
   }
 
   /**
@@ -3144,40 +2997,9 @@ export class ObjectQL implements IObjectQLEngine {
     return assertReferencesResolve.call(host, schema, data, supplied, context, msgCtx, storedRows);
   }
 
-  /**
-   * Does `id` name a row in `target`? `false` only when the probe RAN and found
-   * nothing; `null` when it could not run at all (see the fail-open note on
-   * {@link assertReferencesResolve}).
-   *
-   * `context` is the CALLER's execution context. The probe runs under
-   * {@link ObjectQL.referenceCheckContext} — the same `sudo()`-shaped elevation
-   * the pre-delete reference check uses, so the two reference checks share one
-   * spelling: RLS/FLS bypassed, the caller's `tenantId` (and, under the `group`
-   * posture, its membership set) forwarded to the driver by
-   * `buildDriverOptions`. A row outside the caller's tenant scope is therefore
-   * `false` here, exactly like a row that exists nowhere (#19808).
-   *
-   * Without a `context` the elevation is the bare `{ isSystem: true }` and the
-   * probe spans every organization. {@link inspectDanglingReferences}, which
-   * has no caller, passes the SCANNED row's own organization as the context's
-   * `tenantId` instead (#19837), and no context only for a row that carries
-   * none or under a union (`group`) posture — so outside `group` the audit
-   * reports a stored reference into another organization, the class this guard
-   * now refuses.
-   */
-  private async referenceExists(target: string, id: unknown, context?: ExecutionContext): Promise<boolean | null> {
-    try {
-      const resolved = this.resolveObjectName(target);
-      if (!this._registry.getObject(resolved)) return null;
-      const row = await this.findOne(resolved, {
-        where: { id },
-        fields: ['id'],
-        context: ObjectQL.referenceCheckContext(context),
-      } as any);
-      return !!row;
-    } catch {
-      return null;
-    }
+  private referenceExists(target: string, id: unknown, context?: ExecutionContext): Promise<boolean | null> {
+    // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts`, its docblock with it (see `ReferencesAndMasterDetailHost`).
+    return ReferencesAndMasterDetailFacet.referenceExists.call(referencesAndMasterDetailHost.of(this), target, id, context);
   }
 
   private masterDetailHeaderExists(
@@ -3220,191 +3042,24 @@ export class ObjectQL implements IObjectQLEngine {
     return settleMasterDetailLanding<H>(args);
   }
 
-  /**
-   * [#4889] The master-detail header a detail row's `parent`-scoped
-   * `readonlyWhen` reads, or `null` when this write cannot resolve one.
-   *
-   * `readonlyWhen: parent.status == 'paid'` is a documented **server**
-   * guarantee (ADR-0124 D1 puts enforcement here; the client grid is
-   * courtesy), but the strip is a pure function over the payload and the prior
-   * row — it has no driver and cannot fetch a header. So the engine resolves it
-   * and passes it in.
-   *
-   * The header id comes from the payload first, then the prior row: a write that
-   * REPOINTS the detail at another master must be judged against the master it
-   * is landing on, not the one it is leaving.
-   *
-   * ## Two reads: may the caller see the header, then what it holds (#22519)
-   *
-   * A write of a detail whose header the caller cannot read answers exactly
-   * what a write naming a header that exists nowhere answers — for every
-   * detail, `controlled_by_parent` or not, on insert, update (a repoint
-   * included) and the bulk paths. The caller's right to write the detail does
-   * NOT settle its right to read the header: ADR-0055 §3 gates a detail write
-   * on its header (master edit, which implies read) only for a
-   * `controlled_by_parent` detail, and a detail with a sharing model of its own
-   * meets no header check on write. So the header is read twice, each read
-   * answering one question, in the shape the preview reads it in
-   * ({@link resolvePreviewParents}):
-   *
-   *  1. ⛔ MAY THIS CALLER SEE THE HEADER — the read door, under the caller's
-   *     own context ({@link masterDetailHeadersCallerReads}). A header it does
-   *     not return binds as a missing header binds: `null`, so a parent-scoped
-   *     `requiredWhen` / `readonlyWhen` meets an unbound `parent`, and the
-   *     reference check answers `reference_not_found` for it
-   *     ({@link masterDetailHeaderExists}).
-   *  2. WHAT THE HEADER HOLDS — the write's own ELEVATED read below, for a
-   *     header read 1 returned only. The lock is a data-integrity property of
-   *     the header's state, so a header the caller can read is judged on its
-   *     STORED values, a column field-level security hides from or masks for
-   *     this caller included: author-defined integrity rules run on true data.
-   *     The preview's per-column masking is the preview's own, not the write's.
-   *
-   * A SYSTEM caller (seed replay, boot) asks no read door: read 2 alone, as
-   * before.
-   *
-   * ## The elevation keeps the tenant wall (#19837)
-   *
-   * Read 2's argument is about the VALUES of a header the caller may see, never
-   * about TENANCY, so the
-   * read runs under {@link ObjectQL.referenceCheckContext} — the `sudo()`-shaped
-   * `{ ...context, isSystem: true }` both reference checks share — and never a
-   * bare `{ isSystem: true }`. The bare spelling carried no `tenantId`, so the
-   * header was found in ANY organization and a `parent.*` predicate was judged
-   * against another organization's row: an org-bound caller naming that row's
-   * id learned one bit of it per write (`requiredWhen` answered `required` for a
-   * `locked` header and `reference_not_found` for an `open` one; `readonlyWhen`
-   * dropped or kept the field). With the caller's context spread first,
-   * `buildDriverOptions` forwards its `tenantId` (and, under the `group`
-   * posture, its membership set as `tenantIds`), a header stamped with an
-   * organization outside that scope — another organization, or under `group`
-   * one outside the caller's membership set — is not found, and it binds
-   * exactly as a header that exists nowhere does — absent. The tenancy exemptions stay where they are decided:
-   * a `tenancy.enabled: false` or federated master gets no `tenantId`. A
-   * header with no organization is no tenant's (ADR-0131 D1): the driver's
-   * scope carries no `IS NULL` arm, so a scoped read does not find it. A system
-   * caller with no `tenantId` (seed replay, boot) still reads unscoped.
-   *
-   * `null` on any failure — no relation, no id, header not returned by the
-   * caller's read door, header gone or outside the caller's tenant scope, read
-   * threw. It is NOT read as "unlocked": an
-   * unresolved binding leaves `parent` unbound, and `isReadonlyWhenLocked`
-   * treats a predicate that needs it as LOCKED.
-   *
-   * [#6457] A header that IS resolved is handed over TOTAL over the MASTER
-   * object's declared fields — see {@link materializeParentHeader} for why that
-   * had to happen here and nowhere else, and for the verdict table it moves.
-   */
-  private async resolveMasterDetailParent(
+  private resolveMasterDetailParent(
     schema: any,
     data: Record<string, unknown> | null | undefined,
     priorRow: Record<string, unknown> | null | undefined,
     context: ExecutionContext | undefined,
   ): Promise<Record<string, unknown> | null> {
-    const rel = resolveMasterDetailRelation(schema);
-    if (!rel) return null;
-    // [#24358] ⛔ A header in the stored-metadata-body family is never read,
-    // under either authority. Read 2 below is a whole-row read the family's
-    // projection never reaches, so a `parent.*` predicate would be judged over
-    // the stored body and its content hash unprojected: one bit of material the
-    // family's own door withholds, per write. `parent` stays unbound, the
-    // fail-closed signal (#4889) an unreadable header already gives, so the
-    // verdict says nothing about the row.
-    if (isStoredMetadataBodyObject(rel.master)) return null;
-    const parentId = masterIdOf(rel.fk, data, priorRow);
-    if (parentId == null) return null;
-    // [#22519] 1. The caller's read door: a header it does not return binds as
-    // a missing header binds.
-    const readable = await this.masterDetailHeadersCallerReads(rel.master, [parentId], context);
-    if (!readable.has(String(parentId))) return null;
-    // 2. The write's own elevated, tenant-kept read, for a header read 1 returned.
-    try {
-      const row = await this.findOne(rel.master, { where: { id: parentId }, context: ObjectQL.referenceCheckContext(context) } as any);
-      // `null` stays `null` — the fail-CLOSED signal (#4889) is the ABSENCE of
-      // the binding, and materialising a row we do not have would destroy it.
-      return row == null ? null : this.materializeParentHeader(rel.master, row as Record<string, unknown>);
-    } catch (err) {
-      this.logger?.warn?.('readonlyWhen parent lookup failed — parent stays unbound', {
-        object: rel.master, id: parentId, error: err,
-      });
-      return null;
-    }
+    // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts`, its docblock with it (see `ReferencesAndMasterDetailHost`).
+    return ReferencesAndMasterDetailFacet.resolveMasterDetailParent.call(referencesAndMasterDetailHost.of(this), schema, data, priorRow, context);
   }
 
-  /**
-   * Bulk counterpart of {@link resolveMasterDetailParent}: one read for the
-   * whole matched set, then a per-row lookup for
-   * `stripReadonlyWhenFieldsMulti`. A bulk update of N details under M masters
-   * costs ONE extra query, not N — the same "read the match set once" discipline
-   * the #3106 prior-row fetch follows.
-   *
-   * [#4977] Serves three callers now, unchanged: the bulk `readonlyWhen` strip,
-   * the bulk `requiredWhen` evaluation, and the INSERT path — where `data` is
-   * passed as `null` and each inserted row supplies its own FK, so
-   * `masterIdOf(fk, null, row)` reads `row[fk]` and the batch costs one header
-   * read for the whole `insert()` call.
-   *
-   * [#6457] Every header this resolves is materialised over the MASTER's
-   * declared fields, exactly as the single-id twin does — the declared-field
-   * table is read ONCE for the batch, not per row. A row this map has no entry
-   * for still answers `null` (unbound, fail-CLOSED for `readonlyWhen`).
-   *
-   * [#19837] Read under the same tenant-keeping elevation as the single-id twin,
-   * for the same reason: a header outside the caller's tenant scope gets no
-   * entry here, so it binds as absent rather than lending its fields to a
-   * `parent.*` predicate.
-   *
-   * [#22519] The same two reads as the single-id twin, each once for the batch:
-   * the caller's read door ({@link masterDetailHeadersCallerReads}), then the
-   * elevated read for the headers it returned only. A header the read door does
-   * not return gets no entry, so it binds as a missing header binds.
-   */
-  private async resolveMasterDetailParents(
+  private resolveMasterDetailParents(
     schema: any,
     data: Record<string, unknown> | null | undefined,
     priorRows: ReadonlyArray<Record<string, unknown>> | null | undefined,
     context: ExecutionContext | undefined,
   ): Promise<(row: Record<string, unknown> | undefined) => Record<string, unknown> | null> {
-    const unbound = () => null;
-    const rel = resolveMasterDetailRelation(schema);
-    if (!rel) return unbound;
-    // [#24358] ⛔ The single-id twin's family guard, for the batch: a
-    // stored-metadata-body header is never read, and every row binds unbound.
-    if (isStoredMetadataBodyObject(rel.master)) return unbound;
-    const ids = new Set<string>();
-    for (const row of priorRows ?? []) {
-      const id = masterIdOf(rel.fk, data, row);
-      if (id != null) ids.add(String(id));
-    }
-    if (ids.size === 0) return unbound;
-    // [#22519] 1. The caller's read door, once for the batch.
-    const readable = await this.masterDetailHeadersCallerReads(rel.master, [...ids], context);
-    if (readable.size === 0) return unbound;
-    const byId = new Map<string, Record<string, unknown>>();
-    try {
-      // 2. The write's own elevated, tenant-kept read, for the headers read 1 returned.
-      const rows = await this.find(rel.master, {
-        where: { id: { $in: [...readable] } },
-        context: ObjectQL.referenceCheckContext(context),
-      } as any) as Array<Record<string, unknown>>;
-      // [#6457] One declared-field lookup for the whole batch, then one shallow
-      // copy per header. A master the registry does not know leaves `fields`
-      // undefined and every header passes through untouched — see
-      // {@link materializeParentHeader}.
-      const masterFields = this.masterDeclaredFields(rel.master);
-      for (const row of Array.isArray(rows) ? rows : []) {
-        if (row?.id != null) byId.set(String(row.id), materializeDeclaredFields({ ...row }, masterFields));
-      }
-    } catch (err) {
-      this.logger?.warn?.('readonlyWhen parent lookup failed — parent stays unbound', {
-        object: rel.master, error: err,
-      });
-      return unbound;
-    }
-    return (row) => {
-      const id = masterIdOf(rel.fk, data, row);
-      return id == null ? null : (byId.get(String(id)) ?? null);
-    };
+    // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts`, its docblock with it (see `ReferencesAndMasterDetailHost`).
+    return ReferencesAndMasterDetailFacet.resolveMasterDetailParents.call(referencesAndMasterDetailHost.of(this), schema, data, priorRows, context);
   }
 
   private async resolvePreviewParents(
@@ -3524,22 +3179,11 @@ export class ObjectQL implements IObjectQLEngine {
    * budget never reached (#5718), `unreadableObjects` for what the datasource
    * refused, and `aborted` for a run called off (#4747).
    */
-  async inspectDanglingReferences(
+  inspectDanglingReferences(
     options?: DanglingReferenceAuditOptions,
   ): Promise<DanglingReferenceReport> {
-    // Read once per run, live — the posture IN FORCE, by the engine's one reader.
-    const unionScope = postureUsesUnionScope(this.resolveEnginePosture());
-    return auditDanglingReferences(
-      {
-        objects: () => this._registry.getAllObjects() as unknown as AuditableObject[],
-        find: (object, opts) => this.find(object, opts as any) as Promise<Array<Record<string, unknown>>>,
-        probe: (target, id, organization) => this.referenceExists(
-          target, id, organization == null || unionScope ? undefined : ({ tenantId: organization } as ExecutionContext),
-        ),
-        warn: (msg, meta) => this.logger?.warn?.(msg, meta as any),
-      },
-      options,
-    );
+    // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts` (see `ReferencesAndMasterDetailHost`).
+    return ReferencesAndMasterDetailFacet.inspectDanglingReferences.call(referencesAndMasterDetailHost.of(this), options);
   }
 
   /**
@@ -9438,14 +9082,7 @@ export class ObjectQL implements IObjectQLEngine {
     return CascadePlanningFacet.fileReferenceCheckElevation.call(cascadePlanningHost.of(this), set, object, id, childName, fieldName, context);
   }
 
-  /**
-   * The dependents probe of {@link cascadeDeleteRelations}: the rows of
-   * `childName` whose `fieldName` references `id`, read under SYSTEM identity
-   * and exactly narrowed. [#22305] Both phases read through it, so the set the
-   * collection walk gathers and the rows the deleting walk acts on are one
-   * reading of the same relation.
-   */
-  private async probeReferencingRows(
+  private probeReferencingRows(
     childName: string,
     fieldName: string,
     fdef: any,
@@ -9453,106 +9090,8 @@ export class ObjectQL implements IObjectQLEngine {
     probeWhere: Record<string, unknown>,
     context: ExecutionContext | undefined,
   ): Promise<any[]> {
-    let dependents: any[];
-    try {
-      dependents = await this.find(
-        childName,
-        // [#12166] (maintainer ruling 2026-08-26, option A) SYSTEM identity,
-        // unconditionally. This probe is the platform's own referential-
-        // integrity read, not a query the caller asked for, and running it
-        // as the caller made "delete permission" silently mean "delete +
-        // read on EVERY referencing table": a caller with full delete rights
-        // on `object` but no read grant on `childName` got a blanket 403
-        // from the security middleware — whether or not a reference existed,
-        // and with `childName` EMPTY. Measured on a real deployment across
-        // 17 role×object pairs, with the A/B control that granting read-only
-        // on the referencing object (touching NOTHING about delete rights)
-        // turned the identical delete into a 200.
-        //
-        // Referential-integrity actions are engine responsibility executed
-        // under system identity on every mainstream platform — the RDBMS FK
-        // baseline, Salesforce (lookup clearing / cascade delete documented
-        // as bypassing sharing), Dataverse, ServiceNow, Odoo. Caller
-        // identity here was the outlier.
-        //
-        // The elevation is `sudo()`-SHAPED (`{ ...context, isSystem: true }`),
-        // never a bare `{ isSystem: true }` — the same posture
-        // `recomputeSummaries` holds one axis over. Three reasons, and each
-        // one is a defect if dropped:
-        //   - the open transaction handle, `tenantId` and `timezone` must
-        //     survive, or this probe leaves the caller's transaction and
-        //     stops being TENANT-scoped — a bare system context would widen
-        //     the probe across the tenant wall, which is the opposite of
-        //     what this card relaxes;
-        //   - `userId` survives, and that IS the audit ledger's
-        //     "triggered-by" half (ruling constraint 3): the record carries
-        //     triggered-by = the deleting operator and executed-as = system.
-        //     `read-audit.ts` states the same property of `sudo()`;
-        //   - it is a NARROW elevation: nothing else about the delete path
-        //     changes identity (ruling constraint 1). The `set_null` UPDATE
-        //     and the `cascade` DELETE below still run as the caller, byte
-        //     for byte, so this relaxes the reference CHECK and not the
-        //     caller's own authority over the dependent rows.
-        //
-        // [Constraint 4] If the spec later declares per-relationship
-        // on-delete behaviour, BEHAVIOUR follows the declaration; the
-        // identity of this probe stays system, unconditionally. Do not make
-        // this line conditional on `behavior`.
-        { where: probeWhere, context: ObjectQL.referenceCheckContext(context) } as any,
-      );
-    } catch (error) {
-      // [#8895] Discriminate by error TYPE — this probe IS the referential
-      // guard, so an empty answer is only truthful for the one failure that
-      // really means "no dependents".
-      //
-      // The bare `catch { continue }` this replaces reached `continue` on
-      // ANY probe failure, and every consequence of that is silent: the
-      // walk's `restrict` branch never fires, so a delete the integrity
-      // rules say must be REFUSED is allowed through; `set_null`/`cascade`
-      // never run, so child rows that should have been nulled or removed
-      // are left orphaned; nothing is logged and the caller is told the
-      // delete succeeded. Fail-OPEN on an integrity guard — the read did
-      // not happen and the answer "there are none" was invented for it
-      // (ADR-0110 D3: "the probe found nothing" and "the probe could not
-      // run" are different facts with opposite meanings here).
-      //
-      // Benign: the child object is registered but its TABLE was never
-      // provisioned (schema sync not run yet). It cannot hold a row that
-      // references anything, so zero dependents IS the truth and skipping
-      // the relation is correct. Asked through the shared
-      // `isMissingTableError` predicate (`@objectstack/metadata/errors`,
-      // #4825) — the same call `seedAutonumber` and `resolveFileReferences`
-      // make — never a hand-rolled code test.
-      //
-      // Everything else (connection drop, timeout, permission denial, a
-      // query error, a missing COLUMN on a provisioned table) means the
-      // dependents may well exist and simply were not seen. It propagates:
-      // the delete fails loudly and nothing is written, which is the same
-      // disposition the maintainer's 2026-08-15 ruling gives this family —
-      // unprovisioned is truthful emptiness, everything else must surface.
-      // A guard that could not be EVALUATED must not silently pass.
-      //
-      // No new response field and no new error code: the caller receives
-      // the probe's own failure, envelope intact.
-      if (isMissingTableError(error, childName)) return [];
-      throw error;
-    }
-    // [#9362] The multi-value pushdown in the probe filter can be a SUPERSET
-    // (the substring reading, on a backend without the declaration), so the
-    // exact answer is taken here, on the rows themselves. Everything the walk
-    // does with them — the `restrict` count in the 409 envelope, the `cascade`
-    // recursion, the `set_null` write — and the set the collection walk
-    // gathers read this answer, so narrowing anywhere later would leave one of
-    // them acting on a row that never referenced this record.
-    // [#27004] Over a set of ids (`probeReferencingRowsOfSet`), a row is kept
-    // when it holds any of them.
-    if (declaredMultiValued(fdef) && dependents) {
-      const wanted: ReadonlyArray<string | number> = Array.isArray(id) ? id : [id as string | number];
-      dependents = dependents.filter((row) =>
-        wanted.some((w) => ObjectQL.storedReferenceIncludes(row?.[fieldName], w)),
-      );
-    }
-    return dependents ?? [];
+    // [#29986 codemod] The body moved to `engine-cascade-planning.ts`, its docblock with it (see `CascadePlanningHost`).
+    return CascadePlanningFacet.probeReferencingRows.call(cascadePlanningHost.of(this), childName, fieldName, fdef, id, probeWhere, context);
   }
 
   private referenceProbeFilterOfSet(
@@ -10847,6 +10386,7 @@ export class ObjectQL implements IObjectQLEngine {
       mediaFieldPresence: { get: () => ObjectQL.mediaFieldPresence },
       organizationCountContext: { value: (...args: Parameters<typeof ObjectQL.organizationCountContext>) => ObjectQL.organizationCountContext(...args) },
       outlivesOrganization: { value: (...args: Parameters<typeof ObjectQL.outlivesOrganization>) => ObjectQL.outlivesOrganization(...args) },
+      referenceCheckContext: { value: (...args: Parameters<typeof ObjectQL.referenceCheckContext>) => ObjectQL.referenceCheckContext(...args) },
       remainderAfterMemberRemoval: { value: (...args: Parameters<typeof ObjectQL.remainderAfterMemberRemoval>) => ObjectQL.remainderAfterMemberRemoval(...args) },
       storedReferenceIncludes: { value: (...args: Parameters<typeof ObjectQL.storedReferenceIncludes>) => ObjectQL.storedReferenceIncludes(...args) },
     });
@@ -10905,6 +10445,7 @@ export class ObjectQL implements IObjectQLEngine {
       get autonumberCounters() { return engine.autonumberCounters; },
       get autonumberReadersUnservedReported() { return engine.autonumberReadersUnservedReported; },
       defaultFieldEntries: (...a) => engine.defaultFieldEntries(...a),
+      find: (...a) => engine.find(...a),
       getSchema: (...a) => engine.getSchema(...a),
       isIssuedAutonumberCollision: (...a) => engine.isIssuedAutonumberCollision(...a),
       get logger() { return engine.logger; },
@@ -11019,6 +10560,8 @@ export class ObjectQL implements IObjectQLEngine {
       get _registry() { return engine._registry; },
       cascadeRelationBehavior: (...a) => engine.cascadeRelationBehavior(...a),
       collectCascadeDeleteSet: (...a) => engine.collectCascadeDeleteSet(...a),
+      find: (...a) => engine.find(...a),
+      findOne: (...a) => engine.findOne(...a),
       homeAmountServing: (...a) => engine.homeAmountServing(...a),
       get homeLocalizationResolver() { return engine.homeLocalizationResolver; },
       set homeLocalizationResolver(v) { engine.homeLocalizationResolver = v; },
@@ -11027,9 +10570,11 @@ export class ObjectQL implements IObjectQLEngine {
       get logger() { return engine.logger; },
       masterDeclaredFields: (...a) => engine.masterDeclaredFields(...a),
       masterDetailHeadersCallerReads: (...a) => engine.masterDetailHeadersCallerReads(...a),
+      materializeParentHeader: (...a) => engine.materializeParentHeader(...a),
       get realtimeService() { return engine.realtimeService; },
       set realtimeService(v) { engine.realtimeService = v; },
       referenceExists: (...a) => engine.referenceExists(...a),
+      resolveEnginePosture: (...a) => engine.resolveEnginePosture(...a),
       resolveObjectName: (...a) => engine.resolveObjectName(...a),
     }));
     registrationHost.install((engine) => ({
