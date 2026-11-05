@@ -25,7 +25,7 @@
  * same formatter parts (`currency :EUR` is `currency` with `EUR` in both) and
  * refuse the rest with the same sentence: a formatter name of one word
  * (`{{ due | date-long }}` is refused, never printed as written), one
- * formatter per hole, a formatter the whitelist names (`TEMPLATE_FORMATTERS`),
+ * formatter per hole, a formatter the whitelist names (`MAIL_TEMPLATE_FORMATTERS`),
  * and a `currency` argument that is a literal ISO 4217 code. A refused hole is a hole — it is found, located and
  * named — and the renderer refuses to render it rather than print a wrong
  * value or formatter syntax.
@@ -39,13 +39,24 @@
  * renderer resolves it and refuses a value that is not a code
  * (`currencyCodeValueRefusal`) — it never formats the amount in a default
  * currency in its place.
+ *
+ * One formatter is the mail dialect's own: `option:object.field` prints a
+ * select value as its option's label in the recipient's language
+ * (`OPTION_ARGUMENT_RULE`), from a table the renderer builds per send. Its
+ * argument is parsed ({@link ParsedMailHole}.`optionField`) and, when the
+ * caller hands in the app's objects ({@link MailHoleGrammarOptions}.`objects`),
+ * judged against them: the object must exist, the field must be one of its
+ * fields, and that field must declare options.
  */
 
 import {
   CURRENCY_ARGUMENT_RULE,
   currencyCodePath,
   judgeHoleFormatter,
+  OPTION_ARGUMENT_RULE,
+  optionFieldReference,
   splitHoleFormatter,
+  type OptionFieldReference,
   type TemplateHoleGrammarRefusal,
 } from './template-engine';
 
@@ -78,6 +89,12 @@ export interface ParsedMailHole {
    * as written (`@currency_code`).
    */
   codePath?: string;
+  /**
+   * Set for `option:object.field`: the object and field whose option labels
+   * the renderer prints the value with. `arg` keeps the text as written
+   * (`opportunity.stage`), which is also the key of the renderer's label table.
+   */
+  optionField?: OptionFieldReference;
   /** Set when the grammar refuses the hole: it is not rendered, and authoring refuses it. */
   refusal?: TemplateHoleGrammarRefusal;
 }
@@ -106,11 +123,13 @@ export function parseMailHole(inner: string, hole = `{{${inner}}}`): ParsedMailH
   }
   const formatter = name;
   const codePath = refusal ? undefined : currencyCodePath(formatterPart);
+  const optionField = refusal ? undefined : optionFieldReference(formatterPart);
   return {
     path,
     formatter,
     ...(arg !== undefined ? { arg } : {}),
     ...(codePath !== undefined ? { codePath } : {}),
+    ...(optionField !== undefined ? { optionField } : {}),
     ...(refusal ? { refusal } : {}),
   };
 }
@@ -133,6 +152,52 @@ export interface MailHoleGrammarOptions {
    * judged at render, where a code that does not resolve is refused.
    */
   variables?: readonly string[];
+  /**
+   * The app's objects, as each object's name to its fields' names, each
+   * field's value `true` when the field declares options. Present, an
+   * `option:object.field` hole is judged against it: an object it does not
+   * name (`option-object-unknown`), a field that object does not have
+   * (`option-field-unknown`) and a field without options
+   * (`option-field-no-options`) are refused. Absent, the reference is not
+   * judged here.
+   */
+  objects?: ReadonlyMap<string, ReadonlyMap<string, boolean>>;
+}
+
+/** Why an `option` hole's object and field cannot label its value, or `null` when the field declares options. */
+function optionFieldRefusal(
+  hole: string,
+  ref: OptionFieldReference,
+  objects: ReadonlyMap<string, ReadonlyMap<string, boolean>>,
+): TemplateHoleGrammarRefusal | null {
+  const fields = objects.get(ref.object);
+  if (fields === undefined) {
+    return {
+      rule: 'option-object-unknown',
+      message:
+        `the hole ${hole} names the object \`${ref.object}\`, which this app does not have, so no option list `
+        + `labels the value. ${OPTION_ARGUMENT_RULE} Name the object the value comes from by its \`name\`.`,
+    };
+  }
+  const hasOptions = fields.get(ref.field);
+  if (hasOptions === undefined) {
+    return {
+      rule: 'option-field-unknown',
+      message:
+        `the hole ${hole} names the field \`${ref.field}\`, which the object \`${ref.object}\` does not have, so `
+        + `no option list labels the value. ${OPTION_ARGUMENT_RULE} Name the field the value comes from by its \`name\`.`,
+    };
+  }
+  if (!hasOptions) {
+    return {
+      rule: 'option-field-no-options',
+      message:
+        `the hole ${hole} names the field \`${ref.object}.${ref.field}\`, which declares no options, so it has no `
+        + `option labels to print. ${OPTION_ARGUMENT_RULE} Name a select field, or print the value with a plain `
+        + 'hole or another formatter.',
+    };
+  }
+  return null;
 }
 
 /** One hole of a mail template face that the grammar refuses. */
@@ -151,8 +216,13 @@ export function judgeMailHoleGrammar(face: string, options: MailHoleGrammarOptio
   const findings: MailHoleGrammarFinding[] = [];
   for (const m of face.matchAll(mailHolePattern())) {
     const parsed = parseMailHole(m[2], m[0]);
+    const optionRefusal = parsed?.optionField !== undefined && options.objects !== undefined
+      ? optionFieldRefusal(m[0], parsed.optionField, options.objects)
+      : null;
     if (parsed?.refusal) {
       findings.push({ start: m.index ?? 0, text: m[0], refusal: parsed.refusal });
+    } else if (optionRefusal) {
+      findings.push({ start: m.index ?? 0, text: m[0], refusal: optionRefusal });
     } else if (parsed?.codePath !== undefined && variables.length > 0 && !isDeclaredPath(parsed.codePath, variables)) {
       findings.push({
         start: m.index ?? 0,

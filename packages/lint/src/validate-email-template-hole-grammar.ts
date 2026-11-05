@@ -13,7 +13,7 @@
  * - text after the `|` that is not a formatter name, one word optionally
  *   followed by `:` and its argument (`{{ due | date-long }}`) — the renderer
  *   used to print the hole to the reader as written;
- * - a formatter the whitelist (`TEMPLATE_FORMATTERS`) does not name
+ * - a formatter the whitelist (`MAIL_TEMPLATE_FORMATTERS`) does not name
  *   (`{{ amount | curency:EUR }}`) — the renderer used to print the raw value
  *   (`1234.5`) where a formatted one was meant;
  * - a second formatter (`{{ x | default:0 | number:2 }}`) — the renderer used
@@ -26,6 +26,16 @@
  *   send's data) that the template's declared `variables` do not declare,
  *   when it declares any. A template that declares none has its path judged
  *   at render, where a value that is not a code is refused.
+ * - an `option` argument that is not a bare `object.field`
+ *   (`option:'opportunity.stage'`, `option:stage`, `option:@stage_ref`), or
+ *   one that names an object the app does not have, a field that object does
+ *   not have, or a field that declares no options. The renderer prints such a
+ *   hole's value with that field's option labels in the recipient's language
+ *   (`OPTION_ARGUMENT_RULE`), so a reference that names no option list could
+ *   only ever print the stored value. The app's objects are the stack's own,
+ *   as the registry serves them (`objectExtensions` folded in, the injected
+ *   system columns beside the declared fields); at the publish door they are
+ *   the live object universe the gate carries.
  *
  * WHICH holes are refused is not decided here: it is `@objectstack/formula`'s
  * `judgeMailHoleGrammar`, the grammar the mail renderer itself parses with,
@@ -46,9 +56,11 @@
  * placement rule's question (`validate-email-template-hole-placements.ts`).
  */
 
-import { CURRENCY_ARGUMENT_RULE, judgeMailHoleGrammar } from '@objectstack/formula';
+import { CURRENCY_ARGUMENT_RULE, declaresOptionsOnceServed, judgeMailHoleGrammar, OPTION_ARGUMENT_RULE } from '@objectstack/formula';
 
 import { collectionEntries } from './collection-entries.js';
+import { objectsAsServed, recordsOf } from './object-graph.js';
+import { injectedColumnDefsFor } from './system-fields.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -76,8 +88,31 @@ function declaredVariableNames(variables: unknown): string[] {
       : []);
 }
 
+/**
+ * The stack's objects as the mail grammar's `objects` option reads them:
+ * each object's name to its fields, each field `true` when it declares options
+ * once served (inline `options` or a `picklist` name). The fields are the ones
+ * the registry serves: declared and `objectExtensions` fields, and the
+ * injected system columns, a declared field winning over an injected one of
+ * the same name.
+ */
+function optionFieldIndex(stack: AnyRec): Map<string, Map<string, boolean>> {
+  const index = new Map<string, Map<string, boolean>>();
+  for (const obj of objectsAsServed(stack).objects) {
+    if (typeof obj.name !== 'string' || obj.name === '') continue;
+    const fields = new Map<string, boolean>();
+    for (const [name, def] of injectedColumnDefsFor(obj)) fields.set(name, declaresOptionsOnceServed(def));
+    for (const f of recordsOf(obj.fields)) {
+      if (typeof f.name === 'string' && f.name !== '') fields.set(f.name, declaresOptionsOnceServed(f));
+    }
+    index.set(obj.name, fields);
+  }
+  return index;
+}
+
 export function validateEmailTemplateHoleGrammar(stack: AnyRec): EmailTemplateHoleGrammarFinding[] {
   const findings: EmailTemplateHoleGrammarFinding[] = [];
+  let objects: Map<string, Map<string, boolean>> | undefined;
   for (const { rec: template, path } of collectionEntries(stack.emailTemplates, 'emailTemplates')) {
     const name = typeof template.name === 'string' ? template.name : '(unnamed)';
     const locale = typeof template.locale === 'string' ? ` [${template.locale}]` : '';
@@ -85,7 +120,8 @@ export function validateEmailTemplateHoleGrammar(stack: AnyRec): EmailTemplateHo
     for (const face of FACES) {
       const text = template[face];
       if (typeof text !== 'string') continue;
-      for (const hole of judgeMailHoleGrammar(text, { variables })) {
+      objects ??= optionFieldIndex(stack);
+      for (const hole of judgeMailHoleGrammar(text, { variables, objects })) {
         findings.push({
           severity: 'error',
           rule: EMAIL_TEMPLATE_HOLE_GRAMMAR,
@@ -94,7 +130,8 @@ export function validateEmailTemplateHoleGrammar(stack: AnyRec): EmailTemplateHo
           message: `${face}: ${hole.refusal.message} (offset ${hole.start})`,
           hint:
             'A mail template hole is `{{ path }}` or `{{ path | formatter[:arg] }}`, with one formatter. '
-            + `${CURRENCY_ARGUMENT_RULE} Anything more belongs in the caller that supplies the data.`,
+            + `${hole.refusal.rule.startsWith('option-') ? OPTION_ARGUMENT_RULE : CURRENCY_ARGUMENT_RULE} `
+            + 'Anything more belongs in the caller that supplies the data.',
         });
       }
     }

@@ -96,7 +96,7 @@ in that shape.
 **The formatter is one the whitelist names.** `{{ amount | curency:EUR }}` is
 refused by `os validate`, `os build`, `os lint` and the metadata publish door
 (`email-template-hole-grammar`, a `422 INVALID_METADATA` at the publish door),
-naming the hole and listing the known formatters (`TEMPLATE_FORMATTERS`,
+naming the hole and listing the known formatters (`MAIL_TEMPLATE_FORMATTERS`,
 exported from `@objectstack/formula`). A template stored before this rule fails its render with
 `TEMPLATE_INVALID` and sends nothing, rather than print the raw value (`1234.5`)
 where a formatted one was meant; republish it with the name corrected.
@@ -149,6 +149,29 @@ send; code that calls `sendTemplate` or `renderTemplate` itself passes it as
 sent: the amount is never formatted in US dollars or any other guess. Set the
 organization's default currency, or name the currency in the hole: a literal
 code (`currency:EUR`) or a marked path to it (`currency:@currency_code`).
+
+**`option` prints a select value as its option's label.** A flow notice is
+filled once per run and then sent to each recipient in their own locale, so a
+select field's value reaches the template as it is stored (`needs_analysis`).
+`option` names the object and field the value belongs to, written bare as
+`object.field`, and the hole prints that option's label in the recipient's
+language:
+
+```ts
+subject: 'Deal stalled at {{ stage | option:opportunity.stage }}',
+```
+
+The renderer builds the label table for each `object.field` the template names,
+in the locale it renders that recipient's copy in, and a value that is not one
+of the field's options prints as stored. `os validate`, `os build`, `os lint`
+and the metadata publish door refuse an `option` hole whose object the app does
+not have, whose field that object does not have, or whose field declares no
+options (`email-template-hole-grammar`, a `422 INVALID_METADATA` at the publish
+door), and an argument that is not a bare `object.field`: a quoted one
+(`option:'opportunity.stage'`), a field with no object (`option:stage`) or a
+marked path (`option:@stage_ref`). `option` belongs to mail templates: in-app
+template text (flow notifications, action and bulk-action copy) refuses it as a
+formatter it does not know.
 
 **Where a hole may sit in `bodyHtml`.** The renderer's escaping is right for
 element text and for a quoted attribute value that holds plain text, so those
