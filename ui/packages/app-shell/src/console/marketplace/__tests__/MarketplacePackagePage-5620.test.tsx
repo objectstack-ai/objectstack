@@ -102,6 +102,7 @@ vi.mock('../marketplaceApi', () => ({
   purgeSampleData: async () => ({ ok: true }),
   reseedLocalSampleData: async () => ({ ok: true }),
   purgeLocalSampleData: async () => ({ ok: true }),
+  countLocalSampleData: async () => null,
 }));
 
 vi.mock('../../../assistant/assistantBus', () => ({ emitMetadataRefresh: () => {} }));
