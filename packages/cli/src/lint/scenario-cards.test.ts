@@ -22,7 +22,7 @@
  * (`scenario-score.ts` says why). The loader's own suite validates the cards.
  */
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -39,13 +39,13 @@ type Bag = Record<string, any>;
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCENARIOS_DIR = resolve(HERE, '../../../../docs/qa/scenarios');
 
-const cards: Bag[] = readdirSync(SCENARIOS_DIR)
-  .filter((n) => n.endsWith('.json'))
-  .sort()
-  .map((n) => JSON.parse(readFileSync(resolve(SCENARIOS_DIR, n), 'utf8')) as Bag);
-
 const corpusById = new Map(DEFAULT_METADATA_EVAL_CORPUS.map((c) => [c.id, c]));
-const controls = cards.filter((c) => corpusById.has(c.id));
+
+/** The control cards: the library's cards named for a golden corpus case (a card's basename is its id). */
+const controls: Bag[] = DEFAULT_METADATA_EVAL_CORPUS.map((c) => resolve(SCENARIOS_DIR, `${c.id}.json`))
+  .filter((file) => existsSync(file))
+  .map((file) => JSON.parse(readFileSync(file, 'utf8')) as Bag)
+  .sort((a, b) => (a.id < b.id ? -1 : 1));
 
 /** The derivation the control cards' `provenance` states, applied to a corpus fixture. */
 function deriveExpect(fixture: unknown): ScenarioExpectation {
@@ -84,6 +84,7 @@ function parsedBuild(stack: unknown): Bag {
 describe('control cards — corpus drift', () => {
   it('finds the three control cards (a pin over nothing would pass)', () => {
     expect(controls.map((c) => c.id)).toEqual(['crm_account_with_contacts', 'invoice_with_line_items', 'project_with_tasks']);
+    for (const card of controls) expect(card.id).toBe(corpusById.get(card.id)?.id);
   });
 
   for (const card of controls) {
