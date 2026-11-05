@@ -355,7 +355,7 @@ node `config`**:
 | `hookId` | URL path token (default `'default'`). **Rotate it to revoke** a leaked endpoint |
 | `secretRef` / `secret` | HMAC-SHA256 secret, **one required** (else refused at registration and `os validate`). Ship `secretRef: 'NAME'`: an env var the deployment fills, not `OS_*`; unfilled ⇒ `503`. Never a literal |
 
-- **Signature:** `x-objectstack-signature: t=<unix seconds>,v1=<hex>` — `v1` = HMAC-SHA256 of `<t>.<raw body>` under the secret; refused when `t` is over 300 s from the server clock.
+- **Signature:** `x-objectstack-signature: t=<unix seconds>,v1=<hex>` — HMAC-SHA256 of `<t>.<raw body>`; `t` within 300 s. Vendor-signed: `config.signature` replaces it (recipe 4).
 - **Idempotency:** `x-idempotency-key` dedupes retries — author the flow to be idempotent (delivery is at-least-once).
 - **Queue-backed:** the endpoint ACKs `202` and enqueues; the flow runs on the consumer.
 - The JSON body surfaces to the flow as the trigger record (`record.*` / bare fields) plus `params`.
@@ -414,8 +414,8 @@ credential hand-off, loader limits: [references/integration-recipes.md](./refere
 Platform code only when one holds — and then it is the platform's, filed as a
 card, the app still writing none: the protocol is not HTTP; the work writes
 identity objects (users, units, positions); it processes files locally; one fixed
-action contract spans several vendors; the callback's signature is outside the
-`api` door's HMAC. A document the loader cannot take yet (YAML, Swagger 2.0,
+action contract spans several vendors; the callback is signed in no form
+`config.signature` declares. A document the loader cannot take yet (YAML, Swagger 2.0,
 `$ref`) is a gap named against its platform card, never a
 reason to write code.
 
