@@ -833,9 +833,9 @@ describe('a banned user\'s OAuth credentials resolve to no principal while the b
   const VERIFIED = { userId: 'u_ban', scopes: ['data:read', 'data:write'], clientId: 'agent-client-1' };
 
   /**
-   * A table double for `sys_user` that records every read, and can be made to
-   * throw (a store fault) or to answer as a table that was never provisioned.
-   * Every other object is empty.
+   * A table double for `sys_user` that records every read, and can make the
+   * ban read throw (a store fault) or answer as a table that was never
+   * provisioned. Every other object is empty.
    */
   function banQl(user: Record<string, unknown> | undefined, fault?: 'throws' | 'missing-table') {
     const userReads: any[] = [];
@@ -843,8 +843,10 @@ describe('a banned user\'s OAuth credentials resolve to no principal while the b
       async find(object: string, opts: any) {
         if (object !== 'sys_user') return [];
         userReads.push(opts);
-        if (fault === 'throws') throw new Error('connection reset by peer');
-        if (fault === 'missing-table') throw Object.assign(new Error('no such table: sys_user'), { code: 'SQLITE_ERROR' });
+        // The fault strikes the ban read alone, so the outage asserted below is that read's.
+        const banRead = Array.isArray(opts?.fields) && opts.fields.includes('banned');
+        if (banRead && fault === 'throws') throw new Error('connection reset by peer');
+        if (banRead && fault === 'missing-table') throw Object.assign(new Error('no such table: sys_user'), { code: 'SQLITE_ERROR' });
         const rows = user ? [user] : [];
         return bounded(rows.filter((r) => r.id === opts?.where?.id), opts);
       },
