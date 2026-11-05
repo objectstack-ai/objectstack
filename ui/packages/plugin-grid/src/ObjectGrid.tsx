@@ -73,6 +73,7 @@ import { resolveRowCrudAffordances, resolveRowRecordCrudAffordance } from './row
 import { useRecordCrudVerdicts } from './hooks/useRecordCrudVerdicts';
 import { resolveLegacyRowActions } from './resolveLegacyRowActions';
 import { resolveBulkActions, resolvePromotedBulkParams } from './resolveBulkActions';
+import { useUndeclaredActionNamesWarning } from './undeclaredActionNames';
 import { partitionBulkRows } from './bulkEligibility';
 import { RowActionMenu, formatActionLabel } from './components/RowActionMenu';
 import { BulkActionBar } from './components/BulkActionBar';
@@ -997,9 +998,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // Legacy `rowActions` carry a bare action NAME, which the runner cannot
   // execute on its own — resolve each against the object's declared actions so
   // it dispatches as a real def (and so a name that duplicates an existing
-  // `list_item` def stops rendering a dead twin of it). See
+  // `list_item` def stops rendering a dead twin of it). A name the object does
+  // not declare draws nothing and is reported below, in development. See
   // `resolveLegacyRowActions` for the full rationale (objectui#2960).
-  const { defs: resolvedRowActionDefs, unresolved: customRowActions } = resolveLegacyRowActions({
+  const { defs: resolvedRowActionDefs, undeclared: undeclaredRowActions } = resolveLegacyRowActions({
     rowActions: rowActionsList.filter(a => a !== 'edit' && a !== 'delete'),
     rowActionDefs: rowActionDefsList,
     objectActions: (objectSchema as any)?.actions,
@@ -1250,14 +1252,16 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     : declaredBulkActions?.filter((a: unknown) => String(a).toLowerCase() !== 'delete');
   // `bulkActions` carries a bare action NAME, which the runner cannot execute
   // on its own — resolve each against `objectDef.actions` so it dispatches as a
-  // real def. See `resolveBulkActions` (objectui#3002). The
+  // real def. See `resolveBulkActions` (objectui#3002). A name the object does
+  // not declare gets no button (spec: a bare name "names an action the object
+  // declares") and is reported below, in development. The
   // canonical `'delete'` is held back: it routes to `onBulkDelete` (which owns
   // confirm + refresh), not the runner, even if the object declares an action
   // that happens to be named `delete`.
   const legacyBulkNames = (explicitBulkActions ?? []).filter(
     (a: unknown) => String(a).toLowerCase() !== 'delete',
   );
-  const { defs: resolvedBulkDefs, unresolved: unresolvedBulkActions } = resolveBulkActions({
+  const { defs: resolvedBulkDefs, undeclared: undeclaredBulkActions } = resolveBulkActions({
     bulkActions: legacyBulkNames,
     bulkActionDefs: Array.isArray(schema.bulkActionDefs) ? schema.bulkActionDefs : [],
     objectActions: (objectSchema as any)?.actions,
@@ -1277,18 +1281,33 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       (objectCanDelete || def?.operation !== 'delete')
       && (rowEditVerdict.allowed || def?.operation !== 'update'),
   );
-  // Names still dispatched by string: the unresolved ones, plus `'delete'`
-  // when the author asked for it — or the implicit bulk-delete affordance.
+  // The one name still dispatched by string: `'delete'` when the author asked
+  // for it — or the implicit bulk-delete affordance. An undeclared name is not
+  // among them: it draws nothing.
   const keptDeleteAction = (explicitBulkActions ?? []).filter(
     (a: unknown) => String(a).toLowerCase() === 'delete',
   );
   const effectiveBulkActions: string[] =
     explicitBulkActions && explicitBulkActions.length > 0
-      ? [...unresolvedBulkActions, ...keptDeleteAction]
+      ? keptDeleteAction
       : canDelete && onBulkDelete && bulkActionDefs.length === 0
         ? ['delete']
         : [];
   const hasBulkActions = effectiveBulkActions.length > 0 || bulkActionDefs.length > 0;
+  // The names the two folds above did not draw, said once in development. Only
+  // once the object's actions are known: before that every name is undeclared.
+  const undeclaredNamesReady = objectSchema != null || !schema.objectName;
+  const undeclaredNamesAddress = {
+    blockType: (schema as { type?: unknown }).type,
+    objectName: schema.objectName,
+    label: schema.label ?? (schema as { title?: unknown }).title,
+  };
+  useUndeclaredActionNamesWarning({
+    key: 'bulkActions', names: undeclaredBulkActions, ready: undeclaredNamesReady, address: undeclaredNamesAddress,
+  });
+  useUndeclaredActionNamesWarning({
+    key: 'rowActions', names: undeclaredRowActions, ready: undeclaredNamesReady, address: undeclaredNamesAddress,
+  });
   let selectionMode: 'none' | 'single' | 'multiple' | boolean = false;
   if (schema.selection !== undefined) {
     // "presence enables; an explicit off wins" — the ONE rule both
@@ -1676,7 +1695,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     columnsWithActions, hasActions, hasPinnedColumns, hasUserPinnedColumns, pinnedLeftCols,
     pinnedRightCols, unpinnedCols, rightPinnedClasses, rightPinnedCellClasses, userLeftPinnedCount,
   } = resolveObjectGridActionsColumn({
-    schema, data, objectSchema, persistedColumns, operations, customRowActions, resolvedRowActionDefs,
+    schema, data, objectSchema, persistedColumns, operations, resolvedRowActionDefs,
     wantEditAction, wantDeleteAction, mayInvokeRowAction, rowOperations, canEdit, canDelete,
     recordVerdict, predicateScope, onEdit, onDelete, editPredicates, deletePredicates, executeAction,
     setRefreshKey, t,
