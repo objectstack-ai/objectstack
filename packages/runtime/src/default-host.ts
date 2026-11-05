@@ -131,11 +131,25 @@ export async function createDefaultHostConfig(
     // Empty-boot path: synthesize a minimal artifact stub inside the
     // ObjectStack home directory so MetadataPlugin has a real file to
     // read (and to watch for marketplace installs that land later).
+    const stubPath = resolvePath(resolveObjectStackHome(), 'dist/objectstack.json');
     if (!resolvedArtifact && !requireArtifact) {
-        const home = resolveObjectStackHome();
-        const stubPath = resolvePath(home, 'dist/objectstack.json');
         ensureEmptyBootStub(stubPath);
         resolvedArtifact = stubPath;
+    } else if (
+        resolvedArtifact
+        && !isHttpUrl(resolvedArtifact)
+        && resolvePath(resolvedArtifact) === stubPath
+        && existsSync(stubPath)
+    ) {
+        // The stub is reached NAMED on every `os start` after the first: the
+        // supervisor resolves `<home>/dist/objectstack.json` as an artifact
+        // rung and hands it down as `artifactPath`, so the branch above never
+        // runs again. Measured (#29937): a stub an older CLI wrote kept its
+        // missing range, and its warning, on every later boot until refreshed
+        // here. `ensureEmptyBootStub` touches the file only while it is still
+        // the stub; an app artifact an operator placed at this path is left
+        // alone.
+        ensureEmptyBootStub(stubPath);
     }
 
     return createStandaloneStack({

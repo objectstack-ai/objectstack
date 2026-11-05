@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import { checkProtocolCompat } from '@objectstack/metadata-core';
-import { EMPTY_BOOT_STUB_ID, ensureEmptyBootStub } from './default-host.js';
+import { EMPTY_BOOT_STUB_ID, createDefaultHostConfig, ensureEmptyBootStub } from './default-host.js';
 
 const RANGE = `^${PROTOCOL_MAJOR}`;
 
@@ -115,4 +115,46 @@ describe('ensureEmptyBootStub — the empty kernel declares its own protocol ran
 
         expect(readFileSync(stubPath, 'utf8')).toBe('{ not json');
     });
+});
+
+describe('createDefaultHostConfig — the stub is refreshed on every empty boot, named or not (#29937)', () => {
+    const BOOT_TIMEOUT = 60_000;
+    let savedHome: string | undefined;
+
+    beforeEach(() => {
+        savedHome = process.env.OS_HOME;
+        process.env.OS_HOME = dir;
+    });
+
+    afterEach(() => {
+        if (savedHome === undefined) delete process.env.OS_HOME;
+        else process.env.OS_HOME = savedHome;
+    });
+
+    // `os start` resolves `<home>/dist/objectstack.json` as an artifact rung
+    // once it exists and hands it down as `artifactPath`, so every boot after
+    // the first reaches the stub NAMED, never through the empty-boot branch.
+    it('refreshes a legacy stub handed in as `artifactPath` at the home location', async () => {
+        writeStub(LEGACY_STUB);
+
+        await createDefaultHostConfig({ requireArtifact: true, artifactPath: stubPath, databaseUrl: ':memory:' });
+
+        expect(readStub().manifest.engines).toEqual({ protocol: RANGE });
+    }, BOOT_TIMEOUT);
+
+    it('writes the stub with its range on the empty boot itself', async () => {
+        await createDefaultHostConfig({ requireArtifact: false, databaseUrl: ':memory:' });
+
+        expect(readStub().manifest.engines).toEqual({ protocol: RANGE });
+    }, BOOT_TIMEOUT);
+
+    it('leaves a stub-shaped artifact named anywhere else alone', async () => {
+        const elsewhere = join(dir, 'elsewhere.json');
+        const bytes = JSON.stringify(LEGACY_STUB);
+        writeFileSync(elsewhere, bytes, 'utf8');
+
+        await createDefaultHostConfig({ requireArtifact: true, artifactPath: elsewhere, databaseUrl: ':memory:' });
+
+        expect(readFileSync(elsewhere, 'utf8')).toBe(bytes);
+    }, BOOT_TIMEOUT);
 });
