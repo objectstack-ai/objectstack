@@ -154,7 +154,6 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // `lifecycle` is `@objectstack/objectql`'s manifest (ADR-0057), offered
       // wherever a settings service is mounted, like the entries above.
       { id: 'nav_settings_lifecycle', type: 'url', label: 'Data Lifecycle', url: '/apps/setup/system/settings/lifecycle', icon: 'timer', requiredPermissions: ['manage_platform_settings'] },
-      { id: 'nav_settings_feature_flags', type: 'url', label: 'Feature Flags', url: '/apps/setup/system/settings/feature_flags', icon: 'flag' },
     ],
   },
   {
