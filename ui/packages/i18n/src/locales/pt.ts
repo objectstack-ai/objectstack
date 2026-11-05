@@ -1176,6 +1176,7 @@ const pt = {
   detail: {
     editInlineHint: "Clique duas vezes para editar",
     systemActor: "Sistema",
+    impersonatedActor: "{{admin}} em nome de {{user}}",
     unknownUser: "Desconhecido",
     created: "Criado",
     updated: "Atualizado",

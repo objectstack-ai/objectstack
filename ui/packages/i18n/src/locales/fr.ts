@@ -1176,6 +1176,7 @@ const fr = {
   detail: {
     editInlineHint: "Double-cliquez pour modifier",
     systemActor: "Système",
+    impersonatedActor: "{{admin}} pour le compte de {{user}}",
     unknownUser: "Inconnu",
     created: "Créé",
     updated: "Mis à jour",

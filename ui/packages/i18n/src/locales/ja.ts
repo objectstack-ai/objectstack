@@ -1148,6 +1148,7 @@ const ja = {
   detail: {
     editInlineHint: "ダブルクリックで編集",
     systemActor: "システム",
+    impersonatedActor: "{{admin}} が {{user}} として操作",
     unknownUser: "不明",
     back: "戻る",
     edit: "編集",

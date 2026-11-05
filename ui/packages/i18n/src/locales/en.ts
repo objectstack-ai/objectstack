@@ -1657,6 +1657,7 @@ const en = {
     daysAgo_other: '{{count}}d ago',
     // Activity feed actors
     systemActor: 'System',
+    impersonatedActor: '{{admin}} on behalf of {{user}}',
     unknownUser: 'Unknown',
     // Record meta footer (audit provenance). `created`/`updated` are the
     // actor-less variants — "Created by · 5m ago" dangles when created_by
