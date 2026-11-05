@@ -415,25 +415,40 @@ export type DeviceTokenResponse = z.input<typeof DeviceTokenResponseSchema>;
  *
  * Some identity providers refuse embedded WebViews, so the mobile shell opens
  * the sign-in in the system authentication session (`ASWebAuthenticationSession`
- * on iOS, Custom Tabs on Android). Once that session is signed in, the shell
- * navigates it here. The server mints a single-use token bound to the shell's
- * PKCE challenge (RFC 7636) and redirects to the app's registered scheme; the
- * WebView then redeems the token at `POST /one-time-token/verify` together with
- * the matching verifier, so a callback intercepted by another app on the device
- * cannot be redeemed without the verifier only the shell holds.
+ * on iOS, Custom Tabs on Android), and this route is the one URL it opens there.
+ * For a session signed in within the last five minutes (the system browser's
+ * cookie), the server mints a single-use token bound to the shell's PKCE challenge
+ * (RFC 7636) and redirects to the app's registered scheme; the WebView then redeems
+ * the token at `POST /one-time-token/verify` together with the matching verifier,
+ * so a callback intercepted by another app on the device cannot be redeemed without
+ * the verifier only the shell holds. A browser with no such session is sent to sign
+ * in first, and comes back here afterwards.
  *
- * The route requires a signed-in session (the system browser's cookie). The
- * parameter set is CLOSED: an unknown or repeated parameter is refused.
+ * The parameter set is CLOSED: an unknown or repeated parameter is refused.
  *
- * Answers:
- * - `302`: `Location` is `redirect_uri` with a `token` query parameter appended
- *   (the single-use token, valid for one minute), sent with
+ * Answers, every `400` decided before any session is read:
+ * - `302` with a token: `Location` is `redirect_uri` with a `token` query parameter
+ *   appended (the single-use token, valid for one minute), sent with
  *   `Cache-Control: no-store`.
- * - `400 VALIDATION_ERROR`, with NO redirect: an unknown or repeated parameter,
- *   a `redirect_uri` whose scheme is not registered in
+ * - `302` to sign in: a page navigation with no session, or with one older than
+ *   five minutes, when this process answers the Console's sign-in page with
+ *   `200 text/html`, unless it reports `Sec-Fetch-Site: same-origin`. `Location` is
+ *   that page, root-relative so the browser stays on this origin, with `redirect`
+ *   naming this same request and `handoff_refused_at` carrying the server's time of
+ *   the refusal in epoch milliseconds. The page's route is not part of this contract:
+ *   an app opens this route and never names it.
+ * - `400 VALIDATION_ERROR`, with NO redirect: a navigation another site started
+ *   (`Sec-Fetch-Site: cross-site`), an unknown or repeated parameter, a
+ *   `redirect_uri` whose scheme is not registered in
  *   `AuthConfig.trustedAppSchemes` (compared case-insensitively), a malformed
  *   `code_challenge`, or a `code_challenge_method` other than `S256`.
- * - `401 UNAUTHENTICATED`: no signed-in session.
+ * - `401 UNAUTHENTICATED`: no session, or one older than five minutes, on any request
+ *   that does not get that redirect. That is a request that is not a page navigation
+ *   (an app's anonymous probe gets this, and reads it as "this server registered
+ *   me"); a page navigation reporting `Sec-Fetch-Site: same-origin`, which is the
+ *   sign-in page forwarding a session this route refuses; and any request when this
+ *   process does not answer that page with `200 text/html`, so a Console served by
+ *   something in front of this process keeps the `401` too.
  *
  * The parameter names are the OAuth 2.0 / RFC 7636 wire names, kept verbatim.
  */

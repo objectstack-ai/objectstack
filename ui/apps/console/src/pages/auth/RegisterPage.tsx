@@ -54,7 +54,7 @@ import {
 } from '@object-ui/app-shell';
 import { AuthLayout } from './AuthLayout';
 import { followOauthAuthorize } from './followAuthorize';
-import { useHandoffRedirect } from './handoffRedirect';
+import { handoffMarkQuery, useHandoffRedirect } from './handoffRedirect';
 // Was a second module-private copy of LoginPage's helper; both now share one
 // implementation — objectui#4181. Behaviour here is unchanged.
 import { withConsoleBase, withConsoleBaseRootRelative } from '../../utils/consoleBase';
@@ -168,7 +168,7 @@ export function RegisterPage() {
   // Sign-up switched off — bounce to /login.
   useEffect(() => {
     if (signUpOffer !== 'closed') return;
-    const search = redirect ? `?redirect=${encodeURIComponent(redirect)}` : '';
+    const search = redirect ? `?redirect=${encodeURIComponent(redirect)}${handoffMarkQuery(redirect)}` : '';
     navigate(`/login${search}`, { replace: true });
   }, [signUpOffer, navigate, redirect]);
 
@@ -257,7 +257,7 @@ export function RegisterPage() {
     );
   }
 
-  const loginUrl = redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : '/login';
+  const loginUrl = redirect ? `/login?redirect=${encodeURIComponent(redirect)}${handoffMarkQuery(redirect)}` : '/login';
   const legalLinks = readLegalLinks(authConfig);
   // objectui#10893 — when the server gates sign-in on email verification, the
   // mail's link is the only road back, so it must carry `?redirect=` (e.g. the
