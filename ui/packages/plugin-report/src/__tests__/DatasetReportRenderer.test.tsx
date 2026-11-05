@@ -628,6 +628,7 @@ describe('DatasetReportRenderer', () => {
       task_metrics: {
         rows: [{ status: 'In Progress', est_hours: 30 }],
         object: 'task',
+        drillScopes: { est_hours: {} },
         dimensionFields: { status: 'status' },
         // the visible row carries the DISPLAY label; the raw row carries the stored value
         drillRawRows: [{ status: 'in_progress' }],
@@ -662,6 +663,7 @@ describe('DatasetReportRenderer', () => {
       pipe_by_quarter: {
         rows: [{ close_date: '2026-Q2', revenue: 1000 }],
         object: 'opportunity',
+        drillScopes: { revenue: {} },
         // A date bucket isn't equality-drillable → no dimensionFields; a range sidecar instead.
         drillRanges: [{ close_date: { field: 'close_date', gte: '2026-04-01', lt: '2026-07-01' } }],
       },
@@ -689,6 +691,7 @@ describe('DatasetReportRenderer', () => {
       deal_metrics: {
         rows: [{ account: 'Acme Corp', amount: 1000 }],
         object: 'deal',
+        drillScopes: { amount: {} },
         dimensionFields: { account: 'account_id' },
         drillRawRows: [{ account: 'acc_123' }],
       },
@@ -714,6 +717,7 @@ describe('DatasetReportRenderer', () => {
       task_metrics: {
         rows: [{ status: 'In Progress', priority: 'High', est_hours: 10 }],
         object: 'task',
+        drillScopes: { est_hours: {} },
         dimensionFields: { status: 'status', priority: 'priority' },
         drillRawRows: [{ status: 'in_progress', priority: 'p1' }],
       },
@@ -1054,6 +1058,7 @@ describe('DatasetReportRenderer — matrix bucket encoding (objectstack#5665)', 
           { region: 'New York', quarter: 'Q1', amount: 222 },
         ],
         object: 'opportunity',
+        drillScopes: { amount: {} },
         dimensionFields: { region: 'billing_state', quarter: 'close_quarter' },
         drillRawRows: [
           { region: 'NEW', quarter: 'YORK-Q1' },
@@ -1228,7 +1233,8 @@ describe('DatasetReportRenderer — measure drill scopes (#30615)', () => {
     expect(onDrill.mock.calls[0][0]).toMatchObject({
       object: 'showcase_invoice',
       groupKey: { status: 'Open' },
-      objectFilter: { $and: [{ region: 'emea' }, { status: 'paid' }, { status: 'open' }] },
+      // The measure scope joins the report scope first, then the bucket.
+      objectFilter: { $and: [{ $and: [{ region: 'emea' }, { status: 'paid' }] }, { status: 'open' }] },
     });
   });
 
@@ -1262,7 +1268,7 @@ describe('DatasetReportRenderer — measure drill scopes (#30615)', () => {
     expect(screen.queryByTestId('dataset-drill-cell')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId('dataset-drill-row'));
     expect(onDrill.mock.calls[0][0].objectFilter).toEqual({
-      $and: [{ region: 'emea' }, { status: 'paid' }, { status: 'open' }],
+      $and: [{ $and: [{ region: 'emea' }, { status: 'paid' }] }, { status: 'open' }],
     });
   });
 
@@ -1288,7 +1294,7 @@ describe('DatasetReportRenderer — measure drill scopes (#30615)', () => {
     expect(screen.getAllByTestId('dataset-drill-cell')).toHaveLength(1);
     fireEvent.click(screen.getByTestId('dataset-drill-cell'));
     expect(onDrill.mock.calls[0][0].objectFilter).toEqual({
-      $and: [{ status: 'paid' }, { status: 'open' }, { region: 'emea' }],
+      $and: [{ status: 'paid' }, { $and: [{ status: 'open' }, { region: 'emea' }] }],
     });
   });
 });
