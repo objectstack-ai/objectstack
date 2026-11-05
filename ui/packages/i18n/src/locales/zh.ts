@@ -1994,9 +1994,9 @@ const zh = {
         action: '重命名',
       },
       languageCountry: {
-        title: '默认语言和国家',
+        title: '默认语言和国家/地区',
         todo: '当前为{{language}}、{{country}}。请确认，或改选其他值。',
-        saved: '默认语言和国家已保存',
+        saved: '默认语言和国家/地区已保存',
       },
       timezone: {
         title: '系统时区',
