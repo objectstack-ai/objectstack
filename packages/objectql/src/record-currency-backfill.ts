@@ -177,7 +177,6 @@ export interface RecordCurrencyBackfillOptions {
 
 const SCAN_PAGE_SIZE = 500;
 const MAX_SAMPLE_IDS = 5;
-const ORGANIZATION_COLUMN = 'organization_id';
 /** Unscoped by design, the context every `os migrate` data run uses:
  *  `isSystem` with no `tenantId` is what `buildDriverOptions` reads as "do not
  *  tenant-scope this", so every organization's rows are walked. */
@@ -230,13 +229,14 @@ function resolveScope(
   }
   const schema = engine.getObject(object);
   const declared = schema?.fields ?? {};
-  const column = ORGANIZATION_COLUMN in declared && !isFederatedUnprovisionedInjectedColumn(schema, ORGANIZATION_COLUMN)
-    ? ORGANIZATION_COLUMN
+  // The row's own organization, left out of the read on a federated object that does not provision it.
+  const column = 'organization_id' in declared && !isFederatedUnprovisionedInjectedColumn(schema, 'organization_id')
+    ? 'organization_id'
     : undefined;
   if (organizationId !== undefined && column === undefined) {
     throw invalidField(
-      ORGANIZATION_COLUMN,
-      `[record-currency-backfill] '${object}' stores no ${ORGANIZATION_COLUMN}, so its rows belong to no ` +
+      'organization_id',
+      `[record-currency-backfill] '${object}' stores no organization_id, so its rows belong to no ` +
         `organization and cannot be scoped to '${organizationId}': run it without an organization. ` +
         'Refused before the walk read or wrote any row.',
     );

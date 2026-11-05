@@ -258,3 +258,155 @@ describe('backfillRecordCurrencyCodes — rows stored before the switch to recor
     ]);
   });
 });
+
+// [ADR-0144 Open item 13, ruling 6670707546 item A] Each organization has its
+// own home currency, so one code is right for at most the organizations that
+// share it: the run is scoped by organization, and an unscoped run over the
+// rows of more than one organization is refused before any write.
+describe('backfillRecordCurrencyCodes — one organization at a time', () => {
+  let engine: ObjectQL;
+  let d: ReturnType<typeof makeDriver>;
+  let posture: string | undefined;
+
+  const stored = (id: string, row: Record<string, unknown>) => {
+    d.storeFor('deal').set(id, { id, name: id, ...row });
+  };
+  const deal = (id: string) => d.storeFor('deal').get(id);
+  const run = (options: Record<string, unknown> = {}) =>
+    backfillRecordCurrencyCodes(engine, quietLogger, { object: 'deal', field: 'amount', code: 'USD', ...options });
+  const refused = (p: Promise<unknown>) => p.then(() => null, (e: unknown) => e as Record<string, any>);
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    d = makeDriver();
+    vi.spyOn(d.driver, 'find');
+    vi.spyOn(d.driver, 'update');
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    posture = undefined;
+    engine.setTenancyPostureProvider(() => posture);
+    engine.registry.registerObject({
+      name: 'deal',
+      fields: {
+        name: { type: 'text' },
+        amount: { type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } },
+        currency_code: { type: 'text', valueDomain: 'iso_4217_currency' },
+      },
+    } as any);
+    // Two organizations, each with codeless rows, and one row of A that holds a code.
+    stored('a1', { organization_id: 'org_a', amount: 100 });
+    stored('a2', { organization_id: 'org_a', amount: 200 });
+    stored('a3', { organization_id: 'org_a', amount: 300, currency_code: 'CNY' });
+    stored('b1', { organization_id: 'org_b', amount: 400 });
+  });
+
+  it('the object stores the organization the run counts by (the registry injects organization_id)', () => {
+    expect(engine.getObject('deal')?.fields).toHaveProperty('organization_id');
+  });
+
+  it('two organizations and no scope: refused before any write, the refusal carrying each organization\'s codeless count', async () => {
+    for (const apply of [false, true]) {
+      const err = await refused(run({ apply }));
+      expect(err, `apply: ${apply}`).toMatchObject({ code: 'VALIDATION_ERROR', status: 400, httpStatus: 400, field: 'organizationId' });
+      expect(err?.organizations).toEqual([
+        { organizationId: 'org_a', scannedRecords: 3, codeless: 2, written: 0, skippedCodePresent: 1, skippedAmountBlank: 0 },
+        { organizationId: 'org_b', scannedRecords: 1, codeless: 1, written: 0, skippedCodePresent: 0, skippedAmountBlank: 0 },
+      ]);
+      expect(String(err?.message)).toContain('Refused before any row was written.');
+    }
+    expect(vi.mocked(d.driver.update)).not.toHaveBeenCalled();
+    expect(d.writes).toEqual([]);
+    expect(deal('a1').currency_code).toBeUndefined();
+    expect(deal('b1').currency_code).toBeUndefined();
+  });
+
+  it('an organization scope writes that organization\'s codeless rows only, read and written as it', async () => {
+    const report = await run({ organizationId: 'org_a', apply: true });
+    expect(report).toMatchObject({
+      organizationId: 'org_a', allOrganizations: false,
+      scannedRecords: 3, codeless: 2, written: 2, skippedCodePresent: 1, failures: [],
+    });
+    expect(report.organizations).toEqual([
+      { organizationId: 'org_a', scannedRecords: 3, codeless: 2, written: 2, skippedCodePresent: 1, skippedAmountBlank: 0 },
+    ]);
+    expect(deal('a1').currency_code).toBe('USD');
+    expect(deal('a2').currency_code).toBe('USD');
+    expect(deal('a3').currency_code).toBe('CNY');
+    expect(deal('b1').currency_code).toBeUndefined();
+    expect(d.writes.map((w) => w.id).sort()).toEqual(['a1', 'a2']);
+    // The walk filters on the row's own organization; every write runs as it.
+    for (const [, ast] of vi.mocked(d.driver.find).mock.calls.filter(([o]) => o === 'deal')) {
+      expect(JSON.stringify((ast as any).where)).toContain('"organization_id":"org_a"');
+    }
+    expect(formatRecordCurrencyBackfillReport(report)[0]).toBe(
+      'Scanned 3 row(s) of deal in organization org_a for an amount in amount beside a blank currency code in currency_code.',
+    );
+  });
+
+  it('under a walled posture the scope also reaches the driver as the organization predicate', async () => {
+    posture = 'isolated';
+    await run({ organizationId: 'org_b', apply: true });
+    const finds = vi.mocked(d.driver.find).mock.calls.filter(([o]) => o === 'deal');
+    expect(finds.length).toBeGreaterThan(0);
+    for (const call of finds) expect(call[2]).toMatchObject({ tenantId: 'org_b' });
+    expect(vi.mocked(d.driver.update).mock.calls.map((c) => c[1])).toEqual(['b1']);
+    expect(deal('b1').currency_code).toBe('USD');
+    expect(deal('a1').currency_code).toBeUndefined();
+  });
+
+  it('allOrganizations writes the one code into every organization\'s codeless rows, counted apart', async () => {
+    const report = await run({ allOrganizations: true, apply: true });
+    expect(report).toMatchObject({ organizationId: null, allOrganizations: true, codeless: 3, written: 3 });
+    expect(report.organizations.map((o) => [o.organizationId, o.codeless, o.written])).toEqual([['org_a', 2, 2], ['org_b', 1, 1]]);
+    expect(['a1', 'a2', 'b1'].map((id) => deal(id).currency_code)).toEqual(['USD', 'USD', 'USD']);
+    expect(deal('a3').currency_code).toBe('CNY');
+    expect(formatRecordCurrencyBackfillReport(report).slice(0, 3)).toEqual([
+      'Scanned 4 row(s) of deal in every organization for an amount in amount beside a blank currency code in currency_code.',
+      '  organization org_a: 2 codeless row(s), 2 written',
+      '  organization org_b: 1 codeless row(s), 1 written',
+    ]);
+  });
+
+  it('an organization scope beside allOrganizations, or a blank one, is refused before any row is read', async () => {
+    for (const options of [{ organizationId: 'org_a', allOrganizations: true }, { organizationId: '' }, { organizationId: '  ' }]) {
+      const err = await refused(run({ ...options, apply: true }));
+      expect(err, JSON.stringify(options)).toMatchObject({ code: 'VALIDATION_ERROR', status: 400, field: 'organizationId' });
+      expect(String(err?.message)).toContain('Refused before the walk read or wrote any row.');
+    }
+    expect(vi.mocked(d.driver.find)).not.toHaveBeenCalled();
+    expect(d.writes).toEqual([]);
+  });
+
+  it('an organization scope on an object that stores no organization is refused before any row is read', async () => {
+    engine.registry.registerObject({
+      name: 'shared_deal',
+      tenancy: { enabled: false },
+      fields: {
+        amount: { type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } },
+        currency_code: { type: 'text', valueDomain: 'iso_4217_currency' },
+      },
+    } as any);
+    expect(engine.getObject('shared_deal')?.fields).not.toHaveProperty('organization_id');
+    const err = await refused(backfillRecordCurrencyCodes(engine, quietLogger, {
+      object: 'shared_deal', field: 'amount', code: 'USD', organizationId: 'org_a', apply: true,
+    }));
+    expect(err).toMatchObject({ code: 'INVALID_FIELD', status: 400, field: 'organization_id' });
+    expect(vi.mocked(d.driver.find)).not.toHaveBeenCalled();
+  });
+
+  it('rows of one organization (and rows naming none) run unscoped exactly as before', async () => {
+    d.storeFor('deal').delete('b1');
+    stored('n1', { amount: 50 }); // a row that names no organization
+    const report = await run({ apply: true });
+    expect(report).toMatchObject({ organizationId: null, allOrganizations: false, codeless: 3, written: 3, failures: [] });
+    expect(['a1', 'a2', 'n1'].map((id) => deal(id).currency_code)).toEqual(['USD', 'USD', 'USD']);
+    expect(report.organizations.map((o) => o.organizationId)).toEqual(['org_a', null]);
+    // The unscoped run's writes keep the unscoped system context, as before.
+    for (const call of vi.mocked(d.driver.update).mock.calls) expect((call[3] as any)?.tenantId).toBeUndefined();
+    // Its report reads as it did before the scope existed: no organization line.
+    expect(formatRecordCurrencyBackfillReport(report)[0]).toBe(
+      'Scanned 4 row(s) of deal for an amount in amount beside a blank currency code in currency_code.',
+    );
+    expect(formatRecordCurrencyBackfillReport(report).some((l) => l.includes('organization'))).toBe(false);
+  });
+});

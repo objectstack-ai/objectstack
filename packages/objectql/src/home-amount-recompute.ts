@@ -275,7 +275,6 @@ const SYSTEM_CTX = { isSystem: true } as const;
 /** The write keeps the row's own `updated_at`: the run changes only the two projected fields. */
 const SYSTEM_PRESERVING_CTX = { isSystem: true, preserveAudit: true } as const;
 const CALENDAR_DATE = /^\d{4}-\d{2}-\d{2}$/;
-const ORGANIZATION_COLUMN = 'organization_id';
 
 type RefusalError = Error & { code: string; status: number; httpStatus: number; field?: string };
 
@@ -347,15 +346,6 @@ function resolvePlan(engine: HomeAmountRecomputeEngine, options: HomeAmountRecom
         '[home-amount-recompute] the organization id is blank: give the id of the organization whose rows are '
           + 'recomputed, or leave it out for every organization. Refused before any row was read or written.',
         'organizationId',
-      );
-    }
-    if (!(ORGANIZATION_COLUMN in (schema.fields ?? {})) || isFederatedUnprovisionedInjectedColumn(schema, ORGANIZATION_COLUMN)) {
-      throw refusal(
-        'INVALID_FIELD',
-        `[home-amount-recompute] '${object}' stores no ${ORGANIZATION_COLUMN}, so its rows belong to no organization `
-          + `and cannot be limited to '${options.organizationId}': run it without an organization. `
-          + 'Refused before the walk read or wrote any row.',
-        ORGANIZATION_COLUMN,
       );
     }
   }
@@ -454,6 +444,16 @@ export async function recomputeHomeAmounts(
     if (name in declared && !isFederatedUnprovisionedInjectedColumn(schema, name)) columns.add(name);
   }
   for (const e of plan) for (const name of [e.amountField, e.codeField, e.rateDateField, e.homeField, e.rateField]) columns.add(name);
+  // A limited run needs the column it is limited by: an object that stores none has rows of no organization.
+  if (organizationScope !== undefined && !columns.has('organization_id')) {
+    throw refusal(
+      'INVALID_FIELD',
+      `[home-amount-recompute] '${object}' stores no organization_id, so its rows belong to no organization `
+        + `and cannot be limited to '${organizationScope}': run it without an organization. `
+        + 'Refused before the walk read or wrote any row.',
+      'organization_id',
+    );
+  }
 
   // Seek by `id`: this run's claim is about EVERY stored row, which an offset walk cannot promise.
   // A limited walk filters on the row's own organization as well as reading as it: the context
@@ -463,7 +463,7 @@ export async function recomputeHomeAmounts(
     {
       pageSize: SCAN_PAGE_SIZE,
       max: options.maxRecords ?? 100_000,
-      ...(organizationScope !== undefined ? { where: { [ORGANIZATION_COLUMN]: organizationScope } } : {}),
+      ...(organizationScope !== undefined ? { where: { organization_id: organizationScope } } : {}),
     },
   );
 
