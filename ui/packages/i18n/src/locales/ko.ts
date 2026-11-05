@@ -4545,6 +4545,7 @@ const ko = {
       title: '대기 중인 변경 사항',
       description: '게시 시 변경되는 내용입니다. 새 항목은 추가되고 업데이트는 게시된 버전을 덮어씁니다.',
       savedToCustomization: '{{package}}의 사용자 지정에 저장됨',
+      customizationEnvironment: '이 변경 사항은 이 환경의 데이터베이스에 {{pair}}의 항목으로 저장되며 프로젝트 소스에는 없습니다. 다른 환경으로는 {{command}}로만 옮길 수 있습니다.',
       loading: '대기 중인 변경 사항 불러오는 중…',
       loadFailed: '대기 중인 변경 사항을 불러오지 못했습니다:',
       empty: '대기 중인 항목 없음 — 모든 드래프트가 게시되었습니다.',

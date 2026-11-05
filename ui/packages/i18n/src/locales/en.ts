@@ -4009,6 +4009,9 @@ const en = {
       description: 'What publishing will change. New items are added; updates overwrite the live version.',
       // ADR-0146 D3 — where a customization of a read-only base is saved: its `.custom` pair.
       savedToCustomization: 'Saved to {{package}}’s customizations',
+      // objectstack#30119 (ADR-0146 D2) — the pair lives in this environment's database and moves only by export;
+      // `command` is always the literal `os package export`, never translated.
+      customizationEnvironment: 'These changes are kept in this environment’s database as items of {{pair}}, not in your project’s source. They reach another environment only through {{command}}.',
       loading: 'Loading pending changes…',
       loadFailed: 'Could not load pending changes:',
       empty: 'Nothing pending — every draft has been published.',

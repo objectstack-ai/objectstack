@@ -4548,6 +4548,7 @@ const ja = {
       title: '保留中の変更',
       description: '公開で何が変わるか。新規項目は追加され、更新は公開中のバージョンを上書きします。',
       savedToCustomization: '{{package}} のカスタマイズに保存',
+      customizationEnvironment: 'これらの変更はこの環境のデータベースに {{pair}} の項目として保存され、プロジェクトのソースには含まれません。別の環境へは {{command}} でのみ移せます。',
       loading: '保留中の変更を読み込み中…',
       loadFailed: '保留中の変更を読み込めませんでした:',
       empty: '保留中の変更はありません — すべてのドラフトが公開済みです。',

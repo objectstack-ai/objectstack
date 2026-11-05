@@ -3467,6 +3467,7 @@ const zh = {
       title: '待发布的变更',
       description: '发布将带来以下变更。“新增”为全新内容，“更新”将覆盖线上版本。',
       savedToCustomization: '保存到 {{package}} 的定制',
+      customizationEnvironment: '这些变更保存在当前环境的数据库里，是 {{pair}} 的条目，不在项目源码中；只有通过 {{command}} 才能带到其他环境。',
       loading: '正在加载待发布变更…',
       loadFailed: '无法加载待发布变更：',
       empty: '没有待发布的内容 —— 所有草稿均已发布。',

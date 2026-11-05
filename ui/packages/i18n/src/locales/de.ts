@@ -4546,6 +4546,7 @@ const de = {
       title: 'Ausstehende Änderungen',
       description: 'Was die Veröffentlichung ändert. Neue Elemente werden hinzugefügt; Aktualisierungen überschreiben die Live-Version.',
       savedToCustomization: 'Gespeichert in den Anpassungen von {{package}}',
+      customizationEnvironment: 'Diese Änderungen liegen in der Datenbank dieser Umgebung, als Elemente von {{pair}}, nicht im Quellcode Ihres Projekts. In eine andere Umgebung gelangen sie nur mit {{command}}.',
       loading: 'Ausstehende Änderungen werden geladen…',
       loadFailed: 'Ausstehende Änderungen konnten nicht geladen werden:',
       empty: 'Nichts ausstehend — alle Entwürfe wurden veröffentlicht.',
