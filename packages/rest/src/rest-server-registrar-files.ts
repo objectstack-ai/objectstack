@@ -75,6 +75,9 @@ export const REST_SERVER_REGISTRAR_FILES = [
     // [#27627] `registerMetaAppBundleRoute`' body, the app metadata bundle. New, not a
     // moved slice, and a `/meta` group — see {@link REST_SERVER_META_ROUTE_FILES}.
     'meta-app-bundle-routes.ts',
+    // [#30205] `registerUserWorkEndpoints`' body, a user's assigned work: the counts and
+    // the hand-over. New, not a moved slice.
+    'user-work-routes.ts',
 ] as const;
 
 /** One file on {@link REST_SERVER_REGISTRAR_FILES}. */
@@ -123,9 +126,6 @@ export const REST_SERVER_META_ROUTE_FILES: readonly RestServerRegistrarFile[] = 
     // moved slice; like the per-item writes it goes through the inner method's per-item
     // registrar, handed over in its scope.
     'meta-app-bundle-routes.ts',
-    // [#30205] A user's assigned work: the counts and the hand-over. New, not a moved
-    // slice; it registers on the route manager itself, from a host literal.
-    'user-work-routes.ts',
 ];
 
 /**
