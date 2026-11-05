@@ -1,0 +1,21 @@
+diff --git a/examples/app-showcase/src/data/objects/project.object.ts b/examples/app-showcase/src/data/objects/project.object.ts
+index 9964f980..c81ece70 100644
+--- a/examples/app-showcase/src/data/objects/project.object.ts
++++ b/examples/app-showcase/src/data/objects/project.object.ts
+@@ -25,8 +25,16 @@ export const Project = ObjectSchema.create({
+   // surface (upload / list / download / delete + parent-derived access).
+   enable: { files: true },
+ 
++  // EVIDENCE ONLY (objectstack#29962, never merged): a formula name over a select label.
++  nameField: 'display_name',
++
+   fields: {
+     name: Field.text({ label: 'Project Name', required: true, searchable: true, maxLength: 200 }),
++    display_name: Field.formula({
++      label: 'Display Name',
++      expression: cel`label(record.status) + ' · ' + record.name`,
++      returnType: 'text',
++    }),
+     // `relatedList*` is the read-side mirror of inline editing: the Account's
+     // record DETAIL page auto-renders a "Projects" tab — derived from this
+     // lookup relationship, with NO page config. `relatedList: 'primary'` marks
