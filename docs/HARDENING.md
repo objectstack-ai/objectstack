@@ -241,7 +241,7 @@ production deployment, enable at least:
 | Anti-abuse  | `lockout_threshold: 5`, `lockout_duration_minutes: 15`, `rate_limit_max` / `rate_limit_window_seconds` |
 | MFA         | `mfa_required: true` (or per-org `require_mfa`, which needs two-factor enrollment on), `mfa_grace_period_days: 7`; neither saves while `OS_AUTH_TWO_FACTOR=false` |
 | Sessions    | `session_idle_timeout_minutes: 30–60`, `session_absolute_max_hours: 8–12`, `max_concurrent_sessions_per_user` |
-| Network     | `allowed_ip_ranges` (IPv4 CIDR) for tenant- or office-scoped access                   |
+| Network     | `allowed_ip_ranges` (IPv4 or IPv6 CIDR, or exact addresses) for tenant- or office-scoped access |
 
 Password expiry and enforced MFA share a *session-validation gate*: a
 non-compliant session can authenticate but is blocked from data access (auth +

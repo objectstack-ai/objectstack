@@ -619,7 +619,7 @@ often before the account-level lock engages.
 
 | Setting | Effect |
 |---|---|
-| `allowed_ip_ranges` | Restrict authenticated access to one or more IPv4 CIDR ranges (or exact IPs). The address judged is the one the server establishes, by the same rule as the inbound rate limiter: `X-Forwarded-For` / `X-Real-IP` only when the stack declares `server.trustProxy`, the connection's peer address otherwise. Behind a reverse proxy, declare `server.trustProxy`, or the allow-list judges the proxy's own address. A request whose address cannot be established is refused with `403 IP_NOT_ALLOWED`, like one outside the ranges. `last_login_ip` records the same address. A save that leaves out your own address is refused, and clearing the field applies at once: see [Saving, clearing and lockout recovery](#saving-clearing-and-lockout-recovery). |
+| `allowed_ip_ranges` | Restrict authenticated access to one or more CIDR ranges or exact addresses, IPv4 or IPv6 (`203.0.113.0/24`, `2001:db8::/32`, `192.0.2.7`). An entry that is neither is refused when you save it. The address judged is the one the server establishes, by the same rule as the inbound rate limiter: `X-Forwarded-For` / `X-Real-IP` only when the stack declares `server.trustProxy`, the connection's peer address otherwise. Behind a reverse proxy, declare `server.trustProxy`, or the allow-list judges the proxy's own address. A request whose address cannot be established is refused with `403 IP_NOT_ALLOWED`, like one outside the ranges. `last_login_ip` records the same address. A save that leaves out your own address is refused, and clearing the field applies at once: see [Saving, clearing and lockout recovery](#saving-clearing-and-lockout-recovery). |
 
 > **How enforcement works.** Password expiry (an administrator-forced password
 > change included) and enforced MFA share a single *session-validation gate*.
@@ -654,6 +654,18 @@ often before the account-level lock engages.
 
 These rules apply to `allowed_ip_ranges`.
 
+- **An entry the server cannot read is refused.** Each entry is an IPv4 or IPv6
+  address, or an address followed by `/` and a prefix length written in decimal
+  digits: one or two digits, from 0 to 32, for IPv4, and one to three digits, from
+  0 to 128, for IPv6. Any other entry is refused with `400 SETTINGS_VALIDATION`,
+  whatever address you save from, and nothing is stored. The field error names the
+  entries, also listed in `constraint.invalidEntries`. This check runs before the
+  address check below, on every write, including writes made inside the server. An
+  `allowedIpRanges` list the deployment declares in its own auth configuration is
+  held to the same rule and refused at startup. An entry the server cannot read
+  matches no address at sign-in. If a stored list or `OS_AUTH_ALLOWED_IP_RANGES`
+  already holds one, the server logs it at startup with the entry named, and only
+  the list's other entries admit anyone.
 - **A save that would lock you out is refused.** When you save the field, the server
   checks the new list against the address your own request comes from. It finds that
   address by the same rule as the gate (`server.trustProxy` decides whether the
@@ -668,7 +680,7 @@ These rules apply to `allowed_ip_ranges`.
   If the server cannot establish your address at all, any non-empty list is refused,
   because the gate would refuse you too. Only a change is checked: saving the list
   already in force again is not refused. Writes made inside the server (boot, seed,
-  migrations) carry no request and are not checked.
+  migrations) carry no request, so no address is checked for them.
 - **Setup shows your address before you save.** Under the field, **Setup →
   Authentication** shows the address the server judges for your request, read from
   `GET /api/v1/auth/admin/client-address` (platform administrators only), which
