@@ -278,7 +278,10 @@ export const zhCN: PlatformTranslationData = {
         },
       },
       keys: {
-        email_password_enabled: { label: '启用邮箱/密码登录' },
+        email_password_enabled: {
+          label: '启用邮箱/密码登录',
+          confirmOffText: '使用密码登录的用户将需要其他登录方式。',
+        },
         signup_enabled: {
           label: '允许邮箱注册',
           help: '开启邮箱与密码注册表单。它接纳谁由下方的「自助注册受众」决定:「仅限邀请」下只接纳持有待处理邀请的地址;「邮箱域名」下接纳允许列表中的域名与受邀地址;「开放」下接纳任何人。关闭后,在任何受众下该表单都会关闭,受邀者也不例外。',
