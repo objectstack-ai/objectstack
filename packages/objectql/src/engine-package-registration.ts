@@ -49,6 +49,11 @@
  * this one imports, so the engine's evaluation order is what it was. The
  * published build bundles both files into one, where the cycle does not
  * exist.
+ *
+ * [#30053 codemod] A PRIVATE method's docblock has since moved here,
+ * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * and the class keeps none for it; a public or protected method's docblock
+ * stays on the class, the contract, and its function keeps the placeholder.
  */
 
 import type { ServiceObject } from '@objectstack/spec/data';
@@ -112,7 +117,11 @@ export function convertPackageBodyForward(
     return result.definition;
 }
 
-/** The body of `ObjectQL#resolveNavObjectNames`; the method's docblock there is its contract. */
+/**
+ * Deep-clone an app definition, resolving objectName references in navigation
+ * items via the registry. Object names are canonical identifiers — no FQN
+ * expansion is applied.
+ */
 export function resolveNavObjectNames(
   app: any,
   namespace: string,
@@ -134,7 +143,17 @@ export function resolveNavObjectNames(
     return { ...app, navigation: resolveItems(app.navigation) };
 }
 
-/** The body of `ObjectQL#registerPlugin`; the method's docblock there is its contract. */
+/**
+ * Register a nested plugin's metadata (objects, actions, views, etc.)
+ *
+ * Unlike registerApp(), this does NOT call SchemaRegistry.installPackage()
+ * because plugins are not formal manifests — they are lightweight config
+ * bundles with objects, actions, triggers, and navigation.
+ *
+ * @param plugin - The plugin config object
+ * @param parentId - The parent package ID (for ownership tracking)
+ * @param parentNamespace - The parent package's namespace (for FQN resolution)
+ */
 export function registerPlugin(
   this: Pick<PackageRegistrationHost, 'logger' | '_registry' | 'resolveNavObjectNames' | 'registerMetadataCollections'>,
   plugin: any,
