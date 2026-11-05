@@ -20,6 +20,20 @@ import {
   RELATIONSHIP_FIELD_TYPES,
 } from './object-graph.js';
 import { walkFilterFieldKeys, type FilterFieldKey } from './filter-walk.js';
+import { DATASET_FIELD_UNKNOWN, validateDatasetReferences } from './validate-dataset-references.js';
+import { MEASURE_AGGREGATE_FIELD_TYPE_REFUSED, validateDatasetMeasureAggregates } from './validate-dataset-measure-aggregates.js';
+import { FIELD_NO_CONSUMERS, validateFieldConsumers } from './validate-field-consumers.js';
+import { LIST_VIEW_FIELD_UNKNOWN, validateListViewFieldRefs } from './validate-list-view-field-refs.js';
+import { MAPPING_TARGET_FIELD_UNKNOWN, validateMappingTargetFields } from './validate-mapping-target-fields.js';
+import { OBJECT_FIELD_REF_UNKNOWN, validateObjectFieldRefs } from './validate-object-field-refs.js';
+import { PAGE_FIELD_UNKNOWN, validatePageFieldBindings } from './validate-page-field-bindings.js';
+import { FILTER_PRESET_COMPARAND, validatePresetComparands } from './validate-preset-comparands.js';
+import { RELATED_LIST_REF_UNKNOWN, validateRelatedListRefs } from './validate-related-list-refs.js';
+import { REPORT_FILTER_FIELD_UNKNOWN, validateReportRuntimeFilters } from './validate-report-runtime-filter.js';
+import { RLS_PREDICATE_UNKNOWN_FIELD, validateRlsPredicateEnforceability } from './validate-rls-predicate-enforceability.js';
+import { SHARING_RULE_UNLOWERABLE_CONDITION, validateSharingRuleEnforceability } from './validate-sharing-rule-enforceability.js';
+import { THANK_YOU_RECORD_FIELD, validateThankYouRecordFields } from './validate-thank-you-record-fields.js';
+import { WIDGET_FILTER_FIELD_UNKNOWN, validateWidgetBindings } from './validate-widget-bindings.js';
 // [#16340] Read back the registry's OWN definition table to assert the graph
 // derives its injected types rather than carrying a second copy of them.
 import { injectedSystemColumnDefs } from '@objectstack/spec/data';
@@ -530,5 +544,150 @@ describe('[#19289] object-graph — a `user` field takes its target from the TYP
     const broken = { objects: [{ name: 'crm_task', fields: { assignee: { type: 'user', reference: { object: 'sys_user' } } } }] };
     expect(() => indexObjectGraph(broken)).toThrow(TypeError);
     expect(() => indexObjectGraph(broken)).toThrow(/`reference` is an object/);
+  });
+});
+
+// [#30383] The field-path rules resolve through the fold above. One artifact
+// for all of them: a module package (`mod`) adds fields to the app package's
+// `xs_deal` through `objectExtensions`, the HotCRM shape. Per rule: a path
+// naming an extension-added field passes, the same stack without the
+// extension still refuses it (the pin is not vacuous), and a field no body
+// declares or extends is refused under the same rule id as before.
+describe('[#30383] the field-path rules read the objects as served', () => {
+  type Rec = Record<string, unknown>;
+  type Run = (stack: Rec) => ReadonlyArray<{ rule: string }>;
+  const deal = { name: 'xs_deal', fields: { name: { type: 'text' }, account: { type: 'lookup', reference: 'xs_account' } } };
+  const account = { name: 'xs_account', fields: { name: { type: 'text' }, tier: { type: 'text' } } };
+  const note = { name: 'xs_note', fields: { body: { type: 'text' } } };
+  const added = {
+    region: { type: 'text' },
+    score: { type: 'number' },
+    closed_on: { type: 'date' },
+    ref_no: { type: 'autonumber' },
+    partner: { type: 'lookup', reference: 'xs_account' },
+  };
+  const extensions = [
+    { extend: 'xs_deal', fields: added },
+    { extend: 'xs_note', fields: { deal_id: { type: 'lookup', reference: 'xs_deal' } } },
+  ];
+  const artifact = (extra: Rec, objectExtensions: unknown[] = extensions): Rec => ({
+    objects: [deal, account, note],
+    packages: [
+      { manifest: { id: 'app', objects: [deal, account, note] } },
+      { manifest: { id: 'mod', objectExtensions } },
+    ],
+    ...extra,
+  });
+  const ids = (run: Run, stack: Rec) => run(stack).map((f) => f.rule);
+  const dataset = (field: string) => ({
+    name: 'deals', object: 'xs_deal', include: ['partner'],
+    dimensions: [{ name: 'd', field }], measures: [{ name: 'n', aggregate: 'count' }],
+  });
+  const widget = (filter: Rec) => ({
+    datasets: [dataset('name')],
+    dashboards: [{ name: 'b', widgets: [{ id: 'w', type: 'metric', dataset: 'deals', values: ['n'], filter }] }],
+  });
+
+  // rule · its unknown-field id · the stack naming FIELD
+  const existence: Array<[string, string, Run, (field: string) => Rec]> = [
+    ['validate-dataset-references', DATASET_FIELD_UNKNOWN, validateDatasetReferences, (f) => ({ datasets: [dataset(f)] })],
+    ['validate-report-runtime-filter', REPORT_FILTER_FIELD_UNKNOWN, validateReportRuntimeFilters, (f) => ({
+      datasets: [dataset('name')],
+      reports: [{ name: 'r', label: 'R', type: 'summary', dataset: 'deals', values: ['n'], rows: ['d'], runtimeFilter: { [f]: 'x' } }],
+    })],
+    ['validate-widget-bindings', WIDGET_FILTER_FIELD_UNKNOWN, validateWidgetBindings, (f) => widget({ [f]: 'x' })],
+    ['validate-list-view-field-refs', LIST_VIEW_FIELD_UNKNOWN, validateListViewFieldRefs, (f) => ({
+      views: [{ name: 'v', object: 'xs_deal', list: { type: 'grid', columns: ['name', f] } }],
+    })],
+    ['validate-object-field-refs', OBJECT_FIELD_REF_UNKNOWN, validateObjectFieldRefs, (f) => ({
+      objects: [{ ...deal, highlightFields: ['name', f] }, account, note],
+    })],
+    ['validate-page-field-bindings', PAGE_FIELD_UNKNOWN, validatePageFieldBindings, (f) => ({
+      pages: [{
+        name: 'p', object: 'xs_deal',
+        regions: [{ name: 'main', components: [{ type: 'record:highlights', properties: { fields: ['name', f] } }] }],
+      }],
+    })],
+    ['validate-rls-predicate-enforceability', RLS_PREDICATE_UNKNOWN_FIELD, validateRlsPredicateEnforceability, (f) => ({
+      permissions: [{ name: 's', label: 'S', rowLevelSecurity: [{ name: 'p', object: 'xs_deal', operation: 'select', using: `record.${f} == 'x'` }] }],
+    })],
+    ['validate-thank-you-record-fields', THANK_YOU_RECORD_FIELD, validateThankYouRecordFields, (f) => ({
+      views: [{
+        name: 'vv',
+        form: {
+          type: 'simple', data: { provider: 'object', object: 'xs_deal' }, sections: [{ name: 'a', fields: ['name'] }],
+          submitBehavior: { kind: 'thank-you', title: 'T', message: `Ref {{record.${f}}}` },
+        },
+      }],
+    })],
+    ['validate-mapping-target-fields', MAPPING_TARGET_FIELD_UNKNOWN, validateMappingTargetFields, (f) => ({
+      mappings: [{ name: 'm', targetObject: 'xs_deal', fieldMapping: [{ source: 'R', target: f }] }],
+    })],
+  ];
+  it.each(existence)('%s: an extension-added field passes; a field nothing adds is still %s', (_rule, id, run, naming) => {
+    // `ref_no` (an autonumber) is the one name every member admits, the
+    // thank-you panel included.
+    expect(ids(run, artifact(naming('ref_no')))).not.toContain(id);
+    expect(ids(run, artifact(naming('ref_no'), []))).toContain(id);
+    expect(ids(run, artifact(naming('nowhere')))).toContain(id);
+  });
+
+  it('validate-dataset-references: a path through an extension-added relationship resolves', () => {
+    expect(ids(validateDatasetReferences, artifact({ datasets: [dataset('partner.tier')] }))).toEqual([]);
+    expect(ids(validateDatasetReferences, artifact({ datasets: [dataset('partner.nowhere')] }))).toEqual([DATASET_FIELD_UNKNOWN]);
+  });
+
+  // The type arms judge an extension-added field on its served definition,
+  // as they judge a declared one; a name nothing adds stays the existence
+  // rules' finding, not theirs.
+  it('validate-dataset-measure-aggregates: SUM over an extension-added field is judged on its served type', () => {
+    const sum = (field: string) => ({ datasets: [{ name: 'deals', object: 'xs_deal', measures: [{ name: 's', aggregate: 'sum', field }] }] });
+    expect(ids(validateDatasetMeasureAggregates, artifact(sum('score')))).toEqual([]);
+    expect(ids(validateDatasetMeasureAggregates, artifact(sum('region')))).toEqual([MEASURE_AGGREGATE_FIELD_TYPE_REFUSED]);
+    expect(ids(validateDatasetMeasureAggregates, artifact(sum('nowhere')))).toEqual([]);
+  });
+
+  it('validate-preset-comparands: a preset compared with an extension-added date field is judged as on a declared one', () => {
+    expect(ids(validatePresetComparands, artifact(widget({ closed_on: 'last_30_days' })))).toEqual([FILTER_PRESET_COMPARAND]);
+    expect(ids(validatePresetComparands, artifact(widget({ region: 'last_30_days' })))).toEqual([]);
+  });
+
+  it('validate-sharing-rule-enforceability: a criterion on an extension-added field is judged on its served type', () => {
+    const rule = (condition: string) => ({ sharingRules: [{ name: 'sr', object: 'xs_deal', condition, sharedWith: { type: 'role', value: 'r' }, accessLevel: 'read' }] });
+    expect(ids(validateSharingRuleEnforceability, artifact(rule('record.region == record.name')))).toEqual([]);
+    expect(ids(validateSharingRuleEnforceability, artifact(rule('record.closed_on == record.name')))).toEqual([SHARING_RULE_UNLOWERABLE_CONDITION]);
+  });
+
+  it('validate-field-consumers: a dataset path through an extension-added lookup credits the field it reaches', () => {
+    const tierFindings = (stack: Rec) =>
+      validateFieldConsumers(stack).filter((f) => f.object === 'xs_account' && f.field === 'tier').map((f) => f.rule);
+    expect(tierFindings(artifact({ datasets: [dataset('partner.tier')] }))).toEqual([]);
+    expect(tierFindings(artifact({ datasets: [dataset('name')] }))).toEqual([FIELD_NO_CONSUMERS]);
+    // Extension-added fields are still not judged themselves (the header).
+    expect(validateFieldConsumers(artifact({ datasets: [dataset('name')] })).filter((f) => f.field in added)).toEqual([]);
+  });
+
+  it('validate-related-list-refs: an FK a sibling package adds is an inbound relationship', () => {
+    const lists = (relatedLists: string[]) => ({ objects: [{ ...deal, relatedLists }, account, note] });
+    expect(ids(validateRelatedListRefs, artifact(lists(['xs_note', 'xs_note.deal_id'])))).toEqual([]);
+    expect(ids(validateRelatedListRefs, artifact(lists(['xs_note']), []))).toEqual([RELATED_LIST_REF_UNKNOWN]);
+    expect(ids(validateRelatedListRefs, artifact(lists(['xs_note.nowhere'])))).toEqual([RELATED_LIST_REF_UNKNOWN]);
+  });
+
+  // The two retired private readers folded every entry additively; the shared
+  // fold keeps the registry's one entry per package per target, so a later
+  // entry of the same package replaces an earlier one whole.
+  it('both retired readers now keep one entry per package per target, as the registry does', () => {
+    const replaced = [
+      { extend: 'xs_note', fields: { deal_id: { type: 'lookup', reference: 'xs_deal' } } },
+      { extend: 'xs_note', fields: { body_html: { type: 'html' } } },
+      { extend: 'xs_deal', fields: { region: { type: 'text' } } },
+      { extend: 'xs_deal', fields: { score: { type: 'number' } } },
+    ];
+    const lists = { objects: [{ ...deal, relatedLists: ['xs_note'] }, account, note] };
+    expect(ids(validateRelatedListRefs, artifact(lists, replaced))).toEqual([RELATED_LIST_REF_UNKNOWN]);
+    const mapping = (target: string) => ({ mappings: [{ name: 'm', targetObject: 'xs_deal', fieldMapping: [{ source: 'R', target }] }] });
+    expect(ids(validateMappingTargetFields, artifact(mapping('score'), replaced))).toEqual([]);
+    expect(ids(validateMappingTargetFields, artifact(mapping('region'), replaced))).toEqual([MAPPING_TARGET_FIELD_UNKNOWN]);
   });
 });
