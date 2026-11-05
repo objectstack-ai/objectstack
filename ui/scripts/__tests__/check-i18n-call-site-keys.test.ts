@@ -297,6 +297,7 @@ describe('the pack-shaped namespaces are part of the en pack (objectstack#30588)
       'packages/i18n/src/locales/en.ts': EN_FIXTURE,
       'packages/x/src/page.tsx': `import { useObjectTranslation } from '${I18N_PKG}';\nexport function P() { const { t } = useObjectTranslation(); return t('shop.title'); }\n`,
     });
+    // fixture-address: the finding the gate reports for the fixture page written just above
     expect(findingsOf(root, 'missing-key')).toEqual(['shop.title@packages/x/src/page.tsx:2']);
   });
 });
