@@ -64,7 +64,7 @@
 // flows are held to the same bar.
 
 import { walkFlowNodes, flowNodeLabel } from './flow-walk.js';
-import { recordsOf } from './object-graph.js';
+import { objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
 
 export type ReadonlyFlowWriteSeverity = 'error' | 'warning';
 
@@ -163,6 +163,25 @@ export function buildReadonlyIndex(objects: AnyRec[]): Map<string, Map<string, F
 }
 
 /**
+ * [#30471] {@link buildReadonlyIndex} over the objects as SERVED
+ * (`objectsAsServed`, the package's one fold): a write to a field a sibling
+ * package adds through `objectExtensions` and declares `readonly` or
+ * `readonlyWhen` is judged as a declared one is. Readonly is a question about
+ * the field's definition, so a field two packages tie on is left out
+ * (`objectsWithoutTiedFields`) and goes unjudged. An object that declares no
+ * field keeps its own empty map, extended or not: the write rules leave such an
+ * object (an introspected schema) unjudged, and the readonly rules do too.
+ * Shared by the flow, hook and action readonly rules.
+ */
+export function buildServedReadonlyIndex(stack: AnyRec): Map<string, Map<string, FieldReadonlyMeta>> {
+  const idx = buildReadonlyIndex(objectsWithoutTiedFields(objectsAsServed(stack)));
+  for (const [name, own] of buildReadonlyIndex(recordsOf(stack.objects))) {
+    if (own.size === 0) idx.set(name, own);
+  }
+  return idx;
+}
+
+/**
  * The `managedBy` buckets the engine's create-side strip steps around, mirroring
  * `PLATFORM_INTERNAL_MANAGED_BUCKETS` in
  * `packages/objectql/src/validation/rule-validator.ts` (#15719). ⛔ Not derived
@@ -245,7 +264,10 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
   if (flows.length === 0) return findings;
 
   const objects = recordsOf(stack.objects);
-  const roIndex = buildReadonlyIndex(objects);
+  // [#30471] The readonly index reads the objects as served
+  // (`buildServedReadonlyIndex`). The insert-strip exemption is object-level
+  // and stays on the declared objects.
+  const roIndex = buildServedReadonlyIndex(stack);
   const insertStripExempt = buildInsertStripExemptObjects(objects);
 
   flows.forEach((flow, flowIndex) => {

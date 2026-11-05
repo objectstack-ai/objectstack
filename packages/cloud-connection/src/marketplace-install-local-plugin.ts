@@ -576,6 +576,8 @@ type NamespaceHoldingEngine = PackageWritabilityEngine & {
 type OverrideGateEngine = PackageWritabilityEngine & {
     registry?: PackageWritabilityEngine['registry'] & {
         getAllPackages?(): unknown;
+        /** [#30542] An installed package's code artifact (`SchemaRegistry#getArtifactItem`). */
+        getArtifactItem?(type: string, name: string, currentPackageId?: string): unknown;
     };
 };
 type OverrideGateLister = {
@@ -3691,6 +3693,20 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             return read;
         };
         const isBase = (id: string): boolean => delivered.has(id) || !isWritablePackage(ql, id);
+        // [#30542] An installed base's own item is its code artifact, the one
+        // the protocol door judges a declared action override against
+        // (`overrideWriteVerdict`'s `baseItemOf`). The listing is not: once
+        // the base's declared override is armed, it serves the override under
+        // the base's envelope, so a re-install of the pair was judged against
+        // its own previous version, and a v2 that relaxes a v1 tightening
+        // back to the base's own gates was refused. A registry that answers
+        // no artifact leaves the listed item.
+        const artifactOf = (item: OverrideWriteItem, base: string): unknown => {
+            const artifact = registry.getArtifactItem?.(item.type, item.name, base);
+            return isPlainObject(artifact) && artifact._packageId === base && listedIdentity(item.type, artifact) === item.identity
+                ? artifact
+                : undefined;
+        };
 
         const refusals: OverrideInstallRefusal[] = [];
         for (const [packageId, pkg] of delivered) {
@@ -3703,7 +3719,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 const shipped = new Map<string, unknown>();
                 for (const base of bases) {
                     const held = (await heldBy(item.type, base)).get(item.identity);
-                    if (held !== undefined) { shippers.push(base); shipped.set(base, held); }
+                    if (held !== undefined) {
+                        shippers.push(base);
+                        shipped.set(base, (delivered.has(base) ? undefined : artifactOf(item, base)) ?? held);
+                    }
                 }
                 const verdict = judgeOverrideWrite(
                     { type: item.type, name: item.name, packageId, item: item.item },

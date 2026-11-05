@@ -75,6 +75,9 @@ export const REST_SERVER_REGISTRAR_FILES = [
     // [#27627] `registerMetaAppBundleRoute`' body, the app metadata bundle. New, not a
     // moved slice, and a `/meta` group — see {@link REST_SERVER_META_ROUTE_FILES}.
     'meta-app-bundle-routes.ts',
+    // [#30205] `registerUserWorkEndpoints`' body, a user's assigned work: the counts and
+    // the hand-over. New, not a moved slice.
+    'user-work-routes.ts',
 ] as const;
 
 /** One file on {@link REST_SERVER_REGISTRAR_FILES}. */
