@@ -11,6 +11,7 @@ import { AlertTriangle } from 'lucide-react';
 import { Combobox, EmptyValue, Input, cn } from '@object-ui/components';
 import { SchemaRendererContext } from '@object-ui/react';
 import { AUDIENCE_ANCHOR_POSITIONS } from '@objectstack/spec';
+import { MCP_AGENT_PERMISSION_SETS } from '@objectstack/spec/ai';
 import type { FieldWidgetComponentProps } from './types.js';
 import { registryLister, type RegistryItemHeader } from './registryCatalog.js';
 import { toDomProps } from './toDomProps.js';
@@ -56,10 +57,13 @@ import { useFieldTranslation } from './useFieldTranslation.js';
  * grant cannot name an audience anchor — `everyone` or `guest` (ADR-0090
  * D5/D9), held implicitly by every authenticated or anonymous principal — and
  * the server refuses a `sys_user_position` row that does. So `position-ref`
- * leaves the anchors out of its options ({@link nonGrantableNames}). A stored
- * anchor is still the row's value: it stays on screen as its own option, by its
- * label beside its name, and it is not flagged "not found", because the
- * registry does list it.
+ * leaves the anchors out of its options ({@link nonGrantableNames}). A
+ * permission grant names a set for a PERSON, and the MCP agent ceiling sets
+ * (ADR-0090 D10) are an AI assistant's own grants, which the runtime injects
+ * onto the agent principal directly rather than through any grant row; so
+ * `permission-ref` leaves them out. A stored name left out is still the row's value: it stays on screen as
+ * its own option, by its label beside its name, and it is not flagged "not
+ * found", because the registry does list it.
  *
  * ⛔ No arm writes anything but a name the person picked or typed: no label,
  * no id, no first-item default.
@@ -83,17 +87,22 @@ function failureMessage(err: unknown): string {
 }
 
 const AUDIENCE_ANCHORS: ReadonlySet<string> = new Set(AUDIENCE_ANCHOR_POSITIONS);
+const AGENT_CEILING_SETS: ReadonlySet<string> = new Set(MCP_AGENT_PERMISSION_SETS);
 const NO_EXCLUSIONS: ReadonlySet<string> = new Set();
 
 /**
  * The names of a registry type that a grant cannot name, which the picker
  * therefore does not offer. For `position`, the audience anchors: the list is
  * the spec's own `AUDIENCE_ANCHOR_POSITIONS`, read and never copied, so an
- * anchor the spec adds is left out with no change here. Every other type
- * excludes nothing: a permission set named like an anchor is an ordinary set.
+ * anchor the spec adds is left out with no change here. For `permission`, the
+ * MCP agent ceiling sets, read the same way from the spec's
+ * `MCP_AGENT_PERMISSION_SETS`. Every other type excludes nothing, and each list
+ * applies to its own type only: a permission set named like an anchor is an
+ * ordinary set.
  *
- * Imported statically from the spec's ROOT entry, as `@object-ui/auth` imports
- * `BUILTIN_MEMBERSHIP_ROLES`, and not from `@objectstack/spec/identity`. The
+ * The anchors are imported statically from the spec's ROOT entry, as
+ * `@object-ui/auth` imports `BUILTIN_MEMBERSHIP_ROLES`, and not from
+ * `@objectstack/spec/identity`. The
  * console builds this widget into an eager chunk (`ui-components`), so a
  * static `/identity` import would carry that subpath's whole module into every
  * page load; `pnpm check:eager-closure` is the instrument that weighs it. A
@@ -101,9 +110,17 @@ const NO_EXCLUSIONS: ReadonlySet<string> = new Set();
  * `pnpm check:spec-floors` too: that gate judges the `@objectstack/spec` floor
  * from static imports only, and on the publish lane it reports a subpath it
  * cannot judge as a finding.
+ *
+ * The agent sets have no root export, so they come from `@objectstack/spec/ai`,
+ * statically for the same `check:spec-floors` reason. That subpath's
+ * `mcp.zod` module already reaches the eager closure through the console's
+ * OAuth consent page, which imports its scope constants statically;
+ * `pnpm check:eager-closure` weighs what this import adds.
  */
 function nonGrantableNames(type: string): ReadonlySet<string> {
-  return type === 'position' ? AUDIENCE_ANCHORS : NO_EXCLUSIONS;
+  if (type === 'position') return AUDIENCE_ANCHORS;
+  if (type === 'permission') return AGENT_CEILING_SETS;
+  return NO_EXCLUSIONS;
 }
 
 /** A settled answer, with the inputs it answers for. */
