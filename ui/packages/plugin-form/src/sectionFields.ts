@@ -281,6 +281,19 @@ export function warnSectionMemberExcludedByFields(
 }
 
 /**
+ * The label a declared field without one is drawn under: its name with the
+ * first letter capitalised and underscores as spaces (`part_no` → `Part no`).
+ *
+ * The spec's `FieldSchema.label` is optional, so a label-less field is valid
+ * metadata, and the list draws it under exactly this rule
+ * (`objectGridGenerateColumns`, plugin-grid). The form follows it, so one
+ * field reads the same in the list and in its form (objectstack#30328).
+ */
+export function fieldNameLabel(fieldName: string): string {
+  return fieldName.charAt(0).toUpperCase() + fieldName.slice(1).replace(/_/g, ' ');
+}
+
+/**
  * Build a runtime FormField from object-schema metadata for `fieldName`.
  *
  * The ONE object-field-to-FormField mapping in this package. Exported because
@@ -303,19 +316,6 @@ export function warnSectionMemberExcludedByFields(
  * against — the lint's rule likewise judges only a known object — so the bare
  * stub stays: its value does reach that host.
  */
-/**
- * The label a declared field without one is drawn under: its name with the
- * first letter capitalised and underscores as spaces (`part_no` → `Part no`).
- *
- * The spec's `FieldSchema.label` is optional, so a label-less field is valid
- * metadata, and the list draws it under exactly this rule
- * (`objectGridGenerateColumns`, plugin-grid). The form follows it, so one
- * field reads the same in the list and in its form (objectstack#30328).
- */
-export function fieldNameLabel(fieldName: string): string {
-  return fieldName.charAt(0).toUpperCase() + fieldName.slice(1).replace(/_/g, ' ');
-}
-
 export function fromObjectSchema(fieldName: string, ctx: SectionFieldsContext): FormField | undefined {
   const field = ctx.objectSchema?.fields?.[fieldName];
   if (!field) {

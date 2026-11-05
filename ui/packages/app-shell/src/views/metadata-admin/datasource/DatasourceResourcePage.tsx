@@ -418,7 +418,6 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       .map((o) => ({ name: o.name as string, ...(typeof o.label === 'string' && o.label ? { label: o.label } : {}) }));
   };
 
-  /** Each object by its label, with its name beside it when the two differ. */
   const openDeleteConfirm = (row: DatasourceRow) => {
     setConfirmDelete(row);
     setBound(null);
