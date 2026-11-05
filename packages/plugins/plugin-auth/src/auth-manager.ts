@@ -433,6 +433,23 @@ export function resolveScimEnabled(pluginConfig?: Partial<AuthPluginConfig>): bo
 }
 
 /**
+ * [#30201] SINGLE decision point for "can a user enroll a second factor
+ * here?" — whether better-auth's `twoFactor` plugin is wired, whose
+ * `/two-factor/*` endpoints are the only enrollment path. Shared by
+ * `buildPluginList()` (what is wired), the `/auth/config` features block (what
+ * is advertised), the per-user MFA gate (ADR-0069 D3 holds a user only while
+ * they can enroll) and the `sys_organization.require_mfa` write guard
+ * (`organization-mfa-enrollment-guard.ts`), so the four can never disagree.
+ *
+ * Resolution order: `OS_AUTH_TWO_FACTOR` env (operator override, wins) →
+ * config (`plugins.twoFactor`, which the `auth.mfa_required` setting turns on
+ * together with the requirement) → off.
+ */
+export function resolveTwoFactorEnabled(pluginConfig?: Partial<AuthPluginConfig>): boolean {
+  return readBooleanEnv('OS_AUTH_TWO_FACTOR') ?? pluginConfig?.twoFactor ?? false;
+}
+
+/**
  * Entry validation (#13816, maintainer ruling 2026-09-01) — REFUSES the one
  * incoherent corner of the `admin` tri-state at the point the config enters
  * the manager (constructor, `applyConfigPatch`, and `buildPluginList()` for
@@ -1547,6 +1564,10 @@ export class AuthManager {
   // the node that issues a flag (other nodes catch up within the TTL).
   private _mustChangeCache: { value: boolean; at: number } = { value: false, at: 0 };
   private _mustChangeRefreshing = false;
+  // [#30201] Set the first time the MFA gate meets a requirement it does not
+  // enforce because no one can enroll (see `noteMfaRequirementWithoutEnrollment`),
+  // so the warning is said once per manager, not once per request.
+  private _mfaWithoutEnrollmentNoted = false;
   // Optional auth features whose better-auth plugin failed to initialize and
   // was skipped so core auth stays up (feature key → error message). Rebuilt
   // by every buildPluginList() run; see addOptionalPlugin().
@@ -4584,7 +4605,6 @@ export class AuthManager {
     const termsUrl = resolveLegalUrl(rawTermsUrl, DEFAULT_TERMS_URL);
     const privacyUrl = resolveLegalUrl(rawPrivacyUrl, DEFAULT_PRIVACY_URL);
 
-    const twoFactorFromEnv = readBooleanEnv('OS_AUTH_TWO_FACTOR');
     const turnstileKeys = resolveTurnstileKeys();
 
     // [#7481, maintainer ruling 2026-08-11] `passkeys` / `magicLink` are
@@ -4595,7 +4615,7 @@ export class AuthManager {
     // `magicLink`'s server endpoints are unaffected: `plugins.magicLink` still
     // wires better-auth's magic-link plugin in buildPluginList().
     const features = {
-      twoFactor: twoFactorFromEnv ?? pluginConfig.twoFactor ?? false,
+      twoFactor: resolveTwoFactorEnabled(pluginConfig),
       organization: pluginConfig.organization ?? true,
       multiOrgEnabled,
       // ADR-0105 D1 — WHICH posture is in force. `multiOrgEnabled` stays the
@@ -5234,6 +5254,37 @@ export class AuthManager {
   }
 
   /**
+   * [#30201] Can a user enroll a second factor on this deployment right now —
+   * is the twoFactor plugin wired? {@link resolveTwoFactorEnabled} over the
+   * live config, the one answer `buildPluginList()` and `features.twoFactor`
+   * give too. Read per call, so a settings pass that turns the plugin on is
+   * seen at once.
+   */
+  public isTwoFactorEnabled(): boolean {
+    return resolveTwoFactorEnabled(this.config.plugins);
+  }
+
+  /**
+   * [#30201] Called by the MFA gate when a user is under an MFA requirement
+   * (the global `mfaRequired` or their organization's `require_mfa`) that it
+   * does not enforce, because the twoFactor plugin is off and the user has no
+   * way to enroll. A functional degradation (AGENTS.md, degradation log
+   * levels): the requirement is visibly not in force, nothing stored is lost.
+   * Said once per manager, with the remedy.
+   */
+  private noteMfaRequirementWithoutEnrollment(): void {
+    if (this._mfaWithoutEnrollmentNoted) return;
+    this._mfaWithoutEnrollmentNoted = true;
+    this.config.logger?.warn(
+      '[auth] multi-factor authentication is required (the auth.mfa_required setting, or an organization\'s ' +
+        'require_mfa) but is NOT enforced: the two-factor feature is off, so nobody can enroll an authenticator ' +
+        'app, and holding them would lock every affected member out, the owner included. Remedy: turn two-factor ' +
+        'on (OS_AUTH_TWO_FACTOR=true, or the auth.mfa_required setting, which turns it on with the requirement); ' +
+        'or clear require_mfa on the organization.',
+    );
+  }
+
+  /**
    * #2766 V2 — is an email transport wired? The identity import endpoint
    * rejects the invite password policy up front when it isn't, instead of
    * creating N accounts whose invitation emails all silently fail.
@@ -5441,11 +5492,13 @@ export class AuthManager {
     const readMustChangeCache = () => this._mustChangeCache;
     const readOrgMfaCache = () => this._orgMfaCache;
     const readConfig = () => this.config;
-    const host: Pick<PasswordSessionPolicyHost, '_mustChangeCache' | '_orgMfaCache' | 'config' | 'getDataEngine' | 'refreshMustChangeCacheIfStale' | 'refreshOrgMfaCacheIfStale'> = {
+    const host: Pick<PasswordSessionPolicyHost, '_mustChangeCache' | '_orgMfaCache' | 'config' | 'getDataEngine' | 'isTwoFactorEnabled' | 'noteMfaRequirementWithoutEnrollment' | 'refreshMustChangeCacheIfStale' | 'refreshOrgMfaCacheIfStale'> = {
       get _mustChangeCache() { return readMustChangeCache(); },
       get _orgMfaCache() { return readOrgMfaCache(); },
       get config() { return readConfig(); },
       getDataEngine: (...a) => this.getDataEngine(...a),
+      isTwoFactorEnabled: (...a) => this.isTwoFactorEnabled(...a),
+      noteMfaRequirementWithoutEnrollment: (...a) => this.noteMfaRequirementWithoutEnrollment(...a),
       refreshMustChangeCacheIfStale: (...a) => this.refreshMustChangeCacheIfStale(...a),
       refreshOrgMfaCacheIfStale: (...a) => this.refreshOrgMfaCacheIfStale(...a),
     };
