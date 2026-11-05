@@ -323,6 +323,9 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // because a provider-less host mounting `RelatedList` directly is exactly
   // the case with no per-component error boundary above it either.
   'view.malformedFilter': 'This view’s filter is malformed, so no records are shown: the {{subject}} condition cannot be applied.',
+  // The export doors' refusal sentence, shared with `ListView` and
+  // `ObjectGrid`. Byte-identical to the `en` pack.
+  'view.exportNotPermitted': 'You don’t have permission to export these records. Contact your administrator if you think you should be able to.',
 };
 
 /**

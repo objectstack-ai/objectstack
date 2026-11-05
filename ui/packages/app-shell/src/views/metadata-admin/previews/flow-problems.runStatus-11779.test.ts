@@ -14,6 +14,13 @@
 import { describe, it, expect } from 'vitest';
 import { deriveFlowRunStatus, describeFlowRunStatus } from './flow-problems';
 import { t } from '../i18n';
+import { FLOW_UNBOUND_CAUSES } from '@objectstack/spec/contracts';
+// The zh rows these cases read live in `@object-ui/i18n`'s `studio` namespace,
+// whose `zh` catalogue is fetched on demand (objectstack#25922): until it lands
+// a zh lookup answers from `en`. Resident before any case, so the zh rows read
+// synchronously whatever else shares this worker.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 const REASON = 'FIXTURE: the platform sentence, shown as sent.';
 
@@ -85,5 +92,51 @@ describe('deriveFlowRunStatus — without a runtime row (objectui#11779)', () =>
       expect(['green', 'muted', 'amber', 'plain']).toContain(view.tone);
       expect(view.label, s.kind).not.toBe('');
     }
+  });
+});
+
+describe('the not-running note words a known cause in the console language (objectstack#30039)', () => {
+  const MISSING = "no 'record_change' trigger is registered — add requires: ['triggers']";
+  const missingRow = {
+    enabled: true,
+    bound: false,
+    triggerType: 'record_change',
+    reason: MISSING,
+    unboundCause: 'missing_trigger',
+  };
+
+  it('carries the engine cause code beside the reason, and only when the row sends one', () => {
+    expect(deriveFlowRunStatus(missingRow)).toEqual({ kind: 'not-running', reason: MISSING, cause: 'missing_trigger' });
+    expect(deriveFlowRunStatus({ enabled: true, bound: false, triggerType: 'schedule', reason: REASON })).toEqual({
+      kind: 'not-running',
+      reason: REASON,
+    });
+  });
+
+  it('a known cause reads its designer row in zh and en; the platform sentence moves to the detail', () => {
+    const s = deriveFlowRunStatus(missingRow);
+    for (const locale of ['zh-CN', 'en']) {
+      const view = describeFlowRunStatus(s, locale);
+      expect(view.title).toBe(t('engine.studio.auto.unboundCause.missing_trigger', locale));
+      expect(view.detail).toBe(MISSING);
+    }
+    const zh = describeFlowRunStatus(s, 'zh-CN').title ?? '';
+    expect(zh).toMatch(/[一-鿿]/);
+    expect(zh).not.toBe(t('engine.studio.auto.unboundCause.missing_trigger', 'en'));
+  });
+
+  it('every contract cause has a row in both tables', () => {
+    for (const cause of FLOW_UNBOUND_CAUSES) {
+      for (const locale of ['zh-CN', 'en']) {
+        const key = `engine.studio.auto.unboundCause.${cause}`;
+        expect(t(key, locale), `${cause} @ ${locale}`).not.toBe(key);
+      }
+    }
+  });
+
+  it('a cause the console has no row for keeps the platform sentence as the title — the control', () => {
+    const view = describeFlowRunStatus(deriveFlowRunStatus({ ...missingRow, reason: REASON, unboundCause: 'added_later' }), 'zh-CN');
+    expect(view.title).toBe(REASON);
+    expect(view.detail).toBeUndefined();
   });
 });

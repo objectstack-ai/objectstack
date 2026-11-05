@@ -367,7 +367,7 @@ export function ViewVariantInspector({
     () =>
       mergeServerFields({
         bundledSchema: isFormFamily ? getFormVariantSchema() : getListVariantSchema(),
-        bundledForm: isFormFamily ? undefined : getViewForm(),
+        bundledForm: isFormFamily ? undefined : getViewForm(locale),
         serverSchema: serverVariantSchema,
         excludeFields: VIEW_CURATED_FIELDS,
         sectionTitle: t('engine.inspector.moreFields', locale),
