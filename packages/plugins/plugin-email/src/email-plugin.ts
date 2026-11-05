@@ -441,6 +441,14 @@ export class EmailServicePlugin implements Plugin {
    */
   private brandingProductName?: string;
   /**
+   * The default sender as DECLARED — the constructor's `defaultFrom`, then the
+   * `mail` settings' From email with the From name somebody set, if any —
+   * before {@link applyDefaultSender} names it. Kept apart from the live
+   * sender so a later Branding save can rename a sender that has no name of
+   * its own, and never one that has.
+   */
+  private declaredSender?: EmailAddress;
+  /**
    * Settles when the boot outbox sweep (#5161) has finished — with its counts,
    * or `undefined` when the sweep itself failed (already reported at `error`).
    *
@@ -461,13 +469,37 @@ export class EmailServicePlugin implements Plugin {
    * `config.appName`), else `'ObjectStack'`. It is the chain the auth mails'
    * `{{appName}}` reads (plugin-auth binds the same `workspace_name` over the
    * same deployment name), so the sender and the subject name one product.
-   * A From name somebody set always wins over it (`EmailService.setSenderBrandName`).
+   * A From name somebody set always wins over it ({@link namedSender}).
    */
   private senderBrandName(): string {
     const deployment = this.options.defaultTemplateContext?.appName;
     return this.brandingProductName
       ?? (typeof deployment === 'string' && deployment.trim() ? deployment.trim() : undefined)
       ?? 'ObjectStack';
+  }
+
+  /**
+   * `sender` as it goes out: a sender with a display name of its own keeps it;
+   * one without — a bare address, or `{ address }` alone — takes
+   * {@link senderBrandName}, so mail an administrator configured with an
+   * address alone does not reach the recipient unbranded.
+   */
+  private namedSender(sender: EmailAddress | undefined): EmailAddress | undefined {
+    if (!sender) return sender;
+    // The string form is a bare address: it carries no display name.
+    const declared = typeof sender === 'string' ? { address: sender } : sender;
+    if (declared.name?.trim()) return sender;
+    return { ...declared, name: this.senderBrandName() };
+  }
+
+  /**
+   * Install the declared sender, named ({@link namedSender}), as the live
+   * service's default `from` — after a `mail` save changes the declaration and
+   * after a Branding save changes the name. A sender a caller passes as
+   * `input.from` is the caller's and is never renamed.
+   */
+  private applyDefaultSender(): void {
+    this.service?.setDefaultFrom(this.namedSender(this.declaredSender));
   }
 
   /**
@@ -541,12 +573,12 @@ export class EmailServicePlugin implements Plugin {
 
     this.service = new EmailService({
       transport,
-      defaultFrom: this.options.defaultFrom,
+      defaultFrom: this.namedSender(this.options.defaultFrom),
       retries: this.options.retries,
       defaultTemplateContext: this.options.defaultTemplateContext,
       logger: ctx.logger,
     });
-    this.service.setSenderBrandName(this.senderBrandName());
+    this.declaredSender = this.options.defaultFrom;
 
     // [#28880] The stack's declared fallback locale joins a named-locale
     // template ladder (after the recipient's own tag, before en-US). Read
@@ -723,7 +755,7 @@ export class EmailServicePlugin implements Plugin {
                   ? resolved.value.trim()
                   : '';
                 this.brandingProductName = explicit || undefined;
-                this.service?.setSenderBrandName(this.senderBrandName());
+                this.applyDefaultSender();
               } catch (err: any) {
                 ctx.logger.warn(
                   'EmailServicePlugin: failed to apply branding.workspace_name to the sender name: '
@@ -1460,7 +1492,7 @@ export class EmailServicePlugin implements Plugin {
     // Only a From name somebody SET names the sender. One left empty — or a
     // value the resolver answers as a manifest default, a decision nobody
     // made — leaves the sender nameless here, and the service names it with
-    // the product name (`EmailService.setSenderBrandName`).
+    // the product name ({@link namedSender}).
     const fromName = (sources.from_name ?? 'default') !== 'default'
       && typeof values.from_name === 'string' && values.from_name.trim()
       ? values.from_name
@@ -1479,7 +1511,8 @@ export class EmailServicePlugin implements Plugin {
         + `before reaching the transport, silently on the sign-up path. ${DEFAULT_FROM_FIX}`,
       );
     } else if (fromEmail) {
-      this.service.setDefaultFrom({ address: fromEmail, name: fromName });
+      this.declaredSender = fromName ? { address: fromEmail, name: fromName } : { address: fromEmail };
+      this.applyDefaultSender();
       appliedFrom = fromEmail;
     }
 
