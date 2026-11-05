@@ -5,7 +5,7 @@
 
 refactor(fields, data-objectstack)!: `UploadProvider` moves into `@object-ui/fields`, the ObjectStack upload adapter into `@object-ui/data-objectstack`, and `@object-ui/providers` is retired
 
-Clause-②: yes (widening)
+Clause-②: yes (narrowing) — `@object-ui/fields` gains `UploadProvider`, `useUpload`, `UploadProviderProps` and the three upload contract types, and `@object-ui/data-objectstack` gains `createObjectStackUploadAdapter` and `ObjectStackUploadAdapterOptions`; the whole `@object-ui/providers` package is retired, which takes `createS3Adapter`, `createAzureBlobAdapter`, their option types and the exported `createObjectUrlAdapter` with it.
 Metadata-protocol: none
 
 <!-- adr-0087: not-required (runtime-export-retired @object-ui/providers#*) the retired operand is a published ui package whose entry held a React upload context, its hook, four upload adapter factories and their TypeScript option and result types; no packages/spec schema, registered node type, ADR-0087 conversion surface or stored shape names any of them, so there is nothing for `objectstack migrate meta` to rewrite, and a consumer meets the move at its own import, where the compiler names the missing module -->
