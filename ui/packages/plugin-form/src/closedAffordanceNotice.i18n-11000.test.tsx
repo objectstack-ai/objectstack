@@ -12,8 +12,9 @@
  *
  * The notice resolves through the i18n catalogue (`form.noPermissionToCreate` /
  * `form.noPermissionToEdit`) and names the object the way the console does
- * (`useObjectLabel`): the app's translation of the label when one is loaded,
- * else the label the object declares. The English defaults and the full
+ * (objectstack#30390): the label the server serves, already translated for
+ * the session, else the app's translation of it, else its name. A `zh`
+ * session's definitions serve the `zh` answer. The English defaults and the full
  * layout × principal table are `closedAffordanceNotice-11000.test.tsx`; this
  * file is kept apart because a mounted provider leaves react-i18next's global
  * instance behind.
@@ -51,7 +52,7 @@ const member = (object: string, apiOperations: string[]): any => ({
   fields: {},
 });
 
-const makeDS = (name: string, label: string) => ({
+const makeDS = (name: string, label?: string) => ({
   getObjectSchema: vi.fn().mockResolvedValue({ name, label, fields: FIELDS }),
   findOne: vi.fn().mockResolvedValue({ id: 'r1', customer: 'Acme' }),
   find: vi.fn().mockResolvedValue({ data: [] }),
@@ -87,7 +88,7 @@ describe('The closed-affordance notice in zh (objectui#11000)', () => {
         ],
       },
       member('invoice', ['read', 'update']),
-      makeDS('invoice', 'Invoice'),
+      makeDS('invoice', '发票'),
     );
 
     const notice = await screen.findByText('您没有创建发票的权限，字段均为只读。');
@@ -108,5 +109,30 @@ describe('The closed-affordance notice in zh (objectui#11000)', () => {
       const input = document.querySelector('input[name="customer"]') as HTMLInputElement | null;
       expect(input?.disabled).toBe(true);
     });
+  });
+});
+
+/**
+ * objectstack#30390 — a renamed object is named as served, never by the
+ * packaged catalog string. Directions, written before the run: the renamed
+ * cell RED before the change (`发票`), GREEN after; the control GREEN on both.
+ */
+describe('The closed-affordance notice names a served object as served (objectstack#30390)', () => {
+  it('zh: a renamed object is named by its served label, not the packaged translation', async () => {
+    mount(
+      { objectName: 'invoice', mode: 'edit', recordId: 'r1', fields: ['customer'] },
+      member('invoice', ['create', 'read']),
+      makeDS('invoice', '账单'),
+    );
+    await screen.findByText('您没有编辑账单的权限，字段均为只读。');
+  });
+
+  it('zh: control — an object served with no label is named by the app bundle', async () => {
+    mount(
+      { objectName: 'invoice', mode: 'edit', recordId: 'r1', fields: ['customer'] },
+      member('invoice', ['create', 'read']),
+      makeDS('invoice'),
+    );
+    await screen.findByText('您没有编辑发票的权限，字段均为只读。');
   });
 });
