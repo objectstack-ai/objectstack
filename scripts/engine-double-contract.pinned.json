@@ -1507,6 +1507,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.pair-translation-bundle.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.permission-set-name-cross-package.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3817,6 +3822,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/sign-in-method-floor.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/sys-session-ttl-sweep.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -4519,7 +4529,7 @@
     {
       "file": "packages/rest/src/meta-dashboard-view-i18n-explicit-override.test.ts",
       "verb": "findOne",
-      "pinned": 1
+      "pinned": 2
     },
     {
       "file": "packages/rest/src/meta-disabled-package-doors.test.ts",
