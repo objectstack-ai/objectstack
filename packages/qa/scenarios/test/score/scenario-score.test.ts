@@ -18,15 +18,15 @@ import { describe, expect, it } from 'vitest';
 
 import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/spec';
 
-import { DEFAULT_METADATA_EVAL_CORPUS } from './corpus.js';
-import { artifactToEvalGraph } from './scenario-graph.js';
+import { DEFAULT_METADATA_EVAL_CORPUS } from '../../../../cli/src/lint/corpus.js';
+import { artifactToEvalGraph } from '../../src/score/scenario-graph.js';
 import {
   deriveShape,
   scoreGraph,
   scoreGraphShape,
   type EvalGraph,
-  type ScenarioExpectation,
-} from './scenario-score.js';
+} from '../../src/score/scenario-score.js';
+import type { ScenarioExpect } from '../../src/schema.js';
 
 type Bag = Record<string, any>;
 
@@ -72,7 +72,7 @@ function goldenArtifact(fixture: unknown): Bag {
 }
 
 /** The expectation the golden build itself meets, by name. */
-function expectationOf(graph: EvalGraph): ScenarioExpectation {
+function expectationOf(graph: EvalGraph): ScenarioExpect {
   return {
     objects: graph.objects.map((o) => o.name),
     minFieldsPerObject: Math.min(...graph.objects.map((o) => o.fields.length)),
@@ -126,7 +126,7 @@ const DEGRADATIONS: Record<string, (artifact: Bag) => Bag | null> = {
   },
 };
 
-const scoreBoth = (graph: EvalGraph, exp: ScenarioExpectation) => ({
+const scoreBoth = (graph: EvalGraph, exp: ScenarioExpect) => ({
   exact: scoreGraph(graph, exp),
   shape: scoreGraphShape(graph, deriveShape(exp)),
 });
@@ -193,7 +193,7 @@ describe('scoreGraph — exact names', () => {
     dashboards: [{ name: 'overview' }],
     apps: [{ name: 'library', nav: [{ target: 'loan', resolves: true }, { target: 'book', resolves: true }] }],
   };
-  const exp: ScenarioExpectation = {
+  const exp: ScenarioExpect = {
     objects: ['loan', 'book'],
     minFieldsPerObject: 1,
     selectFields: [{ object: 'loan', field: 'status', minOptions: 2 }],
@@ -234,7 +234,7 @@ describe('scoreGraph — exact names', () => {
 
 describe('scoreGraphShape — names do not matter, structure does', () => {
   it('passes a correct build whose names differ from the scenario', () => {
-    const exp: ScenarioExpectation = { objects: ['loan', 'book'], lookups: [{ object: 'loan', field: 'book', to: 'book' }], appNavTargets: ['loan'] };
+    const exp: ScenarioExpect = { objects: ['loan', 'book'], lookups: [{ object: 'loan', field: 'book', to: 'book' }], appNavTargets: ['loan'] };
     const graph: EvalGraph = {
       objects: [
         { name: 'borrow_record', fields: [{ name: 'volume', type: 'master_detail', reference: 'volume' }] },

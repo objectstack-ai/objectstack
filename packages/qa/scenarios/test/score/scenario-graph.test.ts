@@ -4,8 +4,8 @@ import { describe, expect, it } from 'vitest';
 
 import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/spec';
 
-import { DEFAULT_METADATA_EVAL_CORPUS } from './corpus.js';
-import { artifactToEvalGraph } from './scenario-graph.js';
+import { DEFAULT_METADATA_EVAL_CORPUS } from '../../../../cli/src/lint/corpus.js';
+import { artifactToEvalGraph } from '../../src/score/scenario-graph.js';
 
 type Bag = Record<string, any>;
 

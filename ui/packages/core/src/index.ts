@@ -21,12 +21,37 @@ export * from './validation/index.js';
 // what `toDomProps` passes — everything else is consumed or dropped.
 // `@object-ui/fields` executes the SAME mechanism against its own declared key
 // list (`pickDomProps`), so there is one judge, not two.
-export * from './utils/dom-props.js';
+// Named, not `export *`: `isOpenDomAttributeFamily` stays in the module for its
+// in-package readers and off the public entry (objectstack#25921: zero
+// consumers).
+export {
+  pickDomProps,
+  toDomProps,
+  SDUI_DOM_PASS_THROUGH_KEYS,
+  type SduiDomPassThroughKey,
+  type DomProps,
+} from './utils/dom-props.js';
 export * from './utils/filter-converter.js';
 export * from './utils/managedBy.js';
 // The affordance-to-grant map (objectui#12082): every console affordance that
 // offers a write reads the grant it exercises from this one table.
-export * from './utils/affordanceGrants.js';
+// Named, not `export *`: `AffordanceGrantRow` stays in the module for its
+// in-package readers and off the public entry (objectstack#25921: zero
+// consumers).
+export {
+  resolveAffordance,
+  resolveFieldAffordance,
+  formFieldsAffordance,
+  type AffordanceGrant,
+  type FieldAffordanceGrant,
+  AFFORDANCE_GRANTS,
+  type ConsoleAffordance,
+  type FieldAffordance,
+  type AffordanceGrantPrincipal,
+  type FieldAffordancePrincipal,
+  type AffordanceSource,
+  type AffordanceVerdict,
+} from './utils/affordanceGrants.js';
 export * from './utils/extract-records.js';
 // The non-grid row ceiling (objectui#7210), homed beside the `extractRecords`
 // it wraps by objectui#7508's ruling A′. `@object-ui/react` re-exports three of
@@ -56,32 +81,65 @@ export * from './utils/unmaterialized-fields.js';
 // (`entry exists && sortable: true`). Homed beside the storage-fact set above
 // because a consumer that reaches for one must be able to see the other and
 // know which one the platform actually served.
-export * from './utils/column-sortability.js';
+// Named, not `export *`: `normalizeObjectSortability` and `OBJECT_SORTABILITY_KEY`
+// stay in the module for its in-package readers and off the public entry
+// (objectstack#25921: zero consumers).
+export {
+  FIELD_UNSORTABLE_VIRTUAL_TYPE,
+  FIELD_SORTABLE_UNPROVISIONED_ANCHOR,
+  type FieldSortability,
+  type ObjectSortability,
+  attachObjectSortability,
+  readObjectSortability,
+  isPlatformSortableField,
+  filterPlatformSortableSort,
+} from './utils/column-sortability.js';
 // [objectstack#27504] The served packaged-action activation: which declared
 // actions the installation switched off, stamped by the data layer and asked
 // by every action gate beside the capability check.
-export * from './utils/action-activation.js';
+// Named, not `export *`: `ACTION_SWITCHED_OFF_KEY` stays in the module for its
+// in-package readers and off the public entry (objectstack#25921: zero
+// consumers).
+export {
+  markSwitchedOffActions,
+  markSwitchedOffActionsByObject,
+  isActionSwitchedOff,
+} from './utils/action-activation.js';
 // [objectstack#28472] The served delete cascade: the objects a delete of this
 // object also deletes, carried by the data layer to the delete confirmation.
-export * from './utils/cascade-delete-objects.js';
+// Named, not `export *`: `CASCADE_DELETE_OBJECTS_KEY` stays in the module for
+// its in-package readers and off the public entry (objectstack#25921: zero
+// consumers).
+export {
+  attachCascadeDeleteObjects,
+  readCascadeDeleteObjects,
+} from './utils/cascade-delete-objects.js';
 // [objectstack#28211] A list view's `kanban.lanes` as the `object-kanban`
 // node's `columns`: the one mapping both producers of that node share.
 export * from './utils/kanban-declared-lanes.js';
 // Named, not `export *`: the module's `reset*` helper is test-only and stays off
 // the public barrel (objectui#13453); in-repo tests import it from the module.
+// `CANONICAL_COLUMN_IDENTITY_KEY`, `LEGACY_COLUMN_IDENTITY_KEYS`,
+// `normalizeColumnIdentities` and `CANONICAL_COLUMN_LABEL_KEY` stay in the
+// module for its in-package readers and off the public entry
+// (objectstack#25921: zero consumers).
 export {
-  CANONICAL_COLUMN_IDENTITY_KEY,
-  LEGACY_COLUMN_IDENTITY_KEYS,
   TABLE_ADAPTER_COLUMN_KEY,
   columnIdentity,
   hasConflictingColumnIdentity,
   normalizeColumnIdentity,
-  normalizeColumnIdentities,
-  CANONICAL_COLUMN_LABEL_KEY,
   TABLE_ADAPTER_HEADER_KEY,
   columnHeader,
 } from './utils/column-identity.js';
-export * from './utils/sort-values.js';
+// Named, not `export *`: `compareCellValues` stays in the module for its
+// in-package readers and off the public entry (objectstack#25921: zero
+// consumers).
+export {
+  getSortValue,
+  compareSortValues,
+  type SortValue,
+  type SortValueOptions,
+} from './utils/sort-values.js';
 // Named, not `export *`: the module's `reset*` helper is test-only and stays off
 // the public barrel (objectui#13453); in-repo tests import it from the module.
 export {
@@ -100,8 +158,32 @@ export * from './query/index.js';
 export * from './adapters/index.js';
 export * from './theme/index.js';
 export * from './data-scope/index.js';
-export * from './errors/index.js';
-export * from './utils/debug.js';
+// Named, not `export *`: `isErrorCode`, `formatErrorMessage` stay in the module
+// for its in-package readers and off the public entry (objectstack#25921: zero
+// consumers).
+export {
+  isObjectUIError,
+  createError,
+  type ErrorCodeEntry,
+  ERROR_CODES,
+  ObjectUIError,
+  SchemaError,
+  RegistryError,
+  ExpressionError,
+  PluginError,
+  FieldValidationError,
+} from './errors/index.js';
+// Named, not `export *`: `isDebugEnabled` stays in the module for its
+// in-package readers and off the public entry (objectstack#25921: zero
+// consumers).
+export {
+  parseDebugFlags,
+  debugLog,
+  debugTime,
+  debugTimeEnd,
+  type DebugCategory,
+  type DebugFlags,
+} from './utils/debug.js';
 export * from './utils/debug-collector.js';
 export * from './utils/freeze-schema.js';
 // The shared key/value-bag check (objectui#13458); locals switch to it when touched.
@@ -126,7 +208,15 @@ export * from './utils/date-macros.js';
 // the record-scoped `{record_id}` (objectui#7297),
 // plus `resolveFilterPlaceholders`, the single entry point every surface
 // should call so no vocabulary is silently skipped (objectstack-ai/objectstack#3574).
-export * from './utils/filter-tokens.js';
+// Named, not `export *`: `ContextTokenName` stays in the module for its
+// in-package readers and off the public entry (objectstack#25921: zero
+// consumers).
+export {
+  CONTEXT_TOKENS,
+  resolveContextTokens,
+  resolveFilterPlaceholders,
+  type FilterTokenScope,
+} from './utils/filter-tokens.js';
 // Named, not `export *`: the module's `reset*` helper is test-only and stays off
 // the public barrel (objectui#13453); in-repo tests import it from the module.
 export {
@@ -141,7 +231,44 @@ export {
 } from './utils/dashboard-filters.js';
 export * from './utils/merge-filters.js';
 export * from './utils/compare-to.js';
-export * from './utils/chart-series.js';
+// Named, not `export *`: `isBuiltinAggregate`, `resolveMeasureLabel`,
+// `resolveRelationshipTarget`, `resolveDimensionFieldOptions`,
+// `INTEGER_AGGREGATES` stay in the module for its in-package readers and off
+// the public entry (objectstack#25921: zero consumers).
+export {
+  isIntegerAggregate,
+  chartBucketId,
+  chartRowBucketId,
+  buildChartSeries,
+  relabelDimensions,
+  findChartSeriesRow,
+  buildOptionColorMap,
+  buildCategoryOrder,
+  buildCategoryRank,
+  localizeFieldOptions,
+  buildDimensionLabelMap,
+  resolveDimensionFieldMeta,
+  dimensionOptionTranslator,
+  deriveDimensionLabelMaps,
+  loadDimensionFieldMeta,
+  type ChartResultField,
+  type BuiltinAggregateCarrier,
+  type ChartMeasureField,
+  type ChartSeriesBinding,
+  type ChartSeriesResult,
+  BUILTIN_AGGREGATES,
+  type BuiltinAggregate,
+  type BuiltinAggregateLabels,
+  NULL_CATEGORY_LABEL,
+  CHART_BUCKET_ID_KEY,
+  type ChartSeriesOptions,
+  type ChartDrillLookupOptions,
+  type ChartSegmentClickEvent,
+  type OptionLabelTranslator,
+  type DimensionFieldMeta,
+  type FieldOptionLabelResolver,
+  type DimensionRelabelTarget,
+} from './utils/chart-series.js';
 // "Which result column carries the measure?" — one answer for the row
 // projection and the series binding alike, delegated to the spec's own
 // derivation so the two cannot drift (objectui#8266).
@@ -199,7 +326,13 @@ export {
 // The one `colorField` ladder every record view shares (objectui#7243) — the
 // gantt, calendar and timeline all resolve an authored option colour here
 // instead of each guessing at the raw stored value.
-export * from './utils/record-color.js';
+// Named, not `export *`: `isColorLiteral`, `buildFieldColorMap`,
+// `FieldColorOption` stay in the module for its in-package readers and off the
+// public entry (objectstack#25921: zero consumers).
+export {
+  createFieldColorResolver,
+  type FieldColorDefinition,
+} from './utils/record-color.js';
 export * from './utils/export-filename.js';
 // Named, not `export *`: the module's `reset*` helper is test-only and stays off
 // the public barrel (objectui#13453); in-repo tests import it from the module.

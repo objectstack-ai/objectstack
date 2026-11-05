@@ -11,23 +11,38 @@ export * from './ActionEngine.js';
 export {
   ACTION_DEF_KEYS,
   SPEC_ACTION_KEYS,
-  NAVIGATION_ALIAS_KEYS,
-  HOST_DISPATCH_ACTION_KEYS,
   RETIRED_ACTION_KEYS,
-  KNOWN_ACTION_KEYS,
-  classifyActionKeys,
   warnOnUnknownActionKeys,
-  hasDeprecatedObjectParams,
-  warnOnDeprecatedObjectParams,
-  // `resetActionKeyWarnings` is test-only and stays off the barrel
+  // `resetActionKeyWarnings` is test-only and stays off the barrel;
+  // `NAVIGATION_ALIAS_KEYS`, `HOST_DISPATCH_ACTION_KEYS`, `KNOWN_ACTION_KEYS`,
+  // `classifyActionKeys`, `hasDeprecatedObjectParams` and
+  // `warnOnDeprecatedObjectParams` stay in the module for `ActionRunner` and
+  // its pins, off the public entry (objectstack#25921: zero consumers)
 } from './actionKeys.js';
 export * from './TransactionManager.js';
 export * from './UndoManager.js';
 export * from './bulkFastPath.js';
 export * from './actionErrorDetail.js';
-export * from './actionResponse.js';
+// Named, not `export *`: `isLegacyActionEnvelope` stays in the module for its
+// in-package readers and off the public entry (objectstack#25921: zero
+// consumers).
+export {
+  readActionPayload,
+  interpretActionResponse,
+  refusalFieldErrors,
+  type ActionResponseOutcome,
+} from './actionResponse.js';
 export * from './serverActionHandler.js';
 export * from './recordIdParam.js';
 export * from './recordDelete.js';
 export * from './navigationTarget.js';
-export * from './actionCopyTemplate.js';
+// Named, not `export *`: `actionCopyText`, `fillTransitionalCopy` stay in the
+// module for its in-package readers and off the public entry
+// (objectstack#25921: zero consumers).
+export {
+  isActionCopyEnvelope,
+  actionCopySource,
+  hasTemplateHoles,
+  fillTemplateHoles,
+  type ActionCopyTemplate,
+} from './actionCopyTemplate.js';

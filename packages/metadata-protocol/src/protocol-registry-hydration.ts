@@ -50,6 +50,8 @@ import {
 import type { HydrationOptions, ShippingPackages, UnboundOwnerRefusalState } from './protocol-package-bindings.js';
 import { bundleMemberDiscriminator } from './protocol-bundle-members.js';
 import type { ProtocolHost } from './protocol-host.js';
+import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
+import { clientFacingFailureText } from './protocol-client-failures.js';
 
 export class ProtocolRegistryHydrationFacet {
     /**
@@ -1427,8 +1429,15 @@ export class ProtocolRegistryHydrationFacet {
      * not quiet: a refused sync is reported at `error` with its consequence
      * and fix (#22985), because the publish it follows has already answered
      * success.
+     *
+     * [#30635] …and to the CALLER: a refused sync returns one `warning`
+     * advisory ({@link objectStorageSyncRefusedNotice}) that both doors running
+     * this sync put on the 2xx they answer (`saveMetaItem` in publish mode and
+     * `publishMetaItem`, through `runPublishSideEffects`). A sync that ran, or
+     * a type with no storage, returns `undefined`, so a clean answer is
+     * unchanged.
      */
-    static async ensureObjectStorage(host: Pick<ProtocolHost, 'engine' | 'ensureObjectStorage'>, type: string, name: string): Promise<void> {
+    static async ensureObjectStorage(host: Pick<ProtocolHost, 'engine' | 'ensureObjectStorage'>, type: string, name: string): Promise<RuntimeAuthoringIssue | undefined> {
         // [#8862] The `&& type !== 'objects'` limb is GONE. Both call sites
         // hand over a folded value — `saveMetaItem` after
         // `canonicalizeMetaRequestType`, and `runPublishSideEffects` as
@@ -1446,6 +1455,7 @@ export class ProtocolRegistryHydrationFacet {
         if (type !== 'object') return;
         try {
             await host.engine.syncObjectSchema(name);
+            return undefined;
         } catch (err: any) {
             // [#22985] `error`, not `warn`, by the one question AGENTS.md
             // "Degradation log levels" turns this on: the publish still
@@ -1463,6 +1473,7 @@ export class ProtocolRegistryHydrationFacet {
                 + 're-runs this sync, or restart, since the boot syncs every registered object\'s storage.',
                 err?.message ?? err,
             );
+            return objectStorageSyncRefusedNotice(name, err);
         }
     }
 
@@ -1662,4 +1673,41 @@ export class ProtocolRegistryHydrationFacet {
         err.status = 409;
         return err;
     }
+}
+
+/**
+ * [#30635] The rule id of the advisory a save or publish answers with when the
+ * object's storage sync was refused. Stable across releases: the key a client
+ * groups or suppresses the notice by.
+ */
+export const OBJECT_STORAGE_SYNC_REFUSED = 'object-storage-sync-refused';
+
+/**
+ * [#30635] The caller's half of a refused object-storage sync: one `warning`
+ * on the answer's `advisories`, beside the #22985 `error` line the operator
+ * reads. The answer stays the success it already was (the item is published,
+ * registered and served); this says its storage did not follow, so the
+ * author does not find out only when reads and writes against it fail.
+ *
+ * `path` is empty: the finding is about the object as a whole. The driver's
+ * text is quoted only when the driver declared it a client refusal (a 4xx
+ * `status`), the rule every report riding a 2xx on these doors follows
+ * ({@link clientFacingFailureText}); any other failure is named as being in
+ * the server log, where the `error` line carries it whole.
+ */
+export function objectStorageSyncRefusedNotice(name: string, err: unknown): RuntimeAuthoringIssue {
+    const reason = clientFacingFailureText(err, 'the reason is in the server log');
+    return {
+        rule: OBJECT_STORAGE_SYNC_REFUSED,
+        severity: 'warning',
+        where: `object "${name}"`,
+        path: '',
+        message:
+            `object '${name}' was saved and is served, but its storage was NOT created or altered: `
+            + `the datasource refused its schema sync (${reason}). Until the sync runs, reads and writes `
+            + 'against it fail, or miss the columns this save added.',
+        hint:
+            "Resolve the datasource's refusal, then publish the object again (which re-runs the sync), "
+            + 'or restart the server, which syncs the storage of every registered object.',
+    };
 }
