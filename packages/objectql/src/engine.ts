@@ -3137,13 +3137,11 @@ export class ObjectQL implements IObjectQLEngine {
     storedRows?: StoredReferenceRows,
   ): Promise<void> {
     // [#25522 cut 10] The body moved to `engine-referential-integrity.ts`, its docblock with it (see `ReferentialIntegrityHost`).
-    // [#30205] `find` and `logger` serve the ban-state read of referenced users.
-    const readLogger = () => this.logger;
+    // [#30205] `referenceRow` answers a referenced user's ban state from the existence probe's own read.
     const host: ThisParameterType<typeof assertReferencesResolve> = {
-      get logger() { return readLogger(); },
-      find: (...a) => this.find(...a),
       masterDetailHeaderExists: (...a) => this.masterDetailHeaderExists(...a),
       referenceExists: (...a) => this.referenceExists(...a),
+      referenceRow: (...a) => this.referenceRow(...a),
     };
     return assertReferencesResolve.call(host, schema, data, supplied, context, msgCtx, storedRows);
   }
@@ -3170,15 +3168,34 @@ export class ObjectQL implements IObjectQLEngine {
    * now refuses.
    */
   private async referenceExists(target: string, id: unknown, context?: ExecutionContext): Promise<boolean | null> {
+    const row = await this.referenceRow(target, id, context, []);
+    return row === null ? null : row !== false;
+  }
+
+  /**
+   * [#30205] {@link referenceExists}'s probe, answering the row it found:
+   * `id` plus whichever of `extraFields` the target declares, `false` when the
+   * probe ran and found nothing, `null` when it could not run. Same read, same
+   * elevation, so a check that needs a column of the target (a user's ban
+   * state) costs no read of its own.
+   */
+  private async referenceRow(
+    target: string,
+    id: unknown,
+    context: ExecutionContext | undefined,
+    extraFields: readonly string[],
+  ): Promise<Record<string, unknown> | false | null> {
     try {
       const resolved = this.resolveObjectName(target);
-      if (!this._registry.getObject(resolved)) return null;
+      const schema = this._registry.getObject(resolved);
+      if (!schema) return null;
+      const declared = (schema as { fields?: Record<string, unknown> }).fields ?? {};
       const row = await this.findOne(resolved, {
         where: { id },
-        fields: ['id'],
+        fields: ['id', ...extraFields.filter((f) => f !== 'id' && f in declared)],
         context: ObjectQL.referenceCheckContext(context),
       } as any);
-      return !!row;
+      return row ? row as Record<string, unknown> : false;
     } catch {
       return null;
     }

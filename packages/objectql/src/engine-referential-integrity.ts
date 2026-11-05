@@ -69,6 +69,7 @@ export interface ReferentialIntegrityHost {
   find: ObjectQL['find'];
   masterDetailHeaderExists: ObjectQL['masterDetailHeaderExists'];
   referenceExists: ObjectQL['referenceExists'];
+  referenceRow: ObjectQL['referenceRow'];
 }
 
 /**
@@ -188,7 +189,7 @@ function isEmptyReferenceValue(v: unknown): boolean {
  * (see {@link masterDetailHeadersCallerReads}).
  */
 export async function assertReferencesResolve(
-  this: Pick<ReferentialIntegrityHost, 'find' | 'logger' | 'masterDetailHeaderExists' | 'referenceExists'>,
+  this: Pick<ReferentialIntegrityHost, 'masterDetailHeaderExists' | 'referenceExists' | 'referenceRow'>,
   schema: any,
   data: Record<string, unknown> | null | undefined,
   supplied: Record<string, unknown> | null | undefined,
@@ -204,9 +205,6 @@ export async function assertReferencesResolve(
   if (!fields || !data) return;
 
   const refused: Array<{ name: string; def: any; value: unknown; target: string; code?: 'reference_user_banned' }> = [];
-  // [#30205] The user ids that resolved, by the fields that named them: a
-  // banned user is a row that exists, so the existence probe passes them.
-  const users: Array<{ name: string; def: any; value: unknown; target: string }> = [];
   for (const name of Object.keys(fields)) {
     // [#4441, narrowing kept by #4743] A `readonly` field is never the
     // caller's to answer for — BY CONSTRUCTION, not by exemption.
@@ -263,19 +261,18 @@ export async function assertReferencesResolve(
       if (v === null || v === undefined || v === '') continue;
       if (typeof v === 'object') continue;
       // [#22519] A master-detail header must also be one the caller can read.
+      if (def?.type !== 'master_detail' && target === BAN_CHECKED_USER_OBJECT) {
+        // [#30205] One probe answers both: the row's existence and its ban.
+        const row = await this.referenceRow(target, v, context, USER_BAN_FIELDS);
+        if (row === false) refused.push({ name, def, value: v, target });
+        // adr0112-ok: D6 — a field-addressed FieldErrorCode; this entry becomes `{ field, code }` below
+        else if (row !== null && isUserBanInForce(row)) refused.push({ name, def, value: v, target, code: 'reference_user_banned' });
+        continue;
+      }
       const resolved = def?.type === 'master_detail'
         ? await this.masterDetailHeaderExists(target, v, context)
         : await this.referenceExists(target, v, context);
       if (resolved === false) refused.push({ name, def, value: v, target });
-      else if (resolved === true && target === BAN_CHECKED_USER_OBJECT) users.push({ name, def, value: v, target });
-    }
-  }
-  if (users.length > 0) {
-    const banned = await bannedUserIds.call(this, users.map((u) => u.value), context);
-    for (const u of users) {
-      if (!banned.has(String(u.value))) continue;
-      // adr0112-ok: D6 — a field-addressed FieldErrorCode; this entry becomes `{ field, code }` below
-      refused.push({ ...u, code: 'reference_user_banned' });
     }
   }
   if (refused.length === 0) return;
@@ -300,12 +297,6 @@ export async function assertReferencesResolve(
 
 /**
  * [#30205] The user object whose rows a reference check also asks about a ban.
- */
-const BAN_CHECKED_USER_OBJECT = 'sys_user';
-
-/**
- * [#30205] Which of `ids` name a user whose ban is in force
- * (`isUserBanInForce`, @objectstack/core).
  *
  * Banning a user leaves the row in place, so the existence probe resolves a
  * banned user like any other, and a write could hand new work to someone who
@@ -316,37 +307,13 @@ const BAN_CHECKED_USER_OBJECT = 'sys_user';
  * the banned user stays editable, and is handed over by the transfer
  * instead), never a system write the reference check exempts.
  *
- * Read the way the existence probe reads — `sudo()`-shaped, the caller's
- * context spread under `isSystem: true` — because a ban is a fact about the
- * user, not about what the caller may read: a caller with no read grant on
- * the user object is refused the same way. One `find` for the whole write.
- * A read that fails refuses nothing, and says so once at `warn`: like the
- * probe, a check that cannot run must not invent a rejection.
+ * The ban columns ride the existence probe's own read (`referenceRow`), so the
+ * check costs no read of its own and is read the way the probe reads:
+ * elevated inside the caller's tenant, because a ban is a fact about the
+ * user, not about what the caller may read. A probe that cannot run refuses
+ * nothing, as before.
  */
-async function bannedUserIds(
-  this: Pick<ReferentialIntegrityHost, 'find' | 'logger'>,
-  ids: ReadonlyArray<unknown>,
-  context: ExecutionContext | undefined,
-): Promise<ReadonlySet<string>> {
-  const asked = [...new Set(ids.map((id) => String(id)))];
-  try {
-    const rows = await this.find(BAN_CHECKED_USER_OBJECT, {
-      where: { id: asked.length === 1 ? asked[0] : { $in: asked } },
-      fields: [...USER_BAN_FIELDS],
-      context: { ...(context ?? {}), isSystem: true } as ExecutionContext,
-    } as EngineQueryOptions) as Array<Record<string, unknown>>;
-    const banned = new Set<string>();
-    for (const row of Array.isArray(rows) ? rows : []) {
-      if (row?.id != null && isUserBanInForce(row)) banned.add(String(row.id));
-    }
-    return banned;
-  } catch (err) {
-    this.logger?.warn?.('the ban-state read of the referenced users failed — the write is not refused for a ban', {
-      object: BAN_CHECKED_USER_OBJECT, error: err,
-    });
-    return new Set();
-  }
-}
+const BAN_CHECKED_USER_OBJECT = 'sys_user';
 
 /**
  * [#29062] The rows a write lands on, as stored before it, read on demand by
