@@ -3208,6 +3208,8 @@ describe('AuthManager', () => {
         admin: false,
         phoneNumber: false,
         phoneNumberOtp: false,
+        // [#30107] No email service is wired here, so no mail leaves.
+        emailDelivery: false,
         multiOrgEnabled: false,
         // [ADR-0105 D1] Which of `single` | `group` | `isolated` is in force.
         // A vanilla deployment (no tenancy service wired, no env override) is
@@ -5080,6 +5082,58 @@ describe('AuthManager', () => {
       expect(ipMatchesRange('::ffff:10.0.0.1', '10.0.0.1')).toBe(true);
       expect(ipMatchesRange('10.0.0.1', '::ffff:10.0.0.1')).toBe(true);
       expect(ipMatchesRange('2001:db8::1', '2001:db8::1')).toBe(true);
+    });
+
+    it('ipMatchesRange reads an IPv6 CIDR as the 128-bit prefix it names', () => {
+      expect(ipMatchesRange('2001:db8::5', '2001:db8::/32')).toBe(true);
+      expect(ipMatchesRange('2001:db8:ffff:ffff:ffff:ffff:ffff:ffff', '2001:db8::/32')).toBe(true);
+      expect(ipMatchesRange('2001:db9::5', '2001:db8::/32')).toBe(false);
+      expect(ipMatchesRange('2001:0DB8:0:0::5', '2001:db8::/32')).toBe(true);
+      expect(ipMatchesRange('2001:db8:1234:5600::1', '2001:db8:1234:5600::/56')).toBe(true);
+      expect(ipMatchesRange('2001:db8:1234:5700::1', '2001:db8:1234:5600::/56')).toBe(false);
+      expect(ipMatchesRange('2001:db8::1', '2001:db8::1/128')).toBe(true);
+      expect(ipMatchesRange('2001:db8::2', '2001:db8::1/128')).toBe(false);
+      expect(ipMatchesRange('2001:db8::5', '::/0')).toBe(true);
+      expect(ipMatchesRange('::1', '::1/128')).toBe(true);
+      expect(ipMatchesRange('::2', '::1/128')).toBe(false);
+      // A zone identifier names an interface, not an address: the address is judged.
+      expect(ipMatchesRange('fe80::1%eth0', 'fe80::/10')).toBe(true);
+    });
+
+    it('ipMatchesRange compares an exact IPv6 entry by the address it denotes, not by its spelling', () => {
+      expect(ipMatchesRange('2001:db8::1', '2001:DB8:0:0:0:0:0:1')).toBe(true);
+      expect(ipMatchesRange('::1', '0:0:0:0:0:0:0:1')).toBe(true);
+      expect(ipMatchesRange('2001:db8::2', '2001:db8::1')).toBe(false);
+    });
+
+    it('ipMatchesRange never matches across address families', () => {
+      // An IPv4 range never admits a pure IPv6 address, an IPv6 range never an IPv4 one.
+      expect(ipMatchesRange('::1', '0.0.0.0/0')).toBe(false);
+      expect(ipMatchesRange('2001:db8::5', '0.0.0.0/0')).toBe(false);
+      expect(ipMatchesRange('203.0.113.5', '::/0')).toBe(false);
+      expect(ipMatchesRange('::ffff:203.0.113.5', '::/0')).toBe(false);
+      // The IPv4-mapped form, dotted or hex, is still the IPv4 address it maps.
+      expect(ipMatchesRange('::ffff:cb00:7105', '203.0.113.0/24')).toBe(true);
+      expect(ipMatchesRange('203.0.113.5', '::ffff:203.0.113.0/24')).toBe(true);
+      expect(ipMatchesRange('203.0.114.5', '::ffff:203.0.113.0/24')).toBe(false);
+    });
+
+    it('ipMatchesRange never widens a malformed IPv6 range past its base address', () => {
+      expect(ipMatchesRange('2001:db8::5', '2001:db8::/129')).toBe(false);
+      expect(ipMatchesRange('2001:db8::5', '2001:db8::/')).toBe(false);
+      expect(ipMatchesRange('2001:db8::5', '2001:db8::/3x')).toBe(false);
+      expect(ipMatchesRange('2001:db8::5', '2001:db8:::/32')).toBe(false);
+      expect(ipMatchesRange('2001:db8::5', 'zz01:db8::/32')).toBe(false);
+      // A prefix the family does not read leaves the base address alone, as before.
+      expect(ipMatchesRange('2001:db8::', '2001:db8::/129')).toBe(true);
+    });
+
+    it('isClientIpAllowed admits an IPv6 client inside an allowed IPv6 range', () => {
+      const m = mgr({ allowedIpRanges: ['2001:db8::/32', '::1'] });
+      expect(m.isClientIpAllowed('2001:db8:abcd::1')).toBe(true);
+      expect(m.isClientIpAllowed('::1')).toBe(true);
+      expect(m.isClientIpAllowed('2001:db9::1')).toBe(false);
+      expect(m.isClientIpAllowed('203.0.113.5')).toBe(false);
     });
 
     it('resolveClientAddress believes forwarded headers only under trustProxy', () => {

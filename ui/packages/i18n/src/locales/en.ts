@@ -223,6 +223,9 @@ const en = {
   },
   form: {
     noPermissionToSave: "You don't have permission to save this record.",
+    // A write the ADR-0015 external write gate refused (`EXTERNAL_WRITE_FORBIDDEN`, objectstack#30334):
+    // the object is read-only by design, so the line must not read as a missing permission.
+    readOnlyExternalSource: "This table is read-only. Its records come from an external data source that does not accept changes.",
     // The notice a record form shows when every field is locked because the
     // object's affordance for the form's mode is closed for this user
     // (objectui#11000). `{{object}}` is the object's label.
@@ -2196,6 +2199,12 @@ const en = {
     },
   },
   console: {
+    // What the organization record form says around `require_mfa`: before
+    // saving while two-factor is off, and after a save that turned it on.
+    organizationMfa: {
+      needsTwoFactor: 'Require Multi-Factor Auth needs two-factor authentication, which is off on this deployment, so saving with it ticked is refused. Turn two-factor on first: switch on Require multi-factor authentication in Setup → Authentication (it applies to every organization), or set OS_AUTH_TWO_FACTOR=true on the deployment.',
+      nowRequired: 'Every member of this organization who has not set up an authenticator app must now do so. Each one is blocked from data once the MFA grace period ends (7 days unless changed in Setup → Authentication), counted from the first time they use the app after this change. Members who already use an authenticator are not affected.',
+    },
     // The fixed crumb `AppHeader`'s `studio` variant draws on the Studio front
     // door (objectui#11863), as `organizations.title` is the `orgs` variant's.
     // A product name, which every pack writes as is.
@@ -2332,6 +2341,10 @@ const en = {
       // layer's value in the draft, and Save sends it as `null` (unset), so the
       // row falls back to the value the layer above carries.
       resetToDefault: 'Reset to default',
+      // A value set at the scope this page writes (objectstack#30329), and
+      // the default its Reset returns to. `{{value}}` is that default in words.
+      sourceBadgeModified: 'Modified',
+      defaultValueHint: 'Default: {{value}}',
       // The chips on a settings row's header (objectui#12821): the env-lock
       // chip and the title it shows when the server sends no reason, and the
       // `Deprecated` chip, with `{{replacedBy}}` the key that replaces it.
@@ -3387,6 +3400,8 @@ const en = {
       useEmailResetText: 'Reset via email instead',
       phoneSuccessTitle: 'Password reset',
       phoneSuccessDescription: 'Your password has been reset. You can now sign in with your new password.',
+      noDeliveryTitle: "A reset link can't be emailed here",
+      noDeliveryDescription: "This deployment doesn't send email, so no password reset link can reach you. Ask an administrator: they can set a new password for you from Setup → Users.",
     },
     resetPassword: {
       title: 'Set a new password',
@@ -3525,6 +3540,7 @@ const en = {
         continue: 'Continue',
         preparing: 'Preparing…',
         enrollFailed: 'Could not start enrollment.',
+        unavailable: 'Two-factor authentication is turned off on this deployment, so an authenticator app cannot be set up yet. Ask an administrator to turn it on in Setup → Authentication, then try again.',
         scanTitle: 'Scan with your authenticator',
         scanBody: 'Scan this QR code with Google Authenticator, 1Password, Authy, etc., then enter the 6-digit code.',
         backupTitle: 'Save your backup codes',
@@ -4070,6 +4086,12 @@ const en = {
         dataset: '{{count}} datasets',
         dataset_one: '{{count}} dataset',
         dataset_other: '{{count}} datasets',
+        hook: '{{count}} hooks',
+        hook_one: '{{count}} hook',
+        hook_other: '{{count}} hooks',
+        translation: '{{count}} translations',
+        translation_one: '{{count}} translation',
+        translation_other: '{{count}} translations',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

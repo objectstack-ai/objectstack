@@ -722,7 +722,7 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
   // rather than defer: the composer does give the default form a runtime
   // identity (`<object>.form`), but `_views.*` is a LIST-view convention —
   // `viewLabel` / `viewDescription` resolve view tabs, and the i18n walker
-  // emits no `_views` entry for any form view (`i18n-extract.ts`: "form views
+  // emits no `_views` entry for any form view (`i18n-walk.ts`: "form views
   // have no counterpart in the `viewLabel` / `_views.*` resolver convention").
   // A `_views` name registered here for the default form would make a key
   // legal that no consumer ever reads. Its SECTIONS are a different matter —
@@ -762,7 +762,7 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
  *     the failure that made `_views.form` a non-key (#5164).
  *  2. **The object comes from `interfaceConfig.source` first, then the page's
  *     own `object`.** That is the order `translateInterfaceTabs` resolves in and
- *     the order `walkObjectTabs` (`packages/cli/src/utils/i18n-extract.ts`)
+ *     the order `walkObjectTabs` (`packages/lint/src/i18n-walk.ts`)
  *     scaffolds in — the "component's own binding first" discipline `_sections`
  *     follows. A page-level lookup alone would file the presets of every
  *     `source`-bound list page under the wrong object, reporting correct keys.
@@ -808,7 +808,7 @@ function collectPageTabs(page: AnyRec, factsFor: (objectName: string) => ObjectF
  * (commit b3c1f3cd5, leg 1) and this rule called the key an orphan, in ONE `os lint` run:
  * six instances on the showcase, and no author action could make both green.
  * Ruled 2026-08-06 (#5164): canonical = the runtime identity's bare key.
- * Leg 1's `defaultListViewKey` in `packages/cli/src/utils/i18n-extract.ts` is
+ * Leg 1's `defaultListViewKey` in `packages/lint/src/i18n-walk.ts` is
  * this function's twin — deliberately, both are thin readers of the composer
  * rather than a third and fourth derivation of the key.
  *

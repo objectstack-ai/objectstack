@@ -41,6 +41,10 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // it is rendered from two packages. Adding a `detail.resizeDrawer` twin
   // would fork the translation and drift the two handles apart.
   'common.resizeDrawer': 'Resize drawer',
+  // objectstack#30334 — a stage write the object's external datasource does not
+  // admit (`stageRefusalLines`). The record form's key, not a `detail.*` twin:
+  // one refusal, one sentence on every surface. Byte-identical to the `en` pack.
+  'form.readOnlyExternalSource': 'This table is read-only. Its records come from an external data source that does not accept changes.',
   'detail.back': 'Back',
   'detail.edit': 'Edit',
   'detail.editInline': 'Edit',

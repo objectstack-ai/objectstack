@@ -103,10 +103,21 @@ const FIELDS = {
 /** One authored list view with no `label`, as a list whose view the author left unnamed. */
 const LISTVIEWS = { all: { type: 'grid', columns: ['name'] } };
 
-const OBJECTS = [
-  { name: 'showcase_project', label: 'Project', pluralLabel: 'Projects', fields: FIELDS, listViews: LISTVIEWS },
-  { name: 'showcase_note', label: 'Note', fields: FIELDS, listViews: LISTVIEWS },
-];
+/**
+ * The served objects, per language: the server translates what it serves under
+ * the request's language from the same catalog the console loads, so a zh-CN
+ * session holds the zh-CN answer (objectstack#30311).
+ */
+const OBJECTS: Record<Lang, Array<Record<string, unknown>>> = {
+  en: [
+    { name: 'showcase_project', label: 'Project', pluralLabel: 'Projects', fields: FIELDS, listViews: LISTVIEWS },
+    { name: 'showcase_note', label: 'Note', fields: FIELDS, listViews: LISTVIEWS },
+  ],
+  'zh-CN': [
+    { name: 'showcase_project', label: '项目', pluralLabel: '项目清单', fields: FIELDS, listViews: LISTVIEWS },
+    { name: 'showcase_note', label: 'Note', fields: FIELDS, listViews: LISTVIEWS },
+  ],
+};
 
 /** The catalog as the console loads it: `zh-CN` translates both scalars. */
 const BUNDLE: Record<Lang, Record<string, unknown>> = {
@@ -132,7 +143,7 @@ afterEach(() => {
 });
 
 /** The list page's title text for `objectName`, in `lang`. */
-async function listTitle(lang: Lang, objectName: string): Promise<string> {
+async function listTitle(lang: Lang, objectName: string, objects = OBJECTS[lang]): Promise<string> {
   const i18n = createI18n({ defaultLanguage: lang, detectBrowserLanguage: false });
   // The instance really booted in the language under test.
   expect(i18n.language).toBe(lang);
@@ -151,7 +162,7 @@ async function listTitle(lang: Lang, objectName: string): Promise<string> {
           <Routes>
             <Route
               path="/apps/:appName/:objectName"
-              element={<ObjectView dataSource={dataSource} objects={OBJECTS} onEdit={() => {}} />}
+              element={<ObjectView dataSource={dataSource} objects={objects as never} onEdit={() => {}} />}
             />
           </Routes>
         </MemoryRouter>
@@ -176,5 +187,29 @@ describe('ObjectView — the list page is titled with the plural (objectui#11696
 
   it('control: an object that declares no plural is titled with its label', async () => {
     expect(await listTitle('en', 'showcase_note')).toBe('Note');
+  });
+});
+
+/**
+ * objectstack#30311 — a served object's list is titled as served.
+ *
+ * A `.custom` override renamed the object, and the `/meta/object` read serves
+ * the new name by the server's label order for an overridden item; the title
+ * passed it through the bundle's `objectPluralLabel`, whose packaged
+ * translation of the old name won. Directions, written before the run: the
+ * renamed cell RED before the change (`项目清单`), GREEN after; the control
+ * GREEN on both sides.
+ */
+describe('ObjectView — a served object’s list is titled as served (objectstack#30311)', () => {
+  const renamed = (extra: Record<string, unknown>) =>
+    [{ name: 'showcase_project', fields: FIELDS, listViews: LISTVIEWS, ...extra }];
+
+  it('zh-CN: a renamed object titles its list with the served plural, not the packaged string', async () => {
+    const title = await listTitle('zh-CN', 'showcase_project', renamed({ label: 'Venture (renamed-30311)', pluralLabel: 'Ventures (renamed-30311)' }));
+    expect(title).toBe('Ventures (renamed-30311)');
+  });
+
+  it('zh-CN: control — an object served with no label is titled by the bundle', async () => {
+    expect(await listTitle('zh-CN', 'showcase_project', renamed({}))).toBe('项目清单');
   });
 });

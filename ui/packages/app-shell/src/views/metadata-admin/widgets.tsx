@@ -48,6 +48,7 @@ import { iconNames } from 'lucide-react/dynamic.mjs';
 import { toast } from 'sonner';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useMetadataLocale, t, tFormat } from './i18n.js';
+import { isKnownViewType, viewTypeLabel } from './viewTypeLabels.js';
 import type { FormFieldSpec, FormViewSpec, VisibilityPredicate } from './form-spec.js';
 import { usePredicateScope } from '@object-ui/react';
 import { buildPredicateCtx, visibleOptions, type PredicateCtx } from './predicate.js';
@@ -1710,6 +1711,20 @@ function humanizeOption(v: string): string {
 }
 
 /**
+ * The chip name of one value of a bare `array<enum>` (no `fieldSpec.options`).
+ *
+ * An enum made only of view types (`appearance.allowedVisualizations`) reads
+ * the view-type select's own words (objectstack#30358), so a zh-CN console
+ * shows 表格 / 列表, 看板, … in both controls. en-US keeps the humanised names
+ * the chips have always had (Grid, not the select's "Table / List"): the card
+ * asked for en to stay as it was. Any other enum is humanised in every locale.
+ */
+function enumOptionLabel(value: string, values: readonly string[], locale: string): string {
+  if (locale !== 'en-US' && values.every(isKnownViewType)) return viewTypeLabel(value, locale);
+  return humanizeOption(value);
+}
+
+/**
  * Toggleable option set for `array<enum>` fields (e.g.
  * `appearance.allowedVisualizations`). Options come from the JSON Schema's
  * `items.enum` (or `fieldSpec.options`); the value is the selected subset
@@ -1719,6 +1734,7 @@ function humanizeOption(v: string): string {
  */
 function MultiSelectWidget({ value, onChange, readOnly, schema, fieldSpec, formData, ariaLabelledBy }: WidgetProps) {
   const hostScope = usePredicateScope();
+  const locale = useMetadataLocale();
   // Prefer explicit form options; else the JSON Schema enum on the items.
   //
   // ⚠️ RAW — every per-option `visibleWhen` is carried through untouched
@@ -1733,10 +1749,10 @@ function MultiSelectWidget({ value, onChange, readOnly, schema, fieldSpec, formD
       }
       const enumVals: unknown =
         schema?.items?.enum ?? schema?.enum ?? [];
-      return (Array.isArray(enumVals) ? enumVals : [])
-        .filter((v): v is string => typeof v === 'string')
-        .map((v) => ({ label: humanizeOption(v), value: v }));
-    }, [fieldSpec, schema]);
+      const values = (Array.isArray(enumVals) ? enumVals : [])
+        .filter((v): v is string => typeof v === 'string');
+      return values.map((v) => ({ label: enumOptionLabel(v, values, locale), value: v }));
+    }, [fieldSpec, schema, locale]);
 
   // The CONTENT half: what the author is offered right now.
   const renderedOptions = React.useMemo(

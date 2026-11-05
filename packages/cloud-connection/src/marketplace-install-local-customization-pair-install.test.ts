@@ -27,6 +27,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { PROTOCOL_MAJOR, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 // The runtime binder the door's step 1d loads lazily — paid here, at module
 // top, never inside a clocked `it` (`scripts/check-test-source-alias.mjs`).
 import '@objectstack/runtime';
@@ -366,5 +367,23 @@ describe('install-local — a pair install refused before any write', () => {
         expect(res.status).toBe(503);
         expect(res.payload.error.code).toBe('SERVICE_UNAVAILABLE');
         expectNoCodeInstall(h);
+    });
+});
+
+describe('[#30326] a pair install the handshake admitted unchecked says so in its answer', () => {
+    it('a pair export with no engines.protocol answers `protocolCheckSkipped` reason `no-range`', async () => {
+        const h = await mount(dir);
+        const res = await h.install(exportedPair());
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        const { message, ...machine } = res.payload.data.protocolCheckSkipped;
+        expect(machine).toEqual({ reason: 'no-range', packageId: PAIR, protocolVersion: PROTOCOL_VERSION });
+        expect(message).toContain(`'${PAIR}'`);
+    });
+
+    it(`control: a pair export that declares ^${PROTOCOL_MAJOR} answers no \`protocolCheckSkipped\` key`, async () => {
+        const h = await mount(dir);
+        const res = await h.install(exportedPair({ engines: { protocol: `^${PROTOCOL_MAJOR}` } }));
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(Object.keys(res.payload.data)).not.toContain('protocolCheckSkipped');
     });
 });

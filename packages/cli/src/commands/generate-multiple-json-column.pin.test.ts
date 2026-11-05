@@ -88,6 +88,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isMultiValueField, MULTI_CAPABLE_TYPES, MULTI_OPTION_TYPES } from '@objectstack/spec/data';
+import { readSqlDriverSource } from '../../../../scripts/sql-driver-split-source.mjs';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -377,7 +378,8 @@ describe('#14829 — `multiple: true` is one answer across all three surfaces', 
   // this rule, these fail and whoever moved it re-derives the generators.
 
   it('driver-sql `createColumn` still decides `multiple` BEFORE the type switch', () => {
-    const source = fs.readFileSync(path.join(DRIVER_SQL_SRC, 'sql-driver.ts'), 'utf8');
+    // `SqlDriver` as one text, each codemod stub's body read where it moved (#30147).
+    const source = readSqlDriverSource(DRIVER_SQL_SRC).text;
     // Non-vacuity: the file was really read, and the two landmarks really found.
     expect(source.length).toBeGreaterThan(10_000);
     const start = source.indexOf('protected createColumn(');

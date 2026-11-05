@@ -96,7 +96,7 @@ import { getIcon } from '../utils/getIcon.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { useCommandPalette, useCommandPaletteProviderMounted } from '../context/CommandPaletteProvider.js';
 import { useUrlOverlay } from '../hooks/useUrlOverlay.js';
-import { metadataText } from '../hooks/useNavTargetLabel.js';
+import { metadataText, servedObjectPluralLabel } from '../hooks/useNavTargetLabel.js';
 import { KEYBOARD_SHORTCUTS_PARAM } from '../urlParams.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
 import { useStudioEntryGate } from '../hooks/useStudioDesignGate.js';
@@ -765,7 +765,10 @@ export function AppHeader({
     } else if (routeType) {
       const currentObject = safeObjects.find((o: any) => o.name === routeType);
       if (currentObject) {
-        routeTitle = objectPluralLabel(currentObject);
+        // A served object's label is already translated (objectstack#30311):
+        // drawn as given, as the object page's own header draws it.
+        const listTitle = servedObjectPluralLabel(currentObject, language, objectPluralLabel);
+        routeTitle = listTitle;
         if (pathParts[3] === 'record' && pathParts[4]) {
           const shortId = pathParts[4].length > 12 ? `${pathParts[4].slice(0, 8)}…` : pathParts[4];
           const trimmedTitle = recordTitle?.trim();
@@ -799,7 +802,7 @@ export function AppHeader({
             currentObject.name,
             servedViews,
             viewLabel,
-            objectPluralLabel(currentObject),
+            listTitle,
             language,
           );
         }

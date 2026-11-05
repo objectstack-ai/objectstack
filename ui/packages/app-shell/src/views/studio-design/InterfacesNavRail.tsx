@@ -44,7 +44,13 @@ import {
   type RailCustomizations,
 } from './StudioRailCustomizations.js';
 import { CustomizationMark } from './CustomizationMark.js';
-import type { NavContributionPlacement, TopLevelContributedNav } from './contributionRows.js';
+import {
+  NO_SERVED_CONTRIBUTED_NAV,
+  servedEntryOf,
+  type NavContributionPlacement,
+  type ServedContributedNav,
+  type TopLevelContributedNav,
+} from './contributionRows.js';
 
 const KIND_ICON: Record<string, LucideIcon> = {
   group: Folder,
@@ -207,6 +213,13 @@ export const InterfacesRailMarksContext = React.createContext<RailCustomizations
 export const InterfacesNavContributionsContext = React.createContext<NavContributionPlacement>({ byGroup: new Map(), top: [] });
 
 /**
+ * objectstack#29851 — the open app's served entries its published layer does
+ * not hold, by id (`servedContributedNavOf`): what a contributed row reads
+ * its label from. Empty for a never-published app.
+ */
+export const InterfacesServedContributedNavContext = React.createContext<ServedContributedNav>(NO_SERVED_CONTRIBUTED_NAV);
+
+/**
  * objectstack#29786 — contributed nav entries as rail rows: greyed, with the
  * contributing package, and opening that package's Interfaces pillar. Not
  * nav entries of this app: never in its edit buffer, never dragged, renamed
@@ -221,6 +234,9 @@ export function ContributedNavRows({
 }): React.ReactElement | null {
   const locale = useMetadataLocale();
   const openContributor = useOpenContributor();
+  const served = React.useContext(InterfacesServedContributedNavContext);
+  // objectstack#29851 — the label-less entry inherits as the live sidebar's does.
+  const targetLabel = useNavTargetLabel();
   if (rows.length === 0) return null;
   return (
     <>
@@ -228,6 +244,7 @@ export function ContributedNavRows({
         <ContributedRailRow
           key={`${entry.packageId}:${entry.name}`}
           item={entry}
+          label={contributedNavLabel(servedEntryOf(served, entry), locale, targetLabel)}
           indent={indent}
           icon={<Puzzle className="h-4 w-4 shrink-0" />}
           title={contributedItemTitle(entry, locale, undeclaredGroup)}
@@ -237,6 +254,21 @@ export function ContributedNavRows({
       ))}
     </>
   );
+}
+
+/**
+ * objectstack#29851 — the text the live app shows for a contributed entry: the
+ * served entry read with the rail's own resolver, or `undefined` when no served
+ * entry is known for it (the row then keeps its id).
+ */
+function contributedNavLabel(
+  node: Record<string, unknown> | undefined,
+  locale: string,
+  targetLabel: NavTargetLabelResolver,
+): string | undefined {
+  if (!node) return undefined;
+  const text = navEntryLabelText(node as NavNode, locale, targetLabel).trim();
+  return text || undefined;
 }
 
 export function NavTree({

@@ -9,7 +9,8 @@
  * `listDatasourceDefs`, `markDatasourceUnavailable`,
  * `clearDatasourceUnavailable`, `getDefaultDriverName`,
  * `listUnavailableDatasources`, `assertWriteAllowed` moved out of `engine.ts`
- * whole by `scripts/codemod-split-engine.mjs`.
+ * whole by `scripts/codemod-split-engine.mjs`. `isExternalWriteForbidden`
+ * (#30370) was written here, beside the gate whose verdict it answers.
  *
  * A MOVE, not a redesign. {@link RegistrationFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -493,22 +494,50 @@ export class RegistrationFacet {
    * definition) are unaffected.
    */
   static assertWriteAllowed(this: Pick<RegistrationHost, '_registry' | 'datasourceDefs'>, objectName: string, operation: 'insert' | 'update' | 'delete'): void {
-    const object = this._registry.getObject(objectName) as any;
-    const dsName = object?.datasource;
-    if (!dsName || dsName === 'default') return;
-
-    const ds = this.datasourceDefs.get(dsName);
-    // No recorded definition, or an explicitly managed one ⇒ allow.
-    if (!ds || !ds.schemaMode || ds.schemaMode === 'managed') return;
-
-    const dsAllows = ds.external?.allowWrites ?? false;
-    const objAllows = object?.external?.writable ?? false;
-    if (!(dsAllows && objAllows)) {
+    const closed = externalWriteGateClosure(this, objectName);
+    if (closed) {
       throw new ExternalWriteForbiddenError(
-        `Write '${operation}' blocked on object '${objectName}': datasource '${dsName}' is external ` +
-          `(schemaMode=${ds.schemaMode}). Requires datasource.external.allowWrites=true (got ${dsAllows}) ` +
-          `AND object.external.writable=true (got ${objAllows}).`,
+        `Write '${operation}' blocked on object '${objectName}': datasource '${closed.dsName}' is external ` +
+          `(schemaMode=${closed.schemaMode}). Requires datasource.external.allowWrites=true (got ${closed.dsAllows}) ` +
+          `AND object.external.writable=true (got ${closed.objAllows}).`,
       );
     }
   }
+
+  /** The body of `ObjectQL#isExternalWriteForbidden`; the method's docblock there is its contract. */
+  static isExternalWriteForbidden(this: Pick<RegistrationHost, '_registry' | 'datasourceDefs'>, objectName: string): boolean {
+    return externalWriteGateClosure(this, objectName) !== null;
+  }
+}
+
+/**
+ * [#30370] Gate 3 of ADR-0015 §5.3, judged ONCE: why the external write gate
+ * is closed on `objectName`, or `null` when it is open. Both
+ * {@link RegistrationFacet.assertWriteAllowed} (the refusal) and
+ * {@link RegistrationFacet.isExternalWriteForbidden} (the verdict the
+ * effective-permission map reads) ask this one function, so the map can never
+ * offer a write the gate refuses, nor hide one it admits.
+ *
+ * Closed exactly when the object sits on a recorded, federated datasource
+ * (`schemaMode !== 'managed'`) and NOT both the datasource opts in
+ * (`external.allowWrites`) and the object opts in (`external.writable`).
+ * Managed datasources (the common case, including the absence of any
+ * definition) are open.
+ */
+function externalWriteGateClosure(
+  host: Pick<RegistrationHost, '_registry' | 'datasourceDefs'>,
+  objectName: string,
+): { dsName: string; schemaMode: string; dsAllows: boolean; objAllows: boolean } | null {
+  const object = host._registry.getObject(objectName) as any;
+  const dsName = object?.datasource;
+  if (!dsName || dsName === 'default') return null;
+
+  const ds = host.datasourceDefs.get(dsName);
+  // No recorded definition, or an explicitly managed one ⇒ allow.
+  if (!ds || !ds.schemaMode || ds.schemaMode === 'managed') return null;
+
+  const dsAllows = ds.external?.allowWrites ?? false;
+  const objAllows = object?.external?.writable ?? false;
+  if (dsAllows && objAllows) return null;
+  return { dsName, schemaMode: ds.schemaMode, dsAllows, objAllows };
 }

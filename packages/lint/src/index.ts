@@ -143,6 +143,7 @@ export {
   FLOW_TRIGGER_UNKNOWN_EVENT,
   FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
   FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
+  FLOW_TIME_RELATIVE_OBJECT_MISMATCH,
   FLOW_TRIGGER_UNROUTABLE,
   FLOW_API_TRIGGER_SECRET_MISSING,
   FLOW_API_TRIGGER_SIGNATURE_UNUSABLE,
@@ -1213,3 +1214,11 @@ export type {
   EnvelopeAuditDoor,
   PageEnvelopeAudit,
 } from './page-envelope-audit.js';
+
+// The translatable-key walk: every key a translation bundle can carry for a
+// stack, each with the source text it translates. `os i18n extract` builds its
+// skeletons from it, `os lint`'s coverage gate decides what it gates from it,
+// and Studio's translation editor draws its table from it, in a browser — which
+// is why it lives here and not in the CLI.
+export { authorWarnedTranslationGroups, collectExpectedEntries, humanizeFieldPath } from './i18n-walk.js';
+export type { ExpectedEntry, ExpectedEntryOptions } from './i18n-walk.js';
