@@ -222,7 +222,7 @@ const booleanFlagRule = (unsetRequired: string) =>
 
 /**
  * The refusal of a `defaultValue` that does not fit the field (ruling B on
- * cloud#3619): a type that takes none, a runtime token, a select / radio that
+ * cloud#3619): a runtime token, a type that takes none, a select / radio that
  * declares no options, or a value outside the type's literal contract. Each
  * issue lands on the field's `defaultValue` and names the field and its type.
  *
@@ -244,15 +244,21 @@ function refuseUnfitDefaultValue(field: unknown, ctx: z.RefinementCtx): void {
   const shown = JSON.stringify(defaultValue) ?? String(defaultValue);
   const refuse = (message: string) => ctx.addIssue({ code: 'custom', path: ['defaultValue'], message });
 
+  // A token is judged before the type. On a type that takes no default, that
+  // type's reason is false of a token (`current_user` names no record, `NOW()`
+  // is not frozen), and an author steered by it writes a record id or a fixed day.
+  if (isRuntimeDefaultToken(defaultValue)) {
+    const instead = 'takes' in rule
+      ? `A "${type}" field's default is ${rule.takes}; write one, or remove defaultValue.`
+      : `A "${type}" field takes no defaultValue in a blueprint (the types that take one: `
+        + `${BLUEPRINT_DEFAULT_VALUE_ADMITTED}). Remove defaultValue from this field.`;
+    refuse(`${subject}: the defaultValue ${shown} is a runtime token, resolved when a record is created rather than `
+      + `stored, and a blueprint default is a literal value the built field stores as written. ${instead}`);
+    return;
+  }
   if (!('takes' in rule)) {
     refuse(`${subject}: a "${type}" field takes no defaultValue in a blueprint, because ${rule.because}. The types that `
       + `take one: ${BLUEPRINT_DEFAULT_VALUE_ADMITTED}. Remove defaultValue from this field.`);
-    return;
-  }
-  if (isRuntimeDefaultToken(defaultValue)) {
-    refuse(`${subject}: the defaultValue ${shown} is a runtime token, resolved when a record is created rather than `
-      + `stored, and a blueprint default is a literal value the built field stores as written. A "${type}" field's `
-      + `default is ${rule.takes}; write one, or remove defaultValue.`);
     return;
   }
   const declared = Array.isArray(options) ? options as Array<{ value: string }> : undefined;

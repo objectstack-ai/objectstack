@@ -1422,6 +1422,20 @@ describe('blueprint field `defaultValue`', () => {
     }
   });
 
+  it('refuses a runtime token on a type that takes no default with the token\'s reason, never the type\'s', () => {
+    // The type's reason is false of a token: `current_user` names no record and
+    // `NOW()` is not frozen at design time.
+    for (const [type, token] of [['user', 'current_user'], ['lookup', 'current_user'], ['date', 'NOW()'], ['datetime', 'now()']] as const) {
+      const result = lenientField({ type, ...(type === 'lookup' ? { reference: 'sys_user' } : {}), defaultValue: token });
+      const named = namedRefusals(result, type);
+      expect({ type, issues: result.error?.issues.length, named: named.length }).toEqual({ type, issues: 1, named: 1 });
+      expect(named[0].message).toContain('is a runtime token');
+      expect(named[0].message).toContain(`A "${type}" field takes no defaultValue in a blueprint`);
+      expect(named[0].message.endsWith('Remove defaultValue from this field.')).toBe(true);
+      expect(named[0].message).not.toMatch(/no record exists|fixed when the blueprint is written/);
+    }
+  });
+
   it('refuses a list default on a multi-value field by name, beside the key\'s own union refusal', () => {
     const result = lenientField({ type: 'multiselect', options: OPTIONS, defaultValue: ['open'] });
     expect(result.success).toBe(false);
