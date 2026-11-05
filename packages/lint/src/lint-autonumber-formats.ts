@@ -27,10 +27,26 @@
  * a `format` shorthand the runtime then rendered and threw on. A field that
  * declares neither key is checked against the contract default, which is what
  * it mints with.
+ *
+ * [#30608] Each object is read as SERVED (`objectsAsServed`, the package's one
+ * fold): the engine mints against the registry's merged object, so a format
+ * may interpolate a field an `objectExtensions` entry of the same artifact
+ * adds, an autonumber field an extension adds is minted and so checked, and an
+ * owner's field an extension re-declares is read on the extension's
+ * definition, which replaces the owner's whole (the registry's
+ * `mergeObjectDefinitions`): an autonumber re-declared as `text` mints
+ * nothing, and a referenced field re-declared without `required` is optional.
+ * Whether a field is an autonumber, its format and whether it is required are
+ * its definition, so a field two packages tie on is never walked as an
+ * autonumber, and a format naming one is reported neither unknown (the name is
+ * served) nor optional (which definition wins is registration order). An
+ * object that declares no field (an introspected schema) is skipped, extended
+ * or not: its other columns are not visible here, so a format naming one would
+ * read as unknown.
  */
 
 import { parseAutonumberFormat, referencedFields, resolveAutonumberFormat } from '@objectstack/spec/data';
-import { recordsOf } from './object-graph.js';
+import { objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
 
 export interface AutonumberLintFinding {
   where: string;
@@ -53,14 +69,22 @@ export const AUTONUMBER_LITERAL_TOKEN = 'autonumber-unrecognized-token';
  */
 export function lintAutonumberFormats(stack: AnyRec): AutonumberLintFinding[] {
   const findings: AutonumberLintFinding[] = [];
-  for (const obj of recordsOf(stack.objects)) {
+  const declared = recordsOf(stack.objects);
+  const servedFold = objectsAsServed(stack);
+  const served = objectsWithoutTiedFields(servedFold);
+  declared.forEach((obj, i) => {
     const objectName = typeof obj.name === 'string' ? obj.name : '(unnamed object)';
-    const fields = recordsOf(obj.fields);
-    // name → required?, for schema-aware reference checks.
-    const fieldMeta = new Map<string, { required: boolean }>();
+    // [#30608] Skipped when it declares no field, extended or not (module note).
+    if (!recordsOf(obj.fields).some((f) => typeof f.name === 'string')) return;
+    const fields = recordsOf(served[i].fields);
+    const tiedKeys = typeof obj.name === 'string' ? servedFold.tied.get(obj.name) : undefined;
+    // name → required?, for schema-aware reference checks. `null` is a field
+    // two packages tie on: served, of no stated definition.
+    const fieldMeta = new Map<string, { required: boolean } | null>();
     for (const f of fields) {
       if (typeof f.name === 'string') fieldMeta.set(f.name, { required: f.required === true });
     }
+    for (const key of tiedKeys ?? []) fieldMeta.set(key, null);
 
     for (const f of fields) {
       if (f.type !== 'autonumber') continue;
@@ -106,6 +130,7 @@ export function lintAutonumberFormats(stack: AnyRec): AutonumberLintFinding[] {
           continue;
         }
         const meta = fieldMeta.get(ref);
+        if (meta === null) continue;
         if (!meta) {
           findings.push({
             where,
@@ -125,6 +150,6 @@ export function lintAutonumberFormats(stack: AnyRec): AutonumberLintFinding[] {
         }
       }
     }
-  }
+  });
   return findings;
 }

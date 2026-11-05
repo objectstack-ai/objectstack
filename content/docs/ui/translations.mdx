@@ -174,8 +174,13 @@ Per request, in this order:
 2. A `?locale=` query parameter
 3. The stack's `defaultLocale`
 
-Within the bundle, matching walks: exact (`zh-CN`) → case-insensitive →
-**base language** (`zh-CN` → `zh`) → variant expansion (`zh` → `zh-CN`). If
+Within the bundle, matching walks `resolveLocaleAmong`'s five steps
+(`@objectstack/spec/system`): exact (`zh-CN`) → case-insensitive → the
+**platform locale table** language (`zh-TW` / `zh-HK` / `zh-MO` → `zh-Hant`,
+`zh` → `zh-CN`) → **base language** (`zh-CN` → `zh`) → variant expansion
+(`es-MX` → `es-ES`, the first registered variant). The table step only adds
+answers for the table's aliases: a bundle with no `zh-Hant` still serves
+`zh-TW` its `zh-CN` strings. If
 nothing matches, the request walks the stack's **declared** fallback locale
 (`fallbackLocale`, else `defaultLocale`), and finally the literal label on the
 metadata. **Translation lookup never throws** — a missing string degrades to

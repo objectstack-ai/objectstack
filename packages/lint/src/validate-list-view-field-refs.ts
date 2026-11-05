@@ -966,7 +966,17 @@ export function validateListViewFieldRefs(
   // column, filter key or `groupByField` naming a field a sibling package adds
   // resolves as it does at runtime.
   const servedStack = objectsAsServed(stack);
-  const graph: ObjectGraph = indexObjectGraph({ objects: servedStack.objects });
+  // [#30608] Skip 2 is asked of the DECLARED object: one that declares no
+  // readable field map (an introspected schema) stays `null`, unjudgeable,
+  // when an extension adds to it, as the write, readonly and sort rules keep
+  // it. The served graph alone reads such an object as having only the
+  // extension's fields, and so refused every column naming one of its own.
+  const declaredGraph = indexObjectGraph(stack);
+  const graph: ObjectGraph = new Map(
+    [...indexObjectGraph({ objects: servedStack.objects })].map(
+      ([name, served]) => [name, declaredGraph.get(name) === null ? null : served] as const,
+    ),
+  );
   const scope = options?.packageScope;
   // [#24668] The whole collection, stated — and only without a closure, which
   // is the narrower set and wins.
