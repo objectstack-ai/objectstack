@@ -7,6 +7,6 @@ refactor(objectql): the six `ObjectQL` methods the #4918 query-options erasure p
 Clause-②: no
 Metadata-protocol: none
 
-- The six internal reads in `seedAutonumber`, `referenceExists`, `resolveMasterDetailParent`, `resolveMasterDetailParents`, `inspectDanglingReferences` and `probeReferencingRows` no longer erase their query options to `any`: `tsc` now checks each one against `EngineQueryOptions`, and `engine.ts` leaves the erasure baseline with zero sites.
+- The six internal reads in `seedAutonumber`, `referenceExists`, `resolveMasterDetailParent`, `resolveMasterDetailParents`, `inspectDanglingReferences` and `probeReferencingRows` no longer erase their query options to `any`. Four are plain literals `tsc` now checks against `EngineQueryOptions`; the keyset walk's `where` and the dangling-reference audit's port options are named as `EngineQueryOptions` slots instead. `engine.ts` leaves the erasure baseline with zero sites.
 - A new fourth pass of the `engine.ts` codemod, `--members`, moves the six bodies the way the first pass moves a body, into the facet modules it already wrote, and proves the move by undoing it. `engine.ts` goes from 11,771 to 11,316 lines.
 - Nothing to do on upgrade: the exported names, the public `.d.ts` declarations and what every method does are the same.
