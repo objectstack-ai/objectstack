@@ -2733,7 +2733,9 @@ export class AuthManager {
    * transport swapped from the mail settings at runtime). Read at call time,
    * never cached at boot. [#27843] invite-member's `outcome` asks it too
    * (`invitation-delivery-outcome.ts`), so an invite answers `link_only` on
-   * exactly the deployments where sign-up would not mail either.
+   * exactly the deployments where sign-up would not mail either. [#30107]
+   * `getPublicConfig()`'s `features.emailDelivery` serves the same answer, so
+   * the forgot-password page stops saying a reset link was sent where none is.
    *
    * ⛔ An implementation WITHOUT the member is NOT live: the contract says an
    * absent member is unknown, and the flow asking — a success answer that only
@@ -4645,6 +4647,14 @@ export class AuthManager {
       // SMS path can actually deliver (plugin on + deliverable SMS service),
       // so the login UI never shows a dead "sign in with code" option.
       phoneNumberOtp: ((pluginConfig as any).phoneNumber ?? false) && this.isPhoneOtpDeliverable(),
+      // [#30107] Does mail leave this deployment? The one deliverability rule
+      // (`isEmailDeliveryLive()`: the wired service's own `isConfigured()`),
+      // read per request — so no email service and the stock `log` transport
+      // both answer false, and a transport configured later answers true
+      // without a restart. ⛔ Not `isEmailServiceAvailable()`: that is true on
+      // every default boot. The reset request answers known and unknown
+      // addresses alike either way; this describes the deployment, not one.
+      emailDelivery: this.isEmailDeliveryLive(),
       // The managed (cloud-hosted, SSO-only) mode, from the one accessor every
       // judgement site reads (ruling 6341690661 on #25083, Q2 D / Q3 A). A
       // hide-when-on flag: the console hides the doors that add people.
