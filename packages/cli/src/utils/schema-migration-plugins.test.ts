@@ -845,7 +845,7 @@ describe('measureComposedCoverage, DDL-free, with a disabled package\'s extensio
     dir = mkdtempSync(join(tmpdir(), 'os-migrate-disabled-ext-'));
     const file = join(dir, 'data.db');
     const first = sqlDriver(file);
-    await first.initObjects([registry.getStorageObject(OBJECT)]);
+    await first.initObjects([registry.getStorageObject(OBJECT) as any]);
     await (first as any).knex(OBJECT).insert({ id: 'a1', name: 'acme', qm_credit: 500, organization_id: 'org_a' });
     await first.disconnect();
     drivers.pop();
