@@ -59,12 +59,17 @@ describe('the stream, pure (objectstack#27055)', () => {
     expect(mergeTimelineStream([comment, updated], null).map((i) => i.id)).toEqual(['a2', 'c1']);
   });
 
-  it('the four chips', () => {
+  it('the four chips: 变更 holds the audit's field changes, the activity's `created` row is 活动 (objectstack#30074, ruling C)', () => {
     const stream = mergeTimelineStream([comment, call, created], audit);
     expect(filterTimelineStream(stream, 'all')).toHaveLength(4);
     expect(filterTimelineStream(stream, 'discussion').map((i) => i.id)).toEqual(['c1']);
-    expect(filterTimelineStream(stream, 'changes').map((i) => i.id)).toEqual(['audit:1', 'a3']);
-    expect(filterTimelineStream(stream, 'activity').map((i) => i.id)).toEqual(['a1']);
+    // Judged by source, not by the shared `field_change` presentation: the
+    // `created` row (a3) is an event, so it is not a change.
+    expect(filterTimelineStream(stream, 'changes').map((i) => i.id)).toEqual(['audit:1']);
+    expect(filterTimelineStream(stream, 'activity').map((i) => i.id)).toEqual(['a1', 'a3']);
+    // Every entry sits under exactly one of 活动 / 讨论 / 变更.
+    const sliced = (['activity', 'discussion', 'changes'] as const).flatMap((chip) => filterTimelineStream(stream, chip));
+    expect(sliced.map((i) => i.id).sort()).toEqual(stream.map((i) => i.id).sort());
   });
 });
 
@@ -184,5 +189,60 @@ describe('the 变更 chip is offered only while the record shows its field histo
     rerender(page(false));
     expect(container.querySelector('[data-stream-filter="all"]')?.getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByText('Logged a call')).toBeTruthy();
+  });
+});
+
+describe('an activity row sits under 活动 whatever the history flag; 变更 holds the audit only (objectstack#30074, ruling C)', () => {
+  // The five activity types that share the `field_change` presentation.
+  const events = (['created', 'updated', 'deleted', 'assigned', 'shared'] as const).map(
+    (activityType, i) =>
+      ({
+        id: `ev-${activityType}`,
+        type: 'field_change',
+        actor: 'Dev',
+        body: `Event ${activityType}`,
+        createdAt: new Date(Date.UTC(2026, 9, 10, 0, i)).toISOString(),
+        activityType,
+      }) as FeedItem,
+  );
+  const page = (fieldHistory: boolean) => (
+    <DefaultRecordPageContext.Provider value>
+      <RecordFieldHistoryContext.Provider value={fieldHistory}>
+        <DiscussionContextProvider items={[call, ...events] as any[]} loading={false}>
+          <RecordFieldChangesContext.Provider value={fieldHistory ? audit : null}>
+            <RecordActivityRenderer schema={{ type: 'record:activity', showCompleted: true } as any} />
+          </RecordFieldChangesContext.Provider>
+        </DiscussionContextProvider>
+      </RecordFieldHistoryContext.Provider>
+    </DefaultRecordPageContext.Provider>
+  );
+  const choose = (container: HTMLElement, chip: string) =>
+    fireEvent.click(container.querySelector(`[data-stream-filter="${chip}"]`)!);
+
+  for (const fieldHistory of [true, false]) {
+    it(`history ${fieldHistory ? 'on' : 'off'}: 活动 lists every activity event, and no audit change`, () => {
+      const { container } = render(page(fieldHistory));
+      choose(container, 'activity');
+      // With history on the audit says the update with its values, so the
+      // activity's own `updated` row steps aside (mergeTimelineStream).
+      const shown = events.filter((e) => !(fieldHistory && e.activityType === 'updated'));
+      for (const event of shown) expect(screen.getByText(`Event ${event.activityType}`)).toBeTruthy();
+      expect(screen.getByText('Logged a call')).toBeTruthy();
+      expect(screen.queryByText(/New → Contacted/)).toBeNull();
+    });
+  }
+
+  it('CONTROL, history on: 变更 holds the field change with its old and new values, and no activity event', () => {
+    const { container } = render(page(true));
+    choose(container, 'changes');
+    expect(screen.getByText(/Status New → Contacted/)).toBeTruthy();
+    for (const event of events) expect(screen.queryByText(`Event ${event.activityType}`)).toBeNull();
+  });
+
+  it('the panel's `changes_only` keeps the same rule as the stream', () => {
+    render(<RecordActivityTimeline items={[call, created, ...audit]} filterMode="changes_only" />);
+    expect(screen.getByText('Status')).toBeTruthy();
+    expect(screen.queryByText('Created the lead')).toBeNull();
+    expect(screen.queryByText('Logged a call')).toBeNull();
   });
 });

@@ -45,6 +45,7 @@ import { foldFeedItems, type ActivityTimelineEntry } from './renderers/recordAct
 import {
   TIMELINE_STREAM_FILTERS,
   filterTimelineStream,
+  isFieldHistoryEntry,
   isSystemStreamEntry,
   type TimelineStreamFilter,
 } from './recordTimelineStream';
@@ -284,8 +285,10 @@ function filterItems(items: FeedItem[], mode: FeedFilterMode): FeedItem[] {
   switch (mode) {
     case 'comments_only':
       return items.filter((i) => i.type === 'comment');
+    // The stream's 变更 rule (objectstack#30074, ruling C): the audit's field
+    // changes only, so the panel and the stream agree on what a change is.
     case 'changes_only':
-      return items.filter((i) => i.type === 'field_change');
+      return items.filter(isFieldHistoryEntry);
     case 'tasks_only':
       return items.filter((i) => i.type === 'task');
     default:
