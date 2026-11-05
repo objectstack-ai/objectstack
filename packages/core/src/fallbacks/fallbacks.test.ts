@@ -328,6 +328,17 @@ describe('resolveLocale and resolveBundleLocale — one shared case list', () =>
         ['zh-Hans-SG', ['en', 'zh-Hant', 'zh-CN'], 'zh-CN'],
         ['ZH-HANT-tw', ['en', 'zh-CN', 'zh-Hant'], 'zh-Hant'],
         ['zh-Hant-TW', ['en', 'zh', 'zh-Hant'], 'zh-Hant'],
+        // ...and so are keys spelled that way: a key counts as the script it names.
+        ['zh-TW', ['en', 'zh-CN', 'zh-Hant-TW'], 'zh-Hant-TW'],
+        ['zh-TW', ['en', 'zh-Hant-TW', 'zh-CN'], 'zh-Hant-TW'],
+        ['zh-Hant', ['en', 'zh-CN', 'zh-Hant-TW'], 'zh-Hant-TW'],
+        ['zh-Hant', ['en', 'zh-Hant-TW', 'zh-CN'], 'zh-Hant-TW'],
+        ['zh-CN', ['en', 'zh-Hant', 'zh-Hans-CN'], 'zh-Hans-CN'],
+        ['zh-CN', ['en', 'zh-Hans-CN', 'zh-Hant'], 'zh-Hans-CN'],
+        ['zh-Hant-TW', ['en', 'zh', 'zh-Hant-HK'], 'zh-Hant-HK'],
+        ['zh-Hant-TW', ['en', 'zh-Hant-HK', 'zh'], 'zh-Hant-HK'],
+        // One script registered: a related language still beats none.
+        ['zh-Hant-TW', ['en', 'zh-CN'], 'zh-CN'],
         // Today's alias-spelled bundles keep answering.
         ['ja', ['en', 'zh-CN', 'ja-JP', 'es-ES'], 'ja-JP'],
         ['es', ['en', 'zh-CN', 'ja-JP', 'es-ES'], 'es-ES'],

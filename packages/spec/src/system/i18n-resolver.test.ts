@@ -1088,6 +1088,22 @@ describe('resolveBundleLocale — the platform table language step', () => {
     expect(resolveBundleLocale({ 'zh-Hant': {}, zh: {} }, 'zh-CN')).toBe('zh');
     expect(resolveBundleLocale({ zh: {}, 'zh-Hant': {} }, 'zh-Hant-TW')).toBe('zh-Hant');
     expect(resolveBundleLocale({ 'zh-Hant': {}, zh: {} }, 'zh-Hans-CN')).toBe('zh');
+    expect(resolveBundleLocale({ en: {}, zh: {}, 'zh-Hant-HK': {} }, 'zh-Hant-TW')).toBe('zh-Hant-HK');
+    expect(resolveBundleLocale({ en: {}, 'zh-Hant-HK': {}, zh: {} }, 'zh-Hant-TW')).toBe('zh-Hant-HK');
+  });
+
+  it('reads a key spelled with a script subtag as the script it names, in either registration order', () => {
+    for (const keys of [['en', 'zh-CN', 'zh-Hant-TW'], ['en', 'zh-Hant-TW', 'zh-CN']]) {
+      const bundle = Object.fromEntries(keys.map((code) => [code, {}]));
+      expect(resolveBundleLocale(bundle, 'zh-TW')).toBe('zh-Hant-TW');
+      expect(resolveBundleLocale(bundle, 'zh-Hant')).toBe('zh-Hant-TW');
+    }
+    for (const keys of [['en', 'zh-Hant', 'zh-Hans-CN'], ['en', 'zh-Hans-CN', 'zh-Hant']]) {
+      const bundle = Object.fromEntries(keys.map((code) => [code, {}]));
+      expect(resolveBundleLocale(bundle, 'zh-CN')).toBe('zh-Hans-CN');
+    }
+    // One script registered: a related language still beats none.
+    expect(resolveBundleLocale({ en: {}, 'zh-CN': {} }, 'zh-Hant-TW')).toBe('zh-CN');
   });
 
   it('keeps the alias-spelled bundles of today: ja → ja-JP, es → es-ES, en → en-US', () => {
