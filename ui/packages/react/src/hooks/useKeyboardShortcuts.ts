@@ -95,25 +95,3 @@ export function useKeyboardShortcuts(
     };
   }, [enabled, handleKeyDown]);
 }
-
-/**
- * Returns a list of all registered shortcut descriptions.
- * Useful for building a help dialog (? key).
- */
-export function getShortcutDescriptions(
-  shortcuts: KeyboardShortcutDefinition[]
-): Array<{ keys: string; description: string }> {
-  return shortcuts
-    .filter((s) => s.description && s.enabled !== false)
-    .map((s) => {
-      const parts: string[] = [];
-      if (s.ctrlOrMeta) parts.push('⌘/Ctrl');
-      if (s.shift) parts.push('Shift');
-      if (s.alt) parts.push('Alt');
-      parts.push(s.key.length === 1 ? s.key.toUpperCase() : s.key);
-      return {
-        keys: parts.join(' + '),
-        description: s.description!,
-      };
-    });
-}

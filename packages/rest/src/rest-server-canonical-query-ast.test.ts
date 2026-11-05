@@ -211,6 +211,10 @@ interface CensusEntry {
  * the record page's stream reads (the discussion, its reactions, the activity
  * and the attachments) go through one server-built slot (`readStream`), so the
  * module's floor is 2.
+ *
+ * [#30205] 6, unchanged: a user's assigned work (`user-work-routes.ts`) hands
+ * the engine no `query:` slot of its own (the counts and reads are built in
+ * `@objectstack/core`), so the new module's floor is 0.
  */
 const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, number>> = {
     'rest-server.ts': 0,
@@ -233,6 +237,7 @@ const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, numb
     'meta-object-state-routes.ts': 0,
     'record-page-routes.ts': 2,
     'meta-app-bundle-routes.ts': 0,
+    'user-work-routes.ts': 0,
 };
 
 const CENSUS: CensusEntry[] = [

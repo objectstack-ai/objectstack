@@ -15,7 +15,7 @@
  *
  * ## What is pinned, through the booted plugin's own doors
  *
- *  - a key whose owner holds `MFA_REQUIRED` (scope `account`) → all five doors
+ *  - a key whose owner holds `MFA_REQUIRED` (scope `account`) → every door
  *    answer `403 MFA_REQUIRED` with the session's message, before any effect;
  *  - a key whose owner holds only `PASSWORD_RESET_REQUIRED` (scope
  *    `credential`) → served;
@@ -201,13 +201,14 @@ function withKey(body: unknown = {}, manifestId?: string) {
     };
 }
 
-/** The five doors, addressed with what each needs to act. */
+/** The six doors, addressed with what each needs to act. */
 const IL_DOORS = [
     { route: `POST ${IL}`, body: { manifest: APP } },
     { route: `GET ${IL}`, body: {} },
     { route: `DELETE ${IL}/:manifestId`, body: {} },
     { route: `POST ${IL}/:manifestId/reseed-sample-data`, body: {} },
     { route: `POST ${IL}/:manifestId/purge-sample-data`, body: {} },
+    { route: `GET ${IL}/:manifestId/sample-data`, body: {} },
 ] as const;
 
 let dir: string;
@@ -221,7 +222,7 @@ afterEach(() => {
 });
 
 describe('install-local doors — a key answers as its owner\'s session does (#23455, ruling C′)', () => {
-    it('REFUSES a key whose owner holds MFA_REQUIRED on all five doors, with the session\'s 403 code and message, before any effect', async () => {
+    it('REFUSES a key whose owner holds MFA_REQUIRED on all six doors, with the session\'s 403 code and message, before any effect', async () => {
         const postures: Record<string, Posture[]> = {};
         const m = await mountInstallLocal(dir, postures);
         // Installed by the same key while its owner is not held, so the

@@ -1828,7 +1828,7 @@ const de = {
     savedViewsUnreadable: "Diese Liste ist leer, weil sie nicht gelesen werden konnte, nicht weil dieses Objekt keine gespeicherten Ansichten hätte. Versuchen Sie es erneut und melden Sie das Problem, wenn es weiterhin auftritt.",
     settingsHub: {
       title: "Einstellungen",
-      subtitle: "Konfigurieren Sie Ihr System, Integrationen und Feature-Flags.",
+      subtitle: "Konfigurieren Sie Ihr System und Ihre Integrationen.",
       loadError: "Einstellungen konnten nicht geladen werden",
       empty: "Noch keine Einstellungsseiten verfügbar. Sie erscheinen hier, sobald eine installierte App sie bereitstellt.",
       adminManaged: "Einstellungen werden von Ihrem Administrator verwaltet",

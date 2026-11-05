@@ -178,11 +178,15 @@ function inApplicationOrder(entries: readonly OrderedConversion[]): readonly Met
  *   take the same number; they then apply in `id` order. One that must apply
  *   BEFORE an existing entry takes a number between its neighbours' (`23.5`)
  *   instead of renumbering them.
- * - DEFINE it directly above the definition of the entry that follows it in
- *   this list, so the conversion defined next after it is that entry. One that
- *   sorts last is defined after every other conversion, directly above
- *   `OrderedConversion`. The end of the definitions is one gap too: defining
- *   every new conversion there conflicts exactly as appending here did.
+ * - DEFINE it in a module of its own, `./entries/18/<id>.ts`, the file named for
+ *   the conversion's `id` and exporting it by name (`export { <identifier> };`).
+ *   A new file never conflicts.
+ * - IMPORT it directly above the import of the entry that follows it in this
+ *   list, so the conversion imported next after it is that entry. One that
+ *   sorts last is imported after every other `./entries/18/` import. The
+ *   imports stand where the definitions stood before the split, and their end
+ *   is one gap too: importing every new conversion there conflicts exactly as
+ *   appending here did.
  *
  * `scripts/conversions-major18-merge.test.ts` holds both rules for every entry
  * added after this shape, and proves the merge.

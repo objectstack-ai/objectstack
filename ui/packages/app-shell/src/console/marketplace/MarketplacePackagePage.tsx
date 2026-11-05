@@ -81,6 +81,7 @@ import {
   purgeSampleData,
   reseedLocalSampleData,
   purgeLocalSampleData,
+  countLocalSampleData,
   type MarketplaceDetailResponse,
   type CloudEnvironment,
   type LocalInstallEntry,
@@ -92,7 +93,15 @@ import {
 import { useDependencyMissingText } from './dependencyMissing.js';
 import { useProtocolCheckSkippedText } from './protocolCheckSkipped.js';
 import { ProtocolCheckSkippedNote } from './ProtocolCheckSkippedNote.js';
-import { forgetSampleData, rememberSampleData, sampleDataNotice, sampleRecordsLoaded, takeClearConfirmRequest } from './sampleDataNotice.js';
+import {
+  forgetSampleData,
+  noteServedSampleCount,
+  rememberSampleData,
+  sampleDataGeneration,
+  sampleDataNotice,
+  sampleRecordsLoaded,
+  takeClearConfirmRequest,
+} from './sampleDataNotice.js';
 import { SampleDataLeaveBanner } from './SampleDataLeaveBanner.js';
 import { getCloudBase, getRuntimeConfig, isMarketplaceEnabled } from '../../runtime-config.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
@@ -302,9 +311,13 @@ function MarketplacePackagePageBody() {
     sampleData?: { count: number; reinstall: boolean };
   } | null>(null);
   // objectstack#30323 — the console's own confirm for a sample-data purge, in
-  // place of the browser's: which install it purges, and how many sample
-  // records this session knows that install loaded (`null`: none known).
-  const [purgeConfirm, setPurgeConfirm] = useState<{ target: 'local' | 'cloud'; count: number | null } | null>(null);
+  // place of the browser's: which install it purges. The count it draws for a
+  // local purge is read when it is drawn (`localSampleCount` below), so a
+  // count the runtime answers while it is open still reaches it.
+  const [purgeConfirm, setPurgeConfirm] = useState<{ target: 'local' | 'cloud' } | null>(null);
+  // objectstack#30616 — bumped when the runtime's count of this page's local
+  // install's sample rows lands in the session record, so the page draws it.
+  const [, setSampleCountReads] = useState(0);
   const hasNotificationProvider = useHasNotificationProvider();
   // ADR-0131 D6 — the install modes the package's latest manifest declares,
   // read from the manifest install-local judges, and the operator's pick among
@@ -344,7 +357,7 @@ function MarketplacePackagePageBody() {
       // page it opens, so the confirm opens once the listing says that
       // package's sample data is still there.
       const requested = items.find((i) => i.withSampleData && !i.notLoaded && takeClearConfirmRequest(i.manifestId));
-      if (requested) setPurgeConfirm({ target: 'local', count: sampleDataNotice(requested.manifestId)?.count ?? null });
+      if (requested) setPurgeConfirm({ target: 'local' });
     })();
     return () => { cancelled = true; };
   }, [packageId, localResult, isAdmin]);
@@ -911,12 +924,36 @@ function MarketplacePackagePageBody() {
     ? localInstalls.find((i) => !!data && i.manifestId === data.package.manifest_id)
     : localInstalls.find((i) => i.packageId === packageId)) ?? null;
 
+  // objectstack#30616 — the runtime's count of the sample rows a purge of this
+  // install would delete now, read on every visit and again each time the
+  // listing is read (after an install, a reseed or a clear, which hand the
+  // page a new entry). It goes into the session record the confirm and the
+  // banner read: above zero it is the count they draw, zero drops the record
+  // and its banner. An answer of this session's own that lands while the read
+  // is in flight is fresher and stays (`noteServedSampleCount`). A failed read
+  // changes nothing: the record keeps what this session knows, if anything.
+  useEffect(() => {
+    if (!localInstall || localInstall.notLoaded) return;
+    const manifestId = localInstall.manifestId;
+    const generation = sampleDataGeneration(manifestId);
+    let cancelled = false;
+    (async () => {
+      const served = await countLocalSampleData(manifestId);
+      if (cancelled || !served) return;
+      const name = data?.package ? localizePackage(data.package as any, language).displayName : manifestId;
+      noteServedSampleCount({ manifestId, name, count: served.count, path: `${basePath}/system/marketplace/${packageId}` }, generation);
+      setSampleCountReads((n) => n + 1);
+    })();
+    return () => { cancelled = true; };
+  }, [localInstall, data, language, basePath, packageId]);
+
   // objectstack#30323 — the console's confirm for a local purge, with the
-  // count this session knows the install left in place, when it knows one.
+  // count this session knows the install's purge would delete, when it knows one.
   const openLocalPurgeConfirm = () => {
     if (!localInstall) return;
-    setPurgeConfirm({ target: 'local', count: sampleDataNotice(localInstall.manifestId)?.count ?? null });
+    setPurgeConfirm({ target: 'local' });
   };
+  const localSampleCount = localInstall ? sampleDataNotice(localInstall.manifestId)?.count ?? null : null;
 
   // The local-install menu and the two status banners, drawn by both the
   // catalog view and the marketplace-off local view below (objectui#11627).
@@ -1009,16 +1046,18 @@ function MarketplacePackagePageBody() {
     </div>
   );
   // objectstack#30323 — the purge confirm, in the console's own dialog. The
-  // count line is drawn only when this session knows what the install loaded:
-  // the runtime serves no count of a package's sample rows after that answer.
+  // count line is drawn for a local purge whose count this session knows: the
+  // runtime's (objectstack#30616) or, when that could not be read, the one the
+  // install answered. A cloud purge draws none.
+  const purgeConfirmCount = purgeConfirm?.target === 'local' ? localSampleCount : null;
   const purgeConfirmDialog = (
     <AlertDialog open={purgeConfirm !== null} onOpenChange={(open) => { if (!open) setPurgeConfirm(null); }}>
       <AlertDialogContent data-testid="purge-sample-data-dialog">
         <AlertDialogHeader>
           <AlertDialogTitle>{t('marketplace.detail.purgeSampleData')}</AlertDialogTitle>
           <AlertDialogDescription className="whitespace-pre-line">
-            {purgeConfirm?.count != null
-              ? `${t('marketplace.detail.purgeConfirmAtMost', { count: purgeConfirm.count })}\n${t('marketplace.detail.purgeConfirm')}`
+            {purgeConfirmCount != null
+              ? `${t('marketplace.detail.purgeConfirmAtMost', { count: purgeConfirmCount })}\n${t('marketplace.detail.purgeConfirm')}`
               : t('marketplace.detail.purgeConfirm')}
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -1522,7 +1561,7 @@ function MarketplacePackagePageBody() {
                     : t('marketplace.detail.addSampleData')}
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onSelect={() => setPurgeConfirm({ target: 'cloud', count: null })}
+                  onSelect={() => setPurgeConfirm({ target: 'cloud' })}
                   disabled={sampleDataBusy !== null || cloudSampleDataRefused || !cloudInstall.withSampleData}
                   className="text-destructive focus:text-destructive"
                 >

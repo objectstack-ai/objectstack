@@ -150,6 +150,7 @@ import {
   withoutDeletedSelfParents,
   type SummaryDescriptor,
 } from './summary-aggregate.js';
+import { refreshSummariesExtendedBy, startSummaryRefreshOnEnable, summaryRefreshesSettled, type SummaryEnableRefreshReport } from './summary-enable-refresh.js';
 import { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
 import { HookTargetRebindError } from './hook-target-rebind-errors.js';
 import { FindHookResultNotArrayError } from './find-hook-result-shape.js';
@@ -725,6 +726,10 @@ export class ObjectQL implements IObjectQLEngine {
     // (which reads this map first) kept an uninstalled package read-only until
     // a restart.
     this._registry.onPackageUninstalled((packageId) => { this.manifests.delete(packageId); });
+    // [#30377] A roll-up a package adds by extension is withheld with it, so
+    // the child writes made during a disable recompute nothing: an enable
+    // recomputes it (`summary-enable-refresh.ts`), on every enable door.
+    this._registry.onPackageEnabled((packageId) => startSummaryRefreshOnEnable(this, this.logger, packageId));
     // Pick up production hardening switches from env so deployers can
     // enforce strict-body without code changes:
     //   OBJECTQL_STRICT_HOOKS=1 → unresolved hooks throw at bind time
@@ -1144,11 +1149,15 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * [#30065, ADR-0146 D9 `action`] The one exception: a key a declared
    * action override holds ({@link registerActionOverride}) keeps the
-   * override on top, and another package's registration takes the place
-   * beneath it, the handler a removal of the override binds again. A
-   * marketplace base's handlers are bound by its rehydrate after the
-   * authored-action resync bound the override, so the base's body arrives
-   * second and must not replace the override's.
+   * override on top when the declared base's handler arrives, and that
+   * handler takes the place beneath it, the one a removal of the override
+   * binds again. A marketplace base's handlers are bound by its rehydrate
+   * after the authored-action resync bound the override, so the base's body
+   * arrives second and must not replace the override's. [#30542] The
+   * declared base's handler is the one registered while the registry's code
+   * artifact of the action is that package's, on this object; any other
+   * registration under the key, one with no package included, replaces the
+   * override and is warned like every other.
    */
   registerAction(objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName?: string): void {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
@@ -1169,9 +1178,13 @@ export class ObjectQL implements IObjectQLEngine {
    * warned: the replacement is the declared one. The entry is marked as an
    * override, so the base's handler registered after it (by
    * {@link registerAction}) slots beneath it instead of replacing it.
+   *
+   * @param base [#30542] The package the override declares it overrides
+   *   (`overrides.package`). Only that package's handler slots beneath the
+   *   override; without it, any package's does.
    */
-  registerActionOverride(objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName: string): void {
-    return ActionsFacet.registerActionOverride.call(actionsHost.of(this), objectName, actionName, handler, packageName);
+  registerActionOverride(objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName: string, base?: string): void {
+    return ActionsFacet.registerActionOverride.call(actionsHost.of(this), objectName, actionName, handler, packageName, base);
   }
 
   /**
@@ -2981,11 +2994,20 @@ export class ObjectQL implements IObjectQLEngine {
     storedRows?: StoredReferenceRows,
   ): Promise<void> {
     // [#25522 cut 10] The body moved to `engine-referential-integrity.ts`, its docblock with it (see `ReferentialIntegrityHost`).
+    // [#30205] `referenceRow` answers a referenced user's ban state from the existence probe's own read.
+    const readLogger = () => this.logger;
     const host: ThisParameterType<typeof assertReferencesResolve> = {
+      get logger() { return readLogger(); },
       masterDetailHeaderExists: (...a) => this.masterDetailHeaderExists(...a),
       referenceExists: (...a) => this.referenceExists(...a),
+      referenceRow: (...a) => this.referenceRow(...a),
     };
     return assertReferencesResolve.call(host, schema, data, supplied, context, msgCtx, storedRows);
+  }
+
+  private referenceRow(target: string, id: unknown, context: ExecutionContext | undefined, extraFields: readonly string[]): Promise<Record<string, unknown> | false | null> {
+    // [#30205] The body lives in `engine-references-and-master-detail.ts`, its docblock with it (see `ReferencesAndMasterDetailHost`).
+    return ReferencesAndMasterDetailFacet.referenceRow.call(referencesAndMasterDetailHost.of(this), target, id, context, extraFields);
   }
 
   private referenceExists(target: string, id: unknown, context?: ExecutionContext): Promise<boolean | null> {
@@ -4333,6 +4355,25 @@ export class ObjectQL implements IObjectQLEngine {
   getOwnedSummaryDescriptors(parentObject: string): SummaryDescriptor[] {
     // [#29986 codemod] The body moved to `engine-summaries-and-expansion.ts` (see `SummariesAndExpansionHost`).
     return SummariesAndExpansionFacet.getOwnedSummaryDescriptors.call(summariesAndExpansionHost.of(this), parentObject);
+  }
+
+  /**
+   * [#30377] Recompute, on every parent row, the roll-up `summary` fields
+   * `packageId` adds to other packages' objects by extension, writing a row
+   * only where its stored value differs. An enable of a disabled package runs
+   * this by itself ({@link SchemaRegistry.onPackageEnabled}): while the
+   * package was disabled those fields were withheld from the roll-up index, so
+   * the child writes made then recomputed nothing. Public so an operator can
+   * re-run it after a failure the enable logged. Never throws on a row: each
+   * failure is in the report, and logged at `error`.
+   */
+  refreshSummariesEnabledBy(packageId: string): Promise<SummaryEnableRefreshReport> {
+    return refreshSummariesExtendedBy(this, this.logger, packageId);
+  }
+
+  /** [#30377] Resolves once the summary recomputes the enables so far started ({@link refreshSummariesEnabledBy}) have settled, so a door can answer after them. */
+  summaryRefreshSettled(): Promise<void> {
+    return summaryRefreshesSettled(this);
   }
 
   private initializeSummaryFields(object: string, record: any): any {
@@ -10334,6 +10375,7 @@ export class ObjectQL implements IObjectQLEngine {
       get actionActivation() { return engine.actionActivation; },
       get actions() { return engine.actions; },
       get logger() { return engine.logger; },
+      get registry() { return engine.registry; },
     }));
     cascadePlanningHost.install((engine) => ({
       get _registry() { return engine._registry; },
@@ -10511,6 +10553,7 @@ export class ObjectQL implements IObjectQLEngine {
       get realtimeService() { return engine.realtimeService; },
       set realtimeService(v) { engine.realtimeService = v; },
       referenceExists: (...a) => engine.referenceExists(...a),
+      referenceRow: (...a) => engine.referenceRow(...a),
       resolveEnginePosture: (...a) => engine.resolveEnginePosture(...a),
       resolveObjectName: (...a) => engine.resolveObjectName(...a),
     }));

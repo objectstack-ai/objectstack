@@ -233,23 +233,17 @@ export const FLOW_PAUSE_CAPABLE_NODE_TYPES: readonly string[] = [
  *
  * ## `objectName` — a start input that is a record id (#29425 ruling A)
  *
- * [planned] An input may declare that its value is the id of a record of a
- * named object. The contract the declaration states: every door that starts
- * the flow by name judges the input as a record, whether or not the definition
- * reads it as one in plain sight — the door loads it from the named object in
- * the caller's own scope before the run exists, refusing an unreadable id
- * `404 RECORD_NOT_FOUND` and a value that is not an id
- * `400 VALIDATION_FAILED` naming the input. An input without the declaration
- * keeps the visible-read rule (`flowDeclaredRecordReads` in
- * `packages/runtime/src/flow-start-admission.ts`).
- *
- * ⛔ No door applies it yet. This is the spec half; the start doors read the
- * declaration in the ruling's server half (Blocked-by #29442). Until then the
- * key is parsed, refused on a non-input (below) and linted
- * (`flow-input-unknown-object`), and its liveness row is `planned` with an
- * author warning (`packages/spec/liveness/flow.json` › `variables.objectName`),
- * so an author who writes it is told. Flip the row, drop the warning and the
- * describe's planned sentence in the commit that lands the reader.
+ * An input may declare that its value is the id of a record of a named
+ * object. Every door that starts the flow by name judges the input as a
+ * record, whether or not the definition reads it as one in plain sight: the
+ * door loads it from the named object in the caller's own scope before the
+ * run exists, refusing an unreadable id `404 RECORD_NOT_FOUND` and a value
+ * that is not an id `400` naming the input. The declaration adds that load
+ * beside any read the definition makes in plain sight, never in place of one.
+ * An input without the declaration keeps the visible-read rule. The reader is
+ * `flowDeclaredRecordReads` in `packages/runtime/src/flow-start-admission.ts`;
+ * the key is also refused on a non-input (below) and linted
+ * (`flow-input-unknown-object`).
  *
  * The spelling is `objectName`, the word the CRUD nodes already use for the
  * object they read, and ⛔ not a `type: 'record'` beside it: `type` already
@@ -299,14 +293,14 @@ export const FlowVariableSchema = lazySchema(() => strictObject(
     .meta({ title: 'Default Value' }),
   objectName: z.string().regex(/^[a-z_][a-z0-9_]*$/).optional()
     .describe(
-      '[planned] Declares this input a record reference: its value is the id of one record of the named object ' +
+      'Declares this input a record reference: its value is the id of one record of the named object ' +
       '(the object\'s snake_case name, e.g. `crm_account`). Only on an input (`isInput: true`). The contract: ' +
       'every door that starts the flow by name (the trigger route, an action of type flow over REST and MCP ' +
       'run_action, a declared endpoint of type flow) loads a declared input from this object in the caller\'s ' +
       'own scope before the run exists; an id the caller cannot read there is refused 404 RECORD_NOT_FOUND, and ' +
-      'a value that is not an id is refused 400 VALIDATION_FAILED naming the input. No door applies it yet: ' +
-      'today the key is parsed and checked, and a start with an id the caller cannot read still runs. An input ' +
-      'without this declaration is judged as a record only where the flow\'s own definition reads it as a ' +
+      'a value that is not an id is refused 400 naming the input. The load is added beside any read the ' +
+      'flow\'s own definition makes of the input, never in place of one. An input without this declaration ' +
+      'is judged as a record only where the flow\'s own definition reads it as a ' +
       'record id. `type` stays the data type: the variable holds the id the caller sent.',
     )
     .meta({ title: 'Record Object' }),

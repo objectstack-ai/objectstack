@@ -174,6 +174,7 @@ import {
 } from './validate-hook-body-writes.js';
 import {
   buildReadonlyIndex,
+  buildServedReadonlyIndex,
   buildInsertStripExemptObjects,
   READONLY_INSERT_STRIP_OUTCOME,
   READONLY_WHEN_STRIP_SCOPE,
@@ -404,7 +405,10 @@ export function validateReadonlyHookWrites(
     );
     if (writes.length === 0) return;
 
-    roIndex ??= buildReadonlyIndex(recordsOf(stack.objects));
+    // [#30471] The readonly index reads the objects as served
+    // (`buildServedReadonlyIndex`). The insert-strip exemption is object-level
+    // and stays on the declared objects.
+    roIndex ??= buildServedReadonlyIndex(stack);
     insertStripExempt ??= buildInsertStripExemptObjects(recordsOf(stack.objects));
 
     const hookName = typeof hook.name === 'string' && hook.name ? hook.name : `#${hookIndex}`;

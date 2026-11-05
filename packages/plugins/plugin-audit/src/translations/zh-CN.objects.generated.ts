@@ -263,27 +263,27 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_comment_reaction: {
-    label: "Comment Reaction",
-    pluralLabel: "Comment Reactions",
-    description: "An emoji reaction to a comment, owned by the user who reacted",
+    label: "评论表情回应",
+    pluralLabel: "评论表情回应",
+    description: "对一条评论的表情回应，归回应的用户所有",
     fields: {
       id: {
-        label: "Reaction ID"
+        label: "回应 ID"
       },
       comment_id: {
-        label: "Comment",
-        help: "The id of the sys_comment this reaction is on. The reaction is readable exactly when that comment is."
+        label: "评论",
+        help: "该回应所在的评论。评论可读时，回应才可读。"
       },
       emoji: {
-        label: "Emoji",
-        help: "The emoji, as the character sequence the client renders (for example 👍)"
+        label: "表情",
+        help: "表情本身，即客户端显示的字符（例如 👍）"
       },
       user_id: {
-        label: "User",
-        help: "The user who reacted. Stamped from the session on create; a client-supplied value is replaced."
+        label: "用户",
+        help: "做出回应的用户。创建时取自当前会话；客户端传入的值会被替换。"
       },
       created_at: {
-        label: "Created At"
+        label: "创建时间"
       }
     }
   }

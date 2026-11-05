@@ -1884,7 +1884,7 @@ const es = {
     savedViewsUnreadable: "Esta lista está vacía porque no se pudo leer, no porque este objeto no tenga vistas guardadas. Inténtalo de nuevo e informa del problema si continúa.",
     settingsHub: {
       title: "Configuración",
-      subtitle: "Configure su sistema, las integraciones y los indicadores de funciones.",
+      subtitle: "Configure su sistema y sus integraciones.",
       loadError: "No se pudo cargar la configuración",
       empty: "Todavía no hay páginas de configuración disponibles. Aparecen aquí cuando una aplicación instalada las proporciona.",
       adminManaged: "La configuración la gestiona su administrador",

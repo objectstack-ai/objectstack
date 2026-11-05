@@ -802,3 +802,17 @@ describe('per-release section (ADR-0087 D4, package-version resolution)', () => 
     expect(Object.keys(release.added[0])).not.toContain('since');
   });
 });
+
+describe('flow-record-read-and-decision-type-mismatch-refused names the object a time-relative flow is typed against', () => {
+  // The author-time gate types a time-relative flow's conditions against
+  // config.timeRelative.object when the start node names no objectName
+  // (packages/lint validate-expressions.ts, the flow walk), so the entry's
+  // surface must name that key, not only the start node's objectName.
+  const entry = () =>
+    MIGRATIONS_BY_MAJOR[18]!.semantic.find((s) => s.id === 'flow-record-read-and-decision-type-mismatch-refused');
+
+  it('the surface names config.timeRelative.object as the swept object', () => {
+    expect(entry()).toBeDefined();
+    expect(entry()!.surface).toMatch(/sweeping config\.timeRelative\.object/);
+  });
+});

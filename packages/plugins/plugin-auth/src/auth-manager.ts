@@ -1269,8 +1269,17 @@ export function isScimProtocolPath(endpointPath: string | undefined): boolean {
  *
  * Spelled out rather than imported: `plugin-auth` does not depend on
  * `@objectstack/plugin-email` (it reaches the mail service through the service
- * registry), and these are also the four options the `localization.locale`
- * setting offers, so the two ends agree by construction rather than by import.
+ * registry).
+ *
+ * These are NOT the `localization.locale` setting's options. Since #30286 that
+ * setting offers the deployment's own locale list (the i18n service's
+ * `getLocales()`), which may hold a language with no row here (`vi-VN`). The
+ * two ends agree by pass-through, not by construction:
+ * {@link normalizeAuthEmailLocale} maps a value onto a row spelling where one
+ * of these four means it and hands any other value on unchanged, and the
+ * email service then resolves it against the template bundle's own tags and
+ * falls back to the `en-US` row when no tag matches. A language with no row
+ * therefore gets English mail, not a failed send.
  */
 const AUTH_EMAIL_TEMPLATE_LOCALES = ['en-US', 'zh-CN', 'ja-JP', 'es-ES'] as const;
 
@@ -4383,7 +4392,11 @@ export class AuthManager {
    * deliberately LOCAL, I/O-free verifier depend on the data engine and turn
    * a transient store error into a 401 for a legitimate human, and a row's
    * existence is not humanity anyway (`isHumanUserRow` exists because
-   * `usr_system` is a row and not a person).
+   * `usr_system` is a row and not a person). A banned user's token is
+   * refused by the door that resolves the principal, which reads the ban
+   * where it already reads the principal's grants and answers a store fault
+   * as the 503 it is (`@objectstack/runtime` `oauth-subject-ban.ts`); the
+   * token endpoint mints a banned user no token (`oauth-grant-ban-refusal.ts`).
    *
    * Revocation note: JWT access tokens are not server-tracked, so
    * revocation takes effect at expiry (≤1h default); refresh tokens ARE

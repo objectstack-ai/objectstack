@@ -237,6 +237,10 @@ export class SettingsServicePlugin implements Plugin {
     // at each use (the i18n service registers after this `init`). Registered
     // before the manifests, so `localization`'s registration-time audit of
     // `OS_LOCALIZATION_LOCALE` leaves that key to be judged when it is read.
+    // That list fills during the boot (authored translations arrive at
+    // `kernel:ready`), so its verdict on an override is held until
+    // `kernel:bootstrapped` seals it (`start` below).
+    this.service.holdOptionSourceVerdicts();
     registerLocalizationLocaleOptions(this.service, () => {
       try {
         return ctx.getService<LocaleListService>('i18n');
@@ -294,6 +298,13 @@ export class SettingsServicePlugin implements Plugin {
       readStoredSecret: settleEngine
         ? storedSecretReaderOverEngine(settleEngine as unknown as Parameters<typeof storedSecretReaderOverEngine>[0])
         : async () => [],
+    });
+
+    // Every `kernel:ready` handler has run: the lists the option sources read
+    // are whole, so an `OS_*` override they still do not admit is reported now
+    // and its readers are told to read again (`sealOptionSources`).
+    ctx.hook('kernel:bootstrapped', async () => {
+      this.service?.sealOptionSources();
     });
 
     ctx.hook('kernel:ready', async () => {

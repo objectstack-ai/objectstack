@@ -1880,7 +1880,7 @@ const fr = {
     savedViewsUnreadable: "Cette liste est vide parce qu’elle n’a pas pu être lue, et non parce que cet objet n’aurait aucune vue enregistrée. Réessayez, et signalez le problème s’il persiste.",
     settingsHub: {
       title: "Paramètres",
-      subtitle: "Configurez votre système, vos intégrations et vos indicateurs de fonctionnalité.",
+      subtitle: "Configurez votre système et vos intégrations.",
       loadError: "Échec du chargement des paramètres",
       empty: "Aucune page de paramètres n'est encore disponible. Elles apparaissent ici lorsqu'une application installée en fournit.",
       adminManaged: "Les paramètres sont gérés par votre administrateur",

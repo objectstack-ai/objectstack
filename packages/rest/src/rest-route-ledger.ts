@@ -437,6 +437,9 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     note: 'duplicate mount with the dispatcher /security domain' },
   { route: 'POST /api/v1/security/suggested-bindings/:id/reopen', family: 'security', source: 'route-manager', disposition: 'sdk', client: 'security.suggestedBindings.reopen',
     note: 'duplicate mount with the dispatcher /security domain' },
+  // ── a user's assigned work (#30205) ───────────────────────────────────────
+  { route: 'GET /api/v1/security/users/:id/assigned-work', family: 'user-work', source: 'route-manager', disposition: 'sdk', client: 'security.assignedWork.count' },
+  { route: 'POST /api/v1/security/users/:id/assigned-work/transfer', family: 'user-work', source: 'route-manager', disposition: 'sdk', client: 'security.assignedWork.transfer' },
   // RETIRED (ADR-0131 cutover): `POST /api/v1/security/permission-sets/:id/
   // discard-overlay` left with the "Discard Overlay" Setup action. No door
   // creates an environment overlay of a packaged permission set any more, and

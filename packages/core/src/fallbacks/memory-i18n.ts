@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { normalizeSupportedLocales } from '@objectstack/spec/system';
+import { normalizeSupportedLocales, resolveLocaleAmong } from '@objectstack/spec/system';
 
 /**
  * Recursively merge `source` into `target`. Nested plain objects are merged
@@ -36,35 +36,42 @@ export function deepMerge(
 /**
  * Resolve a locale code against available locales with fallback.
  *
- * Fallback chain:
+ * This is `resolveLocaleAmong` from `@objectstack/spec/system`, the one
+ * locale-matching ladder the spec's `resolveBundleLocale` also runs, so the
+ * two resolvers cannot answer differently. Fallback chain:
  *   1. Exact match (e.g. `zh-CN` → `zh-CN`)
  *   2. Case-insensitive match (e.g. `zh-cn` → `zh-CN`)
- *   3. Base language match (e.g. `zh-CN` → `zh`)
- *   4. Variant expansion (e.g. `zh` → `zh-CN`)
+ *   3. The same platform table language, through the table's read aliases
+ *      (e.g. `zh-TW` / `zh-HK` → `zh-Hant`, `zh` → `zh-CN`, `ja` → `ja-JP`)
+ *   4. Base language match (e.g. `zh-CN` → `zh`)
+ *   5. Variant expansion (e.g. `es-MX` → `es-ES`)
  *
  * Returns the matched locale code, or `undefined` when no match is found.
  */
 export function resolveLocale(requestedLocale: string, availableLocales: string[]): string | undefined {
-  if (availableLocales.length === 0) return undefined;
+  return resolveLocaleAmong(requestedLocale, availableLocales);
+}
 
-  // 1. Exact match
-  if (availableLocales.includes(requestedLocale)) return requestedLocale;
-
-  // 2. Case-insensitive match
-  const lower = requestedLocale.toLowerCase();
-  const caseMatch = availableLocales.find(l => l.toLowerCase() === lower);
-  if (caseMatch) return caseMatch;
-
-  // 3. Base language match (zh-CN → zh)
-  const baseLang = requestedLocale.split('-')[0].toLowerCase();
-  const baseMatch = availableLocales.find(l => l.toLowerCase() === baseLang);
-  if (baseMatch) return baseMatch;
-
-  // 4. Variant expansion (zh → zh-CN, zh-TW, etc. — first match wins)
-  const variantMatch = availableLocales.find(l => l.split('-')[0].toLowerCase() === baseLang);
-  if (variantMatch) return variantMatch;
-
-  return undefined;
+/**
+ * The offered locale a requested one means, or `undefined`: the ONE matcher
+ * for "is this locale offered here, and as which code", where the offered
+ * codes are a deployment's locale list (`II18nService.getLocales()`).
+ *
+ * Setup's default language (`localization.locale`) accepts a value through
+ * it, and the IdP locale claim (`plugin-auth`'s `resolveIdpLocale`) closes a
+ * claimed locale through it, so a language one door takes the other takes
+ * too.
+ *
+ * It is {@link resolveLocale}, which is `resolveLocaleAmong` from
+ * `@objectstack/spec/system`: exact, case-insensitive, the same platform
+ * locale table language (`platformLocaleTagOf`, through the table's read
+ * aliases, so `zh-TW` is `zh-Hant` and never `zh-Hans`, and `en-US` is
+ * `en`), then base language and variant (`fr-FR` is an offered `fr`, `fr` an
+ * offered `fr-FR`). Kept as its own name for the doors that ask the
+ * offered-locale question; the ladder is the one every locale resolver runs.
+ */
+export function resolveOfferedLocale(requested: string, offered: readonly string[]): string | undefined {
+  return resolveLocaleAmong(requested, offered);
 }
 
 /**
