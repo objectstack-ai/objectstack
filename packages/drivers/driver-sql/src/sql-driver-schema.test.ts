@@ -2,6 +2,8 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
+import { ExistingTableAdoptionRefusal } from './existing-table-refusal.js';
+import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
 
 describe('SqlDriver Schema Sync (SQLite)', () => {
   let driver: SqlDriver;
@@ -494,3 +496,123 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
     expect(existsFqn).toBe(false);
   });
 });
+
+/**
+ * Schema sync never drops a table that holds rows.
+ *
+ * `initObjects` rebuilds an existing table keyed by `_id` with no `id` — the
+ * one shape it cannot adopt by adding columns. Measured through
+ * `PUT /api/v1/meta/object/NAME` on a managed SQLite datasource over an
+ * existing file: such a table holding 2 rows was dropped and recreated empty,
+ * and the save answered success. The rebuild now runs only on an empty table;
+ * a table holding rows is refused before anything is written.
+ *
+ * Driven through `syncSchema`, the call the engine makes per object. Across
+ * every dialect cell: SQLite always, Postgres and MySQL where the runner
+ * provisions them (the `Temporal Conformance (live PG + MySQL)` job runs this
+ * package against both).
+ */
+const ROW_GUARD_MATRIX = 'schema sync never drops a table holding rows';
+
+/** A table this file owns; the schema it lands in is per-file on a live cell. */
+const LEGACY_TABLE = 'os30562_legacy_items';
+
+const LEGACY_OBJECT = {
+  name: LEGACY_TABLE,
+  fields: { title: { type: 'string' }, qty: { type: 'integer' } },
+};
+
+const LEGACY_ROWS = [
+  { _id: 'a1', title: 'Bolt' },
+  { _id: 'a2', title: 'Nut' },
+];
+
+function declareRowGuardPins(cell: DialectCell): void {
+  describe(`${ROW_GUARD_MATRIX} — ${cell.label}`, () => {
+    let driver: SqlDriver;
+    let knex: any;
+
+    /** The table as it stands: its column names, and every row in key order. */
+    const snapshot = async (key: string) => ({
+      columns: Object.keys(await knex(LEGACY_TABLE).columnInfo()).sort(),
+      rows: await knex(LEGACY_TABLE).select('*').orderBy(key),
+    });
+
+    beforeEach(async () => {
+      driver = new SqlDriver(cell.config());
+      knex = (driver as any).knex;
+      await knex.schema.dropTableIfExists(LEGACY_TABLE);
+    });
+
+    afterEach(async () => {
+      await knex.schema.dropTableIfExists(LEGACY_TABLE).catch(() => {});
+      await driver.disconnect();
+    });
+
+    it('refuses a `_id`-keyed table holding rows, naming the table and the column, and changes nothing', async () => {
+      await knex.schema.createTable(LEGACY_TABLE, (t: any) => {
+        t.string('_id').primary();
+        t.string('title');
+      });
+      await knex(LEGACY_TABLE).insert(LEGACY_ROWS);
+      const before = await snapshot('_id');
+      // Non-vacuous: the shape is the one the sync rebuilds, and it holds rows.
+      expect(before.columns).toEqual(['_id', 'title']);
+      expect(before.rows).toHaveLength(2);
+
+      const refusal = await driver.syncSchema(LEGACY_TABLE, LEGACY_OBJECT).then(() => null, (e: unknown) => e);
+
+      expect(refusal).toBeInstanceOf(ExistingTableAdoptionRefusal);
+      expect(refusal).toMatchObject({
+        name: 'ExistingTableAdoptionRefusal',
+        table: LEGACY_TABLE,
+        column: '_id',
+        rows: 2,
+      });
+      const { message } = refusal as Error;
+      expect(message).toContain(`'${LEGACY_TABLE}'`);
+      expect(message).toContain(`'_id'`);
+
+      // Nothing was changed: the table is still there, with the same columns
+      // (no declared column added) and the same rows.
+      expect(await knex.schema.hasTable(LEGACY_TABLE)).toBe(true);
+      expect(await snapshot('_id')).toEqual(before);
+    });
+
+    it('CONTROL: rebuilds an empty `_id`-keyed table as the object declares, as before', async () => {
+      await knex.schema.createTable(LEGACY_TABLE, (t: any) => {
+        t.string('_id').primary();
+        t.string('title');
+      });
+
+      await driver.syncSchema(LEGACY_TABLE, LEGACY_OBJECT);
+
+      const after = await snapshot('id');
+      expect(after.columns).toContain('id');
+      expect(after.columns).not.toContain('_id');
+      expect(after.columns).toEqual(expect.arrayContaining(['created_at', 'updated_at', 'title', 'qty']));
+      expect(after.rows).toEqual([]);
+    });
+
+    it('CONTROL: adopts an `id`-keyed table holding rows by adding the declared columns, rows kept', async () => {
+      await knex.schema.createTable(LEGACY_TABLE, (t: any) => {
+        t.string('id').primary();
+        t.string('title');
+      });
+      await knex(LEGACY_TABLE).insert(LEGACY_ROWS.map(({ _id, title }) => ({ id: _id, title })));
+
+      await driver.syncSchema(LEGACY_TABLE, LEGACY_OBJECT);
+
+      const after = await snapshot('id');
+      expect(after.columns).toEqual(['id', 'qty', 'title']);
+      expect(after.rows.map(({ id, title }: any) => ({ id, title }))).toEqual([
+        { id: 'a1', title: 'Bolt' },
+        { id: 'a2', title: 'Nut' },
+      ]);
+    });
+  });
+}
+
+for (const cell of DIALECT_CELLS) {
+  declareDialectCell(cell, ROW_GUARD_MATRIX, declareRowGuardPins);
+}

@@ -183,13 +183,24 @@ export class RegistrationFacet {
       // plugin adding its menu into the `setup` app). Merged into the target
       // app's navigation on read by group id + priority, so registration order
       // does not matter.
-      if (Array.isArray((manifest as any).navigationContributions) && (manifest as any).navigationContributions.length > 0) {
-          for (const contribution of (manifest as any).navigationContributions) {
+      // [#30581] A body with an id REPLACES its package's contributions, so a
+      // re-registration of the same body (an artifact reload re-registers every
+      // package of the artifact) folds each entry once, not once more per
+      // registration; a body that now declares none clears an earlier one's.
+      const navigationContributions: any[] = Array.isArray((manifest as any).navigationContributions)
+          ? (manifest as any).navigationContributions
+          : [];
+      if (id) {
+          this._registry.setPackageNavContributions(id, navigationContributions);
+      } else {
+          for (const contribution of navigationContributions) {
               this._registry.registerAppNavContribution(contribution, id);
           }
+      }
+      if (navigationContributions.length > 0) {
           this.logger.debug('Registered navigation contributions', {
               from: id,
-              count: (manifest as any).navigationContributions.length,
+              count: navigationContributions.length,
           });
       }
 
