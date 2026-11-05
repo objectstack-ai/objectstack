@@ -593,9 +593,9 @@
     },
     "api/PackageInstallResponse": {
       "sites": [
-        "data.package.manifest.data.element.records.element.valueType",
-        "data.package.manifest.navigationContributions.element.items.element.lazy",
-        "data.package.manifest.navigationContributions.element.items.element.lazy.options[0]"
+        "data.manifest.data.element.records.element.valueType",
+        "data.manifest.navigationContributions.element.items.element.lazy",
+        "data.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/PackageUpgradeRequest": {

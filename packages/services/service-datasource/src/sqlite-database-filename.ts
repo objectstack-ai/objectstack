@@ -9,7 +9,8 @@ const IN_MEMORY = ':memory:';
  * [#30331] Why a SQLite datasource's `config.filename` names no database the
  * datasource can use, or `undefined` when it does. The value is either exactly
  * `:memory:` or a file path that exists or can be created; anything else is
- * refused with the value and the reason.
+ * refused with the value and the reason. Precondition: `config` already
+ * passed its driver contract (see "Which arms live here").
  *
  * Judged where the test, the create and the update doors all judge `config`
  * (`DatasourceAdminService.assertValidConfig`), so a draft that tests red is
@@ -43,6 +44,16 @@ const IN_MEMORY = ':memory:';
  *
  * `sqlite` and `sqlite-wasm` only: both open `config.filename`. `turso` names
  * its target as a url, which libSQL parses itself.
+ *
+ * ## Which arms live here
+ *
+ * The filesystem arm only. The two arms the string alone decides (`''`, and a
+ * name that starts with `:` without being exactly `:memory:`) are refined on
+ * `SqliteConfigSchema.filename` / `SqliteWasmConfigSchema.filename` (#30400),
+ * so the build door and `PUT /api/v1/meta/datasource/:name` refuse them too.
+ * `assertValidConfig` runs that driver-contract parse first and calls this only
+ * when it is clean, so those two values arrive here never: ⛔ do not restate
+ * them; the spec is the one copy.
  */
 export async function sqliteDatabaseFilenameIssue(driver: string, config: unknown): Promise<string | undefined> {
   const id = resolveDriverId(driver);
@@ -50,17 +61,11 @@ export async function sqliteDatabaseFilenameIssue(driver: string, config: unknow
   const filename = (config as { filename?: unknown } | null | undefined)?.filename;
   // Absent is the schema's own `:memory:` default; a non-string is the
   // driver contract's refusal, already given.
+  // `''` and a `:`-prefixed name other than exactly `:memory:` are the driver
+  // contract's own refusals (#30400, `SqliteConfigSchema.filename`), reported
+  // by the parse that runs before this; `resolveSqliteAbsentFileTarget` reads
+  // both as fileless and answers nothing for them.
   if (typeof filename !== 'string' || filename === IN_MEMORY) return undefined;
-  if (filename === '') {
-    return `config.filename: '' is empty and names no database file. Use '${IN_MEMORY}' for an ephemeral `
-      + 'in-memory database, or the path of a database file.';
-  }
-  if (filename.startsWith(':')) {
-    return `config.filename: '${filename}' is neither '${IN_MEMORY}' nor a file path. `
-      + `A name that starts with ':' is not read as a file, so this datasource would store nothing: `
-      + `use exactly '${IN_MEMORY}' for an ephemeral in-memory database, or the path of a database file `
-      + 'with nothing in front of it.';
-  }
   const { resolveSqliteAbsentFileTarget } = await import('@objectstack/driver-sql');
   try {
     resolveSqliteAbsentFileTarget(filename, 'empty-in-memory');

@@ -250,6 +250,17 @@ export const CLOUD_CONNECTION_ROUTE_LEDGER: readonly CloudConnectionRouteLedgerE
             + '`manage_metadata` (never merely a signed-in session) and driven from the Console. No `@objectstack/client` method builds this URL, and '
             + 'a bulk data-purge door is deliberately not something the application SDK exposes.',
     },
+    {
+        route: 'GET /api/v1/marketplace/install-local/:manifestId/sample-data',
+        family: 'marketplace-install-local',
+        mountedIn: 'marketplace-install-local-plugin.ts',
+        disposition: 'server-only',
+        note:
+            'the read-only count beside purge: how many of the packaged app\'s sample rows the caller\'s scope still holds, '
+            + 'counted by the purge\'s own matcher, so it is the number a purge would delete now. It deletes nothing and '
+            + 'takes no query parameter. Behind `manage_metadata`, the purge\'s gate, since it exists to tell an operator '
+            + 'what a purge would remove; no `@objectstack/client` method builds this URL, for the reason purge has none.',
+    },
 
     // ── marketplace browse passthrough ─────────────────────────────────
     {
