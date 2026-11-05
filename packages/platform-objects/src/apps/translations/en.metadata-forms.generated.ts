@@ -1154,19 +1154,36 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Field names available for quick search"
       },
       resizable: {
-        label: "Resizable"
+        label: "Resizable",
+        helpText: "Enable column resizing"
       },
       compactToolbar: {
-        label: "Compact Toolbar"
+        label: "Compact Toolbar",
+        helpText: "Collapse Group/Color/Density/Hide-fields into a single View settings popover"
       },
       rowHeight: {
-        label: "Row Height"
+        label: "Row Height",
+        helpText: "Row height / density setting"
       },
       selection: {
-        label: "Selection"
+        label: "Selection",
+        helpText: "Row selection configuration"
+      },
+      "selection.type": {
+        label: "Type",
+        helpText: "Selection mode"
       },
       pagination: {
-        label: "Pagination"
+        label: "Pagination",
+        helpText: "Pagination configuration"
+      },
+      "pagination.pageSize": {
+        label: "Page Size",
+        helpText: "Number of records per page. On a view with no pager (kanban, gallery, timeline) it is the fetch ceiling, and the renderer owes two things: bound its fetch at this number, and, when the filtered set is larger than it, show a visible truncation signal saying what is on screen is not the whole set"
+      },
+      "pagination.pageSizeOptions": {
+        label: "Page Size Options",
+        helpText: "Available page size options"
       },
       kanban: {
         label: "Kanban"
@@ -1190,31 +1207,138 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "User Filters",
         helpText: "Quick-filter bar: element style (dropdown / tabs / toggle) + exposed fields or tab presets"
       },
+      "userFilters.element": {
+        label: "Element",
+        helpText: "Filter control style on object views: \"dropdown\" (per-field value chips). \"toggle\" is deprecated. \"tabs\" is page-only — use `listViews` for named presets."
+      },
+      "userFilters.fields": {
+        label: "Fields",
+        helpText: "Fields exposed as quick filters (dropdown/toggle elements)"
+      },
+      "userFilters.fields.field": {
+        label: "Field"
+      },
+      "userFilters.fields.label": {
+        label: "Label"
+      },
+      "userFilters.fields.type": {
+        label: "Type"
+      },
+      "userFilters.fields.options": {
+        label: "Options"
+      },
+      "userFilters.fields.showCount": {
+        label: "Show Count"
+      },
+      "userFilters.fields.defaultValues": {
+        label: "Default Values"
+      },
       appearance: {
         label: "Appearance",
         helpText: "allowedVisualizations: which renderers users may switch between"
+      },
+      "appearance.showDescription": {
+        label: "Show Description",
+        helpText: "Show the view description text"
+      },
+      "appearance.allowedVisualizations": {
+        label: "Allowed Visualizations",
+        helpText: "Whitelist of visualization types users can switch between (e.g. [\"grid\", \"gallery\", \"kanban\"])"
       },
       userActions: {
         label: "User Actions",
         helpText: "Toolbar toggles: sort / search / filter / row height"
       },
+      "userActions.sort": {
+        label: "Sort",
+        helpText: "Allow users to sort records"
+      },
+      "userActions.search": {
+        label: "Search",
+        helpText: "Allow users to search records"
+      },
+      "userActions.filter": {
+        label: "Filter",
+        helpText: "Allow users to filter records"
+      },
+      "userActions.refresh": {
+        label: "Refresh",
+        helpText: "Allow users to reload the view data from the backend without a full page reload"
+      },
+      "userActions.rowHeight": {
+        label: "Row Height",
+        helpText: "Allow users to toggle row height/density"
+      },
+      "userActions.group": {
+        label: "Group",
+        helpText: "Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block."
+      },
+      "userActions.addRecordForm": {
+        label: "Add Record Form",
+        helpText: "Add records through a form instead of inline"
+      },
+      "userActions.editInline": {
+        label: "Edit Inline",
+        helpText: "Allow users to edit records inline. On by default: a user who may update the object edits a cell in place with the field's type-aware widget (the same control the form uses), under the permission gate that already decides whether the object is editable at all. Declare `editInline: false` to make the list read-only in place."
+      },
+      "userActions.hideFields": {
+        label: "Hide Fields",
+        helpText: "Allow users to hide/show fields from the toolbar (the affordance behind the view-level `hiddenFields` list). Boolean toggle — distinct from the record-details component's `hideFields`, which is an array of field names to omit. On by default: a reader hides and shows columns for themselves; declare `hideFields: false` to withhold the control."
+      },
+      "userActions.rowColor": {
+        label: "Row Color",
+        helpText: "Allow users to configure row colouring from the toolbar. Boolean toggle — the colour rules themselves live in the view-level `rowColor` block. Off by default: row colouring is opt-in."
+      },
+      "userActions.buttons": {
+        label: "Buttons",
+        helpText: "Custom action button IDs to show in the toolbar"
+      },
       addRecord: {
-        label: "Add Record"
+        label: "Add Record",
+        helpText: "Add record entry point configuration"
       },
       "addRecord.enabled": {
-        label: "Enabled"
+        label: "Enabled",
+        helpText: "Show the add record entry point — REQUIRED: `true` draws the Add button, `false` declares it off"
       },
       "addRecord.position": {
-        label: "Position"
+        label: "Position",
+        helpText: "Position of the add record button: `top` (the toolbar, the default), `bottom` (under the list) or `both`"
       },
       showRecordCount: {
-        label: "Show Record Count"
+        label: "Show Record Count",
+        helpText: "Show record count at the bottom of the list"
       },
       navigation: {
-        label: "Navigation"
+        label: "Navigation",
+        helpText: "Configuration for item click navigation (drawer by default, page, new_window or none)"
+      },
+      "navigation.mode": {
+        label: "Mode"
+      },
+      "navigation.preventNavigation": {
+        label: "Prevent Navigation",
+        helpText: "Disable standard navigation entirely"
+      },
+      "navigation.openNewTab": {
+        label: "Open New Tab",
+        helpText: "Force open in new tab (applies to page mode)"
+      },
+      "navigation.size": {
+        label: "Size",
+        helpText: "Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it."
+      },
+      "navigation.width": {
+        label: "Width",
+        helpText: "[DEPRECATED → size] Pixel/percent width of the drawer (e.g. \"600px\"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket."
       },
       sharing: {
-        label: "Sharing"
+        label: "Sharing",
+        helpText: "View sharing configuration: who locked the view configuration"
+      },
+      "sharing.lockedBy": {
+        label: "Locked By",
+        helpText: "User who locked the view configuration"
       }
     }
   },
