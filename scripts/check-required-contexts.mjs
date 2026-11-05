@@ -384,11 +384,14 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
  * RETIRED_CONTEXT_NAMES row, for the reason the `Build Docs` / `Console Pin
  * Gate` tombstone above gives: neither name is dead — both jobs still publish
  * these check-runs on every full-battery run, and the instruction files name
- * them correctly as full-battery jobs.
+ * where each runs.
  * Since #30461 (ruling record 6663883327, letter B) the three dogfood shards
  * also run on `merge_group`, so a queue build publishes `Dogfood Regression
- * Gate` over their credentials; the context stays out of this registry and
- * of the ruleset until a ruling puts it back, which that ruling did not do.
+ * Gate` over their credentials; `Temporal Conformance` stays full-battery
+ * only. The context stays out of this registry and of the ruleset for now: the
+ * follow-up ruling on #30461 (A, in two steps, 6669982756) puts it back only
+ * after a clean 24-hour reading of the queue builds, the row here landing
+ * first and the ruleset edit after it.
  */
 export const REQUIRED_CONTEXTS = [
   {
