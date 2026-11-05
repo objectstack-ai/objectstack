@@ -201,7 +201,7 @@ describe('RelayPushSender — nothing is sent', () => {
         const sender = new RelayPushSender({ config: { transport: 'relay' }, binding: () => binding(), fetch: r.fetch });
         const result = await sender.send({ ...message, data: { notificationId: 'ntf_1', title: 'Deal won' } });
         expect(result).toMatchObject({ status: 'failed', retryable: false });
-        expect((result as { error: string }).error).toMatch(/^relay_payload_refused: payload\.data/);
+        expect((result as { error: string }).error).toMatch(/^relay_payload_refused: deliveries\.0\.payload\.data: Unrecognized key.*`title`/);
         expect(r.calls).toHaveLength(0);
     });
 });

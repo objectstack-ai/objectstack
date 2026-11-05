@@ -111,7 +111,7 @@ describe('PushServicePlugin — the hosted relay', () => {
         await fire('kernel:ready');
         const push = services.get('push') as PushService;
         expect(push.vendors().sort()).toEqual(['apns', 'fcm']);
-        expect(await push.send(message)).toEqual({ status: 'sent' });
+        expect(await push.send({ ...message, data: { notificationId: 'ntf_1' } })).toEqual({ status: 'sent' });
         expect(calls).toHaveLength(1);
         expect(calls[0]!.url).toBe('https://cloud.example.com/api/v1/cloud/push/send');
         expect(calls[0]!.headers.authorization).toBe(`Bearer ${SECRET}`);
