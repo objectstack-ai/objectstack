@@ -25,7 +25,7 @@ import { useMetadataLocale, t, translateMetadataType, translateMetadataDomain } 
 import { environmentScopeSuffix } from './catalog-scope.js';
 import { useMetadataAreaHost } from './metadataAreaHost.js';
 import { isStudioCustomizeType } from '../studio-design/StudioCustomizeControls.js';
-import { AREA_FORM_EDITOR_TYPES } from '../studio-design/metadataArea.js';
+import { AREA_CUSTOMIZE_EDITOR_TYPES, AREA_FORM_EDITOR_TYPES } from '../studio-design/metadataArea.js';
 
 export interface PageShellProps {
   /** The type entry from `/meta/types` (or a synthesized stub). */
@@ -99,9 +99,11 @@ export const TYPE_STATE_WORD_KEY: Readonly<Record<TypeStateWord, string>> = Obje
  * objectstack#30062 — whether Studio offers Customize on a read-only base's
  * item of `type`, read from the doors that offer it, never from the type's
  * overlay flag: the Interfaces pillar's header ({@link isStudioCustomizeType}),
- * the All metadata area's form editor ({@link AREA_FORM_EDITOR_TYPES}), and
- * the Automations pillar's flow header (objectstack#28570). A type joins here
- * when its door opens, in the change that opens it.
+ * the All metadata area's form editor ({@link AREA_FORM_EDITOR_TYPES}) and
+ * its customize editor on a read-only package ({@link AREA_CUSTOMIZE_EDITOR_TYPES},
+ * a dataset, objectstack#30064), and the Automations pillar's flow header
+ * (objectstack#28570). A door added to one of those lists moves its type's
+ * tile with it.
  *
  * Before, a tile read `allowEnvironmentOverlay`, which is false for a flow and
  * an app, so their tiles read 只读 on a read-only package while their headers
@@ -109,7 +111,12 @@ export const TYPE_STATE_WORD_KEY: Readonly<Record<TypeStateWord, string>> = Obje
  */
 export function studioOffersCustomize(type: string | undefined): boolean {
   if (!type || !isOverridableMetadataType(type)) return false;
-  return isStudioCustomizeType(type) || AREA_FORM_EDITOR_TYPES.includes(type) || type === 'flow';
+  return (
+    isStudioCustomizeType(type) ||
+    AREA_FORM_EDITOR_TYPES.includes(type) ||
+    AREA_CUSTOMIZE_EDITOR_TYPES.includes(type) ||
+    type === 'flow'
+  );
 }
 
 /** The {@link TypeStateWord} of `entry`'s items, on a package that is read-only or not. */

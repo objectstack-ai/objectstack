@@ -92,7 +92,7 @@ import { MetadataDirectoryPage } from './DirectoryPage';
 import { PageShell, TYPE_STATE_WORD_KEY, studioOffersCustomize, typeStateWord, type TypeStateWord } from './PageShell';
 import { OVERRIDABLE_METADATA_TYPES } from '@objectstack/spec/kernel';
 import { STUDIO_CUSTOMIZE_TYPES } from '../studio-design/StudioCustomizeControls';
-import { AREA_FORM_EDITOR_TYPES } from '../studio-design/metadataArea';
+import { AREA_CUSTOMIZE_EDITOR_TYPES, AREA_FORM_EDITOR_TYPES } from '../studio-design/metadataArea';
 
 afterEach(() => {
   cleanup();
@@ -120,20 +120,21 @@ async function tileWord(type: string): Promise<string> {
 }
 
 describe('All metadata tiles: one state word, in the package context (objectstack#29705)', () => {
-  it('a read-only package: overlay types can be customized, never 可写; the create-only and closed types are read-only', async () => {
+  it('a read-only package: the types Studio customizes read 可定制, never 可写; the closed types are read-only', async () => {
     renderDirectory(true);
 
-    for (const type of ['dashboard', 'report', 'view']) {
+    // objectstack#30062: a page reads 可定制 since its Customize door opened (objectstack#30063),
+    // although its overlay flag is off: the tile follows the door, not the flag.
+    for (const type of ['dashboard', 'report', 'view', 'page']) {
       expect(await tileWord(type)).toBe('可定制');
     }
-    expect(await tileWord('page')).toBe('只读');
     expect(await tileWord('api')).toBe('只读');
     // The hatch opens only the items no package ships; a read-only package ships them all.
     expect(await tileWord('agent')).toBe('只读');
     expect(screen.queryByText('可写')).toBeNull();
     expect(screen.queryByText('仅可新建')).toBeNull();
     // The filter hides what the words mark read-only and counts the rest.
-    expect(screen.getByRole('button', { name: '隐藏只读 (3)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '隐藏只读 (4)' })).toBeInTheDocument();
   });
 
   it('CONTROL — a writable package: an overlay type is 可写, a create-only type 可新增', async () => {
@@ -175,14 +176,18 @@ describe('the list header draws the tile word (objectstack#29705)', () => {
     );
   }
 
-  it('a read-only package: the view list header reads 可定制, the page list header 只读', () => {
+  it('a read-only package: the view and page list headers read 可定制, the api list header 只读', () => {
     renderHeader('view', true);
     expect(within(document.querySelector('h1')!.parentElement!).getByText('可定制')).toHaveAttribute(
       'title',
       ZH['engine.studio.customize.availableTitle'],
     );
     cleanup();
+    // objectstack#30062: the page's Customize door (objectstack#30063) moves its header with it.
     renderHeader('page', true);
+    expect(within(document.querySelector('h1')!.parentElement!).getByText('可定制')).toBeInTheDocument();
+    cleanup();
+    renderHeader('api', true);
     expect(within(document.querySelector('h1')!.parentElement!).getByText('只读')).toBeInTheDocument();
   });
 
@@ -247,9 +252,10 @@ describe('the state vocabulary census (objectstack#29705)', () => {
 
   it('typeStateWord: the mapping in every context', () => {
     const [dashboard, , , page, api, agent] = ENTRIES;
+    // objectstack#30062: a page has a Customize door (objectstack#30063), so it reads customizable.
     expect([dashboard, page, api, agent].map((e) => typeStateWord(e, true))).toEqual([
       'customizable',
-      'readOnly',
+      'customizable',
       'readOnly',
       'readOnly',
     ]);
@@ -402,17 +408,19 @@ describe('one word per state, the second pass (objectstack#29729)', () => {
  * objectstack#30062 — the tile and the door agree for every type: on a
  * read-only package a type's tile (and its list header) reads 可定制 exactly
  * when Studio offers Customize on its items — the Interfaces pillar's header
- * (`STUDIO_CUSTOMIZE_TYPES`), the All metadata area's form editor
- * (`AREA_FORM_EDITOR_TYPES`) or the flow header — whatever the type's overlay
- * flag says. Before, a tile read `allowEnvironmentOverlay`, false for a flow
- * and an app, so both tiles read 只读 while their headers offered 定制.
+ * (`STUDIO_CUSTOMIZE_TYPES`, a page since objectstack#30063), the All metadata
+ * area's form editor (`AREA_FORM_EDITOR_TYPES`) or customize editor
+ * (`AREA_CUSTOMIZE_EDITOR_TYPES`, a dataset since objectstack#30064), or the
+ * flow header — whatever the type's overlay flag says. Before, a tile read
+ * `allowEnvironmentOverlay`, false for a flow, an app, a page and a dataset,
+ * so their tiles read 只读 while their doors offered 定制.
  *
- * ⚠ A door opened later moves its type here with it: a change that adds a type
- * to either list (a page or dataset door) turns its tile to 可定制, and the
- * `page` 只读 expectation above moves in that change.
+ * ⚠ A door opened later moves its type here with it: these rows derive from
+ * the door lists, and a type with a hard-coded word above moves in the change
+ * that opens its door.
  */
 describe('the tile and the Customize door agree for every type (objectstack#30062)', () => {
-  const DOORS = new Set<string>([...STUDIO_CUSTOMIZE_TYPES, ...AREA_FORM_EDITOR_TYPES, 'flow']);
+  const DOORS = new Set<string>([...STUDIO_CUSTOMIZE_TYPES, ...AREA_FORM_EDITOR_TYPES, ...AREA_CUSTOMIZE_EDITOR_TYPES, 'flow']);
 
   it.each([...OVERRIDABLE_METADATA_TYPES, 'permission', 'object', 'api'])(
     '%s: 可定制 on a read-only package exactly when a door offers Customize, whatever its overlay flag',
@@ -430,6 +438,9 @@ describe('the tile and the Customize door agree for every type (objectstack#3006
   it('the flow and the app, whose overlay flag is off, read 可定制 as their headers offer 定制', () => {
     expect(typeStateWord(entry('flow', false, true), true)).toBe('customizable');
     expect(typeStateWord(entry('app', false, true), true)).toBe('customizable');
+    // The page and dataset doors (objectstack#30063, objectstack#30064) move their tiles too.
+    expect(typeStateWord(entry('page', false, true), true)).toBe('customizable');
+    expect(typeStateWord(entry('dataset', false, true), true)).toBe('customizable');
     // CONTROL: a type with no door stays 只读 (a doc, a mapping), and a writable package keeps its words.
     expect(typeStateWord(entry('doc', false, true), true)).toBe('readOnly');
     expect(typeStateWord(entry('mapping', false, true), true)).toBe('readOnly');
