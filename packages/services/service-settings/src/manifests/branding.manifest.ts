@@ -15,7 +15,8 @@ import type { SettingsManifest } from '@objectstack/spec/system';
  *  - `workspace_name` → `branding.productName`: the product name in the
  *    console chrome, on the sign-in page and in the browser title. It also
  *    keeps its earlier reader, `plugin-auth`, which uses it as the product name
- *    in sign-in emails, the authenticator app entry and the MCP sign-in.
+ *    in sign-in emails, the authenticator app entry and the MCP sign-in, and
+ *    `plugin-email` names a mail sender that has no From name with it.
  *  - `logo_url` → `branding.logoUrl`: the sign-in page, the loading screen and
  *    the home header.
  *  - `accent_color` → `branding.brandColor`: the browser and installed-app

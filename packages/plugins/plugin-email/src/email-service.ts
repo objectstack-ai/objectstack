@@ -756,15 +756,41 @@ export class EmailService implements IEmailService {
   /**
    * `IEmailService.getDefaultFrom` — the sender {@link send} applies when the
    * input names none, read live so it follows {@link setDefaultFrom} from the
-   * `mail` settings namespace.
+   * `mail` settings namespace and {@link setSenderBrandName}.
    */
   getDefaultFrom(): EmailAddress | undefined {
-    return this.options.defaultFrom;
+    return this.namedDefaultFrom();
   }
 
   /** Replace the default `from` address used when callers omit `input.from`. */
   setDefaultFrom(from: EmailAddress | undefined): void {
     this.options.defaultFrom = from;
+  }
+
+  /**
+   * The product name a default sender with no display name of its own goes
+   * out under. A display name somebody set on the sender always wins; this
+   * only names a sender that has none, so mail an administrator configured
+   * with an address alone does not reach the recipient unbranded. A sender a
+   * caller passes as `input.from` is the caller's and is never renamed.
+   *
+   * `EmailServicePlugin` sets it to the name the auth mails' `{{appName}}`
+   * reads, and re-sets it when Setup → Branding changes; unset, a nameless
+   * sender stays nameless.
+   */
+  setSenderBrandName(name: string | undefined): void {
+    this.senderBrandName = name?.trim() || undefined;
+  }
+  private senderBrandName?: string;
+
+  /** {@link EmailServiceOptions.defaultFrom}, named by {@link setSenderBrandName} when it carries no name. */
+  private namedDefaultFrom(): EmailAddress | undefined {
+    const from = this.options.defaultFrom;
+    if (!from || !this.senderBrandName) return from;
+    // The string form is a bare address: it carries no display name.
+    const sender = typeof from === 'string' ? { address: from } : from;
+    if (sender.name?.trim()) return from;
+    return { ...sender, name: this.senderBrandName };
   }
 
   /**
@@ -817,7 +843,7 @@ export class EmailService implements IEmailService {
     let normalized: NormalizedEmailMessage;
     try {
       assertIdentityMailCarriesNoOrganization(input);
-      normalized = normalizeMessage(input, this.options.defaultFrom);
+      normalized = normalizeMessage(input, this.namedDefaultFrom());
     } catch (err: any) {
       // Validation failures must surface to the caller — AND leave a record.
       //

@@ -45,7 +45,7 @@ export const zhCN: PlatformTranslationData = {
         smtp_password: { label: '密码' },
         api_key: { label: 'API 密钥' },
         from_email: { label: '发件地址', help: '示例:no-reply@example.com' },
-        from_name: { label: '发件人名称' },
+        from_name: { label: '发件人名称', help: '留空则使用产品名称(品牌设置),未设置时使用本部署配置的名称。' },
         queue_delivery: {
           label: '持久化队列投递',
           help: '把每封邮件交给任务队列而不是内联发送:投递失败由 worker 按退避重试,进程重启也不会丢失。'
