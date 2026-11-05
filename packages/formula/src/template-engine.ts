@@ -160,13 +160,17 @@ const FORMATTERS: Record<string, Formatter> = {
   // option:opportunity.stage  → a mail template only (`OPTION_ARGUMENT_RULE`):
   // the stored value of a select field as its option's label, read from the
   // table the mail renderer hands in for that `object.field`, in the locale
-  // the face renders in. A value the table does not hold prints as stored,
-  // and so does every value when no table for the field reached this call.
-  // A multi-select value labels each element, joined with `, `.
+  // the face renders in. A value the table does not hold prints as stored
+  // (an option the field no longer declares, say). With no table for the
+  // field it throws, whatever the value (`optionTableRefusal`): the hole
+  // promises a label, so the stored value is never printed in its place, as
+  // `currency` never picks a currency. A multi-select value labels each
+  // element, joined with `, `.
   option: (v, arg, _locale, _timeZone, _currency, optionLabels) => {
-    const labels = arg !== undefined && optionLabels !== undefined && Object.prototype.hasOwnProperty.call(optionLabels, arg)
-      ? optionLabels[arg]
-      : undefined;
+    const objectField = arg ?? '';
+    const refusal = optionTableRefusal(`option:${objectField}`, objectField, optionLabels);
+    if (refusal) throw new RangeError(refusal);
+    const labels = optionLabels![objectField];
     if (Array.isArray(v)) return v.map((item) => optionLabelOf(item, labels)).join(', ');
     return optionLabelOf(v, labels);
   },
@@ -260,7 +264,37 @@ export const OPTION_ARGUMENT_RULE =
   'An `option` hole, in a mail template only, prints the label of the select option whose value it holds, in the '
   + 'recipient\'s language, and its argument names the object and the field the value belongs to, written bare as '
   + '`object.field` (`{{ stage | option:opportunity.stage }}`): the object is one the app has and the field one '
-  + 'of its fields that declares options. A value outside the field\'s options prints as stored.';
+  + 'of its fields that declares options. A multi-select value prints the label of each of its values, joined '
+  + 'with `, `, and a value outside the field\'s options prints as stored.';
+
+/**
+ * Why an `option` hole cannot be rendered, or `null` when it can: the hole
+ * prints the labels of its `object.field`, so it is rendered only when the
+ * caller handed in a label table ({@link OptionLabelTable}) holding that key.
+ * The mail renderer builds the table per recipient locale from the field's
+ * options; a render that reached the hole without one would otherwise print
+ * the stored value where the published grammar promises a label. Every
+ * renderer that refuses such a hole shows this sentence, and a renderer can
+ * ask it before it formats anything, as it asks `currencyDefaultRefusal`.
+ *
+ * @param hole         the hole as written, braces included, or the formatter part when no hole text is at hand
+ * @param objectField  the hole's `object.field` argument
+ * @param optionLabels the label table the caller supplied, if any
+ */
+export function optionTableRefusal(hole: string, objectField: string, optionLabels: unknown): string | null {
+  if (
+    optionLabels !== null
+    && typeof optionLabels === 'object'
+    && Object.prototype.hasOwnProperty.call(optionLabels, objectField)
+    && (optionLabels as Record<string, unknown>)[objectField] !== null
+    && typeof (optionLabels as Record<string, unknown>)[objectField] === 'object'
+  ) return null;
+  return (
+    `the hole ${hole} prints the option labels of \`${objectField}\`, and no label table for that field reached `
+    + 'this render: the renderer builds one in the recipient\'s locale from the field\'s options, and none was '
+    + `supplied. The stored value is not printed in place of the label. ${OPTION_ARGUMENT_RULE}`
+  );
+}
 
 /** An `option` argument as written: one object name, a dot, one field name, no quotes and no `@`. */
 const OPTION_FIELD_RE = /^(\w+)\.(\w+)$/;
@@ -552,8 +586,10 @@ export function judgeHoleFormatter(
  *
  * `opts.optionLabels` is the label table an `option` hole reads
  * ({@link OptionLabelTable}), keyed by the hole's `object.field` argument.
- * A value it does not hold for that key, or every value when it holds no
- * such key or is absent, prints as stored.
+ * A value it does not hold for that key prints as stored. With no table, or
+ * one without that key, that call throws a `RangeError` carrying
+ * {@link optionTableRefusal}'s sentence: it never prints the stored value
+ * where a label was promised.
  */
 export function formatValue(
   name: string,

@@ -21,6 +21,7 @@ import {
   MAIL_TEMPLATE_FORMATTERS,
   OPTION_ARGUMENT_RULE,
   optionFieldReference,
+  optionTableRefusal,
   TEMPLATE_FORMATTERS,
   templateEngine,
 } from './template-engine';
@@ -109,7 +110,7 @@ describe('the object and field, judged against the app\'s objects', () => {
   });
 
   it.each([
-    ['an object the app does not have', '{{ stage | option:deal.stage }}', 'option-object-unknown', 'the object `deal`'],
+    ['an object the app does not have', '{{ stage | option:deal.stage }}', 'option-object-unknown', 'the object `deal`, which resolves to no object'],
     ['a field the object does not have', '{{ stage | option:opportunity.phase }}', 'option-field-unknown', 'the field `phase`'],
     ['a field with no options', '{{ stage | option:opportunity.name }}', 'option-field-no-options', '`opportunity.name`, which declares no options'],
   ])('⭐ refuses %s, naming the hole and what to fix', (_label, hole, rule, says) => {
@@ -118,6 +119,13 @@ describe('the object and field, judged against the app\'s objects', () => {
     expect(findings[0].refusal.message).toContain(hole);
     expect(findings[0].refusal.message).toContain(says);
     expect(findings[0].refusal.message).toContain(OPTION_ARGUMENT_RULE);
+  });
+
+  it('an object that resolves with its fields not in hand (null) has its field left unjudged', () => {
+    const withPlatform = new Map<string, ReadonlyMap<string, boolean> | null>([...objects, ['sys_user', null]]);
+    expect(judgeMailHoleGrammar('At {{ status | option:sys_user.status }}', { objects: withPlatform })).toEqual([]);
+    expect(judgeMailHoleGrammar('At {{ status | option:sys_user.status }}', { objects }).map((f) => f.refusal.rule))
+      .toEqual(['option-object-unknown']);
   });
 
   it('judges no reference when no objects are handed in', () => {
@@ -182,10 +190,38 @@ describe('the formatter, given the label table the mail renderer builds', () => 
     expect(formatValue('option', null, 'opportunity.stage', { optionLabels: en })).toBe('');
   });
 
-  it('⭐ with no table for the field — none handed in, or one for another field — prints the value as stored', () => {
-    expect(formatValue('option', 'needs_analysis', 'opportunity.stage', { locale: 'zh-CN' })).toBe('needs_analysis');
-    expect(formatValue('option', 'needs_analysis', 'opportunity.stage', { optionLabels: { 'lead.status': {} } }))
-      .toBe('needs_analysis');
+  it.each([
+    ['no table', undefined],
+    ['a table for another field', { 'lead.status': { open: 'Open' } }],
+  ])('⭐ with %s for the field it throws the refusal, never printing the stored value', (_label, optionLabels) => {
+    for (const value of ['needs_analysis', ['needs_analysis'], null]) {
+      expect(() => formatValue('option', value, 'opportunity.stage', { locale: 'zh-CN', optionLabels }))
+        .toThrow(RangeError);
+    }
+    expect(() => formatValue('option', 'needs_analysis', 'opportunity.stage', { optionLabels }))
+      .toThrow(optionTableRefusal('option:opportunity.stage', 'opportunity.stage', undefined)!);
+  });
+});
+
+describe('the refusal a renderer asks before it formats', () => {
+  it('is null when the table holds the field, whatever it holds', () => {
+    expect(optionTableRefusal(HOLE, 'opportunity.stage', { 'opportunity.stage': {} })).toBeNull();
+    expect(optionTableRefusal(HOLE, 'opportunity.stage', { 'opportunity.stage': { a: 'A' } })).toBeNull();
+  });
+
+  it.each([
+    ['no table', undefined],
+    ['null', null],
+    ['a table without the key', { 'lead.status': {} }],
+    ['a key holding no table', { 'opportunity.stage': null }],
+    ['an inherited key only', Object.create({ 'opportunity.stage': {} })],
+  ])('⭐ names the hole, the field and the rule for %s', (_label, optionLabels) => {
+    const message = optionTableRefusal(HOLE, 'opportunity.stage', optionLabels);
+    expect(message).toContain(HOLE);
+    expect(message).toContain('`opportunity.stage`');
+    expect(message).toContain('no label table for that field reached this render');
+    expect(message).toContain('The stored value is not printed in place of the label.');
+    expect(message).toContain(OPTION_ARGUMENT_RULE);
   });
 });
 

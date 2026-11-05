@@ -32,10 +32,13 @@
  *   not have, or a field that declares no options. The renderer prints such a
  *   hole's value with that field's option labels in the recipient's language
  *   (`OPTION_ARGUMENT_RULE`), so a reference that names no option list could
- *   only ever print the stored value. The app's objects are the stack's own,
- *   as the registry serves them (`objectExtensions` folded in, the injected
- *   system columns beside the declared fields); at the publish door they are
- *   the live object universe the gate carries.
+ *   only ever print the stored value. The object resolves on the
+ *   object-reference ladder: the stack's own objects as the registry serves
+ *   them (`objectExtensions` folded in, the injected system columns beside
+ *   the declared fields), the objects this artifact's `packages[]` provide,
+ *   and, with its field left unjudged here, a platform-provided object the
+ *   stack does not carry (`PLATFORM_PROVIDED_OBJECT_NAMES`). At the publish
+ *   door the stack's objects are the live object universe the gate carries.
  *
  * WHICH holes are refused is not decided here: it is `@objectstack/formula`'s
  * `judgeMailHoleGrammar`, the grammar the mail renderer itself parses with,
@@ -59,7 +62,9 @@
 import { CURRENCY_ARGUMENT_RULE, declaresOptionsOnceServed, judgeMailHoleGrammar, OPTION_ARGUMENT_RULE } from '@objectstack/formula';
 
 import { collectionEntries } from './collection-entries.js';
-import { objectsAsServed, recordsOf } from './object-graph.js';
+import { PLATFORM_PROVIDED_OBJECT_NAMES } from '@objectstack/spec/system';
+
+import { objectsAsServed, packagesOf, recordsOf } from './object-graph.js';
 import { injectedColumnDefsFor } from './system-fields.js';
 
 type AnyRec = Record<string, unknown>;
@@ -88,31 +93,55 @@ function declaredVariableNames(variables: unknown): string[] {
       : []);
 }
 
+/** One object's fields as the index reads them: each `true` when it declares options once served. */
+function optionFieldsOf(obj: AnyRec): Map<string, boolean> {
+  const fields = new Map<string, boolean>();
+  for (const [name, def] of injectedColumnDefsFor(obj)) fields.set(name, declaresOptionsOnceServed(def));
+  for (const f of recordsOf(obj.fields)) {
+    if (typeof f.name === 'string' && f.name !== '') fields.set(f.name, declaresOptionsOnceServed(f));
+  }
+  return fields;
+}
+
 /**
- * The stack's objects as the mail grammar's `objects` option reads them:
- * each object's name to its fields, each field `true` when it declares options
- * once served (inline `options` or a `picklist` name). The fields are the ones
- * the registry serves: declared and `objectExtensions` fields, and the
- * injected system columns, a declared field winning over an injected one of
- * the same name.
+ * The objects an `option` hole may name, as the mail grammar's `objects`
+ * option reads them, on the object-reference ladder
+ * (`validate-object-references.ts`):
+ *
+ * 1. the stack's own objects, as the registry serves them (declared and
+ *    `objectExtensions` fields, the injected system columns beside them, a
+ *    declared field winning over an injected one of the same name), then the
+ *    objects an entry of this artifact's `packages[]` provides (ADR-0130 D4),
+ *    whose fields are in hand too — each field `true` when it declares
+ *    options once served (inline `options` or a `picklist` name);
+ * 2. a name in `PLATFORM_PROVIDED_OBJECT_NAMES` the stack does not carry
+ *    resolves, with its fields not in hand (`null`): its field is judged at
+ *    the publish door, whose live universe carries the served object, and at
+ *    send, never here.
+ *
+ * Any other name resolves to nothing and is refused.
  */
-function optionFieldIndex(stack: AnyRec): Map<string, Map<string, boolean>> {
-  const index = new Map<string, Map<string, boolean>>();
+function optionFieldIndex(stack: AnyRec): Map<string, Map<string, boolean> | null> {
+  const index = new Map<string, Map<string, boolean> | null>();
   for (const obj of objectsAsServed(stack).objects) {
-    if (typeof obj.name !== 'string' || obj.name === '') continue;
-    const fields = new Map<string, boolean>();
-    for (const [name, def] of injectedColumnDefsFor(obj)) fields.set(name, declaresOptionsOnceServed(def));
-    for (const f of recordsOf(obj.fields)) {
-      if (typeof f.name === 'string' && f.name !== '') fields.set(f.name, declaresOptionsOnceServed(f));
+    if (typeof obj.name === 'string' && obj.name !== '') index.set(obj.name, optionFieldsOf(obj));
+  }
+  for (const entry of packagesOf(stack)) {
+    const body = entry.manifest;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) continue;
+    for (const obj of recordsOf((body as AnyRec).objects)) {
+      if (typeof obj.name === 'string' && obj.name !== '' && !index.has(obj.name)) index.set(obj.name, optionFieldsOf(obj));
     }
-    index.set(obj.name, fields);
+  }
+  for (const name of PLATFORM_PROVIDED_OBJECT_NAMES) {
+    if (!index.has(name)) index.set(name, null);
   }
   return index;
 }
 
 export function validateEmailTemplateHoleGrammar(stack: AnyRec): EmailTemplateHoleGrammarFinding[] {
   const findings: EmailTemplateHoleGrammarFinding[] = [];
-  let objects: Map<string, Map<string, boolean>> | undefined;
+  let objects: Map<string, Map<string, boolean> | null> | undefined;
   for (const { rec: template, path } of collectionEntries(stack.emailTemplates, 'emailTemplates')) {
     const name = typeof template.name === 'string' ? template.name : '(unnamed)';
     const locale = typeof template.locale === 'string' ? ` [${template.locale}]` : '';

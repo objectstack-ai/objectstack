@@ -126,7 +126,8 @@ const MAIL_TEMPLATE_HOLES =
   + "An `option` hole, in a mail template only, prints the label of the select option whose value it holds, in the "
   + "recipient's language, and its argument names the object and the field the value belongs to, written bare as "
   + '`object.field` (`{{ stage | option:opportunity.stage }}`): the object is one the app has and the field one '
-  + "of its fields that declares options. A value outside the field's options prints as stored.";
+  + 'of its fields that declares options. A multi-select value prints the label of each of its values, joined '
+  + "with `, `, and a value outside the field's options prints as stored.";
 
 export const EmailTemplateDefinitionVariableSchema = lazySchema(() => z.object({
   name: z.string().describe(

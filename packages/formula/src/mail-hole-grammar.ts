@@ -153,32 +153,36 @@ export interface MailHoleGrammarOptions {
    */
   variables?: readonly string[];
   /**
-   * The app's objects, as each object's name to its fields' names, each
-   * field's value `true` when the field declares options. Present, an
-   * `option:object.field` hole is judged against it: an object it does not
-   * name (`option-object-unknown`), a field that object does not have
-   * (`option-field-unknown`) and a field without options
+   * The objects an `option` hole may name, each object's name to its fields'
+   * names, each field's value `true` when the field declares options; `null`
+   * for an object that resolves but whose fields are not in hand (a platform
+   * object a stack names without carrying it), whose field is then not
+   * judged here. Present, an `option:object.field` hole is judged against
+   * it: an object it does not name (`option-object-unknown`), a field that
+   * object does not have (`option-field-unknown`) and a field without options
    * (`option-field-no-options`) are refused. Absent, the reference is not
    * judged here.
    */
-  objects?: ReadonlyMap<string, ReadonlyMap<string, boolean>>;
+  objects?: ReadonlyMap<string, ReadonlyMap<string, boolean> | null>;
 }
 
 /** Why an `option` hole's object and field cannot label its value, or `null` when the field declares options. */
 function optionFieldRefusal(
   hole: string,
   ref: OptionFieldReference,
-  objects: ReadonlyMap<string, ReadonlyMap<string, boolean>>,
+  objects: ReadonlyMap<string, ReadonlyMap<string, boolean> | null>,
 ): TemplateHoleGrammarRefusal | null {
   const fields = objects.get(ref.object);
   if (fields === undefined) {
     return {
       rule: 'option-object-unknown',
       message:
-        `the hole ${hole} names the object \`${ref.object}\`, which this app does not have, so no option list `
-        + `labels the value. ${OPTION_ARGUMENT_RULE} Name the object the value comes from by its \`name\`.`,
+        `the hole ${hole} names the object \`${ref.object}\`, which resolves to no object this app defines, a `
+        + 'package of its artifact provides or the platform provides, so no option list labels the value. '
+        + `${OPTION_ARGUMENT_RULE} Name the object the value comes from by its \`name\`.`,
     };
   }
+  if (fields === null) return null;
   const hasOptions = fields.get(ref.field);
   if (hasOptions === undefined) {
     return {

@@ -81,15 +81,29 @@ describe('a reference that names an option list', () => {
     expect(validateEmailTemplateHoleGrammar(stack)).toEqual([]);
   });
 
+  it('⭐ an object a sibling package of the artifact provides publishes, its fields judged', () => {
+    const tpl = onlySubject('{{ stage | option:opportunity.stage }} / {{ name | option:opportunity.name }}');
+    const perPackage = { emailTemplates: [tpl], packages: [{ manifest: { emailTemplates: [tpl] } }, { manifest: { objects: [opportunity] } }] };
+    expect(validateEmailTemplateHoleGrammar(perPackage).map((f) => f.message))
+      .toEqual([expect.stringContaining('names the field `opportunity.name`, which declares no options')]);
+  });
+
+  it('⭐ a platform-provided object the stack does not carry resolves, its field left to the publish door and the send', () => {
+    expect(validateEmailTemplateHoleGrammar(stackWith(onlySubject('{{ status | option:sys_user.status }}')))).toEqual([]);
+    // Control: a platform-shaped name no package registers is still refused.
+    expect(validateEmailTemplateHoleGrammar(stackWith(onlySubject('{{ status | option:sys_userz.status }}'))).map((f) => f.message))
+      .toEqual([expect.stringContaining('names the object `sys_userz`, which resolves to no object')]);
+  });
+
   it('control: the same hole is refused once the object is not declared — the verdict reads the declaration', () => {
     expect(validateEmailTemplateHoleGrammar(stackWith(onlySubject(HOLE), [])).map((f) => f.message))
-      .toEqual([expect.stringContaining('names the object `opportunity`, which this app does not have')]);
+      .toEqual([expect.stringContaining('names the object `opportunity`, which resolves to no object this app defines')]);
   });
 });
 
 describe('a reference that names no option list', () => {
   it.each([
-    ['an object the app does not have', '{{ stage | option:deal.stage }}', 'names the object `deal`, which this app does not have'],
+    ['an object the app does not have', '{{ stage | option:deal.stage }}', 'names the object `deal`, which resolves to no object this app defines, a package of its artifact provides or the platform provides'],
     ['a field the object does not have', '{{ stage | option:opportunity.phase }}', 'names the field `phase`, which the object `opportunity` does not have'],
     ['a field with no options', '{{ name | option:opportunity.name }}', 'names the field `opportunity.name`, which declares no options'],
     ['a quoted reference', "{{ stage | option:'opportunity.stage' }}", 'one object name and one field name joined by a dot'],

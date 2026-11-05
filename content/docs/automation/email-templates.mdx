@@ -162,11 +162,15 @@ subject: 'Deal stalled at {{ stage | option:opportunity.stage }}',
 ```
 
 The renderer builds the label table for each `object.field` the template names,
-in the locale it renders that recipient's copy in, and a value that is not one
-of the field's options prints as stored. `os validate`, `os build`, `os lint`
-and the metadata publish door refuse an `option` hole whose object the app does
-not have, whose field that object does not have, or whose field declares no
-options (`email-template-hole-grammar`, a `422 INVALID_METADATA` at the publish
+in the locale it renders that recipient's copy in. A multi-select value prints
+the label of each of its values, joined with `, `, and a value that is not one
+of the field's options prints as stored. A render that reaches an `option` hole
+with no label table for its field is refused and nothing is sent: the stored
+value is never printed where the label was promised. `os validate`, `os build`,
+`os lint` and the metadata publish door refuse an `option` hole whose object
+resolves to nothing (the app's own objects, those another package of the same
+artifact provides, and the platform's objects all resolve), whose field that
+object does not have, or whose field declares no options (`email-template-hole-grammar`, a `422 INVALID_METADATA` at the publish
 door), and an argument that is not a bare `object.field`: a quoted one
 (`option:'opportunity.stage'`), a field with no object (`option:stage`) or a
 marked path (`option:@stage_ref`). `option` belongs to mail templates: in-app

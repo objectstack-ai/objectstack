@@ -74,6 +74,9 @@ export {
   // and the parse of its argument.
   OPTION_ARGUMENT_RULE,
   optionFieldReference,
+  // An `option` hole with no label table for its `object.field` is refused
+  // with this sentence by every renderer, never printed as stored.
+  optionTableRefusal,
   currencyCodePath,
   currencyCodeValueRefusal,
   // A `currency` hole with no argument formats in the tenant default currency the
