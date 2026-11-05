@@ -4358,11 +4358,8 @@ export class RestServer {
         // caller it does not admit is answered the layers without a `draft`
         // key, byte-identical to a read that never asked for one, so the answer
         // says nothing about whether a draft exists.
-        const layeredOptions = {
-            withDraft: mayReadPendingDrafts(
-                await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable),
-            ),
-        };
+        const layeredCaller = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
+        const layeredOptions = { withDraft: mayReadPendingDrafts(layeredCaller) };
         const layered = await p.getMetaItemLayered(layeredRequest, layeredOptions);
         // [#20156 · #20478] THE per-caller gate on every layer, then the mask —
         // the shared chain. The stored-version doors honour the author
