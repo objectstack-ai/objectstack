@@ -4582,6 +4582,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/meta-object-extension-plural-label.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/meta-object-extension-property-classes.test.ts",
       "verb": "findOne",
       "pinned": 1
