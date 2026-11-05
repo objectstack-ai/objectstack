@@ -50,7 +50,10 @@ export const en: PlatformTranslationData = {
         smtp_password: { label: 'Password' },
         api_key: { label: 'API key' },
         from_email: { label: 'From email', help: 'Example: no-reply@example.com' },
-        from_name: { label: 'From name' },
+        from_name: {
+          label: 'From name',
+          help: 'Leave empty to use the product name (Branding), or the name this deployment was set up with.',
+        },
         queue_delivery: {
           label: 'Durable queue delivery',
           help: 'Hand each message to the job queue instead of sending it inline, so a failed delivery is '
@@ -172,7 +175,10 @@ export const en: PlatformTranslationData = {
         },
       },
       keys: {
-        email_password_enabled: { label: 'Enable email/password login' },
+        email_password_enabled: {
+          label: 'Enable email/password login',
+          confirmOffText: 'People who sign in with a password will need another way in.',
+        },
         signup_enabled: {
           label: 'Allow email sign-up',
           help: 'Opens the email-and-password sign-up form. Who it admits is decided by the Self-registration audience below: under Invitation only, only an address holding a pending invitation; under Allowlisted email domains, the allowlisted domains and invited addresses; under Open, anyone. Off closes the form under every audience, invitations included.',

@@ -2280,6 +2280,7 @@ const platformSettingsShape = () => ({
    *   settings.<namespace>.keys.<setting_key>.help
    *   settings.<namespace>.keys.<setting_key>.placeholder
    *   settings.<namespace>.keys.<setting_key>.options.<option_value>
+   *   settings.<namespace>.keys.<setting_key>.confirmOffText
    *   settings.<namespace>.actions.<action_id>.label
    *   settings.<namespace>.actions.<action_id>.confirmText
    *   settings.<namespace>.actions.<action_id>.successMessage
@@ -2318,6 +2319,8 @@ const platformSettingsShape = () => ({
       placeholder: z.string().optional().describe('Translated input placeholder'),
       options: z.record(z.string(), z.string()).optional()
         .describe('Enum option value → translated label'),
+      confirmOffText: z.string().optional()
+        .describe("Translated confirm text shown before a toggle's value changes to off"),
     })).optional().describe('Per-setting field translations keyed by setting key'),
     actions: z.record(z.string(), strictObject({
       surface: 'this settings action translation',

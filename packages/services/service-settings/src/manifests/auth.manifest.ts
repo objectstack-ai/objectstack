@@ -29,6 +29,10 @@ const manifest = {
       label: 'Enable email/password login',
       required: false,
       default: true,
+      // Asked before the switch goes off (#30418). The server already refuses a
+      // save that leaves no sign-in method at all (#30202); this is the case
+      // where another method exists and the operator should still be told.
+      confirmOffText: 'People who sign in with a password will need another way in.',
     },
     // The email/password sign-up route's own switch (`emailAndPassword.
     // disableSignUp`), a door of its own beside the audience posture below:

@@ -187,11 +187,12 @@ describe('lintLivenessProperties', () => {
     }).filter((f) => f.message.includes('objectName'))).toEqual([]);
   });
 
-  // #30259 — `action.params[].widget` is declared before the console's dialog
-  // reads it (#30260 adds the pass-through), so the drilled row is `planned` +
-  // `authorWarn`. Pinned through the SHIPPED ledger and an array of params, so
-  // the drill (`params.widget`) and the array fan-out both have to hold.
-  it('warns on an action param that names a widget — planned, nothing reads it yet', () => {
+  // #30259 declared `action.params[].widget` before any reader (`planned` +
+  // `authorWarn`, pinned here as a warning). #30260 gave it its console reader
+  // and flipped the drilled row to `live`, so the SAME param now draws nothing.
+  // Pinned through the SHIPPED ledger and an array of params, so the drill
+  // (`params.widget`) and the array fan-out both have to hold.
+  it('no longer warns on an action param that names a widget — live since its console reader (#30260)', () => {
     const findings = lintLivenessProperties({
       actions: [{
         name: 'create_user',
@@ -201,18 +202,23 @@ describe('lintLivenessProperties', () => {
         ],
       }],
     });
-    const warned = findings.filter((f) => f.message.includes('sets `params.widget`'));
-    expect(warned).toHaveLength(1);
-    expect(warned[0].rule).toBe('liveness-planned-property');
-    expect(warned[0].hint).toContain('nothing reads it yet');
-    // The live siblings the drill graded stay silent.
+    expect(findings.filter((f) => f.message.includes('params.widget'))).toEqual([]);
+    expect(ruleOf(findings, 'params.widget')).toBeUndefined();
+    // The live siblings the drill graded stay silent too.
     for (const key of ['name', 'type', 'required', 'options', 'helpText', 'carryOver']) {
       expect(ruleOf(findings, `params.${key}`), key).toBeUndefined();
     }
-    // And an action whose params name no widget draws nothing about it.
-    expect(lintLivenessProperties({
-      actions: [{ name: 'a2', params: [{ name: 'note', type: 'text' }] }],
-    }).filter((f) => f.message.includes('widget'))).toEqual([]);
+    // CONTROL: the same walk still warns on a drilled `planned` + authorWarn
+    // row elsewhere in the shipped ledger, so the silence above is the
+    // widget row's verdict, not a walk that reaches nothing.
+    const flow = lintLivenessProperties({
+      flows: [{
+        name: 'close_account',
+        variables: [{ name: 'accountId', type: 'text', isInput: true, objectName: 'crm_account' }],
+        nodes: [{ id: 'start', type: 'start' }],
+      }],
+    });
+    expect(ruleOf(flow, 'variables.objectName')).toBe('liveness-planned-property');
   });
 
   it('warns on an experimental prop with no authorWarn of its own (tool.outputSchema)', () => {

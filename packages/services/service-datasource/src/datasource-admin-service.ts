@@ -44,6 +44,7 @@ import { redactDatasourceConfig, restoreRedactedConfig } from './datasource-conf
 import { planCredentialMigration } from './datasource-credential-migration.js';
 import { borrowedConnectorOf } from './datasource-connector-credential.js';
 import { ROUTE_SHADOWED_DATASOURCE_NAMES } from './datasource-route-reserved-names.js';
+import { sqliteDatabaseFilenameIssue } from './sqlite-database-filename.js';
 import type {
   IDatasourceAdminService,
   DatasourceDraft,
@@ -332,10 +333,15 @@ export interface DatasourceAdminServiceConfig {
    * whose metadata service predates the verdict cannot report the distinction,
    * so its absence means "unchanged behaviour", never "complete". A host that
    * supplies it gets a removal that refuses rather than guesses.
+   *
+   * `objects` names the bound objects the count was taken over, from the SAME
+   * read, so the refusal's message and its `details` cannot disagree. Optional,
+   * so a host that reports only the number keeps working: its refusal then
+   * carries the count without the names.
    */
   countBoundObjectsDiagnosed?: (
     datasource: string,
-  ) => Promise<{ count: number; degraded: boolean; errors: string[] }>;
+  ) => Promise<{ count: number; degraded: boolean; errors: string[]; objects?: string[] }>;
   /**
    * [ADR-0015 §4.2 · #25277] The objects that name `datasource` as theirs, each
    * with its `external` binding as declared (absent when it has none) — the
@@ -524,6 +530,41 @@ function assertSecretNotEmpty(heading: string, secret: SecretInput | undefined):
     `${heading}\nThe \`secret\` is empty. Send the credential to store, or leave \`secret\` out (or null) `
       + 'to keep the stored one. Nothing was written.',
   );
+}
+
+/**
+ * The refusal {@link DatasourceAdminService.removeDatasource} answers while
+ * objects are still bound to the datasource.
+ *
+ * The answer stays `400` `DATASOURCE_ADMIN_ERROR` with its English sentence;
+ * what this adds is `details`, so a client can tell this refusal from every
+ * other 400 of the family and name the objects in its own language without
+ * re-reading object metadata:
+ *
+ *     { reason: 'objects_bound', count: 2, objects: ['bin', 'part'] }
+ *
+ * `reason` is the discriminator, snake_case like the other `details.reason`
+ * values of the ADR-0112 envelope. `count` is the number in the message.
+ * `objects` is the full list, sorted, present when the host's read names them
+ * (`countBoundObjectsDiagnosed` with `objects`); a host that reports only a
+ * number gets `count` alone.
+ *
+ * `code` and `status` are set so the admin routes' `badRequest` can recognise a
+ * refusal that declared its own envelope and relay its `details`, the same way
+ * it relays the `503` and `404` ones; both are required there.
+ */
+function boundObjectsError(name: string, count: number, objects: string[] | undefined): Error {
+  const err = new Error(
+    `Cannot remove datasource '${name}': ${count} object(s) are still bound to it.`,
+  ) as Error & { code?: string; status?: number; details?: Record<string, unknown> };
+  err.code = 'DATASOURCE_ADMIN_ERROR';
+  err.status = 400;
+  err.details = {
+    reason: 'objects_bound',
+    count,
+    ...(objects ? { objects: [...objects].sort() } : {}),
+  };
+  return err;
 }
 
 function metadataIncompleteError(message: string, errors: string[]): Error {
@@ -804,7 +845,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // report a green "Connection successful" for a datasource that points
     // somewhere else entirely — the wizard's version of #4410's core bug.
     try {
-      this.assertValidConfig(input.driver, input.config);
+      await this.assertValidConfig(input.driver, input.config);
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
@@ -851,7 +892,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     this.assertNoUndeclaredTopLevelKey(`Invalid datasource '${input.name}'.`, input);
     assertNoInlineSslKey(`Invalid datasource '${input.name}'.`, input);
     if (!input.driver) throw new Error('A driver is required to create a datasource.');
-    this.assertValidConfig(input.driver, input.config);
+    await this.assertValidConfig(input.driver, input.config);
     // The wizard is a publish door for `pool` too (#5714). Rejected BEFORE the
     // record is persisted: `tryRegisterPool` swallows its failures into a
     // warning, so a datasource saved with an unhonourable pool would sit in the
@@ -941,7 +982,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // #4410 would otherwise become uneditable, including the `active: false`
     // that takes a misconfigured datasource out of service.
     if (patch.config !== undefined || patch.driver !== undefined) {
-      this.assertValidConfig(merged.driver, merged.config);
+      await this.assertValidConfig(merged.driver, merged.config);
     }
     // Same judgement, same "only when this write touches the pairing" rule
     // (#5714): a new `pool`, or a new `driver` that reinterprets the stored
@@ -1153,9 +1194,10 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       throw new Error(`Datasource '${name}' is code-defined and cannot be removed at runtime.`);
     }
 
-    const bound = this.config.countBoundObjectsDiagnosed
-      ? await this.config.countBoundObjectsDiagnosed(name)
-      : { count: await this.config.countBoundObjects(name), degraded: false, errors: [] };
+    const bound: { count: number; degraded: boolean; errors: string[]; objects?: string[] } =
+      this.config.countBoundObjectsDiagnosed
+        ? await this.config.countBoundObjectsDiagnosed(name)
+        : { count: await this.config.countBoundObjects(name), degraded: false, errors: [] };
 
     if (bound.degraded) {
       throw metadataIncompleteError(
@@ -1167,11 +1209,9 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       );
     }
 
-    if (bound.count > 0) {
-      throw new Error(
-        `Cannot remove datasource '${name}': ${bound.count} object(s) are still bound to it.`,
-      );
-    }
+    // [#30444] One read: the count in the message and the names in `details`
+    // both come from `bound`, so they cannot disagree.
+    if (bound.count > 0) throw boundObjectsError(name, bound.count, bound.objects);
 
     await this.config.deleteDatasourceRecord(name);
     if (existing.external?.credentialsRef) await this.tryRemoveSecret(existing.external.credentialsRef);
@@ -1366,14 +1406,23 @@ export class DatasourceAdminService implements IDatasourceAdminService {
    *
    * A driver the platform ships no contract for passes untouched, matching the
    * spec gate's boundary rather than inventing a stricter one for the UI.
+   *
+   * [#30331] A SQLite `config.filename` that is neither `:memory:` nor a
+   * usable file path is refused here too, in the same envelope: the contract
+   * types it as a string, and this is the one judgement the test, the create
+   * and the update doors share (see {@link sqliteDatabaseFilenameIssue}).
    */
-  private assertValidConfig(driver: string, config: unknown): void {
+  private async assertValidConfig(driver: string, config: unknown): Promise<void> {
     const result = validateDriverConfig(driver, config);
-    if (!result.known || result.issues.length === 0) return;
-    const detail = result.issues
-      .map((issue) => (issue.path.length ? `config.${issue.path.join('.')}: ${issue.message}` : issue.message))
-      .join('\n');
-    throw new Error(`Invalid configuration for driver '${driver}'.\n${detail}`);
+    const issues = result.known
+      ? result.issues.map((issue) => (issue.path.length ? `config.${issue.path.join('.')}: ${issue.message}` : issue.message))
+      : [];
+    if (issues.length === 0) {
+      const filenameIssue = await sqliteDatabaseFilenameIssue(driver, config);
+      if (filenameIssue) issues.push(filenameIssue);
+    }
+    if (issues.length === 0) return;
+    throw new Error(`Invalid configuration for driver '${driver}'.\n${issues.join('\n')}`);
   }
 
   /**

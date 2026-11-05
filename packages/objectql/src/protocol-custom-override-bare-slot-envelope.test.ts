@@ -693,3 +693,88 @@ describe('[#30062] a declared override\'s label order: the packaged base and the
         }
     }
 });
+
+/**
+ * [#30504, ADR-0029 D7 · ADR-0146 D2] The packaged base of an APP carries the
+ * navigation the code layer contributes to it, so a contributed entry is
+ * judged against its own packaged label and the catalog translates it.
+ *
+ * Measured live before the fix: `GET /api/v1/meta/app/setup` under `zh-CN`
+ * served every Setup group heading in Chinese and every leaf entry in English,
+ * while the catalog carried the leaf keys (`nav_users` = 用户). The leaves are
+ * code-level `NavigationContribution`s, folded into the served app on read by
+ * `SchemaRegistry.applyNavContributions`; the base `getPackagedAppBase`
+ * answered was the app's declaration alone, which carries none of them. The
+ * translator reads an id the known base lacks as a node an override authored
+ * (`packagedNavNodes` answers `{}`), and such a node reads only the pair's
+ * translations, so every contributed leaf kept its English.
+ *
+ * Pinned on the #29613 boot, with and without a metadata service:
+ *
+ *  - the packaged base carries the contributed entry, and the registry's own
+ *    item is not mutated by the fold;
+ *  - the base's own app, translated against that base, reads the contributed
+ *    entry in `zh-CN` and keeps it in `en`;
+ *  - on the pair's declared override, a node the OVERRIDE authored still reads
+ *    only the pair's translations, else its own text (ADR-0146 D2), while the
+ *    contributed entry the override is served with reads the catalog.
+ */
+const CONTRIBUTOR = 'com.example.security';
+const CONTRIBUTED_LABEL = 'Users';
+const AUTHORED_LABEL = 'Custom entry';
+const navOf = (doc: any): Record<string, unknown> =>
+    Object.fromEntries(((doc?.navigation ?? []) as any[]).map((n) => [n.id, n.label]));
+const NAV_CATALOG = {
+    'zh-CN': { apps: { showcase: { navigation: { nav_users: { label: '用户' }, nav_custom: { label: '基包译文' } } } } },
+};
+
+async function bootContributed(stores: Stores, withService: boolean) {
+    const booted = await bootSealed(stores, withService);
+    booted.engine.registerApp({
+        id: CONTRIBUTOR, name: 'security', version: '1.0.0', namespace: 'security',
+        navigationContributions: [{
+            app: 'showcase',
+            items: [{ id: 'nav_users', type: 'object', objectName: 'showcase_task', label: CONTRIBUTED_LABEL }],
+        }],
+    });
+    return booted;
+}
+
+describe('[#30504] an app\'s packaged base carries its contributed navigation, so the catalog translates a contributed entry', () => {
+    for (const withService of [false, true]) {
+        const shape = withService ? 'with a metadata service (a real boot)' : 'with no metadata service';
+
+        it(`${shape}: the base carries the contributed entry, and the base's own app reads it translated in zh-CN and unchanged in en`, async () => {
+            const { engine, protocol } = await bootContributed(new Map(), withService);
+            const base = protocol.getPackagedAppBase('showcase');
+            expect(navOf(base), 'the packaged base').toEqual({ nav_users: CONTRIBUTED_LABEL });
+            expect((engine.registry.getItem('app', 'showcase') as any)?.navigation, 'the registry item, unmutated').toBeUndefined();
+
+            const served = (await protocol.getMetaItem({ type: 'app', name: 'showcase' }))?.item;
+            expect(navOf(served), 'served').toEqual({ nav_users: CONTRIBUTED_LABEL });
+            const zh = translateMetadataDocument('app', served, NAV_CATALOG as any, { locale: 'zh-CN', packagedBase: base });
+            expect(navOf(zh), 'zh-CN').toEqual({ nav_users: '用户' });
+            const en = translateMetadataDocument('app', served, NAV_CATALOG as any, { locale: 'en', packagedBase: base });
+            expect(navOf(en), 'en').toEqual({ nav_users: CONTRIBUTED_LABEL });
+        });
+
+        it(`${shape}: on the pair's override, a node the override authored reads only the pair's translations (ADR-0146 D2) while the contributed entry reads the catalog`, async () => {
+            const { protocol } = await bootContributed(new Map(), withService);
+            await publishOverride(protocol, 'app', 'showcase', {
+                ...appBody(EDITED),
+                navigation: [{ id: 'nav_custom', type: 'object', objectName: 'showcase_task', label: AUTHORED_LABEL }],
+            });
+            const served = (await protocol.getMetaItem({ type: 'app', name: 'showcase' }))?.item;
+            expect(protocol.servedOverrideBaseOf('app', served), 'the served override').toBe(BASE);
+            expect(navOf(served), 'served').toEqual({ nav_custom: AUTHORED_LABEL, nav_users: CONTRIBUTED_LABEL });
+
+            const base = protocol.getPackagedAppBase('showcase');
+            const translate = (pairBundle?: unknown) => navOf(translateMetadataDocument('app', served, NAV_CATALOG as any, {
+                locale: 'zh-CN', packagedBase: base, ...(pairBundle ? { pairBundle: pairBundle as any } : {}),
+            }));
+            expect(translate(), 'no pair translation').toEqual({ nav_custom: AUTHORED_LABEL, nav_users: '用户' });
+            const pair = { 'zh-CN': { apps: { showcase: { navigation: { nav_custom: { label: '自定义入口' } } } } } };
+            expect(translate(pair), 'the pair\'s translation').toEqual({ nav_custom: '自定义入口', nav_users: '用户' });
+        });
+    }
+});

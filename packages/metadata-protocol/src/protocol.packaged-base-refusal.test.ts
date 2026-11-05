@@ -376,10 +376,14 @@ describe('packagedBaseRefusal — each Regime C type names its OWN sanctioned pa
             it(`\`action\` — ${operation} names the activation switch and no clone `
                 + `(${environmentId ? 'environment' : 'host-config'} kernel)`, () => {
                 const message = expectRegimeC(refusalOn(environmentId, 'action', 'pkg_action', operation), 'action', 'pkg_action', operation);
+                // [#30065] The save names the declaration from the base's pair
+                // first (ADR-0146 D9 `action`), then the switch; the removal
+                // keeps the row's prescription.
                 expect(message).toContain(
-                    'Switch it off (POST /api/v1/actions/_activation/:object/:action, body {enabled: false}, '
-                    + `:object = global for an object-less action; ${OPERATOR_ONLY}).`,
+                    `${operation === 'save' ? 'switch' : 'Switch'} it off (POST /api/v1/actions/_activation/:object_or_global/:action, `
+                    + `body {enabled: false}; ${OPERATOR_ONLY}).`,
                 );
+                if (operation === 'save') expect(message).toContain("Declare an override from 'com.example.pkg.custom' or rename it");
                 // No clone is chartered for an action (ADR-0126 §8 item 2): none is advertised.
                 expect(message.toLowerCase()).not.toContain('clone');
                 expect(message).not.toContain('/automation/');
@@ -429,7 +433,7 @@ describe('packagedBaseRefusal — each Regime C type names its OWN sanctioned pa
             );
             for (const [type, name, path] of [
                 ['flow', 'pkg_flow', 'POST /api/v1/automation/:name/clone'],
-                ['action', 'pkg_action', 'POST /api/v1/actions/_activation/:object/:action'],
+                ['action', 'pkg_action', 'POST /api/v1/actions/_activation/:object_or_global/:action'],
                 ['permission', 'pkg_perm', 'the "Clone" action on the permission set, or POST /api/v1/'],
             ] as const) {
                 const r: any = p.packagedBaseRefusal({ type, name, operation: 'save', packageId: PACKAGE_ID });
@@ -518,9 +522,12 @@ describe('the override write gate — only the base\'s paired .custom declares a
         { type: 'permission', name: 'crm_perm' },
         { type: 'object', name: 'crm_account' },
     ];
+    // [#30065] The base's action carries the gates that decide who may run
+    // it, which a declared override may keep or tighten and never widen.
+    const BASE_ACTION_GATES = { requiredPermissions: ['crm_admin'], ai: { exposed: false, requiresConfirmation: true } };
     const artifact = (type: string, name: string) =>
         BASE_ITEMS.some((i) => i.type === type && i.name === name)
-            ? { name, label: name, _packageId: BASE, _provenance: 'package' }
+            ? { name, label: name, _packageId: BASE, _provenance: 'package', ...(type === 'action' ? BASE_ACTION_GATES : {}) }
             : undefined;
 
     interface GateRow { type: string; name: string; package_id: string | null; state: string; metadata: string; id?: string }
@@ -766,7 +773,7 @@ describe('the override write gate — only the base\'s paired .custom declares a
     // precedence arms the pair's declaration over the loader's body, version
     // pinning landed in #28405), so the same gate admits the pair's declared
     // flow override — refused until this card as "not yet available" — and
-    // keeps every other refusal. `action` stays closed (the next case).
+    // keeps every other refusal. [#30065] `action` opened after it (below).
     it('the pair\'s declared flow override is admitted at the save door and stored with its declaration (#28412)', async () => {
         const { protocol, rows, stored } = gateProtocol();
         await protocol.saveMetaItem({ type: 'flow', name: 'crm_flow', packageId: PAIR, item: body('flow', 'crm_flow', true) });
@@ -808,12 +815,45 @@ describe('the override write gate — only the base\'s paired .custom declares a
         expect(stored()).toEqual([]);
     });
 
-    it('a declared action override is refused — action customization is not yet available', async () => {
-        const { protocol, stored } = gateProtocol();
-        const e = await thrown(protocol.saveMetaItem({ type: 'action', name: 'crm_action', packageId: PAIR, item: body('action', 'crm_action', true) }));
+    // [#30065, ADR-0146 D9 `action`] `action`'s conditions 1–3 are delivered,
+    // so the pair's declaration is admitted — as long as it keeps every gate
+    // the base's action declares on who may run it (ADR-0066 D4): it may add
+    // a required capability, and never drop one, expose the action to agents
+    // the base keeps off that surface, or drop the base's confirmation gate.
+    const actionBody = (gates: Record<string, unknown>) => ({ ...body('action', 'crm_action', true), ...gates });
+
+    it('the pair\'s declared action override that keeps the base\'s gates is admitted and stored with its declaration (#30065)', async () => {
+        const { protocol, rows, stored } = gateProtocol();
+        await protocol.saveMetaItem({
+            type: 'action', name: 'crm_action', packageId: PAIR,
+            item: actionBody({ requiredPermissions: ['crm_admin', 'crm_auditor'], ai: { requiresConfirmation: true } }),
+        });
+        expect(stored()).toEqual([{ type: 'action', name: 'crm_action', package_id: PAIR, state: 'active' }]);
+        expect(JSON.parse(Array.from(rows.values())[0].metadata).overrides).toEqual(DECLARATION);
+    });
+
+    for (const [what, gates, clause] of [
+        ['drops a required capability', { ai: { requiresConfirmation: true } }, `drops 'crm_admin' from \`requiredPermissions\``],
+        ['exposes the action to agents', { requiredPermissions: ['crm_admin'], ai: { exposed: true, description: 'Closes the account and notifies its owner by email.', requiresConfirmation: true } }, 'sets `ai.exposed: true`'],
+        ['drops the confirmation gate', { requiredPermissions: ['crm_admin'] }, 'drops `ai.requiresConfirmation: true`'],
+    ] as const) {
+        it(`the pair's declared action override that ${what} is refused — it widens who may run the action (#30065)`, async () => {
+            const { protocol, stored } = gateProtocol();
+            const e = await thrown(protocol.saveMetaItem({ type: 'action', name: 'crm_action', packageId: PAIR, item: actionBody(gates) }));
+            expect(shape(e)).toEqual(REFUSED);
+            expect(String(e.message)).toMatch(/^'action\/crm_action' declares an override of '[^']+' that widens who may run the action: /);
+            expect(String(e.message)).toContain(clause);
+            expect(stored()).toEqual([]);
+        });
+    }
+
+    it('publishMetaItem refuses a widening action override draft laid down before the gate (#30065)', async () => {
+        const { protocol, stored, seedDraft } = gateProtocol();
+        seedDraft('action', 'crm_action', PAIR, actionBody({}));
+        const e = await thrown(protocol.publishMetaItem({ type: 'action', name: 'crm_action', packageId: PAIR }));
         expect(shape(e)).toEqual(REFUSED);
-        expect(String(e.message)).toMatch(/action customization is not yet available/);
-        expect(stored()).toEqual([]);
+        expect(String(e.message)).toContain('widens who may run the action');
+        expect(stored()).toEqual([{ type: 'action', name: 'crm_action', package_id: PAIR, state: 'draft' }]);
     });
 
     // ── the sealed write's sentence ─────────────────────────────────────────
