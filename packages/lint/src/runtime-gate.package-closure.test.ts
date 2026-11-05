@@ -763,6 +763,11 @@ describe('a dataset outside the closure: its filter keys are judged against its 
     expect(gate('view', view).errors.map((f) => f.rule)).toContain('list-view-object-outside-closure');
   });
 
+  it('the public `narrowObjectsToPackageClosure` stays the four-limb closure — limb 5 is the write\'s', () => {
+    const names = (narrowObjectsToPackageClosure(objects, SCOPE) as AnyRec[]).map((o) => o.name);
+    expect(names).not.toContain('showcase_task');
+  });
+
   it('datasetBoundObjectNames reads the two bound positions and nothing else', () => {
     expect([...datasetBoundObjectNames('dashboard', board({}), datasets)]).toEqual(['showcase_task']);
     expect([...datasetBoundObjectNames('report', report({}), datasets)]).toEqual(['showcase_task']);

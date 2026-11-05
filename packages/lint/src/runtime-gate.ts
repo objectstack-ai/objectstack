@@ -400,6 +400,9 @@ export interface RuntimePackageScope {
   dependencies: readonly string[];
 }
 
+/** The empty limb-5 set: no object is reached through a dataset (#30005). */
+const NO_NAMES: ReadonlySet<string> = new Set<string>();
+
 /**
  * `objects` reduced to the written item's package closure (#9612).
  *
@@ -421,11 +424,12 @@ export interface RuntimePackageScope {
  * [#30005] A fifth limb, stated by the caller and empty unless it says so:
  *
  *  5. it is the **base object of a dataset the written item binds**
- *     (`datasetBoundObjects`, which {@link datasetBoundObjectNames} computes
- *     for a dashboard or report write). `datasets` is never narrowed — a
- *     dashboard may bind another package's dataset, and the dataset door binds
- *     it at run time against the dataset's own object, closure or no closure —
- *     so a filter key on that binding is judged against that object. Without
+ *     ({@link datasetBoundObjectNames}, for a dashboard or report write; the
+ *     snapshot builder states it, this public spelling never does).
+ *     `datasets` is never narrowed — a dashboard may bind another package's
+ *     dataset, and the dataset door binds it at run time against the
+ *     dataset's own object, closure or no closure — so a filter key on that
+ *     binding is judged against that object. Without
  *     this limb the object fell out of the snapshot while its dataset stayed,
  *     and `widget-filter-field-unknown` / `report-filter-field-unknown` took
  *     their "object absent" skip: a misspelled key published and every reader
@@ -437,7 +441,19 @@ export interface RuntimePackageScope {
 export function narrowObjectsToPackageClosure(
   objects: readonly unknown[],
   scope: RuntimePackageScope | undefined,
-  datasetBoundObjects: ReadonlySet<string> = NO_NAMES,
+): readonly unknown[] {
+  return narrowObjectsToWriteClosure(objects, scope, NO_NAMES);
+}
+
+/**
+ * {@link narrowObjectsToPackageClosure} with limb 5 stated — the one
+ * implementation of both; the public spelling states an empty limb 5, so its
+ * signature and answer are the four-limb ones they always were (#30005).
+ */
+function narrowObjectsToWriteClosure(
+  objects: readonly unknown[],
+  scope: RuntimePackageScope | undefined,
+  datasetBoundObjects: ReadonlySet<string>,
 ): readonly unknown[] {
   if (!packageScopeInForce(scope)) return objects;
   const reachable = new Set<string>([scope.packageId, ...scope.dependencies]);
@@ -458,8 +474,6 @@ export function narrowObjectsToPackageClosure(
     return isSystemObject(entry as AnyRec);
   });
 }
-
-const NO_NAMES: ReadonlySet<string> = new Set<string>();
 
 /**
  * The base objects of the datasets a written dashboard or report binds (#30005)
@@ -856,7 +870,7 @@ export function buildRuntimeWriteSnapshotSet(
     // {@link datasetBoundObjectNames}) — in both passes, by the same rule.
     const raw = (args.context?.[key] ?? []) as readonly AnyRec[];
     const collection = key === 'objects'
-      ? (narrowObjectsToPackageClosure(
+      ? (narrowObjectsToWriteClosure(
           raw,
           args.packageScope,
           datasetBoundObjectNames(args.type, item, args.context?.datasets),
