@@ -79,6 +79,7 @@ import { APPROVAL_REVISE_NODE_TYPE } from '@objectstack/spec/automation';
 import { ApprovalService } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
+import { EMAILED_APPROVAL_TOPICS } from './approval-email-templates.js';
 
 const SYSTEM = { isSystem: true, positions: [], permissions: [] } as any;
 const asUser = (userId: string, positions: string[] = []) =>
@@ -119,8 +120,11 @@ const orgOfDeal = (key: string): string => (key.startsWith('sla_') ? ORG_B : ORG
 /**
  * The fields `notify()` declares for a notification's payload. [#24564] No
  * `actions`: an ADR-0043 action link never rides a payload messaging stores.
+ * [#30509] `approvalUrl`, the approval e-mail's link to the request page, rides
+ * only the notices that go by e-mail (`EMAILED_APPROVAL_TOPICS`).
  */
 const PAYLOAD_FIELDS = new Set(['title', 'body', 'actionUrl']);
+const EMAILED_PAYLOAD_FIELDS = new Set([...PAYLOAD_FIELDS, 'approvalUrl']);
 
 const sysUser = {
   name: 'sys_user',
@@ -429,8 +433,9 @@ describe('every approval notification carries its text in body', () => {
       if (typeof payload.body !== 'string' || payload.body.trim() === '') {
         offenders.push(`${siteOf(e)}: body is ${JSON.stringify(payload.body)}`);
       }
+      const declared = EMAILED_APPROVAL_TOPICS.has(e.topic) ? EMAILED_PAYLOAD_FIELDS : PAYLOAD_FIELDS;
       for (const field of Object.keys(payload)) {
-        if (!PAYLOAD_FIELDS.has(field)) offenders.push(`${siteOf(e)}: undeclared payload field '${field}'`);
+        if (!declared.has(field)) offenders.push(`${siteOf(e)}: undeclared payload field '${field}'`);
       }
     }
     expect(offenders).toEqual([]);

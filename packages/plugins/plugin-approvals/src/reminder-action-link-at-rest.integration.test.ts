@@ -285,6 +285,8 @@ describe('a reminder leaves no usable action link in storage (ADR-0043 storage a
       title: 'Approval reminder',
       body: expect.stringContaining('is still waiting on you'),
       actionUrl: `/system/approvals?request=${encodeURIComponent(rig.requestId)}`,
+      // [#30509] The approval e-mail's link (relative: no public origin here).
+      approvalUrl: `/system/approvals?request=${encodeURIComponent(rig.requestId)}`,
     });
   });
 });

@@ -2176,10 +2176,14 @@ describe('ApprovalService (node era)', () => {
     const reminders = emitted.filter(e => e.topic === 'approval.reminder');
     expect(reminders.map(r => r.audience)).toEqual([['u9'], ['ada@example.com']]);
     for (const r of reminders) {
-      // Messaging stores the payload it is handed: no link, no token, in any field.
-      expect(Object.keys(r.payload).sort()).toEqual(['actionUrl', 'body', 'title']);
+      // Messaging stores the payload it is handed: no action link, no token, in
+      // any field. [#30509] `approvalUrl` is the e-mail's link to the request
+      // page (relative here: this service has no public origin).
+      expect(Object.keys(r.payload).sort()).toEqual(['actionUrl', 'approvalUrl', 'body', 'title']);
       expect(JSON.stringify(r)).not.toMatch(/token=|\/approvals\/act/);
       expect(r.payload.actionUrl).toBe(`/system/approvals?request=${reqId}`);
+      expect(r.payload.approvalUrl).toBe(`/system/approvals?request=${reqId}`);
+      expect(r.channels).toEqual(['inbox', 'email']);
     }
     // A reminder mints nothing: a token minted here could only travel in the stored payload.
     expect((engine._tables['sys_approval_token'] ?? []).length).toBe(minted);
