@@ -61,9 +61,17 @@ const OWNED_FIELDS = { name: { type: 'text' }, owner_id: { type: 'lookup' }, cre
  */
 function memoryEngine(schemas: Record<string, any>, rows: Record<string, Row[]>, refuse?: (object: string, where: Row) => boolean) {
     const writes: Array<{ object: string; data: Row; where: Row; context: unknown }> = [];
+    // Only the stamp's three terms; anything else is REFUSED, never read as a field or an equality.
     const matches = (row: Row, where: Row) => Object.entries(where).every(([k, v]) => {
-        if (v && typeof v === 'object' && Array.isArray((v as any).$in)) return (v as any).$in.includes(row[k]);
+        if (k.startsWith('$')) throw new Error(`memoryEngine: combinator '${k}' is not implemented by this double`);
         if (v === null) return row[k] == null;
+        if (v && typeof v === 'object') {
+            const ops = Object.keys(v);
+            if (ops.length !== 1 || ops[0] !== '$in' || !Array.isArray((v as any).$in)) {
+                throw new Error(`memoryEngine: operator(s) ${ops.join(', ')} on '${k}' are not implemented by this double`);
+            }
+            return (v as any).$in.includes(row[k]);
+        }
         return row[k] === v;
     });
     return {
@@ -209,7 +217,7 @@ describe('stampSeedOwner — the rows a load created get the person who seeded t
 
     it(`writes at most ${SEED_OWNER_STAMP_BATCH} ids per write, and every created row is reached`, async () => {
         const ids = Array.from({ length: 120 }, (_, i) => `d${i}`);
-        const rows = { crm_deal: ids.map((id) => ({ id })) };
+        const rows: Record<string, Row[]> = { crm_deal: ids.map((id) => ({ id })) };
         const engine = memoryEngine({ crm_deal: { name: 'crm_deal', fields: OWNED_FIELDS } }, rows);
 
         await stampSeedOwner(engine, [{ object: 'crm_deal', insertedIds: ids.slice(0, 70) }, { object: 'crm_deal', insertedIds: ids.slice(60) }], 'usr_installer');
@@ -341,7 +349,7 @@ const stamped = (updates: Array<{ data: Row; where: Row }>) => ({
     ids: [...new Set(updates.flatMap((u) => u.where.id?.$in ?? [u.where.id]))],
 });
 
-const infoLines = (logger: { info: any }) => logger.info.mock.calls.map((c: any[]) => String(c[0]));
+const infoLines = (logger: { info: any }): string[] => logger.info.mock.calls.map((c: any[]) => String(c[0]));
 
 describe('#30324 — each seeding door names the person who owns the rows its load created', () => {
     it('install: the installing user owns the rows the install created, and only those', async () => {

@@ -5348,9 +5348,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             return { userId: null, door, none: `the install ledger records no installer for ${entry?.manifestId}` };
         }
         try {
-            const ql: any = ctx.getService('objectql');
-            const rows = await ql.find('sys_user', { where: { id: installedBy }, fields: ['id'], limit: 1 }, { context: { isSystem: true } });
-            const found = Array.isArray(rows) ? rows[0] : rows?.items?.[0];
+            const ql = ctx.getService<IObjectQLEngine>('objectql');
+            const rows: unknown = await ql.find('sys_user', { where: { id: installedBy }, fields: ['id'], limit: 1 }, { context: { isSystem: true } });
+            const found = (Array.isArray(rows) ? rows[0] : (rows as { items?: unknown[] } | null)?.items?.[0]) as { id?: unknown } | undefined;
             if (found && String(found.id) === installedBy) return { userId: installedBy, door };
             return { userId: null, door, none: `the recorded installer ${installedBy} of ${entry.manifestId} is no longer a user` };
         } catch (err: any) {
