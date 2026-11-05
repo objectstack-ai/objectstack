@@ -557,7 +557,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       require_mfa: {
         label: "Require Multi-Factor Auth",
-        help: "When true, every member of this organization must enroll an authenticator app to access data."
+        help: "When true, every member of this organization must enroll an authenticator app to access data. Needs two-factor authentication on for this deployment (OS_AUTH_TWO_FACTOR=true); while it is off, saving this as true is refused."
       },
       timezone: {
         label: "Timezone",
