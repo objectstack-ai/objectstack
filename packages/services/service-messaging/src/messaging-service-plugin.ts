@@ -123,12 +123,24 @@ export interface MessagingServicePluginOptions {
      * this; a tick that claims work snaps it back, and the write that makes work
      * wakes its dispatcher at once — `emit()` enqueueing deliveries,
      * `enqueueHttp()` enqueueing a callout, `redeliverHttp()` resetting one.
-     * While idle it bounds how late a dispatcher notices work nobody woke it
-     * for: a deferred delivery coming due (retry, quiet hours, digest window), a
-     * row enqueued by another process, a crashed node's claim passing its
-     * timeout. A value at or below `dispatchIntervalMs` disables the backoff.
+     * While idle it bounds how late a dispatcher notices a row enqueued by
+     * another process; a deferred delivery coming due (retry, quiet hours,
+     * digest window) and a crashed node's claim passing its timeout wake the
+     * dispatcher at their due time instead (#29919). A value at or below
+     * `dispatchIntervalMs` disables the backoff.
      */
     dispatchMaxIdleIntervalMs?: number;
+    /**
+     * [#29919] This kernel is the only process that writes its database's
+     * delivery outboxes (a hosted tenant kernel: one kernel per tenant
+     * database), so every row is enqueued here and wakes its dispatcher. Both
+     * dispatchers then sleep straight from an idle tick to the next due row or
+     * `dispatchMaxIdleIntervalMs`, instead of re-running the backoff's ramp
+     * from `dispatchIntervalMs` after every boot and every burst (default
+     * `false`). Leave it off when another process — a second node, a worker —
+     * writes the same tables: the ramp is what notices its rows sooner.
+     */
+    dispatchSoleWriter?: boolean;
     /**
      * Topics that bypass the per-user preference matrix (ADR-0030 P2) — e.g.
      * security/system alerts users must not be able to mute. Exact match, or a
@@ -218,6 +230,7 @@ export class MessagingServicePlugin implements Plugin {
             partitionCount: 8,
             dispatchIntervalMs: 500,
             dispatchMaxIdleIntervalMs: DEFAULT_MAX_IDLE_INTERVAL_MS,
+            dispatchSoleWriter: false,
             mandatoryTopics: [],
             ...options,
         };
@@ -561,6 +574,7 @@ export class MessagingServicePlugin implements Plugin {
                     partitionCount: this.options.partitionCount,
                     intervalMs: this.options.dispatchIntervalMs,
                     maxIdleIntervalMs: this.options.dispatchMaxIdleIntervalMs,
+                    soleWriter: this.options.dispatchSoleWriter,
                     logger: ctx.logger,
                     textRenderer,
                 });
@@ -583,6 +597,7 @@ export class MessagingServicePlugin implements Plugin {
                     partitionCount: this.options.partitionCount,
                     intervalMs: this.options.dispatchIntervalMs,
                     maxIdleIntervalMs: this.options.dispatchMaxIdleIntervalMs,
+                    soleWriter: this.options.dispatchSoleWriter,
                     logger: ctx.logger,
                 });
                 this.httpDispatcher.start();
