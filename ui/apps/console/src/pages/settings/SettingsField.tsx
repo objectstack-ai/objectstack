@@ -27,6 +27,15 @@ import {
   Separator,
   Badge,
   Button,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
   cn,
   getLazyIcon,
 } from '@object-ui/components';
@@ -485,6 +494,33 @@ export function SettingsField(props: SettingsFieldProps) {
     // One label per action row (objectui#12610): the button carries it. The
     // row's left side holds the manifest's one-line `description` when it
     // declares one, and nothing otherwise — the label is never drawn twice.
+    //
+    // A handler that declares `confirmText` (the spec's `SpecifierHandlerSchema`
+    // `http` / `action` arms: "omit = no confirm") asks before it invokes:
+    // cancel invokes nothing. Judged on the DECLARATION, as the spec's action
+    // resolver judges `confirmText != null`; the text resolves through the
+    // `actions.<id>.confirmText` slot with the manifest literal as fallback.
+    const declaredConfirm =
+      spec.handler && spec.handler.kind !== 'navigate' ? spec.handler.confirmText : undefined;
+    const confirmText = declaredConfirm != null
+      ? (labels
+          ? labels.actionConfirm(actionId, resolveLabel(declaredConfirm))
+          : resolveLabel(declaredConfirm))
+      : undefined;
+    const actionButton = (
+      <Button
+        size="sm"
+        variant="secondary"
+        onClick={declaredConfirm != null ? undefined : onAction}
+        disabled={saving}
+      >
+        {Icon ? (
+          // eslint-disable-next-line react-hooks/static-components -- getLazyIcon returns a module-cached stable component per name, not one created during render
+          <Icon className="h-4 w-4 mr-1.5" />
+        ) : null}
+        {actionLabel}
+      </Button>
+    );
     return (
       <div
         className={`flex items-center gap-4 py-3 ${spec.description ? 'justify-between' : 'justify-end'}`}
@@ -492,13 +528,23 @@ export function SettingsField(props: SettingsFieldProps) {
         {spec.description ? (
           <p className="text-sm text-muted-foreground">{spec.description}</p>
         ) : null}
-        <Button size="sm" variant="secondary" onClick={onAction} disabled={saving}>
-          {Icon ? (
-            // eslint-disable-next-line react-hooks/static-components -- getLazyIcon returns a module-cached stable component per name, not one created during render
-            <Icon className="h-4 w-4 mr-1.5" />
-          ) : null}
-          {actionLabel}
-        </Button>
+        {declaredConfirm != null ? (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>{actionButton}</AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{t('actionConfirm.title')}</AlertDialogTitle>
+                <AlertDialogDescription>{confirmText}</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>{t('actionConfirm.cancel')}</AlertDialogCancel>
+                <AlertDialogAction onClick={onAction}>{t('actionConfirm.confirm')}</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        ) : (
+          actionButton
+        )}
       </div>
     );
   }
