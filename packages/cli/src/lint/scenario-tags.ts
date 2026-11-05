@@ -382,11 +382,15 @@ export const CAPABILITY_TAG_CHECKS: Readonly<Record<string, TagCheck>> = Object.
       const bound = approvals.map((flow) => ({ flow, object: flowBoundObject(flow) }));
       return {
         checks: [
-          check('approval-flow-exists', approvals.length > 0, `${approvals.length} approval flow(s)`),
           ...bound.map(({ flow, object }) =>
             check(`approval:${flowName(flow)}->resolves`, object !== undefined && resolvesInBuild(f.graph, object), object ?? 'binds no object'),
           ),
-          check('approval-binds-expected-object', bound.some(({ object }) => object !== undefined && expected.has(norm(object)))),
+          // Also the existence check: no approval flow binds nothing.
+          check(
+            'approval-binds-expected-object',
+            bound.some(({ object }) => object !== undefined && expected.has(norm(object))),
+            `${approvals.length} approval flow(s)`,
+          ),
         ],
       };
     },
@@ -400,11 +404,15 @@ export const CAPABILITY_TAG_CHECKS: Readonly<Record<string, TagCheck>> = Object.
       const bound = triggered.map((flow) => ({ flow, object: flowBoundObject(flow) }));
       return {
         checks: [
-          check('record-triggered-flow-exists', triggered.length > 0, `${triggered.length} record-triggered flow(s)`),
           ...bound.map(({ flow, object }) =>
             check(`flow:${flowName(flow)}->resolves`, object !== undefined && resolvesInBuild(f.graph, object), object ?? 'binds no object'),
           ),
-          check('record-trigger-binds-expected-object', bound.some(({ object }) => object !== undefined && expected.has(norm(object)))),
+          // Also the existence check: no record-triggered flow binds nothing.
+          check(
+            'record-trigger-binds-expected-object',
+            bound.some(({ object }) => object !== undefined && expected.has(norm(object))),
+            `${triggered.length} record-triggered flow(s)`,
+          ),
         ],
       };
     },
