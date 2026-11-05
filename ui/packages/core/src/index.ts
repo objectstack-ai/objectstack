@@ -81,10 +81,14 @@ export * from './utils/unmaterialized-fields.js';
 // (`entry exists && sortable: true`). Homed beside the storage-fact set above
 // because a consumer that reaches for one must be able to see the other and
 // know which one the platform actually served.
-// Named, not `export *`: `normalizeObjectSortability`, `OBJECT_SORTABILITY_KEY`
+// Named, not `export *`: `normalizeObjectSortability` and `OBJECT_SORTABILITY_KEY`
 // stay in the module for its in-package readers and off the public entry
 // (objectstack#25921: zero consumers).
 export {
+  FIELD_UNSORTABLE_VIRTUAL_TYPE,
+  FIELD_SORTABLE_UNPROVISIONED_ANCHOR,
+  type FieldSortability,
+  type ObjectSortability,
   attachObjectSortability,
   readObjectSortability,
   isPlatformSortableField,
@@ -208,6 +212,7 @@ export * from './utils/date-macros.js';
 // in-package readers and off the public entry (objectstack#25921: zero
 // consumers).
 export {
+  CONTEXT_TOKENS,
   resolveContextTokens,
   resolveFilterPlaceholders,
   type FilterTokenScope,
