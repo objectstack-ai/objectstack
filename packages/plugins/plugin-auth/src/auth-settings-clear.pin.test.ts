@@ -164,11 +164,13 @@ describe('#30312 a cleared plain option returns to the declaration in the same p
 
   it('a key the store never gave a value is left alone by a pass about another key', async () => {
     const { svc, manager } = await boot({ plugin: { lockoutThreshold: 7 } });
-    const before = running(manager);
+    const applied = vi.spyOn(manager, 'applyConfigPatch');
     await svc.set('auth', 'max_concurrent_sessions_per_user', 2, {});
     await vi.waitFor(() => expect(running(manager).maxConcurrentSessions).toBe(2));
     expect(running(manager).lockoutThreshold).toBe(7);
-    expect(running(manager).emailAndPassword).toEqual(before.emailAndPassword);
+    // Only the stored key's option travels: no piece re-applies (and so no
+    // refusable block re-judges) a declaration nobody cleared.
+    expect(applied.mock.calls.map(([piece]) => Object.keys(piece))).toEqual([['maxConcurrentSessions']]);
   });
 });
 
