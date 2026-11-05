@@ -100,12 +100,12 @@ describe('ApprovalDecisionPanel — the flow origin of a request no person submi
 
   it('draws the active language: the zh pack row under a zh provider', () => {
     const panel = mount(FLOW_ROW, (node) => (
-      <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }} persistLanguage={false}>
+      <I18nProvider config={{ defaultLanguage: 'zh-Hans', detectBrowserLanguage: false }} persistLanguage={false}>
         {node}
       </I18nProvider>
     ));
-    expect(marker(panel)?.textContent).toBe(flowOrigin('zh'));
-    expect(flowOrigin('zh')).not.toBe(flowOrigin('en'));
+    expect(marker(panel)?.textContent).toBe(flowOrigin('zh-Hans'));
+    expect(flowOrigin('zh-Hans')).not.toBe(flowOrigin('en'));
   });
 
   it('CONTROL: a request a person submitted carries no marker', () => {

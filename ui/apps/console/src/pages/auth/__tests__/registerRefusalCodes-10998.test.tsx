@@ -65,7 +65,7 @@ function refusingServer(code: string, message: string): typeof fetch {
   }) as typeof fetch;
 }
 
-type Lang = 'zh' | 'en';
+type Lang = 'zh-Hans' | 'en';
 
 /** Labels as the page renders them in `lang`, read from that pack. */
 function registerLabels(lang: Lang) {
@@ -125,7 +125,7 @@ describe('console RegisterPage — audience refusals under zh-CN (objectui#10998
 
   it('SELF_REGISTRATION_CLOSED shows the localized text, not the server message', async () => {
     const text = await submitRefused(
-      'zh',
+      'zh-Hans',
       'SELF_REGISTRATION_CLOSED',
       SERVER_MESSAGE.SELF_REGISTRATION_CLOSED,
     );
@@ -136,7 +136,7 @@ describe('console RegisterPage — audience refusals under zh-CN (objectui#10998
 
   it('EMAIL_DOMAIN_NOT_ALLOWED shows the localized text, not the server message', async () => {
     const text = await submitRefused(
-      'zh',
+      'zh-Hans',
       'EMAIL_DOMAIN_NOT_ALLOWED',
       SERVER_MESSAGE.EMAIL_DOMAIN_NOT_ALLOWED,
     );
@@ -146,7 +146,7 @@ describe('console RegisterPage — audience refusals under zh-CN (objectui#10998
 
   it('a code the page does not map still shows the raw server message', async () => {
     const raw = 'The server refused this sign-up for a reason the console has no text for.';
-    const text = await submitRefused('zh', 'UNMAPPED_REFUSAL_FOR_TEST', raw);
+    const text = await submitRefused('zh-Hans', 'UNMAPPED_REFUSAL_FOR_TEST', raw);
     expect(text).toBe(raw);
   });
 });

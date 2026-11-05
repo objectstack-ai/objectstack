@@ -37,9 +37,14 @@ import { createI18n } from '../i18n';
 import { I18nProvider, useI18nContext, useObjectTranslation } from '../provider';
 import { useObjectLabel } from '../useObjectLabel';
 import ja from '../locales/ja';
+import ptBR from '../locales/pt-BR';
 import zh from '../locales/zh-Hans';
+import zhHant from '../locales/zh-Hant';
 
-/** The card's config — not a built-in code, so only the app bundle is in play. */
+/**
+ * The card's config. A read alias of `zh-Hans` (objectstack#30511), whose
+ * catalogue is resident, so only the app bundle lands after mount.
+ */
 const ZH_CN = { defaultLanguage: 'zh-CN', detectBrowserLanguage: false } as const;
 
 /** What the fixed starter loader hands the provider for the card's spec payload (objectui#10381). */
@@ -349,5 +354,49 @@ describe('the built-in catalogue path — the grading sibling', () => {
 
     expect(screen.getByTestId('save').textContent).toBe('Save');
     expect(renders.save).toBe(1);
+  });
+
+  // objectstack#30511: the catalogues are keyed by platform locale table tag,
+  // and an instance often runs in a stored alias of one. The boot effect used
+  // to write the tag's catalogue a second time under the alias, an `added`
+  // event that re-rendered every reader (and refetched every chart keyed on
+  // the resolver) for a catalogue that was already resident.
+  it.each([
+    ['zh', 'zh-Hans', zh.common.save],
+    ['zh-CN', 'zh-Hans', zh.common.save],
+    ['zh-TW', 'zh-Hant', zhHant.common.save],
+    ['pt', 'pt-BR', ptBR.common.save],
+  ])('(d) an instance in the alias %s, whose %s catalogue is resident, reads it and wakes nobody', async (alias, tag, save) => {
+    const instance = createI18n({ defaultLanguage: alias, detectBrowserLanguage: false });
+    render(
+      <I18nProvider instance={instance} persistLanguage={false}>
+        <SaveReader />
+      </I18nProvider>,
+    );
+    await settle();
+    await settle();
+
+    expect(instance.language).toBe(alias);
+    expect(screen.getByTestId('save').textContent).toBe(save);
+    expect(renders.save).toBe(1);
+    // The catalogue stays under its tag; the alias reads it through `fallbackLng`.
+    expect(instance.hasResourceBundle(alias, 'translation')).toBe(false);
+    expect(instance.hasResourceBundle(tag, 'translation')).toBe(true);
+  });
+
+  it('a boot catalogue that lands after mount reaches a reader in an alias of its tag', async () => {
+    const instance = instanceWithoutCatalogue('zh-TW', 'zh-Hant');
+    render(
+      <I18nProvider instance={instance} persistLanguage={false}>
+        <SaveReader />
+      </I18nProvider>,
+    );
+    expect(screen.getByTestId('save').textContent).toBe('Save');
+
+    await settle();
+
+    expect(zhHant.common.save).not.toBe(zh.common.save);
+    expect(screen.getByTestId('save').textContent).toBe(zhHant.common.save);
+    expect(instance.hasResourceBundle('zh-TW', 'translation')).toBe(false);
   });
 });

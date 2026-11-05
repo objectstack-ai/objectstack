@@ -30,7 +30,7 @@ import { globMatches, jobBlock, repoPath, rootCi, triggerBlock, uiFilterGlobs, u
 /**
  * objectui#3650 — the behaviour test for `scripts/check-i18n-en-drift.mjs`.
  *
- * The gate answers "did the nine translation packs follow the `en` string this
+ * The gate answers "did the translation packs follow the `en` string this
  * PR changed?", which no other i18n guard in this repo can: parity compares KEY
  * SETS, the call-site guard checks that a key EXISTS, and both were green
  * through objectui#3582 and objectui#3625 — eight packs serving a retired
@@ -91,7 +91,11 @@ function leafValues(node: unknown, prefix = '', into = new Map<string, unknown>(
 
 type Nested = { [key: string]: string | Nested };
 
-/** A pack module source, the way the real ones are written. */
+/**
+ * A pack module source, the way the real ones are written: a const, then
+ * `export default` of it. The const is not named after the pack, because a
+ * table tag (`zh-Hans`, `pt-BR`) is not an identifier.
+ */
 function packSource(lang: string, tree: Nested): string {
   const render = (node: Nested, indent: string): string =>
     Object.entries(node)
@@ -101,7 +105,7 @@ function packSource(lang: string, tree: Nested): string {
           : `${indent}${key}: {\n${render(value, `${indent}  `)}\n${indent}},`,
       )
       .join('\n');
-  return `const ${lang} = {\n${render(tree, '  ')}\n} as const;\n\nexport default ${lang};\n`;
+  return `const pack = {\n${render(tree, '  ')}\n} as const;\n\nexport default pack;\n`;
 }
 
 /**
@@ -130,7 +134,7 @@ function designerSource(en: Record<string, string>, zh: Record<string, string>):
 const DESIGNER_DEFAULT = designerSource({ 'engine.fx.a': 'A' }, { 'engine.fx.a': '\u7532' });
 
 /**
- * Ten packs from one `lang -> tree` map, PLUS the designer table (objectui#8834).
+ * Every pack from one `lang -> tree` map, PLUS the designer table (objectui#8834).
  *
  * The designer table is not optional in a fixture repo. Since that second
  * population landed, the gate reads `i18n.ts` on both sides of every run, so a
@@ -145,7 +149,7 @@ function packFiles(trees: Record<string, Nested>, designer: string = DESIGNER_DE
   };
 }
 
-/** `lang -> tree` for all ten locales, built per locale. */
+/** `lang -> tree` for every locale, built per locale. */
 function treesFor(make: (lang: string) => Nested): Record<string, Nested> {
   return Object.fromEntries(LOCALES.map((lang): [string, Nested] => [lang, make(lang)]));
 }
@@ -229,22 +233,25 @@ function runGateExpectingFailure(
  * The two sentences at the centre of objectui#3582 and objectui#3625, verbatim
  * from those issues. `en` moves to the read-only wording; the eight packs keep
  * their translations of the retired duplicate-to-customize wording. `zh` follows
- * `en`, as it really did.
+ * `en`, as it really did — today that is `zh-Hans`, and the `zh-Hant` pack
+ * generated from it (objectstack#30511), so both follow.
  */
 const RETIRED: Record<string, string> = {
   en: 'System view — duplicate to customize.',
-  zh: '系统视图 — 复制一份来自定义。',
+  'zh-Hans': '系统视图 — 复制一份来自定义。',
+  'zh-Hant': '系統檢視 — 複製一份來自定義。',
   ja: 'システムビュー — 複製してカスタマイズしてください。',
   ko: '시스템 보기 — 사용자 지정하려면 복제하세요.',
   de: 'Systemansicht — zum Anpassen duplizieren.',
   fr: 'Vue système — dupliquer pour personnaliser.',
   es: 'Vista del sistema — duplique para personalizar.',
-  pt: 'Exibição do sistema — duplique para personalizar.',
+  'pt-BR': 'Exibição do sistema — duplique para personalizar.',
   ru: 'Системное представление — скопируйте для настройки.',
   ar: 'عرض النظام — انسخ للتخصيص.',
 };
 const EN_READONLY = 'System view — defined in code, read-only.';
 const ZH_READONLY = '系统视图 — 由代码定义，只读。';
+const ZH_HANT_READONLY = '系統檢視 — 由程式碼定義，只讀。';
 
 function reconstructed3625(): { root: string; base: string; head: string } {
   const before = packFiles(
@@ -256,9 +263,13 @@ function reconstructed3625(): { root: string; base: string; head: string } {
       view: { readonlyTooltip: EN_READONLY },
       common: { save: 'save-en' },
     }),
-    [packPath('zh')]: packSource('zh', {
+    [packPath('zh-Hans')]: packSource('zh-Hans', {
       view: { readonlyTooltip: ZH_READONLY },
-      common: { save: 'save-zh' },
+      common: { save: 'save-zh-Hans' },
+    }),
+    [packPath('zh-Hant')]: packSource('zh-Hant', {
+      view: { readonlyTooltip: ZH_HANT_READONLY },
+      common: { save: 'save-zh-Hant' },
     }),
   };
   const { root, shas } = repoWithCommits([before, after]);
@@ -340,12 +351,12 @@ describe('findDrift — an en value that changed without its translations', () =
     expect(counters.followedPacks).toBe(0);
   });
 
-  it('is silent when the same key changed in all ten packs', () => {
+  it('is silent when the same key changed in every pack', () => {
     const before = packsOf(uniform((lang) => `old-${lang}`));
     const after = packsOf(uniform((lang) => `new-${lang}`));
     const { findings, counters } = findDrift(before, after);
     expect(findings).toEqual([]);
-    expect(counters.followedPacks).toBe(9);
+    expect(counters.followedPacks).toBe(FOLLOWERS.length);
   });
 
   it('reports only the packs that stood still, not the ones that moved', () => {
@@ -357,7 +368,8 @@ describe('findDrift — an en value that changed without its translations', () =
       ar: { greeting: 'new-ar' },
     });
     const { findings } = findDrift(before, after);
-    expect(findings[0].unfollowed).toEqual(['zh', 'ko', 'de', 'fr', 'es', 'pt', 'ru']);
+    // In table order: the platform locale table's, not an alphabet's.
+    expect(findings[0].unfollowed).toEqual(['zh-Hans', 'zh-Hant', 'es', 'fr', 'pt-BR', 'ru', 'de', 'ko']);
   });
 
   it('leaves added and removed en keys to all-locales-key-parity', () => {
@@ -376,18 +388,19 @@ describe('findDrift — an en value that changed without its translations', () =
   });
 
   it('skips — and counts — a key a pack does not define', () => {
-    // The four `console.ai.*` outbound-message keys live in en and zh only, ON
-    // PURPOSE (see all-locales-key-parity.test.ts / outbound-agent-messages.test.ts).
-    // Demanding the other eight "follow" a key they must not define would put
-    // this gate in direct contradiction with the one that owns key sets.
+    // The gate-only `console.ai.*` outbound-message keys live in en and zh-Hans
+    // only, ON PURPOSE (see all-locales-key-parity.test.ts /
+    // outbound-agent-messages.test.ts). Demanding every other pack "follow" a key
+    // it must not define would put this gate in direct contradiction with the
+    // one that owns key sets.
     const trees = treesFor((lang): Nested =>
-      lang === 'en' || lang === 'zh' ? { outbound: `old-${lang}` } : { unrelated: `x-${lang}` },
+      lang === 'en' || lang === 'zh-Hans' ? { outbound: `old-${lang}` } : { unrelated: `x-${lang}` },
     );
     const before = packsOf(trees);
-    const after = packsOf({ ...trees, en: { outbound: 'new-en' }, zh: { outbound: 'new-zh' } });
+    const after = packsOf({ ...trees, en: { outbound: 'new-en' }, 'zh-Hans': { outbound: 'new-zh-Hans' } });
     const { findings, counters } = findDrift(before, after);
     expect(findings).toEqual([]);
-    expect(counters.absentInPack).toBe(8);
+    expect(counters.absentInPack).toBe(FOLLOWERS.length - 1);
   });
 
   it('does not exempt a typography-only edit', () => {
@@ -410,8 +423,9 @@ describe('the objectui#3625 commit, reconstructed in a real git repo', () => {
     expect(findings[0].key).toBe('view.readonlyTooltip');
     expect(findings[0].enBefore).toBe(RETIRED.en);
     expect(findings[0].enAfter).toBe(EN_READONLY);
-    // zh followed and is absent; the eight that did not are all named.
-    expect(findings[0].unfollowed).toEqual(['ja', 'ko', 'de', 'fr', 'es', 'pt', 'ru', 'ar']);
+    // zh-Hans and zh-Hant followed and are absent; the eight that did not are
+    // all named, in table order.
+    expect(findings[0].unfollowed).toEqual(['es', 'ar', 'fr', 'pt-BR', 'ru', 'de', 'ja', 'ko']);
   });
 
   it('fails the build, and the message says which packs and what the sentence became', () => {
@@ -420,7 +434,7 @@ describe('the objectui#3625 commit, reconstructed in a real git repo', () => {
     expect(code).toBe(1);
     expect(output).toContain('view.readonlyTooltip');
     expect(output).toContain(EN_READONLY);
-    expect(output).toContain('unchanged in: ja, ko, de, fr, es, pt, ru, ar');
+    expect(output).toContain('unchanged in: es, ar, fr, pt-BR, ru, de, ja, ko');
   });
 
   it('refuses to judge packs too small to be the real ones', () => {
@@ -436,7 +450,7 @@ describe('the objectui#3625 commit, reconstructed in a real git repo', () => {
     expect(output).toContain('expected at least 2000');
   });
 
-  it('goes green when the same commit translates all nine packs', () => {
+  it('goes green when the same commit translates every follower pack', () => {
     const before = packFiles(treesFor((lang) => ({ view: { readonlyTooltip: RETIRED[lang] } })));
     const after = packFiles(
       treesFor((lang) => ({ view: { readonlyTooltip: `${RETIRED[lang]} [read-only]` } })),
@@ -444,7 +458,66 @@ describe('the objectui#3625 commit, reconstructed in a real git repo', () => {
     const { root, shas } = repoWithCommits([before, after]);
     const { code, output } = runGate(root, [...FIXTURE_FLOOR, '--base', shas[0], '--head', shas[1]]);
     expect(code).toBe(0);
-    expect(output).toContain('Every changed en value was followed by all nine translation packs.');
+    expect(output).toContain(`Every changed en value was followed by all ${FOLLOWERS.length} translation packs.`);
+  });
+});
+
+// -- a follower pack the base never had (objectstack#30511) --------------------
+
+describe('a follower pack the base commit does not have', () => {
+  // The shape of the change that keyed the packs by the platform locale table:
+  // the base carries `zh.ts` and `pt.ts` and no `zh-Hant.ts`; the head carries
+  // the table's tags. Every key of those three packs is new in the change — a
+  // key-set fact, all-locales-key-parity's — so the before side reads them as
+  // empty rather than throwing.
+  const NEW_HERE = ['zh-Hans', 'zh-Hant', 'pt-BR'];
+  const oldLayout = (trees: Record<string, Nested>): Record<string, string> => {
+    const files = packFiles(trees);
+    for (const lang of NEW_HERE) delete files[packPath(lang)];
+    return {
+      ...files,
+      'packages/i18n/src/locales/zh.ts': packSource('zh', trees['zh-Hans']),
+      'packages/i18n/src/locales/pt.ts': packSource('pt', trees['pt-BR']),
+    };
+  };
+  const same = () => treesFor((lang) => ({ greeting: `same-${lang}` }));
+
+  it('reads it as empty, names it, and still judges every pack the base had', () => {
+    const before = oldLayout(treesFor((lang) => ({ greeting: `old-${lang}` })));
+    const after = packFiles(treesFor((lang) => ({ greeting: lang === 'en' ? 'new-en' : `old-${lang}` })));
+    const { root, shas } = repoWithCommits([before, after]);
+    const { findings, counters, newAtBase } = analyze(root, { base: shas[0], head: shas[1] });
+    expect(newAtBase).toEqual(NEW_HERE);
+    // Their keys are absent on the before side: skipped, not drift ...
+    expect(counters.absentInPack).toBe(NEW_HERE.length);
+    // ... and every pack the base did have is still held to the en change.
+    expect(findings).toHaveLength(1);
+    expect(findings[0].unfollowed).toEqual(FOLLOWERS.filter((lang) => !NEW_HERE.includes(lang)));
+  });
+
+  it('says so in the CLI summary', () => {
+    const { root, shas } = repoWithCommits([oldLayout(same()), packFiles(same())]);
+    const { code, output } = runGate(root, [...FIXTURE_FLOOR, '--base', shas[0], '--head', shas[1]]);
+    expect(code).toBe(0);
+    expect(output).toContain('zh-Hans, zh-Hant, pt-BR did not exist at the base commit');
+  });
+
+  it('CONTROL: a base that has every pack names none', () => {
+    const { root, shas } = repoWithCommits([packFiles(same())]);
+    expect(analyze(root, { base: shas[0], head: shas[0] }).newAtBase).toEqual([]);
+  });
+
+  it('never excuses en at the base', () => {
+    const withoutEn = packFiles(same());
+    delete withoutEn[packPath('en')];
+    const { root, shas } = repoWithCommits([withoutEn, packFiles(same())]);
+    expect(() => analyze(root, { base: shas[0], head: shas[1] })).toThrow(/cannot read .*en\.ts/);
+  });
+
+  it('never excuses a pack missing at HEAD', () => {
+    const { root, shas } = repoWithCommits([packFiles(same())]);
+    fs.rmSync(path.join(root, packPath('zh-Hant')));
+    expect(() => analyze(root, { base: shas[0] })).toThrow(/zh-Hant\.ts does not exist in the working tree/);
   });
 });
 
@@ -900,8 +973,8 @@ describe('resolving the commit to compare against', () => {
     // found no changed en value, and printed a confident green (measured: exit 0,
     // with `(--base …)` in the summary line replaced by the candidate it actually
     // used, so the log gave the reader nothing to notice). Restoring the
-    // fallthrough turns this case green again — exit 0 and the "followed by all
-    // nine" line below — which is the reverse verification for the fix.
+    // fallthrough turns this case green again — exit 0 and the "followed by all"
+    // line below — which is the reverse verification for the fix.
     //
     // "The base you named is missing" and "you named no base" are different
     // facts, and only the second may be answered by guessing. Ported verbatim in
@@ -1054,7 +1127,7 @@ describe('the gate is wired to run', () => {
     // The root ci.yml carries no `paths-ignore` on any trigger: it starts on
     // every pull_request, every queue build, every push to main and the hourly
     // schedule. What decides whether `type-check-ui` then runs is the `filter`
-    // job's `ui:` paths filter, which the job's `if:` reads, so the ten locale
+    // job's `ui:` paths filter, which the job's `if:` reads, so the locale
     // packs, the ledger and the designer table must each match one of its
     // globs. (Until objectstack#25712 this pinned objectui's own `push`
     // `paths-ignore` list and its in-job `Decide whether this change needs a

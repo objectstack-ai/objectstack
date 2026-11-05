@@ -80,7 +80,7 @@ describe('one word for the owner: detail.owner equals the platform label of owne
   // system-field fallback declares.
   const pairs: Array<[specLocale: string, uiPack: keyof typeof builtInLocales]> = [
     ['en', 'en'],
-    ['zh-CN', 'zh'],
+    ['zh-CN', 'zh-Hans'],
     ['ja-JP', 'ja'],
     ['es-ES', 'es'],
   ];

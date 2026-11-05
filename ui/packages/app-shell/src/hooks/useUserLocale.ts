@@ -76,6 +76,7 @@ import {
   LOCALE_STORAGE_KEY,
   readStoredLanguage,
   resolveBootstrapLanguage,
+  resolveBuiltInLanguage,
   useObjectTranslation,
 } from '@object-ui/i18n';
 import { useAdapter, useDataInvalidation, extractWriteErrorMessage } from '@object-ui/react';
@@ -285,8 +286,15 @@ const LOCALE_FIELD = 'locale';
  *   1. exact tag (`pt-BR` → `pt-BR`; a real `pt-BR` still beats `pt`);
  *   2. the same tag in any case (`zh-cn` → `zh-CN`) — a row written before the
  *      server door folded case is served as stored, never migrated;
- *   3. the base language (`zh-CN` → `zh`, `en-GB` → `en`), case-insensitively;
- *   4. the first offered variant of that base language (`zh` → `zh-CN`,
+ *   3. the first offered code the platform locale table reads as the same
+ *      language (`zh-TW` → `zh-Hant`, `zh-HK` → `zh-TW`, `zh` → `zh-CN`,
+ *      `pt` → `pt-BR`; objectstack#30511). The table's read aliases are how a
+ *      row stored before the table keeps its meaning, and the one step the
+ *      server's order lacks: without it a base-language match hands a
+ *      Traditional row (`zh-TW`) the first `zh` variant offered, which is the
+ *      Simplified pack;
+ *   4. the base language (`zh-CN` → `zh`, `en-GB` → `en`), case-insensitively;
+ *   5. the first offered variant of that base language (`es` → `es-MX`,
  *      `zh-Hans-CN` → `zh-CN`), in the order the list offers them.
  *
  * A match answers the OFFERED spelling, never the stored one: the list is what
@@ -307,12 +315,18 @@ export function pickRenderableLocale(
   const lower = tag.toLowerCase();
   const caseMatch = offerable.find((code) => code.toLowerCase() === lower);
   if (caseMatch) return caseMatch;
-  // 3. Base language.
+  // 3. The same language, as the platform locale table reads both tags.
+  const pack = resolveBuiltInLanguage(tag);
+  if (pack !== null) {
+    const sameLanguage = offerable.find((code) => resolveBuiltInLanguage(code) === pack);
+    if (sameLanguage) return sameLanguage;
+  }
+  // 4. Base language.
   const base = lower.split('-')[0];
   if (!base) return null;
   const baseMatch = offerable.find((code) => code.toLowerCase() === base);
   if (baseMatch) return baseMatch;
-  // 4. Variant of the base language — first offered wins.
+  // 5. Variant of the base language — first offered wins.
   const variantMatch = offerable.find((code) => code.split('-')[0].toLowerCase() === base);
   return variantMatch ?? null;
 }

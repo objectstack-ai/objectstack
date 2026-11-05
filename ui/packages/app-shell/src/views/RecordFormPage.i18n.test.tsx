@@ -46,6 +46,7 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { I18nProvider } from '@object-ui/i18n';
 import { builtInLocales } from '@object-ui/i18n/locales';
 import { RecordFormPage } from './RecordFormPage';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 
 const h = React.createElement;
 
@@ -180,7 +181,7 @@ describe('RecordFormPage title resolves from the locale packs (#3469)', () => {
     // The strongest available proof that the PACK drives the title: under `zh`
     // the title is Chinese. No inline English `defaultValue` can satisfy this
     // assertion, so it fails loudly if the packs ever stop being consulted.
-    renderPage('create', { language: 'zh' });
+    renderPage('create', { language: 'zh-Hans' });
     expect(title()).toBe(String(builtInLocales['zh-Hans'].form.createTitle).replace('{{object}}', 'Contacts'));
     expect(title()).toBe('新建Contacts');
   });
@@ -244,8 +245,8 @@ describe('the keys RecordFormPage passes bare are defined in every pack (#3469)'
     expect(missing, `${key} missing from: ${missing.join(', ')}`).toEqual([]);
   });
 
-  it('the comparison really covers ten packs', () => {
-    expect(Object.keys(builtInLocales)).toHaveLength(10);
+  it('the comparison really covers every pack', () => {
+    expect(Object.keys(builtInLocales)).toHaveLength(PLATFORM_LOCALE_TAGS.length);
   });
 });
 
@@ -281,7 +282,7 @@ describe('the ADR-0105 write-target badge resolves from the locale packs (#3517)
     // `Creates in ${org}`, so it could never satisfy this assertion — if the
     // packs ever stop driving this badge, it fails loudly instead of quietly
     // reverting to English.
-    const badge = await badgeIn('zh');
+    const badge = await badgeIn('zh-Hans');
     expect(badge).toHaveTextContent(
       String(builtInLocales['zh-Hans'].form.createTargetOrg).replace('{{org}}', 'Acme Inc'),
     );

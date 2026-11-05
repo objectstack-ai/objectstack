@@ -66,7 +66,7 @@ import { PageHeaderPhoneContext } from './page-header-phone-context';
 import { renderBlockChildren } from './page-block-grid';
 import { isFileIdToken } from '@objectstack/spec/data';
 import { readActionEntryParamValues } from '../action/static-params';
-import { useObjectLabel, useSafeFieldLabel, useObjectTranslation, useSafeTranslate, createSafeTranslation, pickLocalized, useDisplayLocale } from '@object-ui/i18n';
+import { useObjectLabel, useSafeFieldLabel, useObjectTranslation, useSafeTranslate, createSafeTranslation, pickLocalized, useDisplayLocale, resolveBuiltInLanguage } from '@object-ui/i18n';
 import { MoreHorizontal, RefreshCw } from 'lucide-react';
 
 /**
@@ -167,10 +167,13 @@ const labelText = (label: any): string => {
  * localized chrome.
  *
  * What stays here is what the packs cannot answer:
- *   - `zh-TW`. There is no `zh-TW` pack; i18next resolves it to the
- *     SIMPLIFIED `zh` resource, so this map is the only source of the
- *     Traditional forms. It must therefore win over the pack lookup, which is
- *     why the dict is consulted first rather than second.
+ *   - the Traditional rows. They were written while `zh-TW` had no pack and
+ *     i18next served it the Simplified one, so this map was the only source
+ *     of Traditional forms and is consulted first. The generated `zh-Hant`
+ *     pack (objectstack#30511) now answers the pack-covered tokens with the
+ *     same words; a `zh-Hant` session (and `zh-HK` / `zh-MO`, which the
+ *     platform locale table reads as it) reads these rows too, never the
+ *     Simplified ones.
  *   - the tokens no pack carries (`Notes`, `Files`, `Tasks`, `Events`,
  *     `Overview`, and the object-name rows) — dropping them would take
  *     coverage AWAY from zh.
@@ -292,10 +295,15 @@ const translateLabel = (
   tt: (keyOrKeys: string | string[], fallback: string) => string,
 ): string => {
   if (!text) return text;
-  // Match `zh-CN`, `zh-TW`, then base `zh` → `zh-CN`.
+  // Match `zh-CN`, `zh-TW`, then any other `zh` by the script its platform
+  // locale tag names: `zh-Hant` (`zh-HK`, `zh-MO`) → `zh-TW`, the rest →
+  // `zh-CN` (objectstack#30511).
   const exact = KNOWN_LABEL_DICT[locale];
   const base = locale.split('-')[0];
-  const fallback = base === 'zh' ? KNOWN_LABEL_DICT['zh-CN'] : undefined;
+  const fallback =
+    base === 'zh'
+      ? KNOWN_LABEL_DICT[resolveBuiltInLanguage(locale) === 'zh-Hant' ? 'zh-TW' : 'zh-CN']
+      : undefined;
   const dict = exact || fallback;
   /**
    * One token, in lookup order: the exact-locale dict, then the pack.

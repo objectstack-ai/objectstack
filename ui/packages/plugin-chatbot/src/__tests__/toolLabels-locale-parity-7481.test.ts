@@ -43,6 +43,7 @@ import { describe, it, expect } from 'vitest';
 import * as specSystem from '@objectstack/spec/system';
 import { builtInLocales } from '@object-ui/i18n/locales';
 import { humanizeToolName, toolTitleKey } from '../tool-display.js';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 
 type LocaleCode = keyof typeof builtInLocales;
 const LANGS = Object.keys(builtInLocales) as LocaleCode[];
@@ -91,8 +92,8 @@ const ttFrom = (lang: LocaleCode) => (key: string, fallback: string): string => 
 };
 
 describe('chatbot.tool.* covers every tool the runtime can show (objectui#7481)', () => {
-  it('covers all ten built-in packs', () => {
-    expect(LANGS).toHaveLength(10);
+  it('covers every built-in pack, one per platform locale', () => {
+    expect(LANGS).toEqual([...PLATFORM_LOCALE_TAGS]);
   });
 
   it('reads a non-empty coverage set', () => {
@@ -135,21 +136,21 @@ describe('chatbot.tool.* covers every tool the runtime can show (objectui#7481)'
 
 describe('humanizeToolName resolves the newer tools through the pack (objectui#7481)', () => {
   it('zh: the card`s own step reads Chinese, not `Get authoring rules`', () => {
-    expect(humanizeToolName('get_authoring_rules', ttFrom('zh'))).toBe('查阅编写规范');
-    expect(humanizeToolName('get_authoring_rules', ttFrom('zh'))).not.toBe('Get authoring rules');
+    expect(humanizeToolName('get_authoring_rules', ttFrom('zh-Hans'))).toBe('查阅编写规范');
+    expect(humanizeToolName('get_authoring_rules', ttFrom('zh-Hans'))).not.toBe('Get authoring rules');
   });
 
   it('zh: the other four newly-mapped tools resolve too', () => {
-    const tt = ttFrom('zh');
+    const tt = ttFrom('zh-Hans');
     for (const name of AHEAD_OF_PIN) {
-      expect(humanizeToolName(name, tt), name).toBe(toolsOf('zh')![name]);
+      expect(humanizeToolName(name, tt), name).toBe(toolsOf('zh-Hans')![name]);
     }
   });
 
   it('an UNKNOWN tool still degrades to the English title-caser', () => {
     // The optionality this whole seam was built on (cloud#1658): a custom or
     // third-party tool must be no worse off than before.
-    expect(humanizeToolName('forecast_revenue', ttFrom('zh'))).toBe('Forecast revenue');
+    expect(humanizeToolName('forecast_revenue', ttFrom('zh-Hans'))).toBe('Forecast revenue');
     expect(toolTitleKey('forecast_revenue')).toBe('chatbot.tool.forecast_revenue');
   });
 });
