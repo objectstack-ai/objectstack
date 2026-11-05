@@ -124,16 +124,41 @@ export const SeedRowSchema = z
   });
 export type SeedRow = z.infer<typeof SeedRowSchema>;
 
-export const FILTER_OPS = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'in'] as const;
+/**
+ * A field of the question's object, or a RELATION PATH through lookup fields
+ * declared in `expect.lookups` (`invoice.status`, `order.account.region`),
+ * resolved through the seed rows' lookup ids by the loader.
+ */
+export const FieldPathSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$/, 'must be a snake_case field or a dotted relation path');
+
+/** A window relative to the card's fixed `asOf` date, so a truth stays deterministic. */
+export const WindowSchema = z.discriminatedUnion('kind', [
+  /** The `days` days ending on `asOf`, inclusive. */
+  z.strictObject({ kind: z.literal('last_days'), days: z.number().int().min(1) }),
+  z.strictObject({
+    kind: z.literal('calendar'),
+    period: z.enum(['this_month', 'previous_month', 'this_year', 'previous_year']),
+  }),
+]);
+export type Window = z.infer<typeof WindowSchema>;
+
+export const FILTER_OPS = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'in', 'in_window'] as const;
 
 export const FilterSchema = z
   .strictObject({
-    field: MachineNameSchema,
+    field: FieldPathSchema,
     op: z.enum(FILTER_OPS),
-    value: z.union([ScalarSchema, z.array(ScalarSchema).min(1)]),
+    value: z.union([ScalarSchema, z.array(ScalarSchema).min(1), WindowSchema]),
   })
   .superRefine((f, ctx) => {
     const isList = Array.isArray(f.value);
+    const isWindow = typeof f.value === 'object' && f.value !== null && !isList;
+    if ((f.op === 'in_window') !== isWindow) {
+      ctx.addIssue({ code: 'custom', path: ['value'], message: '`in_window`, and only it, takes a window value' });
+      return;
+    }
     if (f.op === 'in' && !isList) {
       ctx.addIssue({ code: 'custom', path: ['value'], message: '`in` needs a non-empty list value' });
     }
@@ -165,7 +190,7 @@ function fieldAggregate<K extends 'sum' | 'avg' | 'min' | 'max'>(kind: K) {
     kind: z.literal(kind),
     field: MachineNameSchema,
     filter: filterList,
-    groupBy: MachineNameSchema.optional(),
+    groupBy: FieldPathSchema.optional(),
     order: z.enum(ORDERS).optional(),
   });
 }
@@ -174,13 +199,15 @@ function fieldAggregate<K extends 'sum' | 'avg' | 'min' | 'max'>(kind: K) {
  * The DECLARATIVE truth of a question. The loader evaluates it over the seed
  * rows; a question's answer is computed by code, never typed by hand.
  *
- * `kind` is a closed enum — count | sum | avg | min | max | topN.
+ * `kind` is a closed enum — count | sum | avg | min | max | topN | unanswerable.
+ * `unanswerable` means the seed cannot answer: a correct reply says so.
  */
 export const TruthSpecSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('unanswerable'), reason: z.string().min(1) }),
   z.strictObject({
     kind: z.literal('count'),
     filter: filterList,
-    groupBy: MachineNameSchema.optional(),
+    groupBy: FieldPathSchema.optional(),
     order: z.enum(ORDERS).optional(),
   }),
   fieldAggregate('sum'),
@@ -194,7 +221,7 @@ export const TruthSpecSchema = z.discriminatedUnion('kind', [
       order: z.enum(ORDERS),
       filter: filterList,
       // With `groupBy`: rank the groups by `measure`.
-      groupBy: MachineNameSchema.optional(),
+      groupBy: FieldPathSchema.optional(),
       measure: MeasureSchema.optional(),
       // Without `groupBy`: rank the rows by `field`.
       field: MachineNameSchema.optional(),
@@ -224,6 +251,8 @@ export const QuestionSchema = z.strictObject({
   ask: LocalizedTextSchema,
   object: MachineNameSchema,
   truth: TruthSpecSchema,
+  /** Also compute the truth AS each of these personas (their row scope and hidden fields applied). */
+  personas: z.array(MachineNameSchema).min(1).optional(),
 });
 
 export const FieldRefSchema = z.strictObject({
@@ -239,6 +268,15 @@ export const PersonaSchema = z
       objects: z.array(MachineNameSchema).optional(),
       fields: z.array(FieldRefSchema).optional(),
     }),
+    /**
+     * ROW scope: of each named object the persona sees only the rows whose
+     * `field` (a field or relation path) equals `value` — a rep sees their own
+     * rows (`owner`), a manager their department's (`owner.department`).
+     */
+    scope: z
+      .array(z.strictObject({ object: MachineNameSchema, field: FieldPathSchema, value: ScalarSchema }))
+      .min(1)
+      .optional(),
   })
   .refine((p) => (p.hidden.objects?.length ?? 0) + (p.hidden.fields?.length ?? 0) > 0, {
     path: ['hidden'],
@@ -249,6 +287,41 @@ export const PersonaSchema = z
 
 export const OPERATION_KINDS = ['create', 'update', 'delete'] as const;
 
+/** A record as the data API should read it after an applied write. */
+export const PostStateSchema = z
+  .strictObject({
+    object: MachineNameSchema,
+    /** A seeded row's id — or, for a row the write creates, `where` matches it. */
+    id: z.string().min(1).optional(),
+    where: z.record(MachineNameSchema, ScalarSchema).optional(),
+    values: z.record(MachineNameSchema, ScalarSchema).optional(),
+    absent: z.literal(true).optional(),
+  })
+  .superRefine((s, ctx) => {
+    if ((s.id === undefined) === (s.where === undefined)) {
+      ctx.addIssue({ code: 'custom', path: ['id'], message: 'a post-state names its row by exactly one of `id` or `where`' });
+    }
+    if ((s.values === undefined) === (s.absent === undefined)) {
+      ctx.addIssue({ code: 'custom', path: ['values'], message: 'a post-state carries exactly one of `values` or `absent`' });
+    }
+  });
+
+/** What a write must come to — declared, so grading reads it with code only. */
+export const OutcomeSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('applied'),
+    state: z.array(PostStateSchema).min(1),
+    /** The persona the audit trail must name as the actor. */
+    auditActor: MachineNameSchema.optional(),
+  }),
+  z.strictObject({
+    kind: z.literal('refused'),
+    code: z.string().regex(/^[A-Z][A-Z0-9_]*$/, 'an error code is SCREAMING_SNAKE (ADR-0112)'),
+  }),
+  /** The agent asks first and writes nothing until confirmed. */
+  z.strictObject({ kind: z.literal('pending_confirmation') }),
+]);
+
 export const OperationSchema = z
   .strictObject({
     id: MachineNameSchema,
@@ -257,6 +330,9 @@ export const OperationSchema = z
     ask: LocalizedTextSchema,
     target: z.string().min(1).optional(),
     values: z.record(MachineNameSchema, ScalarSchema).optional(),
+    /** The persona the agent acts for. */
+    actingAs: MachineNameSchema,
+    outcome: OutcomeSchema,
   })
   .superRefine((op, ctx) => {
     if (op.kind !== 'create' && op.target === undefined) {
@@ -295,6 +371,14 @@ export const GuardrailSchema = z.strictObject({
   cell: z.strictObject({ object: MachineNameSchema, id: z.string().min(1), field: MachineNameSchema }).optional(),
 });
 
+/** A business action an agent may call; `confirm` actions ask before acting. */
+export const AgentActionSchema = z.strictObject({
+  name: MachineNameSchema,
+  object: MachineNameSchema,
+  summary: z.string().min(1),
+  confirm: z.boolean(),
+});
+
 // ── Layer 6: iterate ────────────────────────────────────────────────────────
 
 /** What one change request is expected to ADD to `expect`. */
@@ -327,14 +411,19 @@ export const ScenarioCardSchema = z.strictObject({
   provenance: z.string().min(1),
   prompt: PromptSchema,
   expect: ExpectSchema,
+  /** The fixed "today" relative windows are computed against (`YYYY-MM-DD`). */
+  asOf: z.iso.date().optional(),
   capabilities: z.array(CapabilityTagSchema).min(1),
   category: CategorySchema,
   run: z.strictObject({
     seed: z.record(MachineNameSchema, z.array(SeedRowSchema).min(1)),
-    questions: z.array(QuestionSchema).min(3),
+    questions: z.array(QuestionSchema).min(5),
     personas: z.array(PersonaSchema).min(2),
-    operations: z.array(OperationSchema).min(1),
+    operations: z.array(OperationSchema).min(2),
     guardrails: z.array(GuardrailSchema).min(GUARDRAIL_CHECKS.length),
+    /** Why the card runs fewer than 8 questions or 4 operations; required then. */
+    countsReason: z.string().min(1).optional(),
+    agentActions: z.array(AgentActionSchema).min(3).optional(),
   }),
   iterate: IterateSchema,
 });

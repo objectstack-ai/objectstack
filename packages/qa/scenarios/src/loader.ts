@@ -43,8 +43,10 @@ export interface Refusal {
 export interface LoadedScenario {
   file: string;
   card: ScenarioCard;
-  /** Question id → its computed truth. */
+  /** Question id → its computed truth over every row. */
   truths: Record<string, Truth>;
+  /** Question id → persona id → the truth AS that persona, for questions that list personas. */
+  personaTruths: Record<string, Record<string, Truth>>;
 }
 
 export interface LoadResult {
@@ -132,9 +134,9 @@ export function loadScenarioFile(
   }
 
   const card = parsed.data;
-  const truths = checkCard(card, basename(file, '.json'), options, refuse);
+  const computed = checkCard(card, basename(file, '.json'), options, refuse);
   if (refusals.length > 0) return { refusals };
-  return { card: { file, card, truths }, refusals };
+  return { card: { file, card, ...computed }, refusals };
 }
 
 type Refuse = (path: IssuePath, message: string) => void;
@@ -176,7 +178,12 @@ function checkExpectRefs(
   });
 }
 
-function checkCard(card: ScenarioCard, stem: string, options: LoadOptions, refuse: Refuse): Record<string, Truth> {
+function checkCard(
+  card: ScenarioCard,
+  stem: string,
+  options: LoadOptions,
+  refuse: Refuse,
+): Pick<LoadedScenario, 'truths' | 'personaTruths'> {
   const { expect, run } = card;
 
   // ── identity ──
@@ -264,37 +271,44 @@ function checkCard(card: ScenarioCard, stem: string, options: LoadOptions, refus
     return true;
   };
 
-  // ── questions: refs resolve, then the truth is computed ──
-  const truths: Record<string, Truth> = {};
-  duplicates(run.questions, (q) => q.id, ['run', 'questions'], 'question id', refuse);
-  run.questions.forEach((q, i) => {
-    const at: IssuePath = ['run', 'questions', i];
-    const rows = seed[q.object];
-    if (!objects.has(q.object) || rows === undefined) {
-      refuse([...at, 'object'], `\`${q.object}\` is not a seeded expected object`);
-      return;
+  // Relation paths: every hop but the last is a lookup declared in
+  // `expect.lookups`; the last is a field the reached object's seed carries.
+  // Answers the (object, field) pairs the path reads, or null once refused.
+  const checkPath = (object: string, path: string, at: IssuePath): Array<[string, string]> | null => {
+    const segs = path.split('.');
+    const read: Array<[string, string]> = [];
+    let cur = object;
+    for (const seg of segs.slice(0, -1)) {
+      const to = lookupFields.get(`${cur}.${seg}`);
+      if (to === undefined) {
+        refuse(at, `\`${seg}\` is not a lookup of \`${cur}\` in expect.lookups, so \`${path}\` does not resolve`);
+        return null;
+      }
+      read.push([cur, seg]);
+      cur = to;
     }
-    const t = q.truth;
-    const fieldRefs: Array<[string, IssuePath]> = [];
-    (t.filter ?? []).forEach((f, j) => fieldRefs.push([f.field, [...at, 'truth', 'filter', j, 'field']]));
-    if (t.groupBy !== undefined) fieldRefs.push([t.groupBy, [...at, 'truth', 'groupBy']]);
-    if ('field' in t && t.field !== undefined) fieldRefs.push([t.field, [...at, 'truth', 'field']]);
-    if (t.kind === 'topN' && t.measure && 'field' in t.measure) {
-      fieldRefs.push([t.measure.field, [...at, 'truth', 'measure', 'field']]);
+    const last = segs[segs.length - 1];
+    if (!checkField(cur, last, at)) return null;
+    read.push([cur, last]);
+    return read;
+  };
+  const rowById = new Map(Object.entries(seed).map(([name, rows]) => [name, new Map(rows.map((r) => [r.id, r]))]));
+  const resolverFor = (object: string) => (row: SeedRow, path: string) => {
+    let cur = object;
+    let r: SeedRow | undefined = row;
+    const segs = path.split('.');
+    for (const seg of segs.slice(0, -1)) {
+      const to = lookupFields.get(`${cur}.${seg}`) as string;
+      const id: unknown = r[seg];
+      r = typeof id === 'string' ? rowById.get(to)?.get(id) : undefined;
+      if (r === undefined) return null;
+      cur = to;
     }
-    // Evaluate only once every field resolves: a misspelt field would
-    // otherwise read as all-null and compute a confident wrong truth.
-    const resolved = fieldRefs.map(([field, p]) => checkField(q.object, field, p));
-    if (resolved.includes(false)) return;
-    try {
-      truths[q.id] = evaluateTruth(t, rows);
-    } catch (e) {
-      if (e instanceof TruthError) refuse([...at, 'truth', ...e.path], e.message);
-      else throw e;
-    }
-  });
+    const v = r[segs[segs.length - 1]];
+    return v === undefined ? null : v;
+  };
 
-  // ── personas ──
+  // ── personas: hidden refs and row scope resolve ──
   duplicates(run.personas, (p) => p.id, ['run', 'personas'], 'persona id', refuse);
   const personas = new Set(run.personas.map((p) => p.id));
   run.personas.forEach((p, i) => {
@@ -305,6 +319,77 @@ function checkCard(card: ScenarioCard, stem: string, options: LoadOptions, refus
       const at: IssuePath = ['run', 'personas', i, 'hidden', 'fields', j];
       if (!objects.has(f.object)) refuse([...at, 'object'], `\`${f.object}\` is not in expect.objects`);
       else checkField(f.object, f.field, [...at, 'field']);
+    });
+    (p.scope ?? []).forEach((sc, j) => {
+      const at: IssuePath = ['run', 'personas', i, 'scope', j];
+      if (!objects.has(sc.object) || seed[sc.object] === undefined) {
+        refuse([...at, 'object'], `\`${sc.object}\` is not a seeded expected object`);
+      } else checkPath(sc.object, sc.field, [...at, 'field']);
+    });
+  });
+
+  // ── questions: refs resolve, then the truth is computed (and per persona) ──
+  const truths: Record<string, Truth> = {};
+  const personaTruths: Record<string, Record<string, Truth>> = {};
+  duplicates(run.questions, (q) => q.id, ['run', 'questions'], 'question id', refuse);
+  run.questions.forEach((q, i) => {
+    const at: IssuePath = ['run', 'questions', i];
+    const rows = seed[q.object];
+    if (!objects.has(q.object) || rows === undefined) {
+      refuse([...at, 'object'], `\`${q.object}\` is not a seeded expected object`);
+      return;
+    }
+    const t = q.truth;
+    // Evaluate only once every field resolves: a misspelt field would
+    // otherwise read as all-null and compute a confident wrong truth.
+    const read: Array<[string, string]> = [];
+    let ok = true;
+    const path = (field: string, p: IssuePath) => {
+      const r = checkPath(q.object, field, p);
+      if (r) read.push(...r);
+      else ok = false;
+    };
+    if (t.kind !== 'unanswerable') {
+      (t.filter ?? []).forEach((f, j) => path(f.field, [...at, 'truth', 'filter', j, 'field']));
+      if (t.groupBy !== undefined) path(t.groupBy, [...at, 'truth', 'groupBy']);
+      if ('field' in t && t.field !== undefined) path(t.field, [...at, 'truth', 'field']);
+      if (t.kind === 'topN' && t.measure && 'field' in t.measure) path(t.measure.field, [...at, 'truth', 'measure', 'field']);
+    }
+    (q.personas ?? []).forEach((id, j) => {
+      if (!personas.has(id)) {
+        refuse([...at, 'personas', j], `no persona \`${id}\``);
+        ok = false;
+      }
+    });
+    if (!ok) return;
+    const ctx = { resolve: resolverFor(q.object), asOf: card.asOf };
+    const evaluate = (scoped: readonly SeedRow[], p: IssuePath): Truth | undefined => {
+      try {
+        return evaluateTruth(t, scoped, ctx);
+      } catch (e) {
+        if (!(e instanceof TruthError)) throw e;
+        refuse([...p, ...e.path], e.message);
+        return undefined;
+      }
+    };
+    const all = evaluate(rows, [...at, 'truth']);
+    if (all) truths[q.id] = all;
+    if (q.personas === undefined) return;
+    personaTruths[q.id] = {};
+    q.personas.forEach((id, j) => {
+      const p = run.personas.find((x) => x.id === id)!;
+      const hiddenFields = new Set((p.hidden.fields ?? []).map((f) => `${f.object}.${f.field}`));
+      const hiddenObjects = new Set(p.hidden.objects ?? []);
+      const withheld =
+        hiddenObjects.has(q.object) || read.some(([o, f]) => hiddenObjects.has(o) || hiddenFields.has(`${o}.${f}`));
+      if (withheld && t.kind !== 'unanswerable') {
+        personaTruths[q.id][id] = { kind: 'withheld' };
+        return;
+      }
+      const rules = (p.scope ?? []).filter((sc) => sc.object === q.object);
+      const scoped = rows.filter((r) => rules.every((sc) => ctx.resolve(r, sc.field) === sc.value));
+      const truth = evaluate(scoped, [...at, 'personas', j]);
+      if (truth) personaTruths[q.id][id] = truth;
     });
   });
 
@@ -327,7 +412,40 @@ function checkCard(card: ScenarioCard, stem: string, options: LoadOptions, refus
       checkField(op.object, field, [...at, 'values', field]);
       checkRef(op.object, field, value, [...at, 'values', field]);
     }
+    if (!personas.has(op.actingAs)) refuse([...at, 'actingAs'], `no persona \`${op.actingAs}\``);
+    const out = op.outcome;
+    if (out.kind !== 'applied') return;
+    if (out.auditActor !== undefined && !personas.has(out.auditActor)) {
+      refuse([...at, 'outcome', 'auditActor'], `no persona \`${out.auditActor}\``);
+    }
+    out.state.forEach((st, j) => {
+      const sat: IssuePath = [...at, 'outcome', 'state', j];
+      if (!objects.has(st.object) || seed[st.object] === undefined) {
+        refuse([...sat, 'object'], `\`${st.object}\` is not a seeded expected object`);
+        return;
+      }
+      if (st.id !== undefined && !(ids.get(st.object)?.has(st.id) ?? false)) {
+        refuse([...sat, 'id'], `no seeded \`${st.object}\` row has id \`${st.id}\` (a created row is matched by \`where\`)`);
+      }
+      for (const key of ['where', 'values'] as const) {
+        for (const field of Object.keys(st[key] ?? {})) checkField(st.object, field, [...sat, key, field]);
+      }
+    });
   });
+
+  // ── read/write counts: below the default band needs a stated reason ──
+  if ((run.questions.length < 8 || run.operations.length < 4) && run.countsReason === undefined) {
+    refuse(['run', 'countsReason'], `${run.questions.length} questions / ${run.operations.length} operations is below the default 8 / 4: state why in \`countsReason\``);
+  }
+
+  // ── agent actions: resolvable, unique, at least one confirm-gated ──
+  if (run.agentActions !== undefined) {
+    duplicates(run.agentActions, (a) => a.name, ['run', 'agentActions'], 'agent action', refuse);
+    run.agentActions.forEach((a, i) => {
+      if (!objects.has(a.object)) refuse(['run', 'agentActions', i, 'object'], `\`${a.object}\` is not in expect.objects`);
+    });
+    if (!run.agentActions.some((a) => a.confirm)) refuse(['run', 'agentActions'], 'needs at least one confirm-gated action');
+  }
 
   // ── guardrails: all five, once each, every reference resolving ──
   duplicates(run.guardrails, (g) => g.check, ['run', 'guardrails'], 'guardrail check', refuse);
@@ -348,9 +466,17 @@ function checkCard(card: ScenarioCard, stem: string, options: LoadOptions, refus
     if (g.persona !== undefined && !personas.has(g.persona)) refuse([...at, 'persona'], `no persona \`${g.persona}\``);
     if (g.operation !== undefined) {
       const op = operations.get(g.operation);
+      // Each check is graded by the operation's declared outcome, so the
+      // outcome must be the one the check asserts.
+      const wants = { write_validation: 'refused', confirm_irreversible: 'pending_confirmation', audit_actor: 'applied' } as const;
+      const want = wants[g.check as keyof typeof wants];
       if (op === undefined) refuse([...at, 'operation'], `no operation \`${g.operation}\``);
       else if (g.check === 'write_validation' && op.kind === 'delete') {
         refuse([...at, 'operation'], 'write validation is asserted on a create or update, not a delete');
+      } else if (op.outcome.kind !== want) {
+        refuse([...at, 'operation'], `a \`${g.check}\` check needs an operation whose outcome is \`${want}\`, not \`${op.outcome.kind}\``);
+      } else if (g.check === 'audit_actor' && op.outcome.kind === 'applied' && op.outcome.auditActor === undefined) {
+        refuse([...at, 'operation'], 'an `audit_actor` check needs the operation to declare `outcome.auditActor`');
       }
     }
     if (g.cell !== undefined) {
@@ -384,7 +510,7 @@ function checkCard(card: ScenarioCard, stem: string, options: LoadOptions, refus
   const after = applyExpectDelta(expect, delta);
   checkExpectRefs(delta, new Set(after.objects), new Set(after.dashboards ?? []), at, refuse);
 
-  return truths;
+  return { truths, personaTruths };
 }
 
 /** `expect` after an iteration's delta is applied (additive). */
