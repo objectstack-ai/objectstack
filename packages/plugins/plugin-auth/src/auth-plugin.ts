@@ -1238,10 +1238,12 @@ export class AuthPlugin implements Plugin {
         //    `setDefaultLocale`; the CLI passes `config.i18n.defaultLocale`),
         //    and is the bare `en` when the app declares nothing.
         //  - `localization.locale` (ADR-0053) is the workspace's RUNTIME
-        //    language — Setup, Localization, tenant-scoped — whose four
-        //    options are exactly `AUTH_EMAIL_TEMPLATE_LOCALES`. It is
-        //    already the authority for auth SMS (#2815) and for audit
-        //    activity summaries (framework#3039).
+        //    language — Setup, Localization, tenant-scoped — whose options
+        //    are the deployment's locale list (#30286), so it may name a
+        //    language the auth mail rows do not ship (see
+        //    `AUTH_EMAIL_TEMPLATE_LOCALES`). It is already the authority for
+        //    auth SMS (#2815) and for audit activity summaries
+        //    (framework#3039).
         //
         // A workspace that declared Chinese therefore received Chinese SMS
         // and ENGLISH mail. The workspace setting now outranks the
