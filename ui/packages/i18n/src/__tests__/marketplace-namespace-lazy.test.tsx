@@ -54,7 +54,7 @@ const koChunk = vi.hoisted(() => ({ fails: true, requests: 0 }));
 vi.mock('../namespaces/marketplace/ko.js', async (importOriginal) => {
   koChunk.requests += 1;
   if (koChunk.fails) throw new Error('chunk offline');
-  return importOriginal();
+  return { ...(await importOriginal<Record<string, unknown>>()) };
 });
 
 const PACKS: Record<string, Record<string, unknown>> = {

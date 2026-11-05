@@ -84,7 +84,7 @@ vi.mock('../../../components/SuggestedBindingsPanel', () => ({ SuggestedBindings
 vi.mock('@object-ui/i18n/namespaces/marketplace/ar', async (importOriginal) => {
   arChunk.requests += 1;
   if (arChunk.fails) throw new Error('chunk offline');
-  return importOriginal();
+  return { ...(await importOriginal<Record<string, unknown>>()) };
 });
 
 import { I18nProvider } from '@object-ui/i18n';
