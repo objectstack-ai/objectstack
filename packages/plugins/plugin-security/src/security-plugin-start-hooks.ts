@@ -6,7 +6,8 @@
  * statements from the position-catalog refusal to the end of `start()`. In the
  * order they stand, it registers the `sys_user_position` catalog refusal and
  * the grant-holder membership refusal on the engine, the permission-set name
- * hooks, the platform bootstrap on `kernel:ready` (the managed-object write
+ * hooks, the agent ceiling grant refusal, the platform bootstrap on
+ * `kernel:ready` (the managed-object write
  * denies, the platform-admin bootstrap, the permission-door registrations and
  * the audience-binding sync), the boot reports on `kernel:bootstrapped`, the
  * middleware that replays the bootstrap after a qualifying write, the
@@ -50,6 +51,7 @@ import type { SecurityPlugin } from './security-plugin.js';
 import { POSITION_ASSIGNMENT_OBJECT, createPositionCatalogRefusal } from './position-catalog-refusal.js';
 import { registerGrantHolderMembershipRefusal } from './grant-holder-membership-refusal.js';
 import { registerGrantPermissionSetNameHooks } from './grant-permission-set-name.js';
+import { registerAgentCeilingGrantRefusal } from './agent-ceiling-grant-refusal.js';
 import { reportCatalogReferences } from './catalog-reference-report.js';
 import {
   reportAccessUpgrade,
@@ -126,6 +128,12 @@ export function registerStartHooks(
         'permission set the security catalog does not hold is NOT refused',
     );
   }
+  // [ADR-0090 D10] A `sys_user_permission_set` row is a person's grant, and an
+  // agent ceiling set is not a person's set: a non-system write that would
+  // store one is refused (`400 VALIDATION_FAILED`, `invalid_value` at
+  // `permission_set`), for every caller. Engine hooks; see
+  // `agent-ceiling-grant-refusal.ts`.
+  registerAgentCeilingGrantRefusal(ql, ctx.logger);
 
   // [ADR-0131 D3, C3 stage 8] No data-door write-through and no walled
   // catalog data-door refusal is registered: the catalog objects are

@@ -2260,7 +2260,7 @@ const en = {
     },
     settingsHub: {
       title: 'Settings',
-      subtitle: 'Configure your system, integrations, and feature flags.',
+      subtitle: 'Configure your system and integrations.',
       loadError: 'Failed to load settings',
       empty: 'No settings pages are available yet. They appear here when an installed app provides them.',
       adminManaged: 'Settings are managed by your administrator',

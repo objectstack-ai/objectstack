@@ -11,7 +11,7 @@ import { ValueDomainSchema } from '../shared/value-domain.zod';
  * Settings Manifest Protocol
  *
  * Declarative description of a single namespace of platform settings
- * (e.g. `mail`, `branding`, `feature_flags`). Modelled on Apple's
+ * (e.g. `mail`, `branding`, `localization`). Modelled on Apple's
  * `Settings.bundle/Root.plist` PreferenceSpecifiers — a small, closed
  * set of specifier types that the system-owned renderer turns into a
  * uniform Settings page.

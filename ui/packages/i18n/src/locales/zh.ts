@@ -1918,7 +1918,7 @@ const zh = {
     },
     settingsHub: {
       title: '设置',
-      subtitle: '配置系统、集成与功能开关。',
+      subtitle: '配置系统与集成。',
       loadError: '加载设置失败',
       empty: '暂无可用的设置页面。已安装的应用提供设置页面后，会显示在这里。',
       adminManaged: '设置由管理员管理',
