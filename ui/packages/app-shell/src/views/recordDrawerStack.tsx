@@ -64,6 +64,7 @@ import {
 import { overlayWidthFor } from '@object-ui/plugin-view';
 import type { FieldContainerLike } from '@object-ui/core';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
+import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/useNavTargetLabel.js';
 import { prefetchRelatedCounts, relatedCountTargetsIn } from '@object-ui/plugin-detail';
 import { useFilterScope } from '@object-ui/react';
 import {
@@ -419,7 +420,7 @@ export function RecordStackDrawer({
   renderRecord: (level: RecordDrawerLevel) => ReactNode;
 }) {
   const { objectLabel, objectPluralLabel } = useObjectLabel();
-  const { t } = useObjectTranslation();
+  const { t, language } = useObjectTranslation();
   const { path, depth, current, push, popTo, stepper, upcoming } = stack;
   const api = useMemo<RecordDrawerApi>(() => ({ open: push }), [push]);
   const pane = useMemo<RecordPaneApi | null>(
@@ -447,11 +448,13 @@ export function RecordStackDrawer({
     objects.find((o) => (o as { name?: unknown } | null)?.name === objectName);
   const labelOf = (objectName: string) => {
     const def = defOf(objectName);
-    return def ? objectLabel(def as never) : objectName;
+    return def ? servedObjectLabel({ name: objectName, label: (def as { label?: unknown }).label }, language, objectLabel, objectName) : objectName;
   };
   const pluralLabelOf = (objectName: string) => {
     const def = defOf(objectName);
-    return def ? objectPluralLabel(def as never) : objectName;
+    return def
+      ? servedObjectPluralLabel({ ...(def as { label?: unknown; pluralLabel?: unknown }), name: objectName }, language, objectPluralLabel, objectName)
+      : objectName;
   };
   const shortId = (recordId: string) => `#${recordId.length > 12 ? `${recordId.slice(0, 8)}…` : recordId}`;
   const titleOf = (level: RecordDrawerLevel) => titles[levelKey(level)!] || level.title || shortId(level.recordId);

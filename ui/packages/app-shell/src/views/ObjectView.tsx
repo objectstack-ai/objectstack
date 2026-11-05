@@ -25,7 +25,7 @@ import { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
 import { useMetaItemRefusal } from '../hooks/useMetaItemRefusal.js';
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
 import { useServedViewItems } from '../hooks/useServedViewItems.js';
-import { servedObjectPluralLabel } from '../hooks/useNavTargetLabel.js';
+import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/useNavTargetLabel.js';
 import type { DataSource } from '@object-ui/types';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { ViewConfigPanel } from './ViewConfigPanel.js';
@@ -910,16 +910,18 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // and Sonner toast instead of native window.confirm.
     // objectstack#28472 — the objects a delete cascades into, named by label.
     const objectLabelOf = useCallback(
-        (name: string) => objectLabel(objects.find((o: any) => o.name === name) ?? { name, label: name }),
-        [objects, objectLabel],
+        (name: string) =>
+            servedObjectLabel(objects.find((o: any) => o.name === name) ?? { name }, language, objectLabel, name),
+        [objects, objectLabel, language],
     );
     const actions = useObjectActions({
         objectName: objectDef.name,
         // The label this page shows (its header and breadcrumb read the same
-        // `objectLabel`), so the delete confirmation that names the record
+        // label), so the delete confirmation that names the record
         // (objectui#11695) and the delete toasts read it in the session's
-        // language; with no translation bundle it is `objectDef.label`.
-        objectLabel: objectLabel(objectDef),
+        // language: the served label as given, the bundle only when none is
+        // served (objectstack#30390).
+        objectLabel: servedObjectLabel(objectDef, language, objectLabel),
         objectDef,
         dataSource,
         onEdit,
@@ -1256,7 +1258,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                    open={showImport}
                    onOpenChange={setShowImport}
                    objectName={objectDef.name}
-                   objectLabel={objectLabel(objectDef)}
+                   objectLabel={servedObjectLabel(objectDef, language, objectLabel)}
                    fields={identityImportEnabled
                      // Identity import has a curated target set — the generic
                      // writable-field filter below would drop phone_number

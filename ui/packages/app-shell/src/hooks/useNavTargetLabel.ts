@@ -98,24 +98,49 @@ function nonEmpty(text: string | undefined): string | undefined {
 /** `useObjectLabel().objectPluralLabel` — the client bundle's list-title lookup. */
 export type ObjectPluralLabelLookup = (objectDef: { name: string; label: string; pluralLabel?: string }) => string;
 
+/** `useObjectLabel().objectLabel` — the client bundle's record-noun lookup. */
+export type ObjectLabelLookup = (objectDef: { name: string; label: string }) => string;
+
 /**
  * What a served object's LIST is called (objectstack#30311): its served
  * `pluralLabel`, else its served `label`, drawn as given. The server
  * translated both, by its label order for an overridden item, so running the
  * bundle over them was a second translation pass in which the base package's
  * string won a rename back. The bundle's `objectPluralLabel` under the
- * object's name is asked only when the definition carries neither; `''` when
- * nothing names it. Shared by every surface that titles an object's list —
- * the object page's header, the app header, a recent object row.
+ * object's name is asked only when the definition carries neither, with
+ * `fallback` (client text no server translated — the object's name, say) as
+ * the bundle's own last resort; `''` when nothing names it. Shared by every
+ * surface that titles an object's list — the object page's header, the app
+ * header, a recent object row, a related list.
  */
 export function servedObjectPluralLabel(
   objectDef: { name: string; label?: unknown; pluralLabel?: unknown },
   language: string | undefined,
   objectPluralLabel: ObjectPluralLabelLookup,
+  fallback = '',
 ): string {
   // `pluralLabel` is a plain string in the spec, so only a string is one.
   const plural = typeof objectDef.pluralLabel === 'string' ? nonEmpty(objectDef.pluralLabel) : undefined;
-  return plural ?? metadataText(objectDef.label, language) ?? objectPluralLabel({ name: objectDef.name, label: '' });
+  return plural
+    ?? metadataText(objectDef.label, language)
+    ?? objectPluralLabel({ name: objectDef.name, label: fallback });
+}
+
+/**
+ * What ONE record of a served object is called — the singular sibling of
+ * {@link servedObjectPluralLabel} (objectstack#30390): the served `label`,
+ * drawn as given, since the server already translated it; the bundle's
+ * `objectLabel` under the object's name only when the definition carries
+ * none, with `fallback` as the bundle's own last resort. Every record-scoped
+ * surface reads it — the record page, its form, drawer and preview card.
+ */
+export function servedObjectLabel(
+  objectDef: { name: string; label?: unknown },
+  language: string | undefined,
+  objectLabel: ObjectLabelLookup,
+  fallback = '',
+): string {
+  return metadataText(objectDef.label, language) ?? objectLabel({ name: objectDef.name, label: fallback });
 }
 
 /** The two members this hook reads off a cached metadata record. */

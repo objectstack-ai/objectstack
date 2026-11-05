@@ -78,7 +78,7 @@ import {
   PREVIEW_QUERY_VALUE,
 } from '../preview/PreviewModeContext.js';
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
-import { servedObjectPluralLabel } from '../hooks/useNavTargetLabel.js';
+import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/useNavTargetLabel.js';
 import type { RowCrudPredicates } from '../utils/crudAffordances.js';
 
 /** Field types the auto-derived user-filter bar offers as dropdowns. */
@@ -709,7 +709,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
         <NavigationOverlay
           {...navOverlay}
           setIsOpen={(open: boolean) => { if (!open) closeRecordDrawer(); }}
-          title={objectLabel(objectDef)}
+          title={servedObjectLabel(objectDef, language, objectLabel)}
         >
           {(record: any) => (
             <RecordDetailView
