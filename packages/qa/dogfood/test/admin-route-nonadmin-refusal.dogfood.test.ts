@@ -278,6 +278,11 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
       body: {},
       note: 'a read: the gate runs first, then the handler confirms the caller\'s own standing; the admin gets 200 with the roster',
     },
+    // ── #30398 — the address the Allowed IP ranges save check judges (a read) ──
+    'GET /api/v1/auth/admin/client-address': {
+      bucket: 'objectstack-gate',
+      note: 'a read: the gate runs first and the handler reads no body and no query parameter; the admin gets 200 { clientAddress, trustProxy }',
+    },
     // ── #9653: the /admin/sso/* bridges, gated ahead of their delegation ────
     //
     // The ADR-0068 gate runs BEFORE the bridge re-dispatches into better-auth,

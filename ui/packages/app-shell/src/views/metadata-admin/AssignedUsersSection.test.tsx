@@ -37,6 +37,12 @@ vi.mock('@object-ui/fields', async (importOriginal) => {
   };
 });
 const pickedUsers = [{ id: 'u_new', name: 'New Nora' }];
+// The section picks its copy by the console locale; English unless a case sets it.
+let localeFixture: 'en-US' | 'zh-CN' = 'en-US';
+vi.mock('./i18n', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useMetadataLocale: () => localeFixture,
+}));
 
 // The registry's position definitions — the binding is part of the definition.
 const registryPositions = [
@@ -215,5 +221,41 @@ describe('AssignedUsersSection — reports each holders read to its host (object
 
     await screen.findByTestId('assigned-users-read-failed');
     expect(onHoldersRead).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * objectstack#30208 row 4 — a set the everyone position distributes said
+ * 「已绑定到 everyone 锚点」: a position's machine name and an engine word, on a
+ * page a business administrator reads. The note says who holds the set.
+ */
+describe('AssignedUsersSection — the everyone note says who holds the set (objectstack#30208)', () => {
+  it('zh-CN: names every signed-in member, not the everyone anchor', async () => {
+    localeFixture = 'zh-CN';
+    try {
+      const { container } = render(<AssignedUsersSection permissionSetName="showcase_contributor" />);
+      await waitFor(() => expect(screen.getByText('所有登录成员都持有此权限集。')).toBeTruthy());
+      expect(container.textContent).not.toContain('锚点');
+      expect(container.textContent).not.toContain('everyone');
+    } finally {
+      localeFixture = 'en-US';
+    }
+  });
+
+  it('English: the same note, with no anchor word', async () => {
+    const { container } = render(<AssignedUsersSection permissionSetName="showcase_contributor" />);
+    await waitFor(() => expect(screen.getByText('Every signed-in member holds this set.')).toBeTruthy());
+    expect(container.textContent).not.toMatch(/anchor/i);
+  });
+
+  it('CONTROL: a set the everyone position does not distribute draws no note', async () => {
+    localeFixture = 'zh-CN';
+    try {
+      render(<AssignedUsersSection permissionSetName="showcase_auditor" />);
+      await waitFor(() => expect(screen.getByText(/还没有分配任何用户/)).toBeTruthy());
+      expect(screen.queryByText('所有登录成员都持有此权限集。')).toBeNull();
+    } finally {
+      localeFixture = 'en-US';
+    }
   });
 });
