@@ -1,13 +1,13 @@
 ---
-'@objectstack/metadata-protocol': minor
-'@objectstack/objectql': minor
-'@objectstack/cloud-connection': minor
+'@objectstack/metadata-protocol': patch
+'@objectstack/objectql': patch
+'@objectstack/cloud-connection': patch
 ---
 
 fix(objectql, metadata-protocol, cloud-connection)!: a declared `.custom` action override is keyed and judged the same way at every door, and only its declared base's handler slots beneath it
 
 Clause-②: yes (narrowing) — the protocol door (save and publish) now refuses a declared action override whose `objectName` is not the base action's, with `403 NOT_OVERRIDABLE` and rule `declared_package_ships_no_such_item`, the refusal `os validate` and the managed install already gave it; the save door used to admit it. The managed install now admits a re-install of the pair whose override relaxes an earlier tightening back to the base's own gates, which it used to refuse with `declared_action_widens_access` while the save door admitted it. Every other input answers as before.
-Metadata-protocol: narrowed
+Metadata-protocol: none
 Skills-docs: follow-up #30505 — the declared action override's docs card; it owes one sentence that an override keeps the base action's `objectName`.
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: the action schema and the `overrides` declaration keep their shapes. What moves is which door admits one declared override shape, so all three doors give one answer, and the refusal carries its own remedy; nothing at rest is rewritten. -->
