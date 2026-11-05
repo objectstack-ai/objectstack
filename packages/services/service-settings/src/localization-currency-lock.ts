@@ -132,6 +132,12 @@ function arabicCount(n: number, singular: string, plural: string, accusative: st
   return `${n} ${form === 'few' ? plural : form === 'many' ? accusative : singular}`;
 }
 
+/** The Russian noun form for a count: 1, 21 … one; 2–4, 22–24 … few; the rest many. */
+function russianNoun(n: number, one: string, few: string, many: string): string {
+  const form = new Intl.PluralRules('ru').select(n);
+  return form === 'one' ? one : form === 'few' ? few : many;
+}
+
 /**
  * The lock's copy, one entry per locale the settings bundle ships
  * (`settingsBuiltinTranslations`). Kept here and not in that bundle: the
@@ -140,7 +146,7 @@ function arabicCount(n: number, singular: string, plural: string, accusative: st
  * (`SETTINGS_LIVE_STATUS_BANNER_ID`).
  */
 export const CURRENCY_LOCK_COPY: Record<
-  'en' | 'zh-CN' | 'ja-JP' | 'es-ES' | 'zh-Hant' | 'ar' | 'fr' | 'pt-BR',
+  'en' | 'zh-CN' | 'ja-JP' | 'es-ES' | 'zh-Hant' | 'ar' | 'fr' | 'pt-BR' | 'ru' | 'de' | 'ko',
   CurrencyLockCopy
 > = {
   en: {
@@ -271,6 +277,56 @@ export const CURRENCY_LOCK_COPY: Record<
     unsetText: (usage) =>
       'As taxas de câmbio e os valores na moeda principal precisam de uma moeda padrão, e nenhuma está definida. ' +
       `Em uso: ${usage}. Escolha abaixo; depois de salva, não poderá ser alterada.`,
+  },
+  ru: {
+    objects: (n, labels) => `${n} ${russianNoun(n, 'объект', 'объекта', 'объектов')} (${labels})`,
+    rates: (n) => `${n} ${russianNoun(n, 'обменный курс', 'обменных курса', 'обменных курсов')}`,
+    and: ' и ',
+    listSeparator: ', ',
+    refusal: (current, usage) =>
+      `Валюта по умолчанию заблокирована на ${current}: её используют ${usage}. ` +
+      'Её смена переименовала бы валюту у всех сумм, уже пересчитанных в неё. Изменить её снова можно будет, только когда ' +
+      'не останется ни одного обменного курса и ни один объект не будет объявлять сумму в основной валюте.',
+    lockedLabel: (current) => `Валюта по умолчанию заблокирована: ${current}`,
+    lockedText: (usage) =>
+      `Её используют ${usage}. Пересчитанные суммы хранятся в этой валюте, поэтому её больше нельзя изменить.`,
+    unsetLabel: 'Валюта по умолчанию не задана',
+    unsetText: (usage) =>
+      'Обменным курсам и суммам в основной валюте нужна валюта по умолчанию, а она не задана. ' +
+      `Используется: ${usage}. Выберите её ниже; после сохранения изменить её будет нельзя.`,
+  },
+  de: {
+    objects: (n, labels) => `${n} ${n === 1 ? 'Objekt' : 'Objekten'} (${labels})`,
+    rates: (n) => `${n} ${n === 1 ? 'Wechselkurs' : 'Wechselkursen'}`,
+    and: ' und ',
+    listSeparator: ', ',
+    refusal: (current, usage) =>
+      `Die Standardwährung ist auf ${current} festgelegt, weil sie von ${usage} verwendet wird. ` +
+      'Eine Änderung würde jeden bereits in sie umgerechneten Betrag falsch beschriften. Sie lässt sich erst wieder ändern, ' +
+      'wenn kein Wechselkurs mehr erfasst ist und kein Objekt einen Betrag in der Hauswährung deklariert.',
+    lockedLabel: (current) => `Standardwährung festgelegt: ${current}`,
+    lockedText: (usage) =>
+      `Verwendet von ${usage}. Umgerechnete Beträge werden in dieser Währung gespeichert, daher kann sie nicht mehr geändert werden.`,
+    unsetLabel: 'Keine Standardwährung festgelegt',
+    unsetText: (usage) =>
+      'Wechselkurse und Beträge in der Hauswährung benötigen eine Standardwährung, aber es ist keine festgelegt. ' +
+      `Verwendet von ${usage}. Wählen Sie sie unten aus; nach dem Speichern kann sie nicht mehr geändert werden.`,
+  },
+  ko: {
+    objects: (n, labels) => `객체 ${n}개(${labels})`,
+    rates: (n) => `환율 ${n}개`,
+    and: ' 및 ',
+    listSeparator: ', ',
+    refusal: (current, usage) =>
+      `기본 통화는 ${current}에 고정되어 있습니다. ${usage}에서 사용 중이기 때문입니다. ` +
+      '변경하면 이미 이 통화로 환산된 모든 금액에 잘못된 통화가 붙습니다. ' +
+      '기록된 환율이 하나도 없고 기준 통화 금액을 선언하는 객체도 없을 때만 다시 변경할 수 있습니다.',
+    lockedLabel: (current) => `기본 통화 고정됨: ${current}`,
+    lockedText: (usage) => `${usage}에서 사용 중입니다. 환산된 금액이 이 통화로 저장되므로 더 이상 변경할 수 없습니다.`,
+    unsetLabel: '기본 통화가 설정되지 않음',
+    unsetText: (usage) =>
+      '환율과 기준 통화 금액에는 기본 통화가 필요하지만 설정되어 있지 않습니다. ' +
+      `사용 현황: ${usage}. 아래에서 선택하세요. 저장한 뒤에는 변경할 수 없습니다.`,
   },
 };
 

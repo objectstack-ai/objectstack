@@ -79,7 +79,7 @@ export function localeSelfName(code: string): string {
 }
 
 /** "no longer offered", in the reader's language. */
-export const NOT_OFFERED_COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES' | 'zh-Hant' | 'ar' | 'fr' | 'pt-BR', string> = {
+export const NOT_OFFERED_COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES' | 'zh-Hant' | 'ar' | 'fr' | 'pt-BR' | 'ru' | 'de' | 'ko', string> = {
   en: 'no longer offered',
   'zh-CN': '已不再提供',
   'ja-JP': '現在は提供されていません',
@@ -88,6 +88,9 @@ export const NOT_OFFERED_COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES' | 'zh-H
   'ar': 'لم يعد متاحًا',
   'fr': 'n’est plus proposée',
   'pt-BR': 'não é mais oferecido',
+  'ru': 'больше не предлагается',
+  'de': 'nicht mehr angeboten',
+  'ko': '더 이상 제공되지 않음',
 };
 
 const COPY_LOCALES = Object.keys(NOT_OFFERED_COPY);
