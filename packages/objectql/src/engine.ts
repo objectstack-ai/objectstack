@@ -457,6 +457,12 @@ import {
   referencesAndMasterDetailHost, registrationHost, secretsAndRoutingHost, securityResolversHost,
   summariesAndExpansionHost, transactionsSectionHost,
 } from './engine-facet-hosts.js';
+// [#30052 codemod] Repository bound to one object and one execution context: the methods of the same names on `ObjectRepository` hand the bodies what they read (`ObjectRepositoryHost`).
+import { ObjectRepositoryFacet } from './engine-object-repository.js';
+// [#30052 codemod] Scoped execution context: repositories, elevation, transactions: the methods of the same names on `ScopedContext` hand the bodies what they read (`ScopedContextHost`).
+import { ScopedContextFacet } from './engine-scoped-context.js';
+// [#30052 codemod] The scoped facets' hosts, one per instance, which each class's static block builds.
+import { objectRepositoryHost, scopedContextHost } from './engine-scoped-hosts.js';
 
 // [#29986 codemod] The statics of `ObjectQL` its facet modules read, private ones included, as
 // the class declares them (an indexed access on the class). The static block at the end of
@@ -12918,11 +12924,9 @@ export class ObjectRepository implements IScopedObjectRepository {
     private engine: IDataEngine & { executeAction?: (o: string, a: string, c: any) => Promise<any> }
   ) {}
 
-  async find(query: any = {}): Promise<any[]> {
-    return this.engine.find(this.objectName, {
-      ...query,
-      context: this.context,
-    });
+  find(query: any = {}): Promise<any[]> {
+    // [#30052 codemod] The body moved to `engine-object-repository.ts` (see `ObjectRepositoryHost`).
+    return ObjectRepositoryFacet.find.call(objectRepositoryHost.of(this), query);
   }
 
   /**
@@ -12941,22 +12945,20 @@ export class ObjectRepository implements IScopedObjectRepository {
    * ⛔ Not a narrowing of the contract: the contract already said this. This
    * is the implementation coming back to the declaration it published.
    */
-  async findOne(query: any = {}): Promise<Record<string, any> | null> {
-    return this.engine.findOne(this.objectName, {
-      ...query,
-      context: this.context,
-    });
+  findOne(query: any = {}): Promise<Record<string, any> | null> {
+    // [#30052 codemod] The body moved to `engine-object-repository.ts` (see `ObjectRepositoryHost`).
+    return ObjectRepositoryFacet.findOne.call(objectRepositoryHost.of(this), query);
   }
 
-  async insert(data: any): Promise<any> {
-    return this.engine.insert(this.objectName, data, {
-      context: this.context,
-    });
+  insert(data: any): Promise<any> {
+    // [#30052 codemod] The body moved to `engine-object-repository.ts` (see `ObjectRepositoryHost`).
+    return ObjectRepositoryFacet.insert.call(objectRepositoryHost.of(this), data);
   }
 
   /** Alias for insert() — matches @objectql/core convention */
-  async create(data: any): Promise<any> {
-    return this.insert(data);
+  create(data: any): Promise<any> {
+    // [#30052 codemod] The body moved to `engine-object-repository.ts` (see `ObjectRepositoryHost`).
+    return ObjectRepositoryFacet.create.call(objectRepositoryHost.of(this), data);
   }
 
   /**
@@ -12970,49 +12972,37 @@ export class ObjectRepository implements IScopedObjectRepository {
    * matches its contract and there is no drift to repair on this side; that
    * member is `packages/spec`'s to narrow (its spec half: commit 6059b29c0).
    */
-  async update(data: any, options: any = {}): Promise<Record<string, any> | number | null> {
-    return this.engine.update(this.objectName, data, {
-      ...options,
-      context: this.context,
-    });
+  update(data: any, options: any = {}): Promise<Record<string, any> | number | null> {
+    // [#30052 codemod] The body moved to `engine-object-repository.ts` (see `ObjectRepositoryHost`).
+    return ObjectRepositoryFacet.update.call(objectRepositoryHost.of(this), data, options);
   }
 
   /** Update a single record by ID */
-  async updateById(id: string | number, data: any): Promise<any> {
-    return this.engine.update(this.objectName, { ...data, id: id }, {
-      where: { id: id },
-      context: this.context,
-    });
+  updateById(id: string | number, data: any): Promise<any> {
+    // [#30052 codemod] The body moved to `engine-object-repository.ts` (see `ObjectRepositoryHost`).
+    return ObjectRepositoryFacet.updateById.call(objectRepositoryHost.of(this), id, data);
   }
 
-  async delete(options: any = {}): Promise<any> {
-    return this.engine.delete(this.objectName, {
-      ...options,
-      context: this.context,
-    });
+  delete(options: any = {}): Promise<any> {
+    // [#30052 codemod] The body moved to `engine-object-repository.ts` (see `ObjectRepositoryHost`).
+    return ObjectRepositoryFacet.delete.call(objectRepositoryHost.of(this), options);
   }
 
   /** Delete a single record by ID */
-  async deleteById(id: string | number): Promise<any> {
-    return this.engine.delete(this.objectName, {
-      where: { id: id },
-      context: this.context,
-    });
+  deleteById(id: string | number): Promise<any> {
+    // [#30052 codemod] The body moved to `engine-object-repository.ts` (see `ObjectRepositoryHost`).
+    return ObjectRepositoryFacet.deleteById.call(objectRepositoryHost.of(this), id);
   }
 
-  async count(query: any = {}): Promise<number> {
-    return this.engine.count(this.objectName, {
-      ...query,
-      context: this.context,
-    });
+  count(query: any = {}): Promise<number> {
+    // [#30052 codemod] The body moved to `engine-object-repository.ts` (see `ObjectRepositoryHost`).
+    return ObjectRepositoryFacet.count.call(objectRepositoryHost.of(this), query);
   }
 
   /** Aggregate query */
-  async aggregate(query: any = {}): Promise<any[]> {
-    return this.engine.aggregate(this.objectName, {
-      ...query,
-      context: this.context,
-    });
+  aggregate(query: any = {}): Promise<any[]> {
+    // [#30052 codemod] The body moved to `engine-object-repository.ts` (see `ObjectRepositoryHost`).
+    return ObjectRepositoryFacet.aggregate.call(objectRepositoryHost.of(this), query);
   }
 
   /**
@@ -13074,26 +13064,20 @@ export class ObjectRepository implements IScopedObjectRepository {
    * already retired by the maintainer's 2026-08-31 ruling on #13533 (system
    * and user writes materialise sharing grants identically today).
    */
-  async execute(actionName: string, params?: any): Promise<any> {
-    if (this.engine.executeAction) {
-      // [#25653] With the `'action'` mark, as `buildActionExecutionContext`
-      // (runtime) gives the REST and MCP doors' action bodies: the action this
-      // reaches is app-authored automation running elevated, so its writes to
-      // the four identity-assignment objects are refused (plugin-security).
-      const executionContext: ExecutionContext = markAppAutomationElevation(
-        { ...this.context, isSystem: true },
-        'action',
-      );
-      return this.engine.executeAction(this.objectName, actionName, {
-        ...params,
-        userId: this.context.userId,
-        tenantId: this.context.tenantId,
-        roles: this.context.positions,
-        executionContext,
-        api: new ScopedContext(executionContext, this.engine),
-      });
-    }
-    throw new Error(`Actions not supported by engine`);
+  execute(actionName: string, params?: any): Promise<any> {
+    // [#30052 codemod] The body moved to `engine-object-repository.ts` (see `ObjectRepositoryHost`).
+    return ObjectRepositoryFacet.execute.call(objectRepositoryHost.of(this), actionName, params);
+  }
+
+  // [#30052 codemod] Installs the host of `ObjectRepositoryFacet` (`engine-scoped-hosts.ts`): a static
+  // block adds no member to the class, so the published `.d.ts` does not move.
+  static {
+    objectRepositoryHost.install((instance) => ({
+      get context() { return instance.context; },
+      get engine() { return instance.engine; },
+      insert: (...a) => instance.insert(...a),
+      get objectName() { return instance.objectName; },
+    }));
   }
 }
 
@@ -13132,7 +13116,8 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
 
   /** Get a repository scoped to this context */
   object(name: string): ObjectRepository {
-    return new ObjectRepository(name, this.executionContext, this.engine as any);
+    // [#30052 codemod] The body moved to `engine-scoped-context.ts` (see `ScopedContextHost`).
+    return ScopedContextFacet.object.call(scopedContextHost.of(this), name);
   }
 
   /**
@@ -13144,12 +13129,8 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    * the `'hook'` mark (unless the context already carries one).
    */
   sudo(): ScopedContext {
-    const elevated = { ...this.executionContext, isSystem: true };
-    return this.derive(
-      this.appAuthored && !appAutomationElevationOf(elevated)
-        ? markAppAutomationElevation(elevated, 'hook')
-        : elevated,
-    );
+    // [#30052 codemod] The body moved to `engine-scoped-context.ts` (see `ScopedContextHost`).
+    return ScopedContextFacet.sudo.call(scopedContextHost.of(this));
   }
 
   /**
@@ -13199,13 +13180,8 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    *    fall-open, never a silent re-badge as system).
    */
   withRunAs(runAs: Exclude<HookRunAs, 'inherit'>, ref: HookRunAsRef): IScopedContext {
-    if (runAs === 'system') {
-      return this.derive(
-        markAppAutomationElevation({ ...this.executionContext, isSystem: true }, 'hook'),
-      );
-    }
-    if (!this.executionContext.userId) return new UnscopedHookApi(ref);
-    return this.derive({ ...this.executionContext, isSystem: false });
+    // [#30052 codemod] The body moved to `engine-scoped-context.ts` (see `ScopedContextHost`).
+    return ScopedContextFacet.withRunAs.call(scopedContextHost.of(this), runAs, ref);
   }
 
   /**
@@ -13432,46 +13408,14 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    */
   private readonly joinedHandles = new Set<unknown>();
 
-  /**
-   * Was `handle` JOINED by this context rather than opened by it? Consumes the
-   * record, so the trio's terminal call is also what forgets the handle.
-   *
-   * Two independent signals, because the trio's callers are exactly the ones
-   * that cannot keep a closure on the stack and may not close on the same
-   * object they opened on:
-   *
-   *   1. this context's own {@link joinedHandles} record, and
-   *   2. identity with the CURRENT ambient handle — a handle the engine is
-   *      holding open right now is, by construction, not one the trio opened
-   *      (the trio never publishes into `txStore`, so a trio-owned handle is
-   *      never the ambient one).
-   *
-   * Both point the same way and both fail SAFE: the ambiguous answer is
-   * "abstain", never "commit a transaction we do not own".
-   */
   private releaseJoinedHandle(handle: unknown): boolean {
-    if (this.joinedHandles.delete(handle)) return true;
-    if (handle == null) return false;
-    const ambient = (this.engine as any)?.txStore?.getStore?.() as
-      | { transaction?: unknown }
-      | undefined;
-    return ambient?.transaction === handle;
+    // [#30052 codemod] The body moved to `engine-scoped-context.ts`, its docblock with it (see `ScopedContextHost`).
+    return ScopedContextFacet.releaseJoinedHandle.call(scopedContextHost.of(this), handle);
   }
 
-  /**
-   * Resolve the default driver, if it exposes transaction primitives.
-   * Shared by {@link transaction} and the discrete begin/commit/rollback trio.
-   */
   private txDriver(): any | undefined {
-    const engine = this.engine as any;
-    const driver = engine.defaultDriver
-      ? engine.drivers?.get(engine.defaultDriver)
-      : undefined;
-    // [#18063] Declaration, not bare method presence — the trio's `begin`
-    // returns `null` and `commit`/`rollback` abstain for a transport that
-    // declared it cannot honour a handle, which is the same graceful degrade a
-    // driver with no `beginTransaction` already gets.
-    return driverSupportsTransactions(driver) ? driver : undefined;
+    // [#30052 codemod] The body moved to `engine-scoped-context.ts`, its docblock with it (see `ScopedContextHost`).
+    return ScopedContextFacet.txDriver.call(scopedContextHost.of(this));
   }
 
   /**
@@ -13529,27 +13473,9 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    * exactly as before — join is best-effort on visibility, on this face and on
    * both callback faces alike.
    */
-  async beginTransaction(): Promise<{ ctx: ScopedContext; handle: unknown; owned: boolean } | null> {
-    // ADR-0067 D2 — JOIN before the driver lookup, the same first move and the
-    // same position as both callback faces (#6168 / #6406). An ambient
-    // transaction IS a transaction, so there is nothing to look a driver up for.
-    const ambient = (this.engine as any)?.txStore?.getStore?.() as
-      | { transaction?: unknown }
-      | undefined;
-    if (ambient?.transaction) {
-      // Threaded explicitly into the child context, identity-equal to the
-      // store's handle — so `buildDriverOptions` binds every op on it to the
-      // outer connection and `transactionCoversDriverFor` still attributes the
-      // handle to the OUTER owner (#5351 unchanged).
-      const ctx = this.derive({ ...this.executionContext, transaction: ambient.transaction });
-      this.joinedHandles.add(ambient.transaction);
-      return { ctx, handle: ambient.transaction, owned: false };
-    }
-    const driver = this.txDriver();
-    if (!driver) return null;
-    const trx = await driver.beginTransaction();
-    const ctx = this.derive({ ...this.executionContext, transaction: trx });
-    return { ctx, handle: trx, owned: true };
+  beginTransaction(): Promise<{ ctx: ScopedContext; handle: unknown; owned: boolean } | null> {
+    // [#30052 codemod] The body moved to `engine-scoped-context.ts` (see `ScopedContextHost`).
+    return ScopedContextFacet.beginTransaction.call(scopedContextHost.of(this));
   }
 
   /**
@@ -13559,12 +13485,9 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    * did not open would land the inner writes early and take the outcome away
    * from the outer owner — the durability half of the D2 defect.
    */
-  async commitTransaction(handle: unknown): Promise<void> {
-    if (this.releaseJoinedHandle(handle)) return;
-    const driver = this.txDriver();
-    if (!driver) return;
-    if (driver.commit) await driver.commit(handle);
-    else if (driver.commitTransaction) await driver.commitTransaction(handle);
+  commitTransaction(handle: unknown): Promise<void> {
+    // [#30052 codemod] The body moved to `engine-scoped-context.ts` (see `ScopedContextHost`).
+    return ScopedContextFacet.commitTransaction.call(scopedContextHost.of(this), handle);
   }
 
   /**
@@ -13576,12 +13499,9 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    * outer transaction back from here would be the mirror-image error — an inner
    * failure silently discarding writes the outer caller has not finished with.
    */
-  async rollbackTransaction(handle: unknown): Promise<void> {
-    if (this.releaseJoinedHandle(handle)) return;
-    const driver = this.txDriver();
-    if (!driver) return;
-    if (driver.rollback) await driver.rollback(handle);
-    else if (driver.rollbackTransaction) await driver.rollbackTransaction(handle);
+  rollbackTransaction(handle: unknown): Promise<void> {
+    // [#30052 codemod] The body moved to `engine-scoped-context.ts` (see `ScopedContextHost`).
+    return ScopedContextFacet.rollbackTransaction.call(scopedContextHost.of(this), handle);
   }
 
   get userId() { return this.executionContext.userId; }
@@ -13603,7 +13523,22 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    * carries, on that transaction's connection. `undefined` when `field` is not
    * a declared formula field.
    */
-  async serveFormulaField(objectName: string, record: Record<string, unknown>, field: string): Promise<unknown> {
-    return (this.engine as unknown as ObjectQL).serveFormulaField(objectName, record, field, this.executionContext);
+  serveFormulaField(objectName: string, record: Record<string, unknown>, field: string): Promise<unknown> {
+    // [#30052 codemod] The body moved to `engine-scoped-context.ts` (see `ScopedContextHost`).
+    return ScopedContextFacet.serveFormulaField.call(scopedContextHost.of(this), objectName, record, field);
+  }
+
+  // [#30052 codemod] Installs the host of `ScopedContextFacet` (`engine-scoped-hosts.ts`): a static
+  // block adds no member to the class, so the published `.d.ts` does not move.
+  static {
+    scopedContextHost.install((instance) => ({
+      get appAuthored() { return instance.appAuthored; },
+      derive: (...a) => instance.derive(...a),
+      get engine() { return instance.engine; },
+      get executionContext() { return instance.executionContext; },
+      get joinedHandles() { return instance.joinedHandles; },
+      releaseJoinedHandle: (...a) => instance.releaseJoinedHandle(...a),
+      txDriver: (...a) => instance.txDriver(...a),
+    }));
   }
 }
