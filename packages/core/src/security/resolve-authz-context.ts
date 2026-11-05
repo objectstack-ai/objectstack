@@ -515,6 +515,26 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
   return withRequestGrantsMemo(memoEngine, () => resolveAuthzContextInScope(input));
 }
 
+/**
+ * The anonymous entry: what a request that resolved no principal is served —
+ * the guest's grants on a face that takes the guest entry
+ * ({@link ResolveAuthzInput.guestEntry}), the empty envelope otherwise. ONE
+ * helper for both ways to get here (no credential or an unknown key, and a
+ * refused key), so the two answers cannot drift apart.
+ */
+async function anonymousEntry(ctx: ResolvedAuthzContext, input: ResolveAuthzInput): Promise<ResolvedAuthzContext> {
+  if (input.guestEntry) {
+    const guest = await resolveGuestAnchorGrants(input.ql, input.tenancyPosture);
+    if (guest) {
+      ctx.tenantId = guest.organizationId;
+      ctx.permissions = guest.permissions;
+      ctx.systemPermissions = guest.systemPermissions;
+      if (guest.tabPermissions) ctx.tabPermissions = guest.tabPermissions;
+    }
+  }
+  return ctx;
+}
+
 async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<ResolvedAuthzContext> {
   const { ql, headers } = input;
   const ctx: ResolvedAuthzContext = {
@@ -568,7 +588,11 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
       userId: admission.userId,
       organizationId: admission.organizationId,
     });
-    return ctx;
+    // The refused key answers as an unknown key does: the anonymous entry this
+    // face serves (the guest's grants on a face that takes the guest entry,
+    // nothing otherwise), so no composition tells a refused key from a key
+    // that does not exist.
+    return anonymousEntry(ctx, input);
   }
   // [#23287, ruling C′ item 3] A HELD key is a held principal, exactly like a
   // held session: it resolves as the owner, carrying the owner's account-scope
@@ -620,19 +644,9 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
     // any position or binding was resolved, so a set bound to the `guest`
     // anchor granted nothing: ADR-0090 D9's declared-not-enforced point. A face
     // that serves the guest now resolves the guest's grants, in the
-    // organization D4 derives. A REFUSED API key never reaches this line (it
-    // returned above): a request whose credential was refused is not served
-    // the guest's grants.
-    if (input.guestEntry) {
-      const guest = await resolveGuestAnchorGrants(ql, input.tenancyPosture);
-      if (guest) {
-        ctx.tenantId = guest.organizationId;
-        ctx.permissions = guest.permissions;
-        ctx.systemPermissions = guest.systemPermissions;
-        if (guest.tabPermissions) ctx.tabPermissions = guest.tabPermissions;
-      }
-    }
-    return ctx;
+    // organization D4 derives. A REFUSED API key gets this same entry (it
+    // returned above through the same helper), never a session.
+    return anonymousEntry(ctx, input);
   }
   ctx.userId = userId;
   if (tenantId) ctx.tenantId = tenantId;
