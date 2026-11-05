@@ -57,7 +57,8 @@
  * `properties`, and as `ObjectView` / `ListView` compose it. The mirror is no
  * longer an arm of `AnyComponentSchema`; `ObjectGanttBlockSchema` is. The last
  * describe block holds that split. The renderer half — the bag draws what the
- * flat spelling drew — is `plugin-gantt`'s `ObjectGantt.propertiesBag-10859.test.tsx`.
+ * flat spelling drew — is the `ObjectGantt.propertiesBag-10859` block of
+ * `plugin-gantt`'s `ObjectGantt.harness.test.tsx`.
  *
  * ## Two instruments, and which half each one reads
  *
