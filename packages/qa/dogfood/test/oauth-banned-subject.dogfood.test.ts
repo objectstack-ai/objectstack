@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: one showcase boot for the whole file, two DCR-to-token flows driven against its MCP door and token endpoint, and one timed ban waited out to its expiry; 13.13 s of tests, the slower of two local runs on a shared agent box, x 1.25, rounded up, no CI reading yet, re-measure on CI
 
 /**
  * A banned user's OAuth access tokens and refresh grants are refused while the
