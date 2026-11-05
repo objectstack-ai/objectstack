@@ -928,6 +928,24 @@ describe('[#30471] the field-name indexes read the objects as served', () => {
     expect(ids(validateTranslationReferences, artifact(keys({}, { region_set: { message: 'M' } }), replaced))).toEqual([TRANSLATION_TARGET_UNKNOWN]);
   });
 
+  // The two refusals the retired private reader did not raise, both at
+  // `error`: it kept every entry, and read a top-level `objectExtensions`
+  // beside `packages[]` too. The fold keeps one entry per package per target
+  // and reads `packages[]` alone when there is one, as the registry does.
+  it('validate-translation-references: the keys only the fold drops are refused at error', () => {
+    const bundle = { translations: [{ 'zh-CN': { objects: { xs_deal: { fields: { region: { label: 'R' } }, _validations: { region_set: { message: 'M' } } } } } }] };
+    const refused = [[TRANSLATION_TARGET_UNKNOWN, 'error'], [TRANSLATION_TARGET_UNKNOWN, 'error']];
+    const verdicts = (stack: Rec) => validateTranslationReferences(stack).map((f) => [f.rule, f.severity]);
+    const replaced = [...extensions, { extend: 'xs_deal', fields: { mood: { type: 'text' } } }];
+    expect(verdicts(artifact(bundle, replaced))).toEqual(refused);
+    expect(verdicts(perPackage(bundle, replaced))).toEqual(refused);
+    const beside = { objects: [deal, account], objectExtensions: extensions, packages: [{ manifest: { id: 'app', objects: [deal, account] } }], ...bundle };
+    expect(verdicts(beside)).toEqual(refused);
+    // With no `packages[]`, the top level is the artifact's own and is read.
+    const { packages: _packages, ...alone } = beside;
+    expect(verdicts(alone)).toEqual([]);
+  });
+
   // The write rules leave an object that declares no field unjudged (an
   // external, introspected schema): an extension adding to it does not make
   // its other fields knowable.
