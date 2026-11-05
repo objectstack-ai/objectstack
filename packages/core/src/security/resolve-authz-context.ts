@@ -579,7 +579,8 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
   // replaced (an API key already outranks a session), and a refusal that
   // quietly becomes a session login is not a refusal.
   if (admission.outcome === 'refused') {
-    // [#15256 / 2A] The `organization_required` decision point. One line, here,
+    // [#15256 / 2A] The decision point of every refusal the admission decides
+    // (`organization_required`, `owner_banned`, `owner_absent`). One line, here,
     // where the admission verdict is read — ⛔ not a second copy inside
     // `api-key.ts`'s admission path, which would log the same refusal twice.
     warnApiKeyRefusal({
