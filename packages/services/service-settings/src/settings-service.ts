@@ -1572,11 +1572,16 @@ export class SettingsService {
     else console.error(message);
   }
 
-  /** Look up a manifest, or throw `UnknownNamespaceError`. */
-  getManifest(namespace: string): SettingsManifest {
+  /**
+   * Look up a manifest, or throw `UnknownNamespaceError`. A key with a
+   * registered option source carries the source's options, as the namespace
+   * read serves them ({@link servedManifest}); every other key carries its
+   * declared table. `display.locale` is the language the options are named in.
+   */
+  getManifest(namespace: string, display: SettingsDisplayOptions = {}): SettingsManifest {
     const reg = this.registry.get(namespace);
     if (!reg) throw new UnknownNamespaceError(namespace);
-    return reg.manifest;
+    return this.servedManifest(reg, namespace, {}, display);
   }
 
   /**
@@ -1605,10 +1610,16 @@ export class SettingsService {
     }
   }
 
-  /** List all registered manifests, optionally filtered by permission. */
-  listManifests(ctx: SettingsContext = {}): SettingsManifest[] {
+  /**
+   * List all registered manifests, optionally filtered by permission. Each is
+   * served as {@link getManifest} serves it: a sourced key carries the options
+   * the save judges against, not the declared table the source replaces.
+   */
+  listManifests(ctx: SettingsContext = {}, display: SettingsDisplayOptions = {}): SettingsManifest[] {
     const perms = new Set(ctx.permissions ?? []);
-    const all = Array.from(this.registry.values()).map((r) => r.manifest);
+    const all = Array.from(this.registry.entries()).map(([namespace, reg]) =>
+      this.servedManifest(reg, namespace, {}, display),
+    );
     // Empty permissions ⇒ pass-through ONLY for a trusted (non-enforced)
     // in-process caller. An ENFORCED HTTP caller with no capabilities sees only
     // the manifests it may read — never the whole set (Finding-1: an
@@ -1742,9 +1753,13 @@ export class SettingsService {
   }
 
   /**
-   * The manifest a page is served: the registered one, with each sourced
-   * key's `options` replaced by its source's answer for the value in effect.
-   * The registered manifest itself is never changed.
+   * The manifest a reader is served: the registered one, with each sourced
+   * key's `options` replaced by its source's answer. The one resolution every
+   * manifest read goes through: the namespace read passes the values in
+   * effect, so the answer can offer the stored value as stored;
+   * {@link getManifest} and {@link listManifests} pass none, and are served
+   * the options a write is judged against. The registered manifest itself is
+   * never changed.
    */
   private servedManifest(
     reg: RegisteredManifest,
