@@ -89,6 +89,7 @@ import type {
   PrincipalSessionMintOptions,
 } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { isUserBanInForce } from '@objectstack/core';
 import { isHumanUserRow } from './audience-posture.js';
 import { judgeHeldSession } from './platform-admin-gate.js';
 
@@ -225,14 +226,6 @@ function refuseUpFront(context: ExecutionContext | undefined, options: Principal
   return ttl;
 }
 
-function isBanned(user: Record<string, unknown>): boolean {
-  if (user.banned !== true && user.banned !== 1) return false;
-  const until = user.banExpires ?? user.ban_expires;
-  if (until == null || until === '') return true;
-  const ms = new Date(until as string | Date).getTime();
-  return !Number.isFinite(ms) || ms > Date.now();
-}
-
 /** better-call's signed-cookie value (`encodeURIComponent(value + '.' + HMAC-SHA256)`), what `setSignedCookie` writes. */
 async function signedValue(token: string, secret: string): Promise<string> {
   const { makeSignature } = await import('better-auth/crypto');
@@ -270,7 +263,7 @@ export async function mintPrincipalSession(
   const user = await ctx.internalAdapter.findUserById(userId);
   if (!user) throw deny('A principal session cannot be minted: the requesting user does not exist.');
   if (!isHumanUserRow(user)) throw deny('A principal session is minted for human users only, and this user is a system identity.');
-  if (isBanned(user)) throw deny('A principal session cannot be minted for a banned user.');
+  if (isUserBanInForce(user)) throw deny('A principal session cannot be minted for a banned user.');
 
   const live = await deps.resolveUserAuthGates(userId, organizationId ? { organizationId } : {});
   const held = heldRefusal(live[0]);
