@@ -816,6 +816,17 @@ export interface OverrideWriteClosure {
      * holds it.
      */
     readonly baseItemOf?: (basePackageId: string) => unknown;
+    /**
+     * [#30623] The items of this type a base ships, at any object — read by
+     * the door that holds them (the protocol's artifact lookup, the artifact
+     * `os validate` walks, the install door's listing). The gate reads it for
+     * one sentence only: when a declared `action` override names a base that
+     * ships no action of that name on the override's object, the
+     * `declared_package_ships_no_such_item` refusal names the object(s) the
+     * base does ship it on ({@link shipsNoSuchItemMessage}). Absent, or
+     * answering none of that name, the refusal reads as before.
+     */
+    readonly baseItemsOf?: (basePackageId: string) => readonly unknown[];
 }
 
 /** [#28834] The item door an `object_extension` is saved through (#28574), as the refusals name it. */
@@ -944,6 +955,49 @@ function excludedTypeRemedy(type: string, base: string | undefined): string {
     return `Remove \`overrides\`: ${articleFor(type)} ${type} is defined only in package source, so it changes only with a new version of ${shipper}.`;
 }
 
+/**
+ * [#30623] The `declared_package_ships_no_such_item` sentence, the one every
+ * door renders (they all ask {@link judgeOverrideWrite}). An `action` is keyed
+ * `<objectName>:<name>`, so when `base` ships an action of that name on
+ * ANOTHER object (`baseItems`, {@link OverrideWriteClosure.baseItemsOf}) the
+ * name is right and the object is what is wrong: the sentence names both
+ * objects and tells the author to keep the base action's `objectName`.
+ * Otherwise — another type, no such name at all, or no items in hand — it
+ * says the base ships no such item and to correct the name.
+ */
+function shipsNoSuchItemMessage(
+    type: string,
+    name: string,
+    base: string,
+    packageId: string | undefined,
+    overrideItem: unknown,
+    baseItems: readonly unknown[] | undefined,
+): string {
+    const item = `'${type}/${name}'`;
+    if (type === 'action') {
+        const bare = (n: unknown): unknown => (typeof n === 'string' ? n.slice(n.lastIndexOf(':') + 1) : n);
+        const object = overrideWriteActionObjectOf(overrideItem);
+        const others = Array.from(new Set((baseItems ?? [])
+            .filter((a) => isPlainRecord(a) && bare(a.name) === bare(name))
+            .map(overrideWriteActionObjectOf)
+            .filter((o) => o !== object))).sort();
+        if (others.length > 0) {
+            const objectPhrase = (o: string): string => (o === '' ? 'no object' : `object '${o}'`);
+            const fix = others.length === 1 && others[0] !== ''
+                ? `keep the base action's \`objectName: '${others[0]}'\` in the override`
+                : 'keep the `objectName` of the base action it replaces';
+            return `${item} declares an override of '${base}' on ${objectPhrase(object)}, but '${base}' ships its action `
+                + `'${bare(name)}' on ${others.map(objectPhrase).join(' and ')}. An override replaces the base's action on that `
+                + `action's own object: ${fix}, or remove \`overrides\` to keep it as '${packageId}''s own item (ADR-0146 D2).`;
+        }
+    }
+    // [#28746] A pair-identified type names the member it addressed.
+    const member = overrideWriteMemberOf(type, overrideItem);
+    const ofMember = member === undefined ? '' : ` with ${ITEM_KEY_DISCRIMINATORS[type]?.field} '${member}'`;
+    return `${item} declares an override of '${base}', which ships no ${type} named '${name}'${ofMember}. `
+        + `Remove \`overrides\` to keep it as '${packageId}''s own item, or correct the name (ADR-0146 D2).`;
+}
+
 /** The indefinite article for a type name, by its first letter: "an api", "a permission". */
 function articleFor(type: string): 'a' | 'an' {
     return /^[aeiou]/.test(type) ? 'an' : 'a';
@@ -1034,12 +1088,8 @@ export function judgeOverrideWrite(
                 + `Declare a dependency on '${base}' in the \`dependencies\` of '${packageId}''s manifest, or remove \`overrides\` (ADR-0146 D2).`);
         }
         if (!closure.shippers.includes(base)) {
-            // [#28746] A pair-identified type names the member it addressed.
-            const member = overrideWriteMemberOf(type, subject.item);
-            const ofMember = member === undefined ? '' : ` with ${ITEM_KEY_DISCRIMINATORS[type]?.field} '${member}'`;
             return refuse('declared_package_ships_no_such_item',
-                `${item} declares an override of '${base}', which ships no ${type} named '${name}'${ofMember}. `
-                + `Remove \`overrides\` to keep it as '${packageId}''s own item, or correct the name (ADR-0146 D2).`);
+                shipsNoSuchItemMessage(type, name, base, packageId, subject.item, closure.baseItemsOf?.(base)));
         }
         // [#30065] A declared action override replaces the whole action, so
         // it could drop the gates that decide who may run it — the base's
@@ -1208,7 +1258,12 @@ export function overrideWriteVerdict(
     const baseItemOf = (basePackageId: string): unknown => this.shippedArtifactsOf(request.type, request.name, undefined, member)
         .find((a) => overrideWriteMemberOf(request.type, a) === member && onItsObject(a)
             && (a as { _packageId?: unknown } | null | undefined)?._packageId === basePackageId);
-    return judgeOverrideWrite(request, { dependencies, shippers, baseItemOf });
+    // [#30623] The base's items of this name at every object: what the
+    // ships-no-such-item refusal names when the override moved the action.
+    const baseItemsOf = (basePackageId: string): unknown[] => this.shippedArtifactsOf(request.type, request.name, undefined, member)
+        .filter((a) => overrideWriteMemberOf(request.type, a) === member
+            && (a as { _packageId?: unknown } | null | undefined)?._packageId === basePackageId);
+    return judgeOverrideWrite(request, { dependencies, shippers, baseItemOf, baseItemsOf });
 }
 
 
