@@ -23,6 +23,29 @@ export function savedToCustomizationText(t: Translate, baseLabel: string): strin
   });
 }
 
+/**
+ * The command that moves a customization to another environment, spelled
+ * verbatim in every language: it is typed, not read (objectstack#30119).
+ */
+export const PACKAGE_EXPORT_COMMAND = 'os package export';
+
+/**
+ * objectstack#30119 (ADR-0146 D2) — the sentence under "Saved to BASE's
+ * customizations" in the pending-changes sheet: the changes live in this
+ * environment's database as items of `pairId`, the `<base>.custom` package
+ * the server answered for the base, not in the project's source, and only
+ * {@link PACKAGE_EXPORT_COMMAND} takes them to another environment. True on
+ * every deployment, so it is not switched by the served `environment`.
+ */
+export function customizationEnvironmentText(t: Translate, pairId: string): string {
+  return t('preview.changes.customizationEnvironment', {
+    pair: pairId,
+    command: PACKAGE_EXPORT_COMMAND,
+    defaultValue:
+      'These changes are kept in this environment’s database as items of {{pair}}, not in your project’s source. They reach another environment only through {{command}}.',
+  });
+}
+
 /** {@link savedToCustomizationText} as an element, for the Studio item header's note line. */
 export function SavedToCustomizationNote({ baseLabel, testId }: { baseLabel: string; testId?: string }) {
   const { t } = useObjectTranslation();

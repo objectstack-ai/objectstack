@@ -568,7 +568,7 @@ function LoginFormCard({
           const sp = new URLSearchParams();
           if (lastEmailRef.current) sp.set('email', lastEmailRef.current);
           if (redirect) sp.set('redirect', redirect);
-          navigate(`/verify-email-prompt?${sp.toString()}`);
+          navigate(`/verify-email-prompt?${sp.toString()}${handoffMarkQuery(redirect)}`);
         }
       }}
       // The card above draws this page's own header (objectui#12600).

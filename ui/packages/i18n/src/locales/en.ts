@@ -177,6 +177,8 @@ const en = {
     // the server's message plays no part (objectui#11344). It is the one
     // success-toast text the runner writes itself (objectui#10900).
     completedSuccessfully: 'Action completed successfully',
+    // The same toast for an action that has a label: it names what was done.
+    completedNamed: '{{action}} completed',
     // The runner's other own text (objectui#10969): the error fallbacks when no
     // readable error message reached it, and the Undo label it hands the toast
     // handler for an undoable success toast.
@@ -1155,7 +1157,7 @@ const en = {
   },
   managedByBadge: {
     config: {
-      short: 'Admin config',
+      short: 'Configured here',
       title: 'Administrator configuration',
       body: 'These rows define how the platform behaves at runtime. Author them here; the runtime data they produce lives in a separate table.',
     },
@@ -1165,7 +1167,7 @@ const en = {
       body: 'Rows here are created automatically when actions run on the source record. The list below is a read-only monitoring surface — row-level actions (Approve, Recall, Resend, …) live on each row.',
     },
     systemWritable: {
-      short: 'Platform schema',
+      short: 'Built in · editable',
       title: 'Platform-defined, admin-writable',
       body: "This object's schema is defined by the platform, but its rows are yours to create and edit here. Who may write is governed by delegated administration and record-level security, not by this badge.",
     },
@@ -1175,9 +1177,9 @@ const en = {
       body: "Immutable audit log. Rows cannot be created, edited, or deleted from the UI — they're written by the platform when events occur. Use Export to download for compliance review.",
     },
     betterAuth: {
-      short: 'Identity',
-      title: 'Managed by the identity provider',
-      body: "This object's schema is owned by {{provider}}. Direct edits bypass password hashing, session validation, two-factor checks, and audit hooks. Manage these records through your authentication provider's sign-in, invitation, and security flows instead.",
+      short: 'Via identity service',
+      title: 'Written through the built-in identity service',
+      body: "This object's schema belongs to {{provider}}, the platform's built-in identity service. Create and change these records with the actions on this page, or through sign-in, invitation and security flows; every one of them goes through that service. Editing the table directly would bypass password hashing, session validation, two-factor checks and audit hooks.",
     },
   },
   kanban: {
@@ -2341,6 +2343,10 @@ const en = {
       // layer's value in the draft, and Save sends it as `null` (unset), so the
       // row falls back to the value the layer above carries.
       resetToDefault: 'Reset to default',
+      // A value set at the scope this page writes (objectstack#30329), and
+      // the default its Reset returns to. `{{value}}` is that default in words.
+      sourceBadgeModified: 'Modified',
+      defaultValueHint: 'Default: {{value}}',
       // The chips on a settings row's header (objectui#12821): the env-lock
       // chip and the title it shows when the server sends no reason, and the
       // `Deprecated` chip, with `{{replacedBy}}` the key that replaces it.
@@ -3422,6 +3428,7 @@ const en = {
       verifyingDescription: 'Hang tight while we confirm your email.',
       successTitle: 'Email verified',
       successDescription: 'Your email is confirmed. You can now sign in.',
+      handoffSuccessDescription: 'Your email is confirmed. Go back to the app you were signing in to, and sign in there.',
       errorTitle: 'Verification failed',
       errorDescription: 'Verification failed. Please request a new link.',
       missingToken: 'Verification link is missing a token.',
@@ -4005,6 +4012,9 @@ const en = {
       description: 'What publishing will change. New items are added; updates overwrite the live version.',
       // ADR-0146 D3 — where a customization of a read-only base is saved: its `.custom` pair.
       savedToCustomization: 'Saved to {{package}}’s customizations',
+      // objectstack#30119 (ADR-0146 D2) — the pair lives in this environment's database and moves only by export;
+      // `command` is always the literal `os package export`, never translated.
+      customizationEnvironment: 'These changes are kept in this environment’s database as items of {{pair}}, not in your project’s source. They reach another environment only through {{command}}.',
       loading: 'Loading pending changes…',
       loadFailed: 'Could not load pending changes:',
       empty: 'Nothing pending — every draft has been published.',
@@ -5008,6 +5018,11 @@ const en = {
           unreadableRange: '{{packageId}} declares {{dependency}} with the version range {{range}}, which cannot be read. Fix the range and republish the package.',
           unreadableVersion: 'Install a release version of {{dependency}} inside {{range}}. The installed version {{installedVersion}} is not MAJOR.MINOR.PATCH.',
           unreadableDeclaration: '{{packageId}} declares its dependencies in a shape install cannot read. Write them as a map from package ID to version range and republish the package.',
+        },
+        // objectstack#30326 — the install answer's data.protocolCheckSkipped: installed, the protocol range unchecked.
+        protocolCheckSkipped: {
+          noRange: '{{packageId}} does not state which platform protocol it supports, so it was installed under protocol {{protocolVersion}} without a compatibility check and may not work on this platform version. A build of the package that declares the protocol it supports (engines.protocol) is checked at install.',
+          unparsedRange: '{{packageId}} states its platform protocol as {{requiredRange}}, which this runtime cannot read, so it was installed under protocol {{protocolVersion}} without a compatibility check and may not work on this platform version. A build of the package that declares a range this runtime reads (engines.protocol) is checked at install.',
         },
         localUnauthorized: 'Sign in to this runtime first, then try again.',
         localMarketplaceUnavailable: 'This runtime has no OS_CLOUD_URL configured, so the marketplace catalog is unreachable.',

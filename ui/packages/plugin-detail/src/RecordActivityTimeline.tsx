@@ -41,13 +41,20 @@ import { CommentBody } from './CommentAuthorControls';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { useRecordContext, useSafeFieldLabel } from '@object-ui/react';
 import { useDetailTranslation } from './useDetailTranslation';
-import { foldFeedItems, type ActivityTimelineEntry } from './renderers/recordActivityFeed';
 import {
+  foldFeedItems,
+  readerRecordNameOf,
+  withReaderRecordName,
+  type ActivityTimelineEntry,
+} from './renderers/recordActivityFeed';
+import {
+  RecordFieldHistoryContext,
   TIMELINE_STREAM_FILTERS,
   fieldHistoryEntriesOf,
   fieldHistoryOf,
   filterTimelineStream,
   isSystemStreamEntry,
+  timelineStreamFilters,
   type TimelineStreamFilter,
 } from './recordTimelineStream';
 
@@ -214,11 +221,21 @@ const FEED_TYPE_COLORS: Record<FeedItemType, string> = {
   approval: 'bg-violet-100 text-violet-600',
 };
 
-function getFilterOptions(t: (key: string) => string): { value: FeedFilterMode; label: string }[] {
+/**
+ * The dropdown's options, given whether the record's field history is shown
+ * (`RecordFieldHistoryContext`): `changes_only` is offered exactly when the
+ * stream offers its 变更 chip — the one rule, `timelineStreamFilters`
+ * (objectstack#30074, objectstack#30344).
+ */
+function getFilterOptions(
+  t: (key: string) => string,
+  fieldHistory: boolean,
+): { value: FeedFilterMode; label: string }[] {
+  const changesOffered = timelineStreamFilters(fieldHistory).includes('changes');
   return [
     { value: 'all', label: t('detail.allActivity') },
     { value: 'comments_only', label: t('detail.commentsOnly') },
-    { value: 'changes_only', label: t('detail.fieldChangesFilter') },
+    ...(changesOffered ? [{ value: 'changes_only' as const, label: t('detail.fieldChangesFilter') }] : []),
     { value: 'tasks_only', label: t('detail.tasksOnly') },
   ];
 }
@@ -318,7 +335,7 @@ const FOLD_FIELDS_SHOWN = 3;
  * Aligned with @objectstack/spec RecordActivityProps.
  */
 export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
-  items,
+  items: handedItems,
   config,
   filterMode: controlledFilter,
   onFilterChange,
@@ -367,6 +384,28 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   // ONE value for the visible heading's title AND the landmark's name — see the
   // `<section>` below (objectui#9998).
   const title = titleLabel ?? t('detail.activity');
+
+  // The page's record (`RecordContextProvider`): its object schema labels a
+  // changed field below, and its name is the one the summaries say.
+  const recordContext = useRecordContext();
+  // objectstack#29962 — an activity summary names the record as its WRITER
+  // read it, stored when the write happened. For an object whose name field is
+  // a formula (`label(record.FIELD)`) that is the writer's language, so each
+  // row of this record names it as this reader reads it: the H1's name. Every
+  // place below that draws a summary reads these items.
+  const readerName = readerRecordNameOf(recordContext?.objectSchema, recordContext?.data, recordContext?.recordId);
+  const readerRecordId = readerName?.recordId;
+  const readerRecordName = readerName?.name;
+  const items = React.useMemo(
+    () =>
+      withReaderRecordName(
+        handedItems,
+        readerRecordId !== undefined && readerRecordName !== undefined
+          ? { recordId: readerRecordId, name: readerRecordName }
+          : null,
+      ),
+    [handedItems, readerRecordId, readerRecordName],
+  );
 
   // objectui#11195: which of the feed's reads the server REFUSED, one line per
   // refused source. It renders in place of the empty state when there are no
@@ -437,7 +476,11 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
     </>
   ) : null;
 
-  const activeFilter = controlledFilter ?? internalFilter;
+  // A filter the dropdown does not offer filters nothing: it reads as `all`,
+  // as the stream's chips do.
+  const filterOptions = getFilterOptions(t, React.useContext(RecordFieldHistoryContext));
+  const chosenFilter = controlledFilter ?? internalFilter;
+  const activeFilter: FeedFilterMode = filterOptions.some((opt) => opt.value === chosenFilter) ? chosenFilter : 'all';
   const showFilter = config?.showFilterToggle !== false;
   const showCommentInput = config?.showCommentInput !== false && !!onAddComment;
   const enableReactions = config?.enableReactions ?? false;
@@ -503,7 +546,6 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   // A changed field's label: the object's field label where the page has the
   // object schema (`RecordContextProvider`), through the same translated
   // `fieldLabel` the record's own sections use; the machine name otherwise.
-  const recordContext = useRecordContext();
   const { fieldLabel } = useSafeFieldLabel();
   const labelOfField = React.useCallback(
     (name: string): string => {
@@ -1043,7 +1085,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {getFilterOptions(t).map((opt) => (
+                {filterOptions.map((opt) => (
                   <SelectItem key={opt.value} value={opt.value}>
                     {opt.label}
                   </SelectItem>

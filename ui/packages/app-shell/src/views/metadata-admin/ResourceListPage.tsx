@@ -61,7 +61,7 @@ import { t, tFormat, translateMetadataType, useMetadataLocale } from './i18n.js'
 import { buildPackageScopeOptions } from './package-scope.js';
 import { ENVIRONMENT_SCOPE_QUERY, isEnvironmentScope, useWalledCatalogReadOnly } from './catalog-scope.js';
 import { useMetadataAreaHost } from './metadataAreaHost.js';
-import { customizationPackageId } from '@objectstack/spec/kernel';
+import { customizationPackageId, isCustomizationPackage } from '@objectstack/spec/kernel';
 import { CustomizationMark, usePackageCustomizations } from '../studio-design/CustomizationMark.js';
 import {
   customizationBaseOfRow,
@@ -131,11 +131,14 @@ type ItemRow = {
  * tags objects with the synthetic packageId 'sys_metadata' (see
  * framework protocol.ts:3092); treat that sentinel as runtime-authored.
  */
-function classifyProvenance(item: Record<string, unknown>, rawSource?: string): 'artifact' | 'runtime' {
+export function classifyProvenance(item: Record<string, unknown>, rawSource?: string): 'artifact' | 'runtime' {
   if (rawSource === 'overlay' || rawSource === 'runtime') return 'runtime';
   if (rawSource === 'code' || rawSource === 'artifact') return 'artifact';
   const pkg = item._packageId as string | undefined;
   if (!pkg || pkg === 'sys_metadata') return 'runtime';
+  // objectstack#30285 — a code package's `.custom` pair (ADR-0146 D2) holds
+  // what the customer wrote over the package, never what shipped in code.
+  if (isCustomizationPackage(pkg)) return 'runtime';
   return 'artifact';
 }
 

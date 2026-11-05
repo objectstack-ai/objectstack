@@ -115,9 +115,9 @@ export function railCustomizationsOf(
 }
 
 /**
- * A row's mark in the rail's trailing slot, or nothing. objectstack#29693 —
- * compact (its glyph, the text in its name and tooltip), so it never takes the
- * row's label.
+ * A row's mark in the rail's trailing slot, or nothing. Compact (one short
+ * word, no fill; the full text in its name and tooltip), so it never takes the
+ * row's label and never reads as a button.
  */
 export function RailCustomizationMark({
   row,

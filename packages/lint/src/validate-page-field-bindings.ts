@@ -52,6 +52,21 @@
  * same skips, same rule id: the two surfaces agree on what counts as a field by
  * construction rather than by two lists that happen to match, which is the
  * drift #4330 had just finished removing from the system-field lists.
+ *
+ * ── Stored page sorts are not read here (#30093) ─────────────────────────
+ *
+ * A page `sort` is not a binding a renderer skips: it lowers into the list
+ * door's ORDER BY, which answers an unknown name `400 INVALID_SORT` on the
+ * first load and every load after it. So every page sort slot (a component's
+ * `dataSource.sort`, a related list's `sort` and `parentDataSource.sort`, each
+ * sort-carrying block's own `sort`, `interfaceConfig.sort`, an app page's
+ * `record.sort`) is judged by `validateSortableFields`, under this family's
+ * ids: `page-field-unknown` at `error`, `page-field-unprovisioned` at
+ * `warning`. That member is the one the page publish door runs, so the miss
+ * refuses the save instead of publishing a page that breaks on its first read.
+ * Until #30093 this walk read two of those slots at `warning` and the rest
+ * were read by nothing. The react surface's sort props are not page metadata
+ * slots and keep their own reading in `validate-react-page-props`.
  */
 
 export const PAGE_FIELD_UNKNOWN = 'page-field-unknown';
@@ -125,7 +140,7 @@ import {
   sectionGroupRefs,
   type SectionGroupRef,
 } from './object-field-groups.js';
-import { indexObjectGraph, recordsOf, resolveFieldPath, suggestName, type ObjectGraph } from './object-graph.js';
+import { indexObjectGraph, objectsAsServed, recordsOf, resolveFieldPath, suggestName, type ObjectGraph } from './object-graph.js';
 // [#23013] The one answer to "does this field hold several values?" — the
 // predicate storage, the aggregate answer and the generator already ask.
 import { isMultiValueField } from '@objectstack/spec/data';
@@ -600,13 +615,30 @@ export function checkFieldRefs(
   return findings;
 }
 
+/**
+ * [#30093] Is `ref` one a related list's `sort` prop yielded? A STORED page
+ * sort lowers into the list door's ORDER BY, which answers an unknown name
+ * `400 INVALID_SORT` on every load, so it is not the `skipped` miss this pass
+ * grades: `validateSortableFields` asks every page sort slot existence,
+ * provenance and sortability, under this family's ids, and it is the member the
+ * page publish door runs. {@link relatedListFieldRefs} keeps yielding the
+ * sort refs for its out-of-repo callers; only this walk sets them aside.
+ */
+function isPageSortRef(ref: FieldRef, propsPath: string): boolean {
+  const sortPath = `${propsPath}.sort`;
+  return ref.path === sortPath || ref.path.startsWith(`${sortPath}[`) || ref.path.startsWith(`${sortPath}.`);
+}
+
 export function validatePageFieldBindings(stack: AnyRec): PageFieldFinding[] {
   const findings: PageFieldFinding[] = [];
   if (!stack || typeof stack !== 'object') return findings;
 
-  // object name → its declared field names. Built with `recordsOf` so BOTH
-  // `fields` shapes (array of `{name}` and name-keyed map) resolve.
-  const objectFields = indexObjectFields(stack);
+  // object name → its field names. Built with `recordsOf` so BOTH `fields`
+  // shapes (array of `{name}` and name-keyed map) resolve. [#30383] Over the
+  // objects as served, every `objectExtensions` field folded in, as the graph
+  // below: a binding naming a field a sibling package adds is served.
+  const served = { objects: objectsAsServed(stack).objects };
+  const objectFields = indexObjectFields(served);
   // [#8340] The provenance index alongside the existence one — same keying,
   // asked on the path where the existence check stays silent.
   const unprovisionedAnchors = indexUnprovisionedAnchors(stack);
@@ -614,7 +646,7 @@ export function validatePageFieldBindings(stack: AnyRec): PageFieldFinding[] {
   const objectFieldGroups = indexObjectFieldGroups(stack);
   // [#23013] Field DEFINITIONS (type, `multiple`), for the one question a
   // name index cannot answer: is a counted field multi-valued?
-  const objectGraph = indexObjectGraph(stack);
+  const objectGraph = indexObjectGraph(served);
 
   const pages = recordsOf(stack.pages);
   for (let pi = 0; pi < pages.length; pi++) {
@@ -643,7 +675,14 @@ export function validatePageFieldBindings(stack: AnyRec): PageFieldFinding[] {
         // parent; without it, `properties.objectName` names the child.
         const split = relatedListFieldRefs(props, base);
         const dataSource = isRec(component.dataSource) ? component.dataSource : undefined;
-        checkRefs(split.related, strName(dataSource?.object) ?? split.relatedObject, where);
+        // [#30093] The list's `sort` is a stored page sort, judged by
+        // `validateSortableFields` at the list door's grade (see
+        // {@link isPageSortRef}); every other child-side ref stays here.
+        checkRefs(
+          split.related.filter((ref) => !isPageSortRef(ref, base)),
+          strName(dataSource?.object) ?? split.relatedObject,
+          where,
+        );
         // `relationshipValueField` names a field on the PARENT — the record the
         // list hangs off, never its own child `dataSource`. The parent is the
         // list's own `parentDataSource.object` when it declares one (ruling B on
@@ -690,9 +729,10 @@ export function validatePageFieldBindings(stack: AnyRec): PageFieldFinding[] {
     if (cfg) {
       const cfgObject = strName(cfg.source) ?? strName(page.object);
       const base = `pages[${pi}].interfaceConfig`;
+      // [#30093] `cfg.sort` is a stored page sort: `validateSortableFields`
+      // judges it, at the list door's grade.
       const refs: FieldRef[] = [
         ...fieldRefsFrom(cfg.columns, `${base}.columns`),
-        ...sortFieldRefs(cfg.sort, `${base}.sort`),
         ...filterFieldRefs(cfg.filterBy, `${base}.filterBy`),
       ];
       const userFilters = isRec(cfg.userFilters) ? cfg.userFilters : undefined;

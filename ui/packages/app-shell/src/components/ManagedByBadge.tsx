@@ -41,11 +41,16 @@ import { useCanAuthorMetadata } from '../hooks/useCanAuthorMetadata.js';
  * via `resolveEffectiveCrudAffordances()`. This badge purely *labels* the bucket;
  * the detailed explanation lives in the tooltip.
  *
+ * The short label says what the bucket means to the administrator reading the
+ * page ("Configured here", "Built in · editable", "Via identity service"),
+ * never the engine's name for it ("config", "schema", the identity table):
+ * it is the one word they see without opening the tooltip (objectstack#30208).
+ *
  * ## An authoring aid: it draws for an authoring caller only (objectui#12194)
  *
  * The bucket is a fact about how the object is BUILT, so the label speaks to
  * whoever can author it. To an end user it is an implementation word — the
- * `better-auth` variant reads 「身份」 / "Identity" on a workspace page a host
+ * `better-auth` variant names the identity service on a workspace page a host
  * authored, with no meaning to them — and the record page draws it outside
  * the page tree, so no page could leave it out. Triage's ruling on
  * objectui#12194 (option a): the badge renders only for a caller who can
@@ -112,7 +117,7 @@ const VARIANTS: Record<VariantKey, Variant> = {
   config: {
     icon: Settings2,
     i18nKey: 'config',
-    short: 'Admin config',
+    short: 'Configured here',
     title: 'Administrator configuration',
     body: () =>
       'These rows define how the platform behaves at runtime. Author them here; the runtime data they produce lives in a separate table.',
@@ -140,7 +145,7 @@ const VARIANTS: Record<VariantKey, Variant> = {
   'system-data': {
     icon: Settings2,
     i18nKey: 'systemWritable',
-    short: 'Platform schema',
+    short: 'Built in · editable',
     title: 'Platform-defined, admin-writable',
     body: () =>
       "This object's schema is defined by the platform, but its rows are yours to create and edit here. Who may write is governed by delegated administration and record-level security, not by this badge.",
@@ -155,13 +160,17 @@ const VARIANTS: Record<VariantKey, Variant> = {
       "Immutable audit log. Rows cannot be created, edited, or deleted from the UI — they're written by the platform when events occur. Use Export to download for compliance review.",
     tone: 'border-zinc-300/60 bg-zinc-50 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-500/40 dark:bg-zinc-950/40 dark:text-zinc-100',
   },
+  // objectstack#30337 — the note holds for every row of the bucket, a team an
+  // admin made in Setup included: the built-in identity service writes the
+  // rows, and the page's own actions are how to change them. It names no
+  // outside provider: nothing here says the row came from elsewhere.
   'better-auth': {
     icon: ShieldAlert,
     i18nKey: 'betterAuth',
-    short: 'Identity',
-    title: 'Managed by the identity provider',
+    short: 'Via identity service',
+    title: 'Written through the built-in identity service',
     body: (display) =>
-      `This object's schema is owned by ${display}. Direct edits bypass password hashing, session validation, two-factor checks, and audit hooks. Manage these records through your authentication provider's sign-in, invitation, and security flows instead.`,
+      `This object's schema belongs to ${display}, the platform's built-in identity service. Create and change these records with the actions on this page, or through sign-in, invitation and security flows; every one of them goes through that service. Editing the table directly would bypass password hashing, session validation, two-factor checks and audit hooks.`,
     tone: 'border-amber-300/60 bg-amber-50 text-amber-900 hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-100',
   },
 };

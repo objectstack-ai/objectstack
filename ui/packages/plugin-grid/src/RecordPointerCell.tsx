@@ -47,7 +47,7 @@
 
 import React, { useEffect, useSyncExternalStore } from 'react';
 import { Skeleton, resolveIcon } from '@object-ui/components';
-import { extractRecords, getRecordDisplayName, withoutDeniedFields } from '@object-ui/core';
+import { buildExpandFields, extractRecords, getRecordDisplayName, resolveNameField, withoutDeniedFields } from '@object-ui/core';
 import type { RecordPointer } from '@object-ui/fields';
 import { createSafeTranslation } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
@@ -82,6 +82,10 @@ interface PointerStore {
   defs: Map<string, DefAnswer>;
   /** Ids queued for the next flush, per target object. */
   queued: Map<string, Set<string>>;
+  /** Settles once `defs` holds a settled answer for the object. */
+  defSettled: Map<string, Promise<void>>;
+  /** Whether the viewer may read a field; the latest cell to ask supplies it. */
+  canReadField: (objectName: string, field: string) => boolean;
   flushScheduled: boolean;
   listeners: Set<() => void>;
   /** Bumped on every settled answer; what `useSyncExternalStore` compares. */
@@ -97,10 +101,22 @@ const MAX_IDS_PER_READ = 200;
 
 const stores = new WeakMap<object, PointerStore>();
 
+/** The field gate before a permission policy has answered: nothing is filtered. */
+const readsEveryField = (): boolean => true;
+
 function storeFor(source: object): PointerStore {
   let store = stores.get(source);
   if (!store) {
-    store = { records: new Map(), defs: new Map(), queued: new Map(), flushScheduled: false, listeners: new Set(), version: 0 };
+    store = {
+      records: new Map(),
+      defs: new Map(),
+      queued: new Map(),
+      defSettled: new Map(),
+      canReadField: readsEveryField,
+      flushScheduled: false,
+      listeners: new Set(),
+      version: 0,
+    };
     stores.set(source, store);
   }
   return store;
@@ -119,12 +135,13 @@ function readDef(source: RecordPointerSource, store: PointerStore, objectName: s
   if (store.defs.has(objectName)) return;
   if (typeof source.getObjectSchema !== 'function') {
     store.defs.set(objectName, { state: 'unavailable' });
+    store.defSettled.set(objectName, Promise.resolve());
     return;
   }
   store.defs.set(objectName, { state: 'pending' });
   // The executor runs synchronously, so a source that THROWS lands in the same
   // branch as one that rejects.
-  new Promise<unknown>((resolve) => resolve(source.getObjectSchema!(objectName))).then(
+  const settled = new Promise<unknown>((resolve) => resolve(source.getObjectSchema!(objectName))).then(
     (def) => {
       store.defs.set(
         objectName,
@@ -136,6 +153,25 @@ function readDef(source: RecordPointerSource, store: PointerStore, objectName: s
       store.defs.set(objectName, { state: 'unavailable' });
       settle(store);
     },
+  );
+  store.defSettled.set(objectName, settled);
+}
+
+/**
+ * The `$expand` a read of `objectName` carries: its name field, when that field
+ * is a reference (`lookup`, `master_detail`, `user`, …) the viewer may read. A
+ * session is named by its user, and the user id it stores is no name; expanded,
+ * the name ladder reads the user's name off the embedded record, as the record
+ * page's own title does. Every other name field reads as stored.
+ */
+function nameFieldExpand(store: PointerStore, objectName: string): string[] {
+  const answer = store.defs.get(objectName);
+  if (answer?.state !== 'ok') return [];
+  const nameField = resolveNameField(answer.def);
+  const fields = answer.def.fields;
+  if (!nameField || !fields || typeof fields !== 'object' || Array.isArray(fields)) return [];
+  return buildExpandFields(fields as Record<string, unknown>, [nameField]).filter((f) =>
+    store.canReadField(objectName, f),
   );
 }
 
@@ -155,9 +191,18 @@ function flush(source: RecordPointerSource, store: PointerStore): void {
         markAll(() => ({ state: 'unreadable' }));
         continue;
       }
-      new Promise<unknown>((resolve) =>
-        resolve(source.find!(objectName, { $filter: { id: { $in: chunk } }, $top: chunk.length })),
-      ).then(
+      // The read waits for the definition (already in flight, one per object)
+      // so it knows whether the name field needs expanding.
+      (store.defSettled.get(objectName) ?? Promise.resolve())
+        .then(() => {
+          const expand = nameFieldExpand(store, objectName);
+          return source.find!(objectName, {
+            $filter: { id: { $in: chunk } },
+            $top: chunk.length,
+            ...(expand.length > 0 ? { $expand: expand } : {}),
+          });
+        })
+        .then(
         (result) => {
           const byId = new Map<string, Record<string, unknown>>();
           for (const row of extractRecords(result) as Array<Record<string, unknown>>) {
@@ -178,8 +223,14 @@ function flush(source: RecordPointerSource, store: PointerStore): void {
 }
 
 /** Queue one target for the next batched read, unless it is already known. */
-function requestRecord(source: RecordPointerSource, objectName: string, recordId: string): void {
+function requestRecord(
+  source: RecordPointerSource,
+  objectName: string,
+  recordId: string,
+  canReadField: (objectName: string, field: string) => boolean,
+): void {
   const store = storeFor(source);
+  store.canReadField = canReadField;
   readDef(source, store, objectName);
   const key = recordKey(objectName, recordId);
   if (store.records.has(key)) return;
@@ -202,6 +253,8 @@ const NO_SOURCE_STORE: PointerStore = {
   records: new Map(),
   defs: new Map(),
   queued: new Map(),
+  defSettled: new Map(),
+  canReadField: readsEveryField,
   flushScheduled: false,
   listeners: new Set(),
   version: 0,
@@ -238,11 +291,19 @@ export function RecordPointerCell({ pointer, dataSource }: RecordPointerCellProp
   const store = dataSource ? storeFor(dataSource) : NO_SOURCE_STORE;
   useStoreVersion(store);
 
+  const perms = usePermissions();
+  // An unanswered policy filters nothing, as the record page's own `$expand`
+  // gate defers; the server masks a denied field either way.
+  const canReadField = perms?.isLoaded
+    ? (object: string, field: string) => perms.checkField(object, field, 'read')
+    : readsEveryField;
+
   useEffect(() => {
-    if (dataSource) requestRecord(dataSource, objectName, recordId);
+    if (dataSource) requestRecord(dataSource, objectName, recordId, canReadField);
+    // `canReadField` is read when the batch flushes, never compared: re-keying
+    // on it would re-run the request for an answer already cached.
   }, [dataSource, objectName, recordId]);
 
-  const perms = usePermissions();
   const { objectLabel } = useObjectLabel();
   const { t } = useRecordPointerTranslation();
   const recordLinks = useRelatedRecordActions();

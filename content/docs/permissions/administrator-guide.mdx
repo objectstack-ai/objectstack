@@ -81,7 +81,8 @@ only on reorgs. Why the tree matters:
 | **Import** (toolbar) | Bulk onboarding from CSV/Excel | Wizard with column mapping and dry-run preview; up to 500 rows per batch. Pick the sign-in policy: no password (first sign-in via OTP/magic/reset link), send invitations, or one-time temporary passwords |
 
 Day-to-day lifecycle actions live on each user's row menu and record header:
-**Ban / Unban** (blocks sign-in), **Unlock Account** (clears a brute-force
+**Ban / Unban** (blocks sign-in, ends the user's sessions, and refuses their API keys
+while the ban holds), **Unlock Account** (clears a brute-force
 lockout early, at both the password and two-factor stages), **Set Password**
 (also mints one-time temporary passwords),
 and **Impersonate User** (see [Step 4](#step-4--verify)). *(Rough edge today:
@@ -200,7 +201,7 @@ Full model: [Permission Sets](/docs/permissions/permission-sets).
 | I need to… | Do this |
 |:--|:--|
 | Onboard a new employee | Invite/Create the user → Business Unit Member row → assign their position ([2](#step-2--add-people-users)→[3](#step-3--assign-positions)) |
-| Offboard someone | **Ban User** (blocks sign-in immediately) — then hand over their records ([below](#handing-over-a-banned-users-work)) and remove assignments at leisure |
+| Offboard someone | **Ban User** (blocks sign-in and the user's API keys immediately) — then hand over their records ([below](#handing-over-a-banned-users-work)) and remove assignments at leisure |
 | "I can't sign in" | User record → is it banned? locked? **Unlock Account** or **Set Password** (temporary, must-change) |
 | "Why can't I see X?" | Studio → Access → **Explain access** for that user + object |
 | Someone changed departments | Update their Business Unit Member row; re-anchor their User Position rows |

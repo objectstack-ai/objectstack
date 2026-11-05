@@ -82,6 +82,7 @@ import type { TenancyService } from './tenancy-service.js';
 import { OtpSendGuard, assertOtpCooldownSeconds } from './otp-send-guard.js';
 import { assertPasswordResetEndsSessions } from './password-reset-ends-sessions.js';
 import type { CounterStore } from './rate-limit-storage.js';
+import type { SsoProviderDeleteRefusal } from './sign-in-method-floor.js';
 import {
   applyUserBan,
   applyUserUnban,
@@ -1588,6 +1589,22 @@ export class AuthManager {
   setOrganizationDeleteStandingJudge(judge: (organizationId: string) => Promise<void>): void {
     this.organizationDeleteStandingJudge = judge;
   }
+
+  /**
+   * [#30300] The sign-in method floor's question about an identity-provider
+   * delete (`sign-in-method-floor.ts` `ssoProviderDeleteRefusal`), handed over
+   * by `AuthPlugin`, which holds what the floor reads beyond this manager (the
+   * host's sign-in handoff, the boot's provider credentials). Absent on a
+   * manager no plugin composed, where nothing judges the delete.
+   */
+  private ssoProviderDeleteFloor?: (providerId: string, locale?: string) => Promise<SsoProviderDeleteRefusal | undefined>;
+
+  /** @internal [#30300] See {@link ssoProviderDeleteFloor}; called by `AuthPlugin`. */
+  setSsoProviderDeleteFloor(
+    judge: (providerId: string, locale?: string) => Promise<SsoProviderDeleteRefusal | undefined>,
+  ): void {
+    this.ssoProviderDeleteFloor = judge;
+  }
   // ADR-0069 — cached "does any org require MFA" flag (per-org tightening).
   // Refreshed lazily with a TTL so isAuthGateActive() stays synchronous + cheap.
   private _orgMfaCache: { value: boolean; at: number } = { value: false, at: 0 };
@@ -1744,6 +1761,7 @@ export class AuthManager {
       assertPhoneOtpSendAllowed: (...a) => this.assertPhoneOtpSendAllowed(...a),
       assertRemoveMemberPermitted: (...a) => this.assertRemoveMemberPermitted(...a),
       assertRevokeSessionIdentifiesRecord: (...a) => this.assertRevokeSessionIdentifiesRecord(...a),
+      assertSsoProviderDeletable: (...a) => this.assertSsoProviderDeletable(...a),
       auditRefusedSignIn: (...a) => this.auditRefusedSignIn(...a),
       buildPluginList: (...a) => this.buildPluginList(...a),
       composeDatabaseHooks: (...a) => this.composeDatabaseHooks(...a),
@@ -5042,6 +5060,35 @@ export class AuthManager {
       resolveActor: (...a) => this.resolveActor(...a),
     };
     return assertOrganizationDeletable.call(host, ctx);
+  }
+
+  /**
+   * [#30300] `/sso/delete-provider` admission: refuse the delete that would
+   * remove the last way to sign in, before the vendor deletes anything
+   * ({@link ssoProviderDeleteFloor} decides; `409 DELETE_RESTRICTED`, or `503
+   * SERVICE_UNAVAILABLE` when the provider list cannot be read). Asked only of
+   * an authenticated caller with a `providerId`: what the vendor itself answers
+   * (no session, a malformed body) falls through to it. The refusal states a
+   * deployment-wide fact `/auth/config` already publishes (email and password
+   * off, what else signs anyone in), so it is not held back for a caller the
+   * vendor would refuse as not the provider's owner.
+   */
+  private async assertSsoProviderDeletable(ctx: any): Promise<void> {
+    const judge = this.ssoProviderDeleteFloor;
+    if (!judge) return;
+    const providerId = typeof ctx?.body?.providerId === 'string' ? ctx.body.providerId : '';
+    if (!providerId) return;
+    const actor = await this.resolveActor(ctx);
+    if (!actor?.userId) return;
+    const header = acceptLanguageHeader(ctx);
+    const refusal = await judge(providerId, header ? preferredLocaleFromHeader(header) : undefined);
+    if (!refusal) return;
+    const { APIError } = await import('better-auth/api');
+    throw new APIError(refusal.status, {
+      code: refusal.code,
+      message: refusal.message,
+      lastSignInMethod: refusal.lastSignInMethod,
+    });
   }
 
   private assertRemoveMemberPermitted(ctx: any): Promise<void> {

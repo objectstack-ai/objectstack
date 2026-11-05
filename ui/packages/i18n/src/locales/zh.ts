@@ -153,6 +153,7 @@ const zh = {
     notAvailableHere: '「{{action}}」在当前页面不可用。',
     notAvailableForRecord: '对此记录不可用',
     completedSuccessfully: '操作已成功完成',
+    completedNamed: '“{{action}}”已完成',
     failed: '操作失败',
     parallelFailed: '一个或多个并行操作失败',
     selectExactlyOneRow: '此操作针对单条记录，请只选择一行。',
@@ -910,7 +911,7 @@ const zh = {
   },
   managedByBadge: {
     config: {
-      short: '管理配置',
+      short: '在此配置',
       title: '管理员配置',
       body: '这些记录定义平台的运行时行为。请在此处编写配置;其产生的运行时数据存放在单独的表中。',
     },
@@ -920,7 +921,7 @@ const zh = {
       body: '当源记录上的操作运行时,这里的行会自动创建。下方列表是只读监控界面——行级操作(批准、撤回、重发等)在每一行上。',
     },
     systemWritable: {
-      short: '平台架构',
+      short: '平台预置 · 可编辑',
       title: '平台定义,管理员可写',
       body: '此对象的架构由平台定义,但其数据行可在此处创建和编辑。谁可以写入由委派管理和记录级安全控制,而非此标记。',
     },
@@ -930,9 +931,9 @@ const zh = {
       body: '不可变审计日志。行由平台在事件发生时写入,不能在界面上创建、编辑或删除。可使用导出功能下载以供合规审查。',
     },
     betterAuth: {
-      short: '身份',
-      title: '由身份提供方管理',
-      body: '此对象的架构由 {{provider}} 管理。直接编辑会绕过密码哈希、会话校验、两步验证检查和审计钩子。请通过身份认证提供方的登录、邀请和安全流程管理这些记录。',
+      short: '经身份服务写入',
+      title: '经内置身份服务写入',
+      body: '此对象的架构属于平台内置的身份服务 {{provider}}。请用本页上的操作，或通过登录、邀请和安全流程来创建和修改这些记录；它们都经由该服务写入。直接编辑数据表会绕过密码哈希、会话校验、两步验证检查和审计钩子。',
     },
   },
   kanban: {
@@ -1964,6 +1965,8 @@ const zh = {
       sourceBadgeInherited: '继承自{{source}}',
       sourceBadgeOverrides: '覆盖{{source}}',
       resetToDefault: '恢复默认',
+      sourceBadgeModified: '已修改',
+      defaultValueHint: '默认：{{value}}',
       envLockBadge: '环境变量锁定',
       envLockBadgeTitle: '由环境变量固定,无法在界面中编辑。',
       deprecatedBadge: '已弃用',
@@ -2947,6 +2950,7 @@ const zh = {
       verifyingDescription: '正在确认您的邮箱，请稍候。',
       successTitle: '邮箱已验证',
       successDescription: '您的邮箱已确认，现在可以登录了。',
+      handoffSuccessDescription: '您的邮箱已确认。请回到您正在登录的应用，在那里登录。',
       errorTitle: '验证失败',
       errorDescription: '验证失败，请重新获取验证链接。',
       missingToken: '验证链接缺少令牌。',
@@ -3465,6 +3469,7 @@ const zh = {
       title: '待发布的变更',
       description: '发布将带来以下变更。“新增”为全新内容，“更新”将覆盖线上版本。',
       savedToCustomization: '保存到 {{package}} 的定制',
+      customizationEnvironment: '这些变更保存在当前环境的数据库里，是 {{pair}} 的条目，不在项目源码中；只有通过 {{command}} 才能带到其他环境。',
       loading: '正在加载待发布变更…',
       loadFailed: '无法加载待发布变更：',
       empty: '没有待发布的内容 —— 所有草稿均已发布。',
@@ -4398,6 +4403,11 @@ const zh = {
           unreadableRange: '{{packageId}} 为 {{dependency}} 声明的版本范围 {{range}} 无法识别，请修改版本范围后重新发布软件包。',
           unreadableVersion: '请安装 {{dependency}} 在 {{range}} 范围内的正式版本（当前安装的 {{installedVersion}} 不是“主版本.次版本.修订号”格式）。',
           unreadableDeclaration: '{{packageId}} 的依赖声明格式无法识别，请写成“软件包 ID → 版本范围”的映射后重新发布软件包。',
+        },
+        // objectstack#30326 — the install answer's data.protocolCheckSkipped: installed, the protocol range unchecked.
+        protocolCheckSkipped: {
+          noRange: '{{packageId}} 未声明它支持的平台协议版本，因此已在平台协议 {{protocolVersion}} 下安装，未做兼容性检查，可能无法在当前平台版本上正常运行。声明了所支持协议（engines.protocol）的软件包版本会在安装时接受检查。',
+          unparsedRange: '{{packageId}} 声明的平台协议为 {{requiredRange}}，本运行时无法识别，因此已在平台协议 {{protocolVersion}} 下安装，未做兼容性检查，可能无法在当前平台版本上正常运行。声明了可识别协议范围（engines.protocol）的软件包版本会在安装时接受检查。',
         },
         localUnauthorized: '请先登录本运行时再试。',
         localMarketplaceUnavailable: '本运行时未配置 OS_CLOUD_URL，无法访问应用市场目录。',

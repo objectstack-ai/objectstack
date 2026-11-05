@@ -34,7 +34,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { act, render, screen, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { MetadataCtx } from '@object-ui/react';
 import { RelatedCountStore } from '@object-ui/components';
@@ -140,9 +140,18 @@ let dataSource: { find: ReturnType<typeof vi.fn> } & Record<string, unknown>;
  */
 const RELATED_TOTALS: Record<string, number> = { showcase_task: 2, showcase_note: 1 };
 
-function makeDataSource() {
+/**
+ * A rejected read in the shape the ObjectStack client throws it: the HTTP
+ * status on `httpStatus` and the ADR-0112 code on `code`.
+ */
+const rejection = (httpStatus: number, code: string) =>
+  Object.assign(new Error(`${httpStatus} ${code}`), { httpStatus, code });
+
+function makeDataSource(auditRead?: () => Promise<unknown>) {
   return {
-    find: vi.fn(async (objectName: string) => ({ data: [], total: RELATED_TOTALS[objectName] ?? 0 })),
+    find: vi.fn(async (objectName: string) =>
+      objectName === 'sys_audit_log' && auditRead ? auditRead() : { data: [], total: RELATED_TOTALS[objectName] ?? 0 },
+    ),
     create: vi.fn(async (_o: string, row: unknown) => row),
     findOne: vi.fn(async (_o: string, recordId: string) => ({
       id: recordId,
@@ -161,10 +170,19 @@ function renderPage({
   search = '',
   windowWidth = 1440,
   objects = OBJECTS,
-}: { width: number; embedded?: boolean; search?: string; windowWidth?: number; objects?: typeof OBJECTS }) {
+  auditRead,
+}: {
+  width: number;
+  embedded?: boolean;
+  search?: string;
+  windowWidth?: number;
+  objects?: typeof OBJECTS;
+  /** How this reader's `sys_audit_log` read answers; omitted, it answers no rows. */
+  auditRead?: () => Promise<unknown>;
+}) {
   rootWidth = width;
   Object.defineProperty(window, 'innerWidth', { value: windowWidth, configurable: true, writable: true });
-  dataSource = makeDataSource();
+  dataSource = makeDataSource(auditRead);
   const metadata = {
     objects,
     pages: [],
@@ -377,9 +395,19 @@ describe('RecordDetailView — the 动态 tab offers 变更 only while the recor
       { timeout: 5000 },
     );
 
-  it('an object with `enable.trackHistory`: 全部 / 活动 / 讨论 / 变更', async () => {
+  /** The chips once this reader's audit read has gone out and settled. */
+  const streamChipsAfterAuditRead = async (container: HTMLElement) => {
+    await streamChips(container);
+    await waitFor(() => expect(auditReads()).toBeGreaterThan(0), { timeout: 5000 });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    return streamChips(container);
+  };
+
+  it('an object with `enable.trackHistory`, its audit read answered: 全部 / 活动 / 讨论 / 变更', async () => {
     const { container } = renderPage({ width: 1440, search: '?related=timeline' });
-    expect(await streamChips(container)).toEqual(['all', 'activity', 'discussion', 'changes']);
+    expect(await streamChipsAfterAuditRead(container)).toEqual(['all', 'activity', 'discussion', 'changes']);
   });
 
   it('the same object without it: no 变更 chip, and no audit read', async () => {
@@ -387,5 +415,17 @@ describe('RecordDetailView — the 动态 tab offers 变更 only while the recor
     const { container } = renderPage({ width: 1440, search: '?related=timeline', objects: untracked });
     expect(await streamChips(container)).toEqual(['all', 'activity', 'discussion']);
     expect(auditReads()).toBe(0);
+  });
+
+  // objectstack#30344 — the field history this record page shows is the one
+  // THIS reader's audit read answers: a reader the server refuses it to has
+  // nothing for 变更 to hold, so the chip is not offered, as with history off.
+  it('a reader whose audit read is refused (403): no 变更 chip, as with history off', async () => {
+    const { container } = renderPage({
+      width: 1440,
+      search: '?related=timeline',
+      auditRead: () => Promise.reject(rejection(403, 'PERMISSION_DENIED')),
+    });
+    expect(await streamChipsAfterAuditRead(container)).toEqual(['all', 'activity', 'discussion']);
   });
 });
