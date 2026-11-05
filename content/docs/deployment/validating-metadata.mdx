@@ -163,11 +163,19 @@ component silently skips it and the page renders one item short.
 
 Which object a component binds follows `dataSource.object` → `properties.object`
 → the page's `object`, so a multi-object page is checked per element rather than
-against one page-wide guess. A `record:related_list`'s `columns`/`sort`/`filter`
+against one page-wide guess. A `record:related_list`'s `columns`/`filter`
 resolve against its **related** object (`objectName`), and its add-picker against
 its own. Advisory, like form-layout field references — every consumer degrades
 rather than failing. The same descriptor table drives the react page surface
 (§10), so a component is described once and checked wherever it is authored.
+
+A page **sort** is the exception, because no consumer degrades it: the list door
+answers an unknown sort field `400 INVALID_SORT` on every load. So every stored
+page sort (an element's `dataSource.sort`, a related list's `sort` and
+`parentDataSource.sort`, a list block's own `sort`, `interfaceConfig.sort`, an app
+page's `record.sort`) naming a field the bound object lacks is a
+`page-field-unknown` **error**, and the page publish door refuses the save with
+`422 INVALID_METADATA`.
 
 Skipped, to keep false positives at zero: relationship paths (`account.name`,
 resolved by the query engine), registry-injected system fields (`created_at`,

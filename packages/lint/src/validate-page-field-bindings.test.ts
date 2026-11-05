@@ -423,7 +423,10 @@ describe('validatePageFieldBindings — a related list splits its child and pare
     ]]);
   });
 
-  it('a dataSource-bound list checks sort, filter and relationshipField against the child too', () => {
+  // [#30093] The list's `sort` is a stored page sort, judged by
+  // `validateSortableFields` at the list door's grade
+  // (`validate-sortable-fields.test.ts` pins every slot), so it is not read here.
+  it('a dataSource-bound list checks filter and relationshipField against the child too, and leaves sort to the sort rule', () => {
     expect(findingsOf({
       dataSource: { object: 'crm_account' },
       properties: {
@@ -432,7 +435,6 @@ describe('validatePageFieldBindings — a related list splits its child and pare
         filter: [{ field: 'ghost_filter', operator: 'equals', value: 'x' }],
       },
     }).map(([, , path, message]) => [path, message])).toEqual([
-      [`${LIST}.sort[0].field`, expect.stringContaining('"ghost_sort" is not a field on object "crm_account"')],
       [`${LIST}.filter[0].field`, expect.stringContaining('"ghost_filter" is not a field on object "crm_account"')],
       [`${LIST}.relationshipField`, expect.stringContaining('"ghost_fk" is not a field on object "crm_account"')],
     ]);
@@ -731,14 +733,11 @@ describe('validatePageFieldBindings — false-positive floor', () => {
   });
 });
 
-describe('validatePageFieldBindings — legacy bare-string sort (#4340)', () => {
-  /**
-   * `ListViewSchema.sort` still accepts `"created_at desc"`. Reading the whole
-   * string as a field name reported `"amount desc"` as unknown — a finding
-   * whose "field" the author never wrote, and one no fix could satisfy. The
-   * shared `sortFieldRefs` reads its head instead, the way the renderer does.
-   */
-  it('judges the head segment, not the whole "field desc" string', () => {
+// [#30093] A list page's `interfaceConfig.sort` is a stored page sort, judged
+// by `validateSortableFields` (existence at `error`, the legacy string form read
+// by its head — the #4340 reading, pinned there), so this walk reads none of it.
+describe('validatePageFieldBindings — a stored page sort is not read here (#30093)', () => {
+  it('reports nothing for an unknown interfaceConfig.sort, in either form, and still reads the columns', () => {
     const listPage = (sort: unknown) => ({
       ...baseStack(),
       pages: [
@@ -746,15 +745,15 @@ describe('validatePageFieldBindings — legacy bare-string sort (#4340)', () => 
           name: 'list_page',
           type: 'list',
           object: 'crm_lead',
-          interfaceConfig: { source: 'crm_lead', columns: ['name'], sort },
+          interfaceConfig: { source: 'crm_lead', columns: ['name', 'ghost_col'], sort },
         },
       ],
     });
-    expect(validatePageFieldBindings(listPage('amount desc'))).toEqual([]);
-    const bad = validatePageFieldBindings(listPage('ghost_col desc'));
-    expect(bad).toHaveLength(1);
-    expect(bad[0].message).toContain('"ghost_col"');
-    expect(bad[0].message).not.toContain('ghost_col desc');
+    for (const sort of ['ghost_sort desc', [{ field: 'ghost_sort', order: 'desc' }]]) {
+      expect(validatePageFieldBindings(listPage(sort)).map((f) => f.path)).toEqual([
+        'pages[0].interfaceConfig.columns[1]',
+      ]);
+    }
   });
 });
 
