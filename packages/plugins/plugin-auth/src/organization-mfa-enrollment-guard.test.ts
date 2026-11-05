@@ -583,15 +583,16 @@ const post = (manager: AuthManager, path: string, body: unknown, headers: Record
  * A member of an organization that requires MFA, unenrolled, whose grace clock
  * started 30 days ago, in a session whose active organization is that one —
  * the card's measured state, on a deployment with two-factor on or off, and a
- * grace period of `graceDays` (7 unless a case says otherwise).
+ * grace period of `graceDays` (7 unless a case says otherwise; `null` configures
+ * none, so the manager's own default applies).
  */
-async function arrangeHeldMember(twoFactor: boolean, graceDays: number | undefined = 7) {
+async function arrangeHeldMember(twoFactor: boolean, graceDays: number | null = 7) {
   const engine: any = createMemoryEngine();
   const manager = new AuthManager({
     secret: SECRET,
     baseUrl: 'http://localhost:3000',
     dataEngine: engine,
-    ...(graceDays === undefined ? {} : { mfaGracePeriodDays: graceDays }),
+    ...(graceDays === null ? {} : { mfaGracePeriodDays: graceDays }),
     ...(twoFactor ? { plugins: { twoFactor: true } } : {}),
   } as any);
   const signedUp = await post(manager, '/sign-up/email', { email: EMAIL, password: PASSWORD, name: 'Member' });
@@ -653,8 +654,8 @@ describe('#30411 the grace period the notice names is the one the gate holds to'
   });
 
   it.each([
-    [40, false], [20, true], [undefined, true],
-  ] as const)('grace %j days, clock started 30 days ago: held = %j, and the manager answers the same number', async (graceDays, held) => {
+    [40, false], [20, true], [null, true],
+  ] as const)('grace %j days (null: unset), clock started 30 days ago: held = %j, and the manager answers the same number', async (graceDays, held) => {
     const { manager, userId } = await arrangeHeldMember(true, graceDays);
     expect(manager.getMfaGracePeriodDays()).toBe(graceDays ?? 7);
     const gates = await manager.resolveUserAuthGates(userId, { organizationId: ORG });
