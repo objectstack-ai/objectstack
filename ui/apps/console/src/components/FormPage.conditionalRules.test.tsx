@@ -695,3 +695,78 @@ describe('objectui#5627 — the keys reach the rows, in their own slots', () => 
     expect(resolveRowState(byName.owned, values, {}, false).required).toBe(true);
   });
 });
+
+// ─── 5. requiredWhen on an EDIT is the engine's transition gate ──────────
+
+/**
+ * objectstack#30220 — an Edit through `/forms/:name?recordId=` judges
+ * `requiredWhen` as objectql does: an update is refused only when the merged
+ * record violates the rule AND the stored row complied (ADR-0113
+ * non-regression). `resolveRowState` hands `resolveFieldRuleState` the stored
+ * row AND the field's column `name`, so a record already inside the gate
+ * without the value saves an unrelated edit. The CONTROL is the gate still
+ * holding: clearing the value of a record that complied is refused.
+ */
+describe('objectstack#30220 — FormPage judges requiredWhen on an Edit as a transition gate', () => {
+  const SIGNED_WHEN_ACTIVATED = withRules({
+    notes: { label: 'Notes', requiredWhen: "record.status == 'activated'" },
+  });
+  const SECTIONS = [{ label: 'Basics', fields: ['priority', 'title', 'status', 'notes'] }];
+  const writes = () => calls.filter((c) => c.method === 'POST' || c.method === 'PATCH');
+
+  function renderEdit(stored: Record<string, unknown>) {
+    return renderInternal(SECTIONS, {
+      objectSchema: SIGNED_WHEN_ACTIVATED,
+      query: '?recordId=c-1',
+      extraRoutes: [
+        {
+          match: '/data/showcase_task/c-1',
+          body: { object: 'showcase_task', id: 'c-1', record: { id: 'c-1', ...stored } },
+        },
+        {
+          method: 'PATCH',
+          match: '/data/showcase_task/c-1',
+          body: { object: 'showcase_task', id: 'c-1', record: { id: 'c-1', ...stored } },
+        },
+      ],
+    });
+  }
+
+  it('saves an unrelated edit to a record already inside the gate without the value', async () => {
+    const user = userEvent.setup();
+    const { container } = renderEdit({ priority: 'low', title: 'Old', status: 'activated' });
+    await awaitForm();
+    // At rest: neither the marker nor the control says required.
+    expect(controlFor(container, 'notes')).not.toBeRequired();
+    expect(labelFor(container, 'notes').textContent).not.toContain('*');
+
+    const title = screen.getByLabelText('Title');
+    await user.clear(title);
+    await user.type(title, 'Renamed');
+    await user.click(screen.getByRole('button', { name: /submit/i }));
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(writes()[0].method).toBe('PATCH');
+    expect((writes()[0].body as Record<string, unknown>).title).toBe('Renamed');
+  });
+
+  it('CONTROL: clearing the value of a record that complied is still refused', async () => {
+    const { toast } = await import('sonner');
+    vi.mocked(toast.error).mockClear();
+    const user = userEvent.setup();
+    const { container } = renderEdit({
+      priority: 'low',
+      title: 'Old',
+      status: 'activated',
+      notes: 'signed.pdf',
+    });
+    await awaitForm();
+    expect(controlFor(container, 'notes')).toBeRequired();
+
+    await user.clear(screen.getByLabelText(/^Notes/));
+    expect(controlFor(container, 'notes')).toBeRequired();
+    expect(labelFor(container, 'notes').textContent).toContain('*');
+    await user.click(screen.getByRole('button', { name: /submit/i }));
+    await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalled());
+    expect(writes()).toHaveLength(0);
+  });
+});

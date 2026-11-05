@@ -1145,6 +1145,13 @@ export function resolveRowState(
         { field: { defaultValue: field.defaultValue } },
         isCreateForm,
       ),
+      // The column of `previous` that holds this field's stored value, so an
+      // EDIT judges `requiredWhen` as the engine's transition gate: a stored
+      // row already inside the gate without the value rests there, and an
+      // unrelated edit saves (objectstack#30220, the verdict #30184 put in
+      // `resolveFieldRuleState`). A create form passes no `previous`, so it
+      // keeps the plain verdict.
+      name: field.name,
     },
     previous ?? undefined,
     predicateScope,
