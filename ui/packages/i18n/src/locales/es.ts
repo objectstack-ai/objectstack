@@ -2266,6 +2266,9 @@ const es = {
       unsupportedSpecifierType: "Tipo de ajuste no admitido: {{type}}",
       invalidPhone: "Introduzca un número de teléfono solo con dígitos, espacios y + ( ) - .",
       invalidColor: "Introduzca un color hexadecimal, como #1a2b3c",
+      clientAddressDirect: "Su dirección, tal como la juzga el servidor: {{address}}. Una lista que no la incluya no se puede guardar desde aquí. Este servidor no confía en los encabezados de proxy, así que detrás de un proxy esta es la dirección del proxy.",
+      clientAddressViaProxy: "Su dirección, tal como la juzga el servidor: {{address}}, leída de los encabezados reenviados por el proxy en el que confía este servidor. Una lista que no la incluya no se puede guardar desde aquí.",
+      clientAddressUnknown: "El servidor no puede determinar su dirección, así que desde aquí no se puede guardar una lista que no esté vacía.",
     },
     workspaceTimezonePrompt: {
       title: "Configure la zona horaria del sistema",

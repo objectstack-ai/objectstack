@@ -2262,6 +2262,9 @@ const fr = {
       unsupportedSpecifierType: "Type de paramètre non pris en charge : {{type}}",
       invalidPhone: "Saisissez un numéro de téléphone composé uniquement de chiffres, d’espaces et de + ( ) - .",
       invalidColor: "Saisissez une couleur hexadécimale, par exemple #1a2b3c",
+      clientAddressDirect: "Votre adresse, telle que le serveur la juge : {{address}}. Une liste qui ne la contient pas ne peut pas être enregistrée d’ici. Ce serveur ne fait pas confiance aux en-têtes de proxy : derrière un proxy, c’est donc l’adresse du proxy.",
+      clientAddressViaProxy: "Votre adresse, telle que le serveur la juge : {{address}}, lue dans les en-têtes transférés par le proxy auquel ce serveur fait confiance. Une liste qui ne la contient pas ne peut pas être enregistrée d’ici.",
+      clientAddressUnknown: "Le serveur ne peut pas établir votre adresse : une liste non vide ne peut donc pas être enregistrée d’ici.",
     },
     workspaceTimezonePrompt: {
       title: "Définir le fuseau horaire du système",

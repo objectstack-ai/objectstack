@@ -2362,6 +2362,12 @@ const en = {
       // `validation.url`; these two name what a phone number and a colour take.
       invalidPhone: 'Enter a phone number using only digits, spaces and + ( ) - .',
       invalidColor: 'Enter a hex color, such as #1a2b3c',
+      // The address the server judges beside Allowed IP ranges (objectstack#30313),
+      // one whole sentence per state of `GET /api/v1/auth/admin/client-address`:
+      // `trustProxy` off, on, and no address the server can establish.
+      clientAddressDirect: 'Your address, as the server judges it: {{address}}. A list that leaves it out cannot be saved from here. This server does not trust proxy headers, so behind a proxy this is the proxy\'s address.',
+      clientAddressViaProxy: 'Your address, as the server judges it: {{address}}, read from the forwarded headers of the proxy this server trusts. A list that leaves it out cannot be saved from here.',
+      clientAddressUnknown: 'The server cannot establish your address, so a non-empty list cannot be saved from here.',
     },
     // The one-time workspace-timezone prompt (objectui#11758): asked of an
     // administrator while `localization.timezone` is still the manifest default.

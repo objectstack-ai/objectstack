@@ -2206,6 +2206,9 @@ const ja = {
       unsupportedSpecifierType: "サポートされていない設定項目の種類: {{type}}",
       invalidPhone: "数字、スペース、+ ( ) - . のみで電話番号を入力してください",
       invalidColor: "#1a2b3c のような16進カラーを入力してください",
+      clientAddressDirect: "サーバーが判定したあなたのアドレス: {{address}}。このアドレスを含まないリストはここから保存できません。このサーバーはプロキシのヘッダーを信頼しないため、プロキシの背後ではプロキシのアドレスになります。",
+      clientAddressViaProxy: "サーバーが判定したあなたのアドレス: {{address}}（このサーバーが信頼するプロキシの転送ヘッダーから取得）。このアドレスを含まないリストはここから保存できません。",
+      clientAddressUnknown: "サーバーがあなたのアドレスを特定できないため、空でないリストはここから保存できません。",
     },
     workspaceTimezonePrompt: {
       title: "システムのタイムゾーンを設定",
