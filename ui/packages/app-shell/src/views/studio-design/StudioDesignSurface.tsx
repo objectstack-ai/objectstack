@@ -834,9 +834,19 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   const [publishNonce, setPublishNonce] = React.useState(0); // ↑ → pillars re-read the published baseline
   const [draftNonce, setDraftNonce] = React.useState(0); // ↑ → a draft save landed (`onDraftSaved`)
   // objectstack#28572 (ADR-0146 D3) — the base's served customization read
-  // (N-15), which every pillar rail marks its rows from; read again after a
-  // publish, which is what moves the served overrides.
-  const baseCustomizations = usePackageCustomizations(baseRead && packageId !== null ? packageId : null, publishNonce);
+  // (N-15), which every pillar rail marks its rows from; read again whenever
+  // the served overrides may have moved. objectstack#30238 — that is the
+  // metadata-refresh pulse, not `publishNonce`: a publish moves the nonce AND
+  // announces itself on the bus, but "Restore package original" (every
+  // pillar's, and the bundle item editor's) deletes the pair's row and only
+  // announces, so a read keyed on the nonce left the rail's marks and the
+  // "only customizations" count stale until a reload. Keyed on the pulse
+  // alone, a publish reads once, not twice; a copilot publish is read too.
+  const customizationsRefresh = useMetadataRefreshNonce();
+  const baseCustomizations = usePackageCustomizations(
+    baseRead && packageId !== null ? packageId : null,
+    customizationsRefresh,
+  );
   const customization = React.useMemo<StudioBaseCustomization | null>(
     () =>
       baseRead && packageId !== null
