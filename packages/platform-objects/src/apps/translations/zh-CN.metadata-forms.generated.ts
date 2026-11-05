@@ -1154,19 +1154,36 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "可用于快速搜索的字段名"
       },
       resizable: {
-        label: "可调整大小"
+        label: "可调整大小",
+        helpText: "允许调整列宽"
       },
       compactToolbar: {
-        label: "紧凑工具栏"
+        label: "紧凑工具栏",
+        helpText: "将分组 / 颜色 / 密度 / 隐藏字段收进同一个“视图设置”弹出框"
       },
       rowHeight: {
-        label: "行高"
+        label: "行高",
+        helpText: "行高 / 密度设置"
       },
       selection: {
-        label: "选择"
+        label: "选择",
+        helpText: "行选择配置"
+      },
+      "selection.type": {
+        label: "类型",
+        helpText: "选择模式"
       },
       pagination: {
-        label: "分页"
+        label: "分页",
+        helpText: "分页配置"
+      },
+      "pagination.pageSize": {
+        label: "每页条数",
+        helpText: "每页显示的记录数。在没有分页器的视图（看板、画廊、时间线）上，它是取数上限，渲染器须做到两点：按此数限定取数；当筛选结果多于此数时，显示明显的截断提示，说明屏幕上并非全部记录"
+      },
+      "pagination.pageSizeOptions": {
+        label: "每页条数选项",
+        helpText: "可选的每页条数"
       },
       kanban: {
         label: "看板"
@@ -1190,31 +1207,138 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "用户筛选器",
         helpText: "快速筛选栏：控件样式（dropdown / tabs / toggle）+ 暴露的字段或标签页预设"
       },
+      "userFilters.element": {
+        label: "控件样式",
+        helpText: "对象视图上的筛选控件样式：\"dropdown\"（按字段取值的筛选标签）。\"toggle\" 已弃用。\"tabs\" 仅用于页面——命名预设请使用 `listViews`。"
+      },
+      "userFilters.fields": {
+        label: "筛选字段",
+        helpText: "作为快速筛选暴露的字段（dropdown / toggle 控件）"
+      },
+      "userFilters.fields.field": {
+        label: "字段"
+      },
+      "userFilters.fields.label": {
+        label: "显示名称"
+      },
+      "userFilters.fields.type": {
+        label: "类型"
+      },
+      "userFilters.fields.options": {
+        label: "选项"
+      },
+      "userFilters.fields.showCount": {
+        label: "显示计数"
+      },
+      "userFilters.fields.defaultValues": {
+        label: "默认值"
+      },
       appearance: {
         label: "外观",
         helpText: "allowedVisualizations：允许用户切换的渲染器"
+      },
+      "appearance.showDescription": {
+        label: "显示描述",
+        helpText: "显示视图的描述文字"
+      },
+      "appearance.allowedVisualizations": {
+        label: "允许的可视化",
+        helpText: "用户可在其间切换的可视化类型白名单（如 [\"grid\", \"gallery\", \"kanban\"]）"
       },
       userActions: {
         label: "用户操作",
         helpText: "工具栏开关：排序 / 搜索 / 筛选 / 行高"
       },
+      "userActions.sort": {
+        label: "排序",
+        helpText: "允许用户对记录排序"
+      },
+      "userActions.search": {
+        label: "搜索",
+        helpText: "允许用户搜索记录"
+      },
+      "userActions.filter": {
+        label: "筛选",
+        helpText: "允许用户筛选记录"
+      },
+      "userActions.refresh": {
+        label: "刷新",
+        helpText: "允许用户从后端重新加载视图数据，无需整页刷新"
+      },
+      "userActions.rowHeight": {
+        label: "行高",
+        helpText: "允许用户切换行高 / 密度"
+      },
+      "userActions.group": {
+        label: "分组",
+        helpText: "允许用户在工具栏中更改记录分组。仅为开关——分组本身在视图级的 `grouping` 配置中设置。"
+      },
+      "userActions.addRecordForm": {
+        label: "通过表单添加记录",
+        helpText: "通过表单而非行内方式添加记录"
+      },
+      "userActions.editInline": {
+        label: "行内编辑",
+        helpText: "允许用户在行内编辑记录。默认开启：有权更新该对象的用户可直接在单元格内编辑，使用与该字段类型相符的控件（与表单所用相同），并受决定该对象是否可编辑的同一权限门控约束。声明 `editInline: false` 可让列表在原位只读。"
+      },
+      "userActions.hideFields": {
+        label: "隐藏字段",
+        helpText: "允许用户在工具栏中隐藏 / 显示字段（即视图级 `hiddenFields` 列表背后的入口）。布尔开关——不同于记录详情组件的 `hideFields`，后者是要省略的字段名数组。默认开启：读者可自行隐藏和显示列；声明 `hideFields: false` 可收起该控件。"
+      },
+      "userActions.rowColor": {
+        label: "行颜色",
+        helpText: "允许用户在工具栏中配置行着色。布尔开关——着色规则本身在视图级的 `rowColor` 配置中。默认关闭：行着色需显式开启。"
+      },
+      "userActions.buttons": {
+        label: "按钮",
+        helpText: "要在工具栏中显示的自定义操作按钮 ID"
+      },
       addRecord: {
-        label: "添加记录"
+        label: "添加记录",
+        helpText: "添加记录入口配置"
       },
       "addRecord.enabled": {
-        label: "已启用"
+        label: "已启用",
+        helpText: "显示添加记录入口——必填：`true` 显示“添加”按钮，`false` 声明关闭"
       },
       "addRecord.position": {
-        label: "位置"
+        label: "位置",
+        helpText: "添加记录按钮的位置：`top`（工具栏，默认）、`bottom`（列表下方）或 `both`"
       },
       showRecordCount: {
-        label: "显示记录数"
+        label: "显示记录数",
+        helpText: "在列表底部显示记录数"
       },
       navigation: {
-        label: "导航"
+        label: "导航",
+        helpText: "点击条目时的导航配置（默认为抽屉，也可为 page、new_window 或 none）"
+      },
+      "navigation.mode": {
+        label: "模式"
+      },
+      "navigation.preventNavigation": {
+        label: "禁止导航",
+        helpText: "完全禁用标准导航"
+      },
+      "navigation.openNewTab": {
+        label: "在新标签页打开",
+        helpText: "强制在新标签页打开（适用于 page 模式）"
+      },
+      "navigation.size": {
+        label: "尺寸",
+        helpText: "抽屉详情的浮层尺寸档位：'auto'（默认——渲染器按字段数与视口推导，AI 无需填写），或粗粒度覆盖 sm/md/lg/xl/full。优先使用它而非像素 `width`；page 模式会忽略它。"
+      },
+      "navigation.width": {
+        label: "宽度",
+        helpText: "[已弃用 → size] 抽屉的像素 / 百分比宽度（如 \"600px\"）。编写时无法预知客户端视口，因此选不出合适的像素宽度——请使用 `size` 档位。"
       },
       sharing: {
-        label: "共享"
+        label: "共享",
+        helpText: "视图共享配置：谁锁定了视图配置"
+      },
+      "sharing.lockedBy": {
+        label: "锁定者",
+        helpText: "锁定该视图配置的用户"
       }
     }
   },

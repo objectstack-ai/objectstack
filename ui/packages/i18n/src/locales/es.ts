@@ -938,8 +938,8 @@ const es = {
     },
     betterAuth: {
       short: "Identidad",
-      title: "Gestionado por el proveedor de identidad",
-      body: "El esquema de este objeto es propiedad de {{provider}}. Las ediciones directas omiten el hash de contraseñas, la validación de sesiones, las comprobaciones de dos factores y los hooks de auditoría. Gestione estos registros mediante los flujos de inicio de sesión, invitación y seguridad de su proveedor de autenticación.",
+      title: "Escrito a través del servicio de identidad integrado",
+      body: "El esquema de este objeto pertenece a {{provider}}, el servicio de identidad integrado de la plataforma. Cree y modifique estos registros con las acciones de esta página o mediante los flujos de inicio de sesión, invitación y seguridad; todos pasan por ese servicio. Editar la tabla directamente omitiría el hash de contraseñas, la validación de sesiones, las comprobaciones de dos factores y los hooks de auditoría.",
     },
   },
   kanban: {
@@ -2256,6 +2256,8 @@ const es = {
       sourceBadgeInherited: "Heredado de {{source}}",
       sourceBadgeOverrides: "Sobrescribe {{source}}",
       resetToDefault: "Restablecer valor predeterminado",
+      sourceBadgeModified: "Modificado",
+      defaultValueHint: "Predeterminado: {{value}}",
       envLockBadge: "Bloqueado por el entorno",
       envLockBadgeTitle: "Fijado por una variable de entorno: no se puede editar desde la interfaz.",
       deprecatedBadge: "Obsoleto",
@@ -2909,6 +2911,8 @@ const es = {
       useEmailResetText: "Restablecer por correo electrónico en su lugar",
       phoneSuccessTitle: "Contraseña restablecida",
       phoneSuccessDescription: "Tu contraseña ha sido restablecida. Ahora puedes iniciar sesión con tu nueva contraseña.",
+      noDeliveryTitle: "Aquí no se puede enviar un enlace de restablecimiento por correo",
+      noDeliveryDescription: "Esta implementación no envía correos, así que ningún enlace para restablecer la contraseña puede llegarle. Pida ayuda a un administrador: puede establecerle una nueva contraseña en Configuración → Usuarios.",
     },
     resetPassword: {
       title: "Establecer nueva contraseña",
@@ -4644,6 +4648,7 @@ const es = {
       title: 'Cambios pendientes',
       description: 'Lo que cambiará al publicar. Los elementos nuevos se añaden; las actualizaciones sobrescriben la versión publicada.',
       savedToCustomization: 'Guardado en las personalizaciones de {{package}}',
+      customizationEnvironment: 'Estos cambios se guardan en la base de datos de este entorno, como elementos de {{pair}}, no en el código fuente de su proyecto. Solo llegan a otro entorno mediante {{command}}.',
       loading: 'Cargando cambios pendientes…',
       loadFailed: 'No se pudieron cargar los cambios pendientes:',
       empty: 'Nada pendiente — todos los borradores se han publicado.',

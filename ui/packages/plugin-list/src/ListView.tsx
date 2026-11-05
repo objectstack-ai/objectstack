@@ -1690,6 +1690,22 @@ function canReadField(
   return !perms?.isLoaded || !objectName || perms.checkField(objectName, field, 'read');
 }
 
+/**
+ * Whether the object definition marks a field `hidden: true`: the injected
+ * system columns `@objectstack/spec` hides from pickers (`organization_id`,
+ * `queue`, the `__search` companion). The toolbar's field lists ask this one
+ * predicate. The Filter panel's list and the Sort picker's list leave such a
+ * field out unless the current filter or sort already names it, so that row
+ * is not blank and can be removed; the hide-fields lists never offer one to
+ * add. A plain function of the definition's field map, like `canReadField`.
+ */
+function isDeclaredHidden(
+  defs: Record<string, { hidden?: unknown } | undefined> | undefined,
+  field: string,
+): boolean {
+  return defs?.[field]?.hidden === true;
+}
+
 /** The item a value none of a picker's options carries is shown by. */
 const OUTSIDE_OPTIONS = 'outside';
 
@@ -5173,7 +5189,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    */
   const filterFields = React.useMemo(() => {
     const defs: Record<string, { hidden?: unknown; system?: boolean } | undefined> | undefined = objectDef?.fields;
-    const isHidden = (name: string) => defs?.[name]?.hidden === true;
+    const isHidden = (name: string) => isDeclaredHidden(defs, name);
     const held = new Set((currentFilters.conditions ?? []).map((c) => c.field));
     const columnRank = new Map<string, number>();
     for (const column of effectiveFields) {
@@ -5257,14 +5273,19 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // field the current sort already names (a stored or URL sort) stays listed,
   // so its row is not blank and can be removed.
   //
+  // A field the object definition marks `hidden: true` (`isDeclaredHidden`,
+  // the rule the Filter panel's list follows) is withheld the same way as an
+  // unreadable one: not offered, no relational hint, and kept by the in-use
+  // exception alone.
+  //
   // An entry the exception alone keeps is listed REMOVABLE ONLY
   // (objectui#11943): it carries `disabled`, which `SortBuilder` renders as an
   // unavailable option. Its own row still shows its label and can be changed
   // to another field or removed, but no row's dropdown offers it as a choice
   // and "Add sort" never seeds it. That holds for each reason the exception
-  // keeps a field: unreadable, relational, or refused by the platform (or by
-  // the type read when no projection is served). A field the two rules list
-  // anyway carries no flag, whether or not the sort names it.
+  // keeps a field: unreadable, hidden, relational, or refused by the platform
+  // (or by the type read when no projection is served). A field the two rules
+  // list anyway carries no flag, whether or not the sort names it.
   //
   // Both legs below — the list this picker renders, and the sort it emits for
   // a host to persist — read `platformSortability`, the ONE read of the served
@@ -5279,16 +5300,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // stored ID: said in one line under the rows, only while it is true.
     let picked = false;
     const fields: Array<{ value: string; label: string; disabled?: boolean; type?: string }> = [];
+    const defs: Record<string, { hidden?: unknown } | undefined> | undefined = objectDef?.fields;
     for (const field of candidateFields) {
-      const readable = canReadField(perms, schema.objectName, field.value);
-      if (!readable && !inUse.has(field.value)) continue;
+      const offered = canReadField(perms, schema.objectName, field.value) && !isDeclaredHidden(defs, field.value);
+      if (!offered && !inUse.has(field.value)) continue;
       const relational = EXPANDABLE_FIELD_TYPES.has(field.type);
       const platformSortable = platformSortability
         ? isPlatformSortableField(platformSortability, field.value)
         : !UNMATERIALIZED_FIELD_TYPES.has(field.type);
       // `type` lets the picker name a date's direction as time
       // (objectstack#27520): "Oldest → Newest", not "A → Z".
-      if (readable && !relational && platformSortable) {
+      if (offered && !relational && platformSortable) {
         fields.push({ value: field.value, label: field.label, type: field.type });
         continue;
       }
@@ -5306,7 +5328,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       if (relational) excluded = true;
     }
     return { sortFields: fields, sortHasRelationalField: excluded, sortPicksRelationalField: picked };
-  }, [candidateFields, currentSort, t, platformSortability, perms, schema.objectName]);
+  }, [candidateFields, currentSort, t, platformSortability, perms, schema.objectName, objectDef]);
 
   /**
    * [#6455] THE persist boundary: what this picker LISTS is not what it
@@ -5669,8 +5691,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   if (onAddedFieldsChange && objectDef?.fields) {
     const defs = objectDef.fields as Record<string, { label?: string; hidden?: unknown; system?: boolean } | undefined>;
     const listed = new Set(allFields.map((f) => f.name));
-    const candidates = Object.entries(defs).filter(([name, def]) =>
-      !listed.has(name) && def?.hidden !== true && canReadField(perms, schema.objectName, name));
+    const candidates = Object.entries(defs).filter(([name]) =>
+      !listed.has(name) && !isDeclaredHidden(defs, name) && canReadField(perms, schema.objectName, name));
     for (const tier of [false, true]) {
       for (const [name, def] of candidates) {
         if (isSystemManagedField(name, def) !== tier) continue;

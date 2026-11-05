@@ -908,8 +908,8 @@ const de = {
     },
     betterAuth: {
       short: "Identität",
-      title: "Vom Identitätsanbieter verwaltet",
-      body: "Das Schema dieses Objekts gehört {{provider}}. Direkte Änderungen umgehen Passwort-Hashing, Sitzungsvalidierung, Zwei-Faktor-Prüfungen und Audit-Hooks. Verwalten Sie diese Datensätze über die Anmelde-, Einladungs- und Sicherheitsabläufe Ihres Authentifizierungsanbieters.",
+      title: "Über den integrierten Identitätsdienst geschrieben",
+      body: "Das Schema dieses Objekts gehört {{provider}}, dem integrierten Identitätsdienst der Plattform. Legen Sie diese Datensätze mit den Aktionen auf dieser Seite oder über Anmelde-, Einladungs- und Sicherheitsabläufe an und ändern Sie sie dort; alle laufen über diesen Dienst. Direkte Änderungen an der Tabelle würden Passwort-Hashing, Sitzungsvalidierung, Zwei-Faktor-Prüfungen und Audit-Hooks umgehen.",
     },
   },
   kanban: {
@@ -2194,6 +2194,8 @@ const de = {
       sourceBadgeInherited: "Geerbt von {{source}}",
       sourceBadgeOverrides: "Überschreibt {{source}}",
       resetToDefault: "Auf Standard zurücksetzen",
+      sourceBadgeModified: "Geändert",
+      defaultValueHint: "Standard: {{value}}",
       envLockBadge: "Per Umgebung gesperrt",
       envLockBadgeTitle: "Durch eine Umgebungsvariable festgelegt — kann nicht in der Oberfläche bearbeitet werden.",
       deprecatedBadge: "Veraltet",
@@ -2844,6 +2846,8 @@ const de = {
       useEmailResetText: "Stattdessen per E-Mail zurücksetzen",
       phoneSuccessTitle: "Passwort zurückgesetzt",
       phoneSuccessDescription: "Ihr Passwort wurde zurückgesetzt. Sie können sich jetzt mit dem neuen Passwort anmelden.",
+      noDeliveryTitle: "Hier kann kein Link zum Zurücksetzen per E-Mail gesendet werden",
+      noDeliveryDescription: "Diese Bereitstellung versendet keine E-Mails, daher kann Sie kein Link zum Zurücksetzen des Passworts erreichen. Wenden Sie sich an einen Administrator: Er kann unter Einrichtung → Benutzer ein neues Passwort für Sie festlegen.",
     },
     resetPassword: {
       title: "Neues Passwort festlegen",
@@ -4542,6 +4546,7 @@ const de = {
       title: 'Ausstehende Änderungen',
       description: 'Was die Veröffentlichung ändert. Neue Elemente werden hinzugefügt; Aktualisierungen überschreiben die Live-Version.',
       savedToCustomization: 'Gespeichert in den Anpassungen von {{package}}',
+      customizationEnvironment: 'Diese Änderungen liegen in der Datenbank dieser Umgebung, als Elemente von {{pair}}, nicht im Quellcode Ihres Projekts. In eine andere Umgebung gelangen sie nur mit {{command}}.',
       loading: 'Ausstehende Änderungen werden geladen…',
       loadFailed: 'Ausstehende Änderungen konnten nicht geladen werden:',
       empty: 'Nichts ausstehend — alle Entwürfe wurden veröffentlicht.',

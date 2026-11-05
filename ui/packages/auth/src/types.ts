@@ -334,6 +334,16 @@ export interface AuthPublicConfig {
      */
     phoneNumberOtp?: boolean;
     /**
+     * Whether mail leaves this deployment (`AuthFeaturesConfigSchema.emailDelivery`
+     * in `@objectstack/spec`): `true` only when the wired email service reports
+     * itself configured; `false` with no email service or the stock `log`
+     * transport. The forgot-password form swaps its success screen to "a reset
+     * link can't be emailed here, ask an administrator" on an explicit `false`
+     * only. It describes the deployment, never an address. Absent (older
+     * server) ⇒ the form keeps its "check your email" text.
+     */
+    emailDelivery?: boolean;
+    /**
      * better-auth admin plugin mounted server-side (`auth.plugins.admin`;
      * SCIM forces it on). Gates the admin user-management surfaces — the
      * sys_user create/set-password actions and the identity import wizard

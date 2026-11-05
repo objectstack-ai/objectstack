@@ -27,7 +27,7 @@ type RowCrudAffordances = ReturnType<typeof resolveRowCrudAffordances>;
  * `ObjectGrid` calls it where these lines used to stand.
  */
 export function resolveObjectGridActionsColumn({
-  schema, data, objectSchema, persistedColumns, operations, customRowActions, resolvedRowActionDefs,
+  schema, data, objectSchema, persistedColumns, operations, resolvedRowActionDefs,
   wantEditAction, wantDeleteAction, mayInvokeRowAction, rowOperations, canEdit, canDelete,
   recordVerdict, predicateScope, onEdit, onDelete, editPredicates, deletePredicates, executeAction,
   setRefreshKey, t,
@@ -37,7 +37,6 @@ export function resolveObjectGridActionsColumn({
   objectSchema: any;
   persistedColumns: ReturnType<typeof resolveObjectGridPersistedColumns>['persistedColumns'];
   operations: ObjectGridSchema['operations'] | { update: boolean; delete: boolean };
-  customRowActions: ReturnType<typeof resolveLegacyRowActions>['unresolved'];
   resolvedRowActionDefs: ReturnType<typeof resolveLegacyRowActions>['defs'];
   wantEditAction: boolean;
   wantDeleteAction: boolean;
@@ -61,7 +60,7 @@ export function resolveObjectGridActionsColumn({
   // record-level verdict they feed is fetched by a hook, which may not sit
   // behind a conditional return.
   const hasActions = !!(operations && (operations.update || operations.delete));
-  const hasRowActions = customRowActions.length > 0 || resolvedRowActionDefs.length > 0 || wantEditAction || wantDeleteAction;
+  const hasRowActions = resolvedRowActionDefs.length > 0 || wantEditAction || wantDeleteAction;
 
   // objectui#12708 — the Actions column is drawn only when a row on screen
   // OFFERS something: its plan, the one `RowActionMenu` renders the row's cell
@@ -86,7 +85,6 @@ export function resolveObjectGridActionsColumn({
       scope: predicateScope,
       actionDefs: rowActionDefsGated,
       maxInlineActions: maxInlineRowActions,
-      rowActions: customRowActions,
       ...rowCrudVerdicts(row),
       onEdit,
       onDelete,
@@ -116,7 +114,6 @@ export function resolveObjectGridActionsColumn({
     const rowVerdicts = rowCrudVerdicts(row);
     return {
       row,
-      rowActions: customRowActions,
       rowActionDefs: resolvedRowActionDefs as any[],
       objectFields: objectSchema?.fields,
       // NON-AUTHOR SURFACE — `maxInlineRowActions` is deliberately

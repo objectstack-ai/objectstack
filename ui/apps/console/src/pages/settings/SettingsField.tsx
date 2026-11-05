@@ -33,7 +33,12 @@ import {
 import { useObjectTranslation } from '@object-ui/i18n';
 import { AlertTriangle, ChevronRight, Info, RotateCcw } from 'lucide-react';
 import { EnvLockBadge } from './EnvLockBadge';
-import { resolveLabel, type Specifier, type ResolvedSettingValue } from './types';
+import {
+  resolveLabel,
+  type Specifier,
+  type SpecifierScope,
+  type ResolvedSettingValue,
+} from './types';
 import type { SettingsLabelHelpers } from './useSettingsLabel';
 
 /**
@@ -100,17 +105,27 @@ export interface SettingsFieldProps {
    * sitting under a red error reads as if the field has two states at once.
    */
   error?: string;
+  /**
+   * The scope this row's Save writes. The page passes it; a host that does
+   * not (the timezone prompt) keeps the badges a lower scope would see.
+   */
+  writeScope?: SpecifierScope;
 }
 
 type SourceBadge =
   | { kind: 'inherited'; scope: ResolvedSettingValue['source'] }
-  | { kind: 'overrides'; scope: ResolvedSettingValue['source'] };
+  | { kind: 'overrides'; scope: ResolvedSettingValue['source'] }
+  /** The value is the one this page writes; `defaultValue` is the default layer's. */
+  | { kind: 'modified'; defaultValue: unknown };
 
 /**
  * Which source badge a row carries, read off the server's `cascadeChain` alone:
  * the console never invents a source state.
  */
-function sourceBadgeOf(resolved: ResolvedSettingValue): SourceBadge | null {
+function sourceBadgeOf(
+  resolved: ResolvedSettingValue,
+  writeScope: SpecifierScope | undefined,
+): SourceBadge | null {
   const chain = resolved.cascadeChain;
   if (!chain || chain.length === 0) return null;
 
@@ -125,7 +140,12 @@ function sourceBadgeOf(resolved: ResolvedSettingValue): SourceBadge | null {
     effective.scope !== 'user' &&
     effective.scope !== 'tenant'
   ) {
-    // global/env: show as inherited for downstream scopes
+    // global/env: inherited for downstream scopes, but a global value on the
+    // page that writes the global scope was set here.
+    if (effective.scope === writeScope) {
+      const defaultEntry = chain.find((e) => e.scope === 'default');
+      return { kind: 'modified', defaultValue: defaultEntry?.value };
+    }
     return { kind: 'inherited', scope: effective.scope };
   }
 
@@ -143,6 +163,13 @@ function InheritanceBadge({
   labels?: SettingsLabelHelpers;
 }) {
   const { t } = useObjectTranslation();
+  if (badge.kind === 'modified') {
+    return (
+      <Badge variant="outline" className="text-amber-700 border-amber-300 text-[10px]">
+        {t('console.settingsView.sourceBadgeModified')}
+      </Badge>
+    );
+  }
   const source = labels?.sourceLabel?.(badge.scope) ?? badge.scope;
 
   // Each badge is ONE sentence with the layer's label interpolated as
@@ -178,6 +205,8 @@ function FieldHeader({
   htmlFor,
   onReset,
   resetDisabled,
+  writeScope,
+  describeDefault,
 }: {
   spec: Specifier;
   resolved?: ResolvedSettingValue;
@@ -186,15 +215,20 @@ function FieldHeader({
   labelId?: string;
   htmlFor?: string;
   /**
-   * Clears this layer's value (objectui#13145). Offered only beside an
-   * `Overrides` badge, the one state where clearing hands the row back to a
-   * value the layer above carries.
+   * Clears this layer's value (objectui#13145). Offered beside an `Overrides`
+   * badge and a `Modified` one, the states where clearing hands the row back
+   * to a value the layer above, or the default, carries.
    */
   onReset?: () => void;
   resetDisabled?: boolean;
+  writeScope?: SpecifierScope;
+  /** The default value in words, or `null` when it has none worth showing. */
+  describeDefault?: (value: unknown) => string | null;
 }) {
   const { t } = useObjectTranslation();
-  const badge = resolved && !resolved.locked ? sourceBadgeOf(resolved) : null;
+  const badge = resolved && !resolved.locked ? sourceBadgeOf(resolved, writeScope) : null;
+  const defaultText =
+    badge?.kind === 'modified' && describeDefault ? describeDefault(badge.defaultValue) : null;
   return (
     <div className="flex items-center gap-2">
       <Label id={labelId} htmlFor={htmlFor} className="text-sm font-medium">
@@ -210,7 +244,12 @@ function FieldHeader({
       ) : null}
       {resolved?.locked ? <EnvLockBadge reason={resolved.lockedReason} /> : null}
       {badge ? <InheritanceBadge badge={badge} labels={labels} /> : null}
-      {badge?.kind === 'overrides' && onReset ? (
+      {defaultText !== null ? (
+        <span className="text-[11px] text-muted-foreground">
+          {t('console.settingsView.defaultValueHint', { value: defaultText })}
+        </span>
+      ) : null}
+      {(badge?.kind === 'overrides' || badge?.kind === 'modified') && onReset ? (
         // Sets the key to `null` in the draft; the page's Save sends it, and
         // the badge then follows the server's answer for the row.
         <Button
@@ -347,7 +386,8 @@ function DomainCombobox({
 }
 
 export function SettingsField(props: SettingsFieldProps) {
-  const { spec, resolved, value, onChange, onAction, locked, saving, labels, error } = props;
+  const { spec, resolved, value, onChange, onAction, locked, saving, labels, error, writeScope } =
+    props;
   const id = useId();
   const { t } = useObjectTranslation();
   const disabled = Boolean(locked || saving);
@@ -490,6 +530,8 @@ export function SettingsField(props: SettingsFieldProps) {
         htmlFor={labelFor}
         onReset={onReset}
         resetDisabled={disabled}
+        writeScope={writeScope}
+        describeDefault={describeDefault}
       />
       {error && isValidElement(children)
         ? cloneElement(children as ReactElement<Record<string, unknown>>, {
@@ -509,6 +551,20 @@ export function SettingsField(props: SettingsFieldProps) {
     const literal = typeof opt.label === 'string' ? opt.label : opt.label?.defaultValue ?? String(opt.value);
     if (!spec.key || !labels) return literal;
     return labels.optionLabel(spec.key, String(opt.value), literal);
+  };
+
+  // The default a `Modified` row names. A secret's default is never shown,
+  // and a value with no plain spelling (an object) is left unnamed.
+  const describeDefault = (raw: unknown): string | null => {
+    if (raw === null || raw === undefined || spec.type === 'password' || spec.encrypted) return null;
+    if (typeof raw === 'boolean') return t(raw ? 'common.yes' : 'common.no');
+    const optionText = (v: unknown): string => {
+      const opt = spec.options?.find((o) => o.value === v);
+      return opt ? renderOptionLabel(opt) : String(v);
+    };
+    if (Array.isArray(raw)) return raw.length > 0 ? raw.map(optionText).join(', ') : null;
+    if (typeof raw === 'object') return null;
+    return optionText(raw);
   };
 
   switch (spec.type) {
@@ -556,7 +612,9 @@ export function SettingsField(props: SettingsFieldProps) {
         <Input
           id={id}
           type="number"
-          value={value as any}
+          // An unset value (a reset in the draft) is an empty box: React leaves
+          // the last number on screen when `value` is `null`.
+          value={value === null || value === undefined ? '' : (value as number | string)}
           min={spec.min}
           max={spec.max}
           step={spec.step}
@@ -577,6 +635,8 @@ export function SettingsField(props: SettingsFieldProps) {
               htmlFor={id}
               onReset={onReset}
               resetDisabled={disabled}
+              writeScope={writeScope}
+              describeDefault={describeDefault}
             />
             {error ? (
               <FieldError id={errorId} message={error} />
