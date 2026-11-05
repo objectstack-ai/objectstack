@@ -23,7 +23,9 @@ import {
   type BuiltinDriverId,
 } from '@objectstack/spec/data';
 
-import { DRIVER_CATALOG, driverCatalogFor } from '../driver-catalog.js';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
+
+import { DRIVER_CATALOG, driverCatalogFor, driverCatalogLocaleOf } from '../driver-catalog.js';
 import { DRIVER_CATALOG_TRANSLATIONS } from '../driver-catalog-translations.js';
 
 describe('DRIVER_CATALOG', () => {
@@ -92,6 +94,10 @@ const entryOf = (catalog: typeof DRIVER_CATALOG, id: string) => {
   if (!entry) throw new Error(`no ${id} entry`);
   return entry;
 };
+const filenameTitle = (tag: string | undefined) => propsOf(entryOf(driverCatalogFor(tag), 'sqlite')).filename.title;
+
+/** The labels that are product names, served as written in every language. */
+const PRODUCT_NAME_LABELS = new Set(['sqlite', 'postgres', 'mysql', 'mongodb']);
 
 /**
  * The catalog's words in the requester's language. The New datasource dialog
@@ -100,7 +106,7 @@ const entryOf = (catalog: typeof DRIVER_CATALOG, id: string) => {
  * `Host` and `Port` in English until the route served them translated.
  */
 describe('driverCatalogFor', () => {
-  it('serves zh-CN words for SQLite and the network drivers', () => {
+  it('serves Simplified Chinese words for SQLite and the network drivers', () => {
     const zh = driverCatalogFor('zh-CN');
 
     const sqlite = entryOf(zh, 'sqlite');
@@ -119,38 +125,70 @@ describe('driverCatalogFor', () => {
     expect(entryOf(zh, 'memory').label).toBe('内存');
   });
 
+  it('serves a word of its own in every language on the platform table', () => {
+    const expected: Record<string, string> = {
+      'zh-Hans': '文件名',
+      'zh-Hant': '檔案名稱',
+      es: 'Nombre de archivo',
+      ar: 'اسم الملف',
+      fr: 'Nom de fichier',
+      'pt-BR': 'Nome do arquivo',
+      ru: 'Имя файла',
+      de: 'Dateiname',
+      ja: 'ファイル名',
+      ko: '파일 이름',
+    };
+    expect(Object.keys(expected).sort()).toEqual(PLATFORM_LOCALE_TAGS.filter((t) => t !== 'en').sort());
+    for (const [tag, title] of Object.entries(expected)) expect(filenameTitle(tag), tag).toBe(title);
+  });
+
+  it('reads Traditional Chinese codes as Traditional, never Simplified', () => {
+    for (const tag of ['zh-TW', 'zh-HK', 'zh-MO', 'zh-Hant', 'zh-hant', 'zh-Hant-TW', 'zh-Hant-HK']) {
+      expect(driverCatalogLocaleOf(tag), tag).toBe('zh-Hant');
+      expect(filenameTitle(tag), tag).toBe('檔案名稱');
+    }
+    for (const tag of ['zh', 'zh-CN', 'zh-cn', 'zh-SG', 'zh-Hans', 'zh-Hans-CN']) {
+      expect(driverCatalogLocaleOf(tag), tag).toBe('zh-Hans');
+      expect(filenameTitle(tag), tag).toBe('文件名');
+    }
+  });
+
+  it('reads aliases and regional codes through the platform table', () => {
+    const cases: Array<[string, string]> = [
+      ['ja-JP', 'ja'], ['es-ES', 'es'], ['es-MX', 'es'], ['pt', 'pt-BR'], ['pt-PT', 'pt-BR'],
+      ['fr-CA', 'fr'], ['de-AT', 'de'], ['ko-KR', 'ko'], ['ar-EG', 'ar'], ['ru-RU', 'ru'],
+    ];
+    for (const [code, tag] of cases) expect(driverCatalogLocaleOf(code), code).toBe(tag);
+  });
+
   it('keeps everything but the words: ids, icons, types and defaults are the English entry\'s', () => {
-    const zh = driverCatalogFor('zh-CN');
-    expect(zh.map((d) => [d.id, d.icon])).toEqual(DRIVER_CATALOG.map((d) => [d.id, d.icon]));
-    for (const entry of zh) {
-      const english = propsOf(entryOf(DRIVER_CATALOG, entry.id));
-      const translated = propsOf(entry);
-      expect(Object.keys(translated), entry.id).toEqual(Object.keys(english));
-      for (const key of Object.keys(english)) {
-        const { title: _t, description: _d, ...rest } = translated[key];
-        const { title: _et, description: _ed, ...englishRest } = english[key];
-        expect(rest, `${entry.id}.${key}`).toEqual(englishRest);
+    for (const tag of PLATFORM_LOCALE_TAGS) {
+      const served = driverCatalogFor(tag);
+      expect(served.map((d) => [d.id, d.icon]), tag).toEqual(DRIVER_CATALOG.map((d) => [d.id, d.icon]));
+      for (const entry of served) {
+        const english = propsOf(entryOf(DRIVER_CATALOG, entry.id));
+        const translated = propsOf(entry);
+        expect(Object.keys(translated), `${tag}.${entry.id}`).toEqual(Object.keys(english));
+        for (const key of Object.keys(english)) {
+          const { title: _t, description: _d, ...rest } = translated[key];
+          const { title: _et, description: _ed, ...englishRest } = english[key];
+          expect(rest, `${tag}.${entry.id}.${key}`).toEqual(englishRest);
+        }
       }
     }
   });
 
-  it('negotiates the requested tag through the platform ladder', () => {
-    for (const tag of ['zh', 'zh-cn', 'zh-SG', 'zh-Hans']) {
-      expect(propsOf(entryOf(driverCatalogFor(tag), 'sqlite')).filename.title, tag).toBe('文件名');
-    }
-  });
-
-  it('serves English for no locale, en, or a locale nothing translates', () => {
-    for (const tag of [undefined, '', 'en', 'en-US', 'fr', 'constructor', '__proto__']) {
+  it('serves English for no locale, English, or a code the platform table does not name', () => {
+    for (const tag of [undefined, '', 'en', 'en-US', 'en-GB', 'it', 'nl-NL', 'constructor', '__proto__']) {
       expect(driverCatalogFor(tag), String(tag)).toBe(DRIVER_CATALOG);
     }
     expect(propsOf(entryOf(DRIVER_CATALOG, 'sqlite')).filename.title).toBe('Filename');
     expect(propsOf(entryOf(DRIVER_CATALOG, 'postgres')).host.title).toBe('Host');
   });
 
-  it('falls back to the English word where a locale has none, never to a key', () => {
+  it('falls back to the English word where a language has none, never to a key', () => {
     const zh = driverCatalogFor('zh-CN');
-    // Product names are not in the zh-CN table: the English label is served.
+    // Product names are not translated: the English label is served.
     expect(entryOf(zh, 'sqlite').label).toBe('SQLite');
     expect(entryOf(zh, 'postgres').label).toBe('PostgreSQL');
     // The memory driver's fields carry a description and no title in English;
@@ -160,7 +198,7 @@ describe('driverCatalogFor', () => {
   });
 
   it('never writes the spec projection it overlays', () => {
-    driverCatalogFor('zh-CN');
+    for (const tag of PLATFORM_LOCALE_TAGS) driverCatalogFor(tag);
     const sqlite = getDriverConfigJsonSchemaById('sqlite') as { properties: Record<string, JsonProp> };
     expect(sqlite.properties.filename.title).toBe('Filename');
     expect(propsOf(entryOf(DRIVER_CATALOG, 'sqlite')).filename.title).toBe('Filename');
@@ -169,18 +207,28 @@ describe('driverCatalogFor', () => {
 });
 
 /**
- * Every locale in `driver-catalog-translations.ts` against the served shape:
- * a driver or field it names must exist, so a renamed field cannot leave a
- * translation that silently stops applying, and every field word the English
- * form shows must be translated, so a field the spec adds goes red here rather
- * than reading English in a translated dialog.
+ * Every language on the platform locale table against the served shape. It
+ * walks `PLATFORM_LOCALE_TAGS`, not the translation table's own keys, so a
+ * language the table lacks goes red here: the platform has one list of
+ * languages, each complete. A driver or field a language names must exist, so
+ * a renamed field cannot leave a translation that silently stops applying; and
+ * every word the English form shows must be translated, so a field the spec
+ * adds goes red here rather than reading English in a translated dialog.
  */
 describe('DRIVER_CATALOG_TRANSLATIONS coverage', () => {
   const offered = new Set(DRIVER_CATALOG.map((d) => d.id));
+  const languages = PLATFORM_LOCALE_TAGS.filter((tag) => tag !== 'en');
 
-  for (const [locale, table] of Object.entries(DRIVER_CATALOG_TRANSLATIONS)) {
+  it('carries every non-English language on the platform table, and nothing else', () => {
+    expect(PLATFORM_LOCALE_TAGS).toContain('en');
+    expect(Object.keys(DRIVER_CATALOG_TRANSLATIONS).sort()).toEqual([...languages].sort());
+  });
+
+  for (const locale of languages) {
     it(`${locale}: names only drivers and fields the catalog serves`, () => {
-      for (const [id, text] of Object.entries(table)) {
+      const table = DRIVER_CATALOG_TRANSLATIONS[locale];
+      expect(table, locale).toBeDefined();
+      for (const [id, text] of Object.entries(table ?? {})) {
         expect(offered.has(id), `${locale}.${id}`).toBe(true);
         const props = propsOf(entryOf(DRIVER_CATALOG, id));
         for (const key of Object.keys(text?.fields ?? {})) {
@@ -189,10 +237,12 @@ describe('DRIVER_CATALOG_TRANSLATIONS coverage', () => {
       }
     });
 
-    it(`${locale}: translates every driver description and every field word the English form shows`, () => {
+    it(`${locale}: translates every word the English form shows`, () => {
+      const table = DRIVER_CATALOG_TRANSLATIONS[locale];
       for (const entry of DRIVER_CATALOG) {
-        const text = table[entry.id as keyof typeof table];
+        const text = table?.[entry.id as keyof typeof table];
         expect(text?.description, `${locale}.${entry.id}.description`).toBeTruthy();
+        if (!PRODUCT_NAME_LABELS.has(entry.id)) expect(text?.label, `${locale}.${entry.id}.label`).toBeTruthy();
         for (const [key, prop] of Object.entries(propsOf(entry))) {
           const field = text?.fields?.[key];
           if (prop.title !== undefined) expect(field?.title, `${locale}.${entry.id}.${key}.title`).toBeTruthy();

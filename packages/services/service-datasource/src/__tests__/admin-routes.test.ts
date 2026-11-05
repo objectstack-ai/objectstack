@@ -146,8 +146,17 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
     const query = await read(undefined, '/api/v1/datasources/drivers?locale=zh-CN');
     expect(query('sqlite').configSchema.properties.filename.title).toBe('文件名');
 
-    // English and an untranslated language are served the English words.
-    for (const lang of ['en-US', 'fr-FR']) {
+    // A Traditional Chinese reader gets Traditional, never the Simplified text.
+    const zhTW = await read({ headers: { 'accept-language': 'zh-TW,zh;q=0.9' } });
+    expect(zhTW('sqlite').configSchema.properties.filename.title).toBe('檔案名稱');
+    expect(zhTW('postgres').configSchema.properties.port.title).toBe('連接埠');
+
+    // Every other language on the platform table is served too.
+    const fr = await read({ headers: { 'accept-language': 'fr-FR,fr;q=0.9' } });
+    expect(fr('sqlite').configSchema.properties.filename.title).toBe('Nom de fichier');
+
+    // English, and a language the platform table does not name, are served the English words.
+    for (const lang of ['en-US', 'it-IT']) {
       const en = await read({ headers: { 'accept-language': lang } });
       expect(en('sqlite').configSchema.properties.filename.title, lang).toBe('Filename');
       expect(en('postgres').configSchema.properties.host.title, lang).toBe('Host');

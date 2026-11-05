@@ -41,10 +41,11 @@
  */
 
 import { getDriverConfigJsonSchemaById, type BuiltinDriverId } from '@objectstack/spec/data';
-import { resolveLocaleAmong } from '@objectstack/spec/system';
+import { platformLocaleTagOf } from '@objectstack/spec/system';
 
 import {
   DRIVER_CATALOG_TRANSLATIONS,
+  type DriverCatalogLocale,
   type DriverCatalogText,
   type DriverFieldText,
 } from './driver-catalog-translations.js';
@@ -162,19 +163,38 @@ function localizeEntry(entry: DriverCatalogEntry, text: DriverCatalogText | unde
 }
 
 /**
+ * The platform locale table language a requested code names, or `undefined`
+ * for English and for a code the table does not name.
+ *
+ * Read through the table's own reader, `platformLocaleTagOf`, so a read alias
+ * finds its language (`zh-TW`, `zh-HK` → `zh-Hant`; `zh`, `zh-CN` → `zh-Hans`;
+ * `pt` → `pt-BR`). A code the table does not name is shortened one subtag at a
+ * time (RFC 4647 lookup: `fr-CA` → `fr`, `zh-Hant-TW` → `zh-Hant`), the shape
+ * the storage connection test reads a caller's language with. It never falls
+ * to "the first variant of the base language", which would hand a Traditional
+ * Chinese reader the Simplified text.
+ */
+export function driverCatalogLocaleOf(requested: string | undefined): DriverCatalogLocale | undefined {
+  if (typeof requested !== 'string' || requested.length === 0) return undefined;
+  const subtags = requested.split('-');
+  for (let n = subtags.length; n > 0; n -= 1) {
+    const tag = platformLocaleTagOf(subtags.slice(0, n).join('-'));
+    if (tag) return tag === 'en' ? undefined : tag;
+  }
+  return undefined;
+}
+
+/**
  * The driver catalog in the language `requested` names — what
  * `GET /api/v1/datasources/drivers` serves.
  *
- * `requested` is matched against the translated locales by the platform's one
- * negotiation ladder (`resolveLocaleAmong`, `@objectstack/spec/system`), so a
- * bare `zh` or `zh-cn` reaches `zh-CN`. No locale, a locale nothing matches
- * (`en`, `fr`), or a word a locale does not translate is served in English,
- * the `DRIVER_CATALOG` text, never a key.
+ * The language is {@link driverCatalogLocaleOf}. No locale, English, a code
+ * the platform table does not name, or a word a language does not translate
+ * is served in English, the `DRIVER_CATALOG` text, never a key.
  */
 export function driverCatalogFor(requested: string | undefined): DriverCatalogEntry[] {
-  if (typeof requested !== 'string' || requested.length === 0) return DRIVER_CATALOG;
-  const locale = resolveLocaleAmong(requested, Object.keys(DRIVER_CATALOG_TRANSLATIONS));
+  const locale = driverCatalogLocaleOf(requested);
   if (locale === undefined) return DRIVER_CATALOG;
   const translations = DRIVER_CATALOG_TRANSLATIONS[locale];
-  return DRIVER_CATALOG.map((entry) => localizeEntry(entry, translations?.[entry.id as BuiltinDriverId]));
+  return DRIVER_CATALOG.map((entry) => localizeEntry(entry, translations[entry.id as BuiltinDriverId]));
 }
