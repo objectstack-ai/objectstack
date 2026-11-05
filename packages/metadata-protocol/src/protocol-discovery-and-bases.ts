@@ -10,6 +10,12 @@
  * `registeredTranslationBundle`, `readCodeLayerForCarryForward` moved out of
  * `protocol.ts` whole by `scripts/codemod-split-protocol.mjs`.
  *
+ * [#30062] Written here from the start, beside their siblings: the page,
+ * dataset, app and book packaged bases (`getPackagedPageBase`,
+ * `getPackagedDatasetBase`, `getPackagedAppBase`, `getPackagedBookBase`), the
+ * served-override reading of a served document (`servedOverrideBaseOf`) and the
+ * pair's own translations (`getPairTranslationBundle`).
+ *
  * A MOVE, not a redesign. `ProtocolDiscoveryAndBasesFacet` is a stateless facet over the host
  * (ruling 6624345766): each static method below is the body of the class
  * member of the same name as `packages/metadata-protocol/scripts/host-split.mjs`
@@ -29,10 +35,12 @@
 import type { SysMetadataRepository } from './sys-metadata-repository.js';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
 import type { TranslationBundle } from '@objectstack/spec/system';
+import { readAuthoredTranslationLayer } from '@objectstack/core';
 import { restoreTranslatedEchoes } from './protocol-translated-echo.js';
 import type { RestoredTranslatedSlot } from './protocol-translated-echo.js';
 import {
     DEFAULT_METADATA_TYPE_REGISTRY,
+    customizationPackageId,
     getMetadataCreateSeed,
     getMetadataTypeActions,
     getMetadataTypeSchema,
@@ -47,7 +55,15 @@ import {
 } from './protocol-meta-type-schema.js';
 import type { SaveMetaItemRequest } from './protocol-door-requests.js';
 import type { ProtocolHost } from './protocol-host.js';
+import { servedOverrideBaseOf } from './served-override.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
+
+/**
+ * [#30062] The types whose packaged base {@link ProtocolDiscoveryAndBasesFacet.packagedArtifactBase}
+ * answers: the artifact item IS the packaged declaration for each (none has an
+ * extension fold, unlike the object).
+ */
+export type PackagedArtifactBaseType = 'dashboard' | 'view' | 'report' | 'page' | 'dataset' | 'app' | 'book';
 
 export class ProtocolDiscoveryAndBasesFacet {
     /** The body of `ObjectStackProtocolImplementation#getProjectId`; the method's docblock there is its contract. */
@@ -247,14 +263,70 @@ export class ProtocolDiscoveryAndBasesFacet {
         return host.packagedArtifactBase('report', name);
     }
 
+    /** The body of `ObjectStackProtocolImplementation#getPackagedPageBase`; the method's docblock there is its contract. */
+    static getPackagedPageBase(host: Pick<ProtocolHost, 'packagedArtifactBase'>, name: string): unknown {
+        return host.packagedArtifactBase('page', name);
+    }
+
+    /** The body of `ObjectStackProtocolImplementation#getPackagedDatasetBase`; the method's docblock there is its contract. */
+    static getPackagedDatasetBase(host: Pick<ProtocolHost, 'packagedArtifactBase'>, name: string): unknown {
+        return host.packagedArtifactBase('dataset', name);
+    }
+
+    /** The body of `ObjectStackProtocolImplementation#getPackagedAppBase`; the method's docblock there is its contract. */
+    static getPackagedAppBase(host: Pick<ProtocolHost, 'packagedArtifactBase'>, name: string): unknown {
+        return host.packagedArtifactBase('app', name);
+    }
+
+    /** The body of `ObjectStackProtocolImplementation#getPackagedBookBase`; the method's docblock there is its contract. */
+    static getPackagedBookBase(host: Pick<ProtocolHost, 'packagedArtifactBase'>, name: string): unknown {
+        return host.packagedArtifactBase('book', name);
+    }
+
+    /** The body of `ObjectStackProtocolImplementation#servedOverrideBaseOf`; the method's docblock there is its contract. */
+    static servedOverrideBaseOf(type: string, document: unknown): string | undefined {
+        return servedOverrideBaseOf(type, document);
+    }
+
+    /**
+     * The body of `ObjectStackProtocolImplementation#getPairTranslationBundle`;
+     * the method's docblock there is its contract.
+     *
+     * The rows are the environment's ({@link ObjectStackProtocolImplementation.findEnvironmentRows},
+     * ADR-0131 D6/D7), narrowed to the pair's binding, and each is read into
+     * its locale's data by `readAuthoredTranslationLayer` (`@objectstack/core`),
+     * the function the i18n service's authored layer is built with: the same
+     * conversions, the same locale resolution, the same bookkeeping stripped.
+     * So the bundle is exactly the pair's share of the catalog the deployment
+     * serves, with its package kept.
+     */
+    static async getPairTranslationBundle(host: Pick<ProtocolHost, 'findEnvironmentRows'>, basePackageId: string): Promise<TranslationBundle | undefined> {
+        if (typeof basePackageId !== 'string' || basePackageId === '') return undefined;
+        const pair = customizationPackageId(basePackageId);
+        if (!pair.ok) return undefined;
+        const layer = await readAuthoredTranslationLayer({
+            find: (table: string, opts: { where?: Record<string, unknown>; [key: string]: unknown } = {}) =>
+                host.findEnvironmentRows(table, { ...opts, where: { ...opts.where, package_id: pair.value } }),
+        });
+        // `null` is a read that failed: the layer's own rule is "keep what you
+        // had", and a translation input has nothing to keep, so the caller
+        // gets "no pair translation known" — the answer it reads as before the
+        // option existed (the override's own text), never a 5xx on a read of
+        // the document itself.
+        if (layer === null) return undefined;
+        return Object.keys(layer).length > 0 ? (layer as TranslationBundle) : undefined;
+    }
+
     /**
      * The one body behind {@link getPackagedDashboardBase},
-     * {@link getPackagedViewBase} and {@link getPackagedReportBase}:
+     * {@link getPackagedViewBase}, {@link getPackagedReportBase} and
+     * [#30062] {@link getPackagedPageBase}, {@link getPackagedDatasetBase},
+     * {@link getPackagedAppBase} and {@link getPackagedBookBase}:
      * {@link lookupArtifactItem}, and nothing wider, so only an item whose
      * `_packageId` marks a genuine code package answers, and an overlay
      * hydrated under the plain registry key never does.
      */
-    static packagedArtifactBase(host: Pick<ProtocolHost, 'lookupArtifactItem'>, type: 'dashboard' | 'view' | 'report', name: string): unknown {
+    static packagedArtifactBase(host: Pick<ProtocolHost, 'lookupArtifactItem'>, type: PackagedArtifactBaseType, name: string): unknown {
         if (typeof name !== 'string' || name === '') return undefined;
         try {
             return host.lookupArtifactItem(type, name);
