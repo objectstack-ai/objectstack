@@ -1064,8 +1064,8 @@ function selfTest() {
     textNames.found[0]?.sourceIdentifiers?.has('driver') === false,
   );
   expect(
-    'a `${…}` hole IS code: the `k` it reads is collected',
-    textNames.found[0]?.sourceIdentifiers?.has('k') === true,
+    'nor does a plain string literal: its "implemented" is not collected either',
+    textNames.found[0]?.sourceIdentifiers?.has('implemented') === false,
   );
   expect(
     'a matcher beside text naming a sibling binding lifts and is CONFORMING, not UNJUDGED',
