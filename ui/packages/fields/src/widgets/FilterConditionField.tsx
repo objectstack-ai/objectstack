@@ -3,7 +3,44 @@ import { FilterBuilder, cn } from '@object-ui/components';
 import { SchemaRendererContext } from '@object-ui/react';
 import type { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
+import { createSafeTranslation } from '@object-ui/i18n';
 import { useFieldTranslation } from './useFieldTranslation.js';
+
+/**
+ * The words a read-only criteria is said in: the filter builder's own
+ * operator, AND / OR and boolean rows, so the sentence names each operator as
+ * the builder's dropdown does. The English rows are the provider-less render's
+ * stand-in, the same values as the `en` pack.
+ */
+const useCriteriaWords = createSafeTranslation(
+  {
+    'filterBuilder.and': 'AND',
+    'filterBuilder.or': 'OR',
+    'filterBuilder.trueLabel': 'True',
+    'filterBuilder.falseLabel': 'False',
+    'filterBuilder.operators.equals': 'Equals',
+    'filterBuilder.operators.not_equals': 'Does not equal',
+    'filterBuilder.operators.contains': 'Contains',
+    'filterBuilder.operators.icontains': 'Contains (ignore case)',
+    'filterBuilder.operators.not_contains': 'Does not contain',
+    'filterBuilder.operators.is_empty': 'Is empty',
+    'filterBuilder.operators.is_not_empty': 'Is not empty',
+    'filterBuilder.operators.greater_than': 'Greater than',
+    'filterBuilder.operators.less_than': 'Less than',
+    'filterBuilder.operators.greater_than_or_equal': 'Greater than or equal',
+    'filterBuilder.operators.less_than_or_equal': 'Less than or equal',
+    'filterBuilder.operators.between': 'Between',
+    'filterBuilder.operators.in': 'In',
+    'filterBuilder.operators.not_in': 'Not in',
+    'filterBuilder.operators.starts_with': 'Starts with',
+    'filterBuilder.operators.ends_with': 'Ends with',
+    'filterBuilder.operators.is_null': 'Is null',
+    'filterBuilder.operators.is_not_null': 'Is not null',
+    'filterBuilder.operators.exists': 'Is set',
+    'filterBuilder.operators.notExists': 'Is not set',
+  },
+  'filterBuilder.operators.equals',
+);
 
 /**
  * FilterConditionField — visual criteria builder for a stored FilterCondition
@@ -635,6 +672,7 @@ export function FilterConditionField({
 }: FieldWidgetComponentProps<string | object>) {
   const ctx = React.useContext(SchemaRendererContext);
   const { t } = useFieldTranslation();
+  const { t: tWords } = useCriteriaWords();
   // Cast-free context read (objectui#7912); the local stays `any` for the
   // `FieldWidgetProps.dataSource?: unknown` channel it merges with.
   const dataSource: any = props.dataSource ?? ctx?.dataSource ?? null;
@@ -757,7 +795,7 @@ export function FilterConditionField({
     if (group && group.conditions.length > 0) {
       return (
         <span className={cn('text-sm', className)} data-filter-condition="words" title={rawValue}>
-          {describeFilterGroup(group, fields ?? [], t)}
+          {describeFilterGroup(group, fields ?? [], tWords)}
         </span>
       );
     }

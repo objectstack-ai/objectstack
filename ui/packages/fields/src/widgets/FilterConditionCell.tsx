@@ -42,10 +42,13 @@ export function FilterConditionCell({ value, field, dependentValues }: CellRende
   const safe = coerceToSafeValue(value);
   if (isEmptyValue(safe)) return <EmptyValue />;
   const text = String(safe);
+  // The key's storage is JSON text (a `textarea`); any other value is not a
+  // stored criteria and reads as the text cell reads it.
+  if (typeof value !== 'string') return <StoredText text={text} />;
   return (
     <React.Suspense fallback={<StoredText text={text} />}>
       <LazyFilterConditionField
-        value={value as string | object}
+        value={value}
         onChange={ignoreChange}
         readonly
         field={field}
