@@ -70,6 +70,7 @@ import { keysetWalk, type KeysetPageQuery } from '@objectstack/types';
 import { objectNotFoundError, withTransientRetry, type RetryOptions } from '@objectstack/core';
 
 import { planStoredExpressions } from './engine-top-level.js';
+import { isFederatedUnprovisionedInjectedColumn } from './federated-object.js';
 
 /** The engine surface the run needs: the declarations, a read, the stored-expression computation and the update. */
 export interface StoredExpressionBackfillEngine {
@@ -347,7 +348,9 @@ export async function backfillStoredExpressions(
       outcomes.set(field, outcome);
       report.fields.push(outcome);
     }
-    const hasUpdatedAt = 'updated_at' in (engine.getObject(object)?.fields ?? {});
+    // The stamp the apply keeps; a federated object's injected columns are not provisioned, so its write sends none.
+    const schema = engine.getObject(object);
+    const hasUpdatedAt = 'updated_at' in (schema?.fields ?? {}) && !isFederatedUnprovisionedInjectedColumn(schema, 'updated_at');
 
     // Seek by `id`: this run's claim is about EVERY stored row, which an offset walk cannot promise.
     const walk = keysetWalk<Record<string, unknown>>(
