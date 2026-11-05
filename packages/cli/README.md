@@ -433,7 +433,7 @@ service plugins for every preset **except** `--preset minimal`:
 | `queue`     | `QueueServicePlugin`         | Background retries (mail, audit batching) need a queue.      |
 | `job`       | `JobServicePlugin`           | Scheduled jobs (cleanup, reports, cron).                     |
 | `cache`     | `CacheServicePlugin`         | In-memory adapter; performance baseline.                     |
-| `settings`  | `SettingsServicePlugin`      | Mail / storage / branding / feature-flag UI + persistence.   |
+| `settings`  | `SettingsServicePlugin`      | Mail / storage / branding settings UI + persistence.         |
 | `email`     | `EmailServicePlugin`         | Auth callbacks (verify, reset, magic-link) hard-depend.      |
 | `storage`   | `StorageServicePlugin`       | Avatars, attachments, exports. Local fallback in dev.        |
 
@@ -442,8 +442,8 @@ Apps no longer need to list these in `requires: [...]`.
 **Opt-out:** run `objectstack serve --preset minimal` to skip the slate
 and only load core + your explicit `requires`.
 
-**Built-in Settings manifests:** `mail`, `storage`, `branding`,
-`feature_flags` are pre-registered. Both `mail` and `storage` expose a
+**Built-in Settings manifests:** `mail`, `storage` and `branding`
+are among those pre-registered. Both `mail` and `storage` expose a
 "Test connection" action that exercises the live transport / adapter
 end-to-end. Switching the storage adapter does **not** migrate
 previously uploaded files — the plugin logs a warning on every swap.
