@@ -496,7 +496,7 @@ export function ReportDefaultInspector({
     () =>
       mergeServerFields({
         bundledSchema: getReportSchema(),
-        bundledForm: getReportForm(),
+        bundledForm: getReportForm(locale),
         serverSchema,
         excludeFields: REPORT_CURATED_FIELDS,
         sectionTitle: t('engine.inspector.moreFields', locale),

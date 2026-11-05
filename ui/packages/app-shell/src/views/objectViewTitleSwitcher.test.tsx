@@ -190,3 +190,36 @@ describe('objectstack#27594 — the title switcher dropdown', () => {
     expect(within(menu).queryByTestId('list-view-switcher-manage')).toBeNull();
   });
 });
+
+describe('objectstack#30046 — a host with no reader of its own hands no pin and no recent views', () => {
+  function mountStudio(props: Partial<ObjectViewTitleSwitcherProps> = {}) {
+    const onViewChange = vi.fn();
+    render(
+      <ObjectViewTitleSwitcher
+        views={VIEWS}
+        activeViewId="all"
+        activeLabel="All Leads"
+        favorites={null}
+        onViewChange={onViewChange}
+        t={t}
+        {...props}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('list-view-switcher'));
+    return { menu: screen.getByTestId('list-view-switcher-menu'), onViewChange };
+  }
+
+  it('no row draws 📌, and a pinned id handed without the pin door draws no Pinned section', () => {
+    const { menu } = mountStudio({ pinnedViewId: 'mine' });
+    expect(within(menu).queryAllByTestId('view-switcher-pin')).toHaveLength(0);
+    expect(within(menu).queryByTestId('list-view-switcher-pinned')).toBeNull();
+    expect(within(menu).queryByTestId('list-view-switcher-recent')).toBeNull();
+    expect(sectionIds('list-view-switcher-all')).toEqual(['all', 'board', 'mine', 'saved_a', 'saved_b']);
+  });
+
+  it('a row still switches the view', () => {
+    const { menu, onViewChange } = mountStudio();
+    fireEvent.click(within(within(menu).getByTestId('view-switcher-row-board')).getAllByRole('button')[0]);
+    expect(onViewChange).toHaveBeenCalledWith('board');
+  });
+});

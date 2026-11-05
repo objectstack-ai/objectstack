@@ -11,8 +11,9 @@ import { tmpdir } from 'node:os';
  * `e2e/` holds the Playwright suite that drives the Console (served by the
  * backend at /_console) against the real showcase stack: every nav surface
  * renders cleanly (`e2e/showcase-smoke.spec.ts`), the ADR-0085 detail shapes
- * (`e2e/detail-shapes.spec.ts`) and the selection-bar capability gate
- * (`e2e/bulk-capability-gate.spec.ts`). It used to run in its own scheduled
+ * (`e2e/detail-shapes.spec.ts`), the selection-bar capability gate
+ * (`e2e/bulk-capability-gate.spec.ts`) and the mobile sign-in through the real
+ * sign-in page (`e2e/mobile-signin-handoff.spec.ts`). It used to run in its own scheduled
  * workflow, which filed nothing when it went red, so a red was read by nobody.
  * This file is how the same suite runs under Nightly Tiers instead
  * (`.github/workflows/test-nightly-tiers.yml`): the `*.live.test.*` name puts

@@ -25,6 +25,12 @@
  * - **The value is still free text.** Enter and blur commit exactly what was
  *   typed, matched or not: a flow reference may hold an expression, and the
  *   server judges an unknown name as it always did. Escape abandons the typing.
+ * - **Unless the door takes objects only (`objectsOnly`).** Where no
+ *   expression is legal — the new-automation dialog's trigger object — what
+ *   was typed is never committed as itself: Enter and blur commit the object
+ *   it names exactly, else the only pickable match left, else no object at
+ *   all, and the picker says no object is chosen. A typed prefix with one
+ *   match shown is that match, the way a search box reads it.
  * - **The options are the names already held,** from one list read made when
  *   the picker mounts ({@link useObjectCatalog}), shown with their labels and
  *   in three groups: this package's objects, then the other objects, then the
@@ -206,6 +212,13 @@ export interface ObjectPickerProps {
   placeholder?: string;
   /** The designer locale; defaults to the one the designer context carries. */
   locale?: SupportedLocale;
+  /**
+   * Commit only a name the catalog offers, never typed text as itself. For a
+   * door where no expression is legal; off by default, so every flow
+   * reference keeps its free text. While the catalog is not read, nothing can
+   * be resolved and the typed text is committed as before.
+   */
+  objectsOnly?: boolean;
 }
 
 export function ObjectPicker({
@@ -216,6 +229,7 @@ export function ObjectPicker({
   disabled,
   placeholder,
   locale: localeProp,
+  objectsOnly = false,
 }: ObjectPickerProps) {
   const contextLocale = useMetadataLocale();
   const locale = localeProp ?? contextLocale;
@@ -240,6 +254,8 @@ export function ObjectPicker({
   const [systemOpen, setSystemOpen] = React.useState(false);
   const [outsideOpen, setOutsideOpen] = React.useState(false);
   const [declaring, setDeclaring] = React.useState(false);
+  // objectsOnly — the text last refused, so the picker can say no object is chosen.
+  const [refused, setRefused] = React.useState<string | null>(null);
 
   const entries = catalog.status === 'loaded' ? catalog.data : NO_ENTRIES;
   const query = typed ? text.trim().toLowerCase() : '';
@@ -334,6 +350,28 @@ export function ObjectPicker({
     if (next !== value) onCommit(next);
   };
 
+  /**
+   * Commit what the author typed. Free text by default; with `objectsOnly`,
+   * the object it names: the pickable option named exactly so, else the only
+   * pickable option left, else none — an empty commit and a refusal shown.
+   */
+  const commitTyped = () => {
+    if (!objectsOnly || catalog.status !== 'loaded') {
+      commit(text);
+      return;
+    }
+    const wanted = text.trim();
+    if (!wanted) {
+      setRefused(null);
+      commit('');
+      return;
+    }
+    const pickable = rows.flatMap((r) => (r.kind === 'option' && !r.disabled ? [r.entry.name] : []));
+    const name = pickable.includes(wanted) ? wanted : pickable.length === 1 ? pickable[0] : null;
+    setRefused(name === null ? wanted : null);
+    commit(name ?? '');
+  };
+
   const choose = (row: Row) => {
     if (row.kind === 'system-toggle') {
       setSystemOpen((o) => !o);
@@ -351,6 +389,7 @@ export function ObjectPicker({
     }
     // Outside the closure: listed so the author learns why, never committed.
     if (row.disabled) return;
+    setRefused(null);
     commit(row.entry.name);
   };
 
@@ -365,7 +404,7 @@ export function ObjectPicker({
     } else if (e.key === 'Enter') {
       e.preventDefault();
       if (open && activeRow) choose(activeRow);
-      else if (typed) commit(text);
+      else if (typed) commitTyped();
       else close();
     } else if (e.key === 'Escape' && open) {
       // Handled here, so the inspector does not read it as "clear selection".
@@ -415,6 +454,7 @@ export function ObjectPicker({
           onChange={(e) => {
             setText(e.target.value);
             setTyped(true);
+            setRefused(null);
             setActive(-1);
             setOpen(true);
           }}
@@ -422,7 +462,7 @@ export function ObjectPicker({
             setFocused(false);
             // Only what the author typed is committed: a focus that typed
             // nothing must not write back a value that moved underneath it.
-            if (typed) commit(text);
+            if (typed) commitTyped();
             else close();
           }}
           onKeyDown={onKeyDown}
@@ -440,7 +480,9 @@ export function ObjectPicker({
               <p className="px-2 py-1.5 text-[11px] text-muted-foreground">{t('engine.form.loadingOptions', locale)}</p>
             )}
             {catalog.status === 'loaded' && rows.length === 0 && (
-              <p className="px-2 py-1.5 text-[11px] text-muted-foreground">{t('engine.inspector.objectPicker.noMatch', locale)}</p>
+              <p className="px-2 py-1.5 text-[11px] text-muted-foreground">
+                {t(objectsOnly ? 'engine.inspector.objectPicker.noMatchObjectsOnly' : 'engine.inspector.objectPicker.noMatch', locale)}
+              </p>
             )}
             {sections.map((s) => (
               <div key={s.key} role="group" aria-label={s.name}>
@@ -584,6 +626,11 @@ export function ObjectPicker({
       {restingLabel && (
         <p id={nameLineId} data-object-name-line="" className="truncate font-mono text-[10px] leading-tight text-muted-foreground">
           {value}
+        </p>
+      )}
+      {refused !== null && (
+        <p role="alert" data-object-refused="" className="text-[11px] leading-snug text-amber-600 dark:text-amber-300">
+          {tFormat('engine.inspector.objectPicker.notChosen', locale, { text: refused })}
         </p>
       )}
       {declaring && closure && (

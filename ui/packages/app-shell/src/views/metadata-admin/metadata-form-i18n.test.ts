@@ -20,6 +20,11 @@ import { describe, expect, it } from 'vitest';
 import { dashboardForm } from '@objectstack/spec/ui';
 import { localizeMetadataForm, hasMetadataFormOverlay } from './metadata-form-i18n';
 import { getDashboardForm } from './dashboard-schema';
+import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
+import { getViewForm } from './view-schema';
+import { getPageForm } from './page-schema';
+import { getReportForm } from './report-schema';
+import { formKeyLabel } from '../../preview/changeKeyLabels';
 
 /** The two form shapes these assertions read. `unknown` everywhere else. */
 interface FormField {
@@ -61,7 +66,8 @@ describe('localizeMetadataForm — the spec form, in the author’s language', (
 
   it('leaves a type the overlay does not carry untouched', () => {
     const form = dashboardForm as unknown as Record<string, unknown>;
-    expect(localizeMetadataForm(form, 'report', 'zh-CN')).toBe(form);
+    // `job` is no `METADATA_FORM_REGISTRY` type, so the overlay names no row for it.
+    expect(localizeMetadataForm(form, 'job', 'zh-CN')).toBe(form);
   });
 
   it('translates section headings — addressed by the SLUGGED label, not the label text', () => {
@@ -139,7 +145,7 @@ describe('localizeMetadataForm — the spec form, in the author’s language', (
     expect(children.sort()).toEqual(['actions', 'showDescription', 'showTitle']);
     const byName = new Map((header!.fields ?? []).map((f) => [f.field, f]));
     expect(byName.get('showTitle')?.label).toBe('显示标题');
-    expect(byName.get('showTitle')?.helpText).toBe('在页眉中显示仪表板名称');
+    expect(byName.get('showTitle')?.helpText).toBe('在页眉中显示仪表盘名称');
     expect(byName.get('showDescription')?.label).toBe('显示描述');
     expect(byName.get('actions')?.label).toBe('操作按钮');
   });
@@ -170,5 +176,71 @@ describe('getDashboardForm — the overlay reaches the panel, and caches per loc
     for (const owned of ['name', 'label', 'description', 'widgets']) {
       expect(fieldByName(zh, owned)).toBeUndefined();
     }
+  });
+});
+
+describe('every form type Studio renders reads in zh-CN (objectstack#30039)', () => {
+  const registryTypes = Object.keys(METADATA_FORM_REGISTRY);
+  const registryForm = (type: string) => METADATA_FORM_REGISTRY[type] as unknown as Record<string, unknown>;
+
+  it('carries a zh-CN overlay for every METADATA_FORM_REGISTRY type, and none at en', () => {
+    expect(registryTypes.length).toBeGreaterThan(10);
+    for (const type of registryTypes) {
+      expect(hasMetadataFormOverlay(type, 'zh-CN'), type).toBe(true);
+      expect(hasMetadataFormOverlay(type, 'en-US'), type).toBe(false);
+    }
+  });
+
+  it('the view properties panel: section headings, hints and schema-titled rows read in Chinese', () => {
+    const zh = getViewForm('zh-CN');
+    const labels = sections(zh).map((s) => s.label);
+    expect(labels).toContain('基础信息');
+    expect(labels).toContain('列与筛选');
+    for (const english of ['Basics', 'Columns & filters', 'Table options', 'End-user controls', 'Navigation & sharing']) {
+      expect(labels).not.toContain(english);
+    }
+    expect(sections(zh).find((s) => s.label === '基础信息')?.description).toBe('标识与主显示形态');
+    expect(fieldByName(zh, 'searchableFields')?.label).toBe('可搜索字段');
+    expect(fieldByName(zh, 'description')?.label).toBe('描述');
+  });
+
+  it('an English console reads the spec English, the same object every time — the control', () => {
+    const en = getViewForm('en');
+    expect(en).toBe(getViewForm('en'));
+    expect(sections(en).map((s) => s.label)).toContain('Basics');
+    expect(fieldByName(en, 'searchableFields')?.label).toBeUndefined();
+  });
+
+  it('the page and report panels read in Chinese too', () => {
+    expect(sections(getPageForm('zh-CN')).map((s) => s.label)).toContain('基础信息');
+    expect(sections(getPageForm('zh-CN')).map((s) => s.label)).not.toContain('Basics');
+    expect(sections(getReportForm('zh-CN')).map((s) => s.label)).toContain('基础信息');
+  });
+
+  it('a composite the form declares no sub-fields for gets none synthesized from the overlay', () => {
+    // The ⛔ composite rule, mechanically: naming a child of such a field would
+    // make the form show only the named children.
+    for (const type of registryTypes) {
+      const zh = localizeMetadataForm(registryForm(type), type, 'zh-CN');
+      const walk = (before: FormField[] = [], after: FormField[] = []) => {
+        before.forEach((f, i) => {
+          if (typeof f !== 'object' || !f) return;
+          if (!Array.isArray(f.fields)) expect(after[i]?.fields, `${type}.${f.field}`).toBeUndefined();
+          else walk(f.fields, after[i]?.fields);
+        });
+      };
+      sections(registryForm(type)).forEach((s, i) => walk(s.fields, sections(zh)[i]?.fields));
+    }
+  });
+
+  it('the publish sheet names a changed flow property in Chinese: Status → 状态', () => {
+    expect(formKeyLabel('flow', 'status', 'zh-CN')).toBe('状态');
+    expect(formKeyLabel('flow', 'status', 'en')).toBe('Status');
+  });
+
+  it('no zh-CN form row calls a dashboard 仪表板: the one word is 仪表盘', () => {
+    const text = JSON.stringify(registryTypes.map((type) => localizeMetadataForm(registryForm(type), type, 'zh-CN')));
+    expect(text).not.toContain('仪表板');
+    expect(text).toContain('仪表盘');
   });
 });

@@ -156,10 +156,13 @@ async function boot(opts: { bulkRows?: number } = {}): Promise<Rig> {
   });
   // Edit and delete on the child, and no read: the read door refuses this
   // caller outright, which is not a hidden row.
-  const writeOnly = PermissionSetSchema.parse({
+  // The authoring schema refuses this shape (an object permission that edits
+  // or deletes a record also reads it), so it is built raw — the shape a row
+  // stored before that refusal still carries.
+  const writeOnly = {
     name: 'qa_pw_write_only',
     objects: { [CHILD]: { allowRead: false, allowCreate: false, allowEdit: true, allowDelete: true } },
-  });
+  } as unknown as ReturnType<typeof PermissionSetSchema.parse>;
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },
     objectql: engine,
@@ -285,14 +288,16 @@ describe('a predicate write matches only the rows the caller can read', () => {
       else expect(after).toBeNull();
     });
 
-    it(`${verb}: a caller the read door REFUSES keeps the answer the write had — a refusal is not a hidden row`, async () => {
+    it(`${verb}: a stored set granting ${verb} without read writes nothing — an object permission that ${verb}s a record also reads it`, async () => {
       const r = await boot();
+      const before = await names(r);
       await expect(r.engine.find(CHILD, { context: { ...WRITE_ONLY_CALLER } } as never)).rejects.toMatchObject({ status: 403 });
 
       const got = await write(r, ids('c_hidden_open', 'c_shared'), WRITE_ONLY_CALLER);
 
-      // No read question narrowed it: both rows are matched and changed.
-      expect(got).toEqual({ kind: 'landed', result: 2 });
+      // The object gate refuses before any row is matched: the grant has no read half.
+      expect(got).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
+      expect(await names(r)).toEqual(before);
     });
 
     it(`${verb}: a store fault on the read question propagates, and nothing is written`, async () => {

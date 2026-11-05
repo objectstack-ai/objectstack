@@ -48,7 +48,8 @@
  * still cut says its whole text in its tooltip.
  *
  * objectstack#29693 — the title keeps a readable width: its first twelve
- * characters (its whole text when shorter). When the row cannot give it that,
+ * characters (its whole text when shorter), or the width a composed title
+ * declares (`data-studio-title-readable`, objectstack#30046). When the row cannot give it that,
  * the identity chips (the api-name chip and the pillar's `chips`) and the item
  * tools fold into the ⋯ menu, so the title is not the first thing to go. The
  * pillar says where they go (`foldMenu`): into its own ⋯ menu, which mounts
@@ -330,6 +331,11 @@ export const STUDIO_TITLE_READABLE_CHARS = 12;
  * a text range (no layout).
  */
 function readableTitleWidth(title: HTMLElement): number {
+  // objectstack#30046 — a composed title declares its own readable width (an
+  // object entry's object / view ▾: its whole text), since its first
+  // characters are not the part that must stay readable.
+  const declared = Number(title.querySelector<HTMLElement>('[data-studio-title-readable]')?.dataset.studioTitleReadable);
+  if (declared > 0) return declared;
   if (typeof document.createRange !== 'function') return 0;
   const walker = document.createTreeWalker(title, NodeFilter.SHOW_TEXT, {
     acceptNode: (node) =>

@@ -88,9 +88,13 @@ import type { TranslationBundle } from '@objectstack/spec/system';
 import { isZhLocale } from './schema-field-label.js';
 import type { SupportedLocale } from './i18n.js';
 import { hasSourceLabel, stampSourceLabel } from './field-source-label.js';
+import { ZH_CN_SPEC_FORMS } from './metadata-form-zh-cn.js';
 
 /**
- * zh-CN strings for the spec authoring forms this console renders.
+ * zh-CN strings for the spec authoring forms this console renders: the
+ * platform-worded rows of `./metadata-form-zh-cn.ts` (every
+ * `METADATA_FORM_REGISTRY` type; that file says which depth each carries), and
+ * the hand-worded `dashboard` rows below.
  *
  * Keys follow the platform convention exactly — a section is addressed by its
  * SLUGGED label (`'Grid sizing…'` section labelled `Layout` → `layout`), a
@@ -99,10 +103,11 @@ import { hasSourceLabel, stampSourceLabel } from './field-source-label.js';
 const METADATA_FORM_BUNDLE: TranslationBundle = {
   'zh-CN': {
     metadataForms: {
+      ...ZH_CN_SPEC_FORMS,
       dashboard: {
-        label: '仪表板',
+        label: '仪表盘',
         sections: {
-          basics: { label: '基本信息', description: '仪表板的名称与描述。' },
+          basics: { label: '基本信息', description: '仪表盘的名称与描述。' },
           layout: { label: '布局', description: '栅格尺寸与刷新频率。' },
           widgets: { label: '组件', description: '放在栅格上的卡片与图表。' },
           filters: { label: '筛选', description: '应用到全部组件的默认筛选与全局筛选。' },
@@ -122,10 +127,10 @@ const METADATA_FORM_BUNDLE: TranslationBundle = {
           refreshIntervalSeconds: { label: '自动刷新', helpText: '自动刷新间隔（秒），0 表示不自动刷新' },
           header: { label: '页眉', helpText: '页眉设置：标题、描述与操作按钮' },
           // All three children of the `header` composite — see the ⛔ note above.
-          'header.showTitle': { label: '显示标题', helpText: '在页眉中显示仪表板名称' },
-          'header.showDescription': { label: '显示描述', helpText: '在页眉中显示仪表板描述' },
+          'header.showTitle': { label: '显示标题', helpText: '在页眉中显示仪表盘名称' },
+          'header.showDescription': { label: '显示描述', helpText: '在页眉中显示仪表盘描述' },
           'header.actions': { label: '操作按钮', helpText: '显示在页眉里的操作按钮' },
-          widgets: { label: '组件', helpText: '仪表板组件，含位置与尺寸' },
+          widgets: { label: '组件', helpText: '仪表盘组件，含位置与尺寸' },
           dateRange: { label: '日期范围', helpText: '默认的日期范围选择器' },
           globalFilters: { label: '全局筛选', helpText: '应用到全部组件的筛选条件' },
         },

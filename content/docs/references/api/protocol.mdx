@@ -1191,8 +1191,8 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **allowCreate** | `boolean` | optional (default: `false`) | Create permission |
 | **allowRead** | `boolean` | optional (default: `false`) | Read permission |
-| **allowEdit** | `boolean` | optional (default: `false`) | Edit permission |
-| **allowDelete** | `boolean` | optional (default: `false`) | Delete permission |
+| **allowEdit** | `boolean` | optional (default: `false`) | Edit permission. Requires read on the same entry (allowRead, viewAllRecords or modifyAllRecords): an object permission that edits a record also reads it. |
+| **allowDelete** | `boolean` | optional (default: `false`) | Delete permission. Requires read on the same entry (allowRead, viewAllRecords or modifyAllRecords): an object permission that deletes a record also reads it. |
 | **allowExport** | `boolean` | optional | User-level export axis over read (opt-in grant). true = export granted (still bounded by read); unset/false = no export. Merged most-permissively like the CRUD bits; NOT implied by viewAllRecords/modifyAllRecords. |
 | **allowTransfer** | `boolean` | optional (default: `false`) | [RBAC-gated; ENFORCED via the insert/update owner_id guard] Change record ownership (assign/reassign/disown owner_id) |
 | **allowRestore** | `never` | optional | [REMOVED] `objects.<object>.allowRestore` was removed in @objectstack/spec 17 (ADR-0049) — the `restore` ObjectQL operation it claimed to gate has never shipped (roadmap M2), so granting the bit delivered nothing. Delete the key — a dispatched `restore` stays denied fail-closed by the permission evaluator's destructive-operation backstop, and the bit returns with the M2 lifecycle initiative alongside the operation it gates. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
@@ -1652,8 +1652,8 @@ One changed key path of the pending draft, and the last write that changed it.
 | :--- | :--- | :--- | :--- |
 | **allowCreate** | `boolean` | optional (default: `false`) | Create permission |
 | **allowRead** | `boolean` | optional (default: `false`) | Read permission |
-| **allowEdit** | `boolean` | optional (default: `false`) | Edit permission |
-| **allowDelete** | `boolean` | optional (default: `false`) | Delete permission |
+| **allowEdit** | `boolean` | optional (default: `false`) | Edit permission. Requires read on the same entry (allowRead, viewAllRecords or modifyAllRecords): an object permission that edits a record also reads it. |
+| **allowDelete** | `boolean` | optional (default: `false`) | Delete permission. Requires read on the same entry (allowRead, viewAllRecords or modifyAllRecords): an object permission that deletes a record also reads it. |
 | **allowExport** | `boolean` | optional | User-level export axis over read (opt-in grant). true = export granted (still bounded by read); unset/false = no export. Merged most-permissively like the CRUD bits; NOT implied by viewAllRecords/modifyAllRecords. |
 | **allowTransfer** | `boolean` | optional (default: `false`) | [RBAC-gated; ENFORCED via the insert/update owner_id guard] Change record ownership (assign/reassign/disown owner_id) |
 | **allowRestore** | `never` | optional | [REMOVED] `objects.<object>.allowRestore` was removed in @objectstack/spec 17 (ADR-0049) — the `restore` ObjectQL operation it claimed to gate has never shipped (roadmap M2), so granting the bit delivered nothing. Delete the key — a dispatched `restore` stays denied fail-closed by the permission evaluator's destructive-operation backstop, and the bit returns with the M2 lifecycle initiative alongside the operation it gates. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
