@@ -137,22 +137,20 @@ export function RegisterPage() {
   // the signed-in person's own when they have none. Every exit below waits for
   // it: the root entry is a full navigation, which ends the page-load that
   // knows of the pick, and a write sent beside it races the unload. The ref is
-  // the once-only latch, read while rendering so the render that first sees
-  // the user already holds; the state re-renders when the save has settled. A
-  // failed save does not hold the sign-up (the pick still applies here).
-  const signInPickSaveRef = useRef<'idle' | 'saving' | 'settled'>('idle');
-  const [, setSignInPickSaved] = useState(false);
+  // the once-only latch; the state is where the save stands, and the render
+  // that first sees the user already holds, because the pick is still unspent
+  // then. A failed save does not hold the sign-up (the pick still applies
+  // here).
+  const signInPickSaveStartedRef = useRef(false);
+  const [signInPickSave, setSignInPickSave] = useState<'idle' | 'saving' | 'settled'>('idle');
   const holdForSignInPick =
     !!user &&
-    (signInPickSaveRef.current === 'saving' ||
-      (signInPickSaveRef.current === 'idle' && hasSignInLanguagePick()));
+    (signInPickSave === 'saving' || (signInPickSave === 'idle' && hasSignInLanguagePick()));
   useEffect(() => {
-    if (!user || signInPickSaveRef.current !== 'idle' || !hasSignInLanguagePick()) return;
-    signInPickSaveRef.current = 'saving';
-    void saveSignInLanguagePick(String(user.id)).finally(() => {
-      signInPickSaveRef.current = 'settled';
-      setSignInPickSaved(true);
-    });
+    if (!user || signInPickSaveStartedRef.current || !hasSignInLanguagePick()) return;
+    signInPickSaveStartedRef.current = true;
+    setSignInPickSave('saving');
+    void saveSignInLanguagePick(String(user.id)).finally(() => setSignInPickSave('settled'));
   }, [user]);
 
   // Entered by a full-page navigation to the root, as the accept page's
@@ -302,7 +300,7 @@ export function RegisterPage() {
         // language pick waits for its save, and the signed-in branch above
         // then goes to `/` (#30338).
         onSuccess={() => {
-          if (invitationRedirect || signInPickSaveRef.current === 'saving' || hasSignInLanguagePick()) return;
+          if (invitationRedirect || signInPickSaveStartedRef.current || hasSignInLanguagePick()) return;
           navigate('/');
         }}
         onVerificationRequired={(email) => setPendingEmail(email)}

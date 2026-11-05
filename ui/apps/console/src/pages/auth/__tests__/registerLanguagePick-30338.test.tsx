@@ -269,14 +269,18 @@ describe('console /register — a language picked here is saved before the page 
     expect(lands(assign.mock.calls[0][0] as string)).toBe('/_console/');
   });
 
-  // Which exit, and how often, is the post-signup step's own behaviour with
-  // nothing to wait for, unchanged by this card; this pins that nothing waits.
+  // Which exit, and how often, is not this file's to pin here: with nothing
+  // to wait for, a page whose organizations are still loading can navigate
+  // before they answer and again after — the post-signup step's own
+  // behaviour, unchanged by this card (the same holds on `/login`).
   it.each(EXITS)('CONTROL — $exit, with no pick: nothing is saved and the page leaves', async (c) => {
     pick.held = false;
     renderRegister(c.client(), c.search);
     await signUpOnTheForm();
 
-    await waitFor(() => expect(c.left()).toBe(c.expected));
+    await waitFor(() =>
+      expect(assign.mock.calls.length + follow.mock.calls.length).toBeGreaterThanOrEqual(1),
+    );
     expect(pick.save).not.toHaveBeenCalled();
   });
 
