@@ -637,6 +637,7 @@ describe('a write from a caller the read door refuses is refused, whatever rows 
       ['beta', 2, writerCtx],
       ['gamma', 2, readerCtx],
       ['delta', 1, readerCtx],
+      ['epsilon', 1, writerCtx],
       ['kappa', 1, SYS],
     ] as const;
     for (const [tag, n, context] of seeds) {
@@ -716,7 +717,8 @@ describe('a write from a caller the read door refuses is refused, whatever rows 
   });
 
   it('control: the by-id doors give the writer one refusal for its own row and for an id naming none, and the row is untouched', async () => {
-    const id = ids.alpha[0];
+    // A row of the writer's own that no other case here addresses.
+    const id = ids.epsilon[0];
     const missing = 'pwgatedmissing0001';
     /** The answer with the caller-supplied id written out, so two ids compare. */
     const withoutId = (a: Answer, written: string) => JSON.stringify(a).split(written).join('ID');
@@ -727,6 +729,6 @@ describe('a write from a caller the read door refuses is refused, whatever rows 
       expect(refusalOf(row).code, JSON.stringify(row.body)).toBe('PERMISSION_DENIED');
       expect(withoutId(none, missing)).toBe(withoutId(row, id));
     }
-    expect((await ql.findOne('pw_gated', { where: { id }, context: SYS }))?.name).toBe('alpha 0');
+    expect((await ql.findOne('pw_gated', { where: { id }, context: SYS }))?.name).toBe('epsilon 0');
   });
 });
