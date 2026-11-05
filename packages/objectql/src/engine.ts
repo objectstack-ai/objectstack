@@ -1185,11 +1185,15 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * [#30065, ADR-0146 D9 `action`] The one exception: a key a declared
    * action override holds ({@link registerActionOverride}) keeps the
-   * override on top, and another package's registration takes the place
-   * beneath it, the handler a removal of the override binds again. A
-   * marketplace base's handlers are bound by its rehydrate after the
-   * authored-action resync bound the override, so the base's body arrives
-   * second and must not replace the override's.
+   * override on top when the declared base's handler arrives, and that
+   * handler takes the place beneath it, the one a removal of the override
+   * binds again. A marketplace base's handlers are bound by its rehydrate
+   * after the authored-action resync bound the override, so the base's body
+   * arrives second and must not replace the override's. [#30542] The
+   * declared base's handler is the one registered while the registry's code
+   * artifact of the action is that package's, on this object; any other
+   * registration under the key, one with no package included, replaces the
+   * override and is warned like every other.
    */
   registerAction(objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName?: string): void {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
@@ -1210,9 +1214,13 @@ export class ObjectQL implements IObjectQLEngine {
    * warned: the replacement is the declared one. The entry is marked as an
    * override, so the base's handler registered after it (by
    * {@link registerAction}) slots beneath it instead of replacing it.
+   *
+   * @param base [#30542] The package the override declares it overrides
+   *   (`overrides.package`). Only that package's handler slots beneath the
+   *   override; without it, any package's does.
    */
-  registerActionOverride(objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName: string): void {
-    return ActionsFacet.registerActionOverride.call(actionsHost.of(this), objectName, actionName, handler, packageName);
+  registerActionOverride(objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName: string, base?: string): void {
+    return ActionsFacet.registerActionOverride.call(actionsHost.of(this), objectName, actionName, handler, packageName, base);
   }
 
   /**
@@ -10431,6 +10439,7 @@ export class ObjectQL implements IObjectQLEngine {
       get actionActivation() { return engine.actionActivation; },
       get actions() { return engine.actions; },
       get logger() { return engine.logger; },
+      get registry() { return engine.registry; },
     }));
     cascadePlanningHost.install((engine) => ({
       get _registry() { return engine._registry; },
