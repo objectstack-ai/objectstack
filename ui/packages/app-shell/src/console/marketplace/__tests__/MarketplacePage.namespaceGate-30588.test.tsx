@@ -174,6 +174,11 @@ describe('the marketplace pages wait for their strings (objectstack#30588)', () 
   it('zh-CN: the catalogue page shows the load skeleton, then Chinese, and never English or a raw key', async () => {
     const zhMarketplace = builtInLocales.zh.marketplace;
     const view = renderRecording(<MarketplacePage />, 'zh-CN');
+    // The first frame holds no namespace text yet — in no language, and not
+    // as a key — only the skeleton.
+    const firstFrame = view.container.textContent ?? '';
+    expect(firstFrame).not.toMatch(RAW_KEY);
+    expect(firstFrame).not.toContain(ENGLISH.title);
     expect(screen.getByTestId('marketplace-resolving')).toBeInTheDocument();
 
     expect(await screen.findByText(zhMarketplace.title)).toBeInTheDocument();
@@ -188,6 +193,9 @@ describe('the marketplace pages wait for their strings (objectstack#30588)', () 
   it('de: the package page shows the load skeleton, then German, and never English or a raw key', async () => {
     const deMarketplace = builtInLocales.de.marketplace;
     const view = renderRecording(<MarketplacePackagePage />, 'de');
+    const firstFrame = view.container.textContent ?? '';
+    expect(firstFrame).not.toMatch(RAW_KEY);
+    expect(firstFrame).not.toContain(ENGLISH.back);
     expect(screen.getByTestId('marketplace-resolving')).toBeInTheDocument();
 
     expect((await screen.findAllByText(deMarketplace.back)).length).toBeGreaterThan(0);
