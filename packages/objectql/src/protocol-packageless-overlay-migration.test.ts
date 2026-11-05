@@ -612,11 +612,17 @@ describe('[#28576] the close reaches only what the ceremony moves: every row it 
         const pairRow = rowOf(VIEW, PAIR);
         expect(columnsOf(await read(protocol))).toEqual(['title']);
 
-        // The rollback's row is the first active row of the name in store
-        // order (`resolveOverlayPackageBinding`): here the package-less one,
-        // which is rolled back to its version 1.
-        expect(await refusalOf((protocol as any).rollbackMetaItem({ type: 'view', name: VIEW, toVersion: 1 }))).toBeUndefined();
-        expect(columnsOf(JSON.parse(String(rowOf(VIEW, null)!.metadata)))).toEqual(UNBOUND_COLUMNS);
+        // [#29848] The rollback's row is the one the read serves, the pair's
+        // declared row, never the first active row of the name in store order:
+        // version 1 is the package-less row's undeclared body, so the override
+        // write gate answers it there (D2), not the close, and nothing is written.
+        const packagelessRow = rowOf(VIEW, null);
+        const rolledBack = await refusalOf((protocol as any).rollbackMetaItem({ type: 'view', name: VIEW, toVersion: 1 }));
+        expect(rolledBack).toMatchObject({ status: 403, code: 'NOT_OVERRIDABLE' });
+        expect(rolledBack?.message).toContain('declares no override');
+        expect(rolledBack?.message).not.toContain('os migrate packageless-overlays');
+        expect(rowOf(VIEW, PAIR)).toEqual(pairRow);
+        expect(rowOf(VIEW, null)).toEqual(packagelessRow);
         // The package-less save and DELETE are not the close's to refuse:
         // they are addressed as before the close (`packagelessAddress`: the
         // one bound row of the name, the pair's), so the override write gate
@@ -630,7 +636,7 @@ describe('[#28576] the close reaches only what the ceremony moves: every row it 
         expect(rows(VIEW)).toEqual([[null, 'active']]);
         // …which leaves the package-less row movable: the ceremony's remedy.
         expect(dispositions(await census(protocol))).toEqual([`${VIEW}@active movable`]);
-        expect(columnsOf(await read(protocol))).toEqual(UNBOUND_COLUMNS);
+        expect(columnsOf(await read(protocol))).toEqual(EDITED_COLUMNS);
     });
 
     it('CONTROL movable: the same stored row with no pair row beside it — its package-less rollback, save and DELETE are refused', async () => {

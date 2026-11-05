@@ -13088,6 +13088,10 @@ export class ObjectStackProtocolImplementation implements
      * (`VERSION_NOT_FOUND`) when the target version doesn't exist;
      * 409 (`VERSION_NOT_RESTORABLE`) when the target is a delete
      * tombstone (no body to bring back).
+     *
+     * [#29848, ADR-0146 D8 item 2] The door names no package: it restores
+     * into the row the by-name read naming no package serves, a `.custom`
+     * pair's declared override over a row bound to its read-only base.
      */
     async rollbackMetaItem(request: RollbackMetaItemRequest) {
         // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
