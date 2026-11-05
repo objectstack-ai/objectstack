@@ -36,7 +36,7 @@ import type { PageDocumentNode } from '@object-ui/types';
 // object-ui/no-dynamic-import-in-test-hook (objectui#3010/#3021).
 import '../renderers';
 
-const { zh, en } = builtInLocales;
+const { 'zh-Hans': zh, en } = builtInLocales;
 
 /** No `{{slot}}` and no private-use slot mark survives into the rendered text. */
 const LEAK = /\{\{|[\u{E000}-\u{F8FF}]/u;

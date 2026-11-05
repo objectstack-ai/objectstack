@@ -49,6 +49,7 @@
  * classifier rather than a rubber stamp.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { builtInLocales } from '../locales/index';
@@ -296,7 +297,7 @@ describe('console.objectView config-panel keys are retired (objectui#4730)', () 
     expect(new Set(RETIRED_OBJECT_VIEW_KEYS).size).toBe(RETIRED_OBJECT_VIEW_KEYS.length);
     // The locale roster, not this namespace — pinned the same way across the
     // package's retirement files, and left to that roster's own sweep.
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     expect(LANGS).toContain('en');
   });
 
@@ -374,7 +375,7 @@ describe('console.objectView config-panel keys are retired (objectui#4730)', () 
     // A sample across writing systems, so "all ten packs kept the key" cannot be
     // satisfied by ten copies of the English string.
     expect(at(builtInLocales.en, 'console.objectView.save')).toBe('Save');
-    expect(at(builtInLocales.zh, 'console.objectView.save')).toBe('保存');
+    expect(at(builtInLocales['zh-Hans'], 'console.objectView.save')).toBe('保存');
     expect(at(builtInLocales.ru, 'console.objectView.save')).toBe('Сохранить');
     expect(at(builtInLocales.ar, 'console.objectView.save')).toBe('حفظ');
   });

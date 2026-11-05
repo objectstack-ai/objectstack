@@ -71,7 +71,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const { zh, en } = builtInLocales;
+const { 'zh-Hans': zh, en } = builtInLocales;
 const zhAudit = zh.console.system.auditLog;
 const zhFlow = zh.console.developer.flowRuns;
 const zhAgent = zh.console.developer.agentConnect;

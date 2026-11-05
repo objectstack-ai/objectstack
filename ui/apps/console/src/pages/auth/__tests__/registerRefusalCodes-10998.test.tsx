@@ -114,7 +114,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const zhErrors = builtInLocales.zh.auth.register.errors;
+const zhErrors = builtInLocales['zh-Hans'].auth.register.errors;
 const enErrors = builtInLocales.en.auth.register.errors;
 
 describe('console RegisterPage — audience refusals under zh-CN (objectui#10998)', () => {

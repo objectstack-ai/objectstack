@@ -5,10 +5,11 @@
  */
 import i18next, { type i18n as I18nInstance } from 'i18next';
 import { initReactI18next } from 'react-i18next';
+import { PLATFORM_LOCALE_READ_ALIASES } from '@objectstack/spec/system';
 import {
   BUILT_IN_LANGUAGE_CODES,
   getLoadedBuiltInLocales,
-  isBuiltInLanguage,
+  resolveBuiltInLanguage,
 } from './locales/registry.js';
 import { isRTL } from './locales/rtl.js';
 import type { TranslationKeys } from './locales/en.js';
@@ -117,7 +118,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  *
  * ARRAYS ARE REPLACED, NOT CONCATENATED — a deliberate choice, not a library
  * default. Measured: no built-in pack carries an array value today (every leaf
- * in all ten packs is a string), so nothing observable rides on this; the rule
+ * in every pack is a string), so nothing observable rides on this; the rule
  * decides what a future array means. An author who writes an array is naming the
  * whole list, so replacement is the only rule that lets them shorten or reorder
  * one, and the only one that is idempotent when the merge runs again. This is
@@ -159,20 +160,56 @@ function deepMergeTranslations(
  * `I18nProvider` and {@link preloadBootstrapLocale} answer with THIS function,
  * so the host and the provider cannot disagree about which catalogue is active.
  *
- * ⚠️ Browser detection is asked of {@link isBuiltInLanguage} rather than of the
- * merged resource map: a catalogue that has not been fetched yet is still a
- * language this renderer can produce, and asking the map would have made
- * detection depend on load order.
+ * The browser language is matched in this order:
+ *
+ *   1. an app pack in `config.resources` keyed by its base language (`zh` for a
+ *      `zh-CN` browser) — the precedence an app's own pack has always had;
+ *   2. the built-in catalogue the WHOLE tag reads as through the platform locale
+ *      table, answered as its table tag (`zh-TW` → `zh-Hant`, `zh-CN` →
+ *      `zh-Hans`, `pt-BR` → `pt-BR`, `fr-CA` → `fr`). ⛔ Never the base language
+ *      alone: `zh` cannot tell a Taiwan browser from a mainland one.
+ *
+ * ⚠️ Browser detection is asked of the registry rather than of the merged
+ * resource map: a catalogue that has not been fetched yet is still a language
+ * this renderer can produce, and asking the map would have made detection
+ * depend on load order.
  */
 export function pickInitialLanguage(config: I18nConfig = {}): string {
   const { defaultLanguage = 'en', resources = {}, detectBrowserLanguage = true } = config;
   if (!detectBrowserLanguage || typeof navigator === 'undefined') return defaultLanguage;
-  const browserLang = navigator.language?.split('-')[0];
-  if (!browserLang) return defaultLanguage;
-  const known =
-    isBuiltInLanguage(browserLang) ||
-    Object.prototype.hasOwnProperty.call(resources, browserLang);
-  return known ? browserLang : defaultLanguage;
+  const browserTag = navigator.language;
+  if (!browserTag) return defaultLanguage;
+  const browserLang = browserTag.split('-')[0];
+  if (browserLang && Object.prototype.hasOwnProperty.call(resources, browserLang)) return browserLang;
+  return resolveBuiltInLanguage(browserTag) ?? defaultLanguage;
+}
+
+/**
+ * i18next's `fallbackLng`, read off the platform locale table's read aliases.
+ *
+ * The built-in catalogues are keyed by table tag (`zh-Hans`, `pt-BR`), while an
+ * instance's language is often a stored code (`zh`, `zh-CN`, `zh-TW`, `pt`):
+ * `sys_user.locale`, a cached seed, an app's `supportedLocales`. i18next's own
+ * hierarchy only walks a code DOWN (`zh-TW` → `zh`), never across to the tag it
+ * means, so each alias names its table tag as the first fallback, ahead of
+ * `fallbackLanguage`: `zh-TW` resolves `zh-TW`, `zh`, then `zh-Hant`, then
+ * `en`. A longer code reaches its entry through i18next's own lookup of this
+ * map (the whole code, its script part, then its language part: `pt-PT` →
+ * `pt` → `pt-BR`; `zh-Hant-TW` → `zh-Hant`).
+ *
+ * An object, not a function: i18next caches the resolved hierarchy for an
+ * object `fallbackLng` and recomputes it on every lookup for a function one.
+ */
+function fallbackLanguagesFor(fallbackLanguage: string): Record<string, string[]> {
+  const fallbacks: Record<string, string[]> = { default: [fallbackLanguage] };
+  // A table tag falls back to `fallbackLanguage` alone. Listed so a longer tag
+  // stops at its script part: i18next asks this map for `zh-Hant` before `zh`,
+  // so `zh-Hant-TW` never borrows a missing key from the Simplified catalogue.
+  for (const tag of BUILT_IN_LANGUAGE_CODES) fallbacks[tag] = [fallbackLanguage];
+  for (const [code, tag] of Object.entries(PLATFORM_LOCALE_READ_ALIASES)) {
+    fallbacks[code] = tag === fallbackLanguage ? [fallbackLanguage] : [tag, fallbackLanguage];
+  }
+  return fallbacks;
 }
 
 /**
@@ -231,7 +268,7 @@ export function createI18n(config: I18nConfig = {}): I18nInstance {
   // so the discovery fetch never runs and the splash never appears.
   instance.use(initReactI18next).init({
     lng,
-    fallbackLng: fallbackLanguage,
+    fallbackLng: fallbackLanguagesFor(fallbackLanguage),
     resources: mergedResources,
     interpolation: {
       escapeValue: false, // React already escapes

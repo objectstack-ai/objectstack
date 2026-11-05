@@ -48,6 +48,7 @@
  * one commit earlier by objectui#4386 / PR #4397 and a different key entirely.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -108,7 +109,7 @@ describe('`common.search` is retired from the ten packs (objectui#4392)', () => 
     // Guards the premise the rest of the file rests on. A pin that iterates an
     // empty pack list, or asserts absence inside a namespace that itself
     // vanished, is green for the wrong reason.
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     for (const lang of LANGS) {
       const common = at(builtInLocales[lang], 'common');
       expect(common, `${lang} lost the common root`).toBeDefined();
@@ -148,11 +149,11 @@ describe('`common.search` is retired from the ten packs (objectui#4392)', () => 
     // A sample across writing systems, so "all ten packs kept the keys" cannot
     // be satisfied by ten copies of the English string.
     expect(at(builtInLocales.en, 'common.select')).toBe('Select…');
-    expect(at(builtInLocales.zh, 'common.select')).toBe('选择…');
+    expect(at(builtInLocales['zh-Hans'], 'common.select')).toBe('选择…');
     expect(at(builtInLocales.ru, 'common.select')).toBe('Выбрать…');
     expect(at(builtInLocales.ar, 'common.select')).toBe('اختر…');
     expect(at(builtInLocales.en, 'common.filter')).toBe('Filter');
-    expect(at(builtInLocales.zh, 'common.filter')).toBe('筛选');
+    expect(at(builtInLocales['zh-Hans'], 'common.filter')).toBe('筛选');
   });
 
   it('no package or app reads `common.search`, and no fallback table re-declares it', () => {

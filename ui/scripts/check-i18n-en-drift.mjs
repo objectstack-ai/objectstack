@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * When an `en` string CHANGES, the other nine packs must change with it.
+ * When an `en` string CHANGES, every other pack must change with it.
  *
  * Run:  node scripts/check-i18n-en-drift.mjs   (also `pnpm check:i18n-drift`)
  * Exit: 0 = every changed `en` value was followed (or waived), 1 = it was not
@@ -31,7 +31,7 @@
  * The second case is the one that fixes the design. No gate can decide whether
  * a Japanese sentence still MEANS what the English one now means; asking for
  * that is asking for a translator. What a gate can decide is the **event**: the
- * `en` value for this key changed in this PR and the nine translations did not.
+ * `en` value for this key changed in this PR and the translations did not.
  * That is the invariant both defects violated at birth, and it is checkable
  * exactly once — in the PR that edits `en`, while the author still knows what
  * the sentence is supposed to say. A day later it is archaeology.
@@ -44,7 +44,7 @@
  * landed on `main` after it forked.
  *
  * A key is "drifted" when it exists in `en` on BOTH sides with DIFFERENT values.
- * For each drifted key, each of the nine packs must also show a different value
+ * For each drifted key, each follower pack must also show a different value
  * across the same two commits. Granularity is the key — not the sentence, not
  * the namespace, not the file. Two facts follow, and both are deliberate:
  *
@@ -129,7 +129,7 @@
  *
  * ## Why the packs are parsed from source rather than imported
  *
- * The "before" side is a blob inside git, not a file on disk, and the ten packs
+ * The "before" side is a blob inside git, not a file on disk, and the packs
  * are 1.5 MB of TypeScript. `git show <base>:<path>` hands us the text and the
  * TypeScript AST turns it into `key -> string` with no build step, no loader,
  * and no temp files — the same trick, for the same reason, as `collectEnKeys`
@@ -151,7 +151,17 @@
  * whether the tree itself (`<base>:./`) exists; only when it does not is the
  * before side empty, and the CLI says so. Standalone the tree is the repository
  * root, which exists at every commit, so this never fires there; a tree that
- * exists at the base with a pack missing still THROWS, as it always did.
+ * exists at the base with its `en` pack missing still THROWS, as it always did.
+ *
+ * ## A base commit without one FOLLOWER pack (objectstack#30511)
+ *
+ * The packs are the platform locale table's tags, so a language the table
+ * gains arrives as a pack file the base never had — `zh-Hant` in #30511, which
+ * also renamed `zh` and `pt` to their tags `zh-Hans` and `pt-BR`. Such a pack is
+ * read as EMPTY at the base, so each of its keys is absent on the before side —
+ * the key-set fact `findDrift` already skips — and the CLI names the packs. The
+ * excuse is the before side's only, and never `en`'s: a pack missing at HEAD,
+ * or an `en` missing at the base, still throws. See {@link readPacks}.
  */
 
 import ts from 'typescript';
@@ -159,6 +169,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import {
   DESIGNER_TABLE,
   DESIGNER_TABLE_PAIRS,
@@ -169,10 +180,21 @@ import { revPath } from './workspace-root.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
-/** The ten built-in packs, `en` first. Mirrors `packages/i18n/src/locales/index.ts`. */
-export const LOCALES = ['en', 'zh', 'ja', 'ko', 'de', 'fr', 'es', 'pt', 'ru', 'ar'];
+/**
+ * The built-in packs: one per tag of the platform locale table
+ * (`PLATFORM_LOCALES` in `@objectstack/spec/system`), in its order, `en` first
+ * — the same population `packages/i18n/src/locales/index.ts` types its
+ * `builtInLocales` against (objectstack#30511). Read from the table rather than
+ * listed, so a language the table gains is a pack this gate reads on the run
+ * that first sees it; a pack file missing at HEAD then fails loudly in
+ * {@link readPacks}.
+ */
+export const LOCALES = Object.freeze([...PLATFORM_LOCALE_TAGS]);
+if (LOCALES[0] !== 'en') {
+  throw new Error(`the platform locale table no longer opens with en (got ${LOCALES[0]}); this gate compares against en`);
+}
 
-/** The nine packs that must follow `en`. */
+/** The packs that must follow `en`: every other table tag. */
 export const FOLLOWERS = LOCALES.filter((lang) => lang !== 'en');
 
 /** Repo-relative path of a pack source. */
@@ -338,14 +360,27 @@ function gitQuiet(root, args) {
 }
 
 /**
- * The ten packs at `ref`, or from the working tree when `ref` is null.
+ * Every pack at `ref`, or from the working tree when `ref` is null.
  *
  * The working tree is the default "after" side on purpose: an agent editing
  * `en.ts` gets the answer before committing, not after pushing.
  *
+ * A missing pack THROWS — with one exception, and only when the caller asks for
+ * it by passing `absentAtRef` (the BEFORE side, `analyze`): a FOLLOWER pack the
+ * ref does not have, at a ref whose `en` pack was read. That is a language the
+ * platform locale table gained after `ref` (objectstack#30511), or a pack file
+ * renamed to its table tag there; either way every key it holds is new in the
+ * change, which is a key-set fact `all-locales-key-parity.test.ts` owns, not
+ * drift. It reads as an empty pack and its tag is pushed onto `absentAtRef` so
+ * the CLI can say so. ⛔ `en` is never excused: a ref that is not in this clone,
+ * or a tree that moved, still throws on `en` before any follower is reached.
+ *
+ * @param {string} root
+ * @param {string | null} ref
+ * @param {string[] | null} [absentAtRef]
  * @returns {Map<string, Map<string, string>>} lang -> (key -> value)
  */
-export function readPacks(root, ref) {
+export function readPacks(root, ref, absentAtRef = null) {
   const packs = new Map();
   for (const lang of LOCALES) {
     const rel = packPath(lang);
@@ -357,7 +392,14 @@ export function readPacks(root, ref) {
       text = readFileSync(full, 'utf8');
     } else {
       text = gitQuiet(root, ['show', revPath(ref, rel)]);
-      if (text === null) throw new Error(`cannot read ${label} — is ${ref} in this clone?`);
+      if (text === null) {
+        if (absentAtRef !== null && lang !== 'en' && packs.has('en')) {
+          absentAtRef.push(lang);
+          packs.set(lang, new Map());
+          continue;
+        }
+        throw new Error(`cannot read ${label} — is ${ref} in this clone?`);
+      }
     }
     packs.set(lang, parsePack(text, label));
   }
@@ -446,7 +488,7 @@ export function resolveBaseRef(root, { explicit = null, env = process.env } = {}
  *
  * `followers` is a parameter rather than the module constant so a SECOND
  * population can reuse this comparison unchanged — the designer table below
- * has exactly one follower. It defaults to `FOLLOWERS`, so the ten-pack call
+ * has exactly one follower. It defaults to `FOLLOWERS`, so the locale-pack call
  * site is byte-identical to what it was.
  *
  * @param {Map<string, Map<string, string>>} before
@@ -498,7 +540,7 @@ export function findDrift(before, after, followers = FOLLOWERS) {
 /**
  * The ledger, in two independent sections.
  *
- * `waivers` covers the ten locale packs; `designerWaivers` covers the designer
+ * `waivers` covers the locale packs; `designerWaivers` covers the designer
  * table population added by objectui#8834. They are separate maps rather than
  * one because `checkLedger` validates every entry against the `en` values of
  * ITS population — a designer key is not a pack key, and one shared map would
@@ -588,10 +630,12 @@ export function applyLedger(findings, ledger, enAfter) {
  */
 export function analyze(root, { base, head = null }) {
   const treeAtBase = treeExistsAt(root, base);
-  const before = treeAtBase ? readPacks(root, base) : new Map(LOCALES.map((lang) => [lang, new Map()]));
+  /** Follower packs the base does not have — see {@link readPacks}. */
+  const newAtBase = [];
+  const before = treeAtBase ? readPacks(root, base, newAtBase) : new Map(LOCALES.map((lang) => [lang, new Map()]));
   const after = readPacks(root, head);
   const { findings, counters } = findDrift(before, after);
-  return { before, after, findings, counters, treeAtBase };
+  return { before, after, findings, counters, treeAtBase, newAtBase };
 }
 
 /**
@@ -763,7 +807,7 @@ if (invokedDirectly) {
   }
 
   const head = argOf('--head');
-  const { after, findings, counters, treeAtBase } = analyze(root, { base: base.ref, head });
+  const { after, findings, counters, treeAtBase, newAtBase } = analyze(root, { base: base.ref, head });
   const enAfter = after.get('en');
 
   // Guard against a refactor quietly emptying the comparison: with no keys, every
@@ -808,14 +852,18 @@ if (invokedDirectly) {
   }
 
   console.log(
-    `Compared the ten locale packs at ${base.ref.slice(0, 9)} (${base.how}) with ` +
+    `Compared the ${LOCALES.length} locale packs at ${base.ref.slice(0, 9)} (${base.how}) with ` +
       `${head ?? 'the working tree'}: ${counters.changedEnKeys} en value(s) changed ` +
       `(${counters.addedEnKeys} key(s) added, ${counters.removedEnKeys} removed — those are ` +
       `all-locales-key-parity's), ${counters.followedPacks} pack value(s) followed, ` +
       `${counters.absentInPack} pack/key pair(s) skipped because the pack does not define the key, ` +
       `${waived.length} finding(s) waived by the ledger` +
       (treeAtBase
-        ? '.'
+        ? newAtBase.length > 0
+          ? ` — ${newAtBase.join(', ')} did not exist at the base commit (a language the platform locale ` +
+            'table gained, or a pack renamed to its table tag), so every key in those pack(s) is new here ' +
+            'and nothing was compared for them.'
+          : '.'
         : ' — this tree does not exist at the base commit (the change imports it), so every key is new ' +
           'here and there was no before side to compare.'),
   );
@@ -845,8 +893,8 @@ if (invokedDirectly) {
       counters.changedEnKeys === 0
         ? 'No en value changed in this range.'
         : waived.length === 0
-          ? 'Every changed en value was followed by all nine translation packs.'
-          : `Every changed en value was followed by all nine translation packs, except ${waived.length} ` +
+          ? `Every changed en value was followed by all ${FOLLOWERS.length} translation packs.`
+          : `Every changed en value was followed by all ${FOLLOWERS.length} translation packs, except ${waived.length} ` +
             `covered by a waiver in ${LEDGER_PATH}: ${waived.map((f) => f.key).join(', ')}.`,
     );
     console.log(
@@ -868,7 +916,7 @@ if (invokedDirectly) {
       console.error(`      unchanged in: ${finding.unfollowed.join(', ')}`);
     }
     console.error(
-      '\nTranslate the new text in each pack listed, IN THIS PR. The nine packs going one\n' +
+      '\nTranslate the new text in each pack listed, IN THIS PR. The packs going one\n' +
         'release out of date is how objectui#3582 and objectui#3625 happened: eight packs kept\n' +
         'serving a retired sentence, one of them as an idiomatic translation that every other\n' +
         'gate reads as perfectly healthy. Nothing downstream can find it again.\n' +

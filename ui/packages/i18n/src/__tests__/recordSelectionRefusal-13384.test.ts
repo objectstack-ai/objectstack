@@ -27,8 +27,8 @@ const actionsOf = (pack: unknown) => (pack as { actions: Record<string, unknown>
 
 describe('objectui#13384 — the row-count refusals are translated', () => {
   it('zh-CN reads them in Chinese', () => {
-    expect(actionsOf(builtInLocales.zh).selectExactlyOneRow).toBe('此操作针对单条记录，请只选择一行。');
-    expect(actionsOf(builtInLocales.zh).selectRowFirst).toBe('此操作针对单条记录，请先选择一行。');
+    expect(actionsOf(builtInLocales['zh-Hans']).selectExactlyOneRow).toBe('此操作针对单条记录，请只选择一行。');
+    expect(actionsOf(builtInLocales['zh-Hans']).selectRowFirst).toBe('此操作针对单条记录，请先选择一行。');
   });
 
   it('en holds the English source core falls back to', () => {

@@ -181,7 +181,7 @@ describe('RecordFormPage title resolves from the locale packs (#3469)', () => {
     // the title is Chinese. No inline English `defaultValue` can satisfy this
     // assertion, so it fails loudly if the packs ever stop being consulted.
     renderPage('create', { language: 'zh' });
-    expect(title()).toBe(String(builtInLocales.zh.form.createTitle).replace('{{object}}', 'Contacts'));
+    expect(title()).toBe(String(builtInLocales['zh-Hans'].form.createTitle).replace('{{object}}', 'Contacts'));
     expect(title()).toBe('新建Contacts');
   });
 });
@@ -283,7 +283,7 @@ describe('the ADR-0105 write-target badge resolves from the locale packs (#3517)
     // reverting to English.
     const badge = await badgeIn('zh');
     expect(badge).toHaveTextContent(
-      String(builtInLocales.zh.form.createTargetOrg).replace('{{org}}', 'Acme Inc'),
+      String(builtInLocales['zh-Hans'].form.createTargetOrg).replace('{{org}}', 'Acme Inc'),
     );
     expect(badge).toHaveTextContent('创建到Acme Inc');
   });

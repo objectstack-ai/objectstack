@@ -37,7 +37,7 @@ import { createI18n } from '../i18n';
 import { I18nProvider, useI18nContext, useObjectTranslation } from '../provider';
 import { useObjectLabel } from '../useObjectLabel';
 import ja from '../locales/ja';
-import zh from '../locales/zh';
+import zh from '../locales/zh-Hans';
 
 /** The card's config — not a built-in code, so only the app bundle is in play. */
 const ZH_CN = { defaultLanguage: 'zh-CN', detectBrowserLanguage: false } as const;
@@ -303,7 +303,7 @@ describe('an app bundle that lands after mount (objectui#10382)', () => {
 
 describe('the built-in catalogue path — the grading sibling', () => {
   it('a boot catalogue that lands after mount reaches the reader already on screen', async () => {
-    const instance = instanceWithoutCatalogue('zh', 'zh');
+    const instance = instanceWithoutCatalogue('zh-Hans', 'zh-Hans');
     render(
       <I18nProvider instance={instance} persistLanguage={false}>
         <SaveReader />
