@@ -24,6 +24,10 @@
  *  6. **What stays as it was**: a readable id starts the run (the firing
  *     control for every zero above), a read the definition does not declare,
  *     the system principal.
+ *  7. **An input the author declares a record id** (`objectName` on the
+ *     variable): loaded from the declared object at every door, read in plain
+ *     sight or not, beside any visible read of another object, followed into a
+ *     callee; the same input undeclared keeps today's rule (the control).
  *
  * The data double is ROW-SCOPED per object: each row is visible to its owner
  * and to nobody else, and no other id exists, so the real
@@ -84,6 +88,18 @@ const BY_COMPUTED = 'contract_by_computed';
 const SCREEN_EDIT = 'contract_screen_edit';
 const SUBFLOW_PARENT = 'contract_subflow_parent';
 const MAP_PARENT = 'contract_map_parent';
+const DECLARED = 'contract_declared';
+const UNDECLARED = 'contract_undeclared';
+const DECLARED_AND_READ = 'case_declared_contract_read';
+const DECLARED_CALLEE_PARENT = 'contract_declared_callee_parent';
+
+/** A flow whose start input `name` the author declares a record id of `object` (`objectName`). */
+function declaring(def: FlowDef, input: string, object: string): FlowDef {
+    return {
+        ...def,
+        variables: (def.variables as Array<Record<string, unknown>>).map((v) => (v.name === input ? { ...v, objectName: object } : v)),
+    };
+}
 
 const FLOWS: Record<string, FlowDef> = {
     [BY_RECORD]: flow(BY_RECORD, ['recordId'], [getRow(CONTRACT, { id: cel('recordId') })], { runAs: 'system' }),
@@ -98,6 +114,19 @@ const FLOWS: Record<string, FlowDef> = {
     ]),
     [MAP_PARENT]: flow(MAP_PARENT, ['contractIds'], [
         { id: 'each', type: 'map', label: 'Each', config: { collection: cel('contractIds'), flowName: BY_CUSTOM, input: { contractId: cel('item') } } },
+    ]),
+    // The declared input is read by no node: only the declaration says it is a record id.
+    [DECLARED]: declaring(flow(DECLARED, ['contractId'], [], { runAs: 'system' }), 'contractId', CONTRACT),
+    // The control: the same flow without the declaration.
+    [UNDECLARED]: flow(UNDECLARED, ['contractId'], [], { runAs: 'system' }),
+    // Declared an id of `crm_case`, and read in plain sight as an id of `crm_contract`.
+    [DECLARED_AND_READ]: declaring(
+        flow(DECLARED_AND_READ, ['subjectId'], [getRow(CONTRACT, { id: cel('subjectId') })], { runAs: 'system' }),
+        'subjectId', CASE,
+    ),
+    // Hands its own undeclared input to the declared input of a callee.
+    [DECLARED_CALLEE_PARENT]: flow(DECLARED_CALLEE_PARENT, ['target'], [
+        { id: 'sub', type: 'subflow', label: 'Sub', config: { flowName: DECLARED, input: { contractId: cel('target') } } },
     ]),
 };
 
@@ -115,7 +144,13 @@ const CUSTOM_ACTION = {
     params: [{ name: 'contractId', label: 'Contract', type: 'text' }],
 };
 const SCRIPT_ACTION = { name: 'touch_case', label: 'Touch', objectName: CASE, type: 'script', execute: 'return 1' };
-const CASE_DEF = { name: CASE, actions: [CONTRACT_ACTION, CUSTOM_ACTION, SCRIPT_ACTION] };
+const DECLARED_ACTION = {
+    name: 'open_declared_contract', label: 'Open declared contract', objectName: CASE, type: 'flow', target: DECLARED,
+    params: [{ name: 'contractId', label: 'Contract', type: 'text' }],
+    ai: { exposed: true, description: 'Open the declared contract.' },
+};
+const UNDECLARED_ACTION = { ...DECLARED_ACTION, name: 'open_undeclared_contract', label: 'Open undeclared contract', target: UNDECLARED };
+const CASE_DEF = { name: CASE, actions: [CONTRACT_ACTION, CUSTOM_ACTION, SCRIPT_ACTION, DECLARED_ACTION, UNDECLARED_ACTION] };
 const CONTRACT_DEF = { name: CONTRACT, actions: [] };
 const schemaOf = (n: string) => (n === CASE ? CASE_DEF : n === CONTRACT ? CONTRACT_DEF : undefined);
 
@@ -572,5 +607,176 @@ describe('the REST action door refuses a routed record that is not one id, befor
         expect(statusOf(res)).toBe(404);
         expect(errorOf(res).code).toBe('RECORD_NOT_FOUND');
         expect(reads(h).length).toBeGreaterThan(0);
+    });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// 7. An input the author declares a record id (`objectName`, #29425 ruling A)
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('a start input declared a record id is loaded from the declared object at every door, before the run exists', () => {
+    const readsOf = (name: string) =>
+        flowDeclaredRecordReads({ getFlow: async (n: string) => FLOWS[n] ?? null }, name).then((m) => Object.fromEntries(m));
+
+    /** The declared `type: 'flow'` endpoint door, on the real `callData`. */
+    async function endpoint(target: string, body: unknown) {
+        const declared = ApiEndpointSchema.parse({
+            name: `${target}_open`, path: `/api/v1/apps/${target}/open`, method: 'POST', type: 'flow', target,
+        });
+        const ql = makeQl();
+        const automation = makeAutomation();
+        const deps: any = { resolveService: async () => undefined, getObjectQL: async () => ql };
+        const protocolContext: any = { request: {}, environmentId: 'platform', executionContext: ec(MEMBER) };
+        const answer = await executeEndpointTarget(
+            buildEndpointExecutionContext({
+                request: { method: 'POST', path: declared.path, query: {}, headers: {}, body },
+                match: { endpoint: declared, params: {} },
+                executionContext: ec(MEMBER) as any,
+                environmentId: 'platform',
+            }),
+            {
+                automationService: automation,
+                callData: (action, params, dataDriver, scopeId, execCtx) =>
+                    callData(deps, protocolContext, action, params, dataDriver, scopeId, execCtx),
+            },
+        );
+        return { status: answer.status, error: (answer.body as any)?.error ?? {}, ql, automation };
+    }
+
+    /**
+     * One start of `flowName` with `contractId` set to `value`, at each door that
+     * starts a flow by name, read back as status + error + what was loaded + runs.
+     */
+    const DOORS: Record<string, (flowName: string, value: unknown) => Promise<{ status: unknown; error: any; ql: any; automation: any }>> = {
+        'POST /automation/:name/trigger': async (flowName, value) => {
+            const h = boot(ec(MEMBER));
+            const res = await h.trigger(flowName, { params: { contractId: value } });
+            return { status: statusOf(res), error: errorOf(res), ql: h.ql, automation: h.automation };
+        },
+        'legacy POST /automation/trigger/:name': async (flowName, value) => {
+            const h = boot(ec(MEMBER));
+            const res = await h.trigger(flowName, { params: { contractId: value } }, true);
+            return { status: statusOf(res), error: errorOf(res), ql: h.ql, automation: h.automation };
+        },
+        'a declared `type: flow` endpoint': (flowName, value) => endpoint(flowName, { params: { contractId: value } }),
+        'REST POST /actions/:object/:action': async (flowName, value) => {
+            const h = boot(ec(MEMBER));
+            const action = flowName === DECLARED ? DECLARED_ACTION : UNDECLARED_ACTION;
+            const res = await h.actions(`/${CASE}/${action.name}/${BOTH}`, { params: { contractId: value } });
+            return { status: statusOf(res), error: errorOf(res), ql: h.ql, automation: h.automation };
+        },
+        'MCP run_action': async (flowName, value) => {
+            const h = boot(ec(MEMBER));
+            const action = flowName === DECLARED ? DECLARED_ACTION : UNDECLARED_ACTION;
+            try {
+                await h.runAction(action.name, { objectName: CASE, recordId: BOTH, params: { contractId: value } });
+                return { status: 200, error: {}, ql: h.ql, automation: h.automation };
+            } catch (err: any) {
+                return { status: err?.status, error: err ?? {}, ql: h.ql, automation: h.automation };
+            }
+        },
+    };
+    /** Every `crm_contract` row the start loaded. */
+    const contractReads = (ql: any) => ql.find.mock.calls.filter((c: any[]) => c[0] === CONTRACT).map((c: any[]) => c[1]?.where?.id);
+
+    it('the reading: a declared input is one id of the declared object, read by no node', async () => {
+        expect(await readsOf(DECLARED)).toEqual({ contractId: [{ object: CONTRACT, many: false }] });
+        expect(await readsOf(UNDECLARED)).toEqual({});
+    });
+
+    it('the reading: a declaration sits beside a read in plain sight of another object, never in place of it', async () => {
+        expect(await readsOf(DECLARED_AND_READ)).toEqual({
+            subjectId: [{ object: CASE, many: false }, { object: CONTRACT, many: false }],
+        });
+    });
+
+    it('the reading: a callee\'s declared input is followed through the hand-off', async () => {
+        expect(await readsOf(DECLARED_CALLEE_PARENT)).toEqual({ target: [{ object: CONTRACT, many: false }] });
+    });
+
+    it('the reading: a loop that rebinds the name does not withdraw the declaration', async () => {
+        const looped = declaring(flow('looped', ['x'], [
+            { id: 'loop', type: 'loop', label: 'Loop', config: { collection: [1], iteratorVariable: 'x', body: { nodes: [getRow(CASE, { id: cel('x') })], edges: [] } } },
+        ]), 'x', CONTRACT);
+        const got = await flowDeclaredRecordReads({ getFlow: async () => looped }, 'looped');
+        expect(Object.fromEntries(got)).toEqual({ x: [{ object: CONTRACT, many: false }] });
+    });
+
+    for (const [door, start] of Object.entries(DOORS)) {
+        describe(door, () => {
+            it('a declared input naming a record the caller can read: the run starts, the firing control', async () => {
+                const got = await start(DECLARED, BOTH);
+
+                expect(got.status, JSON.stringify(got.error)).toBe(200);
+                expect(got.automation.execute).toHaveBeenCalledTimes(1);
+                expect(contractReads(got.ql)).toContain(BOTH);
+            });
+
+            it.each([
+                ['the caller cannot read', CONTRACT_OTHER],
+                ['does not exist', GHOST],
+            ])('a declared input naming a record the caller %s: 404 RECORD_NOT_FOUND, no run', async (_label, id) => {
+                const got = await start(DECLARED, id);
+
+                expect(got.status).toBe(404);
+                expect(got.error.code).toBe('RECORD_NOT_FOUND');
+                expect(contractReads(got.ql)).toContain(id);
+                expect(got.automation.execute).not.toHaveBeenCalled();
+            });
+
+            it.each([
+                ['an object', { id: BOTH }],
+                ['a list', [BOTH]],
+                ['a boolean', true],
+            ])('a declared input given %s: 400 VALIDATION_FAILED naming the input, nothing loaded from the declared object, no run', async (_label, value) => {
+                const got = await start(DECLARED, value);
+
+                expect(got.status).toBe(400);
+                expect(got.error.code).toBe('VALIDATION_FAILED');
+                expect(String(got.error.message)).toContain('`contractId`');
+                expect(contractReads(got.ql)).toHaveLength(0);
+                expect(got.automation.execute).not.toHaveBeenCalled();
+            });
+
+            it('the same input undeclared, read by no node: not judged, the run starts on an id the caller cannot read (today\'s rule)', async () => {
+                const got = await start(UNDECLARED, CONTRACT_OTHER);
+
+                expect(got.status, JSON.stringify(got.error)).toBe(200);
+                expect(got.automation.execute).toHaveBeenCalledTimes(1);
+                expect(contractReads(got.ql)).toHaveLength(0);
+            });
+        });
+    }
+
+    it('declared one object and read from another: the caller must read the row in both', async () => {
+        const inCaseOnly = boot(ec(MEMBER));
+        const refused = await inCaseOnly.trigger(DECLARED_AND_READ, { params: { subjectId: CASE_ONLY } });
+        expect(statusOf(refused)).toBe(404);
+        expect(errorOf(refused).code).toBe('RECORD_NOT_FOUND');
+        expect(reads(inCaseOnly)).toEqual(expect.arrayContaining([[CASE, CASE_ONLY], [CONTRACT, CASE_ONLY]]));
+        expect(inCaseOnly.automation.execute).not.toHaveBeenCalled();
+
+        const inBoth = boot(ec(MEMBER));
+        const started = await inBoth.trigger(DECLARED_AND_READ, { params: { subjectId: BOTH } });
+        expect(statusOf(started), JSON.stringify(started?.response?.body)).toBe(200);
+        expect(inBoth.automation.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('a parent that hands its input to a callee\'s declared input is judged by the callee\'s declaration', async () => {
+        const h = boot(ec(MEMBER));
+        const res = await h.trigger(DECLARED_CALLEE_PARENT, { params: { target: CONTRACT_OTHER } });
+
+        expect(statusOf(res)).toBe(404);
+        expect(errorOf(res).code).toBe('RECORD_NOT_FOUND');
+        expect(h.automation.execute).not.toHaveBeenCalled();
+    });
+
+    it('the system principal starts on any declared id, nothing loaded', async () => {
+        const h = boot({ isSystem: true });
+        const res = await h.trigger(DECLARED, { params: { contractId: CONTRACT_OTHER } });
+
+        expect(statusOf(res)).toBe(200);
+        expect(h.automation.execute).toHaveBeenCalledTimes(1);
+        expect(reads(h)).toHaveLength(0);
     });
 });
