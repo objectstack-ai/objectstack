@@ -119,8 +119,13 @@ export type CompareTo = DatasetCompareTo;
  * registry across requests, so resolving in place would bake one request's
  * user id (and one day's dates) into every later render. New objects are
  * allocated only when the tree actually held a placeholder.
+ *
+ * [#30526] Exported for `AnalyticsService.queryDataset`, which resolves once
+ * ahead of the executor so the answer's `drillScopes` and its numbers read one
+ * instant; the executor's own call is then the identity (nothing is left to
+ * resolve, so the same trees come back).
  */
-function resolveSelectionTokens(
+export function resolveSelectionTokens(
   compiled: CompiledDataset,
   selection: DatasetSelection,
   context?: ExecutionContext,

@@ -1058,10 +1058,13 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     // invalidation bus (#2269): the dataSource write already emitted a
     // MutationEvent that the bridge fans out — no manual notify needed.
     const claimed = answerWarningClaim.current?.take(saved);
+    // No console line when the answer's notice is the server's own MFA notice,
+    // which names the grace period in force (objectstack#30565).
     const mfaNotice = organizationMfaSavedNotice({
       objectName: formObjectDef?.name,
       storedRequireMfa,
       saved,
+      answerNotice: claimed?.notice,
       t,
     });
     const feedback = mfaNotice

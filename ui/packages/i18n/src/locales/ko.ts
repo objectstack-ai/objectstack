@@ -3101,6 +3101,8 @@ const ko = {
     allDocs: '전체 문서',
     onlineDocs: '온라인 문서',
     loadingDocumentation: '문서 로딩 중',
+    documentation: '문서',
+    uncategorized: '미분류',
     about: '정보',
     aboutTitle: '이 콘솔 정보',
     aboutDescription: '이 콘솔이 컴파일된 빌드입니다.',

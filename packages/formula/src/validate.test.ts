@@ -1139,14 +1139,45 @@ describe('validateExpression (ADR-0032)', () => {
         );
         expect(r.errors[0].message, source).not.toMatch(/evaluates to null/);
       }
-      // Controls: a formula field (no outcome) keeps the null sentence; so does
-      // an advisory rule (`fail-open`), which #30250 does not cover.
-      for (const [role, source, hint, code] of [
-        ['value', 'record.start_date + 1', schema, 'date-arithmetic'],
-        ['value', 'record.end_date - record.start_date', schema, 'date-text-arithmetic'],
-        ['predicate', 'record.start_date + 1 > 3', { ...schema, faultOutcome: 'fail-open' }, 'date-arithmetic'],
+      // Controls: a formula field (no outcome) keeps the null sentence. An
+      // advisory rule (`fail-open`) is #30494's, below.
+      for (const [role, source, code] of [
+        ['value', 'record.start_date + 1', 'date-arithmetic'],
+        ['value', 'record.end_date - record.start_date', 'date-text-arithmetic'],
       ] as const) {
-        const r = validateExpression(role, source, hint);
+        const r = validateExpression(role, source, schema);
+        expect(r.errors.map((e) => e.code), source).toEqual([code]);
+        expect(r.errors[0].message, source).toContain('this faults at runtime, so the field silently evaluates to null');
+      }
+    });
+
+    // [#30494] On an advisory (`warning` / `info`) validation rule a fault
+    // skips the rule and the write proceeds: nothing reads null. The date
+    // verdicts there close on the `type-mismatch-fail-open` clause, under their
+    // own codes. The grade stays an error.
+    it('on an advisory rule says the rule is skipped and the write proceeds, not that the field reads null (#30494)', () => {
+      const open = { ...schema, faultOutcome: 'fail-open' } as const;
+      for (const [source, code] of [
+        ['record.start_date + 1 > 3', 'date-arithmetic-fail-open'],
+        ['record.end_date - record.start_date > duration("24h")', 'date-text-arithmetic-fail-open'],
+      ] as const) {
+        const r = validateExpression('predicate', source, open);
+        expect(r.warnings, source).toHaveLength(0);
+        expect(r.errors.map((e) => e.code), source).toEqual([code]);
+        expect(r.errors[0].message, source).toContain(
+          'this faults at runtime, and here the rule is advisory, so a rule that cannot be evaluated is skipped, not ' +
+            'refused: the write proceeds, the rule is never applied (its advisory never fires), and the only trace is a ' +
+            'log line saying it could not be evaluated.',
+        );
+        expect(r.errors[0].message, source).not.toMatch(/evaluates to null/);
+      }
+      // Control: the same predicates on a formula-field site (no outcome) keep
+      // their codes and the null sentence.
+      for (const [source, code] of [
+        ['record.start_date + 1 > 3', 'date-arithmetic'],
+        ['record.end_date - record.start_date > duration("24h")', 'date-text-arithmetic'],
+      ] as const) {
+        const r = validateExpression('predicate', source, schema);
         expect(r.errors.map((e) => e.code), source).toEqual([code]);
         expect(r.errors[0].message, source).toContain('this faults at runtime, so the field silently evaluates to null');
       }

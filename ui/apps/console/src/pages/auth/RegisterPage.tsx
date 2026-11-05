@@ -38,6 +38,9 @@
  *    page and then on "Invitation accepted" (#30125, app-shell's
  *    `useInvitationSignUpJoin`). An address the server refuses goes on to the
  *    accept page as before, which shows the refusal.
+ *  - A language picked in the footer's menu before signing up is saved as the
+ *    new person's own (app-shell's `saveSignInLanguagePick`), awaited before
+ *    every exit of the post-signup step, as `/login` does (#30338).
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -57,6 +60,8 @@ import {
   invitationArrivalCopy,
   useInvitationArrival,
   useInvitationSignUpJoin,
+  hasSignInLanguagePick,
+  saveSignInLanguagePick,
 } from '@object-ui/app-shell';
 import { AuthLayout } from './AuthLayout';
 import { followOauthAuthorize } from './followAuthorize';
@@ -124,6 +129,12 @@ export function RegisterPage() {
   const mobileHandoffStartedRef = useRef(false);
   // And the entry into the organization an invitation sign-up joined (#30125).
   const invitationEntryStartedRef = useRef(false);
+  // #30338 — a language picked on this page, saved as the new person's own
+  // before any exit below navigates away (as on `/login`). The ref is the
+  // once-only latch; the state re-runs the post-signup effect when the save
+  // has settled.
+  const signInPickSaveRef = useRef<'idle' | 'saving' | 'settled'>('idle');
+  const [signInPickSaved, setSignInPickSaved] = useState(false);
 
   // See LoginPage: `isLoading` is overloaded (initial session check + every
   // in-flight signUp). Latch once the first check resolves so a failed
@@ -185,6 +196,27 @@ export function RegisterPage() {
   // Post-signup orchestration mirrors LoginPage exactly.
   useEffect(() => {
     if (!user) return;
+
+    // 0. A language picked on this page while signed out (#30338): saved as
+    //    this person's own when they have none, and AWAITED before every exit
+    //    below — each leaves by a full navigation, which ends the page-load
+    //    that knows the pick was made here, and a write sent beside it races
+    //    the unload. Without a pick nothing is sent and nothing waits. A failed
+    //    save does not hold the sign-up: the pick still applies on this device.
+    //    A session the hand-off would refuse is not a sign-in yet: skipped.
+    if (signInPickSaveRef.current === 'saving') return;
+    if (
+      signInPickSaveRef.current === 'idle' &&
+      !handoff.holdForSignIn &&
+      hasSignInLanguagePick()
+    ) {
+      signInPickSaveRef.current = 'saving';
+      void saveSignInLanguagePick(String(user.id)).finally(() => {
+        signInPickSaveRef.current = 'settled';
+        setSignInPickSaved(true);
+      });
+      return;
+    }
 
     if (typeof window !== 'undefined') {
       const sp = new URLSearchParams(window.location.search);
@@ -250,6 +282,7 @@ export function RegisterPage() {
     handoff.target,
     handoff.holdForSignIn,
     invitationJoin,
+    signInPickSaved,
   ]);
 
   // The first session check has answered and nobody is signed in: the page is

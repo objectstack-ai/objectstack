@@ -17,7 +17,8 @@
  *
  * - `report-filter-field-unknown` (`error`) — a key of the report's
  *   `runtimeFilter` (or of a joined block's) resolves to no column on the bound
- *   dataset's object graph, and names no dimension of that dataset.
+ *   dataset's object graph, and names no dimension of that dataset — or it names
+ *   one of the dataset's MEASURES, which no filter can key (#30006).
  *
  * The judgement is {@link judgeDatasetFilterKeys}, the function the dashboard
  * twin calls, so the two positions accept the same keys: every authored filter
@@ -25,11 +26,12 @@
  * `[field, op, value]` triple), dotted relationship paths, and the three skips
  * every field-existence rule in this package takes (an object this stack does
  * not define, one with no readable field map, a registry-injected system
- * column). One addition, never a refusal the twin does not make: a bare key
- * that names a DIMENSION of the bound dataset is accepted, because the dataset
- * door resolves a bare `where` key through the cube's members first
- * (`dataset-filter-field-binding.ts`, «a key naming only a dimension still
- * resolves through that dimension»).
+ * column). A bare key that names a DIMENSION of the bound dataset is
+ * accepted, because the dataset door resolves a bare `where` key through the
+ * cube's members first (`dataset-filter-field-binding.ts`, «a key naming only a
+ * dimension still resolves through that dimension»); a bare key that names a
+ * MEASURE is refused with its own message. Both live in the shared judgement
+ * since #30006, so the dashboard twin accepts and refuses the same keys.
  *
  * ## Which dataset a filter is judged against
  *
@@ -51,7 +53,7 @@
 
 import { indexServedObjectGraph, recordsOf } from './object-graph.js';
 import type { AnyRec } from './page-walk.js';
-import { indexResolvableDatasets, judgeDatasetFilterKeys } from './validate-widget-bindings.js';
+import { indexResolvableDatasets, judgeDatasetFilterKeys, measureFilterKeyFix } from './validate-widget-bindings.js';
 
 export const REPORT_FILTER_FIELD_UNKNOWN = 'report-filter-field-unknown';
 
@@ -91,23 +93,18 @@ export function validateReportRuntimeFilters(stack: AnyRec): ReportRuntimeFilter
     const dataset = dsName ? datasets.get(dsName) : undefined;
     // Unbound or unresolvable: the shape rule and `chart-dataset-unknown` own it.
     if (!dsName || !dataset) return;
-    const dimensions = new Set<string>();
-    for (const d of recordsOf(dataset.dimensions)) {
-      const n = strName(d.name);
-      if (n) dimensions.add(n);
-    }
     for (const verdict of judgeDatasetFilterKeys(graph, dataset, filter, path)) {
-      if (verdict.kind !== 'unknown') continue;
-      if (dimensions.has(verdict.field)) continue; // the cube binds a dimension name
+      if (verdict.kind === 'not-included') continue; // the twin's second id, not this rule's
       findings.push({
         severity: 'error',
         rule: REPORT_FILTER_FIELD_UNKNOWN,
         where,
         path: verdict.path,
         message: verdict.message,
-        hint:
-          `Filter on a field of "${verdict.object}" (dataset "${dsName}"), a dimension of that dataset, ` +
-          `or a relationship path whose prefix its \`include\` declares.`,
+        hint: verdict.kind === 'measure'
+          ? measureFilterKeyFix(verdict)
+          : `Filter on a field of "${verdict.object}" (dataset "${dsName}"), a dimension of that dataset, ` +
+            `or a relationship path whose prefix its \`include\` declares.`,
       });
     }
   };

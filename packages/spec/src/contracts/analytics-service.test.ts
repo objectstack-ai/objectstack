@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { IAnalyticsService, AnalyticsResult, CubeMeta } from './analytics-service';
+import type { FilterCondition } from '../data/filter.zod';
 
 describe('Analytics Service Contract', () => {
   it('should allow a minimal IAnalyticsService implementation with required methods', () => {
@@ -150,6 +151,7 @@ describe('Analytics Service Contract', () => {
         drillRawRows: [{ account: 'acc_1' }],
         drillRawTotals: [[{}]],
         drillRanges: [{ close_date: { field: 'close_date', gte: '2026-04-01', lt: '2026-07-01' } }],
+        drillScopes: { revenue: { $and: [{ kind: 'sale' }, { amount: { $null: false } }] } },
       }),
     };
 
@@ -163,6 +165,8 @@ describe('Analytics Service Contract', () => {
     expect(answer.drillRawTotals?.[0]?.[0]).toEqual({});
     const range: { field: string; gte: string; lt: string } | undefined = answer.drillRanges?.[0]?.close_date;
     expect(range).toEqual({ field: 'close_date', gte: '2026-04-01', lt: '2026-07-01' });
+    const scope: FilterCondition | undefined = answer.drillScopes?.revenue;
+    expect(scope).toEqual({ $and: [{ kind: 'sale' }, { amount: { $null: false } }] });
 
     const offType: AnalyticsResult[] = [
       // @ts-expect-error — `dimensionFields` maps a dimension name to a field NAME, a string
@@ -173,8 +177,10 @@ describe('Analytics Service Contract', () => {
       { rows: [], fields: [], drillRawTotals: [{ account: 'acc_1' }] },
       // @ts-expect-error — a `drillRanges` entry carries both bounds
       { rows: [], fields: [], drillRanges: [{ close_date: { field: 'close_date', gte: '2026-04-01' } }] },
+      // @ts-expect-error — a `drillScopes` entry is a filter condition, not a string
+      { rows: [], fields: [], drillScopes: { revenue: 'kind = sale' } },
     ];
-    expect(offType).toHaveLength(4);
+    expect(offType).toHaveLength(5);
   });
 
   it('should generate SQL without executing', async () => {
