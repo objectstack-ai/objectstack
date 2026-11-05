@@ -11,6 +11,10 @@
  *   node scripts/codemod-split-engine.mjs --write         # apply the split, then verify it
  *   node scripts/codemod-split-engine.mjs --verify --base <ref>
  *                                                         # re-prove a split on disk against engine.ts at <ref>
+ *   node scripts/codemod-split-engine.mjs --scoped [--write]
+ *                                                         # the second pass (#30052): plan (or apply) ObjectRepository and ScopedContext
+ *   node scripts/codemod-split-engine.mjs --scoped --verify --base <ref>
+ *                                                         # re-prove the second pass on disk against engine.ts at <ref>
  *   node scripts/codemod-split-engine.mjs --self-test
  *   node scripts/codemod-split-engine.mjs --help          # this usage, on any tree (split or not)
  *
@@ -116,6 +120,21 @@
  * in source order or sorted, and the output is a pure function of the input:
  * two runs on one input write byte-identical trees (the plan prints the output
  * tree's sha256). Only the proof's leaf-reach walk reads sibling files.
+ *
+ * ## The second pass: `ObjectRepository` and `ScopedContext` (#30052)
+ *
+ * `engine.ts` declares two more classes after `ObjectQL`, the repository a
+ * hook reaches as `ctx.api.object(name)` and the context it reaches as
+ * `ctx.api`. `--scoped` facades them with this pass's cut pattern, stay rules
+ * and byte-identity proof, one facet module per class (`SCOPED_CLASSES`) and
+ * one host per INSTANCE (`SCOPED_HOSTS_MODULE`, #30051's shape keyed by the
+ * instance), and it touches no other byte: its input is the `engine.ts` the
+ * first pass left, and it is proved against that file, so it is re-run on the
+ * latest `main` at landing like the first. Its marker is `SCOPED_MARK`, so the
+ * two passes' stubs and files are told apart. Two stay reasons are its own:
+ * a body that reads a private member off another instance (`foreign-private`:
+ * the class body may, a module function may not) and one that reads a
+ * non-public static (`private-static`: the statics route is `ObjectQL`'s).
  *
  * ts-morph is a root devDependency, resolved from the root manifest, as the
  * pilot takes it.
