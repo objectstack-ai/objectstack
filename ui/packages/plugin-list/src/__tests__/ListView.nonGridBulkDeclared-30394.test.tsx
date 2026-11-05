@@ -79,15 +79,15 @@ function renderGallery(objectName: string, bulkActions: string[], ds: Record<str
 }
 
 /** The ListView warnings logged so far (the grid's own say `ObjectGrid`). */
-function listViewWarnings(warn: ReturnType<typeof vi.spyOn>): string[] {
+function listViewWarnings(warn: { mock: { calls: unknown[][] } }): string[] {
   return warn.mock.calls
-    .map(c => String(c[0]))
-    .filter(m => m.startsWith('[ObjectUI] ListView bulkActions:'));
+    .map((c: unknown[]) => String(c[0]))
+    .filter((m: string) => m.startsWith('[ObjectUI] ListView bulkActions:'));
 }
 
 describe('ListView non-grid bulk bar draws only actions the object declares (objectstack#30394)', () => {
   let prevGallery: ReturnType<typeof ComponentRegistry.get>;
-  let warn: ReturnType<typeof vi.spyOn>;
+  let warn: { mock: { calls: unknown[][] }; mockRestore: () => void };
 
   beforeEach(() => {
     prevGallery = ComponentRegistry.get('object-gallery');
