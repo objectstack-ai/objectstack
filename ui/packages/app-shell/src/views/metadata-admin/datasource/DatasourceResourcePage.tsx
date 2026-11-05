@@ -31,16 +31,22 @@
  *  - **Sync objects**: introspect remote tables (`GET …/remote-tables`), pick
  *    which to import, generate an object definition for each (`POST …/object-draft`),
  *    and create it through the normal metadata channel (`MetadataClient.save('object', …)`).
- *    Offered only on a federation source (`offersSync`, objectui#13318).
+ *    Offered only on a federation source (`offersSync`, objectui#13318). Once
+ *    an object is created the dialog stays open on the result: it links each
+ *    new object and says what is left before people can use it, adding it to
+ *    an app and granting access (objectstack#30328).
  *  - **Delete** a runtime datasource (`DELETE …/:name`; blocked by the backend
  *    while objects are still bound), confirmed in an in-app AlertDialog that
- *    names the datasource by its label and name (objectui#13333).
+ *    names the datasource by its label and name (objectui#13333). The confirm
+ *    lists the objects whose metadata names the datasource, and a refused
+ *    delete names them in the console's language, with what to do next.
  *
  * Code-defined (`origin: 'code'`) datasources are read-only: edit/delete are
  * hidden for them.
  */
 
 import * as React from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   Loader2,
@@ -124,6 +130,79 @@ interface DatasourceRow {
   origin?: string;
   active?: boolean;
 }
+
+/** An object whose metadata names this datasource as its `datasource`. */
+interface BoundObject {
+  name: string;
+  label?: string;
+}
+
+/** An object's label and name, the label first when it says something the name does not. */
+const objectText = (o: BoundObject) => (o.label && o.label !== o.name ? `${o.label} (${o.name})` : o.name);
+
+/** The objects one Sync run created, and the datasource they came from. */
+interface SyncResult {
+  datasource: string;
+  objects: BoundObject[];
+}
+
+/**
+ * The app segment the console is under (`/apps/SEGMENT`), Setup when the
+ * route names none. An object's own route lives under an app
+ * (`/apps/:appName/:objectName`), and a synced object is in no app's
+ * navigation yet, so its link opens it under the app this page is in.
+ */
+function appBaseOf(pathname: string): string {
+  const m = /^\/apps\/[^/]+/.exec(pathname);
+  return m ? m[0] : '/apps/setup';
+}
+
+/**
+ * The Sync dialog's result: what was created, a link to each new object, and
+ * the two steps left before people can use it (objectstack#30328). A synced
+ * object is in no app, and only a permission set that grants it lets anyone
+ * but an administrator read it.
+ */
+function SyncResultNote({ result, locale }: { result: SyncResult; locale: SupportedLocale }) {
+  const { pathname } = useLocation();
+  const base = appBaseOf(pathname);
+  const count = result.objects.length;
+  return (
+    <div role="status" data-testid="datasource-sync-result" className="space-y-3 py-2 text-sm">
+      <p className="flex items-center gap-1.5 font-medium">
+        <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+        {count === 1
+          ? tFormat('engine.datasource.syncedOne', locale, { name: result.datasource })
+          : tFormat('engine.datasource.synced', locale, { count, name: result.datasource })}
+      </p>
+      <ul className="space-y-1 pl-5">
+        {result.objects.map((o) => (
+          <li key={o.name} className="list-disc">
+            <Link
+              to={`${base}/${encodeURIComponent(o.name)}`}
+              data-testid="datasource-sync-object-link"
+              className="font-medium text-primary underline-offset-4 hover:underline"
+            >
+              {objectText(o)}
+            </Link>
+          </li>
+        ))}
+      </ul>
+      <div className="rounded-md border bg-muted/40 p-3">
+        <p className="font-medium">
+          {count === 1 ? t('engine.datasource.syncNextStepsOne', locale) : t('engine.datasource.syncNextSteps', locale)}
+        </p>
+        <ol className="mt-1.5 list-decimal space-y-1 pl-5 text-muted-foreground">
+          <li>{t('engine.datasource.syncNextStepApp', locale)}</li>
+          <li>{t('engine.datasource.syncNextStepAccess', locale)}</li>
+        </ol>
+      </div>
+    </div>
+  );
+}
+
+/** A refused request: the envelope's message, with the HTTP status and the envelope's `code` beside it. */
+type DatasourceRequestError = Error & { status?: number; code?: string };
 
 /**
  * Status chip per verdict. `unvalidated` stays visually quiet — it means
@@ -251,6 +330,11 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
   const [busy, setBusy] = React.useState<string | null>(null);
   // objectui#13333 — the row whose delete is being confirmed (in-app dialog).
   const [confirmDelete, setConfirmDelete] = React.useState<DatasourceRow | null>(null);
+  /**
+   * The objects bound to the datasource whose delete is being confirmed, keyed
+   * by its name so an answer for an earlier row is never drawn under a later one.
+   */
+  const [bound, setBound] = React.useState<{ datasource: string; objects: BoundObject[] } | null>(null);
 
   /**
    * Fetch + unwrap the declared response envelope.
@@ -283,7 +367,8 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
           (body && typeof body.error === 'string' ? body.error : undefined) ||
           (body && body.message) ||
           `HTTP ${res.status}`;
-        throw new Error(detail);
+        const code = body && typeof body.error === 'object' && typeof body.error?.code === 'string' ? body.error.code : undefined;
+        throw Object.assign(new Error(detail), { status: res.status, code }) as DatasourceRequestError;
       }
       return body && typeof body.success === 'boolean' && 'data' in body ? body.data : body;
     },
@@ -322,6 +407,27 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
     }
   };
 
+  /**
+   * The objects whose metadata names `datasource` as theirs: the same test the
+   * server's delete guard counts by (`object.datasource === name`).
+   */
+  const readBoundObjects = async (datasource: string): Promise<BoundObject[]> => {
+    const objects = await metaClient.list<{ name?: unknown; label?: unknown; datasource?: unknown }>('object');
+    return objects
+      .filter((o) => o?.datasource === datasource && typeof o.name === 'string')
+      .map((o) => ({ name: o.name as string, ...(typeof o.label === 'string' && o.label ? { label: o.label } : {}) }));
+  };
+
+  const openDeleteConfirm = (row: DatasourceRow) => {
+    setConfirmDelete(row);
+    setBound(null);
+    // A failed read leaves the confirm as it was: the server still judges the delete.
+    readBoundObjects(row.name).then(
+      (objects) => setBound({ datasource: row.name, objects }),
+      () => undefined,
+    );
+  };
+
   const remove = async (name: string) => {
     setBusy(`del:${name}`);
     try {
@@ -329,7 +435,16 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       toast.success(tFormat('engine.datasource.deleted', locale, { name }));
       void load();
     } catch (err) {
-      toast.error(tFormat('engine.datasource.deleteFailed', locale, { name, error: (err as Error).message }));
+      // A 400 on a datasource that objects still name is the server's
+      // bound-object refusal: read the objects now and name them in the
+      // console's language. Any other failure keeps the server's own message.
+      const objects = (err as DatasourceRequestError).status === 400 ? await readBoundObjects(name).catch(() => []) : [];
+      if (objects.length) {
+        const list = objects.map(objectText).join(t('engine.datasource.boundObjectSeparator', locale));
+        toast.error(tFormat('engine.datasource.deleteBoundRefused', locale, { name, objects: list }));
+      } else {
+        toast.error(tFormat('engine.datasource.deleteFailed', locale, { name, error: (err as Error).message }));
+      }
     } finally {
       setBusy(null);
     }
@@ -503,11 +618,18 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
   const syncSeqRef = React.useRef(0);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [syncing, setSyncing] = React.useState(false);
+  /** What the last Sync run created; while set, the open dialog shows it instead of the table list. */
+  const [syncResult, setSyncResult] = React.useState<SyncResult | null>(null);
+  const closeSync = () => {
+    setSyncName(null);
+    setSyncResult(null);
+  };
 
   const openSync = async (name: string) => {
     setSyncName(name);
     syncNameRef.current = name;
     const seq = ++syncSeqRef.current;
+    setSyncResult(null);
     setTables(null);
     setSyncError(null);
     setSelected(new Set());
@@ -534,7 +656,7 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
   const runSync = async () => {
     if (!syncName || selected.size === 0) return;
     setSyncing(true);
-    let ok = 0;
+    const created: BoundObject[] = [];
     const failures: string[] = [];
     for (const table of selected) {
       try {
@@ -543,16 +665,17 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
           body: JSON.stringify({ table }),
         });
         await metaClient.save('object', draft.name, draft.definition);
-        ok += 1;
+        const label = draft.definition?.label;
+        created.push({ name: draft.name, label: typeof label === 'string' ? label : undefined });
       } catch (err) {
         failures.push(`${table}: ${(err as Error).message}`);
       }
     }
     setSyncing(false);
-    if (ok === 1) toast.success(tFormat('engine.datasource.syncedOne', locale, { name: syncName }));
-    else if (ok) toast.success(tFormat('engine.datasource.synced', locale, { count: ok, name: syncName }));
     if (failures.length) toast.error(tFormat('engine.datasource.syncFailed', locale, { failures: failures.join('; ') }));
-    setSyncName(null);
+    // The dialog stays open on what was created, with the steps left (objectstack#30328).
+    if (created.length) setSyncResult({ datasource: syncName, objects: created });
+    else closeSync();
   };
 
   const renderField = (key: string, prop: JsonProp) => {
@@ -618,6 +741,8 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       </div>
     );
   };
+
+  const confirmBound = confirmDelete && bound?.datasource === confirmDelete.name ? bound.objects : [];
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-8">
@@ -686,7 +811,7 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
                     <Button variant="ghost" size="icon" className="h-8 w-8" title={t('engine.datasource.edit', locale)} disabled={busy === `edit:${ds.name}`} onClick={() => void openEdit(ds)}>
                       {busy === `edit:${ds.name}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pencil className="h-4 w-4" />}
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" title={t('engine.datasource.delete', locale)} disabled={busy === `del:${ds.name}`} onClick={() => setConfirmDelete(ds)}>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" title={t('engine.datasource.delete', locale)} disabled={busy === `del:${ds.name}`} onClick={() => openDeleteConfirm(ds)}>
                       {busy === `del:${ds.name}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                     </Button>
                   </>
@@ -779,13 +904,15 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       </Dialog>
 
       {/* Sync objects */}
-      <Dialog open={!!syncName} onOpenChange={(o) => { if (!o) setSyncName(null); }}>
+      <Dialog open={!!syncName} onOpenChange={(o) => { if (!o) closeSync(); }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>{tFormat('engine.datasource.syncTitle', locale, { name: syncName ?? '' })}</DialogTitle>
             <DialogDescription>{t('engine.datasource.syncDescription', locale)}</DialogDescription>
           </DialogHeader>
-          {syncError != null ? (
+          {syncResult ? (
+            <SyncResultNote result={syncResult} locale={locale} />
+          ) : syncError != null ? (
             <div role="alert" className="py-8 text-center text-sm text-destructive">{syncError}</div>
           ) : tables == null ? (
             <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> {t('engine.datasource.introspecting', locale)}</div>
@@ -810,20 +937,27 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
             </div>
           )}
           <div className="mt-2 flex items-center justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setSyncName(null)}>{t('engine.cancel', locale)}</Button>
-            <Button size="sm" disabled={syncing || selected.size === 0} onClick={() => void runSync()}>
-              {syncing ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Boxes className="mr-1.5 h-4 w-4" />}
-              {selected.size === 0
-                ? t('engine.datasource.createObjectsNone', locale)
-                : selected.size === 1
-                  ? t('engine.datasource.createObjectsOne', locale)
-                  : tFormat('engine.datasource.createObjects', locale, { count: selected.size })}
-            </Button>
+            {syncResult ? (
+              <Button size="sm" onClick={closeSync}>{t('engine.close', locale)}</Button>
+            ) : (
+              <>
+                <Button variant="ghost" size="sm" onClick={closeSync}>{t('engine.cancel', locale)}</Button>
+                <Button size="sm" disabled={syncing || selected.size === 0} onClick={() => void runSync()}>
+                  {syncing ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Boxes className="mr-1.5 h-4 w-4" />}
+                  {selected.size === 0
+                    ? t('engine.datasource.createObjectsNone', locale)
+                    : selected.size === 1
+                      ? t('engine.datasource.createObjectsOne', locale)
+                      : tFormat('engine.datasource.createObjects', locale, { count: selected.size })}
+                </Button>
+              </>
+            )}
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Delete a datasource — names it by label and name (objectui#13333). */}
+      {/* Delete a datasource — names it by label and name (objectui#13333), and
+          lists the objects that still use it, which the server refuses the delete for. */}
       <AlertDialog open={confirmDelete !== null} onOpenChange={(o) => { if (!o) setConfirmDelete(null); }}>
         <AlertDialogContent data-testid="datasource-delete-dialog">
           <AlertDialogHeader>
@@ -831,9 +965,16 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
               {confirmDelete && tFormat('engine.datasource.deleteTitle', locale, { item: confirmDelete.label || confirmDelete.name })}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {confirmDelete && tFormat('engine.datasource.deleteBody', locale, { name: confirmDelete.name })}
+              {confirmDelete && (confirmBound.length
+                ? tFormat('engine.datasource.deleteBoundBody', locale, { name: confirmDelete.name })
+                : tFormat('engine.datasource.deleteBody', locale, { name: confirmDelete.name }))}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {confirmBound.length > 0 && (
+            <ul data-testid="datasource-delete-bound" className="max-h-48 list-disc space-y-0.5 overflow-y-auto pl-5 text-sm">
+              {confirmBound.map((o) => <li key={o.name}>{objectText(o)}</li>)}
+            </ul>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel data-testid="datasource-delete-cancel">{t('engine.cancel', locale)}</AlertDialogCancel>
             <AlertDialogAction

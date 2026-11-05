@@ -159,7 +159,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "利用停止",
-        description: "このユーザーを利用停止にしますか？利用停止になるとサインアウトされ、解除されるまでサインインできなくなります。",
+        description: "このユーザーを利用停止にしますか？利用停止になるとサインアウトされ、解除されるまでサインインできず、API キーも拒否されます。解除後はキーが再び使えるようになります。",
         successMessage: "ユーザーを利用停止にしました",
         params: {
           banReason: {
@@ -557,7 +557,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       require_mfa: {
         label: "多要素認証を必須化",
-        help: "true の場合、この組織のすべてのメンバーはデータにアクセスするために認証アプリの登録が必要になります。"
+        help: "true の場合、この組織のすべてのメンバーはデータにアクセスするために認証アプリの登録が必要になります。このデプロイで二要素認証がオンになっている必要があります（OS_AUTH_TWO_FACTOR=true）。オフの間は true で保存すると拒否されます。"
       },
       timezone: {
         label: "タイムゾーン",

@@ -18,10 +18,12 @@ import { extractFieldErrors } from '@object-ui/react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { SettingsField } from './SettingsField';
 import {
+  getJudgedClientAddress,
   getSettingsNamespace,
   lockedKeyOf,
   runSettingsAction,
   saveSettingsNamespace,
+  type JudgedClientAddress,
 } from './api';
 import { resolveLabel, type SettingsNamespacePayload, type Specifier } from './types';
 import { useSettingsLabel, type SettingsLabelHelpers } from './useSettingsLabel';
@@ -46,6 +48,32 @@ function evalVisibility(expr: string | undefined, data: Record<string, unknown>)
   } catch {
     return false;
   }
+}
+
+/**
+ * The row the judged client address is drawn beside (objectstack#30313): the
+ * `auth` namespace's Allowed IP ranges. A save of a list that leaves this
+ * address out is refused (`invalid_value`, `constraint.clientAddress`), so the
+ * admin is shown it before saving rather than learning it from the refusal.
+ */
+const CLIENT_ADDRESS_NAMESPACE = 'auth';
+const CLIENT_ADDRESS_KEY = 'allowed_ip_ranges';
+
+/**
+ * The note under Allowed IP ranges, one whole sentence per state so a pack
+ * words each its own way: no address the server can establish (any non-empty
+ * list is then refused at the save), an address read through a trusted proxy's
+ * forwarded headers, or the transport's own peer address, which behind an
+ * untrusted proxy is the proxy's.
+ */
+function clientAddressNote(
+  judged: JudgedClientAddress,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  if (judged.clientAddress === null) return t('console.settingsView.clientAddressUnknown');
+  return judged.trustProxy
+    ? t('console.settingsView.clientAddressViaProxy', { address: judged.clientAddress })
+    : t('console.settingsView.clientAddressDirect', { address: judged.clientAddress });
 }
 
 /** `{ ...rest }` without `key`, returned as a new object so React sees the change. */
@@ -330,6 +358,37 @@ export function SettingsView() {
     };
     void loadNamespace();
   }, [namespace]);
+
+  /**
+   * The caller's address as the server judges it, on the `auth` page only
+   * (objectstack#30313), or null: not that page, not read yet, or the read
+   * failed. A failure draws no note rather than a guess: the route is
+   * platform-admin gated and absent on a server older than objectstack#30398,
+   * and a refused save still names the address in the row.
+   */
+  const [judgedRead, setJudgedRead] = useState<{
+    namespace: string;
+    judged: JudgedClientAddress;
+  } | null>(null);
+  useEffect(() => {
+    if (namespace !== CLIENT_ADDRESS_NAMESPACE) return;
+    let live = true;
+    getJudgedClientAddress().then(
+      (judged) => {
+        if (live) setJudgedRead({ namespace, judged });
+      },
+      () => {
+        // No note; see above.
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [namespace]);
+  // Tagged with the namespace it was read on, so another namespace's page
+  // never draws it.
+  const judgedAddress =
+    judgedRead && judgedRead.namespace === namespace ? judgedRead.judged : null;
 
   /** Effective live values for visibility expressions. */
   const liveValues = useMemo(() => {
@@ -661,6 +720,16 @@ export function SettingsView() {
                 saving={saving}
                 labels={labels}
                 error={key ? fieldErrors[key] : undefined}
+                note={
+                  judgedAddress &&
+                  namespace === CLIENT_ADDRESS_NAMESPACE &&
+                  key === CLIENT_ADDRESS_KEY
+                    ? clientAddressNote(judgedAddress, t)
+                    : undefined
+                }
+                // The scope the server writes this key at: the specifier's
+                // own, else the manifest's, else the spec's default `tenant`.
+                writeScope={spec.scope ?? manifest.scope ?? 'tenant'}
               />
             );
           })}

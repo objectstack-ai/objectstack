@@ -74,6 +74,7 @@ import type {
 // the published declaration, and the pure half of the import (what a package
 // body holds, what is copied, what is refused) lives beside this file.
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities, CapabilityDescriptor } from '@objectstack/spec/api';
+import type { SeedAppliedLandedParsed } from '@objectstack/spec/api';
 import { readServiceSelfInfo, readChannelRoute, readAuthFamilies, isSubscribableChannel, CHANNEL_SURFACE_SLOTS, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
 // [#24395] The save's authoring surface.
 import {
@@ -2485,7 +2486,60 @@ export class ObjectStackProtocolImplementation implements
         return ProtocolDiscoveryAndBasesFacet.getProjectId(protocolHost(this));
     }
 
-    async getDiscovery() {
+    async getDiscovery(): Promise<{
+        authFamilies?: {
+            admin: boolean;
+        } | undefined;
+        version: string;
+        name: string;
+        /** @deprecated Use `name`. Removed in protocol 18 (#4828). */
+        apiName: string;
+        environment: "sandbox" | "production" | "development";
+        routes: {
+            data: string;
+            metadata: string;
+            discovery?: string | undefined;
+            ui?: string | undefined;
+            auth?: string | undefined;
+            automation?: string | undefined;
+            storage?: string | undefined;
+            analytics?: string | undefined;
+            packages?: string | undefined;
+            datasources?: string | undefined;
+            email?: string | undefined;
+            approvals?: string | undefined;
+            realtime?: string | undefined;
+            notifications?: string | undefined;
+            ai?: string | undefined;
+            i18n?: string | undefined;
+            mcp?: string | undefined;
+        };
+        locale: {
+            default: string;
+            supported: string[];
+            timezone: string;
+        };
+        services: Record<string, {
+            enabled: boolean;
+            status: "registered" | "degraded" | "available" | "unavailable" | "stub";
+            handlerReady?: boolean | undefined;
+            route?: string | undefined;
+            provider?: string | undefined;
+            version?: string | undefined;
+            message?: string | undefined;
+            rateLimit?: {
+                requestsPerMinute?: number | undefined;
+                requestsPerHour?: number | undefined;
+                burstLimit?: number | undefined;
+                retryAfterMs?: number | undefined;
+            } | undefined;
+        }>;
+        capabilities: Record<"ai" | "automation" | "cron" | "analytics" | "files" | "search" | "export" | "i18n" | "notifications" | "comments" | "chunkedUpload" | "transactionalBatch" | "websockets", {
+            enabled: boolean;
+            features?: Record<string, boolean> | undefined;
+            description?: string | undefined;
+        }>;
+    }> {
         // Get registered services from kernel if available
         const registeredServices = this.getServicesRegistry ? this.getServicesRegistry() : new Map();
 
@@ -5406,7 +5460,12 @@ export class ObjectStackProtocolImplementation implements
         return servesExpansionTarget.call(host, target);
     }
 
-    async findData(request: { object: string, query?: any, context?: any }) {
+    async findData(request: { object: string, query?: any, context?: any }): Promise<{
+        hasMore: boolean;
+        total?: number | undefined;
+        object: string;
+        records: any[];
+    }> {
         // [#3770] Existence first: an unregistered object is a 404 before any
         // query parameter is even parsed, so an unknown name can never be
         // probed for query-shape validity (nor reach the driver as a table).
@@ -6158,7 +6217,11 @@ export class ObjectStackProtocolImplementation implements
         };
     }
 
-    async getData(request: { object: string, id: string, expand?: string | string[], select?: string | string[], context?: any }) {
+    async getData(request: { object: string, id: string, expand?: string | string[], select?: string | string[], context?: any }): Promise<{
+        object: string;
+        id: string;
+        record: Record<string, any>;
+    }> {
         this.assertObjectRegistered(request.object); // [#3770]
         const queryOptions: any = {
             where: { id: request.id }
@@ -6280,7 +6343,24 @@ export class ObjectStackProtocolImplementation implements
      * win over the copied values — the natural place to set a new `name`,
      * clear a unique field, or reset status before insert.
      */
-    async cloneData(request: { object: string, id: string, overrides?: Record<string, any>, context?: any }) {
+    async cloneData(request: { object: string, id: string, overrides?: Record<string, any>, context?: any }): Promise<{
+        warnings?: {
+            rule: string;
+            severity: "info" | "warning";
+            field: string;
+            code: string;
+            message: string;
+        }[] | undefined;
+        droppedFields?: {
+            object: string;
+            fields: string[];
+            reason: "readonly" | "computed" | "readonly_when" | "primary_key" | "stored_expression";
+        }[] | undefined;
+        object: string;
+        id: any;
+        sourceId: string;
+        record: any;
+    }> {
         // [#3770] This object-existence check used to be open-coded here and
         // was the ONLY one on the whole data plane; it is now the shared gate
         // every data entry point runs. Same error envelope as before.
@@ -10813,7 +10893,22 @@ export class ObjectStackProtocolImplementation implements
     // STORED content hash itself (`migrateStoredMetadata`): it reaches the
     // repository as given. ⛔ No transport sets it — every door builds its
     // request field by field from named inputs, never by spreading a body.
-    async saveMetaItem(request: SaveMetaItemRequest) {
+    async saveMetaItem(request: SaveMetaItemRequest): Promise<{
+        state: "draft" | "active";
+        message: string;
+        advisories?: {
+            rule: string;
+            path: string;
+            where: string;
+            message: string;
+            hint: string;
+            severity: "error" | "info" | "warning";
+        }[] | undefined;
+        projectionApplied?: MutationProjectionOutcome | undefined;
+        success: boolean;
+        version: string;
+        seq: number;
+    }> {
         // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
         return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
             operation: 'save', type: request.type, name: request.name, actor: request.actor,
@@ -11050,7 +11145,55 @@ export class ObjectStackProtocolImplementation implements
      * Records a history event with `op='publish'`. 404 (`NO_DRAFT`)
      * when there is nothing to publish.
      */
-    async publishMetaItem(request: PublishMetaItemRequest) {
+    async publishMetaItem(request: PublishMetaItemRequest): Promise<{
+        success: boolean;
+        version: string;
+        seq: number;
+        message?: string;
+        /**
+         * Present when a `seed` draft was published: the result of materializing
+         * its rows. Publishing the metadata ALWAYS succeeds independently — a
+         * seed-load problem is surfaced here, never thrown, so callers (and UIs)
+         * must check `seedApplied.success` instead of assuming data went live.
+         */
+        seedApplied?: {
+            success: boolean;
+            inserted: number;
+            updated: number;
+            error?: string;
+            errors?: unknown[];
+            /** [#30348] Per object, the rows created vs matched — `SeedAppliedLandedSchema`. */
+            landed?: SeedAppliedLandedParsed[];
+        };
+        /**
+         * Present when a publish-time materializer is registered for this type
+         * (ADR-0086 P2 — e.g. `flow`): the result of projecting the published
+         * body into its data-plane representation. Best-effort,
+         * same contract as `seedApplied` — surfaced, never thrown.
+         */
+        materializeApplied?: PublishMaterializeResult;
+        /**
+         * Present when an ADR-0094 mutation projector is registered for this
+         * type: the outcome of the awaited post-persist projection. The
+         * draft→active promotion runs the projector exactly as a direct active
+         * save does, so this is the same receipt `saveMetaItem` returns.
+         *
+         * [#7294] It was ASSIGNED below and missing from this annotation, so
+         * the method's declared type denied a key the wire body carried — the
+         * same declared-≠-returned gap one layer down from the one #7294
+         * closed on the spec side.
+         */
+        projectionApplied?: MutationProjectionOutcome;
+        /**
+         * [#9176] Present ONLY when the #4463 runtime authoring gate raised at
+         * least one non-blocking finding against the draft body this promotion
+         * carried to `active` — an empty array is never emitted, so a clean
+         * publish's response bytes are unchanged (the #4717 discipline, one
+         * door over). Every entry is `warning`/`info` by construction: an
+         * `error` finding refuses the promotion as the 422 instead.
+         */
+        advisories?: RuntimeAuthoringIssue[];
+    }> {
         // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
         return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
             operation: 'publish', type: request.type, name: request.name, actor: request.actor,
@@ -11076,6 +11219,8 @@ export class ObjectStackProtocolImplementation implements
             updated: number;
             error?: string;
             errors?: unknown[];
+            /** [#30348] Per object, the rows created vs matched — `SeedAppliedLandedSchema`. */
+            landed?: SeedAppliedLandedParsed[];
         };
         /**
          * Present when a publish-time materializer is registered for this type
@@ -11192,7 +11337,7 @@ export class ObjectStackProtocolImplementation implements
         actor?: string;
         skipSeedApply?: boolean;
     }): Promise<{
-        seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[] };
+        seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[]; landed?: SeedAppliedLandedParsed[] };
         materializeApplied?: PublishMaterializeResult;
         projectionApplied?: MutationProjectionOutcome;
     }> {
@@ -11213,6 +11358,7 @@ export class ObjectStackProtocolImplementation implements
     ): Promise<{
         success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[];
         issues?: Array<{ path: string; message: string; code?: string | undefined }>;
+        landed?: SeedAppliedLandedParsed[];
     }> {
         // [#25467 cut 14] The body moved to `protocol-publish-batch.ts` (see `PublishBatchHost`).
         const readEngine = () => this.engine;
@@ -11531,7 +11677,7 @@ export class ObjectStackProtocolImplementation implements
         }>;
         failed: Array<{ type: string; name: string; error: string; code?: string }>;
         /** Aggregate result of materializing every published `seed` (absent when no seeds). */
-        seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[] };
+        seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[]; landed?: SeedAppliedLandedParsed[] };
         /**
          * ADR-0086 P2 — aggregate result of publish-time materializers across the
          * batch (e.g. `flow`). Absent when no published item had a registered
@@ -13207,7 +13353,13 @@ export class ObjectStackProtocolImplementation implements
      * into the row the by-name read naming no package serves, a `.custom`
      * pair's declared override over a row bound to its read-only base.
      */
-    async rollbackMetaItem(request: RollbackMetaItemRequest) {
+    async rollbackMetaItem(request: RollbackMetaItemRequest): Promise<{
+        success: boolean;
+        version: string;
+        seq: number;
+        restoredFromVersion: number;
+        message?: string;
+    }> {
         // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
         return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
             operation: 'rollback', type: request.type, name: request.name, actor: request.actor,
@@ -13297,7 +13449,14 @@ export class ObjectStackProtocolImplementation implements
      * "Reset to factory default" semantic from ADR-0005. Whitelist is shared
      * with {@link saveMetaItem}.
      */
-    async deleteMetaItem(request: DeleteMetaItemRequest) {
+    async deleteMetaItem(request: DeleteMetaItemRequest): Promise<{
+        success: boolean;
+        message?: string;
+        reset?: boolean;
+        seq?: number;
+        /** [ADR-0094] Outcome of the awaited mutation projector, when one is registered. */
+        projectionApplied?: MutationProjectionOutcome;
+    }> {
         // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
         return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
             operation: 'delete', type: request.type, name: request.name, actor: request.actor,

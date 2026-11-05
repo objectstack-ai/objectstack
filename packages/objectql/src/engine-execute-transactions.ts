@@ -41,6 +41,11 @@
  * This module imports the engine only as a TYPE, so there is no module cycle
  * at run time, and nothing re-exports it, so the published surface does not
  * move.
+ *
+ * [#30053 codemod] A PRIVATE method's docblock has since moved here,
+ * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * and the class keeps none for it; a public or protected method's docblock
+ * stays on the class, the contract, and its function keeps the placeholder.
  */
 
 import type { IDataDriver } from '@objectstack/core';
@@ -135,7 +140,35 @@ export async function execute(
     }
 }
 
-/** The body of `ObjectQL#warnTransactionUnsupported`; the method's docblock there is its contract. */
+/**
+ * A caller asked for a transaction and the driver cannot give it one (#4619).
+ *
+ * The behaviour is unchanged and DECLARED (ADR-0119 D1: "when that driver has
+ * no `beginTransaction` the callback runs with NO transaction and NO
+ * rollback"). What was missing is that a caller had no way to find out —
+ *
+ * [#18063] TWO reasons now reach this degrade and the message says which.
+ * The second is a transport that DECLARED it cannot honour a handle while
+ * inheriting `beginTransaction` from a base class that can. Before the
+ * declaration existed such a driver was indistinguishable from a working one
+ * here, so the engine opened a transaction against it and the degrade — the
+ * honest answer — was unreachable.
+ *
+ * the same shape as `batchData`'s `atomic` flag being a lie for as long as it
+ * was (ADR-0119 D4). Tightening this into a throw would change the declared
+ * contract and is deliberately NOT done here.
+ *
+ * `warn`, not `error`, on purpose. AGENTS.md's judgment question asks whether
+ * the system looks normal *while something it claims is persisted has not
+ * landed*; at this moment nothing has been lost — a capability simply is not
+ * there, and every write in the callback still lands. This is the
+ * `if (!capability)` composition branch the same section names as the
+ * usual `warn`; escalating it would train readers to skim `error`, which is
+ * exactly what made the #4420 `warn` unreadable.
+ *
+ * Once per engine instance per driver: the drivers that reach this path (test
+ * doubles, foreign engines) reach it on EVERY call.
+ */
 export function warnTransactionUnsupported(
   this: Pick<ExecuteTransactionsHost, 'transactionUnsupportedReported' | 'logger'>,
   datasource: string | undefined,
@@ -169,7 +202,50 @@ export function warnTransactionUnsupported(
   );
 }
 
-/** The body of `ObjectQL#enforceTransactionOrigin`; the method's docblock there is its contract. */
+/**
+ * A write inside an open `transaction()` resolved to a driver that
+ * transaction does not cover — decide what happens to it (#5351, #5696).
+ *
+ * Called at the TOP of `insert`/`update`/`delete`, before hooks, validation
+ * or defaults run: a refusal here has cost the caller nothing.
+ *
+ * This seam replaced `reportWriteOutsideTransaction` (#4619 / PR #5724),
+ * which reported the split at `error` and let the write proceed with the
+ * owner's handle. Reporting was the right first move — it made the defect
+ * audible without pre-empting a decision that changes ADR-0119 D1's declared
+ * contract for every multi-datasource deployment. The 2026-08-06 maintainer
+ * ruling made that decision, and it is TWO answers, not one, because the two
+ * kinds of write fail in opposite directions:
+ *
+ * - **Business writes are REFUSED** ({@link CrossDatasourceTransactionWriteError},
+ *   #5696 point 2). The caller opened a transaction and asked for one unit of
+ *   work; there is no way to give them one across two drivers (no two-phase
+ *   commit on `IDataDriver`, deliberately out of scope). Silently committing
+ *   part of it — which is what the pre-v17 engine did, on the wrong
+ *   connection at that — is the outcome a caller can neither detect nor undo.
+ *   Refusing hands them the choice: one datasource per transaction, or
+ *   per-datasource units they reconcile themselves.
+ * - **Append-only system ledgers are CARVED OUT** (#5351): audit / telemetry
+ *   / event rows execute OUTSIDE the transaction, on their own connection,
+ *   with no foreign handle. They therefore survive a rollback of the business
+ *   transaction — an "orphan row" describing a write that was undone. For an
+ *   append-only compliance ledger that is the correct direction of error:
+ *   a spurious row is reconcilable, a MISSING row for a write that did
+ *   commit is an unrecoverable compliance hole, and the missing row is what
+ *   shipped before this change. It is also what lets a plugin author write an
+ *   ordinary `afterInsert` audit hook with no knowledge that datasource
+ *   routing exists — refusing here would be swallowed by that hook's
+ *   try/catch and lose the row exactly as before.
+ *
+ * No `error` log survives on either path. The refusal IS the report, louder
+ * than any line; and the carve-out is now DECLARED behaviour that fires on
+ * every audited write of every transaction in a lifecycle-split deployment —
+ * logging it at `error`, or even `warn`, would train readers to skim the
+ * levels that carry real durability failures, which AGENTS.md names as the
+ * mirror-image mistake. It is recorded at `debug`, once per transaction per
+ * datasource, for the operator who is asking why an audit row outlived a
+ * rolled-back write; the durable answer lives in ADR-0067/ADR-0119.
+ */
 export function enforceTransactionOrigin(
   this: Pick<ExecuteTransactionsHost, 'txStore' | 'datasourceNameOf' | 'isSystemLedgerObject' | 'logger'>,
   objectName: string,

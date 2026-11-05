@@ -411,8 +411,12 @@ function navigationCandidates(table: IntrospectedTable): NavigationCandidate[] {
   return out;
 }
 
-/** A field of a generated draft: a scalar, or a lookup over a foreign-key column. */
-type DraftField = { type: FieldType; reference?: string };
+/**
+ * A field of a generated draft: a scalar, or a lookup over a foreign-key column.
+ * `label` is derived from the field name by {@link toLabel}, the one derivation
+ * the object's own label uses, so a synced object's forms read as sentences.
+ */
+type DraftField = { type: FieldType; label: string; reference?: string };
 
 /**
  * The org-wide default every generated federated object declares.
@@ -915,7 +919,9 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
       }
 
       const isPk = pkOverride ? pkOverride.has(col.name) : col.primaryKey;
-      fields[fieldName] = { type: fieldType };
+      // Labelled from the FIELD name (after rename and numbering), never the
+      // raw remote spelling: the same derivation as the object's label below.
+      fields[fieldName] = { type: fieldType, label: toLabel(fieldName) };
       if (isPk) primaryKeyFields.push(fieldName);
     }
 
@@ -1067,7 +1073,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
         leftOut(`'${target}' is not imported on datasource '${datasource}'; import it before this table to get the lookup`);
         continue;
       }
-      fields[field] = { type: 'lookup', reference };
+      fields[field] = { type: 'lookup', label: fields[field]!.label, reference };
     }
   }
 
@@ -1527,7 +1533,7 @@ function renderObjectSource(
     const note = reviewByField.get(fieldName);
     const comment = note ? ` // REVIEW: ${note}` : '';
     const reference = f.reference ? `, reference: ${quoteTs(f.reference)}` : '';
-    return `    ${fieldName}: { type: '${f.type}'${reference} },${comment}`;
+    return `    ${fieldName}: { type: '${f.type}', label: ${quoteTs(f.label)}${reference} },${comment}`;
   });
   const unplacedLines = unplaced.map((r) => `    // REVIEW: ${r.column} (${r.remoteType}): ${r.note}`);
 

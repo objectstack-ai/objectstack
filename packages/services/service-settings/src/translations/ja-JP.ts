@@ -46,7 +46,10 @@ export const jaJP: PlatformTranslationData = {
         smtp_password: { label: 'パスワード' },
         api_key: { label: 'API キー' },
         from_email: { label: '差出人アドレス', help: '例: no-reply@example.com' },
-        from_name: { label: '差出人名' },
+        from_name: {
+          label: '差出人名',
+          help: '空欄の場合は製品名(ブランディング)を使用し、未設定ならこのデプロイの名前を使用します。',
+        },
         queue_delivery: {
           label: '永続キュー配信',
           help: '各メッセージをインライン送信ではなくジョブキューに渡します。配信に失敗してもワーカーが'
@@ -135,7 +138,10 @@ export const jaJP: PlatformTranslationData = {
         },
       },
       keys: {
-        email_password_enabled: { label: 'メール/パスワードログインを有効化' },
+        email_password_enabled: {
+          label: 'メール/パスワードログインを有効化',
+          confirmOffText: 'パスワードでサインインしているユーザーは、別のサインイン方法が必要になります。',
+        },
         signup_enabled: {
           label: 'メールでの新規登録を許可',
           help: 'メールとパスワードによる新規登録フォームを開きます。誰を受け入れるかは下の「セルフ登録の対象」が決めます。「招待のみ」では保留中の招待を持つアドレスのみ、「メールドメイン」では許可リストのドメインと招待済みのアドレス、「オープン」では誰でも受け入れます。オフにすると、どの対象でもフォームが閉じ、招待済みのアドレスも登録できません。',

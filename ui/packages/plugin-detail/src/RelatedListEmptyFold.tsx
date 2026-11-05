@@ -22,7 +22,10 @@
  * synthesizer knows how many rows a list has; each list does, once its read
  * answers. So the lists coordinate among themselves, through the small store
  * below, keyed by that container. A list placed alone, or wrapped in its own
- * container, is a stack of one and never folds.
+ * container, is a stack of one and never folds. A body table of the record
+ * page (`RecordBodyTablesContext`, objectstack#29944) shares the details
+ * column with its siblings but is a section of the record, not a member of a
+ * stack: it answers `foldable: false`, so it keeps its own header.
  *
  * ## The rule (`decideEmptyFold`)
  *

@@ -14,7 +14,8 @@
  * dataset, app and book packaged bases (`getPackagedPageBase`,
  * `getPackagedDatasetBase`, `getPackagedAppBase`, `getPackagedBookBase`), the
  * served-override reading of a served document (`servedOverrideBaseOf`) and the
- * pair's own translations (`getPairTranslationBundle`).
+ * pair's own translations (`getPairTranslationBundle`). [#30504] The app base
+ * carries the code layer's navigation contributions, folded once.
  *
  * A MOVE, not a redesign. `ProtocolDiscoveryAndBasesFacet` is a stateless facet over the host
  * (ruling 6624345766): each static method below is the body of the class
@@ -273,9 +274,33 @@ export class ProtocolDiscoveryAndBasesFacet {
         return host.packagedArtifactBase('dataset', name);
     }
 
-    /** The body of `ObjectStackProtocolImplementation#getPackagedAppBase`; the method's docblock there is its contract. */
-    static getPackagedAppBase(host: Pick<ProtocolHost, 'packagedArtifactBase'>, name: string): unknown {
-        return host.packagedArtifactBase('app', name);
+    /**
+     * The body of `ObjectStackProtocolImplementation#getPackagedAppBase`; the method's docblock there is its contract.
+     *
+     * [#30504, ADR-0029 D7] The app's packaged declaration WITH the navigation
+     * the code layer contributes to it, folded by the registry's one fold
+     * (`SchemaRegistry.applyNavContributions`, the fold every served app read
+     * applies). A contributed entry is packaged content, so `translateApp`
+     * must find it in the base: without it the translator reads the entry's
+     * id as one an override authored (ADR-0146 D2), the catalog is skipped,
+     * and every contributed entry (the whole Setup sidebar) is served in the
+     * source language. A node a `.custom` override authors is in no
+     * contribution, so it is still absent from the base and still reads only
+     * the pair's translations.
+     */
+    static getPackagedAppBase(host: Pick<ProtocolHost, 'packagedArtifactBase' | 'engine'>, name: string): unknown {
+        const declared = host.packagedArtifactBase('app', name);
+        if (declared === undefined || declared === null) return declared;
+        const registry = (host.engine as { registry?: { applyNavContributions?: (app: unknown) => unknown } } | undefined)?.registry;
+        if (typeof registry?.applyNavContributions !== 'function') return declared;
+        try {
+            return registry.applyNavContributions(declared);
+        } catch {
+            // A fold over in-memory contributors; a failure here must never turn
+            // a served document into a 5xx. The declaration alone is the base
+            // this accessor answered before the fold was applied to it.
+            return declared;
+        }
     }
 
     /** The body of `ObjectStackProtocolImplementation#getPackagedBookBase`; the method's docblock there is its contract. */

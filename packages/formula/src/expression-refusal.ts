@@ -60,7 +60,7 @@ export type ExpressionSourceKind = 'array' | 'object' | 'number' | 'boolean' | '
 /**
  * The params every `type-mismatch*` code interpolates: the CEL operand types,
  * the `operator`, what the field holds, and the field as written when known.
- * The four codes differ in the outcome their sentence states, never in params.
+ * The codes differ in the outcome their sentence states, never in params.
  */
 interface TypeMismatchParams {
   readonly operands: string;
@@ -166,7 +166,8 @@ export interface ExpressionRefusalParams {
    * Arithmetic on a date field against a number. `operands` are the CEL
    * operand types; `reference` is the field as written, when it is known. A
    * flattened (flow) condition is `date-arithmetic-run-fails` /
-   * `date-arithmetic-run-may-fail`.
+   * `date-arithmetic-run-may-fail`; a fail-closed site is
+   * `date-arithmetic-fail-closed`. An advisory rule's stays this code.
    */
   'date-arithmetic': { readonly operands: string; readonly reference?: string };
   /**
@@ -174,7 +175,8 @@ export interface ExpressionRefusalParams {
    * (`record.end_date - record.start_date`), judged with the field declared as
    * that text. `operands` are the CEL operand types (the text is `DateText`);
    * `reference` is the field as written, when it is known. A flattened (flow)
-   * condition is `date-text-arithmetic-run-fails` / `-run-may-fail`.
+   * condition is `date-text-arithmetic-run-fails` / `-run-may-fail`; a
+   * fail-closed site is `date-text-arithmetic-fail-closed`.
    */
   'date-text-arithmetic': { readonly operands: string; readonly reference?: string };
   /**
@@ -193,6 +195,15 @@ export interface ExpressionRefusalParams {
   'date-text-arithmetic-run-fails': { readonly operands: string; readonly reference?: string };
   /** [#30016] ERROR: `date-text-arithmetic`, at a `date-arithmetic-run-may-fail` site. */
   'date-text-arithmetic-run-may-fail': { readonly operands: string; readonly reference?: string };
+  /**
+   * [#30250] ERROR: `date-arithmetic` at a site that FAILS CLOSED (an `error`
+   * validation rule, a field write rule, an option `visibleWhen`, a hook
+   * `condition`) — the fault refuses the write (or aborts the operation a
+   * hook guards). It never reads null.
+   */
+  'date-arithmetic-fail-closed': { readonly operands: string; readonly reference?: string };
+  /** [#30250] ERROR: `date-text-arithmetic`, at a `date-arithmetic-fail-closed` site. */
+  'date-text-arithmetic-fail-closed': { readonly operands: string; readonly reference?: string };
   /**
    * A formula that computes a `google.protobuf.Duration`
    * (`today() - record.start_date`), which a field reads as `{}`. `reference`
@@ -219,6 +230,13 @@ export interface ExpressionRefusalParams {
    * lands.
    */
   'type-mismatch-run-fails': TypeMismatchParams;
+  /**
+   * [#30250] ERROR: the same mismatch in a condition of a time-relative sweep
+   * of the typed object (`ExprSchemaHint.timeRelativeSweep`) — the run for
+   * that row fails at the condition; no write fired it, so nothing else
+   * happens.
+   */
+  'type-mismatch-sweep-run-fails': TypeMismatchParams;
   /**
    * [#29926] ERROR: the same mismatch in an advisory (`warning` / `info`)
    * validation rule — the rule is skipped, the write proceeds, and the
@@ -297,10 +315,13 @@ const CODE_TABLE = {
   'date-arithmetic-run-may-fail': true,
   'date-text-arithmetic-run-fails': true,
   'date-text-arithmetic-run-may-fail': true,
+  'date-arithmetic-fail-closed': true,
+  'date-text-arithmetic-fail-closed': true,
   'date-duration-value': true,
   'type-mismatch': true,
   'type-mismatch-fail-closed': true,
   'type-mismatch-run-fails': true,
+  'type-mismatch-sweep-run-fails': true,
   'type-mismatch-fail-open': true,
   'type-mismatch-run-may-fail': true,
   'field-near-miss': true,

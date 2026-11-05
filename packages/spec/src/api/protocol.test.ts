@@ -3020,3 +3020,55 @@ describe('ListAiConversationsResponseSchema declares the next-page signal', () =
     expect(ListAiConversationsRequestSchema.parse({ limit: 20, cursor: 'c1' })).toEqual({ limit: 20, cursor: 'c1' });
   });
 });
+
+// ==========================================
+// [#30348] seedApplied.landed — the rows a published seed landed on
+// ==========================================
+
+import {
+  SEED_APPLIED_LANDED_IDS_CAP,
+  SeedAppliedLandedSchema,
+  PublishPackageDraftsResponseSchema as LandedBatchSchema,
+} from './protocol.zod';
+
+describe('seedApplied.landed (#30348) — one shared schema on both publish responses', () => {
+  const single = { success: true, version: 'hmac-sha256:x', seq: 1 };
+  const batch = {
+    success: true, outcome: 'published', publishedCount: 1, failedCount: 0,
+    published: [{ type: 'seed', name: 'demo', version: 'hmac-sha256:y' }], failed: [],
+  };
+  const list = (ids: string[], total = ids.length) => ({ ids, total, truncated: total > ids.length });
+  const landed = [{ object: 'account', inserted: list(['a1', 'a2']), matched: list(['c9']) }];
+
+  it('both receipts carry the same `landed` through the parse', () => {
+    const one = PublishMetaItemResponseSchema.parse({ ...single, seedApplied: { success: true, inserted: 2, updated: 0, landed } });
+    const many = LandedBatchSchema.parse({ ...batch, seedApplied: { success: true, inserted: 2, updated: 0, landed } });
+    expect(one.seedApplied?.landed).toEqual(landed);
+    expect(many.seedApplied?.landed).toEqual(landed);
+  });
+
+  it('existing receipts — no `landed` — parse unchanged, and gain no key', () => {
+    const before = { success: true, inserted: 3, updated: 1 };
+    const one = PublishMetaItemResponseSchema.parse({ ...single, seedApplied: before });
+    const many = LandedBatchSchema.parse({ ...batch, seedApplied: { success: false, error: 'seed apply failed' } });
+    expect(one.seedApplied).toEqual(before);
+    expect('landed' in one.seedApplied!).toBe(false);
+    expect(many.seedApplied).toEqual({ success: false, error: 'seed apply failed' });
+    // And a receipt with no seed carries no `seedApplied` at all.
+    expect('seedApplied' in PublishMetaItemResponseSchema.parse(single)).toBe(false);
+  });
+
+  it('the cap is declared: 200 ids per list; one more is refused, and a cut says so', () => {
+    expect(SEED_APPLIED_LANDED_IDS_CAP).toBe(200);
+    const ids = Array.from({ length: SEED_APPLIED_LANDED_IDS_CAP }, (_, i) => `r${i}`);
+    const cut = { object: 'account', inserted: { ids, total: 250, truncated: true }, matched: list([]) };
+    expect(SeedAppliedLandedSchema.parse(cut)).toEqual(cut);
+    expect(SeedAppliedLandedSchema.safeParse({ ...cut, inserted: { ids: [...ids, 'r200'], total: 250, truncated: true } }).success).toBe(false);
+  });
+
+  it('`total` and `truncated` are required on each list, and both lists on each entry', () => {
+    expect(SeedAppliedLandedSchema.safeParse({ object: 'a', inserted: { ids: [] }, matched: list([]) }).success).toBe(false);
+    expect(SeedAppliedLandedSchema.safeParse({ object: 'a', inserted: { ids: [], total: 0 }, matched: list([]) }).success).toBe(false);
+    expect(SeedAppliedLandedSchema.safeParse({ object: 'a', inserted: list([]) }).success).toBe(false);
+  });
+});

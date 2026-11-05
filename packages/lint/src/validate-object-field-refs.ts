@@ -211,7 +211,7 @@
 
 import {
   describeFieldPathVerdict,
-  indexObjectGraph,
+  indexServedObjectGraph,
   isUnjudgeable,
   recordsOf,
   resolveFieldPath,
@@ -466,7 +466,7 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
   const findings: ObjectFieldRefFinding[] = [];
   if (!isRec(stack)) return findings;
 
-  const graph: ObjectGraph = indexObjectGraph(stack);
+  const graph: ObjectGraph = indexServedObjectGraph(stack);
   if (graph.size === 0) return findings;
 
   /**

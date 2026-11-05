@@ -515,6 +515,26 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
   return withRequestGrantsMemo(memoEngine, () => resolveAuthzContextInScope(input));
 }
 
+/**
+ * The anonymous entry: what a request that resolved no principal is served —
+ * the guest's grants on a face that takes the guest entry
+ * ({@link ResolveAuthzInput.guestEntry}), the empty envelope otherwise. ONE
+ * helper for both ways to get here (no credential or an unknown key, and a
+ * refused key), so the two answers cannot drift apart.
+ */
+async function anonymousEntry(ctx: ResolvedAuthzContext, input: ResolveAuthzInput): Promise<ResolvedAuthzContext> {
+  if (input.guestEntry) {
+    const guest = await resolveGuestAnchorGrants(input.ql, input.tenancyPosture);
+    if (guest) {
+      ctx.tenantId = guest.organizationId;
+      ctx.permissions = guest.permissions;
+      ctx.systemPermissions = guest.systemPermissions;
+      if (guest.tabPermissions) ctx.tabPermissions = guest.tabPermissions;
+    }
+  }
+  return ctx;
+}
+
 async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<ResolvedAuthzContext> {
   const { ql, headers } = input;
   const ctx: ResolvedAuthzContext = {
@@ -568,7 +588,11 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
       userId: admission.userId,
       organizationId: admission.organizationId,
     });
-    return ctx;
+    // The refused key answers as an unknown key does: the anonymous entry this
+    // face serves (the guest's grants on a face that takes the guest entry,
+    // nothing otherwise), so no composition tells a refused key from a key
+    // that does not exist.
+    return anonymousEntry(ctx, input);
   }
   // [#23287, ruling C′ item 3] A HELD key is a held principal, exactly like a
   // held session: it resolves as the owner, carrying the owner's account-scope
@@ -620,19 +644,9 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
     // any position or binding was resolved, so a set bound to the `guest`
     // anchor granted nothing: ADR-0090 D9's declared-not-enforced point. A face
     // that serves the guest now resolves the guest's grants, in the
-    // organization D4 derives. A REFUSED API key never reaches this line (it
-    // returned above): a request whose credential was refused is not served
-    // the guest's grants.
-    if (input.guestEntry) {
-      const guest = await resolveGuestAnchorGrants(ql, input.tenancyPosture);
-      if (guest) {
-        ctx.tenantId = guest.organizationId;
-        ctx.permissions = guest.permissions;
-        ctx.systemPermissions = guest.systemPermissions;
-        if (guest.tabPermissions) ctx.tabPermissions = guest.tabPermissions;
-      }
-    }
-    return ctx;
+    // organization D4 derives. A REFUSED API key gets this same entry (it
+    // returned above through the same helper), never a session.
+    return anonymousEntry(ctx, input);
   }
   ctx.userId = userId;
   if (tenantId) ctx.tenantId = tenantId;
@@ -941,6 +955,29 @@ function grantAppliesInTenant(organizationId: string | null, tenantId: string | 
 const GRANT_ROW_COLUMNS = ['permission_set', 'organization_id', 'valid_from', 'valid_until'] as const;
 
 /**
+ * [#30454] The columns of a principal's own `sys_member` row this resolver
+ * decides on, and the only ones its membership reads ask for: the
+ * organization (`accessible_org_ids`, §3b), the role ({@link heldPositionNames})
+ * and the ADR-0091 validity window (`isGrantActive`,
+ * `nextGrantValidityBoundary`). The reads run in every request's prelude, and a
+ * read naming no columns computes every formula field the object declares —
+ * the membership's record title reads the person one hop through `user_id`, a
+ * `sys_user` read and a round trip — for values nothing here reads. The two
+ * bounds are named although `sys_member` declares neither today: a read names
+ * an undeclared column to no effect, and so the moment the object declares
+ * them they are read, as §3's comment promises. A helper below that learns to
+ * read another column of a membership row adds it here.
+ */
+const MEMBER_ROW_COLUMNS = ['organization_id', 'role', 'valid_from', 'valid_until'] as const;
+
+/**
+ * [#30454] {@link MEMBER_ROW_COLUMNS} plus the member (`user_id`), for
+ * {@link countPositionHolders}, which reads the organization's memberships
+ * and groups them by person.
+ */
+const MEMBER_HOLDER_ROW_COLUMNS = ['user_id', ...MEMBER_ROW_COLUMNS] as const;
+
+/**
  * [#29281] The bound of the first leg's `sys_member` read for the active
  * organization — the read the fellow-org peer list (`org_user_ids`, §5) is
  * built from — and the signal that the list is not complete yet. A read that
@@ -955,7 +992,9 @@ const GRANT_ROW_COLUMNS = ['permission_set', 'organization_id', 'valid_from', 'v
  * ordinary member's `sys_user` reads — a people picker's search, a read by id,
  * a lookup label — lost them (the ids are random, so which members vanished was
  * arbitrary and moved as members joined). Unchanged as a bound, so an
- * organization under it issues byte-identically the one read it always did.
+ * organization under it issues the one read it always did; that read asks for
+ * the completion pages' columns ({@link ORG_MEMBER_PAGE_COLUMNS}), the one
+ * value §5 keeps, so it computes no formula field (#30454).
  */
 const ORG_MEMBERS_FIRST_READ_ROWS = 1000;
 
@@ -1512,7 +1551,7 @@ export async function countPositionHolders(
   const limit = opts.limit ?? 10000;
   const nowMs = opts.nowMs ?? Date.now();
   const [members, userPositionRows] = await Promise.all([
-    tryFind(ql, 'sys_member', { organization_id: tenantId }, limit),
+    tryFind(ql, 'sys_member', { organization_id: tenantId }, limit, undefined, MEMBER_HOLDER_ROW_COLUMNS),
     tryFind(ql, 'sys_user_position', { organization_id: tenantId }, limit),
   ]);
   if (members.length >= limit || userPositionRows.length >= limit) return counts;
@@ -1844,9 +1883,9 @@ export async function resolveUserAuthzGrants(
     !grants.email || !grants.permissions.includes('ai_seat') || platformAdminConfig.emails.length > 0;
   const [, members, userPositionRows, orgMembersLeg, upsRowsAll] = await Promise.all([
     needsUserRow ? getUserRow() : Promise.resolve(undefined),
-    tryFind(ql, 'sys_member', { user_id: userId }, 200),
+    tryFind(ql, 'sys_member', { user_id: userId }, 200, undefined, MEMBER_ROW_COLUMNS),
     tryFind(ql, 'sys_user_position', { user_id: userId }, 200),
-    tenantId ? tryFind(ql, 'sys_member', { organization_id: tenantId }, ORG_MEMBERS_FIRST_READ_ROWS) : Promise.resolve([] as any[]),
+    tenantId ? tryFind(ql, 'sys_member', { organization_id: tenantId }, ORG_MEMBERS_FIRST_READ_ROWS, undefined, ORG_MEMBER_PAGE_COLUMNS) : Promise.resolve([] as any[]),
     tryFind(ql, 'sys_user_permission_set', { user_id: userId }, 100, undefined, GRANT_ROW_COLUMNS),
   ]);
 

@@ -36,6 +36,7 @@ import {
   resolveEffectiveApiMethods,
   effectiveOperationsArray,
   canServeApiOperation,
+  type ApiOperation,
   type EnableLike,
 } from '@objectstack/spec/data';
 import { objectPermissionGrants, type EffectiveObjectPermission } from '@objectstack/spec/security';
@@ -238,6 +239,18 @@ const GUARDED_WRITE_BUCKETS: ReadonlySet<string> = new Set(['better-auth', 'engi
  * objects are NOT clamped — no guard covers them, so their permission-set result
  * stands (an admin CAN write them via the data API, and the hint must not
  * under-report that).
+ *
+ * [#30440] Every verb the guard refuses is refused whatever grants it:
+ *  - `allowTransfer` follows `edit` — an owner change is an update, which the
+ *    guard refuses unless `edit` is opted in; the super-user wildcard fold
+ *    copies the transfer bit onto every entry it covers;
+ *  - `modifyAllRecords` grants edit, delete and transfer on its own (the
+ *    spec's `objectPermissionGrants`), so no `allow*: false` beside it takes
+ *    any of them away. Where the guard refuses `edit` or `delete` it is lowered
+ *    by {@link lowerModifyAllRecords}: to `viewAllRecords`, the read it
+ *    implies, plus the plain bit of each verb the object still opts in. Where
+ *    `edit` and `delete` are both opted in it grants nothing the guard
+ *    refuses, and stays.
  */
 export function clampManagedObjectWrites(
   objects: Record<string, any>,
@@ -248,13 +261,40 @@ export function clampManagedObjectWrites(
     const schema = schemaOf(obj);
     if (!schema?.managedBy || !GUARDED_WRITE_BUCKETS.has(schema.managedBy)) continue;
     const ua = schema.userActions ?? {};
-    if (!isWriteOptedIn(ua.edit)) acc.allowEdit = false;
+    const edit = isWriteOptedIn(ua.edit);
+    const del = isWriteOptedIn(ua.delete);
+    if (!edit) acc.allowEdit = false;
     // `create` reads through the same opt-in helper as edit/delete since
     // #7692 widened it to the object form — a bare `ua.create !== true`
     // would clamp away a legitimate `{ enabled: true, visibleWhen: … }`.
     if (!isWriteOptedIn(ua.create)) acc.allowCreate = false;
-    if (!isWriteOptedIn(ua.delete)) acc.allowDelete = false;
+    if (!del) acc.allowDelete = false;
+    if (!edit) acc.allowTransfer = false;
+    lowerModifyAllRecords(acc, { allowEdit: edit, allowDelete: del, allowTransfer: edit });
   }
+}
+
+/**
+ * Lower an entry's `modifyAllRecords` where a server-side layer refuses a verb
+ * it grants. The spec's `objectPermissionGrants` answers edit, delete and
+ * transfer `true` on `modifyAllRecords` alone, so no `allow*: false` beside it
+ * takes any of them away: the bit itself has to go. It becomes
+ * `viewAllRecords` — the read it implies, so the entry keeps exactly the read
+ * it had — and each verb `kept` names is carried over as its plain bit, so a
+ * verb the layer still admits is not lost with it. An entry the layer admits
+ * every one of those verbs on is left as it is.
+ */
+function lowerModifyAllRecords(
+  acc: Record<string, any>,
+  kept: { allowEdit: boolean; allowDelete: boolean; allowTransfer: boolean },
+): void {
+  if (acc.modifyAllRecords !== true) return;
+  if (kept.allowEdit && kept.allowDelete && kept.allowTransfer) return;
+  acc.modifyAllRecords = false;
+  acc.viewAllRecords = true;
+  if (kept.allowEdit) acc.allowEdit = true;
+  if (kept.allowDelete) acc.allowDelete = true;
+  if (kept.allowTransfer) acc.allowTransfer = true;
 }
 
 /** The API-exposure-relevant slice of a registered object schema. */
@@ -478,10 +518,18 @@ export function seedSuperUserRestrictedObjects(
  * Which entries carry the annotation is unchanged in rule: only an
  * unrestricted object that keeps its whole closure — every operation served,
  * `export` included — gets none.
+ *
+ * [#30370] With `isExternalWriteForbidden`, an object whose external write
+ * gate is closed (ADR-0015 §5.3 Gate 3) is served without every write
+ * operation ({@link EXTERNAL_WRITE_GATED_OPERATIONS}): the data plane refuses
+ * each one `403 EXTERNAL_WRITE_FORBIDDEN` whatever the permission sets say,
+ * and such an object is always annotated, since the client's default-allow
+ * path would offer every write. Without it, the answer is what it was.
  */
 export function annotateEffectiveApiOperations(
   objects: Record<string, any>,
   schemaOf: (objectName: string) => ApiExposureSchemaLike | undefined,
+  isExternalWriteForbidden?: (objectName: string) => boolean,
 ): void {
   for (const [obj, acc] of Object.entries(objects) as Array<[string, any]>) {
     if (obj === '*' || !acc) continue;
@@ -497,16 +545,81 @@ export function annotateEffectiveApiOperations(
     const closure = effectiveOperationsArray(eff);
     // [#20135] Only what the door itself admits: `apiEnabled: false` empties
     // the set; any other `enable` leaves the closure as it is.
-    const served = closure.filter((operation) => canServeApiOperation(enable, operation));
+    // [#30370] And only what the external write gate admits: a closed gate
+    // refuses every write operation on the data plane.
+    const writeForbidden = isExternalWriteForbidden?.(obj) === true;
+    const served = closure.filter((operation) =>
+      canServeApiOperation(enable, operation)
+      && !(writeForbidden && EXTERNAL_WRITE_GATED_OPERATIONS.has(operation)));
     // Annotate when the object tightens via `apiMethods`, when the export
     // axis removes `export` from an otherwise-open object (so the client
     // hides the Export button), OR when the door serves less than the closure
-    // (an API-disabled object). An unrestricted object with every operation
-    // still served needs no annotation — the client keeps its default-allow
-    // path.
+    // (an API-disabled object, or [#30370] a closed external write gate). An
+    // unrestricted object with every operation still served needs no
+    // annotation — the client keeps its default-allow path.
     if (eff.mode === 'unrestricted' && userExportAllowed && served.length === closure.length) continue;
     acc.apiOperations = served;
   }
+}
+
+/**
+ * [#30370] The effective API operations that WRITE a row — every one the
+ * external write gate (ADR-0015 §5.3 Gate 3, objectql `assertWriteAllowed`)
+ * refuses on an object whose gate is closed: the three primitives it judges
+ * (`insert` is `create`), and every derived operation built on them —
+ * `upsert` (create ∧ update), `bulk` (batched create / update / delete),
+ * `import` (create ∨ update), and `restore` / `purge`, which never derive
+ * today but write when they do. The read operations (`get`, `list`,
+ * `aggregate`, `history`, `search`, `export`) are untouched: the gate judges
+ * writes only.
+ */
+const EXTERNAL_WRITE_GATED_OPERATIONS: ReadonlySet<ApiOperation> = new Set<ApiOperation>([
+  'create', 'update', 'delete', 'upsert', 'bulk', 'import', 'restore', 'purge',
+]);
+
+/**
+ * [#30370] Re-clamp the map by the THIRD server-side enforcement layer
+ * permission sets do not model: the external write gate (ADR-0015 §5.3
+ * Gate 3). On an object whose gate is closed, objectql refuses every insert,
+ * update and delete `403 EXTERNAL_WRITE_FORBIDDEN` for every caller — no
+ * permission set, super-user bypass included, opens it — so the entry grants
+ * no write: `allowCreate`, `allowEdit`, `allowDelete` and `allowTransfer`
+ * (an owner change is an update) are `false`.
+ *
+ * `modifyAllRecords` is a write grant too: the spec's `objectPermissionGrants`
+ * answers edit, delete and transfer `true` on it alone, so an entry keeping it
+ * would still answer `current_user.can(object, 'edit')` `true`. It is lowered
+ * to `viewAllRecords`, the read half it implies, so the entry keeps exactly
+ * the read it had ({@link lowerModifyAllRecords}, keeping no verb).
+ *
+ * An object the map does not mention already grants nothing, and is left out.
+ */
+function clampExternalReadOnlyWrites(objects: Record<string, any>, forbidden: ReadonlySet<string>): void {
+  if (forbidden.size === 0) return;
+  for (const [obj, acc] of Object.entries(objects) as Array<[string, any]>) {
+    if (obj === '*' || !acc || !forbidden.has(obj)) continue;
+    acc.allowCreate = false;
+    acc.allowEdit = false;
+    acc.allowDelete = false;
+    acc.allowTransfer = false;
+    lowerModifyAllRecords(acc, { allowEdit: false, allowDelete: false, allowTransfer: false });
+  }
+}
+
+/**
+ * [#30370] The {@link EffectiveObjectPermissionsSchemaSource.isExternalWriteForbidden}
+ * accessor over an engine: its `isExternalWriteForbidden`, the verdict objectql's
+ * own write gate (`assertWriteAllowed`) reads before it refuses a write
+ * `403 EXTERNAL_WRITE_FORBIDDEN`. That member is not on the contract's engine
+ * view, so it is asked when present; an engine without it forbids nothing.
+ * Both builders of the map (`/auth/me/permissions` and
+ * `ISecurityService.getEffectiveObjectPermissions`) hand over this one reading.
+ */
+export function engineExternalWriteForbidden(engine: unknown): (objectName: string) => boolean {
+  return (objectName) => {
+    const predicate = (engine as { isExternalWriteForbidden?: unknown } | null | undefined)?.isExternalWriteForbidden;
+    return typeof predicate === 'function' && predicate.call(engine, objectName) === true;
+  };
 }
 
 /**
@@ -534,6 +647,15 @@ export interface EffectiveObjectPermissionsSchemaSource {
    * the map must leave out exactly the objects the data plane refuses.
    */
   isObjectPackageDisabled?: (objectName: string) => boolean;
+  /**
+   * [#30370] Whether the external write gate (ADR-0015 §5.3 Gate 3) is closed
+   * on `objectName` — the engine's `isExternalWriteForbidden`, the verdict its
+   * own `assertWriteAllowed` refuses a write on. Hand over that predicate
+   * itself ({@link engineExternalWriteForbidden}), never a second reading of
+   * the datasource definitions: the map must withhold exactly the writes the
+   * data plane refuses.
+   */
+  isExternalWriteForbidden?: (objectName: string) => boolean;
   /** Where a failed seed / annotation pass is reported. */
   logger?: { warn?: (message: string, meta?: Record<string, unknown>) => void };
 }
@@ -604,8 +726,15 @@ export interface EffectiveObjectPermissionsInputSet {
  *     not a step, so an entry a super-user set names itself keeps that set's
  *     explicit answer, and `modifyAllRecords` alone grants no create;
  *  5. {@link clampManagedObjectWrites};
- *  6. {@link annotateEffectiveApiOperations} — guarded like (2);
- *  7. {@link omitDisabledPackageObjects} — [#28877] an object whose owning
+ *  6. {@link clampExternalReadOnlyWrites} — [#30370] an object whose external
+ *     write gate is closed grants no write, as the data plane refuses every
+ *     one; the verdict is judged for every entry before anything is clamped,
+ *     and a predicate that throws is reported and clamps nothing (guarded
+ *     like (2));
+ *  7. {@link annotateEffectiveApiOperations} — guarded like (2); [#30370] it
+ *     reads the same verdicts, so a closed gate's object is served no write
+ *     operation;
+ *  8. {@link omitDisabledPackageObjects} — [#28877] an object whose owning
  *     package is disabled is left out, as the data plane refuses it; guarded
  *     like (2).
  *
@@ -659,19 +788,33 @@ export function buildEffectiveObjectPermissions(
   }
   // Make the per-object map reflect the server's ACTUAL effective enforcement
   // = permission-set grant ∩ identity write guard (ADR-0057 D10, cited as an
-  // attribution, #9628): (1) fold each set's `'*'` super-user grant into every
+  // attribution, #9628) ∩ [#30370] external write gate (ADR-0015 §5.3): (1) fold each set's `'*'` super-user grant into every
   // entry that set does not name, so an admin's wildcard is not shadowed by
   // another set's explicit deny — [#20134] every bit it grants, `transfer` and
   // its own plain bits included; [#20136] per set only, never the merged
   // bypass, which would also override the super-user set's OWN narrower entry;
-  // (2) re-clamp guarded managed objects by their write affordance.
+  // (2) re-clamp guarded managed objects by their write affordance; (3)
+  // [#30370] re-clamp objects whose external write gate is closed.
   foldSuperUserWildcardGrants(objects, sets);
   clampManagedObjectWrites(objects, schemaOf);
+  // [#30370] Judged in full before anything is clamped, so a predicate that
+  // throws midway clamps nothing rather than half the map — and the
+  // annotation below reads these same verdicts, never a second asking.
+  let externalWriteForbidden: ReadonlySet<string> = new Set();
+  const isForbidden = source.isExternalWriteForbidden;
+  if (typeof isForbidden === 'function') {
+    try {
+      externalWriteForbidden = new Set(Object.keys(objects).filter((name) => name !== '*' && isForbidden(name) === true));
+    } catch (e: any) {
+      source.logger?.warn?.('[effective-permissions] external write gate read failed', { err: e?.message });
+    }
+  }
+  clampExternalReadOnlyWrites(objects, externalWriteForbidden);
   // [#3391] Annotate the per-object effective API operation set. Guarded: on
   // failure `apiOperations` is simply omitted and a client falls back to its
   // default-allow behaviour.
   try {
-    annotateEffectiveApiOperations(objects, schemaOf);
+    annotateEffectiveApiOperations(objects, schemaOf, (name) => externalWriteForbidden.has(name));
   } catch (e: any) {
     source.logger?.warn?.('[effective-permissions] apiOperations annotate failed', { err: e?.message });
   }

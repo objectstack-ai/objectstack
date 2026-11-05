@@ -15,6 +15,11 @@ export { recordNotFoundError } from './protocol.js';
 // still be quoted (a malformed seed body). Exporting is enabling-only — no
 // behaviour in this package changes.
 export { clientFacingFailureText, seedRequestValidationError } from './protocol.js';
+// [#30348] The `seedApplied.landed` projection (rows created vs matched, per
+// object, capped), exported for the same second producer: the runtime's
+// fallback seed apply reports on the same receipt, so it folds the loader's
+// ids through this one function instead of a copy.
+export { seedAppliedLanded, type SeedLandingResult } from './seed-applied-landed.js';
 // [#7823] The write-response half of the `internal: true` guarantee — THE
 // single helper every generic write ingress routes its response records
 // through (A-prime ruling, 2026-08-13). Tripwire-enforced; see the module
@@ -276,7 +281,14 @@ export {
 } from './migrations/recorded-by-sentinel.js';
 export type { SentinelHistoryRow } from './migrations/recorded-by-sentinel.js';
 
-export { SeedLoaderService, type SeedLoaderServiceOptions } from './seed-loader.js';
+export {
+  SeedLoaderService,
+  type SeedLoaderServiceOptions,
+  // [#30429] The runtime's fallback seed apply reads a thrown load's finished
+  // datasets through it, so its receipt reports `landed` as this package's does.
+  seedLoadPartialWrites,
+  type SeedLoadPartialWrites,
+} from './seed-loader.js';
 export { runBuildProbes } from './build-probes.js';
 export type {
   RuntimeBuildIssue,

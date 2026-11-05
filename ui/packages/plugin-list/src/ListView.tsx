@@ -50,10 +50,11 @@ import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLoc
 // (objectui#5134).
 import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema } from '@objectstack/spec/ui';
 import type { GroupingConfig } from '@objectstack/spec/ui';
-import { resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
+import { platformProvisionsStorage, resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { usePermissions } from '@object-ui/permissions';
 import { RecordDetailPanel } from '@object-ui/plugin-detail';
+import { resolveBulkActions, useUndeclaredActionNamesWarning } from '@object-ui/plugin-grid';
 
 /**
  * The `case 'map'` branch below builds an `object-map` schema by flattening
@@ -999,8 +1000,16 @@ const NO_QUEUE_SITTING_CONDITIONS: ReadonlyArray<QueueSittingCondition> = [];
  * records can sit in a queue (the `ownership: 'user'` tier) and refuses an
  * author's own `queue` field on. The filter is offered only there: anywhere
  * else it would name a column the object does not have.
+ *
+ * The column must also have storage behind it. On an ADR-0015 `external`
+ * (federated) object the remote database owns the schema, so the injected
+ * `queue` column exists in the registered definition and nowhere else, and no
+ * row of that table can ever sit in a queue (assignment rules skip such
+ * objects too). The spec's `platformProvisionsStorage` is the one spelling of
+ * that verdict, read here rather than re-derived.
  */
 export function objectHasOwnershipQueue(objectDef: unknown): boolean {
+  if (!platformProvisionsStorage(objectDef)) return false;
   const raw = (objectDef as { fields?: unknown } | null | undefined)?.fields;
   const queue = Array.isArray(raw)
     ? raw.find((f) => (f as { name?: unknown } | null)?.name === 'queue')
@@ -1688,6 +1697,22 @@ function canReadField(
   field: string,
 ): boolean {
   return !perms?.isLoaded || !objectName || perms.checkField(objectName, field, 'read');
+}
+
+/**
+ * Whether the object definition marks a field `hidden: true`: the injected
+ * system columns `@objectstack/spec` hides from pickers (`organization_id`,
+ * `queue`, the `__search` companion). The toolbar's field lists ask this one
+ * predicate. The Filter panel's list and the Sort picker's list leave such a
+ * field out unless the current filter or sort already names it, so that row
+ * is not blank and can be removed; the hide-fields lists never offer one to
+ * add. A plain function of the definition's field map, like `canReadField`.
+ */
+function isDeclaredHidden(
+  defs: Record<string, { hidden?: unknown } | undefined> | undefined,
+  field: string,
+): boolean {
+  return defs?.[field]?.hidden === true;
 }
 
 /** The item a value none of a picker's options carries is shown by. */
@@ -2518,6 +2543,51 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     if (bulkDeleteVerdict.allowed) return declared;
     return declared.filter((a: unknown) => String(a).toLowerCase() !== 'delete');
   }, [schema.bulkActions, bulkDeleteVerdict]);
+
+  /**
+   * [objectstack#30394] What the non-grid bar DRAWS out of `permittedBulkActions`:
+   * the grid's own rule (objectstack#30169, ruling C), folded by the grid's own
+   * `resolveBulkActions` so the two bars cannot drift.
+   *
+   * A bare name draws only when the object declares an action of that name,
+   * labelled from that declaration (through the app's i18n bundle, as the grid
+   * labels it). The canonical `delete` keeps its own path: it is not an object
+   * action but the built-in bulk delete, gated above by `bulkDeleteVerdict`,
+   * so it is held out of the fold exactly as the grid holds it out. Any other
+   * name draws nothing; `undeclared` exists only for the development warning
+   * below. Before this fold every member drew a button, so a name the object
+   * never declared, an action a disabled package withholds included, showed a
+   * button that only toasted "not executable" when pressed.
+   */
+  const nonGridBulkBar = React.useMemo(() => {
+    const names = (permittedBulkActions ?? []).filter((a: unknown) => typeof a === 'string' && a !== '') as string[];
+    const { defs, undeclared } = resolveBulkActions({
+      bulkActions: names.filter((a) => a.toLowerCase() !== 'delete'),
+      objectActions: objectDef?.actions,
+      localizeLabel: (actionName, fallback) =>
+        schema.objectName && typeof resolveActionLabel === 'function'
+          ? resolveActionLabel(schema.objectName, actionName, fallback)
+          : fallback,
+    });
+    const labels = new Map(defs.map((def) => [def.name, def.label]));
+    // Authored order, the built-in `delete` where the author put it.
+    const drawn = names
+      .filter((a) => a.toLowerCase() === 'delete' || labels.has(a))
+      .map((name) => ({ name, label: labels.get(name) }));
+    return { drawn, undeclared };
+  }, [permittedBulkActions, objectDef, schema.objectName, resolveActionLabel]);
+  // The grid says its own (ObjectGrid warns for the names it leaves undrawn),
+  // so this one speaks only while a non-grid view is on screen, and only once
+  // the object's schema read has settled. A list with an object but no schema
+  // in hand (no `getObjectSchema`, or the read failed) reports the names as
+  // unread, never as undeclared: the grid's own reading.
+  useUndeclaredActionNamesWarning({
+    key: 'bulkActions',
+    names: nonGridBulkBar.undeclared,
+    ready: objectDefLoaded && currentView !== 'grid',
+    basis: schema.objectName && objectDef == null ? 'unread' : 'declared',
+    address: { component: 'ListView', blockType: currentView, objectName: schema.objectName, label: schema.label },
+  });
 
   /**
    * [objectui#4420] The PER-RECORD half of the same key, for the same bar.
@@ -5173,7 +5243,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    */
   const filterFields = React.useMemo(() => {
     const defs: Record<string, { hidden?: unknown; system?: boolean } | undefined> | undefined = objectDef?.fields;
-    const isHidden = (name: string) => defs?.[name]?.hidden === true;
+    const isHidden = (name: string) => isDeclaredHidden(defs, name);
     const held = new Set((currentFilters.conditions ?? []).map((c) => c.field));
     const columnRank = new Map<string, number>();
     for (const column of effectiveFields) {
@@ -5257,14 +5327,19 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // field the current sort already names (a stored or URL sort) stays listed,
   // so its row is not blank and can be removed.
   //
+  // A field the object definition marks `hidden: true` (`isDeclaredHidden`,
+  // the rule the Filter panel's list follows) is withheld the same way as an
+  // unreadable one: not offered, no relational hint, and kept by the in-use
+  // exception alone.
+  //
   // An entry the exception alone keeps is listed REMOVABLE ONLY
   // (objectui#11943): it carries `disabled`, which `SortBuilder` renders as an
   // unavailable option. Its own row still shows its label and can be changed
   // to another field or removed, but no row's dropdown offers it as a choice
   // and "Add sort" never seeds it. That holds for each reason the exception
-  // keeps a field: unreadable, relational, or refused by the platform (or by
-  // the type read when no projection is served). A field the two rules list
-  // anyway carries no flag, whether or not the sort names it.
+  // keeps a field: unreadable, hidden, relational, or refused by the platform
+  // (or by the type read when no projection is served). A field the two rules
+  // list anyway carries no flag, whether or not the sort names it.
   //
   // Both legs below — the list this picker renders, and the sort it emits for
   // a host to persist — read `platformSortability`, the ONE read of the served
@@ -5279,16 +5354,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // stored ID: said in one line under the rows, only while it is true.
     let picked = false;
     const fields: Array<{ value: string; label: string; disabled?: boolean; type?: string }> = [];
+    const defs: Record<string, { hidden?: unknown } | undefined> | undefined = objectDef?.fields;
     for (const field of candidateFields) {
-      const readable = canReadField(perms, schema.objectName, field.value);
-      if (!readable && !inUse.has(field.value)) continue;
+      const offered = canReadField(perms, schema.objectName, field.value) && !isDeclaredHidden(defs, field.value);
+      if (!offered && !inUse.has(field.value)) continue;
       const relational = EXPANDABLE_FIELD_TYPES.has(field.type);
       const platformSortable = platformSortability
         ? isPlatformSortableField(platformSortability, field.value)
         : !UNMATERIALIZED_FIELD_TYPES.has(field.type);
       // `type` lets the picker name a date's direction as time
       // (objectstack#27520): "Oldest → Newest", not "A → Z".
-      if (readable && !relational && platformSortable) {
+      if (offered && !relational && platformSortable) {
         fields.push({ value: field.value, label: field.label, type: field.type });
         continue;
       }
@@ -5306,7 +5382,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       if (relational) excluded = true;
     }
     return { sortFields: fields, sortHasRelationalField: excluded, sortPicksRelationalField: picked };
-  }, [candidateFields, currentSort, t, platformSortability, perms, schema.objectName]);
+  }, [candidateFields, currentSort, t, platformSortability, perms, schema.objectName, objectDef]);
 
   /**
    * [#6455] THE persist boundary: what this picker LISTS is not what it
@@ -5669,8 +5745,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   if (onAddedFieldsChange && objectDef?.fields) {
     const defs = objectDef.fields as Record<string, { label?: string; hidden?: unknown; system?: boolean } | undefined>;
     const listed = new Set(allFields.map((f) => f.name));
-    const candidates = Object.entries(defs).filter(([name, def]) =>
-      !listed.has(name) && def?.hidden !== true && canReadField(perms, schema.objectName, name));
+    const candidates = Object.entries(defs).filter(([name]) =>
+      !listed.has(name) && !isDeclaredHidden(defs, name) && canReadField(perms, schema.objectName, name));
     for (const tier of [false, true]) {
       for (const [name, def] of candidates) {
         if (isSystemManagedField(name, def) !== tier) continue;
@@ -7330,7 +7406,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       )}
 
       {/* Bulk Actions Bar — skip for grid view since ObjectGrid renders its own BulkActionBar */}
-      {permittedBulkActions && permittedBulkActions.length > 0 && selectedRows.length > 0 && currentView !== 'grid' && (
+      {nonGridBulkBar.drawn.length > 0 && selectedRows.length > 0 && currentView !== 'grid' && (
         <div
           className="border-t border-primary/30 px-4 py-2 flex items-center gap-2 text-xs bg-primary/10 text-foreground shrink-0 shadow-sm"
           role="region"
@@ -7342,8 +7418,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             {selectedRows.length} {selectedRows.length === 1 ? 'item' : 'items'} selected
           </span>
           <div className="flex items-center gap-1.5 ml-3">
-            {permittedBulkActions.map((action: any) => {
-              const actionStr = String(action).toLowerCase();
+            {nonGridBulkBar.drawn.map(({ name: action, label }) => {
+              const actionStr = action.toLowerCase();
               const isDestructive = actionStr.includes('delete') || actionStr.includes('remove') || actionStr.includes('destroy');
               const Icon = isDestructive ? Trash2 : null;
               // [objectui#4420] The built-in `delete` runs over the ALLOWED
@@ -7366,7 +7442,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   data-testid={`bulk-action-${action}`}
                 >
                   {Icon && <Icon className="h-3 w-3" />}
-                  {tActionLabel(action)}
+                  {label ?? tActionLabel(action)}
                 </Button>
               );
             })}
@@ -7380,7 +7456,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               the dialog's slot: one name for one fact, whichever surface says
               it. */}
           {bulkDeleteEligibility.skipped > 0
-            && permittedBulkActions.some((a: any) => String(a).toLowerCase() === 'delete') && (
+            && nonGridBulkBar.drawn.some(({ name }) => name.toLowerCase() === 'delete') && (
             <span
               className="text-muted-foreground ml-3"
               data-testid="bulk-skipped-notice"

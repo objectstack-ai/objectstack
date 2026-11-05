@@ -110,7 +110,14 @@ import {
   reportIfNoSignInAccountExists,
   type SignInPathConfigView,
 } from './boot-sign-in-reachability.js';
-import { providerCredentialIndex, providerCredentialsFrom, registerSignInMethodFloor } from './sign-in-method-floor.js';
+import {
+  providerCredentialIndex,
+  providerCredentialsFrom,
+  registerSignInMethodFloor,
+  reportIfNoSignInMethodAtBoot,
+  ssoProviderDeleteRefusal,
+  type SignInMethodFloorDeps,
+} from './sign-in-method-floor.js';
 import { judgePlatformAdmin, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
   decideDemoStaffEnvironmentGate,
@@ -800,6 +807,12 @@ export class AuthPlugin implements Plugin {
     // ADR-0092 D6 — remember the storage better-auth will actually use so the
     // identity write guard can keep cached session snapshots coherent.
     this.effectiveSecondaryStorage = authConfig.secondaryStorage;
+    // [#30300] Deleting the last identity provider is judged by the same
+    // sign-in method floor as the auth settings save (`sign-in-method-floor.ts`).
+    const floorDeps = this.signInMethodFloorDeps(ctx, this.authManager);
+    this.authManager.setSsoProviderDeleteFloor((providerId, locale) =>
+      ssoProviderDeleteRefusal(floorDeps, providerId, locale),
+    );
 
     // Register auth service
     ctx.registerService('auth', this.authManager);
@@ -1509,6 +1522,23 @@ export class AuthPlugin implements Plugin {
           ctx.logger,
         );
       }
+
+      // [#30300, ruling A] "Is there ANY way to sign in?" — the question the
+      // account report above does not ask: a redeploy that drops the last
+      // identity provider while email and password is off boots a deployment
+      // that serves no sign-in method at all, and said nothing. Said at
+      // `error` in every posture, NEVER refused: a platform-SSO tenant that
+      // signs in through a door this plugin cannot see must keep booting.
+      // Judged after the auth settings are applied, by the same floor as the
+      // settings save (`sign-in-method-floor.ts`).
+      if (this.authManager) {
+        try {
+          await this.ensureAuthSettingsBound(ctx);
+        } catch {
+          // The binding reports its own failure; judge what is in force.
+        }
+        await reportIfNoSignInMethodAtBoot(this.signInMethodFloorDeps(ctx, this.authManager), ctx.logger);
+      }
     });
 
     // Dev-only: provision a known, loginable platform admin on an empty DB.
@@ -1914,6 +1944,9 @@ export class AuthPlugin implements Plugin {
         registerOrganizationMfaEnrollmentGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.organization-mfa-enrollment-guard',
           isTwoFactorEnabled: () => this.authManager?.isTwoFactorEnabled() ?? false,
+          // [#30411] The grace period an admitted turn-on's save notice names.
+          // No manager means two-factor reads off above, so nothing is admitted.
+          mfaGracePeriodDays: () => this.authManager?.getMfaGracePeriodDays() ?? Number.NaN,
         });
         // A reader's own named list views: the body is judged on every save as
         // a ListView for the row's own object. See personal-view-hooks.ts.
@@ -2014,6 +2047,31 @@ export class AuthPlugin implements Plugin {
   }
 
   /**
+   * [#30202, #30300] The facts the sign-in method floor reads, live: the
+   * manager's advertisement, the data engine `sys_sso_provider` is read from,
+   * the host handoff declaration, and the boot credential index. One builder
+   * for the three doors that judge by it — the auth settings save, the delete
+   * of an identity provider, and the boot report — so they cannot drift apart.
+   */
+  private signInMethodFloorDeps(ctx: PluginContext, manager: AuthManager): SignInMethodFloorDeps {
+    return {
+      publicConfig: () => manager.getPublicConfig(),
+      engine: () => {
+        try {
+          return ctx.getService<IDataEngine>('objectql');
+        } catch {
+          return undefined;
+        }
+      },
+      hostSignInHandoff: this.options.hostSignInHandoff === true,
+      stackConfiguredGoogle: () => !!this.configuredSocialProviders?.google,
+      // Read when judged: the index is set in init, after `auth:configure`.
+      providerHasCredentials: (provider) => providerCredentialsFrom(this.bootProviderCredentials)(provider),
+      env: () => ((globalThis as any)?.process?.env ?? {}) as Record<string, string | undefined>,
+    };
+  }
+
+  /**
    * [#23367, ruling A] Record the API-key lifecycle policy's landing — the
    * anchor of the inactivity clock for keys with no recorded use, and of the
    * one-year grace for keys signed with no expiry — when no value is stored
@@ -2086,26 +2144,7 @@ export class AuthPlugin implements Plugin {
 
     // The save door refuses turning off the last sign-in method, before the
     // value is stored; the pass below would only apply it. See the module.
-    const floorManager = this.authManager;
-    registerSignInMethodFloor(
-      settings,
-      {
-        publicConfig: () => floorManager.getPublicConfig(),
-        engine: () => {
-          try {
-            return ctx.getService<IDataEngine>('objectql');
-          } catch {
-            return undefined;
-          }
-        },
-        hostSignInHandoff: this.options.hostSignInHandoff === true,
-        stackConfiguredGoogle: () => !!this.configuredSocialProviders?.google,
-        // Read at save time: the index is set in init, after `auth:configure`.
-        providerHasCredentials: (provider) => providerCredentialsFrom(this.bootProviderCredentials)(provider),
-        env: () => ((globalThis as any)?.process?.env ?? {}) as Record<string, string | undefined>,
-      },
-      ctx.logger,
-    );
+    registerSignInMethodFloor(settings, this.signInMethodFloorDeps(ctx, this.authManager), ctx.logger);
 
     const applySettings = async (): Promise<void> => {
       if (!this.authManager) return;
@@ -3618,6 +3657,30 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] list-platform-admins failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // [#30398] ADR-0069 D5 — admin: the caller's own address as the
+    // `auth.allowed_ip_ranges` save check and the sign-in gate judge it, so
+    // Setup can show it before a save rather than the save refusal naming it
+    // after. The shared gate first, then the read, which takes the address from
+    // the save check's own call on this request's headers and transport peer
+    // (client-address-read.ts). Closed, empty query set; no body is read.
+    rawApp.get(`${basePath}/admin/client-address`, async (c: any) => {
+      try {
+        const actor = await gateAdmin(c);
+        if (actor instanceof Response) return actor;
+        const { runClientAddressRead } = await import('./client-address-read.js');
+        const answer = runClientAddressRead(this.authManager!, {
+          queries: (c.req.queries() ?? {}) as Record<string, string[]>,
+          transport: { headers: (c.req.header() ?? {}) as Record<string, string>, ...transportOf(c) },
+        });
+        return c.json(answer.body, answer.status as any, answer.headers);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] admin/client-address failed', err);
         return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
       }
     });

@@ -16,7 +16,8 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@object-ui/auth';
-import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
+import { useObjectTranslation } from '@object-ui/i18n';
+import { useServedAppLabel } from '../../hooks/useServedAppLabel.js';
 import { toast } from 'sonner';
 import { Package as PackageIcon, Sparkles as SparklesIcon } from 'lucide-react';
 import { useAdapter } from '../../providers/AdapterProvider.js';
@@ -2181,7 +2182,7 @@ export function ChatPane({
   // Narrow the loosely-typed provider apps once (see MetadataAppItem) so the
   // derivations below read fields without per-access casts.
   const metadataApps = apps as MetadataAppItem[] | undefined;
-  const { appLabel } = useObjectLabel();
+  const { appLabel } = useServedAppLabel();
   // Fold-insensitive, measured: this walks every message irrespective of role
   // and reads `draftReview`/`builderHandoff`, which the adapter spreads through.
   const boundPackageId = useMemo(
@@ -2202,7 +2203,7 @@ export function ChatPane({
     const app = (metadataApps ?? []).find(
       (a) => a._packageId === boundPackageId,
     );
-    return app ? appLabel({ name: app.name, label: resolveKeyedI18nLabel(app.label, t) }) : boundPackageId;
+    return app ? appLabel(app) : boundPackageId;
   }, [boundPackageId, metadataApps, appLabel, t]);
 
   // ADR-0057 A1.b edit mode — the resolved name of the app being EDITED
@@ -2214,7 +2215,7 @@ export function ChatPane({
     const app = (metadataApps ?? []).find(
       (a) => a._packageId === editPackageId,
     );
-    return app ? appLabel({ name: app.name, label: resolveKeyedI18nLabel(app.label, t) }) : undefined;
+    return app ? appLabel(app) : undefined;
   }, [editPackageId, metadataApps, appLabel, t]);
 
   // objectui#11658 — the plan card's extend-mode scope chip names the existing
@@ -2223,7 +2224,7 @@ export function ChatPane({
   const resolveAppLabel = useCallback(
     (appName: string) => {
       const app = (metadataApps ?? []).find((a) => a.name === appName);
-      return app ? appLabel({ name: app.name, label: resolveKeyedI18nLabel(app.label, t) }) : undefined;
+      return app ? appLabel(app) : undefined;
     },
     [metadataApps, appLabel, t],
   );
@@ -2387,7 +2388,7 @@ export function ChatPane({
       if (!pkg || byPackage.has(pkg) || isPlatformBuiltinApp(app)) {
         continue;
       }
-      byPackage.set(pkg, appLabel({ name: app.name, label: resolveKeyedI18nLabel(app.label, t) }));
+      byPackage.set(pkg, appLabel(app));
     }
     return Array.from(byPackage, ([id, label]) => ({ id, label }));
   }, [metadataApps, appLabel, t]);

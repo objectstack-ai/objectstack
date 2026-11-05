@@ -11,6 +11,11 @@
  *    console, of a list that leaves out the address the saving request itself
  *    comes from. Saved, such a list refuses the administrator's own next
  *    sign-in, and nothing at the save said so.
+ *  - {@link judgedClientAddress} is THE reading of a request's address for this
+ *    setting, called by that save check and by the read that shows an
+ *    administrator the address before they save (`GET /admin/client-address`,
+ *    `client-address-read.ts`, #30398), so the address shown is the address
+ *    judged.
  *
  * The address judged at the save is the one the gate judges at sign-in: the
  * auth manager's {@link AuthManager.resolveClientAddress}, from the same two
@@ -36,6 +41,7 @@
 
 import { resolveLocale } from '@objectstack/core';
 import { ipMatchesRange, type AuthManager } from './auth-manager.js';
+import { FORWARDED_CLIENT_ADDRESS_HEADERS } from './client-address-forwarding.js';
 
 /** The settings env override that pins `auth.allowed_ip_ranges` (`OS_` + namespace + key). */
 export const ALLOWED_IP_RANGES_ENV = 'OS_AUTH_ALLOWED_IP_RANGES';
@@ -53,12 +59,43 @@ export function parseAllowedIpRanges(raw: unknown): string[] {
 }
 
 /**
- * The HTTP request a settings write arrived on, as the settings routes hand it
- * to a write predicate (`SettingsWriteOptions.transport` in `service-settings`).
+ * The two facts a door holds about the HTTP request it serves: its headers and
+ * the transport's own peer address. The settings routes hand a write predicate
+ * this shape (`SettingsWriteOptions.transport` in `service-settings`).
  */
-interface WriteTransport {
+export interface RequestTransport {
   headers?: Record<string, string | string[] | undefined>;
   remoteAddress?: string;
+}
+
+/**
+ * [#30398] The address `auth.allowed_ip_ranges` judges for a request, or
+ * `undefined` when the server cannot establish one: the auth manager's
+ * {@link AuthManager.resolveClientAddress} (`server.trustProxy` read there),
+ * handed the request's peer address and only the forwarded-address headers that
+ * rule reads ({@link FORWARDED_CLIENT_ADDRESS_HEADERS}), the narrowing the
+ * settings service applies to the save check's input before it arrives here.
+ *
+ * Both doors that speak about this address call it: the save check below, and
+ * the read that serves the address to an administrator before a save
+ * (`client-address-read.ts`). One call, so what the read shows and what the
+ * save judges cannot drift apart.
+ */
+export function judgedClientAddress(
+  manager: Pick<AuthManager, 'resolveClientAddress'>,
+  transport: RequestTransport,
+): string | undefined {
+  let headers: Record<string, string | string[] | undefined> | undefined;
+  if (transport.headers) {
+    headers = {};
+    for (const [name, value] of Object.entries(transport.headers)) {
+      if (FORWARDED_CLIENT_ADDRESS_HEADERS.includes(name.toLowerCase())) headers[name] = value;
+    }
+  }
+  return manager.resolveClientAddress({
+    ...(headers ? { headers } : {}),
+    ...(transport.remoteAddress ? { remoteAddress: transport.remoteAddress } : {}),
+  });
 }
 
 /**
@@ -68,7 +105,7 @@ interface WriteTransport {
  */
 export interface AllowedIpRangesWriteInput {
   next: unknown;
-  transport?: WriteTransport;
+  transport?: RequestTransport;
   locale?: string;
 }
 
@@ -160,10 +197,7 @@ export function allowedIpRangesWritePredicate(
     if (ranges.length === 0) return undefined;
     const mgr = manager();
     if (!mgr) return undefined;
-    const address = mgr.resolveClientAddress({
-      ...(transport.headers ? { headers: transport.headers } : {}),
-      ...(transport.remoteAddress ? { remoteAddress: transport.remoteAddress } : {}),
-    });
+    const address = judgedClientAddress(mgr, transport);
     if (address && ranges.some((range) => ipMatchesRange(address, range))) return undefined;
     const copy = copyFor(locale);
     return {

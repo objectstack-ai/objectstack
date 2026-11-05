@@ -38,6 +38,11 @@
  * This module imports the engine only as a TYPE, so there is no module cycle
  * at run time, and nothing re-exports it, so the published surface does not
  * move.
+ *
+ * [#30053 codemod] A PRIVATE method's docblock has since moved here,
+ * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * and the class keeps none for it; a public or protected method's docblock
+ * stays on the class, the contract, and its function keeps the placeholder.
  */
 
 import type { ObjectQL } from './engine.js';
@@ -146,7 +151,36 @@ function packagedRuleLookup(
   };
 }
 
-/** The body of `ObjectQL#negotiatedMessageLocale`; the method's docblock there is its contract. */
+/**
+ * The locale the bridged i18n service can actually ANSWER in, for the locale
+ * the caller asked for (#15757).
+ *
+ * `ExecutionContext.locale` is the `Accept-Language` header's first tag
+ * verbatim — `preferredLocaleFromHeader` reports what was ASKED FOR and
+ * expands nothing, deliberately, because every one of its callers negotiates
+ * differently. Handing that tag straight to `II18nService.t()` made this the
+ * one consumer that never negotiated at all: a served adapter resolves a
+ * locale EXACTLY and then falls to its declared fallback
+ * (`FileI18nAdapter.t()` is `resolveFromLocale(key, locale)` then
+ * `resolveFromLocale(key, fallbackLocale)`), so a bare `zh` missed a `zh-CN`
+ * bundle and the caller read an English refusal — on the same response whose
+ * dataset, view and object labels were Chinese, because those go through
+ * `pickData` and `pickData` negotiates.
+ *
+ * ⛔ The rule is NOT re-implemented here. `resolveBundleLocale`
+ * (`@objectstack/spec/system`) is the single negotiation rule the document
+ * translators already run — exact → case-insensitive → base language →
+ * variant expansion, which is the step that reaches `zh-CN` from `zh` — and
+ * this asks it the same question about a different set of available locales:
+ * the translators' set is the bundle's keys, and the service's set is what
+ * `getLocales()` reports it holds. A second rule living here is the defect,
+ * not the fix.
+ *
+ * Passes the requested tag through untouched whenever there is nothing to
+ * negotiate against — no service, no `getLocales`, an empty or non-array
+ * answer, a throwing one, or no match. Negotiation needs a list of what
+ * EXISTS; inventing one is how a second rule gets born.
+ */
 export function negotiatedMessageLocale(
   this: Pick<ValidationMessageHost, 'i18nService'>,
   requested: string | undefined): string | undefined {
@@ -170,7 +204,16 @@ export function negotiatedMessageLocale(
   return resolveBundleLocale(offered, requested) ?? requested;
 }
 
-/** The body of `ObjectQL#objectDisplayLabel`; the method's docblock there is its contract. */
+/**
+ * An OBJECT's display name in the caller's locale: translation bundle →
+ * declared `label` → API name (#7307).
+ *
+ * The object-level twin of `resolveFieldLabel` (`record-validator.ts`), and
+ * deliberately the same three-step ladder with the same last resort: the API
+ * name is what a user must not be shown, so it is where the ladder ENDS, not
+ * where it starts. It stays available to clients on the structured fields
+ * (`object` / `dependentObject`) and on `developerMessage`.
+ */
 export function objectDisplayLabel(
   objectName: string,
   declaredLabel: unknown,

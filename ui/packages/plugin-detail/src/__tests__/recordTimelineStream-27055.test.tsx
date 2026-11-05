@@ -17,9 +17,10 @@
 
 import React from 'react';
 import { describe, it, expect, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
 import { DiscussionContextProvider } from '@object-ui/react';
 import type { FeedItem } from '@object-ui/types';
+import { RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES } from '@objectstack/spec/api';
 import {
   auditEntriesToFeedItems,
   filterTimelineStream,
@@ -194,6 +195,52 @@ describe('the 变更 chip is offered only while the record shows its field histo
   });
 });
 
+describe("the panel's `changes_only` is offered by the same rule as the 变更 chip (objectstack#30344)", () => {
+  const panel = (fieldHistory: boolean | undefined, filterMode?: 'all' | 'changes_only') => {
+    const timeline = <RecordActivityTimeline items={[call, comment, ...audit]} filterMode={filterMode} />;
+    return fieldHistory === undefined ? (
+      timeline
+    ) : (
+      <RecordFieldHistoryContext.Provider value={fieldHistory}>{timeline}</RecordFieldHistoryContext.Provider>
+    );
+  };
+  /** The dropdown's options, in order, read off the opened list. */
+  const options = async () => {
+    fireEvent.keyDown(screen.getByRole('combobox'), { key: 'ArrowDown' });
+    const listbox = await screen.findByRole('listbox');
+    return within(listbox).getAllByRole('option').map((option) => option.textContent);
+  };
+
+  it('history shown: all four options, Field Changes among them', async () => {
+    render(panel(true));
+    expect(await options()).toEqual(['All Activity', 'Comments Only', 'Field Changes', 'Tasks Only']);
+  });
+
+  it('history not shown (history off, or a reader whose audit read did not answer): no `changes_only`', async () => {
+    render(panel(false));
+    expect(await options()).toEqual(['All Activity', 'Comments Only', 'Tasks Only']);
+  });
+
+  it('CONTROL: no host saying, every option draws, as before', async () => {
+    render(panel(undefined));
+    expect(await options()).toEqual(['All Activity', 'Comments Only', 'Field Changes', 'Tasks Only']);
+  });
+
+  it('a `changes_only` the dropdown does not offer reads as 全部: every entry draws', () => {
+    render(panel(false, 'changes_only'));
+    expect(screen.getByRole('combobox').textContent).toContain('All Activity');
+    expect(screen.getByText('Logged a call')).toBeTruthy();
+    expect(screen.getByText('Budget is set')).toBeTruthy();
+  });
+
+  it('CONTROL: with history shown, the same `changes_only` holds the field change only', () => {
+    render(panel(true, 'changes_only'));
+    expect(screen.getByText('Status')).toBeTruthy();
+    expect(screen.queryByText('Logged a call')).toBeNull();
+    expect(screen.queryByText('Budget is set')).toBeNull();
+  });
+});
+
 describe('an activity row sits under 活动 whatever the history flag; 变更 holds the audit only (objectstack#30074, ruling C)', () => {
   // The five activity types that share the `field_change` presentation.
   const events = (['created', 'updated', 'deleted', 'assigned', 'shared'] as const).map(
@@ -352,4 +399,35 @@ describe('one action, one row: an activity row carries its audit entry (objectst
     expect(actors).toEqual(expect.arrayContaining(['Ada', 'Dev Admin']));
     expect(container.querySelectorAll('[data-record-timeline-peek-row]')).toHaveLength(2);
   });
+});
+
+describe("the stream folds exactly the spec's RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES, the set the server's count steps aside", () => {
+  const at = (ms: number) => new Date(Date.UTC(2026, 10, 2, 9, 0, 0) + ms).toISOString();
+  const row = (activityType: string) =>
+    ({ id: 'row', type: 'field_change', actor: 'Dev Admin', body: 'Activity', createdAt: at(0), activityType, actorId: 'u1' }) as FeedItem;
+  const entry = (action: string) =>
+    auditEntriesToFeedItems(
+      [{ id: 1, action, created_at: at(100), user_id: 'u1', user_name: 'Dev Admin', changes: [{ field: 'company', label: 'Company', from: 'A', to: 'B' }] }],
+      { unknownUser: 'Unknown' },
+    );
+  const pairs = (action: string, activityType: string) =>
+    mergeTimelineStream([row(activityType)], entry(action)).some((item) => fieldHistoryOf(item)?.id === 'audit:1');
+  const folded = Object.entries(RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES);
+  const foldedTypes = [...new Set(Object.values(RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES) as string[])];
+
+  it('the spec names the three write actions', () => {
+    expect(folded.map(([action]) => action).sort()).toEqual(['create', 'delete', 'update']);
+  });
+
+  it.each(folded)('the audit `%s` entry pairs with the activity `%s` row, and with no other folded type', (action, activityType) => {
+    expect(pairs(action, activityType)).toBe(true);
+    for (const other of foldedTypes.filter((t) => t !== activityType)) expect(pairs(action, other)).toBe(false);
+  });
+
+  it.each(['restore', 'unknown_action', 'toString', 'constructor', '__proto__', 'hasOwnProperty'])(
+    'an audit `%s` entry, outside the spec constant, pairs with no activity row',
+    (action) => {
+      for (const activityType of foldedTypes) expect(pairs(action, activityType)).toBe(false);
+    },
+  );
 });

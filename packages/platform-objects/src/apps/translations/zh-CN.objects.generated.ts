@@ -159,7 +159,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "封禁用户",
-        description: "要封禁该用户吗？封禁后会立即登出，且在解除封禁前无法再次登录。",
+        description: "要封禁该用户吗？封禁后会立即登出，在解除封禁前无法再次登录，其 API 密钥也会被拒绝。解除封禁后这些密钥恢复可用。",
         successMessage: "用户已封禁",
         params: {
           banReason: {
@@ -557,7 +557,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       require_mfa: {
         label: "强制多因素认证",
-        help: "为 true 时，该组织的每位成员都必须注册身份验证器 App 才能访问数据。"
+        help: "为 true 时，该组织的每位成员都必须注册身份验证器 App 才能访问数据。需要本部署开启双重验证（OS_AUTH_TWO_FACTOR=true）；双重验证关闭时，保存为 true 会被拒绝。"
       },
       timezone: {
         label: "时区",

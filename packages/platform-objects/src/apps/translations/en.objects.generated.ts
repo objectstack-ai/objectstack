@@ -159,7 +159,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Ban User",
-        description: "Ban this user? They will be signed out and unable to sign in until unbanned.",
+        description: "Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned. The keys work again after the unban.",
         successMessage: "User banned",
         params: {
           banReason: {
@@ -557,7 +557,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       require_mfa: {
         label: "Require Multi-Factor Auth",
-        help: "When true, every member of this organization must enroll an authenticator app to access data."
+        help: "When true, every member of this organization must enroll an authenticator app to access data. Needs two-factor authentication on for this deployment (OS_AUTH_TWO_FACTOR=true); while it is off, saving this as true is refused."
       },
       timezone: {
         label: "Timezone",

@@ -1099,12 +1099,13 @@ export function registerObjectTools(
           'build-time errors (bare field refs, unknown fields, unknown functions) and advisory warnings ' +
           '(text/boolean fields misused in arithmetic, an error at a `validation` site, worded for the rule\'s ' +
           '`severity`, and at a `flow_condition` of a record-triggered or time-relative flow, where it fails the run; ' +
-          'a warning on any other flow, a time-relative sweep of another object included; date-equality pitfalls), plus the fields and stdlib ' +
+          'a warning on any other flow; date-equality pitfalls), plus the fields and stdlib ' +
           'functions in scope so you can self-correct. `site` says where the expression will live: a `formula` ' +
           'field, a `validation`/predicate, or a `flow_condition` (fields are bound bare in flow conditions). ' +
-          'Pass the rule\'s `severity` (validation) or the flow\'s `triggerKind` (flow_condition), and a time-relative ' +
-          'flow\'s `sweepObject` when it sweeps another object than objectName, so the verdict is the one the publish ' +
-          'gate gives that rule or flow.',
+          'Pass the rule\'s `severity` (validation) or the flow\'s `triggerKind` (flow_condition), so the verdict is ' +
+          'the one the publish gate gives that rule or flow. A time-relative flow\'s conditions read a row of the object ' +
+          'its sweep scans (`timeRelative.object`): pass that object as objectName. A start whose objectName names ' +
+          'another object is refused at publish (`flow-time-relative-object-mismatch`).',
         inputSchema: strictToolInput(
           {
             surface: 'this validate_expression call',
@@ -1145,10 +1146,11 @@ export function registerObjectTools(
               .string()
               .optional()
               .describe(
-                'site flow_condition with triggerKind time_relative only: the flow\'s `timeRelative.object`, whose rows ' +
-                'the sweep hands each run as its record. objectName is the object the conditions are typed against: the ' +
-                'start node\'s objectName, else the swept object itself. When sweepObject is another object, a type ' +
-                'mismatch is a warning, not an error: the run\'s record is a row of sweepObject. Default: objectName.',
+                'site flow_condition with triggerKind time_relative only: the flow\'s `timeRelative.object`, the object ' +
+                'the sweep scans and whose rows it hands each run as its record. Its conditions are typed against that ' +
+                'object, so it is objectName too. A start whose objectName names another object is refused at publish ' +
+                '(`flow-time-relative-object-mismatch`); passed with another objectName, the verdict is the gate\'s ' +
+                'advisory one for such a flow, a type mismatch warning. Default: objectName.',
               ),
           },
         ),
@@ -1202,6 +1204,9 @@ export function registerObjectTools(
             scope,
             ...(optionFields ? { optionFields } : {}),
             ...(faultOutcome ? { faultOutcome } : {}),
+            // [#30250] A time-relative sweep's run is fired by no write: the
+            // gate's run-fails sentence there names none, and so does this one.
+            ...(site === 'flow_condition' && triggerKind === 'time_relative' ? { timeRelativeSweep: true } : {}),
           } as const;
           // The gate's envelope verdict first: `validateExpression` treats a
           // blank source as "not authored" and answers ok, while the save gate

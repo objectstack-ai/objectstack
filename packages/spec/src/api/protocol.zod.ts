@@ -1409,6 +1409,99 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * [#30348] The most ids one {@link SeedAppliedIdListSchema} list carries: 200
+ * per list, per object. The cloud seed-replay ledger's own cap on
+ * `seeded_record_ids` (objectstack-ai/cloud#3598) is the bound this mirrors in
+ * intent; it could not be read from the platform, so the number follows the
+ * platform's existing bounds on a record-id list —
+ * `EXPLAIN_BATCH_MAX_RECORD_IDS` (200, the cap on record ids crossing the
+ * public API) and the seed loader's own 200-row insert batch. Past it a list
+ * says so ({@link SeedAppliedIdListSchema}'s `truncated` and `total`); ids are
+ * never dropped silently.
+ */
+export const SEED_APPLIED_LANDED_IDS_CAP = 200;
+
+/**
+ * [#30348] One capped list of row ids on a `seedApplied` receipt.
+ *
+ * `ids` is the first {@link SEED_APPLIED_LANDED_IDS_CAP} ids in the loader's
+ * record order, each once (its first occurrence): datasets in the order the
+ * loader ran them, and within a dataset the order its records are authored
+ * (`SeedLoadResult.landedIds` / `insertedIds`). It is NOT the order the writes
+ * completed, since the loader buffers inserts and flushes them after the
+ * skips that follow them. `total` is how many ids the list holds before
+ * the cap, and `truncated` is `true` exactly when `total` exceeds `ids.length`
+ * — the receipt states a cut instead of making a reader count.
+ */
+export const SeedAppliedIdListSchema = lazySchema(() => z.object({
+  ids: z.array(z.string()).max(SEED_APPLIED_LANDED_IDS_CAP).describe(
+    'Row ids in the loader\'s record order (datasets in load order, records as authored), each once '
+    + '— at most `SEED_APPLIED_LANDED_IDS_CAP` (200).',
+  ),
+  total: z.number().int().min(0).describe(
+    'How many ids the list holds before the cap. Equals `ids.length` unless `truncated`.',
+  ),
+  truncated: z.boolean().describe(
+    'True when the cap cut the list: `total` ids exist and only the first `ids.length` are carried.',
+  ),
+}));
+export type SeedAppliedIdList = z.input<typeof SeedAppliedIdListSchema>;
+/** Post-parse shape of {@link SeedAppliedIdList} — defaults applied, transforms run (ADR-0122). */
+export type SeedAppliedIdListParsed = z.infer<typeof SeedAppliedIdListSchema>;
+
+/**
+ * [#30348] Which stored rows a published seed landed on, for one object —
+ * the per-object element of `seedApplied.landed` on BOTH publish responses
+ * ({@link PublishMetaItemResponseSchema}, {@link PublishPackageDraftsResponseSchema}),
+ * declared once so the two cannot drift.
+ *
+ * The seed loader's own answer (`SeedLoadResult.landedIds` / `insertedIds`),
+ * split by what the publish did to the row:
+ *
+ * - `inserted` — rows THIS publish created. The only list a reader may treat
+ *   as the seed's own rows (e.g. to clear sample data later).
+ * - `matched` — rows that already existed and that a seed record's key
+ *   matched: updated, left as they were (a no-op replay, or `ignore` — the
+ *   create-only default since #30081), or matched for an update the engine
+ *   then refused. Such a row may be a customer's own record whose natural key
+ *   the seed happens to share, or a row an EARLIER publish inserted; ⛔ never
+ *   clear it on this receipt's word.
+ *
+ * Per mode: `insert` / `replace` put every row they write in `inserted`;
+ * `ignore` and `upsert` put a created row in `inserted` and a key-matched one in
+ * `matched`; `update` creates nothing, so only `matched`. A record whose write
+ * failed and that matched no row lands nowhere and is in neither list (its
+ * failure is in `errors[]`). An object appears once even when several
+ * datasets of the batch target it; an id `inserted` lists is never also in
+ * `matched`.
+ */
+export const SeedAppliedLandedSchema = lazySchema(() => z.object({
+  object: z.string().describe('The object whose rows the lists name.'),
+  inserted: SeedAppliedIdListSchema.describe(
+    'Rows this publish created. The only ones safe to treat as the seed\'s own.',
+  ),
+  matched: SeedAppliedIdListSchema.describe(
+    'Pre-existing rows a seed record\'s key matched — updated, left as they were, or refused an '
+    + 'update. May be a customer\'s row; never clear these on this receipt\'s word.',
+  ),
+}));
+export type SeedAppliedLanded = z.input<typeof SeedAppliedLandedSchema>;
+/** Post-parse shape of {@link SeedAppliedLanded} — defaults applied, transforms run (ADR-0122). */
+export type SeedAppliedLandedParsed = z.infer<typeof SeedAppliedLandedSchema>;
+
+/** [#30348] The `seedApplied.landed` key's description — one text for both publish responses. */
+const SEED_APPLIED_LANDED_DESCRIPTION =
+  'Per object, the stored rows the seed landed on: `inserted` (created by this publish) and '
+  + '`matched` (pre-existing rows a seed key matched), each capped at '
+  + '`SEED_APPLIED_LANDED_IDS_CAP` (200) ids with `total` and `truncated` stating any cut. One '
+  + 'entry per object the loader ran, empty lists included. When the load threw part-way '
+  + '(`success: false` with `error`), it lists only the datasets that FINISHED before the throw, '
+  + 'and is EMPTY when none had; the dataset that threw is not listed (its rows are in the counts, '
+  + 'its object in `error`). '
+  + 'ABSENT means "not reported" — the apply failed before any load ran (see `error`), or the '
+  + 'producer reports no ids — never "no rows landed".';
+
+/**
  * Publish Metadata Item Response
  *
  * Describes the FULL body `POST /api/v1/meta/:type/:name/publish` returns
@@ -1434,6 +1527,20 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
  *
  * - `seedApplied` — only when the published type is `seed`. Publishing a seed
  *   is what makes its rows live, so the row materialization rides along.
+ *   [#30348] Its `landed` key names the rows, per object
+ *   ({@link SeedAppliedLandedSchema}): `inserted` — the rows this publish
+ *   created, the only ones a reader may treat as the seed's own — and
+ *   `matched` — pre-existing rows a seed key matched, possibly a customer's.
+ *   Each list carries at most {@link SEED_APPLIED_LANDED_IDS_CAP} (200) ids
+ *   and declares a cut with `truncated: true` beside the uncut `total`.
+ *   [#30429] A load that threw part-way still reports `landed` for the
+ *   datasets that FINISHED before the throw, and an empty `landed` when the
+ *   throw came before any had; the dataset that threw is not listed (its ids
+ *   are only partly known), though its rows are in the counts. Absent `landed` means "not reported" (no load ran, or the
+ *   producer reports no ids), never "nothing landed". The same
+ *   key, same schema, rides {@link PublishPackageDraftsResponseSchema}'s
+ *   `seedApplied`. Accepted cost (objectstack-ai/cloud#3598 ruling A): row
+ *   ids on the public publish responses, bounded by the cap.
  * - `materializeApplied` — only when an ADR-0086 P2 publish materializer is
  *   registered for the type (e.g. `flow`, whose draft credentials become the
  *   live ones).
@@ -1492,6 +1599,7 @@ export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
       'Per-record failures reported by the seed loader. Present only when the '
       + 'loader ran and returned a non-empty error list.',
     ),
+    landed: z.array(SeedAppliedLandedSchema).optional().describe(SEED_APPLIED_LANDED_DESCRIPTION),
   }).optional().describe(
     'Outcome of materializing a published `seed` body into data rows. Present '
     + 'ONLY when the published type is `seed` — publishing a seed is what makes '
@@ -1792,6 +1900,7 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
       + '. Absent on non-validation failures (driver faults, '
       + 'unreadable bodies), whose whole story is `error` / `errors[]`.',
     ),
+    landed: z.array(SeedAppliedLandedSchema).optional().describe(SEED_APPLIED_LANDED_DESCRIPTION),
   }).optional().describe(
     'Aggregate outcome of materializing EVERY published `seed` body in one '
     + 'multi-pass loader run (cross-seed references need the whole set). '

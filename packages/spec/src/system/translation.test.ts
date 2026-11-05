@@ -1834,6 +1834,17 @@ describe('translation unknown-key strictness', () => {
       expect(() => PlatformTranslationDataSchema.parse({ settings })).not.toThrow();
       expect(() => PlatformTranslationBundleSchema.parse({ 'zh-CN': { settings } })).not.toThrow();
     });
+
+    it("carries a toggle's turn-off question beside its label on the platform face (#30418)", () => {
+      // The manifest key `confirmOffText` is translated at the toggle's own
+      // address, as its `label` is; a strict `keys` entry that did not declare
+      // the leaf would refuse that bundle here, and `tsc` would refuse the
+      // service's `PlatformTranslationData`-typed bundle literals.
+      const withConfirm = { auth: { keys: { email_password_enabled: { label: 'Login', confirmOffText: 'Sure?' } } } };
+      const result = PlatformTranslationDataSchema.safeParse({ settings: withConfirm });
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+      expect(result.data?.settings?.auth?.keys?.email_password_enabled?.confirmOffText).toBe('Sure?');
+    });
   });
 
   // ──────────────────────────────────────────────────────────────────────────

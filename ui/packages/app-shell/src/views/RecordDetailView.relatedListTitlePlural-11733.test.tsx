@@ -86,7 +86,7 @@ const BASE_FIELDS = {
   name: { type: 'text', label: 'Name' },
 };
 
-const OBJECTS = [
+const OBJECTS_EN = [
   { name: PARENT, label: 'Project', pluralLabel: 'Projects', managedBy: 'platform', fields: BASE_FIELDS },
   // One relationship to the parent: the page resolves the title.
   {
@@ -117,6 +117,21 @@ const OBJECTS = [
   },
 ];
 
+/** `zh-CN`'s served labels for `name`, as the server translates them (objectstack#30390). */
+const SERVED_ZH: Record<string, { label: string; pluralLabel: string }> = {
+  showcase_task: { label: '任务', pluralLabel: '任务清单' },
+  showcase_opportunity: { label: '商机', pluralLabel: '商机列表' },
+};
+
+/**
+ * The object definitions as the server serves them in `lang`: a `zh-CN`
+ * session holds the `zh-CN` answer, and `served` stands in for a rename.
+ */
+function objectsFor(lang: Lang, served: Record<string, { label: string; pluralLabel: string }> = {}) {
+  const labels = { ...(lang === 'zh-CN' ? SERVED_ZH : {}), ...served };
+  return OBJECTS_EN.map((o) => ({ ...o, ...labels[o.name] }));
+}
+
 /** The catalog as the console loads it: `zh-CN` translates both scalars. */
 const BUNDLE: Record<Lang, Record<string, unknown>> = {
   en: {},
@@ -140,13 +155,13 @@ function makeDataSource() {
   } as never;
 }
 
-function renderPage(lang: Lang) {
+function renderPage(lang: Lang, objects: Array<Record<string, unknown>> = objectsFor(lang)) {
   const i18n = createI18n({ defaultLanguage: lang, detectBrowserLanguage: false });
   // The instance really booted in the language under test.
   expect(i18n.language).toBe(lang);
   i18n.addResourceBundle(lang, 'translation', BUNDLE[lang], true, true);
   const metadata = {
-    objects: OBJECTS,
+    objects,
     pages: [],
     loading: false,
     error: null,
@@ -162,7 +177,7 @@ function renderPage(lang: Lang) {
         <MetadataCtx.Provider value={metadata}>
           <RecordDetailView
             dataSource={makeDataSource()}
-            objects={OBJECTS}
+            objects={objects as never}
             onEdit={() => {}}
             objectNameOverride={PARENT}
             recordIdOverride={RECORD_ID}
@@ -221,5 +236,27 @@ describe('RecordDetailView — related-list titles read the plural (objectui#117
   it('control: a child that declares no plural is titled with its label', async () => {
     renderPage('en');
     expect(await drawn('Note')).toBe(true);
+  });
+});
+
+/**
+ * objectstack#30390 — a renamed child object titles its related list with the
+ * served plural, in both producers, never the packaged catalog string.
+ * Directions, written before the run: RED before the change (`任务清单`,
+ * `商机列表 · …`), GREEN after.
+ */
+describe('RecordDetailView — a renamed child titles its related list as served (objectstack#30390)', () => {
+  it('zh-CN: the served plurals win over the packaged translation', async () => {
+    renderPage(
+      'zh-CN',
+      objectsFor('zh-CN', {
+        showcase_task: { label: '工单', pluralLabel: '工单清单' },
+        showcase_opportunity: { label: '线索', pluralLabel: '线索列表' },
+      }),
+    );
+    expect(await drawn('工单清单')).toBe(true);
+    expect(await drawn('线索列表 · Primary Project')).toBe(true);
+    expect(absent('任务清单')).toBe(true);
+    expect(absent('商机列表 · Primary Project')).toBe(true);
   });
 });

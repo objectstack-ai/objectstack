@@ -110,7 +110,7 @@ describe('generateObjectDraft', () => {
      * Where the key went instead is pinned in
      * `external-object-draft-primary-key.test.ts`.
      */
-    expect(fields.order_id).toEqual({ type: 'text' });
+    expect(fields.order_id).toEqual({ type: 'text', label: 'Order Id' });
     expect(fields.amount.type).toBe('number');
     expect(fields.ordered_at.type).toBe('datetime');
     expect(fields.metadata.type).toBe('json');
@@ -124,7 +124,7 @@ describe('generateObjectDraft', () => {
     expect(draft.source).toContain('REVIEW:');
     // Same flip, source side: the rendered field line no longer carries the
     // key, and the introspected key survives as the comment ruling D requires.
-    expect(draft.source).toContain("order_id: { type: 'text' },");
+    expect(draft.source).toContain("order_id: { type: 'text', label: 'Order Id' },");
     expect(draft.source).not.toContain('primaryKey: true');
     expect(draft.source).toContain('// Remote primary key: order_id');
   });
@@ -221,6 +221,80 @@ describe('importObject', () => {
     const { svc, persisted } = makeImporter();
     await expect(svc.importObject('warehouse', 'ghost')).rejects.toThrow(/not found/);
     expect(persisted).toHaveLength(0);
+  });
+});
+
+/**
+ * Every generated field carries a readable label, derived by the SAME function
+ * that labels the object (snake_case → Title Case). Without one the record
+ * form of a synced object shows the raw column name (`part_no`) as the input's
+ * label, while the object itself reads as a sentence.
+ */
+describe('generated field labels', () => {
+  function sparePartsSchema(): IntrospectedSchema {
+    return {
+      dialect: 'sqlite',
+      introspectedAt: '2026-11-05T00:00:00.000Z',
+      tables: {
+        spare_parts: {
+          name: 'spare_parts',
+          indexes: [],
+          columns: [
+            { name: 'id', type: 'integer', nullable: false, primaryKey: true },
+            { name: 'part_no', type: 'text', nullable: false, primaryKey: false },
+            { name: 'part_name', type: 'text', nullable: true, primaryKey: false },
+            { name: 'PartNo', type: 'text', nullable: true, primaryKey: false },
+          ],
+        },
+      },
+    };
+  }
+  function makeSpareParts() {
+    const persisted: Array<{ name: string; def: Record<string, unknown> }> = [];
+    const svc = new ExternalDatasourceService({
+      introspect: async () => sparePartsSchema(),
+      getDatasource: async () => ({ name: 'parts_db', schemaMode: 'external' }),
+      getObject: async () => undefined,
+      listObjects: async () => [],
+      persistObject: async (name, def) => { persisted.push({ name, def }); },
+    });
+    return { svc, persisted };
+  }
+
+  it('labels each field of the draft from its field name, and the object label is unchanged', async () => {
+    const { svc } = makeSpareParts();
+    const draft = await svc.generateObjectDraft('parts_db', 'spare_parts');
+    const fields = draft.definition.fields as Record<string, { type: string; label?: string }>;
+    expect(fields.id).toEqual({ type: 'number', label: 'Id' });
+    expect(fields.part_no).toEqual({ type: 'text', label: 'Part No' });
+    expect(fields.part_name).toEqual({ type: 'text', label: 'Part Name' });
+    // A column that is not snake_case is labelled from the field name it is
+    // saved under (`PartNo` → `part_no`, taken → `part_no_2`), never from the
+    // raw remote spelling.
+    expect(fields.part_no_2).toEqual({ type: 'text', label: 'Part No 2' });
+    // Control: the object label is derived exactly as before.
+    expect(draft.definition.label).toBe('Spare Parts');
+    // The rendered source carries the same label the definition does.
+    expect(draft.source).toContain("part_no: { type: 'text', label: 'Part No' },");
+  });
+
+  it('a renamed column is labelled from the name it is renamed to', async () => {
+    const { svc } = makeSpareParts();
+    const draft = await svc.generateObjectDraft('parts_db', 'spare_parts', {
+      includeColumns: ['part_no'],
+      rename: { part_no: 'catalogue_number' },
+    });
+    const fields = draft.definition.fields as Record<string, { label?: string }>;
+    expect(fields.catalogue_number?.label).toBe('Catalogue Number');
+  });
+
+  it('the persisted object of an import carries the same field labels', async () => {
+    const { svc, persisted } = makeSpareParts();
+    await svc.importObject('parts_db', 'spare_parts');
+    const def = persisted[0]!.def as { label: string; fields: Record<string, { label?: string }> };
+    expect(def.fields.part_no?.label).toBe('Part No');
+    expect(def.fields.part_name?.label).toBe('Part Name');
+    expect(def.label).toBe('Spare Parts');
   });
 });
 

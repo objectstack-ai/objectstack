@@ -1146,6 +1146,13 @@ export function resolveRowState(
         { field: { defaultValue: field.defaultValue } },
         isCreateForm,
       ),
+      // The column of `previous` that holds this field's stored value, so an
+      // EDIT judges `requiredWhen` as the engine's transition gate: a stored
+      // row already inside the gate without the value rests there, and an
+      // unrelated edit saves (objectstack#30220, the verdict #30184 put in
+      // `resolveFieldRuleState`). A create form passes no `previous`, so it
+      // keeps the plain verdict.
+      name: field.name,
     },
     previous ?? undefined,
     predicateScope,
@@ -3490,14 +3497,14 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
             * than by its raw qualified name (`showcase_task.form`). The same
             * rule the public route applies in `loadPublicForm`; resolved here
             * because the session's bundle lives in render, not in the loader.
-            * The object's API name stays the last resort, `||` so an empty
-            * label cannot blank the heading.
+            * The served label is drawn as given — the server localized
+            * `/meta/object` — and the bundle is asked only when none is
+            * served (objectstack#30390). The object's API name stays the last
+            * resort, `||` so an empty label cannot blank the heading.
             */}
           {loaded.label
-            ?? objectLabel({
-              name: loaded.object,
-              label: loaded.objectSchema?.label || loaded.object,
-            })}
+            ?? (pickLocalized(loaded.objectSchema?.label, language)
+              || objectLabel({ name: loaded.object, label: loaded.object }))}
         </h1>
         {/*
           * objectui#8408 — the subtitle slot renders the form's `description`.

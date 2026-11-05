@@ -48,6 +48,7 @@ import { isMissingTableError } from '@objectstack/metadata/errors';
 // [#25779] `seedFile(path)` values: stored, kept across replays, and owned by
 // the row that holds them; an id-shaped file value that names no file refused.
 import { SeedDatasetFiles, type SeedFileClaims } from './seed-files.js';
+import type { SeedLandingResult } from './seed-applied-landed.js';
 
 interface Logger {
   info(message: string, meta?: Record<string, any>): void;
@@ -581,6 +582,21 @@ export interface SeedLoadPartialWrites {
   readonly updated: number;
   /** The object of the dataset that was loading when the load threw; absent when it threw outside any dataset. */
   readonly failedObject?: string;
+  /**
+   * [#30429] The datasets that FINISHED before the throw, in load order, each
+   * with the row ids it landed on (`landedIds` / `insertedIds`, exactly as its
+   * returned result carries them) — what the publish receipt projects into
+   * `seedApplied.landed` with the same `seedAppliedLanded` a returned load
+   * uses. Empty when the throw came before any dataset finished.
+   *
+   * The dataset that threw is NOT here, although its rows are in the counts
+   * above: its ids are only partly known when it throws. A batched insert
+   * whose response was lost may have committed rows whose ids never came back
+   * (the loader re-reads by key on its retry for exactly that reason), so a
+   * list of the ids it did see would read as complete while missing rows. A
+   * finished dataset's list is complete; that is the line this field draws.
+   */
+  readonly finished: readonly SeedLandingResult[];
 }
 
 /** The writes a thrown load had made, keyed by the error it threw. */
@@ -815,6 +831,9 @@ export class SeedLoaderService implements ISeedLoaderService {
       inserted: finished.reduce((sum, r) => sum + r.inserted, 0) + (loading?.written.inserted ?? 0),
       updated: finished.reduce((sum, r) => sum + r.updated, 0) + (loading?.written.updated ?? 0),
       ...(loading ? { failedObject: loading.object } : {}),
+      // A snapshot of the ids alone: the results array is the live one pass 2
+      // writes its counters into.
+      finished: finished.map((r) => ({ object: r.object, landedIds: r.landedIds, insertedIds: r.insertedIds })),
     };
     const carrier = err !== null && typeof err === 'object' ? err : new Error(String(err));
     partialWritesByError.set(carrier, partial);
@@ -1329,6 +1348,12 @@ export class SeedLoaderService implements ISeedLoaderService {
     const deferredStart = deferredUpdates.length;
     const internalIdByRecordIndex = new Map<number, string>();
     /**
+     * [#30348] The record indexes whose row THIS load created — the insert
+     * sites mark them beside {@link noteLanded}; every other landed index is a
+     * pre-existing row a record's key matched. Published as `insertedIds`.
+     */
+    const insertedRecordIndexes = new Set<number>();
+    /**
      * Record the id row `recordIndex` landed with. Every write site below goes
      * through here, so a re-identified row (#21665) enters
      * {@link SeedLoaderService.replayIdByAuthoredId} exactly when it lands and
@@ -1436,6 +1461,7 @@ export class SeedLoaderService implements ISeedLoaderService {
           written.inserted++;
           const internalId = this.extractId(res.record);
           if (internalId) noteLanded(recordIndex, internalId); // [commit 9a884c6e4]
+          if (internalId) insertedRecordIndexes.add(recordIndex); // [#30348]
           if (externalIdValue && internalId) {
             insertedRecords.get(objectName)!.set(externalIdValue, internalId);
           }
@@ -2149,6 +2175,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             const externalIdValue = this.externalIdKey(record, externalId);
             const internalId = result.id;
             if (internalId) noteLanded(i, String(internalId)); // [commit 9a884c6e4]
+            if (internalId && result.action === 'inserted') insertedRecordIndexes.add(i); // [#30348]
             if (externalIdValue && internalId) {
               insertedRecords.get(objectName)!.set(externalIdValue, String(internalId));
             }
@@ -2268,6 +2295,17 @@ export class SeedLoaderService implements ISeedLoaderService {
         .sort(([a], [b]) => a - b)
         .map(([, id]) => id),
     )];
+    // [#30348] The subset this load CREATED, same order and dedupe. An id is
+    // here only when the record that landed on it was an insert, so a replay
+    // that matches the rows an earlier load inserted reports them as landed
+    // and not inserted — the publish receipt tells "created" from "matched"
+    // by exactly this.
+    const insertedIds = [...new Set(
+      [...internalIdByRecordIndex.entries()]
+        .filter(([recordIndex]) => insertedRecordIndexes.has(recordIndex))
+        .sort(([a], [b]) => a - b)
+        .map(([, id]) => id),
+    )];
 
     if (this.loadProgress) this.loadProgress.loading = undefined;
     return {
@@ -2283,6 +2321,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       referencesDropped,
       summariesStale: this.summariesStale - summariesStaleAtStart,
       landedIds,
+      insertedIds,
       errors,
     };
   }

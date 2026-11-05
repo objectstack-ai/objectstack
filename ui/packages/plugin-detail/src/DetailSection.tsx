@@ -653,6 +653,9 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
             <CellRenderer
               value={value}
               field={enrichedField as unknown as FieldMetadata}
+              // The record, as a grid cell gets its row (see the highlights
+              // strip): a sibling-scoped face reads its sibling from it.
+              dependentValues={data}
               deadlineSettled={isDeadlineSettled(enrichedField, data, { scope: predicateScope, fields: objectSchema?.fields })}
               // A record page writes every date one way. The highlights strip
               // above writes the year on a current-year date (objectui#13331),

@@ -59,12 +59,13 @@ function rows(): ActivityFeedReading['value'] {
 /** How many times the card read `objects` — reading it is what loads the type. */
 let objectReads = 0;
 
-function metadata() {
+/** The definitions as the server serves them in `lang`: a `zh-CN` session holds the `zh-CN` label. */
+function metadata(lang: Lang) {
   return {
     apps: [],
     get objects() {
       objectReads += 1;
-      return [{ name: 'crm_lead', label: 'Lead' }];
+      return [{ name: 'crm_lead', label: lang === 'zh-CN' ? '线索' : 'Lead' }];
     },
     dashboards: [],
     reports: [],
@@ -90,7 +91,7 @@ function renderCard(lang: Lang, value: ActivityFeedReading['value'] = rows()) {
   expect(i18n.language).toBe(lang);
   render(
     <I18nProvider instance={i18n} persistLanguage={false}>
-      <MetadataCtx.Provider value={metadata() as never}>
+      <MetadataCtx.Provider value={metadata(lang) as never}>
         <HomeActivity activity={{ value, status: 'ready', readable: true }} onViewAll={vi.fn()} t={t} />
       </MetadataCtx.Provider>
     </I18nProvider>,
@@ -118,7 +119,7 @@ describe("Home's activity card names a row's object by its label (objectui#12238
     expect(objectShownFor(LEAD_SUMMARY)).toBe('Lead');
   });
 
-  it('zh-CN: the label comes from the object translation bundle', () => {
+  it('zh-CN: the label is the one served in the session language (objectstack#30390)', () => {
     renderCard('zh-CN');
     expect(objectShownFor(LEAD_SUMMARY)).toBe('线索');
   });

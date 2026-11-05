@@ -31,49 +31,49 @@
       "file": "packages/metadata-protocol/src/protocol.ts",
       "member": "getDiscovery",
       "card": "#30054",
-      "reason": "inferred-return-type (#29985 report: stays on the class until the return type is spelled)"
+      "reason": "return type spelled on the signature (#30054 step 1, public .d.ts byte-equal); the body stays until the protocol.ts codemod can move a member of the landed facade (it refuses its own output, and the split no longer re-proves from its #29985 base)"
     },
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
       "member": "findData",
       "card": "#30054",
-      "reason": "inferred-return-type (#29985 report: stays on the class until the return type is spelled)"
+      "reason": "return type spelled on the signature (#30054 step 1, public .d.ts byte-equal); the body stays until the protocol.ts codemod can move a member of the landed facade (it refuses its own output, and the split no longer re-proves from its #29985 base)"
     },
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
       "member": "getData",
       "card": "#30054",
-      "reason": "inferred-return-type (#29985 report: stays on the class until the return type is spelled)"
+      "reason": "return type spelled on the signature (#30054 step 1, public .d.ts byte-equal); the body stays until the protocol.ts codemod can move a member of the landed facade (it refuses its own output, and the split no longer re-proves from its #29985 base)"
     },
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
       "member": "cloneData",
       "card": "#30054",
-      "reason": "inferred-return-type (#29985 report: stays on the class until the return type is spelled)"
+      "reason": "return type spelled on the signature (#30054 step 1, public .d.ts byte-equal); the body stays until the protocol.ts codemod can move a member of the landed facade (it refuses its own output, and the split no longer re-proves from its #29985 base)"
     },
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
       "member": "saveMetaItem",
       "card": "#30054",
-      "reason": "inferred-return-type (#29985 report: stays on the class until the return type is spelled)"
+      "reason": "return type spelled on the signature (#30054 step 1, public .d.ts byte-equal); the body stays until the protocol.ts codemod can move a member of the landed facade (it refuses its own output, and the split no longer re-proves from its #29985 base)"
     },
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
       "member": "publishMetaItem",
       "card": "#30054",
-      "reason": "inferred-return-type (#29985 report: stays on the class until the return type is spelled)"
+      "reason": "return type spelled on the signature (#30054 step 1, public .d.ts byte-equal); the body stays until the protocol.ts codemod can move a member of the landed facade (it refuses its own output, and the split no longer re-proves from its #29985 base)"
     },
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
       "member": "rollbackMetaItem",
       "card": "#30054",
-      "reason": "inferred-return-type (#29985 report: stays on the class until the return type is spelled)"
+      "reason": "return type spelled on the signature (#30054 step 1, public .d.ts byte-equal); the body stays until the protocol.ts codemod can move a member of the landed facade (it refuses its own output, and the split no longer re-proves from its #29985 base)"
     },
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
       "member": "deleteMetaItem",
       "card": "#30054",
-      "reason": "inferred-return-type (#29985 report: stays on the class until the return type is spelled)"
+      "reason": "return type spelled on the signature (#30054 step 1, public .d.ts byte-equal); the body stays until the protocol.ts codemod can move a member of the landed facade (it refuses its own output, and the split no longer re-proves from its #29985 base)"
     },
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
@@ -350,48 +350,6 @@
     {
       "file": "packages/objectql/src/engine.ts",
       "class": "ObjectQL",
-      "member": "seedAutonumber",
-      "card": "#30055",
-      "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "probeReferencingRows",
-      "card": "#30055",
-      "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "resolveMasterDetailParent",
-      "card": "#30055",
-      "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "resolveMasterDetailParents",
-      "card": "#30055",
-      "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "inspectDanglingReferences",
-      "card": "#30055",
-      "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "referenceExists",
-      "card": "#30055",
-      "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
       "member": "homeAmountServing",
       "card": "#30147",
       "reason": "codemod limit: field-call, it calls a field or accessor as a function (#29986 report)"
@@ -462,12 +420,6 @@
       "member": "get supports",
       "card": "#30147",
       "reason": "codemod limit: inferred-return-type, a get accessor whose object type the base leaves inferred, with a docblock on each key (MOVED_ACCESSORS moves a getter whose type is written, #30147 phase 2a)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "applyFilterCondition",
-      "card": "#30147",
-      "reason": "inferred-return-type (#30105 report: stays on the class until its return type is spelled, #30147 phase 2d); its comment-in-parameters half is retired (#30147 phase 2a)"
     }
   ]
 }
