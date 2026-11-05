@@ -1452,7 +1452,7 @@ export class ProtocolRegistryHydrationFacet {
         // same sync gives the target's table the columns the extension adds —
         // the DDL path a manifest extension takes at boot, unchanged.
         if (type === OBJECT_EXTENSION_TYPE) return host.ensureObjectStorage('object', name);
-        if (type !== 'object') return undefined;
+        if (type !== 'object') return;
         try {
             await host.engine.syncObjectSchema(name);
             return undefined;
