@@ -526,20 +526,32 @@ function isOpenOverrideType(singular: string): boolean {
 
 /**
  * [#28412, ADR-0146 D9 item 1] Whether a removal addressed to `packageId`
- * removes the shipping package's PAIR row of a type whose D9 conditions are
- * delivered ({@link CONDITIONS_DELIVERED}: `flow` today) — the row the pair's
+ * removes the shipping package's PAIR row of a type whose declared override
+ * the gate admits today ({@link isOpenOverrideType}) — the row the pair's
  * declared override is stored in. Such a removal is admitted past the
  * sealed-removal refusal: it removes no managed definition, and the code
- * package's flow is what every read serves and what the automation engine
- * arms once the row is gone — the narrowing direction the #6960 ruling names.
- * ⛔ Only the pair, named: a removal naming no package, or any other package,
- * keeps the sealed refusal it had. ⛔ Only a delivered type: every other open
- * type (`view`, `mapping`, …) keeps main's delete verdict — its own removal
- * carve-out or its sealed refusal — untouched by this card.
+ * package's item is what every read serves (for a flow, what the automation
+ * engine arms) once the row is gone — the narrowing direction the #6960
+ * ruling names, and ADR-0146's revert ("Restore package original" deletes the
+ * overriding item from `.custom`, so the base's document is served again).
+ *
+ * [#30062] Every open type, no longer `flow` alone. A `doc` or `mapping`
+ * opens no overlay channel and is no `supportsOverlay` type either, so the
+ * sealed-removal refusal answered a pair's own removal of its declared
+ * override with 403 and the override stayed served: a customization the
+ * customer could not undo. The other open types already passed (their own
+ * overlay channel or the #6960 carve-out); the removal is now told to the
+ * store as runtime-only for all of them, as the declared save wrote the row.
+ *
+ * ⛔ Only the pair, named: a removal naming no package, the base, or any
+ * other package, keeps the refusal it had — a base's own item is never
+ * removed. ⛔ Only an open type: `action` (its D9 conditions are not
+ * delivered, so no pair holds a declared action override) and every excluded
+ * type keep main's delete verdict.
  */
 export function isPairRowRemoval(type: string, basePackageId: unknown, packageId: unknown): boolean {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
-    if (!CONDITIONS_DELIVERED.has(singular) || !isOpenOverrideType(singular)) return false;
+    if (!isOpenOverrideType(singular)) return false;
     if (typeof basePackageId !== 'string') return false;
     if (typeof packageId !== 'string' || packageId.length === 0) return false;
     const pair = customizationPackageId(basePackageId);

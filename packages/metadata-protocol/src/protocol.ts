@@ -7877,7 +7877,7 @@ export class ObjectStackProtocolImplementation implements
      *    written through the `OS_METADATA_WRITABLE` hatch before the seal; they
      *    stay at rest, untouched, and the boot report names them per type with
      *    the two remedies ({@link reportSealedOverlayRows}). [#29613] Except,
-     *    for a `page`, `app`, `dataset`, `doc` or `book`, the shipping
+     *    for a `page`, `app`, `dataset`, `doc`, `book` or [#30062] `mapping`, the shipping
      *    package's declared `.custom` override (`row`, below): ADR-0146 D8
      *    item 2 serves it, as a dashboard's.
      *

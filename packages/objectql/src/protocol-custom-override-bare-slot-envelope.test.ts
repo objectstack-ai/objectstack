@@ -38,6 +38,10 @@
  *
  * ## [#29613] The second describe: page, app, dataset, doc and book
  *
+ * [#30062] …and mapping, measured the same way: before, a published mapping
+ * override was answered by no read (every reader served S), so an import that
+ * named the mapping ran the base's field mapping.
+ *
  * A `.custom` pair's published override of a base's
  * page, app, dataset, doc or book is served from its ROW, as a dashboard's
  * is, and no longer from a copy in the registry's bare slot wearing the
@@ -359,6 +363,11 @@ const docBody = (label: string) => ({ name: 'showcase_index', label, content: '#
 const bookBody = (label: string) => ({
     name: 'showcase_manual', label, groups: [{ key: 'start', label: 'Start', pages: ['showcase_index'] }],
 });
+/** [#30062] An import mapping: the import door resolves it through the by-name read (`@objectstack/rest`'s `import-mapping.ts`). */
+const mappingBody = (label: string) => ({
+    name: 'showcase_task_feed', label, sourceFormat: 'csv', targetObject: 'showcase_task',
+    fieldMapping: [{ source: 'Title', target: 'title' }], mode: 'insert',
+});
 
 /** Per type: its body and the manifest collection that ships it. */
 const SEALED_TYPES = [
@@ -367,6 +376,8 @@ const SEALED_TYPES = [
     { type: 'dataset', body: datasetBody, collection: 'datasets' },
     { type: 'doc', body: docBody, collection: 'docs' },
     { type: 'book', body: bookBody, collection: 'books' },
+    // [#30062] Before, a published mapping override was answered by no read: every reader served the base's body.
+    { type: 'mapping', body: mappingBody, collection: 'mappings' },
 ] as const;
 
 function sealedBaseManifest(): Record<string, unknown> {
