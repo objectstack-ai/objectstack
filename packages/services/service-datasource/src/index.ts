@@ -21,6 +21,7 @@ export type {
   ExternalDatasourceServiceConfig,
   DatasourceLike,
   ObjectLike,
+  ImportLanding,
   // Canonical minimal logger surface for the whole package.
   Logger,
 } from './external-datasource-service.js';
