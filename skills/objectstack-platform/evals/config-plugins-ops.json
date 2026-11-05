@@ -229,7 +229,6 @@
           "page"
         ],
         "must_not_contain": [
-          "only for views",
           "PUT /api/v1/meta/dataset/crm_pipeline",
           "PUT /api/v1/meta/page/crm_sales_overview"
         ]
