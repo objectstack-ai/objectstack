@@ -370,6 +370,21 @@ describe('[ADR-0142 D2] OwnershipQueueService — the queue reads page to comple
     expect(warn.mock.calls[0][0]).toMatch(/sys_queue_member read failed/);
     expect(warn.mock.calls[0][1]).toEqual({ error: 'sys_queue_member page 2 unavailable' });
   });
+
+  it('a read that cannot vouch for completion logs its reason, not the walk\'s "refuses instead" — the queue answers nobody', async () => {
+    // A full page whose last row carries no id: the walk cannot resume after it.
+    const tables = bigQueue(10_000);
+    delete tables.sys_queue_member.at(-1)!.id;
+    const warn = vi.fn();
+    const svc = service(makeEngine({ tables }), { warn });
+
+    expect(await svc.expandMembers('big', 'org_a')).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][1].error).toBe(
+      "[sharing] the member rows of queue 'big' in organization 'org_a' could not be read: "
+      + 'the read by id could not continue past a page (a row without an id, or a page that repeated the cursor).',
+    );
+  });
 });
 
 describe('[ADR-0131 D4] OwnershipQueueService.hasAnyQueue — the session payload\'s one boolean', () => {

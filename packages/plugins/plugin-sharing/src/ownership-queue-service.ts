@@ -119,15 +119,17 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 /**
  * The reason behind a failed authored read, for a warning that answers nobody.
- * A walk's refusal words its own consequence ("so the expansion refuses"),
- * which is not this service's answer yet, so the driver's reason it carries as
- * `cause` is logged instead; a walk that could not vouch for completion has no
- * cause and logs its own sentence.
+ * A walk's refusal ends on its own consequence ("…, so the expansion refuses
+ * instead."), which is not this service's answer until #29604 part 2, so only
+ * the reason is logged: the driver's error the refusal carries as `cause`, or,
+ * for a walk that could not vouch for completion (no cause), the refusal's
+ * sentence with that closing clause cut.
  */
 function readFailureReason(err: unknown): string {
   const cause = (err as { cause?: unknown } | null)?.cause;
   if (cause instanceof Error) return cause.message;
-  return err instanceof Error ? err.message : String(err);
+  const message = err instanceof Error ? err.message : String(err);
+  return message.replace(/ [^.]*\brefuses instead\.$/, '');
 }
 
 /**

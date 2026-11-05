@@ -1181,6 +1181,17 @@ function holderReadRefusal(scope: string, err: unknown): Error {
 const DIRECTORY_REFUSING_APPROVER_TYPES: ReadonlySet<string> = new Set(['queue', 'team', 'position']);
 
 /**
+ * [#29604] The read a failed ADR-0105 D9 cross-organization read filter names:
+ * that filter's, not the directory's. One wording for the static resolver and
+ * the `expression` one, so a refusal from either says the same thing.
+ */
+function crossOrgFilterReadFailure(directoryOrg: unknown, organizationId: unknown, err: unknown): string {
+  return `the cross-organization read filter (who among the people of organization '${directoryOrg}' can read `
+    + `this request of organization '${organizationId}') could not be read: `
+    + `${err instanceof Error ? err.message : String(err)}.`;
+}
+
+/**
  * [ADR-0142 D6 as amended; ruling record 6599731698 on #29604, letter B] The
  * approval node refuses to open because a directory read behind one of its
  * approvers failed ({@link DIRECTORY_REFUSING_APPROVER_TYPES}).
@@ -2692,11 +2703,7 @@ export class ApprovalService implements IApprovalService {
           directoryOrgId: directoryOrg,
         });
       } catch (err) {
-        throw Object.assign(new Error(
-          `the cross-organization read filter (who among the people of organization '${directoryOrg}' can read `
-          + `this request of organization '${organizationId}') could not be read: `
-          + `${err instanceof Error ? err.message : String(err)}.`,
-        ), { cause: err });
+        throw Object.assign(new Error(crossOrgFilterReadFailure(directoryOrg, organizationId, err)), { cause: err });
       }
     };
 
@@ -3046,9 +3053,23 @@ export class ApprovalService implements IApprovalService {
         users = [];
       }
       if (crossOrg && users.length) {
-        users = await filterApproversWhoCanRead(this.orgScopeDeps, users, organizationId, {
-          approverType: resolveAs, value: key, directoryOrgId: directoryOrg,
-        });
+        try {
+          users = await filterApproversWhoCanRead(this.orgScopeDeps, users, organizationId, {
+            approverType: resolveAs, value: key, directoryOrgId: directoryOrg,
+          });
+        } catch (err) {
+          // [#29604] The read filter is a read behind a `team` or `position`
+          // value as much as the expansion is: it refuses the node the same
+          // way, naming the filter's read as the static resolver's `bounded`
+          // does. Every other case fails as it always did.
+          if (onDirectoryFailure === 'refuse' && DIRECTORY_REFUSING_APPROVER_TYPES.has(resolveAs)) {
+            throw new ApproverDirectoryUnreadableError({
+              type: resolveAs, value: key, organizationId: directoryOrg,
+              failedRead: crossOrgFilterReadFailure(directoryOrg, organizationId, err), expression: source, cause: err,
+            });
+          }
+          throw err;
+        }
       }
       if (!users.length) {
         slots.push({ id: `${resolveAs}:${key}`, subGroup: key });
