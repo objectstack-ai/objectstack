@@ -1382,6 +1382,39 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       expect(formula[0]!.message).toContain('this faults at runtime, so the field silently evaluates to null');
     });
 
+    // [#30494] An advisory (`warning` / `info`) validation rule fails open: a
+    // fault skips the rule and the write proceeds, so its date arithmetic says
+    // so, still an error. Control: a formula field keeps the null sentence.
+    it('says an advisory validation rule\'s date arithmetic skips the rule; a formula keeps the null sentence (#30494)', () => {
+      const issues = validateStackExpressions({
+        objects: [{
+          name: 'crm_opportunity',
+          fields: {
+            close_date: { type: 'date' },
+            end_date: { type: 'date' },
+            next_day: { type: 'formula', expression: 'record.close_date + 1' },
+          },
+          validations: [
+            { name: 'late', condition: 'record.close_date + 1 > 3', severity: 'warning' },
+            { name: 'long', condition: 'record.end_date - record.close_date > duration("24h")', severity: 'info' },
+          ],
+        }],
+      });
+      const found = issues.filter(i => /^date arithmetic/.test(i.message));
+      expect(found.map(i => i.severity)).toEqual(['error', 'error', 'error']);
+      const rules = found.filter(i => /validation/.test(i.where));
+      expect(rules).toHaveLength(2);
+      for (const i of rules) {
+        expect(i.message, i.where).toContain(
+          'the rule is advisory, so a rule that cannot be evaluated is skipped, not refused: the write proceeds',
+        );
+        expect(i.message, i.where).not.toMatch(/evaluates to null|is refused, not skipped/);
+      }
+      const formula = found.filter(i => !/validation/.test(i.where));
+      expect(formula).toHaveLength(1);
+      expect(formula[0]!.message).toContain('this faults at runtime, so the field silently evaluates to null');
+    });
+
     // [#29959] `seedRunVariables` seeds the flow's declared variables before it
     // flattens the record, and the flattening skips a name already bound: a
     // bare `title` here reads the NUMBER variable and `title > 5` runs. Only
