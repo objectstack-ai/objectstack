@@ -85,12 +85,13 @@ import { AppSwitcher } from './AppSwitcher.js';
 import type { ConnectionState } from '@object-ui/data-objectstack';
 import { useAdapter } from '../providers/AdapterProvider.js';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
+import { useServedAppLabel } from '../hooks/useServedAppLabel.js';
 import type { BreadcrumbItem as BreadcrumbItemType } from '@object-ui/types';
 import { useAuth, getUserInitials } from '@object-ui/auth';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useBundledReads } from '../providers/bundledReads.js';
 import { readItemPreferLocal, useReadItemsByName } from '../hooks/useObjectPresence.js';
-import { resolveKeyedI18nLabel, preferLocal, matchAppBySegment, appStudioRoutePath } from '../utils/index.js';
+import { preferLocal, matchAppBySegment, appStudioRoutePath } from '../utils/index.js';
 import { appAddressSegment } from '../utils/appRoute.js';
 import { getIcon } from '../utils/getIcon.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
@@ -474,7 +475,8 @@ export function AppHeader({
   // Same signal as the FAB and the `/ai` route guard.
   const { enabled: aiEnabled } = useAiSurfaceEnabled();
   const { t, language } = useObjectTranslation();
-  const { objectPluralLabel, dashboardLabel, pageLabel, reportLabel, viewLabel, appLabel } = useObjectLabel();
+  const { objectPluralLabel, dashboardLabel, pageLabel, reportLabel, viewLabel } = useObjectLabel();
+  const { appLabel } = useServedAppLabel();
   // The dashboard, page and report lists are LAZY getters: reading one starts
   // its `/meta/:type` read. They are read below only on the route type that
   // names one (the phone bar's title), never destructured here, so a route of
@@ -1324,7 +1326,7 @@ export function AppHeader({
                 .filter((a: any) => a.active !== false && a.hidden === true && a.name !== 'account')
                 .map((app: any) => {
                   const AppIcon = getIcon(app.icon);
-                  const label = appLabel({ name: app.name, label: resolveKeyedI18nLabel(app.label, t) });
+                  const label = appLabel(app);
                   return (
                     <DropdownMenuItem
                       key={`hidden_app_${app.name}`}

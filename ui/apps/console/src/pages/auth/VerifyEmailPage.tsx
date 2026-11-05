@@ -6,6 +6,12 @@
  * `GET /api/v1/auth/verify-email?token=…` (better-auth's standard endpoint,
  * served as GET only). `useAuth()` doesn't expose a `verifyEmail()` so we
  * call the REST endpoint directly.
+ *
+ * It is also where the server's own verification link lands when the sign-in
+ * was the mobile hand-off (#30157, `./handoffRedirect` rule 6): with
+ * `?handoff=verified` and no token, the server has already verified the
+ * address (or appended its `error`), and the page tells the person to go back
+ * to the app and sign in there, with no Console sign-in link.
  */
 
 import { useEffect, useState } from 'react';
@@ -20,6 +26,7 @@ import {
   CardTitle,
 } from '@object-ui/components';
 import { AuthLayout } from './AuthLayout';
+import { HANDOFF_VERIFIED_PARAM } from './handoffRedirect';
 
 const AUTH_BASE = `${import.meta.env.VITE_SERVER_URL || ''}/api/v1/auth`;
 
@@ -27,10 +34,18 @@ export function VerifyEmailPage() {
   const { t } = useObjectTranslation();
   const [params] = useSearchParams();
   const token = params.get('token');
+  // The server's landing for a hand-off sign-in's mail: it verified already.
+  const handoffLanding = !token && params.get(HANDOFF_VERIFIED_PARAM) === 'verified';
+  const serverError = params.get('error');
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [message, setMessage] = useState('');
 
   useEffect(() => {
+    if (handoffLanding) {
+      // better-auth appends `error=CODE` to the callback when the token is bad.
+      setStatus(serverError ? 'error' : 'success');
+      return;
+    }
     if (!token) {
       setStatus('error');
       setMessage(
@@ -84,7 +99,7 @@ export function VerifyEmailPage() {
     return () => {
       cancelled = true;
     };
-  }, [token, t]);
+  }, [token, t, handoffLanding, serverError]);
 
   return (
     <AuthLayout>
@@ -115,20 +130,27 @@ export function VerifyEmailPage() {
               <CardTitle className="text-xl tracking-tight">
                 {t('auth.verifyEmail.successTitle', { defaultValue: 'Email verified' })}
               </CardTitle>
-              <CardDescription>
-                {t('auth.verifyEmail.successDescription', {
-                  defaultValue: 'Your email is confirmed. You can now sign in.',
-                })}
+              <CardDescription data-landing={handoffLanding ? 'handoff' : undefined}>
+                {handoffLanding
+                  ? t('auth.verifyEmail.handoffSuccessDescription', {
+                      defaultValue:
+                        'Your email is confirmed. Go back to the app you were signing in to, and sign in there.',
+                    })
+                  : t('auth.verifyEmail.successDescription', {
+                      defaultValue: 'Your email is confirmed. You can now sign in.',
+                    })}
               </CardDescription>
             </CardHeader>
-            <CardContent className="text-center">
-              <Link
-                to="/login"
-                className="text-sm font-medium text-primary underline-offset-4 hover:underline"
-              >
-                {t('auth.verifyEmail.signInLink', { defaultValue: 'Go to sign in' })}
-              </Link>
-            </CardContent>
+            {handoffLanding ? null : (
+              <CardContent className="text-center">
+                <Link
+                  to="/login"
+                  className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+                >
+                  {t('auth.verifyEmail.signInLink', { defaultValue: 'Go to sign in' })}
+                </Link>
+              </CardContent>
+            )}
           </>
         )}
         {status === 'error' && (

@@ -62,10 +62,42 @@
  * A deployment that stored the dead-end state before this check existed gets
  * back in with `OS_AUTH_EMAIL_PASSWORD_ENABLED=true`, the settings environment
  * override, which wins over the stored value, and a restart.
+ *
+ * ## The two doors that are not a settings save
+ *
+ * The same end state is reached without saving the auth settings, so the same
+ * list of ways in is asked at two more places:
+ *
+ *   - **Deleting the last identity provider.** Setup's "Delete SSO Provider"
+ *     posts better-auth's `/sso/delete-provider`. Measured on `main`
+ *     `bfca0efb` with email and password off and one SAML provider as the only
+ *     other way in: `200`, the row gone, and after sign-out every sign-in
+ *     answered `400` or `404`. {@link ssoProviderDeleteRefusal} answers it
+ *     from the global before-hook, ahead of the vendor's first write: `409
+ *     DELETE_RESTRICTED` when the provider is the last row and nothing but
+ *     enterprise SSO is in force, and `503 SERVICE_UNAVAILABLE` when the
+ *     provider list cannot be read to tell. The data API is not a door: it
+ *     refuses a delete on `sys_sso_provider` (`405`), and the object has no
+ *     switch that disables a provider.
+ *   - **A boot that serves no way in.** A redeploy whose configuration no
+ *     longer declares the last provider (measured: Google declared by
+ *     `GOOGLE_CLIENT_*`, dropped at the next boot) started clean and served
+ *     nothing. Nothing is refused there: a provider can leave the
+ *     configuration in many ways, and a deployment that delegates sign-in in a
+ *     way this list does not count (`ssoOnlyMode` alone) must still boot. The
+ *     boot says it once, at `error`, with the recovery
+ *     ({@link reportIfNoSignInMethodAtBoot}).
  */
 
 import { resolveLocale } from '@objectstack/core';
-import { probeSsoProvidersPresence, type BootProbeEngine } from './boot-sign-in-reachability.js';
+import type { StandardErrorCode } from '@objectstack/spec/api';
+import {
+  probeSsoProvidersPresence,
+  type BootDiagnosticLogger,
+  type BootProbeEngine,
+  type BootStorePresence,
+} from './boot-sign-in-reachability.js';
+import { SSO_PROVIDER_OBJECT } from './sso-client-secret.js';
 
 /** A way in other than email and password, as {@link otherSignInMethods} names it. */
 export type OtherSignInMethod = 'social_provider' | 'enterprise_sso' | 'phone_number' | 'host_handoff';
@@ -155,11 +187,12 @@ function providerCounts(
 /**
  * The ways in besides email and password that are in force now. `withoutGoogle`
  * leaves the settings-managed Google provider out, to judge a save that may
- * remove or add it.
+ * remove or add it; `withoutEnterpriseSso` leaves enterprise SSO out (and reads
+ * no provider row), for a caller that judges the provider rows itself.
  */
 export async function otherSignInMethods(
   deps: SignInMethodFloorDeps,
-  options: { withoutGoogle?: boolean } = {},
+  options: { withoutGoogle?: boolean; withoutEnterpriseSso?: boolean } = {},
 ): Promise<OtherSignInMethod[]> {
   const config = deps.publicConfig();
   const methods: OtherSignInMethod[] = [];
@@ -169,7 +202,11 @@ export async function otherSignInMethods(
   if (providers.length > 0) methods.push('social_provider');
   if (config.features?.phoneNumber === true) methods.push('phone_number');
   if (deps.hostSignInHandoff) methods.push('host_handoff');
-  if (config.features?.sso === true && (await probeSsoProvidersPresence(deps.engine())) === 'present') {
+  if (
+    !options.withoutEnterpriseSso &&
+    config.features?.sso === true &&
+    (await probeSsoProvidersPresence(deps.engine())) === 'present'
+  ) {
     methods.push('enterprise_sso');
   }
   return methods;
@@ -180,6 +217,10 @@ export async function otherSignInMethods(
 interface SignInFloorCopy {
   emailPassword: string;
   google: string;
+  /** Deleting the last identity provider ({@link ssoProviderDeleteRefusal}). */
+  enterpriseSso: string;
+  /** The provider list could not be read to judge that delete. */
+  enterpriseSsoUnverified: string;
 }
 
 /** One entry per locale the settings bundle ships, as the currency lock's copy. */
@@ -194,6 +235,14 @@ export const SIGN_IN_FLOOR_COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', Sign
       'With email and password off, this change to Google would leave no way to sign in, so everyone would be ' +
       'locked out, administrators included. Keep email and password sign-in on, or set up another sign-in method, ' +
       'before or in this save.',
+    enterpriseSso:
+      'This is the last enterprise SSO identity provider, and with email and password off nothing else signs ' +
+      'anyone in, so deleting it would lock everyone out, administrators included. First turn email and password ' +
+      'sign-in back on, or register another identity provider or set up another sign-in method, then delete this one.',
+    enterpriseSsoUnverified:
+      'The identity provider was not deleted: the list of identity providers could not be read to confirm that ' +
+      'another way to sign in remains, and with email and password off this one may be the last. Try again once ' +
+      'the database is reachable.',
   },
   'zh-CN': {
     emailPassword:
@@ -202,6 +251,12 @@ export const SIGN_IN_FLOOR_COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', Sign
     google:
       '邮箱/密码登录关闭时，这项 Google 修改会导致没有任何登录方式，所有人（包括管理员）都将无法登录。' +
       '请保持邮箱/密码登录开启，或在本次保存之前或同时配置另一种登录方式。',
+    enterpriseSso:
+      '这是最后一个企业 SSO 身份提供方，邮箱/密码登录又已关闭，没有其他登录方式，删除后所有人（包括管理员）都将无法登录。' +
+      '请先重新开启邮箱/密码登录，或登记另一个身份提供方、配置另一种登录方式，然后再删除它。',
+    enterpriseSsoUnverified:
+      '身份提供方未删除：无法读取身份提供方列表来确认仍有其他登录方式，而邮箱/密码登录已关闭，它可能是最后一种。' +
+      '请在数据库可以访问时重试。',
   },
   'ja-JP': {
     emailPassword:
@@ -213,6 +268,14 @@ export const SIGN_IN_FLOOR_COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', Sign
       'メール/パスワードログインがオフの状態でこの Google の変更を行うとログイン方法がなくなり、管理者を含む全員が' +
       'ログインできなくなります。メール/パスワードログインをオンのままにするか、この保存の前か同じ保存で別のログイン' +
       '方法を設定してください。',
+    enterpriseSso:
+      'これは最後のエンタープライズ SSO の ID プロバイダーで、メール/パスワードログインもオフのため他にログイン方法が' +
+      'ありません。削除すると管理者を含む全員がログインできなくなります。先にメール/パスワードログインをオンに戻すか、' +
+      '別の ID プロバイダーを登録するか別のログイン方法を設定してから削除してください。',
+    enterpriseSsoUnverified:
+      'ID プロバイダーは削除されませんでした。ID プロバイダーの一覧を読み取れず、他のログイン方法が残ることを確認できません' +
+      'でした。メール/パスワードログインがオフのため、これが最後のログイン方法かもしれません。データベースに接続できる' +
+      'ようになってから再試行してください。',
   },
   'es-ES': {
     emailPassword:
@@ -225,6 +288,15 @@ export const SIGN_IN_FLOOR_COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', Sign
       'Con el correo y la contraseña desactivados, este cambio en Google dejaría sin ninguna forma de iniciar ' +
       'sesión, así que todo el mundo quedaría fuera, incluidos los administradores. Mantenga activado el inicio de ' +
       'sesión con correo y contraseña o configure otro método, antes o en este mismo guardado.',
+    enterpriseSso:
+      'Este es el último proveedor de identidad de SSO empresarial y, con el correo y la contraseña desactivados, ' +
+      'nada más permite iniciar sesión, así que eliminarlo dejaría fuera a todo el mundo, incluidos los ' +
+      'administradores. Vuelva a activar primero el inicio de sesión con correo y contraseña, o registre otro ' +
+      'proveedor de identidad o configure otro método, y después elimine este.',
+    enterpriseSsoUnverified:
+      'El proveedor de identidad no se ha eliminado: no se pudo leer la lista de proveedores de identidad para ' +
+      'confirmar que queda otra forma de iniciar sesión y, con el correo y la contraseña desactivados, este podría ' +
+      'ser el último. Vuelva a intentarlo cuando la base de datos esté disponible.',
   },
 };
 
@@ -387,4 +459,130 @@ export function registerSignInMethodFloor(
       // No `auth` namespace or no such key on this service: nothing saves it.
     }
   }
+}
+
+// ── Door 1: deleting the last identity provider ─────────────────────────────
+
+/** The better-auth endpoint Setup's "Delete SSO Provider" posts. */
+export const SSO_PROVIDER_DELETE_PATH = '/sso/delete-provider';
+
+/**
+ * Whether a `sys_sso_provider` row other than `providerId` exists. One bounded
+ * read of at most two rows answers it: the only way none of them is another
+ * provider is that the table holds exactly the provider being deleted.
+ * `absent` therefore means "`providerId` is the last row", and `not_found`
+ * that the table holds no row at all, so the delete removes nothing (the
+ * vendor answers it `404`). A read that fails, or no engine, is `unknown`.
+ */
+export async function probeOtherSsoProviders(
+  engine: BootProbeEngine | undefined,
+  providerId: string,
+): Promise<BootStorePresence | 'not_found'> {
+  if (!engine || typeof engine.find !== 'function') return 'unknown';
+  try {
+    const rows = await engine.find(SSO_PROVIDER_OBJECT, { limit: 2 }, { context: { isSystem: true } });
+    if (rows.length === 0) return 'not_found';
+    return rows.some((row) => row?.provider_id !== providerId) ? 'present' : 'absent';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/** The refusal of a `/sso/delete-provider` request; the caller throws it as better-auth's `APIError`. */
+export interface SsoProviderDeleteRefusal {
+  /** The better-auth status name. */
+  status: 'CONFLICT' | 'SERVICE_UNAVAILABLE';
+  code: StandardErrorCode;
+  message: string;
+  /** Set on the `409`: the way in the delete would remove, in the settings floor's vocabulary. */
+  lastSignInMethod?: 'enterprise_sso';
+}
+
+/**
+ * Whether deleting the identity provider `providerId` would leave no way to
+ * sign in, asked before the vendor deletes anything. Nothing is refused while
+ * email and password is on, while enterprise SSO is not switched on (its rows
+ * then sign nobody in either way), or while another way in counts
+ * ({@link otherSignInMethods}, enterprise SSO left out) or another provider row
+ * remains. Otherwise the delete would remove the last way in: `409
+ * DELETE_RESTRICTED` (the standard code for a delete refused while something
+ * depends on the row; `organization-delete.ts` answers the same), or `503
+ * SERVICE_UNAVAILABLE` when the provider list cannot be read to tell, because a
+ * guard that could not be evaluated does not pass.
+ */
+export async function ssoProviderDeleteRefusal(
+  deps: SignInMethodFloorDeps,
+  providerId: string,
+  locale?: string,
+): Promise<SsoProviderDeleteRefusal | undefined> {
+  const config = deps.publicConfig();
+  if (config.emailPassword?.enabled !== false) return undefined;
+  if (config.features?.sso !== true) return undefined;
+  if ((await otherSignInMethods(deps, { withoutEnterpriseSso: true })).length > 0) return undefined;
+  const others = await probeOtherSsoProviders(deps.engine(), providerId);
+  if (others === 'present' || others === 'not_found') return undefined;
+  const copy = signInFloorCopy(locale);
+  if (others === 'unknown') {
+    return { status: 'SERVICE_UNAVAILABLE', code: 'SERVICE_UNAVAILABLE', message: copy.enterpriseSsoUnverified };
+  }
+  return {
+    status: 'CONFLICT',
+    code: 'DELETE_RESTRICTED',
+    message: copy.enterpriseSso,
+    lastSignInMethod: 'enterprise_sso',
+  };
+}
+
+// ── Door 2: a boot that serves no way in ────────────────────────────────────
+
+/** The grep token of the boot report, beside `no_sign_in_account_at_boot`. */
+export const NO_SIGN_IN_METHOD_AT_BOOT = 'no_sign_in_method_at_boot';
+
+/**
+ * The boot report for a deployment that serves no way to sign in, or `null`.
+ * It makes a positive claim only: email and password is off, no other way in
+ * counts, and when enterprise SSO is switched on the provider table was READ
+ * and holds no row. A provider table that cannot be read proves nothing either
+ * way, so it stays silent, as `no_sign_in_account_at_boot` does on an
+ * unanswered probe.
+ */
+export async function resolveNoSignInMethodReport(deps: SignInMethodFloorDeps): Promise<string | null> {
+  const config = deps.publicConfig();
+  if (config.emailPassword?.enabled !== false) return null;
+  if ((await otherSignInMethods(deps, { withoutEnterpriseSso: true })).length > 0) return null;
+  if (config.features?.sso === true && (await probeSsoProvidersPresence(deps.engine())) !== 'absent') return null;
+  return (
+    `[auth] ${NO_SIGN_IN_METHOD_AT_BOOT}: this deployment serves NO way to sign in, so nobody can sign in, ` +
+    'administrators included, while it keeps looking healthy. Email and password sign-in is off, and no other ' +
+    'sign-in method is in force: no social or OIDC provider with a client ID and secret, no enterprise SSO identity ' +
+    'provider, no phone-number sign-in and no host sign-in handoff. A provider the previous deployment declared ' +
+    'may be gone from its configuration. Recover: set OS_AUTH_EMAIL_PASSWORD_ENABLED=true and restart (it overrides ' +
+    'the stored auth.email_password_enabled), or restore the sign-in method this configuration no longer declares; ' +
+    'then set up another sign-in method before turning email and password off again. The boot continues.'
+  );
+}
+
+/**
+ * Say {@link resolveNoSignInMethodReport} once, at `error` (or at `warn` on a
+ * sink without `error`, the `boot-sign-in-reachability.ts` way). Never throws
+ * and never refuses the boot. Answers the message it printed, or `null`.
+ */
+export async function reportIfNoSignInMethodAtBoot(
+  deps: SignInMethodFloorDeps,
+  logger?: BootDiagnosticLogger,
+): Promise<string | null> {
+  let message: string | null;
+  try {
+    message = await resolveNoSignInMethodReport(deps);
+  } catch {
+    return null;
+  }
+  if (!message || !logger) return message;
+  try {
+    if (typeof logger.error === 'function') logger.error(message);
+    else logger.warn(message);
+  } catch {
+    // A sink that throws is not a reason to fail the boot.
+  }
+  return message;
 }

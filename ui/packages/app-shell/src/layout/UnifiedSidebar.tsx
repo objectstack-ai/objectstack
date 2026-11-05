@@ -52,7 +52,7 @@ import { useNavActionDispatch } from '../hooks/useNavActionDispatch.js';
 import { useNavTargetLabel } from '../hooks/useNavTargetLabel.js';
 import { useNavDocTargetCheck } from '../hooks/useNavDocTargetCheck.js';
 import { useNavMemberGates } from '../hooks/useNavMemberGates.js';
-import { matchAppBySegment, resolveKeyedI18nLabel } from '../utils/index.js';
+import { matchAppBySegment } from '../utils/index.js';
 import { appAddressSegment } from '../utils/appRoute.js';
 import { withoutUnreadableObjectEntries } from '../utils/navObjectReadGate.js';
 import { useHomePath } from '../hooks/useHomePath.js';
@@ -61,10 +61,10 @@ import { useHomePath } from '../hooks/useHomePath.js';
 // @objectstack/spec 17.0.0-rc.6) for the INLINE per-locale map form of
 // `I18nLabel`, not for a translation-key ref.
 import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui';
-import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
-// useObjectLabel provides appLabel/appDescription for convention-based
-// i18n lookup — `{ns}.apps.{name}.label` resolves to the translated label
-// loaded from /api/v1/i18n/translations/:locale.
+import { useObjectTranslation } from '@object-ui/i18n';
+// The served app label as given; the `{ns}.apps.{name}.label` bundle lookup
+// only for an app no server translated (objectstack#30311).
+import { useServedAppLabel } from '../hooks/useServedAppLabel.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import {
   useAppContextSelectors,
@@ -173,7 +173,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   const { isMobile, setOpenMobile } = useSidebar();
   const location = useLocation();
   const { t, language } = useObjectTranslation();
-  const { appLabel } = useObjectLabel();
+  const { appLabel } = useServedAppLabel();
   const { context, currentAppName } = useNavigationContext();
   const { user, activeOrganization } = useAuth();
   const { isAdmin: isWorkspaceAdmin } = useWorkspaceAdminStatus();
@@ -587,7 +587,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
           <div className="flex min-h-[44px] items-center gap-2.5 px-2" data-testid="mobile-sidebar-app">
             <AppMark app={activeApp} size="md" />
             <span className="flex-1 truncate text-[15px] font-semibold">
-              {appLabel({ name: activeApp.name, label: resolveKeyedI18nLabel(activeApp.label, t) })}
+              {appLabel(activeApp)}
             </span>
             <Link to={homePath} onClick={() => setOpenMobile(false)} data-testid="mobile-sidebar-home" aria-label={t('layout.appSwitcher.allApps', { defaultValue: 'All apps' })} title={t('layout.appSwitcher.allApps', { defaultValue: 'All apps' })} className="inline-flex size-11 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
               <LayoutGrid className="h-5 w-5" />

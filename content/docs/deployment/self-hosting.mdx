@@ -628,6 +628,28 @@ logins too, or leave the directory empty until the first administrator exists.
 A deployment that boots with zero human rows is the case both paths above
 describe, and it needs none of this.
 
+### No sign-in method left
+
+Accounts are not enough if nothing serves a way to use them. With email and
+password sign-in off, the deployment depends on its other sign-in methods: a
+social or OIDC provider with a client ID and secret, enterprise SSO with at
+least one registered identity provider, phone-number sign-in, or a host
+sign-in handoff. Three doors used to remove the last of them without a word;
+each now answers:
+
+| Door | What happens now |
+|:---|:---|
+| The auth settings save turns email and password off, or removes Google, leaving nothing | Refused `400 SETTINGS_VALIDATION` at the field |
+| Setup's **Delete SSO Provider** on the last identity provider (`POST /api/v1/auth/sso/delete-provider`) | Refused `409 DELETE_RESTRICTED`, nothing deleted; `503 SERVICE_UNAVAILABLE` when the provider list cannot be read to tell |
+| A redeploy whose configuration no longer declares the last provider (for example, without the `GOOGLE_CLIENT_*` pair) | Boots, and reports at **error** under the grep token `no_sign_in_method_at_boot` |
+
+The boot is not refused: a deployment that signs people in through a door the
+auth plugin cannot see keeps starting. **Recovery:** set
+`OS_AUTH_EMAIL_PASSWORD_ENABLED=true` and restart. The environment override
+wins over a stored `auth.email_password_enabled = false` and over the stack
+config, and email and password sign-in comes back. Or restore the sign-in
+method the configuration no longer declares.
+
 ## Who may sign up — and what each posture tells a stranger
 
 `auth.audience.posture` is the one declaration answering who may become a user

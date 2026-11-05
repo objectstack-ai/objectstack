@@ -74,6 +74,7 @@ import type {
 // the published declaration, and the pure half of the import (what a package
 // body holds, what is copied, what is refused) lives beside this file.
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities, CapabilityDescriptor } from '@objectstack/spec/api';
+import type { SeedAppliedLandedParsed } from '@objectstack/spec/api';
 import { readServiceSelfInfo, readChannelRoute, readAuthFamilies, isSubscribableChannel, CHANNEL_SURFACE_SLOTS, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
 // [#24395] The save's authoring surface.
 import {
@@ -11216,6 +11217,8 @@ export class ObjectStackProtocolImplementation implements
             updated: number;
             error?: string;
             errors?: unknown[];
+            /** [#30348] Per object, the rows created vs matched — `SeedAppliedLandedSchema`. */
+            landed?: SeedAppliedLandedParsed[];
         };
         /**
          * Present when a publish-time materializer is registered for this type
@@ -11332,7 +11335,7 @@ export class ObjectStackProtocolImplementation implements
         actor?: string;
         skipSeedApply?: boolean;
     }): Promise<{
-        seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[] };
+        seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[]; landed?: SeedAppliedLandedParsed[] };
         materializeApplied?: PublishMaterializeResult;
         projectionApplied?: MutationProjectionOutcome;
     }> {
@@ -11353,6 +11356,7 @@ export class ObjectStackProtocolImplementation implements
     ): Promise<{
         success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[];
         issues?: Array<{ path: string; message: string; code?: string | undefined }>;
+        landed?: SeedAppliedLandedParsed[];
     }> {
         // [#25467 cut 14] The body moved to `protocol-publish-batch.ts` (see `PublishBatchHost`).
         const readEngine = () => this.engine;
@@ -11671,7 +11675,7 @@ export class ObjectStackProtocolImplementation implements
         }>;
         failed: Array<{ type: string; name: string; error: string; code?: string }>;
         /** Aggregate result of materializing every published `seed` (absent when no seeds). */
-        seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[] };
+        seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[]; landed?: SeedAppliedLandedParsed[] };
         /**
          * ADR-0086 P2 — aggregate result of publish-time materializers across the
          * batch (e.g. `flow`). Absent when no published item had a registered

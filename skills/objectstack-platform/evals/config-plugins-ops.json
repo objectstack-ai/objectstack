@@ -215,6 +215,40 @@
           "\"private_key\""
         ]
       }
+    },
+    {
+      "id": 13,
+      "prompt": "HotCRM (`hotcrm`, 3.2.0) ships the `crm_pipeline` dataset and the `crm_sales_overview` page. Can we replace both with our own the way we replaced its `crm_account_grid` view, or is that only for views?",
+      "expected_output": "The same declaration, both types. In `hotcrm.custom`, an item of the same name and type with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` in its body replaces the base's dataset or page whole, and every read of the name serves it: a pair's declared override is served for a view, dashboard, report, email_template, translation, flow, page, app, dataset, doc, book or mapping. Not an edit of HotCRM's read-only item, not a package-unbound Setup row, and not an object extension (`__c` fields add to an object and replace no dataset or page).",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "hotcrm.custom",
+          "overrides:",
+          "dataset",
+          "page"
+        ],
+        "must_not_contain": [
+          "PUT /api/v1/meta/dataset/crm_pipeline",
+          "PUT /api/v1/meta/page/crm_sales_overview"
+        ]
+      }
+    },
+    {
+      "id": 14,
+      "prompt": "We overrode HotCRM's `crm_account_grid` view from `hotcrm.custom`; the customer wants HotCRM's original back. How do we undo it?",
+      "expected_output": "Remove the pair's item: `DELETE /api/v1/meta/view/crm_account_grid?package=hotcrm.custom`, the removal naming the pair. The base's own document is served again by every read of the name (no `?package`, `?package=hotcrm`, the layered read, both lists), and the pair's export no longer carries the item. Not an edit of HotCRM's item, not a rollback of the base's row (its package-less rollback is refused), and not a second override that copies the base's body into `hotcrm.custom`.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "DELETE",
+          "?package=hotcrm.custom"
+        ],
+        "must_not_contain": [
+          "/rollback",
+          "PUT /api/v1/meta/view/crm_account_grid"
+        ]
+      }
     }
   ]
 }

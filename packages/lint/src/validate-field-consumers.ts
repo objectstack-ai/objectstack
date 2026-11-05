@@ -165,7 +165,10 @@
  *     `controlled_by_parent` sharing, roll-ups and inline grids as its
  *     readers; the relationship is consumed by being declared).
  *   - **Object extensions** (`objectExtensions`) are not judged: the fields
- *     they add belong to objects this stack does not own.
+ *     they add belong to objects this stack does not own. They are still
+ *     READ (#30383): a dataset or cube path is resolved over the objects as
+ *     served, so a hop through an extension-added relationship credits the
+ *     declared field it reaches.
  *
  * Severity is `warning` and stays so: a refusal would narrow the authorable
  * surface (today-valid metadata would start being refused), which is the
@@ -183,7 +186,7 @@ import type { DisplayNameObjectMeta } from '@objectstack/spec/data';
 import { referenceTargetOf } from '@objectstack/spec/data';
 import { collectionEntries } from './collection-entries.js';
 import {
-  indexObjectGraph,
+  indexServedObjectGraph,
   isUnjudgeable,
   joinablePrefixes,
   recordsOf,
@@ -1194,7 +1197,7 @@ function creditColumnPath(
  * walk.
  */
 function creditAnalyticsColumns(ledger: ConsumerLedger, stack: AnyRec): void {
-  const graph = indexObjectGraph(stack);
+  const graph = indexServedObjectGraph(stack);
   for (const { rec: ds, path: dsPath } of collectionEntries(stack.datasets, 'datasets')) {
     const object = strName(ds.object);
     if (!object || !graph.get(object)) continue;
