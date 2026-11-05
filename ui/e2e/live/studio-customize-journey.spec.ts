@@ -64,7 +64,7 @@ import { test as base, expect, type APIRequestContext, type Page, type Response 
  * session the spec was written for.
  */
 const test = base.extend({
-  request: async ({ playwright, storageState, baseURL, userAgent, extraHTTPHeaders, ignoreHTTPSErrors }, use) => {
+  request: async ({ playwright, storageState, baseURL, userAgent, extraHTTPHeaders, ignoreHTTPSErrors }, provide) => {
     const request = await playwright.request.newContext({
       storageState,
       baseURL,
@@ -72,7 +72,7 @@ const test = base.extend({
       ignoreHTTPSErrors,
       extraHTTPHeaders: { ...extraHTTPHeaders, Connection: 'close' },
     });
-    await use(request);
+    await provide(request);
     await request.dispose();
   },
 });
