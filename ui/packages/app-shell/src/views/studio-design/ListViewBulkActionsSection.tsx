@@ -328,10 +328,16 @@ function FieldUpdateRow({
   const params = defsOf(def.params);
   const asked = new Set(params.map((p) => p.name));
   const label = typeof def.label === 'string' ? def.label : '';
-  const confirm = typeof def.confirmText === 'string' ? def.confirmText : '';
+  // A served def carries `confirmText` as the parsed `{ dialect, source }`
+  // envelope, the shorthand string lifted: the sentence is its `source`, and an
+  // edit keeps the envelope.
+  const envelope = isPlainObject(def.confirmText) ? def.confirmText : null;
+  const confirm =
+    typeof def.confirmText === 'string' ? def.confirmText : typeof envelope?.source === 'string' ? envelope.source : '';
   const setText = (key: 'label' | 'confirmText', value: string) => {
     const { [key]: _dropped, ...rest } = def;
-    onChange(value.trim() ? { ...rest, [key]: value } : rest);
+    const kept = key === 'confirmText' && envelope ? { ...envelope, source: value } : value;
+    onChange(value.trim() ? { ...rest, [key]: kept } : rest);
   };
   return (
     <div className="space-y-1.5 rounded border border-input p-2" data-testid="list-view-bulk-def" data-name={name} data-operation="update">

@@ -355,6 +355,30 @@ describe('ObjectListViewInspector — selection actions (objectstack#30089)', ()
     expect(lastPut().body.config).not.toHaveProperty('bulkActionDefs');
   });
 
+  it('a served confirmation, the parsed `{ dialect, source }` envelope, is shown and edited as its sentence', async () => {
+    server.active.set(
+      `view/${VIEW}`,
+      view({
+        bulkActionDefs: [
+          {
+            name: 'set_status',
+            label: 'Set status',
+            operation: 'update',
+            params: [{ name: 'status', label: 'Status', type: 'text', required: true }],
+            confirmText: { dialect: 'template', source: 'Set {{ count }}?' },
+          },
+        ],
+      }),
+    );
+    await openPanel();
+    const confirm = within(section()).getByTestId('list-view-bulk-def-confirm');
+    expect(confirm).toHaveValue('Set {{ count }}?');
+    fireEvent.change(confirm, { target: { value: 'Set status on {{ count }}?' } });
+    await save();
+    expect(lastPut()).toMatchObject({ status: 200 });
+    expect(lastPut().body.config.bulkActionDefs[0].confirmText).toEqual({ dialect: 'template', source: 'Set status on {{ count }}?' });
+  });
+
   it('removing the last action removes `bulkActions`', async () => {
     server.active.set(`view/${VIEW}`, view({ bulkActions: ['escalate'] }));
     await openPanel();
