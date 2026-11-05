@@ -134,14 +134,14 @@ async function boot(posture: Posture): Promise<ObjectQL> {
   return engine;
 }
 
-const inOrg = (organizationId: string) => ({ context: { isSystem: true, tenantId: organizationId } } as any);
+const inOrg = (organizationId: string) => ({ context: { isSystem: true, tenantId: organizationId } });
 
 async function seedInvoice(engine: ObjectQL, id: string, organizationId: string) {
   await engine.insert(INVOICE, { id, status: 'open', organization_id: organizationId }, inOrg(organizationId));
 }
 
 async function storedInvoice(engine: ObjectQL, id: string): Promise<Record<string, unknown> | undefined> {
-  const rows = await engine.find(INVOICE, { where: { id }, context: { isSystem: true } } as any);
+  const rows = await engine.find(INVOICE, { where: { id }, context: { isSystem: true } });
   return (Array.isArray(rows) ? rows : [])[0];
 }
 
@@ -158,8 +158,8 @@ async function answerOf(run: () => Promise<unknown>): Promise<Record<string, unk
 
 const writeById = (engine: ObjectQL, op: 'update' | 'delete', id: string, context: object) =>
   answerOf(() => op === 'update'
-    ? engine.update(INVOICE, { status: 'closed' }, { where: { id }, context: structuredClone(context) } as any)
-    : engine.delete(INVOICE, { where: { id }, context: structuredClone(context) } as any));
+    ? engine.update(INVOICE, { status: 'closed' }, { where: { id }, context: structuredClone(context) })
+    : engine.delete(INVOICE, { where: { id }, context: structuredClone(context) }));
 
 /** The caller-context re-read step 2.7 asks: `{ id }` first, then the platform's predicates. */
 const isRowReRead = (query: any, id: string) =>
@@ -211,8 +211,8 @@ describe("a by-id write's row re-read propagates a store fault as raised; a decl
           let raised: unknown;
           try {
             await (op === 'update'
-              ? engine.update(INVOICE, { status: 'closed' }, { where: { id }, context: structuredClone(PLAIN) } as any)
-              : engine.delete(INVOICE, { where: { id }, context: structuredClone(PLAIN) } as any));
+              ? engine.update(INVOICE, { status: 'closed' }, { where: { id }, context: structuredClone(PLAIN) })
+              : engine.delete(INVOICE, { where: { id }, context: structuredClone(PLAIN) }));
           } catch (e) {
             raised = e;
           }
@@ -263,7 +263,7 @@ describe("a by-id write's row re-read judges the platform's own predicates witho
         await seedInvoice(engine, 'own_update', ORG_A);
         await seedInvoice(engine, 'own_delete', ORG_A);
         // The precondition: the caller reads the row, and the column is hidden from it.
-        const seen = await engine.findOne(INVOICE, { where: { id: 'own_update' }, context: structuredClone(ORG_HIDDEN) } as any);
+        const seen = await engine.findOne(INVOICE, { where: { id: 'own_update' }, context: structuredClone(ORG_HIDDEN) });
         expect(seen, 'the caller reads the row').toBeTruthy();
         expect((seen as Record<string, unknown>).organization_id, 'the organization column is hidden from it').toBeUndefined();
 
@@ -289,13 +289,13 @@ describe("a by-id write's row re-read judges the platform's own predicates witho
       it("control: the caller's own predicate on the hidden column is still refused, on a read and on a predicate write", async () => {
         const engine = await boot(posture);
         await seedInvoice(engine, 'own_predicate', ORG_A);
-        const read = await answerOf(() => engine.find(INVOICE, { where: { organization_id: ORG_A }, context: structuredClone(ORG_HIDDEN) } as any));
+        const read = await answerOf(() => engine.find(INVOICE, { where: { organization_id: ORG_A }, context: structuredClone(ORG_HIDDEN) }));
         expect([read.status, read.code], String(read.message)).toEqual([403, 'PERMISSION_DENIED']);
         const write = await answerOf(() => engine.update(INVOICE, { status: 'closed' },
-          { multi: true, where: { organization_id: ORG_A }, context: structuredClone(ORG_HIDDEN) } as any));
+          { multi: true, where: { organization_id: ORG_A }, context: structuredClone(ORG_HIDDEN) }));
         expect([write.status, write.code], String(write.message)).toEqual([403, 'PERMISSION_DENIED']);
         // ...and the same predicate from a caller who reads the column is answered.
-        expect(await answerOf(() => engine.find(INVOICE, { where: { organization_id: ORG_A }, context: structuredClone(PLAIN) } as any)))
+        expect(await answerOf(() => engine.find(INVOICE, { where: { organization_id: ORG_A }, context: structuredClone(PLAIN) })))
           .toEqual({ status: 200 });
         expect(await storedInvoice(engine, 'own_predicate'), 'untouched').toMatchObject({ status: 'open' });
       });
@@ -303,7 +303,7 @@ describe("a by-id write's row re-read judges the platform's own predicates witho
       it('control: a system write by id is not the gate\'s, and lands', async () => {
         const engine = await boot(posture);
         await seedInvoice(engine, 'system_write', ORG_B);
-        await engine.update(INVOICE, { status: 'closed' }, { where: { id: 'system_write' }, ...inOrg(ORG_B) } as any);
+        await engine.update(INVOICE, { status: 'closed' }, { where: { id: 'system_write' }, ...inOrg(ORG_B) });
         expect(await storedInvoice(engine, 'system_write')).toMatchObject({ status: 'closed' });
       });
     });
@@ -326,18 +326,18 @@ describe("the controlled-by-parent master read judges the platform's own predica
       await engine.insert(MASTER, { id: 'master_b', name: 'B', organization_id: ORG_B }, inOrg(ORG_B));
 
       const own = await answerOf(() => engine.insert(DETAIL, { id: 'detail_own', note: 'n', master: 'master_a' },
-        { context: structuredClone(MASTER_ORG_HIDDEN) } as any));
+        { context: structuredClone(MASTER_ORG_HIDDEN) }));
       expect(own, 'a detail under a master of its organization').toEqual({ status: 200 });
-      const stored = await engine.find(DETAIL, { where: { id: 'detail_own' }, context: { isSystem: true } } as any);
+      const stored = await engine.find(DETAIL, { where: { id: 'detail_own' }, context: { isSystem: true } });
       expect(stored, 'the detail is stored').toHaveLength(1);
 
       const reads = await answerOf(() => engine.insert(DETAIL, { id: 'detail_other_plain', note: 'n', master: 'master_b' },
-        { context: structuredClone(PLAIN) } as any));
+        { context: structuredClone(PLAIN) }));
       expect(reads.status, `column read: ${reads.message}`).not.toBe(200);
       const hidden = await answerOf(() => engine.insert(DETAIL, { id: 'detail_other_hidden', note: 'n', master: 'master_b' },
-        { context: structuredClone(MASTER_ORG_HIDDEN) } as any));
+        { context: structuredClone(MASTER_ORG_HIDDEN) }));
       expect([hidden.status, hidden.code, hidden.name], `column hidden: ${hidden.message}`).toEqual([reads.status, reads.code, reads.name]);
-      expect(await engine.find(DETAIL, { where: { master: 'master_b' }, context: { isSystem: true } } as any), 'nothing stored').toHaveLength(0);
+      expect(await engine.find(DETAIL, { where: { master: 'master_b' }, context: { isSystem: true } }), 'nothing stored').toHaveLength(0);
     });
   }
 });
