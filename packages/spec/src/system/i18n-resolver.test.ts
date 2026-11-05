@@ -6503,9 +6503,7 @@ describe('bundle locale keys are the bundle\'s OWN keys — an Object.prototype 
     expect(resolveBundleLocale(parsed, '__proto__')).toBe('__proto__');
     expect(resolveViewLabel(parsed, view, { locale: 'constructor' })).toBe('ctor');
 
-    const bare = Object.create(null) as Record<string, unknown>;
-    bare.en = {};
-    bare.constructor = {};
+    const bare: Record<string, unknown> = Object.assign(Object.create(null), { en: {}, constructor: {} });
     expect(resolveBundleLocale(bare, 'constructor')).toBe('constructor');
     expect(resolveBundleLocale(bare, 'toString')).toBeUndefined();
   });
