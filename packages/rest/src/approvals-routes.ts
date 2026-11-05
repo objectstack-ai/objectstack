@@ -108,10 +108,18 @@ function readApprovalStatusFilter(
 ): { status: ApprovalStatus | ApprovalStatus[] | undefined } | { refusal: string } {
     if (raw === undefined) return { status: undefined };
     const allowed: readonly string[] = APPROVAL_STATUSES;
-    const entries = typeof raw === 'string' ? raw.split(',').map((s) => s.trim()) : [];
-    const unknown = typeof raw === 'string'
-        ? entries.filter((s) => !allowed.includes(s))
-        : [String(raw)];
+    // [#30525] A value the query parser built into something other than a
+    // string (`?status[$ne]=pending` arrives as an object) has no entry to
+    // name: quoting `String(raw)` printed `"[object Object]"`. Say what shape
+    // the parameter takes instead. Same 400, same envelope, service not asked.
+    if (typeof raw !== 'string') {
+        return {
+            refusal: 'The "status" query parameter must be one status, or several separated by '
+                + `commas, given as plain text. Allowed values: ${allowed.join(', ')}.`,
+        };
+    }
+    const entries = raw.split(',').map((s) => s.trim());
+    const unknown = entries.filter((s) => !allowed.includes(s));
     if (unknown.length > 0) {
         const named = [...new Set(unknown)].map((s) => `"${s}"`).join(', ');
         return {

@@ -89,8 +89,10 @@ export interface PackagedActionRow {
   label: string;
   /**
    * The owning object's label as `GET /meta/object` serves it, when the
-   * object is in that list and declares one; the page resolves it in the
-   * reader's language and keeps the machine name beside it.
+   * object is in that list and declares one. The section reads that list in
+   * the session's language, so this is already the reader's name for the
+   * object, a `.custom` rename included; the page draws it as given
+   * (objectstack#30486) and keeps the machine name beside it.
    */
   objectLabel?: string;
   /** Activation as the ledger reports it — `true` when no row says otherwise. */

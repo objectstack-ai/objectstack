@@ -130,7 +130,7 @@ export const SysBusinessUnit = ObjectSchema.create({
       label: 'Kind',
       required: true,
       defaultValue: 'department',
-      description: 'Categorisation hint — does not change graph semantics.',
+      description: 'For grouping and reporting only; it does not change where the unit sits in the organization or who it covers.',
       group: 'Identity',
       options: [
         { value: 'company', label: 'Company' },
@@ -154,7 +154,7 @@ export const SysBusinessUnit = ObjectSchema.create({
       required: false,
       deleteBehavior: 'restrict',
       description:
-        'Self-reference for the org tree. Null = root of tenant. A unit that still has child units cannot be deleted until they are re-parented or deleted.',
+        'The unit this one sits under. Leave empty for a top-level unit. A unit that still has units under it cannot be deleted until they are moved under another unit or deleted.',
       group: 'Hierarchy',
     }),
 
@@ -238,21 +238,21 @@ export const SysBusinessUnit = ObjectSchema.create({
       label: 'Active',
       required: false,
       defaultValue: true,
-      description: 'When false, members are not expanded by graph queries.',
+      description: 'Turn off to retire the unit: sharing and other access given to this unit, or to a unit above it, no longer reaches its members or the units under it.',
       group: 'Lifecycle',
     }),
 
     effective_from: Field.datetime({
       label: 'Effective From',
       required: false,
-      description: 'When this business unit came into existence (HRIS sync).',
+      description: 'When this business unit came into existence. Usually filled in by a sync from your HR system.',
       group: 'Lifecycle',
     }),
 
     effective_to: Field.datetime({
       label: 'Effective To',
       required: false,
-      description: 'When this business unit was retired (HRIS sync).',
+      description: 'When this business unit was retired. Usually filled in by a sync from your HR system.',
       group: 'Lifecycle',
     }),
 
@@ -260,7 +260,7 @@ export const SysBusinessUnit = ObjectSchema.create({
       label: 'External Reference',
       required: false,
       maxLength: 200,
-      description: 'ID in upstream HRIS (Workday / SAP HR / 北森).',
+      description: 'The unit\'s ID in your HR system (such as Workday, SAP HR or 北森), used to match it on each sync.',
       group: 'Lifecycle',
     }),
 

@@ -167,7 +167,8 @@ export interface ExpressionRefusalParams {
    * operand types; `reference` is the field as written, when it is known. A
    * flattened (flow) condition is `date-arithmetic-run-fails` /
    * `date-arithmetic-run-may-fail`; a fail-closed site is
-   * `date-arithmetic-fail-closed`. An advisory rule's stays this code.
+   * `date-arithmetic-fail-closed`, and an advisory rule's is
+   * `date-arithmetic-fail-open`.
    */
   'date-arithmetic': { readonly operands: string; readonly reference?: string };
   /**
@@ -176,7 +177,8 @@ export interface ExpressionRefusalParams {
    * that text. `operands` are the CEL operand types (the text is `DateText`);
    * `reference` is the field as written, when it is known. A flattened (flow)
    * condition is `date-text-arithmetic-run-fails` / `-run-may-fail`; a
-   * fail-closed site is `date-text-arithmetic-fail-closed`.
+   * fail-closed site is `date-text-arithmetic-fail-closed`, an advisory rule's
+   * `date-text-arithmetic-fail-open`.
    */
   'date-text-arithmetic': { readonly operands: string; readonly reference?: string };
   /**
@@ -204,6 +206,14 @@ export interface ExpressionRefusalParams {
   'date-arithmetic-fail-closed': { readonly operands: string; readonly reference?: string };
   /** [#30250] ERROR: `date-text-arithmetic`, at a `date-arithmetic-fail-closed` site. */
   'date-text-arithmetic-fail-closed': { readonly operands: string; readonly reference?: string };
+  /**
+   * [#30494] ERROR: `date-arithmetic` in an advisory (`warning` / `info`)
+   * validation rule, a site that FAILS OPEN — the fault skips the rule and the
+   * write proceeds (the `type-mismatch-fail-open` outcome). It never reads null.
+   */
+  'date-arithmetic-fail-open': { readonly operands: string; readonly reference?: string };
+  /** [#30494] ERROR: `date-text-arithmetic`, at a `date-arithmetic-fail-open` site. */
+  'date-text-arithmetic-fail-open': { readonly operands: string; readonly reference?: string };
   /**
    * A formula that computes a `google.protobuf.Duration`
    * (`today() - record.start_date`), which a field reads as `{}`. `reference`
@@ -317,6 +327,8 @@ const CODE_TABLE = {
   'date-text-arithmetic-run-may-fail': true,
   'date-arithmetic-fail-closed': true,
   'date-text-arithmetic-fail-closed': true,
+  'date-arithmetic-fail-open': true,
+  'date-text-arithmetic-fail-open': true,
   'date-duration-value': true,
   'type-mismatch': true,
   'type-mismatch-fail-closed': true,
