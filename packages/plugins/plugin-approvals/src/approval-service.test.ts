@@ -15,8 +15,16 @@ import {
   ApprovalService, ApproverDirectoryUnreadableError, REMIND_COOLDOWN_MS, ESCALATION_ENABLED_FLIP_CUTOFF_MS, SLA_ACTOR_ID,
 } from './approval-service.js';
 import { bindApprovalLockHook, bindDelegationWriteGuard, unbindAllHooks } from './lifecycle-hooks.js';
+import { filterApproversWhoCanRead } from './approver-org-scope.js';
 import { celEngine } from '@objectstack/formula';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
+
+// [#29604] A pass-through spy on the ADR-0105 D9 read filter, so one describe
+// below can make it reject. Every other case runs the real filter through it.
+vi.mock('./approver-org-scope.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./approver-org-scope.js')>();
+  return { ...actual, filterApproversWhoCanRead: vi.fn(actual.filterApproversWhoCanRead) };
+});
 
 interface FakeRow { [k: string]: any }
 
@@ -4339,6 +4347,73 @@ describe('ApprovalService — a team, position or queue approver whose directory
     const decided = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u2' }, SYS);
     expect(decided.decision).toBe('approve');
   });
+});
+
+// [ADR-0142 D6 as amended; ruling record 6599731698 on #29604, letter B] The
+// ADR-0105 D9 cross-organization read filter is a read behind a `position` or
+// `team` approver as much as the directory expansion is. When it fails, the
+// node refuses, naming THAT read, on the static resolver (its `bounded`
+// filter) and on an `expression` approver's `resolveAs` values alike.
+// `filterApproversWhoCanRead` answers its own failed `sys_member` read by
+// keeping the slate, so the pass-through spy above is how it is made to fail.
+// The scenario is `approver-cross-org.integration.test.ts`'s: a Plant A
+// request routed to the group CFO.
+describe('ApprovalService — a failed cross-organization read filter refuses the node, named as that read (ADR-0142 D6)', () => {
+  const PLANT_CTX = { userId: 'u_submitter', organizationId: 'o_plant', positions: [], permissions: [] } as any;
+  const FILTER_READ = /^the cross-organization read filter \(who among the people of organization 'o_group' can read this request of organization 'o_plant'\) could not be read: membership read filter down\.$/;
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: ApprovalService;
+  let n = 0;
+
+  beforeEach(() => {
+    vi.mocked(filterApproversWhoCanRead).mockClear();
+    engine = makeFakeEngine();
+    engine._tables['sys_user'].push({ id: 'u_cfo' });
+    engine._tables['sys_organization'] = [
+      { id: 'o_group', slug: 'acme-group', parent_organization_id: null },
+      { id: 'o_plant', slug: 'acme-plant-a', parent_organization_id: 'o_group' },
+    ];
+    engine._tables['sys_user_position'] = [{ id: 'up1', user_id: 'u_cfo', position: 'cfo', organization_id: 'o_group' }];
+    engine._tables['sys_member'] = [{ id: 'm1', user_id: 'u_cfo', organization_id: 'o_plant', role: 'member' }];
+    n = 0;
+    svc = new ApprovalService({
+      engine: engine as any,
+      clock: { now: () => new Date(1767000000000 + (n++) * 1000) },
+      tenancyPosture: () => 'group',
+    });
+  });
+
+  const node = (approver: Record<string, unknown>) => ({
+    object: 'purchase_order',
+    recordId: 'po1',
+    runId: 'run_1',
+    nodeId: 'group_signoff',
+    flowName: 'po_approval',
+    config: { approvers: [approver as any], behavior: 'unanimous' as const, lockRecord: false, onEmptyApprovers: 'admin_rescue' as const },
+    record: { id: 'po1', signoff_position: 'cfo' },
+  });
+  const refusalOf = (p: Promise<unknown>) => p.then(() => null, (e: unknown) => e);
+
+  for (const [label, approver] of [
+    ['a static position approver', { type: 'position', value: 'cfo', organization: '$root' }],
+    ['an expression approver resolving as position', { type: 'expression', value: 'trigger.signoff_position', resolveAs: 'position', organization: '$root' }],
+  ] as const) {
+    it(`control — ${label} reaches the group CFO through the filter`, async () => {
+      const req = await svc.openNodeRequest(node(approver), PLANT_CTX) as any;
+      expect(req.pending_approvers).toEqual(['u_cfo']);
+      expect(filterApproversWhoCanRead).toHaveBeenCalledTimes(1);
+    });
+
+    it(`${label}: the filter's failure refuses the node and names the filter's read`, async () => {
+      vi.mocked(filterApproversWhoCanRead).mockRejectedValueOnce(new Error('membership read filter down'));
+      const refusal = await refusalOf(svc.openNodeRequest(node(approver), PLANT_CTX));
+
+      expect(refusal).toBeInstanceOf(ApproverDirectoryUnreadableError);
+      expect(refusal).toMatchObject({ approverType: 'position', approverValue: 'cfo', retryable: true });
+      expect((refusal as ApproverDirectoryUnreadableError).failedRead).toMatch(FILTER_READ);
+      expect(engine._tables['sys_approval_request'] ?? []).toEqual([]);
+    });
+  }
 });
 
 // #3807 follow-up: `queue` was not the only way to end up with a slot nobody
