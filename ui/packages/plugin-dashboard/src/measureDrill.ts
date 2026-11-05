@@ -30,9 +30,6 @@
 import { composeDrillFilter } from '@object-ui/core';
 import { readMeasureDrillScope } from './metricDrill';
 
-/** One measure's list filter (`{}` = no leg beyond the bucket and the widget filter). */
-export type MeasureDrillScope = Record<string, unknown>;
-
 /** Key-order-free spelling of a JSON condition, so two equal scopes compare equal. */
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -54,7 +51,7 @@ function canonical(value: unknown): string {
 export function sharedMeasureDrillScope(
   answer: { drillScopes?: unknown } | null | undefined,
   measures: readonly string[],
-): MeasureDrillScope | undefined {
+): Record<string, unknown> | undefined {
   if (measures.length === 0) return undefined;
   const first = readMeasureDrillScope(answer, measures[0]);
   if (!first) return undefined;
@@ -67,13 +64,16 @@ export function sharedMeasureDrillScope(
 }
 
 /**
+ * A scope is one measure's list filter (`{}` = no leg beyond the bucket and
+ * the widget filter).
+ *
  * The widget filter a drill composes with the clicked bucket: `runtimeFilter`
  * AND the measure's scope. A `{}` scope hands `runtimeFilter` back UNTOUCHED,
  * so a drill on an unfiltered measure is byte-identical to the bucket-and-
  * widget-filter drill it always was. Throws the sink's `FilterOperatorError`
  * on a refused filter, which `openDrill` already reports.
  */
-export function scopeDrillFilter(runtimeFilter: unknown, scope: MeasureDrillScope): unknown {
+export function scopeDrillFilter(runtimeFilter: unknown, scope: Record<string, unknown>): unknown {
   if (Object.keys(scope).length === 0) return runtimeFilter;
   return composeDrillFilter(runtimeFilter, scope);
 }
