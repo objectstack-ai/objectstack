@@ -49,7 +49,7 @@
  *    question, not this card's.
  */
 
-import { indexObjectGraph, recordsOf } from './object-graph.js';
+import { indexServedObjectGraph, recordsOf } from './object-graph.js';
 import type { AnyRec } from './page-walk.js';
 import { indexResolvableDatasets, judgeDatasetFilterKeys } from './validate-widget-bindings.js';
 
@@ -84,7 +84,7 @@ export function validateReportRuntimeFilters(stack: AnyRec): ReportRuntimeFilter
   const reports = recordsOf(stack.reports);
   if (reports.length === 0) return findings;
   const datasets = indexResolvableDatasets(stack);
-  const graph = indexObjectGraph(stack);
+  const graph = indexServedObjectGraph(stack);
 
   const judge = (filter: unknown, path: string, dsName: string | undefined, where: string): void => {
     if (filter === undefined || filter === null) return;

@@ -100,6 +100,7 @@
     "data/Seed:mode = \"ignore\"",
     "data/SeedColumn:applyOn = \"always\"",
     "data/SeedLoadResult:errors = []",
+    "data/SeedLoadResult:insertedIds = []",
     "data/SeedLoadResult:landedIds = []",
     "data/SeedLoadResult:referencesDropped = 0",
     "data/SeedLoadResult:summariesStale = 0",

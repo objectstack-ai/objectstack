@@ -73,6 +73,7 @@ import { resolveRowCrudAffordances, resolveRowRecordCrudAffordance } from './row
 import { useRecordCrudVerdicts } from './hooks/useRecordCrudVerdicts';
 import { resolveLegacyRowActions } from './resolveLegacyRowActions';
 import { resolveBulkActions, resolvePromotedBulkParams } from './resolveBulkActions';
+import { useUndeclaredActionNamesWarning } from './undeclaredActionNames';
 import { partitionBulkRows } from './bulkEligibility';
 import { RowActionMenu, formatActionLabel } from './components/RowActionMenu';
 import { BulkActionBar } from './components/BulkActionBar';
@@ -701,6 +702,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // getter, which reads the live cache at call time.
   const metadata = useMetadata();
   const [objectSchema, setObjectSchema] = useState<any>(null);
+  // The inline-data schema read failed (the non-inline load says so through
+  // `error`). Read only by the undeclared-name warning's readiness below, so a
+  // failed read reports the names instead of dropping them silently.
+  const [objectSchemaReadFailed, setObjectSchemaReadFailed] = useState(false);
   const [useCardView, setUseCardView] = useState(false);
   // objectstack#28434 — the record URL a row links to, for its context menu's
   // "Open in new tab": the host's own builder, the one `LinkCell` draws the
@@ -997,9 +1002,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // Legacy `rowActions` carry a bare action NAME, which the runner cannot
   // execute on its own — resolve each against the object's declared actions so
   // it dispatches as a real def (and so a name that duplicates an existing
-  // `list_item` def stops rendering a dead twin of it). See
+  // `list_item` def stops rendering a dead twin of it). A name the object does
+  // not declare draws nothing and is reported below, in development. See
   // `resolveLegacyRowActions` for the full rationale (objectui#2960).
-  const { defs: resolvedRowActionDefs, unresolved: customRowActions } = resolveLegacyRowActions({
+  const { defs: resolvedRowActionDefs, undeclared: undeclaredRowActions } = resolveLegacyRowActions({
     rowActions: rowActionsList.filter(a => a !== 'edit' && a !== 'delete'),
     rowActionDefs: rowActionDefsList,
     objectActions: (objectSchema as any)?.actions,
@@ -1129,6 +1135,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         // mask, handled as masked), because it could be a `password` /
         // `secret` field — fail closed (objectui#10657, `objectTypesPending`).
         console.warn(`[ObjectGrid] Failed to fetch objectSchema for inline data (objectName: ${objectName}):`, err);
+        if (!cancelled) setObjectSchemaReadFailed(true);
       }
     };
 
@@ -1250,14 +1257,16 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     : declaredBulkActions?.filter((a: unknown) => String(a).toLowerCase() !== 'delete');
   // `bulkActions` carries a bare action NAME, which the runner cannot execute
   // on its own — resolve each against `objectDef.actions` so it dispatches as a
-  // real def. See `resolveBulkActions` (objectui#3002). The
+  // real def. See `resolveBulkActions` (objectui#3002). A name the object does
+  // not declare gets no button (spec: a bare name "names an action the object
+  // declares") and is reported below, in development. The
   // canonical `'delete'` is held back: it routes to `onBulkDelete` (which owns
   // confirm + refresh), not the runner, even if the object declares an action
   // that happens to be named `delete`.
   const legacyBulkNames = (explicitBulkActions ?? []).filter(
     (a: unknown) => String(a).toLowerCase() !== 'delete',
   );
-  const { defs: resolvedBulkDefs, unresolved: unresolvedBulkActions } = resolveBulkActions({
+  const { defs: resolvedBulkDefs, undeclared: undeclaredBulkActions } = resolveBulkActions({
     bulkActions: legacyBulkNames,
     bulkActionDefs: Array.isArray(schema.bulkActionDefs) ? schema.bulkActionDefs : [],
     objectActions: (objectSchema as any)?.actions,
@@ -1277,18 +1286,45 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       (objectCanDelete || def?.operation !== 'delete')
       && (rowEditVerdict.allowed || def?.operation !== 'update'),
   );
-  // Names still dispatched by string: the unresolved ones, plus `'delete'`
-  // when the author asked for it — or the implicit bulk-delete affordance.
+  // The one name still dispatched by string: `'delete'` when the author asked
+  // for it — or the implicit bulk-delete affordance. An undeclared name is not
+  // among them: it draws nothing.
   const keptDeleteAction = (explicitBulkActions ?? []).filter(
     (a: unknown) => String(a).toLowerCase() === 'delete',
   );
   const effectiveBulkActions: string[] =
     explicitBulkActions && explicitBulkActions.length > 0
-      ? [...unresolvedBulkActions, ...keptDeleteAction]
+      ? keptDeleteAction
       : canDelete && onBulkDelete && bulkActionDefs.length === 0
         ? ['delete']
         : [];
   const hasBulkActions = effectiveBulkActions.length > 0 || bulkActionDefs.length > 0;
+  // The names the two folds above did not draw, said once in development, and
+  // only once there is nothing left to wait for. Keyed on the RESOLVED
+  // `objectName` (a grid may name its object only through
+  // `data: { provider: 'object', object }`), and mirroring `objectTypesPending`:
+  // a schema is awaited only when there is an object to ask about and a data
+  // source that can answer `getObjectSchema`, and a read that failed (inline:
+  // `objectSchemaReadFailed`; the row load: `error`) is not awaited either.
+  // Reported with no schema in hand, the names are said to be unread, never
+  // undeclared.
+  const objectSchemaAwaited =
+    !!objectName && typeof dataSource?.getObjectSchema === 'function' && objectSchema == null
+    && !objectSchemaReadFailed && error == null;
+  const undeclaredNamesBasis = objectName && objectSchema == null ? 'unread' : 'declared';
+  const undeclaredNamesAddress = {
+    blockType: (schema as { type?: unknown }).type,
+    objectName,
+    label: schema.label ?? (schema as { title?: unknown }).title,
+  };
+  useUndeclaredActionNamesWarning({
+    key: 'bulkActions', names: undeclaredBulkActions, ready: !objectSchemaAwaited,
+    basis: undeclaredNamesBasis, address: undeclaredNamesAddress,
+  });
+  useUndeclaredActionNamesWarning({
+    key: 'rowActions', names: undeclaredRowActions, ready: !objectSchemaAwaited,
+    basis: undeclaredNamesBasis, address: undeclaredNamesAddress,
+  });
   let selectionMode: 'none' | 'single' | 'multiple' | boolean = false;
   if (schema.selection !== undefined) {
     // "presence enables; an explicit off wins" — the ONE rule both
@@ -1676,7 +1712,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     columnsWithActions, hasActions, hasPinnedColumns, hasUserPinnedColumns, pinnedLeftCols,
     pinnedRightCols, unpinnedCols, rightPinnedClasses, rightPinnedCellClasses, userLeftPinnedCount,
   } = resolveObjectGridActionsColumn({
-    schema, data, objectSchema, persistedColumns, operations, customRowActions, resolvedRowActionDefs,
+    schema, data, objectSchema, persistedColumns, operations, resolvedRowActionDefs,
     wantEditAction, wantDeleteAction, mayInvokeRowAction, rowOperations, canEdit, canDelete,
     recordVerdict, predicateScope, onEdit, onDelete, editPredicates, deletePredicates, executeAction,
     setRefreshKey, t,

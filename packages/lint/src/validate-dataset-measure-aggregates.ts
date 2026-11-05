@@ -222,7 +222,7 @@ import { DATASET_DURATION_FIELD_TYPE } from '@objectstack/spec/ui';
 
 import { collectionEntries } from './collection-entries.js';
 import {
-  indexObjectGraph,
+  indexServedObjectGraph,
   isUnjudgeable,
   recordsOf,
   resolveFieldPath,
@@ -651,7 +651,9 @@ export function validateDatasetMeasureAggregates(stack: unknown): DatasetMeasure
   const cubes = collectionEntries(stack.analyticsCubes, 'analyticsCubes');
   if (datasets.length === 0 && cubes.length === 0) return findings;
 
-  const graph: ObjectGraph = indexObjectGraph(stack);
+  // [#30383] Served, a field two packages tie on left out: which definition
+  // wins is registration order, so its type is not judged here.
+  const graph: ObjectGraph = indexServedObjectGraph(stack, { tied: 'drop' });
 
   datasets.forEach((ds, di) => {
     // ── Skip 1: no base object, or one the graph cannot answer for ──

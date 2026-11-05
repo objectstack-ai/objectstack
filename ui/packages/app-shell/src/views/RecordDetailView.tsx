@@ -2906,7 +2906,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       .catch((err: any) => {
         if (cancelled) return;
         console.warn('[RecordDetailView] Failed to fetch sys_audit_log:', err);
-        setHistoryEntries([]);
+        // No answer, no field history: a refused (or failed) read holds
+        // nothing for the stream's 变更 chip, which `fieldHistoryShown`
+        // below withholds while the entries are `null`.
+        setHistoryEntries(null);
       })
       .finally(() => {
         if (!cancelled) setHistoryLoading(false);
@@ -4147,9 +4150,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // ride this list at all — objectui#3055 moved them to the declared-action
   // bar, which reads the pending row directly.)
   }, [objectDef?.name, childRelations, t, objectPluralLabel, objects, approvals.available, approvals.pendingRequest, approvals.requests, user?.id]);
+  // objectstack#30344 — whether this record page shows the record's field
+  // history: the history gate, AND this reader's audit read answered. A read
+  // the server refuses (or that fails) answers nothing, so the stream offers
+  // no 变更 chip, as with history off (objectstack#30074); the chip joins
+  // the others once the read answers. Nothing waits on it: the page payload
+  // still asks the field changes by `historyEnabled`, and the server counts a
+  // refused ledger read as no field change (objectstack#28737).
+  const fieldHistoryShown = historyEnabled && historyEntries !== null;
   // objectstack#27055, Target 3 — the record's field changes, as feed items of
   // the timeline stream. `null` while there are none to give (no
-  // `trackHistory`, an authored page, the read not made or not landed).
+  // `trackHistory`, an authored page, the read not made, not landed or not
+  // answered).
   const timelineFieldChanges = useMemo(
     () =>
       historyEnabled && historyEntries
@@ -5069,9 +5081,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         {/* objectstack#27055 — the field changes of the timeline stream,
             for the synthesized page's `record:activity`. */}
         <RecordFieldChangesContext.Provider value={assignedPage ? null : timelineFieldChanges}>
-        {/* objectstack#30074 — whether this record shows its field history:
+        {/* objectstack#30074 — whether this record shows its field history
+            (objectstack#30344: to this reader, whose audit read answered):
             the stream offers its 变更 chip only while it does. */}
-        <RecordFieldHistoryContext.Provider value={historyEnabled}>
+        <RecordFieldHistoryContext.Provider value={fieldHistoryShown}>
         {/* objectstack#28737 — the whole stream's count, for the 动态 panel,
             its tab and the tab row's probe. */}
         <RecordTimelineTotalContext.Provider value={assignedPage ? null : timelineTotal}>

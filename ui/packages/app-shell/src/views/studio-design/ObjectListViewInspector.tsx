@@ -131,6 +131,7 @@ import {
   listViewTypeHeldEdit,
 } from './ListViewTypeSection.js';
 import { ListViewChartSection } from './ListViewChartSection.js';
+import { ListViewBulkActionsSection, listViewHasSelectionBar } from './ListViewBulkActionsSection.js';
 import {
   addedArrayElements,
   agentDraftMarkOf,
@@ -1559,6 +1560,16 @@ export function ObjectListViewInspector({
                 </PopoverContent>
               </Popover>
             </div>
+            {objectName && listViewHasSelectionBar(body) && (
+              // objectstack#30089 — the selection bar's actions: `bulkActions` and `bulkActionDefs`.
+              <ListViewBulkActionsSection
+                objectName={objectName}
+                body={body}
+                writeBody={writeBody}
+                readOnly={readOnly}
+                locale={locale}
+              />
+            )}
             {latestMark && (
               // objectui#12725 — the 来源 line: who drafted the marked settings, and when.
               <DraftSourceLine mark={latestMark} locale={locale} items={addedLabels} className="border-t pt-3" />
