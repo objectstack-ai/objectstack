@@ -281,9 +281,9 @@ import { declaredOptionLabels } from './formula-option-labels.js';
 import { bindHooksToEngine, type BindHooksOptions } from './hook-binder.js';
 import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink, ValidationMessageContext } from './validation/record-validator.js';
-import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
+import type { RelatedRecordBinding } from './validation/rule-validator.js';
 import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
-import { collectReferenceTraversals, evaluateValidationRules, emitValidationAdvisories, optionVisibilityReadsPermissions, readsPermissionPredicate, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
+import { evaluateValidationRules, emitValidationAdvisories, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
 // [#14088] The before-phase write recorder — the provenance channel the static
 // `readonly` strip needs to tell a hook's write from a caller's echo of the
 // SAME value. Armed and sealed in `update()`; the module owns the argument for
@@ -333,9 +333,6 @@ import { resolveOneHopRelated, resolvePredicateRelated, resolvePreviewParents, s
 // (`ReadableIdsPermissionFormulaHost`). Imported after every module those bodies import, so
 // the engine's module evaluation order is what it was.
 import { composeReadableIdsChain, findUnservableControlledByParentMasters, permissionResolution, readableIdsScopeOf, reportFormulaFault, resolveDefaultPermissions, resolveFormulaPermissions, resolveOptionPermissions } from './engine-readable-ids-permission-formula.js';
-// [#25522 cut 16] Type-only, for the `{@link}`s on `composeReadableIdsAtBoundary`'s and
-// `composeReadableIdsChain`'s docblocks: the constant moved with its reader in cut 15.
-import type { READABLE_IDS_MAX_CHAIN_DEPTH } from './engine-readable-ids-permission-formula.js';
 // [#25522 cut 19] The delete cascade's collection walk, the in-cascade
 // `restrict` judge, the `DELETE_RESTRICTED` refusal, the reference-probe
 // filter and the reference-check elevation record; the methods of the same

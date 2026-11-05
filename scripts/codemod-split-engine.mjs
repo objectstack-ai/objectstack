@@ -1641,10 +1641,12 @@ function usedImportNames(tm, text) {
 /**
  * Drop every import binding `used` lacks. A declaration left with no binding
  * goes whole (its own text and the line break after it; the comments above it
- * stay); one left with some keeps them, a one-line `{ … }` on one line, a
- * multi-line one as one binding per line. Pure. Returns `{ text, removed }`.
+ * stay, unless `dropAttachedComments`: then the `//` lines directly above it,
+ * with no blank line between, go with it); one left with some keeps them, a
+ * one-line `{ … }` on one line, a multi-line one as one binding per line.
+ * Pure. Returns `{ text, removed }`.
  */
-function pruneImports(tm, text, used) {
+function pruneImports(tm, text, used, { dropAttachedComments = false } = {}) {
   const ts = tm.ts;
   const sf = parseSourceFile(HOST_PATH, text);
   const edits = [];
@@ -1666,7 +1668,18 @@ function pruneImports(tm, text, used) {
     const keepNamed = named.filter((e) => used.has(e.name.text));
     if (!keepDefault && !keepNs && keepNamed.length === 0) {
       const end = text[st.getEnd()] === '\n' ? st.getEnd() + 1 : st.getEnd();
-      edits.push({ start: st.getStart(sf), end, text: '' });
+      let start = st.getStart(sf);
+      if (dropAttachedComments) {
+        // Walk up the `//` lines that touch the declaration (no blank line between).
+        for (;;) {
+          const prevEnd = start - 1;
+          if (prevEnd <= 0 || text[prevEnd] !== '\n') break;
+          const lineStart = text.lastIndexOf('\n', prevEnd - 1) + 1;
+          if (!/^\s*\/\/.*$/.test(text.slice(lineStart, prevEnd))) break;
+          start = lineStart;
+        }
+      }
+      edits.push({ start, end, text: '' });
       continue;
     }
     if (nb && ts.isNamedImports(nb) && dropNamed.length > 0) {
@@ -2720,10 +2733,14 @@ async function mainScoped(tm, argv) {
  * (re-indented), the placeholder back on its function, and taking the marker
  * phrase and the header note out rebuilds the base `engine.ts` and every base
  * hand module byte-for-byte (a base an earlier slice landed in is undone the
- * same way first, so a slice is proved on its own). A one-character edit in a
- * moved docblock, a block dropped on either side, a public docblock moved, or
- * any other byte changed in those files fails it. The public `.d.ts` bar is a
- * report reading on two built dists, as for the first two passes.
+ * same way first, so a slice is proved on its own), once the import bindings
+ * only a moved docblock's `{@link}` read (`noUnusedLocals` counts a link) are
+ * pruned from the base with the `//` lines directly above a declaration that
+ * goes whole; every pruned name must be one a moved docblock links. A
+ * one-character edit in a moved docblock, a block dropped on either side, a
+ * public docblock moved, or any other byte changed in those files fails it.
+ * The public `.d.ts` bar is a report reading on two built dists, as for the
+ * first two passes.
  */
 const HAND_DOCS_CARD = '#30053';
 
@@ -2868,7 +2885,16 @@ function generateHandDocs(tm, engineText, moduleTexts, planned) {
     }
     modules.set(file, applyEdits(text, edits));
   }
-  return { host: applyEdits(engineText, hostEdits), modules };
+  const moved = applyEdits(engineText, hostEdits);
+  // A JSDoc `{@link X}` is a read `noUnusedLocals` counts, so an import binding
+  // only a moved docblock linked is dropped, with the `//` lines that explain it.
+  const { text: host, removed: pruned } = pruneImports(tm, moved, usedImportNames(tm, moved), { dropAttachedComments: true });
+  return { host, modules, pruned };
+}
+
+/** The names a docblock links (`{@link X}`, `{@linkcode X}`, `@see X`; the leftmost name of a dotted one). */
+function linkedNames(doc) {
+  return new Set([...doc.matchAll(/\{@link(?:code|plain)?\s+([A-Za-z_$][\w$]*)|@see\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1] ?? m[2]));
 }
 
 /**
@@ -2902,7 +2928,7 @@ function undoHandDocs(tm, engineText, moduleTexts, className = CLASS_NAME) {
     const edits = perModule.get(s.module) ?? [];
     edits.push({ start: fn.leadStart, end: fn.start, text: `${placeholderDoc(s.name, className)}\n` });
     perModule.set(s.module, edits);
-    moved.push({ name: s.name, module: s.module, lines: sole.doc.split('\n').length });
+    moved.push({ name: s.name, module: s.module, lines: sole.doc.split('\n').length, doc: sole.doc });
   }
   const modules = new Map();
   for (const [file, text] of moduleTexts) {
@@ -2935,7 +2961,13 @@ function verifyHandDocs(tm, baseText, headText, baseModules, headModules, { clas
     let i = 0; while (i < Math.max(x.length, y.length) && x[i] === y[i]) i += 1;
     return `line ${i + 1}: undone base ${JSON.stringify(x[i] ?? null)} | undone head ${JSON.stringify(y[i] ?? null)}`;
   };
-  if (head.host !== base.host) failures.push(`undoing the moves does NOT rebuild the base ${HOST_BASENAME} (${firstDiff(base.host, head.host)})`);
+  // The one edit the undo does not read back from the head is the import
+  // prune: recomputed from the head and applied to the base, and every binding
+  // it drops must be a name a moved docblock links.
+  const { text: prunedBase, removed: pruned } = pruneImports(tm, base.host, usedImportNames(tm, headText), { dropAttachedComments: true });
+  const links = new Set(head.moved.flatMap((m) => [...linkedNames(m.doc)]));
+  for (const name of pruned) if (!links.has(name)) failures.push(`${name}: the head no longer imports it, and no moved docblock links it`);
+  if (head.host !== prunedBase) failures.push(`undoing the moves does NOT rebuild the base ${HOST_BASENAME} (${firstDiff(prunedBase, head.host)})`);
   const files = [...new Set([...baseModules.keys(), ...headModules.keys()])].sort();
   for (const file of files) {
     const b = base.modules.get(file); const h = head.modules.get(file);
@@ -2944,7 +2976,7 @@ function verifyHandDocs(tm, baseText, headText, baseModules, headModules, { clas
   }
   const baseMoved = new Set(base.moved.map((m) => m.name));
   return {
-    failures, moved: head.moved.filter((m) => !baseMoved.has(m.name)), baseMoved: base.moved.length,
+    failures, moved: head.moved.filter((m) => !baseMoved.has(m.name)), baseMoved: base.moved.length, pruned,
     modules: files.length, linesBefore: lineCount(baseText), linesAfter: lineCount(headText),
   };
 }
@@ -2970,7 +3002,8 @@ function printVerifyHandDocs(v) {
   for (const f of v.failures) console.error(`  ✗ ${f}`);
   console.log(`hand docblocks: ${v.moved.length} moved (${v.moved.reduce((n, m) => n + m.lines, 0)} lines) across ${new Set(v.moved.map((m) => m.module)).size} module(s), ${v.baseMoved} already moved at base; ` +
     `${HOST_BASENAME} ${v.linesBefore} -> ${v.linesAfter} lines; undoing every move ${v.failures.some((f) => f.startsWith('undoing')) ? 'does NOT rebuild' : 'rebuilds'} the base, ` +
-    `undone the same way, for ${HOST_BASENAME} and its ${v.modules} hand module(s) byte-for-byte`);
+    `undone the same way, for ${HOST_BASENAME} and its ${v.modules} hand module(s) byte-for-byte, once the ${v.pruned.length} import binding(s) ` +
+    `only a moved docblock linked are pruned from the base (${v.pruned.join(', ') || 'none'})`);
 }
 
 /** The hand modules `engine.ts`'s hand stubs name, read through `read(file)` (null: absent). */
@@ -3129,7 +3162,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'import prune': 4,
   'refusals': 6,
   'scoped classes (second pass)': 16,
-  'hand-series docblocks (third pass)': 16,
+  'hand-series docblocks (third pass)': 18,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
 
@@ -3384,6 +3417,8 @@ export class ScopedContext {
 function handFixtureEngine() {
   return `import { privateDoc, publicDoc, noDoc, richer } from './engine-alpha.js';
 import { betaPrivate } from './engine-beta.js';
+// Type-only, for the link on betaPrivate's docblock.
+import type { LinkedOnly } from './engine-beta.js';
 
 export class ObjectQL {
   private n = 1;
@@ -3415,7 +3450,7 @@ export class ObjectQL {
     return richer();
   }
 
-  /** A beta docblock. */
+  /** A beta docblock, {@link LinkedOnly}. */
   private betaPrivate(): number {
     // [#29460] The body lives in \`engine-beta.ts\`; it reads no member.
     return betaPrivate();
@@ -3753,6 +3788,11 @@ async function selfTest() {
     check('a marker that says moved over a docblock still on the class fails', fails(
       out.host.replace('`engine-alpha.ts` (see `AlphaHost`). PUBLIC', `\`engine-alpha.ts\`${HAND_DOC_MOVED} (see \`AlphaHost\`). PUBLIC`), []));
     check('a module missing its header note fails', fails(out.host, [['engine-alpha.ts', alpha.replace(`\n${HAND_DOCS_NOTE}`, '')]]));
+    check('an import only a moved docblock links is pruned with the // lines above it (not before its docblock moves), and the proof names it',
+      out.pruned.join() === 'LinkedOnly' && v.pruned.join() === 'LinkedOnly' && !out.host.includes('LinkedOnly }') &&
+      !out.host.includes('for the link on') && slice.host.includes('for the link on'), `${out.pruned} | ${v.pruned}`);
+    check('a binding the head dropped that no moved docblock links fails',
+      fails(out.host.replace("import { betaPrivate } from './engine-beta.js';\n", ''), []));
     check('--modules naming a module no stub delegates to refuses',
       refused(() => planHandDocs(tm, input, mods, { modules: ['engine-gone.ts'] })));
   }
