@@ -188,7 +188,9 @@ describe('[#23198] every stored-row write in protocol.ts and its modules reaches
     it('a same-member route is called after its write and before the member\'s next write', () => {
         for (const row of WRITES) {
             if (!('sameMember' in row.route)) continue;
-            const write = writes.find((w) => w.member === row.member && w.verb === row.verb)!;
+            const found = writes.find((w) => w.member === row.member && w.verb === row.verb);
+            expect(found, `${row.member}: ${row.verb} is in the source`).toBeDefined();
+            const write = found!;
             const { end } = memberAt(write.scanned, write.offset);
             const nextWrite = writes.find((w) => w.scanned === write.scanned && w.member === row.member && w.offset > write.offset)?.offset ?? end;
             const routes = codeMatches(new RegExp(`\\b${SELF}\\.${row.route.sameMember}\\(`))
