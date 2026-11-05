@@ -38,7 +38,9 @@
  * evaluates it over a copy of the row whose lookup carries the related row,
  * and the console renders the `titleFormat` placeholder by that related row's
  * display name; the case's `row` is that copy (`sys_business_unit_member`,
- * `sys_team_member`).
+ * `sys_team_member`, and since #30454 `sys_member`, `sys_two_factor`,
+ * `sys_scim_group_member` and `sys_scim_projection_grant`: every case below
+ * whose title names a lookup).
  * The engine-level proof of the hop is
  * `plugin-security/src/business-unit-member-title.test.ts`.
  */
