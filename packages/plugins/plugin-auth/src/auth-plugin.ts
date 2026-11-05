@@ -109,6 +109,7 @@ import {
   reportIfNoSignInAccountExists,
   type SignInPathConfigView,
 } from './boot-sign-in-reachability.js';
+import { providerCredentialIndex, providerCredentialsFrom, registerSignInMethodFloor } from './sign-in-method-floor.js';
 import { judgePlatformAdmin, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
   decideDemoStaffEnvironmentGate,
@@ -554,6 +555,8 @@ export class AuthPlugin implements Plugin {
   /** [#30203] Whether the running allow-list is the one a stored setting gave it. */
   private allowedIpRangesFromSettings = false;
   private configuredSocialProviders: SocialProviderConfig | undefined;
+  /** Whether each provider declared at boot holds a credential pair (the sign-in floor's count). */
+  private bootProviderCredentials: ReadonlyMap<string, boolean> = new Map();
   // ADR-0092 D6 — the EFFECTIVE better-auth secondaryStorage (host-supplied or
   // the kernel-cache adapter wired in init). The identity write guard's
   // session-snapshot refresh reads through this; undefined = refresh no-ops.
@@ -751,6 +754,7 @@ export class AuthPlugin implements Plugin {
     this.configuredSocialProviders = authConfig.socialProviders
       ? { ...authConfig.socialProviders }
       : undefined;
+    this.bootProviderCredentials = providerCredentialIndex(authConfig.socialProviders, authConfig.oidcProviders);
 
     // [ADR-0105 D8] Lazy handle to plugin-security's `invitation-placement`
     // service. LAZY on purpose: plugin-security starts after plugin-auth, so
@@ -2078,6 +2082,29 @@ export class AuthPlugin implements Plugin {
       return;
     }
     if (!settings || typeof settings.getNamespace !== 'function') return;
+
+    // The save door refuses turning off the last sign-in method, before the
+    // value is stored; the pass below would only apply it. See the module.
+    const floorManager = this.authManager;
+    registerSignInMethodFloor(
+      settings,
+      {
+        publicConfig: () => floorManager.getPublicConfig(),
+        engine: () => {
+          try {
+            return ctx.getService<IDataEngine>('objectql');
+          } catch {
+            return undefined;
+          }
+        },
+        hostSignInHandoff: this.options.hostSignInHandoff === true,
+        stackConfiguredGoogle: () => !!this.configuredSocialProviders?.google,
+        // Read at save time: the index is set in init, after `auth:configure`.
+        providerHasCredentials: (provider) => providerCredentialsFrom(this.bootProviderCredentials)(provider),
+        env: () => ((globalThis as any)?.process?.env ?? {}) as Record<string, string | undefined>,
+      },
+      ctx.logger,
+    );
 
     const applySettings = async (): Promise<void> => {
       if (!this.authManager) return;
