@@ -36,7 +36,9 @@ import userEvent from '@testing-library/user-event';
 import { AuthProvider, TokenStorage } from '@object-ui/auth';
 import type { AuthClient } from '@object-ui/auth';
 import { I18nProvider } from '@object-ui/i18n';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { ImpersonationBanner } from '../ImpersonationBanner';
+import { HostNavigationBridge } from '../../console/HostNavigationBridge';
 
 const ADMIN_TOKEN = 'admin-token';
 const IMPERSONATED_TOKEN = 'impersonated-token';
@@ -304,5 +306,87 @@ describe('ImpersonationBanner (#4467)', () => {
     // Nobody pressed Stop on THIS impersonation, so nothing may say it failed.
     expect(screen.queryByTestId('impersonation-not-restored')).toBeNull();
     expect(screen.queryByTestId('impersonation-stop-error')).toBeNull();
+  });
+});
+
+/**
+ * Starting an impersonation from a Setup page lands the administrator on home,
+ * not on the page they were on, which the impersonated user usually cannot
+ * open. Mounted the way `ConsoleShell` mounts the banner: under a router, inside
+ * the console's `HostNavigationBridge`, with the current path read back.
+ */
+describe('ImpersonationBanner: starting an impersonation lands on home', () => {
+  const SETUP_PAGE = '/apps/setup/sys_user/usr_dave';
+
+  function LocationProbe() {
+    const location = useLocation();
+    return <output data-testid="location">{location.pathname}</output>;
+  }
+
+  function renderInConsole(initialPath: string) {
+    return render(
+      <MemoryRouter initialEntries={[initialPath]}>
+        <HostNavigationBridge>
+          <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
+            <AuthProvider authUrl="/api/v1/auth" client={tokenBoundClient()}>
+              <ImpersonationBanner />
+              <LocationProbe />
+            </AuthProvider>
+          </I18nProvider>
+        </HostNavigationBridge>
+      </MemoryRouter>,
+    );
+  }
+
+  const location = () => screen.getByTestId('location').textContent;
+
+  beforeEach(() => {
+    TokenStorage.clear();
+    stubStopEndpoint((url) =>
+      url.endsWith(STOP_PATH)
+        ? new Response('{}', { status: 200, headers: { 'set-auth-token': ADMIN_TOKEN } })
+        : new Response('{}'),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    TokenStorage.clear();
+  });
+
+  it('navigates to / when an ordinary session becomes impersonated', async () => {
+    TokenStorage.set(ADMIN_TOKEN);
+    renderInConsole(SETUP_PAGE);
+    // The administrator's ordinary session has resolved on the Setup page.
+    await waitFor(() => expect(TokenStorage.get()).toBe(ADMIN_TOKEN));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(location()).toBe(SETUP_PAGE);
+
+    // The impersonate action's response rotates the token; the provider
+    // re-resolves identity from it.
+    TokenStorage.set(IMPERSONATED_TOKEN);
+
+    await screen.findByTestId('impersonation-banner');
+    await waitFor(() => expect(location()).toBe('/'));
+  });
+
+  it('stays on the URL it was opened at when the console boots already impersonated', async () => {
+    TokenStorage.set(IMPERSONATED_TOKEN);
+    renderInConsole(SETUP_PAGE);
+
+    await screen.findByTestId('impersonation-banner');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(location()).toBe(SETUP_PAGE);
+  });
+
+  it('does not move the page when the impersonation ends', async () => {
+    TokenStorage.set(IMPERSONATED_TOKEN);
+    renderInConsole(SETUP_PAGE);
+
+    await screen.findByTestId('impersonation-banner');
+    await userEvent.click(screen.getByTestId('impersonation-stop'));
+    await waitFor(() => expect(screen.queryByTestId('impersonation-banner')).toBeNull());
+    expect(location()).toBe(SETUP_PAGE);
   });
 });

@@ -30,6 +30,7 @@ import type { ApiKeyLifecyclePolicy } from '@objectstack/spec/contracts';
 import { accountScopeAuthGate, type AuthGate, type UserAuthGateSource } from './auth-gate.js';
 import { isMissingTableError } from '@objectstack/types';
 import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
+import { isUserBanInForce, USER_BAN_FIELDS } from './user-ban.js';
 
 /** Default visible prefix for generated keys (helps users identify a key). */
 export const API_KEY_PREFIX = 'osk_';
@@ -492,7 +493,7 @@ export interface ApiKeyPrincipal {
  * key is unknown/revoked/expired": a refusal means the credential is real and
  * intact but cannot be admitted under this deployment's tenancy posture.
  */
-export type ApiKeyRefusalReason = 'organization_required' | 'organization_membership_ended';
+export type ApiKeyRefusalReason = 'organization_required' | 'organization_membership_ended' | 'owner_banned';
 
 /**
  * The verdict on an inbound API key. Five outcomes, deliberately distinct:
@@ -518,7 +519,8 @@ export type ApiKeyRefusalReason = 'organization_required' | 'organization_member
  *    caller must NOT fall through to the session path, for the reason the
  *    `refused` arm gives. ⛔ Not a revocation: nothing is written, and the same
  *    key is admitted again the moment the owner remediates.
- *  - `refused` — a real, intact key the posture cannot admit. The caller must
+ *  - `refused` — a real, intact key the posture cannot admit, or whose owner's
+ *    ban holds (`owner_banned`, {@link isUserBanInForce}). The caller must
  *    NOT fall through to the session path: falling through would be more
  *    permissive than today's behaviour (an API key already outranks a session),
  *    and the whole point of the refusal is that it is LOUD at call time.
@@ -747,6 +749,47 @@ export async function resolveApiKeyAdmission(
   }
   const lifecycle = lifecycleRefusalOf(row, nowMs, policy, { keyId, userId });
   if (lifecycle) return { outcome: 'lifecycle', refusal: lifecycle };
+
+  // A banned user's credentials are refused while the ban holds. The key is a
+  // credential of its owner, so the owner's ban is read HERE, where the key
+  // becomes that owner, with the one ban predicate (`isUserBanInForce`) the
+  // session refusal shares: the ban flag, lifted once its expiry has passed.
+  //
+  // The answer is the `refused` arm: no principal, no fall-through to the
+  // session path, and on the wire the generic 401 a key that does not exist
+  // gets — nothing tells the holder whether the key, or its owner, is the
+  // reason. ⛔ Not a revocation: nothing is written (the key row is not
+  // revoked and the use is not stamped), so lifting the ban admits the same
+  // key again. Asked after the key's own lifecycle, as every owner question
+  // is: a dead key answers for its own state first.
+  //
+  // One read of the owner's row per key resolution: nothing earlier on this
+  // path has the row (the grants read comes after admission and may be served
+  // from a cache that would not see a fresh ban). A read that THROWS is the
+  // branded store outage, as for `sys_api_key`; a `sys_user` table that was
+  // never provisioned holds no ban.
+  let owner: Record<string, unknown> | undefined;
+  try {
+    let users: any = await ql.find('sys_user', {
+      where: { id: userId },
+      fields: [...USER_BAN_FIELDS],
+      limit: 1,
+      context: { isSystem: true },
+    });
+    if (users && (users as any).value) users = (users as any).value;
+    owner = Array.isArray(users) ? users[0] : undefined;
+  } catch (err) {
+    if (!isMissingTableError(err, 'sys_user')) throw new AuthzStoreUnavailableError('sys_user', err);
+  }
+  if (isUserBanInForce(owner, nowMs)) {
+    return {
+      outcome: 'refused',
+      reason: 'owner_banned',
+      keyId,
+      userId,
+      message: 'The owner of this API key is banned; the key is refused while the ban holds.',
+    };
+  }
 
   // [#8287 / PD #12] ONE spelling. The producer (`runtime` `/keys`) writes
   // `active_organization_id` and nothing else, so this reads that column and

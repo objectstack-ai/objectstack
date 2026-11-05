@@ -9,6 +9,7 @@ import {
   assertReadableQueryFields,
 } from './predicate-guard.js';
 import { isPermissionDeniedError } from './errors.js';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 
 const HIDDEN_SALARY = { salary: { readable: false, editable: false } };
 
@@ -195,6 +196,44 @@ describe('a cross-field comparand is collected and judged like a condition key',
     for (const [, ast] of POSITIONS) {
       const readable = JSON.parse(JSON.stringify(ast).replaceAll('sealed_n', 'seen_c')) as Record<string, unknown>;
       expect(refusalOf(readable)).toBeUndefined();
+    }
+  });
+});
+
+describe("the guard judges the caller's own predicate, never a subtree the platform composed and marked 'policy'", () => {
+  const policy = <T extends object>(subtree: T): T => markFilterSubtreeProvenance(subtree, 'policy');
+  const refusal = (ast: Record<string, unknown>) => {
+    try {
+      assertReadableQueryFields(ast, HIDDEN_SALARY, 'employee');
+      return undefined;
+    } catch (e) {
+      return e as { code?: string; statusCode?: number };
+    }
+  };
+
+  it("a hidden field inside a 'policy' subtree is not collected, nor anything beneath it", () => {
+    const where = { $and: [{ id: 'e1' }, policy({ $and: [{ salary: { $gte: 1 } }, { $or: [{ salary: 2 }] }] })] };
+    expect([...collectConditionFields(where)]).toEqual(['id']);
+    expect(refusal({ where })).toBeUndefined();
+  });
+
+  it("CONTROL the caller's own predicate on the hidden field beside a 'policy' subtree is still refused", () => {
+    const where = { $and: [{ salary: { $gte: 100000 } }, policy({ salary: { $gte: 1 } })] };
+    const r = refusal({ where });
+    expect(isPermissionDeniedError(r)).toBe(true);
+    expect([r?.code, r?.statusCode]).toEqual(['PERMISSION_DENIED', 403]);
+  });
+
+  it("CONTROL an unmarked subtree, an 'author' subtree, and a copy of a 'policy' subtree are judged as the caller's", () => {
+    const marked = policy({ salary: { $gte: 1 } });
+    for (const subtree of [
+      { salary: { $gte: 1 } },
+      markFilterSubtreeProvenance({ salary: { $gte: 1 } }, 'author'),
+      { ...marked },
+      JSON.parse(JSON.stringify(marked)) as Record<string, unknown>,
+    ]) {
+      const r = refusal({ where: { $and: [{ id: 'e1' }, subtree] } });
+      expect([r?.code, r?.statusCode]).toEqual(['PERMISSION_DENIED', 403]);
     }
   });
 });

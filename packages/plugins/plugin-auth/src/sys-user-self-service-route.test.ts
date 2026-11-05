@@ -22,8 +22,9 @@
  *
  *   1. the CRUD **object gate** — `member_default.objects.sys_user.allowEdit`;
  *   2. the **row scope** — the by-id write pre-image check, which re-reads the
- *      target row through the caller's compiled write-RLS filter and denies when
- *      it comes back empty (`sys_user_self`);
+ *      target row with its `{ id }` address AND-ed with one nested `$and` of the
+ *      caller's compiled write-RLS parts (the platform's own predicate, never
+ *      the caller's) and denies when it comes back empty (`sys_user_self`);
  *   3. the ADR-0092 D2 **identity write guard** — an engine `beforeUpdate` hook
  *      that strips non-whitelisted columns and throws when nothing editable
  *      survives.
@@ -298,8 +299,9 @@ describe('sys_user self-service — the row scope the write actually composes', 
     const r = await route(ME, { locale: 'ja-JP' });
     expect(r.refusedBy).toBeNull();
     // One pre-image re-read, and its `where` is the `{id}` address ANDed with
-    // the compiled RLS parts. Asserted verbatim because every other assertion in
-    // this file leans on `matchesFilter` reading it correctly, and because it is
+    // one nested `$and` of the compiled RLS parts. Asserted verbatim because
+    // every other assertion in this file leans on `matchesFilter` reading it
+    // correctly (nested `$and` included), and because it is
     // the security property in one line: the caller's id, and nothing wider.
     //
     // Then exactly one more read: the caller's OWN row by id, which step 3.6
@@ -308,7 +310,7 @@ describe('sys_user self-service — the row scope the write actually composes', 
     // already admitted above, never a scope: it cannot widen what the member may
     // write, and the check it feeds can only refuse more.
     expect(r.preImageWheres).toHaveLength(2);
-    expect(r.preImageWheres[0]).toEqual({ $and: [{ id: ME }, { id: ME }] });
+    expect(r.preImageWheres[0]).toEqual({ $and: [{ id: ME }, { $and: [{ id: ME }] }] });
     expect(r.preImageWheres[1]).toEqual({ id: ME });
   });
 
@@ -352,7 +354,7 @@ describe('sys_user self-service — the four pins, each attributed to a layer', 
     // re-read HAPPENED, was scoped to the caller, and came back empty.
     // …and, the row being refused, the read question that keeps the 403: the
     // member reads the peer's row, so it is not answered as a missing one.
-    expect(r.preImageWheres).toEqual([{ $and: [{ id: PEER }, { id: ME }] }, { id: PEER }]);
+    expect(r.preImageWheres).toEqual([{ $and: [{ id: PEER }, { $and: [{ id: ME }] }] }, { id: PEER }]);
     expect(r.error?.name).toBe('PermissionDeniedError');
     expect(r.error?.code).toBe('PERMISSION_DENIED');
   });
@@ -400,7 +402,7 @@ describe('sys_user self-service — the four pins, each attributed to a layer', 
     // The pre-image re-read ran and SUCCEEDED (the row was visible), and the
     // post-image check read the caller's own row and passed — proof the first
     // two layers admitted the write before the guard refused it.
-    expect(r.preImageWheres).toEqual([{ $and: [{ id: ME }, { id: ME }] }, { id: ME }]);
+    expect(r.preImageWheres).toEqual([{ $and: [{ id: ME }, { $and: [{ id: ME }] }] }, { id: ME }]);
     // ADR-0112 envelope, both discriminators (the REST boundary derives 403 from
     // `status`, and `mapDataError` keys on `code`).
     expect(r.error?.code).toBe('PERMISSION_DENIED');
