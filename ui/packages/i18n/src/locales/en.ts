@@ -177,6 +177,8 @@ const en = {
     // the server's message plays no part (objectui#11344). It is the one
     // success-toast text the runner writes itself (objectui#10900).
     completedSuccessfully: 'Action completed successfully',
+    // The same toast for an action that has a label: it names what was done.
+    completedNamed: '{{action}} completed',
     // The runner's other own text (objectui#10969): the error fallbacks when no
     // readable error message reached it, and the Undo label it hands the toast
     // handler for an undoable success toast.

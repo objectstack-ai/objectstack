@@ -148,6 +148,7 @@ const ja = {
     notAvailableHere: '「{{action}}」は現在のページでは利用できません。',
     notAvailableForRecord: 'このレコードでは利用できません',
     completedSuccessfully: '操作が正常に完了しました',
+    completedNamed: '「{{action}}」が完了しました',
     failed: '操作に失敗しました',
     parallelFailed: '1 つ以上の並列操作が失敗しました',
     selectExactlyOneRow: 'この操作は 1 件のレコードに対して実行されます。行を 1 つだけ選択してください。',

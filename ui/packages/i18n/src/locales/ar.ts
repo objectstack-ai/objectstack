@@ -162,6 +162,7 @@ const ar = {
     notAvailableHere: '"{{action}}" غير متاح في الصفحة الحالية.',
     notAvailableForRecord: 'غير متاح لهذا السجل',
     completedSuccessfully: 'اكتمل الإجراء بنجاح',
+    completedNamed: 'اكتمل الإجراء: {{action}}',
     failed: 'فشل الإجراء',
     parallelFailed: 'فشل إجراء متوازٍ واحد أو أكثر',
     selectExactlyOneRow: 'يُنفَّذ هذا الإجراء على سجل واحد — حدّد صفًا واحدًا فقط.',
