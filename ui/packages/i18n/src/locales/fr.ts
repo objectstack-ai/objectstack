@@ -2905,6 +2905,8 @@ const fr = {
       useEmailResetText: "Réinitialiser par e-mail à la place",
       phoneSuccessTitle: "Mot de passe réinitialisé",
       phoneSuccessDescription: "Votre mot de passe a été réinitialisé. Vous pouvez maintenant vous connecter avec votre nouveau mot de passe.",
+      noDeliveryTitle: "Aucun lien de réinitialisation ne peut être envoyé par e-mail ici",
+      noDeliveryDescription: "Ce déploiement n'envoie pas d'e-mails, aucun lien de réinitialisation du mot de passe ne peut donc vous parvenir. Demandez à un administrateur : il peut vous définir un nouveau mot de passe dans Configuration → Utilisateurs.",
     },
     resetPassword: {
       title: "Définir un nouveau mot de passe",

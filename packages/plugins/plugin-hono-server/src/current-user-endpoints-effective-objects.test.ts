@@ -17,7 +17,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
-import { buildEffectiveObjectPermissions, registryObjectPackageDisabled } from '@objectstack/core';
+import { buildEffectiveObjectPermissions, engineExternalWriteForbidden, registryObjectPackageDisabled } from '@objectstack/core';
 import { registerCurrentUserEndpoints } from './current-user-endpoints';
 
 const ME_PERMISSIONS = '/api/v1/auth/me/permissions';
@@ -53,6 +53,9 @@ const SCHEMAS: Record<string, any> = {
 /** [#28877] Objects whose owning package the registry reports disabled — empty but in one case. */
 const DISABLED = new Set<string>();
 
+/** [#30370] Objects whose external write gate the engine reports closed — empty but in one case. */
+const READ_ONLY_EXTERNAL = new Set<string>();
+
 const ql = {
     find: async () => [],
     registry: {
@@ -61,6 +64,7 @@ const ql = {
         isObjectPackageDisabled: (name: string) => DISABLED.has(name),
     },
     getSchema: (name: string) => SCHEMAS[name],
+    isExternalWriteForbidden: (name: string) => READ_ONLY_EXTERNAL.has(name),
 };
 
 function mount(resolved: unknown[] = RESOLVED) {
@@ -195,6 +199,32 @@ describe('[#18783] /auth/me/permissions `objects` is the one effective-map funct
         // Re-enabled: back on the next request.
         const again: any = await (await mount().request(`http://localhost${ME_PERMISSIONS}`)).json();
         expect(again.objects.deal).toMatchObject({ allowEdit: true });
+    });
+
+    it('[#30370] serves a read-only external object no write grant and no write operation — the same bytes', async () => {
+        READ_ONLY_EXTERNAL.add('deal');
+        try {
+            const body: any = await (await mount().request(`http://localhost${ME_PERMISSIONS}`)).json();
+            const expected = buildEffectiveObjectPermissions(RESOLVED, {
+                allSchemas: () => ql.registry.getAllObjects(),
+                schemaOf: (name) => ql.getSchema(name),
+                isObjectPackageDisabled: registryObjectPackageDisabled(ql.registry),
+                isExternalWriteForbidden: engineExternalWriteForbidden(ql),
+            });
+            expect(JSON.stringify(body.objects)).toBe(JSON.stringify(expected));
+            // The super-user's wildcard would grant every write on `deal`; the gate refuses each one.
+            expect(body.objects.deal).toMatchObject({ allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false, allowTransfer: false });
+            for (const op of ['create', 'update', 'delete', 'upsert', 'bulk', 'import']) {
+                expect(body.objects.deal.apiOperations, op).not.toContain(op);
+            }
+            expect(body.objects.deal.apiOperations).toEqual(expect.arrayContaining(['get', 'list']));
+        } finally {
+            READ_ONLY_EXTERNAL.clear();
+        }
+        // Gate open again: the write is back on the next request.
+        const again: any = await (await mount().request(`http://localhost${ME_PERMISSIONS}`)).json();
+        expect(again.objects.deal).toMatchObject({ allowCreate: true, allowEdit: true });
+        expect(again.objects.deal.apiOperations).toEqual(expect.arrayContaining(['create', 'update', 'delete', 'import']));
     });
 
     it('keeps the rest of the envelope on its own merges', async () => {

@@ -43,9 +43,6 @@ import {
   collectComposableReadableIds,
   type ComposableReadableIdsSite,
 } from './filter-comparand-shape.js';
-import {
-  type RELATION_FILTER_ID_CAP,
-} from './relation-filter-lowering.js';
 // Seek pagination for the walks that must read EVERY row — the autonumber seed
 // scan is one (#6249). Shared with `summary-backfill` rather than re-rolled:
 // the cursor merge is the part that is easy to get subtly wrong.
@@ -141,7 +138,6 @@ import {
   createLogger,
   withTransientRetry,
   type RetryOptions,
-  resolveFilterTokens,
   recordNotFoundError,
   resolveUserAuthzGrants,
   markAppAutomationElevation,
@@ -241,10 +237,6 @@ export type InsertManyRowOutcome =
 import { CoreServiceName } from '@objectstack/spec/system';
 import { IRealtimeService } from '@objectstack/spec/contracts';
 import type { ICryptoProvider } from '@objectstack/spec/contracts';
-import {
-  collectInternalReadFields,
-  collectCredentialFields,
-} from './secret-fields.js';
 // [#25522 cut 18] `count` and `aggregate()`'s credential guard
 // (`rejectCredentialAggregation`); the methods of the same names below hand
 // each body the members it reads (`CountAggregateHost`).
@@ -1120,61 +1112,14 @@ export class ObjectQL implements IObjectQLEngine {
     return HooksAndFunctionsFacet.opensAfterAbortUnit.call(hooksAndFunctionsHost.of(this), event, object, context);
   }
 
-  /** [#22782] The unit {@link opensAfterAbortUnit} asked for; `write` re-enters the door, which joins it. */
   private async inAfterAbortUnit<T>(write: () => Promise<T>): Promise<T> {
-    // [#25522 cut 6] The body moved to `engine-hook-dispatch.ts` (see `HookDispatchHost`).
+    // [#25522 cut 6] The body moved to `engine-hook-dispatch.ts`, its docblock with it (see `HookDispatchHost`).
     const host: ThisParameterType<typeof inAfterAbortUnit> = {
       transaction: (...a) => this.transaction(...a),
     };
     return (inAfterAbortUnit<T>).call(host, write);
   }
 
-  /**
-   * [#5038] The per-row after-hook contexts a predicate (`multi: true`) write
-   * dispatches, one per matched row.
-   *
-   * ## Why per row at all
-   *
-   * ADR-0058's bulk-write addendum (the 2026-08-04 ruling on #4800 / #4862)
-   * records the contract: **a bulk write is N record changes, so after-hooks
-   * and the record-change flow triggers riding them evaluate and fire PER
-   * ROW**, with `previous` = that row's pre-write state and `record` = that
-   * row's actual state. Before it, the engine fired the hook ONCE, never
-   * assigned `previous`, and left `record` degraded to the bare payload — so
-   * the transition condition both the docs and ten showcase flows teach
-   * (`status == "done" && previous.status != "done"`) was unevaluable on a
-   * bulk write, and the audit/notification flows behind it silently did not
-   * happen.
-   *
-   * ## The shape is the SINGLE-RECORD shape, deliberately
-   *
-   * Each context is exactly what a single-id write builds — `input.id` is the
-   * row, `input.data` is this write's payload, `result` is the row's state,
-   * `previous` is its pre-image. That is #2922's ruling for batch INSERT
-   * restated: a single array-shaped context "broke every consumer built for
-   * the single shape", so a per-row context must be indistinguishable from a
-   * record-scoped one. It is also what makes this fix land at the PRODUCER:
-   * `hook-wrappers`' `record`/`previous` bindings, the record-change trigger's
-   * `buildContext`, and plugin-audit's diff all read these same four fields and
-   * need no bulk-aware branch of their own.
-   *
-   * `input.data` is a shallow COPY per row: the batch has one payload, but an
-   * after-handler that writes through the flat-input proxy must not have its
-   * mutation leak into the next row's view.
-   *
-   * ## `result` is composed, not re-read
-   *
-   * The row's post-write state is `row ⊕ payload` — the pre-image the matched
-   * set already gave us, overlaid with the payload the driver just applied.
-   * Composing keeps the issue's performance guardrail literal: the matched row
-   * set is read ONCE and reused for every per-row evaluation. Re-reading the
-   * batch after the write to capture driver-side stamps would be a second
-   * full-set query for fields the after-view has never carried on this path.
-   *
-   * For a DELETE there is no post-state, so `result` is left unset and
-   * `input` carries no `data`: consumers fall back to `previous` (the deleted
-   * row), which is what `record` means for a delete.
-   */
   private buildPerRowAfterContexts(
     object: string,
     event: 'afterUpdate' | 'afterDelete',
@@ -1182,7 +1127,7 @@ export class ObjectQL implements IObjectQLEngine {
     batchCtx: HookContext,
     payload?: Record<string, unknown>,
   ): HookContext[] {
-    // [#25522 cut 6] The body moved to `engine-hook-dispatch.ts` (see `HookDispatchHost`).
+    // [#25522 cut 6] The body moved to `engine-hook-dispatch.ts`, its docblock with it (see `HookDispatchHost`).
     const readRegistry = () => this._registry;
     const host: ThisParameterType<typeof buildPerRowAfterContexts> = {
       get _registry() { return readRegistry(); },
@@ -1190,88 +1135,13 @@ export class ObjectQL implements IObjectQLEngine {
     return buildPerRowAfterContexts.call(host, object, event, rows, batchCtx, payload);
   }
 
-  /**
-   * [#5574] The per-row `before*` dispatch of a predicate (`multi: true`)
-   * write — ADR-0058 Addendum II, clauses D1–D4.
-   *
-   * ## D1/D2 — one dispatch per matched row, on the SINGLE-RECORD shape
-   *
-   * `input.id` names the row, `previous` is that row's pre-image, and
-   * `input.options` is still the CALLER's bag (the PHASE rule in `hook.zod.ts`
-   * is unchanged: the `before*` phase reads the pre-merge view, `where` and
-   * `multi` visible). `result` stays ABSENT — the before phase has no
-   * post-state, and a value assigned to `ctx.result` here is overwritten by the
-   * write's own result before any `after*` handler could see it.
-   *
-   * Zero matched rows is zero dispatches, and `[]` is meaningful: a batch that
-   * changed nothing is not a record change. The caller checks that BEFORE
-   * calling in, so an empty row set never reaches this loop.
-   *
-   * ## D3 — the payload is BATCH-scoped, and that IS the merge rule
-   *
-   * Every per-row context carries THE payload, not a copy — deliberately
-   * unlike {@link buildPerRowAfterContexts}, which copies because an
-   * after-handler's mutation has nowhere legitimate to go. There is exactly one
-   * payload for a predicate update (`driver.updateMany` takes one SET clause
-   * for N rows), so:
-   *
-   *  - a rewrite takes effect on the WHOLE batch, whichever row's dispatch made
-   *    it, and rewrites ACCUMULATE across the N dispatches in dispatch order;
-   *  - N post-hook payloads cannot diverge, so nothing is reconciled, no
-   *    payload is discarded, and no predicate write is ever split into N
-   *    single-row writes.
-   *
-   * Two ways a handler can write the payload and both must accumulate: mutating
-   * it in place (`ctx.input.data.x = 1`) needs no help, while REPLACING it
-   * (`ctx.input.data = {…}`) would otherwise be lost with the row context that
-   * held it. So each row reads the batch payload fresh and writes it back after
-   * its dispatch — that write-back is what makes "accumulate in dispatch order"
-   * true for both spellings rather than only the first.
-   *
-   * A rewrite CONDITIONED on the row (`ctx.previous`, `ctx.input.id`) cannot
-   * scope itself to the row it was decided on: it widens to every matched row.
-   * Per-row `previous` is supplied so a guard can REFUSE the write (throw),
-   * and — ruled on #16074 — so a hook can make a ROW-INVARIANT-IN-EFFECT
-   * rewrite: one whose written KEY SET is the same on every matched row AND is
-   * assigned IN PLACE (`ctx.input.data.x = 1`, never `ctx.input.data = {…}`,
-   * which the recording below cannot attribute). A rewrite AIMED at one row
-   * stays outside the contract, and what makes the admitted shape safe is that
-   * enforcement rather than the hook's good faith.
-   *
-   * ## D3, ENFORCED — divergent key sets refuse the batch [#14099]
-   *
-   * That last paragraph used to end "a contract statement, not an enforcement
-   * — no static rule can decide whether a rewrite is row-invariant". The second
-   * half is still true and the conclusion no longer follows: nothing STATIC can
-   * decide it, but the dispatch can MEASURE it. #14088's recorder is armed once
-   * more per row here, so each dispatch reports the set of payload keys THAT
-   * row's hook chain assigned; if two rows disagree, the batch is refused whole
-   * before any write ({@link MultiUpdateHookKeyDivergenceError}).
-   *
-   * Maintainer ruling of 2026-09-02, on the corruption `duly` measured against
-   * published 17.2.0 — a `completed_at` transition stamp moved an
-   * already-completed row's timestamp, silently, on a two-row batch. The
-   * criterion is the key SET and never the values, which is what lets the
-   * clock-reading audit stamp through: every row writes `updated_at`, so an
-   * honest batch is never refused non-deterministically. The full argument,
-   * both rejected value-comparison variants, and the blind spot the ruling
-   * carries openly (same key, per-row VALUES) live on
-   * `multi-update-hook-key-divergence.ts`.
-   *
-   * ## D4 — `input.id` is not a reroute lever here
-   *
-   * On the old batch dispatch it was: `input.id` was present-but-`undefined`,
-   * and binding it moved the write onto the single-id branch. A per-row context
-   * arrives with `id` already bound and the dispatch already decided, so
-   * rebinding retargets nothing — and is refused rather than ignored.
-   */
   private async dispatchPerRowBeforeHooks(
     object: string,
     event: 'beforeUpdate' | 'beforeDelete',
     rows: Record<string, unknown>[],
     batchCtx: HookContext,
   ): Promise<void> {
-    // [#25522 cut 6] The body moved to `engine-hook-dispatch.ts` (see `HookDispatchHost`).
+    // [#25522 cut 6] The body moved to `engine-hook-dispatch.ts`, its docblock with it (see `HookDispatchHost`).
     const readRegistry = () => this._registry;
     const host: ThisParameterType<typeof dispatchPerRowBeforeHooks> = {
       get _registry() { return readRegistry(); },
@@ -1289,33 +1159,8 @@ export class ObjectQL implements IObjectQLEngine {
     return HooksAndFunctionsFacet.dispatchUnscopedMultiWriteHooks.call(hooksAndFunctionsHost.of(this), event, object, batchCtx);
   }
 
-  /**
-   * [#5038, one ceiling for both phases since #5574] Ceiling on the matched-row
-   * set a predicate write fires per-row hooks over.
-   *
-   * The consequence ADR-0058's addendum told this implementation to price: a
-   * hook that used to run once per batch now runs once per row, so a
-   * notification hook sends N messages and a cache-invalidation hook runs N
-   * times. Unbounded, a single `multi: true` update matching a whole table
-   * turns into an unbounded fan-out of handler executions inside one write.
-   *
-   * Exceeding it REJECTS the write, before the FIRST per-row dispatch and
-   * before `updateMany`/`deleteMany` runs, so nothing is written and no handler
-   * ran for a batch that was going to be refused anyway. The alternative —
-   * quietly falling back to firing once for the batch — is the silent
-   * degradation this whole family exists to abolish (#4649/#4775): the hooks
-   * would not fire for N-1 rows and nothing would say so.
-   *
-   * [#5574] The rule itself is `resolveBulkPerRowHookBudget` in
-   * `packages/spec/src/data/bulk-write-hook-conformance.ts` (D6), not a copy
-   * kept in step by a pin. This method is the RAISING half only: the contract
-   * is pure and total (no clock, no I/O, no throw), the engine turns a
-   * `refused` verdict into the thrown error. Splitting it that way is what lets
-   * `before*` and `after*`, update and delete, share one ceiling and one
-   * message with nothing to keep synchronised.
-   */
   private assertBulkPerRowHookBudget(object: string, event: string, matched: number): void {
-    // [#25522 cut 6] The body moved to `engine-hook-dispatch.ts`; it reads no member.
+    // [#25522 cut 6] The body moved to `engine-hook-dispatch.ts`, its docblock with it; it reads no member.
     return assertBulkPerRowHookBudget(object, event, matched);
   }
 
@@ -2184,103 +2029,13 @@ export class ObjectQL implements IObjectQLEngine {
     return buildUser(execCtx);
   }
 
-  /**
-   * Build the DriverOptions blob passed to every IDataDriver call.
-   *
-   * # The tenant read scope is the wall's verdict (ADR-0131 D8)
-   *
-   * The driver's native tenant scope — `tenantId` (equality) and `tenantIds`
-   * (the `group` union), which `applyTenantScope` compiles — is the Layer 0
-   * verdict projected onto `DriverOptions`, never a second derivation beside
-   * it. One function decides ({@link computeTenantLayer0Verdict},
-   * `@objectstack/core`), and the engine reads it from one of two places:
-   *
-   * - **the verdict the wall RECORDED on this operation**
-   *   ({@link OperationContext.tenantLayer0Verdict}, passed in as
-   *   `scope.recordedVerdict`) — present where the security layer composed its
-   *   wall onto the predicate: a read, or a predicate write. It already carries
-   *   what only that layer can know (the exempt `PLATFORM_ADMIN` on a
-   *   posture-permitting object, the verified platform owner's read, the
-   *   delegator's intersection), so the driver reaches exactly the rows Layer 0
-   *   admits;
-   * - **otherwise, the same function over the engine's own facts** — the
-   *   posture in force ({@link resolveEnginePosture}), the context's active
-   *   organization and access set, the object's tenancy — with no admin
-   *   exemption, since the engine holds no permission sets. That covers a
-   *   system context, a by-id write, and a composition with no security layer
-   *   mounted.
-   *
-   * Projected: `none` (the `single` posture; a non-tenant, tenancy-disabled or
-   * federated object; an exempt platform admin) → no scope; `organization` →
-   * `tenantId`; `organizations` → `tenantIds`, with the active organization as
-   * `tenantId` (the driver keys its scope on `tenantId` being present); `deny`
-   * → the active organization if there is one — the narrowest scope a driver
-   * can express, and where the wall ran its deny sentinel is already in the
-   * predicate. Under `single` the driver therefore no longer narrows a read to
-   * the active organization: the posture is one tenant, and isolation inside it
-   * was never the driver's to add (ADR-0131 D11).
-   *
-   * # The write target is not a read scope
-   *
-   * An insert (`scope.writeTarget`) keeps the active organization as
-   * `tenantId` in EVERY posture — `injectTenantOnInsert` stamps the row with
-   * it, the counter scopes by it, and an upsert's identity probe refuses a
-   * merge into another organization's row by it — and the `group` membership
-   * set beside it, unchanged.
-   *
-   * # Withheld for two object postures
-   *
-   * 1. **`tenancy.enabled: false`** (ADR-0066 platform-global posture, e.g.
-   *    `sys_license`): stamping the caller's active-org tenantId there would
-   *    org-scope a global catalog at the driver, and its NULL-org rows would
-   *    vanish for authenticated org-context reads while anonymous reads still
-   *    see them (#3249).
-   *
-   * 2. **`external != null`** — a federated object (ADR-0015), whose schema
-   *    is owned by the REMOTE database (#7738). The driver turns `tenantId`
-   *    into `organization_id = :tenant`, and
-   *    against a remote table that carries no such column that is a SQL error
-   *    on Postgres/MySQL — or worse on SQLite, whose quoted-identifier
-   *    fallback reinterprets the unresolvable identifier as the string
-   *    literal `'organization_id'`, makes both disjuncts constant-false, and
-   *    answers **0 rows with HTTP 200**: a correctly-bound external object
-   *    silently reads empty.
-   *
-   *    Note the reason is NOT "the remote happens to lack the column". The
-   *    column the driver detects is the platform's OWN: `applySystemFields`
-   *    (`resolveInjectedSystemColumns`) injects `organization_id` into every
-   *    object it registers, with no `external` branch, and
-   *    `SqlDriver.registerExternalObject` is DDL-free by design and runs no
-   *    introspection — so it computes the tenant column from the platform's
-   *    field set, never from the remote's. On a federated object
-   *    `organization_id`'s presence is therefore always the injection and
-   *    never evidence about the remote, which leaves the engine no ground on
-   *    which to scope by it. Tenant isolation for federated data belongs to
-   *    the remote and to the layers above (RBAC/RLS, the datasource binding),
-   *    not to a predicate the platform guesses onto someone else's table.
-   *
-   * # Declared keys only
-   *
-   * The result holds the keys `DriverOptionsSchema` declares and nothing else
-   * (`pickDeclaredDriverOptions`, `engine-driver-options.ts`). `base` is
-   * usually a caller's whole option bag — the query, the write-observability
-   * callbacks and the other engine-level keys ride in it — and only its
-   * declared keys are kept: an explicitly-passed `base.tenantId` /
-   * `base.transaction` / `base.bypassTenantAudit` is deliberate caller intent
-   * and still wins, under every verdict; everything else in the bag is the
-   * engine's, never a driver's. That is why a verb hands its driver THIS
-   * object and keeps `input.options` as the hooks' additive view
-   * (`mergeDriverOptionsIntoHookView`). System / isSystem callers may still
-   * cross tenants by clearing `tenantId` themselves on the resulting object;
-   * this helper does not mask the system path.
-   */
   private buildDriverOptions(
     object: string,
     execCtx?: ExecutionContext,
     base?: any,
     scope: { writeTarget?: boolean; recordedVerdict?: unknown } = {},
   ): any {
-    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts`, its docblock with it (see `DriverOptionsHost`).
     const readTxStore = () => this.txStore;
     const readRegistry = () => this._registry;
     const host: ThisParameterType<typeof buildDriverOptions> = {
@@ -2295,106 +2050,48 @@ export class ObjectQL implements IObjectQLEngine {
     return buildDriverOptions.call(host, object, execCtx, base, scope);
   }
 
-  /**
-   * [ADR-0131 D8] The driver's native read scope for one operation — the Layer
-   * 0 verdict projected onto `DriverOptions` (see {@link buildDriverOptions}).
-   * `undefined` is "no scope"; the caller has already excluded a
-   * tenancy-disabled or federated object.
-   *
-   * A recorded verdict that does not parse as `TenantLayer0VerdictSchema`
-   * reads as absent — never as an organization — and the engine then decides
-   * over its own facts, which carry no admin exemption: fail toward the wall.
-   */
   private driverReadScope(
     execCtx: ExecutionContext | undefined,
     recordedVerdict: unknown,
   ): { tenantId: string; tenantIds?: string[] } | undefined {
-    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts`, its docblock with it (see `DriverOptionsHost`).
     const host: ThisParameterType<typeof driverReadScope> = {
       engineLayer0Verdict: (...a) => this.engineLayer0Verdict(...a),
     };
     return driverReadScope.call(host, execCtx, recordedVerdict);
   }
 
-  /**
-   * The Layer 0 verdict over the engine's OWN facts — what {@link driverReadScope}
-   * falls back to where no wall was recorded. The one ladder,
-   * `computeTenantLayer0Verdict`, with the exemption's facts withheld.
-   */
   private engineLayer0Verdict(
     execCtx: ExecutionContext | undefined,
     activeOrganization: string | undefined,
   ): TenantLayer0Verdict {
-    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts`, its docblock with it (see `DriverOptionsHost`).
     const host: ThisParameterType<typeof engineLayer0Verdict> = {
       resolveEnginePosture: (...a) => this.resolveEnginePosture(...a),
     };
     return engineLayer0Verdict.call(host, execCtx, activeOrganization);
   }
 
-  /**
-   * [ADR-0131 D8 · 8c-1] Did the wall's EXEMPTION lift this operation's scope?
-   * True when the recorded verdict is `none` while the same ladder over the
-   * engine's own facts — every rung but the exemption — would have walled it.
-   * That is plugin-security's own `crossedByPlatformAdmin` test (the ladder
-   * asked a second time with only the exemption withheld), with the engine's
-   * existing fallback ({@link engineLayer0Verdict}, what an unrecorded
-   * operation is scoped by) as the second asking: no rung is computed beside
-   * the one ladder, and a `single` posture answers `none` both ways, so it is
-   * no crossing. The #12974 owner bypass records `none` on READS only, where
-   * the declaration is inert.
-   *
-   * Absence is not exemption: a by-id write, a system context or a stack with
-   * no security layer records nothing, and answers false. A recorded value
-   * that does not parse answers false too — junk never lifts anything.
-   */
   private wallExemptedOperation(execCtx: ExecutionContext | undefined, recordedVerdict: unknown): boolean {
-    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts`, its docblock with it (see `DriverOptionsHost`).
     const host: ThisParameterType<typeof wallExemptedOperation> = {
       engineLayer0Verdict: (...a) => this.engineLayer0Verdict(...a),
     };
     return wallExemptedOperation.call(host, execCtx, recordedVerdict);
   }
 
-  /**
-   * The write target of an insert or upsert: the active organization, in every
-   * posture, with the `group` membership set beside it — the scope the
-   * driver's insert readback and upsert identity probe narrow by (ADR-0105 D5:
-   * the active organization is where a write lands).
-   */
   private driverWriteTarget(
     execCtx: ExecutionContext | undefined,
   ): { tenantId: string; tenantIds?: string[] } | undefined {
-    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts`, its docblock with it (see `DriverOptionsHost`).
     const host: ThisParameterType<typeof driverWriteTarget> = {
       resolveEnginePosture: (...a) => this.resolveEnginePosture(...a),
     };
     return driverWriteTarget.call(host, execCtx);
   }
 
-  /**
-   * [#8844] The tenancy posture IN FORCE for this engine, by the same two-step
-   * `app-plugin.organizationWallActive` uses and for the same reason: the
-   * injected provider is the `tenancy` service's answer (what is actually
-   * ENFORCED, degraded boots included), and the env resolution is what the
-   * operator ASKED for — the best fact available to a lean embedding that
-   * mounts no SecurityPlugin.
-   *
-   * ⛔ Never `resolveMultiOrgEnabled()`: ADR-0105 D1 demoted that boolean to a
-   * back-compat INPUT of `resolveTenancyPosture()`, so it reads `false` on a
-   * deployment configured the documented way and would put a fully walled
-   * install on the single-tenant branch below — the third recurrence of that
-   * shape is what `app-plugin` documents.
-   *
-   * Read live per call, never cached: nothing here may freeze a verdict a later
-   * boot phase can still change. `resolveTenancyPosture()` THROWS on an
-   * unrecognized `OS_TENANCY_POSTURE` (deliberately — a typo'd posture must not
-   * silently remove the wall); a write is not the place that refusal belongs,
-   * and an unreadable posture is exactly the case where guessing `single` would
-   * be worst, so it degrades to the walled reading and the write is refused.
-   */
   private resolveEnginePosture(): TenancyPosture {
-    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts`, its docblock with it (see `DriverOptionsHost`).
     const readTenancyPostureProvider = () => this.tenancyPostureProvider;
     const host: ThisParameterType<typeof resolveEnginePosture> = {
       get tenancyPostureProvider() { return readTenancyPostureProvider(); },
@@ -3163,6 +2860,25 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#30370] Is the external write gate (ADR-0015 §5.3 Gate 3) CLOSED on
+   * `objectName`? `true` exactly when every insert / update / delete on it is
+   * refused `403 EXTERNAL_WRITE_FORBIDDEN`: the object sits on a federated
+   * datasource (`schemaMode !== 'managed'`) and not both
+   * `datasource.external.allowWrites` and `object.external.writable` opt in.
+   * `false` for a managed datasource, an object with no datasource, and an
+   * unknown object (the gate judges none of them).
+   *
+   * The write gate itself reads this same verdict, so the two can never
+   * disagree. A read-only question for the effective-permission map
+   * (`buildEffectiveObjectPermissions` in `@objectstack/core`), which must not
+   * offer a write the data plane refuses. Holds for every caller alike: no
+   * permission set, super-user bypass included, opens a closed gate.
+   */
+  isExternalWriteForbidden(objectName: string): boolean {
+    return RegistrationFacet.isExternalWriteForbidden.call(registrationHost.of(this), objectName);
+  }
+
+  /**
    * Set the realtime service for publishing data change events.
    * Should be called after kernel resolves the realtime service.
    *
@@ -3173,37 +2889,6 @@ export class ObjectQL implements IObjectQLEngine {
     return ReferencesAndMasterDetailFacet.setRealtimeService.call(referencesAndMasterDetailHost.of(this), service);
   }
 
-  /**
-   * Publish a realtime {@link DataEvent} for a record write (#4626 —
-   * contract-first, the data-side twin of #4602/#4628).
-   *
-   * What reaches a `subscribeData` callback must BE the spec's `DataEvent`
-   * (`@objectstack/spec/api`): top-level `id` (uuid), `type`, `object`,
-   * `recordId` (REQUIRED), plus `changes`/`after`/`userId` when they apply.
-   * The transport keeps its `RealtimeEventPayload` envelope — `payload`
-   * carries the complete `DataEvent`, and the client SDK unwraps + validates
-   * it at the boundary instead of double-casting the envelope.
-   *
-   * Only per-record writes reach here. A predicate (`multi: true`) write has
-   * its own contract — see {@link publishBulkDataEvent} (#4639) — and the
-   * multi branches of `update()`/`delete()` route to it directly, so they
-   * never arrive at the identity gate below.
-   *
-   * Two loud-by-design gates:
-   *  - **No record identity → no event.** `DataEvent.recordId` is required, so
-   *    a write that names no record has no truthful per-record event to
-   *    publish. It publishes NONE (warn log) instead of the pre-#4626
-   *    fabrication (`recordId: ''`, `after: <affected count>`) that every
-   *    schema-compliant consumer must reject. Reaching this gate now means a
-   *    single-id write whose driver returned no usable primary key — a driver
-   *    bug — because the bulk callers no longer come through here.
-   *  - The event body is `DataEventSchema.parse`d before publish, so a
-   *    malformed producer fails here (warn log, event not published) rather
-   *    than delivering a lie downstream.
-   *
-   * Never throws and never fails the write: a realtime transport problem must
-   * not roll back a committed record.
-   */
   private async publishDataEvent(
     action: 'created' | 'updated' | 'deleted',
     object: string,
@@ -3223,7 +2908,7 @@ export class ObjectQL implements IObjectQLEngine {
       context?: ExecutionContext;
     },
   ): Promise<void> {
-    // [#25522 cut 4] The body moved to `engine-realtime-publish.ts` (see `RealtimePublishHost`).
+    // [#25522 cut 4] The body moved to `engine-realtime-publish.ts`, its docblock with it (see `RealtimePublishHost`).
     const readRealtimeService = () => this.realtimeService;
     const readLogger = () => this.logger;
     const readRegistry = () => this._registry;
@@ -3235,47 +2920,12 @@ export class ObjectQL implements IObjectQLEngine {
     return publishDataEvent.call(host, action, object, input);
   }
 
-  /**
-   * Publish a realtime {@link BulkDataEvent} for a predicate write (#4639).
-   *
-   * The `multi: true` branches of `update()`/`delete()` reach
-   * `IDataDriver.updateMany`/`deleteMany`, which resolve an affected COUNT and
-   * nothing else. That is too little for the per-record `DataEvent` contract
-   * (`recordId` is required), so those writes were silent from #4626 until now
-   * — honest, but it meant webhooks and every other event consumer saw
-   * nothing at all when a predicate write emptied half a table.
-   *
-   * They now get their own event instead of impersonating a per-record one:
-   * `data.records.updated` / `data.records.deleted`, carrying the object and
-   * the count. A consumer reading the type knows immediately that no
-   * `recordId` is coming — the failure mode of the pre-#4626 fabrication,
-   * where `recordId: ''` looked like a record until you tried to use it.
-   *
-   * Deliberately NOT carried: the query predicate. The only one in hand here
-   * is the middleware-composed AST, whose `where` embeds the security layer's
-   * injected row scoping (RLS, sharing) — publishing it would ship tenant
-   * internals to whatever external URL a webhook points at. See
-   * `BulkDataEventSchema`'s TSDoc for the full reasoning.
-   *
-   * [#15225 / #15813] `organizationId` — the ONE organization the tenant
-   * wall named for this batch, read off the Layer 0 verdict the enforcement
-   * layer RECORDED on the operation context ({@link OperationContext.tenantLayer0Verdict})
-   * — ⛔ no second query on the publish path, and ⛔ no re-derivation of the
-   * wall from posture, context or schema (the #15706 mirror) — and OMITTED
-   * whenever the producer cannot assert one. See {@link bulkEventOrganizationId}
-   * for what is read, what is deliberately not, and for why `absent` here
-   * means "not asserted", not the per-record "belongs to no organization".
-   *
-   * Same two disciplines as the per-record twin: validate before publish, and
-   * never throw — a realtime transport problem must not roll back a committed
-   * write.
-   */
   private async publishBulkDataEvent(
     action: 'updated' | 'deleted',
     object: string,
     input: { matched: unknown; context?: ExecutionContext; tenantLayer0Verdict?: unknown },
   ): Promise<void> {
-    // [#25522 cut 4] The body moved to `engine-realtime-publish.ts` (see `RealtimePublishHost`).
+    // [#25522 cut 4] The body moved to `engine-realtime-publish.ts`, its docblock with it (see `RealtimePublishHost`).
     const readRealtimeService = () => this.realtimeService;
     const readLogger = () => this.logger;
     const host: ThisParameterType<typeof publishBulkDataEvent> = {
@@ -3460,38 +3110,8 @@ export class ObjectQL implements IObjectQLEngine {
     return validationMessageContext.call(host, objectName, context);
   }
 
-  /**
-   * The locale the bridged i18n service can actually ANSWER in, for the locale
-   * the caller asked for (#15757).
-   *
-   * `ExecutionContext.locale` is the `Accept-Language` header's first tag
-   * verbatim — `preferredLocaleFromHeader` reports what was ASKED FOR and
-   * expands nothing, deliberately, because every one of its callers negotiates
-   * differently. Handing that tag straight to `II18nService.t()` made this the
-   * one consumer that never negotiated at all: a served adapter resolves a
-   * locale EXACTLY and then falls to its declared fallback
-   * (`FileI18nAdapter.t()` is `resolveFromLocale(key, locale)` then
-   * `resolveFromLocale(key, fallbackLocale)`), so a bare `zh` missed a `zh-CN`
-   * bundle and the caller read an English refusal — on the same response whose
-   * dataset, view and object labels were Chinese, because those go through
-   * `pickData` and `pickData` negotiates.
-   *
-   * ⛔ The rule is NOT re-implemented here. `resolveBundleLocale`
-   * (`@objectstack/spec/system`) is the single negotiation rule the document
-   * translators already run — exact → case-insensitive → base language →
-   * variant expansion, which is the step that reaches `zh-CN` from `zh` — and
-   * this asks it the same question about a different set of available locales:
-   * the translators' set is the bundle's keys, and the service's set is what
-   * `getLocales()` reports it holds. A second rule living here is the defect,
-   * not the fix.
-   *
-   * Passes the requested tag through untouched whenever there is nothing to
-   * negotiate against — no service, no `getLocales`, an empty or non-array
-   * answer, a throwing one, or no match. Negotiation needs a list of what
-   * EXISTS; inventing one is how a second rule gets born.
-   */
   private negotiatedMessageLocale(requested: string | undefined): string | undefined {
-    // [#25522 cut 1] The body moved to `engine-validation-messages.ts` (see `ValidationMessageHost`).
+    // [#25522 cut 1] The body moved to `engine-validation-messages.ts`, its docblock with it (see `ValidationMessageHost`).
     const readI18nService = () => this.i18nService;
     const host: ThisParameterType<typeof negotiatedMessageLocale> = {
       get i18nService() { return readI18nService(); },
@@ -3499,128 +3119,15 @@ export class ObjectQL implements IObjectQLEngine {
     return negotiatedMessageLocale.call(host, requested);
   }
 
-  /**
-   * An OBJECT's display name in the caller's locale: translation bundle →
-   * declared `label` → API name (#7307).
-   *
-   * The object-level twin of `resolveFieldLabel` (`record-validator.ts`), and
-   * deliberately the same three-step ladder with the same last resort: the API
-   * name is what a user must not be shown, so it is where the ladder ENDS, not
-   * where it starts. It stays available to clients on the structured fields
-   * (`object` / `dependentObject`) and on `developerMessage`.
-   */
   private objectDisplayLabel(
     objectName: string,
     declaredLabel: unknown,
     ctx: { locale?: string; translate?: (key: string, locale: string, params?: Record<string, unknown>) => string },
   ): string {
-    // [#25522 cut 1] The body moved to `engine-validation-messages.ts`; it reads no member.
+    // [#25522 cut 1] The body moved to `engine-validation-messages.ts`, its docblock with it; it reads no member.
     return objectDisplayLabel(objectName, declaredLabel, ctx);
   }
 
-  /**
-   * [#4441] Referential integrity on the WRITE path: a `lookup` (or any
-   * reference-typed field) may not be given an id that exists in no row of the
-   * object it declares.
-   *
-   * The field metadata is unambiguous — `{"type":"lookup","required":true,
-   * "reference":"sys_permission_set"}` — and the DELETE side already reasons
-   * about the edge (`deleteBehavior: 'set_null'`). Only the insert side never
-   * checked, so `POST /data/sys_position_permission_set
-   * {"permission_set_id":"ps_does_not_exist_at_all"}` created the row.
-   *
-   * On the RBAC link tables that is a security-surface record that resolves to
-   * nothing: an administrator auditing permissions sees a binding whose target
-   * cannot be inspected, and the audience-anchor gate had to resolve that very
-   * set to evaluate the grant — so a dangling row was an unevaluable gate input,
-   * not merely an untidy one. (That gate and `sys_position_permission_set` are
-   * retired since C3 stage 8; the check stands for the link tables that remain.)
-   *
-   * ## Scope, deliberately narrow
-   *
-   * - **Caller-supplied keys only.** Server stamps (`owner_id`,
-   *   `organization_id`, `created_by`/`updated_by`) are lookups too; they are
-   *   written by hooks and middleware, not by the request, and re-validating
-   *   them here would turn a platform stamp into a caller-facing rejection.
-   * - **Non-system writes only**, like every other write-path guard in this
-   *   engine (`stripReadonlyFields` — which since #14147 runs on the create
-   *   path as well as the update one — and `stripRuntimeOwnedFields`). Seed
-   *   replay,
-   *   package install and boot-time provisioning legitimately write rows in an
-   *   order that resolves only once the batch completes; failing them closed
-   *   would turn an ordering detail into a boot failure. This leaves a real
-   *   residual — an `isSystem` caller can still write a dangling reference —
-   *   which is recorded on the issue rather than silently accepted.
-   *   [#28881] ⛔ Except a flow run's elevated write (`runAs: 'system'`):
-   *   its context carries the flow-write mark (`keepsFlowWriteReferenceCheck`,
-   *   `@objectstack/core`, set by `resolveRunDataContext` in
-   *   service-automation) and is checked like a user write. Its elevation is
-   *   for authorization (other people's rows, past RLS and FLS), never for a
-   *   link to a row that does not exist, and it keeps every authorization
-   *   exemption `isSystem` gives it. A write it sets off (a hook's `ctx.api`,
-   *   its `sudo()`, a cascade leg) spreads that context and is checked as
-   *   the flow's own.
-   * - **Empty values are not references.** `null` / `undefined` / `''` mean
-   *   "no link", which is what `deleteBehavior: 'set_null'` produces.
-   * - **Already-expanded objects are skipped.** A read round-trip can hand back
-   *   `{id, name, …}` in the slot; that is not an id write.
-   * - **A value the row already stores is not the write's (#29062).** The
-   *   check judges only the references a write ADDS. An update's `storedRows`
-   *   (the by-id prior row; a predicate update's matched rows) forgive a
-   *   refused value, or a multi-valued member, that every one of those rows
-   *   already holds: an edit form carries the whole record back, and a stored
-   *   id that has since stopped resolving (the delete walk leaves a `user`
-   *   value in place, `DELETE_SEMANTICS_REFERENCE_TYPES`) is not the editor's
-   *   to answer for. A value new to any of the rows is refused as before, and
-   *   an insert has no stored rows, so every value it supplies is judged.
-   *
-   * ## Why the probe bypasses RLS — and why it keeps the tenant wall
-   *
-   * Existence is a fact about the database, not about the caller's ROW-LEVEL
-   * visibility — the same distinction the #4435 existence probe turns on. A
-   * probe under the caller's own context would refuse a link to a permission
-   * set the caller cannot READ, which is ordinary in an RLS-scoped deployment
-   * and would make the platform's own admin flows fail. Whether the caller may
-   * create the binding at all is the RBAC/RLS layer's decision, made where it
-   * already is. So the probe is elevated: `isSystem` bypasses RBAC, RLS and FLS.
-   *
-   * That argument is about visibility, never about TENANCY, and the elevation
-   * is therefore `sudo()`-shaped — `{ ...context, isSystem: true }`, see
-   * {@link referenceExists} — not a bare `{ isSystem: true }` (#19808). The
-   * bare spelling carried no `tenantId`, so the probe spanned every
-   * organization: an org-bound caller could store a reference to another
-   * organization's row, and could tell "exists in another organization" (the
-   * write committed) from "exists nowhere" (refused) — a cross-tenant existence
-   * oracle. With the caller's context spread first, `buildDriverOptions`
-   * forwards its `tenantId` to the driver, a row stamped with another
-   * organization is not found, and both cases answer the same
-   * `reference_not_found`. The tenancy exemptions stay where they are decided:
-   * `buildDriverOptions` withholds `tenantId` for a `tenancy.enabled: false`
-   * (platform-global) object and for a federated one, so a reference to either
-   * still resolves from an org-bound caller. A row with no organization is no
-   * tenant's (ADR-0131 D1): the driver's scope is the organization equality,
-   * with no `IS NULL` arm, so an org-bound caller's probe does not find one.
-   *
-   * ## …except a master-detail header, which the caller must be able to read (#22519)
-   *
-   * A `master_detail` field names the detail's HEADER, and a write of a detail
-   * whose header the caller cannot read answers exactly what a write naming a
-   * header that exists nowhere answers. Nothing upstream of this check settles
-   * that: ADR-0055 §3 gates a detail write on its header (master edit) only for
-   * a `controlled_by_parent` detail, so an elevated probe alone would tell such
-   * a caller "exists" apart from "exists nowhere". So for a `master_detail`
-   * field the caller's read door is asked first ({@link masterDetailHeaderExists}),
-   * and a header it does not return is `reference_not_found`. ⛔ A plain
-   * `lookup` keeps the elevated probe above, unchanged.
-   *
-   * Fails OPEN when the target cannot be checked (unregistered object, no
-   * driver, a probe that throws): an integrity check that cannot run must not
-   * invent a rejection, and the alternative — refusing every write to an object
-   * whose target lives on an unreachable datasource — converts a connectivity
-   * problem into data loss. A master-detail header's read door that fails is
-   * the exception: it did not return the header, so the header is missing
-   * (see {@link masterDetailHeadersCallerReads}).
-   */
   private async assertReferencesResolve(
     schema: any,
     data: Record<string, unknown> | null | undefined,
@@ -3629,7 +3136,7 @@ export class ObjectQL implements IObjectQLEngine {
     msgCtx?: { locale?: string; translate?: any; objectName?: string },
     storedRows?: StoredReferenceRows,
   ): Promise<void> {
-    // [#25522 cut 10] The body moved to `engine-referential-integrity.ts` (see `ReferentialIntegrityHost`).
+    // [#25522 cut 10] The body moved to `engine-referential-integrity.ts`, its docblock with it (see `ReferentialIntegrityHost`).
     const host: ThisParameterType<typeof assertReferencesResolve> = {
       masterDetailHeaderExists: (...a) => this.masterDetailHeaderExists(...a),
       referenceExists: (...a) => this.referenceExists(...a),
@@ -3682,32 +3189,12 @@ export class ObjectQL implements IObjectQLEngine {
     return ReferencesAndMasterDetailFacet.masterDetailHeaderExists.call(referencesAndMasterDetailHost.of(this), target, id, context);
   }
 
-  /**
-   * [#22519] Read 1 of the write's master-detail header read: which of `ids`
-   * the caller's READ DOOR returns — one `find` for the whole batch, under the
-   * caller's own context, so every enforcement layer in the middleware chain
-   * (RBAC, RLS, sharing, row scope) answers it, as it answers the preview's
-   * first read ({@link resolvePreviewParents}). Projected to `id`: what the
-   * header HOLDS is read 2's question, never this one's.
-   *
-   * A header it does not return binds as a header that exists nowhere binds:
-   * the reference check answers `reference_not_found` for it
-   * ({@link masterDetailHeaderExists}), and the write's header resolution
-   * leaves `parent` unbound for it ({@link resolveMasterDetailParent},
-   * {@link resolveMasterDetailParents}). A read that fails — a refusal of the
-   * read itself included — returned no header, so every header binds as
-   * missing, as the preview binds them and as the write's own failed header
-   * read does; ⛔ never as readable.
-   *
-   * A SYSTEM caller (seed replay, boot) has no read door to ask: every id goes
-   * straight to read 2, and its write resolves exactly as before.
-   */
   private async masterDetailHeadersCallerReads(
     master: string,
     ids: ReadonlyArray<unknown>,
     context: ExecutionContext | undefined,
   ): Promise<ReadonlySet<string>> {
-    // [#25522 cut 10] The body moved to `engine-referential-integrity.ts` (see `ReferentialIntegrityHost`).
+    // [#25522 cut 10] The body moved to `engine-referential-integrity.ts`, its docblock with it (see `ReferentialIntegrityHost`).
     const readLogger = () => this.logger;
     const host: ThisParameterType<typeof masterDetailHeadersCallerReads> = {
       find: (...a) => this.find(...a),
@@ -5385,29 +4872,6 @@ export class ObjectQL implements IObjectQLEngine {
     return SummariesAndExpansionFacet.expandRelatedRecords.call(summariesAndExpansionHost.of(this), objectName, records, expand, depth, execCtx);
   }
 
-  /**
-   * [#29460] Serve `FieldSchema.referenceNameVisible` on an expanded read
-   * (director ruling 6574398310, letter B). Runs from
-   * {@link expandRelatedRecords} for a field declaring the key, after the
-   * caller's own expansion of it, and rewrites only the ids that expansion
-   * left bare.
-   *
-   * For each such id it asks, as the caller and with none of the caller's
-   * `$expand` nesting, whether the caller may read it (the security service's
-   * object-level admission, then an id-only read for the row scope). A refused
-   * id whose record exists in the caller's tenant becomes
-   * `{ id, name, readRefused: true }`: `name` is ADR-0079's display name,
-   * read by the engine under the tenant-kept elevation from exactly `id` and
-   * the resolved name field, with the floor `Record #<id>` when field-level
-   * security keeps that field from the caller. A readable target keeps its
-   * expansion, an id the caller's own nested filter left bare stays bare, an
-   * id no record has stays bare. `multiple: true` is judged per element.
-   *
-   * ⛔ Never served on an unexpanded read: ADR-0104 D1's stored form is the
-   * bare id for every caller. ⛔ The caller's projection, filter, order and
-   * nested expand never reach the elevated read, and the field's
-   * `displayField` does not choose its column.
-   */
   private async serveReferenceNames(
     objectName: string,
     records: any[],
@@ -5415,7 +4879,7 @@ export class ObjectQL implements IObjectQLEngine {
     referenceObject: string,
     execCtx?: ExecutionContext,
   ): Promise<void> {
-    // The body lives in `engine-reference-name-visible.ts` (see `ReferenceNameVisibleHost`).
+    // The body lives in `engine-reference-name-visible.ts`, its docblock with it (see `ReferenceNameVisibleHost`).
     const readRegistry = () => this._registry;
     const readLogger = () => this.logger;
     const host: ThisParameterType<typeof serveReferenceNames> = {
@@ -5436,53 +4900,12 @@ export class ObjectQL implements IObjectQLEngine {
     return serveReferenceNames.call(host, objectName, records, fieldName, referenceObject, execCtx);
   }
 
-  /**
-   * Resolve file-field id references to their expanded read form (ADR-0104 D3
-   * wave 2). A `file`/`image`/`avatar`/`video`/`audio` value stored as an
-   * opaque `sys_file` id string whose servable row this read finds (committed,
-   * or a tombstone still held) is enriched, in place, to the `FileValueSchema`
-   * object `{ id, name, size, mimeType, url }` — `url` derived from the stable
-   * `/files/:fileId` resolver, never stored. That is one of three expanded
-   * forms: an id nothing resolves stays the bare id (DUAL-MODE SAFE, and the
-   * fail-open `catch` below), and an id whose `sys_file` read is refused to the
-   * caller becomes `FileRefusedValueSchema` (REFUSED IS NOT ABSENT).
-   *
-   * DUAL-MODE SAFE: an inline-blob value (an object) and a string that does
-   * NOT match a committed `sys_file` row (e.g. an external url) pass through
-   * unchanged, so a field may hold either form during the pre-v17 window.
-   *
-   * REFUSED IS NOT ABSENT: when the caller's own `sys_file` read is refused,
-   * each id becomes `{ id, metadataRefused: true }` (`FileRefusedValueSchema`)
-   * rather than staying a bare id — see the `catch` below.
-   *
-   * PARENT-DERIVED (#22637, maintainer ruling B on #22624): that refusal is
-   * about `sys_file` as an object, not about the files a record owns. A file
-   * whose `ref_object` / `ref_id` name the record being read is judged by the
-   * download door's own field-owned verdict (ADR-0104 D3) — the declared
-   * `fileAccessDelegate` where the object names one, else the caller's read of
-   * that record — and hydrates when it allows. Every other id keeps the
-   * refused marker. See {@link readParentDerivedFiles}.
-   *
-   * ASKED BEFORE READ (#24335): the caller's `sys_file` read is issued only
-   * when the security service admits it — {@link callerMayReadSysFile}, the
-   * middleware's own object-level read gate. A caller it refuses goes
-   * straight to the refused arm, the answer that read's refusal produced, so
-   * the served value is the same and no access attempt is made: the security
-   * layer logs no denial for a read the reader never asked for. A direct
-   * `sys_file` read by that reader is refused, and logged, exactly as before.
-   *
-   * Batched: one admission ask and at most one `sys_file` `id $in […]` read
-   * per call (no N+1) — and, on the refused arm only, one more system read
-   * plus one verdict call; zero of each when no field holds a string value
-   * (the blob-only case), so the step is free for objects that have not
-   * adopted references.
-   */
   private async resolveFileReferences(
     objectName: string,
     records: any[],
     execCtx?: ExecutionContext,
   ): Promise<any[]> {
-    // [#25522 cut 11] The body moved to `engine-file-reference-hydration.ts` (see `FileReferenceHydrationHost`).
+    // [#25522 cut 11] The body moved to `engine-file-reference-hydration.ts`, its docblock with it (see `FileReferenceHydrationHost`).
     const readRegistry = () => this._registry;
     const readLogger = () => this.logger;
     const host: ThisParameterType<typeof resolveFileReferences> = {
@@ -5496,45 +4919,14 @@ export class ObjectQL implements IObjectQLEngine {
     return resolveFileReferences.call(host, objectName, records, execCtx);
   }
 
-  /**
-   * [#24335] May this caller read `sys_file` at all? Asked of the registered
-   * security service's `canReadObject` BEFORE {@link resolveFileReferences}
-   * issues the caller's own `sys_file` read, as the parent-record read gate
-   * asks before it reads a parent object ("A skipped object is not an access
-   * attempt", plugin-audit). `canReadObject` is the security middleware's own
-   * object-level read gate, arm for arm, and answers without logging or
-   * throwing; the read it spares is one that gate would refuse, and
-   * plugin-security logs every refusal at WARN — a line on every ordinary
-   * record read by a reader without `sys_file` read, burying the real denials.
-   *
-   * Asked with the caller's envelope minus its operation-private `__` keys
-   * (`withoutOperationPrivateKeys`, as {@link readParentDerivedFiles} asks its
-   * verdict): no second derivation of authority, and no muting of the
-   * middleware's log — the reader's own `sys_file` read still logs its denial.
-   *
-   * It only ever NARROWS what is read: `true` still reads as the caller, and
-   * that read still decides. Unasked ⇒ `true`, the read goes to the middleware
-   * as it did before: no usable security service, one whose contract omits the
-   * optional `canReadObject`, or an ask that throws. Any other answer than
-   * `true` ⇒ the refused arm, which is what that read's refusal served.
-   */
   private async callerMayReadSysFile(execCtx?: ExecutionContext): Promise<boolean> {
-    // [#25522 cut 11] The body moved to `engine-file-reference-hydration.ts` (see `FileReferenceHydrationHost`).
+    // [#25522 cut 11] The body moved to `engine-file-reference-hydration.ts`, its docblock with it (see `FileReferenceHydrationHost`).
     const host: ThisParameterType<typeof callerMayReadSysFile> = {
       resolveReadableIdsSecurity: (...a) => this.resolveReadableIdsSecurity(...a),
     };
     return callerMayReadSysFile.call(host, execCtx);
   }
 
-  /**
-   * The refused arm of {@link resolveFileReferences}: this caller may not read
-   * `sys_file`, whether its admission said so up front (#24335) or its read was
-   * refused. Each id a record of this result owns is put to the field-owned
-   * verdict ({@link readParentDerivedFiles}, #22637) and hydrates when it
-   * allows; every other id becomes `{ id, metadataRefused: true }`
-   * (`FileRefusedValueSchema`). Logged at `debug`: the answer is handed to
-   * the caller in the value.
-   */
   private async serveRefusedFileHydration(
     objectName: string,
     records: any[],
@@ -5542,7 +4934,7 @@ export class ObjectQL implements IObjectQLEngine {
     uniqueIds: string[],
     execCtx?: ExecutionContext,
   ): Promise<any[]> {
-    // [#25522 cut 11] The body moved to `engine-file-reference-hydration.ts` (see `FileReferenceHydrationHost`).
+    // [#25522 cut 11] The body moved to `engine-file-reference-hydration.ts`, its docblock with it (see `FileReferenceHydrationHost`).
     const readLogger = () => this.logger;
     const host: ThisParameterType<typeof serveRefusedFileHydration> = {
       readParentDerivedFiles: (...a) => this.readParentDerivedFiles(...a),
@@ -5551,13 +4943,8 @@ export class ObjectQL implements IObjectQLEngine {
     return serveRefusedFileHydration.call(host, objectName, records, fileFields, uniqueIds, execCtx);
   }
 
-  /**
-   * The servable subset of some `sys_file` rows, keyed by id — the rule both
-   * arms of {@link resolveFileReferences} serve by, so a row hydrates under
-   * the same condition whichever read found it.
-   */
   private async servableFileRows(objectName: string, rows: any[]): Promise<Map<string, any>> {
-    // [#25522 cut 11] The body moved to `engine-file-reference-hydration.ts` (see `FileReferenceHydrationHost`).
+    // [#25522 cut 11] The body moved to `engine-file-reference-hydration.ts`, its docblock with it (see `FileReferenceHydrationHost`).
     const readHeldFileResolver = () => this._heldFileResolver;
     const readLogger = () => this.logger;
     const host: ThisParameterType<typeof servableFileRows> = {
@@ -5567,64 +4954,13 @@ export class ObjectQL implements IObjectQLEngine {
     return servableFileRows.call(host, objectName, rows);
   }
 
-  /**
-   * [#22637] The parent-derived half of a REFUSED `sys_file` hydration: which
-   * of the ids this result holds are field-owned by a record in it, and does
-   * the download door's verdict let this caller read them?
-   *
-   * Maintainer ruling B on #22624, verbatim as the card records it: "A file
-   * field's metadata follows the parent-derived verdict the download door
-   * already applies (ADR-0104 D3, `buildFileReadAuthorizer`): when the
-   * caller's `sys_file` read is refused, `resolveFileReferences` still
-   * hydrates a file whose `ref_object` / `ref_id` name the record being read
-   * (the delegate consulted where the owner object declares a
-   * `fileAccessDelegate`); a referenced id that does not point at that record
-   * keeps PR #22620's refused marker; direct `sys_file` queries and
-   * `public_read` are unchanged."
-   *
-   * Two reads, both narrow:
-   *
-   *  1. **Which ids does a record in this result own?** One `sys_file` read
-   *     under a `sudo()`-shaped context (`{ ...caller, isSystem: true }`: the
-   *     caller's tenant wall and transaction ride along). The `where` itself
-   *     asks for the ownership pair — `ref_object` this object, `ref_id` one
-   *     of these records — so a file that is not field-owned here is never
-   *     read at all, and only {@link PARENT_DERIVED_FILE_COLUMNS} leave the
-   *     driver. It is the same posture the download door reads a file in (by
-   *     id, under the system context, never the caller's `sys_file` grant).
-   *     `sys_file`'s own read rule is untouched: this read serves only the ids
-   *     a record the caller just read holds, and the caller's own `sys_file`
-   *     queries are refused exactly as before.
-   *  2. **May this caller read those owners' files?** The registered
-   *     {@link FieldOwnedFileReadAuthorizer} — the door's own field-owned arm,
-   *     handed over by the storage plugin, never re-derived here — asked ONCE
-   *     with every owner id, under the caller's envelope minus its
-   *     operation-private `__` keys (`withoutOperationPrivateKeys`: the
-   *     verdict judges the caller, not this sub-read). It consults the
-   *     owner object's `fileAccessDelegate` where one is declared, so a
-   *     delegate-governed object gets the delegate's answer and not the raw
-   *     record read.
-   *
-   * Narrower than the door, by the ruling: the door also serves a file's
-   * uploader and a file reachable through any `sys_attachment` parent; this
-   * serves only a file owned by the record it is read in.
-   *
-   * Returns, per allowed file id, the owning record's id and its servable row
-   * — `null` when the row is owned and allowed but not servable, which the
-   * caller reads as the bare id a `sys_file` reader would see. An id absent
-   * from the map keeps the refused marker. Unwired, no record ids, or a
-   * failure: an empty map — every id stays refused, the answer before this
-   * existed. [#26672] `find` / `findOne` read `id` for any projection that
-   * names a file field ({@link withFileOwnerKey}), so a caller's projection
-   * that leaves `id` out does not land here.
-   */
   private async readParentDerivedFiles(
     objectName: string,
     records: any[],
     uniqueIds: string[],
     execCtx?: ExecutionContext,
   ): Promise<Map<string, { ownerId: string; row: any | null }>> {
-    // [#25522 cut 11] The body moved to `engine-file-reference-hydration.ts` (see `FileReferenceHydrationHost`).
+    // [#25522 cut 11] The body moved to `engine-file-reference-hydration.ts`, its docblock with it (see `FileReferenceHydrationHost`).
     const readFieldOwnedFileReadAuthorizer = () => this._fieldOwnedFileReadAuthorizer;
     const readLogger = () => this.logger;
     const host: ThisParameterType<typeof readParentDerivedFiles> = {
@@ -5640,42 +4976,6 @@ export class ObjectQL implements IObjectQLEngine {
   // Data Access Methods (IDataEngine Interface)
   // ============================================
 
-  /**
-   * Expand `{filter-placeholder}` values in a read AST's `where` against the
-   * request (framework#3582).
-   *
-   * Filters travel as JSON, so a time- or user-scoped slice authored in a view,
-   * dashboard, related list or REST query writes `'{current_year_start}'` /
-   * `'{current_user_id}'` rather than a literal. Until now nothing on the server
-   * substituted them: the placeholder reached the driver as a string, compared
-   * as text, and matched nothing — an empty grid with no error anywhere.
-   *
-   * The engine is the right seam because it is the ONE gate every server-side
-   * read passes through (REST, SDK, related lists, flow `find_records`, sharing
-   * graph reads), so a surface that follows the filter contract works the day it
-   * ships instead of waiting for its own resolver. It runs BEFORE the middleware
-   * chain so only author-supplied filters are inspected; the RLS/sharing filters
-   * injected downstream are built from concrete context values and carry no
-   * placeholders.
-   *
-   * Cheap by construction: {@link resolveFilterTokens} returns the input by
-   * reference when the tree holds no placeholder, which is every internal query.
-   * An unresolvable placeholder throws (see the resolver's module doc) — the one
-   * outcome an author can act on.
-   *
-   * [#20334] `position` names the AST's filter slot: `where` (every read verb)
-   * or `having` (`aggregate`). One resolver for both, so a placeholder reads the
-   * same in either position: `{current_year_start}` resolves, and an unknown one
-   * is `FILTER_TOKEN_UNKNOWN` / 400. The resolver needs no field type — it walks
-   * values, never keys — so a `having` keyed by aggregate aliases resolves as a
-   * `where` keyed by fields does.
-   *
-   * [ADR-0053 D-D1, amended — #5930] …and then LOWERS the position, through
-   * {@link resolveThenLowerWhere}: resolution and lowering are one stage, so a
-   * verb cannot run one without the other. `lowering` is required for that
-   * reason — the position's declared-type reader (`where`: the object's
-   * fields; `having`: the aggregated row's columns).
-   */
   private async resolveWhereTokens(
     ast: QueryAST | undefined,
     execCtx: ExecutionContext | undefined,
@@ -5683,7 +4983,7 @@ export class ObjectQL implements IObjectQLEngine {
     position: 'where' | 'having' = 'where',
     operation = 'find',
   ): Promise<void> {
-    // [#25522 cut 20] The body moved to `engine-query-lowering.ts` (see `QueryLoweringHost`).
+    // [#25522 cut 20] The body moved to `engine-query-lowering.ts`, its docblock with it (see `QueryLoweringHost`).
     const readRegistry = () => this._registry;
     const host: ThisParameterType<typeof resolveWhereTokens> = {
       get _registry() { return readRegistry(); },
@@ -5709,36 +5009,13 @@ export class ObjectQL implements IObjectQLEngine {
    */
   private readonly relatedSchemaOf = (name: string): unknown => this._registry.getObject(name);
 
-  /**
-   * [#20802] Lower every nested-relation condition in one `where` —
-   * `{ owner: { region: 'NA' } }` beneath a relation field — into a filter
-   * every driver answers, by READING the related object: the ids of the
-   * records the condition matches become `$in` on a single-valued relation, or
-   * an `$or` of `$contains` per id on a multi-valued one
-   * (`relation-filter-lowering.ts` holds the forms, the cap and the words).
-   *
-   * **As the caller.** The read is this engine's own `find` on the related
-   * object with the caller's execution context — not a driver call and not a
-   * system read — so the related object's CRUD gate, row scope and field
-   * permissions apply exactly as they do to a direct read of it, and its own
-   * doors judge the condition's comparands against its own declarations. A
-   * refusal from any of them is the answer, loudly; nothing is swallowed.
-   *
-   * **Bounded.** The read asks for one id more than
-   * {@link RELATION_FILTER_ID_CAP}; receiving it, the filter is refused
-   * (`INVALID_FILTER` / 400, the two-step route in the words), never run over
-   * a cut-off list.
-   *
-   * Returns `where` by reference when it holds no condition — the common path
-   * reads nothing and allocates nothing beyond one walk.
-   */
   private async lowerRelationConditions<W>(
     object: string,
     operation: string,
     where: W,
     execCtx: ExecutionContext | undefined,
   ): Promise<W> {
-    // [#25522 cut 20] The body moved to `engine-query-lowering.ts` (see `QueryLoweringHost`).
+    // [#25522 cut 20] The body moved to `engine-query-lowering.ts`, its docblock with it (see `QueryLoweringHost`).
     const readRegistry = () => this._registry;
     const readRelatedSchemaOf = () => this.relatedSchemaOf;
     const host: ThisParameterType<typeof lowerRelationConditions> = {
@@ -5768,21 +5045,11 @@ export class ObjectQL implements IObjectQLEngine {
     return FindFacet.expandSearchOnAst.call(findHost.of(this), ast, schema, context);
   }
 
-  /**
-   * [#25672] The fields `context` may query on `object`, asked of the
-   * registered `security` service's `getQueryableFields` — the answer the
-   * field-read predicate guard is the complement of. `undefined` narrows
-   * nothing, and is the answer when no context is carried (a context-less
-   * read is never asked about, as `searchAll` does), when no security service
-   * is registered or it has no such method, or when it gives no answer: the
-   * guard still judges the search, so an absent answer can only leave the
-   * request as strict as it was. A throw from the method propagates.
-   */
   private async resolveSearchQueryableFields(
     object: string,
     context: ExecutionContext | undefined,
   ): Promise<ReadonlySet<string> | undefined> {
-    // [#25522 cut 20] The body moved to `engine-query-lowering.ts` (see `QueryLoweringHost`).
+    // [#25522 cut 20] The body moved to `engine-query-lowering.ts`, its docblock with it (see `QueryLoweringHost`).
     const readSecurityServiceSourceSlot = () => (this as unknown as Record<symbol, unknown>)[SECURITY_SERVICE_SOURCE_SLOT];
     const host: ThisParameterType<typeof resolveSearchQueryableFields> = {
       get [SECURITY_SERVICE_SOURCE_SLOT]() { return readSecurityServiceSourceSlot(); },
@@ -11171,49 +10438,8 @@ export class ObjectQL implements IObjectQLEngine {
     return DeleteAndAggregateFacet.assertNoInternalFieldEvaluated.call(deleteAndAggregateHost.of(this), object, query, options);
   }
 
-  /**
-   * Fail-closed guard (ADR-0100 / #3171 / #7922): refuse to aggregate over a
-   * field whose value is withheld on the generic read path. Such fields reach
-   * this guard through **two independent collectors**, and it needs both:
-   *
-   *  - {@link collectCredentialFields} — keyed by field TYPE (`secret` /
-   *    `password`). A GROUP BY / MIN / MAX / array_agg over such a column would
-   *    surface the stored `secret:<id>` ref or the password value.
-   *  - {@link collectInternalReadFields} — keyed by the `internal: true` FLAG
-   *    (#7728). ADR-0100's third credential channel is a one-way hash living in
-   *    an ordinary `text` column, which no type-keyed collector can ever reach;
-   *    the flag is that channel's opt-in declaration. Without this half the
-   *    guard had the same type-vs-flag blind spot #7728 fixed on the read path:
-   *    a flagged column was omitted from `find`/`findOne` yet freely groupable
-   *    here, so the flag's promise ("never returned on the generic data path")
-   *    stopped at the edge of `aggregate()`.
-   *
-   * Post-hoc masking is not available on this path — the value is already a
-   * group key by the time there is a row, and masking group keys corrupts the
-   * result. So we reject instead.
-   *
-   * Neither collector carries a `managedBy` exemption, so the union does not
-   * acquire one, deliberately. Read-masking exempts `password` on better-auth
-   * objects so login reads still see the stored value; *aggregating* a
-   * credential is never legitimate, least of all on an identity table, where it
-   * is an inference oracle over hashes.
-   *
-   * Only the two output-bearing positions on `EngineAggregateOptions` carry
-   * field names: `aggregations[].field` (skip COUNT(*) — undefined or '*') and
-   * `groupBy[]` (a string, or a `{ field }` bucket object).
-   *
-   * The refusal carries the ADR-0112 envelope — `INVALID_FIELD` / 400, located
-   * at the object and the field(s) named. It used to be a bare `Error` with no
-   * `code` or `status`, so a 400-class author refusal reached the data door
-   * 500-shaped (`INTERNAL_ERROR`, an undeclared fault). The code matches the
-   * analytics door's own refusal of an `internal: true` member and the engine's
-   * structured-JSON group-by refusal: the verdict is about the NAME being a
-   * field that is never returned on a generic data exit, which `INVALID_FIELD`
-   * is the catalog member for. The envelope now binds the `secret` / `password`
-   * case too, which shared the bare `Error`.
-   */
   private rejectCredentialAggregation(object: string, query: EngineAggregateOptions): void {
-    // [#25522 cut 18] The body moved to `engine-count-aggregate.ts` (see `CountAggregateHost`).
+    // [#25522 cut 18] The body moved to `engine-count-aggregate.ts`, its docblock with it (see `CountAggregateHost`).
     const readRegistry = () => this._registry;
     const host: ThisParameterType<typeof rejectCredentialAggregation> = {
       get _registry() { return readRegistry(); },
@@ -11325,37 +10551,8 @@ export class ObjectQL implements IObjectQLEngine {
     return TransactionsSectionFacet.datasourceNameOf.call(transactionsSectionHost.of(this), driver);
   }
 
-  /**
-   * A caller asked for a transaction and the driver cannot give it one (#4619).
-   *
-   * The behaviour is unchanged and DECLARED (ADR-0119 D1: "when that driver has
-   * no `beginTransaction` the callback runs with NO transaction and NO
-   * rollback"). What was missing is that a caller had no way to find out —
-   *
-   * [#18063] TWO reasons now reach this degrade and the message says which.
-   * The second is a transport that DECLARED it cannot honour a handle while
-   * inheriting `beginTransaction` from a base class that can. Before the
-   * declaration existed such a driver was indistinguishable from a working one
-   * here, so the engine opened a transaction against it and the degrade — the
-   * honest answer — was unreachable.
-   *
-   * the same shape as `batchData`'s `atomic` flag being a lie for as long as it
-   * was (ADR-0119 D4). Tightening this into a throw would change the declared
-   * contract and is deliberately NOT done here.
-   *
-   * `warn`, not `error`, on purpose. AGENTS.md's judgment question asks whether
-   * the system looks normal *while something it claims is persisted has not
-   * landed*; at this moment nothing has been lost — a capability simply is not
-   * there, and every write in the callback still lands. This is the
-   * `if (!capability)` composition branch the same section names as the
-   * usual `warn`; escalating it would train readers to skim `error`, which is
-   * exactly what made the #4420 `warn` unreadable.
-   *
-   * Once per engine instance per driver: the drivers that reach this path (test
-   * doubles, foreign engines) reach it on EVERY call.
-   */
   private warnTransactionUnsupported(datasource: string | undefined, declaredUnsupported = false): void {
-    // [#25522 cut 7] The body moved to `engine-execute-transactions.ts` (see `ExecuteTransactionsHost`).
+    // [#25522 cut 7] The body moved to `engine-execute-transactions.ts`, its docblock with it (see `ExecuteTransactionsHost`).
     const readTransactionUnsupportedReported = () => this.transactionUnsupportedReported;
     const readLogger = () => this.logger;
     const host: ThisParameterType<typeof warnTransactionUnsupported> = {
@@ -11365,56 +10562,12 @@ export class ObjectQL implements IObjectQLEngine {
     return warnTransactionUnsupported.call(host, datasource, declaredUnsupported);
   }
 
-  /**
-   * A write inside an open `transaction()` resolved to a driver that
-   * transaction does not cover — decide what happens to it (#5351, #5696).
-   *
-   * Called at the TOP of `insert`/`update`/`delete`, before hooks, validation
-   * or defaults run: a refusal here has cost the caller nothing.
-   *
-   * This seam replaced `reportWriteOutsideTransaction` (#4619 / PR #5724),
-   * which reported the split at `error` and let the write proceed with the
-   * owner's handle. Reporting was the right first move — it made the defect
-   * audible without pre-empting a decision that changes ADR-0119 D1's declared
-   * contract for every multi-datasource deployment. The 2026-08-06 maintainer
-   * ruling made that decision, and it is TWO answers, not one, because the two
-   * kinds of write fail in opposite directions:
-   *
-   * - **Business writes are REFUSED** ({@link CrossDatasourceTransactionWriteError},
-   *   #5696 point 2). The caller opened a transaction and asked for one unit of
-   *   work; there is no way to give them one across two drivers (no two-phase
-   *   commit on `IDataDriver`, deliberately out of scope). Silently committing
-   *   part of it — which is what the pre-v17 engine did, on the wrong
-   *   connection at that — is the outcome a caller can neither detect nor undo.
-   *   Refusing hands them the choice: one datasource per transaction, or
-   *   per-datasource units they reconcile themselves.
-   * - **Append-only system ledgers are CARVED OUT** (#5351): audit / telemetry
-   *   / event rows execute OUTSIDE the transaction, on their own connection,
-   *   with no foreign handle. They therefore survive a rollback of the business
-   *   transaction — an "orphan row" describing a write that was undone. For an
-   *   append-only compliance ledger that is the correct direction of error:
-   *   a spurious row is reconcilable, a MISSING row for a write that did
-   *   commit is an unrecoverable compliance hole, and the missing row is what
-   *   shipped before this change. It is also what lets a plugin author write an
-   *   ordinary `afterInsert` audit hook with no knowledge that datasource
-   *   routing exists — refusing here would be swallowed by that hook's
-   *   try/catch and lose the row exactly as before.
-   *
-   * No `error` log survives on either path. The refusal IS the report, louder
-   * than any line; and the carve-out is now DECLARED behaviour that fires on
-   * every audited write of every transaction in a lifecycle-split deployment —
-   * logging it at `error`, or even `warn`, would train readers to skim the
-   * levels that carry real durability failures, which AGENTS.md names as the
-   * mirror-image mistake. It is recorded at `debug`, once per transaction per
-   * datasource, for the operator who is asking why an audit row outlived a
-   * rolled-back write; the durable answer lives in ADR-0067/ADR-0119.
-   */
   private enforceTransactionOrigin(
     objectName: string,
     driver: IDataDriver,
     operation: 'insert' | 'update' | 'delete',
   ): void {
-    // [#25522 cut 7] The body moved to `engine-execute-transactions.ts` (see `ExecuteTransactionsHost`).
+    // [#25522 cut 7] The body moved to `engine-execute-transactions.ts`, its docblock with it (see `ExecuteTransactionsHost`).
     const readTxStore = () => this.txStore;
     const readLogger = () => this.logger;
     const host: ThisParameterType<typeof enforceTransactionOrigin> = {

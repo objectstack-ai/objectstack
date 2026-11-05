@@ -2,7 +2,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { declaredHttpStatus } from '@objectstack/types';
-import { Plugin, PluginContext, POSTURE_LADDER, buildEffectiveObjectPermissions, registryObjectPackageDisabled } from '@objectstack/core';
+import { Plugin, PluginContext, POSTURE_LADDER, buildEffectiveObjectPermissions, engineExternalWriteForbidden, registryObjectPackageDisabled } from '@objectstack/core';
 import type { EffectiveObjectPermission, PermissionSet, RowLevelSecurityPolicy, TenantLayer0Verdict } from '@objectstack/spec/security';
 import { describeHighPrivilegeBits } from '@objectstack/spec/security';
 import type { AnchorBindingContext } from '@objectstack/spec/security';
@@ -3647,6 +3647,9 @@ export class SecurityPlugin implements Plugin {
       // [#28877] The data plane's own predicate, as `/auth/me/permissions` hands
       // it: a disabled package's objects leave the map `can()` reads.
       isObjectPackageDisabled: registryObjectPackageDisabled(ql?.registry),
+      // [#30370] The write gate's own verdict, as `/auth/me/permissions` hands
+      // it: a read-only external object grants no write `can()` reads.
+      isExternalWriteForbidden: engineExternalWriteForbidden(ql),
       logger: this.logger,
     }));
   }

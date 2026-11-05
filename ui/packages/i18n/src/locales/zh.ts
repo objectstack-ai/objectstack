@@ -2908,6 +2908,8 @@ const zh = {
       useEmailResetText: '改用邮箱重置',
       phoneSuccessTitle: '密码已重置',
       phoneSuccessDescription: '您的密码已重置，现在可以使用新密码登录了。',
+      noDeliveryTitle: '此处无法通过邮件发送重置链接',
+      noDeliveryDescription: '此部署不发送邮件，因此密码重置链接无法送达。请联系管理员：管理员可以在“设置 → 用户”中为你设置新密码。',
     },
     setPassword: {
       title: '设置一个备用密码',
