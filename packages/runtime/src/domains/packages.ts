@@ -97,7 +97,7 @@ import type { MetadataProtocol, PackageProtocol } from '@objectstack/spec/api';
 // a second copy of `metadata-protocol`'s `applySeedBodies`, and a second
 // private restatement of "when may a caught sentence be quoted" is where the
 // two copies start answering differently.
-import { clientFacingFailureText, seedAppliedLanded, seedRequestValidationError } from '@objectstack/metadata-protocol';
+import { clientFacingFailureText, seedAppliedLanded, seedLoadPartialWrites, seedRequestValidationError } from '@objectstack/metadata-protocol';
 import type { SeedAppliedLandedParsed } from '@objectstack/spec/api';
 // [#15591] The DECLARED removal of our OWN read-time annotations, imported
 // from the list that defines them (`METADATA_READ_DECORATIONS`) rather than
@@ -2126,9 +2126,16 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                             (deps.logger ?? console).warn(
                                 `[handlePackages] seed apply failed: ${e?.message ?? e}`,
                             );
+                            // [#30429] A load that threw mid-batch still reports
+                            // the rows of the datasets that finished, through the
+                            // same reader and projection as `metadata-protocol`'s
+                            // catch; no reading (the throw came before a load
+                            // ran) leaves `landed` absent.
+                            const written = seedLoadPartialWrites(e);
                             (result as any).seedApplied = {
                                 success: false,
                                 error: clientFacingFailureText(e, 'seed apply failed'),
+                                ...(written ? { landed: seedAppliedLanded(written.finished) } : {}),
                                 // [#10524] The declared 422's structured
                                 // findings ride beside the headline `error` —
                                 // `seedRequestValidationError`'s message is a
