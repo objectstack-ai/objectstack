@@ -2184,23 +2184,25 @@ export const CloseAccount = defineFlow({
 });
 ```
 
-<Callout type="warn">
-**Planned — no door applies this yet.** The declaration parses, is refused on a
-variable that is not an input, and is linted, but no start door loads a
-declared input today: a start that hands it an id the caller cannot read still
-runs. `os validate` warns on every flow that writes it
-(`liveness-planned-property`). The contract below is what the start doors will
-enforce.
-</Callout>
-
-The contract: every door that starts the flow by name (the trigger route, an
-action of `type: 'flow'` over REST and MCP `run_action`, a declared endpoint of
+Every door that starts the flow by name (the trigger route, an action of
+`type: 'flow'` over REST and MCP `run_action`, a declared endpoint of
 `type: 'flow'`) loads a declared input from the named object in the caller's
-own scope before the run exists. An id the caller cannot read there is refused
-`404` `RECORD_NOT_FOUND`; a value that is not an id is refused `400`
-`VALIDATION_FAILED` naming the input. An input without the declaration is
-judged as a record only where the flow's own definition reads it as a record id
-(see the `404` row under [running a flow via the API](#run-a-flow-via-api)).
+own scope before the run exists. An id the caller cannot read there, or one
+that names no record, is refused `404` `RECORD_NOT_FOUND`, and no run is
+created; a value that is not an id is refused `400` naming the input
+(`VALIDATION_FAILED`; at an action, a param's own declared type answers first
+with `VALIDATION_ERROR`). An input without the declaration is judged as a
+record only where the flow's own definition reads it as a record id (see the
+`404` row under [running a flow via the API](#run-a-flow-via-api)). The system
+principal is not judged.
+
+- **Beside the definition's own reads, never in place of them.** When the flow
+  also reads the input as an id of another object (a `get_record` node's
+  `filter.id`, say), the door loads it from both, and the caller must be able
+  to read both rows.
+- **Followed into sub-flows.** A parent that hands its input on, unchanged, to
+  a `subflow` or `map` callee whose input carries the declaration is judged by
+  that declaration too.
 
 - **Inputs only.** A variable that is not `isInput: true` receives nothing from
   a caller, so `objectName` there is refused at parse.
@@ -2606,7 +2608,7 @@ door's own admission check, made before anything is dispatched:
 | `404` | — | No flow by that name in this deployment | Check the name; nothing was dispatched |
 | `403` | `PERMISSION_DENIED` | The caller is not the system principal, and the flow is declared `runAs: 'system'` with a self-triggered `type` (`autolaunched`, `record_change`, `schedule`). The same answer at every door that starts a flow by name: this route, a `type: 'flow'` action (REST and MCP `run_action`) and a declared `type: 'flow'` endpoint | Let it run on its own trigger, or call it from a parent flow's `subflow` node. If members are meant to start it, declare it `type: 'screen'` (or `'api'` for a signed inbound hook) |
 | `403` | `PERMISSION_DENIED` | The flow declares `requiredPermissions` and the caller, not the system principal, does not hold every capability it names. Checked after the row above, at the same doors; the message names the declared and the missing capabilities | Grant the capability through a permission set's `systemPermissions`, or start the flow as someone who holds it |
-| `404` | `RECORD_NOT_FOUND` | The start names a record (`recordId`, or the object's id alias such as `crmLeadId`) that the caller, not the system principal, cannot read in its own scope, or that does not exist: the two get one answer, the one the action door gives. Checked after the two rows above, at the same doors. A record key that is not one id, or a record named with no `objectName` for a flow declared `runAs: 'system'`, is refused `400` `VALIDATION_FAILED` naming the key. Where the flow's own definition reads a start input as the id of a record of a fixed object (a `get_record`, `update_record` or `delete_record` node with a literal `objectName` whose `filter.id` or `filter.id.$eq` is the input, or whose `filter.id.$in` is; a `screen` node with a literal `objectName` whose `recordId` is the input; a `subflow` or `map` node that hands the input to a callee input the callee reads so), that input is also loaded in the caller's own scope from THAT object, whatever object the start names, or none, and whatever the flow runs as: a value the caller cannot read there gets this `404`, and a value that is not one id (or a list of ids, where the definition reads a list) is refused `400` `VALIDATION_FAILED` naming the input | Start the flow on a record the caller can read, and name the record's object (`objectName`) beside `recordId`. Hand an input the flow reads as a record id the id of a record the caller can read in the object the flow reads it from, in the shape the flow reads (one id, or a list of ids) |
+| `404` | `RECORD_NOT_FOUND` | The start names a record (`recordId`, or the object's id alias such as `crmLeadId`) that the caller, not the system principal, cannot read in its own scope, or that does not exist: the two get one answer, the one the action door gives. Checked after the two rows above, at the same doors. A record key that is not one id, or a record named with no `objectName` for a flow declared `runAs: 'system'`, is refused `400` `VALIDATION_FAILED` naming the key. Where the flow's own definition reads a start input as the id of a record of a fixed object (a `get_record`, `update_record` or `delete_record` node with a literal `objectName` whose `filter.id` or `filter.id.$eq` is the input, or whose `filter.id.$in` is; a `screen` node with a literal `objectName` whose `recordId` is the input; a `subflow` or `map` node that hands the input to a callee input the callee reads so), that input is also loaded in the caller's own scope from THAT object, whatever object the start names, or none, and whatever the flow runs as: a value the caller cannot read there gets this `404`, and a value that is not one id (or a list of ids, where the definition reads a list) is refused `400` `VALIDATION_FAILED` naming the input. An input the flow declares a record id (`objectName` on the variable, [above](#a-start-input-that-is-a-record-id)) is loaded from the declared object the same way, whether or not the definition reads it | Start the flow on a record the caller can read, and name the record's object (`objectName`) beside `recordId`. Hand an input the flow reads as a record id the id of a record the caller can read in the object the flow reads it from, in the shape the flow reads (one id, or a list of ids) |
 | `409` | `FLOW_DISABLED` | The flow exists but is switched off | Enable it — the identical request then succeeds |
 | `422` | `FLOW_NO_START_NODE` | The stored definition has no `start` node | Fix the flow; retrying cannot help |
 | `422` | `FLOW_INPUT_SCHEMA_INVALID` | A node's `config` violates the `inputSchema` its own definition declares | Fix the flow; the refusal is non-retryable — even under `errorHandling.strategy: 'retry'` the engine refuses once and never enters the retry loop |

@@ -537,6 +537,27 @@ export {
   keepsFlowWriteReferenceCheck,
 } from './flow-write-reference-check.js';
 
+// #30205 — a banned user's open work: the per-object counts, the optional bulk
+// hand-over (both read and written as the caller), and the ban-in-force
+// predicate objectql's write-time reference check refuses a new assignment by.
+export {
+  USER_ASSIGNED_WORK_FIELD_CAP,
+  USER_WORK_TRANSFER_ROW_CAP,
+  USER_WORK_FAILURE_SAMPLE,
+  userAssignedWorkFields,
+  countUserAssignedWork,
+  transferUserAssignedWork,
+  UserWorkTransferRefusal,
+  type UserAssignedWorkField,
+  type UserWorkEngine,
+  type UserAssignedWorkCount,
+  type UserAssignedWorkSummary,
+  type UserWorkFailureDescriber,
+  type UserWorkTransferFailure,
+  type UserWorkTransferOutcome,
+  type UserWorkTransferReport,
+} from './user-assigned-work.js';
+
 // Ruling of record 6355206139 — the EXTERNAL rung's OWD seam: plugin-security
 // stamps whether a held grant's RLS speaks, plugin-sharing floors the OWD.
 export {

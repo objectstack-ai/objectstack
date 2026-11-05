@@ -153,7 +153,7 @@ import type { FlowCelEntrance } from './flow-cel-root-scope.js';
 import { injectedColumnDefsFor, injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
 import { findUnguardedNullableOperands, nullGuardMessage, provenNonNullKeys } from './validate-null-guards.js';
 import type { NullGuardOptions, NullGuardOutcome } from './validate-null-guards.js';
-import { recordsOf } from './object-graph.js';
+import { objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
 export interface ExprIssue {
   where: string;
   message: string;
@@ -198,6 +198,9 @@ type AnyRec = Record<string, unknown>;
  * `owner_id`, so `record.owner_id` there stays the error it should be. A blanket
  * union would have traded a false positive for a false negative and called it
  * fixed.
+ *
+ * [#30471] Built over the objects as served ({@link objectsAsServed}), so the
+ * authored half includes every field an `objectExtensions` entry adds.
  */
 function buildFieldIndex(objects: AnyRec[]): Map<string, string[]> {
   const idx = new Map<string, string[]>();
@@ -2235,10 +2238,23 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     return actionCopyTemplateIssues(stack, { actions: false, objects: false, pages: true });
   }
   const objects = recordsOf(stack.objects);
-  const fieldIndex = buildFieldIndex(objects);
+  // [#30471] The field indexes read the objects as the registry SERVES them,
+  // every `objectExtensions` field of any body folded in (`objectsAsServed`,
+  // the package's one fold): a `record.FIELD` read of a field a sibling
+  // package adds resolves as it does at runtime, and a field no body declares
+  // or extends is still unknown. The walk below stays on the declared
+  // `objects`, so every finding keeps its declared path. The two indexes that
+  // judge a field's DEFINITION (its type, whether it is nullable) leave out a
+  // field two packages tie on (`objectsWithoutTiedFields`): which definition
+  // the registry serves is registration order, which the stack does not state,
+  // so such a field is a known name with no type and no null-guard verdict.
+  // The read-attachment index is object-level and an extension carries none.
+  const { objects: servedObjects, tied } = objectsAsServed(stack);
+  const typedObjects = objectsWithoutTiedFields({ objects: servedObjects, tied });
+  const fieldIndex = buildFieldIndex(servedObjects);
   const attachedOnReadIndex = buildAttachedOnReadIndex(objects);
-  const fieldTypeIndex = buildFieldTypeIndex(objects);
-  const nullableIndex = buildNullableFieldIndex(objects);
+  const fieldTypeIndex = buildFieldTypeIndex(typedObjects);
+  const nullableIndex = buildNullableFieldIndex(typedObjects);
   // [#24316] object name → its references into a stored-metadata-body table,
   // read the first time a site of that object serves a hop, or (#24677) when
   // the walk reaches the object's fields, whichever comes first — never before
@@ -3461,7 +3477,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // The type is read from the field-type index, never off the field again:
     // the #5017 receiver meta-test pins the keys this walk reads off `f`. The
     // collector admits only a field whose `type` is a string, and the index
-    // records every such field, so each collected field has its type here.
+    // records every such field, so each collected field has its type here,
+    // save one two packages tie on (#30471): the index leaves its definition
+    // out, so it is skipped rather than judged on a definition the registry
+    // may not serve.
     if (objectName) {
       const familyRefs = storedMetadataBodyReferencesFor(objectName);
       const ownFieldTypes = fieldTypeIndex.get(objectName);

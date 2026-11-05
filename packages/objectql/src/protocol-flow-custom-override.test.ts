@@ -505,6 +505,25 @@ describe('[#30065] a declared .custom action override is the packaged action, at
         expect((await p.getMetaItemLayered({ type: 'action', name: ACTION })).effective.label).toBe('SHIPPED');
     });
 
+    it('[#30542] an override that moves the action to another object is refused at the save door, by the rule os validate and the install door give it', async () => {
+        const { protocol, engine } = await boot();
+        await install(protocol, PAIR);
+        const moved = actionBody('MOVED', { ...declared, objectName: 'showcase_other' });
+        const refusal = await protocol.saveMetaItem({
+            type: 'action', name: ACTION, item: moved, mode: 'draft', packageId: PAIR,
+        } as any).then(() => undefined, (e: any) => e);
+        expect(refusal).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+        // `os validate` and the install door key the base's action
+        // `<objectName>:<name>`, so the base ships no such item there.
+        expect((protocol as any).overrideWriteVerdict({ type: 'action', name: ACTION, packageId: PAIR, item: moved }))
+            .toMatchObject({ verdict: 'refuse', rule: 'declared_package_ships_no_such_item' });
+        expect(await stored(engine)).toEqual([]);
+        expect(await everyRead(protocol, engine)).toEqual(servedAs('SHIPPED'));
+        // CONTROL: on the base's own object the same declaration is admitted.
+        expect((protocol as any).overrideWriteVerdict({ type: 'action', name: ACTION, packageId: PAIR, item: actionBody('OURS', declared) }))
+            .toMatchObject({ verdict: 'admit' });
+    });
+
     it('the pair\'s undeclared save is refused, and the remedy names the declaration, never a clone', async () => {
         const { protocol } = await boot();
         await install(protocol, PAIR);

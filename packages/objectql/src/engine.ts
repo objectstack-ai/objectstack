@@ -1149,11 +1149,15 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * [#30065, ADR-0146 D9 `action`] The one exception: a key a declared
    * action override holds ({@link registerActionOverride}) keeps the
-   * override on top, and another package's registration takes the place
-   * beneath it, the handler a removal of the override binds again. A
-   * marketplace base's handlers are bound by its rehydrate after the
-   * authored-action resync bound the override, so the base's body arrives
-   * second and must not replace the override's.
+   * override on top when the declared base's handler arrives, and that
+   * handler takes the place beneath it, the one a removal of the override
+   * binds again. A marketplace base's handlers are bound by its rehydrate
+   * after the authored-action resync bound the override, so the base's body
+   * arrives second and must not replace the override's. [#30542] The
+   * declared base's handler is the one registered while the registry's code
+   * artifact of the action is that package's, on this object; any other
+   * registration under the key, one with no package included, replaces the
+   * override and is warned like every other.
    */
   registerAction(objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName?: string): void {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
@@ -1174,9 +1178,13 @@ export class ObjectQL implements IObjectQLEngine {
    * warned: the replacement is the declared one. The entry is marked as an
    * override, so the base's handler registered after it (by
    * {@link registerAction}) slots beneath it instead of replacing it.
+   *
+   * @param base [#30542] The package the override declares it overrides
+   *   (`overrides.package`). Only that package's handler slots beneath the
+   *   override; without it, any package's does.
    */
-  registerActionOverride(objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName: string): void {
-    return ActionsFacet.registerActionOverride.call(actionsHost.of(this), objectName, actionName, handler, packageName);
+  registerActionOverride(objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName: string, base?: string): void {
+    return ActionsFacet.registerActionOverride.call(actionsHost.of(this), objectName, actionName, handler, packageName, base);
   }
 
   /**
@@ -2986,11 +2994,21 @@ export class ObjectQL implements IObjectQLEngine {
     storedRows?: StoredReferenceRows,
   ): Promise<void> {
     // [#25522 cut 10] The body moved to `engine-referential-integrity.ts`, its docblock with it (see `ReferentialIntegrityHost`).
+    // [#30205] `referenceRow` answers a referenced user's ban state from the existence probe's own read.
+    const readLogger = () => this.logger;
     const host: ThisParameterType<typeof assertReferencesResolve> = {
+      get logger() { return readLogger(); },
       callerReadableReferenceExists: (...a) => this.callerReadableReferenceExists(...a),
+      callerReadableReferenceRow: (...a) => this.callerReadableReferenceRow(...a),
       referenceExists: (...a) => this.referenceExists(...a),
+      referenceRow: (...a) => this.referenceRow(...a),
     };
     return assertReferencesResolve.call(host, schema, data, supplied, context, msgCtx, storedRows);
+  }
+
+  private referenceRow(target: string, id: unknown, context: ExecutionContext | undefined, extraFields: readonly string[]): Promise<Record<string, unknown> | false | null> {
+    // [#30205] The body lives in `engine-references-and-master-detail.ts`, its docblock with it (see `ReferencesAndMasterDetailHost`).
+    return ReferencesAndMasterDetailFacet.referenceRow.call(referencesAndMasterDetailHost.of(this), target, id, context, extraFields);
   }
 
   private referenceExists(target: string, id: unknown, context?: ExecutionContext): Promise<boolean | null> {
@@ -3005,6 +3023,16 @@ export class ObjectQL implements IObjectQLEngine {
   ): Promise<boolean | null> {
     // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts`, its docblock with it (see `ReferencesAndMasterDetailHost`).
     return ReferencesAndMasterDetailFacet.callerReadableReferenceExists.call(referencesAndMasterDetailHost.of(this), target, id, context);
+  }
+
+  private callerReadableReferenceRow(
+    target: string,
+    id: unknown,
+    context: ExecutionContext | undefined,
+    extraFields: readonly string[],
+  ): Promise<Record<string, unknown> | false | null> {
+    // [#29029, #30205] The body lives in `engine-references-and-master-detail.ts`, its docblock with it (see `ReferencesAndMasterDetailHost`).
+    return ReferencesAndMasterDetailFacet.callerReadableReferenceRow.call(referencesAndMasterDetailHost.of(this), target, id, context, extraFields);
   }
 
   private async masterDetailHeadersCallerReads(
@@ -10376,6 +10404,7 @@ export class ObjectQL implements IObjectQLEngine {
       get actionActivation() { return engine.actionActivation; },
       get actions() { return engine.actions; },
       get logger() { return engine.logger; },
+      get registry() { return engine.registry; },
     }));
     cascadePlanningHost.install((engine) => ({
       get _registry() { return engine._registry; },
@@ -10553,6 +10582,7 @@ export class ObjectQL implements IObjectQLEngine {
       get realtimeService() { return engine.realtimeService; },
       set realtimeService(v) { engine.realtimeService = v; },
       referenceExists: (...a) => engine.referenceExists(...a),
+      referenceRow: (...a) => engine.referenceRow(...a),
       resolveEnginePosture: (...a) => engine.resolveEnginePosture(...a),
       resolveObjectName: (...a) => engine.resolveObjectName(...a),
     }));

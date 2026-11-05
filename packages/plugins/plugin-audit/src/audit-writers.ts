@@ -89,6 +89,7 @@ import {
   type ActivityTextSources,
 } from './activity-field-redaction.js';
 import type { LedgerRecordWriteAction } from './audit-log-field-redaction.js';
+import { SIGN_IN_STAMP_EVENT, isSignInStamp } from './sign-in-stamp.js';
 import type { MentionGateInput } from './mention-recipient-gate.js';
 // [ADR-0139 E6] The ONE derivation of the two writer-stamped columns the
 // withheld-row rule reads, shared with the before-insert hook and the backfill.
@@ -2138,6 +2139,9 @@ export function installAuditWriters(
 
     let oldValue: Record<string, any> | null = null;
     let newValue: Record<string, any> | null = null;
+    // The sign-in stamp (`sign-in-stamp.ts`): judged on the diff below, and
+    // marked in `metadata.event` so the ledger's default view can leave it out.
+    let signInStamp = false;
     if (action === 'create') {
       newValue = ledgerView(ctx.object, after, { dropComputed: true, storedType: storedBodyType });
     } else if (action === 'update') {
@@ -2147,6 +2151,7 @@ export function installAuditWriters(
       const d = diff(before || {}, after || {}, getFieldDefs(ctx.object));
       // If nothing meaningfully changed, skip the audit row to avoid noise.
       if (Object.keys(d.next).length === 0) return;
+      signInStamp = isSignInStamp(ctx.object, Object.keys(d.next));
       oldValue = ledgerView(ctx.object, d.old, { dropComputed: false, storedType: storedBodyType });
       newValue = ledgerView(ctx.object, d.next, { dropComputed: false, storedType: storedBodyType });
     } else if (action === 'delete') {
@@ -2189,10 +2194,12 @@ export function installAuditWriters(
     // `user_id` column rather than from a second carrier: rule 4 asks for both
     // sides on the row, and one source for one fact is what keeps them from
     // ever disagreeing.
-    if (performedByClientId) {
+    if (performedByClientId || signInStamp) {
       auditRow.metadata = safeStringify({
-        performed_by: performedByClientId,
-        on_behalf_of: userId ?? null,
+        // A sign-in stamp names its event the way a `config_change` row does
+        // (`metadata.event`); every other CRUD row still carries no event.
+        ...(signInStamp ? { event: SIGN_IN_STAMP_EVENT } : {}),
+        ...(performedByClientId ? { performed_by: performedByClientId, on_behalf_of: userId ?? null } : {}),
       });
     }
 
