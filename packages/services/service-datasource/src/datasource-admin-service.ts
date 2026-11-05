@@ -333,10 +333,15 @@ export interface DatasourceAdminServiceConfig {
    * whose metadata service predates the verdict cannot report the distinction,
    * so its absence means "unchanged behaviour", never "complete". A host that
    * supplies it gets a removal that refuses rather than guesses.
+   *
+   * `objects` names the bound objects the count was taken over, from the SAME
+   * read, so the refusal's message and its `details` cannot disagree. Optional,
+   * so a host that reports only the number keeps working: its refusal then
+   * carries the count without the names.
    */
   countBoundObjectsDiagnosed?: (
     datasource: string,
-  ) => Promise<{ count: number; degraded: boolean; errors: string[] }>;
+  ) => Promise<{ count: number; degraded: boolean; errors: string[]; objects?: string[] }>;
   /**
    * [ADR-0015 §4.2 · #25277] The objects that name `datasource` as theirs, each
    * with its `external` binding as declared (absent when it has none) — the
@@ -525,6 +530,41 @@ function assertSecretNotEmpty(heading: string, secret: SecretInput | undefined):
     `${heading}\nThe \`secret\` is empty. Send the credential to store, or leave \`secret\` out (or null) `
       + 'to keep the stored one. Nothing was written.',
   );
+}
+
+/**
+ * The refusal {@link DatasourceAdminService.removeDatasource} answers while
+ * objects are still bound to the datasource.
+ *
+ * The answer stays `400` `DATASOURCE_ADMIN_ERROR` with its English sentence;
+ * what this adds is `details`, so a client can tell this refusal from every
+ * other 400 of the family and name the objects in its own language without
+ * re-reading object metadata:
+ *
+ *     { reason: 'objects_bound', count: 2, objects: ['bin', 'part'] }
+ *
+ * `reason` is the discriminator, snake_case like the other `details.reason`
+ * values of the ADR-0112 envelope. `count` is the number in the message.
+ * `objects` is the full list, sorted, present when the host's read names them
+ * (`countBoundObjectsDiagnosed` with `objects`); a host that reports only a
+ * number gets `count` alone.
+ *
+ * `code` and `status` are set so the admin routes' `badRequest` can recognise a
+ * refusal that declared its own envelope and relay its `details`, the same way
+ * it relays the `503` and `404` ones; both are required there.
+ */
+function boundObjectsError(name: string, count: number, objects: string[] | undefined): Error {
+  const err = new Error(
+    `Cannot remove datasource '${name}': ${count} object(s) are still bound to it.`,
+  ) as Error & { code?: string; status?: number; details?: Record<string, unknown> };
+  err.code = 'DATASOURCE_ADMIN_ERROR';
+  err.status = 400;
+  err.details = {
+    reason: 'objects_bound',
+    count,
+    ...(objects ? { objects: [...objects].sort() } : {}),
+  };
+  return err;
 }
 
 function metadataIncompleteError(message: string, errors: string[]): Error {
@@ -1154,9 +1194,10 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       throw new Error(`Datasource '${name}' is code-defined and cannot be removed at runtime.`);
     }
 
-    const bound = this.config.countBoundObjectsDiagnosed
-      ? await this.config.countBoundObjectsDiagnosed(name)
-      : { count: await this.config.countBoundObjects(name), degraded: false, errors: [] };
+    const bound: { count: number; degraded: boolean; errors: string[]; objects?: string[] } =
+      this.config.countBoundObjectsDiagnosed
+        ? await this.config.countBoundObjectsDiagnosed(name)
+        : { count: await this.config.countBoundObjects(name), degraded: false, errors: [] };
 
     if (bound.degraded) {
       throw metadataIncompleteError(
@@ -1168,11 +1209,9 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       );
     }
 
-    if (bound.count > 0) {
-      throw new Error(
-        `Cannot remove datasource '${name}': ${bound.count} object(s) are still bound to it.`,
-      );
-    }
+    // [#30444] One read: the count in the message and the names in `details`
+    // both come from `bound`, so they cannot disagree.
+    if (bound.count > 0) throw boundObjectsError(name, bound.count, bound.objects);
 
     await this.config.deleteDatasourceRecord(name);
     if (existing.external?.credentialsRef) await this.tryRemoveSecret(existing.external.credentialsRef);
