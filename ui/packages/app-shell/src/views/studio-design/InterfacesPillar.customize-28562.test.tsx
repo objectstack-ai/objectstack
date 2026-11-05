@@ -35,6 +35,10 @@
  * the first saved edit copies the whole page into the pair, declaring the
  * override; Restore deletes it; the rail marks the page and counts it under
  * "only customizations"; on a writable package the page saves in place.
+ *
+ * objectstack#30089 — and a list view's selection actions: the first field
+ * update added in the list-view panel is written into the pair's copy of the
+ * view, declaring the override, the base untouched.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -663,6 +667,47 @@ describe('Customize an object leaf’s list view into the pair (objectstack#2856
     ]);
     await waitFor(() => expect(JSON.stringify(canvasSchema())).not.toContain('amount'), { timeout: 8000 });
     await waitFor(() => expect(within(header()).queryByTestId('studio-override-chip')).toBeNull());
+  });
+});
+
+describe('Customize a list view’s selection actions into the pair (objectstack#30089)', () => {
+  it('the first field update added on a read-only base is written into the pair’s copy, declaring the override', async () => {
+    const base = BASE_ROWS['view/opportunity.default']!;
+    const grid = { ...clone(base), config: { type: 'grid', data: { provider: 'object', object: 'opportunity' }, columns: ['name', 'stage'] } };
+    srv.base.set('view/opportunity.default', grid);
+    mount();
+    await openPipeline();
+    fireEvent.click(screen.getByRole('button', { name: /Opportunities/ }));
+    const section = await screen.findByTestId('list-view-bulk', undefined, { timeout: 8000 });
+    // Read-only until Customize: nothing to pick, nothing to add.
+    expect(within(section).queryByTestId('list-view-bulk-add-def')).toBeNull();
+
+    await customize();
+    fireEvent.click(await within(screen.getByTestId('list-view-bulk')).findByTestId('list-view-bulk-add-def', undefined, { timeout: 8000 }));
+    const form = await screen.findByTestId('list-view-bulk-new-def');
+    fireEvent.change(within(form).getByTestId('list-view-bulk-new-def-label'), { target: { value: 'Change stage' } });
+    const fieldPick = document.getElementById('studio-list-view-bulk-new-def-field')!;
+    await waitFor(() => expect(fieldPick).toBeEnabled(), { timeout: 8000 });
+    fireEvent.keyDown(fieldPick, { key: 'ArrowDown' });
+    const listbox = await screen.findByRole('listbox');
+    fireEvent.click(within(listbox).getAllByRole('option').find((o) => o.querySelector('code')?.textContent === 'stage')!);
+    fireEvent.click(within(form).getByTestId('list-view-bulk-new-def-add'));
+
+    await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 8000 });
+    expect(srv.ensure).toEqual([201]);
+    const [saved] = srv.saves;
+    expect(saved).toMatchObject({ type: 'view', name: 'opportunity.default', opts: { mode: 'draft', packageId: PAIR } });
+    expect((saved!.body.config as Record<string, unknown>).bulkActionDefs).toEqual([
+      {
+        name: 'update_stage',
+        label: 'Change stage',
+        operation: 'update',
+        params: [{ name: 'stage', label: 'Stage', type: 'text', required: true }],
+      },
+    ]);
+    expect(saved!.body.overrides).toEqual({ package: BASE, basedOn: '4.0.0' });
+    expect(saved!.opts).toMatchObject({ ifNoneMatch: '*' });
+    expect(srv.base.get('view/opportunity.default')).toStrictEqual(grid);
   });
 });
 
