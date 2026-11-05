@@ -52,7 +52,7 @@
 
 import { referenceTargetOf, type EngineQueryOptions } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { isUserBanInForce, keepsFlowWriteReferenceCheck } from '@objectstack/core';
+import { isUserBanInForce, keepsFlowWriteReferenceCheck, USER_BAN_FIELDS } from '@objectstack/core';
 import { ValidationError, buildFieldError } from './validation/record-validator.js';
 import type { ObjectQL } from './engine.js';
 
@@ -328,7 +328,7 @@ async function bannedUserIds(
   try {
     const rows = await this.find(BAN_CHECKED_USER_OBJECT, {
       where: { id: asked.length === 1 ? asked[0] : { $in: asked } },
-      fields: ['id', 'banned', 'ban_expires'],
+      fields: [...USER_BAN_FIELDS],
       context: { ...(context ?? {}), isSystem: true } as ExecutionContext,
     } as EngineQueryOptions) as Array<Record<string, unknown>>;
     const banned = new Set<string>();

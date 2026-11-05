@@ -4,35 +4,11 @@ import { describe, it, expect } from 'vitest';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import {
   countUserAssignedWork,
-  isUserBanInForce,
   transferUserAssignedWork,
   userAssignedWorkFields,
   UserWorkTransferRefusal,
   type UserWorkEngine,
 } from './user-assigned-work.js';
-
-const NOW = Date.parse('2026-11-05T12:00:00Z');
-
-describe('[#30205] isUserBanInForce', () => {
-  it('a ban with no expiry, or one still ahead, is in force', () => {
-    expect(isUserBanInForce({ banned: true }, NOW)).toBe(true);
-    expect(isUserBanInForce({ banned: true, ban_expires: null }, NOW)).toBe(true);
-    expect(isUserBanInForce({ banned: true, ban_expires: '2026-11-06T00:00:00Z' }, NOW)).toBe(true);
-    expect(isUserBanInForce({ banned: true, ban_expires: new Date(NOW + 1000) }, NOW)).toBe(true);
-  });
-
-  it('an expired ban, an unbanned user and a non-row are not', () => {
-    expect(isUserBanInForce({ banned: true, ban_expires: '2026-11-04T00:00:00Z' }, NOW)).toBe(false);
-    expect(isUserBanInForce({ banned: false }, NOW)).toBe(false);
-    expect(isUserBanInForce({ banned: null }, NOW)).toBe(false);
-    expect(isUserBanInForce({}, NOW)).toBe(false);
-    expect(isUserBanInForce(null, NOW)).toBe(false);
-  });
-
-  it('an expiry that does not parse cannot prove the ban lifted', () => {
-    expect(isUserBanInForce({ banned: true, ban_expires: 'not a date' }, NOW)).toBe(true);
-  });
-});
 
 const ticket = {
   name: 'ticket',

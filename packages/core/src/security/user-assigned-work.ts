@@ -51,6 +51,7 @@
  */
 
 import { referenceTargetOf, unprovisionedInjectedColumns } from '@objectstack/spec/data';
+import { isUserBanInForce, USER_BAN_FIELDS } from './user-ban.js';
 
 /** The platform user object every user reference targets. */
 const USER_OBJECT = 'sys_user';
@@ -63,26 +64,6 @@ export const USER_WORK_TRANSFER_ROW_CAP = 500;
 
 /** At most this many failed rows are described per (object, field) pair. */
 export const USER_WORK_FAILURE_SAMPLE = 10;
-
-/**
- * Is this user row's ban in force?
- *
- * `banned` is `true` and the ban has no expiry, or one still in the future.
- * better-auth leaves `banned` true past `ban_expires` until the user's next
- * sign-in clears it, and such a user CAN sign in again, so an expired ban is
- * not in force. A row that is not an object, or has no `banned: true`, is not
- * banned.
- */
-export function isUserBanInForce(row: unknown, now: number = Date.now()): boolean {
-  if (!row || typeof row !== 'object') return false;
-  const { banned, ban_expires: expires } = row as { banned?: unknown; ban_expires?: unknown };
-  if (banned !== true) return false;
-  if (expires === null || expires === undefined || expires === '') return true;
-  const at = expires instanceof Date ? expires.getTime() : new Date(expires as string | number).getTime();
-  // An expiry that does not parse cannot prove the ban lifted.
-  if (Number.isNaN(at)) return true;
-  return at > now;
-}
 
 /** One user reference a record can hold work through. */
 export interface UserAssignedWorkField {
@@ -283,7 +264,7 @@ export async function transferUserAssignedWork(
   const elevated = { ...((context as object | undefined) ?? {}), isSystem: true };
   const [target] = await engine.find(USER_OBJECT, {
     where: { id: toUserId },
-    fields: ['id', 'banned', 'ban_expires'],
+    fields: [...USER_BAN_FIELDS],
     limit: 1,
     context: elevated,
   });

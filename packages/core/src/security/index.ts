@@ -544,7 +544,6 @@ export {
   USER_ASSIGNED_WORK_FIELD_CAP,
   USER_WORK_TRANSFER_ROW_CAP,
   USER_WORK_FAILURE_SAMPLE,
-  isUserBanInForce,
   userAssignedWorkFields,
   countUserAssignedWork,
   transferUserAssignedWork,
