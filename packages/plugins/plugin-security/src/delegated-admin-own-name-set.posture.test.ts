@@ -258,9 +258,9 @@ describe('[ADR-0090 D12, amended 2026-10-17; #24757] a delegate is judged on exa
 });
 
 /** [#29029] Every unit id `context` reads, sorted, or the refusal's status and code. */
-async function unitsRead(h: Awaited<ReturnType<typeof boot>>, context: any): Promise<string[] | { status: number; code?: string }> {
+async function unitsRead(h: Awaited<ReturnType<typeof boot>>, context: ReturnType<typeof delegateCtx>): Promise<string[] | { status: number; code?: string }> {
   try {
-    const rows = await h.engine.find('sys_business_unit', { context } as any);
+    const rows = await h.engine.find('sys_business_unit', { context });
     return (Array.isArray(rows) ? rows : []).map((r: any) => String(r.id)).sort();
   } catch (e) {
     const r = resolveThrownHttpError(e);
@@ -294,9 +294,9 @@ describe('[ADR-0090 D12, ruling of record 6663849489; #29029] a delegate reads t
       it('the delegate reads exactly the units its scope covers: the scope root and its subtree, not the unit above it', async () => {
         const h = await boot(posture);
         expect(await unitsRead(h, NARROW)).toEqual(['bu_east', 'bu_east_field']);
-        const above = await h.engine.findOne('sys_business_unit', { where: { id: 'bu_hq' }, context: NARROW } as any);
+        const above = await h.engine.findOne('sys_business_unit', { where: { id: 'bu_hq' }, context: NARROW });
         expect(above ?? null).toBeNull();
-        expect(await h.engine.count('sys_business_unit', { context: NARROW } as any)).toBe(2);
+        expect(await h.engine.count('sys_business_unit', { context: NARROW })).toBe(2);
       });
 
       it('the delegate assigns a position in a unit its scope covers, and the assignment is stored', async () => {

@@ -44,7 +44,7 @@ import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { defaultPermissionSets } from './objects/index.js';
 import { maskFieldValue } from './field-masker.js';
-import { provisionRigUsers } from './rig-users.testkit.js';
+import { provisionRigUsers } from './__tests__/rig-users.testkit.js';
 
 const SYS = { isSystem: true } as const;
 const ORG_A = 'org_a';

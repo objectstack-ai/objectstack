@@ -37,7 +37,7 @@ import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.j
 import { RESERVED_IDENTITY_NAMES } from './objects/reserved-identity-names.js';
 import { defaultPermissionSets } from './objects/index.js';
 import { BUILTIN_IDENTITY_ORG_EXTERNAL } from '@objectstack/spec';
-import { provisionRigUsers } from './rig-users.testkit.js';
+import { provisionRigUsers } from './__tests__/rig-users.testkit.js';
 
 const SYS = { isSystem: true } as const;
 const ORG_A = 'org_a';

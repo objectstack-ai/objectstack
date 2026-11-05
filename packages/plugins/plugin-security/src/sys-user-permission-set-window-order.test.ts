@@ -44,7 +44,7 @@ import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js'
 import { SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
-import { provisionRigUsers } from './rig-users.testkit.js';
+import { provisionRigUsers } from './__tests__/rig-users.testkit.js';
 
 const MEMBER_DEFAULT = { name: 'member_default', label: 'Member', objects: {} } as unknown as PermissionSet;
 const QA_ADMIN = {

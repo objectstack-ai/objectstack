@@ -44,7 +44,7 @@ import {
   registerGrantPermissionSetNameHooks,
 } from './grant-permission-set-name.js';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
-import { provisionRigUsers } from './rig-users.testkit.js';
+import { provisionRigUsers } from './__tests__/rig-users.testkit.js';
 
 // ---------------------------------------------------------------------------
 // Fixture

@@ -37,7 +37,7 @@ import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { namesWithoutCatalogRow, positionNotInCatalogMessage } from './position-catalog-refusal.js';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
-import { provisionRigUsers } from './rig-users.testkit.js';
+import { provisionRigUsers } from './__tests__/rig-users.testkit.js';
 
 // ---------------------------------------------------------------------------
 // Fixture
