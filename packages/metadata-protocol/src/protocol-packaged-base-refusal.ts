@@ -46,6 +46,7 @@ import {
 import { SysMetadataRepository } from './sys-metadata-repository.js';
 import { OBJECT_EXTENSION_TYPE } from './protocol-object-extension-item.js';
 import { customizationPairEnsureRefusal, type PairRegistry } from './protocol-customization-package.js';
+import { resolveOverlaySchema } from './protocol-meta-type-schema.js';
 import { resolvePackageClosure } from '@objectstack/lint/runtime';
 import { overlayMemberField, overlayMemberOfBody, overlayMemberValue } from './migrations/overlay-index.js';
 import {
@@ -462,8 +463,70 @@ export function overlayPairFixAdmits(
         ...(body ?? { name, ...(disc && member !== null ? { [disc]: member } : {}) }),
         overrides: { package: fix.base, basedOn: fix.basedOn },
     };
+    // [#30261] The save door's schema half: a body whose shape cannot carry
+    // the declaration (a view container) is refused there, whatever the gate
+    // answers. A bare identity has no shape to judge.
+    if (body !== undefined && overrideDeclarationRefusedByShape(type, body)) return false;
     const verdict = host.overrideWriteVerdict({ type, name, packageId: fix.pair, item: declaredBody }, fix.pendingPairScope);
     return verdict.verdict !== 'refuse';
+}
+
+/**
+ * [#30261, ADR-0146 D2, D11] Whether the schema the save door judges `body`
+ * by (`resolveOverlaySchema`, the door's own resolver) refuses an `overrides`
+ * key on it as unrecognized: the body's SHAPE cannot carry the override
+ * declaration, so no save declaring it lands, whatever the override write gate
+ * answers.
+ *
+ * Measured over the five overlay types the ceremony moves, one shape answers
+ * `true`: the view CONTAINER (`ViewSchema`, the `container` member of
+ * `ViewMetadataSchema`). A single view, a list or form overlay, a dashboard, a
+ * report, a translation and an email template each spread
+ * `OverrideDeclarationFields`. Read from the parse, not from a list of shapes,
+ * so a member that gains or loses the key is answered by its own schema.
+ *
+ * Only the refusal of the KEY is read: an `unrecognized_keys` issue naming
+ * `overrides` at the body's root. Inside a union it must be named by EVERY
+ * branch still diagnosing the body — the view union keeps the branch the body
+ * claims and mutes the others to a kind mismatch at the root
+ * (`focusClaimedBranch`), which is dropped here as every consumer of a failed
+ * union drops it — so a body that claims no branch, refused by the container
+ * member and by a member that carries the key, is not answered `true`. Every
+ * other finding on the body is the save door's to answer, as before, and
+ * answers `false` here. The body's own `overrides` value, if any, is replaced
+ * by a well-formed probe: the key alone decides.
+ */
+export function overrideDeclarationRefusedByShape(type: string, body: Record<string, unknown>): boolean {
+    const schema = resolveOverlaySchema(type, body);
+    if (!schema) return false;
+    const parsed = schema.safeParse({ ...body, overrides: OVERRIDES_KEY_PROBE });
+    return !parsed.success && parsed.error.issues.some(namesOverridesAtRoot);
+}
+
+/** A well-formed declaration: the probe asks whether the KEY is carried, so its value raises nothing. */
+const OVERRIDES_KEY_PROBE = Object.freeze({ package: 'com.example.base', basedOn: '1.0.0' });
+
+type ParseIssue = { code?: unknown; path?: unknown; keys?: unknown; errors?: unknown } | null;
+
+/** An issue at the parsed value's root: a `path` of length 0. */
+const atRoot = (issue: ParseIssue): boolean => Array.isArray(issue?.path) && issue.path.length === 0;
+
+/**
+ * An `unrecognized_keys` issue naming `overrides` at the parsed body's root;
+ * for a union, named by every branch whose issues are not a bare kind
+ * mismatch at the root (a muted branch, or a member of another kind).
+ */
+function namesOverridesAtRoot(issue: unknown): boolean {
+    const candidate = issue as ParseIssue;
+    if (candidate?.code === 'unrecognized_keys') {
+        return atRoot(candidate) && Array.isArray(candidate.keys) && candidate.keys.includes('overrides');
+    }
+    if (candidate?.code === 'invalid_union' && Array.isArray(candidate.errors)) {
+        const diagnosing = candidate.errors.filter((branch): branch is unknown[] => Array.isArray(branch)
+            && !branch.every((i) => (i as ParseIssue)?.code === 'invalid_type' && atRoot(i as ParseIssue)));
+        return diagnosing.length > 0 && diagnosing.every((branch) => branch.some(namesOverridesAtRoot));
+    }
+    return false;
 }
 
 /** The class members {@link namedBaseCloseSubject} reads, typed as the class declares them. */
