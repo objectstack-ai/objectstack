@@ -93,7 +93,7 @@ export function registerUserWorkEndpoints(this: UserWorkRouteHost, basePath: str
                 return sendServerFault(res, 500, 'INTERNAL_ERROR', 'Counting the user\'s assigned work failed', err);
             }
         },
-        metadata: { summary: 'Count the records a user owns or is assigned, per object, as the caller can read them' },
+        metadata: { summary: 'Count the records a user owns or is assigned, per object, as the caller can read them', tags: ['security'] },
     });
 
     this.routeManager.register({
@@ -139,6 +139,6 @@ export function registerUserWorkEndpoints(this: UserWorkRouteHost, basePath: str
                 return sendServerFault(res, 500, 'INTERNAL_ERROR', 'Transferring the user\'s assigned work failed', err);
             }
         },
-        metadata: { summary: 'Hand a user\'s owned and assigned records to another active user, as the caller, in bounded batches' },
+        metadata: { summary: 'Hand a user\'s owned and assigned records to another active user, as the caller, in bounded batches', tags: ['security'] },
     });
 }
