@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { normalizeSupportedLocales } from '@objectstack/spec/system';
+import { normalizeSupportedLocales, platformLocaleTagOf } from '@objectstack/spec/system';
 
 /**
  * Recursively merge `source` into `target`. Nested plain objects are merged
@@ -65,6 +65,42 @@ export function resolveLocale(requestedLocale: string, availableLocales: string[
   if (variantMatch) return variantMatch;
 
   return undefined;
+}
+
+/**
+ * The offered locale a requested one means, or `undefined`: the ONE matcher
+ * for "is this locale offered here, and as which code", where the offered
+ * codes are a deployment's locale list (`II18nService.getLocales()`).
+ *
+ * Setup's default language (`localization.locale`) accepts a value through
+ * it, and the IdP locale claim (`plugin-auth`'s `resolveIdpLocale`) closes a
+ * claimed locale through it, so a language one door takes the other takes
+ * too. Order, first answer wins:
+ *
+ *   1. {@link resolveLocale}'s exact and case-insensitive steps.
+ *   2. The platform locale table: an offered code that means the same table
+ *      language as the request (`platformLocaleTagOf`, through the table's
+ *      read aliases), so `zh-TW` is `zh-Hant` and never `zh-Hans`, and
+ *      `en-US` is `en`. The table's own note prescribes this order: map the
+ *      code to its table language first, then resolve.
+ *   3. {@link resolveLocale}'s base-language and variant steps (`fr-FR` is an
+ *      offered `fr`, `fr` an offered `fr-FR`).
+ *
+ * Steps 1 and 3 are `resolveLocale`'s own rules; step 2 only decides between two
+ * offered codes of one base language that the table tells apart by script or
+ * region (`zh-Hans`/`zh-Hant`), where `resolveLocale` takes the first listed.
+ */
+export function resolveOfferedLocale(requested: string, offered: readonly string[]): string | undefined {
+  if (offered.length === 0) return undefined;
+  const lower = requested.toLowerCase();
+  const literal = offered.find((code) => code === requested) ?? offered.find((code) => code.toLowerCase() === lower);
+  if (literal !== undefined) return literal;
+  const tag = platformLocaleTagOf(requested);
+  if (tag !== undefined) {
+    const sameLanguage = offered.find((code) => platformLocaleTagOf(code) === tag);
+    if (sameLanguage !== undefined) return sameLanguage;
+  }
+  return resolveLocale(requested, [...offered]);
 }
 
 /**
