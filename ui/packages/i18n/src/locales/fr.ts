@@ -2395,7 +2395,7 @@ const fr = {
       countFailed: 'Impossible de compter les enregistrements détenus par cette personne : {{message}}',
       noClient: 'Les enregistrements détenus par cette personne ne peuvent pas être comptés ici.',
       none: 'Cette personne ne détient aucun enregistrement que vous pouvez lire.',
-      summary: 'Détient {{total}} enregistrements que vous pouvez lire : propriétaire de {{owned}}, assignée à {{assigned}}.',
+      summary: 'Enregistrements que vous pouvez lire : {{total}}. En propriété : {{owned}}, assignés : {{assigned}}.',
       row: '{{object}} · {{field}}',
       notTransferable: 'Ce champ contient plusieurs personnes et ne peut pas être transféré ici.',
       truncated: 'Tous les champs utilisateur n’ont pas été comptés ; cette personne peut en détenir davantage.',
@@ -2407,7 +2407,7 @@ const fr = {
       handoverNext: 'Transférer le lot suivant',
       targetBanned: 'Cette personne est bannie. Choisissez un utilisateur actif.',
       transferRefused: 'Le transfert a été refusé : {{message}}',
-      report: '{{updated}} transférés, {{failed}} n’ont pas pu être déplacés, {{remaining}} encore détenus.',
+      report: 'Transférés : {{updated}}, non déplacés : {{failed}}, encore détenus : {{remaining}}.',
       failure: '{{object}} {{id}} : {{message}}',
     },
     objectView: {

@@ -38,6 +38,7 @@ import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import { useAdapter, useMetadata } from '@object-ui/react';
 import { getLazyFieldWidget } from '@object-ui/fields';
 import type { ObjectStackAdapter } from '@object-ui/data-objectstack';
+import { servedObjectLabel } from '@object-ui/core';
 import { splitAssignedWork, type AssignedWorkSummary, type AssignedWorkTransferReport } from './userAssignedWork.js';
 
 /** The `user` field widget the hand-over picks its person with (lazy until drawn). */
@@ -58,7 +59,7 @@ function failureText(err: unknown): string {
 }
 
 /** The slice of an object definition the panel labels rows with. */
-type ObjectDefLike = { name?: unknown; label?: string; fields?: Record<string, { label?: string } | undefined> };
+type ObjectDefLike = { name?: unknown; label?: unknown; fields?: Record<string, { label?: string } | undefined> };
 
 type CountState =
   | { phase: 'loading' }
@@ -77,7 +78,7 @@ export interface UserAssignedWorkPanelProps {
 }
 
 export function UserAssignedWorkPanel({ userId }: UserAssignedWorkPanelProps) {
-  const { t } = useObjectTranslation();
+  const { t, language } = useObjectTranslation();
   const { objectLabel, fieldLabel } = useObjectLabel();
   const adapter = useAdapter() as ObjectStackAdapter | null;
   const { objects } = useMetadata();
@@ -108,10 +109,13 @@ export function UserAssignedWorkPanel({ userId }: UserAssignedWorkPanelProps) {
       .find((o) => o?.name === name) ?? undefined,
     [objects],
   );
+  // An object's name follows the served-object-label rule (objectstack#30486):
+  // the label the server served is drawn as given, and the client bundle is
+  // asked only when none is served, so a renamed object shows its new name.
   const objectText = useCallback((name: string) => {
     const def = objectDefOf(name);
-    return objectLabel({ name, label: def?.label || name });
-  }, [objectDefOf, objectLabel]);
+    return servedObjectLabel({ name, label: def?.label }, language, objectLabel, name);
+  }, [objectDefOf, language, objectLabel]);
   const fieldText = useCallback((object: string, field: string) => {
     const declared = objectDefOf(object)?.fields?.[field]?.label;
     return fieldLabel(object, field, declared || field);

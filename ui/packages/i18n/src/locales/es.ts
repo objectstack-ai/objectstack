@@ -2399,7 +2399,7 @@ const es = {
       countFailed: 'No se pudieron contar los registros que tiene esta persona: {{message}}',
       noClient: 'Aquí no se pueden contar los registros que tiene esta persona.',
       none: 'Esta persona no tiene registros que usted pueda leer.',
-      summary: 'Tiene {{total}} registros que usted puede leer: propietaria de {{owned}}, asignada en {{assigned}}.',
+      summary: 'Registros que usted puede leer: {{total}}. En propiedad: {{owned}}, asignados: {{assigned}}.',
       row: '{{object}} · {{field}}',
       notTransferable: 'Admite varias personas, así que no se puede traspasar aquí.',
       truncated: 'No se contaron todos los campos de usuario; esta persona puede tener más.',
@@ -2411,7 +2411,7 @@ const es = {
       handoverNext: 'Traspasar el siguiente lote',
       targetBanned: 'Esa persona está bloqueada. Elija un usuario activo.',
       transferRefused: 'El traspaso fue rechazado: {{message}}',
-      report: 'Traspasados {{updated}}, {{failed}} no se pudieron mover, {{remaining}} siguen asignados.',
+      report: 'Traspasados: {{updated}}, sin mover: {{failed}}, todavía asignados: {{remaining}}.',
       failure: '{{object}} {{id}}: {{message}}',
     },
     objectView: {

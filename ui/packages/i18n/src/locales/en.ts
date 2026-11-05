@@ -2889,7 +2889,7 @@ const en = {
       countFailed: 'The records this person holds could not be counted: {{message}}',
       noClient: 'The records this person holds cannot be counted here.',
       none: 'This person holds no records you can read.',
-      summary: 'Holds {{total}} records you can read: owns {{owned}}, assigned {{assigned}}.',
+      summary: 'Records you can read: {{total}}, owns {{owned}}, assigned {{assigned}}.',
       row: '{{object}} · {{field}}',
       notTransferable: 'Lists several people, so it cannot be handed over here.',
       truncated: 'Not every user field was counted; this person may hold more.',

@@ -22,6 +22,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import type { ActionParamDef } from '@object-ui/core';
 
+// The client bundle's own words for some objects, which differ from what the
+// server serves: the panel must draw the served label (objectstack#30486) and
+// ask the bundle only for an object with none.
+const CATALOG: Record<string, string> = {
+  showcase_project: 'Catalogue Project',
+  hr_leave: 'Catalogue Leave',
+};
+
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/i18n')>()),
   useObjectTranslation: () => ({
@@ -29,7 +37,7 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
     language: 'en',
   }),
   useObjectLabel: () => ({
-    objectLabel: (def: { name: string; label: string }) => def.label,
+    objectLabel: (def: { name: string; label: string }) => CATALOG[def.name] ?? def.label,
     fieldLabel: (_o: string, _f: string, fallback: string) => fallback,
   }),
 }));
@@ -133,6 +141,18 @@ describe('the ban dialog says how many records the user holds (objectstack#30205
     expect(await screen.findByTestId('user-assigned-work-truncated')).toBeTruthy();
     expect(screen.getByTestId('user-assigned-work-unreadable').textContent)
       .toBe('console.assignedWork.unreadable {"objects":"Review, no_such_def"}');
+  });
+
+  it('names an object by the label the server served, not the bundle\'s; the bundle only when none is served', async () => {
+    count = vi.fn(async () => ({ ...SUMMARY, unreadable: ['hr_leave', 'no_such_def'] }));
+    mount();
+    const ownerRow = await screen.findByTestId('user-assigned-work-row-showcase_project-owner_id');
+    // Served "Project" differs from the bundle's "Catalogue Project": served wins.
+    expect(ownerRow.textContent).toContain('console.assignedWork.row {"object":"Project","field":"Owner"}');
+    expect(ownerRow.textContent).not.toContain('Catalogue Project');
+    // No definition served: the bundle names it, else the object's name.
+    expect(screen.getByTestId('user-assigned-work-unreadable').textContent)
+      .toBe('console.assignedWork.unreadable {"objects":"Catalogue Leave, no_such_def"}');
   });
 
   it('a user who holds nothing readable: says so and offers no hand-over', async () => {

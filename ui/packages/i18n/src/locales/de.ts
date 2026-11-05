@@ -2337,7 +2337,7 @@ const de = {
       countFailed: 'Die Datensätze dieser Person konnten nicht gezählt werden: {{message}}',
       noClient: 'Die Datensätze dieser Person können hier nicht gezählt werden.',
       none: 'Diese Person hat keine Datensätze, die Sie lesen können.',
-      summary: 'Hält {{total}} Datensätze, die Sie lesen können: Besitzer bei {{owned}}, zugewiesen bei {{assigned}}.',
+      summary: 'Datensätze, die Sie lesen können: {{total}}. Besitzer: {{owned}}, zugewiesen: {{assigned}}.',
       row: '{{object}} · {{field}}',
       notTransferable: 'Enthält mehrere Personen und kann hier nicht übergeben werden.',
       truncated: 'Nicht alle Benutzerfelder wurden gezählt; diese Person kann weitere halten.',
@@ -2349,7 +2349,7 @@ const de = {
       handoverNext: 'Nächsten Stapel übergeben',
       targetBanned: 'Diese Person ist gesperrt. Wählen Sie einen aktiven Benutzer.',
       transferRefused: 'Die Übergabe wurde abgelehnt: {{message}}',
-      report: '{{updated}} übergeben, {{failed}} konnten nicht verschoben werden, {{remaining}} noch gehalten.',
+      report: 'Übergeben: {{updated}}, nicht verschiebbar: {{failed}}, noch gehalten: {{remaining}}.',
       failure: '{{object}} {{id}}: {{message}}',
     },
     objectView: {
