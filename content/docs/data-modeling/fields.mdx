@@ -283,7 +283,10 @@ The key's full contract is in the [Field reference](/docs/references/data/field)
 `reference` is **enforced on write**. A create or update that sets a
 `lookup` / `master_detail` to an id with no matching row in the target object is
 rejected with `400 VALIDATION_FAILED` and a `fields[]` entry whose `code` is
-`reference_not_found` (see the [error catalog](/docs/api/error-catalog)). The
+`reference_not_found` (see the [error catalog](/docs/api/error-catalog)). A
+write that is not a system write may name, in a `lookup`, `master_detail` or
+`user` field, only a record its caller can read: one the caller cannot read is
+rejected the same way, before the record's validation rules run. The
 same check runs on bulk updates. An update judges only the references it adds: a
 value the row already stores, carried back unchanged, is not judged again, so a
 deleted user's id left in a `user` field does not block later edits of the record.
