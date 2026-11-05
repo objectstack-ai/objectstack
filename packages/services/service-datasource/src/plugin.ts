@@ -346,14 +346,12 @@ export class ExternalDatasourceServicePlugin implements Plugin {
        *    `showcase_customers` is refused there with `NAMESPACE_PREFIX`.
        *
        * The pair comes from the ensure door and from nowhere else (ADR-0146
-       * D3). The protocol's ensure body judges the packages, never the
-       * caller: the HTTP door judges the caller, and this seam has no caller
-       * to judge. So under a walled posture, where the platform operator
-       * alone creates the pair (ADR-0146 D3 "Walled postures", ADR-0131 D3),
-       * this seam NEVER creates it: an existing pair receives the import, and
-       * an absent one refuses it, naming the operator and the door that
-       * creates it. ⛔ No package-less landing instead — the silent fallback
-       * ADR-0070 D3 forbids.
+       * D3). Under a walled posture the platform operator alone creates the
+       * pair, through that door's HTTP route (ADR-0146 D3 "Walled postures",
+       * ADR-0131 D3), so this seam NEVER creates it there: an existing pair
+       * receives the import, and an absent one refuses it, naming the
+       * operator and the route that creates it. ⛔ No package-less landing
+       * instead — the silent fallback ADR-0070 D3 forbids.
        */
       resolveImportLanding: async (datasource: string) => {
         const basePackageId = await datasourcePackageId(datasource);
