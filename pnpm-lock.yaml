@@ -875,6 +875,9 @@ importers:
       '@objectstack/observability':
         specifier: workspace:*
         version: link:../observability
+      '@objectstack/rest':
+        specifier: workspace:*
+        version: link:../rest
       '@objectstack/runtime':
         specifier: workspace:*
         version: link:../runtime
