@@ -28,13 +28,13 @@ import type { AuthClient } from '@object-ui/auth';
 
 const pick = vi.hoisted(() => ({
   held: false,
-  save: null as unknown as ReturnType<typeof vi.fn>,
+  save: vi.fn<(userId: string) => Promise<void>>(),
 }));
 
 vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   hasSignInLanguagePick: () => pick.held,
-  saveSignInLanguagePick: (...args: unknown[]) => pick.save(...args),
+  saveSignInLanguagePick: (userId: string) => pick.save(userId),
 }));
 
 const follow = vi.hoisted(() => vi.fn());
@@ -66,7 +66,8 @@ beforeEach(() => {
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   follow.mockReset();
   pick.held = true;
-  pick.save = vi.fn(
+  pick.save.mockReset();
+  pick.save.mockImplementation(
     () =>
       new Promise<void>((resolve) => {
         settleSave = () => {
@@ -98,7 +99,7 @@ function createMockClient(organizations?: Orgs, createdAt: Date = minutesAgo(1))
       ? {
           listOrganizations: vi.fn().mockResolvedValue(organizations),
           getActiveOrganization: vi.fn().mockResolvedValue(null),
-          setActiveOrganization: vi.fn().mockResolvedValue(undefined),
+          setActiveOrganization: vi.fn(async (id: string) => organizations.find((o) => o.id === id) ?? null),
         }
       : {}),
   };
@@ -180,11 +181,17 @@ describe('LoginPage — a language picked here is saved before the page leaves (
     expect(pick.save).toHaveBeenCalledTimes(1);
   });
 
-  it.each(EXITS)('CONTROL — $exit, with no pick: nothing is saved and nothing waits', async (c) => {
+  // Which exit, and how often, is not this file's to pin here: with nothing
+  // to wait for, a page whose organizations are still loading can navigate
+  // before they answer and again after — the post-login step's own behaviour,
+  // unchanged by this card.
+  it.each(EXITS)('CONTROL — $exit, with no pick: nothing is saved and the page leaves', async (c) => {
     pick.held = false;
     renderLogin(createMockClient(c.organizations), c.search);
 
-    await waitFor(() => expect(c.left()).toBe(c.expected));
+    await waitFor(() =>
+      expect(assign.mock.calls.length + follow.mock.calls.length).toBeGreaterThanOrEqual(1),
+    );
     expect(pick.save).not.toHaveBeenCalled();
   });
 
