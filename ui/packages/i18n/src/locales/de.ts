@@ -4600,6 +4600,9 @@ const de = {
         object_extension: '{{count}} Objekterweiterungen',
         object_extension_one: '{{count}} Objekterweiterung',
         object_extension_other: '{{count}} Objekterweiterungen',
+        dataset: '{{count}} Datensätze',
+        dataset_one: '{{count}} Datensatz',
+        dataset_other: '{{count}} Datensätze',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

@@ -135,7 +135,7 @@ const TYPE_LABELS_ZH: Record<string, string> = {
   hook: '钩子',
   view: '视图',
   page: '页面',
-  dashboard: '仪表板',
+  dashboard: '仪表盘',
   app: '应用',
   action: '操作',
   report: '报表',
@@ -478,6 +478,24 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
     // forms now write; the `url` spelling is the converted alias.
     actionUrl: { label: '链接 URL', help: '显式的点击跳转 URL;覆盖默认值。会渲染 {{ }} 占位。' },
     payload: { label: '附加数据', help: '合并进模板输入的额外数据。' },
+    // The engine-published descriptor's `template` / `templateData` carry no
+    // title and a developer-length description; these rows say what the author
+    // decides.
+    template: {
+      label: '邮件模板',
+      help: '要发送的邮件模板名称。按每位收件人自己的语言选取模板内容（未设置时用部署默认语言）。与内联的标题/内容二选一。',
+    },
+    templateData: {
+      label: '模板数据',
+      help: '填入模板 {{变量}} 占位的值：每个值是字面量，或每次运行时求值的 CEL 表达式。只能与邮件模板一起使用。',
+    },
+  },
+  // The engine-published `save_notice` descriptor's one field.
+  save_notice: {
+    message: {
+      label: '提示内容',
+      help: '保存记录的人看到的那句话，可使用 {{ }} 占位（如：已将 {{ record.name }} 提交给你的经理审批）。只用于由记录创建或更新启动的流程，并且要放在任何会暂停运行的节点之前。',
+    },
   },
   boundary_event: {
     'boundaryConfig.attachedToNodeId': { label: '附加到', help: '此边界事件所监视的宿主节点。' },

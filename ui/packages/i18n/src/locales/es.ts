@@ -4717,6 +4717,10 @@ const es = {
         object_extension_one: '{{count}} extensión de objeto',
         object_extension_many: '{{count}} de extensiones de objeto',
         object_extension_other: '{{count}} extensiones de objeto',
+        dataset: '{{count}} conjuntos de datos',
+        dataset_one: '{{count}} conjunto de datos',
+        dataset_many: '{{count}} de conjuntos de datos',
+        dataset_other: '{{count}} conjuntos de datos',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.
