@@ -16,6 +16,11 @@ import { ComponentPropsMap } from '@objectstack/spec/ui';
 import { indexObjectSearchTargets } from './validate-searchable-fields.js';
 import { indexUnprovisionedAnchors } from './system-fields.js';
 import { explainRule } from './rule-explanations.js';
+import {
+  PAGE_FIELD_UNKNOWN,
+  PAGE_FIELD_UNPROVISIONED,
+  validatePageFieldBindings,
+} from './validate-page-field-bindings.js';
 
 // [#22161] Each finding of the three ids is one verdict sentence; the reasoning
 // it used to carry is the id's `os explain` entry. Every call below records
@@ -871,7 +876,7 @@ describe('validateSortableFields — stored PAGE sorts (#30023)', () => {
     expect(findings[0].message).toContain("a virtual 'formula' field");
   });
 
-  it('controls: no key, `true`, an unknown name, a dotted path and another package\'s object are not this rule\'s', () => {
+  it('controls: no key, `true`, a dotted path, a system column and another package\'s object are not this rule\'s', () => {
     const findings = validateSortableFields(pageStack({
       ...region(
         {
@@ -879,8 +884,9 @@ describe('validateSortableFields — stored PAGE sorts (#30023)', () => {
           properties: {
             objectName: 'help_ticket',
             relationshipField: 'subject',
-            // Existence and dotted paths stay with validate-page-field-bindings.
-            sort: [{ field: 'subject' }, { field: 'priority' }, { field: 'no_such_field' }, { field: 'owner.name' }, { field: 'created_at' }],
+            // A dotted path is refused by the door as its own verdict; neither
+            // family judges it. An unknown name is #30093's (below).
+            sort: [{ field: 'subject' }, { field: 'priority' }, { field: 'owner.name' }, { field: 'created_at' }],
           },
         },
         { type: 'object-grid', properties: { objectName: 'not_in_this_stack', sort: [{ field: 'body' }] } },
@@ -897,6 +903,132 @@ describe('validateSortableFields — stored PAGE sorts (#30023)', () => {
       ...region({ type: 'object-grid', properties: { objectName: 'help_ticket', sort: [{ field: 'body' }] } }),
       kind: 'react',
     }))).toEqual([]);
+  });
+});
+
+/**
+ * [#30093] Existence and provenance on every stored page sort slot. The list
+ * door answers an unknown sort name `400 INVALID_SORT` on every load, so a page
+ * slot naming one is graded `error`, like a list view's `sort-field-unknown`,
+ * under the page family's id. Before #30093 two slots warned (from
+ * `validate-page-field-bindings`) and the rest were read by nothing.
+ */
+describe('validateSortableFields — an unknown field on a stored PAGE sort (#30093)', () => {
+  const everySlot = (field: string) => ({
+    ...region(
+      { type: 'record:related_list', properties: { objectName: 'help_ticket', relationshipField: 'subject', sort: [{ field }] } },
+      {
+        type: 'record:related_list',
+        dataSource: { object: 'help_ticket', sort: [{ field, order: 'desc' }] },
+        properties: { relationshipField: 'subject', parentDataSource: { object: 'help_ticket', sort: [{ field }] } },
+      },
+      { type: 'object-grid', properties: { objectName: 'help_ticket', sort: [{ field: 'subject' }, { field }] } },
+      { type: 'record:line_items', properties: { childObject: 'help_ticket', sort: [{ field }] } },
+      { type: 'list-view', properties: { type: 'grid', data: { provider: 'object', object: 'help_ticket' }, sort: [{ field }] } },
+      { type: 'element:number', dataSource: { object: 'help_ticket', sort: [{ field }] }, properties: { field: 'priority' } },
+    ),
+    interfaceConfig: { source: 'help_ticket', sort: [{ field }] },
+    record: { object: 'help_ticket', sort: [{ field }] },
+  });
+  const SLOT_PATHS = [
+    'pages[0].regions[0].components[0].properties.sort[0]',
+    'pages[0].regions[0].components[1].dataSource.sort[0]',
+    'pages[0].regions[0].components[1].properties.parentDataSource.sort[0]',
+    'pages[0].regions[0].components[2].properties.sort[1]',
+    'pages[0].regions[0].components[3].properties.sort[0]',
+    'pages[0].regions[0].components[4].properties.sort[0]',
+    'pages[0].regions[0].components[5].dataSource.sort[0]',
+    'pages[0].interfaceConfig.sort[0]',
+    'pages[0].record.sort[0]',
+  ];
+
+  it('refuses it at every page slot, as `page-field-unknown` at `error`, at the slot path', () => {
+    const findings = validateSortableFields(pageStack(everySlot('subjcet')));
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual(
+      SLOT_PATHS.map((path) => [PAGE_FIELD_UNKNOWN, 'error', path]),
+    );
+    expect(findings[0].message).toBe(
+      'field "subjcet" is not a field on object "help_ticket" — the record:related_list sort orders by it, ' +
+        'so every load answers 400 INVALID_SORT.',
+    );
+    expect(findings[0].hint).toBe('Fix the field name, or add "subjcet" to help_ticket. Did you mean "subject"?');
+    expect(findings.map((f) => f.where)).toContain('page "p" · record');
+  });
+
+  it('is the one reader of a page sort: validate-page-field-bindings reports none of those slots', () => {
+    const stack = pageStack(everySlot('subjcet'));
+    const bindingPaths = validatePageFieldBindings(stack).map((f) => f.path);
+    expect(bindingPaths.filter((p) => /\.sort(\[|\.|$)/.test(p))).toEqual([]);
+    // Non-vacuity: the same walk still reads a related list's other child refs.
+    const withColumn = pageStack(region({
+      type: 'record:related_list',
+      properties: { objectName: 'help_ticket', relationshipField: 'subject', columns: ['subjcet'], sort: [{ field: 'subjcet' }] },
+    }));
+    expect(validatePageFieldBindings(withColumn).map((f) => f.path)).toEqual([
+      'pages[0].regions[0].components[0].properties.columns[0]',
+    ]);
+  });
+
+  it('binds each slot to the object its renderer reads', () => {
+    // `body` is a help_ticket field and not a crm_opportunity one.
+    const blockOnDataSource = validateSortableFields(pageStack(region({
+      type: 'object-grid',
+      dataSource: { object: 'crm_opportunity' },
+      properties: { objectName: 'help_ticket', sort: [{ field: 'subject' }] },
+    })));
+    expect(blockOnDataSource.map((f) => [f.rule, f.path])).toEqual([
+      [PAGE_FIELD_UNKNOWN, 'pages[0].regions[0].components[0].properties.sort[0]'],
+    ]);
+    expect(blockOnDataSource[0].message).toContain('object "crm_opportunity"');
+    const listPageOnPageObject = validateSortableFields(pageStack({
+      name: 'p', type: 'list', object: 'crm_opportunity', interfaceConfig: { sort: [{ field: 'subject' }] },
+    }));
+    expect(listPageOnPageObject.map((f) => f.message)).toEqual([expect.stringContaining('object "crm_opportunity"')]);
+  });
+
+  it('judges the head of the legacy string form, its `-field` shorthand and each comma-separated key', () => {
+    const listPage = (sort: unknown) => pageStack({ name: 'p', type: 'list', object: 'help_ticket', interfaceConfig: { sort } });
+    expect(validateSortableFields(listPage('subject desc'))).toEqual([]);
+    const bad = validateSortableFields(listPage('ghost_col desc'));
+    expect(bad.map((f) => [f.rule, f.path])).toEqual([[PAGE_FIELD_UNKNOWN, 'pages[0].interfaceConfig.sort']]);
+    expect(bad[0].message).toContain('"ghost_col"');
+    expect(bad[0].message).not.toContain('ghost_col desc');
+    expect(validateSortableFields(listPage('-ghost_col')).map((f) => f.rule)).toEqual([PAGE_FIELD_UNKNOWN]);
+    expect(validateSortableFields(listPage('subject asc, ghost_col desc')).map((f) => f.path)).toEqual([
+      'pages[0].interfaceConfig.sort[1]',
+    ]);
+  });
+
+  it('skips what the family cannot judge: a dotted path, another package\'s object, an object with no field map', () => {
+    const findings = validateSortableFields({
+      objects: [ticket, { name: 'introspected_table' }],
+      pages: [region(
+        { type: 'object-grid', properties: { objectName: 'help_ticket', sort: [{ field: 'ghost.name' }] } },
+        { type: 'object-grid', properties: { objectName: 'not_in_this_stack', sort: [{ field: 'ghost' }] } },
+        { type: 'object-grid', properties: { objectName: 'introspected_table', sort: [{ field: 'ghost' }] } },
+      )],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('asks provenance of an injected anchor on an external object, at `warning`, and not on the local twin', () => {
+    const page = (object: string) => ({ name: 'p', type: 'list', object, interfaceConfig: { sort: [{ field: 'created_at' }] } });
+    const external = validateSortableFields({ objects: [externalObject], pages: [page('showcase_ext_customer')] });
+    expect(external.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [PAGE_FIELD_UNPROVISIONED, 'warning', 'pages[0].interfaceConfig.sort[0]'],
+    ]);
+    expect(external[0].message).toContain('so its ORDER BY is dropped');
+    expect(external[0].hint).toContain('columnMap');
+    expect(validateSortableFields({ objects: [localTwin], pages: [page('showcase_customer')] })).toEqual([]);
+  });
+
+  it('an author-declared field of a system name is the author\'s column, judged by the projection', () => {
+    const owned = { name: 'help_ticket', fields: { ...ticketFields, created_at: { type: 'datetime', label: 'Created', sortable: false } } };
+    const findings = validateSortableFields({
+      objects: [owned],
+      pages: [{ name: 'p', type: 'list', object: 'help_ticket', interfaceConfig: { sort: [{ field: 'created_at' }] } }],
+    });
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([[SORT_FIELD_UNSORTABLE, 'pages[0].interfaceConfig.sort[0]']]);
   });
 });
 
@@ -944,7 +1076,12 @@ describe('[#22161] one-line verdicts — the three sort ids', () => {
   it('every verdict the cases above fired is one line of at most 200 characters', () => {
     // The coverage control first: each id fired at least once, so the shape
     // assertion below cannot pass over an empty record.
-    expect([...new Set(fired.map((f) => f.rule))].sort()).toEqual([...SORT_IDS].sort());
+    // [#30093] Page sort slots answer existence and provenance under the page
+    // family's ids, so those fire from this module too and are held to the
+    // same one-line shape.
+    expect([...new Set(fired.map((f) => f.rule))].sort()).toEqual(
+      [...SORT_IDS, PAGE_FIELD_UNKNOWN, PAGE_FIELD_UNPROVISIONED].sort(),
+    );
     for (const f of fired) {
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
