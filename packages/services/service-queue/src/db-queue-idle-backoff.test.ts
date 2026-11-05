@@ -313,9 +313,10 @@ describe('#17612 DbQueueAdapter — idle poll cost', () => {
  *
  * The CRASHED-WORKER FIXTURE is that row written straight into the table: the
  * state a dead process leaves behind, with no adapter alive to have written
- * it. Measured before the fix (this file's legs run against
- * `origin/main`'s adapter): the fixture stays `running` with `attempts: 0`
- * through an hour of ticks and its handler never runs.
+ * it. Measured before the fix (these legs against the pre-fix adapter): the
+ * three reclaim legs fail — the fixture stays `running` with `attempts: 0`,
+ * a tick reports nothing moved, and its handler never runs. The other three
+ * pass there too, trivially, because nothing reclaimed anything.
  *
  * The risk the fix itself introduces is the opposite one — reclaiming a row
  * whose handler is still running, and running it twice. The live-handler legs
