@@ -319,7 +319,8 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     // The REST family at ledger granularity: the family is exactly these two
     // routes and both handlers open with the floor.
     covers: ['rest-family:rest-route-ledger.ts:user-work'],
-    note: 'New in #30205. The cited proof drives both routes anonymously (401, the REST flat envelope, nothing counted or moved) and with a signed-in member on one boot (the count served 200; the hand-over reaching its own unknown-target refusal, 404, before any write). Row admission and the update of each moved record stay with the security layer behind the engine, because both routes run as the caller.' },
+    // Added by #30205.
+    note: 'The cited proof drives both routes anonymously (401, the REST flat envelope, nothing counted or moved) and with a signed-in member on one boot (the count served 200; the hand-over reaching its own unknown-target refusal, 404, before any write). Row admission and the update of each moved record stay with the security layer behind the engine, because both routes run as the caller.' },
   // #22432 — the `/i18n` dispatcher domain, under the ruling recorded on #22146
   // (the domain gains the domain-level anonymous refusal every other dispatcher
   // domain has, with an objectui companion for the Console's sign-in page).
