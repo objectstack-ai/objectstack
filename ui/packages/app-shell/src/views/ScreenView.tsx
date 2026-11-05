@@ -707,7 +707,12 @@ export function ScreenFieldInput({
   if (kind === 'textarea' || kind === 'markdown') {
     return <Textarea id={id} aria-required={ariaRequired} aria-invalid={ariaInvalid} aria-describedby={describedBy} value={(value as string) ?? ''} placeholder={field.placeholder} onChange={(e) => onChange(e.target.value)} />;
   }
-  const htmlType = kind === 'number' || kind === 'currency' ? 'number' : kind === 'email' ? 'email' : 'text';
+  // The three numeric kinds the server judges as numbers on resume (a finite
+  // JSON number, never a numeric string) take the numeric input, which posts
+  // a number; as text, a `percent` value went out as a string, which it refuses.
+  const htmlType = kind === 'number' || kind === 'currency' || kind === 'percent'
+    ? 'number'
+    : kind === 'email' ? 'email' : 'text';
   // The declared bound pair goes on a NUMERIC input only, as the native
   // attributes — on a text input they mean nothing. The submit-time refusal
   // is the runner's (`screenFieldBoundViolations`), beside its `required` check.

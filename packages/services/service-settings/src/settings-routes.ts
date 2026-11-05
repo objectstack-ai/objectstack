@@ -355,8 +355,17 @@ export function registerSettingsRoutes(
         ns,
         dropEchoedSecretMasks(body, secretKeys),
         ctx,
-        // The language a write predicate's refusal is written in.
-        { locale: requestLocaleOf(req) },
+        // The language a write predicate's refusal is written in, and [#30203]
+        // the request's own connection, for a predicate that judges the change
+        // against it (`SettingsWriteOptions.transport`). Each predicate sees
+        // only the headers it named at registration (`narrowTransport`).
+        {
+          locale: requestLocaleOf(req),
+          transport: {
+            headers: req.headers,
+            ...(req.remoteAddress ? { remoteAddress: req.remoteAddress } : {}),
+          },
+        },
       );
       // The write response carries resolved values too — including cascade
       // entries the caller never submitted (an upper-scope secret it may not

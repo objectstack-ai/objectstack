@@ -2941,12 +2941,19 @@ export function metaTranslateOptions(
  *    serves (`getPackagedDashboardBase`, `getPackagedViewBase`,
  *    `getPackagedReportBase`). A view is looked up by the served item's
  *    registry name, the qualified `<object>.<viewKey>` — never the bare key
- *    the catalog addresses it by under its object.
+ *    the catalog addresses it by under its object;
+ *  - [#30062] `page`, `dataset`, `app` and `book` — sealed (no org overlay,
+ *    ADR-0131 D6), but a `.custom` pair's declared override replaces the
+ *    base's item on every read (ADR-0146 D2), so the served document can
+ *    differ from the one the catalog translates (`getPackagedPageBase`,
+ *    `getPackagedDatasetBase`, `getPackagedAppBase`, `getPackagedBookBase`).
+ *    The label order the base feeds is ruling record 6631250894's: a
+ *    translation in the pair ({@link pairTranslationBundleOf}), then the
+ *    override's own label, then the base's translation.
  *
- * A translatable type without a row (`action`, `app`, `dataset`, `page`) is
- * ADR-0126 tier B — a write against its packaged item answers
- * `NOT_OVERRIDABLE`, so no org overlay of a packaged item exists for it —
- * and the protocol has no packaged-base accessor for it.
+ * The one translatable type without a row, `action`, has no packaged-base
+ * accessor: its override waits for ADR-0146 D9's conditions, so no read serves
+ * one over a packaged action.
  *
  * ⛔ One table, never a second resolver beside it: a type that gains a
  * packaged-base accessor on the protocol adds its row here.
@@ -2956,6 +2963,10 @@ const PACKAGED_BASE_ACCESSORS: ReadonlyMap<string, string> = new Map<string, str
     ['dashboard', 'getPackagedDashboardBase'],
     ['view', 'getPackagedViewBase'],
     ['report', 'getPackagedReportBase'],
+    ['page', 'getPackagedPageBase'],
+    ['dataset', 'getPackagedDatasetBase'],
+    ['app', 'getPackagedAppBase'],
+    ['book', 'getPackagedBookBase'],
 ]);
 
 /**
@@ -2963,8 +2974,9 @@ const PACKAGED_BASE_ACCESSORS: ReadonlyMap<string, string> = new Map<string, str
  * metadata document, for `translateMetadataDocument`'s `packagedBase` — the
  * per-type resolver over {@link PACKAGED_BASE_ACCESSORS}: an `object` answers
  * `getPackagedObjectBase(name)`, a `dashboard` `getPackagedDashboardBase(name)`,
- * a `view` `getPackagedViewBase(name)` and a `report`
- * `getPackagedReportBase(name)`.
+ * a `view` `getPackagedViewBase(name)`, a `report`
+ * `getPackagedReportBase(name)`, and [#30062] a `page`, `dataset`, `app` or
+ * `book` its own `getPackaged<Type>Base(name)`.
  *
  * `undefined` on every uncertainty — a type with no row, an empty name, a
  * protocol without the accessor (they are server-only extensions, so
@@ -2986,13 +2998,62 @@ export function packagedObjectBaseOf(protocol: unknown, type: string, name: unkn
     }
 }
 
+/**
+ * [#30062, ADR-0146 D2] The translations a served document's `.custom` pair
+ * ships itself, for `translateMetadataDocument`'s `pairBundle` — or
+ * `undefined` when the document is not a pair's declared override.
+ *
+ * Two protocol questions, both the protocol's to answer:
+ * `servedOverrideBaseOf(type, document)` — is this served document the
+ * declared override of a base, and of which (read off the envelope the read
+ * stamped on it); then `getPairTranslationBundle(base)` — that base's pair's
+ * own `translation` rows, locale-keyed. The deployment catalog cannot answer
+ * the second: it is every package's translations deep-merged, ids dropped.
+ *
+ * `undefined` on every uncertainty, {@link packagedObjectBaseOf}'s rule: a
+ * protocol without the accessors (server-only, feature-detected), an accessor
+ * that throws or rejects. The translator reads `undefined` as before the option
+ * existed: a string the override changed keeps its own text.
+ *
+ * `memo` is one read's cache, by base: a list serves many overrides of one
+ * base, and their pair's translations are read once.
+ */
+export async function pairTranslationBundleOf(
+    protocol: unknown,
+    type: string,
+    document: unknown,
+    memo?: Map<string, Promise<unknown>>,
+): Promise<unknown> {
+    const p: any = protocol;
+    if (!p || typeof p.servedOverrideBaseOf !== 'function' || typeof p.getPairTranslationBundle !== 'function') {
+        return undefined;
+    }
+    let base: unknown;
+    try {
+        base = p.servedOverrideBaseOf(type, document);
+    } catch {
+        return undefined;
+    }
+    if (typeof base !== 'string' || base === '') return undefined;
+    let pending = memo?.get(base);
+    if (pending === undefined) {
+        pending = Promise.resolve()
+            .then(() => p.getPairTranslationBundle(base))
+            .catch(() => undefined);
+        memo?.set(base, pending);
+    }
+    return pending;
+}
+
 /** How a transport reaches what the list translation reads. */
 export interface MetaListTranslationSources {
     /** This request's i18n service, or `undefined` when the deployment has none. */
     resolveI18nService(): Promise<unknown>;
     /**
      * This request's protocol, for the packaged base of an object, dashboard,
-     * view or report ({@link packagedObjectBaseOf}); `undefined` when unreachable.
+     * view, report, page, dataset, app or book ({@link packagedObjectBaseOf})
+     * and a declared override's pair translations
+     * ({@link pairTranslationBundleOf}); `undefined` when unreachable.
      */
     resolveProtocol(): Promise<unknown>;
     /**
@@ -3038,19 +3099,24 @@ export async function translateMetaList(
     if (!locale) return items;
     const { translateMetadataDocument } = await import('@objectstack/spec/system');
     // [#8284 · #20730] One protocol resolution for the whole page, for every
-    // type with a packaged base (object, dashboard, view, report); the lookup
-    // itself is a synchronous in-memory registry read per element, by that
-    // element's own registry name — a view's qualified `<object>.<viewKey>`.
+    // type with a packaged base (object, dashboard, view, report, and since
+    // #30062 page, dataset, app, book); the lookup itself is a synchronous
+    // in-memory registry read per element, by that element's own registry
+    // name — a view's qualified `<object>.<viewKey>`.
     const p = PACKAGED_BASE_ACCESSORS.has(metaType) ? await sources.resolveProtocol() : undefined;
+    // [#30062] A declared override's pair translations, read once per base for the page.
+    const pairBundles = new Map<string, Promise<unknown>>();
     // `getMetaItems` elements are metadata documents (the list envelope is the
     // OUTER `{ type, items }`), so every element translates directly (#5563).
-    const translated = arr.map((item) => {
+    const translated = await Promise.all(arr.map(async (item) => {
+        const pairBundle = p === undefined ? undefined : await pairTranslationBundleOf(p, metaType, item, pairBundles);
         const out = translateMetadataDocument(metaType, item, bundle, {
             ...metaTranslateOptions(i18n, locale),
             packagedBase: packagedObjectBaseOf(p, metaType, item?.name),
+            ...(pairBundle !== undefined ? { pairBundle: pairBundle as any } : {}),
         });
         return metaType === 'view' && item && typeof item === 'object' ? withoutInventedViewLabel(item, out) : out;
-    });
+    }));
     return Array.isArray(raw) ? translated : { ...raw, items: translated };
 }
 
@@ -3066,7 +3132,9 @@ export async function translateMetaList(
  * built-in fallbacks still apply); no locale is. The i18n service is resolved
  * only for a translatable type, and the protocol only for a type with a
  * packaged base — an object, a dashboard, a view or a report (#8284, #20730, #25788:
- * {@link packagedObjectBaseOf}).
+ * {@link packagedObjectBaseOf}), and since #30062 a page, a dataset, an app or a
+ * book, each also handed its pair's own translations when the document is a
+ * declared override ({@link pairTranslationBundleOf}).
  *
  * Moved here, unchanged, from `RestServer.translateMetaItem` (which now
  * delegates), so the runtime dispatcher's item read translates with the same
@@ -3106,12 +3174,14 @@ export async function translateMetaDocument(
         }
     }
     const { translateMetadataDocument } = await import('@objectstack/spec/system');
-    const packagedBase = PACKAGED_BASE_ACCESSORS.has(metaType)
-        ? packagedObjectBaseOf(await sources.resolveProtocol(), metaType, (document as any)?.name)
-        : undefined;
+    const p = PACKAGED_BASE_ACCESSORS.has(metaType) ? await sources.resolveProtocol() : undefined;
+    const packagedBase = packagedObjectBaseOf(p, metaType, (document as any)?.name);
+    // [#30062] A declared override's pair translations: the ruled order's first rank.
+    const pairBundle = p === undefined ? undefined : await pairTranslationBundleOf(p, metaType, document);
     const translated = translateMetadataDocument(metaType, document as any, bundle, {
         ...metaTranslateOptions(i18n, locale),
         packagedBase,
+        ...(pairBundle !== undefined ? { pairBundle: pairBundle as any } : {}),
     });
     return metaType === 'view' ? withoutInventedViewLabel(document as Record<string, unknown>, translated) : translated;
 }
@@ -4194,7 +4264,8 @@ export function createMetaLayeredAnswer(
 
 /** Everything {@link createMetaBookTreeAnswer} reads, supplied by the transport. */
 export interface MetaBookTreeSources
-    extends MetaReadGateAudienceSources, Pick<MetaListTranslationSources, 'resolveI18nService'> {
+    extends MetaReadGateAudienceSources, Pick<MetaListTranslationSources, 'resolveI18nService'>,
+        Partial<Pick<MetaListTranslationSources, 'resolveProtocol'>> {
     /**
      * One list read of `type` for the tree, env-wide, scoped to `packageId` when
      * the request names one (`?package=`, ADR-0048). A THROW propagates: an
@@ -4244,8 +4315,10 @@ export type MetaBookTreeAnswer =
  *     group's `label` from the bundle's `books` group — through
  *     {@link translateMetaDocument}, the table every `/meta/book` read
  *     translates through, so the tree and the list the console's sidebar
- *     draws cannot disagree. Translated AFTER the gate: the audience is
- *     judged on the book as stored, and a label is not an access input.
+ *     draws cannot disagree ([#30062] its packaged base and its pair's
+ *     translations included, over the transport's `resolveProtocol`).
+ *     Translated AFTER the gate: the audience is judged on the book as
+ *     stored, and a label is not an access input.
  *  6. The tree, its ENTRIES narrowed by each doc's effective audience, so a
  *     reader never sees an entry that would refuse them on fetch.
  */
@@ -4277,7 +4350,14 @@ export async function createMetaBookTreeAnswer(
             tags: d.tags,
             packageId: d._packageId,
         }));
-    // A book has no packaged base (`PACKAGED_BASE_ACCESSORS`), so the protocol is never asked for.
-    const served = await translateMetaDocument({ ...sources, resolveProtocol: async () => undefined }, 'book', book);
+    // [#30062] The book's packaged base and its pair's translations, as the
+    // `/meta/book` list the sidebar draws reads them, so the two never disagree
+    // on a pair's override. A transport that supplies no protocol gets the
+    // catalog alone, as before.
+    const served = await translateMetaDocument(
+        { ...sources, resolveProtocol: sources.resolveProtocol ?? (async () => undefined) },
+        'book',
+        book,
+    );
     return { ok: true, tree: audience.readableTree(served as typeof book, docs) };
 }

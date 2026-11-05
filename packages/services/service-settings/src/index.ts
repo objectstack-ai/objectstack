@@ -59,9 +59,12 @@ export {
   type SettingsWritePredicateInput,
   type SettingsWriteRefusal,
   type SettingsDisplayOptions,
+  type SettingsWriteOptions,
+  type SettingsWritePredicateOptions,
   SETTINGS_LIVE_STATUS_BANNER_ID,
   type SettingsAuditSink,
   type SettingsContext,
+  type SettingsRequestTransport,
   type SettingsDiagnosticsLogger,
   type SettingsEngine,
   type SettingsRow,
@@ -155,13 +158,12 @@ export {
   SETTINGS_PLUGIN_VERSION,
 } from './manifest.js';
 
-// Reference manifests (mail / branding / feature flags) and the
+// Reference manifests (mail / branding / storage) and the
 // convenience aggregate. Hosts can pass `builtinSettingsManifests`
 // directly to `new SettingsServicePlugin({ manifests })`.
 export {
   builtinSettingsManifests,
   brandingSettingsManifest,
-  featureFlagsSettingsManifest,
   mailSettingsManifest,
   mailTestActionHandler,
   smsSettingsManifest,

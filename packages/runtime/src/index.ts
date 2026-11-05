@@ -202,6 +202,10 @@ export type { SeedSourceOutcome } from './seed-summary.js';
 // replays the UNION of every seed source, not just the first one.
 export { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
 export { declareSeedSource, readSeedSettlement } from './seed-settlement.js';
+// Per-organization seed locale (#30281) — the producer of `Seed.locale` that the
+// marketplace install, reseed, rehydrate heal and per-org replay share.
+export { appDefaultSeedLocale, describeSeedLocale, resolveSeedLocaleForLoad, seedsDeclareLocale } from './seed-locale.js';
+export type { ResolvedSeedLocale, SeedLocaleQuestion, SeedLocaleSource } from './seed-locale.js';
 export type { SeedSourceHandle } from './seed-settlement.js';
 // External Datasource Federation — boot-validation gate (ADR-0015, Gate 2)
 export { ExternalValidationPlugin, createExternalValidationPlugin } from './external-validation-plugin.js';

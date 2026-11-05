@@ -25,6 +25,7 @@ import { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
 import { useMetaItemRefusal } from '../hooks/useMetaItemRefusal.js';
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
 import { useServedViewItems } from '../hooks/useServedViewItems.js';
+import { servedObjectPluralLabel } from '../hooks/useNavTargetLabel.js';
 import type { DataSource } from '@object-ui/types';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { ViewConfigPanel } from './ViewConfigPanel.js';
@@ -256,14 +257,22 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // and keeps an `object:` favorite only for an object the app does not list.
     // The entry the list is starred under is named with the plural the title
     // reads (objectui#11733).
+    // What this list is titled: a served object's label is already translated
+    // (objectstack#30311), so it is drawn as given; the bundle is asked only
+    // when the definition carries none. The header, the favorite and an
+    // unlabelled view's tab all read this one function, so they agree.
+    const listTitleOf = useCallback(
+        (def: { name: string; label?: unknown; pluralLabel?: unknown }) => servedObjectPluralLabel(def, language, objectPluralLabel),
+        [language, objectPluralLabel],
+    );
     const listFavorite = useObjectListFavorite({
         appSegment: appName,
         objectName,
-        label: objectPluralLabel(objectDef),
+        label: listTitleOf(objectDef),
     });
     // A view stored with no `label` is named by the object's plural label, on
     // its tab and on the record page's way back alike (objectui#12774).
-    const unlabelledViewText = objectPluralLabel(objectDef);
+    const unlabelledViewText = listTitleOf(objectDef);
 
     // Refresh trigger — bumped after view CRUD or this page's own data writes.
     const [ownRefreshKey, setRefreshKey] = useState(0);
@@ -1182,7 +1191,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                  titleSwitcher={pageHeaderShown ? titleSwitcher : null}
                  titleLabel={titleLabel}
                  objectListHref={appName && objectName ? `/apps/${appName}/${objectName}` : undefined}
-                 objectPluralLabel={objectPluralLabel}
+                 objectPluralLabel={listTitleOf}
                  objectDesc={objectDesc}
                  createButton={createButton}
                  importShown={importShown}

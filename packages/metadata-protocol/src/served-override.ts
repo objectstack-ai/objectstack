@@ -103,3 +103,38 @@ export function isServedOverrideRowOf(row: ServedOverrideRow | null | undefined,
     if (declaration === null || typeof declaration !== 'object' || Array.isArray(declaration)) return false;
     return (declaration as { package?: unknown }).package === basePackageId;
 }
+
+/**
+ * [#30062] The base package a SERVED document is the declared override of, or
+ * `undefined` — the read-side reading of the answer {@link isServedOverrideRowOf}
+ * gave, never a second judgement of the row.
+ *
+ * Every read that serves a base's name from the pair's declaring row stamps
+ * the document with the overridden base's envelope (`_packageId` =
+ * `overrideOf`, `protocol-meta-item-reads.ts` and the list's slot), and the
+ * body keeps the declaration it was saved with (`overrides.package`). The two
+ * agree exactly on a document the reads served as the base's item from its
+ * pair: a row bound anywhere else keeps its own column's binding
+ * (`withRowBinding`), so a pair row that declares nothing reads the pair, a
+ * package-less row reads no package, and a declaration naming some other
+ * package never matches the envelope it is served under.
+ *
+ * | served document | type | answer |
+ * |:--|:--|:--|
+ * | `_packageId: 'hotcrm'`, `overrides.package: 'hotcrm'` | `page` | `'hotcrm'` |
+ * | the same document | `object` | `undefined` — extended, never replaced (D10) |
+ * | `_packageId: 'hotcrm.custom'`, `overrides.package: 'hotcrm'` | `page` | `undefined` — not served as the base's item |
+ * | `_packageId: 'hotcrm'`, no `overrides` | `page` | `undefined` — the base's own item |
+ * | no `_packageId`, `overrides.package: 'hotcrm'` | `view` | `undefined` — a package-less row |
+ *
+ * Pure, synchronous and total, as {@link isServedOverrideRowOf} is.
+ */
+export function servedOverrideBaseOf(type: unknown, document: unknown): string | undefined {
+    if (typeof type !== 'string' || !isOverridableMetadataType(PLURAL_TO_SINGULAR[type] ?? type)) return undefined;
+    if (document === null || typeof document !== 'object' || Array.isArray(document)) return undefined;
+    const declaration = (document as { overrides?: unknown }).overrides;
+    if (declaration === null || typeof declaration !== 'object' || Array.isArray(declaration)) return undefined;
+    const base = (declaration as { package?: unknown }).package;
+    if (typeof base !== 'string' || base === '') return undefined;
+    return (document as { _packageId?: unknown })._packageId === base ? base : undefined;
+}

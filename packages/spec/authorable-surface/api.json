@@ -214,6 +214,7 @@
     "api/AuthFeaturesConfig:cloudManaged",
     "api/AuthFeaturesConfig:degradedTenancy",
     "api/AuthFeaturesConfig:deviceAuthorization",
+    "api/AuthFeaturesConfig:emailDelivery",
     "api/AuthFeaturesConfig:magicLink [RETIRED]",
     "api/AuthFeaturesConfig:multiOrgEnabled",
     "api/AuthFeaturesConfig:oidcProvider",

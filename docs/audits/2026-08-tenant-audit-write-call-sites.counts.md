@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 259 |
-| Object name statically decidable | 182 |
+| Write call sites | 261 |
+| Object name statically decidable | 184 |
 | Object name chosen at run time | 77 |
-| Against a tenancy-enabled object | 176 |
+| Against a tenancy-enabled object | 178 |
 | Against an object declaring tenancy off | 6 |
-| Threading a tenant context | 196 |
+| Threading a tenant context | 198 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 55 |
 | …and decidably tenancy-enabled | 29 |
 | Threading a decidably elevated context | 144 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 107 |
+| Threading a context of undecidable elevation | 109 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-03 at `1c86b45c5`.
+Measured on 2026-11-05 at `e40e04854`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 856 |
-| engine-shaped types recognised | 103 |
-| declared objects in the registry | 126 |
-| same-named calls subtracted as non-engine | 226 |
+| tracked non-test sources scanned | 871 |
+| engine-shaped types recognised | 105 |
+| declared objects in the registry | 127 |
+| same-named calls subtracted as non-engine | 229 |
 
 ## Every site
 
@@ -248,7 +248,7 @@ Measured on 2026-11-03 at `1c86b45c5`.
 | `packages/services/service-messaging/src/sql-outbox.ts` | `update` | `this.objectName` | undecidable | options unreadable | 1 |
 | `packages/services/service-queue/src/db-queue-adapter.ts` | `delete` | `sys_job_queue` | enabled | context, elevation undecidable | 2 |
 | `packages/services/service-queue/src/db-queue-adapter.ts` | `insert` | `sys_job_queue` | enabled | context, elevation undecidable | 1 |
-| `packages/services/service-queue/src/db-queue-adapter.ts` | `update` | `sys_job_queue` | enabled | context, elevation undecidable | 6 |
+| `packages/services/service-queue/src/db-queue-adapter.ts` | `update` | `sys_job_queue` | enabled | context, elevation undecidable | 8 |
 | `packages/services/service-settings/src/config-change-audit.ts` | `insert` | `sys_audit_log` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `objectName` | undecidable | options unreadable | 1 |
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `update` | `objectName` | undecidable | options unreadable | 2 |

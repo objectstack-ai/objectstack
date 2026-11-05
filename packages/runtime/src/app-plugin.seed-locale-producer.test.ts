@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AppPlugin } from './app-plugin';
+import { appDefaultSeedLocale } from './seed-locale';
 import type { PluginContext } from '@objectstack/core';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
@@ -295,5 +296,215 @@ describe('AppPlugin supplies SeedLoaderConfig.locale (#16595)', () => {
             expect(seededObjects()).toEqual(['account', 'plan_en']);
             expect(store.plan_zh).toBeUndefined();
         });
+    });
+});
+
+/**
+ * [#30281] The per-org replay resolves its locale PER ORGANIZATION, at replay
+ * time (maintainer ruling A, 2026-11-05: the install paths pick datasets by
+ * locale). Before, the replayer captured the boot bundle's `i18n.defaultLocale`
+ * once, so every organization founded in one process got the boot's market.
+ *
+ * The rungs, first answer wins (`resolveSeedLocaleForLoad`): the organization's
+ * Localization setting (only a value somebody SET — the manifest's `en-US`
+ * default is `source: 'default'` and does not count), then the founder's
+ * `sys_user.locale`, then the app's declared default. Rows reaching the engine
+ * are the assertion, as in the suite above.
+ */
+describe('per-org replay resolves the locale per organization (#30281)', () => {
+    const OLD_MULTI = process.env.OS_MULTI_ORG_ENABLED;
+    let engine: IDataEngine;
+    let store: Record<string, any[]>;
+    let services: Map<string, unknown>;
+    let logger: { info: any; warn: any; error: any; debug: any };
+
+    /** The organization's own setting, as the settings service resolves it. */
+    let settingFor: Record<string, { value: string; source: string }>;
+    let settingsGet: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+        process.env.OS_MULTI_ORG_ENABLED = 'true';
+        ({ engine, store } = createEngine());
+        services = new Map();
+        logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+        settingFor = {};
+        settingsGet = vi.fn(async (_ns: string, _key: string, ctx?: { tenantId?: string }) =>
+            settingFor[ctx?.tenantId ?? ''] ?? { value: 'en-US', source: 'default' });
+        services.set('settings', { get: settingsGet });
+    });
+    afterEach(() => {
+        if (OLD_MULTI === undefined) delete process.env.OS_MULTI_ORG_ENABLED;
+        else process.env.OS_MULTI_ORG_ENABLED = OLD_MULTI;
+    });
+
+    const ctx = (): PluginContext => ({
+        logger,
+        registerService: vi.fn((name: string, svc: unknown) => { services.set(name, svc); }),
+        getService: vi.fn((name: string) => {
+            if (name === 'objectql') return engine;
+            if (name === 'metadata') return createMetadata();
+            return services.get(name);
+        }),
+        getServices: vi.fn(() => services),
+        hook: vi.fn(),
+        trigger: vi.fn(),
+    }) as unknown as PluginContext;
+
+    /** Boot a multi-tenant app and hand back its registered replayer. */
+    async function bootReplayer(defaultLocale: string | undefined, datasets = ALL_DATASETS) {
+        const plugin = new AppPlugin({
+            id: 'com.example.per-org-locale-app',
+            ...(defaultLocale ? { i18n: { defaultLocale } } : {}),
+            data: datasets,
+        });
+        await plugin.start(ctx());
+        const replayer = services.get('seed-replayer') as (orgId: string, options?: { userId?: string }) => Promise<any>;
+        expect(typeof replayer).toBe('function');
+        return replayer;
+    }
+
+    /** The plan objects an organization received rows in. */
+    const plansOf = (orgId: string) =>
+        ['plan_en', 'plan_zh'].filter((o) => (store[o] ?? []).some((r) => r.organization_id === orgId));
+
+    it('two organizations with different Localization settings get different datasets in one process', async () => {
+        settingFor.org_zh = { value: 'zh-CN', source: 'tenant' };
+        settingFor.org_en = { value: 'en', source: 'tenant' };
+        const replayer = await bootReplayer('en');
+
+        await replayer('org_zh');
+        await replayer('org_en');
+
+        expect(plansOf('org_zh')).toEqual(['plan_zh']);
+        expect(plansOf('org_en')).toEqual(['plan_en']);
+        // Each read named its own organization.
+        expect(settingsGet).toHaveBeenCalledWith('localization', 'locale', { tenantId: 'org_zh' });
+        expect(settingsGet).toHaveBeenCalledWith('localization', 'locale', { tenantId: 'org_en' });
+    });
+
+    it('a deployment-wide `global` value counts as set', async () => {
+        settingFor.org_new = { value: 'zh-CN', source: 'global' };
+        const replayer = await bootReplayer('en');
+
+        await replayer('org_new');
+
+        expect(plansOf('org_new')).toEqual(['plan_zh']);
+    });
+
+    it('at founding (no setting yet) the founder\'s language decides — option (a)', async () => {
+        store.sys_user = [{ id: 'usr_founder', locale: 'zh-CN' }];
+        const replayer = await bootReplayer('en');
+
+        await replayer('org_new', { userId: 'usr_founder' });
+
+        expect(plansOf('org_new')).toEqual(['plan_zh']);
+    });
+
+    it('the manifest\'s `en-US` default is not a choice: it never outranks the founder', async () => {
+        // `settingFor` is empty, so the service answers its built-in default.
+        store.sys_user = [{ id: 'usr_founder', locale: 'zh-CN' }];
+        const replayer = await bootReplayer('en');
+
+        await replayer('org_new', { userId: 'usr_founder' });
+
+        expect(plansOf('org_new')).toEqual(['plan_zh']);
+        expect(store.plan_en).toBeUndefined();
+    });
+
+    it('the organization\'s setting outranks the founder\'s language', async () => {
+        settingFor.org_new = { value: 'en', source: 'tenant' };
+        store.sys_user = [{ id: 'usr_founder', locale: 'zh-CN' }];
+        const replayer = await bootReplayer('zh-CN');
+
+        await replayer('org_new', { userId: 'usr_founder' });
+
+        expect(plansOf('org_new')).toEqual(['plan_en']);
+    });
+
+    it('no founder and no setting ⇒ the app\'s declared default — option (c)', async () => {
+        const replayer = await bootReplayer('zh-CN');
+
+        await replayer('org_sys');
+
+        expect(plansOf('org_sys')).toEqual(['plan_zh']);
+    });
+
+    it('a founder with no stored language falls through to the app\'s default', async () => {
+        store.sys_user = [{ id: 'usr_blank', locale: '' }];
+        const replayer = await bootReplayer('zh-CN');
+
+        await replayer('org_new', { userId: 'usr_blank' });
+
+        expect(plansOf('org_new')).toEqual(['plan_zh']);
+    });
+
+    it('a host with no settings service still honours the founder', async () => {
+        services.delete('settings');
+        store.sys_user = [{ id: 'usr_founder', locale: 'zh-CN' }];
+        const replayer = await bootReplayer('en');
+
+        await replayer('org_new', { userId: 'usr_founder' });
+
+        expect(plansOf('org_new')).toEqual(['plan_zh']);
+    });
+
+    it('nothing answers ⇒ no locale: every dataset loads and the loader says so', async () => {
+        const replayer = await bootReplayer(undefined);
+
+        await replayer('org_new');
+
+        expect(plansOf('org_new')).toEqual(['plan_en', 'plan_zh']);
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('No locale was supplied'), expect.anything());
+    });
+
+    it('a dataset without `locale` loads whatever the organization speaks (item 4)', async () => {
+        settingFor.org_zh = { value: 'zh-CN', source: 'tenant' };
+        settingFor.org_en = { value: 'en', source: 'tenant' };
+        const replayer = await bootReplayer('en');
+
+        await replayer('org_zh');
+        await replayer('org_en');
+
+        expect((store.account ?? []).map((r) => r.organization_id).sort()).toEqual(['org_en', 'org_zh']);
+    });
+
+    it('reads nothing when no dataset declares a locale', async () => {
+        store.sys_user = [{ id: 'usr_founder', locale: 'zh-CN' }];
+        const replayer = await bootReplayer('en', [ACCOUNT_DATASET]);
+
+        await replayer('org_new', { userId: 'usr_founder' });
+
+        expect(settingsGet).not.toHaveBeenCalled();
+        expect((engine.find as any).mock.calls.some((c: any[]) => c[0] === 'sys_user')).toBe(false);
+        expect((store.account ?? []).map((r) => r.organization_id)).toEqual(['org_new']);
+    });
+
+    it('a settings read that fails writes nothing — no other language is seeded over a choice that could not be read', async () => {
+        settingsGet.mockRejectedValueOnce(new Error('settings backend down'));
+        store.sys_user = [{ id: 'usr_founder', locale: 'en' }];
+        const replayer = await bootReplayer('en');
+
+        await expect(replayer('org_new', { userId: 'usr_founder' })).rejects.toThrow('settings backend down');
+
+        expect(plansOf('org_new')).toEqual([]);
+        expect(store.account).toBeUndefined();
+    });
+});
+
+/** [#30281] Reading the app's declared default off a package body. */
+describe('appDefaultSeedLocale (#30281)', () => {
+    it('reads `i18n.defaultLocale` at the top level, then off a nested `manifest`', () => {
+        expect(appDefaultSeedLocale({ i18n: { defaultLocale: 'zh-CN' } })).toBe('zh-CN');
+        expect(appDefaultSeedLocale({ manifest: { i18n: { defaultLocale: 'ja-JP' } } })).toBe('ja-JP');
+    });
+
+    it('a legacy `i18n` array of translation bundles declares no default', () => {
+        expect(appDefaultSeedLocale({ i18n: [{ 'zh-CN': {} }] })).toBeUndefined();
+    });
+
+    it('a blank or missing default is no default', () => {
+        expect(appDefaultSeedLocale({ i18n: { defaultLocale: '  ' } })).toBeUndefined();
+        expect(appDefaultSeedLocale({})).toBeUndefined();
+        expect(appDefaultSeedLocale(undefined)).toBeUndefined();
     });
 });

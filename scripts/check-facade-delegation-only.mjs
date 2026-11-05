@@ -31,10 +31,15 @@
  *   facades     { file, class, card }    a file that has LANDED in facade form,
  *                                        the class in it that is the facade, and
  *                                        the card that landed it.
- *   exceptions  { file, member, card, reason? }
+ *   exceptions  { file, class?, member, card, reason? }
  *                                        a member of a registered facade that may
  *                                        keep a body for now, and the card that
  *                                        will move it (ruling 6624345766 item 3).
+ *
+ * A file may register more than one class: `engine.ts` holds `ObjectQL` and,
+ * since #30052, its two scoped classes `ObjectRepository` and `ScopedContext`.
+ * Each is its own `facades` row, and an exception row in such a file names its
+ * `class` (in a file with one facade the `class` may be left out).
  *
  * The next split adds one `facades` row. ⛔ A file joins only once it is in
  * facade form on `main`, so the gate never reds `main` ahead of a landing: the
@@ -164,7 +169,7 @@ export const REGISTRY_FILE = 'scripts/facade-delegation-registry.json';
 
 const CARD_REF = /^#[1-9][0-9]*$/;
 const FACADE_KEYS = Object.freeze(['file', 'class', 'card']);
-const EXCEPTION_KEYS = Object.freeze(['file', 'member', 'card', 'reason']);
+const EXCEPTION_KEYS = Object.freeze(['file', 'class', 'member', 'card', 'reason']);
 
 /** One level of nested call in an argument: `protocolHost(this)`. Two is logic. */
 const MAX_NESTED_CALL_DEPTH = 1;
@@ -663,7 +668,9 @@ export function checkRegistry(registry, readFile) {
   const extraTop = unknownKeys(registry, ['facades', 'exceptions']);
   if (extraTop.length) problem(REGISTRY_FILE, `unknown top-level key(s) ${extraTop.join(', ')}`);
 
-  const byFile = new Map();
+  const facadeKey = (file, cls) => `${file}\u0000${cls}`;
+  const byFacade = new Map();
+  const classesOfFile = new Map();
   registry.facades.forEach((row, i) => {
     const where = `${REGISTRY_FILE} facades[${i}]`;
     if (!row || typeof row !== 'object') return problem(where, 'a row must be an object');
@@ -674,11 +681,15 @@ export function checkRegistry(registry, readFile) {
     if (typeof row.card !== 'string' || !CARD_REF.test(row.card)) {
       problem(where, `${row.file}: a row must name the card that landed the facade as \`#<number>\`, got ${JSON.stringify(row.card)}`);
     }
-    if (byFile.has(row.file)) return problem(where, `${row.file} is registered twice`);
-    byFile.set(row.file, { row, judged: null });
+    if (byFacade.has(facadeKey(row.file, row.class))) return problem(where, `${row.file} \`${row.class}\` is registered twice`);
+    const entry = { row, judged: null };
+    byFacade.set(facadeKey(row.file, row.class), entry);
+    if (!classesOfFile.has(row.file)) classesOfFile.set(row.file, []);
+    classesOfFile.get(row.file).push(entry);
   });
 
-  for (const [file, entry] of byFile) {
+  for (const entry of byFacade.values()) {
+    const file = entry.row.file;
     const text = readFile(file);
     if (text === null) {
       problem(file, `registered as a facade, but the file does not exist — a gate over a missing file judges nothing. Restore the file or remove its row.`);
@@ -713,18 +724,30 @@ export function checkRegistry(registry, readFile) {
     if (typeof row.file !== 'string' || typeof row.member !== 'string' || !row.member) {
       return problem(where, 'a row must name its `file` and `member`');
     }
-    const label = `${row.file} \`${row.member}\``;
+    if (row.class !== undefined && (typeof row.class !== 'string' || !row.class)) {
+      return problem(where, `${row.file} \`${row.member}\`: \`class\`, when present, is a non-empty string`);
+    }
+    const label = `${row.file} \`${row.class ? `${row.class}.` : ''}${row.member}\``;
     if (typeof row.card !== 'string' || !CARD_REF.test(row.card)) {
       problem(where, `${label}: an exception must name the card that will move the member, as \`#<number>\`; got ${JSON.stringify(row.card)}. An exception nobody owns is a permanent hole.`);
     }
     if (row.reason !== undefined && (typeof row.reason !== 'string' || !row.reason)) {
       problem(where, `${label}: \`reason\`, when present, is a non-empty string`);
     }
-    const id = `${row.file}\u0000${row.member}`;
+    const ofFile = classesOfFile.get(row.file);
+    if (!ofFile) return problem(where, `${label}: ${row.file} is not a registered facade`);
+    let entry;
+    if (row.class) {
+      entry = byFacade.get(facadeKey(row.file, row.class));
+      if (!entry) return problem(where, `${label}: \`${row.class}\` is not a registered facade class of ${row.file} (registered: ${ofFile.map((e) => `\`${e.row.class}\``).join(', ')})`);
+    } else if (ofFile.length > 1) {
+      return problem(where, `${label}: ${row.file} registers ${ofFile.length} facade classes (${ofFile.map((e) => `\`${e.row.class}\``).join(', ')}), so the row must name its \`class\``);
+    } else {
+      entry = ofFile[0];
+    }
+    const id = `${row.file}\u0000${entry.row.class}\u0000${row.member}`;
     if (seen.has(id)) return problem(where, `${label} has two exception rows`);
     seen.add(id);
-    const entry = byFile.get(row.file);
-    if (!entry) return problem(where, `${label}: ${row.file} is not a registered facade`);
     if (!entry.judged) return; // the facade itself was refused above
     const member = entry.judged.find((m) => m.key === row.member && m.verdict !== 'signature');
     if (!member) {
@@ -738,7 +761,7 @@ export function checkRegistry(registry, readFile) {
       return problem(where, `${label}: the member is already a ${member.verdict === 'field' ? 'field' : 'delegation'} — its card ${row.card} has moved it. Delete the row; the member must stay a delegation.`);
     }
     member.exception = row;
-    excepted.push({ file: row.file, member: row.member, card: row.card, line: member.line });
+    excepted.push({ file: row.file, class: entry.row.class, member: row.member, card: row.card, line: member.line });
   });
 
   for (const f of facades) {
@@ -791,6 +814,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'E7 two exception rows for one member → RED': 1,
   'E8 an unknown key in a row → RED': 1,
   'E9 a row missing its static/get/set prefix → RED naming the nearest member key': 1,
+  'E10 two facades in one file: each judged; an exception row there names its class, or → RED': 1,
   'N1 a registered facade file that is missing → RED': 1,
   'N2 a registered class that is absent from its file → RED': 1,
   'N3 a registered facade with zero delegations → RED': 1,
@@ -798,7 +822,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'N5 an empty registry → GREEN with nothing guarded, never a crash': 1,
   'N6 the committed registry is well-formed against this checkout': 1,
 });
-const SELF_TEST_BATTERY_FLOOR = 36;
+const SELF_TEST_BATTERY_FLOOR = 37;
 
 function selfTest() {
   const FILE = 'pkg/src/facade.ts';
@@ -963,6 +987,20 @@ function selfTest() {
       ]);
       return all(red(r, /no member spelled `table`; did you mean `static table`\?/), red(r, /no member spelled `size`; did you mean `get size`\?/));
     } },
+    { label: 'E10 two facades in one file: each judged; an exception row there names its class, or → RED', run: () => {
+      const text = `${facadeOf('  update(x: number) { let y = x; return y; }')}export class Second {\n  m(a: string) { return F.m(host(this), a); }\n  update(x: number) { let y = x; return y; }\n}\n`;
+      const rows = [row, { file: FILE, class: 'Second', card: '#2' }];
+      const both = [{ file: FILE, class: 'Facade', member: 'update', card: '#30020' }, { file: FILE, class: 'Second', member: 'update', card: '#30020' }];
+      const ok = run(text, both, rows);
+      return all(
+        green(ok),
+        ok.facades.length === 2 && ok.excepted.length === 2 ? null : `facades ${ok.facades.length}, excepted ${ok.excepted.length}`,
+        red(run(text, [both[0]], rows), /Second\.update holds a body/),
+        red(run(text, [{ file: FILE, member: 'update', card: '#30020' }, both[1]], rows), /registers 2 facade classes .* must name its `class`/),
+        red(run(text, [{ ...both[0], class: 'Third' }, both[1]], rows), /`Third` is not a registered facade class/),
+        red(run(text, both, [row, row]), /`Facade` is registered twice/),
+      );
+    } },
     { label: 'N1 a registered facade file that is missing → RED', run: () =>
       red(checkRegistry(reg([row]), () => null), /pkg\/src\/facade\.ts registered as a facade, but the file does not exist/) },
     { label: 'N2 a registered class that is absent from its file → RED', run: () =>
@@ -1110,7 +1148,7 @@ function main() {
       if (m.verdict === 'field') fields += 1;
       if (m.verdict === 'delegation') shapes.set(m.shape, (shapes.get(m.shape) ?? 0) + 1);
     }
-    const own = excepted.filter((x) => x.file === f.file);
+    const own = excepted.filter((x) => x.file === f.file && x.class === f.class);
     const cards = [...new Set(own.map((x) => x.card))].join(', ');
     console.log(
       `✓ ${f.file} \`${f.class}\`: ${f.members.length} members — ` +
@@ -1119,7 +1157,8 @@ function main() {
     );
     for (const [shape, n] of [...shapes].sort((a, b) => b[1] - a[1])) console.log(`    ${String(n).padStart(4)}  ${shape}`);
   }
-  console.log(`✓ check-facade-delegation-only: ${facades.length} facade file(s) hold delegations only, ${excepted.length} named exception(s).`);
+  const files = new Set(facades.map((f) => f.file)).size;
+  console.log(`✓ check-facade-delegation-only: ${facades.length} facade class(es) in ${files} file(s) hold delegations only, ${excepted.length} named exception(s).`);
 }
 
 if (isEntrypoint(import.meta.url)) {

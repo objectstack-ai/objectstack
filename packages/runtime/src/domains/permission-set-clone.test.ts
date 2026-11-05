@@ -84,7 +84,7 @@ const PACKAGES: Record<string, { manifest: Record<string, unknown> }> = {
     'com.vendor.app': { manifest: { id: 'com.vendor.app', scope: 'cloud' } },
 };
 
-interface Saved { type: string; name: string; item: Record<string, unknown>; parentVersion?: string | null; packageId?: string }
+interface Saved { type: string; name: string; item: Record<string, unknown>; parentVersion?: string | null; packageId?: string; inheritedGrantObjects?: readonly string[] }
 
 interface BootOptions {
     unbound?: boolean;
@@ -178,8 +178,11 @@ describe('the permission-set clone door — success', () => {
         expect(save.parentVersion).toBeNull();
         // [ADR-0146 D3/D6] No organization; the package is the SAVE's — the
         // read-only source's pair, ensured through the ensure door.
-        expect(Object.keys(save).sort()).toEqual(['item', 'name', 'packageId', 'parentVersion', 'type']);
+        expect(Object.keys(save).sort()).toEqual(['inheritedGrantObjects', 'item', 'name', 'packageId', 'parentVersion', 'type']);
         expect(save.packageId).toBe('crm.custom');
+        // [#30255] The copy's grant keys are the source's, and the save is told
+        // so: its unknown-grant refusal does not judge them as this write's.
+        expect(save.inheritedGrantObjects).toEqual(Object.keys(PACKAGED.objects));
         expect(h.ensures).toEqual(['crm']);
 
         // Whole-definition copy: the source minus the declared keys, the two
@@ -226,7 +229,8 @@ describe('the permission-set clone door — success', () => {
 
         expect(statusOf(res)).toBe(200);
         expect(h.saves[0].item).toEqual({ ...ENV_SET, name: 'env_reader_copy', label: 'Env Reader Copy' });
-        expect(Object.keys(h.saves[0]).sort()).toEqual(['item', 'name', 'parentVersion', 'type']);
+        expect(Object.keys(h.saves[0]).sort()).toEqual(['inheritedGrantObjects', 'item', 'name', 'parentVersion', 'type']);
+        expect(h.saves[0].inheritedGrantObjects).toEqual(Object.keys(ENV_SET.objects));
         expect(h.ensures).toEqual([]);
         expect((res as any).response.body.data.package).toBeNull();
         // [#29727] The environment-wide variant's code.

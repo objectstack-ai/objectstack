@@ -688,6 +688,27 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // cli's whole suite on every driver commit.
       'packages/drivers/driver-sql/src/sql-driver.ts',
       'packages/drivers/driver-sql/src/schema-drift.ts',
+      // The facade form of that first file (#30147). The codemod
+      // (`scripts/codemod-split-sql-driver.mjs`) left `createColumn` and the
+      // other members those pins slice on the class as one-call stubs and moved
+      // their bodies into `sql-driver-*.ts` facet modules, and the top-level
+      // declarations into the leaf. The five generate-* pins read `SqlDriver`
+      // through `sql-driver-split-source.mjs`, which follows each stub to the
+      // module it names, so every one of those modules is now read, by a path
+      // built out of the stub's own text -- the shape this scan cannot name,
+      // hence the witnesses below. A glob rather than the modules by name: the
+      // set is the codemod's section table, and a module it adds is read on the
+      // day it is written. It also covers the package's `sql-driver-*.test.ts`
+      // files, and that costs no re-run the suite does not already make:
+      // `@objectstack/cli#test` depends on `build`, which depends on `^build`,
+      // and driver-sql's `build` hashes `$TURBO_DEFAULT$` (every tracked file in
+      // the package, tests included).
+      'packages/drivers/driver-sql/src/sql-driver-*.ts',
+      // The reader itself and its types, the import-shaped coupling the
+      // `cli-unbuilt-workspace-lead` trio above has: what it returns IS the text
+      // those pins judge, and the `.d.mts` is an input to the typecheck verdict.
+      'scripts/sql-driver-split-source.mjs',
+      'scripts/sql-driver-split-source.d.mts',
       // `field.zod.ts` is the third entry no test READS -- named in the header
       // of src/commands/generate-field-type-vocabulary.pin.test.ts, which cites
       // it as the file `git log -S` was run over to establish that the ghost
@@ -745,6 +766,31 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // the witness keeps it attributed to the read that needs it.
       'packages/create-objectstack/src/templates/blank/src/**': [
         'packages/cli/test/create-objectstack-wiring-parity.test.ts',
+      ],
+      // `readSqlDriverSource` builds both from its argument and from the stubs'
+      // text (#30147), so no literal names them; these pins read through it.
+      'packages/drivers/driver-sql/src/sql-driver.ts': [
+        'packages/cli/src/commands/generate-builtin-id-column.pin.test.ts',
+        'packages/cli/src/commands/generate-field-type-vocabulary.pin.test.ts',
+        'packages/cli/src/commands/generate-file-reference-width.pin.test.ts',
+        'packages/cli/src/commands/generate-multiple-json-column.pin.test.ts',
+        'packages/cli/src/commands/generate-string-family-width.pin.test.ts',
+      ],
+      // The `.d.mts` is resolved by the typecheck from the `.mjs` specifier,
+      // never named.
+      'scripts/sql-driver-split-source.d.mts': [
+        'packages/cli/src/commands/generate-builtin-id-column.pin.test.ts',
+        'packages/cli/src/commands/generate-field-type-vocabulary.pin.test.ts',
+        'packages/cli/src/commands/generate-file-reference-width.pin.test.ts',
+        'packages/cli/src/commands/generate-multiple-json-column.pin.test.ts',
+        'packages/cli/src/commands/generate-string-family-width.pin.test.ts',
+      ],
+      'packages/drivers/driver-sql/src/sql-driver-*.ts': [
+        'packages/cli/src/commands/generate-builtin-id-column.pin.test.ts',
+        'packages/cli/src/commands/generate-field-type-vocabulary.pin.test.ts',
+        'packages/cli/src/commands/generate-file-reference-width.pin.test.ts',
+        'packages/cli/src/commands/generate-multiple-json-column.pin.test.ts',
+        'packages/cli/src/commands/generate-string-family-width.pin.test.ts',
       ],
     },
   },

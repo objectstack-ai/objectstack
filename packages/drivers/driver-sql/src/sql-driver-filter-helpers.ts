@@ -11,9 +11,10 @@
  * `temporalFilterColumnSql`, `isJsonColumn`, `jsonColumnFieldClass`,
  * `isNonTextColumn`, `applyTextOperatorOverNonTextColumn`,
  * `declaredValueShape`, `assertOperatorAppliesToColumn`, `applyFilters`,
- * `logWithheldFilterDiagnostic`, `withWithheldFilterLog`, `compileFilters`,
- * `applyContainsLike`, `declaredFieldsFor`, `applyFalseConstant` moved out of
- * `sql-driver.ts` whole by `scripts/codemod-split-sql-driver.mjs`.
+ * `resolveWithheldFilterRefusal`, `logWithheldFilterDiagnostic`,
+ * `withWithheldFilterLog`, `compileFilters`, `applyContainsLike`,
+ * `declaredFieldsFor`, `applyFalseConstant` moved out of `sql-driver.ts` whole
+ * by `scripts/codemod-split-sql-driver.mjs`.
  *
  * A MOVE, not a redesign. {@link FilterHelpersFacet} is a stateless facet of `SqlDriver`
  * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
@@ -38,16 +39,18 @@
  * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
+import { resolveFilterSubtreeProvenance } from '@objectstack/spec/data';
 import type { DriverOptions, ValueShapeFieldDef } from '@objectstack/spec/data';
 import { JSON_COLUMN_INCOMPATIBLE_OPERATORS, findMisplacedReadableIds, presentAsNumber, refuseReadableIdsOnce, temporalStorageForm } from '@objectstack/core';
 import type { JsonColumnFieldClass } from '@objectstack/core';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import type { Knex } from 'knex';
 import {
-  AUDIT_TIMESTAMP_COLUMNS, SQLITE_TIME_EXPR_REFS, WITHHELD_FILTER_LOGGED, assertCompilableComparand,
-  assertDefinedComparands, canonicalTimeOfDay, canonicalUtcDatetime, emptyFieldConstraintError,
-  filterArrayReachedDriverError, isEmptyFieldConstraint, jsonColumnOperatorError, mysqlDatetimeLiteral,
-  normalizeSqliteDatetimeOutput, presentAuditTimestampOutput, refusalSubtree, withheldFilterDiagnosticOf,
+  AUDIT_TIMESTAMP_COLUMNS, SQLITE_TIME_EXPR_REFS, WITHHELD_FILTER_AUTHOR_TEXT, WITHHELD_FILTER_LOGGED,
+  WITHHELD_FILTER_SUBTREE, assertCompilableComparand, assertDefinedComparands, canonicalTimeOfDay,
+  canonicalUtcDatetime, emptyFieldConstraintError, filterArrayReachedDriverError, isEmptyFieldConstraint,
+  jsonColumnOperatorError, mysqlDatetimeLiteral, normalizeSqliteDatetimeOutput, presentAuditTimestampOutput,
+  refusalSubtree, unsupportedFilterError, withheldFilterDiagnosticOf,
 } from './sql-driver-top-level.js';
 import type { ReadPresentationKind } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
@@ -79,6 +82,7 @@ export interface FilterHelpersHost {
   readonly isSqlite: SqlDriver['isSqlite'];
   jsonColumnFieldClass: SqlDriver['jsonColumnFieldClass'];
   readonly jsonFields: SqlDriver['jsonFields'];
+  logWithheldFilterDiagnostic: SqlDriver['logWithheldFilterDiagnostic'];
   readonly logger: SqlDriver['logger'];
   readonly managedObjectFields: SqlDriver['managedObjectFields'];
   readonly mediaFields: SqlDriver['mediaFields'];
@@ -428,6 +432,22 @@ export class FilterHelpersFacet {
     } catch (err) {
       throw this.resolveWithheldFilterRefusal(err, filters);
     }
+  }
+
+  /** The body of `SqlDriver#resolveWithheldFilterRefusal`; the method's docblock there is its contract. */
+  static resolveWithheldFilterRefusal(this: Pick<FilterHelpersHost, 'logWithheldFilterDiagnostic'>, err: unknown, rootFilter: unknown): unknown {
+    const diagnostic = withheldFilterDiagnosticOf(err);
+    if (diagnostic === null) return err;
+    const carrier = err as Record<symbol, unknown>;
+    const subtree = carrier[WITHHELD_FILTER_SUBTREE];
+    const provenance =
+      subtree === undefined ? null : resolveFilterSubtreeProvenance(rootFilter, subtree);
+    if (provenance === 'author') {
+      const authorText = carrier[WITHHELD_FILTER_AUTHOR_TEXT];
+      return unsupportedFilterError(typeof authorText === 'string' ? authorText : diagnostic);
+    }
+    this.logWithheldFilterDiagnostic(err);
+    return err;
   }
 
   /** The body of `SqlDriver#logWithheldFilterDiagnostic`; the method's docblock there is its contract. */

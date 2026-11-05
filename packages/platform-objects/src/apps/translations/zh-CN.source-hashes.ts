@@ -111,7 +111,6 @@ export const zhCNSourceHashes: Readonly<Record<string, string>> = {
   'apps.setup.navigation.nav_settings_ai.label': 'a6b41a554173f7ab',
   'apps.setup.navigation.nav_settings_knowledge.label': '140348539a50d9d5',
   'apps.setup.navigation.nav_settings_lifecycle.label': 'cd9fe9c930afed06',
-  'apps.setup.navigation.nav_settings_feature_flags.label': '4e7e9e879ea1bcc3',
   'apps.setup.navigation.nav_notification_preferences.label': '8869f324c1bd545a',
   'apps.setup.navigation.nav_notification_templates.label': '9e270c87ef2578df',
   'apps.setup.navigation.nav_sessions.label': '673bde6e0c8a3ef9',
