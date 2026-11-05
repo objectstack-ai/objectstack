@@ -56,10 +56,22 @@ import { test as base, expect, type APIRequestContext, type Page, type Response 
  * with `read ECONNRESET` instead of an answer (objectstack#30524, reproduced
  * against @hono/node-server at a 5996–5999 ms idle). With a connection per
  * read no read depends on that race. The browser's own traffic is unchanged.
+ *
+ * The context is otherwise the one the default `request` fixture builds: the
+ * project's request-relevant `use` options (the signed-in `storageState`,
+ * `baseURL`, the device's `userAgent`, any `extraHTTPHeaders` and
+ * `ignoreHTTPSErrors`) are passed on by name, so the reads run as the admin
+ * session the spec was written for.
  */
 const test = base.extend({
-  request: async ({ playwright }, use) => {
-    const request = await playwright.request.newContext({ extraHTTPHeaders: { Connection: 'close' } });
+  request: async ({ playwright, storageState, baseURL, userAgent, extraHTTPHeaders, ignoreHTTPSErrors }, use) => {
+    const request = await playwright.request.newContext({
+      storageState,
+      baseURL,
+      userAgent,
+      ignoreHTTPSErrors,
+      extraHTTPHeaders: { ...extraHTTPHeaders, Connection: 'close' },
+    });
     await use(request);
     await request.dispose();
   },
