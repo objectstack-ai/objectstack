@@ -1274,6 +1274,8 @@ export const ObjectChart = (props: ObjectChartProps) => {
       vsLastYear: 'Previous year',
       vsYesterday: 'Yesterday',
       vsPreviousPeriod: 'Previous period',
+      vsThisMonth: 'This month',
+      vsThisQuarter: 'This quarter',
     };
     const labelKey = compareToTrendLabelKey(compareToConfig!, schema.filter);
     const friendlyLabel = labelMap[labelKey] || 'Previous period';

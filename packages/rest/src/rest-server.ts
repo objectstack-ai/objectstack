@@ -3709,8 +3709,13 @@ export class RestServer {
                     mayWriteItem: RestServer.metaSaveVerdict(caller).allowed,
                 });
             },
+            // [#30192] The REQUEST's environment, through the shared resolver,
+            // as every other `security` consumer asks it: the raw `undefined`
+            // of the unscoped mount read the host's occupant.
             resolveSecurityService: async () => (
-                this.securityServiceProvider ? this.securityServiceProvider(environmentId) : undefined
+                this.securityServiceProvider
+                    ? this.securityServiceProvider(await this.resolveRequestEnvironmentId(environmentId, req))
+                    : undefined
             ),
         };
     }
@@ -5875,11 +5880,17 @@ export class RestServer {
 
     /**
      * [#3547] Resolve the environment's `security` service — the ENVIRONMENT's
-     * kernel service first (its evaluator / FieldMasker are bound to that
-     * kernel's data engine), the host provider as the single-kernel fallback.
-     * Mirrors the resolver in registerSecurityExplainEndpoints. Returns
-     * `undefined` when no security service is reachable (no plugin-security /
-     * single-kernel without a provider), so callers degrade gracefully.
+     * kernel service (its evaluator / FieldMasker are bound to that kernel's
+     * data engine). Mirrors the resolver in registerSecurityExplainEndpoints.
+     * Returns `undefined` when no security service is reachable (no
+     * plugin-security / single-kernel without a provider), so callers degrade
+     * gracefully.
+     *
+     * [#30192] The provider resolves the environment's kernel itself now
+     * (`rest-api-plugin`'s environment-scoped seam), so this asks it for the
+     * REQUEST's environment, the shared resolver's answer, and nothing else.
+     * The host's occupant is no longer a fallback: an environment whose kernel
+     * carries no security service, or cannot be acquired, answers `undefined`.
      *
      * Typed as a PARTIAL {@link ISecurityService}: an implementation may omit a
      * method it cannot honour, so every call site must keep feature-detecting
@@ -5889,16 +5900,11 @@ export class RestServer {
         environmentId?: string,
         req?: any,
     ): Promise<Partial<ISecurityService> | undefined> {
+        if (!this.securityServiceProvider) return undefined;
         try {
             const envId = await this.resolveRequestEnvironmentId(environmentId, req);
-            if (envId && envId !== 'platform' && this.kernelManager) {
-                const kernel = await this.kernelManager.getOrCreate(envId);
-                const svc = await kernel.getServiceAsync<any>('security').catch(() => undefined);
-                if (svc) return svc;
-            }
-        } catch { /* fall back to the host provider */ }
-        if (!this.securityServiceProvider) return undefined;
-        try { return await this.securityServiceProvider(environmentId); }
+            return await this.securityServiceProvider(envId);
+        }
         catch { return undefined; }
     }
 
@@ -6170,12 +6176,10 @@ export class RestServer {
         // [#23050 slice 6] The body moved to `security-routes.ts`. This literal
         // hands it every member it reads — the list IS its dependency on this
         // class (see `SecurityExplainRouteHost`, and that module's header for why
-        // `kernelManager` and `securityServiceProvider` are getters).
-        const readKernelManager = () => this.kernelManager;
+        // `securityServiceProvider` is a getter).
         const readSecurityServiceProvider = () => this.securityServiceProvider;
         const host: SecurityExplainRouteHost = {
             routeManager: this.routeManager,
-            get kernelManager() { return readKernelManager(); },
             get securityServiceProvider() { return readSecurityServiceProvider(); },
             resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
@@ -6286,6 +6290,7 @@ export class RestServer {
         const host: SecurityRouteHost = {
             routeManager: this.routeManager,
             get securityServiceProvider() { return readSecurityServiceProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
         };

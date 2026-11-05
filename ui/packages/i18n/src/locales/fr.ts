@@ -1688,6 +1688,8 @@ const fr = {
       vsLastYear: "vs. année dernière",
       vsYesterday: "vs. hier",
       vsPreviousPeriod: "vs. période précédente",
+      vsThisMonth: "vs. ce mois-ci",
+      vsThisQuarter: "vs. ce trimestre",
     },
   },
   appDesigner: {

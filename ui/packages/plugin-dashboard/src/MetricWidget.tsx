@@ -30,6 +30,8 @@ const TREND_LABEL_DEFAULTS: Record<string, string> = {
   'dashboard.trend.vsLastYear': 'vs last year',
   'dashboard.trend.vsYesterday': 'vs yesterday',
   'dashboard.trend.vsPreviousPeriod': 'vs previous period',
+  'dashboard.trend.vsThisMonth': 'vs this month',
+  'dashboard.trend.vsThisQuarter': 'vs this quarter',
 };
 
 const useTrendT = createSafeTranslation(TREND_LABEL_DEFAULTS, 'dashboard.trend.vsLastQuarter');
@@ -54,6 +56,10 @@ function trendLabelKey(label: string): string | undefined {
     case 'vs last year':
     case 'vs previous year':
       return 'dashboard.trend.vsLastYear';
+    case 'vs this month':
+      return 'dashboard.trend.vsThisMonth';
+    case 'vs this quarter':
+      return 'dashboard.trend.vsThisQuarter';
     case 'vs yesterday':
       return 'dashboard.trend.vsYesterday';
     case 'vs previous period':
