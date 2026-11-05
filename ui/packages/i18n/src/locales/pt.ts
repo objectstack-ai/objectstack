@@ -3133,6 +3133,7 @@ const pt = {
     createButton: "Criar organização",
     nameLabel: "Nome da organização",
     namePlaceholder: "p.ex., Acme Inc",
+    defaultPersonalName: "Organização de {{name}}",
     slugLabel: "Slug de URL",
     slugHint: "Usado em URLs. Apenas letras minúsculas, números e hifens.",
     settings: "Configurações da organização",

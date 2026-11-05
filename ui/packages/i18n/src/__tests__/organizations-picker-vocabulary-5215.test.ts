@@ -57,6 +57,7 @@ const ORG_KEYS = [
   'workspace.createDescription',
   'workspace.createButton',
   'workspace.nameLabel',
+  'workspace.defaultPersonalName',
   'workspace.settings',
   'workspace.createFailed',
 ] as const;

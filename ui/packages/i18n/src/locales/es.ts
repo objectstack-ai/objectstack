@@ -3138,6 +3138,7 @@ const es = {
     createButton: "Crear organización",
     nameLabel: "Nombre de la organización",
     namePlaceholder: "p.ej., Acme Inc",
+    defaultPersonalName: "Organización de {{name}}",
     slugLabel: "Slug de URL",
     slugHint: "Se utiliza en URLs. Solo minúsculas, números y guiones.",
     settings: "Configuración de la organización",

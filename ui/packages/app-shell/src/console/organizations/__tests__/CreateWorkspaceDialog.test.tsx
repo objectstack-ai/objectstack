@@ -17,6 +17,9 @@
  * `Intl.DateTimeFormat.prototype.resolvedOptions`, to `Asia/Shanghai`, so the
  * create call's argument does not depend on the zone of the machine running
  * the suite (objectui#11908).
+ *
+ * `t` answers the `defaultValue` unless a case sets `packLang`, in which case
+ * it answers that built-in pack's value; either way `{{x}}` is interpolated.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -24,12 +27,23 @@ import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } fr
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { CreateWorkspaceDialog } from '../CreateWorkspaceDialog';
 import { provisionProductionEnvironment } from '../provisionEnvironment';
+import { builtInLocales } from '@object-ui/i18n/locales';
+
+/** The pack `t` reads from; `null` answers the call site's `defaultValue`. */
+let packLang: 'en' | 'zh' | null = null;
+function translate(key: string, options?: Record<string, unknown>): string {
+  const fromPack = packLang
+    ? key.split('.').reduce<unknown>((n, k) => (n as Record<string, unknown> | undefined)?.[k], builtInLocales[packLang])
+    : undefined;
+  const template = String(typeof fromPack === 'string' ? fromPack : (options?.defaultValue ?? key));
+  return template.replace(/\{\{(\w+)\}\}/g, (whole, name: string) =>
+    options && name in options ? String(options[name]) : whole,
+  );
+}
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  useObjectTranslation: () => ({
-    t: (key: string, options?: Record<string, unknown>) => String(options?.defaultValue ?? key),
-  }),
+  useObjectTranslation: () => ({ t: translate }),
 }));
 
 vi.mock('../provisionEnvironment', () => ({
@@ -38,9 +52,11 @@ vi.mock('../provisionEnvironment', () => ({
 
 const createOrganization = vi.fn();
 const getAuthConfig = vi.fn();
+/** Extra `useAuth()` fields a case sets: `user`, `organizations`, `isOrganizationsLoading`. */
+let authState: Record<string, unknown> = {};
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  useAuth: () => ({ createOrganization, getAuthConfig }),
+  useAuth: () => ({ createOrganization, getAuthConfig, ...authState }),
 }));
 
 const provisionMock = vi.mocked(provisionProductionEnvironment);
@@ -59,6 +75,8 @@ beforeEach(() => {
   createOrganization.mockResolvedValue(NEW_ORG);
   provisionMock.mockResolvedValue({ id: 'env-1', hostname: 'os-abc123.objectstack.app' });
   browserZone = BROWSER_ZONE;
+  packLang = null;
+  authState = {};
   zoneReader = vi
     .spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
     .mockImplementation(function (this: Intl.DateTimeFormat) {
@@ -261,5 +279,83 @@ describe('CreateWorkspaceDialog', () => {
       const sent = createOrganization.mock.calls[0][0] as Record<string, unknown>;
       expect(Object.keys(sent).sort()).toEqual(['name', 'slug']);
     });
+  });
+});
+
+// Maintainer ruling objectstack-ai/cloud#3559 A: the dialog that opens right
+// after sign-up prefills a default name so one click continues; the field stays
+// editable, and nothing is created until the user clicks.
+describe('prefills a first organization from the e-mail (objectstack-ai/cloud#3559 A)', () => {
+  const GMAIL_USER = { id: 'u1', email: 'zhang.san@gmail.com', name: 'Zhang San' };
+  const WORK_USER = { id: 'u2', email: 'jane@acme.com', name: 'Jane Doe' };
+
+  function submitAsIs() {
+    fireEvent.submit(screen.getByTestId('create-workspace-dialog').querySelector('form') as HTMLFormElement);
+  }
+
+  it.each([
+    ['en', 'Zhang San', "Zhang San's organization", 'zhang-sans-organization'],
+    ['zh', '张三', '张三的组织', null],
+  ] as const)('%s: a public-mailbox user sees the personal default and one click creates it', async (lang, person, expected, slug) => {
+    packLang = lang;
+    authState = { user: { ...GMAIL_USER, name: person }, organizations: [], isOrganizationsLoading: false };
+    render(<CreateWorkspaceDialog open onOpenChange={() => {}} onCreated={() => {}} />);
+    await settleAuthConfig();
+
+    expect(screen.getByTestId('workspace-name-input')).toHaveValue(expected);
+    expect(createOrganization).not.toHaveBeenCalled();
+    submitAsIs();
+
+    await waitFor(() => expect(createOrganization).toHaveBeenCalledTimes(1));
+    const sent = createOrganization.mock.calls[0][0] as { name: string; slug: string };
+    expect(sent.name).toBe(expected);
+    if (slug) expect(sent.slug).toBe(slug);
+    else expect(sent.slug).toMatch(/^workspace-[0-9a-z]+$/);
+    await waitFor(() => expect(provisionMock).toHaveBeenCalledWith({ organizationId: 'org-123', displayName: expected }));
+  });
+
+  it('a work-domain user sees the company name in both locales', async () => {
+    for (const lang of ['en', 'zh'] as const) {
+      packLang = lang;
+      authState = { user: WORK_USER, organizations: [], isOrganizationsLoading: false };
+      const { unmount } = render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
+      expect(screen.getByTestId('workspace-name-input')).toHaveValue('Acme');
+      unmount();
+    }
+  });
+
+  it('the default stays editable: what the user types is what is created', async () => {
+    authState = { user: WORK_USER, organizations: [], isOrganizationsLoading: false };
+    render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
+    await settleAuthConfig();
+
+    fillAndSubmit('Acme Robotics');
+
+    await waitFor(() => expect(createOrganization).toHaveBeenCalledTimes(1));
+    expect((createOrganization.mock.calls[0][0] as { name: string }).name).toBe('Acme Robotics');
+  });
+
+  it.each([
+    ['already has an organization', { organizations: [NEW_ORG], isOrganizationsLoading: false }],
+    ['has an organization list still loading', { organizations: [], isOrganizationsLoading: true }],
+    ['has no organization list at all', {}],
+  ] as const)('control: a user who %s opens with an empty name', async (_label, orgState) => {
+    authState = { user: WORK_USER, ...orgState };
+    render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
+    await settleAuthConfig();
+
+    expect(screen.getByTestId('workspace-name-input')).toHaveValue('');
+    expect(screen.getByTestId('workspace-create-submit')).toBeDisabled();
+  });
+
+  it('the name does not change while open when the organization list moves off zero', async () => {
+    authState = { user: WORK_USER, organizations: [], isOrganizationsLoading: false };
+    const { rerender } = render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
+    expect(screen.getByTestId('workspace-name-input')).toHaveValue('Acme');
+
+    authState = { user: WORK_USER, organizations: [NEW_ORG], isOrganizationsLoading: false };
+    rerender(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
+
+    expect(screen.getByTestId('workspace-name-input')).toHaveValue('Acme');
   });
 });

@@ -3208,6 +3208,7 @@ const ru = {
     createButton: "Создать организацию",
     nameLabel: "Название организации",
     namePlaceholder: "например, Acme Inc",
+    defaultPersonalName: "Организация {{name}}",
     slugLabel: "URL-слаг",
     slugHint: "Используется в URL. Только строчные буквы, цифры и дефисы.",
     settings: "Настройки организации",

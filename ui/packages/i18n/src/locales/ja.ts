@@ -3075,6 +3075,7 @@ const ja = {
     createButton: "組織を作成",
     nameLabel: "組織名",
     namePlaceholder: "例: Acme Inc",
+    defaultPersonalName: "{{name}}の組織",
     slugLabel: "URL スラッグ",
     slugHint: "URL に使用されます。小文字、数字、ハイフンのみ。",
     settings: "組織設定",

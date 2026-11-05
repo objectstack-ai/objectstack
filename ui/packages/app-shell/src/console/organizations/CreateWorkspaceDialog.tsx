@@ -8,10 +8,15 @@
  * owner can still change it later, in organization settings (`SettingsPage`'s
  * slug input).
  *
+ * For a user with no organization yet — the dialog that opens right after
+ * sign-up — the name is prefilled from the user's e-mail
+ * (`defaultOrganizationName`), so one click continues; the field stays
+ * editable. Creating a further organization opens with an empty name.
+ *
  * @module
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -29,6 +34,7 @@ import { useObjectTranslation } from '@object-ui/i18n';
 import { Loader2 } from 'lucide-react';
 import { provisionProductionEnvironment } from './provisionEnvironment.js';
 import { resolveOrgErrorMessage } from './orgErrorMessage.js';
+import { defaultOrganizationName } from './defaultOrganizationName.js';
 
 /**
  * Convert a display name to a URL-friendly slug.
@@ -142,7 +148,29 @@ export function CreateWorkspaceDialog({
   onCreated,
 }: CreateWorkspaceDialogProps) {
   const { t } = useObjectTranslation();
-  const { createOrganization, getAuthConfig } = useAuth();
+  const { createOrganization, getAuthConfig, user, organizations, isOrganizationsLoading } = useAuth();
+
+  // Prefill only a FIRST organization (maintainer ruling objectstack-ai/cloud#3559
+  // A scopes the default to the naming step after sign-up): a known-empty list,
+  // not one still loading. A second organization derived from the same e-mail
+  // would only repeat the first one's name.
+  const isFirstOrganization =
+    Array.isArray(organizations) && organizations.length === 0 && !isOrganizationsLoading;
+  const derived = isFirstOrganization && user ? defaultOrganizationName(user) : null;
+  const defaultName =
+    derived === null
+      ? ''
+      : derived.kind === 'company'
+        ? derived.name
+        : t('workspace.defaultPersonalName', {
+            name: derived.person,
+            defaultValue: "{{name}}'s organization",
+          });
+  // Read when the dialog opens, never after: creating the organization moves
+  // `organizations` off zero mid-submit, and the name being submitted must not
+  // change under the user.
+  const defaultNameRef = useRef(defaultName);
+  defaultNameRef.current = defaultName;
 
   const [name, setName] = useState('');
   // The slug is not asked for (objectui#11659): it is derived from the name on
@@ -173,10 +201,10 @@ export function CreateWorkspaceDialog({
     };
   }, [open, getAuthConfig]);
 
-  // Reset form when dialog opens
+  // Reset form when dialog opens: the first-organization default, else empty.
   useEffect(() => {
     if (open) {
-      setName('');
+      setName(defaultNameRef.current);
       setError(null);
     }
   }, [open]);

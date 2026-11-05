@@ -3073,6 +3073,7 @@ const ko = {
     createButton: "조직 생성",
     nameLabel: "조직 이름",
     namePlaceholder: "예: Acme Inc",
+    defaultPersonalName: "{{name}}의 조직",
     slugLabel: "URL 슬러그",
     slugHint: "URL에 사용됩니다. 소문자, 숫자, 하이픈만 사용 가능합니다.",
     settings: "조직 설정",
