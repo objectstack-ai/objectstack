@@ -189,3 +189,15 @@ describe('mailTestActionHandler (fallback — no email plugin mounted)', () => {
     expect(r.message).toMatch(/smtp \/ resend \/ postmark \/ log/);
   });
 });
+
+// An unset From name is not 'ObjectStack': plugin-email names a sender that has
+// none with the product name the mail's subject and body read. A manifest
+// default would show the page a name the mail never goes out under, and the
+// mail plugin takes only a From name somebody SET.
+describe('mailSettingsManifest — from_name has no default of its own', () => {
+  it('declares no default, stays optional, and tells the administrator what an empty value means', () => {
+    expect(spec('from_name').default).toBeUndefined();
+    expect(spec('from_name').required).toBe(false);
+    expect(String(spec('from_name').description)).toMatch(/Leave empty to use the product name/);
+  });
+});
