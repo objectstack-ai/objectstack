@@ -2070,7 +2070,12 @@ export class ProtocolSaveFacet {
                     // [#6602] The SAME scope the row was just written with.
                     organizationId: null,
                 });
-                await host.ensureObjectStorage(request.type, request.name);
+                // [#30635] A refused storage sync is told to the caller too:
+                // one `warning` on this answer's `advisories`, after the
+                // gate's findings and the save's own notices. The save is not
+                // failed (the row is written, registered and served).
+                const storageRefused = await host.ensureObjectStorage(request.type, request.name);
+                if (storageRefused) saveNotices.push(storageRefused);
             }
             // ADR-0010 — success audit (best-effort).
             await host.recordMetadataAudit({

@@ -10032,7 +10032,7 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /** Docblock and body: {@link ProtocolRegistryHydrationFacet.ensureObjectStorage} in `protocol-registry-hydration.ts` [#29985 codemod]. */
-    private async ensureObjectStorage(type: string, name: string): Promise<void> {
+    private async ensureObjectStorage(type: string, name: string): Promise<RuntimeAuthoringIssue | undefined> {
         // [#29985 codemod] The body moved to `protocol-registry-hydration.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolRegistryHydrationFacet.ensureObjectStorage(protocolHost(this), type, name);
     }
@@ -11340,6 +11340,7 @@ export class ObjectStackProtocolImplementation implements
         seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[]; landed?: SeedAppliedLandedParsed[] };
         materializeApplied?: PublishMaterializeResult;
         projectionApplied?: MutationProjectionOutcome;
+        storageRefused?: RuntimeAuthoringIssue;
     }> {
         // [#29985 codemod] The body moved to `protocol-history-and-publish.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolHistoryAndPublishFacet.runPublishSideEffects(protocolHost(this), args);
