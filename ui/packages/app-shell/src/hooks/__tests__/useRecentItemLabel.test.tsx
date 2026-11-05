@@ -186,11 +186,13 @@ describe('useRecentItemLabel — a served report, page or dashboard is named as 
     dashboards: [{ name: 'ops_board', label: 'Ops Cockpit (renamed-30244)', widgets: [] }],
   };
 
-  it('zh-CN: a renamed report, page and dashboard show the served label, not the packaged translation', () => {
+  it.each([
+    ['report', 'q3_results', 'Quarter Review (renamed-30244)'],
+    ['page', 'welcome_tour', 'Getting Started (renamed-30244)'],
+    ['dashboard', 'ops_board', 'Ops Cockpit (renamed-30244)'],
+  ] as const)('zh-CN: a renamed %s shows the served label, not the packaged translation', (type, name, served) => {
     const { result } = renderHook(() => useRecentItemLabel(), { wrapper: wrapper('zh-CN', RENAMED) });
-    expect(result.current(item('report', 'q3_results'))).toBe('Quarter Review (renamed-30244)');
-    expect(result.current(item('page', 'welcome_tour'))).toBe('Getting Started (renamed-30244)');
-    expect(result.current(item('dashboard', 'ops_board'))).toBe('Ops Cockpit (renamed-30244)');
+    expect(result.current(item(type, name))).toBe(served);
   });
 
   it('zh-CN: control — an item the read did not serve, or served with no label, is named by the bundle', () => {
