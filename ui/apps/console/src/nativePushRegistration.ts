@@ -126,7 +126,10 @@ function installIdOf(host: ObjectStackNative): string | null {
 
 /** The registry's platform for this shell, or `null` for a shell that is neither iOS nor Android. */
 function platformOf(host: ObjectStackNative): 'ios' | 'android' | null {
-  return host.platform === 'ios' || host.platform === 'android' ? host.platform : null;
+  const { platform } = host;
+  if (platform === 'ios') return 'ios';
+  if (platform === 'android') return 'android';
+  return null;
 }
 
 /**

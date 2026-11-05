@@ -86,11 +86,14 @@ function answer(status: number, body: unknown) {
 
 function deviceRequests(): Array<{ method: string; url: string; body: unknown }> {
   return fetchMock.mock.calls
-    .map(([url, init]: [string, RequestInit | undefined]) => ({
-      method: init?.method ?? 'GET',
-      url: String(url),
-      body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
-    }))
+    .map((call: unknown[]) => {
+      const init = call[1] as RequestInit | undefined;
+      return {
+        method: init?.method ?? 'GET',
+        url: String(call[0]),
+        body: typeof init?.body === 'string' ? (JSON.parse(init.body) as unknown) : undefined,
+      };
+    })
     .filter((request) => request.url.includes(DEVICES));
 }
 
@@ -311,7 +314,7 @@ describe('unregistering the device this Console registered (objectstack#29042)',
     await act(async () => {
       await unregister!();
     });
-    expect(deviceRequests().at(-1)).toEqual({ method: 'DELETE', url: expect.stringContaining(`${DEVICES}/install-7`), body: undefined });
+    expect(deviceRequests()[deviceRequests().length - 1]).toEqual({ method: 'DELETE', url: expect.stringContaining(`${DEVICES}/install-7`), body: undefined });
     expect(sessionStorage.getItem(NATIVE_PUSH_REGISTRATION_KEY)).toBeNull();
   });
 
