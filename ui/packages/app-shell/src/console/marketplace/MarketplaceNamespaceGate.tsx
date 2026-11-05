@@ -12,6 +12,10 @@
  * translated console nor a raw key. A language switch while a page is open
  * shows the skeleton again until that language's catalogue has arrived.
  *
+ * That swap unmounts the page body while the visitor stays on the page, so an
+ * unmount cleanup that means "the visitor left" (`SampleDataLeaveBanner`)
+ * asks `useMarketplaceFrameHolding()` (`marketplaceFrameHolding.ts`) first.
+ *
  * A catalogue that cannot be fetched is said once, in the console's own error
  * words (resident pack keys, which need no fetch), with a Try again that asks
  * for it again — never a skeleton that waits forever, and never a retry loop.
@@ -24,18 +28,32 @@
  * `__tests__/marketplaceNamespaceBoundary.test.ts` holds both halves.
  */
 
-import type { ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { RotateCcw } from 'lucide-react';
 import { Button, Empty, EmptyTitle } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useMarketplaceNamespace } from '@object-ui/i18n/namespaces/marketplace';
 import { MarketplaceResolving } from './MarketplaceResolving.js';
+import { MarketplaceFrameHolding } from './marketplaceFrameHolding.js';
 
 export function MarketplaceNamespaceGate({ children }: { children: ReactNode }) {
   const namespace = useMarketplaceNamespace();
-  if (namespace.status === 'ready') return <>{children}</>;
-  if (namespace.status === 'failed') return <MarketplaceNamespaceFailed onRetry={namespace.retry} />;
-  return <MarketplaceResolving />;
+  const holding = useRef(false);
+  useLayoutEffect(() => {
+    holding.current = namespace.status !== 'ready';
+  });
+  const isHolding = useCallback(() => holding.current, []);
+  return (
+    <MarketplaceFrameHolding.Provider value={isHolding}>
+      {namespace.status === 'ready' ? (
+        children
+      ) : namespace.status === 'failed' ? (
+        <MarketplaceNamespaceFailed onRetry={namespace.retry} />
+      ) : (
+        <MarketplaceResolving />
+      )}
+    </MarketplaceFrameHolding.Provider>
+  );
 }
 
 function MarketplaceNamespaceFailed({ onRetry }: { onRetry: () => void }) {

@@ -1273,7 +1273,7 @@ export default defineConfig({
             { name: 'i18n-ns-marketplace-pt', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]pt\.ts$/, priority: 84 },
             { name: 'i18n-ns-marketplace-ru', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]ru\.ts$/, priority: 84 },
             { name: 'i18n-ns-marketplace-ar', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]ar\.ts$/, priority: 84 },
-            { name: 'marketplace-namespace-gate', test: /[\\/]packages[\\/]app-shell[\\/]src[\\/]console[\\/]marketplace[\\/]MarketplaceNamespaceGate\.tsx$/, priority: 84, includeDependenciesRecursively: false },
+            { name: 'marketplace-namespace-gate', test: /[\\/]packages[\\/]app-shell[\\/]src[\\/]console[\\/]marketplace[\\/](?:MarketplaceNamespaceGate\.tsx|marketplaceFrameHolding\.ts)$/, priority: 84, includeDependenciesRecursively: false },
             //
             // ⛔ `i18n-runtime` takes `includeDependenciesRecursively: false`
             // for the reason `data-adapter` below does (objectui#9345, read out

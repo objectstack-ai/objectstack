@@ -33,7 +33,7 @@
  */
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { ReactElement } from 'react';
+import { useState, type ReactElement } from 'react';
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
 
 const arChunk = vi.hoisted(() => ({ fails: false, requests: 0 }));
@@ -87,7 +87,9 @@ vi.mock('@object-ui/i18n/namespaces/marketplace/ar', async (importOriginal) => {
   return { ...(await importOriginal<Record<string, unknown>>()) };
 });
 
-import { I18nProvider } from '@object-ui/i18n';
+import { I18nProvider, useI18nContext } from '@object-ui/i18n';
+import { NotificationProvider } from '@object-ui/react';
+import { NotificationBanners } from '@object-ui/components';
 import { builtInLocales } from '@object-ui/i18n/locales';
 import { BUILT_IN_LANGUAGE_CODES, registerBuiltInLocale } from '@object-ui/i18n/locales/registry';
 import en from '@object-ui/i18n/locales/en';
@@ -103,6 +105,7 @@ import ar from '@object-ui/i18n/locales/ar';
 import { initRuntimeConfig, resetRuntimeConfigForTesting } from '../../../runtime-config';
 import { MarketplacePage } from '../MarketplacePage';
 import { MarketplacePackagePage } from '../MarketplacePackagePage';
+import { rememberSampleData, resetSampleDataSessionForTesting } from '../sampleDataNotice';
 
 const PACKS: Record<string, Record<string, unknown>> = { en, zh, ja, ko, de, fr, es, pt, ru, ar };
 for (const code of BUILT_IN_LANGUAGE_CODES) registerBuiltInLocale(code, PACKS[code]);
@@ -112,6 +115,7 @@ const RAW_KEY = /\bmarketplace\.[A-Za-z]/;
 
 beforeEach(async () => {
   arChunk.fails = false;
+  resetSampleDataSessionForTesting();
   resetRuntimeConfigForTesting();
   vi.stubGlobal(
     'fetch',
@@ -222,6 +226,51 @@ describe('the marketplace pages wait for their strings (objectstack#30588)', () 
 
     const shown = (await view.shown()).join('\n');
     expect(shown).not.toContain(ENGLISH.title);
+    expect(shown).not.toMatch(RAW_KEY);
+  });
+
+  it('ja after zh-CN: a language switch on the package page raises no sample-data banner, and leaving the page raises it in Japanese', async () => {
+    // A package this session installed with sample data: leaving its page
+    // raises the banner that follows the installer (objectstack#30323).
+    rememberSampleData({ manifestId: PKG.manifest_id, name: PKG.display_name, count: 12, path: '/apps/setup/system/marketplace/pkg_1' });
+    const banner = (pack: { marketplace: { detail: { sampleDataBannerTitle: string } } }) =>
+      pack.marketplace.detail.sampleDataBannerTitle.replace('{{name}}', PKG.display_name);
+
+    /** The console around the page: its banner surface, a language switch and a way out, all outside the frame. */
+    function Console() {
+      const [onPage, setOnPage] = useState(true);
+      const { changeLanguage } = useI18nContext();
+      return (
+        <NotificationProvider>
+          <NotificationBanners />
+          <button type="button" onClick={() => void changeLanguage('ja')}>switch-language</button>
+          <button type="button" onClick={() => setOnPage(false)}>leave-page</button>
+          {onPage ? <MarketplacePackagePage /> : <div data-testid="app-page" />}
+        </NotificationProvider>
+      );
+    }
+
+    const view = renderRecording(<Console />, 'zh-CN');
+    expect((await screen.findAllByText(builtInLocales.zh.marketplace.back)).length).toBeGreaterThan(0);
+
+    // The switch sends the frame back to its skeleton until the Japanese
+    // catalogue lands, which unmounts the page body. That is not a leave.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'switch-language' }));
+    });
+    expect((await screen.findAllByText(builtInLocales.ja.marketplace.back)).length).toBeGreaterThan(0);
+    const beforeLeaving = (await view.shown()).join('\n');
+    for (const pack of [builtInLocales.en, builtInLocales.zh, builtInLocales.ja]) expect(beforeLeaving).not.toContain(banner(pack));
+
+    // Leaving the page is: the banner follows, in the console's language.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'leave-page' }));
+    });
+    expect(await screen.findByText(banner(builtInLocales.ja))).toBeInTheDocument();
+
+    const shown = (await view.shown()).join('\n');
+    expect(shown).not.toContain(banner(builtInLocales.en));
+    expect(shown).not.toContain(ENGLISH.back);
     expect(shown).not.toMatch(RAW_KEY);
   });
 });
