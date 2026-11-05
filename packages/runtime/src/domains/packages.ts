@@ -2127,14 +2127,22 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                                 `[handlePackages] seed apply failed: ${e?.message ?? e}`,
                             );
                             // [#30429] A load that threw mid-batch still reports
-                            // the rows of the datasets that finished, through the
-                            // same reader and projection as `metadata-protocol`'s
-                            // catch; no reading (the throw came before a load
-                            // ran) leaves `landed` absent.
+                            // what it wrote, read off the error exactly as
+                            // `metadata-protocol`'s catch reads it: the counts
+                            // (finished datasets plus the one that threw), the
+                            // object that stopped it, and `landed` for the
+                            // datasets that finished, through the same
+                            // projection. No reading (no load ran) means nothing
+                            // was written: zero counts, `landed` absent.
                             const written = seedLoadPartialWrites(e);
+                            const failure = clientFacingFailureText(e, 'seed apply failed');
                             (result as any).seedApplied = {
                                 success: false,
-                                error: clientFacingFailureText(e, 'seed apply failed'),
+                                inserted: written?.inserted ?? 0,
+                                updated: written?.updated ?? 0,
+                                error: written?.failedObject
+                                    ? `seed apply stopped at the seed for object '${written.failedObject}': ${failure}`
+                                    : failure,
                                 ...(written ? { landed: seedAppliedLanded(written.finished) } : {}),
                                 // [#10524] The declared 422's structured
                                 // findings ride beside the headline `error` —

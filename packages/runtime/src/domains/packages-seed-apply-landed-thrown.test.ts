@@ -88,7 +88,7 @@ async function publishDrafts(opts: Parameters<typeof makeDoor>[0] = {}) {
 
 const list = (ids: string[]) => ({ ids, total: ids.length, truncated: false });
 
-describe('#30429 · the runtime fallback reports a thrown load\'s finished datasets', () => {
+describe('#30429 · the runtime fallback reports a thrown load\'s finished datasets and counts', () => {
     it('positive control: a returned load lists the rows, created vs matched', async () => {
         const { seedApplied, insertedIds } = await publishDrafts();
 
@@ -106,6 +106,13 @@ describe('#30429 · the runtime fallback reports a thrown load\'s finished datas
         expect(insertedIds).toEqual(['id_Apollo']);
         expect(seedApplied?.success).toBe(false);
         expect(seedApplied?.landed).toEqual([{ object: 'project', inserted: list(insertedIds), matched: list(['cust_gemini']) }]);
+        // The counts the schema requires, read off the same partial-writes
+        // record: the finished dataset's one created row. The object that
+        // stopped the load is named; the driver's sentence is withheld.
+        expect(seedApplied?.inserted).toBe(1);
+        expect(seedApplied?.updated).toBe(0);
+        expect(seedApplied?.error).toBe(`seed apply stopped at the seed for object '${BROKEN}': seed apply failed`);
+        expect(JSON.stringify(seedApplied)).not.toContain('unreadable');
     });
 
     it('a failure before any load ran leaves `landed` absent: "not reported"', async () => {

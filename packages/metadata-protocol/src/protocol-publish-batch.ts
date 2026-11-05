@@ -155,9 +155,11 @@ export async function applySeedBodies(
         // The counters describe what was WRITTEN. The loader writes dataset
         // by dataset and stops at the one that throws; the rows of the
         // datasets ahead of it stay written (nothing rolls them back), so the
-        // receipt carries the loader's own count of them and names the seed
-        // that stopped it. No reading means the throw came before the loader
-        // wrote anything — the request parse, or the loader's import.
+        // receipt carries the loader's own count of them (plus any rows the
+        // dataset that threw wrote first) and names the seed that stopped
+        // it. No reading means no load ran — the request parse refused, or
+        // the loader's import failed — so nothing was written; a reading
+        // with zero counts is a load that threw before writing a row.
         const written = partialWritesOf?.(e);
         const failure = clientFacingFailureText(e, 'seed apply failed');
         return {
@@ -172,8 +174,9 @@ export async function applySeedBodies(
             // ids a reader clearing a partial publish's sample data needs. The
             // dataset that threw is not listed (its ids are only partly known,
             // see `SeedLoadPartialWrites.finished`); its rows are in the
-            // counts above and its object in `error`. No reading means no
-            // load ran, so `landed` stays absent: "not reported".
+            // counts above and its object in `error`. Empty when the throw
+            // came before any dataset finished; absent when there is no
+            // reading (no load ran, see above): "not reported".
             ...(written ? { landed: seedAppliedLanded(written.finished) } : {}),
             // [#10524] A DECLARED refusal's structured findings ride the
             // receipt beside the headline `error` — the message is a
