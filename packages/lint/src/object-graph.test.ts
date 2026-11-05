@@ -926,21 +926,24 @@ describe('[#30471] the field-name indexes read the objects as served', () => {
   });
 
   // A field two packages write at the deciding priority: its name is served,
-  // its definition is registration order. The expression type check leaves it
-  // untyped; each pair lists last the definition the check would refuse.
-  it('validate-expressions: a field two packages tie on is a served name with no type', () => {
-    const tie = (a: Rec, b: Rec, extra: Rec): Rec => ({
-      objects: [deal, account],
+  // its definition is registration order. The two definition questions of the
+  // expression passes (its type, whether it is nullable) leave it unjudged;
+  // the single-writer controls show both verdicts the tie would otherwise get.
+  it('validate-expressions: a field two packages tie on is a served name, judged on no definition', () => {
+    const tie = (a: Rec, b: Rec): Rec => ({
+      ...validationOn('record.score + 1 > 2'),
       packages: [
         { manifest: { id: 'app', objects: [deal, account] } },
         { manifest: { id: 'mod', objectExtensions: [{ extend: 'xs_deal', fields: a }] } },
         { manifest: { id: 'mod2', objectExtensions: [{ extend: 'xs_deal', fields: b }] } },
       ],
-      ...extra,
     });
-    const sum = validationOn('record.score + 1 > 2');
-    expect(ids(expressions, tie({ score: { type: 'number' } }, { score: { type: 'text' } }, sum))).toEqual([]);
-    expect(ids(expressions, tie({ score: { type: 'text' } }, {}, sum))).toEqual(['expression']);
-    expect(ids(expressions, tie({ score: { type: 'number' } }, {}, sum))).toEqual([]);
+    const messages = (a: Rec, b: Rec) => validateStackExpressions(tie(a, b)).map((issue) => issue.message);
+    const num = { score: { type: 'number' } };
+    const text = { score: { type: 'text' } };
+    expect(messages(num, text)).toEqual([]);
+    expect(messages(text, num)).toEqual([]);
+    expect(messages(text, {})).toEqual([expect.stringContaining('type mismatch'), expect.stringContaining('nullable')]);
+    expect(messages(num, {})).toEqual([expect.stringContaining('nullable')]);
   });
 });

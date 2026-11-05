@@ -2242,9 +2242,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // the registry serves is registration order, which the stack does not state,
   // so such a field is a known name with no type and no null-guard verdict.
   // The read-attachment index is object-level and an extension carries none.
-  const served = objectsAsServed(stack);
-  const typedObjects = objectsWithoutTiedFields(served);
-  const fieldIndex = buildFieldIndex(served.objects);
+  const { objects: servedObjects, tied } = objectsAsServed(stack);
+  const typedObjects = objectsWithoutTiedFields({ objects: servedObjects, tied });
+  const fieldIndex = buildFieldIndex(servedObjects);
   const attachedOnReadIndex = buildAttachedOnReadIndex(objects);
   const fieldTypeIndex = buildFieldTypeIndex(typedObjects);
   const nullableIndex = buildNullableFieldIndex(typedObjects);
