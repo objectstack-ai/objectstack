@@ -661,6 +661,9 @@ export function SettingsView() {
                 saving={saving}
                 labels={labels}
                 error={key ? fieldErrors[key] : undefined}
+                // The scope the server writes this key at: the specifier's
+                // own, else the manifest's, else the spec's default `tenant`.
+                writeScope={spec.scope ?? manifest.scope ?? 'tenant'}
               />
             );
           })}

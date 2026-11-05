@@ -173,6 +173,7 @@ const fr = {
   },
   form: {
     noPermissionToSave: "Vous n'avez pas l'autorisation d'enregistrer cet enregistrement.",
+    readOnlyExternalSource: "Cette table est en lecture seule. Ses enregistrements proviennent d'une source de données externe qui n'accepte pas de modifications.",
     noPermissionToCreate: "Vous n'avez pas l'autorisation de créer des enregistrements {{object}}. Les champs sont en lecture seule.",
     noPermissionToEdit: "Vous n'avez pas l'autorisation de modifier les enregistrements {{object}}. Les champs sont en lecture seule.",
     noPermissionToEditRecord: "Vous n'avez pas l'autorisation de modifier cet enregistrement. Les champs sont en lecture seule.",
@@ -932,8 +933,8 @@ const fr = {
     },
     betterAuth: {
       short: "Identité",
-      title: "Géré par le fournisseur d'identité",
-      body: "Le schéma de cet objet appartient à {{provider}}. Les modifications directes contournent le hachage des mots de passe, la validation des sessions, les contrôles à deux facteurs et les hooks d'audit. Gérez ces enregistrements via les flux de connexion, d'invitation et de sécurité de votre fournisseur d'authentification.",
+      title: "Écrit via le service d'identité intégré",
+      body: "Le schéma de cet objet appartient à {{provider}}, le service d'identité intégré de la plateforme. Créez et modifiez ces enregistrements avec les actions de cette page ou via les flux de connexion, d'invitation et de sécurité ; tous passent par ce service. Modifier la table directement contournerait le hachage des mots de passe, la validation des sessions, les contrôles à deux facteurs et les hooks d'audit.",
     },
   },
   kanban: {
@@ -1854,6 +1855,10 @@ const fr = {
     },
   },
   console: {
+    organizationMfa: {
+      needsTwoFactor: "Exiger l'authentification multifacteur nécessite l'authentification à deux facteurs, désactivée sur ce déploiement : un enregistrement avec la case cochée est donc refusé. Activez d'abord les deux facteurs : activez « Exiger l'authentification multifacteur » dans Configuration → Authentification (cela s'applique à toutes les organisations), ou définissez OS_AUTH_TWO_FACTOR=true sur le déploiement.",
+      nowRequired: "Tous les membres de cette organisation qui n'ont pas configuré d'application d'authentification doivent maintenant le faire. Chacun perd l'accès aux données à la fin du délai de grâce MFA (7 jours sauf modification dans Configuration → Authentification), compté à partir de sa première utilisation après ce changement. Les membres qui utilisent déjà une application d'authentification ne sont pas concernés.",
+    },
     studio: {
       title: "Studio",
       accessRequired: "Vous avez besoin de l'accès à Studio pour ouvrir Studio. Un administrateur peut vous l'accorder avec un ensemble d'autorisations dans Configuration → Attribution des ensembles d’autorisations.",
@@ -2247,6 +2252,8 @@ const fr = {
       sourceBadgeInherited: "Hérité de {{source}}",
       sourceBadgeOverrides: "Remplace {{source}}",
       resetToDefault: "Rétablir la valeur par défaut",
+      sourceBadgeModified: "Modifié",
+      defaultValueHint: "Par défaut : {{value}}",
       envLockBadge: "Verrouillé par l'env.",
       envLockBadgeTitle: "Fixé par une variable d'environnement — modification impossible depuis l'interface.",
       deprecatedBadge: "Obsolète",
@@ -2900,6 +2907,8 @@ const fr = {
       useEmailResetText: "Réinitialiser par e-mail à la place",
       phoneSuccessTitle: "Mot de passe réinitialisé",
       phoneSuccessDescription: "Votre mot de passe a été réinitialisé. Vous pouvez maintenant vous connecter avec votre nouveau mot de passe.",
+      noDeliveryTitle: "Aucun lien de réinitialisation ne peut être envoyé par e-mail ici",
+      noDeliveryDescription: "Ce déploiement n'envoie pas d'e-mails, aucun lien de réinitialisation du mot de passe ne peut donc vous parvenir. Demandez à un administrateur : il peut vous définir un nouveau mot de passe dans Configuration → Utilisateurs.",
     },
     resetPassword: {
       title: "Définir un nouveau mot de passe",
@@ -2923,6 +2932,7 @@ const fr = {
       verifyingDescription: "Nous vérifions votre e-mail. Veuillez patienter.",
       successTitle: "E-mail vérifié",
       successDescription: "Votre e-mail a été vérifié. Vous pouvez maintenant vous connecter.",
+      handoffSuccessDescription: "Votre e-mail a été vérifié. Revenez à l'application dans laquelle vous vous connectiez, et connectez-vous là-bas.",
       errorTitle: "Échec de la vérification",
       errorDescription: "La vérification a échoué. Veuillez demander un nouveau lien.",
       missingToken: "Il manque un token dans le lien de vérification.",
@@ -3015,6 +3025,7 @@ const fr = {
         continue: "Continuer",
         preparing: "Préparation…",
         enrollFailed: "Impossible de démarrer l'enrôlement.",
+        unavailable: "L'authentification à deux facteurs est désactivée sur ce déploiement : aucune application d'authentification ne peut encore être configurée. Demandez à un administrateur de l'activer dans Configuration → Authentification, puis réessayez.",
         scanTitle: "Scannez avec votre application d'authentification",
         scanBody: "Scannez ce QR code avec Google Authenticator, 1Password, Authy, etc., puis saisissez le code à 6 chiffres.",
         backupTitle: "Enregistrez vos codes de secours",
@@ -4176,6 +4187,9 @@ const fr = {
       revoke: "Révoquer",
       revoking: "Révocation…",
       revokedToast: "Acceptation de « {{set}} » révoquée.",
+      reopen: "Reconsidérer",
+      reopening: "Réouverture…",
+      reopenedToast: "Suggestion pour « {{set}} » rouverte : rien n'est accordé tant qu'elle n'est pas acceptée.",
     },
     title: "Marketplace d'applications",
     subtitle: "Parcourez les applications approuvées publiées dans le catalogue ObjectStack. Cliquez sur une application pour voir les détails et l'installer dans l'un de vos environnements.",
@@ -4284,6 +4298,10 @@ const fr = {
         unreadableRange: "{{packageId}} déclare {{dependency}} avec la plage de versions {{range}}, qui ne peut pas être lue. Corrigez la plage et republiez le paquet.",
         unreadableVersion: "Installez une version publiée de {{dependency}} comprise dans {{range}}. La version installée {{installedVersion}} n’est pas au format MAJOR.MINOR.PATCH.",
         unreadableDeclaration: "{{packageId}} déclare ses dépendances sous une forme que l’installation ne peut pas lire. Écrivez-les sous forme de correspondance entre ID de paquet et plage de versions, puis republiez le paquet.",
+      },
+      protocolCheckSkipped: {
+        noRange: "{{packageId}} n’indique pas quel protocole de plateforme il prend en charge : il a donc été installé sous le protocole {{protocolVersion}} sans vérification de compatibilité et risque de ne pas fonctionner sur cette version de la plateforme. Une version du paquet qui déclare le protocole pris en charge (engines.protocol) est vérifiée à l’installation.",
+        unparsedRange: "{{packageId}} déclare son protocole de plateforme comme {{requiredRange}}, que ce runtime ne sait pas lire : il a donc été installé sous le protocole {{protocolVersion}} sans vérification de compatibilité et risque de ne pas fonctionner sur cette version de la plateforme. Une version du paquet qui déclare une plage lisible (engines.protocol) est vérifiée à l’installation.",
       },
       localUnauthorized: "Connectez-vous d'abord à ce runtime.",
       localMarketplaceUnavailable: "Ce runtime n'a pas de OS_CLOUD_URL configuré.",
@@ -4631,6 +4649,7 @@ const fr = {
       title: 'Modifications en attente',
       description: 'Ce que la publication changera. Les nouveaux éléments sont ajoutés ; les mises à jour remplacent la version en ligne.',
       savedToCustomization: 'Enregistré dans les personnalisations de {{package}}',
+      customizationEnvironment: 'Ces modifications sont stockées dans la base de données de cet environnement, comme éléments de {{pair}}, et non dans les sources de votre projet. Elles ne passent dans un autre environnement que par {{command}}.',
       loading: 'Chargement des modifications en attente…',
       loadFailed: 'Impossible de charger les modifications en attente :',
       empty: 'Rien en attente — tous les brouillons ont été publiés.',
@@ -4719,6 +4738,14 @@ const fr = {
         dataset_one: '{{count}} jeu de données',
         dataset_many: '{{count}} de jeux de données',
         dataset_other: '{{count}} jeux de données',
+        hook: '{{count}} hooks',
+        hook_one: '{{count}} hook',
+        hook_many: '{{count}} de hooks',
+        hook_other: '{{count}} hooks',
+        translation: '{{count}} traductions',
+        translation_one: '{{count}} traduction',
+        translation_many: '{{count}} de traductions',
+        translation_other: '{{count}} traductions',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

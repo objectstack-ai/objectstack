@@ -13,7 +13,7 @@
     "description": {
       "status": "live",
       "verifiedAt": "2026-08-10",
-      "evidence": "ui/packages/app-shell/src/views/ActionParamDialog.tsx#ActionParamDialog renders it as the dialog's DialogDescription, falling back to the generic `actionDialog.description` string; ui/packages/app-shell/src/hooks/useConsoleActionRuntime.tsx#paramCollectionHandler and ui/packages/app-shell/src/views/RecordDetailView.tsx#paramCollectionHandler both feed it as `actionDescription(objForI18n, action?.name, action?.description)`; ui/packages/i18n/src/useObjectLabel.ts#actionDescription resolves it through ui/packages/i18n/src/useObjectLabel.ts#actionSuffixes, reading objects.{o}._actions.{a}.description for an action with a key object or globalActions.{a}.description for one without, never both, then this literal; framework: packages/cli/src/utils/i18n-extract.ts emits the key and packages/spec/src/system/translation.zod.ts declares the translation slot.",
+      "evidence": "ui/packages/app-shell/src/views/ActionParamDialog.tsx#ActionParamDialog renders it as the dialog's DialogDescription, falling back to the generic `actionDialog.description` string; ui/packages/app-shell/src/hooks/useConsoleActionRuntime.tsx#paramCollectionHandler and ui/packages/app-shell/src/views/RecordDetailView.tsx#paramCollectionHandler both feed it as `actionDescription(objForI18n, action?.name, action?.description)`; ui/packages/i18n/src/useObjectLabel.ts#actionDescription resolves it through ui/packages/i18n/src/useObjectLabel.ts#actionSuffixes, reading objects.{o}._actions.{a}.description for an action with a key object or globalActions.{a}.description for one without, never both, then this literal; framework: packages/lint/src/i18n-walk.ts emits the key and packages/spec/src/system/translation.zod.ts declares the translation slot.",
       "note": "Added #7367 — the RENDERER half predates the key by design: the consumer chain above shipped while `ActionSchema` (strictObject) refused `description`, so no producer could reach it (the mirror image of declared-but-unenforced). Live from the moment this key exists: the dialog reads `action.description` directly, no second input required. Mechanism for the 2026-08-10 ruling on #7278 — an action with `params` carries its confirm question here instead of in `confirmText`, so one decision is one dialog. Moved out of spec source, #23434: packages/spec/src/ui/action.zod.ts (this key's docblock) and packages/spec/src/system/translation.zod.ts (the translation slot's comment) cited this chain by line, sha-less. Re-read at objectui @b9814b334 on 2026-10-15: the object-then-global fallback both described, and this entry's evidence with them, is gone — objectui#11439 retired it, so the client resolves one bundle entry the way packages/spec/src/system/i18n-resolver.ts#actionTranslationNode does."
     },
     "submitText": {
@@ -95,7 +95,148 @@
       "verifiedAt": "2026-09-15",
       "evidenceScope": "cross-repo",
       "evidence": "cloud @cb8ee7ff: packages/service-ai/src/tools/action-tools.ts#buildParametersSchema — each declared param becomes one JSON Schema property on the exposed tool.",
-      "note": "field/objectOverride/defaultFromRow/options/placeholder/helpText/defaultValue/required all consumed."
+      "note": "field/objectOverride/defaultFromRow/options/placeholder/helpText/defaultValue/required all consumed. DRILLED 2026-11-05 (#30259): each member now carries its own verdict and in-repo evidence (the console resolver, the param dialog, paramToField, and the dispatcher's ADR-0104 D2 check), and the container left the undrilled-containers baseline. The container's own row keeps its cross-repo AI-tool evidence. `widget` is this type's planned member, with authorWarn, until #30260 gives it a reader.",
+      "children": {
+        "name": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (the request-body key of the resolved param, `param.name ?? ''` inline, falling back to the field name); ui/packages/app-shell/src/views/ActionParamDialog.tsx#ActionParamDialog (keys the collected values and each control's error by `param.name`); packages/runtime/src/action-execution.ts#resolveDeclaredActionParams (the dispatcher's ADR-0104 D2 descriptor is keyed by `p?.name ?? fieldRef`)"
+        },
+        "field": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (a param with `field` takes the field-backed branch: label, type, options, placeholder, help, default and the picker group inherited from `owner.fields[param.field]`); packages/runtime/src/action-execution.ts#resolveDeclaredActionParams (inherits type / multiple / required / options from the referenced field before validating the submitted value)"
+        },
+        "objectOverride": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`const ownerName = param.objectOverride ?? ctx.objectName` picks the object whose field a field-backed param resolves against)",
+          "note": "Console only: the dispatcher's resolveDeclaredActionParams resolves a field-backed param against the action's own object and does not read this key, so its inherited value check is the own object's field (or open, when that object has no such field)."
+        },
+        "label": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`resolveInlineI18nLabel(param.label, ctx.locale)`, else the field's label or the name); ui/packages/app-shell/src/views/ActionParamDialog.tsx#ActionParamDialog (draws the control's label); packages/runtime/src/action-execution.ts#summarizeActionParams (the MCP action summary carries a string label)"
+        },
+        "type": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`param.type ?? 'text'` inline, `param.type ?? field.type` field-backed); ui/packages/app-shell/src/utils/paramToField.ts#paramToField (folds the type to the widget that draws it); packages/runtime/src/action-execution.ts#resolveDeclaredActionParams and packages/spec/src/ui/action-params.zod.ts#validateActionParams (the submitted value is checked against `valueSchemaFor` of this type, ADR-0104 D2)"
+        },
+        "widget": {
+          "status": "planned",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "authorWarn": true,
+          "authorHint": "Keep it, but nothing reads it yet: the console's action dialog draws the param with its `type` widget until the dialog passes `widget` through, so a param naming `permission-ref` is a text box for now.",
+          "note": "PLANNED RECORD (#30259, ADR-0131 D4): the widget override, the same key, vocabulary and meaning as FieldSchema.widget, declared spec-first so a param can ask for the `permission-ref` picker the grant column uses. Accepted by the parse door and carried in the parsed param; read by nothing yet, measured: the console's resolveActionParam builds an ActionParamDef from named members and copies no `widget`, paramToField sets a field widget only for `boolean`, and the dispatcher's resolveDeclaredActionParams copies five named members and validates by `type`, so the value contract is unchanged. The reader is #30260 (the resolveActionParams / paramToField pass-through); flip this row to live there. Create User's permissionSet param switches to it in #30117's server PR."
+        },
+        "required": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`param.required ?? false`, field-backed `?? field.required`); ui/packages/app-shell/src/views/ActionParamDialog.tsx#ActionParamDialog (a required param with no value blocks submit); packages/runtime/src/action-execution.ts#resolveDeclaredActionParams and packages/spec/src/ui/action-params.zod.ts#validateActionParams (an absent required value is refused `required`)"
+        },
+        "options": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (an authored list wins over the field's, its labels resolved by resolveOptionLabels); ui/packages/app-shell/src/utils/paramToField.ts#paramToField (passes the list into the widget's field metadata); packages/runtime/src/action-execution.ts#resolveDeclaredActionParams and packages/spec/src/ui/action-params.zod.ts#validateActionParams (a submitted value must be one of the option values, ADR-0104 D2)",
+          "children": {
+            "label": {
+              "status": "live",
+              "verifiedAt": "2026-11-05",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveOptionLabels (resolves an inline per-locale map to the string the dialog shows, falling back to the value); ui/packages/app-shell/src/views/ActionParamDialog.tsx#ActionParamDialog (re-localises each entry's label with pickLocalized before drawing it)"
+            },
+            "value": {
+              "status": "live",
+              "verifiedAt": "2026-11-05",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveOptionLabels (the fallback label of an unresolved entry); packages/spec/src/ui/action-params.zod.ts#validateActionParams (membership is judged over the option values through valueSchemaFor); ui/packages/core/src/evaluator/optionRules.ts#resolveCascadingOptions (filters the offered set by entry)"
+            },
+            "visibleWhen": {
+              "status": "live",
+              "verifiedAt": "2026-11-05",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveOptionLabels (an inline list reaches the dialog verbatim, `visibleWhen` included, the pinned fast path); ui/packages/core/src/evaluator/optionRules.ts#resolveCascadingOptions (the select, multiselect, radio and checkboxes widgets narrow the offered set by evaluating it)",
+              "note": "Client-side only: the dispatcher checks the submitted value against the option values and does not evaluate visibleWhen, so hiding an option is not authorization (the key's TSDoc says so)."
+            }
+          }
+        },
+        "placeholder": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`param.placeholder`, field-backed `?? field.placeholder`); ui/packages/app-shell/src/utils/paramToField.ts#paramToField (copied onto the widget's field metadata)"
+        },
+        "helpText": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`actionCopySource(param.helpText)`, field-backed falling back to the field's help); ui/packages/app-shell/src/views/ActionParamDialog.tsx#ActionParamDialog (fills its holes and draws it under the control); packages/runtime/src/action-execution.ts#summarizeActionParams (the MCP summary's help, falling back to the field description)"
+        },
+        "defaultValue": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`rowDefault ?? param.defaultValue`); ui/packages/app-shell/src/views/ActionParamDialog.tsx#ActionParamDialog (seeds the dialog state with it, so an untouched control submits it verbatim)"
+        },
+        "multiple": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`param.multiple`, field-backed `?? field.multiple`); ui/packages/app-shell/src/utils/paramToField.ts#paramToField (copied onto the widget's field metadata); packages/runtime/src/action-execution.ts#resolveDeclaredActionParams and packages/spec/src/ui/action-params.zod.ts#validateActionParams (an array value shape when multi-valued)"
+        },
+        "accept": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`param.accept`, field-backed `?? field.accept`); ui/packages/app-shell/src/utils/paramToField.ts#paramToField (copied onto the upload widget's field metadata)"
+        },
+        "maxSize": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`param.maxSize`, field-backed `?? field.maxSize`); ui/packages/app-shell/src/utils/paramToField.ts#paramToField (copied onto the upload widget's field metadata)"
+        },
+        "reference": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`referenceTo: param.reference` inline, `param.reference ?? field.reference` field-backed); ui/packages/app-shell/src/utils/paramToField.ts#paramToField (a lookup param with no target degrades to a text input, paramDegradesWithoutTarget)"
+        },
+        "defaultFromRow": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`param.defaultFromRow && ctx.row …` seeds the default from the current row's stored value)"
+        },
+        "carryOver": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (copied onto ActionParamDef.carryOver on every branch); ui/packages/app-shell/src/views/ActionParamDialog.tsx#CarryOverParam (draws it as a read-only summary) and ui/packages/app-shell/src/views/ActionParamDialog.tsx#serializeParamValues (submits it verbatim, skipping the upload rewrite)"
+        },
+        "visible": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (normaliseVisible); ui/packages/app-shell/src/views/ActionParamDialog.tsx#filterVisibleParams (evaluates the predicate and omits the param when it is false)"
+        },
+        "requiresFeature": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/spec/src/kernel/public-auth-features.ts#lowerRequiresFeature, wired as the param schema's .transform() in packages/spec/src/ui/action.zod.ts",
+          "note": "Author-facing sugar consumed AT PARSE TIME, as on the action itself: lowered into this param's `visible` predicate and stripped from the output, so no downstream reader sees it."
+        }
+      }
     },
     "variant": {
       "status": "live",
@@ -118,7 +259,7 @@
       "status": "live",
       "verifiedAt": "2026-10-03",
       "evidenceScope": "in-repo",
-      "evidence": "ui/packages/core/src/actions/ActionRunner.ts#composeSuccessMessage — the success toast's text: `outcomeMessages[outcome]` off the handler's return value, then `successMessage`, then the runner's default text, with the `{{ }}` holes (#27948; a holeless sentence keeps its transitional `${result.*}` reading) filled in whichever is shown (called from `handlePostExecution`); ui/packages/components/src/renderers/action/action-button.tsx#ActionButtonRenderer — forwards the key to the runner, and `action:bar` spreads a registered action onto `action:button` whole (`action-icon.tsx`, `action-group.tsx` and `action-menu.tsx` forward it too); packages/spec/src/ui/action.zod.ts#refuseInertOutcomeMessages (authoring-time: the map is refused on a type with no server response to report an outcome and beside `resultDialog`, which suppresses the toast; the declarative-update table refuses it beside `operation: 'update'`); packages/spec/src/system/i18n-resolver.ts#translateAction (the REST localization seam overlays each DECLARED outcome's translated copy at the action's one address: `_actions.<a>.outcomeMessages.<outcome>` for a bound action, `globalActions` for an object-less one); packages/cli/src/utils/i18n-extract.ts#pushActionOutcomeMessages (one translation key per declared outcome, beside `successMessage`)",
+      "evidence": "ui/packages/core/src/actions/ActionRunner.ts#composeSuccessMessage — the success toast's text: `outcomeMessages[outcome]` off the handler's return value, then `successMessage`, then the runner's default text, with the `{{ }}` holes (#27948; a holeless sentence keeps its transitional `${result.*}` reading) filled in whichever is shown (called from `handlePostExecution`); ui/packages/components/src/renderers/action/action-button.tsx#ActionButtonRenderer — forwards the key to the runner, and `action:bar` spreads a registered action onto `action:button` whole (`action-icon.tsx`, `action-group.tsx` and `action-menu.tsx` forward it too); packages/spec/src/ui/action.zod.ts#refuseInertOutcomeMessages (authoring-time: the map is refused on a type with no server response to report an outcome and beside `resultDialog`, which suppresses the toast; the declarative-update table refuses it beside `operation: 'update'`); packages/spec/src/system/i18n-resolver.ts#translateAction (the REST localization seam overlays each DECLARED outcome's translated copy at the action's one address: `_actions.<a>.outcomeMessages.<outcome>` for a bound action, `globalActions` for an object-less one); packages/lint/src/i18n-walk.ts#pushActionOutcomeMessages (one translation key per declared outcome, beside `successMessage`)",
       "note": "LIVE from the `.objectui-sha` pin ab1879721595 (2026-10-03): the console reader objectstack-ai/objectui#11344 (objectui c476be0e0) is in the pin's range 89cad75d5570..ab1879721595, so the flip this row prescribed lands on the pin bump that carries it, with `authorWarn` / `authorHint` dropped in the same edit. At 89cad75d5570 no objectui source outside `packages/types` named the key (0 hit lines), and `handlePostExecution` toasted `result.data.message || action.successMessage || runner default`; at ab1879721595 the server-message rung is gone and `composeSuccessMessage` selects the outcome copy. An `outcome` reaches it only from a handler that returns one, which a `script` handler's author writes beside the map and an `api` target returns in its body. History: PLANNED, carrier objectstack-ai/objectui#11344 (the console's success toast picks `outcomeMessages[result.outcome]`, interpolates ${result.*}, falls back to `successMessage`, then the runner default). Declared by ruling A on objectstack-ai/cloud#2315 (maintainer 2026-10-01), the mechanism half of ruling B there — the server returns facts, the console composes the message in the user's locale — landing spec+client first (#21095), the console second, cloud's producers LAST. Measured at objectui @e420df31: packages/core/src/actions/ActionRunner.ts#handlePostExecution composes the toast from `result.data.message || action.successMessage || runner default` and reads no `outcomeMessages`; re-read unchanged at objectui @31971ff1 (the `.objectui-sha` pin after the base merge), and objectui main 3c3ce15 has no reader either. The in-repo pieces cited in `evidence` validate, translate and extract the copy; none of them SELECTS or shows it, which is what a `live` verdict would claim. Flip to `live` on the commit that cites the console reader at the `.objectui-sha` pin — and drop `authorWarn` / `authorHint` in that same edit: a warned `live` row reds this gate (#21127). Re-read at objectui @b9814b334 on 2026-10-14 (the record moved out of packages/spec/src/ui/action.zod.ts, #23434): objectui @b9814b334 packages/core/src/actions/ActionRunner.ts#composeSuccessMessage unchanged; at objectui @89cad75d5570 no objectui source outside its types named the key."
     },
     "errorMessage": {
@@ -169,7 +310,7 @@
       "status": "live",
       "verifiedAt": "2026-10-27",
       "evidenceScope": "in-repo",
-      "evidence": "ui/packages/components/src/renderers/layout/containers.tsx#disabledReasonFor (the record header, inline and in the ⋯ overflow: the declared reason, else `actions.notAvailableForRecord`); ui/packages/plugin-detail/src/renderers/record-quick-actions.tsx#QuickActionButton (the record section bar); ui/packages/app-shell/src/views/DeclaredActionsBar.tsx#DeclaredActionButton (the declared actions bar, button and override-menu item); ui/packages/components/src/renderers/action/disabled-reason.tsx#useDisabledReason (the four `action:*` renderers: `action-button.tsx`, `action-icon.tsx`, `action-group.tsx`, `action-menu.tsx`); ui/packages/react/src/hooks/useActionTextLocalizer.ts#useActionTextLocalizer and ui/packages/i18n/src/useObjectLabel.ts#useObjectLabel (`actionDisabledReason`: the bundle's `_actions.{a}.disabledReason` / `globalActions.{a}.disabledReason`, else the authored I18nLabel collapsed to the active language); packages/spec/src/system/i18n-resolver.ts#translateAction (the served overlay); packages/cli/src/utils/i18n-extract.ts#collectExpectedEntries (the extract).",
+      "evidence": "ui/packages/components/src/renderers/layout/containers.tsx#disabledReasonFor (the record header, inline and in the ⋯ overflow: the declared reason, else `actions.notAvailableForRecord`); ui/packages/plugin-detail/src/renderers/record-quick-actions.tsx#QuickActionButton (the record section bar); ui/packages/app-shell/src/views/DeclaredActionsBar.tsx#DeclaredActionButton (the declared actions bar, button and override-menu item); ui/packages/components/src/renderers/action/disabled-reason.tsx#useDisabledReason (the four `action:*` renderers: `action-button.tsx`, `action-icon.tsx`, `action-group.tsx`, `action-menu.tsx`); ui/packages/react/src/hooks/useActionTextLocalizer.ts#useActionTextLocalizer and ui/packages/i18n/src/useObjectLabel.ts#useObjectLabel (`actionDisabledReason`: the bundle's `_actions.{a}.disabledReason` / `globalActions.{a}.disabledReason`, else the authored I18nLabel collapsed to the active language); packages/spec/src/system/i18n-resolver.ts#translateAction (the served overlay); packages/lint/src/i18n-walk.ts#collectExpectedEntries (the extract).",
       "note": "LIVE since the console half of #26619 (ruling 6442737825, letter A: spec PR #26786 first, this console PR second). Each greyed-action surface shows the declared reason as the hover title and the accessible description (a menu item's second line), only while the DECLARED `disabled` predicate is TRUE, and shows `actions.notAvailableForRecord` (\"Not available for this record\") when the action declares none or a blank one. The record header, the section bar and the declared actions bar run actions through `useActionTextLocalizer`, so the bundle's sentence outranks the authored text; the four `action:*` renderers read the action as authored and honour its inline locale map. `authorWarn` / `authorHint` were dropped in the same edit (a warned `live` row reds this gate, #21127). Display only by contract: never a server admission input, never read as a predicate."
     },
     "pressed": {

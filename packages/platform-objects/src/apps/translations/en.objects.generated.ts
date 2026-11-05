@@ -159,7 +159,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Ban User",
-        description: "Ban this user? They will be signed out and unable to sign in until unbanned.",
+        description: "Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned. The keys work again after the unban.",
         successMessage: "User banned",
         params: {
           banReason: {
@@ -3388,7 +3388,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       namespace: {
         label: "Namespace",
-        help: "Manifest namespace (e.g. mail, branding, feature_flags)."
+        help: "Manifest namespace (e.g. mail, branding, storage)."
       },
       key: {
         label: "Key",

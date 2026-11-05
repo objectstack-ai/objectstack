@@ -37,6 +37,7 @@ import {
 import type { DataSource } from '@object-ui/types';
 // Registers `record:related_list`, the block under test.
 import '../../index';
+import { RecordBodyTablesContext } from '../../relatedListCompact';
 
 beforeAll(() => {
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
@@ -79,7 +80,7 @@ const ACCOUNT_ROWS: Rows = {
   ],
 };
 
-function mount(nodes: object[], rows: Rows) {
+function mount(nodes: object[], rows: Rows, bodyTables: ReadonlySet<string> = new Set()) {
   const ds = makeDataSource(rows);
   const created = vi.fn();
   const host: RelatedRecordActionsValue = {
@@ -89,12 +90,14 @@ function mount(nodes: object[], rows: Rows) {
     <SchemaRendererProvider dataSource={ds as unknown as DataSource}>
       <RecordContextProvider objectName={PARENT} recordId="a1" dataSource={ds as never}>
         <RelatedRecordActionsProvider value={host}>
-          {/* The stack: siblings in one container, as `page:tabs` draws a tab's children. */}
-          <div data-testid="stack">
-            {nodes.map((node, idx) => (
-              <SchemaRenderer key={idx} schema={node as never} />
-            ))}
-          </div>
+          <RecordBodyTablesContext.Provider value={bodyTables}>
+            {/* The stack: siblings in one container, as `page:tabs` draws a tab's children. */}
+            <div data-testid="stack">
+              {nodes.map((node, idx) => (
+                <SchemaRenderer key={idx} schema={node as never} />
+              ))}
+            </div>
+          </RecordBodyTablesContext.Provider>
         </RelatedRecordActionsProvider>
       </RecordContextProvider>
     </SchemaRendererProvider>,
@@ -198,5 +201,58 @@ describe('record:related_list — empty lists of a stack fold into one line (#25
     const names = within(fold()!).getAllByRole('group').map((g) => g.getAttribute('aria-label'));
     expect(names).toEqual(['Leads']);
     expect(cardTitled('Team')).toBeVisible();
+  });
+});
+
+/**
+ * objectstack#29944 — the record page's BODY tables (their ids in
+ * `RecordBodyTablesContext`) are sections of the record, drawn side by side in
+ * the details column (or the Details tab), so they share a container like a
+ * Related tab's lists do. They are not a related-list stack: an empty one
+ * keeps its own header — title, 0, New — with the empty sentence under it,
+ * where the table of a non-empty one is. Measured on hotclm's contract page:
+ * the empty 偏离 table folded into 「暂无相关记录 偏离 ＋ 新建」.
+ */
+describe('record:related_list — a body table of the record page never folds (objectstack#29944)', () => {
+  const CONTRACT = [
+    list('crm_quote', 'Payment plan'),
+    list('crm_child_account', 'Deviations'),
+    list('crm_contact', 'Versions'),
+  ];
+  const CONTRACT_ROWS: Rows = {
+    crm_quote: [{ id: 'q1', name: 'Q-001', account_id: 'a1' }],
+    crm_contact: [{ id: 'c1', name: 'Ada', account_id: 'a1' }],
+  };
+  const BODY = new Set(['crm_quote.account_id', 'crm_child_account.account_id', 'crm_contact.account_id']);
+
+  it('an empty body table beside tables with records keeps its header, with the empty sentence under it', async () => {
+    const { ds, created } = mount(CONTRACT, CONTRACT_ROWS, BODY);
+    await settled(ds, 3);
+    // Every list has answered once Deviations counts 0; give a fold the time to draw.
+    await screen.findByLabelText('0 records');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(fold()).toBeNull();
+    const title = cardTitled('Deviations');
+    expect(title).toBeVisible();
+
+    // The header row is the non-empty tables' header: title, count, New.
+    const head = title.closest('[data-related-list-head]') as HTMLElement;
+    expect(head).not.toBeNull();
+    fireEvent.click(within(head).getByRole('button', { name: /New/ }));
+    expect(created).toHaveBeenCalledWith('crm_child_account');
+
+    // The sentence is not in the header row: it is drawn under it.
+    expect(within(head).queryByText('No related records found')).toBeNull();
+    const sentence = screen.getByText('No related records found');
+    expect(sentence).toBeVisible();
+    expect(head.compareDocumentPosition(sentence) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('CONTROL: a Related tab stack under the same context folds as before — only the listed ids are body tables', async () => {
+    const { ds } = mount(ACCOUNT_STACK, ACCOUNT_ROWS, new Set(['crm_opportunity.account_id']));
+    await settled(ds, 4);
+    await waitFor(() => expect(fold()).not.toBeNull());
+    const names = within(fold()!).getAllByRole('group').map((g) => g.getAttribute('aria-label'));
+    expect(names).toEqual(['Child accounts', 'Leads']);
   });
 });

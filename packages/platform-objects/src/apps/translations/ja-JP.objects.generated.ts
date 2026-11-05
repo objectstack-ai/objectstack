@@ -159,7 +159,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "利用停止",
-        description: "このユーザーを利用停止にしますか？利用停止になるとサインアウトされ、解除されるまでサインインできなくなります。",
+        description: "このユーザーを利用停止にしますか？利用停止になるとサインアウトされ、解除されるまでサインインできず、API キーも拒否されます。解除後はキーが再び使えるようになります。",
         successMessage: "ユーザーを利用停止にしました",
         params: {
           banReason: {
@@ -3388,7 +3388,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       namespace: {
         label: "名前空間",
-        help: "マニフェスト名前空間（例: mail、branding、feature_flags）。"
+        help: "マニフェスト名前空間（例: mail、branding、storage）。"
       },
       key: {
         label: "キー",

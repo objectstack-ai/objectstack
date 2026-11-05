@@ -176,6 +176,7 @@ const zh = {
   },
   form: {
     noPermissionToSave: '您没有权限保存这条记录。',
+    readOnlyExternalSource: '这张表是只读的：它的记录来自外部数据源，不接受修改。',
     noPermissionToCreate: '您没有创建{{object}}的权限，字段均为只读。',
     noPermissionToEdit: '您没有编辑{{object}}的权限，字段均为只读。',
     noPermissionToEditRecord: '您没有编辑此记录的权限，字段均为只读。',
@@ -930,8 +931,8 @@ const zh = {
     },
     betterAuth: {
       short: '身份',
-      title: '由身份提供方管理',
-      body: '此对象的架构由 {{provider}} 管理。直接编辑会绕过密码哈希、会话校验、两步验证检查和审计钩子。请通过身份认证提供方的登录、邀请和安全流程管理这些记录。',
+      title: '经内置身份服务写入',
+      body: '此对象的架构属于平台内置的身份服务 {{provider}}。请用本页上的操作，或通过登录、邀请和安全流程来创建和修改这些记录；它们都经由该服务写入。直接编辑数据表会绕过密码哈希、会话校验、两步验证检查和审计钩子。',
     },
   },
   kanban: {
@@ -1867,6 +1868,10 @@ const zh = {
     },
   },
   console: {
+    organizationMfa: {
+      needsTwoFactor: '“强制多因素认证”需要双重验证，而本部署未开启双重验证，因此勾选后保存会被拒绝。请先开启双重验证：在“设置 → 认证”中打开“要求多因素认证”（对所有组织生效），或在部署上设置 OS_AUTH_TWO_FACTOR=true。',
+      nowRequired: '本组织所有尚未绑定身份验证器的成员现在都必须绑定。每位成员从此次变更后第一次使用起开始计算 MFA 宽限期（默认 7 天，可在“设置 → 认证”中修改），宽限期结束后将无法访问数据，直到完成绑定。已使用身份验证器的成员不受影响。',
+    },
     studio: {
       title: 'Studio',
       accessRequired: '你需要 Studio 访问权限才能打开 Studio。管理员可以在“设置 → 权限集分配”中通过权限集授予。',
@@ -1959,6 +1964,8 @@ const zh = {
       sourceBadgeInherited: '继承自{{source}}',
       sourceBadgeOverrides: '覆盖{{source}}',
       resetToDefault: '恢复默认',
+      sourceBadgeModified: '已修改',
+      defaultValueHint: '默认：{{value}}',
       envLockBadge: '环境变量锁定',
       envLockBadgeTitle: '由环境变量固定,无法在界面中编辑。',
       deprecatedBadge: '已弃用',
@@ -2903,6 +2910,8 @@ const zh = {
       useEmailResetText: '改用邮箱重置',
       phoneSuccessTitle: '密码已重置',
       phoneSuccessDescription: '您的密码已重置，现在可以使用新密码登录了。',
+      noDeliveryTitle: '此处无法通过邮件发送重置链接',
+      noDeliveryDescription: '此部署不发送邮件，因此密码重置链接无法送达。请联系管理员：管理员可以在“设置 → 用户”中为你设置新密码。',
     },
     setPassword: {
       title: '设置一个备用密码',
@@ -2940,6 +2949,7 @@ const zh = {
       verifyingDescription: '正在确认您的邮箱，请稍候。',
       successTitle: '邮箱已验证',
       successDescription: '您的邮箱已确认，现在可以登录了。',
+      handoffSuccessDescription: '您的邮箱已确认。请回到您正在登录的应用，在那里登录。',
       errorTitle: '验证失败',
       errorDescription: '验证失败，请重新获取验证链接。',
       missingToken: '验证链接缺少令牌。',
@@ -3032,6 +3042,7 @@ const zh = {
         continue: '继续',
         preparing: '正在准备…',
         enrollFailed: '无法开始绑定。',
+        unavailable: '此部署未开启双重验证，暂时无法绑定身份验证器。请联系管理员在“设置 → 认证”中开启后再试。',
         scanTitle: '使用身份验证器扫码',
         scanBody: '使用 Google Authenticator、1Password、Authy 等应用扫描此二维码，然后输入 6 位验证码。',
         backupTitle: '保存您的备用码',
@@ -3457,6 +3468,7 @@ const zh = {
       title: '待发布的变更',
       description: '发布将带来以下变更。“新增”为全新内容，“更新”将覆盖线上版本。',
       savedToCustomization: '保存到 {{package}} 的定制',
+      customizationEnvironment: '这些变更保存在当前环境的数据库里，是 {{pair}} 的条目，不在项目源码中；只有通过 {{command}} 才能带到其他环境。',
       loading: '正在加载待发布变更…',
       loadFailed: '无法加载待发布变更：',
       empty: '没有待发布的内容 —— 所有草稿均已发布。',
@@ -3529,6 +3541,12 @@ const zh = {
         dataset: '数据集 {{count}}',
         dataset_one: '数据集 {{count}}',
         dataset_other: '数据集 {{count}}',
+        hook: '钩子 {{count}}',
+        hook_one: '钩子 {{count}}',
+        hook_other: '钩子 {{count}}',
+        translation: '翻译 {{count}}',
+        translation_one: '翻译 {{count}}',
+        translation_other: '翻译 {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.
@@ -4385,6 +4403,11 @@ const zh = {
           unreadableVersion: '请安装 {{dependency}} 在 {{range}} 范围内的正式版本（当前安装的 {{installedVersion}} 不是“主版本.次版本.修订号”格式）。',
           unreadableDeclaration: '{{packageId}} 的依赖声明格式无法识别，请写成“软件包 ID → 版本范围”的映射后重新发布软件包。',
         },
+        // objectstack#30326 — the install answer's data.protocolCheckSkipped: installed, the protocol range unchecked.
+        protocolCheckSkipped: {
+          noRange: '{{packageId}} 未声明它支持的平台协议版本，因此已在平台协议 {{protocolVersion}} 下安装，未做兼容性检查，可能无法在当前平台版本上正常运行。声明了所支持协议（engines.protocol）的软件包版本会在安装时接受检查。',
+          unparsedRange: '{{packageId}} 声明的平台协议为 {{requiredRange}}，本运行时无法识别，因此已在平台协议 {{protocolVersion}} 下安装，未做兼容性检查，可能无法在当前平台版本上正常运行。声明了可识别协议范围（engines.protocol）的软件包版本会在安装时接受检查。',
+        },
         localUnauthorized: '请先登录本运行时再试。',
         localMarketplaceUnavailable: '本运行时未配置 OS_CLOUD_URL，无法访问应用市场目录。',
         updateTo: '更新 → v{{version}}',
@@ -4466,6 +4489,9 @@ const zh = {
         revoke: '撤销',
         revoking: '撤销中…',
         revokedToast: '已撤销对「{{set}}」的接受。',
+        reopen: '重新考虑',
+        reopening: '重新打开中…',
+        reopenedToast: '已重新打开「{{set}}」的建议：接受之前不授予任何权限。',
       },
       uninstall: {
         confirm: '从本运行时卸载 {{manifestId}} v{{version}}？\n\n该应用将立即从运行中的内核中移除，其权限集及相应授权也一并移除，缓存的清单也将被删除。其对象中已存储的记录仍保留在数据库中。',

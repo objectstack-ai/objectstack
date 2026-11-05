@@ -18,7 +18,17 @@ import type { MetadataWriteFace } from './protocol-write-face.js';
  */
 
 /** The request of {@link ObjectStackProtocolImplementation.saveMetaItem}. */
-type SaveMetaItemRequest = { type: string, name: string, item?: any, parentVersion?: string | null, storedParentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace, surface?: MetadataAuthoringSurface, client?: MetadataAuthoringClient };
+type SaveMetaItemRequest = {
+    type: string, name: string, item?: any, parentVersion?: string | null, storedParentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace, surface?: MetadataAuthoringSurface, client?: MetadataAuthoringClient,
+    /**
+     * [#30255] The grant keys of a `permission` item that this save copies
+     * verbatim from a set that already holds them — the permission-set clone
+     * door's copy. Not this write's grants, so the unknown-grant refusal does
+     * not judge them, exactly as it does not judge a re-save's grants the set
+     * already holds. Set by server code only; no HTTP door forwards it.
+     */
+    inheritedGrantObjects?: readonly string[],
+};
 
 /** The request of {@link ObjectStackProtocolImplementation.publishMetaItem}. */
 type PublishMetaItemRequest = {

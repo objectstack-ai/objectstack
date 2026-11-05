@@ -13,7 +13,12 @@
  * item still appears in its rail.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { loadPackageLessSurfaces, loadPackageSurfaces, type PackageSurfaceClient } from './packageSurfaces';
+import {
+  loadPackageLessSurfaces,
+  loadPackageSurfaces,
+  withDraftViewBindings,
+  type PackageSurfaceClient,
+} from './packageSurfaces';
 
 function makeClient(
   published: Array<Record<string, unknown>>,
@@ -207,5 +212,45 @@ describe("a draft-only item reads as its `_drafts` row's label (objectui#11862)"
     expect(await loadPackageLessSurfaces(client, 'flow')).toEqual([
       { type: 'flow', name: 'org_draft_only', label: 'Org draft' },
     ]);
+  });
+});
+
+/**
+ * objectstack#30046 — a `view` row carries its bound object and family, so the
+ * Interfaces rail can tell a list view (reached by its object's dropdown, and
+ * opened on its object's page) from a form view. A draft-only view's family is
+ * read from the draft-overlaid list, since its `_drafts` header has no body.
+ */
+describe('view rows say their object and family (objectstack#30046)', () => {
+  it('a published view row carries `object` and `viewKind`; another type carries neither', async () => {
+    const views = makeClient([{ name: 'crm_lead.all', label: 'All', object: 'crm_lead', viewKind: 'list' }], []);
+    expect(await loadPackageSurfaces(views, 'view', 'pkg')).toEqual([
+      { type: 'view', name: 'crm_lead.all', label: 'All', object: 'crm_lead', viewKind: 'list' },
+    ]);
+    const pages = makeClient([{ name: 'home', label: 'Home', object: 'crm_lead' }], []);
+    expect(await loadPackageSurfaces(pages, 'page', 'pkg')).toEqual([{ type: 'page', name: 'home', label: 'Home' }]);
+  });
+
+  it('a draft-only view takes its object and family from the draft-overlaid list', async () => {
+    const list = vi.fn(async () => [
+      { name: 'crm_lead.all', object: 'crm_lead', viewKind: 'list' },
+      { name: 'crm_lead.mine', object: 'crm_lead', viewKind: 'list', _draft: true },
+    ]);
+    const items = await withDraftViewBindings({ withPreviewDrafts: () => ({ list }) }, 'pkg', [
+      { type: 'view', name: 'crm_lead.all', label: 'All', object: 'crm_lead', viewKind: 'list' },
+      { type: 'view', name: 'crm_lead.mine', label: 'Mine' },
+    ]);
+    expect(list).toHaveBeenCalledWith('view', { packageId: 'pkg' });
+    expect(items[1]).toEqual({ type: 'view', name: 'crm_lead.mine', label: 'Mine', object: 'crm_lead', viewKind: 'list' });
+  });
+
+  it('asks nothing when every row already says it, and keeps the rows when the read fails', async () => {
+    const list = vi.fn(async () => []);
+    const known = [{ type: 'view', name: 'crm_lead.all', label: 'All', object: 'crm_lead', viewKind: 'list' }];
+    expect(await withDraftViewBindings({ withPreviewDrafts: () => ({ list }) }, 'pkg', known)).toBe(known);
+    expect(list).not.toHaveBeenCalled();
+    const unknown = [{ type: 'view', name: 'crm_lead.mine', label: 'Mine' }];
+    const failing = { withPreviewDrafts: () => ({ list: vi.fn(async () => Promise.reject(new Error('403'))) }) };
+    expect(await withDraftViewBindings(failing, 'pkg', unknown)).toEqual(unknown);
   });
 });

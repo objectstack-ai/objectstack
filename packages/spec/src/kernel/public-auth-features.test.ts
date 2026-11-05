@@ -16,14 +16,15 @@ import {
 describe('PUBLIC_AUTH_FEATURES registry', () => {
   const entries = Object.entries(PUBLIC_AUTH_FEATURES);
 
-  it('classifies all 12 public flags', () => {
-    expect(PUBLIC_AUTH_FEATURE_NAMES).toHaveLength(12);
+  it('classifies all 13 public flags', () => {
+    expect(PUBLIC_AUTH_FEATURE_NAMES).toHaveLength(13);
     expect([...PUBLIC_AUTH_FEATURE_NAMES].sort()).toEqual(
       [
         'admin',
         'cloudManaged',
         'degradedTenancy',
         'deviceAuthorization',
+        'emailDelivery',
         'multiOrgEnabled',
         'oidcProvider',
         'organization',

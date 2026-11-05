@@ -2,10 +2,11 @@
 
 /**
  * [#29520 codemod] The "Database helpers" section of `SqlDriver`: the bodies of
- * `sqliteFilename`, `setFileColumnsMovedResolver`,
- * `setTenantKeyCertifiedResolver`, `isTenantKeyCertified`,
- * `resolveFileColumnsMoved`, `mediaColumnIsJson`, `isJsonField` moved out of
- * `sql-driver.ts` whole by `scripts/codemod-split-sql-driver.mjs`.
+ * `sqliteFilename`, `ensureDatabaseExists`, `createDatabase`,
+ * `setFileColumnsMovedResolver`, `setTenantKeyCertifiedResolver`,
+ * `isTenantKeyCertified`, `resolveFileColumnsMoved`, `mediaColumnIsJson`,
+ * `isJsonField` moved out of `sql-driver.ts` whole by
+ * `scripts/codemod-split-sql-driver.mjs`.
  *
  * A MOVE, not a redesign. {@link DatabaseHelpersFacet} is a stateless facet of `SqlDriver`
  * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
@@ -26,6 +27,10 @@
  * class, and a field a body assigns goes with a SETTER that assigns it on the
  * driver.
  *
+ * `SqlDriver` here is `SqlDriverStatics` (imported AS `SqlDriver`): forwarders to the
+ * statics the bodies read, private ones included, which the class fills in a
+ * static block; the class as a type is `SqlDriverClass`.
+ *
  * Values that stayed in `sql-driver.ts` are imported from it (lever (a) of
  * ruling 6591753301); every use is inside a function body, so the import
  * cycle is never read at evaluation time. `index.ts` re-exports nothing from
@@ -33,9 +38,11 @@
  */
 
 import { FILE_REFERENCE_TYPES } from '@objectstack/spec/data';
-import { PRE_DDL_QUESTION_SCOPE, isMultiValuedColumn } from './sql-driver-top-level.js';
-import { JSON_COLUMN_TYPES } from './sql-driver.js';
-import type { SqlDriver } from './sql-driver.js';
+import { SqliteDatabaseFileError, makeDatabaseDirectory } from './sqlite-database-file.js';
+import knex from 'knex';
+import { JSON_COLUMN_TYPES, PRE_DDL_QUESTION_SCOPE, isMultiValuedColumn } from './sql-driver-top-level.js';
+import { SqlDriverStatics as SqlDriver } from './sql-driver.js';
+import type { SqlDriver as SqlDriverClass } from './sql-driver.js';
 
 /**
  * The `SqlDriver` members the bodies of {@link DatabaseHelpersFacet} read — every one of
@@ -45,18 +52,23 @@ import type { SqlDriver } from './sql-driver.js';
  * assigns.
  */
 export interface DatabaseHelpersHost {
-  readonly config: SqlDriver['config'];
-  fileColumnsMoved: SqlDriver['fileColumnsMoved'];
-  fileColumnsMovedAsked: SqlDriver['fileColumnsMovedAsked'];
-  readonly fileColumnsMovedDeclared: SqlDriver['fileColumnsMovedDeclared'];
-  fileColumnsMovedResolver: SqlDriver['fileColumnsMovedResolver'];
-  readonly isSqlite: SqlDriver['isSqlite'];
-  readonly logger: SqlDriver['logger'];
-  mediaColumnIsJson: SqlDriver['mediaColumnIsJson'];
-  readonly openedEmptyInMemory: SqlDriver['openedEmptyInMemory'];
-  tenantKeyCertified: SqlDriver['tenantKeyCertified'];
-  tenantKeyCertifiedReadFailureReported: SqlDriver['tenantKeyCertifiedReadFailureReported'];
-  tenantKeyCertifiedResolver: SqlDriver['tenantKeyCertifiedResolver'];
+  readonly config: SqlDriverClass['config'];
+  createDatabase: SqlDriverClass['createDatabase'];
+  fileColumnsMoved: SqlDriverClass['fileColumnsMoved'];
+  fileColumnsMovedAsked: SqlDriverClass['fileColumnsMovedAsked'];
+  readonly fileColumnsMovedDeclared: SqlDriverClass['fileColumnsMovedDeclared'];
+  fileColumnsMovedResolver: SqlDriverClass['fileColumnsMovedResolver'];
+  readonly isMysql: SqlDriverClass['isMysql'];
+  readonly isPostgres: SqlDriverClass['isPostgres'];
+  readonly isSqlite: SqlDriverClass['isSqlite'];
+  readonly knex: SqlDriverClass['knex'];
+  readonly logger: SqlDriverClass['logger'];
+  mediaColumnIsJson: SqlDriverClass['mediaColumnIsJson'];
+  readonly openedEmptyInMemory: SqlDriverClass['openedEmptyInMemory'];
+  sqliteFilename: SqlDriverClass['sqliteFilename'];
+  tenantKeyCertified: SqlDriverClass['tenantKeyCertified'];
+  tenantKeyCertifiedReadFailureReported: SqlDriverClass['tenantKeyCertifiedReadFailureReported'];
+  tenantKeyCertifiedResolver: SqlDriverClass['tenantKeyCertifiedResolver'];
 }
 
 /** The bodies of the "Database helpers" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
@@ -76,6 +88,97 @@ export class DatabaseHelpersFacet {
     const filename = typeof conn === 'string' ? conn : conn?.filename;
     if (typeof filename !== 'string' || filename === '') return null;
     return filename.startsWith(':') ? null : filename;
+  }
+
+  /** The body of `SqlDriver#ensureDatabaseExists`; the method's docblock there is its contract. */
+  static async ensureDatabaseExists(this: Pick<DatabaseHelpersHost, 'createDatabase' | 'isMysql' | 'isPostgres' | 'isSqlite' | 'knex' | 'sqliteFilename'>) {
+    // SQLite auto-creates database files but NOT parent directories.
+    // Ensure the directory exists so better-sqlite3 can create the file — with
+    // a bounded walk, never Node's recursive mkdir, which loops forever on a
+    // path like `/proc/x/` (#23696, see `makeDatabaseDirectory`).
+    if (this.isSqlite) {
+      const filename = this.sqliteFilename();
+      if (filename) {
+        const { dirname } = await import('node:path');
+        const dir = dirname(filename);
+        if (dir && dir !== '.') {
+          try {
+            await makeDatabaseDirectory(dir);
+          } catch (e) {
+            throw new SqliteDatabaseFileError(filename, `cannot be created: its directory '${dir}' could not be made`, e);
+          }
+        }
+      }
+      return;
+    }
+
+    // Only PostgreSQL and MySQL support programmatic database creation
+    if (!this.isPostgres && !this.isMysql) return;
+
+    try {
+      await this.knex.raw('SELECT 1');
+    } catch (e: any) {
+      // PostgreSQL: '3D000' = database does not exist
+      // MySQL:      'ER_BAD_DB_ERROR' (errno 1049) = unknown database
+      if (
+        e.code === '3D000' ||
+        e.code === 'ER_BAD_DB_ERROR' ||
+        e.errno === 1049
+      ) {
+        await this.createDatabase();
+      } else {
+        throw e;
+      }
+    }
+  }
+
+  /** The body of `SqlDriver#createDatabase`; the method's docblock there is its contract. */
+  static async createDatabase(this: Pick<DatabaseHelpersHost, 'config' | 'isMysql' | 'isPostgres'>) {
+    const config = this.config as any;
+    const connection = config.connection;
+    let dbName = '';
+    const adminConfig = { ...config };
+
+    if (this.isPostgres) {
+      // PostgreSQL: connect to the 'postgres' maintenance database
+      if (typeof connection === 'string') {
+        const url = new URL(connection);
+        dbName = url.pathname.slice(1);
+        url.pathname = '/postgres';
+        adminConfig.connection = url.toString();
+      } else {
+        dbName = connection.database;
+        adminConfig.connection = { ...connection, database: 'postgres' };
+      }
+    } else if (this.isMysql) {
+      // MySQL: connect without specifying a database
+      if (typeof connection === 'string') {
+        const url = new URL(connection);
+        dbName = url.pathname.slice(1);
+        url.pathname = '/';
+        adminConfig.connection = url.toString();
+      } else {
+        dbName = connection.database;
+        const { database: _db, ...rest } = connection;
+        adminConfig.connection = rest;
+      }
+    } else {
+      return; // Unsupported dialect for auto-creation
+    }
+
+    // Same connect bound as the main pool (#3769) — this admin connection is
+    // opened during boot against the very server we already suspect might be
+    // unreachable, so it must not be the one place that waits 30s.
+    const adminKnex = knex(SqlDriver.withConnectBound(adminConfig));
+    try {
+      if (this.isPostgres) {
+        await adminKnex.raw(`CREATE DATABASE "${dbName}"`);
+      } else if (this.isMysql) {
+        await adminKnex.raw(`CREATE DATABASE IF NOT EXISTS \`${dbName}\``);
+      }
+    } finally {
+      await adminKnex.destroy();
+    }
   }
 
   /** The body of `SqlDriver#setFileColumnsMovedResolver`; the method's docblock there is its contract. */

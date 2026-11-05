@@ -252,6 +252,28 @@ export function forwardSeedSettledToParent(msg: unknown): boolean {
 }
 
 /**
+ * The internal channel `@objectstack/cloud-connection` reads as
+ * `FRESH_HOME_CHANNEL_ENV` (#30217): the ephemeral `OS_HOME` a `--fresh` run
+ * created. Spelled here rather than imported because oclif loads every command
+ * module on every invocation; `dev-fresh-home-channel.test.ts` holds the two
+ * spellings equal.
+ */
+export const FRESH_HOME_CHANNEL_ENV = 'OS_INTERNAL_FRESH_HOME';
+
+/**
+ * Set or clear {@link FRESH_HOME_CHANNEL_ENV} on the serve child's env
+ * (#30217). Under `--fresh` it names the run's ephemeral `OS_HOME`, so the
+ * install ledger there adopts nothing from the project's working-directory
+ * ledger — a fresh run starts without an earlier run's installs. Otherwise it is
+ * removed: the parent owns the variable, so an inherited copy never speaks for
+ * a home this run did not create. Not an operator setting.
+ */
+export function applyFreshHomeChannel(childEnv: NodeJS.ProcessEnv, freshHome: string | undefined): void {
+  if (freshHome) childEnv[FRESH_HOME_CHANNEL_ENV] = freshHome;
+  else delete childEnv[FRESH_HOME_CHANNEL_ENV];
+}
+
+/**
  * Whether this `os dev` boot runs the watch-recompile loop (#20681).
  *
  * Off when the operator passed `--no-watch`, when the boot serves an artifact
@@ -676,6 +698,9 @@ export default class Dev extends Command {
       //     (OS_HOME → <home>/data/objectstack.db, published as OS_DATABASE_URL),
       //   - the storage-service uploads root, published on the settings
       //     service's own env name OS_STORAGE_LOCAL_ROOT (#4968),
+      //   - the install-local ledger, which follows OS_HOME (#30217); the
+      //     child is told this home is ephemeral (applyFreshHomeChannel), so
+      //     it adopts nothing from the project's working-directory ledger,
       //   - any other state a plugin keys off OS_HOME.
       // In one sentence: framework-owned, OS_HOME-keyed state plus the env
       // channels this block publishes below. Auto-deleted on exit.
@@ -810,6 +835,7 @@ export default class Dev extends Command {
         ...(flags['database-auth-token'] ? { OS_DATABASE_AUTH_TOKEN: flags['database-auth-token'] } : {}),
         ...(flags['auth-secret'] ? { OS_AUTH_SECRET: flags['auth-secret'] } : {}),
       };
+      applyFreshHomeChannel(localEnv, freshHome);
       // The data key's file: the ONE answer `os start` takes too (#29934), so a
       // secret saved here reads back under `os start` over the same project —
       // and the file an earlier `os start` kept in the project is still read.

@@ -69,6 +69,18 @@ import { isNonCanonicalStoredType } from './protocol-stored-overlay-types.js';
 import type { RollbackMetaItemRequest } from './protocol-door-requests.js';
 import type { ProtocolHost } from './protocol-host.js';
 
+/**
+ * [#30319] The grant keys of a stored permission set's `objects` map: what a
+ * copy of that row holds because the source does (the save request's
+ * `inheritedGrantObjects`). The same derivation as the permission-set clone
+ * door's `inheritedGrantObjectsOf` (`@objectstack/runtime`, which depends on
+ * this package, so it is restated, not imported).
+ */
+function storedGrantObjectKeys(stored: unknown): string[] {
+    const objects = stored && typeof stored === 'object' ? (stored as { objects?: unknown }).objects : undefined;
+    return objects && typeof objects === 'object' && !Array.isArray(objects) ? Object.keys(objects) : [];
+}
+
 export class ProtocolPackageCommitsFacet {
     /** The body of `ObjectStackProtocolImplementation#revertStoredPackage`; the method's docblock there is its contract. */
     static async revertStoredPackage(host: Pick<ProtocolHost, 'discardDraftInItsScope' | 'ensureOverlayIndex' | 'findEnvironmentRows' | 'getOverlayRepo' | 'refuseOrganizationScopedWrite' | 'rethrowUnlessMetadataStoreUnprovisioned'>, request: {
@@ -779,6 +791,15 @@ export class ProtocolPackageCommitsFacet {
                     // duplicate-AGAIN workflow, and its `?force=true` default
                     // would name a parameter this door does not accept.
                     writeFace: 'package-duplicate',
+                    // [#30319] A copied permission set's grants are the SOURCE
+                    // row's, so the unknown-object refusal does not judge the
+                    // keys that row holds as stored — the clone door's rule
+                    // (#30255) for this door's copy. A platform set may grant on
+                    // an optional plugin's object this deployment does not
+                    // install (`sys_comment`, `@objectstack/plugin-audit`).
+                    // Derived from the stored row, never from the request; a key
+                    // the rewrite above renamed is not the source's, and is judged.
+                    ...(singular === 'permission' ? { inheritedGrantObjects: storedGrantObjectKeys(body) } : {}),
                     ...(request.actor ? { actor: request.actor } : {}),
                 });
                 copied.push({ type: row.type, name: newName });
@@ -939,6 +960,9 @@ export class ProtocolPackageCommitsFacet {
                     packageId: targetPackageId,
                     // Server-stated, as on every face: no body reaches this field.
                     writeFace: 'package-unmanaged-import',
+                    // [#30319] No `inheritedGrantObjects`, deliberately: the
+                    // package is the request's body, not a stored row, so its
+                    // permission sets are new writes and every grant is judged.
                     ...(actor ? { actor } : {}),
                 });
                 copied.push({ type: item.type, name: item.name });
@@ -1906,7 +1930,7 @@ export class ProtocolPackageCommitsFacet {
     }
 
     /** [#28355] The body of {@link rollbackMetaItem} before its refusal audit; that method's docblock is the contract. */
-    static async rollbackMetaItemUnaudited(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'emitMetadataMutation' | 'ensureOverlayIndex' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'packagelessOverlayWriteRefusal' | 'receiptVersion' | 'recordMetadataAudit' | 'recordOptimisticConflictAudit' | 'refuseOrganizationScopedWrite' | 'resolveOverlayPackageBinding' | 'restoreWriteFor' | 'runMutationProjector'>, request: RollbackMetaItemRequest): Promise<{
+    static async rollbackMetaItemUnaudited(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'emitMetadataMutation' | 'ensureOverlayIndex' | 'findServedOverlayRow' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'packagelessOverlayWriteRefusal' | 'packagelessReadAddress' | 'receiptVersion' | 'recordMetadataAudit' | 'recordOptimisticConflictAudit' | 'refuseOrganizationScopedWrite' | 'resolveOverlayPackageBinding' | 'restoreWriteFor' | 'runMutationProjector'>, request: RollbackMetaItemRequest): Promise<{
             success: boolean;
             version: string;
             seq: number;
@@ -2025,7 +2049,31 @@ export class ProtocolPackageCommitsFacet {
         // it afterwards would put a fallible query downstream of a write that
         // already succeeded — the shape that ends in a `catch {}` swallowing a
         // real outage (#4867).
-        const rollbackPackageId = await host.resolveOverlayPackageBinding(singularType, request.name, member);
+        //
+        // [#29848, ADR-0146 D8 item 2] The row is the one the by-name read
+        // naming no package SERVES ({@link findServedOverlayRow} at
+        // {@link packagelessReadAddress}, its declared override first), so a
+        // rollback restores the item the caller sees. Beside a row bound to the
+        // read-only base (stored before #28905's close), the base's paired
+        // `.custom` row that declares the override is served, and its rollback
+        // restores it; the package-agnostic binding read answered whichever
+        // active row of the name the store returned first, so the pair's
+        // rollback addressed the base row and the named-base close below
+        // refused it, naming a row the caller never meant. No row served (a
+        // row only another package binds under the name): that row's binding,
+        // as before.
+        const servedPackage = await host.packagelessReadAddress(singularType, request.name, member);
+        const served = await host.findServedOverlayRow({
+            type: singularType,
+            name: request.name,
+            state: 'active',
+            ...(servedPackage !== undefined ? { packageId: servedPackage } : {}),
+            ...memberOption(member),
+            servedOverride: true,
+        });
+        const rollbackPackageId = served !== undefined
+            ? ((served.row as { package_id?: string | null } | null)?.package_id ?? null)
+            : await host.resolveOverlayPackageBinding(singularType, request.name, member);
         // [ADR-0146 D11, D1] A rollback writes the row its binding names, so
         // a rollback of a packaged item's package-less row (an overlay type's
         // row the ceremony has not moved, or none stored, whose restore writes
@@ -2081,6 +2129,9 @@ export class ProtocolPackageCommitsFacet {
                 deriveRestoredBody,
                 // [#22877] The member whose lineage `toVersion` is taken from.
                 ...memberOption(member),
+                // [#29848, #29414] The row the binding above names, and no other
+                // package's row of the name: its parent hash, and the write.
+                packageId: rollbackPackageId,
             });
             // #4521 — a rollback is a live write like any other: the restored
             // body must be the one the runtime dispatches on immediately, not

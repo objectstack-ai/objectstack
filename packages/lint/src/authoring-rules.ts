@@ -1469,7 +1469,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // (`validateFlowApiTriggerSecret`), because it reads a context input this entry
   // has no use for (#20611). None of those verdicts
   // can be changed by installing a package, so there is no reading under which
-  // the flow fires. `flow-trigger-unknown-object` deliberately stayed `warning`
+  // the flow fires. [#30283] `flow-time-relative-object-mismatch` gates on the
+  // same question without being a never-fire verdict: a time-relative start
+  // whose `objectName` is not the swept object, which the run never binds while
+  // the expression checks type its conditions against it. `flow-trigger-unknown-object` deliberately stayed `warning`
   // (the object may come from another installed package — a hedge this rule
   // cannot decide), as did `flow-draft-status-ambiguous` (draft flows DO fire;
   // that one is ambiguity of intent, not a dead flow). [#24669] The hedge is

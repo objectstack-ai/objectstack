@@ -6,10 +6,8 @@ the fields the answer lands in, a flow dispatching `connector_action`) and the
 one thing the **customer's administrator** supplies: the value behind
 `auth.credentialRef` — an environment variable of that name (wins), or a
 value set in the running app at `PUT /api/v1/automation/connectors/credential-refs/:ref`;
-an unset ref leaves its instance degraded until set. A spec is not a
-secret and ships in the package; an `api` flow's hook secret goes to the
-deployment and to the sender. Keep `automation` in `requires` whenever a
-connector is declared. Full guide: https://objectstack.ai/docs/automation/connectors.
+an unset ref leaves its instance degraded until set. Keep `automation` in
+`requires` whenever a connector is declared. Full guide: https://objectstack.ai/docs/automation/connectors.
 
 ## Holds on every recipe
 
@@ -130,9 +128,9 @@ export const CarrierCallback = defineFlow({
 ```
 
 `requires: ['automation', 'triggers', 'queue']`. The sender signs each post
-under `CARRIER_HOOK_SECRET` (SKILL.md *Signature* bullet). The door verifies no
-other scheme: a vendor whose webhook signs its own header cannot post here
-today — poll its status (recipe 1's shape) until vendor schemes verify.
+under `CARRIER_HOOK_SECRET` (SKILL.md *Signature* bullet). A vendor signing
+its own header adds, keyed by that ref, `signature: { signs: 'body', header:
+'X-DocuSign-Signature-1', algorithm: 'hmac-sha256', encoding: 'base64' }`.
 
 ## 5 · Vendor with no machine-readable spec — write the document by hand
 
@@ -155,8 +153,10 @@ export const LegacyErp = defineConnector({
 ## 6 · OAuth or vendor-app token — the server runs the grant
 
 Recipe 1's shape with a grant-bearing `auth`, served on `rest`, `openapi` and
-`mcp` (`http` only; a `stdio` server's credentials ride `transport.env`): the
-token is fetched per dispatch; no metadata key holds it.
+`mcp` (`http` only; a `stdio` server takes a static `auth: { type: 'bearer',
+credentialRef }` in the variable `transport.credentialEnv` names, never a
+literal in `transport.env`): the token is fetched per dispatch; no metadata
+key holds it.
 
 ```ts
 // PKCE always on; the ref is the client secret, omitted for a public client.

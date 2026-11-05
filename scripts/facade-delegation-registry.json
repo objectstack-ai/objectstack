@@ -11,6 +11,16 @@
       "card": "#29986"
     },
     {
+      "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectRepository",
+      "card": "#30052"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "class": "ScopedContext",
+      "card": "#30052"
+    },
+    {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
       "class": "SqlDriver",
       "card": "#30105"
@@ -199,183 +209,241 @@
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "update",
       "card": "#30020",
       "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "insert",
       "card": "#30020",
       "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "delete",
       "card": "#30020",
       "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "find",
       "card": "#30020",
       "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "findOne",
       "card": "#30020",
       "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "recomputeSummaries",
       "card": "#30020",
       "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "resolveReadableIdsSecurity",
       "card": "#30020",
       "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "bindHooks",
       "card": "#30020",
       "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "readMigrationFlagRowMemoized",
       "card": "#30020",
       "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "createContext",
       "card": "#30020",
       "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "ownershipQueueService",
       "card": "#30020",
       "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "buildHookApi",
       "card": "#30020",
       "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "registerApp",
       "card": "#30054",
       "reason": "inferred-return-type (#29986 report: stays on the class until the return type is spelled)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "registerHook",
       "card": "#30054",
       "reason": "inferred-return-type (#29986 report: stays on the class until the return type is spelled)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "registerDriver",
       "card": "#30054",
       "reason": "inferred-return-type (#29986 report: stays on the class until the return type is spelled)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "init",
       "card": "#30054",
       "reason": "inferred-return-type (#29986 report: stays on the class until the return type is spelled)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "triggerHooks",
       "card": "#30054",
       "reason": "inferred-return-type (#29986 report: stays on the class until the return type is spelled)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "destroy",
       "card": "#30054",
       "reason": "inferred-return-type (#29986 report: stays on the class until the return type is spelled)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "setDatasourceMapping",
       "card": "#30054",
       "reason": "inferred-return-type (#29986 report: stays on the class until the return type is spelled)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "getStatus",
       "card": "#30054",
       "reason": "inferred-return-type (#29986 report: stays on the class until the return type is spelled)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "seedAutonumber",
       "card": "#30055",
       "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "probeReferencingRows",
       "card": "#30055",
       "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "resolveMasterDetailParent",
       "card": "#30055",
       "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "resolveMasterDetailParents",
       "card": "#30055",
       "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "inspectDanglingReferences",
       "card": "#30055",
       "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "referenceExists",
       "card": "#30055",
       "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "homeAmountServing",
       "card": "#30147",
       "reason": "codemod limit: field-call, it calls a field or accessor as a function (#29986 report)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "constructor",
       "card": "#30020",
       "reason": "state-owning: gate reading, constructor logic (a fallback and a branch on an env flag)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "projectHomeAmountsOntoPatch",
       "card": "#30147",
       "reason": "codemod limit: gate reading, a parameter default computes (calls this.homeAmountServing)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
       "member": "serveReferenceNames",
       "card": "#30020",
       "reason": "state-owning: gate reading, a hand-series host slot holds a try block; the hand-series host rule is #30020's"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "class": "ScopedContext",
+      "member": "derive",
+      "card": "#30147",
+      "reason": "codemod limit: foreign-private, it writes `appAuthored` on another instance, which a module function cannot (#30052 report)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "class": "ScopedContext",
+      "member": "[APP_AUTHORED_HOOK_API]",
+      "card": "#30147",
+      "reason": "codemod limit: not-identifier-name, a symbol-keyed method; it also writes `appAuthored` on another instance (#30052 report)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "class": "ScopedContext",
+      "member": "[SEED_USER_GRANTS]",
+      "card": "#30020",
+      "reason": "state-owning: bare-this, the body hands the instance itself on (`return this`); also a symbol-keyed method (#30052 report)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "class": "ScopedContext",
+      "member": "transaction",
+      "card": "#30020",
+      "reason": "state-owning: bare-this, the body hands the instance itself on (`callback(this, …)`) (#30052 report: stays on the class)"
     },
     {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
@@ -385,165 +453,15 @@
     },
     {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "logger",
-      "card": "#30147",
-      "reason": "codemod limit: gate reading, the default sink's field initializer holds arrow functions (the default can be built by a module function)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
       "member": "static DIALECT_CONNECT_TIMEOUT",
       "card": "#30147",
-      "reason": "codemod limit: gate reading, a static table whose initializer holds arrow functions (the initializer can move to a module)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "logDurabilityFailure",
-      "card": "#30147",
-      "reason": "path-reader (#30105 report: check-durability-degradation-log-level follows a catch's log helper to its body in the same file)"
+      "reason": "codemod limit: a static initializer runs while the class itself is evaluated, so a call into a facet module there could meet that module in its temporal dead zone (MOVED_FIELD_DEFAULTS takes instance fields only, #30147 phase 2a)"
     },
     {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
       "member": "get supports",
       "card": "#30147",
-      "reason": "accessor (#30105 report: the codemod moves methods, not accessors)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "get insertReturnsStoredRows",
-      "card": "#30147",
-      "reason": "accessor (#30105 report: the codemod moves methods, not accessors)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "get dateGranularityCapabilities",
-      "card": "#30147",
-      "reason": "accessor (#30105 report: the codemod moves methods, not accessors)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "get supportsWalJournal",
-      "card": "#30147",
-      "reason": "accessor (#30105 report: the codemod moves methods, not accessors)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "get dialectName",
-      "card": "#30147",
-      "reason": "accessor (#30105 report: the codemod moves methods, not accessors)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "rotateShards",
-      "card": "#30147",
-      "reason": "gate reading: a parameter default computes (`nowMs = Date.now()`, the signature stays byte-for-byte)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "ensureRotation",
-      "card": "#30147",
-      "reason": "gate reading: a parameter default computes (`nowMs = Date.now()`; a hand-series stub, #25521 cut 17)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "ensureShardTable",
-      "card": "#30147",
-      "reason": "path-reader (#30105 report: packages/cli generate-* pins read its text in sql-driver.ts); field-call: knex"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "initObjects",
-      "card": "#30147",
-      "reason": "path-reader (#30105 report: packages/cli generate-* pins read its text in sql-driver.ts); field-call: knex"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "migrateMysqlDatetimeColumns",
-      "card": "#30147",
-      "reason": "path-reader (#30105 report: check-durability-degradation-log-level resolves its catch's log helper in the same file)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "migrateMysqlTimeColumns",
-      "card": "#30147",
-      "reason": "path-reader (#30105 report: check-durability-degradation-log-level resolves its catch's log helper in the same file)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "resolveWithheldFilterRefusal",
-      "card": "#30147",
-      "reason": "path-reader (#30105 report: sql-driver-compile-refusal-seam.test.ts enumerates the unsupportedFilterError callers)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "createAuditTimestampColumn",
-      "card": "#30147",
-      "reason": "path-reader (#30105 report: the packages/cli generate-builtin-id-column pin reads its text in sql-driver.ts)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "varcharColumnChars",
-      "card": "#30147",
-      "reason": "path-reader (#30105 report: check-keyed-text-bounds and the packages/cli generate-string-family-width pin read its text in sql-driver.ts)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "createColumn",
-      "card": "#30147",
-      "reason": "path-reader (#30105 report: check-keyed-text-bounds and the packages/cli generate-* pins slice its type switch in sql-driver.ts); inferred-return-type"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "listPhysicalColumns",
-      "card": "#30147",
-      "reason": "field-call: knex (#30105 report: stays on the class)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "getBuilder",
-      "card": "#30147",
-      "reason": "field-call: knex; inferred-return-type (#30105 report: stays on the class)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "explainUnkeyableTextColumn",
-      "card": "#30147",
-      "reason": "field-call: knex (#30105 report: stays on the class)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "explainHashShadowDuplicate",
-      "card": "#30147",
-      "reason": "field-call: knex (#30105 report: stays on the class)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "applyFilters",
-      "card": "#30147",
-      "reason": "inferred-return-type (#30105 report: stays on the class until the codemod spells the return type)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "applyFilterCondition",
-      "card": "#30147",
-      "reason": "inferred-return-type; comment-in-parameters (#30105 report: stays on the class)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "ensureDatabaseExists",
-      "card": "#30147",
-      "reason": "inferred-return-type (#30105 report: stays on the class until the codemod spells the return type)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "createDatabase",
-      "card": "#30147",
-      "reason": "inferred-return-type (#30105 report: stays on the class until the codemod spells the return type)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "assertOperatorAppliesToColumn",
-      "card": "#30147",
-      "reason": "comment-in-parameters (#30105 report: stays on the class)"
+      "reason": "codemod limit: inferred-return-type, a get accessor whose object type the base leaves inferred, with a docblock on each key (MOVED_ACCESSORS moves a getter whose type is written, #30147 phase 2a)"
     }
   ]
 }

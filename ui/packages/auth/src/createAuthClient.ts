@@ -134,6 +134,31 @@ function toAuthError(
   return err;
 }
 
+/** The error half of a better-auth `twoFactor.*` answer. */
+type TwoFactorWireError = { message?: string; status?: number; code?: string };
+
+/**
+ * The error an enrollment call (`enrollTotp`, `verifyTotp`) rejects with: the
+ * server's `message` (`WHAT (STATUS)` when it sent none), plus the machine
+ * `code` and the HTTP `status`, so the console can say in the user's language
+ * what happened instead of echoing English text. A `404` is the answer that
+ * matters most: the `/two-factor/*` endpoints are mounted only while two-factor
+ * is on for the deployment, so it means enrollment does not exist there, not
+ * that the request was wrong.
+ */
+function twoFactorEnrollError(
+  error: TwoFactorWireError,
+  what: string,
+): Error & { code?: string; status?: number } {
+  const err = new Error(error.message ?? `${what} (${error.status ?? '?'})`) as Error & {
+    code?: string;
+    status?: number;
+  };
+  if (error.code) err.code = error.code;
+  if (typeof error.status === 'number') err.status = error.status;
+  return err;
+}
+
 /**
  * The wire boundary for invitations (objectui#3879).
  *
@@ -466,16 +491,27 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
     }
   }
 
-  // Auth config is static per server boot: single-flight + cache the success
-  // so the login page's multiple consumers (LoginForm, SocialSignInButtons,
-  // RegisterForm) share ONE request instead of three. Failures RETRY with a
-  // short backoff before rejecting — a first-load failure used to render the
-  // page without its SSO buttons, which strands SSO-only users on a password
-  // wall they have no password for (#2625). A final failure clears the cache
-  // so the next caller starts a fresh cycle.
+  // Single-flight + cache the success so the login page's multiple consumers
+  // (LoginForm, SocialSignInButtons, RegisterForm) share ONE request instead
+  // of three. Failures RETRY with a short backoff before rejecting — a
+  // first-load failure used to render the page without its SSO buttons, which
+  // strands SSO-only users on a password wall they have no password for
+  // (#2625). A final failure clears the cache so the next caller starts a
+  // fresh cycle.
+  //
+  // The config is NOT static per server boot: an administrator changes the
+  // sign-in doors from the settings page (email and password, the Google
+  // provider) and the server answers the new set at once. So the cache lives
+  // for one signed-in stretch only — `forgetConfig()` runs whenever this tab
+  // is left without a session (sign-out, or a session read that finds none),
+  // and the sign-in page that follows reads the doors the server has now
+  // instead of the ones it had when the tab was opened.
   const CONFIG_RETRY_DELAYS_MS = [500, 1500, 3500];
   const CONFIG_ATTEMPT_TIMEOUT_MS = 8_000;
   let configPromise: Promise<AuthPublicConfig> | null = null;
+  const forgetConfig = () => {
+    configPromise = null;
+  };
 
   async function loadConfigWithRetry(): Promise<AuthPublicConfig> {
     let lastError: unknown;
@@ -624,6 +660,11 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       // `providerLogoutURL`); without a provider the answer is
       // `{ success: true }` and the caller's in-app route to the sign-in page
       // stays as it was.
+      //
+      // The sign-in page comes next, so it must read the doors the server
+      // has now; forgotten before the request, so a failed sign-out (which
+      // still leaves this tab without its token) forgets it too.
+      forgetConfig();
       const { data, error } = await betterAuth.signOut({ callbackURL: resolveSpaRoute('/login') });
       TokenStorage.clear();
       if (error) {
@@ -696,6 +737,10 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
           }
         } catch { /* network hiccup — treat as signed out, keep the token */ }
       }
+      // No session: whatever reads the config next is the sign-in page (a
+      // session that expired lands there without a sign-out), so it reads it
+      // fresh rather than the copy cached while signed in.
+      forgetConfig();
       return null;
     },
 
@@ -814,26 +859,26 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
     // plugin; cast through unknown to bridge loose better-auth client types.
     async enrollTotp(password: string) {
       type EnableFn = (opts: { password: string }) =>
-        Promise<{ data?: { totpURI?: string; backupCodes?: string[] } | null; error?: { message?: string; status?: number } | null }>;
+        Promise<{ data?: { totpURI?: string; backupCodes?: string[] } | null; error?: TwoFactorWireError | null }>;
       const tf = (betterAuth as unknown as { twoFactor?: { enable?: EnableFn } }).twoFactor;
       if (!tf || typeof tf.enable !== 'function') {
         throw new Error('two-factor enrollment is not available on this auth backend');
       }
       const { data, error } = await tf.enable({ password });
-      if (error) throw new Error(error.message ?? `Two-factor enable failed (${error.status ?? '?'})`);
+      if (error) throw twoFactorEnrollError(error, 'Two-factor enable failed');
       return { totpURI: data?.totpURI ?? '', backupCodes: data?.backupCodes ?? [] };
     },
 
     // ADR-0069 — verify the first TOTP code to activate enrollment.
     async verifyTotp(code: string) {
       type VerifyFn = (opts: { code: string }) =>
-        Promise<{ error?: { message?: string; status?: number } | null }>;
+        Promise<{ error?: TwoFactorWireError | null }>;
       const tf = (betterAuth as unknown as { twoFactor?: { verifyTotp?: VerifyFn } }).twoFactor;
       if (!tf || typeof tf.verifyTotp !== 'function') {
         throw new Error('two-factor verification is not available on this auth backend');
       }
       const { error } = await tf.verifyTotp({ code });
-      if (error) throw new Error(error.message ?? `Two-factor verification failed (${error.status ?? '?'})`);
+      if (error) throw twoFactorEnrollError(error, 'Two-factor verification failed');
     },
 
     async setInitialPassword(newPassword: string) {

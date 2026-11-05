@@ -71,6 +71,7 @@ import {
   resolveDcrEnabled,
   resolveOidcProviderEnabled,
   resolveScimEnabled,
+  resolveTwoFactorEnabled,
   type AuthManager,
 } from './auth-manager.js';
 import {
@@ -189,11 +190,13 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
   // better-auth build would otherwise mount SCIM with its ADR-0134
   // deprovisioning path silently declined.
   assertScimAdminCoherence(pluginConfig);
-  const twoFactorFromEnv = readBooleanEnv('OS_AUTH_TWO_FACTOR');
   const hibpFromEnv = readBooleanEnv('OS_AUTH_PASSWORD_REJECT_BREACHED');
   const enabled = {
     organization: pluginConfig.organization ?? true,
-    twoFactor: twoFactorFromEnv ?? pluginConfig.twoFactor ?? false,
+    // [#30201] Shared decision point (env → config), see
+    // resolveTwoFactorEnabled — the MFA gate and the require_mfa write guard
+    // ask the same question, so a requirement is never enforced unenrollable.
+    twoFactor: resolveTwoFactorEnabled(pluginConfig),
     passwordRejectBreached: hibpFromEnv ?? pluginConfig.passwordRejectBreached ?? false,
     passkeys: pluginConfig.passkeys ?? false,
     magicLink: pluginConfig.magicLink ?? false,

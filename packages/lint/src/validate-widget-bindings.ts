@@ -9,6 +9,8 @@ import {
   indexObjectGraph,
   isUnjudgeable,
   joinablePrefixes,
+  objectsAsServed,
+  objectsWithoutTiedFields,
   packagesOf,
   recordsOf,
   resolveFieldPath,
@@ -813,8 +815,14 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
   // (it can exceed 100%); rates must AVG. This is a dataset-level defect (it
   // does not depend on any widget), so it is checked once over every dataset
   // whose object's field types are known. Advisory — the page still renders.
+  // [#30383] Read over the objects as served, every `objectExtensions` field
+  // folded in, as the graph below is: the runtime aggregates the served field.
+  // A field two packages tie on is left out of this TYPE map: which definition
+  // wins is registration order.
+  const servedStack = objectsAsServed(stack);
+  const served = servedStack.objects;
   const objectFieldTypes = new Map<string, Map<string, string>>();
-  for (const o of recordsOf(stack.objects)) {
+  for (const o of objectsWithoutTiedFields(servedStack)) {
     if (typeof o.name !== 'string') continue;
     const fm = new Map<string, string>();
     for (const f of recordsOf(o.fields)) {
@@ -830,7 +838,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
   // once for the whole stack and shared by every widget, exactly as
   // `validate-dataset-references.ts` does one level down — the same seam, so
   // the two positions cannot drift into two accounts of one object graph.
-  const graph: ObjectGraph = indexObjectGraph(stack);
+  const graph: ObjectGraph = indexObjectGraph({ objects: served });
   const datasetList = recordsOf(stack.datasets);
   for (let i = 0; i < datasetList.length; i++) {
     const ds = datasetList[i];

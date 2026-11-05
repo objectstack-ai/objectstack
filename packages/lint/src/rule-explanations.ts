@@ -819,7 +819,8 @@ const SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION: RuleExplanation = {
     'Unlike an unqualified key (`security-fls-unqualified-key`) this one looks correct in review, and ' +
       'it is exactly what a field rename leaves behind; an empty remainder is what a half-finished edit ' +
       'leaves. A key with more dots is judged on its whole remainder, because FLS keys address columns, ' +
-      'never joins.',
+      'never joins. The columns are the object\'s as the registry serves it: the fields it declares and ' +
+      'every field an `objectExtensions` entry adds to it, from any package of the same artifact.',
     'Not judged: an object this stack does not define, an object with no readable field map, and a ' +
       'registry-injected system column, which is real and addressable. To fix it, point the key at a ' +
       'field the object declares, or delete the entry: an entry that cannot match is not protection, ' +
@@ -1993,6 +1994,38 @@ const FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const FLOW_TIME_RELATIVE_OBJECT_MISMATCH_EXPLANATION: RuleExplanation = {
+  rule: 'flow-time-relative-object-mismatch',
+  covers: 'why a time-relative start may not name a second object',
+  paragraphs: [
+    'A time-relative run binds the object its descriptor sweeps, `config.timeRelative.object`, and ' +
+      'nothing else. The engine\'s binding resolver reads that key first, and the time-relative trigger ' +
+      'finds the rows of that object whose date field falls in the window, then launches one run per row ' +
+      'with the row as `record` and that object as the run\'s object, which is also the object a declared ' +
+      '`expand` is read from. No part of the run reads the start node\'s `config.objectName`.',
+    'The checks do read it. When the start names an `objectName`, the flow\'s conditions are typed ' +
+      'against that object\'s fields, at `os validate`, at the runtime publish gate and in the engine\'s ' +
+      'registration pass, so a start naming another object than the one it sweeps is checked against ' +
+      'records its runs never hold. Measured both ways: a condition reading a field only the named object ' +
+      'declares passes every check and fails every run (`No such key` for `record.FIELD`, `Unknown ' +
+      'variable` for a bare name), while a correct read of a field of the swept object is refused as an ' +
+      'unknown field on the named object.',
+    'Remove `config.objectName`, or set it to the swept object. Either way nothing the run does changes, ' +
+      'and the conditions are checked against the record each run holds: a field the swept object does not ' +
+      'declare is refused, and a type mismatch fails the publish, as on a record-triggered flow.',
+    'Not reported: a start whose `objectName` equals `timeRelative.object` or that names none; a start ' +
+      'whose `triggerType` routes the flow to the record-change trigger (a `record-` token, or an array ' +
+      'holding one), because that trigger binds `objectName` and the descriptor is never swept; and a ' +
+      'descriptor whose `object` is not a string, which `flow-time-relative-descriptor-invalid` refuses.',
+    'The finding is an error, because the start node alone settles it and nothing installed changes which ' +
+      'object the run binds: it fails `os validate` and `os build`, and the runtime publish gate refuses an ' +
+      'active flow write that carries it. That gate judges only the flow being written, against the ' +
+      'findings the stored stack already had, so a stored flow that names two objects keeps being served ' +
+      'and never blocks another flow\'s save; what is refused is its own publish, until its start names ' +
+      'one object.',
+  ],
+};
+
 const FLOW_TRIGGER_UNROUTABLE_EXPLANATION: RuleExplanation = {
   rule: 'flow-trigger-unroutable',
   covers: 'why a record_change flow with no record token never fires',
@@ -2063,6 +2096,32 @@ const FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION: RuleExplanation = {
     'A flow that is only ever started explicitly and never receives inbound posts is `type: ' +
       '\'autolaunched\'`, with no `triggerType: \'api\'` on its start node: that flow binds no api trigger ' +
       'and needs no secret.',
+  ],
+};
+
+const FLOW_API_TRIGGER_SIGNATURE_UNUSABLE_EXPLANATION: RuleExplanation = {
+  rule: 'flow-api-trigger-signature-unusable',
+  covers: 'why a hook with a broken sender signature admits nothing',
+  paragraphs: [
+    'An inbound api hook may declare how a third-party sender signs its posts, in its start node\'s ' +
+      '`config.signature`: the header the sender writes its digest in, `hmac-sha256`, `hex` or `base64`, and ' +
+      'what is signed, the raw body (`signs: \'body\'`, as DocuSign Connect signs it) or `<t>.<raw body>` ' +
+      '(`signs: \'timestamp.body\'`, a Stripe-style `t=…,v1=…` header). The key is the one ' +
+      '`config.secretRef` names, never a literal. A declared scheme REPLACES the `x-objectstack-signature` ' +
+      'check for its hook: the hook has that one verifier and never reads the platform header.',
+    'The finding means the declaration is present and the spec refuses it: an unknown algorithm or ' +
+      'encoding, a reserved header name, a timestamped scheme without its elements, no `config.secretRef`, ' +
+      'or a literal `config.secret` beside it. The verdict names the key the spec refuses at; the flow ' +
+      'parse prints the refusal itself in full.',
+    'A broken declaration never falls back to `x-objectstack-signature` and is never admitted unsigned. The ' +
+      'automation engine\'s flow parse refuses the flow at registration, and a trigger handed it anyway ' +
+      'refuses every post to its hook with the one `401 INVALID_SIGNATURE` every unverified post gets, so ' +
+      'the flow never receives a post. Fix the declaration, or remove `config.signature` to verify ' +
+      '`x-objectstack-signature` under the hook\'s secret.',
+    'A usable declaration is ready: the hook verifies the sender\'s header under the named key, a ' +
+      'timestamped scheme inside the same 300-second window `x-objectstack-signature` has, a body-only ' +
+      'scheme with no replay window because the sender signs no time.',
+    FLOW_GATE_REACH,
   ],
 };
 
@@ -5658,9 +5717,11 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION.rule]: SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION,
   [FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION.rule]: FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION,
   [FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION.rule]: FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION,
+  [FLOW_TIME_RELATIVE_OBJECT_MISMATCH_EXPLANATION.rule]: FLOW_TIME_RELATIVE_OBJECT_MISMATCH_EXPLANATION,
   [FLOW_TRIGGER_UNROUTABLE_EXPLANATION.rule]: FLOW_TRIGGER_UNROUTABLE_EXPLANATION,
   [FLOW_TRIGGER_UNKNOWN_EVENT_EXPLANATION.rule]: FLOW_TRIGGER_UNKNOWN_EVENT_EXPLANATION,
   [FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION.rule]: FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION,
+  [FLOW_API_TRIGGER_SIGNATURE_UNUSABLE_EXPLANATION.rule]: FLOW_API_TRIGGER_SIGNATURE_UNUSABLE_EXPLANATION,
   [FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION.rule]: FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION,
   [FLOW_INPUT_UNKNOWN_OBJECT_EXPLANATION.rule]: FLOW_INPUT_UNKNOWN_OBJECT_EXPLANATION,
   [VALIDATION_RULE_REGEX_UNCOMPILABLE_EXPLANATION.rule]: VALIDATION_RULE_REGEX_UNCOMPILABLE_EXPLANATION,

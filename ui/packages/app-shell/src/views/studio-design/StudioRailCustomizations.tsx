@@ -36,13 +36,21 @@ import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@object-ui/components';
 import { Boxes } from 'lucide-react';
-import { customizationBasePackageId } from '@objectstack/spec/kernel';
+import { customizationBasePackageId, isCustomizationPackage } from '@objectstack/spec/kernel';
 import { tFormat } from '../metadata-admin/i18n.js';
 import { confirmUnsavedLeave } from '../../chrome/unsavedEdits.js';
 import { CustomizationMark, type PackageCustomizationsState } from './CustomizationMark.js';
 import { customizationMarkOf, type CustomizationMarkKind } from './customizationMarks.js';
 import { StudioRailRow } from './StudioRail.js';
-import type { ContributedNav, ContributedOnObject } from './contributionRows.js';
+import {
+  contributedNavCountOf,
+  declaredNavTargetApps,
+  type ContributedElsewhere,
+  type ContributedNav,
+  type ContributedOnObject,
+} from './contributionRows.js';
+import type { ListedPackageManifest } from './packages-io.js';
+import { fetchPackageCustomizations, type PackageCustomizations } from './packageCustomizations-io.js';
 
 /** A rail row as the one-surface helpers read it. */
 export interface PairRailRow {
@@ -107,9 +115,9 @@ export function railCustomizationsOf(
 }
 
 /**
- * A row's mark in the rail's trailing slot, or nothing. objectstack#29693 —
- * compact (its glyph, the text in its name and tooltip), so it never takes the
- * row's label.
+ * A row's mark in the rail's trailing slot, or nothing. Compact (one short
+ * word, no fill; the full text in its name and tooltip), so it never takes the
+ * row's label and never reads as a button.
  */
 export function RailCustomizationMark({
   row,
@@ -342,6 +350,7 @@ export function ContributedRailRow({
   onOpen,
   locale,
   testId,
+  label,
 }: {
   item: ContributedNav | ContributedOnObject;
   icon?: React.ReactNode;
@@ -350,7 +359,14 @@ export function ContributedRailRow({
   onOpen: () => void;
   locale: string;
   testId?: string;
+  /**
+   * objectstack#29851 — the text the live app shows for the item, when a
+   * served read gives it. The row then leads with it and keeps the id as a
+   * muted second line; without it the id leads, as before.
+   */
+  label?: string;
 }): React.ReactElement {
+  const shown = label && label !== item.name ? label : null;
   return (
     <StudioRailRow
       data-testid={testId ?? `contributed-${item.kind}-${item.name}`}
@@ -365,9 +381,93 @@ export function ContributedRailRow({
       wrap
     >
       <span className="flex min-w-0 flex-col items-start gap-0.5">
-        <span className="max-w-full truncate">{item.name}</span>
+        <span className="max-w-full truncate" data-testid="contributed-label">
+          {shown ?? item.name}
+        </span>
+        {shown !== null && (
+          <span className="max-w-full truncate font-mono text-[11px] text-muted-foreground" data-testid="contributed-id">
+            {item.name}
+          </span>
+        )}
         <ContributionMark packageName={item.packageName} packageId={item.packageId} locale={locale} className="max-w-full" />
       </span>
     </StudioRailRow>
+  );
+}
+
+/**
+ * objectstack#29851 — what a package with no app of its own adds to other
+ * packages' apps, as the served reads show it, or `null` when they show
+ * nothing (today's "no app yet" text then stays).
+ *
+ * Asked only while `active` (the Interfaces pillar's no-app empty state) and
+ * only for a package whose listed manifest declares `navigationContributions`.
+ * `manifests` is the package list the Studio surface already read: no
+ * package-list request is sent here.
+ * Per declared target app, at most two reads:
+ *  1. the served app read (`GET /meta/app/:app`, through `readApp`), for the
+ *     app's owner (`_packageId`) — the declared app is an ADDRESS only;
+ *  2. the owner's customization read (`GET /packages/:owner/customizations`),
+ *     whose `contributions` are counted for this package and that app.
+ * A target that is missing, owned by this package, failing to read, or
+ * counting 0 (a disabled package's entries are not served) contributes
+ * nothing. ⛔ Nothing is drawn from the declaration itself.
+ */
+export function useContributedElsewhere(
+  packageId: string | null,
+  active: boolean,
+  manifests: ReadonlyMap<string, ListedPackageManifest> | null,
+  readApp: (name: string) => Promise<Record<string, unknown> | null>,
+): readonly ContributedElsewhere[] | null {
+  const [answer, setAnswer] = React.useState<{ id: string; found: readonly ContributedElsewhere[] | null } | null>(null);
+  // The newest reader, without re-asking when a caller passes a new closure.
+  const readAppRef = React.useRef(readApp);
+  React.useEffect(() => {
+    readAppRef.current = readApp;
+  });
+  React.useEffect(() => {
+    if (!active || !packageId || !manifests || isCustomizationPackage(packageId)) return;
+    let cancelled = false;
+    (async () => {
+      const apps = declaredNavTargetApps(manifests.get(packageId)?.manifest);
+      const reads = new Map<string, Promise<PackageCustomizations | null>>();
+      const found = await Promise.all(
+        apps.map(async (app): Promise<ContributedElsewhere | null> => {
+          const served = await readAppRef.current(app).catch(() => null);
+          const owner = served && typeof served._packageId === 'string' ? served._packageId : null;
+          if (!owner || owner === packageId || isCustomizationPackage(owner)) return null;
+          let read = reads.get(owner);
+          if (!read) {
+            read = fetchPackageCustomizations(owner).catch(() => null);
+            reads.set(owner, read);
+          }
+          const customizations = await read;
+          if (!customizations) return null;
+          const count = contributedNavCountOf(customizations, packageId, app);
+          if (count === 0) return null;
+          return { app, ownerId: owner, ownerName: manifests.get(owner)?.name ?? owner, count };
+        }),
+      );
+      if (cancelled) return;
+      const shown = found.filter((f): f is ContributedElsewhere => f !== null);
+      setAnswer({ id: packageId, found: shown.length > 0 ? shown : null });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [packageId, active, manifests]);
+  if (!active || !packageId || answer?.id !== packageId) return null;
+  return answer.found;
+}
+
+/**
+ * The sentence a contributor-only package's empty state says of one target:
+ * "It adds N navigation entries to OWNER's app."
+ */
+export function contributedElsewhereText(found: ContributedElsewhere, locale: string): string {
+  return tFormat(
+    found.count === 1 ? 'engine.studio.if.contributesOne' : 'engine.studio.if.contributesOther',
+    locale,
+    { count: found.count, package: found.ownerName },
   );
 }

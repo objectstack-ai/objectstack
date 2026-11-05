@@ -416,6 +416,8 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                             requestLocale: (i18n) => this.extractLocale(req, i18n),
                             // [#26690] The book's own labels, from the bundle's `books` group.
                             resolveI18nService: () => this.resolveI18nService(environmentId, req),
+                            // [#30062] …judged against its packaged base, with its pair's translations.
+                            resolveProtocol: async () => prot,
                         },
                         { name: req.params.name, packageId },
                     );

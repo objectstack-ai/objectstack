@@ -48,11 +48,22 @@
  * shape — `auth`, `settings`, `i18n`, `metadata`, and `security` as the record
  * and meta doors reach it — with the host carrying its own occupant of each,
  * so an answer from the host is seen.
+ *
+ * ## [#30218] The data engine
+ *
+ * The `objectql` engine was the last environment-blind provider. The last two
+ * describes boot the same shape with the host carrying an engine of its OWN,
+ * and drive the four doors that ask the provider for one: the transactional
+ * `POST /batch`, the `/meta` object-state and published reads, and the meta
+ * read gate's disabled-package owner step. Every engine call records which
+ * kernel's engine made it, so a batch for environment A is seen to open its
+ * transaction and write through A's engine alone, never B's or the host's.
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import type { PluginContext } from '@objectstack/core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { EMAIL_SEND_CAPABILITY } from './email-routes.js';
 
 const captured = vi.hoisted(() => ({ servers: [] as any[] }));
@@ -250,13 +261,15 @@ interface HostedOptions {
     extra?: (env: string) => Record<string, unknown>;
     /** [#30192] The host carries an `auth` of its own (a `u_host` session). */
     hostAuth?: boolean;
+    /** [#30218] `ENV_BARE`'s kernel carries no `objectql` engine at all. */
+    bareWithoutEngine?: boolean;
 }
 
 async function bootHosted(opts: HostedOptions = {}): Promise<Hosted> {
     const reached: Reached[] = [];
     const envKernel = (env: string, withServices: boolean, withAuth = true) => bootKernel(`test.env.${env}`, {
         ...(withAuth ? { auth: authServiceFor(`u_${env}`) } : {}),
-        objectql: emptyQl(),
+        ...(opts.bareWithoutEngine && env === ENV_BARE ? {} : { objectql: emptyQl() }),
         protocol: envProtocol(env),
         ...(withServices ? { ...occupants(env, reached), ...opts.extra?.(env) } : {}),
     });
@@ -697,4 +710,241 @@ describe('[#30192] hosted shape: the audited seams answer from the request\'s en
             expect(await h.server.metaReadAudienceSources(id, req).resolveSecurityService()).toBeUndefined();
         }
     }, 60_000);
+});
+
+/**
+ * [#30218] The engine each kernel carries in the last two describes. Every
+ * call a door makes records the kernel whose engine answered (`env`) and, for
+ * a write, the transaction it joined (`trx`), so a write that reached another
+ * kernel's store, or joined another kernel's transaction, is seen. Identity
+ * lookups the execution context makes answer empty, as `emptyQl` does.
+ *
+ * The registry knows ONE object, `acct_<env>`, and disables ONE package,
+ * `pkg_<env>`, so a read judged by another kernel's registry answers
+ * differently on the wire as well as in the record.
+ */
+interface EngineCall { env: string; op: string; trx?: string }
+
+function recordingEngine(env: string, calls: EngineCall[]): unknown {
+    const empty = async () => [];
+    const own: Record<string, unknown> = {
+        registry: {
+            getObject: (name: string) => {
+                calls.push({ env, op: 'registry.getObject' });
+                return name === `acct_${env}` ? { name, fields: {} } : undefined;
+            },
+            isObjectPackageDisabled: () => false,
+            isPackageDisabled: (packageId: unknown) => {
+                calls.push({ env, op: 'registry.isPackageDisabled' });
+                return packageId === `pkg_${env}`;
+            },
+        },
+        transaction: async (fn: (trx: unknown) => unknown) => {
+            calls.push({ env, op: 'transaction' });
+            return fn({ __trx: env });
+        },
+        update: async (_object: string, data: any, options: any) => {
+            assertEngineUpdateDispatch(data, options);
+            calls.push({ env, op: 'update', trx: options?.context?.__trx });
+            return { id: data?.id, env };
+        },
+        delete: async (_object: string, options: any) => {
+            assertEngineDeleteDispatch(options);
+            calls.push({ env, op: 'delete', trx: options?.context?.__trx });
+            return { id: options?.where?.id, env };
+        },
+    };
+    return new Proxy(own, { get: (t, k: string) => (k === 'then' ? undefined : k in t ? t[k] : empty) });
+}
+
+/** A `metadata` service with the code/package store the published read falls back to. */
+function publishedStore(env: string): unknown {
+    return { getPublished: async (type: string, name: string) => ({ type, name, env }) };
+}
+
+/**
+ * The environment's protocol, with the create ingress the batch's create op
+ * goes through, recording the transaction the create joined. An item that is
+ * not an object names its owner package, `pkg_<env>`.
+ */
+function engineProtocol(env: string, calls: EngineCall[]): unknown {
+    return {
+        ...(envProtocol(env) as Record<string, unknown>),
+        getMetaItem: async (request: { type?: string }) => (request?.type === 'object' ? undefined : { packageId: `pkg_${env}` }),
+        createData: async ({ object, data, context }: { object: string; data: any; context: any }) => {
+            calls.push({ env, op: 'protocol.createData', trx: context?.__trx });
+            return { object, record: { id: `new_${env}`, ...data } };
+        },
+    };
+}
+
+/** The batch every case sends: one create, one update, one delete. */
+const BATCH_BODY = {
+    operations: [
+        { object: 'account', action: 'create', data: { name: 'Acme' } },
+        { object: 'account', action: 'update', id: 'r1', data: { name: 'Acme 2' } },
+        { object: 'account', action: 'delete', id: 'r2' },
+    ],
+};
+
+const ENGINE_DOORS: Record<'batch' | 'state' | 'published', Door> = {
+    batch: {
+        provider: 'objectql', method: 'POST', path: '/batch', params: () => ({}), body: BATCH_BODY,
+        op: 'transaction', answeredBy: (b) => b?.results?.map((r: any) => r?.id ?? r?.env),
+        absent: { status: 501 },
+    },
+    state: {
+        provider: 'objectql', method: 'GET', path: '/meta/object/:name/state/:field',
+        params: (env) => ({ name: `acct_${env}`, field: 'status' }),
+        op: 'registry.getObject', answeredBy: (b) => b?.object,
+        absent: { status: 404 },
+    },
+    published: {
+        provider: 'objectql', method: 'GET', path: '/meta/:type/:name/published',
+        params: () => ({ type: 'view', name: 'v_list' }),
+        op: 'registry.isPackageDisabled', answeredBy: (b) => b,
+        absent: { status: 404 },
+    },
+};
+
+/** The batch's engine calls, in order, all made by `env`'s engine and in `env`'s transaction. */
+function batchCalls(env: string): EngineCall[] {
+    return [
+        { env, op: 'transaction' },
+        { env, op: 'protocol.createData', trx: env },
+        { env, op: 'update', trx: env },
+        { env, op: 'delete', trx: env },
+    ];
+}
+
+const BATCH_OPS = new Set(['transaction', 'protocol.createData', 'update', 'delete']);
+
+/** A protocol for the meta read gate's owner step: the plain read serves no item, and names `pkg_<env>`. */
+function ownerStepProtocol(env: string): any {
+    return { getMetaItem: async () => ({ item: undefined, packageId: `pkg_${env}` }) };
+}
+
+describe('[#30218] hosted shape: the data engine is the request\'s environment\'s, never the host\'s', () => {
+    let h: Hosted;
+    const calls: EngineCall[] = [];
+    beforeAll(async () => {
+        h = await bootHosted({
+            extra: (env) => ({
+                objectql: recordingEngine(env, calls),
+                protocol: engineProtocol(env, calls),
+                metadata: publishedStore(env),
+            }),
+            bareWithoutEngine: true,
+        });
+    }, 60_000);
+    afterAll(async () => { for (const k of h?.kernels ?? []) await k.shutdown(); });
+
+    for (const mount of ['scoped', 'hostname'] as const) {
+        for (const env of [ENV_A, ENV_B]) {
+            it(`⭐ POST /batch (${mount}) for ${env} opens its transaction and writes through ${env}'s engine alone`, async () => {
+                calls.length = 0;
+                const out = await drive(h, ENGINE_DOORS.batch, mount, env);
+                expect(out.status, JSON.stringify(out.body)).toBe(200);
+                expect(out.body?.results?.map((r: any) => r?.id)).toEqual([`new_${env}`, 'r1', 'r2']);
+                expect(calls.filter((c) => BATCH_OPS.has(c.op))).toEqual(batchCalls(env));
+                // Nothing at all went through the other environment's engine,
+                // or the host's: no read, no transaction, no write.
+                expect(calls.filter((c) => c.env !== env)).toEqual([]);
+            }, 60_000);
+
+            it(`GET /meta/object/:name/state/:field (${mount}) for ${env} is judged by ${env}'s engine registry`, async () => {
+                calls.length = 0;
+                const out = await drive(h, ENGINE_DOORS.state, mount, env);
+                expect(out.status, JSON.stringify(out.body)).toBe(200);
+                // `acct_<env>` is known to `env`'s registry alone.
+                expect(out.body).toEqual({ object: `acct_${env}`, field: 'status', from: null, next: null });
+                expect(calls.some((c) => c.op === 'registry.getObject')).toBe(true);
+                expect(calls.filter((c) => c.env !== env)).toEqual([]);
+            }, 60_000);
+
+            it(`GET /meta/:type/:name/published (${mount}) for ${env} asks ${env}'s engine whether the owner package is disabled`, async () => {
+                calls.length = 0;
+                const out = await drive(h, ENGINE_DOORS.published, mount, env);
+                // `pkg_<env>` is disabled on `env`'s registry alone, so the item
+                // is withheld: the door's own 404. Any other kernel's registry
+                // would have served the published document.
+                expect(out.status, JSON.stringify(out.body)).toBe(404);
+                expect(calls.filter((c) => c.op === 'registry.isPackageDisabled')).toEqual([{ env, op: 'registry.isPackageDisabled' }]);
+                expect(calls.filter((c) => c.env !== env)).toEqual([]);
+            }, 60_000);
+
+            it(`the meta read gate's disabled-package owner step (${mount}) for ${env} asks ${env}'s engine`, async () => {
+                const req = mount === 'scoped' ? scopedRequest(env) : hostnameRequest(env);
+                calls.length = 0;
+                const sources = h.server.metaItemReadGateSources(req.params.environmentId, req, ownerStepProtocol(env));
+                await expect(sources.isItemOfDisabledPackage({ type: 'view', name: 'v_list' })).resolves.toBe(true);
+                expect(calls).toEqual([{ env, op: 'registry.isPackageDisabled' }]);
+            }, 60_000);
+        }
+
+        it(`POST /batch (${mount}) for an environment whose kernel carries no engine answers 501 — the host's engine is NOT a fallback`, async () => {
+            calls.length = 0;
+            const out = await drive(h, ENGINE_DOORS.batch, mount, ENV_BARE);
+            expect(out.status, JSON.stringify(out.body)).toBe(501);
+            expect(out.body?.code).toBe('NOT_IMPLEMENTED');
+            expect(calls).toEqual([]);
+        }, 60_000);
+    }
+});
+
+describe('[#30218] single kernel: the data engine is the plugin\'s own kernel\'s, exactly as before', () => {
+    let h: Hosted;
+    const calls: EngineCall[] = [];
+    beforeAll(async () => {
+        const http = recordingHttp();
+        captured.servers.length = 0;
+        const kernel = await bootKernel('test.single.engine', {
+            'http.server': http,
+            protocol: engineProtocol('host', calls),
+            auth: authServiceFor('u_host'),
+            objectql: recordingEngine('host', calls),
+            metadata: publishedStore('host'),
+        }, [createRestApiPlugin({ api: { api: { enableProjectScoping: true, projectResolution: 'auto' } } } as any)]);
+        expect(captured.servers).toHaveLength(1);
+        h = {
+            table: http.table,
+            reached: [],
+            km: hostKernelManager({}),
+            resolver: hostKernelResolver(),
+            server: captured.servers[0],
+            kernels: [kernel],
+        };
+    }, 60_000);
+    afterAll(async () => { for (const k of h?.kernels ?? []) await k.shutdown(); });
+
+    for (const mount of ['scoped', 'hostname'] as const) {
+        it(`POST /batch (${mount}) runs in the one kernel's transaction`, async () => {
+            calls.length = 0;
+            const out = await drive(h, ENGINE_DOORS.batch, mount, 'host');
+            expect(out.status, JSON.stringify(out.body)).toBe(200);
+            expect(calls.filter((c) => BATCH_OPS.has(c.op))).toEqual(batchCalls('host'));
+        }, 60_000);
+
+        it(`GET /meta/object/:name/state/:field (${mount}) is judged by the one kernel's registry`, async () => {
+            calls.length = 0;
+            const out = await drive(h, ENGINE_DOORS.state, mount, 'host');
+            expect(out.status, JSON.stringify(out.body)).toBe(200);
+            expect(out.body?.object).toBe('acct_host');
+        }, 60_000);
+
+        it(`GET /meta/:type/:name/published (${mount}) asks the one kernel's registry`, async () => {
+            calls.length = 0;
+            const out = await drive(h, ENGINE_DOORS.published, mount, 'host');
+            expect(out.status, JSON.stringify(out.body)).toBe(404);
+            expect(calls.filter((c) => c.op === 'registry.isPackageDisabled')).toEqual([{ env: 'host', op: 'registry.isPackageDisabled' }]);
+        }, 60_000);
+
+        it(`the meta read gate's owner step (${mount}) asks the one kernel's registry`, async () => {
+            const req = mount === 'scoped' ? scopedRequest('host') : hostnameRequest('host');
+            calls.length = 0;
+            const sources = h.server.metaItemReadGateSources(req.params.environmentId, req, ownerStepProtocol('host'));
+            await expect(sources.isItemOfDisabledPackage({ type: 'view', name: 'v_list' })).resolves.toBe(true);
+            expect(calls).toEqual([{ env: 'host', op: 'registry.isPackageDisabled' }]);
+        }, 60_000);
+    }
 });

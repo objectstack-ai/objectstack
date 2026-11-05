@@ -293,7 +293,8 @@ describe('SecurityPlugin', () => {
     const baseSchema: any = { name: 'task', fields, ...(overrides.schemaExtra ?? {}) };
     let middleware: any;
     // The pre-image write-authorization check re-reads the target row via
-    // `ql.findOne(object, { where: { $and: [{ id }, writeFilter] }, … })`.
+    // `ql.findOne(object, { where: { $and: [{ id }, { $and: writeParts }] }, … })`:
+    // the write predicates ride as one nested `$and`, the platform's own.
     // `findOneImpl` lets a test decide whether that row is "visible" (owned /
     // in-tenant) or filtered out (someone else's row → null → deny).
     // [#21829] With `find` beside it this is an engine double, so its `findOne`

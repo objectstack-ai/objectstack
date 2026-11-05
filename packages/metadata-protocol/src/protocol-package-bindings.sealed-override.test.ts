@@ -15,7 +15,8 @@
 import { describe, expect, it } from 'vitest';
 import { declinesBorrowedEnvelope, servesSealedOverrideRow } from './protocol-package-bindings.js';
 
-const ROW_SERVED = ['page', 'app', 'dataset', 'doc', 'book'] as const;
+/** [#30062] `mapping` the sixth: its reads were measured and its published override was served by none. */
+const ROW_SERVED = ['page', 'app', 'dataset', 'doc', 'book', 'mapping'] as const;
 /** The base's code artifact the hydrator's lookup falls back to for a pair's row. */
 const BASE_ARTIFACT = { _packageId: 'com.example.showcase' };
 
@@ -30,7 +31,7 @@ describe('[#29613] the sealed row-served override types', () => {
         expect(servesSealedOverrideRow('apps')).toBe(true);
     });
 
-    it.each(['mapping', 'action', 'flow', 'object', 'permission', 'view', 'dashboard', 'report', 'email_template'])(
+    it.each(['action', 'flow', 'object', 'permission', 'view', 'dashboard', 'report', 'email_template'])(
         '%s: not a sealed row-served override type',
         (type) => {
             expect(servesSealedOverrideRow(type)).toBe(false);

@@ -171,6 +171,7 @@ const de = {
   },
   form: {
     noPermissionToSave: "Sie haben keine Berechtigung, diesen Datensatz zu speichern.",
+    readOnlyExternalSource: "Diese Tabelle ist schreibgeschützt. Ihre Datensätze stammen aus einer externen Datenquelle, die keine Änderungen annimmt.",
     noPermissionToCreate: "Sie haben keine Berechtigung, „{{object}}“-Datensätze zu erstellen. Die Felder sind schreibgeschützt.",
     noPermissionToEdit: "Sie haben keine Berechtigung, „{{object}}“-Datensätze zu bearbeiten. Die Felder sind schreibgeschützt.",
     noPermissionToEditRecord: "Sie haben keine Berechtigung, diesen Datensatz zu bearbeiten. Die Felder sind schreibgeschützt.",
@@ -907,8 +908,8 @@ const de = {
     },
     betterAuth: {
       short: "Identität",
-      title: "Vom Identitätsanbieter verwaltet",
-      body: "Das Schema dieses Objekts gehört {{provider}}. Direkte Änderungen umgehen Passwort-Hashing, Sitzungsvalidierung, Zwei-Faktor-Prüfungen und Audit-Hooks. Verwalten Sie diese Datensätze über die Anmelde-, Einladungs- und Sicherheitsabläufe Ihres Authentifizierungsanbieters.",
+      title: "Über den integrierten Identitätsdienst geschrieben",
+      body: "Das Schema dieses Objekts gehört {{provider}}, dem integrierten Identitätsdienst der Plattform. Legen Sie diese Datensätze mit den Aktionen auf dieser Seite oder über Anmelde-, Einladungs- und Sicherheitsabläufe an und ändern Sie sie dort; alle laufen über diesen Dienst. Direkte Änderungen an der Tabelle würden Passwort-Hashing, Sitzungsvalidierung, Zwei-Faktor-Prüfungen und Audit-Hooks umgehen.",
     },
   },
   kanban: {
@@ -1804,6 +1805,10 @@ const de = {
     },
   },
   console: {
+    organizationMfa: {
+      needsTwoFactor: "Mehrstufige Authentifizierung erzwingen setzt die Zwei-Faktor-Authentifizierung voraus, die in dieser Bereitstellung deaktiviert ist; Speichern mit gesetztem Häkchen wird daher abgelehnt. Aktivieren Sie zuerst die Zwei-Faktor-Authentifizierung: Schalten Sie unter Einrichtung → Authentifizierung „Mehrstufige Authentifizierung verlangen“ ein (gilt für alle Organisationen), oder setzen Sie OS_AUTH_TWO_FACTOR=true in der Bereitstellung.",
+      nowRequired: "Alle Mitglieder dieser Organisation, die noch keine Authenticator-App eingerichtet haben, müssen das jetzt tun. Jedes wird vom Datenzugriff ausgeschlossen, sobald die MFA-Kulanzfrist endet (7 Tage, sofern unter Einrichtung → Authentifizierung nicht geändert), gerechnet ab der ersten Nutzung nach dieser Änderung. Mitglieder, die bereits einen Authenticator verwenden, sind nicht betroffen.",
+    },
     studio: {
       title: "Studio",
       accessRequired: "Sie benötigen Studio-Zugriff, um Studio zu öffnen. Ein Administrator kann ihn unter Einrichtung → Berechtigungssatz-Zuweisung mit einem Berechtigungssatz erteilen.",
@@ -2189,6 +2194,8 @@ const de = {
       sourceBadgeInherited: "Geerbt von {{source}}",
       sourceBadgeOverrides: "Überschreibt {{source}}",
       resetToDefault: "Auf Standard zurücksetzen",
+      sourceBadgeModified: "Geändert",
+      defaultValueHint: "Standard: {{value}}",
       envLockBadge: "Per Umgebung gesperrt",
       envLockBadgeTitle: "Durch eine Umgebungsvariable festgelegt — kann nicht in der Oberfläche bearbeitet werden.",
       deprecatedBadge: "Veraltet",
@@ -2839,6 +2846,8 @@ const de = {
       useEmailResetText: "Stattdessen per E-Mail zurücksetzen",
       phoneSuccessTitle: "Passwort zurückgesetzt",
       phoneSuccessDescription: "Ihr Passwort wurde zurückgesetzt. Sie können sich jetzt mit dem neuen Passwort anmelden.",
+      noDeliveryTitle: "Hier kann kein Link zum Zurücksetzen per E-Mail gesendet werden",
+      noDeliveryDescription: "Diese Bereitstellung versendet keine E-Mails, daher kann Sie kein Link zum Zurücksetzen des Passworts erreichen. Wenden Sie sich an einen Administrator: Er kann unter Einrichtung → Benutzer ein neues Passwort für Sie festlegen.",
     },
     resetPassword: {
       title: "Neues Passwort festlegen",
@@ -2862,6 +2871,7 @@ const de = {
       verifyingDescription: "Wir bestätigen Ihre E-Mail. Bitte warten.",
       successTitle: "E-Mail bestätigt",
       successDescription: "Ihre E-Mail wurde bestätigt. Sie können sich jetzt anmelden.",
+      handoffSuccessDescription: "Ihre E-Mail wurde bestätigt. Kehren Sie zur App zurück, bei der Sie sich anmelden wollten, und melden Sie sich dort an.",
       errorTitle: "Bestätigung fehlgeschlagen",
       errorDescription: "Bestätigung fehlgeschlagen. Bitte fordern Sie einen neuen Link an.",
       missingToken: "Im Bestätigungslink fehlt ein Token.",
@@ -2954,6 +2964,7 @@ const de = {
         continue: "Weiter",
         preparing: "Wird vorbereitet…",
         enrollFailed: "Registrierung konnte nicht gestartet werden.",
+        unavailable: "Die Zwei-Faktor-Authentifizierung ist in dieser Bereitstellung deaktiviert, daher kann noch keine Authenticator-App eingerichtet werden. Bitten Sie einen Administrator, sie unter Einrichtung → Authentifizierung zu aktivieren, und versuchen Sie es dann erneut.",
         scanTitle: "Mit Ihrer Authenticator-App scannen",
         scanBody: "Scannen Sie diesen QR-Code mit Google Authenticator, 1Password, Authy usw. und geben Sie dann den 6-stelligen Code ein.",
         backupTitle: "Backup-Codes speichern",
@@ -4095,6 +4106,9 @@ const de = {
       revoke: "Widerrufen",
       revoking: "Wird widerrufen…",
       revokedToast: "Annahme von „{{set}}“ widerrufen.",
+      reopen: "Neu bewerten",
+      reopening: "Wird wieder geöffnet…",
+      reopenedToast: "Vorschlag für „{{set}}“ wieder geöffnet: Nichts wird gewährt, bis er angenommen wird.",
     },
     title: "App-Marktplatz",
     subtitle: "Durchsuchen Sie genehmigte Apps, die im ObjectStack-Katalog veröffentlicht wurden. Klicken Sie auf eine App, um Details zu sehen und sie in eine Ihrer Umgebungen zu installieren.",
@@ -4201,6 +4215,10 @@ const de = {
         unreadableRange: "{{packageId}} deklariert {{dependency}} mit dem Versionsbereich {{range}}, der nicht gelesen werden kann. Korrigieren Sie den Bereich und veröffentlichen Sie das Paket erneut.",
         unreadableVersion: "Installieren Sie eine Release-Version von {{dependency}} innerhalb von {{range}}. Die installierte Version {{installedVersion}} hat nicht das Format MAJOR.MINOR.PATCH.",
         unreadableDeclaration: "{{packageId}} deklariert seine Abhängigkeiten in einer Form, die die Installation nicht lesen kann. Schreiben Sie sie als Zuordnung von Paket-ID zu Versionsbereich und veröffentlichen Sie das Paket erneut.",
+      },
+      protocolCheckSkipped: {
+        noRange: "{{packageId}} gibt nicht an, welches Plattformprotokoll es unterstützt. Es wurde daher ohne Kompatibilitätsprüfung unter Protokoll {{protocolVersion}} installiert und funktioniert auf dieser Plattformversion möglicherweise nicht. Ein Build des Pakets, der sein unterstütztes Protokoll (engines.protocol) angibt, wird bei der Installation geprüft.",
+        unparsedRange: "{{packageId}} gibt sein Plattformprotokoll als {{requiredRange}} an, was diese Laufzeitumgebung nicht lesen kann. Es wurde daher ohne Kompatibilitätsprüfung unter Protokoll {{protocolVersion}} installiert und funktioniert auf dieser Plattformversion möglicherweise nicht. Ein Build des Pakets mit lesbarem Bereich (engines.protocol) wird bei der Installation geprüft.",
       },
       localUnauthorized: "Melden Sie sich zuerst in diesem Laufzeitsystem an.",
       localMarketplaceUnavailable: "Dieses Laufzeitsystem hat keine OS_CLOUD_URL konfiguriert.",
@@ -4533,6 +4551,7 @@ const de = {
       title: 'Ausstehende Änderungen',
       description: 'Was die Veröffentlichung ändert. Neue Elemente werden hinzugefügt; Aktualisierungen überschreiben die Live-Version.',
       savedToCustomization: 'Gespeichert in den Anpassungen von {{package}}',
+      customizationEnvironment: 'Diese Änderungen liegen in der Datenbank dieser Umgebung, als Elemente von {{pair}}, nicht im Quellcode Ihres Projekts. In eine andere Umgebung gelangen sie nur mit {{command}}.',
       loading: 'Ausstehende Änderungen werden geladen…',
       loadFailed: 'Ausstehende Änderungen konnten nicht geladen werden:',
       empty: 'Nichts ausstehend — alle Entwürfe wurden veröffentlicht.',
@@ -4605,6 +4624,12 @@ const de = {
         dataset: '{{count}} Datensätze',
         dataset_one: '{{count}} Datensatz',
         dataset_other: '{{count}} Datensätze',
+        hook: '{{count}} Hooks',
+        hook_one: '{{count}} Hook',
+        hook_other: '{{count}} Hooks',
+        translation: '{{count}} Übersetzungen',
+        translation_one: '{{count}} Übersetzung',
+        translation_other: '{{count}} Übersetzungen',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

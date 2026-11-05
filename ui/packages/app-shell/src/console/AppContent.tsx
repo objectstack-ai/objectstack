@@ -72,6 +72,7 @@ import { enterAppBundle, readAppObjectScope } from './appObjectScope.js';
 import { preferLocal } from '../utils/preferLocal.js';
 import { packagedAutomationStudioPath, setupMetadataRest, setupMetadataStudioPath } from '../views/studio-design/setupMetadataRedirect.js';
 import { SkeletonDashboard, SkeletonDetail, SkeletonGrid } from '../skeletons/index.js';
+import { organizationMfaFormNotice, organizationMfaSavedNotice, useStoredRequireMfa } from './organizationMfaNotices.js';
 
 // Route-based code splitting — lazy-load less-frequently-used routes.
 //
@@ -964,6 +965,23 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     : currentObjectDef;
   const isChildFormTask = !!formObjectParam && formObjectParam !== currentObjectDef?.name;
 
+  // objectstack#30295 — an organization's `require_mfa`: before saving, the
+  // form says it needs two-factor on (when it is off); after a save that turned
+  // it on, the toast says who must enroll and when the block starts. The rules
+  // live in `organizationMfaNotices.ts`.
+  const formObjectFieldNames: string[] = formObjectDef?.fields
+    ? Array.isArray(formObjectDef.fields)
+      ? formObjectDef.fields.map((f: any) => (typeof f === 'string' ? f : f?.name)).filter(Boolean)
+      : Object.keys(formObjectDef.fields)
+    : [];
+  const organizationMfaNotice = organizationMfaFormNotice({
+    objectName: formObjectDef?.name,
+    fields: formObjectFieldNames,
+    features,
+    t,
+  });
+  const storedRequireMfa = useStoredRequireMfa(formObjectDef?.name, editingRecord?.id, isDialogOpen, dataSource);
+
   // objectstack#27138 — the record the overlay edits may be held by a pending
   // approval that locks it. The record's field projection leaves that lock out
   // (the server judges it on the values a save sends), so the dialog reads it
@@ -1038,7 +1056,19 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     // the child's open related lists refetch on their own via the
     // invalidation bus (#2269): the dataSource write already emitted a
     // MutationEvent that the bridge fans out — no manual notify needed.
-    const feedback = answerWarningClaim.current?.take(saved);
+    const claimed = answerWarningClaim.current?.take(saved);
+    const mfaNotice = organizationMfaSavedNotice({
+      objectName: formObjectDef?.name,
+      storedRequireMfa,
+      saved,
+      t,
+    });
+    const feedback = mfaNotice
+      ? {
+          warnings: claimed?.warnings ?? [],
+          notice: claimed?.notice ? `${claimed.notice}\n${mfaNotice}` : mfaNotice,
+        }
+      : claimed;
     if (isChildFormTask) {
       toastRecordSave(toast, recordSaveMessage(saved), feedback);
       closeRecordForm();
@@ -1080,7 +1110,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
       return;
     }
     navigate(target.url, { replace: true });
-  }, [handleCrudSuccess, recordSaveMessage, isChildFormTask, editingRecord, currentObjectDef, appSegment, location.pathname, navigate, closeRecordForm, objectPluralLabel]);
+  }, [handleCrudSuccess, recordSaveMessage, isChildFormTask, editingRecord, currentObjectDef, appSegment, location.pathname, navigate, closeRecordForm, objectPluralLabel, formObjectDef?.name, storedRequireMfa, t]);
 
   // Track recent items on route change. The hook matches `appName` against the
   // pathname's app segment, so it takes the ROUTE SEGMENT: handed
@@ -1718,6 +1748,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                 title: editingRecord
                   ? t('form.editTitle', { object: objectLabel(formObjectDef as any) })
                   : t('form.createTitle', { object: objectLabel(formObjectDef as any) }),
+                ...(organizationMfaNotice ? { description: organizationMfaNotice } : {}),
                 open: isDialogOpen,
                 onOpenChange: (open: boolean) => { if (!open) closeRecordForm(); },
                 // objectui#6514 — the same declared-key gate `RecordFormPage`

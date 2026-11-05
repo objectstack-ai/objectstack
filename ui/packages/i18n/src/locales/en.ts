@@ -223,6 +223,9 @@ const en = {
   },
   form: {
     noPermissionToSave: "You don't have permission to save this record.",
+    // A write the ADR-0015 external write gate refused (`EXTERNAL_WRITE_FORBIDDEN`, objectstack#30334):
+    // the object is read-only by design, so the line must not read as a missing permission.
+    readOnlyExternalSource: "This table is read-only. Its records come from an external data source that does not accept changes.",
     // The notice a record form shows when every field is locked because the
     // object's affordance for the form's mode is closed for this user
     // (objectui#11000). `{{object}}` is the object's label.
@@ -1173,8 +1176,8 @@ const en = {
     },
     betterAuth: {
       short: 'Identity',
-      title: 'Managed by the identity provider',
-      body: "This object's schema is owned by {{provider}}. Direct edits bypass password hashing, session validation, two-factor checks, and audit hooks. Manage these records through your authentication provider's sign-in, invitation, and security flows instead.",
+      title: 'Written through the built-in identity service',
+      body: "This object's schema belongs to {{provider}}, the platform's built-in identity service. Create and change these records with the actions on this page, or through sign-in, invitation and security flows; every one of them goes through that service. Editing the table directly would bypass password hashing, session validation, two-factor checks and audit hooks.",
     },
   },
   kanban: {
@@ -2196,6 +2199,12 @@ const en = {
     },
   },
   console: {
+    // What the organization record form says around `require_mfa`: before
+    // saving while two-factor is off, and after a save that turned it on.
+    organizationMfa: {
+      needsTwoFactor: 'Require Multi-Factor Auth needs two-factor authentication, which is off on this deployment, so saving with it ticked is refused. Turn two-factor on first: switch on Require multi-factor authentication in Setup → Authentication (it applies to every organization), or set OS_AUTH_TWO_FACTOR=true on the deployment.',
+      nowRequired: 'Every member of this organization who has not set up an authenticator app must now do so. Each one is blocked from data once the MFA grace period ends (7 days unless changed in Setup → Authentication), counted from the first time they use the app after this change. Members who already use an authenticator are not affected.',
+    },
     // The fixed crumb `AppHeader`'s `studio` variant draws on the Studio front
     // door (objectui#11863), as `organizations.title` is the `orgs` variant's.
     // A product name, which every pack writes as is.
@@ -2332,6 +2341,10 @@ const en = {
       // layer's value in the draft, and Save sends it as `null` (unset), so the
       // row falls back to the value the layer above carries.
       resetToDefault: 'Reset to default',
+      // A value set at the scope this page writes (objectstack#30329), and
+      // the default its Reset returns to. `{{value}}` is that default in words.
+      sourceBadgeModified: 'Modified',
+      defaultValueHint: 'Default: {{value}}',
       // The chips on a settings row's header (objectui#12821): the env-lock
       // chip and the title it shows when the server sends no reason, and the
       // `Deprecated` chip, with `{{replacedBy}}` the key that replaces it.
@@ -3387,6 +3400,8 @@ const en = {
       useEmailResetText: 'Reset via email instead',
       phoneSuccessTitle: 'Password reset',
       phoneSuccessDescription: 'Your password has been reset. You can now sign in with your new password.',
+      noDeliveryTitle: "A reset link can't be emailed here",
+      noDeliveryDescription: "This deployment doesn't send email, so no password reset link can reach you. Ask an administrator: they can set a new password for you from Setup → Users.",
     },
     resetPassword: {
       title: 'Set a new password',
@@ -3411,6 +3426,7 @@ const en = {
       verifyingDescription: 'Hang tight while we confirm your email.',
       successTitle: 'Email verified',
       successDescription: 'Your email is confirmed. You can now sign in.',
+      handoffSuccessDescription: 'Your email is confirmed. Go back to the app you were signing in to, and sign in there.',
       errorTitle: 'Verification failed',
       errorDescription: 'Verification failed. Please request a new link.',
       missingToken: 'Verification link is missing a token.',
@@ -3525,6 +3541,7 @@ const en = {
         continue: 'Continue',
         preparing: 'Preparing…',
         enrollFailed: 'Could not start enrollment.',
+        unavailable: 'Two-factor authentication is turned off on this deployment, so an authenticator app cannot be set up yet. Ask an administrator to turn it on in Setup → Authentication, then try again.',
         scanTitle: 'Scan with your authenticator',
         scanBody: 'Scan this QR code with Google Authenticator, 1Password, Authy, etc., then enter the 6-digit code.',
         backupTitle: 'Save your backup codes',
@@ -3993,6 +4010,9 @@ const en = {
       description: 'What publishing will change. New items are added; updates overwrite the live version.',
       // ADR-0146 D3 — where a customization of a read-only base is saved: its `.custom` pair.
       savedToCustomization: 'Saved to {{package}}’s customizations',
+      // objectstack#30119 (ADR-0146 D2) — the pair lives in this environment's database and moves only by export;
+      // `command` is always the literal `os package export`, never translated.
+      customizationEnvironment: 'These changes are kept in this environment’s database as items of {{pair}}, not in your project’s source. They reach another environment only through {{command}}.',
       loading: 'Loading pending changes…',
       loadFailed: 'Could not load pending changes:',
       empty: 'Nothing pending — every draft has been published.',
@@ -4070,6 +4090,12 @@ const en = {
         dataset: '{{count}} datasets',
         dataset_one: '{{count}} dataset',
         dataset_other: '{{count}} datasets',
+        hook: '{{count}} hooks',
+        hook_one: '{{count}} hook',
+        hook_other: '{{count}} hooks',
+        translation: '{{count}} translations',
+        translation_one: '{{count}} translation',
+        translation_other: '{{count}} translations',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.
@@ -4991,6 +5017,11 @@ const en = {
           unreadableVersion: 'Install a release version of {{dependency}} inside {{range}}. The installed version {{installedVersion}} is not MAJOR.MINOR.PATCH.',
           unreadableDeclaration: '{{packageId}} declares its dependencies in a shape install cannot read. Write them as a map from package ID to version range and republish the package.',
         },
+        // objectstack#30326 — the install answer's data.protocolCheckSkipped: installed, the protocol range unchecked.
+        protocolCheckSkipped: {
+          noRange: '{{packageId}} does not state which platform protocol it supports, so it was installed under protocol {{protocolVersion}} without a compatibility check and may not work on this platform version. A build of the package that declares the protocol it supports (engines.protocol) is checked at install.',
+          unparsedRange: '{{packageId}} states its platform protocol as {{requiredRange}}, which this runtime cannot read, so it was installed under protocol {{protocolVersion}} without a compatibility check and may not work on this platform version. A build of the package that declares a range this runtime reads (engines.protocol) is checked at install.',
+        },
         localUnauthorized: 'Sign in to this runtime first, then try again.',
         localMarketplaceUnavailable: 'This runtime has no OS_CLOUD_URL configured, so the marketplace catalog is unreachable.',
         updateTo: 'Update → v{{version}}',
@@ -5075,6 +5106,9 @@ const en = {
         revoke: 'Revoke',
         revoking: 'Revoking…',
         revokedToast: 'Acceptance of "{{set}}" revoked.',
+        reopen: 'Reconsider',
+        reopening: 'Reopening…',
+        reopenedToast: 'Suggestion for "{{set}}" reopened: nothing is granted until it is accepted.',
       },
       uninstall: {
         confirm: 'Uninstall {{manifestId}} v{{version}} from this runtime?\n\nThe app will leave the running kernel at once, together with its permission sets and their grants, and its cached manifest will be removed. Records stored in its objects stay in the database.',

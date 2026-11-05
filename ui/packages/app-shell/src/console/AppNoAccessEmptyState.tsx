@@ -40,8 +40,8 @@ import { Lock, PanelLeft } from 'lucide-react';
 // already reaches it through `PreviewDraftEmptyState`, so the eager graph
 // gains no new module.
 import { Button, DataEmptyState } from '@object-ui/components';
-import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
-import { resolveKeyedI18nLabel } from '../utils/index.js';
+import { useObjectTranslation } from '@object-ui/i18n';
+import { useServedAppLabel } from '../hooks/useServedAppLabel.js';
 
 export interface AppNoAccessEmptyStateProps {
   /** The active app, as the console's metadata list carries it. */
@@ -65,9 +65,9 @@ export interface AppNoAccessEmptyStateProps {
 
 export function AppNoAccessEmptyState({ app, setupPath, reason = 'no-navigation' }: AppNoAccessEmptyStateProps) {
   const { t } = useObjectTranslation();
-  const { appLabel } = useObjectLabel();
+  const { appLabel } = useServedAppLabel();
   // The same label the header's app switcher shows for this app.
-  const label = appLabel({ name: app.name, label: resolveKeyedI18nLabel(app.label, t) });
+  const label = appLabel(app);
 
   if (reason === 'menu-only') {
     return (

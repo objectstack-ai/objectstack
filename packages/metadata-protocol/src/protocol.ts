@@ -74,6 +74,7 @@ import type {
 // the published declaration, and the pure half of the import (what a package
 // body holds, what is copied, what is refused) lives beside this file.
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities, CapabilityDescriptor } from '@objectstack/spec/api';
+import type { SeedAppliedLandedParsed } from '@objectstack/spec/api';
 import { readServiceSelfInfo, readChannelRoute, readAuthFamilies, isSubscribableChannel, CHANNEL_SURFACE_SLOTS, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
 // [#24395] The save's authoring surface.
 import {
@@ -338,6 +339,7 @@ import type {
     NamedBaseWriteSubject,
     OverrideWriteSubject,
     OverrideWriteVerdict,
+    WrittenPackageScope,
     PackagelessWriteOperation,
 } from './protocol-packaged-base-refusal.js';
 // [ADR-0146 D10, #28564] The `__c` extension-field reservation's one judge.
@@ -644,7 +646,7 @@ import { createData, deleteData, updateData, validateData } from './protocol-dat
 // [#29985 codemod] Class head: fields, stored-row conversion, resolvers, registration hooks, authoring gates, mutation pub/sub, overlay index: the members below delegate to its facet, `ProtocolClassHeadFacet`.
 import { ProtocolClassHeadFacet } from './protocol-class-head.js';
 // [#29985 codemod] Discovery, types, diagnostics, packaged bases, credential carry-forward: the members below delegate to its facet, `ProtocolDiscoveryAndBasesFacet`.
-import { ProtocolDiscoveryAndBasesFacet } from './protocol-discovery-and-bases.js';
+import { ProtocolDiscoveryAndBasesFacet, type PackagedArtifactBaseType } from './protocol-discovery-and-bases.js';
 // [#29985 codemod] Data CRUD: the members below delegate to its facet, `ProtocolDataCrudFacet`.
 import { ProtocolDataCrudFacet } from './protocol-data-crud.js';
 // [#29985 codemod] Global search and the metadata cache: the members below delegate to its facet, `ProtocolSearchAndCacheFacet`.
@@ -3312,8 +3314,108 @@ export class ObjectStackProtocolImplementation implements
         return ProtocolDiscoveryAndBasesFacet.getPackagedReportBase(protocolHost(this), name);
     }
 
+    /**
+     * [#30062] The PACKAGED (code-layer) declaration of a PAGE — the page a
+     * code package ships, before a `.custom` pair's declared override replaces
+     * it (ADR-0146 D2). The page twin of {@link getPackagedDashboardBase},
+     * answered the same way, and the fact `translatePage`
+     * (`@objectstack/spec/system`) compares against as its `packagedBase`: the
+     * i18n catalog (`pages.<name>`) is the packaged translation of exactly
+     * this body, so it may only replace a string the served page still carries
+     * unchanged from it (ruling record 6631250894: a translation in the pair,
+     * then the override's own label, then the base's translation).
+     *
+     * Measured before this existed: a pair's override of the CRM's
+     * `crm_welcome` labelled `OVpage` was served, and a `zh-CN` reader got the
+     * base's `欢迎页`, because the translation of the served page had no base to
+     * compare with.
+     *
+     * Shadow-immune for the dashboard's reason: the override is served from its
+     * row, never as the artifact, so the body returned is the base's own. A
+     * page has no extension fold, so the artifact item IS the packaged
+     * declaration. Returns `undefined` for a page no code package ships, an
+     * unknown or empty name, and a registry double without the lookup — "no
+     * packaged baseline", read by the translator as the catalog applying
+     * unchanged.
+     */
+    getPackagedPageBase(name: string): unknown {
+        return ProtocolDiscoveryAndBasesFacet.getPackagedPageBase(protocolHost(this), name);
+    }
+
+    /**
+     * [#30062] The PACKAGED (code-layer) declaration of a DATASET, the fact
+     * `translateDataset` compares each string against (`datasets.<name>`: its
+     * label, description, dimension and measure labels). The dataset twin of
+     * {@link getPackagedPageBase}, answered the same way and for the same
+     * reason: a pair's dataset override kept the base's translated label and
+     * measure labels over its own. Returns `undefined` on the same
+     * uncertainties.
+     */
+    getPackagedDatasetBase(name: string): unknown {
+        return ProtocolDiscoveryAndBasesFacet.getPackagedDatasetBase(protocolHost(this), name);
+    }
+
+    /**
+     * [#30062] The PACKAGED (code-layer) declaration of an APP, the fact
+     * `translateApp` compares each string against (`apps.<name>`: its label,
+     * description and navigation labels, a node judged against the base's node
+     * of the same `id`). The app twin of {@link getPackagedPageBase}, answered
+     * the same way. Returns `undefined` on the same uncertainties.
+     */
+    getPackagedAppBase(name: string): unknown {
+        return ProtocolDiscoveryAndBasesFacet.getPackagedAppBase(protocolHost(this), name);
+    }
+
+    /**
+     * [#30062] The PACKAGED (code-layer) declaration of a BOOK, the fact
+     * `translateBook` compares each string against (`books.<name>`: its label,
+     * description and group labels, a group judged against the base's group of
+     * the same `key`). The book twin of {@link getPackagedPageBase}, answered
+     * the same way. Returns `undefined` on the same uncertainties.
+     */
+    getPackagedBookBase(name: string): unknown {
+        return ProtocolDiscoveryAndBasesFacet.getPackagedBookBase(protocolHost(this), name);
+    }
+
+    /**
+     * [#30062, ADR-0146 D2] The base package a SERVED metadata document is the
+     * declared override of, or `undefined` when it is none — read off the
+     * envelope every read stamps on a pair's declaring row when it serves it as
+     * the base's item (`_packageId` = the base) beside the declaration it was
+     * saved with (`overrides.package`). The serving layer asks it before it
+     * hands a translator the pair's own translations
+     * ({@link getPairTranslationBundle}). An `object` is extended, never
+     * replaced (D10), so it never answers one.
+     */
+    servedOverrideBaseOf(type: string, document: unknown): string | undefined {
+        return ProtocolDiscoveryAndBasesFacet.servedOverrideBaseOf(type, document);
+    }
+
+    /**
+     * [#30062, ADR-0146 D2/D3] The translations a base's paired `.custom`
+     * package ships itself, locale-keyed (`{ [locale]: data }`), for the
+     * translators' `pairBundle` (`@objectstack/spec/system`): the first rank of
+     * the label order on a declared override (ruling record 6631250894 — a
+     * translation in the pair, then the override's own label, then the base's
+     * translation).
+     *
+     * Needed because the catalog the deployment serves cannot say where a
+     * string came from: the i18n service deep-merges every code bundle and
+     * every authored `translation` row, package ids dropped. The pair's own
+     * translations are its active `translation` rows (the pair is an authored
+     * package, created only through {@link ensureCustomizationPackage}, so it
+     * ships no code bundle of its own), read here by their binding.
+     *
+     * `undefined` when the base has no pair id, when the pair stores no
+     * translation, and when the row read fails — "no pair translation known",
+     * which the translators read as they did before the option existed.
+     */
+    getPairTranslationBundle(basePackageId: string): Promise<TranslationBundle | undefined> {
+        return ProtocolDiscoveryAndBasesFacet.getPairTranslationBundle(protocolHost(this), basePackageId);
+    }
+
     /** Docblock and body: {@link ProtocolDiscoveryAndBasesFacet.packagedArtifactBase} in `protocol-discovery-and-bases.ts` [#29985 codemod]. */
-    private packagedArtifactBase(type: 'dashboard' | 'view' | 'report', name: string): unknown {
+    private packagedArtifactBase(type: PackagedArtifactBaseType, name: string): unknown {
         // [#29985 codemod] The body moved to `protocol-discovery-and-bases.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolDiscoveryAndBasesFacet.packagedArtifactBase(protocolHost(this), type, name);
     }
@@ -3807,6 +3909,9 @@ export class ObjectStackProtocolImplementation implements
             isWritablePackage: (...a) => this.isWritablePackage(...a),
             ensureCustomizationPackage: (...a) => this.ensureCustomizationPackage(...a),
             saveMetaItem: (...a) => this.saveMetaItem(...a),
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
+            // [#30000] Awaited here too: the census of `sys_metadata` writes reads every call into the heal.
+            restoreArtifactRegistryView: async (...a) => { await this.restoreArtifactRegistryView(...a); },
         };
         return migratePackagelessOverlays.call(host, request);
     }
@@ -7877,7 +7982,7 @@ export class ObjectStackProtocolImplementation implements
      *    written through the `OS_METADATA_WRITABLE` hatch before the seal; they
      *    stay at rest, untouched, and the boot report names them per type with
      *    the two remedies ({@link reportSealedOverlayRows}). [#29613] Except,
-     *    for a `page`, `app`, `dataset`, `doc` or `book`, the shipping
+     *    for a `page`, `app`, `dataset`, `doc`, `book` or [#30062] `mapping`, the shipping
      *    package's declared `.custom` override (`row`, below): ADR-0146 D8
      *    item 2 serves it, as a dashboard's.
      *
@@ -8267,8 +8372,8 @@ export class ObjectStackProtocolImplementation implements
      * {@link promoteDraftForPublish}) or a rollback that would land a row bound
      * to the base. D1 puts a read-only package's customizations in its paired
      * `<base>.custom`; such a row is served at the base's address with no
-     * declaration, outside the pair, and `os migrate packageless-overlays`
-     * never sees it (its census reads package-less rows only). Refused with
+     * declaration, outside the pair, until [#29392] `os migrate
+     * packageless-overlays` moves it into the pair. Refused with
      * the fix the package-less close names ({@link packagelessOverlayWriteRefusal},
      * one spelling): write it into the pair, declaring the override.
      *
@@ -8282,9 +8387,10 @@ export class ObjectStackProtocolImplementation implements
      * that could not be taken.
      *
      * ⛔ Not a delete: removing a row bound to the base writes nothing, and it
-     * is the only way to clear such a row stored before the close (the
-     * ceremony moves package-less rows only). A row stored before it stays
-     * served until the pair declares the override, which is served over it.
+     * is one way to clear such a row stored before the close; the ceremony is
+     * the other, moving it into the pair with its declaration. A row stored
+     * before it stays served until one of those, or the pair's declared
+     * override, which is served over it; the sentence names all three.
      *
      * Authoring writes only: the server-stated rewrites (`source` set, the
      * `package-duplicate` write face) name the row they rewrite. Registry
@@ -8316,15 +8422,17 @@ export class ObjectStackProtocolImplementation implements
      *
      * Asked by the save door ahead of {@link refusePackagedBaseOverride}, and
      * by the promotion ({@link promoteDraftForPublish}, so both
-     * `publishMetaItem` and `publishPackageDrafts`) on the draft's body.
+     * `publishMetaItem` and `publishPackageDrafts`) on the draft's body. The
+     * two overlay-write closes ask it about the pair their fix writes into,
+     * with the closure a pair not yet ensured will have (`writtenScope`).
      */
-    private overrideWriteVerdict(request: OverrideWriteSubject): OverrideWriteVerdict {
+    private overrideWriteVerdict(request: OverrideWriteSubject, writtenScope?: WrittenPackageScope): OverrideWriteVerdict {
         const host: ThisParameterType<typeof overrideWriteVerdict> = {
             isWritablePackage: (...a) => this.isWritablePackage(...a),
             resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
             shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
         };
-        return overrideWriteVerdict.call(host, request);
+        return overrideWriteVerdict.call(host, request, writtenScope);
     }
 
     /** Docblock and body: {@link ProtocolWriteGatesFacet.refusePackagedBaseRemoval} in `protocol-write-gates.ts` [#29985 codemod]. */
@@ -10299,7 +10407,16 @@ export class ObjectStackProtocolImplementation implements
      *    a set), since the batch promotes as one unit in no type order;
      *  - the set's current definition already grants on it: the grant is not
      *    this write's. A re-save or a restore that keeps it is not judged, and
-     *    neither is an object that has gone since the grant was made.
+     *    neither is an object that has gone since the grant was made;
+     *  - [#30255] the save copies it verbatim from a set that already holds it
+     *    (`inherited`, the request's `inheritedGrantObjects`: the permission-set
+     *    clone door's copy). The grant is the source's, not this write's — the
+     *    rule above, for a copy. A platform set may grant on an object of an
+     *    optional platform plugin this deployment does not install
+     *    (`member_default` on `sys_comment` / `sys_activity`, which
+     *    `@objectstack/plugin-audit` registers): the grant applies to nothing
+     *    here, in the source and in the copy alike, and the copy is what the
+     *    clone door promises.
      *
      * Asked in draft and in publish mode by {@link saveMetaItem} after the
      * schema gate (except a `migrate-stored` re-save, the platform healing
@@ -10320,6 +10437,7 @@ export class ObjectStackProtocolImplementation implements
         pending?: 'drafts' | ReadonlySet<string>,
         writeFace?: MetadataWriteFace,
         door?: 'save' | 'publish',
+        inherited?: readonly string[],
     ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
         const readEngine = () => this.engine;
         const host: ThisParameterType<typeof unknownGrantObjectSaveRefusal> = {
@@ -10327,7 +10445,7 @@ export class ObjectStackProtocolImplementation implements
             listDrafts: (...a) => this.listDrafts(...a),
             readMetaItem: (...a) => this.readMetaItem(...a),
         };
-        return unknownGrantObjectSaveRefusal.call(host, singularType, item, name, pending, writeFace, door);
+        return unknownGrantObjectSaveRefusal.call(host, singularType, item, name, pending, writeFace, door, inherited);
     }
 
     /**
@@ -10959,6 +11077,8 @@ export class ObjectStackProtocolImplementation implements
             updated: number;
             error?: string;
             errors?: unknown[];
+            /** [#30348] Per object, the rows created vs matched — `SeedAppliedLandedSchema`. */
+            landed?: SeedAppliedLandedParsed[];
         };
         /**
          * Present when a publish-time materializer is registered for this type
@@ -11075,7 +11195,7 @@ export class ObjectStackProtocolImplementation implements
         actor?: string;
         skipSeedApply?: boolean;
     }): Promise<{
-        seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[] };
+        seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[]; landed?: SeedAppliedLandedParsed[] };
         materializeApplied?: PublishMaterializeResult;
         projectionApplied?: MutationProjectionOutcome;
     }> {
@@ -11096,6 +11216,7 @@ export class ObjectStackProtocolImplementation implements
     ): Promise<{
         success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[];
         issues?: Array<{ path: string; message: string; code?: string | undefined }>;
+        landed?: SeedAppliedLandedParsed[];
     }> {
         // [#25467 cut 14] The body moved to `protocol-publish-batch.ts` (see `PublishBatchHost`).
         const readEngine = () => this.engine;
@@ -11414,7 +11535,7 @@ export class ObjectStackProtocolImplementation implements
         }>;
         failed: Array<{ type: string; name: string; error: string; code?: string }>;
         /** Aggregate result of materializing every published `seed` (absent when no seeds). */
-        seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[] };
+        seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[]; landed?: SeedAppliedLandedParsed[] };
         /**
          * ADR-0086 P2 — aggregate result of publish-time materializers across the
          * batch (e.g. `flow`). Absent when no published item had a registered
@@ -13085,6 +13206,10 @@ export class ObjectStackProtocolImplementation implements
      * (`VERSION_NOT_FOUND`) when the target version doesn't exist;
      * 409 (`VERSION_NOT_RESTORABLE`) when the target is a delete
      * tombstone (no body to bring back).
+     *
+     * [#29848, ADR-0146 D8 item 2] The door names no package: it restores
+     * into the row the by-name read naming no package serves, a `.custom`
+     * pair's declared override over a row bound to its read-only base.
      */
     async rollbackMetaItem(request: RollbackMetaItemRequest) {
         // [#28355] A refusal that carries no row of its own leaves its `denied` row here.

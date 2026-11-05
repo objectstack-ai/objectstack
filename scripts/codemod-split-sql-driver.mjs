@@ -150,12 +150,14 @@
 
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
+import { readSqlDriverSource } from './sql-driver-split-source.mjs';
 import { parseSourceFile } from './ts-parse.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -244,16 +246,15 @@ const HOSTS_CLASS = 'FacetHost';
  * top-level declaration of the name stays. Each row names the reader. A row
  * naming nothing the file declares stops the script (exit 2), so the table
  * cannot rot into names nobody reads.
+ *
+ * Empty since #30147: its two rows were `createColumn` and
+ * `createAuditTimestampColumn`, sliced by four `packages/cli` generate-* pins
+ * and `scripts/check-keyed-text-bounds.mjs`. Those readers now read `SqlDriver`
+ * through `scripts/sql-driver-split-source.mjs`, which follows each stub this
+ * script writes to the body it moved, so the two members move. The table stays
+ * for the next reader that takes the file's own text.
  */
 const PATH_READER_PINS = Object.freeze({
-  createColumn: 'packages/cli generate-{field-type-vocabulary,string-family-width,multiple-json-column} pins and '
-    + 'scripts/check-keyed-text-bounds.mjs slice `protected createColumn(` to its type switch',
-  createAuditTimestampColumn: 'packages/cli generate-builtin-id-column pin reads 600 characters after its signature',
-  // The durability catches that stay (the `this.runWideningAlters(` row
-  // below) are judged by following `this.logDurabilityFailure(…)` to its
-  // body in the same file; a one-call stub there is a call that gate cannot
-  // follow, so both catches read "swallowed, no log" (measured, #30105).
-  logDurabilityFailure: 'scripts/check-durability-degradation-log-level.mjs follows a catch\'s log helper to its body in the same file',
 });
 
 /**
@@ -264,24 +265,14 @@ const PATH_READER_PINS = Object.freeze({
  * A reader that also reads the leaf (`sql-driver-top-level.ts`) has its rows in
  * `CLASS_PATH_READER_NEEDLES` below instead: there a top-level declaration
  * carrying the text may move, and only a method carrying it stays.
+ *
+ * Empty since #30147: its ten rows were the literals the same readers
+ * required (the id and audit column builders, the media-id width, the keyed
+ * text arm, the JSON and file-reference arms). They read the joined source,
+ * leaf included, so `ensureShardTable`, `initObjects` and `varcharColumnChars`
+ * move, and so do the two top-level declarations that carried a row.
  */
 const PATH_READER_NEEDLES = Object.freeze({
-  "table.string('id').primary();": 'packages/cli generate-builtin-id-column and generate-field-type-vocabulary pins',
-  'table.timestamp(name).defaultTo(this.knex.fn.now());': 'packages/cli generate-builtin-id-column pin',
-  '...STRUCTURED_JSON_TYPES, ...MULTI_OPTION_TYPES,': 'packages/cli generate-field-type-vocabulary and generate-string-family-width pins',
-  'const MEDIA_ID_VARCHAR_CHARS = ': 'packages/cli generate-file-reference-width and generate-field-type-vocabulary pins',
-  'table.string(name, MEDIA_ID_VARCHAR_CHARS)': 'packages/cli generate-file-reference-width and generate-field-type-vocabulary pins',
-  'this.createColumn(table, name, field, keyedColumns.get(name));': 'packages/cli generate-string-family-width pin',
-  'const keyedColumns = indexedKeyColumns({': 'packages/cli generate-string-family-width pin',
-  'keyed ? this.keyableTextLength(field) : null': 'scripts/check-keyed-text-bounds.mjs EMITTER_ANCHOR and the generate-string-family-width pin',
-  'JSON_COLUMN_TYPES.has(type) ? this.jsonColumn(table, name) : table.string(name)': 'packages/cli generate-field-type-vocabulary and generate-string-family-width pins',
-  'if (FILE_REFERENCE_TYPES.has(type)) {': 'packages/cli generate-string-family-width pin',
-  // check-durability-degradation-log-level judges the `catch` around a
-  // durability call by following SAME-FILE helpers (its `functionBodies` is
-  // per source file): `this.logDurabilityFailure(…)` resolves only in
-  // sql-driver.ts, so a moved catch reads as "swallowed, no log" (measured:
-  // migrateMysqlDatetimeColumns / migrateMysqlTimeColumns red when moved).
-  'this.runWideningAlters(': 'scripts/check-durability-degradation-log-level.mjs resolves the catch\'s log helper in the same file',
 });
 
 /**
@@ -290,20 +281,15 @@ const PATH_READER_NEEDLES = Object.freeze({
  * class; a top-level declaration carrying one moves as any other, because the
  * reader reads the leaf it moves to. The same stale-needle refusal applies.
  *
- * All three rows are `sql-driver-compile-refusal-seam.test.ts`'s enumeration:
- * it parses `sql-driver.ts`, the leaf and three named seam modules, and asserts
- * the EXACT set of functions that call `unsupportedFilterError` /
- * `withheldFilterError` or write the `INVALID_FILTER` code, by enclosing name.
- * Its `sources` gained the leaf by ruling 6597555122 (#29520 round 3, the path
- * reader migrated in the same PR as #25521 ask 3 asks), so these rows left
- * `PATH_READER_NEEDLES`. A method still stays: its body would move to a section
- * module the test does not read, and `SqlDriver.resolveWithheldFilterRefusal`,
- * a name the test pins, would drop out of the set.
+ * Empty since #30147: its three rows were `sql-driver-compile-refusal-seam.test.ts`'s
+ * enumeration of the functions that call `unsupportedFilterError` /
+ * `withheldFilterError` or write the `INVALID_FILTER` code. That test now reads
+ * every `sql-driver-*.ts` module and names a facet's static `x` as
+ * `SqlDriver.x` (ruling 6597555122 item 3: the reader gains the new modules in
+ * the same PR), so `resolveWithheldFilterRefusal` moves. The table stays for
+ * the next reader of `sql-driver.ts` and the leaf only.
  */
 const CLASS_PATH_READER_NEEDLES = Object.freeze({
-  'unsupportedFilterError(': 'sql-driver-compile-refusal-seam.test.ts enumerates its callers (it reads the leaf, no section module)',
-  'withheldFilterError(': 'sql-driver-compile-refusal-seam.test.ts enumerates its callers (it reads the leaf, no section module)',
-  '.INVALID_FILTER': 'sql-driver-compile-refusal-seam.test.ts enumerates the INVALID_FILTER code writers (it reads the leaf, no section module)',
 });
 
 /**
@@ -318,6 +304,113 @@ const CLASS_PATH_READER_NEEDLES = Object.freeze({
  */
 const BOUND_HOST_METHODS = new Set(['getBuilder']);
 
+/**
+ * Fields a moved body may CALL (#30147). A body that calls a field reaches it
+ * through the host's getter, so the call's receiver becomes the host, not the
+ * driver (`field-call`). A field whose value never reads its receiver is
+ * called the same either way; each row names why. A row naming no field of
+ * the class stops the script (exit 2).
+ */
+const RECEIVER_FREE_FIELDS = Object.freeze({
+  knex: 'a Knex instance is the `function knex(tableName, options)` closure `makeKnex` returns, which reads `knex.context` and never `this`',
+});
+
+/**
+ * Non-private methods whose return type the base leaves inferred, each with
+ * the type the base's declaration output prints for it (`dist/index.d.ts` of
+ * `@objectstack/driver-sql` built from the base, copied, never read off the
+ * source by hand) (#30147). The stub on the class carries it written out
+ * after its parameter list, so the published declaration does not re-infer
+ * the type through the facet; the facet member keeps the base text, return
+ * type absent. The public-surface `.d.ts` reading of the PR proves each one
+ * prints as it did. A row naming no method, or a method the base already
+ * annotates, stops the script (exit 2).
+ */
+const EXPLICIT_RETURN_TYPES = Object.freeze({
+  applyFilterCondition: 'void',
+  applyFilters: 'void',
+  createColumn: 'void',
+  createDatabase: 'Promise<void>',
+  ensureDatabaseExists: 'Promise<void>',
+  getBuilder: 'knex.Knex.QueryBuilder<any, { _base: any; _hasSelection: false; _keys: never; _aliases: {}; _single: false; _intersectProps: {}; _unionProps: never }[]>',
+});
+
+/**
+ * Get accessors whose bodies move like methods (#30147): the getter stays on
+ * the class with its signature, its body becomes the one-call stub, and the
+ * facet member of the same name is the body. Only getters whose bodies the
+ * facade gate reads as logic are named; a getter that reads one member or
+ * forwards one call is a delegation as it stands. A row naming no get
+ * accessor of the class stops the script (exit 2).
+ */
+const MOVED_ACCESSORS = Object.freeze({
+  dateGranularityCapabilities: 'branches on the dialect',
+  dialectName: 'branches on the dialect',
+  insertReturnsStoredRows: 'an operator over two dialect probes',
+  supportsWalJournal: 'a literal answer a subclass overrides',
+});
+
+/**
+ * Instance fields whose initializer moves (#30147): the field stays on the
+ * class with its declared type, and its initializer becomes one call of the
+ * facet member of the same name, a function whose body returns the base
+ * initializer's text exactly, typed as the field (`SqlDriver['x']`). An
+ * instance initializer runs at construction, after every module has been
+ * evaluated, so the call never meets a facet in its temporal dead zone; a
+ * STATIC initializer runs while the class itself is evaluated, so none is
+ * named here. The initializer must read no `this`. A row naming no such field
+ * stops the script (exit 2).
+ */
+const MOVED_FIELD_DEFAULTS = Object.freeze({
+  logger: 'the default sink: arrow functions over `console`',
+});
+
+/**
+ * A parameter default the facade gate reads as data (`'x'`, `-1`, `CONST.X`,
+ * `{}`, `[]`, `{ a: 1 }`), the gate's own rule: anything else computes. A
+ * stub whose parameter computes its default is written with the parameter
+ * optional instead (`nowMs?: number`), and the default stays where the body
+ * is, so the value the body sees is the one it saw (#30147).
+ */
+function isDataDefault(tm, e) {
+  const { Node, SyntaxKind } = tm;
+  while (Node.isParenthesizedExpression(e) || Node.isAsExpression(e) || Node.isNonNullExpression(e) || Node.isSatisfiesExpression?.(e)) e = e.getExpression();
+  const k = e.getKind();
+  if ([SyntaxKind.StringLiteral, SyntaxKind.NumericLiteral, SyntaxKind.NoSubstitutionTemplateLiteral, SyntaxKind.TrueKeyword,
+    SyntaxKind.FalseKeyword, SyntaxKind.NullKeyword, SyntaxKind.BigIntLiteral].includes(k)) return true;
+  if (Node.isPrefixUnaryExpression(e)) return Node.isNumericLiteral(e.getOperand());
+  if (Node.isIdentifier(e)) return true;
+  if (Node.isPropertyAccessExpression(e)) {
+    let x = e;
+    while (Node.isPropertyAccessExpression(x)) x = x.getExpression();
+    return Node.isIdentifier(x) || x.getKind() === SyntaxKind.ThisKeyword;
+  }
+  if (Node.isArrayLiteralExpression(e)) return e.getElements().every((x) => isDataDefault(tm, x));
+  if (Node.isObjectLiteralExpression(e)) {
+    return e.getProperties().every((p) => (Node.isPropertyAssignment(p) && !Node.isComputedPropertyName(p.getNameNode()) && isDataDefault(tm, p.getInitializerOrThrow()))
+      || (Node.isShorthandPropertyAssignment(p) && !p.getObjectAssignmentInitializer()));
+  }
+  return false;
+}
+
+/**
+ * The parameters of a stub that the stub writes optional (#30147): each
+ * parameter whose default computes, carries a type annotation, and is
+ * followed only by optional or defaulted parameters. Returns
+ * `[{ param, text }]`, `text` being what the stub writes in its place.
+ */
+function optionalizedParams(tm, m) {
+  const params = m.getParameters();
+  const out = [];
+  params.forEach((p, i) => {
+    const init = p.getInitializer();
+    if (!init || isDataDefault(tm, init) || !p.getTypeNode() || p.isRestParameter()) return;
+    if (!params.slice(i + 1).every((q) => q.hasQuestionToken() || q.getInitializer() || q.isRestParameter())) return;
+    out.push({ param: p, text: `${p.getName()}?: ${p.getTypeNode().getText()}` });
+  });
+  return out;
+}
+
 /** Every reason a method stays, with the one-line why the plan prints. */
 const STAY_REASONS = Object.freeze({
   'no-section': 'declared above the first section banner, and the class head maps to no module',
@@ -331,7 +424,6 @@ const STAY_REASONS = Object.freeze({
   'not-identifier-name': 'a computed, string or #private name',
   'inferred-return-type': 'a non-private method whose return type is inferred (the .d.ts would infer it through the module)',
   'parameter-shape': 'a destructured or `this` parameter (the stub cannot forward it unchanged)',
-  'comment-in-parameters': 'a comment inside its parameter list (one-line parameters would drop it)',
   'path-reader': 'a reader takes its text out of sql-driver.ts by path (PATH_READER_PINS / PATH_READER_NEEDLES / CLASS_PATH_READER_NEEDLES)',
   'arguments': 'its body reads `arguments`',
   'super': 'its body reads `super`',
@@ -599,18 +691,19 @@ function readMethod(tm, ctx, m) {
   const routeBlockers = [];
   let readsNonPublicStatic = false;
   let classOther = false;
-  const result = () => ({ reasons, host, writes, imports, moduleRefs, classStatics, routeBlockers, readsNonPublicStatic, classOther });
+  let rawParams = null;
+  const result = () => ({ reasons, host, writes, imports, moduleRefs, classStatics, routeBlockers, readsNonPublicStatic, classOther, rawParams });
 
   if (m.isStatic() && ctx.members.has(m.getName())) add('static-name-shared');
   if (!m.getBody()) add('no-body');
   if (m.isAbstract && m.isAbstract()) add('no-body');
-  if (m.isGenerator()) add('generator');
-  if (m.getOverloads().length > 0) add('overloaded');
+  if (typeof m.isGenerator === 'function' && m.isGenerator()) add('generator');
+  if (typeof m.getOverloads === 'function' && m.getOverloads().length > 0) add('overloaded');
   if (m.getDecorators().length > 0) add('decorated');
   const nameNode = m.getNameNode();
   if (!Node.isIdentifier(nameNode)) { add('not-identifier-name'); return result(); }
   const name = nameNode.getText();
-  if (!m.getReturnTypeNode() && m.getScope() !== 'private') add('inferred-return-type');
+  if (!m.getReturnTypeNode() && m.getScope() !== 'private' && !Object.hasOwn(ctx.returnTypes, name)) add('inferred-return-type');
   for (const p of m.getParameters()) {
     // A defaulted identifier forwards as it is: the stub keeps the default and
     // hands the body the value it produced.
@@ -619,22 +712,18 @@ function readMethod(tm, ctx, m) {
   const body = m.getBody();
   if (!body) return result();
 
-  // A comment between the parentheses that no parameter's own text carries.
+  // A comment between the parentheses that no parameter's own text carries:
+  // the facet member then takes the base's parameter list verbatim, comments
+  // and line breaks included (#30147), instead of one parameter after another.
   const params = m.getParameters();
-  const open = m.getFirstChildByKindOrThrow(SyntaxKind.OpenParenToken);
-  const close = m.getFirstChildByKindOrThrow(SyntaxKind.CloseParenToken);
-  let between = ctx.text.slice(open.getEnd(), close.getStart());
-  for (const p of [...params].reverse()) {
-    between = between.slice(0, p.getStart() - open.getEnd()) + between.slice(p.getEnd() - open.getEnd());
-  }
-  if (/\/\/|\/\*/.test(between)) add('comment-in-parameters');
+  rawParams = commentInParameters(tm, m) ? parameterListText(tm, m) : null;
 
   const methodText = m.getText();
   for (const needle of Object.keys(ctx.needles)) if (methodText.includes(needle)) add('path-reader', JSON.stringify(needle));
   for (const needle of Object.keys(ctx.classNeedles)) if (methodText.includes(needle)) add('path-reader', JSON.stringify(needle));
   if (Object.prototype.hasOwnProperty.call(ctx.pins, name)) add('path-reader', name);
 
-  const regions = [...m.getTypeParameters(), ...params, m.getReturnTypeNode(), body].filter(Boolean);
+  const regions = [...typeParamsOf(m), ...params, m.getReturnTypeNode(), body].filter(Boolean);
   const checker = ctx.sf.getProject().getTypeChecker().compilerObject;
   for (const region of regions) {
     const nodes = [region, ...region.getDescendants()];
@@ -668,7 +757,7 @@ function readMethod(tm, ctx, m) {
         } else if (info.kind === 'setter') {
           add('this-write', member);
         } else {
-          if (called) add('field-call', member);
+          if (called && !Object.hasOwn(ctx.receiverFree, member)) add('field-call', member);
           host.set(member, 'getter');
         }
         continue;
@@ -783,6 +872,9 @@ const CLASS_TYPE_ALIAS = `${CLASS_NAME}Class`;
 
 /** The placeholder above a moved public or protected body: its docblock stays on the class. */
 const placeholderDoc = (name) => `/** The body of \`${CLASS_NAME}#${name}\`; the method's docblock there is its contract. */`;
+const fieldDefaultDoc = (name) => `/** The initializer of \`${CLASS_NAME}#${name}\`; the field's declaration there is its contract. */`;
+/** A member's type parameters; an accessor has none. */
+const typeParamsOf = (m) => (typeof m.getTypeParameters === 'function' ? m.getTypeParameters() : []);
 
 /**
  * The statics block `sql-driver.ts` carries for the routed facets: the type and
@@ -1044,7 +1136,11 @@ function hostUsesOfMovers(tm, ctx, top, methodRecords) {
   const checker = ctx.sf.getProject().getTypeChecker().compilerObject;
   const skip = [];
   for (const r of top.movers) skip.push([r.node.getFullStart(), r.node.getEnd()]);
-  for (const r of methodRecords) if (r.reasons.length === 0) skip.push([r.node.getBody().getStart(), r.node.getBody().getEnd()]);
+  for (const r of methodRecords) {
+    if (r.reasons.length > 0) continue;
+    const moved = r.kind === 'field-default' ? r.node.getInitializer() : r.node.getBody();
+    skip.push([moved.getStart(), moved.getEnd()]);
+  }
   const uses = new Map();
   for (const node of ctx.sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
     const at = node.getStart();
@@ -1070,6 +1166,7 @@ function hostUsesOfMovers(tm, ctx, top, methodRecords) {
  */
 function plan(tm, text, {
   sections = SECTION_MODULES, head = CLASS_HEAD_SECTION, pins = PATH_READER_PINS, needles = PATH_READER_NEEDLES, classNeedles = CLASS_PATH_READER_NEEDLES,
+  receiverFree = RECEIVER_FREE_FIELDS, returnTypes = EXPLICIT_RETURN_TYPES, accessors = MOVED_ACCESSORS, fieldDefaults = MOVED_FIELD_DEFAULTS,
 } = {}) {
   const sf = parse(tm, HOST_PATH, text);
   const cls = sf.getClass(CLASS_NAME);
@@ -1090,7 +1187,7 @@ function plan(tm, text, {
       });
     }
   }
-  const ctx = { text, sf, cls, members: instanceMembers(tm, cls), scope: moduleScope(tm, sf), statics, pins, needles, classNeedles };
+  const ctx = { text, sf, cls, members: instanceMembers(tm, cls), scope: moduleScope(tm, sf), statics, pins, needles, classNeedles, receiverFree, returnTypes };
   for (const n of [STATICS_NAME, STATICS_HOST_NAME, ...[...Object.values(sections), head && head[1]].filter(Boolean).map((file) => facetNameOf(file))]) {
     if (ctx.scope.bindings.has(n)) refuse(`${HOST_BASENAME} already binds ${n}, a name this script generates`);
   }
@@ -1101,6 +1198,30 @@ function plan(tm, text, {
   if (staleNeedles.length > 0) refuse(`PATH_READER_NEEDLES names text ${HOST_BASENAME} no longer carries: ${staleNeedles.map((n) => JSON.stringify(n)).join(', ')}`);
   const staleClassNeedles = Object.keys(classNeedles).filter((n) => !text.includes(n));
   if (staleClassNeedles.length > 0) refuse(`CLASS_PATH_READER_NEEDLES names text ${HOST_BASENAME} no longer carries: ${staleClassNeedles.map((n) => JSON.stringify(n)).join(', ')}`);
+
+  // The #30147 tables: every row names what the class declares, as it says.
+  for (const n of Object.keys(receiverFree)) {
+    if (ctx.members.get(n)?.kind !== 'field') refuse(`RECEIVER_FREE_FIELDS names ${n}, which is no instance field of ${CLASS_NAME}`);
+  }
+  for (const n of Object.keys(returnTypes)) {
+    const ms = cls.getMethods().filter((m) => m.getName() === n && !m.isStatic());
+    if (ms.length !== 1) refuse(`EXPLICIT_RETURN_TYPES names ${n}, which is not one instance method of ${CLASS_NAME}`);
+    if (ms[0].getReturnTypeNode()) refuse(`EXPLICIT_RETURN_TYPES names ${n}, whose return type the base already writes`);
+  }
+  const getters = new Map();
+  for (const n of Object.keys(accessors)) {
+    const gs = cls.getGetAccessors().filter((g) => g.getName() === n && !g.isStatic());
+    if (gs.length !== 1) refuse(`MOVED_ACCESSORS names ${n}, which is not one instance get accessor of ${CLASS_NAME}`);
+    getters.set(n, gs[0]);
+  }
+  const defaultFields = new Map();
+  for (const n of Object.keys(fieldDefaults)) {
+    const fs = cls.getProperties().filter((f) => f.getName() === n && !f.isStatic());
+    if (fs.length !== 1 || !fs[0].getInitializer() || !fs[0].getTypeNode()) {
+      refuse(`MOVED_FIELD_DEFAULTS names ${n}, which is not one typed instance field of ${CLASS_NAME} with an initializer`);
+    }
+    defaultFields.set(n, fs[0]);
+  }
 
   const top = planTopLevel(tm, ctx);
 
@@ -1130,8 +1251,56 @@ function plan(tm, text, {
       }
     }
     if (record.reasons.length === 0) record.stubLines = stubBody(record, record.module, '  ').split('\n').length;
+    record.kind = 'method';
+    record.optionalized = optionalizedParams(tm, m);
     records.push(record);
   }
+  // The get accessors MOVED_ACCESSORS names move as methods do (#30147).
+  for (const g of getters.values()) {
+    const section = sectionOf(g);
+    const read = readMethod(tm, ctx, g);
+    if (!section) read.reasons.unshift('no-section');
+    else if (section[1] === null) read.reasons.unshift('section-kept');
+    if (!g.getReturnTypeNode()) read.reasons.push('inferred-return-type');
+    const startLine = g.getStartLineNumber(true);
+    const body = g.getBody();
+    const record = {
+      name: g.getName(), node: g, section: section ? section[0] : null, module: section ? section[1] : null, startLine,
+      lineCount: g.getEndLineNumber() - startLine + 1, bodyLines: body.getEndLineNumber() - body.getStartLineNumber() + 1,
+      doc: null, docLines: 0, ...read, kind: 'accessor', optionalized: [],
+    };
+    if (record.reasons.length === 0) record.stubLines = stubBody(record, record.module, '  ').split('\n').length;
+    records.push(record);
+  }
+  // The field initializers MOVED_FIELD_DEFAULTS names (#30147): one that
+  // reads `this`, or a name of this file (an import or a top-level binding),
+  // is refused, since the facet member would carry it unedited.
+  for (const f of defaultFields.values()) {
+    const section = sectionOf(f);
+    const init = f.getInitializer();
+    const checker = sf.getProject().getTypeChecker().compilerObject;
+    for (const node of [init, ...init.getDescendants()]) {
+      if (node.getKind() === tm.SyntaxKind.ThisKeyword) refuse(`MOVED_FIELD_DEFAULTS: the initializer of ${f.getName()} reads \`this\``);
+      if (node.getKind() !== tm.SyntaxKind.Identifier) continue;
+      const symbol = checker.getSymbolAtLocation(node.compilerNode);
+      for (const decl of symbol?.declarations ?? []) {
+        if (decl.getSourceFile() !== sf.compilerNode) continue;
+        if (decl.getStart() >= init.getStart() && decl.getEnd() <= init.getEnd()) continue;
+        refuse(`MOVED_FIELD_DEFAULTS: the initializer of ${f.getName()} reads ${node.getText()}, a name of ${HOST_BASENAME}`);
+      }
+    }
+    const reasons = !section ? ['no-section'] : section[1] === null ? ['section-kept'] : [];
+    const startLine = f.getStartLineNumber(true);
+    records.push({
+      name: f.getName(), node: f, section: section ? section[0] : null, module: section ? section[1] : null, startLine,
+      lineCount: f.getEndLineNumber() - startLine + 1, bodyLines: init.getEndLineNumber() - init.getStartLineNumber() + 1,
+      doc: null, docLines: 0, reasons, host: new Map(), writes: new Set(), imports: new Map(), moduleRefs: new Map(),
+      classStatics: new Map(), routeBlockers: [], readsNonPublicStatic: false, classOther: false, rawParams: null,
+      kind: 'field-default', optionalized: [], stubLines: 1,
+    });
+  }
+  // Facet member order is the class's: methods, accessors and fields by position.
+  records.sort((a, b) => a.node.getStart() - b.node.getStart());
 
   // The private-static-through-host rule, per facet module: once one mover
   // reads the statics through `SqlDriverStatics` (imported AS `SqlDriver`),
@@ -1305,6 +1474,37 @@ function paramsText(m) {
   return m.getParameters().map((p) => p.getText());
 }
 
+/** The text between a member's parentheses, exactly. */
+function parameterListText(tm, m) {
+  const { SyntaxKind } = tm;
+  const open = m.getFirstChildByKindOrThrow(SyntaxKind.OpenParenToken);
+  const close = m.getFirstChildByKindOrThrow(SyntaxKind.CloseParenToken);
+  return m.getSourceFile().getFullText().slice(open.getEnd(), close.getStart());
+}
+
+/** Whether a comment stands between a member's parentheses that no parameter's own text carries. */
+function commentInParameters(tm, m) {
+  const { SyntaxKind } = tm;
+  const open = m.getFirstChildByKindOrThrow(SyntaxKind.OpenParenToken);
+  let between = parameterListText(tm, m);
+  for (const p of [...m.getParameters()].reverse()) {
+    between = between.slice(0, p.getStart() - open.getEnd()) + between.slice(p.getEnd() - open.getEnd());
+  }
+  return /\/\/|\/\*/.test(between);
+}
+
+/**
+ * A facet member's parameter list: its host parameter (when it has one),
+ * then the base's parameters. One after another, unless a comment stands
+ * between the base's parentheses: then the base's list verbatim, so the
+ * comment moves with it (#30147).
+ */
+function facetParamsText(thisParam, m, raw) {
+  if (raw === null) return [...(thisParam ? [thisParam] : []), ...paramsText(m)].join(', ');
+  if (!thisParam) return raw;
+  return `${thisParam},${/^\s/.test(raw) ? '' : ' '}${raw}`;
+}
+
 function forwardList(m) {
   return m.getParameters().map((p) => (p.isRestParameter() ? `...${p.getName()}` : p.getName()));
 }
@@ -1372,7 +1572,7 @@ function moduleText(moduleFile, title, movers, scope, leafNames, routed = false)
   }
   out.push(' */');
   out.push('');
-  out.push(...importLines(scope, movers, { needsHost, moduleRefs, leafNames, routed }));
+  out.push(...importLines(scope, movers, { needsHost: needsHost || movers.some((r) => r.kind === 'field-default'), moduleRefs, leafNames, routed }));
   if (needsHost) {
     out.push('');
     out.push('/**');
@@ -1395,11 +1595,17 @@ function moduleText(moduleFile, title, movers, scope, leafNames, routed = false)
   movers.forEach((r, i) => {
     const m = r.node;
     const picks = [...r.host.keys()].sort().map((k) => `'${k}'`).join(' | ');
-    const params = [...(r.host.size > 0 ? [`this: Pick<${hostName}, ${picks}>`] : []), ...paramsText(m)];
-    const ret = m.getReturnTypeNode() ? `: ${m.getReturnTypeNode().getText()}` : '';
     if (i > 0) out.push('');
-    const typeParams = m.getTypeParameters().length > 0 ? `<${m.getTypeParameters().map((t) => t.getText()).join(', ')}>` : '';
-    out.push(`  ${r.doc ?? `${placeholderDoc(r.name)}\n  `}static ${m.isAsync() ? 'async ' : ''}${r.name}${typeParams}(${params.join(', ')})${ret} ${m.getBody().getText()}`);
+    if (r.kind === 'field-default') {
+      // The field's initializer, returned exactly, typed as the field.
+      out.push(`  ${fieldDefaultDoc(r.name)}\n  static ${r.name}(): ${classType}['${r.name}'] {\n    return ${m.getInitializer().getText()};\n  }`);
+      return;
+    }
+    const thisParam = r.host.size > 0 ? `this: Pick<${hostName}, ${picks}>` : null;
+    const ret = m.getReturnTypeNode() ? `: ${m.getReturnTypeNode().getText()}` : '';
+    const typeParams = typeParamsOf(m).length > 0 ? `<${typeParamsOf(m).map((t) => t.getText()).join(', ')}>` : '';
+    const isAsync = typeof m.isAsync === 'function' && m.isAsync();
+    out.push(`  ${r.doc ?? `${placeholderDoc(r.name)}\n  `}static ${isAsync ? 'async ' : ''}${r.name}${typeParams}(${facetParamsText(thisParam, m, r.rawParams)})${ret} ${m.getBody().getText()}`);
   });
   out.push('}');
   out.push('');
@@ -1443,6 +1649,9 @@ function leafText(scope, top, leafExports) {
 
 const DOC_MOVED = 'its docblock with it';
 
+/** A moved field initializer's replacement: one call of its facet member. */
+const fieldDefaultCall = (moduleFile, name) => `${facetNameOf(moduleFile)}.${name}()`;
+
 /**
  * A stub's body: the marker line, then ONE call of the facet member of the
  * same name. A body that reads the class is called with its facet's host, the
@@ -1455,7 +1664,7 @@ function stubBody({ node, name, usesHost, docMoved }, moduleFile, closeIndent) {
   const hostName = hostNameOf(moduleFile);
   // A generic method calls its body INSTANTIATED with its own type
   // parameters (`Function#call` alone would erase them).
-  const typeArgs = node.getTypeParameters().map((t) => t.getName());
+  const typeArgs = typeParamsOf(node).map((t) => t.getName());
   const fn = typeArgs.length > 0 ? `(${facetNameOf(moduleFile)}.${name}<${typeArgs.join(', ')}>)` : `${facetNameOf(moduleFile)}.${name}`;
   const out = ['{'];
   const args = forwardList(node).join(', ');
@@ -1517,6 +1726,12 @@ function generate(tm, text, planned) {
       `${anyHost ? ` what they read (\`${hostName}\`)` : ' their arguments'}.`);
     importBlock.push(`\nimport { ${facetNameOf(moduleFile)} } from './${moduleFile.replace(/\.ts$/, '.js')}';`);
     for (const r of movers) {
+      if (r.kind === 'field-default') {
+        // The initializer becomes one call of the facet member that returns it.
+        const init = r.node.getInitializer();
+        edits.push({ start: init.getStart(), end: init.getEnd(), text: fieldDefaultCall(moduleFile, r.name) });
+        continue;
+      }
       const body = r.node.getBody();
       const lineStart = text.lastIndexOf('\n', body.getEnd() - 1) + 1;
       const closeIndent = text.slice(lineStart, body.getEnd() - 1);
@@ -1529,7 +1744,20 @@ function generate(tm, text, planned) {
       const asyncKw = r.node.getModifiers().find((x) => x.getKind() === tm.SyntaxKind.AsyncKeyword);
       if (asyncKw) edits.push({ start: asyncKw.getStart(), end: r.node.getNameNode().getStart(), text: '' });
       if (r.doc) edits.push({ start: r.node.getStart(true), end: r.node.getStart(), text: '' });
+      // An inferred return type the base's declaration output prints, written out (#30147).
+      if (r.kind === 'method' && !r.node.getReturnTypeNode() && Object.hasOwn(ctx.returnTypes, r.name)) {
+        const close = r.node.getFirstChildByKindOrThrow(tm.SyntaxKind.CloseParenToken);
+        edits.push({ start: close.getEnd(), end: close.getEnd(), text: `: ${ctx.returnTypes[r.name]}` });
+      }
+      for (const o of r.optionalized) edits.push({ start: o.param.getStart(), end: o.param.getEnd(), text: o.text });
     }
+  }
+  // A hand-series stub (its body already a seam call) whose parameter
+  // computes its default takes the same optional spelling; the seam function
+  // keeps the default (`verify` reads it there) (#30147).
+  for (const r of planned.records) {
+    if (r.kind !== 'method' || r.reasons.length === 0 || !r.reasons.every((x) => x.startsWith('already-moved'))) continue;
+    for (const o of r.optionalized) edits.push({ start: o.param.getStart(), end: o.param.getEnd(), text: o.text });
   }
   // After the class's last member: the static block that fills the statics
   // forwarders, then the one that installs the facet hosts (one edit, so the
@@ -1606,7 +1834,7 @@ const sha256 = (text) => createHash('sha256').update(text).digest('hex');
  *
  * Returns `{ failures, moved, movedTop, linesBefore, linesAfter, routedStatics }`; no failure = proved.
  */
-function verify(tm, baseText, headText, moduleTexts, { readSibling = null } = {}) {
+function verify(tm, baseText, headText, moduleTexts, { readSibling = null, returnTypes = EXPLICIT_RETURN_TYPES } = {}) {
   const { Node } = tm;
   const failures = [];
   const moved = [];
@@ -1693,11 +1921,20 @@ function verify(tm, baseText, headText, moduleTexts, { readSibling = null } = {}
 
   const marker = new RegExp(`^\\{\\s*// ${MARK.replace(/[[\]]/g, '\\$&')} The body moved to \`(sql-driver-[a-z0-9-]+\\.ts)\`(, ${DOC_MOVED})?`);
   const edits = [];
-  for (const m of headCls.getMethods()) {
+  // A base member of the head member's kind and name: a method, or a get accessor (#30147).
+  const baseOf = (m) => (Node.isGetAccessorDeclaration(m) ? baseCls.getGetAccessors() : baseCls.getMethods())
+    .find((x) => x.getName() === m.getName() && x.isStatic() === m.isStatic());
+  for (const m of [...headCls.getMethods(), ...headCls.getGetAccessors()]) {
     const body = m.getBody();
     if (!body) continue;
     const hit = marker.exec(body.getText());
-    if (!hit) continue;
+    if (!hit) {
+      // A stub that is not generated (a hand-series one) may still write a
+      // parameter optional whose default computes; the seam keeps the default.
+      const base = baseOf(m);
+      if (base && Node.isMethodDeclaration(m)) undoOptionalized(m, base, null);
+      continue;
+    }
     const name = m.getName();
     const mod = modules.get(hit[1]);
     const fn = mod && mod.fns.get(name);
@@ -1713,16 +1950,23 @@ function verify(tm, baseText, headText, moduleTexts, { readSibling = null } = {}
       const want = stubBody({ node: m, name, usesHost, docMoved: Boolean(hit[2]) }, hit[1], closeIndent);
       if (body.getText() !== want) failures.push(`${name}: its stub is not the generated one-call stub (want ${JSON.stringify(want.split('\n').at(-2).trim())})`);
     }
-    const base = baseCls.getMethods().find((x) => x.getName() === name && x.isStatic() === m.isStatic());
+    const base = baseOf(m);
     if (!base || !base.getBody()) { failures.push(`${name}: no method of that name with a body at base`); continue; }
     const fnParams = fn.getParameters().filter((p) => p.getName() !== 'this').map((p) => p.getText());
     const baseParams = base.getParameters().map((p) => p.getText());
+    // With a comment between the base's parentheses, the facet member carries
+    // the base's list verbatim after its host parameter (#30147).
+    const rawSame = !commentInParameters(tm, base) || (() => {
+      const thisParam = fn.getParameters().find((p) => p.getName() === 'this');
+      return facetParamsText(thisParam ? thisParam.getText() : null, base, parameterListText(tm, base)) === parameterListText(tm, fn);
+    })();
+    const asyncOf = (x) => typeof x.isAsync === 'function' && x.isAsync();
     const same = {
       body: fn.getBody().getText() === base.getBody().getText(),
-      params: JSON.stringify(fnParams) === JSON.stringify(baseParams),
+      params: JSON.stringify(fnParams) === JSON.stringify(baseParams) && rawSame,
       returnType: (fn.getReturnTypeNode()?.getText() ?? null) === (base.getReturnTypeNode()?.getText() ?? null),
-      async: fn.isAsync() === base.isAsync(),
-      typeParameters: JSON.stringify(fn.getTypeParameters().map((t) => t.getText())) === JSON.stringify(base.getTypeParameters().map((t) => t.getText())),
+      async: asyncOf(fn) === asyncOf(base),
+      typeParameters: JSON.stringify(typeParamsOf(fn).map((t) => t.getText())) === JSON.stringify(typeParamsOf(base).map((t) => t.getText())),
       static: m.isStatic() === base.isStatic(),
     };
     // Docblock ownership: the facet member's leading text is the base
@@ -1743,7 +1987,83 @@ function verify(tm, baseText, headText, moduleTexts, { readSibling = null } = {}
       lines: base.getBody().getEndLineNumber() - base.getBody().getStartLineNumber() + 1, text: fn.getText(), docMoved, ...same,
     });
     edits.push({ start: body.getStart(), end: body.getEnd(), text: fn.getBody().getText() });
-    if (fn.isAsync()) edits.push({ start: m.getNameNode().getStart(), end: m.getNameNode().getStart(), text: 'async ' });
+    if (asyncOf(fn)) edits.push({ start: m.getNameNode().getStart(), end: m.getNameNode().getStart(), text: 'async ' });
+    // A return type the stub writes and the base leaves inferred: only the
+    // one EXPLICIT_RETURN_TYPES names, undone by deleting it (#30147).
+    if (Node.isMethodDeclaration(m) && m.getReturnTypeNode() && !base.getReturnTypeNode()) {
+      if (returnTypes[name] !== m.getReturnTypeNode().getText()) failures.push(`${name}: its stub writes a return type the base leaves inferred and EXPLICIT_RETURN_TYPES does not name`);
+      const close = m.getFirstChildByKindOrThrow(tm.SyntaxKind.CloseParenToken);
+      edits.push({ start: close.getEnd(), end: m.getReturnTypeNode().getEnd(), text: '' });
+    }
+    if (Node.isMethodDeclaration(m)) undoOptionalized(m, base, fn);
+  }
+
+  // A parameter a stub writes optional (`x?: T`) where the base computes its
+  // default (`x: T = f()`): exactly that spelling, of a computed default, and
+  // the default kept where the body is: in the facet member (`fn`) or, for a
+  // hand-series stub, in the seam function its import names. The undo puts the
+  // callee's parameter text back (#30147).
+  function undoOptionalized(m, base, fn) {
+    const hp = m.getParameters();
+    const bp = base.getParameters();
+    if (hp.length !== bp.length) return;
+    let seam;
+    hp.forEach((p, i) => {
+      const b = bp[i];
+      if (p.getText() === b.getText()) return;
+      const init = b.getInitializer();
+      if (!init || isDataDefault(tm, init) || !b.getTypeNode() || p.getInitializer() || !p.hasQuestionToken()
+        || p.getText() !== `${b.getName()}?: ${b.getTypeNode().getText()}`) return;
+      let callee = null;
+      if (fn) {
+        callee = fn.getParameters().filter((x) => x.getName() !== 'this')[i] ?? null;
+      } else {
+        if (seam === undefined) {
+          seam = null;
+          const binding = headSf.getImportDeclarations().flatMap((d) => d.getNamedImports().map((s) => [d, s]))
+            .find(([, s]) => (s.getAliasNode()?.getText() ?? s.getName()) === m.getName());
+          const spec = binding ? binding[0].getModuleSpecifierValue() : null;
+          const src = spec && SEAM_SPECIFIER.test(spec) && readSibling ? readSibling(spec.replace(/^\.\//, '').replace(/\.js$/, '.ts')) : null;
+          const fnDecl = src ? parse(tm, join(SRC_DIR, spec.replace(/\.js$/, '.ts')), src).getFunction(binding[0].getNamedImports().find((s) => (s.getAliasNode()?.getText() ?? s.getName()) === m.getName()).getName()) : null;
+          seam = fnDecl ? fnDecl.getParameters().filter((x) => x.getName() !== 'this') : null;
+          if (!seam) failures.push(`${m.getName()}: its stub writes a parameter optional, and the seam function that keeps the default cannot be read`);
+        }
+        callee = seam ? seam[i] ?? null : null;
+      }
+      if (!callee) return;
+      if (callee.getText() !== b.getText()) { failures.push(`${m.getName()}: parameter ${b.getName()} is optional on the stub, but its callee does not keep the base default`); return; }
+      edits.push({ start: p.getStart(), end: p.getEnd(), text: callee.getText() });
+    });
+  }
+
+  // A field whose initializer moved (#30147): the head initializer is one call
+  // of the facet member of the field's name, and that member returns the
+  // initializer exactly, typed as the field. The undo puts the text back.
+  for (const f of headCls.getProperties()) {
+    const init = f.getInitializer();
+    const hit = init ? /^([A-Z]\w*Facet)\.(\w+)\(\)$/.exec(init.getText()) : null;
+    if (!hit || hit[2] !== f.getName() || f.isStatic()) continue;
+    const name = f.getName();
+    const entry = [...modules].find(([file]) => facetNameOf(file) === hit[1]);
+    const fn = entry && entry[1].fns.get(name);
+    if (!fn) { failures.push(`${name}: its initializer calls ${hit[1]}.${name}, which no facet module declares`); continue; }
+    const [file, mod] = entry;
+    mod.claimed.add(name);
+    const lead = mod.text.slice(fn.getStart(true), fn.getStart());
+    const bodyText = fn.getBody().getText();
+    const want = /^\{\n {4}return ([\s\S]*);\n {2}\}$/.exec(bodyText);
+    const retType = fn.getReturnTypeNode()?.getText() ?? null;
+    const typeOk = retType === `${CLASS_NAME}['${name}']` || retType === `${CLASS_TYPE_ALIAS}['${name}']`;
+    const baseField = baseCls.getProperties().find((x) => x.getName() === name && !x.isStatic());
+    const ok = Boolean(want) && typeOk && fn.getParameters().length === 0 && !fn.isAsync() && lead === `${fieldDefaultDoc(name)}\n  `
+      && init.getText() === fieldDefaultCall(file, name) && baseField && baseField.getInitializer();
+    if (!ok) { failures.push(`${name}: its moved initializer is not the generated one (a returning member typed as the field, called with no arguments)`); continue; }
+    const same = want[1] === baseField.getInitializer().getText();
+    if (!same) failures.push(`${name}: the facet member does not return the base initializer exactly`);
+    moved.push({ name, module: file, bodySha: sha256(want[1]), baseBodySha: sha256(baseField.getInitializer().getText()),
+      lines: baseField.getInitializer().getEndLineNumber() - baseField.getInitializer().getStartLineNumber() + 1, text: fn.getText(),
+      docMoved: false, body: same, params: true, returnType: true, async: true, typeParameters: true, static: true });
+    edits.push({ start: init.getStart(), end: init.getEnd(), text: want[1] });
   }
 
   // The statics route: the forwarder type and object ahead of the class and
@@ -2068,16 +2388,19 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'top-level moves': 11,
   'byte-identity proof': 10,
   'refusals': 6,
+  'codemod-limit retirements (#30147)': 31,
+  'split readers (#30147)': 8,
 });
-const SELF_TEST_BATTERY_FLOOR = 5;
+const SELF_TEST_BATTERY_FLOOR = 7;
 
 const FIXTURE_SECTIONS = Object.freeze({ 'Lifecycle': 'sql-driver-lifecycle.ts', 'Kept': null });
 const FIXTURE_HEAD = Object.freeze(['Head', 'sql-driver-head.ts']);
 const FIXTURE_NEEDLES = Object.freeze({ 'PINNED_TEXT': 'a fixture reader', 'needleInMethod(': 'a fixture reader' });
 const FIXTURE_CLASS_NEEDLES = Object.freeze({ 'classReaderText(': 'a fixture reader that also reads the leaf' });
 const FIXTURE_PINS = Object.freeze({ pinnedMethod: 'a fixture reader' });
-const fixturePlan = (tm, text, head = null) => plan(tm, text,
-  { sections: FIXTURE_SECTIONS, head, pins: FIXTURE_PINS, needles: FIXTURE_NEEDLES, classNeedles: FIXTURE_CLASS_NEEDLES });
+const NO_RETIREMENT_TABLES = Object.freeze({ receiverFree: {}, returnTypes: {}, accessors: {}, fieldDefaults: {} });
+const fixturePlan = (tm, text, head = null, tables = NO_RETIREMENT_TABLES) => plan(tm, text,
+  { sections: FIXTURE_SECTIONS, head, pins: FIXTURE_PINS, needles: FIXTURE_NEEDLES, classNeedles: FIXTURE_CLASS_NEEDLES, ...tables });
 
 function fixtureSource(extraMethods = '') {
   const pad = Array.from({ length: 12 }, (_, i) => `    const p${i} = ${i};`).join('\n');
@@ -2414,19 +2737,177 @@ async function selfTest() {
       out.host.replace('SECRET: { get: () => SqlDriver.SECRET },', 'SECRET: { value: SqlDriver.SECRET },'), out.modules).failures.length > 0);
   }
 
+  open('codemod-limit retirements (#30147)');
+  {
+    const pad = Array.from({ length: 12 }, (_, i) => `    const p${i} = ${i};`).join('\n');
+    const extra = `
+  protected knexCall(object: string): string {
+${pad}
+    return this.knex(object);
+  }
+
+  public spelled(object: string) {
+${pad}
+    return this.other(object);
+  }
+
+  protected commented(object: string /* the table */, n: number): string {
+${pad}
+    return object + n;
+  }
+
+  public get movedGetter(): string {
+${pad}
+    return this.count > 0 ? 'a' : 'b';
+  }
+
+  protected computedDefault(name: string, nowMs: number = Date.now()): number {
+${pad}
+    return nowMs + name.length;
+  }
+
+  protected seamed(name: string, nowMs: number = Date.now()): number {
+    return seamed(name, nowMs);
+  }
+`;
+    const input = fixtureSource(extra).replace("import { seamHelper } from './sql-driver-seam.js';",
+      "import { seamHelper, seamed } from './sql-driver-seam.js';");
+    const SEAM = 'export function seamed(name: string, nowMs: number = Date.now()): number {\n  return nowMs + name.length;\n}\n';
+    const sibling = (text) => (rel) => (rel === 'sql-driver-seam.ts' ? text : null);
+    const TABLES = { receiverFree: { knex: 'a fixture closure' }, returnTypes: { spelled: 'string' },
+      accessors: { movedGetter: 'a fixture branch' }, fieldDefaults: { logger: 'a fixture sink' } };
+    const without = fixturePlan(tm, input, FIXTURE_HEAD);
+    const planned = fixturePlan(tm, input, FIXTURE_HEAD, TABLES);
+    const rec = (p, name) => p.records.find((r) => r.name === name);
+    const why = (p, name) => (rec(p, name)?.reasons ?? ['<absent>']).join('; ');
+    check('with no table, the knex call and the inferred return type stay (field-call, inferred-return-type)',
+      why(without, 'knexCall').startsWith('field-call') && why(without, 'spelled').startsWith('inferred-return-type') && !rec(without, 'movedGetter'),
+      `${why(without, 'knexCall')} | ${why(without, 'spelled')}`);
+    check('a call of a receiver-free field moves', why(planned, 'knexCall') === '', why(planned, 'knexCall'));
+    check('a method EXPLICIT_RETURN_TYPES names moves', why(planned, 'spelled') === '', why(planned, 'spelled'));
+    check('a comment between the parentheses no longer keeps a method on the class', why(planned, 'commented') === '' && why(without, 'commented') === '', why(planned, 'commented'));
+    check('a named get accessor moves as an accessor', why(planned, 'movedGetter') === '' && rec(planned, 'movedGetter').kind === 'accessor', why(planned, 'movedGetter'));
+    check('a named field default moves into the class-head module', why(planned, 'logger') === '' && rec(planned, 'logger').kind === 'field-default'
+      && rec(planned, 'logger').module === 'sql-driver-head.ts', why(planned, 'logger'));
+    check('a computed default is written optional on the stub, a data default is not',
+      rec(planned, 'computedDefault').optionalized.map((o) => o.text).join() === 'nowMs?: number' && rec(planned, 'defaulted').optionalized.length === 0);
+    check('a hand-series stub stays (already-moved) and takes the optional spelling too',
+      why(planned, 'seamed').startsWith('already-moved') && rec(planned, 'seamed').optionalized.map((o) => o.text).join() === 'nowMs?: number', why(planned, 'seamed'));
+
+    const out = generate(tm, input, planned);
+    const mod = out.modules.get('sql-driver-lifecycle.ts') ?? '';
+    const head = out.modules.get('sql-driver-head.ts') ?? '';
+    check('the stub writes the named return type; the facet member keeps the base text',
+      /\n  public spelled\(object: string\): string \{\n/.test(out.host) && /\n  static spelled\(this: Pick<LifecycleHost, [^>]*>, object: string\) \{\n/.test(mod));
+    check('the facet member carries the base parameter list verbatim, comment and all',
+      /\n  static commented\(this: Pick<LifecycleHost, [^)]*\), object: string \/\* the table \*\/, n: number\): string \{\n/.test(mod) || /\n  static commented\(object: string \/\* the table \*\/, n: number\): string \{\n/.test(mod),
+      (mod.match(/\n  static commented\([^\n]*/) ?? ['<absent>'])[0]);
+    check('the getter keeps its signature and its body becomes the one-call stub',
+      /\n  public get movedGetter\(\): string \{\n    \/\/ \[#29520 codemod\] The body moved to `sql-driver-lifecycle\.ts`[^\n]*\n    return LifecycleFacet\.movedGetter\.call\(lifecycleHost\.of\(this\)\);\n  \}\n/.test(out.host),
+      (out.host.match(/get movedGetter[\s\S]{0,200}/) ?? ['<absent>'])[0]);
+    check('the stub writes the computed default optional and the facet member keeps the default',
+      /\n  protected computedDefault\(name: string, nowMs\?: number\): number \{\n/.test(out.host) && /\n  static computedDefault\(name: string, nowMs: number = Date\.now\(\)\): number \{\n/.test(mod));
+    check('the hand-series stub writes the parameter optional and keeps its seam call',
+      out.host.includes('  protected seamed(name: string, nowMs?: number): number {\n    return seamed(name, nowMs);\n  }'));
+    check('the field keeps its type and calls the facet member; the member returns the initializer typed as the field',
+      out.host.includes("  protected logger: { warn(m: string): void } = HeadFacet.logger();") &&
+      head.includes(`  ${fieldDefaultDoc('logger')}\n  static logger(): SqlDriver['logger'] {\n    return console;\n  }`), head.slice(0, 600));
+    check('the knex call moves as written, through the host', mod.includes('    return this.knex(object);'));
+
+    const again = generate(tm, input, fixturePlan(tm, input, FIXTURE_HEAD, TABLES));
+    check('two runs on one input write byte-identical trees',
+      treeHash(new Map([['h', out.host], ...out.modules])) === treeHash(new Map([['h', again.host], ...again.modules])));
+    const opts = { readSibling: sibling(SEAM), returnTypes: TABLES.returnTypes };
+    const v = verify(tm, input, out.host, out.modules, opts);
+    const names = v.moved.map((m) => m.name);
+    check('the generated split proves against its base, each retired mechanism among the moved',
+      v.failures.length === 0 && ['knexCall', 'spelled', 'commented', 'movedGetter', 'computedDefault', 'logger'].every((n) => names.includes(n)),
+      [...v.failures, `moved: ${names.join()}`].join(' | '));
+    const failsWith = (host, modules = out.modules, o = opts) => verify(tm, input, host, modules, o).failures.length > 0;
+    const withMod = (file, text) => new Map([...out.modules, [file, text]]);
+    check('a return type EXPLICIT_RETURN_TYPES does not name fails', failsWith(out.host, out.modules, { ...opts, returnTypes: {} }));
+    check('an edited written return type fails', failsWith(out.host.replace('public spelled(object: string): string {', 'public spelled(object: string): String {')));
+    check('an edited comment in the moved parameter list fails',
+      failsWith(out.host, withMod('sql-driver-lifecycle.ts', mod.replace('/* the table */', '/* a table */'))));
+    check('an edited getter body fails', failsWith(out.host, withMod('sql-driver-lifecycle.ts', mod.replace("this.count > 0 ? 'a' : 'b'", "this.count > 1 ? 'a' : 'b'"))));
+    check('an optional parameter spelled with another type fails', failsWith(out.host.replace('nowMs?: number): number {\n    // [#29520', 'nowMs?: any): number {\n    // [#29520')));
+    check('a facet member that drops the computed default fails',
+      failsWith(out.host, withMod('sql-driver-lifecycle.ts', mod.replace('static computedDefault(name: string, nowMs: number = Date.now()): number {', 'static computedDefault(name: string, nowMs: number = 0): number {'))));
+    check('a hand-series stub whose seam drops the default fails', failsWith(out.host, out.modules, { ...opts, readSibling: sibling(SEAM.replace(' = Date.now()', '?')) }));
+    check('a hand-series optional parameter with no seam to read fails', failsWith(out.host, out.modules, { ...opts, readSibling: null }));
+    check('an edited moved initializer fails', failsWith(out.host, withMod('sql-driver-head.ts', head.replace('    return console;', '    return globalThis.console;'))));
+    check('a field calling a member of another name fails', failsWith(out.host.replace('= HeadFacet.logger();', '= HeadFacet.other();')));
+
+    const refusedWith = (tables) => refused(() => fixturePlan(tm, input, FIXTURE_HEAD, { ...TABLES, ...tables }));
+    check('RECEIVER_FREE_FIELDS naming a method or no member refuses',
+      refusedWith({ receiverFree: { other: 'x' } }) && refusedWith({ receiverFree: { gone: 'x' } }));
+    check('EXPLICIT_RETURN_TYPES naming an annotated or absent method refuses',
+      refusedWith({ returnTypes: { other: 'string' } }) && refusedWith({ returnTypes: { gone: 'string' } }));
+    check('MOVED_ACCESSORS naming no get accessor refuses', refusedWith({ accessors: { other: 'x' } }) && refusedWith({ accessors: { gone: 'x' } }));
+    check('MOVED_FIELD_DEFAULTS naming an untyped field, an initializer reading `this` or a name of the file refuses',
+      refusedWith({ fieldDefaults: { fn: 'x' } }) && refusedWith({ fieldDefaults: { gone: 'x' } }) &&
+      refused(() => fixturePlan(tm, input.replace('  private count = 0;', '  private count = 0;\n  private self: number = this.count;'), FIXTURE_HEAD, { ...TABLES, fieldDefaults: { self: 'x' } })) &&
+      refused(() => fixturePlan(tm, input.replace('  private count = 0;', '  private count = 0;\n  private local: number = LOCAL_VALUE;'), FIXTURE_HEAD, { ...TABLES, fieldDefaults: { local: 'x' } })));
+  }
+
   open('refusals');
   {
     const unknownBanner = fixtureSource('\n  // ── Unnamed section ──────────\n\n  protected z(): number {\n    return 1;\n  }\n');
     check('a banner the section table does not name refuses', refused(() => fixturePlan(tm, unknownBanner)));
     const named = fixtureSource('\n  // ── Lifecycle ──────────\n\n  protected z(): number {\n    return 1;\n  }\n');
     check('a banner in the dash spelling the table names is read, not refused', !refused(() => fixturePlan(tm, named)));
-    check('a pin naming what the file lacks refuses', refused(() => plan(tm, fixtureSource(), { sections: FIXTURE_SECTIONS, head: null, pins: { gone: 'x' }, needles: {}, classNeedles: {} })));
+    check('a pin naming what the file lacks refuses', refused(() => plan(tm, fixtureSource(), { ...NO_RETIREMENT_TABLES, sections: FIXTURE_SECTIONS, head: null, pins: { gone: 'x' }, needles: {}, classNeedles: {} })));
     check('a class-scoped needle the file no longer carries refuses',
-      refused(() => plan(tm, fixtureSource(), { sections: FIXTURE_SECTIONS, head: null, pins: {}, needles: {}, classNeedles: { 'gone text': 'x' } })));
-    check('a needle the file no longer carries refuses', refused(() => plan(tm, fixtureSource(), { sections: FIXTURE_SECTIONS, head: null, pins: {}, needles: { 'gone text': 'x' }, classNeedles: {} })));
+      refused(() => plan(tm, fixtureSource(), { ...NO_RETIREMENT_TABLES, sections: FIXTURE_SECTIONS, head: null, pins: {}, needles: {}, classNeedles: { 'gone text': 'x' } })));
+    check('a needle the file no longer carries refuses', refused(() => plan(tm, fixtureSource(), { ...NO_RETIREMENT_TABLES, sections: FIXTURE_SECTIONS, head: null, pins: {}, needles: { 'gone text': 'x' }, classNeedles: {} })));
     // `--help` reads no tree: it answers before the "already split" guard, so
     // it exits 0 whether sql-driver.ts on disk is split (as on a branch) or not.
     check('--help is answered, never refused, whatever sql-driver.ts holds', (await main(['--help']).catch(() => 2)) === 0);
+  }
+
+  open('split readers (#30147)');
+  {
+    // `sql-driver-split-source.mjs` hands the by-path readers `SqlDriver` as
+    // one text again. Driven over a split this script generates, written to a
+    // directory the way `--write` lays it out.
+    const input = fixtureSource();
+    const out = generate(tm, input, fixturePlan(tm, input));
+    const dir = mkdtempSync(join(tmpdir(), 'codemod-split-reader-'));
+    const lay = (host, modules) => {
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, HOST_BASENAME), host);
+      for (const [name, text] of modules) writeFileSync(join(dir, name), text);
+    };
+    const read = () => { try { return readSqlDriverSource(dir); } catch (e) { return { error: e.message }; } };
+    try {
+      lay(out.host, out.modules);
+      const r = read();
+      const base = parse(tm, HOST_BASENAME, input).getClassOrThrow(CLASS_NAME);
+      const baseBody = (name) => (base.getMethod(name) ?? base.getGetAccessor(name))?.getBody()?.getText();
+      const stubs = (out.host.match(new RegExp(`// ${MARK.replace(/[[\]#]/g, '\\$&')} The body moved to`, 'g')) ?? []).length;
+      check('every stub the split writes is followed', !r.error && r.spliced.length === stubs && stubs > 0,
+        r.error ?? `${r.spliced.length} followed of ${stubs}`);
+      check('each followed stub reads its base body, byte for byte, after the signature the class keeps',
+        !r.error && r.spliced.every(({ member }) => baseBody(member) && r.text.includes(baseBody(member))),
+        r.error ?? r.spliced.filter(({ member }) => !r.text.includes(baseBody(member) ?? '\0')).map((x) => x.member).join());
+      check('no stub text survives in the joined source', !r.error && !r.text.includes(`${MARK} The body moved to`));
+      check('the leaf is read and stands ahead of the class',
+        !r.error && r.files.includes(LEAF_MODULE) && r.text.indexOf('const LOCAL_VALUE = 1;') >= 0
+          && r.text.indexOf('const LOCAL_VALUE = 1;') < r.text.indexOf(`export class ${CLASS_NAME}`));
+      lay(input, new Map());
+      const unsplit = read();
+      check('an unsplit sql-driver.ts is read as it stands', !unsplit.error && unsplit.text === input && unsplit.spliced.length === 0);
+      lay(out.host, new Map([...out.modules].filter(([name]) => name !== 'sql-driver-lifecycle.ts')));
+      check('a stub naming a module that is not there refuses', /does not exist/.test(read().error ?? ''), read().error);
+      const mod = out.modules.get('sql-driver-lifecycle.ts');
+      lay(out.host, new Map([...out.modules, ['sql-driver-lifecycle.ts', mod.replace('static async movable(', 'static async renamed(')]]));
+      check('a stub whose facet lacks the static refuses', /has no static `movable`/.test(read().error ?? ''), read().error);
+      lay(out.host.replace(/return LifecycleFacet\.movable\.call\(lifecycleHost\.of\(this\)/, 'return LifecycleFacet.movable.call(this'), out.modules);
+      check('a marked stub of another shape refuses rather than reading the stub', /is not one `return <X>Facet/.test(read().error ?? ''), read().error);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }
 
   const declared = Object.keys(SELF_TEST_BATTERIES);

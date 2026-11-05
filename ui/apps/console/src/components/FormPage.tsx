@@ -165,6 +165,7 @@ import {
   SchemaRendererContext,
   declaredUserMessage,
   delegationScopeMessage,
+  isExternalWriteRefusal,
   extractFieldErrors,
   isPermissionError,
   unmarkedRefusalLines,
@@ -1145,6 +1146,13 @@ export function resolveRowState(
         { field: { defaultValue: field.defaultValue } },
         isCreateForm,
       ),
+      // The column of `previous` that holds this field's stored value, so an
+      // EDIT judges `requiredWhen` as the engine's transition gate: a stored
+      // row already inside the gate without the value rests there, and an
+      // unrelated edit saves (objectstack#30220, the verdict #30184 put in
+      // `resolveFieldRuleState`). A create form passes no `previous`, so it
+      // keeps the plain verdict.
+      name: field.name,
     },
     previous ?? undefined,
     predicateScope,
@@ -2077,13 +2085,16 @@ class WriteRefusal extends Error {
  *
  *  1. the sentence the producer MARKED for the end user (`userMessage`), or a
  *     delegated administrator's scope refusal, which names only their own scope;
- *  2. any other denial (`403`, `PERMISSION_DENIED`, `FORBIDDEN`) as the fixed
+ *  2. a write the object's external datasource does not admit
+ *     (`EXTERNAL_WRITE_FORBIDDEN`) as the localized read-only line: no
+ *     permission can lift it, so the permission line would mislead;
+ *  3. any other denial (`403`, `PERMISSION_DENIED`, `FORBIDDEN`) as the fixed
  *     localized line — the server's text names objects and policies, not
  *     something the submitter can act on (objectstack#3821, #24914 B′);
- *  3. the per-rule lines no row carries (`unmarkedRefusalLines`);
- *  4. the server's sentence of a `4xx` — it answers the request the submitter
+ *  4. the per-rule lines no row carries (`unmarkedRefusalLines`);
+ *  5. the server's sentence of a `4xx` — it answers the request the submitter
  *     made, and they can change it;
- *  5. otherwise — a `5xx`, or a refusal that gave no sentence — the localized
+ *  6. otherwise — a `5xx`, or a refusal that gave no sentence — the localized
  *     generic line: a server fault's text is a diagnostic, not a reason.
  */
 function refusalText(
@@ -2098,6 +2109,7 @@ function refusalText(
   }
   const marked = declaredUserMessage(err) ?? delegationScopeMessage(err);
   if (marked) return marked;
+  if (isExternalWriteRefusal(err)) return t('form.readOnlyExternalSource');
   if (isPermissionError(err)) return t('form.noPermissionToSave');
   if (unmarked && unmarked.length > 1) return unmarked;
   if (unmarked?.[0]) return unmarked[0];

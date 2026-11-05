@@ -28,7 +28,13 @@
  *    gets; the server-side phone reset call (no `Request`) still awaits its
  *    send;
  *  - `runAfterResponse` hands a task's synchronous throw to `onFailure` and
- *    survives an `onFailure` that throws.
+ *    survives an `onFailure` that throws;
+ *  - the public config says whether mail leaves the deployment
+ *    (`features.emailDelivery`): false with no email service and with a
+ *    transport that reports itself unconfigured (the stock `log` one), true
+ *    with a configured one. It describes the deployment, not an address: in
+ *    all three a known and an unknown address get the same reset answer, and
+ *    that answer is the same one whether mail leaves or not.
  */
 
 import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
@@ -294,6 +300,45 @@ describe('the phone-number reset request answers without waiting on the reset te
     await api.requestPasswordResetPhoneNumber({ body: { phoneNumber: PHONE } });
 
     expect(d.settled).toEqual([PHONE]);
+  }, 60_000);
+});
+
+describe('the public config says whether a reset link can be emailed from this deployment', () => {
+  /** The deployment's one account, then the email service under test swapped in. */
+  async function withEmailService(service: Record<string, unknown> | undefined) {
+    const d = await deployment(async () => ({ status: 'sent' }));
+    d.manager.setEmailService(service as never);
+    const config = d.manager.getPublicConfig() as { features: Record<string, unknown> };
+    const forAccount = await requestReset(d.manager, EMAIL);
+    const forNobody = await requestReset(d.manager, NOBODY);
+    return { emailDelivery: config.features.emailDelivery, forAccount, forNobody };
+  }
+
+  const sendTemplate = async () => ({ status: 'sent' });
+
+  it('no email service: no delivery, and a known and an unknown address get the same answer', async () => {
+    const r = await withEmailService(undefined);
+
+    expect(r.emailDelivery).toBe(false);
+    expect(r.forAccount.status).toBe(200);
+    expect(r.forAccount).toEqual(r.forNobody);
+  }, 60_000);
+
+  it('a transport that reports itself unconfigured (the log one): no delivery, same answer for both addresses', async () => {
+    const r = await withEmailService({ sendTemplate, isConfigured: () => false });
+
+    expect(r.emailDelivery).toBe(false);
+    expect(r.forAccount.status).toBe(200);
+    expect(r.forAccount).toEqual(r.forNobody);
+  }, 60_000);
+
+  it('a configured transport: delivery, and the reset answer is the one a deployment without mail gives', async () => {
+    const live = await withEmailService({ sendTemplate, isConfigured: () => true });
+    const none = await withEmailService(undefined);
+
+    expect(live.emailDelivery).toBe(true);
+    expect(live.forAccount).toEqual(live.forNobody);
+    expect(live.forAccount).toEqual(none.forAccount);
   }, 60_000);
 });
 

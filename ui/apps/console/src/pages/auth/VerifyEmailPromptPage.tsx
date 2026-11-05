@@ -21,7 +21,7 @@ import {
   CardTitle,
 } from '@object-ui/components';
 import { AuthLayout } from './AuthLayout';
-import { withConsoleBaseRootRelative } from '../../utils/consoleBase';
+import { handoffMarkQuery, verificationCallbackURL } from './handoffRedirect';
 
 export function VerifyEmailPromptPage() {
   const { t } = useObjectTranslation();
@@ -61,12 +61,10 @@ export function VerifyEmailPromptPage() {
       // server redirects to this value verbatim after verification, so it
       // must be resolved against the console mount first: the bare route
       // landed at the ORIGIN root, outside `/_console`. No safe target means
-      // no callbackURL, and the server default applies, as it did before.
-      const callbackURL =
-        redirect.startsWith('/') && !redirect.startsWith('//')
-          ? withConsoleBaseRootRelative(redirect)
-          : undefined;
-      await sendVerificationEmail(email, callbackURL);
+      // no callbackURL, and the server default applies, as it did before. A
+      // hand-off `redirect` returns to the "go back to the app" landing
+      // (#30157, `./handoffRedirect` rule 6).
+      await sendVerificationEmail(email, verificationCallbackURL(redirect));
       setResent(true);
       toast.success(
         t('auth.verifyEmail.resentSuccess', {
@@ -99,7 +97,7 @@ export function VerifyEmailPromptPage() {
   };
 
   const handleBackToLogin = () => {
-    const search = redirect ? `?redirect=${encodeURIComponent(redirect)}` : '';
+    const search = redirect ? `?redirect=${encodeURIComponent(redirect)}${handoffMarkQuery(redirect)}` : '';
     navigate(`/login${search}`);
   };
 

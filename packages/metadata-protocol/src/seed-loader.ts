@@ -1329,6 +1329,12 @@ export class SeedLoaderService implements ISeedLoaderService {
     const deferredStart = deferredUpdates.length;
     const internalIdByRecordIndex = new Map<number, string>();
     /**
+     * [#30348] The record indexes whose row THIS load created — the insert
+     * sites mark them beside {@link noteLanded}; every other landed index is a
+     * pre-existing row a record's key matched. Published as `insertedIds`.
+     */
+    const insertedRecordIndexes = new Set<number>();
+    /**
      * Record the id row `recordIndex` landed with. Every write site below goes
      * through here, so a re-identified row (#21665) enters
      * {@link SeedLoaderService.replayIdByAuthoredId} exactly when it lands and
@@ -1436,6 +1442,7 @@ export class SeedLoaderService implements ISeedLoaderService {
           written.inserted++;
           const internalId = this.extractId(res.record);
           if (internalId) noteLanded(recordIndex, internalId); // [commit 9a884c6e4]
+          if (internalId) insertedRecordIndexes.add(recordIndex); // [#30348]
           if (externalIdValue && internalId) {
             insertedRecords.get(objectName)!.set(externalIdValue, internalId);
           }
@@ -2149,6 +2156,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             const externalIdValue = this.externalIdKey(record, externalId);
             const internalId = result.id;
             if (internalId) noteLanded(i, String(internalId)); // [commit 9a884c6e4]
+            if (internalId && result.action === 'inserted') insertedRecordIndexes.add(i); // [#30348]
             if (externalIdValue && internalId) {
               insertedRecords.get(objectName)!.set(externalIdValue, String(internalId));
             }
@@ -2268,6 +2276,17 @@ export class SeedLoaderService implements ISeedLoaderService {
         .sort(([a], [b]) => a - b)
         .map(([, id]) => id),
     )];
+    // [#30348] The subset this load CREATED, same order and dedupe. An id is
+    // here only when the record that landed on it was an insert, so a replay
+    // that matches the rows an earlier load inserted reports them as landed
+    // and not inserted — the publish receipt tells "created" from "matched"
+    // by exactly this.
+    const insertedIds = [...new Set(
+      [...internalIdByRecordIndex.entries()]
+        .filter(([recordIndex]) => insertedRecordIndexes.has(recordIndex))
+        .sort(([a], [b]) => a - b)
+        .map(([, id]) => id),
+    )];
 
     if (this.loadProgress) this.loadProgress.loading = undefined;
     return {
@@ -2283,6 +2302,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       referencesDropped,
       summariesStale: this.summariesStale - summariesStaleAtStart,
       landedIds,
+      insertedIds,
       errors,
     };
   }

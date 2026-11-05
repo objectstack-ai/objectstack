@@ -159,7 +159,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Bloquear usuario",
-        description: "¿Bloquear a este usuario? Cerrará sesión y no podrá volver a iniciarla hasta que se desbloquee.",
+        description: "¿Bloquear a este usuario? Cerrará sesión, no podrá volver a iniciarla y sus claves de API se rechazarán hasta que se desbloquee. Las claves vuelven a funcionar tras el desbloqueo.",
         successMessage: "Usuario bloqueado",
         params: {
           banReason: {
@@ -3388,7 +3388,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       namespace: {
         label: "Espacio de nombres",
-        help: "Espacio de nombres del manifiesto (p. ej. mail, branding, feature_flags)."
+        help: "Espacio de nombres del manifiesto (p. ej. mail, branding, storage)."
       },
       key: {
         label: "Clave",

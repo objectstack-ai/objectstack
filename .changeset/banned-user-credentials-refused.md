@@ -1,5 +1,6 @@
 ---
 '@objectstack/core': patch
+'@objectstack/platform-objects': patch
 '@objectstack/plugin-auth': patch
 ---
 

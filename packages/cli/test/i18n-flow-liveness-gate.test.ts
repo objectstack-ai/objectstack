@@ -53,7 +53,7 @@ import {
   authorWarnedTranslationGroups,
   collectExpectedEntries,
   extractTranslations,
-} from '../src/utils/i18n-extract.js';
+} from '../src/utils/i18n-bundle-extract.js';
 import { computeI18nCoverage } from '../src/utils/i18n-coverage.js';
 import { authorWarnedProperties, lintLivenessProperties } from '@objectstack/lint';
 

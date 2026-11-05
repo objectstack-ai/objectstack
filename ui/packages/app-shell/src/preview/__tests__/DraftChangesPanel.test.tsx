@@ -27,6 +27,7 @@ vi.mock('@object-ui/i18n', async (importOriginal) => {
 
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 import { DraftChangesPanel, computeChangeDetail } from '../DraftChangesPanel';
+import { PACKAGE_EXPORT_COMMAND, customizationEnvironmentText } from '../savedToCustomization';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -293,5 +294,40 @@ describe('DraftChangesPanel — names the base whose customizations it saves (ob
     renderIn('en');
     await waitFor(() => expect(screen.getByText('ticket')).toBeInTheDocument());
     expect(screen.queryByTestId('draft-changes-saved-to')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('draft-changes-environment')).not.toBeInTheDocument();
+  });
+
+  /*
+   * objectstack#30119 (ADR-0146 D2) — under it, where the changes live: this
+   * environment's database, as items of the pair the host reviews (its
+   * `packageId`, named as served), and the one command that moves them,
+   * verbatim in every pack.
+   */
+  it('names the pair and `os package export` in the line under it, in en', async () => {
+    renderIn('en', { customizationOf: 'HotCRM', packageId: 'com.hotcrm.custom' });
+    const line = await screen.findByTestId('draft-changes-environment');
+    expect(line.textContent).toContain('this environment’s database');
+    expect(line.textContent).toContain('com.hotcrm.custom');
+    expect(line.textContent).toContain('os package export');
+  });
+
+  it('keeps the pair id and the command untranslated in zh', async () => {
+    renderIn('zh', { customizationOf: 'HotCRM', packageId: 'com.hotcrm.custom' });
+    const line = await screen.findByTestId('draft-changes-environment');
+    expect(line.textContent).toContain('当前环境的数据库');
+    expect(line.textContent).toContain('com.hotcrm.custom');
+    expect(line.textContent).toContain('os package export');
+  });
+});
+
+describe('the environment line keeps the command verbatim in every pack (objectstack#30119)', () => {
+  const LOCALES = ['en', 'zh', 'ja', 'ko', 'de', 'fr', 'es', 'pt', 'ru', 'ar'] as const;
+  it.each(LOCALES)('%s: names the pair and `os package export` once each', async (lang) => {
+    const i18n = createI18n({ defaultLanguage: lang, detectBrowserLanguage: false });
+    await i18n.changeLanguage(lang);
+    const text = customizationEnvironmentText(i18n.t.bind(i18n) as never, 'com.hotcrm.custom');
+    expect(text).not.toContain('{{');
+    expect(text.split('com.hotcrm.custom')).toHaveLength(2);
+    expect(text.split(PACKAGE_EXPORT_COMMAND)).toHaveLength(2);
   });
 });

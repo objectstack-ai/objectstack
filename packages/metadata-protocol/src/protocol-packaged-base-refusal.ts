@@ -36,17 +36,27 @@
  */
 
 import type { ObjectStackProtocolImplementation } from './protocol.js';
-import { isOriginGatedType, managedItemSealedSentence, regimeCDeclaredSaveSentence } from './packaged-base-regime.js';
+import {
+    isOriginGatedType,
+    managedItemSealedSentence,
+    packagedBaseRegimePrescription,
+    packagedBaseRegimeRow,
+    regimeCDeclaredSaveSentence,
+} from './packaged-base-regime.js';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
 import { OBJECT_EXTENSION_TYPE } from './protocol-object-extension-item.js';
 import { customizationPairEnsureRefusal, type PairRegistry } from './protocol-customization-package.js';
+import { resolveOverlaySchema } from './protocol-meta-type-schema.js';
+import { resolvePackageClosure } from '@objectstack/lint/runtime';
 import { overlayMemberField, overlayMemberOfBody, overlayMemberValue } from './migrations/overlay-index.js';
 import {
     customizationBasePackageId,
     customizationPackageId,
+    DEFAULT_METADATA_TYPE_REGISTRY,
     getOverrideTypeClassification,
     isCustomizationPairOf,
     OverrideDeclarationSchema,
+    type OverrideClassificationBasis,
 } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec';
@@ -246,12 +256,12 @@ export function packagelessOverlayWriteRefusal(
     closed: { base: string; pair: string },
     operation: PackagelessWriteOperation,
 ): Error {
-    const { item, shipped, pair, declared, writeInto } = closedOverlayWriteClauses(request, closed);
-    const rule = 'A write naming no package is closed where `os migrate packageless-overlays` can move its row '
+    const { item, shipped, pair, declared, writeInto, ceremony } = closedOverlayWriteClauses(request, closed);
+    const rule = `A write naming no package is closed where ${ceremony} can move its row `
         + `(ADR-0146 D11); a package-less row stored before it is served until that command moves it into '${closed.pair}'.`;
     const message = operation === 'rollback'
         ? `${item} ${shipped}, and a rollback of its package-less row is closed (ADR-0146 D11): run `
-            + `\`os migrate packageless-overlays\` to move the row into ${pair}; to restore a version from before `
+            + `${ceremony} to move the row into ${pair}; to restore a version from before `
             + `the move, save that version's body there, declaring ${declared}.`
         : operation === 'delete'
             ? `${item} ${shipped}: remove its customization from ${pair}. ${rule}`
@@ -266,6 +276,13 @@ export function packagelessOverlayWriteRefusal(
  * the declaration, and the fix — write it into the pair, declaring the
  * override. ONE spelling: a writer refused at either address reads the same
  * fix, and only the rule clause that follows it says which address is closed.
+ *
+ * Two more clauses, one spelling each: `ceremony`, the command that moves a
+ * stored row into the pair (both sentences name it), and `boundRowServed`,
+ * what serves a row bound to the base stored before the close until one of
+ * the three open doors acts on it — [#29392] that command, which moves it
+ * into the pair with its declaration, the pair's declared override, or a
+ * delete naming the base.
  */
 function closedOverlayWriteClauses(
     request: { type: string; name: string },
@@ -278,7 +295,9 @@ function closedOverlayWriteClauses(
     const declared = `overrides: { package: '${closed.base}', basedOn }`;
     const writeInto = (operation: 'save' | 'publish') =>
         `${item} ${shipped}: ${operation === 'publish' ? 'publish' : 'save'} it into ${pair}, declaring ${declared}.`;
-    return { item, shipped, pair, declared, writeInto };
+    const ceremony = '`os migrate packageless-overlays`';
+    const boundRowServed = `is served until moved by ${ceremony}, overridden by the pair, or deleted naming the base.`;
+    return { item, shipped, pair, declared, writeInto, ceremony, boundRowServed };
 }
 
 /** `403 NOT_OVERRIDABLE`, the code and status the sealed write already answers, so neither close gains a code. */
@@ -298,11 +317,11 @@ function closedOverlayWriteError(message: string): Error {
  * a row bound to the base. `rollback` is every restore of a stored version:
  * the per-item rollback and [#29390] a commit revert's restore limb (and the
  * package rollback through it), one sentence for both. ⛔ Not `delete`:
- * removing a row bound to the base writes nothing, and it is the one way to
- * clear such a row stored before the close — `os migrate packageless-overlays`
- * reads package-less rows only, so it never moves one. The removal serves the
- * base's own document again, or the pair's declared override where one exists
- * (it is served over the row).
+ * removing a row bound to the base writes nothing, and it is one way to clear
+ * such a row stored before the close; [#29392] `os migrate packageless-overlays`
+ * is the other, moving it into the pair with its declaration. The removal
+ * serves the base's own document again, or the pair's declared override where
+ * one exists (it is served over the row).
  */
 export type NamedBaseWriteOperation = Exclude<PackagelessWriteOperation, 'delete'>;
 
@@ -314,12 +333,14 @@ export type NamedBaseWriteOperation = Exclude<PackagelessWriteOperation, 'delete
  * package itself (`?package=<base>`) onto an item of one of the five overlay
  * types that package ships stored the customization as a row bound to the
  * base, with no declaration: served at the base's address in place of its
- * document, outside the pair D1 puts every customization in, and not seen by
- * `os migrate packageless-overlays`. It is refused with the fix the
- * package-less close names ({@link closedOverlayWriteClauses}): write it into
- * the pair, declaring the override. A row stored that way before the close is
- * still served until the pair declares the override (the declared override is
- * served over it) or a delete naming the base removes it — both open.
+ * document, outside the pair D1 puts every customization in. It is refused
+ * with the fix the package-less close names ({@link closedOverlayWriteClauses}):
+ * write it into the pair, declaring the override. A row stored that way before
+ * the close is still served until one of three open doors acts on it, all
+ * named in the sentence ({@link closedOverlayWriteClauses}' `boundRowServed`):
+ * [#29392] `os migrate packageless-overlays` moves it into the pair with its
+ * declaration, the pair declares the override (served over it), or a delete
+ * naming the base removes it.
  *
  * Fix first, under the REST door's 500-character bound (`CLIENT_MESSAGE_MAX`,
  * `@objectstack/types`), as the package-less sentence.
@@ -329,13 +350,12 @@ export function namedBaseOverlayWriteRefusal(
     closed: { base: string; pair: string },
     operation: NamedBaseWriteOperation,
 ): Error {
-    const { item, shipped, pair, declared, writeInto } = closedOverlayWriteClauses(request, closed);
-    const served = 'is served until the pair declares the override, or a delete naming the base removes it.';
+    const { item, shipped, pair, declared, writeInto, boundRowServed } = closedOverlayWriteClauses(request, closed);
     const message = operation === 'rollback'
         ? `${item} ${shipped}, and a rollback of its row bound to the read-only base is closed (ADR-0146 D1, D11): `
-            + `save the version's body into ${pair}, declaring ${declared}. The row ${served}`
+            + `save the version's body into ${pair}, declaring ${declared}. It ${boundRowServed}`
         : `${writeInto(operation)} The read-only base itself takes no customization (ADR-0146 D1, D11): `
-            + `a row bound to it from before ${served}`;
+            + `a row bound to it ${boundRowServed}`;
     return closedOverlayWriteError(message);
 }
 
@@ -348,7 +368,30 @@ export interface OverlayPairFix {
     readonly base: string;
     readonly pair: string;
     readonly basedOn: string;
+    /**
+     * The closure the pair WILL have, present only while the pair is not
+     * installed: the ensure door declares the pair's one dependency, the base
+     * (`manifest.dependencies: { [base]: range }`), so its closure is the base
+     * and what the base reaches. The gate's own read
+     * (`resolveWritePackageScope`) answers nothing for a package the registry
+     * cannot produce, and its `not_concerned` on a declared body is no verdict
+     * about the write the fix takes.
+     */
+    readonly pendingPairScope?: WrittenPackageScope;
 }
+
+/** A written package and the closure of its declared dependencies, as `resolveWritePackageScope` answers it. */
+export interface WrittenPackageScope {
+    readonly packageId: string;
+    readonly dependencies: readonly string[];
+}
+
+/**
+ * The override write gate as a close asks it: {@link overrideWriteVerdict},
+ * with the written package's closure when the caller holds it (a pair the
+ * ensure step would create, {@link OverlayPairFix.pendingPairScope}).
+ */
+export type OverrideWriteVerdictAsk = (request: OverrideWriteSubject, writtenScope?: WrittenPackageScope) => OverrideWriteVerdict;
 
 /**
  * [ADR-0146 D1, D11] The registry half of whether the fix both overlay-write
@@ -382,7 +425,11 @@ export function overlayPairFixOf(
     if (customizationPairEnsureRefusal(host.engine, registry, base, pair) !== undefined) return null; // the ensure door would refuse
     const basedOn = registry.getPackage(base)?.manifest?.version;
     if (typeof basedOn !== 'string' || basedOn === '') return null; // no `basedOn` to declare
-    return { base, pair, basedOn };
+    if (registry.getPackage(pair)) return { base, pair, basedOn };
+    // The pair the ensure door would create: one dependency, the base.
+    const baseClosure = resolvePackageClosure(base, (id) => registry.getPackage(id) as { manifest?: unknown } | undefined);
+    const dependencies = [base, ...(baseClosure?.dependencies ?? []).filter((id) => id !== pair)];
+    return { base, pair, basedOn, pendingPairScope: { packageId: pair, dependencies } };
 }
 
 /**
@@ -392,9 +439,14 @@ export function overlayPairFixOf(
  * identity at `member`, declaring `overrides: { package: base, basedOn }`. An
  * `email_template` member at a locale the base does not ship is refused
  * there, so its write stays open.
+ *
+ * The gate is asked about the pair the fix writes into, installed or not: a
+ * pair not yet ensured (a fresh install) is judged with the closure the
+ * ensure door gives it ({@link OverlayPairFix.pendingPairScope}), so the
+ * answer is the one the write meets once the pair exists.
  */
 export function overlayPairFixAdmits(
-    host: { readonly overrideWriteVerdict: (request: OverrideWriteSubject) => OverrideWriteVerdict },
+    host: { readonly overrideWriteVerdict: OverrideWriteVerdictAsk },
     fix: OverlayPairFix,
     subject: {
         /** The singular type. */
@@ -411,8 +463,70 @@ export function overlayPairFixAdmits(
         ...(body ?? { name, ...(disc && member !== null ? { [disc]: member } : {}) }),
         overrides: { package: fix.base, basedOn: fix.basedOn },
     };
-    const verdict = host.overrideWriteVerdict({ type, name, packageId: fix.pair, item: declaredBody });
+    // [#30261] The save door's schema half: a body whose shape cannot carry
+    // the declaration (a view container) is refused there, whatever the gate
+    // answers. A bare identity has no shape to judge.
+    if (body !== undefined && overrideDeclarationRefusedByShape(type, body)) return false;
+    const verdict = host.overrideWriteVerdict({ type, name, packageId: fix.pair, item: declaredBody }, fix.pendingPairScope);
     return verdict.verdict !== 'refuse';
+}
+
+/**
+ * [#30261, ADR-0146 D2, D11] Whether the schema the save door judges `body`
+ * by (`resolveOverlaySchema`, the door's own resolver) refuses an `overrides`
+ * key on it as unrecognized: the body's SHAPE cannot carry the override
+ * declaration, so no save declaring it lands, whatever the override write gate
+ * answers.
+ *
+ * Measured over the five overlay types the ceremony moves, one shape answers
+ * `true`: the view CONTAINER (`ViewSchema`, the `container` member of
+ * `ViewMetadataSchema`). A single view, a list or form overlay, a dashboard, a
+ * report, a translation and an email template each spread
+ * `OverrideDeclarationFields`. Read from the parse, not from a list of shapes,
+ * so a member that gains or loses the key is answered by its own schema.
+ *
+ * Only the refusal of the KEY is read: an `unrecognized_keys` issue naming
+ * `overrides` at the body's root. Inside a union it must be named by EVERY
+ * branch still diagnosing the body — the view union keeps the branch the body
+ * claims and mutes the others to a kind mismatch at the root
+ * (`focusClaimedBranch`), which is dropped here as every consumer of a failed
+ * union drops it — so a body that claims no branch, refused by the container
+ * member and by a member that carries the key, is not answered `true`. Every
+ * other finding on the body is the save door's to answer, as before, and
+ * answers `false` here. The body's own `overrides` value, if any, is replaced
+ * by a well-formed probe: the key alone decides.
+ */
+export function overrideDeclarationRefusedByShape(type: string, body: Record<string, unknown>): boolean {
+    const schema = resolveOverlaySchema(type, body);
+    if (!schema) return false;
+    const parsed = schema.safeParse({ ...body, overrides: OVERRIDES_KEY_PROBE });
+    return !parsed.success && parsed.error.issues.some(namesOverridesAtRoot);
+}
+
+/** A well-formed declaration: the probe asks whether the KEY is carried, so its value raises nothing. */
+const OVERRIDES_KEY_PROBE = Object.freeze({ package: 'com.example.base', basedOn: '1.0.0' });
+
+type ParseIssue = { code?: unknown; path?: unknown; keys?: unknown; errors?: unknown } | null;
+
+/** An issue at the parsed value's root: a `path` of length 0. */
+const atRoot = (issue: ParseIssue): boolean => Array.isArray(issue?.path) && issue.path.length === 0;
+
+/**
+ * An `unrecognized_keys` issue naming `overrides` at the parsed body's root;
+ * for a union, named by every branch whose issues are not a bare kind
+ * mismatch at the root (a muted branch, or a member of another kind).
+ */
+function namesOverridesAtRoot(issue: unknown): boolean {
+    const candidate = issue as ParseIssue;
+    if (candidate?.code === 'unrecognized_keys') {
+        return atRoot(candidate) && Array.isArray(candidate.keys) && candidate.keys.includes('overrides');
+    }
+    if (candidate?.code === 'invalid_union' && Array.isArray(candidate.errors)) {
+        const diagnosing = candidate.errors.filter((branch): branch is unknown[] => Array.isArray(branch)
+            && !branch.every((i) => (i as ParseIssue)?.code === 'invalid_type' && atRoot(i as ParseIssue)));
+        return diagnosing.length > 0 && diagnosing.every((branch) => branch.some(namesOverridesAtRoot));
+    }
+    return false;
 }
 
 /** The class members {@link namedBaseCloseSubject} reads, typed as the class declares them. */
@@ -421,7 +535,7 @@ export interface NamedBaseCloseHost {
     /** The read-only code packages that ship a name of an overlay type ([] for any other type). */
     readonly overlayBaseShippers: (type: string, name: string) => string[];
     /** The override write gate, as the declared write into the pair meets it at the save door. */
-    readonly overrideWriteVerdict: (request: OverrideWriteSubject) => OverrideWriteVerdict;
+    readonly overrideWriteVerdict: OverrideWriteVerdictAsk;
 }
 
 /** The write naming a package that {@link namedBaseCloseSubject} judges. */
@@ -526,20 +640,32 @@ function isOpenOverrideType(singular: string): boolean {
 
 /**
  * [#28412, ADR-0146 D9 item 1] Whether a removal addressed to `packageId`
- * removes the shipping package's PAIR row of a type whose D9 conditions are
- * delivered ({@link CONDITIONS_DELIVERED}: `flow` today) — the row the pair's
+ * removes the shipping package's PAIR row of a type whose declared override
+ * the gate admits today ({@link isOpenOverrideType}) — the row the pair's
  * declared override is stored in. Such a removal is admitted past the
  * sealed-removal refusal: it removes no managed definition, and the code
- * package's flow is what every read serves and what the automation engine
- * arms once the row is gone — the narrowing direction the #6960 ruling names.
- * ⛔ Only the pair, named: a removal naming no package, or any other package,
- * keeps the sealed refusal it had. ⛔ Only a delivered type: every other open
- * type (`view`, `mapping`, …) keeps main's delete verdict — its own removal
- * carve-out or its sealed refusal — untouched by this card.
+ * package's item is what every read serves (for a flow, what the automation
+ * engine arms) once the row is gone — the narrowing direction the #6960
+ * ruling names, and ADR-0146's revert ("Restore package original" deletes the
+ * overriding item from `.custom`, so the base's document is served again).
+ *
+ * [#30062] Every open type, no longer `flow` alone. A `doc` or `mapping`
+ * opens no overlay channel and is no `supportsOverlay` type either, so the
+ * sealed-removal refusal answered a pair's own removal of its declared
+ * override with 403 and the override stayed served: a customization the
+ * customer could not undo. The other open types already passed (their own
+ * overlay channel or the #6960 carve-out); the removal is now told to the
+ * store as runtime-only for all of them, as the declared save wrote the row.
+ *
+ * ⛔ Only the pair, named: a removal naming no package, the base, or any
+ * other package, keeps the refusal it had — a base's own item is never
+ * removed. ⛔ Only an open type: `action` (its D9 conditions are not
+ * delivered, so no pair holds a declared action override) and every excluded
+ * type keep main's delete verdict.
  */
 export function isPairRowRemoval(type: string, basePackageId: unknown, packageId: unknown): boolean {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
-    if (!CONDITIONS_DELIVERED.has(singular) || !isOpenOverrideType(singular)) return false;
+    if (!isOpenOverrideType(singular)) return false;
     if (typeof basePackageId !== 'string') return false;
     if (typeof packageId !== 'string' || packageId.length === 0) return false;
     const pair = customizationPackageId(basePackageId);
@@ -657,6 +783,89 @@ function declarationOf(item: unknown): { present: boolean; base: string | undefi
 }
 
 /**
+ * [#30062] The decision record each excluded type's basis rests on: the one
+ * the refusal of a declared override of that type cites. Before, every
+ * excluded type cited ADR-0146 D6, the security catalog's paragraph, whatever
+ * excluded it.
+ */
+const EXCLUSION_BASIS_CITATION: Readonly<Record<OverrideClassificationBasis, string>> = {
+    adr_0146_d2_listed: 'ADR-0146 D2',
+    adr_0146_d6_security_catalog: 'ADR-0146 D6',
+    adr_0146_d10_extended: 'ADR-0146 D10',
+    adr_0126_code_only: 'ADR-0146 D6',
+    not_package_shipped: 'ADR-0146 D2',
+    not_runtime_creatable: 'ADR-0146 D2',
+    adr_0126_one_shot: 'ADR-0126 §3',
+    setup_owned_connection: 'ADR-0146 D1',
+    behavioural_switch_first: 'ADR-0146 D9',
+};
+
+/**
+ * [#30062] The Setup page an organization authors its OWN item of an
+ * excluded type on, for a type no metadata door creates and no ADR-0126
+ * regime row routes: a queue is a `sys_queue` record (ADR-0142 D1), listed at
+ * Setup › Queues (`@objectstack/plugin-sharing`'s navigation contribution).
+ */
+const SETUP_AUTHORED_DOORS: Readonly<Record<string, string>> = {
+    queue: 'Setup › Queues',
+};
+
+/** `type`'s registry entry admits a runtime create (`allowRuntimeCreate`), read on the canonical type. */
+function admitsRuntimeCreate(type: string): boolean {
+    return DEFAULT_METADATA_TYPE_REGISTRY.some((e) => e.type === type && e.allowRuntimeCreate === true);
+}
+
+/**
+ * [#30062] The remedy a declared override of an excluded `type` is told: one
+ * that works for that type, read from the facts that decide whether it does,
+ * in this order, never from a sentence shared by every excluded type:
+ *
+ *  1. a Setup-owned connection (`datasource`, ADR-0146 D1): Setup › Datasources;
+ *     a `field`: its object's extension in the pair (ADR-0146 D10);
+ *  2. a type the metadata door creates (`allowRuntimeCreate`): the customer's
+ *     own item under a new name, "new similar" (D6's remedy for its catalog);
+ *  3. a type with an ADR-0126 Regime C row: that row's sanctioned path, the
+ *     sentence every other door of the type names (`sharing_rule`: an
+ *     organization rule, `POST /sharing/rules`, which Setup › Sharing Rules
+ *     lists, or the switch);
+ *  4. a type an organization authors as a Setup record ({@link SETUP_AUTHORED_DOORS});
+ *  5. else the type is defined only in package source: it changes with a new
+ *     version of the package that ships it.
+ *
+ * Before, every excluded type was told to "create your own TYPE under a new
+ * name", and for a type with no runtime create (a sharing rule, a queue, a
+ * code-only type) that create answered 403 `NOT_CREATABLE`.
+ */
+function excludedTypeRemedy(type: string, base: string | undefined): string {
+    if (getOverrideTypeClassification(type)?.basis === 'setup_owned_connection') {
+        return `Remove \`overrides\`: ${articleFor(type)} ${type} is the environment's own connection and does not travel in a package. `
+            + 'Add your own under a new name in Setup › Datasources.';
+    }
+    if (type === 'field') {
+        // ADR-0146 D10: a base field changes through its object's extension, never on its own.
+        return 'Remove `overrides` and change the field through an object extension in the base\'s paired .custom package '
+            + `(ADR-0146 D10): an \`object_extension\` item saved through ${OBJECT_EXTENSION_ITEM_DOOR} adds a field, or changes a base field within the display-property whitelist.`;
+    }
+    if (admitsRuntimeCreate(type)) {
+        return `Remove \`overrides\` and create your own ${type} under a new name ("new similar").`;
+    }
+    if (packagedBaseRegimeRow(type)?.regime === 'C') {
+        return `Remove \`overrides\`. ${packagedBaseRegimePrescription(type)}`;
+    }
+    const setup = Object.prototype.hasOwnProperty.call(SETUP_AUTHORED_DOORS, type) ? SETUP_AUTHORED_DOORS[type] : undefined;
+    if (setup !== undefined) {
+        return `Remove \`overrides\` and add your organization's own ${type} under a new name in ${setup}.`;
+    }
+    const shipper = base === undefined ? 'the package that ships it' : `'${base}'`;
+    return `Remove \`overrides\`: ${articleFor(type)} ${type} is defined only in package source, so it changes only with a new version of ${shipper}.`;
+}
+
+/** The indefinite article for a type name, by its first letter: "an api", "a permission". */
+function articleFor(type: string): 'a' | 'an' {
+    return /^[aeiou]/.test(type) ? 'an' : 'a';
+}
+
+/**
  * THE override write gate's rule, as a pure verdict — the one judgement the
  * publish doors (`saveMetaItem`, `publishMetaItem`, `publishPackageDrafts`),
  * `os validate` and the marketplace install door all ask, so the three gate
@@ -709,9 +918,11 @@ export function judgeOverrideWrite(
                 + `object it extends and is stored under that object's name. Remove \`overrides\` and edit the object_extension '${name}' itself.`);
         }
         if (row?.disposition !== 'overridable') {
+            // [#30062] The citation is the type's own basis, and the remedy one that works for the type.
+            const cite = row === undefined ? 'ADR-0146 D2' : EXCLUSION_BASIS_CITATION[row.basis];
             return refuse('declared_type_not_overridable',
-                `${item} carries \`overrides\`, but a ${type} takes no override (ADR-0146 D6). `
-                + `Remove \`overrides\` and create your own ${type} under a new name ("new similar").`);
+                `${item} carries \`overrides\`, but ${articleFor(type)} ${type} takes no override (${cite}). `
+                + excludedTypeRemedy(type, declaration.base));
         }
         // `action` is classified overridable and waits for D9's conditions
         // (`isOpenOverrideType`): "action customization is not yet available".
@@ -848,17 +1059,25 @@ export function overrideWriteRefusalError(
  * member ({@link overrideWriteMemberOf}), and an artifact of another member is
  * no shipper: a registry that ignores `member` can answer one, as
  * `mergeArtifactProtection` guards on the read side.
+ *
+ * `writtenScope`, when given for the written package, is its closure in
+ * place of the registry's read: a close asking about a pair the ensure step
+ * would create ({@link OverlayPairFix.pendingPairScope}). Every door's own
+ * write passes none.
  */
 export function overrideWriteVerdict(
     this: Pick<PackagedBaseRefusalHost, 'isWritablePackage' | 'resolveWritePackageScope' | 'shippedArtifactsOf'>,
     request: OverrideWriteSubject,
+    writtenScope?: WrittenPackageScope,
 ): OverrideWriteVerdict {
     const packageId = typeof request.packageId === 'string' && request.packageId.length > 0
         ? request.packageId
         : undefined;
     const declaration = declarationOf(request.item);
     if (packageId === undefined && !declaration.present) return NOT_CONCERNED;
-    const scope = packageId === undefined ? undefined : this.resolveWritePackageScope(packageId);
+    const scope = packageId === undefined
+        ? undefined
+        : writtenScope?.packageId === packageId ? writtenScope : this.resolveWritePackageScope(packageId);
     // A named package the registry cannot produce is not this gate's to
     // judge: both doors ask `uninstalledNamedBaseRefusal`, which refuses a
     // write naming an uninstalled base (`WRITABLE_PACKAGE_REQUIRED`) — the

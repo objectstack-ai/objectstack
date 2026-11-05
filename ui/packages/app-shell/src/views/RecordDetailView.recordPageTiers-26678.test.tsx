@@ -34,7 +34,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { act, render, screen, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { MetadataCtx } from '@object-ui/react';
 import { RelatedCountStore } from '@object-ui/components';
@@ -140,9 +140,18 @@ let dataSource: { find: ReturnType<typeof vi.fn> } & Record<string, unknown>;
  */
 const RELATED_TOTALS: Record<string, number> = { showcase_task: 2, showcase_note: 1 };
 
-function makeDataSource() {
+/**
+ * A rejected read in the shape the ObjectStack client throws it: the HTTP
+ * status on `httpStatus` and the ADR-0112 code on `code`.
+ */
+const rejection = (httpStatus: number, code: string) =>
+  Object.assign(new Error(`${httpStatus} ${code}`), { httpStatus, code });
+
+function makeDataSource(auditRead?: () => Promise<unknown>) {
   return {
-    find: vi.fn(async (objectName: string) => ({ data: [], total: RELATED_TOTALS[objectName] ?? 0 })),
+    find: vi.fn(async (objectName: string) =>
+      objectName === 'sys_audit_log' && auditRead ? auditRead() : { data: [], total: RELATED_TOTALS[objectName] ?? 0 },
+    ),
     create: vi.fn(async (_o: string, row: unknown) => row),
     findOne: vi.fn(async (_o: string, recordId: string) => ({
       id: recordId,
@@ -155,12 +164,27 @@ function makeDataSource() {
   };
 }
 
-function renderPage({ width, embedded = false, search = '', windowWidth = 1440 }: { width: number; embedded?: boolean; search?: string; windowWidth?: number }) {
+function renderPage({
+  width,
+  embedded = false,
+  search = '',
+  windowWidth = 1440,
+  objects = OBJECTS,
+  auditRead,
+}: {
+  width: number;
+  embedded?: boolean;
+  search?: string;
+  windowWidth?: number;
+  objects?: typeof OBJECTS;
+  /** How this reader's `sys_audit_log` read answers; omitted, it answers no rows. */
+  auditRead?: () => Promise<unknown>;
+}) {
   rootWidth = width;
   Object.defineProperty(window, 'innerWidth', { value: windowWidth, configurable: true, writable: true });
-  dataSource = makeDataSource();
+  dataSource = makeDataSource(auditRead);
   const metadata = {
-    objects: OBJECTS,
+    objects,
     pages: [],
     loading: false,
     error: null,
@@ -175,7 +199,7 @@ function renderPage({ width, embedded = false, search = '', windowWidth = 1440 }
       <MetadataCtx.Provider value={metadata}>
         <RecordDetailView
           dataSource={dataSource as never}
-          objects={OBJECTS}
+          objects={objects}
           onEdit={() => {}}
           objectNameOverride={PARENT}
           recordIdOverride={RECORD_ID}
@@ -356,5 +380,52 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     // The face takes the page: no columns under it.
     expect(container.querySelector('[data-record-columns]')).toBeNull();
     await waitFor(() => expect(auditReads()).toBeGreaterThan(0));
+  });
+});
+
+describe('RecordDetailView — the 动态 tab offers 变更 only while the record shows its field history (objectstack#30074)', () => {
+  /** The full stream's chips, in order, once the 动态 tab has drawn. */
+  const streamChips = async (container: HTMLElement) =>
+    waitFor(
+      () => {
+        const chips = container.querySelectorAll('[data-related-enlarged="timeline"] [data-stream-filter]');
+        expect(chips.length).toBeGreaterThan(0);
+        return Array.from(chips).map((chip) => chip.getAttribute('data-stream-filter'));
+      },
+      { timeout: 5000 },
+    );
+
+  /** The chips once this reader's audit read has gone out and settled. */
+  const streamChipsAfterAuditRead = async (container: HTMLElement) => {
+    await streamChips(container);
+    await waitFor(() => expect(auditReads()).toBeGreaterThan(0), { timeout: 5000 });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    return streamChips(container);
+  };
+
+  it('an object with `enable.trackHistory`, its audit read answered: 全部 / 活动 / 讨论 / 变更', async () => {
+    const { container } = renderPage({ width: 1440, search: '?related=timeline' });
+    expect(await streamChipsAfterAuditRead(container)).toEqual(['all', 'activity', 'discussion', 'changes']);
+  });
+
+  it('the same object without it: no 变更 chip, and no audit read', async () => {
+    const untracked = OBJECTS.map((o) => (o.name === PARENT ? { ...o, enable: undefined } : o)) as typeof OBJECTS;
+    const { container } = renderPage({ width: 1440, search: '?related=timeline', objects: untracked });
+    expect(await streamChips(container)).toEqual(['all', 'activity', 'discussion']);
+    expect(auditReads()).toBe(0);
+  });
+
+  // objectstack#30344 — the field history this record page shows is the one
+  // THIS reader's audit read answers: a reader the server refuses it to has
+  // nothing for 变更 to hold, so the chip is not offered, as with history off.
+  it('a reader whose audit read is refused (403): no 变更 chip, as with history off', async () => {
+    const { container } = renderPage({
+      width: 1440,
+      search: '?related=timeline',
+      auditRead: () => Promise.reject(rejection(403, 'PERMISSION_DENIED')),
+    });
+    expect(await streamChipsAfterAuditRead(container)).toEqual(['all', 'activity', 'discussion']);
   });
 });

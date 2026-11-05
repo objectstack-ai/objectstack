@@ -7,7 +7,7 @@
 // `help` into one locale had the DEFAULT locale reported missing.
 
 import { describe, it, expect } from 'vitest';
-import { collectExpectedEntries } from '../src/utils/i18n-extract';
+import { collectExpectedEntries } from '../src/utils/i18n-bundle-extract';
 import { computeI18nCoverage } from '../src/utils/i18n-coverage';
 
 const HELP_KEY = 'objects.kpi.fields.score.help';

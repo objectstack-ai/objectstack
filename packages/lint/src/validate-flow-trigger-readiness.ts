@@ -46,6 +46,13 @@
 //      ADR-0018, so the scalar parses fine), not `os validate`, and not even
 //      the one bind-time warn rule 3's case gets.
 //
+//   4b. A time-relative start whose `config.objectName` is not the object its
+//      descriptor sweeps (#30283). Not a dead flow: the sweep binds and runs.
+//      It is a start that names two objects, and the run binds only the swept
+//      one, while the expression checks type the flow's conditions against
+//      `objectName`. So a condition the run cannot evaluate passes every check,
+//      and one it can is refused (1b-iii).
+//
 //   5. A `type: 'record_change'` flow whose start-node `triggerType` the engine
 //      routes NOWHERE — present but off-grammar (`triggerType: 'onCreate'`,
 //      #6637's original specimen) or absent entirely (the omission shape,
@@ -65,6 +72,12 @@
 //      rest of the family does not (#20611) — see its docblock for why, and see
 //      `FLOW_API_TRIGGER_SECRET_MISSING` for why the judgement is carried here
 //      rather than read from the runtime.
+//      [#30009] The same rule reads the hook's ONE verifier through the spec's
+//      `apiTriggerVerifierOf`, the reader the engine and the trigger share: a
+//      start node that declares its sender's own scheme (`config.signature`)
+//      is ready on the key `config.secretRef` names and nothing else, and one
+//      whose declaration the reader answers `unusable` is never ready
+//      (`flow-api-trigger-signature-unusable`).
 //
 //   ⚠️ One more rule lived here and is RETIRED (#17396):
 //      `flow-schedule-organization-missing`, a `warning` on a time-triggered
@@ -117,6 +130,16 @@
 //     reaches the point of asking that trigger. The rule speaks only for flows
 //     whose binding the ENGINE resolves to `api` (see 1h), so every flow it
 //     names is one the engine refuses.
+//   - `error` — `flow-time-relative-object-mismatch` (#30283) is not a
+//     never-fire verdict, and sits here on the same question all the same: is
+//     THIS STACK enough to know? Both names are on the one start node, and which
+//     one the run binds is a hardcoded read in the engine's binding resolver
+//     (`timeRelative.object` first), so nothing installed changes the answer.
+//     What it costs when left standing was measured, not assumed: a condition
+//     typed against `objectName` reading a field the swept object lacks passed
+//     every check and failed every run (`No such key`), while a correct read of
+//     the swept object's field was refused as unknown on `objectName`. Removing
+//     `objectName` changes nothing the run does, so refusing loses nothing.
 //   ⚠️ `flow-schedule-organization-missing` was the family's one measured
 //     exception — `error` on the criterion, held at `warning` by the shipped
 //     corpus — and it is retired (#17396) rather than re-severitied. The
@@ -180,6 +203,8 @@ import {
   API_TRIGGER_SECRET_REF_KEY,
   TimeRelativeTriggerSchema,
   apiTriggerSecretRefOf,
+  apiTriggerSignatureRefusals,
+  apiTriggerVerifierOf,
   resolveFlowTriggerKind,
 } from '@objectstack/spec/automation';
 import { closureDependencyRemedy, recordsOf, suggestName } from './object-graph.js';
@@ -238,6 +263,25 @@ export const FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID = 'flow-time-relative-descrip
  *     there is no runtime channel at all for it to be moved earlier from.
  */
 export const FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE = 'flow-time-relative-descriptor-unroutable';
+/**
+ * #30283 — a time-relative start whose `config.objectName` names an object
+ * other than the one its descriptor sweeps (`config.timeRelative.object`).
+ *
+ * The run binds the swept object and nothing else: the engine's binding
+ * resolver reads `timeRelative.object` first, and the trigger launches each run
+ * with a row of that object as `record` and that object as the run's object.
+ * `objectName` is read by no part of a time-relative run — but the expression
+ * checks type the flow's conditions against it whenever it is set, so the start
+ * names an object for its checks that its run never binds. Measured: a
+ * condition reading a field only the named object declares passes every check
+ * and faults every run; a correct read of the swept object's field is refused
+ * as unknown on the named one (see 1b-iii).
+ *
+ * The third id of the `flow-<descriptor>-<verdict>` family, on a different key
+ * from the other two (`config.objectName`, beside the descriptor), so it can
+ * fire together with either of them: two keys, two facts.
+ */
+export const FLOW_TIME_RELATIVE_OBJECT_MISMATCH = 'flow-time-relative-object-mismatch';
 /**
  * #6637 — a `type: 'record_change'` flow whose start-node `triggerType` the
  * engine routes to NO trigger at all, so the flow is silently demoted to a
@@ -298,6 +342,17 @@ export const FLOW_TRIGGER_UNROUTABLE = 'flow-trigger-unroutable';
  * with the engine, so this rule restates no grammar for it.
  */
 export const FLOW_API_TRIGGER_SECRET_MISSING = 'flow-api-trigger-secret-missing';
+/**
+ * #30009 — a flow bound to the inbound `api` trigger whose start node declares
+ * its sender's own signature scheme (`config.signature`) in a form the spec
+ * refuses: `apiTriggerVerifierOf` answers `unusable`. The engine's flow parse
+ * refuses the flow at registration, and a trigger handed it anyway arms a
+ * hook that refuses every post `401 INVALID_SIGNATURE` and never falls back
+ * to `x-objectstack-signature`, so it never receives a post. The verdict is
+ * the spec's own reader, shared with the engine and the trigger, so this rule
+ * restates none of the declaration's grammar.
+ */
+export const FLOW_API_TRIGGER_SIGNATURE_UNUSABLE = 'flow-api-trigger-signature-unusable';
 
 type AnyRec = Record<string, unknown>;
 
@@ -657,6 +712,46 @@ export function validateFlowTriggerReadiness(
           hint:
             'Correct config.timeRelative to TimeRelativeTriggerSchema, starting with the key the verdict names, ' +
             'and re-run until the schema accepts it: a descriptor the schema accepts binds',
+        });
+      }
+
+      // 1b-iii. #30283 — the start names one object in `config.objectName` and
+      //     sweeps another in `timeRelative.object`. Only a flow the ENGINE binds
+      //     to the time-relative trigger is judged: the spec's kind resolver
+      //     says `time_relative`, and the start carries no array-form record
+      //     token (the engine's binding pre-check routes that shape to the
+      //     record-change trigger, which DOES bind `objectName`, ahead of the
+      //     resolver). A `record-*` token outranks the descriptor in the
+      //     resolver itself, so that flow is not judged either.
+      //
+      //     `error`, on the family's criterion: the stack alone settles it. Both
+      //     names sit on the one start node, and which of them the run binds is
+      //     a hardcoded read in the engine's binding resolver, so no installed
+      //     package changes the answer. The fix loses nothing: removing
+      //     `objectName` changes nothing the run does.
+      const sweptObject = typeof tr.object === 'string' ? tr.object : undefined;
+      const namedObject = typeof config.objectName === 'string' ? config.objectName : undefined;
+      if (
+        sweptObject &&
+        namedObject !== undefined &&
+        namedObject !== sweptObject &&
+        resolveFlowTriggerKind(flow) === 'time_relative' &&
+        !isArrayRecordTriggered
+      ) {
+        findings.push({
+          severity: 'error',
+          rule: FLOW_TIME_RELATIVE_OBJECT_MISMATCH,
+          where: `flow "${flowName}" › start node`,
+          path: `flows[${flowIndex}].nodes[${start.index}].config.objectName`,
+          // One verdict sentence; what the run binds, what the checks type
+          // against, and the measured outcome are
+          // `os explain flow-time-relative-object-mismatch`.
+          message:
+            `config.objectName '${namedObject}' is not the object this time-relative start sweeps ` +
+            `('${sweptObject}'): each run's record is a '${sweptObject}' row, and '${namedObject}' is never bound`,
+          hint:
+            `Remove config.objectName (the sweep never reads it), or set it to '${sweptObject}': conditions are then ` +
+            `checked against the record each run holds`,
         });
       }
     }
@@ -1055,17 +1150,30 @@ export function validateFlowApiTriggerSecret(
     const triggerType = typeof config.triggerType === 'string' ? config.triggerType : undefined;
     const bindsApiTrigger = !isArrayRecordTriggerType(config) && resolveFlowTriggerKind(flow) === 'api';
     const secretPath = start ? `flows[${flowIndex}].nodes[${start.index}].config.secret` : undefined;
-    // [#20611] Withheld and stored ⇒ present: the host restores the stored
-    // secret at exactly this position before the item is persisted.
-    if (secretPath !== undefined && options.restoredCredentialPaths?.has(secretPath)) return;
-    const secretProblem = bindsApiTrigger ? describeUnusableSecret(start, config) : undefined;
-    if (!secretProblem) return;
     // Which declaration binds it — the engine's own message names the same
     // two, so an author who meets both channels reads one story.
     const binds = [
       flow.type === 'api' ? `type: 'api'` : undefined,
       triggerType === 'api' ? `start-node triggerType: 'api'` : undefined,
     ].filter((s): s is string => s !== undefined);
+    // [#30009] The hook's ONE verifier, by the spec's reader the engine and
+    // the trigger share. Judged before the withheld-secret shortcut below: a
+    // declared scheme's key is only ever `config.secretRef`, never the stored
+    // literal that shortcut stands for.
+    const verifier = bindsApiTrigger && start ? apiTriggerVerifierOf(config) : undefined;
+    if (verifier?.kind === 'unusable') {
+      findings.push(signatureUnusableFinding(flow, flowIndex, flowName, start!, binds));
+      return;
+    }
+    // A declared scheme verifies under the key `config.secretRef` names, which
+    // `apiTriggerVerifierOf` has already found usable: the hook is ready, and
+    // no literal or withheld secret is consulted for it.
+    if (verifier?.kind === 'declared') return;
+    // [#20611] Withheld and stored ⇒ present: the host restores the stored
+    // secret at exactly this position before the item is persisted.
+    if (secretPath !== undefined && options.restoredCredentialPaths?.has(secretPath)) return;
+    const secretProblem = bindsApiTrigger ? describeUnusableSecret(start, config) : undefined;
+    if (!secretProblem) return;
     findings.push({
       // `error` — the never-fire family, and the strongest verdict in it: the
       // engine does not merely leave this flow unfired, it refuses to register
@@ -1088,4 +1196,43 @@ export function validateFlowApiTriggerSecret(
     });
   });
   return findings;
+}
+
+/**
+ * The 1h finding for an `api`-bound start node whose `config.signature` the
+ * spec's reader answers `unusable` ({@link FLOW_API_TRIGGER_SIGNATURE_UNUSABLE}).
+ * Located at the first refusal the spec's own judge raises for that node; a
+ * node the judge raises nothing for is unusable because its
+ * `config.secretRef` is, and is located there. The verdict names the key, not
+ * the refusal's prose: the flow parse already prints that in full, and a
+ * verdict here stays one line (#22161).
+ */
+function signatureUnusableFinding(
+  flow: AnyRec,
+  flowIndex: number,
+  flowName: string,
+  start: { node: AnyRec; index: number },
+  binds: readonly string[],
+): FlowTriggerReadinessFinding {
+  const nodePrefix = ['nodes', start.index, 'config'];
+  const own = apiTriggerSignatureRefusals(flow).find((r) => nodePrefix.every((seg, i) => r.path[i] === seg));
+  const keyPath = own
+    ? own.path.slice(2).reduce<string>((acc, seg) => (typeof seg === 'number' ? `${acc}[${seg}]` : `${acc}.${seg}`), '').slice(1)
+    : `config.${API_TRIGGER_SECRET_REF_KEY}`;
+  return {
+    // `error` — the never-fire family: the engine's flow parse refuses the
+    // flow at registration, and the trigger admits no post to such a hook.
+    severity: 'error',
+    rule: FLOW_API_TRIGGER_SIGNATURE_UNUSABLE,
+    where: `flow "${flowName}" › start node`,
+    path: `flows[${flowIndex}].nodes[${start.index}].${keyPath}`,
+    // [#22161] One verdict sentence; what a declared scheme is, and why a
+    // broken one admits nothing, is `os explain flow-api-trigger-signature-unusable`.
+    message:
+      `binds the inbound api trigger (${binds.join(' and ')}) and declares config.signature, refused at ` +
+      `${keyPath}, so the engine refuses the flow and its hook admits no post`,
+    hint:
+      `Fix config.signature (its key named by config.secretRef only), or remove it to verify ` +
+      `x-objectstack-signature`,
+  };
 }

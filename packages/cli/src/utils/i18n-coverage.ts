@@ -7,8 +7,8 @@
  * actually attached to it, and reports the ones that are missing or empty.
  *
  * The expected set is **not** computed here. It comes from
- * {@link collectExpectedEntries} in `i18n-extract.ts` — the same walker that
- * scaffolds bundles for `os i18n extract`. That sharing is the point: this
+ * {@link collectExpectedEntries} in `@objectstack/lint` (`packages/lint/src/i18n-walk.ts`)
+ * — the same walker that scaffolds bundles for `os i18n extract`. That sharing is the point: this
  * detector used to keep its own parallel walk, and the two drifted until whole
  * declared surfaces were extractable but ungated — most visibly the action
  * labels declared *inline on an object* (`sys_approval_request`'s
@@ -44,7 +44,7 @@
 
 import { deepMerge } from '@objectstack/core';
 import type { TranslationBundle, TranslationData } from '@objectstack/spec/system';
-import { collectExpectedEntries, type ExpectedEntry } from './i18n-extract.js';
+import { collectExpectedEntries, type ExpectedEntry } from './i18n-bundle-extract.js';
 
 export type CoverageSeverity = 'error' | 'warning';
 

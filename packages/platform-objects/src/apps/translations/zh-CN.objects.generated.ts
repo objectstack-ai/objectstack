@@ -159,7 +159,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "封禁用户",
-        description: "要封禁该用户吗？封禁后会立即登出，且在解除封禁前无法再次登录。",
+        description: "要封禁该用户吗？封禁后会立即登出，在解除封禁前无法再次登录，其 API 密钥也会被拒绝。解除封禁后这些密钥恢复可用。",
         successMessage: "用户已封禁",
         params: {
           banReason: {
@@ -3388,7 +3388,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       namespace: {
         label: "命名空间",
-        help: "Manifest 命名空间（例如 mail、branding、feature_flags）。"
+        help: "Manifest 命名空间（例如 mail、branding、storage）。"
       },
       key: {
         label: "键",

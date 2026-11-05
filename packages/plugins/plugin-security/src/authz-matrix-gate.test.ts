@@ -244,7 +244,11 @@ async function writeFilter(cell: any, roleCtx: any): Promise<unknown> {
   if (!reRead) {
     return threw ? `CRUD_DENY:${threw?.name ?? 'err'}` : 'BYPASS(no-write-filter)';
   }
-  return reRead[1].where.$and.slice(1);
+  // The re-read is `{ $and: [{ id }, PLATFORM] }`: PLATFORM is one `$and` of
+  // the write predicates, marked as the platform's own (never the caller's
+  // predicate), and its members are the matrix this gate locks.
+  const [, platform] = reRead[1].where.$and;
+  return platform.$and;
 }
 
 /**

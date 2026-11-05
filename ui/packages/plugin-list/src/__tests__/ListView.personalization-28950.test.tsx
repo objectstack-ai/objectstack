@@ -212,3 +212,30 @@ describe('with the callback wired, the host owns the one reset (objectstack#2895
     expect(screen.getByTestId('sort-reset-default')).toBeEnabled();
   });
 });
+
+/**
+ * objectstack#30073 — a host that shows the view's own conditions as Filter
+ * panel rows hands them in `viewDefaults.filters`: the panel holding exactly
+ * those rows is the view's own, and a changed or emptied panel is `filters`.
+ */
+describe('the view\'s own conditions as panel rows (`viewDefaults.filters`, objectstack#30073)', () => {
+  const OWN = { id: 'root', logic: 'and', conditions: [{ id: 'view-0', field: 'name', operator: 'contains', value: 'Acme' }] };
+  const withOwn = { viewDefaults: { ...VIEW_DEFAULTS, filters: OWN } as never };
+
+  it('the panel holding the view\'s own rows reports no part', async () => {
+    const { reported, onPersonalizationChange } = mount({}, { ...withOwn, initialFilters: OWN as never });
+    await waitFor(() => expect(onPersonalizationChange).toHaveBeenCalled());
+    await waitFor(() => expect(reported()).toEqual([]));
+  });
+
+  it('an edited panel is `filters`', async () => {
+    const edited = { ...OWN, conditions: [{ ...OWN.conditions[0], value: 'Globex' }] };
+    const { reported } = mount({}, { ...withOwn, initialFilters: edited as never });
+    await waitFor(() => expect(reported()).toEqual(['filters']));
+  });
+
+  it('an emptied panel is `filters` too', async () => {
+    const { reported } = mount({}, { ...withOwn, initialFilters: { id: 'root', logic: 'and', conditions: [] } as never });
+    await waitFor(() => expect(reported()).toEqual(['filters']));
+  });
+});

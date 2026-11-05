@@ -1575,10 +1575,13 @@ export class ProtocolSaveFacet {
         // already holds and is not judged: a draft-only set has no active row
         // to hold its grants, so judging it refused the pass's own rewrite of
         // a draft whose object draft was gone; the draft is judged at its
-        // publish. See {@link unknownGrantObjectSaveRefusal}.
+        // publish. [#30255] Grants the item copies from a set that already
+        // holds them (`inheritedGrantObjects`, the clone door's copy) are not
+        // this save's either. See {@link unknownGrantObjectSaveRefusal}.
         if (writeSource !== 'migrate-stored') {
             const grantRefusal = await host.unknownGrantObjectSaveRefusal(
                 singularType, request.item, request.name, mode === 'draft' ? 'drafts' : undefined, request.writeFace,
+                undefined, request.inheritedGrantObjects,
             );
             if (grantRefusal) throw grantRefusal;
         }

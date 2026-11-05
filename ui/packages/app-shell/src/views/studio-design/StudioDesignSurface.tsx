@@ -98,6 +98,7 @@ import {
   InterfacesNavContributionsContext,
   InterfacesNavOverrideMark,
   InterfacesRailMarksContext,
+  InterfacesServedContributedNavContext,
   NavTree,
   OFF_NAV_TYPES,
   OffNavSections,
@@ -105,6 +106,9 @@ import {
   navIcon,
   navKindName,
   navOpenedItems,
+  offNavViewHeading,
+  offNavViewLabel,
+  offNavViewReachedByEntry,
   type OffNavType,
 } from './InterfacesNavRail.js';
 import {
@@ -239,6 +243,7 @@ import {
   listViewColumnIndexOf,
   listViewColumnSelection,
   listViewHeldEdit,
+  listViewNameOf,
   listViewIsKanban,
   ObjectListViewInspector,
   useObjectListViewDraft,
@@ -311,7 +316,12 @@ import {
   type StudioRefusal,
 } from './metadataError.js';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
-import { loadPackageLessSurfaces, loadPackageSurfaces, type PackageSurface } from './packageSurfaces.js';
+import {
+  loadPackageLessSurfaces,
+  loadPackageSurfaces,
+  withDraftViewBindings,
+  type PackageSurface,
+} from './packageSurfaces.js';
 import {
   STUDIO_ORG_SCOPE_PILLAR,
   isOrgScopeDraft,
@@ -325,7 +335,7 @@ import { useWalledCatalogReadOnly } from '../metadata-admin/catalog-scope.js';
 import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
 import { StudioMetadataArea } from './StudioMetadataArea.js';
 import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
-import { resolveSurface, findSurfaceInTree, type NavNode, type Surface } from './navSurface.js';
+import { resolveSurface, findSurfaceInTree, isSameSurface, type NavNode, type Surface } from './navSurface.js';
 import { servedNavTextOf, displayNavTree, displayAppLabel, type ServedNavText } from './servedNavText.js';
 import { ServedWidgetTextContext, servedWidgetTextOf } from './servedDashboardText.js';
 import {
@@ -415,10 +425,12 @@ import {
   prefixObjectName,
   type EnsuredCustomizationPackage,
   type PkgEntry,
+  type ListedPackageManifest,
 } from './packages-io.js';
 import { usePackageCustomizations } from './CustomizationMark.js';
 import {
   ContributedRailRow,
+  contributedElsewhereText,
   RailCustomizationFilter,
   RailCustomizationMark,
   StudioPairItemChip,
@@ -426,6 +438,7 @@ import {
   customizationPairBaseOf,
   railCustomizationsOf,
   useDeepLinkFallback,
+  useContributedElsewhere,
   useOpenContributor,
   useRailCustomizationsOnly,
   withPairItems,
@@ -435,7 +448,10 @@ import {
   contributedFieldsOf,
   placeNavContributions,
   placesAnyNav,
+  servedContributedNavOf,
   withContributedFlowGroups,
+  NO_SERVED_CONTRIBUTED_NAV,
+  type ServedContributedNav,
   type ContributedOnObject,
 } from './contributionRows.js';
 import {
@@ -646,6 +662,14 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     basedOn: string | null;
     listedPair: string | null;
   } | null>(null);
+  // objectstack#29851 — the listed manifests this same read answered, held
+  // with the id it answered for: the Interfaces pillar's no-app empty state
+  // reads the open package's declared navigation targets off it (addresses
+  // only), so it sends no package-list request of its own.
+  const [listedManifests, setListedManifests] = React.useState<{
+    for: string;
+    manifests: ReadonlyMap<string, ListedPackageManifest>;
+  } | null>(null);
   React.useEffect(() => {
     // objectui#11553 — the package-less scope has no package to look up; its
     // writability is decided below, not fetched.
@@ -659,7 +683,12 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     const listedIds = fetchListedPackageIds();
     listedIds.catch(() => {});
     const listedManifests = fetchListedPackageManifests();
-    listedManifests.catch(() => {});
+    listedManifests.then(
+      (manifests) => {
+        if (!cancelled) setListedManifests({ for: packageId, manifests });
+      },
+      () => {},
+    );
     const settle = (entry: PkgEntry | null) => {
       setPkgWritable(entry?.writable ?? null);
       setPkgEntry(entry);
@@ -834,9 +863,19 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   const [publishNonce, setPublishNonce] = React.useState(0); // ↑ → pillars re-read the published baseline
   const [draftNonce, setDraftNonce] = React.useState(0); // ↑ → a draft save landed (`onDraftSaved`)
   // objectstack#28572 (ADR-0146 D3) — the base's served customization read
-  // (N-15), which every pillar rail marks its rows from; read again after a
-  // publish, which is what moves the served overrides.
-  const baseCustomizations = usePackageCustomizations(baseRead && packageId !== null ? packageId : null, publishNonce);
+  // (N-15), which every pillar rail marks its rows from; read again whenever
+  // the served overrides may have moved. objectstack#30238 — that is the
+  // metadata-refresh pulse, not `publishNonce`: a publish moves the nonce AND
+  // announces itself on the bus, but "Restore package original" (every
+  // pillar's, and the bundle item editor's) deletes the pair's row and only
+  // announces, so a read keyed on the nonce left the rail's marks and the
+  // "only customizations" count stale until a reload. Keyed on the pulse
+  // alone, a publish reads once, not twice; a copilot publish is read too.
+  const customizationsRefresh = useMetadataRefreshNonce();
+  const baseCustomizations = usePackageCustomizations(
+    baseRead && packageId !== null ? packageId : null,
+    customizationsRefresh,
+  );
   const customization = React.useMemo<StudioBaseCustomization | null>(
     () =>
       baseRead && packageId !== null
@@ -1830,6 +1869,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                   readOnly={readOnly}
                   readOnlySettled={pkgWritable !== undefined}
                   customization={customization}
+                  listedManifests={listedManifests?.for === packageId ? listedManifests.manifests : null}
                   onDirtyChange={setPillarDirty}
                   onSurfaceLabelChange={setSurfaceLabel}
                   onHeldEditChange={setHeldEdit}
@@ -1977,8 +2017,14 @@ export function InterfacesPillar({
   onSurfaceLabelChange,
   onHeldEditChange,
   customization = null,
+  listedManifests = null,
 }: {
   packageId: string;
+  /** objectstack#29851 — the package list's manifests, as the Studio surface
+   * already read them; `null` until that read answers (or when it failed).
+   * The no-app empty state reads the open package's declared navigation
+   * targets off it, as addresses only. */
+  listedManifests?: ReadonlyMap<string, ListedPackageManifest> | null;
   /** objectui#12718 — the package's display name, as the Studio top bar
    * reads it; `undefined` until the package list answers. The pillar names a
    * package with no app by it, so the id shows only when neither exists. */
@@ -2063,6 +2109,7 @@ export function InterfacesPillar({
   // `railAppLabel`; every editor keeps reading `navTree` / `appLabel`, the
   // authored buffer, so no input ever echoes a served text.
   const [servedNav, setServedNav] = React.useState<ServedNavText | null>(null);
+  const [servedContributed, setServedContributed] = React.useState<ServedContributedNav>(NO_SERVED_CONTRIBUTED_NAV);
   const railTree = React.useMemo(() => displayNavTree(navTree, servedNav), [navTree, servedNav]);
   const railAppLabel = displayAppLabel(appLabel, servedNav);
   // objectstack#29786 — what other packages add to this app's navigation,
@@ -2261,9 +2308,22 @@ export function InterfacesPillar({
   // default in `offNavFallbackRef`, and the effect after the package-items read
   // opens the item from those lists, or that default when the package has no
   // such item. Decided once, for the link this pillar mounted with.
+  // objectstack#30046 — so does a link to an object no entry opens (the object
+  // page a list view under 不在导航中 opens, reloaded or shared): the views
+  // the package lists say which object that is.
   const offNavDeepLinkRef = React.useRef<'pending' | 'done'>(
-    initialSurface && (OFF_NAV_TYPES as readonly string[]).includes(initialSurface.type) ? 'pending' : 'done',
+    initialSurface && ([...OFF_NAV_TYPES, 'object'] as readonly string[]).includes(initialSurface.type)
+      ? 'pending'
+      : 'done',
   );
+  // objectstack#30046 — the doors that open a list view on its object's page
+  // (`listViewDoorOf`, `openListViewDoor`, below), read by the deep-link
+  // effect, which runs before they are defined in this render.
+  const listViewDoorRef = React.useRef<{
+    of: (item: PackageSurface & { addedIn?: string }) => { surface: Surface; viewId: string } | null;
+    objectSurface: (objectName: string) => Surface;
+    open: (door: { surface: Surface; viewId: string }) => void;
+  } | null>(null);
   const offNavFallbackRef = React.useRef<Surface | null>(null);
   const offNavUpgrade = useDeepLinkFallback();
   const currentRef = React.useRef(current);
@@ -2391,6 +2451,16 @@ export function InterfacesPillar({
   // objectui#11785 — a load failure as it was (`plainRefusal`), a refused leaf
   // save as an author sentence with the raw text behind Details.
   const [error, setError] = React.useState<StudioRefusal | null>(null);
+  // objectstack#29851 — on the no-app empty state only: what this package adds
+  // to other packages' apps, from the target's served owner and that owner's
+  // customization read (the declared app is an address, never shown).
+  const contributedElsewhere = useContributedElsewhere(
+    packageId,
+    appStatus === 'missing' && !error,
+    listedManifests,
+    (name) => client.get<Record<string, unknown>>('app', name),
+  );
+  const openContributor = useOpenContributor();
   // Objects in THIS package (published ∪ draft) — the nav item inspector's
   // object picker, so nav can be wired to sibling objects before publishing.
   const [pkgObjects, setPkgObjects] = React.useState<Array<{ name: string; label: string; icon?: string; pair?: true }>>(
@@ -2483,9 +2553,11 @@ export function InterfacesPillar({
     const read = (at: string) =>
       Promise.all(
         OFF_NAV_TYPES.map((type) =>
-          loadPackageSurfaces(client, type, at, locale, getMetadataResource(type)?.listFilter).catch(
-            () => [] as PackageSurface[],
-          ),
+          loadPackageSurfaces(client, type, at, locale, getMetadataResource(type)?.listFilter)
+            // objectstack#30046 — a view row says its object and family, a
+            // draft-only one too: the 视图 group and its doors read them.
+            .then((items) => (type === 'view' ? withDraftViewBindings(client, at, items) : items))
+            .catch(() => [] as PackageSurface[]),
         ),
       );
     (async () => {
@@ -2509,22 +2581,42 @@ export function InterfacesPillar({
   React.useEffect(() => {
     if (!initialSurface) return;
     if (appStatus === 'loading' || packageItems?.packageId !== packageId) return;
+    // objectstack#30046 — a link to an object no entry opens: a list view of
+    // it is among the package's views, and the object's page opens (on the
+    // view the link names, `initialView` of the list-view buffer).
+    const objectViews =
+      initialSurface.type === 'object'
+        ? (packageItems.byType.view ?? []).some((i) => i.viewKind === 'list' && i.object === initialSurface.name)
+        : false;
     const item = (packageItems.byType[initialSurface.type as OffNavType] ?? []).find(
       (i) => i.name === initialSurface.name,
     );
-    const linked: Surface | null = item
-      ? { type: item.type, name: item.name, label: item.label, ...(item.addedIn ? { addedIn: item.addedIn } : {}) }
-      : null;
+    // objectstack#30046 — a link to a list view itself (`surface=view:`, the
+    // All metadata door) lands on its object's page, as a row under 不在导航中
+    // does.
+    const door = item && initialSurface.type === 'view' ? (listViewDoorRef.current?.of(item) ?? null) : null;
+    const linked: Surface | null = door
+      ? door.surface
+      : objectViews
+        ? (listViewDoorRef.current?.objectSurface(initialSurface.name) ?? null)
+        : item
+          ? { type: item.type, name: item.name, label: item.label, ...(item.addedIn ? { addedIn: item.addedIn } : {}) }
+          : null;
     // objectstack#28572 — an item the pair adds is listed once the pair is
     // known, after the package list answers: a link the first lists could not
     // resolve opens it then, while the default it opened is still open.
     if (offNavDeepLinkRef.current === 'done') {
       if (linked && offNavUpgrade.take(currentRef.current ? leafKeyOf(currentRef.current) : null, leafKeyOf(linked))) {
-        setCurrent(linked);
+        if (door) listViewDoorRef.current?.open(door);
+        else setCurrent(linked);
       }
       return;
     }
     offNavDeepLinkRef.current = 'done';
+    if (door && currentRef.current === null) {
+      listViewDoorRef.current?.open(door);
+      return;
+    }
     const target = linked ?? offNavFallbackRef.current;
     if (!linked && target && currentRef.current === null) offNavUpgrade.note(leafKeyOf(target));
     setCurrent((cur) => cur ?? target);
@@ -2619,6 +2711,9 @@ export function InterfacesPillar({
         // translated from. A never-saved app has neither, and no served text.
         const served = saved ? servedNavTextOf(eff, published[0]) : null;
         setServedNav(served);
+        // objectstack#29851 — from the same two answers: the entries the fold
+        // added, by id, for the contributed rows' labels. No request of its own.
+        setServedContributed(saved ? servedContributedNavOf(eff, published[0]) : NO_SERVED_CONTRIBUTED_NAV);
         const appDraftBody = extractDraftBody(appDraftResp);
         // A served draft is the whole document — taken as-is, never spread
         // over the published layer (objectui#10765; the rule is stated once
@@ -3230,6 +3325,38 @@ export function InterfacesPillar({
   // `?surface=` mirror (see useSurfaceDeepLink), with the view an `object`
   // leaf shows when it is not the one its entry opens (objectstack#30046).
   useSurfaceDeepLinkMirror(current, current?.type === 'object' && listView.entryTarget ? (listView.target?.viewId ?? null) : null);
+  // objectstack#30046 — an object's name as the Studio shows it: the label the
+  // shell's metadata serves in this locale, else this package's own row, else
+  // the name. Names the page of an object no entry opens, and its forms.
+  const objectLabelOf = (objectName: string): string =>
+    resolveI18nLabel((findByName(metadata.objects, objectName) as { label?: I18nLabel } | undefined)?.label, locale)?.trim() ||
+    pkgObjects.find((o) => o.name === objectName)?.label ||
+    objectName;
+  // objectstack#30046 (Scope 6) — a list view opened from a door outside the
+  // header (a row under 不在导航中, a link to the view itself) lands on its
+  // object's page, the one page a list view is edited on: the object's nav
+  // entry when it has one (the first, in tree order, as a link to the object
+  // finds it), else the object itself, with no entry. A form view, a view
+  // whose family or object is unknown, and one a read-only base's pair adds
+  // (read and saved at that pair) open as themselves, as before.
+  const objectSurfaceOf = (objectName: string): Surface =>
+    findSurfaceInTree(navTree, { type: 'object', name: objectName }, locale, targetLabel) ?? {
+      type: 'object',
+      name: objectName,
+      label: objectLabelOf(objectName),
+    };
+  const listViewDoorOf = (item: PackageSurface & { addedIn?: string }): { surface: Surface; viewId: string } | null =>
+    item.type === 'view' && item.viewKind === 'list' && item.object && !item.addedIn
+      ? { surface: objectSurfaceOf(item.object), viewId: item.name }
+      : null;
+  const openListView = listView.openView;
+  const openListViewDoor = (door: { surface: Surface; viewId: string }) => {
+    openListView(door.surface, door.viewId);
+    setCurrent(door.surface);
+  };
+  React.useLayoutEffect(() => {
+    listViewDoorRef.current = { of: listViewDoorOf, objectSurface: objectSurfaceOf, open: openListViewDoor };
+  });
   const listViewTargetId = listView.target?.viewId ?? null;
   const listViewCustomizable = customizing && listViewTargetId !== null;
   const listViewServed = useServedOverride(
@@ -3255,7 +3382,27 @@ export function InterfacesPillar({
   // objectstack#27895 — an edit that clears a required setting of the view
   // type's own block (a calendar's start date) is held, not sent, as a
   // leaf's is: asked of the spec's list-view schema (`listViewHeldEdit`).
-  const listViewHeld = listViewHeldEdit(listView, locale);
+  // objectstack#30046 — so is an edit while a conditional-formatting rule's
+  // CEL does not parse (the panel's `ListViewMoreSection`), as the view's own
+  // page held its Save on the same verdicts.
+  const listViewTargetKey = listView.targetKey;
+  const [listViewCel, setListViewCel] = React.useState<{ key: string; count: number }>({ key: '', count: 0 });
+  const reportListViewCel = React.useCallback(
+    (count: number) =>
+      setListViewCel((prev) => (prev.key === listViewTargetKey && prev.count === count ? prev : { key: listViewTargetKey, count })),
+    [listViewTargetKey],
+  );
+  const listViewCelBlocking = listViewCel.key === listViewTargetKey ? listViewCel.count : 0;
+  const listViewHeld =
+    listViewHeldEdit(listView, locale) ??
+    (listViewCelBlocking > 0 && listView.dirty && listView.target
+      ? {
+          clause: tFormat('engine.studio.held.inspectorInvalid', locale, {
+            item: listViewNameOf(listView, listView.target, listView.row, locale),
+          }),
+          target: null,
+        }
+      : null);
   const { flush: flushListView } = useDraftAutoSave({
     target: listView.targetKey,
     loadedFor: listView.loadedFor,
@@ -3835,7 +3982,12 @@ export function InterfacesPillar({
       return null;
     };
     const railEntry = current.navId ? find(railTree) : null;
-    const text = railEntry ? navEntryLabelText(railEntry as NavEntryLike, locale, targetLabel) : current.label;
+    // objectstack#30046 — an object page no entry opens is named by its object.
+    const text = railEntry
+      ? navEntryLabelText(railEntry as NavEntryLike, locale, targetLabel)
+      : current.type === 'object' && !current.navId
+        ? objectLabelOf(current.name)
+        : current.label;
     return text || current.name;
   })();
   // objectui#12455 — an object entry's structure is the Data pillar's: the
@@ -4326,10 +4478,32 @@ export function InterfacesPillar({
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
               <LayoutDashboard className="h-6 w-6 text-muted-foreground" />
             </div>
-            <div>
-              <p className="text-sm font-medium">{t('engine.studio.if.noAppTitle', locale)}</p>
-              <p className="mt-1 text-xs text-muted-foreground">{t('engine.studio.if.noAppHint', locale)}</p>
-            </div>
+            {contributedElsewhere ? (
+              // objectstack#29851 — what the served reads show this package
+              // adding to other packages' apps, each with a way there.
+              <div data-testid="if-contributes-elsewhere">
+                <p className="text-sm font-medium">{t('engine.studio.if.noOwnAppTitle', locale)}</p>
+                {contributedElsewhere.map((found) => (
+                  <div key={found.app} className="mt-1 flex flex-col items-center gap-2">
+                    <p className="text-xs text-muted-foreground">{contributedElsewhereText(found, locale)}</p>
+                    <button
+                      type="button"
+                      data-testid="if-open-owner"
+                      data-package={found.ownerId}
+                      onClick={() => openContributor(`/studio/${encodeURIComponent(found.ownerId)}/interfaces`)}
+                      className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted"
+                    >
+                      {tFormat('engine.studio.if.openOwner', locale, { package: found.ownerName })}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div>
+                <p className="text-sm font-medium">{t('engine.studio.if.noAppTitle', locale)}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{t('engine.studio.if.noAppHint', locale)}</p>
+              </div>
+            )}
             {onCreateApp && (
               <button
                 type="button"
@@ -4478,6 +4652,8 @@ export function InterfacesPillar({
             // objectui#12725 — the pillar's selection, which a canvas header click also makes.
             selection={selection}
             onSelectionChange={setSelection}
+            // objectstack#30046 — a formatting rule's CEL that does not parse holds the autosave.
+            onBlockingIssuesChange={reportListViewCel}
           />
         </div>
       ) : (
@@ -4652,6 +4828,24 @@ export function InterfacesPillar({
     setCurrent(s);
     if (isMobile) setRailOpen(false);
   };
+  // objectstack#30046 (Scope 6) — a row under 不在导航中 opens its item; a list
+  // view's is its object's page (`listViewDoorOf`). On that page already, the
+  // pick is the header dropdown's: a pending edit is sent first, or asked about.
+  const pickOffNav = (s: Surface) => {
+    const item = s.type === 'view' ? (packageItems?.byType.view ?? []).find((i) => i.name === s.name) : undefined;
+    const door = item && !s.addedIn ? listViewDoorOf(item) : null;
+    if (!door) {
+      pickSurface(s);
+      return;
+    }
+    if (current?.type === 'object' && isSameSurface(current, door.surface)) {
+      switchListView(door.viewId);
+    } else {
+      if (leafKeyOf(door.surface) !== leafKey && !confirmDropUnsavedWork(leafUnsent, locale)) return;
+      openListViewDoor(door);
+    }
+    if (isMobile) setRailOpen(false);
+  };
   // objectstack#26889 — what the sections under the tree list: the package's
   // items no entry of the nav buffer opens, an unsent nav edit included. None
   // while the app is still resolving, so an item its entry will claim is never
@@ -4690,14 +4884,27 @@ export function InterfacesPillar({
           hasDraft: navHasDraft,
         }
       : null;
-  const offNavSections = OFF_NAV_TYPES.map((type) => ({
-    type,
-    items: listOnlyCustomized
+  // objectstack#30046 — under 视图: a list view an entry's header dropdown
+  // reaches is not listed again (Scope 7); a form view reads a readable name,
+  // and the heading says what the group holds (Scope 8).
+  const offNavSections = OFF_NAV_TYPES.map((type) => {
+    const items = listOnlyCustomized
       ? markedOf(type)
       : itemsRead
-        ? (packageItems?.byType[type] ?? []).filter((item) => !navOpened.has(itemKeyOf(type, item.name)))
-        : [],
-  }));
+        ? (packageItems?.byType[type] ?? []).filter(
+            (item) =>
+              !navOpened.has(itemKeyOf(type, item.name)) && !(type === 'view' && offNavViewReachedByEntry(item, navOpened)),
+          )
+        : [];
+    if (type !== 'view') return { type, items };
+    return {
+      type,
+      label: offNavViewHeading(items, locale),
+      items: items.map((item) => ({ ...item, label: offNavViewLabel(item, objectLabelOf(item.object ?? ''), locale) })),
+    };
+  });
+  // objectstack#30046 — the view an object page opened from 不在导航中 shows: its row is the active one.
+  const offNavActiveView = current?.type === 'object' && !current.navId ? (listView.target?.viewId ?? null) : null;
 
   return (
     <StudioDatasetAuthoringContext.Provider value={datasetAuthoring}>
@@ -4913,6 +5120,7 @@ export function InterfacesPillar({
         >
           <InterfacesRailMarksContext.Provider value={railMarks}>
           <InterfacesNavContributionsContext.Provider value={navPlacement}>
+          <InterfacesServedContributedNavContext.Provider value={servedContributed}>
           {editNav && (
               <div className="mt-1.5 flex items-center gap-1.5">
                 {navHasDraft && (
@@ -4935,8 +5143,19 @@ export function InterfacesPillar({
             </p>
           )}
             {listOnlyCustomized && !editNav && !navMarked ? null : appStatus === 'missing' && !error ? (
-              <div className="px-2 py-3">
-                <p className="text-[11px] text-muted-foreground">{t('engine.studio.if.noApp', locale)}</p>
+              <div className="px-2 py-3" data-testid="if-no-app-rail">
+                {contributedElsewhere ? (
+                  <>
+                    <p className="text-[11px] text-muted-foreground">{t('engine.studio.if.noOwnApp', locale)}</p>
+                    {contributedElsewhere.map((found) => (
+                      <p key={found.app} className="mt-1 text-[11px] text-muted-foreground">
+                        {contributedElsewhereText(found, locale)}
+                      </p>
+                    ))}
+                  </>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">{t('engine.studio.if.noApp', locale)}</p>
+                )}
                 {onCreateApp && (
                   <button
                     type="button"
@@ -4983,10 +5202,12 @@ export function InterfacesPillar({
               <OffNavSections
                 sections={offNavSections}
                 active={current}
-                onPick={pickSurface}
+                activeViewId={offNavActiveView}
+                onPick={pickOffNav}
                 onlyCustomized={listOnlyCustomized}
               />
             )}
+          </InterfacesServedContributedNavContext.Provider>
           </InterfacesNavContributionsContext.Provider>
           </InterfacesRailMarksContext.Provider>
         </StudioRail>
@@ -6998,6 +7219,19 @@ export function DataPillar({
                     focus={actionFocus}
                     actionSchema={typeSchemas.action}
                     onCelVerdictsChange={reportPanelVerdicts}
+                    // objectstack#30088 — a base object's new actions are items of the pair.
+                    pair={
+                      extendsBase && customization
+                        ? {
+                            pairId: railPairId,
+                            ensure: customization.ensure,
+                            walled: customization.walled,
+                            marks: railMarks,
+                            publishNonce,
+                            onDraftSaved,
+                          }
+                        : null
+                    }
                   />
                 </div>
               ) : viewMode === 'api' ? (
@@ -10013,6 +10247,10 @@ export function AccessPillar({
             revoking: t('engine.studio.access.suggestRevoking', locale),
             revokedToast: (s) =>
               tFormat('engine.studio.access.suggestRevokedToast', locale, { set: s.permission_set_name }),
+            reopen: t('engine.studio.access.suggestReopen', locale),
+            reopening: t('engine.studio.access.suggestReopening', locale),
+            reopenedToast: (s) =>
+              tFormat('engine.studio.access.suggestReopenedToast', locale, { set: s.permission_set_name }),
           }}
         />
       )}
