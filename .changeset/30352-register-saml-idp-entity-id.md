@@ -4,7 +4,7 @@
 
 fix(plugin-auth): Setup's Register SAML Provider registers a complete form; it answered 400 for every one
 
-Clause-②: no — a form the bridge always refused registers; nothing a caller sends today is refused (the dev measures the arm and declares `yes (widening)` if the bridge's accepted input grows on an exported surface)
+Clause-②: no — a form the bridge always refused registers; nothing a caller sends today is refused
 Metadata-protocol: none
 
 - **Before.** `POST /api/v1/auth/admin/sso/register-saml` (Setup → SSO Providers → Register SAML Provider) answered `400 SAML_REGISTER_FAILED` "[body.samlConfig.idpMetadata] idpMetadata.entityID is required when IdP metadata XML is not provided" for every complete form. The bridge sent `samlConfig` with no IdP descriptor, which `@better-auth/sso` requires when no IdP metadata XML is given, so no SAML provider could be registered from Setup.
