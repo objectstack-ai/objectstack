@@ -17,6 +17,15 @@ export interface AuthContextValue {
   /** Whether the user is authenticated */
   isAuthenticated: boolean;
   /**
+   * objectstack#30125 — `true` when this tab's last session was ended by
+   * `signOut()` and no session has been established since; `false` on load,
+   * while signed in, and after a session that ended any other way (expired,
+   * revoked, signed out in another tab). Lets a sign-in redirect tell "the
+   * person left", where whoever signs in next is nobody in particular, from
+   * "the session lapsed under the person", who comes back to the same page.
+   */
+  sessionEndedBySignOut: boolean;
+  /**
    * Whether real authentication is enabled in this environment.
    * - `true`: real auth backend is in use; sign-in / sign-out are meaningful.
    * - `false`: auth is disabled (guest mode) or running in preview/demo mode.
