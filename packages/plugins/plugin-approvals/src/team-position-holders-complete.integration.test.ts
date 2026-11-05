@@ -16,10 +16,13 @@
  *   - a failed `sys_user_position` read routed a `position` approver to its
  *     `sys_member.role` holders ALONE — a shrunk slate that looks complete.
  *
- * What a caller sees now: the expansion throws, the approver-spec resolver's
- * directory catch takes it, and the slot falls back to its literal with the
- * warning that names the failed read and carries its `error`. A membership
- * object that does not exist is still no holders.
+ * What a caller sees now: the expansion throws and the approver-spec
+ * resolver's directory catch takes it. [ADR-0142 D6 as amended, #29604] The
+ * resolver then refuses the approval node (`ApproverDirectoryUnreadableError`,
+ * naming the read), so no `onEmptyApprovers` policy acts on the slate; only
+ * `decide`'s pre-snapshot re-resolution (the `'literal'` reader) still falls
+ * back to the literal, with the warning that names the failed read and carries
+ * its `error`. A membership object that does not exist is still no holders.
  *
  * Measured on a REAL engine (ObjectQL + SqlDriver over in-memory SQLite)
  * carrying the shipped `SysTeamMember` and `SysMember`; `sys_user_position` is
@@ -31,7 +34,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { SysMember, SysOrganization, SysTeamMember } from '@objectstack/platform-objects/identity';
-import { ApprovalService } from './approval-service.js';
+import { ApprovalService, ApproverDirectoryUnreadableError } from './approval-service.js';
 
 const ORG = 'org_large';
 const ELSEWHERE = 'org_elsewhere';
@@ -137,8 +140,8 @@ async function boot(seeded: 'team' | 'position', n: number, opts: { omit?: strin
 /** The private expansions and the resolver, as the request opener calls them. */
 const team = (rig: Rig, value = TEAM) => (rig.svc as any).expandTeamUsers(value, ORG) as Promise<string[]>;
 const position = (rig: Rig, value = POSITION) => (rig.svc as any).expandPositionUsers(value, ORG) as Promise<string[]>;
-const resolveSpec = (rig: Rig, a: { type: string; value: string }) =>
-  (rig.svc as any).resolveApproverSpec(a, undefined, ORG, Date.now()) as Promise<string[]>;
+const resolveSpec = (rig: Rig, a: { type: string; value: string }, onDirectoryFailure?: 'refuse' | 'literal') =>
+  (rig.svc as any).resolveApproverSpec(a, undefined, ORG, Date.now(), undefined, onDirectoryFailure) as Promise<string[]>;
 const failureWarnings = (rig: Rig) => rig.warn.mock.calls.filter(([, meta]) => typeof meta?.error === 'string');
 
 describe('[#29503] approvals team expansion reads every member (driver-sql, shipped SysTeamMember)', () => {
@@ -173,11 +176,18 @@ describe('[#29503] approvals team expansion reads every member (driver-sql, ship
     await expect(team(rig)).rejects.toThrow(/members of team 'team_large'.*could not be read/);
   });
 
-  it('⛔ what the caller sees: the team slot falls back to its literal, and the warning names the failed read', async () => {
+  it('⛔ what the caller sees: the node refuses, naming the failed read; the literal reader keeps the literal and warns', async () => {
     const rig = await boot('team', 3);
     rig.failReadsOf('sys_team_member');
 
-    expect(await resolveSpec(rig, { type: 'team', value: TEAM })).toEqual([`team:${TEAM}`]);
+    const refusal = await resolveSpec(rig, { type: 'team', value: TEAM }).then(() => null, (e: unknown) => e);
+    expect(refusal).toBeInstanceOf(ApproverDirectoryUnreadableError);
+    expect(refusal).toMatchObject({ approverType: 'team', approverValue: TEAM, retryable: true });
+    expect((refusal as Error).message).toMatch(/^APPROVER_DIRECTORY_UNREADABLE: approver 'team:team_large'/);
+    expect((refusal as ApproverDirectoryUnreadableError).failedRead).toMatch(/members of team 'team_large'.*could not be read/);
+    expect(failureWarnings(rig)).toEqual([]);
+
+    expect(await resolveSpec(rig, { type: 'team', value: TEAM }, 'literal')).toEqual([`team:${TEAM}`]);
     const failed = failureWarnings(rig);
     expect(failed.map(([, meta]) => meta.type)).toEqual(['team']);
     expect(failed[0][0]).toMatch(/could not be expanded — a directory or read-filter lookup failed/);
@@ -221,14 +231,19 @@ describe('[#29503] approvals position expansion reads every assignment (driver-s
     await expect(position(rig)).rejects.toThrow(/assignments of position 'cfo_office'.*could not be read/);
   });
 
-  it('⛔ what the caller sees: the position slot falls back to its literal, never the tier holders alone', async () => {
+  it('⛔ what the caller sees: the node refuses, never the tier holders alone; the literal reader keeps the literal', async () => {
     const rig = await boot('position', 3);
     await (rig.engine as any).getDriverForObject('sys_member').bulkCreate('sys_member', [
       { id: 'mem_tier', user_id: 'usr_tier', organization_id: ORG, role: POSITION },
     ]);
     rig.failReadsOf('sys_user_position');
 
-    expect(await resolveSpec(rig, { type: 'position', value: POSITION })).toEqual([`position:${POSITION}`]);
+    const refusal = await resolveSpec(rig, { type: 'position', value: POSITION }).then(() => null, (e: unknown) => e);
+    expect(refusal).toBeInstanceOf(ApproverDirectoryUnreadableError);
+    expect(refusal).toMatchObject({ approverType: 'position', approverValue: POSITION, retryable: true });
+    expect((refusal as ApproverDirectoryUnreadableError).failedRead).toMatch(/assignments of position 'cfo_office'.*could not be read/);
+
+    expect(await resolveSpec(rig, { type: 'position', value: POSITION }, 'literal')).toEqual([`position:${POSITION}`]);
     const failed = failureWarnings(rig);
     expect(failed.map(([, meta]) => meta.type)).toEqual(['position']);
     expect(failed[0][1].error).toMatch(/SQLITE_IOERR/);

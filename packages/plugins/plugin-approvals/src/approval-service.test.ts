@@ -11,7 +11,9 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { APPROVAL_REVISE_NODE_TYPE, templateSlotSource } from '@objectstack/spec/automation';
-import { ApprovalService, REMIND_COOLDOWN_MS, ESCALATION_ENABLED_FLIP_CUTOFF_MS, SLA_ACTOR_ID } from './approval-service.js';
+import {
+  ApprovalService, ApproverDirectoryUnreadableError, REMIND_COOLDOWN_MS, ESCALATION_ENABLED_FLIP_CUTOFF_MS, SLA_ACTOR_ID,
+} from './approval-service.js';
 import { bindApprovalLockHook, bindDelegationWriteGuard, unbindAllHooks } from './lifecycle-hooks.js';
 import { celEngine } from '@objectstack/formula';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
@@ -4204,6 +4206,138 @@ describe('ApprovalService — a queue approver routes to the queue\'s members (A
     expect(req.pending_approvers.filter((s: string) => s.startsWith('queue:'))).toEqual([]);
     const hit = warnings.find(([msg]) => String(msg).includes("approver 'queue:billing' expanded to nobody"));
     expect(String(hit?.[0])).toContain('no ownership-queue service is registered');
+  });
+});
+
+// [ADR-0142 D6 as amended; ruling record 6599731698 on #29604, letter B] A
+// directory read behind a `team`, `position` or `queue` approver that FAILS is
+// not an empty slate: the node refuses to open under every `onEmptyApprovers`
+// policy, on its own retryable error class, naming the read — and writes
+// nothing. Before, the slot fell back to its literal and the policy acted on a
+// slate missing the people who could not be read.
+describe('ApprovalService — a team, position or queue approver whose directory read fails refuses the node (ADR-0142 D6)', () => {
+  const POLICIES = ['admin_rescue', 'auto_approve', 'fail', 'fallback'] as const;
+
+  /** A service over `engine` whose reads of `failing` throw, as a driver outage does. */
+  const outage = (failing: string[], queues?: () => any) => {
+    const engine = makeFakeEngine();
+    engine._tables['sys_team_member'] = [{ id: 'tm1', team_id: 't_ops', user_id: 'u5' }];
+    engine._tables['sys_user_position'] = [{ id: 'up1', position: 'cfo', user_id: 'u9', organization_id: 't1' }];
+    const real = engine.find.bind(engine);
+    engine.find = async (object: string, options?: any) => {
+      if (failing.includes(object)) throw new Error(`SQLITE_IOERR: disk I/O error reading ${object}`);
+      return real(object, options);
+    };
+    const warnings: any[] = [];
+    let n = 0;
+    const svc = new ApprovalService({
+      engine,
+      clock: { now: () => new Date(1757000000000 + (n++) * 1000) },
+      logger: { warn: (msg: any, meta: any) => warnings.push([msg, meta]) },
+      ...(queues ? { ownershipQueues: queues } : {}),
+    });
+    return { engine, svc, warnings };
+  };
+  const node = (approvers: any[], configExtra: Record<string, any> = {}) => ({
+    ...openInput([]),
+    config: { approvers, behavior: 'first_response' as const, lockRecord: false, ...configExtra },
+  });
+  const policy = (p: (typeof POLICIES)[number]) => (
+    p === 'fallback' ? { onEmptyApprovers: p, fallbackApprovers: [{ type: 'user', value: 'u_backstop' }] } : { onEmptyApprovers: p }
+  );
+  const refusalOf = (p: Promise<unknown>) => p.then(() => null, (e: unknown) => e);
+  const nothingWritten = (engine: ReturnType<typeof makeFakeEngine>) => {
+    expect(engine._tables['sys_approval_request'] ?? []).toEqual([]);
+    expect(engine._tables['sys_approval_approver'] ?? []).toEqual([]);
+    expect(engine._tables['sys_approval_action'] ?? []).toEqual([]);
+  };
+
+  for (const [type, value, table] of [['team', 't_ops', 'sys_team_member'], ['position', 'cfo', 'sys_user_position']] as const) {
+    for (const p of POLICIES) {
+      it(`a ${type} approver whose ${table} read fails: onEmptyApprovers '${p}' opens nothing and approves nothing`, async () => {
+        const { engine, svc } = outage([table]);
+        const refusal = await refusalOf(svc.openNodeRequest(node([{ type, value }], policy(p)), CTX));
+
+        expect(refusal).toBeInstanceOf(ApproverDirectoryUnreadableError);
+        expect(refusal).toMatchObject({ approverType: type, approverValue: value, retryable: true });
+        expect((refusal as Error).message).toMatch(new RegExp(`^APPROVER_DIRECTORY_UNREADABLE: approver '${type}:${value}'`));
+        expect((refusal as ApproverDirectoryUnreadableError).failedRead).toMatch(/SQLITE_IOERR/);
+        expect((refusal as Error).message).not.toMatch(/NO_APPROVERS|expanded to nobody/);
+        nothingWritten(engine);
+      });
+    }
+  }
+
+  it('beside a staffed person, the node still refuses: no slate shortened to the people who could be read', async () => {
+    const { engine, svc } = outage(['sys_team_member']);
+    const refusal = await refusalOf(svc.openNodeRequest(
+      node([{ type: 'user', value: 'u2' }, { type: 'team', value: 't_ops' }]), CTX,
+    ));
+
+    expect(refusal).toBeInstanceOf(ApproverDirectoryUnreadableError);
+    nothingWritten(engine);
+  });
+
+  it('a fallback slate whose directory read fails refuses too, rather than degrade to the administrators', async () => {
+    // The primary slate reads fine and is empty (an unstaffed position); the
+    // declared fallback names a team whose read fails.
+    const { engine, svc } = outage(['sys_team_member']);
+    const refusal = await refusalOf(svc.openNodeRequest(node([{ type: 'position', value: 'nobody_holds_this' }], {
+      onEmptyApprovers: 'fallback', fallbackApprovers: [{ type: 'team', value: 't_ops' }],
+    }), CTX));
+
+    expect(refusal).toBeInstanceOf(ApproverDirectoryUnreadableError);
+    expect(refusal).toMatchObject({ approverType: 'team', approverValue: 't_ops' });
+    nothingWritten(engine);
+  });
+
+  it('a queue whose expansion fails refuses before its "expanded to nobody" answer', async () => {
+    const { engine, svc, warnings } = outage([], () => ({
+      expandMembers: async () => { throw new Error('ownership-queue read failed'); },
+    }));
+    const refusal = await refusalOf(svc.openNodeRequest(node([{ type: 'queue', value: 'billing' }]), CTX));
+
+    expect(refusal).toBeInstanceOf(ApproverDirectoryUnreadableError);
+    expect(refusal).toMatchObject({ approverType: 'queue', approverValue: 'billing' });
+    expect(warnings.some(([msg]) => String(msg).includes("approver 'queue:billing' expanded to nobody"))).toBe(false);
+    nothingWritten(engine);
+  });
+
+  it('control — the readable slate opens as before', async () => {
+    const { svc } = outage([]);
+    const req = await svc.openNodeRequest(node([{ type: 'team', value: 't_ops' }, { type: 'position', value: 'cfo' }]), CTX) as any;
+
+    expect(req.status).toBe('pending');
+    expect([...req.pending_approvers].sort()).toEqual(['u5', 'u9']);
+  });
+
+  it('control — a department read that fails is not named by the ruling: the node still opens, as before', async () => {
+    const { engine, svc } = outage(['sys_business_unit', 'sys_business_unit_member']);
+    const outcome = await refusalOf(svc.openNodeRequest(
+      node([{ type: 'department', value: 'bu_x' }], { onEmptyApprovers: 'fallback', fallbackApprovers: [{ type: 'user', value: 'u_backstop' }] }),
+      CTX,
+    ));
+
+    expect(outcome).toBeNull();
+    expect(engine._tables['sys_approval_request']).toHaveLength(1);
+  });
+
+  it("decide's pre-snapshot re-resolution keeps the literal: a recorded decision is never failed by the outage", async () => {
+    // A unanimous request opened while the directory read, then stripped of
+    // its open-time snapshot as a request opened before the snapshot existed.
+    const failing: string[] = [];
+    const { engine, svc } = outage(failing);
+    const req = await svc.openNodeRequest(
+      node([{ type: 'user', value: 'u2' }, { type: 'team', value: 't_ops' }], { behavior: 'unanimous' }), CTX,
+    ) as any;
+    const row = engine._tables['sys_approval_request'].find((r: any) => r.id === req.id);
+    const config = JSON.parse(row.node_config_json);
+    delete config.__approverGroups;
+    row.node_config_json = JSON.stringify(config);
+
+    failing.push('sys_team_member');
+    const decided = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u2' }, SYS);
+    expect(decided.decision).toBe('approve');
   });
 });
 

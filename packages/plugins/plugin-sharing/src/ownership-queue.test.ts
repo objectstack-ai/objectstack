@@ -25,8 +25,9 @@ import { ruleRegrantQueue } from './rule-hooks.js';
 type Row = Record<string, any>;
 
 /**
- * Equality, `$in`, `$or` and `$and` — every predicate shape the queue reads
- * send. Any other combinator or operator is refused rather than misread.
+ * Equality, `$in`, `$gt`, `$or` and `$and` — every predicate shape the queue
+ * reads send (`$gt` is the keyset cursor of a paged read, #29604). Any other
+ * combinator or operator is refused rather than misread.
  */
 function matches(row: Row, filter: any): boolean {
   if (!filter || typeof filter !== 'object') return true;
@@ -43,6 +44,10 @@ function matches(row: Row, filter: any): boolean {
     const rv = row[k] ?? null;
     if (v != null && typeof v === 'object') {
       const ops = Object.keys(v as object);
+      if (ops.length === 1 && ops[0] === '$gt') {
+        if (!(rv != null && String(rv) > String((v as any).$gt))) return false;
+        continue;
+      }
       if (ops.length !== 1 || ops[0] !== '$in') throw new Error(`test double: operator ${ops.join(',')} on '${k}' is not implemented`);
       if (!(v as any).$in.includes(rv)) return false;
       continue;
@@ -72,6 +77,9 @@ function makeEngine(opts: {
       if (opts.failOn?.includes(object)) throw new Error(`${object} unavailable`);
       const filter = options?.filter ?? options?.where;
       const rows = (tables[object] ?? []).filter((r) => matches(r, filter));
+      for (const { field } of [...(options?.orderBy ?? [])].reverse()) {
+        rows.sort((a, b) => (String(a[field]) < String(b[field]) ? -1 : String(a[field]) > String(b[field]) ? 1 : 0));
+      }
       return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
     async insert(object: string, data: any) {
@@ -117,11 +125,12 @@ const BASE_TABLES = (): Record<string, Row[]> => ({
     { id: 'q1', name: 'billing', label: 'Billing', organization_id: 'org_a' },
     { id: 'q2', name: 'billing', label: 'Billing B', organization_id: 'org_b' },
   ],
+  // [#29604] Carrying their `id` too: the authored queue reads page by it.
   sys_queue_member: [
-    { queue: 'billing', recipient_type: 'position', recipient_id: 'billing_clerk', organization_id: 'org_a' },
-    { queue: 'billing', recipient_type: 'user', recipient_id: 'u_e', organization_id: 'org_a' },
-    { queue: 'support_tier1', recipient_type: 'team', recipient_id: 't_night', organization_id: 'org_a' },
-    { queue: 'billing', recipient_type: 'user', recipient_id: 'u_b_only', organization_id: 'org_b' },
+    { id: 'qm_1', queue: 'billing', recipient_type: 'position', recipient_id: 'billing_clerk', organization_id: 'org_a' },
+    { id: 'qm_2', queue: 'billing', recipient_type: 'user', recipient_id: 'u_e', organization_id: 'org_a' },
+    { id: 'qm_3', queue: 'support_tier1', recipient_type: 'team', recipient_id: 't_night', organization_id: 'org_a' },
+    { id: 'qm_4', queue: 'billing', recipient_type: 'user', recipient_id: 'u_b_only', organization_id: 'org_b' },
   ],
   [METADATA_ACTIVATION_TABLE]: [],
 });
@@ -235,7 +244,7 @@ describe('[ADR-0142 D2] OwnershipQueueService — the one expander', () => {
 
   it('queuesOf lists every queue the user is in, declared and authored, ordered by name', async () => {
     const tables = BASE_TABLES();
-    tables.sys_queue_member.push({ queue: 'billing', recipient_type: 'user', recipient_id: 'u_a', organization_id: 'org_a' });
+    tables.sys_queue_member.push({ id: 'qm_5', queue: 'billing', recipient_type: 'user', recipient_id: 'u_a', organization_id: 'org_a' });
     const svc = service(makeEngine({ declared: SUPPORT_DECLARED, tables }));
     expect(await svc.queuesOf('u_a', 'org_a')).toEqual(['billing', 'support_tier1']);
     expect(await svc.queuesOf('u_c', 'org_a')).toEqual(['billing']);
@@ -292,6 +301,76 @@ describe('[ADR-0142 D2] OwnershipQueueService — the one expander', () => {
 });
 
 // ─── "Does this organization have any queue at all?" ───────────────────────
+
+// [#29604, review record 6591670782] The queue reads paged by id to completion,
+// where they read one page of 10,000 rows and answered on it: a queue's
+// 10,001st member, an organization's 10,001st queue, and the queues naming a
+// recipient past that bound were silently not there. A read that fails partway
+// keeps the answer a failed read gives today (nobody, logged once) until the
+// contract can carry a refusal (#30251) — never the first page as if complete.
+describe('[ADR-0142 D2] OwnershipQueueService — the queue reads page to completion (#29604)', () => {
+  const PAST_ONE_PAGE = 10_001;
+  const pad = (i: number) => String(i).padStart(5, '0');
+  const LAST = pad(PAST_ONE_PAGE - 1);
+
+  /** `count` user members of queue `big` in org_a, keyed so the last sorts last. */
+  const bigQueue = (count = PAST_ONE_PAGE): Record<string, Row[]> => ({
+    ...BASE_TABLES(),
+    sys_queue: [{ id: 'q_big', name: 'big', label: 'Big', organization_id: 'org_a' }],
+    sys_queue_member: Array.from({ length: count }, (_, i) => ({
+      id: `qm_${pad(i)}`, queue: 'big', recipient_type: 'user', recipient_id: `u_${pad(i)}`, organization_id: 'org_a',
+    })),
+  });
+
+  it('a queue past one page expands to every member, and its last member is one', async () => {
+    const svc = service(makeEngine({ tables: bigQueue() }));
+    const members = await svc.expandMembers('big', 'org_a');
+    expect(members).toHaveLength(PAST_ONE_PAGE);
+    expect(members.at(-1)).toBe(`u_${LAST}`);
+    expect(await svc.isMember(`u_${LAST}`, 'big', 'org_a')).toBe(true);
+    expect(await svc.queuesOf(`u_${LAST}`, 'org_a')).toEqual(['big']);
+  });
+
+  it('an organization past one page of queues lists its last queue for that queue\'s member', async () => {
+    const tables = BASE_TABLES();
+    tables.sys_queue = Array.from({ length: PAST_ONE_PAGE }, (_, i) => ({
+      id: `q_${pad(i)}`, name: `queue_${pad(i)}`, label: `Queue ${i}`, organization_id: 'org_a',
+    }));
+    tables.sys_queue_member = [
+      { id: 'qm_last', queue: `queue_${LAST}`, recipient_type: 'user', recipient_id: 'u_z', organization_id: 'org_a' },
+    ];
+    const svc = service(makeEngine({ tables }));
+    expect(await svc.queuesOf('u_z', 'org_a')).toEqual([`queue_${LAST}`]);
+    expect(await svc.hasAnyQueue('org_a')).toBe(true);
+  });
+
+  it('the queues naming a recipient are found past one page of member rows', async () => {
+    const tables = BASE_TABLES();
+    tables.sys_queue_member = Array.from({ length: PAST_ONE_PAGE }, (_, i) => ({
+      id: `qm_${pad(i)}`, queue: `queue_${pad(i)}`, recipient_type: 'position',
+      recipient_id: i === PAST_ONE_PAGE - 1 ? 'closer' : 'filler', organization_id: 'org_a',
+    }));
+    const svc = service(makeEngine({ tables }));
+    expect(await svc.queuesNaming('position', new Set(['closer']), 'org_a')).toEqual([`queue_${LAST}`]);
+  });
+
+  it('a read that fails on its second page answers as a failed read does today, never with the first page', async () => {
+    const engine = makeEngine({ tables: bigQueue() });
+    const find = engine.find.bind(engine);
+    engine.find = async (object: string, options?: any) => {
+      if (object === 'sys_queue_member' && options?.where?.$and) throw new Error('sys_queue_member page 2 unavailable');
+      return find(object, options);
+    };
+    const warn = vi.fn();
+    const svc = service(engine, { warn });
+
+    expect(await svc.expandMembers('big', 'org_a')).toEqual([]);
+    expect(await svc.isMember('u_00000', 'big', 'org_a')).toBe(false);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(/sys_queue_member read failed/);
+    expect(warn.mock.calls[0][1]).toEqual({ error: 'sys_queue_member page 2 unavailable' });
+  });
+});
 
 describe('[ADR-0131 D4] OwnershipQueueService.hasAnyQueue — the session payload\'s one boolean', () => {
   const ROW_ONLY = (): Record<string, Row[]> => ({
