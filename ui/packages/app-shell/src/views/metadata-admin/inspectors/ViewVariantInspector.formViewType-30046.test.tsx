@@ -17,7 +17,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
 
 const state = vi.hoisted(() => {
   const metadataClient: Record<string, unknown> = {
@@ -35,6 +35,10 @@ vi.mock('../useMetadata', async (importOriginal) => {
 
 import { ViewDefaultInspector } from './ViewInspector';
 import { t } from '../i18n';
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+
+// The zh designer strings are a lazy namespace: loaded before any case reads them.
+await loadStudioCatalogue('zh');
 
 afterEach(cleanup);
 
@@ -56,11 +60,20 @@ function renderView(locale: Locale, viewKind: 'form' | 'list', config: Record<st
   return screen.getByRole('combobox', { name: t('engine.inspector.view.type', locale) });
 }
 
-/** The options the open picker offers, by their text. */
+/**
+ * The options the open picker offers, by their text: read in the listbox this
+ * trigger controls, so a list another case left in the document is never read.
+ */
 async function optionsOf(trigger: HTMLElement): Promise<string[]> {
   fireEvent.keyDown(trigger, { key: 'ArrowDown' });
-  await waitFor(() => expect(screen.queryAllByRole('option').length).toBeGreaterThan(0));
-  return screen.getAllByRole('option').map((o) => (o.textContent ?? '').trim());
+  const listbox = await waitFor(() => {
+    const id = trigger.getAttribute('aria-controls');
+    const el = id ? document.getElementById(id) : null;
+    expect(el).not.toBeNull();
+    expect(within(el!).queryAllByRole('option').length).toBeGreaterThan(0);
+    return el!;
+  });
+  return within(listbox).getAllByRole('option').map((o) => (o.textContent ?? '').trim());
 }
 
 const formType = (value: string, locale: Locale) => t(`engine.inspector.pageBlock.option.formType.${value}`, locale);
