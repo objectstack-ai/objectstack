@@ -2862,6 +2862,25 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#30370] Is the external write gate (ADR-0015 §5.3 Gate 3) CLOSED on
+   * `objectName`? `true` exactly when every insert / update / delete on it is
+   * refused `403 EXTERNAL_WRITE_FORBIDDEN`: the object sits on a federated
+   * datasource (`schemaMode !== 'managed'`) and not both
+   * `datasource.external.allowWrites` and `object.external.writable` opt in.
+   * `false` for a managed datasource, an object with no datasource, and an
+   * unknown object (the gate judges none of them).
+   *
+   * The write gate itself reads this same verdict, so the two can never
+   * disagree. A read-only question for the effective-permission map
+   * (`buildEffectiveObjectPermissions` in `@objectstack/core`), which must not
+   * offer a write the data plane refuses. Holds for every caller alike: no
+   * permission set, super-user bypass included, opens a closed gate.
+   */
+  isExternalWriteForbidden(objectName: string): boolean {
+    return RegistrationFacet.isExternalWriteForbidden.call(registrationHost.of(this), objectName);
+  }
+
+  /**
    * Set the realtime service for publishing data change events.
    * Should be called after kernel resolves the realtime service.
    *

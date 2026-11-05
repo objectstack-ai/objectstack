@@ -140,6 +140,52 @@ describe('write gate (ADR-0015 Gate 3)', () => {
   });
 });
 
+/**
+ * [#30370] `isExternalWriteForbidden` is the gate's own verdict: the
+ * effective-permission map reads it to withhold the writes the gate refuses,
+ * so over every case of the double opt-in it must answer exactly what the
+ * write itself meets.
+ */
+describe('[#30370] isExternalWriteForbidden agrees with the write gate', () => {
+  /** What an insert, an update and a delete each meet: the refusal envelope, or none. */
+  async function refusals(engine: ObjectQL, object: string) {
+    const meet = (p: Promise<unknown>) =>
+      p.then(() => null, (err: any) => (err?.code === 'EXTERNAL_WRITE_FORBIDDEN' ? { code: err.code, status: err.status } : null));
+    return [
+      await meet(engine.insert(object, { order_id: 'o1' })),
+      await meet(engine.update(object, { id: 'x', amount: 1 })),
+      await meet(engine.delete(object, { where: { id: 'x' } } as any)),
+    ];
+  }
+
+  const CASES: Array<{ label: string; opts: Parameters<typeof makeEngine>[0]; forbidden: boolean }> = [
+    { label: 'external, neither opts in', opts: { dsAllowWrites: false, objWritable: false }, forbidden: true },
+    { label: 'external, only the datasource opts in', opts: { dsAllowWrites: true, objWritable: false }, forbidden: true },
+    { label: 'external, only the object opts in', opts: { dsAllowWrites: false, objWritable: true }, forbidden: true },
+    { label: 'validate-only, neither opts in', opts: { dsSchemaMode: 'validate-only' }, forbidden: true },
+    { label: 'external, the full double opt-in', opts: { dsAllowWrites: true, objWritable: true }, forbidden: false },
+    { label: 'managed datasource', opts: { dsSchemaMode: 'managed' }, forbidden: false },
+  ];
+
+  for (const { label, opts, forbidden } of CASES) {
+    it(`${label}: verdict ${forbidden}, and every write meets it`, async () => {
+      const engine = makeEngine(opts);
+      expect(engine.isExternalWriteForbidden('wh_order')).toBe(forbidden);
+      const met = await refusals(engine, 'wh_order');
+      for (const refusal of met) {
+        expect(refusal).toEqual(forbidden ? { code: 'EXTERNAL_WRITE_FORBIDDEN', status: 403 } : null);
+      }
+    });
+  }
+
+  it('an object on the default datasource, and an unknown object, are not forbidden', () => {
+    const engine = makeEngine({});
+    engine.registerApp({ id: 'local_pkg', name: 'Local', objects: [{ name: 'task', fields: { title: { type: 'text' } } }] } as any);
+    expect(engine.isExternalWriteForbidden('task')).toBe(false);
+    expect(engine.isExternalWriteForbidden('no_such_object')).toBe(false);
+  });
+});
+
 describe('engine.introspectDatasource (ADR-0015)', () => {
   it('delegates to the named driver introspectSchema()', async () => {
     const engine = new ObjectQL();
