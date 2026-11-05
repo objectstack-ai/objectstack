@@ -76,12 +76,13 @@
  * pass without ever reaching the bar.
  */
 
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
 import { ObjectGrid } from '../ObjectGrid';
+import { resetUndeclaredActionNamesWarnings } from '../undeclaredActionNames';
 import { registerAllFields } from '@object-ui/fields';
 import { ActionProvider } from '@object-ui/react';
 
@@ -176,6 +177,9 @@ function bulkDefWarnings(warn: ConsoleSpy): string[] {
     .map((args: unknown[]) => String(args[0]))
     .filter((line: string) => line.includes('bulkActionDefs'));
 }
+
+// The warning is said once per message per module; each row starts unwarned.
+beforeEach(() => resetUndeclaredActionNamesWarnings());
 
 describe('object-grid `bulkActions` members are BARE ACTION NAMES (objectui#8071)', () => {
   it('1. a name member is resolved against `objectDef.actions` and promoted', async () => {

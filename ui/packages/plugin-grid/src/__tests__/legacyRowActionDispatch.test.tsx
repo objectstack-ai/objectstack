@@ -38,6 +38,7 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
 });
 
 import { ObjectGrid } from '../ObjectGrid';
+import { resetUndeclaredActionNamesWarnings } from '../undeclaredActionNames';
 import { registerAllFields } from '@object-ui/fields';
 import { ActionProvider, SchemaRendererProvider } from '@object-ui/react';
 
@@ -108,6 +109,7 @@ async function openRowMenu(opts: Parameters<typeof renderGrid>[0]) {
 }
 
 beforeEach(() => {
+  resetUndeclaredActionNamesWarnings();
   fetchMock = vi.fn().mockResolvedValue({
     ok: true,
     status: 200,

@@ -41,6 +41,7 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
 });
 
 import { ObjectGrid } from '../ObjectGrid';
+import { resetUndeclaredActionNamesWarnings } from '../undeclaredActionNames';
 import { registerAllFields } from '@object-ui/fields';
 import { ActionProvider } from '@object-ui/react';
 
@@ -80,16 +81,24 @@ function renderGrid(opts: {
   handlers?: Record<string, any>;
   /** Override the seed records — e.g. to give a `visible` predicate something to bite on. */
   rows?: Array<Record<string, unknown>>;
+  /** `'absent'`: the data source has no `getObjectSchema`; `'fails'`: it rejects. */
+  schemaRead?: 'absent' | 'fails';
+  /** Mount under React StrictMode, as the Console does. */
+  strict?: boolean;
 }) {
   const rows = opts.rows ?? ROWS;
   const dataSource: any = {
     find: vi.fn(async () => ({ data: rows.map(r => ({ ...r })), total: rows.length, hasMore: false, pageSize: 50 })),
-    getObjectSchema: async (name: string) => ({
+  };
+  if (opts.schemaRead === 'fails') {
+    dataSource.getObjectSchema = async () => { throw new Error('schema read refused'); };
+  } else if (opts.schemaRead !== 'absent') {
+    dataSource.getObjectSchema = async (name: string) => ({
       name,
       fields: { id: { type: 'text' }, name: { type: 'text', label: 'Name' }, done: { type: 'boolean' } },
       ...(opts.objectActions ? { actions: opts.objectActions } : {}),
-    }),
-  };
+    });
+  }
   const schema: any = {
     type: 'object-grid',
     objectName: OBJECT,
@@ -97,11 +106,13 @@ function renderGrid(opts: {
     pagination: { pageSize: 50 },
     ...opts.schema,
   };
-  render(
+  const tree = (
     <ActionProvider handlers={opts.handlers ?? {}}>
       <ObjectGrid schema={schema} dataSource={dataSource} />
-    </ActionProvider>,
+    </ActionProvider>
   );
+  const result = render(opts.strict ? <React.StrictMode>{tree}</React.StrictMode> : tree);
+  dataSource.unmount = result.unmount;
   return dataSource;
 }
 
@@ -117,6 +128,7 @@ async function renderAndSelectAll(opts: Parameters<typeof renderGrid>[0]) {
 }
 
 beforeEach(() => {
+  resetUndeclaredActionNamesWarnings();
   fetchMock = vi.fn().mockResolvedValue({
     ok: true,
     status: 200,
@@ -277,6 +289,69 @@ describe('a bulk action a disabled package withholds (objectstack#30169)', () =>
 
       expect(await screen.findByTestId('bulk-action-create_campaign')).toHaveTextContent('Add to Campaign');
       expect(bulkActionWarnings(warn)).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('an object named only through `data.object` waits for that object, and the warning names it', async () => {
+    // The grid's object is `resolveRecordSourceObjectName(schema, data)`, not
+    // `schema.objectName`. Keyed on the top-level key, readiness was true on
+    // the first render, before the schema landed, so the DECLARED `push_down`
+    // was reported too, under "no objectName".
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await renderAndSelectAll({
+        objectActions: [PUSH_DOWN],
+        schema: { ...VIEW, objectName: undefined, data: { provider: 'object', object: OBJECT } },
+      });
+
+      expect(await screen.findByTestId('bulk-action-push_down')).toBeInTheDocument();
+      await waitFor(() => expect(bulkActionWarnings(warn)).toHaveLength(1));
+      expect(bulkActionWarnings(warn)[0]).toContain(`objectName: '${OBJECT}'`);
+      expect(bulkActionWarnings(warn)[0]).toContain("'create_campaign'");
+      expect(bulkActionWarnings(warn)[0]).not.toContain("'push_down'");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it.each([
+    ['has no getObjectSchema', 'absent'],
+    ['rejects the schema read', 'fails'],
+  ] as const)('inline rows whose data source %s still report the names, as unread', async (_label, schemaRead) => {
+    // Nothing will ever land, so nothing is awaited: the names are reported,
+    // and the message says the object's actions are unknown rather than that
+    // the names are undeclared. Before, readiness never flipped and the drop
+    // was silent.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // (No wait on the rows: with a failed read their columns stay masked,
+      // objectui#10657, so 'Plan A' is never drawn in the `fails` leg.)
+      renderGrid({ schemaRead, schema: { ...VIEW, data: { provider: 'value', items: ROWS } } });
+
+      await waitFor(() => expect(bulkActionWarnings(warn)).toHaveLength(1));
+      expect(bulkActionWarnings(warn)[0]).toContain('could not be read');
+      expect(bulkActionWarnings(warn)[0]).toContain("'push_down', 'create_campaign'");
+      expect(screen.queryByTestId('bulk-action-create_campaign')).not.toBeInTheDocument();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('warns once under StrictMode and across a remount of the same list', async () => {
+    // StrictMode runs every mount effect setup → cleanup → setup; this shape is
+    // ready on its first render, so an effect-only guard said it twice.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const opts = { schemaRead: 'absent', strict: true, schema: { ...VIEW, data: { provider: 'value', items: ROWS } } } as const;
+      const ds = renderGrid(opts);
+      await waitFor(() => expect(screen.getByText('Plan A')).toBeInTheDocument());
+      await waitFor(() => expect(bulkActionWarnings(warn).length).toBeGreaterThan(0));
+      ds.unmount();
+      renderGrid(opts);
+      await waitFor(() => expect(screen.getByText('Plan A')).toBeInTheDocument());
+      expect(bulkActionWarnings(warn)).toHaveLength(1);
     } finally {
       warn.mockRestore();
     }

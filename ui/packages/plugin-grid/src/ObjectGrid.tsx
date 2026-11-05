@@ -702,6 +702,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // getter, which reads the live cache at call time.
   const metadata = useMetadata();
   const [objectSchema, setObjectSchema] = useState<any>(null);
+  // The inline-data schema read failed (the non-inline load says so through
+  // `error`). Read only by the undeclared-name warning's readiness below, so a
+  // failed read reports the names instead of dropping them silently.
+  const [objectSchemaReadFailed, setObjectSchemaReadFailed] = useState(false);
   const [useCardView, setUseCardView] = useState(false);
   // objectstack#28434 — the record URL a row links to, for its context menu's
   // "Open in new tab": the host's own builder, the one `LinkCell` draws the
@@ -1131,6 +1135,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         // mask, handled as masked), because it could be a `password` /
         // `secret` field — fail closed (objectui#10657, `objectTypesPending`).
         console.warn(`[ObjectGrid] Failed to fetch objectSchema for inline data (objectName: ${objectName}):`, err);
+        if (!cancelled) setObjectSchemaReadFailed(true);
       }
     };
 
@@ -1294,19 +1299,31 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         ? ['delete']
         : [];
   const hasBulkActions = effectiveBulkActions.length > 0 || bulkActionDefs.length > 0;
-  // The names the two folds above did not draw, said once in development. Only
-  // once the object's actions are known: before that every name is undeclared.
-  const undeclaredNamesReady = objectSchema != null || !schema.objectName;
+  // The names the two folds above did not draw, said once in development, and
+  // only once there is nothing left to wait for. Keyed on the RESOLVED
+  // `objectName` (a grid may name its object only through
+  // `data: { provider: 'object', object }`), and mirroring `objectTypesPending`:
+  // a schema is awaited only when there is an object to ask about and a data
+  // source that can answer `getObjectSchema`, and a read that failed (inline:
+  // `objectSchemaReadFailed`; the row load: `error`) is not awaited either.
+  // Reported with no schema in hand, the names are said to be unread, never
+  // undeclared.
+  const objectSchemaAwaited =
+    !!objectName && typeof dataSource?.getObjectSchema === 'function' && objectSchema == null
+    && !objectSchemaReadFailed && error == null;
+  const undeclaredNamesBasis = objectName && objectSchema == null ? 'unread' : 'declared';
   const undeclaredNamesAddress = {
     blockType: (schema as { type?: unknown }).type,
-    objectName: schema.objectName,
+    objectName,
     label: schema.label ?? (schema as { title?: unknown }).title,
   };
   useUndeclaredActionNamesWarning({
-    key: 'bulkActions', names: undeclaredBulkActions, ready: undeclaredNamesReady, address: undeclaredNamesAddress,
+    key: 'bulkActions', names: undeclaredBulkActions, ready: !objectSchemaAwaited,
+    basis: undeclaredNamesBasis, address: undeclaredNamesAddress,
   });
   useUndeclaredActionNamesWarning({
-    key: 'rowActions', names: undeclaredRowActions, ready: undeclaredNamesReady, address: undeclaredNamesAddress,
+    key: 'rowActions', names: undeclaredRowActions, ready: !objectSchemaAwaited,
+    basis: undeclaredNamesBasis, address: undeclaredNamesAddress,
   });
   let selectionMode: 'none' | 'single' | 'multiple' | boolean = false;
   if (schema.selection !== undefined) {
