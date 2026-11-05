@@ -108,7 +108,7 @@ export function describeUndeclaredActionNames(
     return `[ObjectUI] ${describeComponent(address.component)} ${key}: ${describeAddress(address)} — the object's schema could not `
       + `be read (no getObjectSchema on the data source, or the read failed), so its declared actions `
       + `are unknown and ${SURFACE[key]} for ${count}: ${listed}.\n`
-      + `${rule} Give the grid a data source that answers getObjectSchema, or check why the read failed.`;
+      + `${rule} Give the ${describeComponent(address.component)} a data source that answers getObjectSchema, or check why the read failed.`;
   }
   const count = names.length === 1 ? '1 name matches' : `${names.length} names match`;
   return `[ObjectUI] ${describeComponent(address.component)} ${key}: ${describeAddress(address)} — ${count} no action the object `
