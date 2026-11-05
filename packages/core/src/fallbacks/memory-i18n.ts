@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { normalizeSupportedLocales } from '@objectstack/spec/system';
+import { normalizeSupportedLocales, resolveLocaleAmong } from '@objectstack/spec/system';
 
 /**
  * Recursively merge `source` into `target`. Nested plain objects are merged
@@ -36,35 +36,20 @@ export function deepMerge(
 /**
  * Resolve a locale code against available locales with fallback.
  *
- * Fallback chain:
+ * This is `resolveLocaleAmong` from `@objectstack/spec/system`, the one
+ * locale-matching ladder the spec's `resolveBundleLocale` also runs, so the
+ * two resolvers cannot answer differently. Fallback chain:
  *   1. Exact match (e.g. `zh-CN` → `zh-CN`)
  *   2. Case-insensitive match (e.g. `zh-cn` → `zh-CN`)
- *   3. Base language match (e.g. `zh-CN` → `zh`)
- *   4. Variant expansion (e.g. `zh` → `zh-CN`)
+ *   3. The same platform table language, through the table's read aliases
+ *      (e.g. `zh-TW` / `zh-HK` → `zh-Hant`, `zh` → `zh-CN`, `ja` → `ja-JP`)
+ *   4. Base language match (e.g. `zh-CN` → `zh`)
+ *   5. Variant expansion (e.g. `es-MX` → `es-ES`)
  *
  * Returns the matched locale code, or `undefined` when no match is found.
  */
 export function resolveLocale(requestedLocale: string, availableLocales: string[]): string | undefined {
-  if (availableLocales.length === 0) return undefined;
-
-  // 1. Exact match
-  if (availableLocales.includes(requestedLocale)) return requestedLocale;
-
-  // 2. Case-insensitive match
-  const lower = requestedLocale.toLowerCase();
-  const caseMatch = availableLocales.find(l => l.toLowerCase() === lower);
-  if (caseMatch) return caseMatch;
-
-  // 3. Base language match (zh-CN → zh)
-  const baseLang = requestedLocale.split('-')[0].toLowerCase();
-  const baseMatch = availableLocales.find(l => l.toLowerCase() === baseLang);
-  if (baseMatch) return baseMatch;
-
-  // 4. Variant expansion (zh → zh-CN, zh-TW, etc. — first match wins)
-  const variantMatch = availableLocales.find(l => l.split('-')[0].toLowerCase() === baseLang);
-  if (variantMatch) return variantMatch;
-
-  return undefined;
+  return resolveLocaleAmong(requestedLocale, availableLocales);
 }
 
 /**

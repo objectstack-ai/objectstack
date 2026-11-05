@@ -5,6 +5,7 @@ import { createMemoryJob } from './memory-job';
 import { createMemoryI18n, resolveLocale } from './memory-i18n';
 import { CORE_FALLBACK_FACTORIES } from './index';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
+import { resolveBundleLocale } from '@objectstack/spec/system';
 
 describe('CORE_FALLBACK_FACTORIES', () => {
     // [#10746] `job` is deliberately OFF this list — a fallback must not fake
@@ -292,6 +293,56 @@ describe('resolveLocale', () => {
 
     it('should handle es → es-ES expansion', () => {
         expect(resolveLocale('es', ['en', 'es-ES', 'fr'])).toBe('es-ES');
+    });
+});
+
+// One case list, run against core's `resolveLocale` (a list) and the spec's
+// `resolveBundleLocale` (a bundle's keys), so the two server resolvers cannot
+// drift. The platform locale table's read aliases decide before any
+// base-language or first-variant guess: a Traditional reader reaches a
+// registered `zh-Hant`, a Simplified one `zh-CN`, in either registration order.
+describe('resolveLocale and resolveBundleLocale — one shared case list', () => {
+    const CASES: Array<[requested: string, available: string[], expected: string | undefined]> = [
+        ['zh-TW', ['en', 'zh-CN', 'zh-Hant'], 'zh-Hant'],
+        ['zh-TW', ['en', 'zh-Hant', 'zh-CN'], 'zh-Hant'],
+        ['zh-HK', ['en', 'zh-CN', 'zh-Hant'], 'zh-Hant'],
+        ['zh-HK', ['en', 'zh-Hant', 'zh-CN'], 'zh-Hant'],
+        ['zh-MO', ['en', 'zh-CN', 'zh-Hant'], 'zh-Hant'],
+        ['zh-MO', ['en', 'zh-Hant', 'zh-CN'], 'zh-Hant'],
+        ['zh-CN', ['en', 'zh-CN', 'zh-Hant'], 'zh-CN'],
+        ['zh-CN', ['en', 'zh-Hant', 'zh-CN'], 'zh-CN'],
+        ['zh', ['en', 'zh-Hant', 'zh-CN'], 'zh-CN'],
+        ['zh-SG', ['en', 'zh-Hant', 'zh-CN'], 'zh-CN'],
+        ['zh-Hans', ['en', 'zh-Hant', 'zh-CN'], 'zh-CN'],
+        ['zh-TW', ['en', 'zh', 'zh-Hant'], 'zh-Hant'],
+        // Today's alias-spelled bundles keep answering.
+        ['ja', ['en', 'zh-CN', 'ja-JP', 'es-ES'], 'ja-JP'],
+        ['es', ['en', 'zh-CN', 'ja-JP', 'es-ES'], 'es-ES'],
+        ['zh-TW', ['en', 'zh-CN', 'ja-JP', 'es-ES'], 'zh-CN'],
+        ['zh-TW', ['en', 'zh'], 'zh'],
+        // A code the table does not know falls back as before.
+        ['es-MX', ['en', 'es-ES'], 'es-ES'],
+        ['en-GB', ['en-US', 'en'], 'en'],
+        ['fr', ['en', 'zh-CN'], undefined],
+        ['zh-TW', [], undefined],
+    ];
+
+    it.each(CASES)('resolveLocale(%s, %j) → %s', (requested, available, expected) => {
+        expect(resolveLocale(requested, available)).toBe(expected);
+    });
+
+    it.each(CASES)('resolveBundleLocale(%j over %j) → %s', (requested, available, expected) => {
+        const bundle = Object.fromEntries(available.map((code) => [code, {}]));
+        expect(resolveBundleLocale(bundle, requested)).toBe(expected);
+    });
+
+    it('a zh-HK reader of the in-memory service gets the zh-Hant bundle', () => {
+        const i18n = createMemoryI18n();
+        i18n.loadTranslations('en', { settings: 'Settings' });
+        i18n.loadTranslations('zh-CN', { settings: '设置' });
+        i18n.loadTranslations('zh-Hant', { settings: '設定' });
+        expect(i18n.t('settings', 'zh-HK')).toBe('設定');
+        expect(i18n.t('settings', 'zh')).toBe('设置');
     });
 });
 

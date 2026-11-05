@@ -105,14 +105,12 @@ const TAG_BY_FOLDED_CODE: ReadonlyMap<string, PlatformLocaleTag> = new Map<strin
  *
  * It answers which table language a code MEANS, which is a different
  * question from which key of a bundle SERVES a requested locale; that is
- * `resolveBundleLocale`'s ladder (exact, case, base language, first variant).
- * A reader that uses both maps the code here first and then resolves the
- * table tag against the bundle, so the two never contradict: `pt` means
- * `pt-BR`, and a request for `pt-BR` may still be served by a bundle's `pt`
- * key. Run the other way round, the ladder alone answers a bare or regional
- * Chinese code by key order once a bundle holds both scripts:
- * `resolveBundleLocale({ 'zh-Hant': …, 'zh-Hans': … }, 'zh')`, and the same
- * call with `zh-CN`, answers `zh-Hant`.
+ * `resolveBundleLocale`'s ladder (exact, case, table language, base
+ * language, first variant). Its table-language step asks this function of
+ * both the requested code and each key, so the two never contradict: `pt`
+ * means `pt-BR`, and a request for `pt-BR` may still be served by a bundle's
+ * `pt` key; a bundle holding both scripts answers `zh` and `zh-CN` with its
+ * Simplified key and `zh-TW` with its Traditional one, in any key order.
  */
 export function platformLocaleTagOf(code: unknown): PlatformLocaleTag | undefined {
   if (typeof code !== 'string') return undefined;
