@@ -246,7 +246,8 @@ export async function runRegisterSsoProviderFromForm(
  *
  * `@better-auth/sso` (samlify-backed) registers a SAML IdP via the SAME
  * `/sso/register` endpoint, with the protocol fields nested under `samlConfig`
- * ({ entryPoint, cert, callbackUrl, identifierFormat? }) instead of `oidcConfig`.
+ * ({ entryPoint, cert, callbackUrl, idpMetadata: { entityID }, spMetadata,
+ * identifierFormat? }) instead of `oidcConfig`.
  * The UI action collects FLAT fields; this helper reshapes them, derives the
  * per-provider ACS callback URL (`/sso/saml2/sp/acs/<providerId>`), and
  * re-dispatches through `/sso/register` so the admin gate + provisioning run.
@@ -298,6 +299,13 @@ export async function runRegisterSamlProviderFromForm(
     entryPoint,
     cert,
     callbackUrl: acsUrl,
+    // The IdP descriptor. The form carries no metadata XML, so this is the
+    // vendor's manual-configuration arm, which requires the IdP's own EntityID
+    // (`idpMetadata.entityID`) — the form's `issuer` field ("IdP Entity ID").
+    // Without it `/sso/register` refuses every form with 400. The IdP SSO URL
+    // and signing cert stay top-level (`entryPoint`, `cert`), which the vendor
+    // reads when `idpMetadata` names no `singleSignOnService` / `cert`.
+    idpMetadata: { entityID: issuer },
     // better-auth requires an SP descriptor (its inner fields are optional). Use
     // the SP metadata URL as our EntityID — the value the IdP keys this SP on.
     spMetadata: { entityID: spMetadataUrl },

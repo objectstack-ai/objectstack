@@ -98,6 +98,7 @@ import {
   InterfacesNavContributionsContext,
   InterfacesNavOverrideMark,
   InterfacesRailMarksContext,
+  InterfacesServedContributedNavContext,
   NavTree,
   OFF_NAV_TYPES,
   OffNavSections,
@@ -415,10 +416,12 @@ import {
   prefixObjectName,
   type EnsuredCustomizationPackage,
   type PkgEntry,
+  type ListedPackageManifest,
 } from './packages-io.js';
 import { usePackageCustomizations } from './CustomizationMark.js';
 import {
   ContributedRailRow,
+  contributedElsewhereText,
   RailCustomizationFilter,
   RailCustomizationMark,
   StudioPairItemChip,
@@ -426,6 +429,7 @@ import {
   customizationPairBaseOf,
   railCustomizationsOf,
   useDeepLinkFallback,
+  useContributedElsewhere,
   useOpenContributor,
   useRailCustomizationsOnly,
   withPairItems,
@@ -435,7 +439,10 @@ import {
   contributedFieldsOf,
   placeNavContributions,
   placesAnyNav,
+  servedContributedNavOf,
   withContributedFlowGroups,
+  NO_SERVED_CONTRIBUTED_NAV,
+  type ServedContributedNav,
   type ContributedOnObject,
 } from './contributionRows.js';
 import {
@@ -646,6 +653,14 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     basedOn: string | null;
     listedPair: string | null;
   } | null>(null);
+  // objectstack#29851 — the listed manifests this same read answered, held
+  // with the id it answered for: the Interfaces pillar's no-app empty state
+  // reads the open package's declared navigation targets off it (addresses
+  // only), so it sends no package-list request of its own.
+  const [listedManifests, setListedManifests] = React.useState<{
+    for: string;
+    manifests: ReadonlyMap<string, ListedPackageManifest>;
+  } | null>(null);
   React.useEffect(() => {
     // objectui#11553 — the package-less scope has no package to look up; its
     // writability is decided below, not fetched.
@@ -659,7 +674,12 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     const listedIds = fetchListedPackageIds();
     listedIds.catch(() => {});
     const listedManifests = fetchListedPackageManifests();
-    listedManifests.catch(() => {});
+    listedManifests.then(
+      (manifests) => {
+        if (!cancelled) setListedManifests({ for: packageId, manifests });
+      },
+      () => {},
+    );
     const settle = (entry: PkgEntry | null) => {
       setPkgWritable(entry?.writable ?? null);
       setPkgEntry(entry);
@@ -1830,6 +1850,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                   readOnly={readOnly}
                   readOnlySettled={pkgWritable !== undefined}
                   customization={customization}
+                  listedManifests={listedManifests?.for === packageId ? listedManifests.manifests : null}
                   onDirtyChange={setPillarDirty}
                   onSurfaceLabelChange={setSurfaceLabel}
                   onHeldEditChange={setHeldEdit}
@@ -1977,8 +1998,14 @@ export function InterfacesPillar({
   onSurfaceLabelChange,
   onHeldEditChange,
   customization = null,
+  listedManifests = null,
 }: {
   packageId: string;
+  /** objectstack#29851 — the package list's manifests, as the Studio surface
+   * already read them; `null` until that read answers (or when it failed).
+   * The no-app empty state reads the open package's declared navigation
+   * targets off it, as addresses only. */
+  listedManifests?: ReadonlyMap<string, ListedPackageManifest> | null;
   /** objectui#12718 — the package's display name, as the Studio top bar
    * reads it; `undefined` until the package list answers. The pillar names a
    * package with no app by it, so the id shows only when neither exists. */
@@ -2063,6 +2090,7 @@ export function InterfacesPillar({
   // `railAppLabel`; every editor keeps reading `navTree` / `appLabel`, the
   // authored buffer, so no input ever echoes a served text.
   const [servedNav, setServedNav] = React.useState<ServedNavText | null>(null);
+  const [servedContributed, setServedContributed] = React.useState<ServedContributedNav>(NO_SERVED_CONTRIBUTED_NAV);
   const railTree = React.useMemo(() => displayNavTree(navTree, servedNav), [navTree, servedNav]);
   const railAppLabel = displayAppLabel(appLabel, servedNav);
   // objectstack#29786 — what other packages add to this app's navigation,
@@ -2391,6 +2419,16 @@ export function InterfacesPillar({
   // objectui#11785 — a load failure as it was (`plainRefusal`), a refused leaf
   // save as an author sentence with the raw text behind Details.
   const [error, setError] = React.useState<StudioRefusal | null>(null);
+  // objectstack#29851 — on the no-app empty state only: what this package adds
+  // to other packages' apps, from the target's served owner and that owner's
+  // customization read (the declared app is an address, never shown).
+  const contributedElsewhere = useContributedElsewhere(
+    packageId,
+    appStatus === 'missing' && !error,
+    listedManifests,
+    (name) => client.get<Record<string, unknown>>('app', name),
+  );
+  const openContributor = useOpenContributor();
   // Objects in THIS package (published ∪ draft) — the nav item inspector's
   // object picker, so nav can be wired to sibling objects before publishing.
   const [pkgObjects, setPkgObjects] = React.useState<Array<{ name: string; label: string; icon?: string; pair?: true }>>(
@@ -2619,6 +2657,9 @@ export function InterfacesPillar({
         // translated from. A never-saved app has neither, and no served text.
         const served = saved ? servedNavTextOf(eff, published[0]) : null;
         setServedNav(served);
+        // objectstack#29851 — from the same two answers: the entries the fold
+        // added, by id, for the contributed rows' labels. No request of its own.
+        setServedContributed(saved ? servedContributedNavOf(eff, published[0]) : NO_SERVED_CONTRIBUTED_NAV);
         const appDraftBody = extractDraftBody(appDraftResp);
         // A served draft is the whole document — taken as-is, never spread
         // over the published layer (objectui#10765; the rule is stated once
@@ -4326,10 +4367,32 @@ export function InterfacesPillar({
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
               <LayoutDashboard className="h-6 w-6 text-muted-foreground" />
             </div>
-            <div>
-              <p className="text-sm font-medium">{t('engine.studio.if.noAppTitle', locale)}</p>
-              <p className="mt-1 text-xs text-muted-foreground">{t('engine.studio.if.noAppHint', locale)}</p>
-            </div>
+            {contributedElsewhere ? (
+              // objectstack#29851 — what the served reads show this package
+              // adding to other packages' apps, each with a way there.
+              <div data-testid="if-contributes-elsewhere">
+                <p className="text-sm font-medium">{t('engine.studio.if.noOwnAppTitle', locale)}</p>
+                {contributedElsewhere.map((found) => (
+                  <div key={found.app} className="mt-1 flex flex-col items-center gap-2">
+                    <p className="text-xs text-muted-foreground">{contributedElsewhereText(found, locale)}</p>
+                    <button
+                      type="button"
+                      data-testid="if-open-owner"
+                      data-package={found.ownerId}
+                      onClick={() => openContributor(`/studio/${encodeURIComponent(found.ownerId)}/interfaces`)}
+                      className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted"
+                    >
+                      {tFormat('engine.studio.if.openOwner', locale, { package: found.ownerName })}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div>
+                <p className="text-sm font-medium">{t('engine.studio.if.noAppTitle', locale)}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{t('engine.studio.if.noAppHint', locale)}</p>
+              </div>
+            )}
             {onCreateApp && (
               <button
                 type="button"
@@ -4913,6 +4976,7 @@ export function InterfacesPillar({
         >
           <InterfacesRailMarksContext.Provider value={railMarks}>
           <InterfacesNavContributionsContext.Provider value={navPlacement}>
+          <InterfacesServedContributedNavContext.Provider value={servedContributed}>
           {editNav && (
               <div className="mt-1.5 flex items-center gap-1.5">
                 {navHasDraft && (
@@ -4935,8 +4999,19 @@ export function InterfacesPillar({
             </p>
           )}
             {listOnlyCustomized && !editNav && !navMarked ? null : appStatus === 'missing' && !error ? (
-              <div className="px-2 py-3">
-                <p className="text-[11px] text-muted-foreground">{t('engine.studio.if.noApp', locale)}</p>
+              <div className="px-2 py-3" data-testid="if-no-app-rail">
+                {contributedElsewhere ? (
+                  <>
+                    <p className="text-[11px] text-muted-foreground">{t('engine.studio.if.noOwnApp', locale)}</p>
+                    {contributedElsewhere.map((found) => (
+                      <p key={found.app} className="mt-1 text-[11px] text-muted-foreground">
+                        {contributedElsewhereText(found, locale)}
+                      </p>
+                    ))}
+                  </>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">{t('engine.studio.if.noApp', locale)}</p>
+                )}
                 {onCreateApp && (
                   <button
                     type="button"
@@ -4987,6 +5062,7 @@ export function InterfacesPillar({
                 onlyCustomized={listOnlyCustomized}
               />
             )}
+          </InterfacesServedContributedNavContext.Provider>
           </InterfacesNavContributionsContext.Provider>
           </InterfacesRailMarksContext.Provider>
         </StudioRail>

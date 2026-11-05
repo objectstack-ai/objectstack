@@ -34,6 +34,7 @@
  */
 
 import {
+    RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES,
     RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES,
     RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE,
     RecordPageRequestSchema,
@@ -359,7 +360,12 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                 // deployment does not serve holds no entry, as the page reads
                 // such a stream as an empty one; a refused comment or activity
                 // count refuses the part, and a refused ledger count is no
-                // field change, as the stream then merges none.
+                // field change, as the stream then merges none. [#30343] The
+                // stream draws one action that wrote both an activity row and
+                // a ledger row as one entry, so with a field change counted
+                // every update steps aside, and a create (a delete) steps
+                // aside as often as both sources hold one: the fewer of the
+                // two counts, as the stream pairs no more than that.
                 const answerTimeline = async (
                     sources: NonNullable<RecordPageRequest['timeline']>,
                 ): Promise<{ total: number } | { error: PartRefusal }> => {
@@ -369,22 +375,37 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                         return answer.error.code === 'OBJECT_NOT_FOUND' ? 0 : answer;
                     };
                     const ofRecord = { object_name: object, record_id: id };
-                    const [comments, fieldChanges, activity, updates] = await Promise.all([
+                    const both = sources.activity && sources.fieldChanges;
+                    /** The record's activity rows and ledger writes of one action, when both sources count. */
+                    const ofAction = (action: 'create' | 'delete') =>
+                        both
+                            ? Promise.all([
+                                count(ACTIVITY_OBJECT, { ...ofRecord, type: RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES[action] }),
+                                count(AUDIT_LOG_OBJECT, { ...ofRecord, action }),
+                            ])
+                            : Promise.resolve([0, 0] as const);
+                    const [comments, fieldChanges, activity, updates, creates, deletes] = await Promise.all([
                         sources.discussion ? count(COMMENT_OBJECT, { thread_id: `${object}:${id}` }) : 0,
                         sources.fieldChanges ? count(AUDIT_LOG_OBJECT, { ...ofRecord, action: { $in: FIELD_CHANGE_ACTIONS } }) : 0,
                         sources.activity
                             ? count(ACTIVITY_OBJECT, { ...ofRecord, type: { $nin: [...RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES] } })
                             : 0,
                         // The updates that step aside once a field change is counted.
-                        sources.activity && sources.fieldChanges
-                            ? count(ACTIVITY_OBJECT, { ...ofRecord, type: RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE })
-                            : 0,
+                        both ? count(ACTIVITY_OBJECT, { ...ofRecord, type: RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE }) : 0,
+                        ofAction('create'),
+                        ofAction('delete'),
                     ]);
                     if (typeof comments !== 'number') return comments;
                     if (typeof activity !== 'number') return activity;
                     if (typeof updates !== 'number') return updates;
+                    let paired = 0;
+                    for (const [rows, writes] of [creates, deletes]) {
+                        if (typeof rows !== 'number') return rows;
+                        // A refused ledger count pairs nothing, as the stream then merges none.
+                        paired += Math.min(rows, typeof writes === 'number' ? writes : 0);
+                    }
                     const changes = typeof fieldChanges === 'number' ? fieldChanges : 0;
-                    return { total: comments + changes + activity - (changes > 0 ? updates : 0) };
+                    return { total: comments + changes + activity - (changes > 0 ? updates + paired : 0) };
                 };
 
                 const answerFieldAccess = async () => {
