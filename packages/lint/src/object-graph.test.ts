@@ -1142,5 +1142,24 @@ describe('[#30471] the field-name indexes read the objects as served', () => {
         for (const s of onLegs(stack, packages, [bare, account])) expect(ids(run, s)).toEqual([]);
       }
     });
+
+    // An extension that RE-DECLARES an owner's field replaces it whole, in the
+    // fold as in the registry's `mergeObjectDefinitions`
+    // (`{ ...base.fields, ...extension.fields }`), so the owner's field is
+    // judged on the extension's definition. On the declared objects alone (what
+    // `main` read) the owner's `amount: number` is known, sortable and writable,
+    // and nothing is raised. ADR-0146 D10 refuses this shape on the extension;
+    // no CLI door does.
+    it.each<[string, Run, Rec, Rec, string]>([
+      ['a list-view sort by an owner field re-declared as formula', validateSortableFields,
+        { amount: { type: 'formula', expression: 'record.name' } }, viewSort('amount'), SORT_FIELD_UNSORTABLE],
+      ['a flow update_record of an owner field re-declared readonly', validateReadonlyFlowWrites,
+        { amount: { type: 'number', readonly: true } }, flowNode('update_record', 'amount'), FLOW_UPDATE_READONLY_FIELD],
+    ])('%s: judged on the extension\'s definition', (_write, run, fields, stack, id) => {
+      for (const served of onLegs(stack, [ext(fields)])) {
+        expect(run(served).map((f) => [f.rule, f.severity])).toEqual([[id, 'error']]);
+      }
+      for (const declared of onLegs(stack, [[]])) expect(run(declared)).toEqual([]);
+    });
   });
 });

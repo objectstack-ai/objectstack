@@ -475,6 +475,13 @@ export function objectExtensionsByTarget(stack: unknown): Map<string, VisibleObj
  * name is served whichever wins) and named in `tied`, for a caller whose
  * verdict depends on which definition wins: registration order decides that,
  * and a stack does not state it.
+ *
+ * Contract, which `indexObjectFields` (validate-hook-body-writes.ts) joins on
+ * by position: `objects` is one to one and in order with
+ * `recordsOf(stack.objects)`. `objectsAsServed(stack).objects[i]` is the
+ * served form of `recordsOf(stack.objects)[i]`, on the early return (nothing
+ * extends anything: the declared array itself) as on the fold. No object is
+ * dropped, added or reordered.
  */
 export function objectsAsServed(stack: unknown): { objects: AnyRec[]; tied: Map<string, Set<string>> } {
   const objects = isRec(stack) ? recordsOf(stack.objects) : [];

@@ -512,10 +512,13 @@ export function hookBodyFindingLocation(
  * Whether the column is WRITABLE (`readonly`) is the readonly rules' question,
  * not this index's.
  *
- * Judgeability stays the declaration's ({@link judgeableFieldsOf}): an object
- * that declares no field at all (external, datasource-introspected) keeps an
- * empty set even when an extension adds to it, because the fields it does
- * serve are still unknown here.
+ * Judgeability stays the declaration's ({@link judgeableFieldsOf}) for the
+ * stack this is handed: an object that declares no field at all (external,
+ * datasource-introspected) keeps an empty set even when an extension adds to
+ * it, because the fields it does serve are still unknown here. The guard reads
+ * the declaration from `stack.objects`, so a caller that hands it objects
+ * already served (`{ objects: objectsAsServed(stack).objects }`, as the react
+ * page rule does with the page rule's own index) bypasses it by construction.
  */
 export function indexObjectFields(stack: AnyRec): Map<string, Set<string>> {
   const out = new Map<string, Set<string>>();

@@ -1140,7 +1140,12 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
   // [#30471] Over the objects as served, every `objectExtensions` field
   // folded in, as `validatePageFieldBindings` reads them: a prop naming a
   // field a sibling package adds is served, and one no body declares or
-  // extends is still unknown.
+  // extends is still unknown. Handing the index pre-served objects bypasses
+  // the declares-nothing guard by construction: an object that declares no
+  // field but is extended gets the extension's names, not an empty set. No
+  // verdict moves toward a refusal: this rule judged that empty set on main
+  // too (`checkFieldRefs` and `checkObjectChart` skip only a missing object),
+  // so every ref was unknown there and the extension's names now resolve.
   const objectFields = indexObjectFields({ objects: objectsAsServed(stack).objects });
   // [#8340] The provenance index alongside the existence one — same keying,
   // asked on the path where the existence check stays silent.
