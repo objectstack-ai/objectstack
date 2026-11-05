@@ -26,6 +26,8 @@ import {
   summarizePendingSchemaWork,
   groupByCategory,
   SKIPPED_SCHEMA_SYNC_NOTE,
+  describeRefusedSchemaWork,
+  splitRefusedSchemaWork,
 } from '../../utils/schema-migrate.js';
 import type { ManagedDriftEntry } from '@objectstack/driver-sql';
 import { exitOneShotCommand } from '../../utils/one-shot-exit.js';
@@ -680,7 +682,11 @@ export default class MigrateApply extends Command {
       // marker when it created the database from empty — the half this
       // deferred boot's birth plugin could not run — so the first `os serve`
       // admits it. A database that was not empty gets none.
-      const created = await stack.flushSchemaDdl();
+      // [#30636] A table the sync refused (`refuse_table`: keyed by `_id`, no
+      // `id`, holding rows) comes back beside the work performed, never in a
+      // throw: every other table still got its DDL. It is not performed work,
+      // so it is never counted in `created`; it is named, and the run is PARTIAL.
+      const { performed: created, refused } = await splitRefusedSchemaWork(await stack.flushSchemaDdl());
       const { applied, skipped } = await stack.applyMigrationEntries(drift, { allowDestructive });
 
       // ── [#23848] NAME WHAT THE DRIVER DID NOT APPLY ──────────────────
@@ -703,7 +709,7 @@ export default class MigrateApply extends Command {
       const held = new Set<ManagedDriftEntry>(deferred);
       const notApplied = skipped.filter((d) => !held.has(d));
       const unappliedDestructive = notApplied.filter((d) => d.category === 'destructive');
-      const partial = unappliedDestructive.length > 0;
+      const partial = unappliedDestructive.length > 0 || refused.length > 0;
 
       if (flags.json) {
         await emitJson({
@@ -712,6 +718,7 @@ export default class MigrateApply extends Command {
           applied,
           skipped,
           notApplied,
+          ...(refused.length > 0 ? { refused } : {}),
           ...(partial ? { message: 'partial' } : {}),
           ...compositionPayload,
           duration: timer.elapsed(),
@@ -752,11 +759,24 @@ export default class MigrateApply extends Command {
       }
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');
+      // [#30636] Each refused table, with the refusal's own text.
+      for (const p of refused) {
+        printError(`REFUSED ${describeRefusedSchemaWork(p)}`);
+        if (p.refusal) console.log(chalk.dim(`      ${p.refusal}`));
+      }
       if (partial) {
-        printError(
-          `PARTIAL apply: ${unappliedDestructive.length} destructive change(s) confirmed with --allow-destructive were `
-          + 'NOT applied (named above), so this database still differs from its metadata.',
-        );
+        if (unappliedDestructive.length > 0) {
+          printError(
+            `PARTIAL apply: ${unappliedDestructive.length} destructive change(s) confirmed with --allow-destructive were `
+            + 'NOT applied (named above), so this database still differs from its metadata.',
+          );
+        }
+        if (refused.length > 0) {
+          printError(
+            `PARTIAL apply: schema sync REFUSED ${refused.length} existing table(s) (named above) and left them exactly `
+            + 'as they were; every other table got its DDL.',
+          );
+        }
         this.exit(1);
       }
     } catch (error: any) {

@@ -113,6 +113,7 @@ export {
   expectedIndexes,
   isIndexDriftOp,
   isInPlaceSchemaWork,
+  isRefusedSchemaWork,
   isManagedIndexName,
   isRuntimeManagedIndex,
   isSyncReproducibleIndex,

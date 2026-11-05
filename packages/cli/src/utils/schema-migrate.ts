@@ -1698,6 +1698,33 @@ async function loadIsInPlaceSchemaWork(): Promise<(kind: PendingSchemaWork['kind
   return isInPlaceSchemaWork;
 }
 
+/** [#30636] The driver's refusal classifier, loaded at the point of use for the reason above. */
+async function loadIsRefusedSchemaWork(): Promise<(kind: PendingSchemaWork['kind']) => boolean> {
+  const { isRefusedSchemaWork } = await import('@objectstack/driver-sql');
+  return isRefusedSchemaWork;
+}
+
+/**
+ * [#30636] Split what {@link SchemaStack.flushSchemaDdl} returned into the
+ * work it performed and the tables the sync refused and left as they were
+ * (`refuse_table`). A refusal is never performed work: `os migrate apply`
+ * names each one and ends PARTIAL.
+ */
+export async function splitRefusedSchemaWork(
+  work: PendingSchemaWork[],
+): Promise<{ performed: PendingSchemaWork[]; refused: PendingSchemaWork[] }> {
+  const isRefusedSchemaWork = await loadIsRefusedSchemaWork();
+  return {
+    performed: work.filter((w) => !isRefusedSchemaWork(w.kind)),
+    refused: work.filter((w) => isRefusedSchemaWork(w.kind)),
+  };
+}
+
+/** [#30636] One refused table, as the plan and `os migrate apply` name it. */
+export function describeRefusedSchemaWork(p: PendingSchemaWork): string {
+  return `${p.table} [${p.kind}: ${p.columns.join(', ')} — ${formatRows(p.rows)} row(s)]`;
+}
+
 const CATEGORY_ORDER: DriftCategory[] = ['safe', 'needs_confirm', 'destructive'];
 
 const CATEGORY_META: Record<DriftCategory, { label: string; color: (s: string) => string; icon: string }> = {
@@ -1808,8 +1835,9 @@ export async function renderPendingSchemaWork(pending: PendingSchemaWork[]): Pro
   if (pending.length === 0) return;
 
   const isInPlaceSchemaWork = await loadIsInPlaceSchemaWork();
-  const additive = pending.filter((p) => !isInPlaceSchemaWork(p.kind));
-  const inPlace = pending.filter((p) => isInPlaceSchemaWork(p.kind));
+  const { performed: work, refused } = await splitRefusedSchemaWork(pending);
+  const additive = work.filter((p) => !isInPlaceSchemaWork(p.kind));
+  const inPlace = work.filter((p) => isInPlaceSchemaWork(p.kind));
 
   if (additive.length > 0) {
     console.log(`  ${chalk.bold('New (additive — created when you apply)')}`);
@@ -1827,6 +1855,15 @@ export async function renderPendingSchemaWork(pending: PendingSchemaWork[]): Pro
     for (const p of inPlace) {
       // A MySQL widen is `ALTER … MODIFY`, i.e. a full table rebuild holding a
       // metadata lock — worth saying outright, not just implying via the count.
+      // [#30636] An empty `_id`-keyed table is dropped and recreated: say so,
+      // rather than listing every declared column as if each were converged.
+      if (p.kind === 'rebuild_table') {
+        console.log(
+          `    ${chalk.yellow('~')} ${chalk.yellow(p.table)} ` +
+          `${chalk.dim(`[${p.kind}: empty table dropped and recreated, ${p.columns.length} column(s)]`)}`,
+        );
+        continue;
+      }
       const cost = p.kind === 'widen_datetime_columns' || p.kind === 'widen_time_columns'
         ? `${formatRows(p.rows)} row table rebuild`
         : `${formatRows(p.rows)} row update(s)`;
@@ -1834,6 +1871,17 @@ export async function renderPendingSchemaWork(pending: PendingSchemaWork[]): Pro
         `    ${chalk.yellow('~')} ${chalk.yellow(p.table)} ` +
         `${chalk.dim(`[${p.kind}: ${p.columns.join(', ')} — ${cost}]`)}`,
       );
+    }
+    console.log('');
+  }
+
+  // [#30636] Work the sync will NOT do: each table it refuses, with the
+  // refusal's own text (rendered by the driver, the text `apply` reports).
+  if (refused.length > 0) {
+    console.log(`  ${chalk.bold('Refused (left exactly as it is when you apply)')}`);
+    for (const p of refused) {
+      console.log(`    ${chalk.red('✗')} ${chalk.red(describeRefusedSchemaWork(p))}`);
+      if (p.refusal) console.log(`        ${chalk.dim(p.refusal)}`);
     }
     console.log('');
   }
@@ -1854,11 +1902,16 @@ export async function summarizePendingSchemaWork(pending: PendingSchemaWork[]): 
   // Only mentioned when there is some, so the common in-sync summary is
   // unchanged — but never omitted when there is, which is the #3954 point.
   const isInPlaceSchemaWork = await loadIsInPlaceSchemaWork();
-  const inPlace = pending.filter((p) => isInPlaceSchemaWork(p.kind));
+  const inPlace = pending.filter((p) => isInPlaceSchemaWork(p.kind) && p.kind !== 'rebuild_table');
   if (inPlace.length > 0) {
     const cols = inPlace.reduce((n, p) => n + p.columns.length, 0);
     const rows = inPlace.reduce((n, p) => n + (p.rows ?? 0), 0);
     parts.push(`${cols} temporal column(s) to converge in place (~${formatRows(rows)} rows)`);
   }
+  // [#30636] Named only when there are some, like the in-place count above.
+  const rebuilds = pending.filter((p) => p.kind === 'rebuild_table').length;
+  if (rebuilds > 0) parts.push(`${rebuilds} empty table(s) to rebuild`);
+  const { refused } = await splitRefusedSchemaWork(pending);
+  if (refused.length > 0) parts.push(`${refused.length} table(s) REFUSED`);
   return parts.join(', ');
 }
