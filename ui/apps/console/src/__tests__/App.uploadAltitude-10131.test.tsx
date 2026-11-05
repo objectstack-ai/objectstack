@@ -81,10 +81,10 @@ const { adapterOptions, uploadSpy, passthrough, stub, MINTED_FILE_ID } = vi.hois
   return { adapterOptions, uploadSpy, passthrough, stub, MINTED_FILE_ID };
 });
 
-// The console's OWN adapter factory, replaced by a spy that mints a `sys_file`
-// id. `UploadProvider` / `useUpload` stay real — the context lookup is the
-// thing under test.
-vi.mock('@object-ui/providers', async (importOriginal) => ({
+// The console's OWN adapter factory (`@object-ui/data-objectstack`), replaced by
+// a spy that mints a `sys_file` id. `UploadProvider` / `useUpload`
+// (`@object-ui/fields`) stay real — the context lookup is the thing under test.
+vi.mock('@object-ui/data-objectstack', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   createObjectStackUploadAdapter: (opts: Record<string, unknown>) => {
     adapterOptions.push(opts);

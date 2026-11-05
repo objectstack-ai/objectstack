@@ -41,7 +41,7 @@ import {
 import { useAuth } from '@object-ui/auth';
 import type { AuthOrganizationMember } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { useUpload } from '@object-ui/providers';
+import { useUpload } from '@object-ui/fields';
 import { Loader2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
