@@ -229,7 +229,7 @@ describe('[ADR-0142 D7] a failed queue-member read keeps the queue-recipient rul
       /record reconcile failed for rule/.test(String(line)) && REFUSAL.test(String((meta as any)?.error)))).toBe(true);
   });
 
-  it('control — once the read succeeds, the recompute converges: a member who left loses the grant', async () => {
+  it('after the refusal, once the read succeeds, the next recompute converges: a member who left loses the grant', async () => {
     engine.failing.add('sys_team_member');
     await expect(rules.evaluateRule(RULE, SYS)).rejects.toThrow(REFUSAL);
     engine.failing.delete('sys_team_member');
