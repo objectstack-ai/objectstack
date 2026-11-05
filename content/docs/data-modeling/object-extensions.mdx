@@ -66,7 +66,7 @@ check that spelling first.
 | `fieldPatches` | **Applied, field by field.** Changes the *display* of one of the target's own fields — never one an extension adds — without replacing it — [below](#relabelling-a-vendor-field). |
 | `validations` | **Concatenated.** Your rules run alongside the owner's; neither replaces the other. |
 | `indexes` | **Concatenated**, same as validations. |
-| `label` | Replaces the target's label — with one exception, [below](#extensions-and-tenant-customization). |
+| `label` | Replaces the target's label — with one exception, [below](#extensions-and-tenant-customization). A new `label` with no `pluralLabel` beside it also takes the target's plural off, since that plural names the old label: the object is served as one that declares no plural, and lists title it by its label. Set `pluralLabel` too to serve one. A plural the tenant set stays. |
 | `pluralLabel` | Same as `label`. |
 | `description` | Same as `label`. |
 | `priority` | Not merged — it *orders* the merge. `0`–`999`, default `200`. |

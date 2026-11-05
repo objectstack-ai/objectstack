@@ -36,6 +36,7 @@ import { FILE_REFERENCE_TYPES, NUMERIC_VALUE_TYPES, isTenancyDisabled, parseAuto
 import type { AutonumberToken } from '@objectstack/spec/data';
 import { aggregandColumnClass } from '@objectstack/core';
 import { StorageNameMapping, SystemObjectName } from '@objectstack/spec/system';
+import { ExistingTableAdoptionRefusal } from './existing-table-refusal.js';
 import { indexedKeyColumns, isUniqueScopeDeclared } from './schema-drift.js';
 import {
   AUDIT_TIMESTAMP_COLUMNS, MYSQL_DATETIME_PRECISION, NUMERIC_SCALAR_TYPES, declaredValueShapes,
@@ -458,7 +459,7 @@ export class RotationFacet {
       let exists = await this.knex.schema.hasTable(tableName);
       // Recorded BEFORE the legacy-`_id` rebuild below can flip `exists`: a
       // table that was here when we arrived stays "found" even if we then drop
-      // and recreate it. Re-syncing a table we made ourselves this boot — boot
+      // and recreate it (or refuse it). Re-syncing a table we made ourselves this boot — boot
       // runs the sync more than once, and objects registered later sync on
       // demand — is not evidence of anything preceding us, so it is ignored.
       // See `getSchemaSyncStats`.
@@ -469,7 +470,17 @@ export class RotationFacet {
         const columnInfo = await this.knex(tableName).columnInfo();
         const existingColumns = Object.keys(columnInfo);
 
+        // A table keyed by `_id` with no `id` (the ObjectQL driver's storage
+        // key) is the one shape the additive path below cannot adopt, so it is
+        // rebuilt — but only while it is EMPTY. [#30562] Schema sync never
+        // drops a table that holds rows: on a managed datasource over an
+        // existing database that table is the customer's, and the drop deleted
+        // its rows behind a save that answered success. Refused here, before
+        // any DDL, so nothing about the table changes. See
+        // `existing-table-refusal.ts`.
         if (existingColumns.includes('_id') && !existingColumns.includes('id')) {
+          const [{ rows }] = await this.knex(tableName).count({ rows: '*' });
+          if (Number(rows) > 0) throw new ExistingTableAdoptionRefusal(tableName, '_id', Number(rows));
           await this.knex.schema.dropTable(tableName);
           exists = false;
         }
