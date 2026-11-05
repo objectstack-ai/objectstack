@@ -274,6 +274,7 @@ const DECLARED_WATCH_HINTS = [
   'packages/drivers/driver-sql/src/sql-driver-raw-execution.ts',
   'packages/drivers/driver-sql/src/sql-driver-read-exit-fault.ts',
   'packages/drivers/driver-sql/src/sql-driver-rotation.ts',
+  'packages/drivers/driver-sql/src/sql-driver-schema-introspection.ts',
   'packages/drivers/driver-sql/src/sql-driver-schema-sync-section.ts',
   'packages/drivers/driver-sql/src/sql-driver-schema-sync.ts',
   'packages/drivers/driver-sql/src/sql-driver-sequence-semantics.ts',

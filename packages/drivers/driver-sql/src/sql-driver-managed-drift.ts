@@ -2,7 +2,7 @@
 
 /**
  * [#29520 codemod] The "Managed-schema drift & reconcile (#2186)" section of
- * `SqlDriver`: the bodies of `isProductionEnv`,
+ * `SqlDriver`: the bodies of `dialectName`, `isProductionEnv`,
  * `probeNullSafeUniqueDuplicates`, `buildRebuiltColumn`, `buildIndexName`,
  * `getExistingIndexNames`, `uniqueIndexesFromFields`, `dropIndexIfExists`,
  * `syncTableIndexes` moved out of `sql-driver.ts` whole by
@@ -32,6 +32,7 @@
  */
 
 import { GLOBAL_TENANT, buildIndexName, uniqueIndexesFromFields } from './schema-drift.js';
+import type { SqlDialectName } from './schema-drift.js';
 import type { Knex } from 'knex';
 import { uniqueProbeNotNullClause } from './sql-driver-top-level.js';
 import type { IntrospectedColumn } from './sql-driver-top-level.js';
@@ -48,6 +49,7 @@ export interface ManagedDriftHost {
   introspectIndexes: SqlDriver['introspectIndexes'];
   readonly isMysql: SqlDriver['isMysql'];
   readonly isPostgres: SqlDriver['isPostgres'];
+  readonly isSqlite: SqlDriver['isSqlite'];
   readonly knex: SqlDriver['knex'];
   syncDeclaredIndexes: SqlDriver['syncDeclaredIndexes'];
   uniqueIndexesFromFields: SqlDriver['uniqueIndexesFromFields'];
@@ -55,6 +57,14 @@ export interface ManagedDriftHost {
 
 /** The bodies of the "Managed-schema drift & reconcile (#2186)" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class ManagedDriftFacet {
+  /** The body of `SqlDriver#dialectName`; the method's docblock there is its contract. */
+  static dialectName(this: Pick<ManagedDriftHost, 'isMysql' | 'isPostgres' | 'isSqlite'>): SqlDialectName {
+    if (this.isSqlite) return 'sqlite';
+    if (this.isPostgres) return 'postgres';
+    if (this.isMysql) return 'mysql';
+    return 'unknown';
+  }
+
   /** The body of `SqlDriver#isProductionEnv`; the method's docblock there is its contract. */
   static isProductionEnv(): boolean {
     try {

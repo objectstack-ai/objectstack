@@ -739,6 +739,8 @@ const WRITE_SITES: Record<string, WriteSite> = {
     outOfFamily("the caller's OWN sys_personal_view row (Save as my view), offered behind perms.can(sys_personal_view, create) in ObjectView; the server keeps the rows owner-scoped; no record the caller browses is written"),
   'packages/app-shell/src/views/personalViews.ts :: usePersonalViews > rename :: update':
     outOfFamily("the caller's OWN sys_personal_view row (Rename), offered behind perms.can(sys_personal_view, update) in ObjectView; the server keeps the rows owner-scoped and fixes the owner; no record the caller browses is written"),
+  'packages/app-shell/src/views/personalViews.ts :: usePersonalViews > update :: update':
+    outOfFamily("the caller's OWN sys_personal_view row (保存, the list written back into the open personal view), offered behind the same perms.can(sys_personal_view, update) read as Rename in ObjectView; the server keeps the rows owner-scoped and fixes the owner; no record the caller browses is written"),
   // ── core ──
   'packages/core/src/actions/TransactionManager.ts :: TransactionManager > executeBatch :: batch':
     door('the action engine\'s transaction executor runs the operations its caller hands it'),

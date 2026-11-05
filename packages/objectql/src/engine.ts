@@ -2101,6 +2101,28 @@ export class ObjectQL implements IObjectQLEngine {
     return SecurityResolversFacet.serveFormulaField.call(securityResolversHost.of(this), objectName, record, field, context);
   }
 
+  /**
+   * [#29961] The values `object`'s stored computed fields ({@link planStoredExpressions})
+   * take over rows ALREADY stored, computed and served exactly as a write
+   * computes them: the declared option labels, the one hop, and the `can()`
+   * map, under `context`. Index-aligned with `rows`, keyed by every stored
+   * computed field the object declares; evaluated over copies, writes nothing.
+   *
+   * For a row that never went through a write since its field was declared —
+   * `os migrate stored-expressions` (`stored-expression-backfill.ts`) and the
+   * boot advisory it shares. A field that does not evaluate computes `null`,
+   * the write's answer, and is told to `onFault` when given (else the engine's
+   * once-per-field report).
+   */
+  computeStoredExpressionsOver(
+    object: string,
+    rows: ReadonlyArray<Record<string, unknown>>,
+    context?: ExecutionContext,
+    onFault?: (field: string, message: string) => void,
+  ): Promise<Array<Record<string, unknown>>> {
+    return SecurityResolversFacet.computeStoredExpressionsOver.call(securityResolversHost.of(this), object, rows, context, onFault);
+  }
+
   private formulaOptionLabels(
     schema: unknown,
     plan: FormulaPlanEntry[],
