@@ -38,6 +38,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import React from 'react';
 
 import { toast } from 'sonner';
+import { createI18n, I18nProvider } from '@object-ui/i18n';
 import { PackagedActionsSection } from './PackagedActionsSection';
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn() } }));
@@ -556,8 +557,7 @@ describe('the switch confirms off, says what happened, and names the object', ()
  * cell RED (no header; `客户`); the control GREEN on both sides.
  */
 describe('the object column draws the served label, read in the session language (objectstack#30486)', () => {
-  async function renderIn(lang: 'en' | 'zh-CN') {
-    const { createI18n, I18nProvider } = await import('@object-ui/i18n');
+  function renderIn(lang: 'en' | 'zh-CN') {
     const i18n = createI18n({ defaultLanguage: lang, detectBrowserLanguage: false });
     expect(i18n.language).toBe(lang);
     // The base package's translation, which a rename must win over.
