@@ -1402,8 +1402,11 @@ export function MarketplacePackagePage() {
 
       {localResultNote(pkg.manifest_id)}
 
+      {/* `min-w-0` on each cell: a grid item's automatic minimum is its content's
+          width, so a long line in the README would widen the page past its edge
+          instead of scrolling inside its own block. */}
       <div className="grid gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2 space-y-4">
+        <div className="min-w-0 lg:col-span-2 space-y-4">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">{t('marketplace.detail.about')}</CardTitle>
@@ -1417,7 +1420,7 @@ export function MarketplacePackagePage() {
             </CardContent>
           </Card>
         </div>
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">{t('marketplace.detail.versions')}</CardTitle>
