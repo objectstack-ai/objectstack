@@ -1168,6 +1168,7 @@ const es = {
     readonlyAriaLabel: "Vista de solo lectura",
     readonlyTooltip: "Vista del sistema — definida en el código, solo lectura.",
     malformedFilter: "El filtro de esta vista no es válido, por lo que no se muestra ningún registro: la condición {{subject}} no se puede aplicar.",
+    exportNotPermitted: "No tiene permiso para exportar estos registros. Contacte a su administrador si cree que debería poder hacerlo.",
     noObject: "No se ha indicado ningún objeto: define {{property}} o dataSource.object.",
   },
   designer: {
@@ -4718,6 +4719,10 @@ const es = {
         object_extension_one: '{{count}} extensión de objeto',
         object_extension_many: '{{count}} de extensiones de objeto',
         object_extension_other: '{{count}} extensiones de objeto',
+        dataset: '{{count}} conjuntos de datos',
+        dataset_one: '{{count}} conjunto de datos',
+        dataset_many: '{{count}} de conjuntos de datos',
+        dataset_other: '{{count}} conjuntos de datos',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

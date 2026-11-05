@@ -32,7 +32,7 @@ import {
   type CalendarVisibleRange,
   type CalendarWindow,
 } from './calendarWindow';
-import { SchemaRenderer, useNavigationOverlay, classifyLoadError, answeredLoadFailure, usePredicateScope, useDataInvalidation, useFilterScope, useResolvedFilter, NonGridRowCeilingNote } from '@object-ui/react';
+import { SchemaRenderer, useNavigationOverlay, classifyLoadError, answeredLoadFailure, isPermissionError, usePredicateScope, useDataInvalidation, useFilterScope, useResolvedFilter, NonGridRowCeilingNote } from '@object-ui/react';
 import type { LoadErrorKind, AnsweredLoadFailure } from '@object-ui/react';
 import { useDensityMode, resolveInlineAriaProps } from '@object-ui/react';
 import type { DataTableSchema, DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
@@ -1252,6 +1252,9 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.groupBy': 'Group By',
   'list.export': 'Export',
   'list.exportAs': 'Export as {{format}}',
+  // The export doors' refusal sentence, shared with `ObjectGrid` and
+  // `RelatedList`. Byte-identical to the `en` pack.
+  'view.exportNotPermitted': 'You don’t have permission to export these records. Contact your administrator if you think you should be able to.',
   'list.color': 'Color',
   'list.rowColor': 'Row Color',
   'list.colorByField': 'Color by field',
@@ -5490,7 +5493,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // Surface the failure instead of swallowing it (e.g. permission denied
           // or a server error) — the toolbar shows the message.
           console.error('ListView export failed:', err);
-          setExportError(err instanceof Error ? err.message : String(err));
+          // A refusal says the Console's sentence, never the server's text.
+          setExportError(isPermissionError(err)
+            ? t('view.exportNotPermitted')
+            : err instanceof Error ? err.message : String(err));
         } finally {
           setExportBusy(false);
         }
@@ -5548,7 +5554,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     setShowExport(false);
     // `searchTerm` / `searchableFields` belong here: the export now narrows by
     // the active search, so a stale closure would export the wrong row set.
-  }, [data, effectiveFields, resolvedExportOptions, schema.objectName, authoredFilter, schema.searchableFields, exportPermitted, dataSource, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, serverSort, searchTerm, objectDef, resolveObjectLabel]);
+  }, [data, effectiveFields, resolvedExportOptions, schema.objectName, authoredFilter, schema.searchableFields, exportPermitted, dataSource, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, serverSort, searchTerm, objectDef, resolveObjectLabel, t]);
 
   // All available fields for hide/show (with i18n)
   //

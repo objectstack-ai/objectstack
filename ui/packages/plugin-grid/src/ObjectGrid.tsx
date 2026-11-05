@@ -24,7 +24,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { ObjectGridSchema, DataSource, ViewData, TableSortItem, DataTableSchema, ListViewExportFormat, RecordNavigateAction } from '@object-ui/types';
 import { isSystemManagedField, detectStatusField } from '@object-ui/types';
-import { SchemaRenderer, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useRelatedRecordActions, notifyDataChanged, useMetadata, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
+import { SchemaRenderer, isPermissionError, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useRelatedRecordActions, notifyDataChanged, useMetadata, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
 // objectui#8920 — the grid reaches a cell renderer through THIS module and
 // nowhere else. `getCellRenderer` / `resolveCellRendererType` are deliberately
 // NOT imported here: six sites spelling the resolve three different ways is
@@ -1493,7 +1493,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           // Surface the failure instead of swallowing it (e.g. permission denied
           // or a server error) — the toolbar shows the message.
           console.error('ObjectGrid export failed:', err);
-          setExportError(err instanceof Error ? err.message : String(err));
+          // A refusal says the Console's sentence, never the server's text.
+          setExportError(isPermissionError(err)
+            ? t('view.exportNotPermitted')
+            : err instanceof Error ? err.message : String(err));
         } finally {
           setExportBusy(false);
         }
@@ -1551,7 +1554,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       downloadFile(new Blob([JSON.stringify(unmasked, null, 2)], { type: 'application/json' }), fileNameFor('json'));
     }
     setShowExport(false);
-  }, [data, schema.exportOptions, schema.operations?.export, effectiveApiOps, schema.objectName, objectName, objectSchema, objectFields, objectTypesPending, generateColumns, dataSource, hasInlineData, schemaFilter, schemaSort]);
+  }, [data, schema.exportOptions, schema.operations?.export, effectiveApiOps, schema.objectName, objectName, objectSchema, objectFields, objectTypesPending, generateColumns, dataSource, hasInlineData, schemaFilter, schemaSort, t]);
 
   // objectui#9050 step 2 — a refused filter: `schema.filter` (a render-time
   // `useMemo`, which would otherwise have thrown out of render), or a

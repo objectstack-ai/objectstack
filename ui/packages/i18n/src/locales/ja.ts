@@ -1135,6 +1135,7 @@ const ja = {
     readonlyAriaLabel: "読み取り専用ビュー",
     readonlyTooltip: "システムビュー — コードで定義され、読み取り専用です。",
     malformedFilter: "このビューのフィルターが不正なため、レコードを表示しません：{{subject}} の条件を適用できません。",
+    exportNotPermitted: "これらのレコードをエクスポートする権限がありません。必要な場合は管理者にお問い合わせください。",
     noObject: "オブジェクトが指定されていません。{{property}} または dataSource.object を設定してください。",
   },
   designer: {
@@ -4603,6 +4604,9 @@ const ja = {
         object_extension: 'オブジェクト拡張 {{count}}',
         object_extension_one: 'オブジェクト拡張 {{count}}',
         object_extension_other: 'オブジェクト拡張 {{count}}',
+        dataset: 'データセット {{count}}',
+        dataset_one: 'データセット {{count}}',
+        dataset_other: 'データセット {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

@@ -355,6 +355,12 @@ function isTenantLevelAdmin(sets: PermissionSet[]): boolean {
 interface OrganizationFailure {
   reason: string;
   meta: Record<string, unknown>;
+  /**
+   * The by-id update or delete addresses no row the caller's own read returns
+   * — refused with {@link UnreadableAddressedRowRefusal}, not the boundary's
+   * refusal.
+   */
+  unreadable?: boolean;
 }
 
 /** Single scalar id from an update/delete opCtx (mirrors the engine's single-id rule). */
@@ -395,6 +401,80 @@ function refusalFor(
     `[Security] Outside your delegated scope: ${what} — ${failure.reason}.`,
     details,
   );
+}
+
+/**
+ * [ADR-0090 D12; ruling of record 5985885287] The gate's refusal of a by-id
+ * update or delete whose row the caller's own read does not return: an id
+ * naming no row and a row the caller cannot read, refused alike.
+ *
+ * Its own class only so the security middleware can tell it from every other
+ * refusal of the gate. For the by-id write the caller addressed, the
+ * middleware answers it the way the read door and step 2.7 answer every other
+ * object — `recordNotFoundError` for that object and id
+ * (`readDoorAnswerForGateRefusal`). Wherever no row was addressed — a cascade's
+ * or a hook's nested write, the write-admission preview — it stays this
+ * refusal: `403 PERMISSION_DENIED`, naming no row and no id.
+ */
+class UnreadableAddressedRowRefusal extends PermissionDeniedError {}
+
+/** Is `refusal` the gate's {@link UnreadableAddressedRowRefusal}? */
+export function isUnreadableAddressedRowRefusal(refusal: unknown): boolean {
+  return refusal instanceof UnreadableAddressedRowRefusal;
+}
+
+/**
+ * [ADR-0090 D12] A row a delegated write targets, with what the caller may be
+ * told about it: `prev` the stored row a by-id write addresses, `next` the row
+ * an insert or an update writes, and the two column sets a refusal's guidance
+ * reads ({@link mayName}).
+ */
+interface DelegatedTarget {
+  next: any | null;
+  prev: any | null;
+  /**
+   * The columns whose `next` value the caller supplied in its own payload;
+   * `null` for an insert, whose every value is the caller's.
+   */
+  wrote: ReadonlySet<string> | null;
+  /**
+   * The columns of `prev` the caller's own read returned at their stored
+   * value ({@link columnsReadAsStored}).
+   */
+  reads: ReadonlySet<string>;
+}
+
+/**
+ * [ruling of record 5985885287, sub-item B] The columns of the stored row
+ * `prev` that the caller's own read `seen` returned at their stored value.
+ *
+ * The read is the read door's answer to this caller, field rules and masking
+ * included, so a column a field rule hides is absent from it and a masked one
+ * differs: neither is here. Strict equality, so a value read in any other form
+ * counts as not read. No read (`null`), no column.
+ */
+function columnsReadAsStored(seen: any | null, prev: any | null): Set<string> {
+  const out = new Set<string>();
+  if (!seen || typeof seen !== 'object' || !prev || typeof prev !== 'object') return out;
+  for (const [column, value] of Object.entries(prev)) {
+    if (Object.prototype.hasOwnProperty.call(seen, column) && seen[column] === value) out.add(column);
+  }
+  return out;
+}
+
+/**
+ * [ruling of record 5985885287, sub-item B] May a refusal of `t` name the
+ * value of `column` on its `side`?
+ *
+ * Only a value the caller already has: one it wrote (an insert's row, a
+ * column its update payload carries), or one its own read returned at the
+ * stored value. The verdict is still taken on the stored row; only the
+ * wording follows this, and a value it may not name is left out of the
+ * sentence and out of the details.
+ */
+function mayName(t: DelegatedTarget, side: 'next' | 'prev', column: string): boolean {
+  if (side === 'next' && (t.wrote === null || t.wrote.has(column))) return true;
+  return t.reads.has(column);
 }
 
 export class DelegatedAdminGate {
@@ -505,7 +585,8 @@ export class DelegatedAdminGate {
 
     const held = await this.resolveHeldScopes(sets, organizationId);
     if (held.length === 0 && organizationFailure) {
-      throw new PermissionDeniedError(
+      const Refusal = organizationFailure.unreadable ? UnreadableAddressedRowRefusal : PermissionDeniedError;
+      throw new Refusal(
         `[Security] Access denied: organization administrator '${opCtx.operation}' on '${opCtx.object}' ` +
           `rejected — ${organizationFailure.reason} (ADR-0090 D12, the organization boundary).`,
         { operation: opCtx.operation, object: opCtx.object, ...organizationFailure.meta },
@@ -768,7 +849,11 @@ export class DelegatedAdminGate {
    *
    * The row a removal targets is judged as the CALLER reads it
    * ({@link organizationTargets}), so a row the caller cannot read is answered
-   * exactly as an id naming no row is (ruling of record 5985885287).
+   * exactly as an id naming no row is (ruling of record 5985885287). A by-id
+   * edit, which the right never admits, is asked the same question first: an
+   * edit of a row the caller cannot read, or of an id naming none, is refused
+   * as no row, not as an edit — `unreadable`, which the security middleware
+   * answers with the read door's not-found.
    */
   private async organizationAdminFailure(
     opCtx: any,
@@ -777,6 +862,12 @@ export class DelegatedAdminGate {
     const op = String(opCtx.operation);
     if (!organizationId) {
       return { reason: 'the request carries no active organization to administer', meta: {} };
+    }
+    if (op === 'update') {
+      const id = extractSingleId(opCtx);
+      if (id != null && (await this.hiddenFromCaller(opCtx, id))) {
+        return { reason: 'the assignment row it addresses could not be read', meta: {}, unreadable: true };
+      }
     }
     if (op !== 'insert' && op !== 'delete') {
       return {
@@ -795,7 +886,7 @@ export class DelegatedAdminGate {
       const row = t.next ?? t.prev;
       // No row answers an id naming none and a row the caller cannot read
       // alike: one refusal, and never a fall-through to the engine.
-      if (!row) return { reason: 'the assignment row to remove could not be read', meta: {} };
+      if (!row) return { reason: 'the assignment row to remove could not be read', meta: {}, unreadable: op === 'delete' };
 
       const rowOrg = rowOrganizationId(row);
       if (t.next ? rowOrg !== null && rowOrg !== organizationId : rowOrg !== organizationId) {
@@ -1196,30 +1287,51 @@ export class DelegatedAdminGate {
     const targets = await this.delegatedTargets(opCtx);
     for (const t of targets) {
       const buId = t.next?.business_unit_id ?? null;
+      const positionSide = t.next && (t.next.position != null || !t.prev) ? 'next' : 'prev';
       const positionName = String(t.next?.position ?? t.prev?.position ?? '');
       const boundSets = positionName ? await this.setsBoundToPosition(positionName) : [];
+      // [ruling of record 5985885287, sub-item B] Each value below is named
+      // only when the caller wrote or reads it ({@link mayName}); the verdict
+      // is the stored row's either way.
+      const positionNamed = mayName(t, positionSide, 'position');
 
       const failure = this.firstApprovalFailure(held, (s) => {
         if (!s.scope.manageAssignments) return 'the scope does not grant manageAssignments';
         // New/updated rows must be anchored inside the delegate's subtree.
         if (t.next) {
           if (!buId) return 'the assignment has no business_unit_id anchor — delegated assignments must target your subtree (ADR-0090 Addendum)';
-          if (!s.subtree.has(String(buId))) return outsideScope(`business unit '${buId}' is outside the delegated subtree`);
+          if (!s.subtree.has(String(buId))) {
+            return outsideScope(mayName(t, 'next', 'business_unit_id')
+              ? `business unit '${buId}' is outside the delegated subtree`
+              : "the assignment's business unit is outside the delegated subtree");
+          }
         }
         // Pre-image (update/delete) must also lie inside the subtree — a
         // delegate can neither capture nor evict assignments beyond it.
         if (t.prev) {
           const prevBu = t.prev.business_unit_id ?? null;
           if (!prevBu) return 'the existing assignment is unanchored (no business_unit_id) — only a tenant admin may modify it';
-          if (!s.subtree.has(String(prevBu))) return outsideScope(`the existing assignment's business unit '${prevBu}' is outside the delegated subtree`);
+          if (!s.subtree.has(String(prevBu))) {
+            return outsideScope(mayName(t, 'prev', 'business_unit_id')
+              ? `the existing assignment's business unit '${prevBu}' is outside the delegated subtree`
+              : "the existing assignment's business unit is outside the delegated subtree");
+          }
         }
         // Every set the position distributes must be allowlisted
-        // ({@link setsBoundToPosition}).
+        // ({@link setsBoundToPosition}). A set is named only beside the
+        // position it is read from.
         for (const bound of boundSets) {
           if (!s.scope.assignablePermissionSets.includes(bound.name)) {
-            return outsideScope(`position '${positionName}' distributes permission set '${bound.name}', which is not in the scope's allowlist`);
+            return outsideScope(positionNamed
+              ? `position '${positionName}' distributes permission set '${bound.name}', which is not in the scope's allowlist`
+              : "the assignment's position distributes a permission set which is not in the scope's allowlist");
           }
-          const contained = this.assertScopeGrantContainment(bound, held, /*dryRun*/ true);
+          const contained = this.assertScopeGrantContainment(
+            bound,
+            held,
+            /*dryRun*/ true,
+            positionNamed ? undefined : "a permission set the assignment's position distributes",
+          );
           if (contained) return contained;
         }
         return null;
@@ -1228,7 +1340,7 @@ export class DelegatedAdminGate {
         throw refusalFor(
           failure,
           `delegated '${opCtx.operation}' on sys_user_position rejected`,
-          { operation: opCtx.operation, object: opCtx.object, position: positionName },
+          { operation: opCtx.operation, object: opCtx.object, ...(positionNamed ? { position: positionName } : {}) },
         );
       }
     }
@@ -1239,24 +1351,36 @@ export class DelegatedAdminGate {
   private async assertDirectGrantWrite(opCtx: any, held: HeldScope[]): Promise<void> {
     const targets = await this.delegatedTargets(opCtx);
     for (const t of targets) {
+      const side = t.next ? 'next' : 'prev';
       const row = t.next ?? t.prev ?? {};
-      const { setRow, setName, unresolved } = await this.directGrantSet(t, row);
+      const { setRow, setName, unresolved, setNamed } = await this.directGrantSet(t, row);
       const targetUserId = row.user_id ? String(row.user_id) : null;
       const userBUs = targetUserId ? await this.businessUnitsOfUser(targetUserId) : new Set<string>();
+      // [ruling of record 5985885287, sub-item B] Named only when the caller
+      // wrote or reads it ({@link mayName}); the verdict is the stored row's.
+      const userNamed = mayName(t, side, 'user_id');
 
       const failure = this.firstApprovalFailure(held, (s) => {
         if (!s.scope.manageAssignments) return 'the scope does not grant manageAssignments';
         if (unresolved) return unresolved;
         if (!s.scope.assignablePermissionSets.includes(setName)) {
-          return outsideScope(`permission set '${setName}' is not in the scope's allowlist`);
+          return outsideScope(setNamed
+            ? `permission set '${setName}' is not in the scope's allowlist`
+            : "the grant's permission set is not in the scope's allowlist");
         }
         if (!targetUserId) return 'the grant names no target user';
-        if (userBUs.size === 0) return `target user '${targetUserId}' has no business-unit membership — only a tenant admin may grant outside the tree`;
+        if (userBUs.size === 0) {
+          return `${userNamed ? `target user '${targetUserId}'` : "the grant's target user"} has no business-unit membership — only a tenant admin may grant outside the tree`;
+        }
         let inSubtree = false;
         for (const bu of userBUs) if (s.subtree.has(bu)) { inSubtree = true; break; }
-        if (!inSubtree) return outsideScope(`target user '${targetUserId}' is outside the delegated subtree`);
+        if (!inSubtree) {
+          return outsideScope(userNamed
+            ? `target user '${targetUserId}' is outside the delegated subtree`
+            : "the grant's target user is outside the delegated subtree");
+        }
         if (setRow) {
-          const contained = this.assertScopeGrantContainment(setRow, held, true);
+          const contained = this.assertScopeGrantContainment(setRow, held, true, setNamed ? undefined : "the grant's permission set");
           if (contained) return contained;
         }
         return null;
@@ -1265,7 +1389,7 @@ export class DelegatedAdminGate {
         throw refusalFor(
           failure,
           `delegated '${opCtx.operation}' on sys_user_permission_set rejected`,
-          { operation: opCtx.operation, object: opCtx.object, permissionSet: setName },
+          { operation: opCtx.operation, object: opCtx.object, ...(setNamed ? { permissionSet: setName } : {}) },
         );
       }
     }
@@ -1295,8 +1419,11 @@ export class DelegatedAdminGate {
    * If `setRowOrDef` itself carries an adminScope, verify strict containment
    * against the actor's held scopes. Returns a failure description or null.
    * (`dryRun` callers use the string as a per-scope rejection reason.)
+   * `unnamed`, when given, is how the description refers to the set instead of
+   * by name — for a set read from a value the caller may not be told
+   * ({@link mayName}).
    */
-  private assertScopeGrantContainment(setRowOrDef: any, held: HeldScope[], _dryRun: boolean): string | null {
+  private assertScopeGrantContainment(setRowOrDef: any, held: HeldScope[], _dryRun: boolean, unnamed?: string): string | null {
     const carried: AdminScope | undefined =
       parseMaybeJson(setRowOrDef.admin_scope ?? setRowOrDef.adminScope) ?? undefined;
     if (!carried) return null;
@@ -1306,7 +1433,7 @@ export class DelegatedAdminGate {
     for (const s of held) {
       if (this.definitionContainsStrictly(s.scope, carried)) return null;
     }
-    return `granting set '${setRowOrDef.name ?? '?'}' would hand out an adminScope not strictly contained by yours`;
+    return `granting ${unnamed ?? `set '${setRowOrDef.name ?? '?'}'`} would hand out an adminScope not strictly contained by yours`;
   }
 
   /** Definition-level strict containment (no tree resolution): same-root-or-
@@ -1504,28 +1631,42 @@ export class DelegatedAdminGate {
    * (`readDoorAnswerForGateRefusal`), for every id alike. A store fault, in
    * either read, propagates as raised: an outage is neither an answer nor a
    * refusal.
+   *
+   * No row is {@link UnreadableAddressedRowRefusal}, which the middleware
+   * answers for the by-id write the caller addressed with the read door's
+   * not-found. Each target also carries what the caller may be told of it
+   * ({@link DelegatedTarget}): the columns its payload wrote, and the columns
+   * its own read returned at the stored value — none, when that read was
+   * refused.
    */
-  private async delegatedTargets(opCtx: any): Promise<Array<{ next: any | null; prev: any | null }>> {
+  private async delegatedTargets(opCtx: any): Promise<DelegatedTarget[]> {
     const op = opCtx.operation;
     const payload = rowsOf(opCtx);
-    if (op === 'insert') return payload.map((r) => ({ next: r, prev: null }));
+    if (op === 'insert') return payload.map((r) => ({ next: r, prev: null, wrote: null, reads: new Set<string>() }));
 
     const id = extractSingleId(opCtx) as string | number;
-    const prev = (await this.hiddenFromCaller(opCtx, id)) ? null : await this.storedRow(opCtx.object, id);
+    const read = await this.callerReadUnlessRefused(opCtx, id);
+    const prev = !read.refused && read.row === null ? null : await this.storedRow(opCtx.object, id);
     if (!prev) {
-      throw new PermissionDeniedError(
+      throw new UnreadableAddressedRowRefusal(
         `[Security] Access denied: delegated '${op}' on ${opCtx.object} rejected — the assignment row it addresses could not be read.`,
         { operation: op, object: opCtx.object },
       );
     }
+    const reads = columnsReadAsStored(read.refused ? null : read.row, prev);
     if (op === 'update') {
       const next = payload.length > 0 ? payload[0] : null;
       // Merge unchanged pre-image values so boundary checks see the full row
       // (an update payload may carry only the changed columns).
-      return [{ next: next ? { ...prev, ...next } : prev, prev }];
+      return [{
+        next: next ? { ...prev, ...next } : prev,
+        prev,
+        wrote: new Set(next && typeof next === 'object' ? Object.keys(next) : []),
+        reads,
+      }];
     }
     // delete / transfer / restore / purge — judged on the pre-image alone.
-    return [{ next: null, prev }];
+    return [{ next: null, prev, wrote: new Set<string>(), reads }];
   }
 
   /**
@@ -1534,11 +1675,23 @@ export class DelegatedAdminGate {
    * fault propagates.
    */
   private async hiddenFromCaller(opCtx: any, id: string | number): Promise<boolean> {
+    const read = await this.callerReadUnlessRefused(opCtx, id);
+    return !read.refused && read.row === null;
+  }
+
+  /**
+   * The caller's own read of row `id` ({@link callerRead}), or `refused` when
+   * the read door refuses it (a declared 4xx). A store fault propagates.
+   */
+  private async callerReadUnlessRefused(
+    opCtx: any,
+    id: string | number,
+  ): Promise<{ refused: true } | { refused: false; row: any | null }> {
     try {
-      return (await this.callerRead(opCtx, id)) === null;
+      return { refused: false, row: await this.callerRead(opCtx, id) };
     } catch (e) {
       const status = declaredHttpStatus(e);
-      if (status !== undefined && status < 500) return false;
+      if (status !== undefined && status < 500) return { refused: true };
       throw e;
     }
   }
@@ -1604,22 +1757,28 @@ export class DelegatedAdminGate {
    *   still judged against the allowlist (the write is then refused 400 by the
    *   grant's own name refusal, `grant-permission-set-name.ts`); no
    *   `sys_permission_set` row and no `permission_set_id` is read.
+   *
+   * `setNamed` says whether a refusal may name the set ({@link mayName}): the
+   * name the write points the grant at always (the caller's own); the grant's
+   * own name only when the caller's read returned it.
    */
   private async directGrantSet(
-    t: { next: any | null; prev: any | null },
+    t: DelegatedTarget,
     row: any,
-  ): Promise<{ setRow: any | null; setName: string; unresolved?: string }> {
+  ): Promise<{ setRow: any | null; setName: string; setNamed: boolean; unresolved?: string }> {
     const repointed = !!t.next && (!t.prev || grantSetNameOf(t.next) !== grantSetNameOf(t.prev));
     if (repointed) {
       const nextName = grantSetNameOf(t.next) ?? '';
       const setRow = nextName ? await this.catalogSet(nextName) : null;
-      return { setRow, setName: nextName };
+      return { setRow, setName: nextName, setNamed: true };
     }
+    const setNamed = mayName(t, t.next ? 'next' : 'prev', 'permission_set');
     const name = grantSetNameOf(row);
     if (!name) {
       return {
         setRow: null,
         setName: '',
+        setNamed,
         unresolved: 'the grant names no permission set (it is not yet named, or could not be) — only a tenant admin may change it',
       };
     }
@@ -1628,10 +1787,11 @@ export class DelegatedAdminGate {
       return {
         setRow: null,
         setName: name,
-        unresolved: `permission set '${name}' is not in the security catalog, so this grant confers nothing — only a tenant admin may change it`,
+        setNamed,
+        unresolved: `${setNamed ? `permission set '${name}'` : "the grant's permission set"} is not in the security catalog, so this grant confers nothing — only a tenant admin may change it`,
       };
     }
-    return { setRow, setName: name };
+    return { setRow, setName: name, setNamed };
   }
 
   /**

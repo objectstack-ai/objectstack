@@ -1197,6 +1197,7 @@ const ru = {
     readonlyAriaLabel: "Представление только для чтения",
     readonlyTooltip: "Системное представление — определено в коде, только для чтения.",
     malformedFilter: "Фильтр этого представления некорректен, поэтому записи не отображаются: условие {{subject}} невозможно применить.",
+    exportNotPermitted: "У вас нет прав на экспорт этих записей. Обратитесь к администратору, если считаете, что экспорт вам нужен.",
     noObject: "Объект не указан: задайте {{property}} или dataSource.object.",
   },
   designer: {
@@ -4844,6 +4845,11 @@ const ru = {
         object_extension_few: 'Расширения объектов: {{count}}',
         object_extension_many: 'Расширения объектов: {{count}}',
         object_extension_other: 'Расширения объектов: {{count}}',
+        dataset: 'Наборы данных: {{count}}',
+        dataset_one: 'Набор данных: {{count}}',
+        dataset_few: 'Наборы данных: {{count}}',
+        dataset_many: 'Наборы данных: {{count}}',
+        dataset_other: 'Наборы данных: {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.
