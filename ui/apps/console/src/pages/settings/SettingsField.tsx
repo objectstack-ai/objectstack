@@ -612,7 +612,9 @@ export function SettingsField(props: SettingsFieldProps) {
         <Input
           id={id}
           type="number"
-          value={value as any}
+          // An unset value (a reset in the draft) is an empty box: React leaves
+          // the last number on screen when `value` is `null`.
+          value={value === null || value === undefined ? '' : (value as number | string)}
           min={spec.min}
           max={spec.max}
           step={spec.step}
