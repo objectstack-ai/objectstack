@@ -731,3 +731,55 @@ describe('[#28737] the timeline part is the 动态 stream\'s size, counted by th
         expect(findData).not.toHaveBeenCalled();
     });
 });
+
+describe('[#30343] one action is one entry in the timeline count, as the 动态 stream draws it', () => {
+    const items: Record<string, any> = { ...ITEMS, sys_audit_log: systemObject('sys_audit_log') };
+    const ofRecord = { object_name: 'account', record_id: 'a1' };
+    // Rows, not canned totals: each count read is answered by filtering these
+    // with its own `where`, so the sum is the one the rows give.
+    const matches = (row: Record<string, unknown>, where: Record<string, any>) =>
+        Object.entries(where).every(([key, want]) => {
+            if (want && typeof want === 'object' && '$in' in want) return want.$in.includes(row[key]);
+            if (want && typeof want === 'object' && '$nin' in want) return !want.$nin.includes(row[key]);
+            return row[key] === want;
+        });
+    const rowsBoot = (rows: Record<string, Array<Record<string, unknown>>>, refuse: string[] = []) =>
+        boot({
+            items,
+            findData: async (req) => {
+                if (refuse.includes(req.object)) throw permissionDenied();
+                const where = req.query?.where ?? {};
+                return { records: [], total: (rows[req.object] ?? []).filter((row) => matches(row, where)).length };
+            },
+        });
+    // One create and one edit, each written to both the activity and the ledger.
+    const createThenEdit = {
+        sys_activity: [
+            { ...ofRecord, type: 'created' },
+            { ...ofRecord, type: 'updated' },
+        ],
+        sys_audit_log: [
+            { ...ofRecord, action: 'create' },
+            { ...ofRecord, action: 'update' },
+        ],
+    };
+    const BOTH = { timeline: { discussion: true, activity: true, fieldChanges: true } };
+
+    it('an audit reader counts one create and one edit as 2, the rows the stream draws', async () => {
+        const { call } = rowsBoot(createThenEdit);
+        const data = RecordPageResponseSchema.parse((await call(BOTH)).body.data);
+        expect(data.timeline).toEqual({ total: 2 });
+    });
+
+    it('a member without audit read counts the same 2 activity rows, unchanged', async () => {
+        const { call } = rowsBoot(createThenEdit, ['sys_audit_log']);
+        const data = RecordPageResponseSchema.parse((await call(BOTH)).body.data);
+        expect(data.timeline).toEqual({ total: 2 });
+    });
+
+    it('a comment still adds one', async () => {
+        const { call } = rowsBoot({ ...createThenEdit, sys_comment: [{ thread_id: 'account:a1' }] });
+        const data = RecordPageResponseSchema.parse((await call(BOTH)).body.data);
+        expect(data.timeline).toEqual({ total: 3 });
+    });
+});
