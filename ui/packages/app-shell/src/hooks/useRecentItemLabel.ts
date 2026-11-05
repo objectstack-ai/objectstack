@@ -25,20 +25,20 @@
  *    its object rung is the spec's step 3 for an UNLABELLED NAVIGATION ENTRY
  *    ("the object's label", the singular), a ruling this entry does not reopen;
  *  - a dashboard: {@link useNavTargetLabel} — the text the sidebar shows for an
- *    unlabelled navigation entry that opens the same target (the metadata
- *    label, an inline locale map read in the active language, through the
- *    `useObjectLabel` bundle lookup);
+ *    unlabelled navigation entry that opens the same target (the served
+ *    label, an inline locale map read in the active language, drawn as given;
+ *    the `useObjectLabel` bundle lookup only when the read carries none);
  *  - a list view (objectui#12604): {@link useNavTargetLabel} again — the text
  *    the sidebar shows for an unlabelled navigation entry that opens the same
  *    view (the view's label from its object's `listViews`, through the
  *    `viewLabel` bundle lookup). A view the cache does not hold — one a user
  *    saved for themself — is drawn as the list it opens: the object's, as an
  *    object entry is;
- *  - a page or a report: the same pair for that kind — the page's / report's
- *    cached metadata `label`, through `useObjectLabel`'s `pageLabel` /
- *    `reportLabel`. `useNavTargetLabel` has no page or report target because
- *    the navigation ruling names none, so the pair is composed here from the
- *    same two helpers it uses;
+ *  - a page or a report: the same rule for that kind — the page's / report's
+ *    cached metadata `label` as served, else `useObjectLabel`'s `pageLabel` /
+ *    `reportLabel` under its name. `useNavTargetLabel` has no page or report
+ *    target because the navigation ruling names none, so the rule is composed
+ *    here from the same two helpers it uses;
  *  - a Studio package (objectui#11863): the `name` its row in `packages` has —
  *    the package list the rendering surface loaded, as the Studio landing does
  *    with `fetchPackages()`. A package has no metadata cache behind it, so the
@@ -111,15 +111,20 @@ export function useRecentItemLabel(
           return targetLabel({ kind: 'view', objectName: item.object, viewName: item.name }) ?? listTitle(item.object);
         case 'dashboard':
           return targetLabel({ kind: 'dashboard', dashboardName: item.name }) ?? item.name;
+        // A served page's or report's label is already translated
+        // (objectstack#30244): drawn as given, the bundle asked only when the
+        // read carries none.
         case 'page': {
           const pages = () => readItemsByName('page', [item.name], () => metadata.pages);
-          const text = metadataText(bundledFirst(bundledReads, 'page', item.name, pages)?.label, language);
-          return nonEmpty(pageLabel({ name: item.name, label: text ?? '' })) ?? item.name;
+          return metadataText(bundledFirst(bundledReads, 'page', item.name, pages)?.label, language)
+            ?? nonEmpty(pageLabel({ name: item.name, label: '' }))
+            ?? item.name;
         }
         case 'report': {
           const reports = readItemsByName('report', [item.name], () => metadata.reports);
-          const text = metadataText(findByName(reports, item.name)?.label, language);
-          return nonEmpty(reportLabel({ name: item.name, label: text ?? '' })) ?? item.name;
+          return metadataText(findByName(reports, item.name)?.label, language)
+            ?? nonEmpty(reportLabel({ name: item.name, label: '' }))
+            ?? item.name;
         }
         case 'package':
           return nonEmpty(packages?.find((p) => p.id === item.name)?.name) ?? item.name;

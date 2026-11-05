@@ -37,10 +37,12 @@
  * Nothing is written back and nothing is memoised across metadata versions, so
  * a renamed target shows its new name on the next render (the ruling accepts a
  * reload). A metadata label that is an inline locale map resolves through the
- * spec's own `resolveI18nLabel` in the active language, and the result passes
- * through the same convention-based bundle lookup (`useObjectLabel`) the rest
- * of the console applies to object / view / dashboard names, so the nav shows
- * the name the target's own page shows.
+ * spec's own `resolveI18nLabel` in the active language. An object's or view's
+ * result passes through the same convention-based bundle lookup
+ * (`useObjectLabel`) the rest of the console applies to their names; a served
+ * dashboard's label is already translated by the server and is drawn as given,
+ * as its page header draws it (objectstack#30244). Either way the nav shows the
+ * name the target's own page shows.
  *
  * A target with no label answers `undefined` — the renderer then falls through
  * the spec's ladder and, at the bottom, to the target's machine name.
@@ -186,9 +188,14 @@ export function useNavTargetLabel(options?: NavTargetLabelOptions): NavTargetLab
           const def = bundledFirst(bundledReads, 'dashboard', target.dashboardName, () =>
             byName ? readItemsByName('dashboard', [target.dashboardName], () => metadata.dashboards) : metadata.dashboards,
           );
-          const text =
-            metadataText(def?.label, language) ?? draftText(drafts, 'dashboard', target.dashboardName, language);
-          return nonEmpty(dashboardLabel({ name: target.dashboardName, label: text ?? '' }));
+          // A served dashboard's label is already translated
+          // (objectstack#30244): drawn as given. A pending draft's label,
+          // which no server translated, still goes through the bundle.
+          return metadataText(def?.label, language)
+            ?? nonEmpty(dashboardLabel({
+              name: target.dashboardName,
+              label: draftText(drafts, 'dashboard', target.dashboardName, language) ?? '',
+            }));
         }
         case 'reportIndex':
           return nonEmpty(t('sidebar.allReports', { defaultValue: 'All reports' }));
