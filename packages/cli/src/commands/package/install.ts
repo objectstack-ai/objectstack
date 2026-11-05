@@ -32,6 +32,15 @@
  * "Source" and "mode" are two words for two questions on purpose: where the
  * package comes from, and how it is installed.
  *
+ * A base's paired customization package — `<base>.custom`, what
+ * `os package export` writes for the overrides an administrator authored
+ * (ADR-0146 D2 / D3) — is neither: the runtime writes its items into ITS OWN
+ * writable pair of that base, as Studio would, so the overrides are served,
+ * listed by the base's customization read, and stay editable there. Printed
+ * as such; a runtime that answers it as a managed install (one that predates
+ * the pair install, and registered it as read-only code) is printed as the
+ * failure it is, with the way back.
+ *
  * This complements `os package publish` (which uploads to the CLOUD): the
  * pairing is publish-to-cloud / install-into-runtime. The target runtime
  * authenticates the call with its own better-auth session — pass
@@ -43,7 +52,7 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
-import { INSTALL_MODES, type InstallMode } from '@objectstack/spec/kernel';
+import { INSTALL_MODES, customizationBasePackageId, type InstallMode } from '@objectstack/spec/kernel';
 import { printHeader, printKV, printSuccess, printWarning, printError, printStep, isExitSignal } from '../../utils/format.js';
 
 /**
@@ -305,6 +314,45 @@ export default class PackageInstall extends Command {
       }
 
       const data = res.body?.data ?? res.body ?? {};
+
+      // [ADR-0146 D3, #30106] A base's paired customization package answers
+      // its own shape too: the writable pair its items were written into,
+      // never a kernel registration or a cached manifest — so, as for an
+      // unmanaged install, none of the managed lines below is true of it.
+      const pair = data.customizationPair;
+      if (pair && typeof pair === 'object' && typeof pair.packageId === 'string') {
+        console.log('');
+        printSuccess(
+          `Customization package installed into the writable pair of '${String(pair.basePackageId)}' — `
+          + 'its overrides are served now, and the pair stays editable on this runtime',
+        );
+        printKV('  Package',   String(data.manifestId ?? label));
+        printKV('  Version',   String(data.version ?? flags.version));
+        printKV('  Runtime',   runtime);
+        printKV('  Pair',      `${pair.packageId}${pair.created === true ? ' (created by this install)' : ''}`);
+        if (typeof data.writtenCount === 'number') printKV('  Items written', String(data.writtenCount));
+        if (data.seeded?.mode === 'skipped' && typeof data.seeded.reason === 'string') {
+          printKV('  Sample data', `not loaded — ${data.seeded.reason}`);
+        }
+        printWithheldMaps(data.withheldMaps);
+        console.log('');
+        return;
+      }
+      // Sent a pair, answered as a managed install: the runtime predates the
+      // pair install and registered the pair as CODE — read-only, serving none
+      // of its overrides. Said out loud, never printed as a success: that
+      // answer is what #30106 measured.
+      if (customizationBasePackageId(String(data.manifestId ?? label)) !== null) {
+        const pairId = String(data.manifestId ?? label);
+        printError(
+          `The runtime at ${runtime} installed ${pairId} as code, not into its writable pair: it serves none of the `
+          + 'package\'s overrides and leaves the pair read-only. Uninstall it '
+          + `(\`DELETE ${runtime}/api/v1/marketplace/install-local/${pairId}\`), upgrade and restart the runtime, `
+          + 'then install it again.',
+        );
+        this.exit(1);
+        return;
+      }
 
       // [ADR-0131 D6] An unmanaged install answers its own shape: what was
       // copied and where, never a kernel registration — so none of the

@@ -26,6 +26,15 @@
  * markup stops claiming to be a control; a real click-to-advance stage control
  * is a separate card with its own appetite, NOT folded in here.
  *
+ * That separate card landed as the `allowStageChange` opt-in
+ * (objectstack#28061), and a later ruling (objectstack#30075, option A) has
+ * the synthesized DEFAULT record page write the opt-in on its path, so for an
+ * editor that page's path is a real control (pinned in
+ * `record-path.stageChange-28199.test.tsx`). What this file pins is unchanged
+ * and still binds: a `record:path` node that does not carry the opt-in — an
+ * authored page that leaves the key out or sets it `false` — is the readout
+ * below, and must not look like a control. Every mount here is such a node.
+ *
  * ── What each group is for ────────────────────────────────────────────────
  *
  * Group A is the CONTROL — what must not move. It also establishes

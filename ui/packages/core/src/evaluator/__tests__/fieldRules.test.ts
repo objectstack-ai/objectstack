@@ -8,7 +8,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ExpressionEngine } from '@objectstack/formula';
-import { evalFieldPredicate, resolveFieldRuleState } from '../fieldRules';
+import { evalFieldPredicate, requiredWhenRestsOnStoredRecord, resolveFieldRuleState } from '../fieldRules';
 
 /** Run `fn` with `console.warn` muted (the loud fail-open of #5149 is pinned
  * in its own describe below; these legacy value-contract tests only care about
@@ -413,6 +413,7 @@ describe('fault directions — what a BROKEN rule decides (objectui#8069)', () =
         readonlyWhen: expect.any(String),
         requiredWhen: expect.any(String),
       },
+      requiredWhenAtRest: false,
     });
   });
 });
@@ -553,5 +554,66 @@ describe('blank predicate — declared but empty (objectui#8069)', () => {
     const msg = String(warn.mock.calls[0][0]);
     expect(msg).toContain("visibleWhen of field 'amount_8069'");
     expect(msg).toContain('[blank]');
+  });
+});
+
+/**
+ * objectstack#30184 — `requiredWhen` is a TRANSITION GATE on an update, judged
+ * the way objectql's `evaluateValidationRules` judges it: refused only when the
+ * merged record violates the rule AND the stored row complied.
+ */
+describe('resolveFieldRuleState — `requiredWhen` as a transition gate (objectstack#30184)', () => {
+  const RULE = { requiredWhen: "record.status == 'activated'" };
+  const LEGACY = { status: 'activated', end_date: '2026-12-31', signed_copy: null };
+
+  it('an already-activated stored row with no value rests: not required, at rest', () => {
+    const st = resolveFieldRuleState(RULE, { ...LEGACY, end_date: '2027-01-31' }, { name: 'signed_copy' }, LEGACY);
+    expect(st.required).toBe(false);
+    expect(st.requiredWhenAtRest).toBe(true);
+  });
+
+  it('the write that moves a stored row INTO the gate is still required', () => {
+    const stored = { status: 'draft', signed_copy: null };
+    const st = resolveFieldRuleState(RULE, { ...stored, status: 'activated' }, { name: 'signed_copy' }, stored);
+    expect(st.required).toBe(true);
+    expect(st.requiredWhenAtRest).toBe(false);
+  });
+
+  it('a stored row that complied stays required, so clearing its value is refused', () => {
+    const stored = { status: 'activated', signed_copy: 'copy.pdf' };
+    const st = resolveFieldRuleState(RULE, { ...stored, signed_copy: null }, { name: 'signed_copy' }, stored);
+    expect(st.required).toBe(true);
+    expect(st.requiredWhenAtRest).toBe(false);
+  });
+
+  it('an insert (no stored row) is required whenever the predicate holds', () => {
+    const st = resolveFieldRuleState(RULE, { status: 'activated', signed_copy: null }, { name: 'signed_copy' });
+    expect(st.required).toBe(true);
+    expect(st.requiredWhenAtRest).toBe(false);
+  });
+
+  it('without `statics.name` the plain verdict is kept', () => {
+    const st = resolveFieldRuleState(RULE, LEGACY, {}, LEGACY);
+    expect(st.required).toBe(true);
+    expect(st.requiredWhenAtRest).toBe(false);
+  });
+
+  it('a static `required: true` is never relaxed by the stored row', () => {
+    const st = resolveFieldRuleState(RULE, LEGACY, { required: true, name: 'signed_copy' }, LEGACY);
+    expect(st.required).toBe(true);
+  });
+
+  it('a predicate that cannot be evaluated over the stored row treats it as COMPLIANT', () => {
+    // A field selection on a string faults, so no violation is proven and
+    // the rule keeps enforcing, as the engine does.
+    const pred = "record.status == 'activated' && record.flag.x == 1";
+    expect(muted(() => requiredWhenRestsOnStoredRecord(pred, 'signed_copy', { status: 'activated', flag: 'not-a-map', signed_copy: null }))).toBe(false);
+    expect(requiredWhenRestsOnStoredRecord("record.status == 'activated'", 'signed_copy', undefined)).toBe(false);
+  });
+
+  it('a stored value that is present is not at rest', () => {
+    expect(
+      requiredWhenRestsOnStoredRecord("record.status == 'activated'", 'signed_copy', { status: 'activated', signed_copy: 'copy.pdf' }),
+    ).toBe(false);
   });
 });
