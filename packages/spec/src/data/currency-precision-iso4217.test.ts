@@ -224,7 +224,7 @@ describe('field-level `precision` is total digits, never judged against the curr
     expect(result.data!.precision).toBe(2);
   });
 
-  it('flipped: `precision: 2` on a fixed-JPY field parses — a DECIMAL(2,0) amount — where the ISO 4217 width check used to refuse it', () => {
+  it('flipped: `precision: 2` on a fixed-JPY field parses — a DECIMAL(2,0) amount — where the retired #7918 width check used to refuse it', () => {
     const result = FieldSchema.safeParse({ ...base, precision: 2, currencyConfig: fixed('JPY') });
     expect(result.success).toBe(true);
     expect(result.data!.precision).toBe(2);

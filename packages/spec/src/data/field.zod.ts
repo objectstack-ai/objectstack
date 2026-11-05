@@ -501,8 +501,8 @@ const CURRENCY_DECIMAL_PLACES_ARE_THE_CURRENCYS =
  * #19992 (ADR-0049 enforce-or-remove, triage direction REMOVE under ruling 乙 on
  * #19910 — 「a currency's decimal places are the currency's, not a setting」):
  * `precision` was a declared, validated key that no renderer or runtime ever
- * read. objectui's `CurrencyField` derives the width from the currency's ISO
- * 4217 minor unit (read points recorded in `liveness/field.json`, row
+ * read. objectui's `CurrencyField` derives the width from the currency's CLDR
+ * fraction digits (read points recorded in `liveness/field.json`, row
  * `currencyConfig`), and no code read the key at all — measured with a lit
  * control (`currencyConfig.currencyMode` IS read) over objectstack
  * `packages/**` + `examples/**`, objectui (the console's tree and `main`) and
