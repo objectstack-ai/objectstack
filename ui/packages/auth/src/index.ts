@@ -39,7 +39,6 @@ export { LoginForm, type LoginFormProps, type LoginFormLabels } from './LoginFor
 export { RegisterForm, type RegisterFormProps, type RegisterFormLabels } from './RegisterForm.js';
 export {
   TurnstileWidget,
-  TURNSTILE_SCRIPT_URL,
   type TurnstileWidgetProps,
   type TurnstileWidgetLabels,
   type TurnstileApi,
@@ -49,8 +48,7 @@ export { SocialSignInButtons, type SocialSignInButtonsProps } from './SocialSign
 export { UserMenu, type UserMenuProps } from './UserMenu.js';
 export { PreviewBanner, type PreviewBannerProps } from './PreviewBanner.js';
 export { createAuthClient, TokenStorage } from './createAuthClient.js';
-export { normalizePhoneIdentifier, looksLikePhoneIdentifier } from './phone-identifier.js';
-export { createAuthenticatedFetch, ActiveOrganizationStorage, type AuthenticatedAdapterOptions } from './createAuthenticatedFetch.js';
+export { createAuthenticatedFetch, ActiveOrganizationStorage } from './createAuthenticatedFetch.js';
 // objectui#10193 — "the browser changed hands in this page-load". The purge on a
 // change of session user clears storage; state already derived from it in
 // memory (the UI language, first of all) is re-derived by whoever owns it, and
@@ -69,7 +67,6 @@ export {
   ORG_ROLE_ADMIN,
   ORG_ROLE_DELEGATED_ADMIN,
   ORG_ROLE_MEMBER,
-  ORG_ROLES,
   ORG_ROLE_LABELS,
   orgRoleGrade,
   invitableOrgRoles,
@@ -78,28 +75,20 @@ export {
 } from './org-roles.js';
 
 // Invitation lifecycle vocabulary — a CLOSED set of four, bound to better-auth's
-// own `InvitationStatus` so it cannot drift, plus the narrowing guard the wire
-// boundary uses. Exported because a screen switching on `AuthInvitation.status`
-// needs the union by name (objectui#3879).
-export {
-  AUTH_INVITATION_STATUSES,
-  isAuthInvitationStatus,
-  type AuthInvitationStatus,
-} from './invitation-status.js';
+// own `InvitationStatus` so it cannot drift. Only the union is exported, because
+// a screen switching on `AuthInvitation.status` needs it by name
+// (objectui#3879); the status list and the narrowing guard the wire boundary
+// uses stay in `invitation-status.ts`.
+export type { AuthInvitationStatus } from './invitation-status.js';
 
 // Shared auth form primitives — exposed so consumers can build custom forms
 // that match the look of LoginForm / RegisterForm / ForgotPasswordForm.
 export {
-  AUTH_FIELD_LABEL_CLASS,
-  AUTH_INPUT_CLASS,
   AUTH_LINK_CLASS,
   AUTH_PRIMARY_BUTTON_CLASS,
   AuthAlertIcon,
-  AuthCheckIcon,
-  AuthDivider,
   AuthErrorBanner,
   AuthFormHeader,
-  AuthMailIcon,
   AuthSpinner,
 } from './authStyles.js';
 
