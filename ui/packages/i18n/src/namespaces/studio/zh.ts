@@ -3827,6 +3827,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.flowProblems.connectRefused.missingTarget': '无法连线：此流程中没有节点 “{target}”。',
   'engine.flowProblems.connectRefused.self': '无法将 “{source}” 连到它自身。',
   'engine.flowProblems.connectRefused.repeat': '“{source}” 已经连到 “{target}”。请选中那条连线再修改。',
+  // objectstack#30038 — 流程绑定了软件包依赖范围外的对象时的发布拒绝（`previews/flow-closure-refusal.ts`）。
+  'engine.flowProblems.closureRefusal.triggerObject': '此流程由对象“{object}”的记录触发，但本软件包不能使用这个对象。软件包只能使用自己的对象、它声明为依赖的软件包中的对象以及系统对象。请从列表中选择一个对象，或声明对定义“{object}”的软件包的依赖。',
+  'engine.flowProblems.closureRefusal.scanObject': '此流程的定时扫描读取对象“{object}”的记录，但本软件包不能使用这个对象。软件包只能使用自己的对象、它声明为依赖的软件包中的对象以及系统对象。请从列表中选择一个对象，或声明对定义“{object}”的软件包的依赖。',
+  'engine.flowProblems.closureRefusal.inputObject': '输入“{input}”接收对象“{object}”的记录，但本软件包不能使用这个对象。软件包只能使用自己的对象、它声明为依赖的软件包中的对象以及系统对象。请为这个输入从列表中选择一个对象，或声明对定义“{object}”的软件包的依赖。',
   'engine.repeater.empty': '暂无条目。点击 + 添加。',
   'engine.cancel': '取消',
   'engine.close': '关闭',
