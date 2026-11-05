@@ -113,8 +113,16 @@ function makeCountingEngine() {
             // the same reason `delete` below is: a predicate update rewrites
             // every matching row, so a double looser than the engine here hides
             // exactly the writes it was introduced to observe.
-            assertEngineUpdateDispatch(patch, options);
+            const dispatch = assertEngineUpdateDispatch(patch, options);
             if (table === QUEUE_TABLE) calls.update++;
+            // [#30228] A predicate write rewrites the rows its `where` matches
+            // and reports how many — the compare-and-set the lease reclaim and
+            // renewal ride on, which a by-id double would turn unconditional.
+            if (dispatch.kind === 'multi') {
+                const hit = (tables.get(table) ?? []).filter((x) => matches(x, options?.where ?? {}));
+                for (const x of hit) Object.assign(x, patch);
+                return hit.length;
+            }
             const r = (tables.get(table) ?? []).find((x) => x.id === patch.id);
             if (!r) throw new Error(`row ${patch.id} not found in ${table}`);
             Object.assign(r, patch);
@@ -162,11 +170,12 @@ describe('#17612 DbQueueAdapter — idle poll cost', () => {
         await vi.advanceTimersByTimeAsync(HOUR);
         await adapter.stop();
 
-        // 3600 s / 1 s, plus the tick `start()` runs immediately.
-        expect(engine.calls.find).toBe(3601);
+        // 3600 s / 1 s, plus the tick `start()` runs immediately — and [#30228]
+        // one lease-reclaim read per 30 s lease window (t = 0, 30 s, … 3600 s).
+        expect(engine.calls.find).toBe(3601 + 121);
     });
 
-    it('backs off while idle: the same hour, same queue, is 124 reads instead of 3600', async () => {
+    it('backs off while idle: the same hour, same queue, is 124 claim reads instead of 3600', async () => {
         vi.useFakeTimers();
         const engine = makeCountingEngine();
         const adapter = adapterOn(engine);
@@ -176,19 +185,26 @@ describe('#17612 DbQueueAdapter — idle poll cost', () => {
         await adapter.stop();
 
         // 1s,2s,4s,8s,16s then the 30 s ceiling — pinned exactly, because a
-        // bound alone is met by a loop that stopped.
-        expect(engine.calls.find).toBe(124);
+        // bound alone is met by a loop that stopped. [#30228] Plus the
+        // lease-reclaim read, at most once per 30 s lease window: on the first
+        // tick and on every ceiling tick (the 1/3/7/15 s ramp ticks fall inside
+        // the first window), 124 - 4 = 120 of them.
+        expect(engine.calls.find).toBe(124 + 120);
         // Nothing was claimed, so nothing was written.
         expect(engine.calls.update).toBe(0);
     });
 
-    it('costs exactly one read per registered queue per tick', async () => {
+    it('costs exactly one read per registered queue per tick, plus one lease read per lease window', async () => {
         for (const n of [1, 3]) {
             const engine = makeCountingEngine();
             const adapter = adapterOn(engine);
             for (let i = 0; i < n; i++) await adapter.subscribe(`q${i}`, async () => {});
             expect(await adapter.pollOnce()).toBe(0);
-            expect(engine.calls.find).toBe(n);
+            // [#30228] One reclaim read answers every queue at once…
+            expect(engine.calls.find).toBe(n + 1);
+            // …and a tick inside the same lease window skips it.
+            expect(await adapter.pollOnce()).toBe(0);
+            expect(engine.calls.find).toBe(2 * n + 1);
         }
     });
 
@@ -286,5 +302,188 @@ describe('#17612 DbQueueAdapter — idle poll cost', () => {
         await vi.advanceTimersByTimeAsync(HOUR);
 
         expect(engine.calls.find).toBe(findsAtStop);
+    });
+});
+
+/**
+ * [#30228] A worker that dies mid-handler — a crash, an OOM kill, a redeploy —
+ * leaves its row `running`. `leaseMs` documents that another worker reclaims
+ * it once the lease runs out; before #30228 nothing did, and the row sat
+ * `running` forever: never retried, never dead-lettered.
+ *
+ * The CRASHED-WORKER FIXTURE is that row written straight into the table: the
+ * state a dead process leaves behind, with no adapter alive to have written
+ * it. Measured before the fix (this file's legs run against
+ * `origin/main`'s adapter): the fixture stays `running` with `attempts: 0`
+ * through an hour of ticks and its handler never runs.
+ *
+ * The risk the fix itself introduces is the opposite one — reclaiming a row
+ * whose handler is still running, and running it twice. The live-handler legs
+ * pin that against a handler that runs three leases long.
+ */
+describe('#30228 DbQueueAdapter — a running row whose lease ran out is reclaimed', () => {
+    const LEASE = 3_000;
+
+    function crashedRow(over: Row = {}): Row {
+        const nowMs = Date.now();
+        return {
+            id: 'msg_crashed',
+            queue: 'q1',
+            payload_json: JSON.stringify({ n: 1 }),
+            status: 'running',
+            priority: 100,
+            attempts: 0,
+            max_attempts: 3,
+            backoff_type: 'exponential',
+            backoff_delay_ms: 1000,
+            backoff_max_delay_ms: null,
+            scheduled_for: new Date(nowMs - 60_000).toISOString(),
+            locked_by: 'worker_dead',
+            locked_until: new Date(nowMs - 1).toISOString(),
+            created_at: new Date(nowMs - 60_000).toISOString(),
+            ...over,
+        };
+    }
+
+    it('CRASHED-WORKER FIXTURE: an expired lease goes back to the retry path with the lost run counted, then runs', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(1_000_000);
+        const engine = makeCountingEngine();
+        engine.tables.set(QUEUE_TABLE, [crashedRow()]);
+        const adapter = adapterOn(engine, { leaseMs: LEASE });
+        const seen: Array<{ data: unknown; attempts: number }> = [];
+        await adapter.subscribe('q1', async (msg: any) => { seen.push({ data: msg.data, attempts: msg.attempts }); });
+
+        // One tick reclaims it — and reports the row as moved, so the loop does
+        // not back off over work it just made claimable.
+        expect(await adapter.pollOnce()).toBe(1);
+        const [row] = engine.tables.get(QUEUE_TABLE) ?? [];
+        expect(row).toMatchObject({
+            status: 'pending',
+            attempts: 1,
+            locked_by: null,
+            locked_until: null,
+            // exponential, base 1 s, attempt 1 → 1 s
+            scheduled_for: new Date(1_000_000 + 1000).toISOString(),
+        });
+        expect(row!.last_error).toMatch(/^lease expired: worker worker_dead /);
+        expect(seen).toEqual([]);
+
+        // On its backoff the ordinary claim path runs it, as attempt 2.
+        vi.setSystemTime(1_000_000 + 1000);
+        expect(await adapter.pollOnce()).toBe(1);
+        expect(seen).toEqual([{ data: { n: 1 }, attempts: 2 }]);
+        expect(row).toMatchObject({ status: 'completed', attempts: 2 });
+    });
+
+    it('a lease that runs out while the loop is deep in its idle backoff is reclaimed within one idle tick', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(0);
+        const engine = makeCountingEngine();
+        const adapter = adapterOn(engine, { leaseMs: LEASE });
+        const at: number[] = [];
+        await adapter.subscribe('q1', async () => { at.push(Date.now()); });
+        adapter.start();
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+
+        // Another node claimed a row and died: its lease runs out 10 s from now,
+        // and nothing tells this process about it.
+        const expiresAt = Date.now() + 10_000;
+        engine.tables.set(QUEUE_TABLE, [crashedRow({ locked_until: new Date(expiresAt).toISOString() })]);
+        await vi.advanceTimersByTimeAsync(10_000 + DEFAULT_MAX_IDLE_INTERVAL_MS + 2 * BASE);
+        await adapter.stop();
+
+        const [row] = engine.tables.get(QUEUE_TABLE) ?? [];
+        expect(row).toMatchObject({ status: 'completed', attempts: 2 });
+        // Reclaimed on the first tick after expiry (≤ one 30 s idle interval),
+        // then claimed on the base interval the reclaim snapped the loop to.
+        expect(at).toHaveLength(1);
+        expect(at[0]! - expiresAt).toBeLessThanOrEqual(DEFAULT_MAX_IDLE_INTERVAL_MS + 2 * BASE);
+    });
+
+    it('the lost run counts: a row whose last attempt died with its worker is dead-lettered, not retried forever', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(1_000_000);
+        const engine = makeCountingEngine();
+        engine.tables.set(QUEUE_TABLE, [crashedRow({ attempts: 2, max_attempts: 3 })]);
+        const adapter = adapterOn(engine, { leaseMs: LEASE });
+        let ran = 0;
+        await adapter.subscribe('q1', async () => { ran++; });
+
+        expect(await adapter.pollOnce()).toBe(1);
+        const [row] = engine.tables.get(QUEUE_TABLE) ?? [];
+        expect(row).toMatchObject({ status: 'dlq', attempts: 3, locked_by: null, locked_until: null });
+        expect(row!.last_error).toMatch(/^lease expired: /);
+        expect(await adapter.listFailed('q1')).toHaveLength(1);
+        await adapter.pollOnce();
+        expect(ran).toBe(0);
+    });
+
+    it('a row INSIDE its lease is never reclaimed', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(1_000_000);
+        const engine = makeCountingEngine();
+        const live = crashedRow({ locked_by: 'worker_live', locked_until: new Date(1_000_000 + 10_000).toISOString() });
+        engine.tables.set(QUEUE_TABLE, [{ ...live }]);
+        const adapter = adapterOn(engine, { leaseMs: LEASE });
+        let ran = 0;
+        await adapter.subscribe('q1', async () => { ran++; });
+
+        expect(await adapter.pollOnce()).toBe(0);
+        expect((engine.tables.get(QUEUE_TABLE) ?? [])[0]).toEqual(live);
+        expect(ran).toBe(0);
+        expect(engine.calls.update).toBe(0);
+    });
+
+    it('the reclaim is a compare-and-set: a lease renewed between its read and its write keeps its run', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(1_000_000);
+        const engine = makeCountingEngine();
+        engine.tables.set(QUEUE_TABLE, [crashedRow({ locked_by: 'worker_slow' })]);
+        // The holder renews right after the reclaim read saw the lease expired.
+        const find = engine.find.bind(engine);
+        engine.find = async (table: string, opts: any = {}) => {
+            const out = await find(table, opts);
+            if (opts?.where?.status === 'running') {
+                const [held] = engine.tables.get(QUEUE_TABLE) ?? [];
+                held!.locked_until = new Date(1_000_000 + LEASE).toISOString();
+            }
+            return out;
+        };
+        const adapter = adapterOn(engine, { leaseMs: LEASE });
+        await adapter.subscribe('q1', async () => {});
+
+        expect(await adapter.pollOnce()).toBe(0);
+        expect((engine.tables.get(QUEUE_TABLE) ?? [])[0]).toMatchObject({
+            status: 'running', locked_by: 'worker_slow', attempts: 0,
+        });
+    });
+
+    it('a LIVE handler three leases long is never double-claimed: its worker renews the lease while it runs', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(0);
+        const engine = makeCountingEngine();
+        const runs: string[] = [];
+        const slow = (who: string) => async () => {
+            runs.push(who);
+            await new Promise((r) => setTimeout(r, 3 * LEASE));
+        };
+        const a = adapterOn(engine, { leaseMs: LEASE, workerId: 'worker_a' });
+        const b = adapterOn(engine, { leaseMs: LEASE, workerId: 'worker_b' });
+        await a.subscribe('q1', slow('a'));
+        await b.subscribe('q1', slow('b'));
+        await a.publish('q1', { n: 1 });
+        a.start();
+        // A is inside the handler before B starts polling the same table.
+        await vi.advanceTimersByTimeAsync(10);
+        expect(runs).toEqual(['a']);
+        b.start();
+
+        await vi.advanceTimersByTimeAsync(3 * LEASE + 5 * BASE);
+        await a.stop();
+        await b.stop();
+
+        expect(runs).toEqual(['a']);
+        expect((engine.tables.get(QUEUE_TABLE) ?? [])[0]).toMatchObject({ status: 'completed', attempts: 1 });
     });
 });

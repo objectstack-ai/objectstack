@@ -155,7 +155,23 @@ export interface DbQueueAdapterOptions {
   maxIdleIntervalMs?: number;
   /** Max messages claimed per poll tick (default 10) */
   batchSize?: number;
-  /** Lease duration before another worker may reclaim (ms, default 30000) */
+  /**
+   * Lease duration before another worker may reclaim (ms, default 30000).
+   *
+   * [#30228] A claimed message is `running` under this worker until
+   * `locked_until`. A LIVE handler never loses it however long it runs: the
+   * worker renews the lease every third of this window while the handler is
+   * inside it. A lease that runs out
+   * therefore means the worker is gone — a crash, an OOM kill, a redeploy — or
+   * stalled its event loop for most of a window; any worker reclaims such a
+   * row on its next poll tick. The lost run
+   * counts as an attempt: the row returns to `pending` on its backoff, or to
+   * the dead-letter surface once `maxAttempts` is spent, so a message that
+   * kills its worker every time cannot loop forever.
+   *
+   * Set it above the longest synchronous stretch a handler can block the
+   * event loop for: renewal is a timer, and a blocked loop renews nothing.
+   */
   leaseMs?: number;
   /**
    * Idempotency window — how long the same key blocks re-publish (ms, default 24h).
@@ -186,7 +202,9 @@ interface RegisteredHandler {
  * Persists every message to `sys_job_queue`. A polling worker leases
  * pending messages (CAS update status pending→running with a lease),
  * invokes registered subscribers, and retries with backoff on failure.
- * Messages that exceed `max_attempts` land in `status='dlq'`.
+ * Messages that exceed `max_attempts` land in `status='dlq'`. A `running`
+ * row whose lease ran out — its worker died mid-handler — is reclaimed onto
+ * that same retry path (#30228, {@link DbQueueAdapterOptions.leaseMs}).
  *
  * Idempotency: publish suppresses duplicates within a configurable
  * window when `(queue, idempotencyKey)` is non-null.
@@ -211,6 +229,13 @@ export class DbQueueAdapter implements IQueueService {
 
   private readonly handlers = new Map<string, RegisteredHandler[]>();
   private loop?: DispatchLoop;
+  /**
+   * [#30228] Adapter-clock instant (ms) before which no `running` row of a
+   * subscribed queue can have an expired lease, so {@link reclaimExpired}
+   * need not read. `0` = read on the next tick. See that method for why the
+   * bound is sound.
+   */
+  private reclaimNotBeforeMs = 0;
 
   constructor(args: {
     engine: JobEngine;
@@ -502,12 +527,16 @@ export class DbQueueAdapter implements IQueueService {
     this.loop?.wake();
   }
 
-  /** Test-friendly synchronous poll. */
+  /**
+   * Test-friendly synchronous poll. Answers how many rows the tick moved:
+   * messages dispatched, plus expired leases reclaimed (#30228) — a reclaimed
+   * row is work the next tick claims, so the loop must not back off over it.
+   */
   async pollOnce(): Promise<number> {
     const queues = [...this.handlers.keys()];
     if (queues.length === 0) return 0;
 
-    let processed = 0;
+    let processed = await this.reclaimExpired(queues);
     for (const queue of queues) {
       const claimed = await this.claimBatch(queue, this.opts.batchSize);
       for (const row of claimed) {
@@ -519,6 +548,160 @@ export class DbQueueAdapter implements IQueueService {
   }
 
   // ── Internals ────────────────────────────────────────────────────
+
+  /**
+   * [#30228] Return every `running` row of a subscribed queue whose lease ran
+   * out to the retry path, and answer how many were reclaimed.
+   *
+   * ## Why a lease that ran out means a dead worker, not a slow one
+   *
+   * {@link dispatch} renews its lease every third of `leaseMs` for as long as
+   * the handler runs ({@link renewLease}). So `locked_until` passes only when
+   * the holder stopped renewing — the process died, or its event loop was
+   * blocked for most of a window. Without the renewal, any handler slower than
+   * `leaseMs` would be reclaimed while still running and run twice.
+   *
+   * ## Why the lost run counts as an attempt
+   *
+   * The handler's attempt is written only after it settles, so a worker that
+   * died left the row's `attempts` one short. Reclaiming without counting would
+   * retry forever a message that kills its worker every time (an OOM on a
+   * large payload). So the reclaim writes that attempt down and takes the same
+   * branch a thrown handler takes: `pending` on its backoff, or `dlq` once
+   * `max_attempts` is spent.
+   *
+   * ## Why the write is a compare-and-set
+   *
+   * The write re-states the expiry in its predicate (`status`, `locked_by` and
+   * an expired `locked_until`), so a lease renewed between this read and this
+   * write — a holder that was alive after all — matches nothing and keeps its
+   * run. It is a `multi: true` write on purpose: the by-id path binds only
+   * the primary key and would drop the rest of the predicate. Two workers
+   * reclaiming the same row write the same values from the same read; neither
+   * runs it, so that race costs nothing.
+   *
+   * ## Why it does not read on every tick
+   *
+   * One read answers every subscribed queue, and it also returns the
+   * earliest lease still running. Until the earlier of that lease and
+   * `now + leaseMs` no lease can run out: every row already `running` was
+   * in the read, and a row claimed after it carries a lease of at least
+   * `leaseMs` from its claim — every node of one deployment runs the same
+   * `QueueServicePlugin` options — and renewal only ever moves a lease later. So
+   * a busy 1 s poll pays one read per lease window, an idle one at most one
+   * per tick, and an expired lease is still reclaimed on the first tick after
+   * it runs out.
+   */
+  private async reclaimExpired(queues: string[]): Promise<number> {
+    const now = this.now();
+    const nowMs = now.getTime();
+    if (nowMs < this.reclaimNotBeforeMs) return 0;
+    const max = this.opts.batchSize;
+    const rows = await this.engine.find(QUEUE_TABLE, {
+      where: { queue: { $in: queues }, status: 'running' },
+      fields: [
+        'id', 'locked_by', 'locked_until', 'attempts', 'max_attempts',
+        'backoff_type', 'backoff_delay_ms', 'backoff_max_delay_ms',
+      ],
+      orderBy: [{ field: 'locked_until', order: 'asc' }],
+      limit: max,
+      context: SYSTEM_CTX,
+    });
+
+    let nextExpiryMs = nowMs + this.opts.leaseMs;
+    let reclaimed = 0;
+    for (const row of rows ?? []) {
+      // Instants, not strings: `locked_until` is a declared `Field.datetime`
+      // and the dialects materialize it differently (see claimBatch). A
+      // `running` row with no lease at all was never validly claimed, so it is
+      // as orphaned as an expired one.
+      const leaseMs = row.locked_until ? new Date(row.locked_until).getTime() : NaN;
+      if (Number.isFinite(leaseMs) && leaseMs > nowMs) {
+        nextExpiryMs = Math.min(nextExpiryMs, leaseMs);
+        continue;
+      }
+      if (await this.reclaimRow(row, now)) reclaimed++;
+    }
+    // A full page may hide more expired rows behind it: read again next tick.
+    this.reclaimNotBeforeMs = (rows?.length ?? 0) >= max ? 0 : nextExpiryMs;
+    return reclaimed;
+  }
+
+  /** [#30228] The compare-and-set write of {@link reclaimExpired}, one row. */
+  private async reclaimRow(row: any, now: Date): Promise<boolean> {
+    const nowIso = now.toISOString();
+    const attempts = (row.attempts ?? 0) + 1;
+    const maxAttempts = row.max_attempts ?? this.opts.defaultMaxAttempts;
+    const lastError = `lease expired: worker ${row.locked_by ?? '(none)'} did not finish within its lease `
+      + '(process crash, OOM kill or redeploy); reclaimed as a failed attempt';
+    const patch = attempts >= maxAttempts
+      ? { status: 'dlq', completed_at: nowIso }
+      : { status: 'pending', scheduled_for: new Date(now.getTime() + this.computeBackoff(row, attempts)).toISOString() };
+    try {
+      const res = await this.engine.update(QUEUE_TABLE, {
+        ...patch,
+        attempts,
+        last_error: lastError,
+        locked_by: null,
+        locked_until: null,
+        updated_at: nowIso,
+      }, {
+        where: {
+          id: row.id,
+          status: 'running',
+          locked_by: row.locked_by ?? null,
+          $or: [{ locked_until: null }, { locked_until: { $lte: nowIso } }],
+        },
+        multi: true,
+        context: SYSTEM_CTX,
+      });
+      const landed = typeof res === 'number' ? res > 0 : true;
+      if (landed) {
+        this.logger?.warn?.('DbQueueAdapter: reclaimed a message whose lease expired', {
+          id: row.id, lockedBy: row.locked_by, attempts, maxAttempts, status: patch.status,
+        } as any);
+      }
+      return landed;
+    } catch (err) {
+      this.logger?.warn?.('DbQueueAdapter: reclaim CAS failed', err as any);
+      return false;
+    }
+  }
+
+  /**
+   * [#30228] Keep this worker's lease on a row while its handler runs: every
+   * third of `leaseMs`, move `locked_until` a full window ahead. The write is
+   * a compare-and-set on `locked_by` — `multi: true` for the reason
+   * {@link reclaimExpired} gives — so a lease that was reclaimed underneath
+   * (this worker stalled past it) is not silently taken back. Returns the
+   * stop function {@link dispatch} calls once the handler settles.
+   */
+  private renewLease(id: string): () => void {
+    let inFlight = false;
+    const timer = setInterval(() => {
+      if (inFlight) return;
+      inFlight = true;
+      const now = this.now();
+      void Promise.resolve()
+        .then(() => this.engine.update(QUEUE_TABLE, {
+          locked_until: new Date(now.getTime() + this.opts.leaseMs).toISOString(),
+          updated_at: now.toISOString(),
+        }, {
+          where: { id, status: 'running', locked_by: this.opts.workerId },
+          multi: true,
+          context: SYSTEM_CTX,
+        }))
+        .then((res) => {
+          if (typeof res === 'number' && res === 0) {
+            this.logger?.warn?.('DbQueueAdapter: lease lost while the handler was still running', { id } as any);
+          }
+        })
+        .catch((err) => { this.logger?.warn?.('DbQueueAdapter: lease renewal failed', err as any); })
+        .finally(() => { inFlight = false; });
+    }, Math.max(1, Math.floor(this.opts.leaseMs / 3)));
+    (timer as { unref?: () => void }).unref?.();
+    return () => clearInterval(timer);
+  }
 
   private async claimBatch(queue: string, max: number): Promise<any[]> {
     const now = this.now();
@@ -604,14 +787,19 @@ export class DbQueueAdapter implements IQueueService {
 
     let success = true;
     let lastError: string | undefined;
-    for (const h of handlers) {
-      try { await h.fn(msg); }
-      catch (err) {
-        success = false;
-        lastError = err instanceof Error ? err.message : String(err);
-        this.logger?.warn?.(`DbQueueAdapter: handler failed on ${row.queue}`, err as any);
-        break;
+    const stopRenewing = this.renewLease(String(row.id));
+    try {
+      for (const h of handlers) {
+        try { await h.fn(msg); }
+        catch (err) {
+          success = false;
+          lastError = err instanceof Error ? err.message : String(err);
+          this.logger?.warn?.(`DbQueueAdapter: handler failed on ${row.queue}`, err as any);
+          break;
+        }
       }
+    } finally {
+      stopRenewing();
     }
 
     const now = this.now();
