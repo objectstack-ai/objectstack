@@ -58,6 +58,17 @@ export interface ForgotPasswordFormLabels {
   phoneSuccessTitle?: string;
   /** Phone reset — success screen description. */
   phoneSuccessDescription?: string;
+  /**
+   * Success screen title when the server reports `features.emailDelivery: false`
+   * (defaults to "A reset link can't be emailed here").
+   */
+  noDeliveryTitle?: string;
+  /**
+   * Success screen description when the server reports
+   * `features.emailDelivery: false`. It describes the deployment, never the
+   * address, so it carries no `{email}` hole.
+   */
+  noDeliveryDescription?: string;
 }
 
 export interface ForgotPasswordFormProps {
@@ -139,6 +150,12 @@ export function ForgotPasswordForm({
   // deliverable SMS service — so the link never leads to codes that can't
   // arrive.
   const [phoneOtpEnabled, setPhoneOtpEnabled] = useState(false);
+  // Whether mail leaves this deployment (`features.emailDelivery`). Only an
+  // explicit `false` swaps the success screen: an absent key (a server that
+  // predates the flag) or a failed config fetch is unknown, and keeps the
+  // "check your email" text rather than telling people on a mail-sending
+  // deployment to go find an administrator.
+  const [emailDeliveryOff, setEmailDeliveryOff] = useState(false);
   const [mode, setMode] = useState<'email' | 'phone'>('email');
   const [phone, setPhone] = useState('');
   const [otpCode, setOtpCode] = useState('');
@@ -154,10 +171,13 @@ export function ForgotPasswordForm({
     Promise.resolve()
       .then(() => getAuthConfig())
       .then((config) => {
-        if (!cancelled) setPhoneOtpEnabled(config?.features?.phoneNumberOtp === true);
+        if (cancelled) return;
+        setPhoneOtpEnabled(config?.features?.phoneNumberOtp === true);
+        setEmailDeliveryOff(config?.features?.emailDelivery === false);
       })
       .catch(() => {
-        // Phone reset is an enhancement — a failed config fetch just hides it.
+        // Phone reset is an enhancement — a failed config fetch just hides it,
+        // and leaves the email success text as it is (delivery unknown).
       });
     return () => {
       cancelled = true;
@@ -198,6 +218,10 @@ export function ForgotPasswordForm({
     phoneSuccessDescription:
       labels.phoneSuccessDescription ??
       'Your password has been reset. You can now sign in with your new password.',
+    noDeliveryTitle: labels.noDeliveryTitle ?? "A reset link can't be emailed here",
+    noDeliveryDescription:
+      labels.noDeliveryDescription ??
+      "This deployment doesn't send email, so no password reset link can reach you. Ask an administrator: they can set a new password for you from Setup → Users.",
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -284,18 +308,30 @@ export function ForgotPasswordForm({
   }
 
   if (submitted) {
-    const successMsg = l.successDescription.includes('{email}')
-      ? l.successDescription.replace('{email}', email)
-      : `${l.successDescription} ${email}`;
+    // No account-existence oracle: the reset request answers a known and an
+    // unknown address alike, and which text shows here is decided by the
+    // deployment's `features.emailDelivery` alone, never by that answer.
+    // The no-delivery text names no address at all.
+    const successMsg = emailDeliveryOff
+      ? l.noDeliveryDescription
+      : l.successDescription.includes('{email}')
+        ? l.successDescription.replace('{email}', email)
+        : `${l.successDescription} ${email}`;
     return (
       <div className="mx-auto flex w-full flex-col justify-center space-y-7 sm:w-[400px]">
         <AuthFormHeader
           icon={
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-600 ring-1 ring-emerald-500/15 dark:text-emerald-400">
+            <span
+              className={
+                emailDeliveryOff
+                  ? 'flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-600 ring-1 ring-amber-500/15 dark:text-amber-400'
+                  : 'flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-600 ring-1 ring-emerald-500/15 dark:text-emerald-400'
+              }
+            >
               <AuthMailIcon />
             </span>
           }
-          title={l.successTitle}
+          title={emailDeliveryOff ? l.noDeliveryTitle : l.successTitle}
           description={successMsg}
         />
         {loginUrl && (

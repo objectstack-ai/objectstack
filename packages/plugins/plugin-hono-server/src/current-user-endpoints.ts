@@ -42,6 +42,7 @@ import {
     buildEffectiveFieldPermissions,
     buildEffectiveObjectPermissions,
     registryObjectPackageDisabled,
+    engineExternalWriteForbidden,
     IDataEngine,
     resolveLocalizationContext,
     resolveRequestExecutionContext,
@@ -1037,6 +1038,10 @@ export function registerCurrentUserEndpoints(
                 // [#28877] The data plane's own predicate: a disabled package's
                 // objects leave the map, as the data plane refuses them.
                 isObjectPackageDisabled: registryObjectPackageDisabled(ql?.registry),
+                // [#30370] The external write gate's own verdict: a read-only
+                // external object is served no write, as the data plane
+                // refuses every one.
+                isExternalWriteForbidden: engineExternalWriteForbidden(ql),
                 logger: ctx.logger,
             });
             // Spread into a literal ON PURPOSE, here and in the `catch`: the

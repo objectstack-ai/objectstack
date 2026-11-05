@@ -908,8 +908,8 @@ const ja = {
     },
     betterAuth: {
       short: "アイデンティティ",
-      title: "ID プロバイダーが管理",
-      body: "このオブジェクトのスキーマは {{provider}} が所有しています。直接編集するとパスワードハッシュ、セッション検証、二要素チェック、監査フックがバイパスされます。認証プロバイダーのサインイン、招待、セキュリティフローで管理してください。",
+      title: "組み込みの ID サービス経由で書き込み",
+      body: "このオブジェクトのスキーマは、プラットフォーム組み込みの ID サービス {{provider}} に属します。レコードはこのページの操作、またはサインイン・招待・セキュリティのフローで作成・変更してください。いずれもこのサービスを経由します。テーブルを直接編集すると、パスワードハッシュ、セッション検証、二要素チェック、監査フックがバイパスされます。",
     },
   },
   kanban: {
@@ -2196,6 +2196,8 @@ const ja = {
       sourceBadgeInherited: "{{source}}から継承",
       sourceBadgeOverrides: "{{source}}を上書き",
       resetToDefault: "デフォルトに戻す",
+      sourceBadgeModified: "変更済み",
+      defaultValueHint: "デフォルト: {{value}}",
       envLockBadge: "環境変数でロック",
       envLockBadgeTitle: "環境変数で固定されているため、画面から編集できません。",
       deprecatedBadge: "非推奨",
@@ -2846,6 +2848,8 @@ const ja = {
       useEmailResetText: "メールでリセットする",
       phoneSuccessTitle: "パスワードをリセットしました",
       phoneSuccessDescription: "パスワードをリセットしました。新しいパスワードでサインインできます。",
+      noDeliveryTitle: "ここではリセットリンクをメールで送信できません",
+      noDeliveryDescription: "このデプロイはメールを送信しないため、パスワードリセットリンクは届きません。管理者にお問い合わせください。管理者が「設定 → ユーザー」で新しいパスワードを設定できます。",
     },
     resetPassword: {
       title: "新しいパスワードを設定",
@@ -4544,6 +4548,7 @@ const ja = {
       title: '保留中の変更',
       description: '公開で何が変わるか。新規項目は追加され、更新は公開中のバージョンを上書きします。',
       savedToCustomization: '{{package}} のカスタマイズに保存',
+      customizationEnvironment: 'これらの変更はこの環境のデータベースに {{pair}} の項目として保存され、プロジェクトのソースには含まれません。別の環境へは {{command}} でのみ移せます。',
       loading: '保留中の変更を読み込み中…',
       loadFailed: '保留中の変更を読み込めませんでした:',
       empty: '保留中の変更はありません — すべてのドラフトが公開済みです。',
@@ -4616,6 +4621,12 @@ const ja = {
         dataset: 'データセット {{count}}',
         dataset_one: 'データセット {{count}}',
         dataset_other: 'データセット {{count}}',
+        hook: 'フック {{count}}',
+        hook_one: 'フック {{count}}',
+        hook_other: 'フック {{count}}',
+        translation: '翻訳 {{count}}',
+        translation_one: '翻訳 {{count}}',
+        translation_other: '翻訳 {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

@@ -29,7 +29,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { buildEffectiveObjectPermissions, registryObjectPackageDisabled } from '@objectstack/core';
+import { buildEffectiveObjectPermissions, engineExternalWriteForbidden, registryObjectPackageDisabled } from '@objectstack/core';
 import { ExpressionEngine, toEvalPermissions } from '@objectstack/formula';
 import { SysAttachment, SysMember, SysSecret, SysUser, SysUserPreference } from '@objectstack/platform-objects';
 import type { ISecurityService } from '@objectstack/spec/contracts';
@@ -108,6 +108,8 @@ function bootPlugin(
     dbRows?: Array<Record<string, unknown>>; engineSeam?: boolean; schemas?: Record<string, any>;
     /** [#28877] Objects whose owning package the registry reports disabled. */
     disabledObjects?: string[];
+    /** [#30370] Objects whose external write gate the engine reports closed. */
+    readOnlyExternal?: string[];
   } = {},
 ) {
   const dbRows = opts.dbRows ?? [];
@@ -140,6 +142,7 @@ function bootPlugin(
       isObjectPackageDisabled: (name: string) => (opts.disabledObjects ?? []).includes(name),
     },
     getSchema: (name: string) => schemas[name] ?? null,
+    isExternalWriteForbidden: (name: string) => (opts.readOnlyExternal ?? []).includes(name),
     // No table answers here: every set is the catalog's (above).
     find: async () => [],
   };
@@ -177,6 +180,7 @@ function endpointObjects(sets: unknown, ql: any) {
     allSchemas: () => ql.registry.getAllObjects(),
     schemaOf: (name) => ql.getSchema(name),
     isObjectPackageDisabled: registryObjectPackageDisabled(ql.registry),
+    isExternalWriteForbidden: engineExternalWriteForbidden(ql),
   });
 }
 
@@ -236,6 +240,29 @@ describe('[#18783] getEffectiveObjectPermissions — reachable, and the endpoint
     // The admin keeps every other object.
     const admin: any = await svc.getEffectiveObjectPermissions!(ADMIN);
     expect(admin.sys_member).toMatchObject({ allowRead: true });
+  });
+
+  it('[#30370] a read-only external object grants no write — the same bytes as the endpoint, and can() answers false', async () => {
+    const { svc, ql } = await locate({ dbRows: [OPS_ADMIN_ROW, SALES_ROW], readOnlyExternal: ['deal'] });
+    for (const context of [ADMIN, REP]) {
+      const sets = await svc.resolvePermissionSetsForContext!(context);
+      const map: any = await svc.getEffectiveObjectPermissions!(context);
+      expect(JSON.stringify(map), context.userId).toBe(JSON.stringify(endpointObjects(sets, ql)));
+      for (const verb of ['create', 'edit', 'delete', 'transfer']) {
+        const answer = ExpressionEngine.evaluate<boolean>(
+          { dialect: 'cel', source: `current_user.can('deal', '${verb}')` },
+          { user: { id: context.userId }, permissions: toEvalPermissions(map) } as any,
+        );
+        expect(answer, `${context.userId} ${verb}`).toMatchObject({ ok: true, value: false });
+      }
+      for (const op of ['create', 'update', 'delete', 'upsert', 'bulk', 'import']) {
+        expect(map.deal.apiOperations, `${context.userId} ${op}`).not.toContain(op);
+      }
+    }
+    // Read stays; and an object on a managed datasource keeps its writes.
+    const admin: any = await svc.getEffectiveObjectPermissions!(ADMIN);
+    expect(admin.deal).toMatchObject({ allowRead: true });
+    expect(admin.report).toMatchObject({ allowEdit: true });
   });
 
   it('is frozen at the top level and aliases no permission set', async () => {
