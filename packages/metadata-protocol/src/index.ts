@@ -44,6 +44,10 @@ export { judgeOverrideWrite, overrideWriteIdentityOf, overrideWriteItemsOf, type
 // exported for the doors outside this package — `os validate` and the
 // marketplace install — so every door that lets a field in asks one judgement.
 export { judgeExtensionFieldSuffix, extensionFieldSuffixRefusalError, objectBodyExtensionFieldSuffixRefusal, type ExtensionFieldSuffixRefusal, type ExtensionFieldSuffixRule, type ExtensionFieldSuffixSubject } from './protocol-extension-field-suffix.js';
+// [ADR-0146 D10, second rule] An extension's `fields` entry re-declaring an
+// owner's field beyond the display-property whitelist: one judge, asked by the
+// save doors here and by `os validate` and the marketplace install outside.
+export { judgeRedeclaredOwnerFields, redeclaredFieldChanges, redeclaredOwnerFieldRefusalError, redeclaredOwnerFieldInstallMessage, type RedeclaredOwnerFieldRefusal, type RedeclaredOwnerFieldSubject, type ObjectOwnerDeclaration } from './protocol-extension-redeclared-owner-field.js';
 
 // The probe-first replacement's shared vocabulary: the raw-SQL seam type the
 // exported migrations below take, and the dialect classifier their reports
