@@ -194,7 +194,7 @@ export function AuthProvider({
   // objectstack#30125 — the session in this tab was ended by `signOut()`, and
   // nobody has signed in since. Raised in the same batch that clears `user`, so
   // the first render without a session already reads it; lowered as soon as a
-  // session exists again (the effect below), whoever it belongs to. A session
+  // session exists again (below), whoever it belongs to. A session
   // that ends any other way (expired, revoked, signed out in another tab)
   // leaves it `false`.
   const [sessionEndedBySignOut, setSessionEndedBySignOut] = useState(false);
@@ -223,10 +223,9 @@ export function AuthProvider({
     : true;
 
   // Any session, a new sign-in or a re-resolved one, ends "signed out".
-  const hasUser = user !== null;
-  useEffect(() => {
-    if (hasUser) setSessionEndedBySignOut(false);
-  }, [hasUser]);
+  // Adjusted during render (React's "storing information from previous
+  // renders"), so no render ever pairs a session with a raised flag.
+  if (sessionEndedBySignOut && user !== null) setSessionEndedBySignOut(false);
 
   // True while `loadSession` is awaiting the server. Read by the rotation
   // subscription below: a rotation the server performs INSIDE our own

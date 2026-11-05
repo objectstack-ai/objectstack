@@ -39,7 +39,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { AuthProvider, useAuth } from '@object-ui/auth';
 import type { AuthClient } from '@object-ui/auth';
 
@@ -106,7 +106,10 @@ const seen: string[] = [];
 const navigateTo: { current: ((to: string) => void) | null } = { current: null };
 function LocationProbe() {
   const location = useLocation();
-  navigateTo.current = useNavigate();
+  const navigate = useNavigate();
+  useEffect(() => {
+    navigateTo.current = navigate;
+  }, [navigate]);
   seen.push(location.pathname + location.search);
   return null;
 }
