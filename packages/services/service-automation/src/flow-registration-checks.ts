@@ -457,8 +457,9 @@ export function validateFlowExpressions(
     // here — the readiness rule `flow-time-relative-object-mismatch` refuses a
     // start naming another object at publish, but a flow stored before it
     // still registers, and its advisory must speak of the scanned object.
-    // Absent resolver / no object / the stored pass (`advisory: false`) → the
-    // hint is undefined and only the fatal syntax/bare-ref pass runs.
+    // Absent resolver / no object → the hint is undefined and only the fatal
+    // syntax/bare-ref pass runs (unchanged); the stored pass (`advisory:
+    // false`) never reads the hint, so it derives no binding.
     const startNode = flow.nodes.find((n) => n.type === 'start');
     const bound = advisory && this.objectSchemaResolver ? this.deriveTriggerBinding(flowName, flow) : undefined;
     const objectName = bound?.triggerType === 'time_relative'
