@@ -278,11 +278,12 @@ describe('Register SAML Provider through the REAL route — the INSTALLED @bette
 
   it('an incomplete form is still refused before the vendor, naming the missing field', async () => {
     const { issuer: _omitted, ...withoutEntityId } = COMPLETE_FORM;
+    const storedBefore = db.ssoProvider.length;
     const res = await post({ ...withoutEntityId, providerId: 'acme-saml-2' });
     const body: any = await res.json();
     expect(res.status).toBe(400);
     expect(body.error?.code).toBe('INVALID_REQUEST');
     expect(body.error?.message).toContain('issuer');
-    expect(db.ssoProvider).toHaveLength(1);
+    expect(db.ssoProvider).toHaveLength(storedBefore);
   });
 });
