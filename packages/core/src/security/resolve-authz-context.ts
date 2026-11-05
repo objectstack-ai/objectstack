@@ -955,6 +955,29 @@ function grantAppliesInTenant(organizationId: string | null, tenantId: string | 
 const GRANT_ROW_COLUMNS = ['permission_set', 'organization_id', 'valid_from', 'valid_until'] as const;
 
 /**
+ * [#30454] The columns of a principal's own `sys_member` row this resolver
+ * decides on, and the only ones its membership reads ask for: the
+ * organization (`accessible_org_ids`, §3b), the role ({@link heldPositionNames})
+ * and the ADR-0091 validity window (`isGrantActive`,
+ * `nextGrantValidityBoundary`). The reads run in every request's prelude, and a
+ * read naming no columns computes every formula field the object declares —
+ * the membership's record title reads the person one hop through `user_id`, a
+ * `sys_user` read and a round trip — for values nothing here reads. The two
+ * bounds are named although `sys_member` declares neither today: a read names
+ * an undeclared column to no effect, and so the moment the object declares
+ * them they are read, as §3's comment promises. A helper below that learns to
+ * read another column of a membership row adds it here.
+ */
+const MEMBER_ROW_COLUMNS = ['organization_id', 'role', 'valid_from', 'valid_until'] as const;
+
+/**
+ * [#30454] {@link MEMBER_ROW_COLUMNS} plus the member (`user_id`), for
+ * {@link countPositionHolders}, which reads the organization's memberships
+ * and groups them by person.
+ */
+const MEMBER_HOLDER_ROW_COLUMNS = ['user_id', ...MEMBER_ROW_COLUMNS] as const;
+
+/**
  * [#29281] The bound of the first leg's `sys_member` read for the active
  * organization — the read the fellow-org peer list (`org_user_ids`, §5) is
  * built from — and the signal that the list is not complete yet. A read that
@@ -969,7 +992,9 @@ const GRANT_ROW_COLUMNS = ['permission_set', 'organization_id', 'valid_from', 'v
  * ordinary member's `sys_user` reads — a people picker's search, a read by id,
  * a lookup label — lost them (the ids are random, so which members vanished was
  * arbitrary and moved as members joined). Unchanged as a bound, so an
- * organization under it issues byte-identically the one read it always did.
+ * organization under it issues the one read it always did; that read asks for
+ * the completion pages' columns ({@link ORG_MEMBER_PAGE_COLUMNS}), the one
+ * value §5 keeps, so it computes no formula field (#30454).
  */
 const ORG_MEMBERS_FIRST_READ_ROWS = 1000;
 
@@ -1526,7 +1551,7 @@ export async function countPositionHolders(
   const limit = opts.limit ?? 10000;
   const nowMs = opts.nowMs ?? Date.now();
   const [members, userPositionRows] = await Promise.all([
-    tryFind(ql, 'sys_member', { organization_id: tenantId }, limit),
+    tryFind(ql, 'sys_member', { organization_id: tenantId }, limit, undefined, MEMBER_HOLDER_ROW_COLUMNS),
     tryFind(ql, 'sys_user_position', { organization_id: tenantId }, limit),
   ]);
   if (members.length >= limit || userPositionRows.length >= limit) return counts;
@@ -1858,9 +1883,9 @@ export async function resolveUserAuthzGrants(
     !grants.email || !grants.permissions.includes('ai_seat') || platformAdminConfig.emails.length > 0;
   const [, members, userPositionRows, orgMembersLeg, upsRowsAll] = await Promise.all([
     needsUserRow ? getUserRow() : Promise.resolve(undefined),
-    tryFind(ql, 'sys_member', { user_id: userId }, 200),
+    tryFind(ql, 'sys_member', { user_id: userId }, 200, undefined, MEMBER_ROW_COLUMNS),
     tryFind(ql, 'sys_user_position', { user_id: userId }, 200),
-    tenantId ? tryFind(ql, 'sys_member', { organization_id: tenantId }, ORG_MEMBERS_FIRST_READ_ROWS) : Promise.resolve([] as any[]),
+    tenantId ? tryFind(ql, 'sys_member', { organization_id: tenantId }, ORG_MEMBERS_FIRST_READ_ROWS, undefined, ORG_MEMBER_PAGE_COLUMNS) : Promise.resolve([] as any[]),
     tryFind(ql, 'sys_user_permission_set', { user_id: userId }, 100, undefined, GRANT_ROW_COLUMNS),
   ]);
 
