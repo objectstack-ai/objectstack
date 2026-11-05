@@ -71,7 +71,7 @@ function makeDataSource() {
   } as any;
 }
 
-function renderGrid(dataSource: any, handlers: { approve: (...args: any[]) => unknown }) {
+function renderGrid(dataSource: any, handlers: Record<string, any>) {
   const schema: any = {
     type: 'object-grid',
     objectName: OBJECT,
