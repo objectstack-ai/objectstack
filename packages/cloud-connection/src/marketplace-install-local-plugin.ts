@@ -3995,9 +3995,26 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 });
                 written.push({ type: entry.type, name: entry.name });
             } catch (err: any) {
+                const notWritten = plan.items.slice(at + 1).map((i) => ({ type: i.type, name: i.name }));
+                // Logged here, at `error`, with the save's own words: the
+                // install the operator asked for did not land, and the pair
+                // this environment holds is not what the export describes —
+                // removed again when this install created it, partly written
+                // when it existed before. The answer says the same, but its
+                // text withholds a reason the save door did not declare.
+                const status = resolveThrownHttpError(err, 500);
+                ctx.logger.error(
+                    `[MarketplaceInstallLocal] the install of ${manifestId} into the pair of '${baseId}' failed: `
+                    + `${entry.type} '${entry.name}' (${entry.path}) was refused by the save door (${status.status} `
+                    + `${status.code}): ${err?.message ?? err}. `
+                    + (created
+                        ? 'The pair this install created is removed again.'
+                        : `The pair existed before and is kept: ${written.length} item(s) written before it stay `
+                            + `published, ${notWritten.length} were not written.`)
+                    + ' Correct the item and install the package again.',
+                );
                 return this.pairInstallWriteFailure(c, ctx, remove.bind(protocol), {
-                    manifestId, baseId, created, userId, err, failed: entry, written,
-                    notWritten: plan.items.slice(at + 1).map((i) => ({ type: i.type, name: i.name })),
+                    manifestId, baseId, created, userId, err, failed: entry, written, notWritten,
                 });
             }
         }
@@ -4058,12 +4075,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     ): Promise<Response> => {
         const { manifestId, baseId, created, userId, err, failed, written, notWritten } = args;
         const resolved = resolveThrownHttpError(err, 500);
+        // The caller logged the save's own words at `error` before handing
+        // the failure here, so the fallback's promise of a log line holds.
         const fallback = 'the reason is in the server log';
         const reason = pairDoorRefusalText(err, resolved, fallback);
-        if (reason === fallback) {
-            ctx.logger?.warn?.(`[MarketplaceInstallLocal] installing ${manifestId}: ${failed.type} '${failed.name}' could not be `
-                + `written into the pair (${resolved.status} ${resolved.code}): ${err?.message ?? err}`);
-        }
         let outcome: string;
         if (created) {
             let residue: string | undefined;
