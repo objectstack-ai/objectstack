@@ -761,6 +761,13 @@ export default ${toCamelCase(name)}Picklist;
      * is read, create and edit without delete, the shape the example apps
      * start a user's set from; the emitted comments name the bits to change.
      *
+     * `readScope` is written, as `'own'`: on an object whose sharing model is
+     * private (the `object` scaffold's), a read grant with no depth is what
+     * `security-private-no-readscope` reports, because a holder then reads
+     * only their own records and the author may not know it. `'own'` states
+     * that same reach as a decision rather than widening it; the emitted
+     * comment names `'org'` for the author who means every record.
+     *
      * Declared through `definePermissionSet`, so the set is parsed the moment
      * this module loads: an unknown key (`roles`, `profiles`, `users` — none is
      * a field of a set) is a startup error that names where that rule lives.
@@ -789,10 +796,18 @@ const ${toCamelCase(name)}PermissionSet = definePermissionSet({
   name: '${toSnakeCase(name)}',
   label: '${toTitleCase(name)}',
 
-  // One entry per object, keyed by its machine name. Also: viewAllRecords and
-  // modifyAllRecords, which reach past the object's sharing model.
+  // One entry per object, keyed by its machine name. readScope is which of
+  // the object's records a holder reads: 'own' is the ones they own (plus
+  // records shared with them), 'org' is every record. Also: viewAllRecords
+  // and modifyAllRecords, which reach past the object's sharing model.
   objects: {
-    ${tsString(object.name)}: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+    ${tsString(object.name)}: {
+      allowRead: true,
+      allowCreate: true,
+      allowEdit: true,
+      allowDelete: false,
+      readScope: 'own',
+    },
   },
 
   // isDefault: true binds this set to every signed-in user when the app

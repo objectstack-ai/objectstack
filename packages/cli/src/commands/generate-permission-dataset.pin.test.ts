@@ -114,6 +114,8 @@ describe('the permission scaffold is a set that grants the bound object', () => 
       allowCreate: true,
       allowEdit: true,
       allowDelete: false,
+      // The read depth is declared, not left to the object's sharing model.
+      readScope: 'own',
     });
     // Never bound to every signed-in user by the scaffold.
     expect(set.isDefault).toBe(false);
