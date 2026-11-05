@@ -68,6 +68,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { HttpDispatcher } from '@objectstack/runtime';
+// The route map ships from `/api-assembled` (its read responses embed the
+// assembled package body); the install output it binds is declared in `/api`.
+import { PackageApiContracts } from '@objectstack/spec/api-assembled';
 import { ObjectStackClient } from './index';
 
 const BASE_URL = 'http://localhost:3000';
@@ -230,5 +233,60 @@ describe('#12034 — the packages write verbs answer the bare row, not `{ packag
 
         // …and the post-unwrap value the SDK hands the caller is that `data`.
         expect(await client.packages.enable(MANIFEST.id)).toEqual(body.data);
+    });
+});
+
+/**
+ * [#30464] The published contract for `POST /api/v1/packages`, held against
+ * what the door really answers.
+ *
+ * The half above pins the CLIENT's declaration to the wire. This half pins the
+ * SPEC's: `PackageApiContracts.installPackage.output` is what an integrator
+ * generates a client from, and it declared `data: { package, … }` — a wrapper
+ * no surface sends, so code written against it read `data.package` and got
+ * `undefined`. The contract now follows the wire (the door was not changed).
+ *
+ * Same in-process chain as above: a real `SchemaRegistry`, the real
+ * `HttpDispatcher` answering it, and the dispatcher's own body handed to the
+ * declared schema untouched. Nothing here writes the expected body out by
+ * hand, which is how the false declaration survived in the first place.
+ */
+describe('#30464 — PackageApiContracts.installPackage.output parses the install door\'s real answer', () => {
+    async function installThroughTheDoor() {
+        const registry = new SchemaRegistry();
+        const { dispatcher } = dispatcherBackedClient(registry);
+        const raw = await dispatcher.handlePackages('', 'POST', { manifest: MANIFEST }, {}, CONTEXT());
+        return { registry, status: raw.response?.status, body: raw.response?.body as any };
+    }
+
+    it('the door\'s 201 body parses green, and the parse keeps every key the door sent', async () => {
+        const { registry, status, body } = await installThroughTheDoor();
+        expect(status).toBe(201);
+
+        const parsed = PackageApiContracts.installPackage.output.safeParse(body);
+        expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+
+        // The declared `data` IS the row the registry recorded — nothing the
+        // door sent was stripped by the parse, and nothing was invented by it.
+        expect(parsed.data!.data).toEqual(body.data);
+        expect(parsed.data!.data).toEqual(registry.getPackage(MANIFEST.id));
+        expect(parsed.data!.data.manifest.id).toBe(MANIFEST.id);
+    });
+
+    it('the old `{ package }` reading is refused by the contract, and absent from the wire', async () => {
+        const { body } = await installThroughTheDoor();
+
+        expect('package' in body.data).toBe(false);
+        expect('message' in body.data).toBe(false);
+
+        // The wrapper the contract used to promise, built from the door's own
+        // row, no longer passes it: the declaration and the wire cannot both
+        // be read as true.
+        const wrapped = { ...body, data: { package: body.data } };
+        const parsed = PackageApiContracts.installPackage.output.safeParse(wrapped);
+        expect(parsed.success).toBe(false);
+        expect(parsed.error!.issues.map((i) => i.path.join('.'))).toEqual(
+            expect.arrayContaining(['data.manifest', 'data.source']),
+        );
     });
 });
