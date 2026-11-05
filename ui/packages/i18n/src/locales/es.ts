@@ -2936,6 +2936,7 @@ const es = {
       verifyingDescription: "Estamos verificando su correo. Por favor espere.",
       successTitle: "Correo verificado",
       successDescription: "Su correo fue verificado. Ahora puede iniciar sesión.",
+      handoffSuccessDescription: "Su correo fue verificado. Vuelva a la aplicación en la que estaba iniciando sesión e inicie sesión allí.",
       errorTitle: "Verificación fallida",
       errorDescription: "La verificación falló. Solicite un nuevo enlace.",
       missingToken: "Falta un token en el enlace de verificación.",
