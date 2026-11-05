@@ -95,6 +95,29 @@ function nonEmpty(text: string | undefined): string | undefined {
   return typeof text === 'string' && text.trim() !== '' ? text : undefined;
 }
 
+/** `useObjectLabel().objectPluralLabel` — the client bundle's list-title lookup. */
+export type ObjectPluralLabelLookup = (objectDef: { name: string; label: string; pluralLabel?: string }) => string;
+
+/**
+ * What a served object's LIST is called (objectstack#30311): its served
+ * `pluralLabel`, else its served `label`, drawn as given. The server
+ * translated both, by its label order for an overridden item, so running the
+ * bundle over them was a second translation pass in which the base package's
+ * string won a rename back. The bundle's `objectPluralLabel` under the
+ * object's name is asked only when the definition carries neither; `''` when
+ * nothing names it. Shared by every surface that titles an object's list —
+ * the object page's header, the app header, a recent object row.
+ */
+export function servedObjectPluralLabel(
+  objectDef: { name: string; label?: unknown; pluralLabel?: unknown },
+  language: string | undefined,
+  objectPluralLabel: ObjectPluralLabelLookup,
+): string {
+  // `pluralLabel` is a plain string in the spec, so only a string is one.
+  const plural = typeof objectDef.pluralLabel === 'string' ? nonEmpty(objectDef.pluralLabel) : undefined;
+  return plural ?? metadataText(objectDef.label, language) ?? objectPluralLabel({ name: objectDef.name, label: '' });
+}
+
 /** The two members this hook reads off a cached metadata record. */
 export interface LabelledRecord {
   name?: unknown;

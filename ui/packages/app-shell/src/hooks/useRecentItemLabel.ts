@@ -65,7 +65,14 @@ import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import type { RecentItem } from '../context/RecentItemsProvider.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { bundledFirst, useBundledReads } from '../providers/bundledReads.js';
-import { findByName, metadataText, useNavTargetLabel, type LabelledRecord, type NavTargetLabelOptions } from './useNavTargetLabel.js';
+import {
+  findByName,
+  metadataText,
+  servedObjectPluralLabel,
+  useNavTargetLabel,
+  type LabelledRecord,
+  type NavTargetLabelOptions,
+} from './useNavTargetLabel.js';
 import { readObjectsByName, useReadItemsByName } from './useObjectPresence.js';
 
 const BY_NAME: NavTargetLabelOptions = { byName: true };
@@ -102,14 +109,8 @@ export function useRecentItemLabel(
       const listTitle = (objectName: string): string => {
         const def = findByName(readObjectsByName(metadata, [objectName]), objectName) as (LabelledRecord & { pluralLabel?: unknown }) | undefined;
         // A served object's labels are already translated (objectstack#30311):
-        // drawn as given. The singular half is read exactly as
-        // `useNavTargetLabel` reads it; `pluralLabel` is a plain string in the
-        // spec, so only a string is one.
-        const plural = typeof def?.pluralLabel === 'string' ? nonEmpty(def.pluralLabel) : undefined;
-        return plural
-          ?? metadataText(def?.label, language)
-          ?? nonEmpty(objectPluralLabel({ name: objectName, label: '' }))
-          ?? objectName;
+        // drawn as given, as the list page the entry opens titles itself.
+        return nonEmpty(servedObjectPluralLabel({ ...def, name: objectName }, language, objectPluralLabel)) ?? objectName;
       };
       switch (item.type) {
         case 'object':

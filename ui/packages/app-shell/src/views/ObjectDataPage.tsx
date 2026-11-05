@@ -78,6 +78,7 @@ import {
   PREVIEW_QUERY_VALUE,
 } from '../preview/PreviewModeContext.js';
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
+import { servedObjectPluralLabel } from '../hooks/useNavTargetLabel.js';
 import type { RowCrudPredicates } from '../utils/crudAffordances.js';
 
 /** Field types the auto-derived user-filter bar offers as dropdowns. */
@@ -234,7 +235,7 @@ export function buildSaveAsViewSpec(
 
 export function ObjectDataPage({ dataSource, objects }: any) {
   const { appName, objectName } = useParams();
-  const { t } = useObjectTranslation();
+  const { t, language } = useObjectTranslation();
   const { objectLabel, objectPluralLabel, fieldLabel } = useObjectLabel();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -600,7 +601,8 @@ export function ObjectDataPage({ dataSource, objects }: any) {
               {/* The page lists the object's records, so it is titled with the
                   plural, as the object crumb above it is (objectui#11696). The
                   record drawer below keeps the singular. */}
-              <span className="truncate">{objectPluralLabel(objectDef)}</span>
+              {/* A served object's label is already translated (objectstack#30311): drawn as given. */}
+              <span className="truncate">{servedObjectPluralLabel(objectDef, language, objectPluralLabel)}</span>
               <span className="rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                 {t('console.objectData.badge', { defaultValue: 'Data' })}
               </span>
