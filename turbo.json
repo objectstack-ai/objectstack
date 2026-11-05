@@ -700,6 +700,20 @@
         "$TURBO_ROOT$/packages/spec/package.json"
       ]
     },
+    "@objectstack/scenarios#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "!**/node_modules/**",
+        "$TURBO_ROOT$/docs/qa/scenarios/*.json",
+        "$TURBO_ROOT$/docs/qa/platform-checklist/areas/*.json"
+      ]
+    },
     "create-objectstack#test": {
       "dependsOn": ["^build"],
       "outputs": [],

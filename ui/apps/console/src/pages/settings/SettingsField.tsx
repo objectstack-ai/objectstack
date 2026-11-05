@@ -115,6 +115,14 @@ export interface SettingsFieldProps {
    */
   error?: string;
   /**
+   * A fact the PAGE knows about this row that the manifest cannot carry
+   * (objectstack#30313: the address the server judges beside Allowed IP
+   * ranges). Drawn under the control after the help text or the error, never
+   * in place of either: a refusal does not make the fact any less true.
+   * Already translated by the page.
+   */
+  note?: string;
+  /**
    * The scope this row's Save writes. The page passes it; a host that does
    * not (the timezone prompt) keeps the badges a lower scope would see.
    */
@@ -475,7 +483,7 @@ function ToggleSwitch({
 }
 
 export function SettingsField(props: SettingsFieldProps) {
-  const { spec, resolved, value, onChange, onAction, locked, saving, labels, error, writeScope } =
+  const { spec, resolved, value, onChange, onAction, locked, saving, labels, error, note, writeScope } =
     props;
   const id = useId();
   const { t, language } = useObjectTranslation();
@@ -637,7 +645,11 @@ export function SettingsField(props: SettingsFieldProps) {
   // through `wrapper`, so marking it here covers all of them at once instead of
   // per-case (objectstack#4224).
   const errorId = `${id}-error`;
+  const noteId = `${id}-note`;
   const labelId = `${id}-label`;
+  // The note describes the control too, so a screen reader reads it with the
+  // field, after the error when there is one.
+  const describedBy = [error ? errorId : null, note ? noteId : null].filter(Boolean).join(' ');
   // `labelFor` is the id of the labelable control the row renders — `id`, the
   // one every single-control case puts on it — or `undefined` for a case whose
   // control is a group that names itself from `labelId` instead.
@@ -659,10 +671,10 @@ export function SettingsField(props: SettingsFieldProps) {
         writeScope={writeScope}
         describeDefault={describeDefault}
       />
-      {error && isValidElement(children)
+      {describedBy && isValidElement(children)
         ? cloneElement(children as ReactElement<Record<string, unknown>>, {
-            'aria-invalid': true,
-            'aria-describedby': errorId,
+            ...(error ? { 'aria-invalid': true } : {}),
+            'aria-describedby': describedBy,
           })
         : children}
       {error ? (
@@ -670,6 +682,11 @@ export function SettingsField(props: SettingsFieldProps) {
       ) : (
         <FieldDescription description={fieldHelp} />
       )}
+      {note ? (
+        <p id={noteId} className="text-xs text-muted-foreground mt-1" data-testid="settings-field-note">
+          {note}
+        </p>
+      ) : null}
     </div>
   );
 

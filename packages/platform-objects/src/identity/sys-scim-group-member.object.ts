@@ -37,9 +37,9 @@ export const SysScimGroupMember = ObjectSchema.create({
   // wins over `titleFormat`) drew the raw id as the record page's H1. The
   // retired `titleFormat` template beside it is gone (refused at save and by
   // `os validate`); `identity-display-title.test.ts` holds the formula to the
-  // text that template drew. `scim_user_id` and `group_id` are lookups, so the
-  // formula reads their stored ids: a formula is evaluated on the stored row,
-  // before `$expand`, and cannot reach a related record's own title.
+  // text that template drew. The formula names the provisioned user and the
+  // group, each read one hop through its lookup (ADR-0079 addendum
+  // 2026-10-18), never the stored ids.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   highlightFields: ['group_id', 'scim_user_id', 'created_at'],
@@ -74,12 +74,17 @@ export const SysScimGroupMember = ObjectSchema.create({
     id: Field.text({ label: 'ID', required: true, readonly: true, group: 'System' }),
 
     // [ADR-0079] The record title (`nameField` above). A formula is computed on
-    // read and has no stored column. Every source column is required, so the
-    // expression needs no null guard.
+    // read and has no stored column. It names the provisioned user and the
+    // group by each one's own title, read ONE hop through its lookup (ADR-0079
+    // addendum, 2026-10-18): `sys_scim_user.user_name` and
+    // `sys_scim_group.display_name`, both required stored text (no second hop,
+    // no null guard). Both hops are read under the READER's own authority: a
+    // row the reader may not read, or one that no longer exists, leaves the
+    // title null, never an id.
     display_title: Field.formula({
       label: 'Title',
       returnType: 'text',
-      expression: F`record.scim_user_id + ' in ' + record.group_id`,
+      expression: F`record.scim_user_id.user_name + ' in ' + record.group_id.display_name`,
       description: 'Record title: the provisioned user and the group (computed on read)',
       group: 'Membership',
     }),

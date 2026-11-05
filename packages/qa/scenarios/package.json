@@ -1,0 +1,38 @@
+{
+  "name": "@objectstack/scenarios",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Scenario-card schema and loader for the open scenario library under docs/qa/scenarios/. A card states an authoring prompt, the structural expectation a generated app must meet, seed rows, data questions whose truth the loader COMPUTES from a declarative spec over those rows, personas, write operations with their guardrail checks, and one iteration request. Not published, no build step, no model calls: a devx instrument, not a protocol (packages/spec carries no obligation for this format).",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@objectstack/spec": "workspace:*",
+    "zod": "^4.6.6"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
+  },
+  "keywords": [
+    "objectstack",
+    "qa",
+    "scenarios",
+    "eval"
+  ],
+  "author": "ObjectStack",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "directory": "packages/qa/scenarios"
+  },
+  "homepage": "https://objectstack.ai/docs",
+  "bugs": "https://github.com/objectstack-ai/objectstack/issues"
+}
