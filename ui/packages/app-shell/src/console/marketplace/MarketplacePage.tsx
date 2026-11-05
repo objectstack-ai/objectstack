@@ -51,6 +51,8 @@ import { appRouteSegment, filterActiveApps, resolveKeyedI18nLabel } from '../../
 import { waitForServedApp, type ServedApp } from './waitForServedApp.js';
 import { splitPackageSuffix } from './middleTruncate.js';
 import { useDependencyMissingText } from './dependencyMissing.js';
+import { useProtocolCheckSkippedText } from './protocolCheckSkipped.js';
+import { ProtocolCheckSkippedNote } from './ProtocolCheckSkippedNote.js';
 import { ConnectorCredentialsStep } from './ConnectorCredentialsStep.js';
 import { packagesHref } from '../../views/metadata-admin/packageSource.js';
 
@@ -309,6 +311,7 @@ export function MarketplacePage() {
   const { isAdmin, isResolved } = useWorkspaceAdminStatus();
   const { t, language } = useObjectTranslation();
   const dependencyMissingText = useDependencyMissingText();
+  const protocolCheckSkippedText = useProtocolCheckSkippedText();
   const { appLabel } = useObjectLabel();
   // The adapter `MetadataProvider` reads through: the deploy wait asks the
   // same `GET /meta/app` the cache would, without the cache persisting it.
@@ -355,6 +358,8 @@ export function MarketplacePage() {
     ok: boolean;
     text: string;
     credentials?: { packageId: string; note?: string };
+    // objectstack#30326 — the answer's `protocolCheckSkipped`, drawn.
+    protocolNote?: string;
   } | null>(null);
   const [orgDeploy, setOrgDeploy] = useState<OrgDeployState | null>(null);
   const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
@@ -490,6 +495,8 @@ export function MarketplacePage() {
     try {
       if (getRuntimeConfig().features.installLocal) {
         const result = await installLocal({ packageId: pkg.manifest_id || pkg.id, versionId: 'latest' });
+        // objectstack#30326 — installed, its platform protocol range unchecked.
+        const protocolNote = protocolCheckSkippedText(result);
         // objectui#12098 — `hotLoaded: false` is the runtime's lenient path
         // (objectstack#22695): installed, loaded at its next restart. Nothing
         // of it is served until then, so the strip says so and nothing is
@@ -500,6 +507,7 @@ export function MarketplacePage() {
             ? t('marketplace.org.installed', { defaultValue: `Installed ${pkg.display_name}`, name: pkg.display_name })
             : t('marketplace.install.localLoadsAtRestart', { version: result.version, name: pkg.display_name }),
           ...(result.hotLoaded ? { credentials: { packageId: result.manifestId, note: result.credentialNote } } : {}),
+          ...(protocolNote ? { protocolNote } : {}),
         });
         await load();
         // On `hotLoaded` the runtime registered the package before it answered,
@@ -737,6 +745,7 @@ export function MarketplacePage() {
           {orgMsg && (
             <div className={`whitespace-pre-wrap rounded-md border p-3 text-sm ${orgMsg.ok ? 'border-green-500/30 bg-green-500/5 text-green-700 dark:text-green-400' : 'border-destructive/30 bg-destructive/5 text-destructive'}`}>
               {orgMsg.text}
+              {orgMsg.protocolNote ? <ProtocolCheckSkippedNote text={orgMsg.protocolNote} /> : null}
               {orgMsg.ok && orgMsg.credentials ? (
                 <ConnectorCredentialsStep
                   packageId={orgMsg.credentials.packageId}

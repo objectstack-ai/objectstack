@@ -147,6 +147,7 @@ export type { PluginRuntime } from '@objectstack/spec/kernel';
 
 import type { MetadataLock, PluginPermissions, PluginRuntime } from '@objectstack/spec/kernel';
 import { isPlainRecord } from '@objectstack/spec/data';
+import type { ProtocolCheckSkipped } from './protocolCheckSkipped.js';
 
 export interface MarketplacePackageVersion {
   id: string;
@@ -770,6 +771,12 @@ export interface LocalManagedInstallResult {
    * as under a walled tenancy posture, which this sentence names the remedy for.
    */
   credentialNote?: string;
+  /**
+   * Present only when the install door's protocol handshake admitted the
+   * package WITHOUT checking its range (objectstack#30326): it declares no
+   * `engines.protocol`, or one the runtime cannot read. Omitted when checked.
+   */
+  protocolCheckSkipped?: ProtocolCheckSkipped;
 }
 
 /**
@@ -806,6 +813,8 @@ export interface LocalUnmanagedInstallResult {
   copied: Array<{ type: string; name: string }>;
   strippedLocks: LocalInstallStrippedLock[];
   note?: string;
+  /** As on the managed answer ({@link LocalManagedInstallResult.protocolCheckSkipped}). */
+  protocolCheckSkipped?: ProtocolCheckSkipped;
 }
 
 export type LocalInstallResult = LocalManagedInstallResult | LocalUnmanagedInstallResult;

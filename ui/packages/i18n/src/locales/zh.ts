@@ -4402,6 +4402,11 @@ const zh = {
           unreadableVersion: '请安装 {{dependency}} 在 {{range}} 范围内的正式版本（当前安装的 {{installedVersion}} 不是“主版本.次版本.修订号”格式）。',
           unreadableDeclaration: '{{packageId}} 的依赖声明格式无法识别，请写成“软件包 ID → 版本范围”的映射后重新发布软件包。',
         },
+        // objectstack#30326 — the install answer's data.protocolCheckSkipped: installed, the protocol range unchecked.
+        protocolCheckSkipped: {
+          noRange: '{{packageId}} 未声明它支持的平台协议版本，因此已在平台协议 {{protocolVersion}} 下安装，未做兼容性检查，可能无法在当前平台版本上正常运行。声明了所支持协议（engines.protocol）的软件包版本会在安装时接受检查。',
+          unparsedRange: '{{packageId}} 声明的平台协议为 {{requiredRange}}，本运行时无法识别，因此已在平台协议 {{protocolVersion}} 下安装，未做兼容性检查，可能无法在当前平台版本上正常运行。声明了可识别协议范围（engines.protocol）的软件包版本会在安装时接受检查。',
+        },
         localUnauthorized: '请先登录本运行时再试。',
         localMarketplaceUnavailable: '本运行时未配置 OS_CLOUD_URL，无法访问应用市场目录。',
         updateTo: '更新 → v{{version}}',
