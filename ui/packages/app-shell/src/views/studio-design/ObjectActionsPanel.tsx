@@ -589,7 +589,7 @@ export function ObjectActionsPanel({
     <div className="flex min-h-0 flex-1 gap-4">
       {added.dialog}
       {/* action list */}
-      <div className="flex w-72 shrink-0 flex-col rounded-lg border">
+      <div data-testid="actions-list" className="flex w-72 shrink-0 flex-col rounded-lg border">
         <header className="flex items-center gap-2 border-b px-3 py-2">
           <Zap className="h-3.5 w-3.5" />
           <span className="text-[13px] font-medium">{t('engine.studio.data.tab.actions', locale)}</span>
@@ -681,7 +681,7 @@ export function ObjectActionsPanel({
                     <Loader2 className="h-3 w-3 animate-spin" />
                     {t('engine.studio.autoSaving', locale)}
                   </span>
-                ) : selAdded && added.savedAt?.name === sel.name && added.dirty !== sel.name ? (
+                ) : selAdded && added.savedAt !== null && added.savedAt.name === sel.name && added.dirty !== sel.name ? (
                   <span className="text-[11px] text-muted-foreground" data-testid="actions-pair-saved-at">
                     {tFormat('engine.studio.data.lastSaved', locale, {
                       time: added.savedAt.at.toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' }),
