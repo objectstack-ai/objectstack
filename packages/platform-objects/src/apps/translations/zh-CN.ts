@@ -92,7 +92,6 @@ export const zhCN: TranslationData = {
         nav_settings_ai: { label: 'AI 与 Embedder' },
         nav_settings_knowledge: { label: '知识库' },
         nav_settings_lifecycle: { label: '数据生命周期' },
-        nav_settings_feature_flags: { label: '功能开关' },
         nav_notification_preferences: { label: '通知偏好' },
         nav_notification_templates: { label: '通知模板' },
 

@@ -105,7 +105,10 @@ declaring `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (`basedOn` is the
 `manifest.version` of `hotcrm` it was taken from, recorded and never judged). Only the pair declares an override: an item of any other
 package that depends on `hotcrm` and bears a `hotcrm` item's name is refused at save
 and publish, and its fix is a new name. A permission set, position or capability is
-never overridden; it is copied under a new name. What the reads then serve is in
+never overridden: a permission set or position is copied under a new name, and a
+capability changes only with a new version of the package that declares it. An
+`overrides` on a type that takes none is refused `403 NOT_OVERRIDABLE`, and the
+sentence names that type's own route. What the reads then serve is in
 [Metadata lifecycle](/docs/concepts/metadata-lifecycle#customizing-an-installed-package-the-paired-custom-override-adr-0146).
 `POST /packages/hotcrm/ensure-customization` creates the pair when absent (Studio calls
 it on the first change), and `GET /packages/hotcrm/customizations` lists its overrides,

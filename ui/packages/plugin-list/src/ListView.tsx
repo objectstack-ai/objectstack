@@ -496,8 +496,17 @@ export interface ListViewProps {
    * carries over the view's in `schema`. Unlike the three above, a
    * `viewDefaults` without the `grouping` key leaves the grouping `schema`
    * opened with as the view's own.
+   *
+   * `filters` (objectstack#30073) are the view's own conditions, for a host
+   * that shows them as Filter panel rows (and passes them as
+   * `initialFilters`) instead of applying them under the list: the panel's
+   * finished conditions are then judged against these, so the view's own
+   * rows are not a personalization and an edit, a removal or a "Clear all"
+   * is. Absent ⇒ any finished panel condition is the reader's own, as before.
    */
-  viewDefaults?: Pick<ListViewSchema, 'hiddenFields' | 'rowHeight' | 'sort' | 'grouping'>;
+  viewDefaults?: Pick<ListViewSchema, 'hiddenFields' | 'rowHeight' | 'sort' | 'grouping'> & {
+    filters?: FilterBuilderRowGroup;
+  };
   /**
    * A reset to the view's own, told apart from a choice (objectstack#28948).
    * For a host that stores the user's preference and passes `viewDefaults`:
@@ -1032,6 +1041,16 @@ function isAppliedFilterRow(row: { operator: string; value?: unknown }): boolean
  * Returns `group` itself when every row is finished, so an emit with nothing
  * to drop hands the host the identity it had before.
  */
+/**
+ * A filter-panel group by what it selects: its rows' field, operator and
+ * value in order, and its logic once two rows make it matter. Never by row
+ * `id`, which the builder mints per row.
+ */
+function filterRowsKey(group: FilterBuilderRowGroup): string {
+  const rows = (group.conditions ?? []).map((c) => [c.field, c.operator, c.value ?? null]);
+  return JSON.stringify([rows.length > 1 ? group.logic ?? 'and' : 'and', rows]);
+}
+
 function appliedFilterGroup(group: FilterBuilderRowGroup): FilterBuilderRowGroup {
   const rows = group.conditions ?? [];
   const finished = rows.filter(isAppliedFilterRow);
@@ -5753,8 +5772,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     JSON.stringify((fields ?? []).map((f) => [f.field, f.order ?? 'asc']));
   const personalizationParts: ListPersonalizationPart[] = [];
   if (sortDiffersFromDeclared) personalizationParts.push('sort');
+  const viewPanelFilters = viewDefaults?.filters;
   if (
-    appliedFilterGroup(currentFilters).conditions.length > 0
+    (viewPanelFilters
+      ? filterRowsKey(appliedPanelFilters) !== filterRowsKey(appliedFilterGroup(viewPanelFilters))
+      : appliedPanelFilters.conditions.length > 0)
     || userFilterConditions.length > 0
     || appliedQueueSittingConditions.length > 0
   ) personalizationParts.push('filters');

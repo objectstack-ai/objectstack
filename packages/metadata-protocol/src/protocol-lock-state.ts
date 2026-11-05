@@ -150,8 +150,8 @@ export function declinesStoredRow(
     if (typeof name !== 'string' || name === '') return false;
     if (this.isDeclaredCodeDatasource(type, name)) return true;
     if (!this.isUnservedSealedOverlay(type, name)) return false;
-    // [#29613, ADR-0146 D8 item 2] …except, for a page, app, dataset, doc or
-    // book, the shipping package's declared override: judged as the flow's
+    // [#29613, ADR-0146 D8 item 2] …except, for a page, app, dataset, doc,
+    // book or [#30062] mapping, the shipping package's declared override: judged as the flow's
     // above, on the row's own `package_id` and body, against the package
     // that ships the name. The reads then serve it from its row, as they
     // serve a dashboard's. Every other sealed row of the name stays declined.

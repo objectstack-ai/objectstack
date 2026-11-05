@@ -34,6 +34,7 @@ import { applyProtection } from '@objectstack/spec/shared';
 import { isFederatedObject } from './federated-object.js';
 // [#22070] The builtin audit stamps are wrapped like a bound hook but registered in code.
 import { wrapDeclarativeHook } from './hook-wrappers.js';
+import { announceStoredExpressionHoles } from './stored-expression-backfill.js';
 import { LifecycleService } from './lifecycle/lifecycle-service.js';
 import { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
 import type { DanglingReferenceAuditOptions } from './integrity/dangling-reference-audit.js';
@@ -1196,6 +1197,13 @@ export class ObjectQLPlugin implements Plugin {
         );
         if (unservable) throw unservable;
         await this.ql?.announceOpenMigrationGates();
+        // [#29961] A stored computed field declared on an object that already
+        // held rows is NULL on them until each is next written: name the
+        // fields and `os migrate stored-expressions`. Here, beside the gate
+        // advisory, for its reason: schema sync has run and every object is
+        // registered. A bounded sample read that writes nothing and never fails
+        // the boot (`stored-expression-backfill.ts`).
+        if (this.ql) await announceStoredExpressionHoles(this.ql, ctx.logger);
     });
     ctx.hook('metadata:reloaded', async (payload?: unknown) => {
         await this.resyncAuthoredHooks(ctx);
