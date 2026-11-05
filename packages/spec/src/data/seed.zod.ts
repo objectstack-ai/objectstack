@@ -272,9 +272,12 @@ export const SeedSchema = lazySchema(() => strictObject({
    *   install, the sample-data reseed, the restart heal and the
    *   per-organization replay filter on the locale resolved for that load by
    *   `resolveSeedLocaleForLoad` (`@objectstack/runtime`), first answer wins:
-   *   the `localization.locale` setting for the organization the rows land in,
-   *   counted only when somebody set it (a value whose `source` is `'default'`
-   *   is the platform's placeholder, not a choice); then the `sys_user.locale`
+   *   the `localization.locale` setting for the organization the rows land in
+   *   (a load that names no organization, such as a single-tenant install or
+   *   reseed or the restart heal, still reads it, and the environment override
+   *   or the `global` setting answers), counted only when somebody set it (a
+   *   value whose `source` is `'default'` is the platform's placeholder, not a
+   *   choice); then the `sys_user.locale`
    *   of the user who installs, reseeds or founds the organization, when one
    *   started the load; then the app's declared `i18n.defaultLocale`, when the
    *   caller names one. No answer is a load with no locale, as above. A
@@ -287,7 +290,7 @@ export const SeedSchema = lazySchema(() => strictObject({
    *   (2026-11-05).
    */
   locale: z.array(LocaleSchema).min(1).optional()
-    .describe('Applicable locales (BCP-47 tags); omitted applies to every locale. The boot seed filters on the app\'s i18n.defaultLocale; the marketplace install, sample-data reseed, restart heal and per-organization replay filter on the locale resolved for the load (the localization.locale setting when set, then the installing or founding user\'s locale, then the app\'s i18n.defaultLocale where the load names one); package apply and draft publish do not filter by locale — they load every dataset and warn'),
+    .describe('Applicable locales (BCP-47 tags); omitted applies to every locale. The boot seed filters on the app\'s i18n.defaultLocale; the marketplace install, sample-data reseed, restart heal and per-organization replay filter on the locale resolved for the load (the localization.locale setting when set, then the locale of the installing, reseeding or founding user, then the app\'s i18n.defaultLocale where the load names one); package apply and draft publish do not filter by locale — they load every dataset and warn'),
 
   /**
    * The Payload
