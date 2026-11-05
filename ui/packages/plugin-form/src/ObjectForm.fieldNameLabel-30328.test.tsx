@@ -20,6 +20,7 @@ import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { registerAllFields } from '@object-ui/fields';
+import type { DataSource } from '@object-ui/types';
 import { ObjectForm } from './ObjectForm';
 import { fieldNameLabel, fromObjectSchema, type SectionFieldsContext } from './sectionFields';
 
@@ -35,14 +36,14 @@ const PARTS_SCHEMA = {
   },
 };
 
-function dataSource() {
+function dataSource(): DataSource {
   return {
     getObjectSchema: vi.fn().mockResolvedValue(PARTS_SCHEMA),
     create: vi.fn(),
     update: vi.fn(),
     findOne: vi.fn(),
     find: vi.fn().mockResolvedValue({ data: [] }),
-  } as any;
+  } as unknown as DataSource;
 }
 
 describe('a label-less field reads the same in the form as in the list (objectstack#30328)', () => {
