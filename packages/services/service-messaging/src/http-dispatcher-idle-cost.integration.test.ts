@@ -61,7 +61,7 @@ import { HttpDelivery, SYS_HTTP_DELIVERY } from './objects/http-delivery.object.
 import { HttpDispatcher } from './http-dispatcher.js';
 import { hashPartition } from './backoff.js';
 import type { FetchImpl } from './http-sender.js';
-import type { EnqueueHttpInput, HttpClaimCredential, IHttpOutbox } from './http-outbox.js';
+import type { EnqueueHttpInput, HttpClaimCredential, HttpDelivery as HttpDeliveryRecord, IHttpOutbox } from './http-outbox.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /** The production default. */
@@ -266,6 +266,8 @@ describe('#17623 #28383 HttpDispatcher — idle tick cost', () => {
 });
 
 describe('#29919 SqlHttpOutbox.nextDueAt — the one read a sole-writer loop wakes by', () => {
+    const credential = (d: HttpDeliveryRecord): HttpClaimCredential => ({ claimedBy: d.claimedBy!, claimedAt: d.claimedAt! });
+
     it('an empty outbox answers null in TWO statements, both reads', async () => {
         statements = [];
         expect(await outbox.nextDueAt({ claimTtlMs: TTL })).toBeNull();
@@ -279,12 +281,12 @@ describe('#29919 SqlHttpOutbox.nextDueAt — the one read a sole-writer loop wak
         await outbox.enqueue(delivery('r_retry'));
         const claimed = await outbox.claim({ nodeId: 'node-a', limit: 10, claimTtlMs: TTL, now });
         const retry = claimed.find((d) => d.refId === 'r_retry')!;
-        await outbox.ack(retry.id, { success: false, httpStatus: 500, durationMs: 1, nextRetryAt: now + 10 * TTL }, retry);
+        await outbox.ack(retry.id, { success: false, httpStatus: 500, durationMs: 1, nextRetryAt: now + 10 * TTL }, credential(retry));
         // r_now is still in flight under node-a, claimed at `now`.
         expect(await outbox.nextDueAt({ claimTtlMs: TTL, now })).toBe(now + TTL + 1);
 
         const live = claimed.find((d) => d.refId === 'r_now')!;
-        await outbox.ack(live.id, { success: true, httpStatus: 200, durationMs: 1 }, live);
+        await outbox.ack(live.id, { success: true, httpStatus: 200, durationMs: 1 }, credential(live));
         expect(await outbox.nextDueAt({ claimTtlMs: TTL, now })).toBe(now + 10 * TTL);
     });
 });
