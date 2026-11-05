@@ -5,7 +5,7 @@
 
 feat(studio): a contributed nav entry shows the label the live app shows, and a package that only contributes navigation says where it goes
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 - **The label.** A navigation entry another package contributes to a base's app now shows the label the live app shows, with its id as a muted second line under it. Before, the row showed only the id. The label is looked up by `(app, id)` in the app row the Interfaces pillar already reads (`GET /meta/app?package=`), which serves the folded navigation: the served entries the app's published layer does not hold. No request is added and nothing is read from the contributor's manifest. An id the base also holds, or one two contributions share, keeps the bare id, so no label is guessed. A label-less entry reads what it inherits, through the rail's own resolver. A never-published app has no served row, so its contributed rows keep the id.
