@@ -50,6 +50,7 @@ import {
   cn,
 } from '@object-ui/components';
 import { SchemaRenderer, useMetadata } from '@object-ui/react';
+import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { ModalForm } from '@object-ui/plugin-form';
 import { resolveFormViewLayout } from '../utils/recordFormNavigation.js';
 import { modalTargetRefusalMessage } from '../utils/modalTargetDiagnostics.js';
@@ -165,6 +166,9 @@ export function useActionModal(dataSource?: any) {
   // layout needs, and an action is when it is needed.
   const metadata = useMetadata();
   const { getItem, ensureType } = metadata;
+  // The object form's title when the descriptor names none (below).
+  const { t } = useObjectTranslation();
+  const { objectLabel } = useObjectLabel();
 
   const close = useCallback((r: ActionResult) => {
     setState((s) => {
@@ -267,12 +271,21 @@ export function useActionModal(dataSource?: any) {
       // a create uses the object's `create` form view when it declares one
       // (objectui#13099), read from the same mode the form below opens in.
       const formMode = (d.mode as 'create' | 'view' | 'edit') || 'create';
+      const objectDef = metadata.objects.find((o: any) => o?.name === d.objectName);
       const viewLayout = (d.fields || (d as any).sections)
         ? {}
-        : resolveFormViewLayout(
-          metadata.objects.find((o: any) => o?.name === d.objectName),
-          formMode === 'create' ? 'create' : 'edit',
-        );
+        : resolveFormViewLayout(objectDef, formMode === 'create' ? 'create' : 'edit');
+      // A create form is titled by its object, the way the console's own
+      // New dialog is (`form.createTitle`). The lookup field's inline "create
+      // the referenced record" hands a descriptor with no title, and its
+      // dialog opened straight onto the first section's heading.
+      const title = d.title
+        ?? (formMode === 'create' && objectDef
+          ? t('form.createTitle', {
+            defaultValue: 'Create {{object}}',
+            object: objectLabel({ name: objectDef.name, label: objectDef.label ?? objectDef.name }),
+          })
+          : undefined);
       modalElement = (
         <ModalForm
           schema={{
@@ -281,7 +294,7 @@ export function useActionModal(dataSource?: any) {
             objectName: d.objectName,
             mode: formMode,
             recordId: d.recordId,
-            title: d.title,
+            title,
             description: d.description,
             fields: d.fields,
             ...viewLayout,

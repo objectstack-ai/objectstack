@@ -20,7 +20,7 @@
  */
 
 import * as React from 'react';
-import { RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE } from '@objectstack/spec/api';
+import { RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES, RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE } from '@objectstack/spec/api';
 import type { FeedItem } from '@object-ui/types';
 
 /**
@@ -160,12 +160,17 @@ const timeOf = (item: FeedItem): number => {
  */
 export const TIMELINE_PAIR_WINDOW_MS = 5000;
 
-/** The ledger's write actions and the activity type the same action writes. */
-const AUDIT_ACTION_TO_ACTIVITY_TYPE: Readonly<Record<string, string>> = {
-  create: 'created',
-  update: RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE,
-  delete: 'deleted',
-};
+/**
+ * The activity type the ledger write action `action` writes, or undefined for
+ * an action the spec does not fold (`restore`, an unknown action, a prototype
+ * key such as `toString`). The pairs are the spec's
+ * `RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES`, the same set the server's
+ * `timeline` count steps aside, so the badge and the drawn rows fold alike.
+ */
+function foldedActivityTypeOf(action: string | undefined): string | undefined {
+  if (!action || !Object.prototype.hasOwnProperty.call(RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES, action)) return undefined;
+  return RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES[action as keyof typeof RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES];
+}
 
 /** One actor on both sides: the same user id, or, where neither names one, the same name. */
 function sameActor(activity: FeedItem, audit: FeedItem & AuditFeedFacts): boolean {
@@ -183,7 +188,7 @@ function sameActor(activity: FeedItem, audit: FeedItem & AuditFeedFacts): boolea
  * in ms, or -1.
  */
 function pairGap(activity: FeedItem, audit: FeedItem & AuditFeedFacts): number {
-  const activityType = audit.auditAction ? AUDIT_ACTION_TO_ACTIVITY_TYPE[audit.auditAction] : undefined;
+  const activityType = foldedActivityTypeOf(audit.auditAction);
   if (!activityType || activity.activityType !== activityType || activity.parentId) return -1;
   if (!sameActor(activity, audit)) return -1;
   const gap = Math.abs(timeOf(activity) - timeOf(audit));

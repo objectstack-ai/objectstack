@@ -50,6 +50,7 @@ import { studioRoutes } from './components/StudioRoute';
 import { SetupRoute } from './components/SetupRoute';
 import { UnmatchedRoute } from './components/UnmatchedRoute';
 import { nativeShellRouteTarget } from './nativeShellRoute';
+import { useNativePushRegistration } from './nativePushRegistration';
 import { FormPage } from './components/FormPage';
 import { InternalFormRoute } from './components/InternalFormRoute';
 import { MetadataHmrReloader } from './components/MetadataHmrReloader';
@@ -161,6 +162,10 @@ const BASENAME = resolveBasename();
  * active, else the first active app. The shell's published `currentAppName` is
  * left to that guard because it is an app NAME, and only the app list turns a
  * name into the address its route uses.
+ *
+ * Push registration (`useNativePushRegistration`) is called first, so its
+ * listener for a rotated token is installed in the commit that posts `ready()`,
+ * and its unregister answers the shell's removal of this connection.
  */
 function NativeShellRouting() {
   const location = useLocation();
@@ -175,9 +180,11 @@ function NativeShellRouting() {
     },
     [apps, hostHint, navigate],
   );
+  const unregisterPushDevice = useNativePushRegistration(location.pathname);
   const host = useNativeHostRouting({
     route: `${location.pathname}${location.search}${location.hash}`,
     navigate: navigateShellRoute,
+    onConnectionRemoved: unregisterPushDevice,
   });
   const platform = host?.platform;
   useEffect(() => {

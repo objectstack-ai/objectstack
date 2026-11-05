@@ -46,8 +46,31 @@ export function customizationEnvironmentText(t: Translate, pairId: string): stri
   });
 }
 
-/** {@link savedToCustomizationText} as an element, for the Studio item header's note line. */
-export function SavedToCustomizationNote({ baseLabel, testId }: { baseLabel: string; testId?: string }) {
+/**
+ * {@link savedToCustomizationText} as an element, for the Studio item header's
+ * note line. Given the pair's id, it goes on with the pending-changes sheet's
+ * second sentence, {@link customizationEnvironmentText}, so the header and
+ * the sheet say the same words from the same keys (objectstack#30436).
+ */
+export function SavedToCustomizationNote({
+  baseLabel,
+  pairId,
+  testId,
+}: {
+  baseLabel: string;
+  /** The base's `<base>.custom` pair; nothing more is said without one. */
+  pairId?: string | null;
+  testId?: string;
+}) {
   const { t } = useObjectTranslation();
-  return <span data-testid={testId}>{savedToCustomizationText(t, baseLabel)}</span>;
+  return (
+    <>
+      <span data-testid={testId}>{savedToCustomizationText(t, baseLabel)}</span>
+      {pairId ? (
+        <span data-testid={testId ? `${testId}-environment` : undefined} className="block">
+          {customizationEnvironmentText(t, pairId)}
+        </span>
+      ) : null}
+    </>
+  );
 }

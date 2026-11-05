@@ -54,6 +54,10 @@ export {
   type SettingsActionHandler,
   type SettingsLiveStatus,
   type SettingsLiveStatusProvider,
+  // The options a select key serves from the running system, not its manifest.
+  type SettingsOptionSource,
+  type SettingsOptionSourceAnswer,
+  type SettingsServedOption,
   // ADR-0144 D4 — the write-side rule a package registers on one key.
   type SettingsWritePredicate,
   type SettingsWritePredicateInput,

@@ -533,6 +533,19 @@ export const SpecifierSchema = lazySchema(() => z.object({
   /** `action_button`: handler invoked on click. */
   handler: SpecifierHandlerSchema.optional().describe('Action handler (action_button)'),
 
+  /**
+   * `toggle`: the confirm dialog text shown before the value changes to off
+   * (omit = no confirm). The name mirrors a handler's `confirmText`; it is
+   * asked only on the turn to OFF, the one direction a toggle such as
+   * `auth.email_password_enabled` takes away from people. Translated under
+   * `settings.<namespace>.keys.<key>.confirmOffText`, beside the toggle's
+   * `label`. The parse refuses it on every other specifier type, which would
+   * never ask it.
+   */
+  confirmOffText: I18nLabelSchema
+    .optional()
+    .describe("Confirm dialog text shown before a toggle's value changes to off (omit = no confirm)"),
+
   /** `child_pane`: namespace of the sub-manifest to navigate to. */
   childNamespace: SnakeCaseIdentifierSchema.optional().describe('Sub-namespace (child_pane)'),
 
@@ -565,6 +578,16 @@ export const SpecifierSchema = lazySchema(() => z.object({
       code: z.ZodIssueCode.custom,
       path: ['valueDomain'],
       message: `Specifier of type '${spec.type}' carries no value, so it must not declare a 'valueDomain'.`,
+    });
+  }
+  // A turn to OFF is asked about only on a `toggle`, the one specifier with an
+  // off. On any other type the renderer never asks it, so the declaration is a
+  // silent no-op, the shape Prime Directive #10 refuses (ruling 6657805240).
+  if (spec.confirmOffText !== undefined && spec.type !== 'toggle') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['confirmOffText'],
+      message: `Specifier of type '${spec.type}' has no off to confirm, so it must not declare a 'confirmOffText' (only a 'toggle' may).`,
     });
   }
   // select/radio/multiselect require options.

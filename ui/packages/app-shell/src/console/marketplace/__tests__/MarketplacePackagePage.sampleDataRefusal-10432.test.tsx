@@ -169,6 +169,8 @@ describe('ENVIRONMENT_KERNEL_UNAVAILABLE is a terminal refusal', () => {
     render(<MarketplacePackagePage />);
 
     fireEvent.click((await openMenu()).purge);
+    // objectstack#30323 — confirmed in the console's own dialog.
+    fireEvent.click(await screen.findByTestId('purge-sample-data-confirm'));
 
     expect(await screen.findByText('«marketplace.detail.sampleDataKernelUnavailable»')).toBeInTheDocument();
     expect(screen.queryByText(WITHHELD)).not.toBeInTheDocument();
@@ -197,6 +199,8 @@ describe('CONTROL: INTERNAL_ERROR keeps today\'s retryable behaviour', () => {
     render(<MarketplacePackagePage />);
 
     fireEvent.click((await openMenu()).purge);
+    // objectstack#30323 — confirmed in the console's own dialog.
+    fireEvent.click(await screen.findByTestId('purge-sample-data-confirm'));
 
     expect(await screen.findByText(WITHHELD)).toBeInTheDocument();
     expect(screen.queryByText('«marketplace.detail.sampleDataKernelUnavailable»')).not.toBeInTheDocument();

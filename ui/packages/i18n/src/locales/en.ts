@@ -177,6 +177,8 @@ const en = {
     // the server's message plays no part (objectui#11344). It is the one
     // success-toast text the runner writes itself (objectui#10900).
     completedSuccessfully: 'Action completed successfully',
+    // The same toast for an action that has a label: it names what was done.
+    completedNamed: '{{action}} completed',
     // The runner's other own text (objectui#10969): the error fallbacks when no
     // readable error message reached it, and the Undo label it hands the toast
     // handler for an undoable success toast.
@@ -2360,6 +2362,12 @@ const en = {
       // `validation.url`; these two name what a phone number and a colour take.
       invalidPhone: 'Enter a phone number using only digits, spaces and + ( ) - .',
       invalidColor: 'Enter a hex color, such as #1a2b3c',
+      // The address the server judges beside Allowed IP ranges (objectstack#30313),
+      // one whole sentence per state of `GET /api/v1/auth/admin/client-address`:
+      // `trustProxy` off, on, and no address the server can establish.
+      clientAddressDirect: 'Your address, as the server judges it: {{address}}. A list that leaves it out cannot be saved from here. This server does not trust proxy headers, so behind a proxy this is the proxy\'s address.',
+      clientAddressViaProxy: 'Your address, as the server judges it: {{address}}, read from the forwarded headers of the proxy this server trusts. A list that leaves it out cannot be saved from here.',
+      clientAddressUnknown: 'The server cannot establish your address, so a non-empty list cannot be saved from here.',
       // A settings value that misses its declared pattern (objectstack#30206),
       // said in the console's words instead of the server's English sentence.
       // `{{setting}}` is the setting's label and `{{help}}` the help line the
@@ -5005,6 +5013,16 @@ const en = {
         purgeSuccess_one: 'Removed {{count}} sample record.',
         purgeSuccess_other: 'Removed {{count}} sample records.',
         purgeNoData: 'No sample records found to purge.',
+        // objectstack#30323 — the install note's sample-data count, its clear and the app banner.
+        sampleDataLoaded: 'This install loaded {{count}} sample record(s) so you can see the app working. Clear them when you start using it for real.',
+        sampleDataLoaded_one: 'This install loaded {{count}} sample record so you can see the app working. Clear it when you start using the app for real.',
+        sampleDataLoaded_other: 'This install loaded {{count}} sample records so you can see the app working. Clear them when you start using it for real.',
+        sampleDataReloaded: 'Installing again loads the sample data again, including any you had cleared.',
+        purgeConfirmAtMost: 'At most {{count}} sample record(s) will be deleted: the number this install loaded.',
+        purgeConfirmAtMost_one: 'At most {{count}} sample record will be deleted: the number this install loaded.',
+        purgeConfirmAtMost_other: 'At most {{count}} sample records will be deleted: the number this install loaded.',
+        sampleDataBannerTitle: '"{{name}}" has sample data.',
+        sampleDataBannerMessage: 'It is there so you can see the app working. Clear it when you start using the app for real.',
         reseedQueued: 'Sample data will be re-seeded on next environment access.',
         reseedLocalSuccess: 'Re-seeded sample data: {{inserted}} inserted, {{updated}} updated.',
         reseedPartialErrors: '({{count}} record(s) failed to write)',
@@ -5041,7 +5059,7 @@ const en = {
         noPermission: 'You do not have permission to install apps in any environment. Only organization owners and admins can install — ask your organization admin.',
         signInFirst: 'You need to sign into ObjectOS Cloud first. Click "Open on cloud" below.',
         success: 'Installed successfully. Open the environment to see the new app.',
-        localSuccess: 'Installed v{{version}} to this runtime. "{{name}}" should now appear in the app switcher.',
+        localSuccess: 'Installed v{{version}} to this runtime. "{{name}}" is now in the app switcher.',
         // objectui#12098 — the install answered `hotLoaded: false`: installed, and
         // the running kernel did not register it (objectstack#22695), so nothing
         // of it is served before the next restart.

@@ -464,6 +464,11 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
                           <CellRenderer
                             value={value}
                             field={enrichedField as any}
+                            // The record, as a grid cell gets its row: a face
+                            // whose value means something only beside a
+                            // sibling (`recipient-picker` reads
+                            // `recipient_type`) names it here too.
+                            dependentValues={stagedRecord}
                             deadlineSettled={isDeadlineSettled(enrichedField, stagedRecord, { scope: predicateScope, fields: objectSchema?.fields })}
                             // Every date in the strip writes its year
                             // (objectui#13331). The chips are read side by
