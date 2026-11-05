@@ -1948,7 +1948,7 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   },
   {
     receiver: 'ext',
-    expected: ['extend', 'fields', 'priority'],
+    expected: ['extend', 'fields', 'priority', 'validations'],
     declaredBy: 'ObjectStackSchema.objectExtensions[]',
     keys: () => shapeKeysOf(ObjectStackSchema.shape.objectExtensions),
   },
