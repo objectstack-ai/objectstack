@@ -23,7 +23,7 @@
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
-import { UploadProvider, type UploadResult } from '@object-ui/providers';
+import { UploadProvider, type UploadResult } from '@object-ui/fields';
 import type { ActionParamDef } from '@object-ui/core';
 import { ActionParamDialog } from './ActionParamDialog';
 

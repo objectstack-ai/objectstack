@@ -45,6 +45,7 @@ import { MessagingService, NOTIFICATION_EVENT_OBJECT, type EmitInput } from './m
 import { createInboxChannel, INBOX_OBJECT } from './inbox-channel.js';
 import { createEmailChannel } from './email-channel.js';
 import { createSmsChannel } from './sms-channel.js';
+import { createPushChannel, type PushSenderSurface } from './push-channel.js';
 import { NotificationTemplateStore } from './template-renderer.js';
 import { SqlNotificationOutbox, DELIVERY_OBJECT } from './sql-outbox.js';
 import { MemoryNotificationOutbox } from './memory-outbox.js';
@@ -60,6 +61,7 @@ import {
     NotificationPreference,
     NotificationReceipt,
     NotificationTemplate,
+    UserDevice,
 } from './objects/index.js';
 
 const SYSTEM = { context: { isSystem: true } as ExecutionContext };
@@ -138,7 +140,7 @@ async function boot(): Promise<ObjectQL> {
     await ql.init();
     for (const def of [
         SYS_ORGANIZATION, SYS_USER, SysNotification, InboxMessage, NotificationReceipt,
-        NotificationDelivery, NotificationPreference, NotificationTemplate,
+        NotificationDelivery, NotificationPreference, NotificationTemplate, UserDevice,
     ]) {
         ql.registry.registerObject(def as any, '@objectstack/service-messaging');
     }
@@ -541,5 +543,65 @@ describe('#24978 — the contract is closed', () => {
                 .rejects.toBeInstanceOf(TypeError);
         }
         expect(await ql.find(NOTIFICATION_EVENT_OBJECT, { fields: ['id'] }, SYSTEM)).toEqual([]);
+    });
+});
+
+describe("a push reaches the recipient in the recipient's language, not in its device's locale", () => {
+    type Pushed = Parameters<PushSenderSurface['send']>[0];
+
+    /**
+     * The real push channel over the real device registry (`sys_user_device`),
+     * on a push-service double that records what each device token was sent.
+     * Each recipient's phone is registered with a locale that is not the
+     * recipient's own: the zh-CN user's phone in `en`, the `en` user's in
+     * `zh-CN`, the user with no locale's in `ja-JP`.
+     */
+    async function withPush(c: Composition): Promise<Pushed[]> {
+        const pushed: Pushed[] = [];
+        c.messaging.registerChannel(createPushChannel({
+            getPush: () => ({
+                vendors: () => ['apns'],
+                async send(m) { pushed.push(m); return { status: 'sent', messageId: `push_${pushed.length}` }; },
+            }),
+            devices: c.messaging,
+        }));
+        await c.messaging.registerDevice('u_zh', { token: 'tok-zh', platform: 'ios', deviceId: 'phone-zh', locale: 'en' });
+        await c.messaging.registerDevice('u_en', { token: 'tok-en', platform: 'ios', deviceId: 'phone-en', locale: 'zh-CN' });
+        await c.messaging.registerDevice('u_none', { token: 'tok-none', platform: 'ios', deviceId: 'phone-none', locale: 'ja-JP' });
+        return pushed;
+    }
+
+    const toToken = (pushed: Pushed[], token: string) =>
+        pushed.filter((m) => m.token === token).map((m) => ({ title: m.title, body: m.body }));
+
+    it('the device row keeps the locale it was registered with — stored, and read by nothing on the way out', async () => {
+        const ql = await boot();
+        await withPush(compose(ql));
+        const rows = (await ql.find('sys_user_device', { fields: ['user_id', 'locale'] }, SYSTEM)) as any[];
+        expect(rows.map((r) => [r.user_id, r.locale]).sort()).toEqual([['u_en', 'zh-CN'], ['u_none', 'ja-JP'], ['u_zh', 'en']]);
+    });
+
+    it('inline fan-out: each phone gets its user\'s sentence, then the deployment default for a user with none', async () => {
+        const ql = await boot();
+        const c = compose(ql, { deploymentDefault: 'zh-CN' });
+        const pushed = await withPush(c);
+
+        await c.messaging.emit(emitTo(['u_zh', 'u_en', 'u_none'], { channels: ['push'] }));
+
+        expect(toToken(pushed, 'tok-zh')).toEqual([ZH]);        // device says en
+        expect(toToken(pushed, 'tok-en')).toEqual([LITERAL]);   // device says zh-CN
+        expect(toToken(pushed, 'tok-none')).toEqual([ZH]);      // device says ja-JP; the deployment default wins
+    });
+
+    it('durable path (SQL outbox + dispatcher): the same, rendered at delivery', async () => {
+        const ql = await boot();
+        const c = compose(ql, { outbox: 'sql' });
+        const pushed = await withPush(c);
+
+        expect((await c.messaging.emit(emitTo(['u_zh', 'u_en'], { channels: ['push'] }))).enqueued).toBe(2);
+        await c.dispatcher!.tick();
+
+        expect(toToken(pushed, 'tok-zh')).toEqual([ZH]);
+        expect(toToken(pushed, 'tok-en')).toEqual([LITERAL]);
     });
 });

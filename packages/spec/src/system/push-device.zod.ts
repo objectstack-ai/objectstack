@@ -59,7 +59,10 @@ export const UserDeviceSchema = lazySchema(() => z.object({
   token: z.string().min(1).describe('Vendor push token. Held by one live device at a time: a second user\'s registration moves it'),
   platform: z.enum(PUSH_DEVICE_PLATFORMS).describe('Device platform, as the registration named it'),
   appId: z.string().optional().describe('App the token was issued to: the iOS bundle ID or the Android application ID'),
-  locale: LocaleSchema.optional().describe('Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in'),
+  locale: LocaleSchema.optional().describe(
+    'Device locale (BCP 47, for example zh-CN), as the registration named it. Stored for the device; no push renders by it: '
+    + 'a push arrives in the recipient\'s language (sys_user.locale, then the deployment default)',
+  ),
   name: z.string().optional().describe('Device friendly name, as the registration named it'),
   origin: z.string().regex(PUSH_SERVER_ORIGIN_PATTERN, { message: PUSH_SERVER_ORIGIN_MESSAGE }).optional().describe(
     '[PLANNED — not yet stored] The origin the Console was loaded from, as the registration named it (for example '

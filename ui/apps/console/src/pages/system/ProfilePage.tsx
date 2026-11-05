@@ -35,7 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@object-ui/components';
-import { useUpload } from '@object-ui/providers';
+import { useUpload } from '@object-ui/fields';
 import { ConsolePageHeader } from '@object-ui/app-shell';
 import { useDisplayLocale, useObjectTranslation, type TranslateFn } from '@object-ui/i18n';
 import { useAdapter, extractFieldErrors, extractWriteErrorMessage } from '@object-ui/react';
