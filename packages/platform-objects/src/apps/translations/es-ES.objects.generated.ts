@@ -3388,7 +3388,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       namespace: {
         label: "Espacio de nombres",
-        help: "Espacio de nombres del manifiesto (p. ej. mail, branding, feature_flags)."
+        help: "Espacio de nombres del manifiesto (p. ej. mail, branding, storage)."
       },
       key: {
         label: "Clave",
