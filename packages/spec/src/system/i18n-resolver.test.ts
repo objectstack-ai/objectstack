@@ -6467,3 +6467,46 @@ describe("label precedence on an overridden item — the pair's translation, the
     });
   });
 });
+
+describe('bundle locale keys are the bundle\'s OWN keys — an Object.prototype member name is an unknown code', () => {
+  const inherited = ['constructor', 'toString', '__proto__'] as const;
+  const zhBundle: TranslationBundle = {
+    'zh-CN': { objects: { account: { _views: { all_accounts: { label: '全部客户' } } } } } as any,
+  };
+  const view = { name: 'all_accounts', label: 'All Accounts', objectName: 'account' };
+
+  for (const code of inherited) {
+    it(`resolveBundleLocale answers ${code} exactly what it answers an unknown code`, () => {
+      expect(resolveBundleLocale({ en: {} }, code)).toBe(resolveBundleLocale({ en: {} }, 'xx'));
+      expect(resolveBundleLocale({ en: {} }, code)).toBeUndefined();
+      expect(resolveBundleLocale({ en: {}, 'zh-CN': {} }, code)).toBe(resolveBundleLocale({ en: {}, 'zh-CN': {} }, 'xx'));
+    });
+
+    it(`a reader asked for ${code} reads what an unknown code reads — the literal, or the next locale in the chain`, () => {
+      expect(resolveViewLabel(zhBundle, view, { locale: code })).toBe(resolveViewLabel(zhBundle, view, { locale: 'xx' }));
+      expect(resolveViewLabel(zhBundle, view, { locale: code })).toBe('All Accounts');
+      expect(resolveViewLabel(zhBundle, view, { locale: code, fallbackChain: ['zh-CN'] })).toBe('全部客户');
+    });
+  }
+
+  it('a key the bundle only inherits is no locale of it, whatever its prototype holds', () => {
+    const layered = Object.create(zhBundle) as TranslationBundle;
+    expect(resolveBundleLocale(layered, 'zh-CN')).toBe(resolveBundleLocale(layered, 'xx'));
+    expect(resolveViewLabel(layered, view, { locale: 'zh-CN' })).toBe('All Accounts');
+  });
+
+  it('an OWN constructor or __proto__ key still answers — an own-property check, not a deny-list', () => {
+    const parsed = JSON.parse(
+      '{"en":{},"constructor":{"objects":{"account":{"_views":{"all_accounts":{"label":"ctor"}}}}},"__proto__":{}}',
+    ) as TranslationBundle;
+    expect(resolveBundleLocale(parsed, 'constructor')).toBe('constructor');
+    expect(resolveBundleLocale(parsed, '__proto__')).toBe('__proto__');
+    expect(resolveViewLabel(parsed, view, { locale: 'constructor' })).toBe('ctor');
+
+    const bare = Object.create(null) as Record<string, unknown>;
+    bare.en = {};
+    bare.constructor = {};
+    expect(resolveBundleLocale(bare, 'constructor')).toBe('constructor');
+    expect(resolveBundleLocale(bare, 'toString')).toBeUndefined();
+  });
+});
