@@ -755,7 +755,12 @@ export class ObjectQL implements IObjectQLEngine {
    * Service Status Report
    * Used by Kernel to verify health and capabilities.
    */
-  getStatus() {
+  getStatus(): {
+    name: "data";
+    status: string;
+    version: string;
+    features: string[];
+  } {
       return {
           name: CoreServiceName.enum.data,
           status: 'running',
@@ -810,7 +815,7 @@ export class ObjectQL implements IObjectQLEngine {
     meta?: any;
     /** Stable name from metadata (set by `bindHooksToEngine`). */
     hookName?: string;
-  }) {
+  }): void {
     // Refuse a scope that is statically decidable as meaningless before
     // anything is registered or reported. Each face is checked on its own
     // first, so the combined check below can assume well-formed names.
@@ -1055,7 +1060,7 @@ export class ObjectQL implements IObjectQLEngine {
    * added here that defers a dispatch past the enclosing unit of work would be
    * changing that ruling, not implementing it.
    */
-  public async triggerHooks(event: string, context: HookContext) {
+  public async triggerHooks(event: string, context: HookContext): Promise<void> {
     const entries = this.hooks.get(event) || [];
     // [#28251] `ctx.notice` — the write's own `onNotice` listener, bound here
     // so every insert / update dispatch site carries it (see hook-notice.ts).
@@ -2303,7 +2308,7 @@ export class ObjectQL implements IObjectQLEngine {
    * comes through here (it is installed by `installPackage` in
    * `@objectstack/metadata-protocol`), so `'authored'` is not accepted.
    */
-  registerApp(registeredBody: any, scope?: ArtifactInstallScope, source: Exclude<InstalledPackageSource, 'authored'> = 'code') {
+  registerApp(registeredBody: any, scope?: ArtifactInstallScope, source: Exclude<InstalledPackageSource, 'authored'> = 'code'): void {
       // The CONVERTED body, for everything below — the package record, the
       // live manifest, every item it registers (see {@link convertPackageBodyForward}).
       // [#23972] Refused before anything registers — see the docblock: an
@@ -2504,7 +2509,7 @@ export class ObjectQL implements IObjectQLEngine {
    *    else already is the default** → the caller's intent is being dropped,
    *    so it is loud too rather than folded into the quiet path.
    */
-  registerDriver(driver: IDataDriver, isDefault: boolean = false) {
+  registerDriver(driver: IDataDriver, isDefault: boolean = false): void {
     const existing = this.drivers.get(driver.name);
     if (existing) {
       // [#27277] The entry may be the floored instance of this very driver.
@@ -3749,7 +3754,7 @@ export class ObjectQL implements IObjectQLEngine {
     default?: boolean;
     datasource: string;
     priority?: number;
-  }>) {
+  }>): void {
     this.datasourceMapping = rules;
     this.logger.info('Datasource mapping rules configured', {
       ruleCount: rules.length
@@ -3784,7 +3789,7 @@ export class ObjectQL implements IObjectQLEngine {
    * `OS_ALLOW_DRIVER_CONNECT_FAILURE=1`, which boots in a state that is warned
    * about loudly rather than assumed.
    */
-  async init() {
+  async init(): Promise<void> {
     this.logger.info('Initializing ObjectQL engine', {
       driverCount: this.drivers.size,
       drivers: Array.from(this.drivers.keys())
@@ -4275,7 +4280,7 @@ export class ObjectQL implements IObjectQLEngine {
     return wasDatastoreCreatedFromEmpty.call(host);
   }
 
-  async destroy() {
+  async destroy(): Promise<void> {
     this.logger.info('Destroying ObjectQL engine', { driverCount: this.drivers.size });
     
     for (const [name, driver] of this.drivers.entries()) {
