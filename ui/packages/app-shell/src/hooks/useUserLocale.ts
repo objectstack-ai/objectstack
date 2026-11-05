@@ -203,10 +203,20 @@ const LOCALE_FIELD = 'locale';
  * locales ∩ what this renderer can resolve) — the same list the globe menu and
  * the profile card render, deliberately not a second opinion about what ships.
  *
- * Exact tag first, then the base language: a column holding `zh-CN` must reach
- * the `zh` pack, while a real `pt-BR` pack still beats `pt`. That order is the
- * one `@object-ui/i18n` already documents for a seed and for `pickLocalized`,
- * so this is the existing convention rather than a new rule.
+ * The match order is the server's `resolveLocale` (`packages/core`
+ * `fallbacks/memory-i18n.ts`), the one the platform's i18n routes already
+ * resolve a requested locale with, so the console and the server agree on
+ * which language a stored tag means:
+ *
+ *   1. exact tag (`pt-BR` → `pt-BR`; a real `pt-BR` still beats `pt`);
+ *   2. the same tag in any case (`zh-cn` → `zh-CN`) — a row written before the
+ *      server door folded case is served as stored, never migrated;
+ *   3. the base language (`zh-CN` → `zh`, `en-GB` → `en`), case-insensitively;
+ *   4. the first offered variant of that base language (`zh` → `zh-CN`,
+ *      `zh-Hans-CN` → `zh-CN`), in the order the list offers them.
+ *
+ * A match answers the OFFERED spelling, never the stored one: the list is what
+ * the provider can switch to.
  *
  * `null` while the list is still in flight (`offerable === null`), and `null`
  * for a tag nothing can render: switching to a locale this renderer cannot
@@ -216,11 +226,21 @@ export function pickRenderableLocale(
   tag: string,
   offerable: readonly string[] | null,
 ): string | null {
-  if (!offerable) return null;
+  if (!offerable || offerable.length === 0) return null;
+  // 1. Exact.
   if (offerable.includes(tag)) return tag;
-  const base = tag.split('-')[0];
-  if (base && base !== tag && offerable.includes(base)) return base;
-  return null;
+  // 2. Case-insensitive.
+  const lower = tag.toLowerCase();
+  const caseMatch = offerable.find((code) => code.toLowerCase() === lower);
+  if (caseMatch) return caseMatch;
+  // 3. Base language.
+  const base = lower.split('-')[0];
+  if (!base) return null;
+  const baseMatch = offerable.find((code) => code.toLowerCase() === base);
+  if (baseMatch) return baseMatch;
+  // 4. Variant of the base language — first offered wins.
+  const variantMatch = offerable.find((code) => code.split('-')[0].toLowerCase() === base);
+  return variantMatch ?? null;
 }
 
 /**
