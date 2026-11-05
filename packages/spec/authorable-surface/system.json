@@ -1136,6 +1136,7 @@
     "system/Specifier:bannerSeverity",
     "system/Specifier:bannerText",
     "system/Specifier:childNamespace",
+    "system/Specifier:confirmOffText",
     "system/Specifier:default",
     "system/Specifier:deprecated",
     "system/Specifier:description",

@@ -6,9 +6,9 @@
  * `storedReferenceIncludes`, `remainderAfterMemberRemoval`,
  * `referenceCheckContext`, `dependentCountIsDisclosable`,
  * `cascadeDeleteRelations`, `cascadeRelationBehavior`,
- * `fileReferenceCheckElevation`, `referenceProbeFilterOfSet`,
- * `probeReferencingRowsOfSet`, `walkReferencingRelations`,
- * `isTenantColumnSetNull`, `outlivesOrganization`,
+ * `fileReferenceCheckElevation`, `probeReferencingRows`,
+ * `referenceProbeFilterOfSet`, `probeReferencingRowsOfSet`,
+ * `walkReferencingRelations`, `isTenantColumnSetNull`, `outlivesOrganization`,
  * `keepsOrganizationReference`, `countReferencingRowsOutside`,
  * `organizationCountContext`, `organizationCountIsDisclosable`,
  * `refuseOrganizationDeleteWhileOwned`, `organizationOwnedRowCounts` moved out
@@ -656,6 +656,116 @@ export class CascadePlanningFacet {
     if (set.elevationsFiled.has(key)) return;
     set.elevationsFiled.add(key);
     this.recordReferenceCheckElevation(object, id, childName, fieldName, context);
+  }
+
+  /**
+   * The dependents probe of {@link cascadeDeleteRelations}: the rows of
+   * `childName` whose `fieldName` references `id`, read under SYSTEM identity
+   * and exactly narrowed. [#22305] Both phases read through it, so the set the
+   * collection walk gathers and the rows the deleting walk acts on are one
+   * reading of the same relation.
+   */
+  static async probeReferencingRows(this: Pick<CascadePlanningHost, 'find'>, childName: string, fieldName: string, fdef: any, id: string | number | ReadonlyArray<string | number>, probeWhere: Record<string, unknown>, context: ExecutionContext | undefined): Promise<any[]> {
+    let dependents: any[];
+    try {
+      dependents = await this.find(
+        childName,
+        // [#12166] (maintainer ruling 2026-08-26, option A) SYSTEM identity,
+        // unconditionally. This probe is the platform's own referential-
+        // integrity read, not a query the caller asked for, and running it
+        // as the caller made "delete permission" silently mean "delete +
+        // read on EVERY referencing table": a caller with full delete rights
+        // on `object` but no read grant on `childName` got a blanket 403
+        // from the security middleware — whether or not a reference existed,
+        // and with `childName` EMPTY. Measured on a real deployment across
+        // 17 role×object pairs, with the A/B control that granting read-only
+        // on the referencing object (touching NOTHING about delete rights)
+        // turned the identical delete into a 200.
+        //
+        // Referential-integrity actions are engine responsibility executed
+        // under system identity on every mainstream platform — the RDBMS FK
+        // baseline, Salesforce (lookup clearing / cascade delete documented
+        // as bypassing sharing), Dataverse, ServiceNow, Odoo. Caller
+        // identity here was the outlier.
+        //
+        // The elevation is `sudo()`-SHAPED (`{ ...context, isSystem: true }`),
+        // never a bare `{ isSystem: true }` — the same posture
+        // `recomputeSummaries` holds one axis over. Three reasons, and each
+        // one is a defect if dropped:
+        //   - the open transaction handle, `tenantId` and `timezone` must
+        //     survive, or this probe leaves the caller's transaction and
+        //     stops being TENANT-scoped — a bare system context would widen
+        //     the probe across the tenant wall, which is the opposite of
+        //     what this card relaxes;
+        //   - `userId` survives, and that IS the audit ledger's
+        //     "triggered-by" half (ruling constraint 3): the record carries
+        //     triggered-by = the deleting operator and executed-as = system.
+        //     `read-audit.ts` states the same property of `sudo()`;
+        //   - it is a NARROW elevation: nothing else about the delete path
+        //     changes identity (ruling constraint 1). The `set_null` UPDATE
+        //     and the `cascade` DELETE below still run as the caller, byte
+        //     for byte, so this relaxes the reference CHECK and not the
+        //     caller's own authority over the dependent rows.
+        //
+        // [Constraint 4] If the spec later declares per-relationship
+        // on-delete behaviour, BEHAVIOUR follows the declaration; the
+        // identity of this probe stays system, unconditionally. Do not make
+        // this line conditional on `behavior`.
+        { where: probeWhere, context: ObjectQL.referenceCheckContext(context) },
+      );
+    } catch (error) {
+      // [#8895] Discriminate by error TYPE — this probe IS the referential
+      // guard, so an empty answer is only truthful for the one failure that
+      // really means "no dependents".
+      //
+      // The bare `catch { continue }` this replaces reached `continue` on
+      // ANY probe failure, and every consequence of that is silent: the
+      // walk's `restrict` branch never fires, so a delete the integrity
+      // rules say must be REFUSED is allowed through; `set_null`/`cascade`
+      // never run, so child rows that should have been nulled or removed
+      // are left orphaned; nothing is logged and the caller is told the
+      // delete succeeded. Fail-OPEN on an integrity guard — the read did
+      // not happen and the answer "there are none" was invented for it
+      // (ADR-0110 D3: "the probe found nothing" and "the probe could not
+      // run" are different facts with opposite meanings here).
+      //
+      // Benign: the child object is registered but its TABLE was never
+      // provisioned (schema sync not run yet). It cannot hold a row that
+      // references anything, so zero dependents IS the truth and skipping
+      // the relation is correct. Asked through the shared
+      // `isMissingTableError` predicate (`@objectstack/metadata/errors`,
+      // #4825) — the same call `seedAutonumber` and `resolveFileReferences`
+      // make — never a hand-rolled code test.
+      //
+      // Everything else (connection drop, timeout, permission denial, a
+      // query error, a missing COLUMN on a provisioned table) means the
+      // dependents may well exist and simply were not seen. It propagates:
+      // the delete fails loudly and nothing is written, which is the same
+      // disposition the maintainer's 2026-08-15 ruling gives this family —
+      // unprovisioned is truthful emptiness, everything else must surface.
+      // A guard that could not be EVALUATED must not silently pass.
+      //
+      // No new response field and no new error code: the caller receives
+      // the probe's own failure, envelope intact.
+      if (isMissingTableError(error, childName)) return [];
+      throw error;
+    }
+    // [#9362] The multi-value pushdown in the probe filter can be a SUPERSET
+    // (the substring reading, on a backend without the declaration), so the
+    // exact answer is taken here, on the rows themselves. Everything the walk
+    // does with them — the `restrict` count in the 409 envelope, the `cascade`
+    // recursion, the `set_null` write — and the set the collection walk
+    // gathers read this answer, so narrowing anywhere later would leave one of
+    // them acting on a row that never referenced this record.
+    // [#27004] Over a set of ids (`probeReferencingRowsOfSet`), a row is kept
+    // when it holds any of them.
+    if (declaredMultiValued(fdef) && dependents) {
+      const wanted: ReadonlyArray<string | number> = Array.isArray(id) ? id : [id as string | number];
+      dependents = dependents.filter((row) =>
+        wanted.some((w) => ObjectQL.storedReferenceIncludes(row?.[fieldName], w)),
+      );
+    }
+    return dependents ?? [];
   }
 
   /**

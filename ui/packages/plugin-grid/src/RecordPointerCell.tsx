@@ -322,7 +322,9 @@ export function RecordPointerCell({ pointer, dataSource }: RecordPointerCellProp
   }
 
   const def = defAnswer.state === 'ok' ? defAnswer.def : null;
-  const typeLabel = objectLabel({ name: objectName, label: def?.label || objectName });
+  // The served label as given — the server already translated it — and the
+  // bundle only when none is served (objectstack#30390).
+  const typeLabel = def?.label || objectLabel({ name: objectName, label: objectName });
   const Icon = def?.icon ? resolveIcon(def.icon) : null;
   // The annotation the other `resolveIcon` seam call sites carry: it returns a
   // STABLE, cached component per icon name; it does not create one during

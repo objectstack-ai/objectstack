@@ -172,7 +172,10 @@ export const en: PlatformTranslationData = {
         },
       },
       keys: {
-        email_password_enabled: { label: 'Enable email/password login' },
+        email_password_enabled: {
+          label: 'Enable email/password login',
+          confirmOffText: 'People who sign in with a password will need another way in.',
+        },
         signup_enabled: {
           label: 'Allow email sign-up',
           help: 'Opens the email-and-password sign-up form. Who it admits is decided by the Self-registration audience below: under Invitation only, only an address holding a pending invitation; under Allowlisted email domains, the allowlisted domains and invited addresses; under Open, anyone. Off closes the form under every audience, invitations included.',
