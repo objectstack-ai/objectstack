@@ -31,9 +31,9 @@
  *
  * That module is a published entry the runtime's inbound rate limiter loads,
  * and it is kept free of imports; this one needs `node:net`. The trust rule
- * also feeds the ADR-0069 D5 allow-list, which compares exact IPv6 entries as
- * text, so rewriting the rule's own answer would change which configured
- * entries match. This module changes only what is stored.
+ * also feeds the ADR-0069 D5 allow-list (`ipMatchesRange`), which reads each
+ * entry and the address as the address they denote, whatever their spelling.
+ * This module changes only what is stored.
  *
  * ## The form
  *

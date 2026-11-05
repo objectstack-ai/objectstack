@@ -2875,7 +2875,7 @@ export function FilterBuilderField({ value, onChange, fields, readOnly, id, aria
         <Button {...controlNaming({ id, ariaLabelledBy })} variant="outline" size="sm" disabled={readOnly || notEditable}
           title={notEditable ? tr('console.objectView.filterOrGroupNotEditable') : undefined}
           className="h-8 w-full justify-between text-xs font-normal" data-testid="filter-builder-trigger">
-          <span className="truncate text-left">{summary || <span className="text-muted-foreground">+ Add filter…</span>}</span>
+          <span className="truncate text-left">{summary || <span className="text-muted-foreground">{t('engine.inspector.dataset.addFilter', locale)}</span>}</span>
           <ChevronDown className="h-3.5 w-3.5 opacity-60 shrink-0" />
         </Button>
       </PopoverTrigger>

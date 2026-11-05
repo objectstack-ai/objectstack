@@ -202,6 +202,9 @@ describe('every form type Studio renders reads in zh-CN (objectstack#30039)', ()
     expect(sections(zh).find((s) => s.label === '基础信息')?.description).toBe('标识与主显示形态');
     expect(fieldByName(zh, 'searchableFields')?.label).toBe('可搜索字段');
     expect(fieldByName(zh, 'description')?.label).toBe('描述');
+    // The description row's hint: without the overlay leaf it showed the
+    // schema's English `.describe()` text.
+    expect(fieldByName(zh, 'description')?.helpText).toBe('视图说明，用于文档与悬停提示');
   });
 
   it('an English console reads the spec English, the same object every time — the control', () => {
@@ -209,6 +212,7 @@ describe('every form type Studio renders reads in zh-CN (objectstack#30039)', ()
     expect(en).toBe(getViewForm('en'));
     expect(sections(en).map((s) => s.label)).toContain('Basics');
     expect(fieldByName(en, 'searchableFields')?.label).toBeUndefined();
+    expect(fieldByName(en, 'description')?.helpText).toBeUndefined();
   });
 
   it('the page and report panels read in Chinese too', () => {

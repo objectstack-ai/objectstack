@@ -10,6 +10,8 @@ import * as dashboards from './src/dashboards';
 import * as apps from './src/apps';
 import * as skills from './src/skills';
 import * as picklists from './src/picklists';
+import * as permissions from './src/security';
+import * as datasets from './src/datasets';
 
 // Every value a barrel exports, as the list a stack key takes: typed by what
 // the barrel exports, and an empty list while it exports nothing yet.
@@ -79,4 +81,6 @@ export default defineStack({
   apps: exportsOf(apps),
   skills: exportsOf(skills),
   picklists: exportsOf(picklists),
+  permissions: exportsOf(permissions),
+  datasets: exportsOf(datasets),
 });

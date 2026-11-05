@@ -28,7 +28,9 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { DEFAULT_METADATA_TYPE_REGISTRY, OVERRIDE_TYPE_CLASSIFICATION } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { judgeOverrideWrite } from './protocol-packaged-base-refusal.js';
 import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
 
 const PACKAGE_ID = 'com.example.pkg';
@@ -922,5 +924,76 @@ describe('the override write gate — only the base\'s paired .custom declares a
         expect(res.success).toBe(true);
         expect(stored().map((r) => `${r.type}/${r.name}:${r.state}`).sort())
             .toEqual(['dashboard/custom_board:active', 'page/crm_home:active']);
+    });
+});
+
+/**
+ * [#30062] A declared override of a type that takes none is told a remedy that
+ * works for THAT type, and cites the record that excluded it. Before, every
+ * excluded type read "… takes no override (ADR-0146 D6). Remove `overrides` and
+ * create your own TYPE under a new name": a `sharing_rule`'s or a `queue`'s
+ * create then answered 403 NOT_CREATABLE, a code-only type has no create at
+ * all, the D6 citation was the security catalog's for types outside it, and an
+ * `api` read "a api".
+ *
+ * Judged on the pure verdict every door asks (`judgeOverrideWrite`), for every
+ * excluded type of the closed classification, so a type classified later is
+ * held to the rule the day it lands.
+ */
+describe('[#30062] each excluded type\'s refusal names a remedy that works for it', () => {
+    const BASE_ID = 'com.example.base';
+    const PAIR_ID = `${BASE_ID}.custom`;
+    const CITATION: Record<string, string> = {
+        adr_0146_d6_security_catalog: 'ADR-0146 D6',
+        adr_0126_code_only: 'ADR-0146 D6',
+        not_package_shipped: 'ADR-0146 D2',
+        not_runtime_creatable: 'ADR-0146 D2',
+        adr_0126_one_shot: 'ADR-0126 §3',
+        setup_owned_connection: 'ADR-0146 D1',
+        behavioural_switch_first: 'ADR-0146 D9',
+    };
+    const creatable = (type: string) => DEFAULT_METADATA_TYPE_REGISTRY.some((e) => e.type === type && e.allowRuntimeCreate === true);
+    // The extend-only object and its extension keep their own D10 sentences (pinned above).
+    const EXCLUDED = (Object.entries(OVERRIDE_TYPE_CLASSIFICATION) as Array<[string, { disposition: string; basis: string }]>)
+        .filter(([, row]) => row.disposition === 'excluded' && row.basis !== 'adr_0146_d10_extended');
+    const refusalOf = (type: string): string => {
+        const verdict = judgeOverrideWrite(
+            { type, name: 'their_item', packageId: PAIR_ID, item: { name: 'their_item', overrides: { package: BASE_ID, basedOn: '1.0.0' } } },
+            { dependencies: [BASE_ID], shippers: [BASE_ID] },
+        );
+        expect(verdict, type).toMatchObject({ verdict: 'refuse', rule: 'declared_type_not_overridable' });
+        return (verdict as { message: string }).message;
+    };
+
+    it('enumerates every excluded type of the classification', () => {
+        expect(EXCLUDED.length).toBeGreaterThanOrEqual(17);
+    });
+
+    for (const [type, row] of EXCLUDED) {
+        it(`${type}: cites ${CITATION[row.basis]}, and names a create only where the type has one`, () => {
+            const message = refusalOf(type);
+            expect(message).toContain(`takes no override (${CITATION[row.basis]})`);
+            expect(message).not.toMatch(/\ba [aeiou]/);
+            if (creatable(type) && row.basis !== 'setup_owned_connection') {
+                expect(message).toContain(`create your own ${type} under a new name`);
+            } else {
+                expect(message).not.toContain('create your own');
+            }
+        });
+    }
+
+    it('a sharing rule names its organization rule and its switch, a queue its Setup page, a datasource Setup', () => {
+        expect(refusalOf('sharing_rule')).toContain('POST /api/v1/sharing/rules');
+        expect(refusalOf('sharing_rule')).toContain('/security/_activation/sharing_rule/:name');
+        expect(refusalOf('queue')).toContain('in Setup › Queues');
+        expect(refusalOf('datasource')).toContain('Setup › Datasources');
+        expect(refusalOf('field')).toContain('`object_extension` item saved through');
+    });
+
+    it('a code-only type names a new version of the base that ships it', () => {
+        for (const type of ['job', 'api', 'agent', 'capability', 'picklist', 'assignment_rule']) {
+            expect(refusalOf(type), type).toContain(`changes only with a new version of '${BASE_ID}'`);
+        }
+        expect(refusalOf('api')).toContain('but an api takes no override');
     });
 });

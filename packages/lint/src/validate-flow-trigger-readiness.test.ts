@@ -10,8 +10,10 @@ import {
   FLOW_TRIGGER_UNKNOWN_EVENT,
   FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
   FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
+  FLOW_TIME_RELATIVE_OBJECT_MISMATCH,
   FLOW_TRIGGER_UNROUTABLE,
   FLOW_API_TRIGGER_SECRET_MISSING,
+  FLOW_API_TRIGGER_SIGNATURE_UNUSABLE,
   validateFlowApiTriggerSecret as validateFlowApiTriggerSecretUnrecorded,
   schemaRefusalHead,
 } from './validate-flow-trigger-readiness.js';
@@ -30,6 +32,7 @@ const NEVER_FIRE_IDS: readonly string[] = [
   FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
   FLOW_TRIGGER_UNROUTABLE,
   FLOW_API_TRIGGER_SECRET_MISSING,
+  FLOW_API_TRIGGER_SIGNATURE_UNUSABLE,
   FLOW_TRIGGER_UNKNOWN_EVENT,
 ];
 const fired: Array<{ rule: string; message: string; hint: string }> = [];
@@ -1465,6 +1468,27 @@ describe('validateFlowTriggerReadiness', () => {
         },
       ],
       [
+        FLOW_TIME_RELATIVE_OBJECT_MISMATCH,
+        'error',
+        {
+          objects: [{ name: 'task', label: 'Task', fields: {} }, { name: 'project', label: 'Project', fields: {} }],
+          flows: [
+            {
+              name: 'two_objects',
+              type: 'schedule',
+              status: 'active',
+              nodes: [
+                {
+                  id: 'start',
+                  type: 'start',
+                  config: { objectName: 'project', timeRelative: { object: 'task', dateField: 'due_at', withinDays: 3 } },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      [
         FLOW_TRIGGER_UNKNOWN_EVENT,
         'error',
         {
@@ -1517,6 +1541,31 @@ describe('validateFlowTriggerReadiness', () => {
               type: 'api',
               status: 'active',
               nodes: [{ id: 'start', type: 'start', config: { hookId: 'intake' } }],
+            },
+          ],
+        },
+      ],
+      // [#30009] A declared sender scheme the spec refuses: never-fire, like a missing secret.
+      [
+        FLOW_API_TRIGGER_SIGNATURE_UNUSABLE,
+        'error',
+        {
+          objects: [candidateObject],
+          flows: [
+            {
+              name: 'broken_vendor_hook',
+              type: 'api',
+              status: 'active',
+              nodes: [
+                {
+                  id: 'start',
+                  type: 'start',
+                  config: {
+                    secretRef: 'DOCUSIGN_CONNECT_KEY',
+                    signature: { signs: 'body', header: 'X-DocuSign-Signature-1', algorithm: 'hmac-sha1', encoding: 'base64' },
+                  },
+                },
+              ],
             },
           ],
         },
@@ -1753,6 +1802,199 @@ describe('validateFlowTriggerReadiness', () => {
   });
 });
 
+// [#30009] A start node that declares its sender's own scheme (`config.signature`)
+// is graded by the hook's ONE verifier, read through the spec's
+// `apiTriggerVerifierOf` (the reader the engine and the trigger share): ready on
+// the key `config.secretRef` names and nothing else, and never ready when the
+// reader answers `unusable`.
+// [#30283] A time-relative start naming, in `config.objectName`, an object other
+// than the one it sweeps. The run binds the swept object alone; the expression
+// checks type the conditions against `objectName`. One finding, at that key.
+describe('[#30283] a time-relative start whose objectName is not the swept object', () => {
+  const objects = [
+    { name: 'crm_opportunity', label: 'Opportunity', sharingModel: 'private', fields: { amount: { type: 'number', required: true } } },
+    { name: 'crm_task', label: 'Task', sharingModel: 'private', fields: { priority: { type: 'number', required: true }, close_date: { type: 'date' } } },
+  ];
+  /** A sweep of `crm_task`; `config` extras ride on the start node. */
+  const sweepFlow = (extra: Record<string, unknown>, timeRelative: unknown = { object: 'crm_task', dateField: 'close_date', offsetDays: [3] }) => ({
+    name: 'task_due',
+    label: 'Task due',
+    type: 'schedule',
+    status: 'active',
+    runAs: 'system',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start', config: { ...extra, timeRelative, organization: FIXTURE_ORG } },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'end' }],
+  });
+  const mismatchOf = (findings: ReadonlyArray<{ rule: string }>) =>
+    findings.filter((f) => f.rule === FLOW_TIME_RELATIVE_OBJECT_MISMATCH);
+
+  it('refuses the start, at config.objectName, naming both objects and the fix', () => {
+    const findings = validateFlowTriggerReadiness({ objects, flows: [sweepFlow({ objectName: 'crm_opportunity' })] });
+    expect(findings.map((f) => [f.rule, f.severity, f.where, f.path])).toEqual([
+      [FLOW_TIME_RELATIVE_OBJECT_MISMATCH, 'error', 'flow "task_due" › start node', 'flows[0].nodes[0].config.objectName'],
+    ]);
+    const [f] = findings;
+    expect(f.message).toContain("config.objectName 'crm_opportunity'");
+    expect(f.message).toContain("('crm_task')");
+    expect(f.message).not.toContain('\n');
+    expect(f.message.length).toBeLessThanOrEqual(200);
+    expect(f.hint).toMatch(/^Remove config\.objectName .*or set it to 'crm_task'/);
+    expect(f.hint).not.toContain('\n');
+    expect(f.hint.length).toBeLessThanOrEqual(200);
+  });
+
+  it('is silent where the start names one object: the swept one, or none', () => {
+    for (const extra of [{ objectName: 'crm_task' }, {}]) {
+      expect(validateFlowTriggerReadiness({ objects, flows: [sweepFlow(extra)] }), JSON.stringify(extra)).toEqual([]);
+    }
+  });
+
+  it('is silent where the engine binds another trigger, which reads objectName and never sweeps', () => {
+    // A `record-*` token outranks the descriptor in the kind resolver, and an
+    // array-form record token is routed to the record-change trigger by the
+    // engine's pre-check. Each is paired with the shape that fires.
+    for (const triggerType of ['record-after-update', ['record-after-create', 'record-after-update']]) {
+      const findings = validateFlowTriggerReadiness({
+        objects,
+        flows: [sweepFlow({ objectName: 'crm_opportunity', triggerType })],
+      });
+      expect(mismatchOf(findings), JSON.stringify(triggerType)).toEqual([]);
+    }
+    expect(
+      mismatchOf(validateFlowTriggerReadiness({ objects, flows: [sweepFlow({ objectName: 'crm_opportunity', triggerType: 'schedule' })] })),
+    ).toHaveLength(1);
+  });
+
+  it('leaves a descriptor whose object is not a string to the descriptor rule, and co-fires with it otherwise', () => {
+    const noObject = validateFlowTriggerReadiness({
+      objects,
+      flows: [sweepFlow({ objectName: 'crm_opportunity' }, { object: 7, dateField: 'close_date', offsetDays: [3] })],
+    });
+    expect(noObject.map((f) => f.rule)).toEqual([FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID]);
+    // Two keys, two facts: a bad window beside a string object reports both.
+    const both = validateFlowTriggerReadiness({
+      objects,
+      flows: [sweepFlow({ objectName: 'crm_opportunity' }, { object: 'crm_task', dateField: 'close_date' })],
+    });
+    expect(both.map((f) => [f.rule, f.path]).sort()).toEqual([
+      [FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID, 'flows[0].nodes[0].config.timeRelative'],
+      [FLOW_TIME_RELATIVE_OBJECT_MISMATCH, 'flows[0].nodes[0].config.objectName'],
+    ]);
+  });
+
+  it('closes the measured hole: a condition only the named object can satisfy no longer passes every authoring command', () => {
+    // The run binds a `crm_task` row, which has no `amount`: this condition
+    // faults every run (`No such key: amount`). Typed against `objectName`,
+    // the expression checks find nothing wrong with it, so before this rule
+    // the stack passed every command clean.
+    const stack = { objects, flows: [sweepFlow({ objectName: 'crm_opportunity', condition: 'record.amount > 10' })] };
+    for (const command of AUTHORING_COMMANDS) {
+      const errors = runAuthoringRules(command, { normalized: stack, parsed: stack }).filter((f) => f.severity === 'error');
+      expect(errors.map((f) => [f.rule, f.path]), command).toEqual([
+        [FLOW_TIME_RELATIVE_OBJECT_MISMATCH, 'flows[0].nodes[0].config.objectName'],
+      ]);
+    }
+  });
+
+  it('the runtime publish gate refuses the write, judged on the flow alone', () => {
+    const gated = runRuntimeAuthoringRules({ type: 'flow', item: sweepFlow({ objectName: 'crm_opportunity' }) });
+    expect(gated.rulesRun).toContain('validateFlowTriggerReadiness');
+    expect(gated.errors.map((f) => [f.rule, f.path])).toEqual([
+      [FLOW_TIME_RELATIVE_OBJECT_MISMATCH, 'flows[0].nodes[0].config.objectName'],
+    ]);
+    expect(runRuntimeAuthoringRules({ type: 'flow', item: sweepFlow({}) }).errors).toEqual([]);
+  });
+
+  it('`os explain flow-time-relative-object-mismatch` carries what the verdict does not say', () => {
+    expect(FLOW_TIME_RELATIVE_OBJECT_MISMATCH).toBe('flow-time-relative-object-mismatch');
+    const text = explanationOf(FLOW_TIME_RELATIVE_OBJECT_MISMATCH);
+    for (const fact of ['No part of the run reads', 'No such key', 'refused as an unknown field', 'nothing the run does changes', 'that trigger binds `objectName`', 'what is refused is its own publish']) {
+      expect(text, fact).toContain(fact);
+    }
+  });
+});
+
+describe('[#30009] api trigger readiness reads the hook\'s one verifier (config.signature)', () => {
+  const DOCUSIGN = { signs: 'body', header: 'X-DocuSign-Signature-1', algorithm: 'hmac-sha256', encoding: 'base64' };
+  const STRIPE = {
+    signs: 'timestamp.body', header: 'Stripe-Signature', algorithm: 'hmac-sha256', encoding: 'hex',
+    timestampElement: 't', digestElement: 'v1',
+  };
+  const vendorFlow = (config: Record<string, unknown>, type = 'api') => ({
+    name: 'vendor_hook',
+    label: 'Vendor hook',
+    type,
+    status: 'active',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start', config },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'end' }],
+  });
+  const judge = (flow: Record<string, unknown>) => cliFlowFamily({ objects: [candidateObject], flows: [flow] });
+  const rules = (flow: Record<string, unknown>) => judge(flow).map((f) => [f.rule, f.severity, f.path]);
+
+  it('a usable declaration keyed by secretRef is ready, on both arms, at the CLI and the runtime publish gate', () => {
+    for (const signature of [DOCUSIGN, STRIPE, { ...DOCUSIGN, encoding: 'hex', prefix: 'sha256=' }]) {
+      const flow = vendorFlow({ hookId: 'vendor', secretRef: 'VENDOR_WEBHOOK_KEY', signature });
+      expect(judge(flow), JSON.stringify(signature)).toEqual([]);
+      expect(runRuntimeAuthoringRules({ type: 'flow', item: flow }).errors, JSON.stringify(signature)).toEqual([]);
+    }
+  });
+
+  it('an unusable declaration is never ready: one error, at the key the spec refuses', () => {
+    const cases: Array<[string, Record<string, unknown>, string]> = [
+      ['an algorithm the spec refuses', { secretRef: 'K', signature: { ...DOCUSIGN, algorithm: 'hmac-sha1' } }, 'config.signature.algorithm'],
+      ['a reserved header', { secretRef: 'K', signature: { ...DOCUSIGN, header: 'x-objectstack-signature' } }, 'config.signature.header'],
+      ['a timestamped scheme with no timestamp element', { secretRef: 'K', signature: { ...STRIPE, timestampElement: undefined } }, 'config.signature.timestampElement'],
+      ['no key reference', { signature: DOCUSIGN }, 'config.signature'],
+      ['a literal secret beside it (an inline key)', { secret: 'whsec_inline', signature: DOCUSIGN }, 'config.signature'],
+      ['a literal secret AND a secretRef beside it', { secret: 'whsec_inline', secretRef: 'K', signature: DOCUSIGN }, 'config.signature'],
+      ['a secretRef that is not a usable name', { secretRef: 'OS_AUTH_SECRET', signature: DOCUSIGN }, 'config.secretRef'],
+    ];
+    for (const [label, config, keyPath] of cases) {
+      const findings = judge(vendorFlow(config)).filter((f) => f.rule === FLOW_API_TRIGGER_SIGNATURE_UNUSABLE);
+      expect(findings.map((f) => [f.severity, f.path]), label).toEqual([['error', `flows[0].nodes[0].${keyPath}`]]);
+      expect(findings[0]!.message, label).toContain(keyPath);
+      expect(findings[0]!.message, label).toContain(`type: 'api'`);
+      // Never the missing-secret id beside it: one verdict per hook.
+      expect(judge(vendorFlow(config)).map((f) => f.rule), label).not.toContain(FLOW_API_TRIGGER_SECRET_MISSING);
+      // And never let through at the runtime publish gate.
+      expect(
+        runRuntimeAuthoringRules({ type: 'flow', item: vendorFlow(config) }).errors.map((f) => f.rule),
+        label,
+      ).toContain(FLOW_API_TRIGGER_SIGNATURE_UNUSABLE);
+    }
+  });
+
+  it('a declared scheme is graded on its key reference alone: a withheld-and-stored literal secret does not make it ready', () => {
+    const flow = vendorFlow({ signature: DOCUSIGN });
+    const findings = validateFlowApiTriggerSecret(
+      { objects: [candidateObject], flows: [flow] },
+      { restoredCredentialPaths: new Set(['flows[0].nodes[0].config.secret']) },
+    );
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([[FLOW_API_TRIGGER_SIGNATURE_UNUSABLE, 'flows[0].nodes[0].config.signature']]);
+  });
+
+  it('CONTROL: a flow that binds no api trigger is not graded by this rule, and a hook with no declaration keeps its own verdicts', () => {
+    expect(rules(vendorFlow({ secretRef: 'K', signature: { ...DOCUSIGN, algorithm: 'hmac-sha1' } }, 'autolaunched'))
+      .map(([rule]) => rule)).not.toContain(FLOW_API_TRIGGER_SIGNATURE_UNUSABLE);
+    expect(rules(vendorFlow({ hookId: 'vendor' }))).toEqual([[FLOW_API_TRIGGER_SECRET_MISSING, 'error', 'flows[0].nodes[0].config.secret']]);
+    expect(judge(vendorFlow({ secretRef: 'VENDOR_WEBHOOK_KEY' }))).toEqual([]);
+  });
+
+  it('`os explain flow-api-trigger-signature-unusable` says what a declared scheme is and why a broken one admits nothing', () => {
+    expect(FLOW_API_TRIGGER_SIGNATURE_UNUSABLE).toBe('flow-api-trigger-signature-unusable');
+    const text = explanationOf(FLOW_API_TRIGGER_SIGNATURE_UNUSABLE);
+    for (const fact of ['config.signature', 'config.secretRef', 'REPLACES', 'never falls back', '401 INVALID_SIGNATURE', '300-second']) {
+      expect(text, fact).toContain(fact);
+    }
+  });
+});
+
 describe('[#22161] one-line verdicts — the never-fire family', () => {
   it('every verdict the cases above fired is one line of at most 200 characters', () => {
     // The coverage control first: each of the five ids fired at least once, so
@@ -1798,9 +2040,10 @@ describe('[#22161] one-line verdicts — the never-fire family', () => {
     [FLOW_TRIGGER_UNROUTABLE]: ['`resolveTriggerBinding`', 'manual — nothing to bind', 'one higher than its bound count', 'RESOLVED type', 'record-{before,after}-{create,insert,update,delete,write}'],
     [FLOW_TRIGGER_UNKNOWN_EVENT]: ['record-{before,after}-{create,insert,update,delete,write}', 'bind-time warn', 'multi-event shape', '`record-after-write`'],
     [FLOW_API_TRIGGER_SECRET_MISSING]: ['ADR-0041', 'HMAC', '`registerFlow`', 'whatever the flow\'s `status`', 'never receives a post', 'withholds'],
+    [FLOW_API_TRIGGER_SIGNATURE_UNUSABLE]: ['REPLACES', 'never falls back', 'flow parse refuses the flow at registration', 'names the key the spec refuses at'],
   };
 
-  it('covers exactly the five ids', () => {
+  it('covers exactly the never-fire ids', () => {
     expect(Object.keys(MOVED).sort()).toEqual([...NEVER_FIRE_IDS].sort());
   });
 

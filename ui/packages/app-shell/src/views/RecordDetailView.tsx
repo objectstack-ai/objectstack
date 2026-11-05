@@ -10,12 +10,12 @@
 
 import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef, type ReactElement } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { activityRowToFeedItem, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordFieldHistoryContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderPhoneContext, PageHeaderTrailingContext, PanelToggles, RecordTopBar, cn, useRecordStepKeys, type PanelToggleItem, type RecordTopBarStepper } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
 import { useDisplayLocale, useLocalization, pickLocalized } from '@object-ui/i18n';
-import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLocalizer, usePageAssignment, isRecordPageOf, useMetadata, RecordContextProvider, SchemaRenderer, DiscussionContextProvider, HighlightFieldsProvider, InlineEditProvider, resolveApprovalLock, useGlobalUndo, useDataInvalidation, notifyDataChanged, subscribeDataChanges, dataChangeMatches, useRowPredicate, classifyLoadError, answeredLoadFailure, extractWriteErrorMessage } from '@object-ui/react';
+import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLocalizer, usePageAssignment, isRecordPageOf, useMetadata, RecordContextProvider, SchemaRenderer, DiscussionContextProvider, HighlightFieldsProvider, InlineEditProvider, resolveApprovalLock, useGlobalUndo, useDataInvalidation, notifyDataChanged, subscribeDataChanges, dataChangeMatches, useRowPredicate, classifyLoadError, answeredLoadFailure, extractWriteErrorMessage, isExternalWriteRefusal } from '@object-ui/react';
 import type { AnsweredLoadFailure } from '@object-ui/react';
 import { buildExpandFields, captureUpdateUndoData, recordDelete, resolveAffordance, resolveRecordIdParamSeed, userActionPredicates, withoutDeniedFields, type AffordanceGrantPrincipal, type SchemaLike } from '@object-ui/core';
 import { toast } from 'sonner';
@@ -4641,7 +4641,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             const baseAppUrl = appName ? `/apps/${appName}` : '';
             navigate(`${baseAppUrl}/${objectName}`, { replace: true });
           } catch (err: any) {
-            toast.error(err?.message || 'Delete failed');
+            // A delete the object's external datasource does not admit
+            // (ADR-0015, `EXTERNAL_WRITE_FORBIDDEN`) says the table is
+            // read-only, never the gate's diagnostic.
+            toast.error(
+              isExternalWriteRefusal(err)
+                ? t('form.readOnlyExternalSource')
+                : err?.message || 'Delete failed',
+            );
           }
         },
       } as any);
@@ -5044,6 +5051,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         {/* objectstack#27055 — the field changes of the timeline stream,
             for the synthesized page's `record:activity`. */}
         <RecordFieldChangesContext.Provider value={assignedPage ? null : timelineFieldChanges}>
+        {/* objectstack#30074 — whether this record shows its field history:
+            the stream offers its 变更 chip only while it does. */}
+        <RecordFieldHistoryContext.Provider value={historyEnabled}>
         {/* objectstack#28737 — the whole stream's count, for the 动态 panel,
             its tab and the tab row's probe. */}
         <RecordTimelineTotalContext.Provider value={assignedPage ? null : timelineTotal}>
@@ -5321,6 +5331,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           {modalElement}
         </ActionProvider>
         </RecordTimelineTotalContext.Provider>
+        </RecordFieldHistoryContext.Provider>
         </RecordFieldChangesContext.Provider>
         </DiscussionContextProvider>
         </HighlightFieldsProvider>

@@ -15,6 +15,8 @@ import {
   nearestName,
   listNames,
   packagesOf,
+  objectExtensionsByTarget,
+  objectsAsServed,
   RELATIONSHIP_FIELD_TYPES,
 } from './object-graph.js';
 import { walkFilterFieldKeys, type FilterFieldKey } from './filter-walk.js';
@@ -342,6 +344,93 @@ describe('object-graph — packagesOf (#20206, ruling A on #15293 `5634034754`)'
     );
     expect(() => packagesOf({ packages: null })).toThrow(/`packages` of type null/);
     expect(() => packagesOf({ packages: null })).not.toThrow(/of type object/);
+  });
+});
+
+/**
+ * [#30303] The shared extension fold on junk input, beside the
+ * `indexObjectGraph` and `packagesOf` cases above. Neither export refuses
+ * anything: a malformed `packages` is {@link packagesOf}'s refusal, met by a
+ * caller that reads the bodies through it (`validateSecurityPosture` does,
+ * before either fold runs). Each shape below reads as "nothing to fold" for
+ * the part that is junk, and never throws.
+ */
+describe('[#30303] object-graph — objectExtensionsByTarget / objectsAsServed on junk input', () => {
+  const OBJ = { name: 'crm_contract', fields: { contract_no: { type: 'text' } } };
+  const EXT = { extend: 'crm_contract', fields: { note: { type: 'text' } } };
+  const served = (stack: unknown) =>
+    objectsAsServed(stack).objects.map((o) => [o.name, (o.fields as Array<{ name: string }> | Record<string, unknown>)]);
+
+  it('a null or non-record stack: no extensions, no objects', () => {
+    for (const stack of [null, undefined, 'junk', 42, []]) {
+      expect(objectExtensionsByTarget(stack).size, String(stack)).toBe(0);
+      expect(objectsAsServed(stack), String(stack)).toEqual({ objects: [], tied: new Map() });
+    }
+  });
+
+  it('packages: [null] and other non-record entries or bodies contribute nothing; a record body beside them still does', () => {
+    expect(objectExtensionsByTarget({ packages: [null] }).size).toBe(0);
+    const stack = {
+      objects: [OBJ],
+      packages: [null, 'junk', 42, [], { manifest: null }, { manifest: 'junk' }, { manifest: { objectExtensions: [EXT] } }],
+    };
+    expect([...objectExtensionsByTarget(stack).entries()].map(([t, list]) => [t, list.map((e) => [e.carrier, e.path])])).toEqual([
+      ['crm_contract', [[6, 'packages[6].manifest.objectExtensions[0]']]],
+    ]);
+    expect(objectsAsServed(stack).objects[0].fields).toEqual([
+      { name: 'contract_no', type: 'text' },
+      { name: 'note', type: 'text' },
+    ]);
+  });
+
+  it('a non-array objectExtensions folds nothing', () => {
+    for (const objectExtensions of [null, 'junk', 42, { crm_contract: EXT }]) {
+      const stack = { objects: [OBJ], objectExtensions };
+      expect(objectExtensionsByTarget(stack).size, JSON.stringify(objectExtensions)).toBe(0);
+      expect(objectsAsServed(stack).objects, JSON.stringify(objectExtensions)).toEqual([OBJ]);
+    }
+  });
+
+  it('a non-record entry, or one whose extend is not a string, is skipped; the record entry beside it is read', () => {
+    const stack = {
+      objects: [OBJ],
+      objectExtensions: [null, 'junk', 42, [], { extend: 7, fields: { x: { type: 'text' } } }, { fields: { y: {} } }, EXT],
+    };
+    expect([...objectExtensionsByTarget(stack).keys()]).toEqual(['crm_contract']);
+    expect(objectExtensionsByTarget(stack).get('crm_contract')!.map((e) => e.path)).toEqual(['objectExtensions[6]']);
+    expect(served(stack)).toEqual([['crm_contract', [{ name: 'contract_no', type: 'text' }, { name: 'note', type: 'text' }]]]);
+  });
+
+  it('junk fields add nothing: a non-collection, non-record members, a member with no name', () => {
+    for (const fields of [null, 'junk', 42, [null, 'x', 3, { type: 'text' }, { name: '', type: 'text' }]]) {
+      const stack = { objects: [OBJ], objectExtensions: [{ extend: 'crm_contract', fields }] };
+      expect(() => objectsAsServed(stack), JSON.stringify(fields)).not.toThrow();
+      expect(objectsAsServed(stack).objects[0].fields, JSON.stringify(fields)).toEqual([{ name: 'contract_no', type: 'text' }]);
+    }
+    // The array form is read by name, as the map form is.
+    const arrayForm = { objects: [OBJ], objectExtensions: [{ extend: 'crm_contract', fields: [{ name: 'note', type: 'text' }] }] };
+    expect(served(arrayForm)).toEqual([['crm_contract', [{ name: 'contract_no', type: 'text' }, { name: 'note', type: 'text' }]]]);
+  });
+
+  // `ObjectExtensionSchema.priority` is a number, so a parsed stack never
+  // carries this shape; the fold reads a non-number as absent (the default 200,
+  // as `SchemaRegistry.registerObjectExtension` does) rather than guessing.
+  it('a string priority reads as the default 200 and never throws', () => {
+    const stack = {
+      objects: [OBJ],
+      packages: [
+        { manifest: { objectExtensions: [{ extend: 'crm_contract', priority: '100', fields: { note: { type: 'text', label: 'A' } } }] } },
+        { manifest: { objectExtensions: [{ extend: 'crm_contract', priority: 150, fields: { note: { type: 'text', label: 'B' } } }] } },
+      ],
+    };
+    expect(objectExtensionsByTarget(stack).get('crm_contract')!.map((e) => [e.carrier, e.priority])).toEqual([
+      [1, 150],
+      [0, 200],
+    ]);
+    // So the string-priority entry folds LAST and its definition wins, untied.
+    const { objects, tied } = objectsAsServed(stack);
+    expect((objects[0].fields as Array<Record<string, unknown>>).find((f) => f.name === 'note')?.label).toBe('A');
+    expect(tied.size).toBe(0);
   });
 });
 

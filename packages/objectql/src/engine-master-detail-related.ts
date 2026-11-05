@@ -49,6 +49,11 @@
  * this one imports, so the engine's evaluation order is what it was. The
  * published build bundles both files into one, where the cycle does not
  * exist.
+ *
+ * [#30053 codemod] A PRIVATE method's docblock has since moved here,
+ * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * and the class keeps none for it; a public or protected method's docblock
+ * stays on the class, the contract, and its function keeps the placeholder.
  */
 
 import { referenceTargetOf } from '@objectstack/spec/data';
@@ -133,7 +138,64 @@ function staticReadonlyStripTakes(
   return !(key in staticReadonlyStoredView(schema, data, supplied, strip));
 }
 
-/** The body of `ObjectQL#settleMasterDetailLanding`; the method's docblock there is its contract. */
+/**
+ * [#19853] Settle whether an UPDATE lands the master-detail FK its payload
+ * names, BEFORE any `parent`-scoped lock is judged — so `parent` is the
+ * header the write STORES, not merely the one it NAMES. Shared by the by-id
+ * and bulk paths, which differ only in how a header is resolved and how the
+ * FK's own lock is judged (one row, or "locked in ≥1 matched row").
+ *
+ * #4889's rule — a repoint is judged against the master it lands on — is
+ * right only when the repoint LANDS. Two strips can take the FK back out
+ * after `parent` was resolved from it, and the row then keeps the header it
+ * had while every other parent-scoped lock was judged against one it never
+ * reached. Measured on the card's shape: `update(l1, { amount: 999, invoice:
+ * 'inv_b' })` with `invoice` statically `readonly` and `l1` under a PAID
+ * `inv_a` committed `{ amount: 999, invoice: 'inv_a' }` — the frozen line
+ * rewritten, still under the paid invoice. The strips, in the order they run
+ * after this point:
+ *
+ *  ① the FK's OWN `readonlyWhen` lock. Judged here first, against the
+ *    header the FK names — #4889's rule for the FK itself, unmoved.
+ *    [#19911] Judged WITH the other caller-supplied locks, not alone, and
+ *    settled with them (`settleReadonlyWhenDrops`), so a value one of them
+ *    drops can no longer unlock it — but only the FK is TAKEN here (`only`).
+ *    That moves the FK's verdict in BOTH directions: a repoint its lock
+ *    used to let through can now stay home, and a repoint it used to hold
+ *    can now LAND, when the value its `record` lock reads is itself locked
+ *    under the header the FK names — that value is dropped, the FK's lock
+ *    reads the stored one, and the rest are then judged under the header
+ *    the row lands on. When that verdict keeps the FK off the landing it is final:
+ *    the returned `supplied` no longer holds the FK, so the strip that
+ *    judges the other fields never re-asks it against the header the row
+ *    keeps, where it could flip and land the FK after the rest were judged
+ *    against the header it left. When the FK lands, that strip re-judges it
+ *    on the same landing and reaches the same verdict.
+ *  ② the static `readonly` strip (`staticReadonlyStripTakes`), which runs
+ *    after the conditional one and takes a non-system caller's forged FK.
+ *
+ * Nothing else on either path moves the FK after this point, and what moves
+ * it before this point (a `beforeUpdate` hook, the post-hook payload) is
+ * already in `data`. Field-level security refuses a forbidden FK outright
+ * rather than stripping it, so it never leaves a payload that names one
+ * header and stores another.
+ *
+ * Returns:
+ *  - `subject` — the payload the `readonlyWhen` strip judges next: `data`,
+ *    or `data` without the FK when ①'s verdict locked it;
+ *  - `supplied` — the entry snapshot that strip judges against: without the
+ *    FK when the FK does not land (its verdict is in), whole when it does;
+ *  - `view` — the payload the header id is read from: `data` when the FK
+ *    lands, else `data` without it, so `masterIdOf` falls through to the
+ *    prior row's FK;
+ *  - `header` — what `resolve(view)` answers. ① needs the NAMED header only
+ *    when judging the FK's lock reads `parent` — its own predicate, or
+ *    [#19911] a `record`-reading one whose view another payload key's
+ *    `parent`-scoped lock shapes (`readonlyWhenFkJudgementReadsParent`);
+ *    when the FK then lands that is the same header and is reused, so the
+ *    write still reads one header — two only when ① read the named header
+ *    and the FK does not land.
+ */
 export async function settleMasterDetailLanding<H>(
   args: {
     schema: unknown;
@@ -173,7 +235,46 @@ export async function settleMasterDetailLanding<H>(
   return { subject, supplied: rest, view, header: await resolve(view) };
 }
 
-/** The body of `ObjectQL#resolvePreviewParents`; the method's docblock there is its contract. */
+/**
+ * [#22474] The master-detail headers a `validate()` preview binds, per row:
+ * `parents[i]` is the header row `i` is judged under (`parent`), and
+ * `previousParents[i]` the header its stored row hangs off when the row
+ * REPOINTS it (`previousParent`, for the ADR-0113 pre-check), else
+ * `undefined`, which the evaluator reads as "the same header", as the
+ * write's own `undefined` is read.
+ *
+ * The header ids are read the way the write reads them ({@link masterIdOf}):
+ * `views[i]` is the judged view, the row on an insert and the stored row
+ * merged with the patch on an update, so the patch's FK wins over the stored
+ * one; `storedRows[i]` names the header a repoint leaves.
+ *
+ * ## Read under the caller's access, not elevated
+ *
+ * A header read elevated here would answer a predicate over a row the caller
+ * may not read. Two reads, each answering one question, as the preview's
+ * stored-row read does — and, since #22519, as the write's own header read
+ * does ({@link resolveMasterDetailParent}):
+ *
+ *  1. ⛔ MAY THIS CALLER SEE THE HEADER — the READ DOOR, under the caller's
+ *     own context, one `find` for the whole batch. A header it does not
+ *     return binds as a missing header binds: `null`, so a predicate that
+ *     reads `parent` refuses as unevaluable, whatever the header holds. A
+ *     failed read binds every header as missing, as the write's own failed
+ *     header read does.
+ *  2. WHAT THE WRITE WOULD JUDGE — the write's own header read
+ *     ({@link resolveMasterDetailParents}, whose own read door returns the
+ *     same headers), for the headers read 1 returned only.
+ *
+ * ⛔ The column rule is the preview's own; the write judges a header the
+ * caller can read on its stored values. A header column is kept only where
+ * the read door served this caller
+ * that very value ({@link servedAsStored}); every other column, hidden or
+ * served transformed (a partial mask keeps the key and replaces the value),
+ * is judged as empty: the header is materialised over the master's declared
+ * fields after the columns are kept, so such a column reads `null`. So the
+ * verdict never depends on a header value the caller could not have read in
+ * full.
+ */
 export async function resolvePreviewParents(
   this: Pick<MasterDetailRelatedHost, 'find' | 'logger' | 'resolveMasterDetailParents' | 'materializeParentHeader'>,
   schema: unknown,
@@ -237,7 +338,62 @@ export async function resolvePreviewParents(
   };
 }
 
-/** The body of `ObjectQL#resolvePredicateRelated`; the method's docblock there is its contract. */
+/**
+ * [#18682] Resolve the related rows this object's PREDICATE rules read one
+ * hop through a reference field, for a whole batch of rows at once.
+ *
+ * Returns a per-row lookup the validation seams hand to
+ * `evaluateValidationRules` as `related`. When no rule traverses anything the
+ * schema says so up front and this costs NOTHING — no query, no closure work
+ * — which is what bounds the N+1: one hop, only the fields a rule names, one
+ * batched read per reference field per write (two for a caller that is not
+ * SYSTEM where a read door bounds the rows, below), and only when a rule asks.
+ *
+ * ## Which related rows a caller's rule may read, and how their values are read
+ *
+ * The VALUES are read as SYSTEM: a validation rule's output is a pass/fail the
+ * SYSTEM enforces, not data handed to the caller — categorically unlike an
+ * access-control rule, which is why RLS predicates are excluded from this
+ * capability altogether. Reading the columns as the acting user instead made
+ * the rule unauthorable for exactly the persona it exists to constrain. What
+ * bounds that elevation is the PROJECTION: only the columns the predicate
+ * names, intersected with the related object's declared fields. ⛔ Never the
+ * whole row.
+ *
+ * Which ROWS a caller that is not SYSTEM may have read is a different
+ * question, answered before any value is read:
+ *
+ *  - ⛔ Through a `master_detail` FK the related row is the detail's HEADER,
+ *    and ruling A on #22519 holds here as on the write's own header read
+ *    ({@link resolveMasterDetailParent}): an unreadable header is a header
+ *    that exists nowhere (#22892). The caller's read door first, under the
+ *    caller's own context ({@link masterDetailHeadersCallerReads}); a header
+ *    it does not return is `unresolved`, exactly as a header that exists
+ *    nowhere is, so the rule's answer never depends on what an unreadable
+ *    header holds. The elevated, tenant-kept read follows for the headers the
+ *    door returned only, and a header the caller CAN read is judged on its
+ *    stored values, as the write judges it.
+ *  - On a related object no organization wall scopes, the own read of the
+ *    caller bounds the rows, and any other id is `unreadable`, stored or not.
+ *  - ⛔ A plain `lookup` to a walled object keeps the tenant-kept elevated read
+ *    alone: no ruling extends the header rule to it.
+ *
+ * A SYSTEM caller (seed replay, boot) asks no read door: the elevated read
+ * alone, as before.
+ *
+ * ## An unresolved row is left UNAVAILABLE, and it says which kind
+ *
+ * No reference stored, the related record not found, the related object
+ * declares no such column, or the row could not be read: each is its own reason, and
+ * {@link checkPredicate} turns it into a refusal naming the related object and
+ * column. The write is REJECTED rather than judged on a rule that produced no
+ * verdict. ⛔ Never silently true, and never silently false.
+ *
+ * The projection always names `id` alongside the fields the rules read:
+ * the map below is keyed on `row.id`, and a projection that omitted it would
+ * build an EMPTY map and leave every row unbound (#7537's shape, one seam
+ * over).
+ */
 export async function resolvePredicateRelated(
   this: Pick<MasterDetailRelatedHost, 'buildReferentialFieldClear' | '_registry' | 'resolveOneHopRelated'>,
   schema: any,
@@ -316,7 +472,36 @@ export async function resolvePredicateRelated(
   };
 }
 
-/** The body of `ObjectQL#resolveOneHopRelated`; the method's docblock there is its contract. */
+/**
+ * [#24197] Resolve the related rows a page of `rows` reads ONE hop through a
+ * reference field — the one loader behind both seams that serve a hop:
+ * validation predicates ({@link resolvePredicateRelated}, `authority:
+ * 'predicate'`) and formula fields ({@link resolveFormulaRelated},
+ * `authority: 'caller'`).
+ *
+ * Everything but the AUTHORITY of the value read is shared, so the two seams
+ * cannot disagree about it: which reference fields and related fields to
+ * read ({@link collectReferenceTraversals}), the declared-field intersection
+ * and its `undeclared-field` report, the id set (one batched read per
+ * reference field per call, never one per row; a multi-value or already
+ * expanded slot names no single row), the `null` materialisation of a
+ * declared column the driver omitted, and the per-row
+ * {@link RelatedFieldBinding} with its reason when there is no row.
+ *
+ * ## The authority, and why the two differ
+ *
+ *  - `predicate`: a rule's output is a pass/fail the SYSTEM enforces, so the
+ *    values are read as SYSTEM behind the caller's read doors — see
+ *    {@link resolvePredicateRelated} for the whole argument.
+ *  - `caller`: a formula's output is DATA handed to the reader. Reading the
+ *    hop as SYSTEM would hand any reader of the junction row a related
+ *    column it could not read directly, so the hop is read under the
+ *    caller's OWN context, through every enforcement layer `find` applies
+ *    (row-level security, field-level security, the organization wall). A
+ *    related row that read does not return is `unresolved` — whether it
+ *    exists nowhere or the reader may not see it, the formula answers the
+ *    same, so the answer discloses neither.
+ */
 export async function resolveOneHopRelated(
   this: Pick<MasterDetailRelatedHost, 'resolveEnginePosture' | '_registry' | 'find' | 'masterDetailHeadersCallerReads' | 'formulaHopReads' | 'logger'>,
   schema: any,

@@ -168,6 +168,8 @@ const FAMILY: Record<string, string[]> = {
   // `sys_metadata` hydration, so it deletes nothing. No table exists in the
   // fixture, so the face driven here is its empty listing.
   'migrate security-catalog-overlays': [],
+  // Its dry run takes the `summary-nulls` shape: a read-only boot, no row written.
+  'migrate stored-expressions': [],
   'migrate summary-nulls': [],
   // One object per run, so it needs a name: the fixture's own `jp_ticket`,
   // which the composed host config registers. No database file exists, so the

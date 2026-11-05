@@ -77,6 +77,7 @@ export const actionForm = defineForm({
             { field: 'objectOverride', label: 'Object Override' },
             { field: 'label', label: 'Label' },
             { field: 'type', label: 'Type' },
+            { field: 'widget', label: 'Widget' },
             { field: 'required', label: 'Required' },
             { field: 'options', label: 'Options' },
             { field: 'placeholder', label: 'Placeholder' },

@@ -1303,6 +1303,7 @@ where the data lives.
 | `os migrate files-to-references` | Convert legacy file-field values to `sys_file` references, verify the ownership ledger, and record the deployment's migration flag |
 | `os migrate value-shapes` | Scan stored reference and structured-JSON field values against the platform's value contract, and record the deployment's migration flag when clean |
 | `os migrate summary-nulls` | Backfill roll-up `count` / `sum` columns still stored as `NULL` on parent rows created before the insert-time seed. Repairs values; no flag, nothing depends on it having run |
+| `os migrate stored-expressions` | Fill a stored computed field (a non-formula field declaring `expression`) on the rows stored before the field was declared, which hold `NULL` until each is next written; the boot warns, naming the field, when a sample of rows holds such a `NULL`. `--changed` also recomputes values an edited expression no longer gives. Rows an expression cannot compute while they hold a value are listed, never written. No flag; idempotent |
 | `os migrate blank-single-values` | Rewrite the empty strings (`''`) still stored on optional single-value option, reference and file columns to `null`, the form a cleared value is stored in today, so `$empty` finds those rows. Repairs values; no flag, nothing depends on it having run. See [below](#os-migrate-blank-single-values) |
 | `os migrate option-codes` | Rewrite option values still stored as a number, a boolean or SQLite `"N.0"` text (rows written before option fields stored the code string) to that code string, so filters, reads and unique keys see one value. Values it cannot decide are listed, never rewritten. No flag; idempotent. See [below](#os-migrate-option-codes) |
 | `os migrate text-scalars` | Rewrite numbers and booleans still stored raw on text fields (rows written before text fields stored the string) to that string, so filters, reads and unique keys see one value. SQLite `"N.0"` text it cannot decide is listed, never rewritten. No flag; idempotent. See [below](#os-migrate-text-scalars) |
@@ -1316,7 +1317,7 @@ where the data lives.
 | `os migrate comment-parent-pair` | Stamp the parent pair (`object_name`, `record_id`) on the `sys_comment` rows written before it existed. Until it runs, a broad comment read past 2,000 candidate rows omits comments the reader may see, and its total agrees with the short list, so run it at once after upgrading. No flag; idempotent |
 | `os migrate meta --stored` | Replay the metadata conversion chain over this deployment's `sys_metadata` rows and rewrite the ones still carrying a pre-protocol shape. Hygiene, not a gate — nothing depends on it having run |
 | `os migrate security-catalog-overlays` | List the environment-wide permission-set and position rows (the legacy plurals `permissions` / `positions` included) stored over a name a configured package holds — the rows a v18 cold boot refuses — each with the package that holds its name; `--apply` deletes them, one history tombstone per row. Run it before the first v18 boot, with the flags and environment the deployment boots with: the platform security plugin's sets are held only where `os serve` composes it (an auth secret set, and the `auth` tier on), and the step takes `serve`'s `--preset` and `--dev` with `serve`'s meaning. Adopts nothing; exits 1 while it lists a row |
-| `os migrate packageless-overlays` | List the package-less view, dashboard, report, translation and email-template rows stored over a name exactly one installed package ships — the customizations Setup saved before ADR-0146 D11 closed that write — and with `--apply` move each into that package's paired `<base>.custom` (created when absent) as a declared override, `basedOn` the base's installed version; the package-less row is deleted only after the moved one reads back as served. A name no package ships is environment metadata and is not touched; a name several packages ship, or one the pair already holds a row of, is listed and left with the reason. Takes `serve`'s `--preset` and `--dev`. Idempotent: a second run moves nothing. Run it once after upgrading |
+| `os migrate packageless-overlays` | List the package-less view, dashboard, report, translation and email-template rows stored over a name exactly one installed package ships — the customizations Setup saved before ADR-0146 D11 closed that write — and with `--apply` move each into that package's paired `<base>.custom` (created when absent) as a declared override, `basedOn` the base's installed version; the package-less row is deleted only after the moved one reads back as served. A name no package ships is environment metadata and is not touched; a name several packages ship, or one the pair already holds a row of, is listed and left with the reason. So is a view container (`list`, `listViews`, `form`, `formViews`): only a single view declares an override, so it is listed `cannot_declare` and never attempted, with the way out — save each of its views into the pair as a single view, then delete the container row. Takes `serve`'s `--preset` and `--dev`. Idempotent: a second run moves nothing. Run it once after upgrading |
 | `os migrate duplicates` | Report business identifiers already minted twice across the organization partitions, and the rows blocking the boot-time NULL-safe index tightenings — a read-only inventory as JSON on stdout. Renumbers nothing and writes no row and no schema; run it before the boot-time tenancy repair, which overwrites part of the evidence |
 
 **The boot itself writes no row and no schema you did not ask for.** Each of these commands boots
@@ -2341,6 +2342,8 @@ os g dashboard sales                          # Generate a dashboard
 os g app sales --object customer              # Generate an app whose navigation opens Customer
 os g skill lead_qual                          # Generate an AI skill
 os g picklist industry                        # Generate a shared option list select fields name
+os g permission sales_user --object customer  # Generate a permission set that grants Customer
+os g dataset customer_metrics --object customer  # Generate a dataset dashboard widgets bind to
 
 os g action escalate --object customer --flow customer_changed_flow  # Name the flow when there are several
 os g object task -d lib/                      # Override target directory
@@ -2359,6 +2362,8 @@ os g object task --dry-run                    # Preview without writing
 | `app` | `src/apps/` | `NAME.app.ts` | `apps` | Application navigation |
 | `skill` | `src/skills/` | `NAME.skill.ts` | `skills` | AI skill — the ADR-0063 extension primitive |
 | `picklist` | `src/picklists/` | `NAME.picklist.ts` | `picklists` | Shared option list that select fields reference by name |
+| `permission` | `src/security/` | `NAME.permission.ts` | `permissions` | Permission set: what a signed-in user may do with an object |
+| `dataset` | `src/datasets/` | `NAME.dataset.ts` | `datasets` | Analytics dataset: the dimensions and measures dashboard widgets bind to |
 
 <Callout type="info" title="Why generated files carry a type infix">
 Every scaffold is written as `NAME.TYPE.ts`, and the infix is read from the
@@ -2412,12 +2417,12 @@ the rules a JSON Schema can express and names the rest under
 **Options:**
 - `-d, --dir <directory>` — Override target directory
 - `--dry-run` — Preview without writing files
-- `--object <object>` — The object a `flow`, `action` or `app` binds; default: the stack's only object
+- `--object <object>` — The object a `flow`, `action`, `app`, `permission` or `dataset` binds; default: the stack's only object
 - `--flow <flow>` — The flow an `action` runs; default: the stack's only flow
 
 **What it does:**
-1. For a type that names an object (`object`, `view`, `action`, `flow`, `app`), reads `manifest.namespace` from the project config (`objectstack.config.ts`, `.js` or `.mjs`) and prefixes the object name with it, and resolves every object or flow the scaffold binds against the stack that config loads (see above)
-2. Creates the TypeScript file — an `object` declared with `ObjectSchema.create({ … })`, the same shape the `os init` templates write; a `skill` declared with `defineSkill({ … })`; a `picklist` declared with `definePicklist({ … })`, which a select field names with `Field.select({ picklist: 'NAME' })` in place of its own `options`, and which the server resolves into that field's `options`; the other types as typed literals (`UI.View`, `UI.Action`, `Automation.Flow`, `UI.Dashboard`, `UI.App`)
+1. For a type that names an object (`object`, `view`, `action`, `flow`, `app`, `permission`, `dataset`), reads `manifest.namespace` from the project config (`objectstack.config.ts`, `.js` or `.mjs`) and prefixes the object name with it, and resolves every object or flow the scaffold binds against the stack that config loads (see above)
+2. Creates the TypeScript file — an `object` declared with `ObjectSchema.create({ … })`, the same shape the `os init` templates write; a `skill` declared with `defineSkill({ … })`; a `picklist` declared with `definePicklist({ … })`, which a select field names with `Field.select({ picklist: 'NAME' })` in place of its own `options`, and which the server resolves into that field's `options`; a `permission` set declared with `definePermissionSet({ … })`, granting the bound object; a `dataset` declared with `defineDataset({ … })` over the bound object, with a record-count measure; the other types as typed literals (`UI.View`, `UI.Action`, `Automation.Flow`, `UI.Dashboard`, `UI.App`)
 3. Creates or updates the barrel `index.ts` in the target directory
 4. Shows a hint to run `objectstack validate`
 

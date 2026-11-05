@@ -171,6 +171,7 @@ const ko = {
   },
   form: {
     noPermissionToSave: "이 레코드를 저장할 권한이 없습니다.",
+    readOnlyExternalSource: "이 테이블은 읽기 전용입니다. 레코드는 변경을 받지 않는 외부 데이터 소스에서 가져옵니다.",
     noPermissionToCreate: "{{object}} 생성 권한이 없습니다. 필드는 읽기 전용입니다.",
     noPermissionToEdit: "{{object}} 편집 권한이 없습니다. 필드는 읽기 전용입니다.",
     noPermissionToEditRecord: "이 레코드를 편집할 권한이 없습니다. 필드는 읽기 전용입니다.",
@@ -1804,6 +1805,10 @@ const ko = {
     },
   },
   console: {
+    organizationMfa: {
+      needsTwoFactor: "다단계 인증 필수에는 2단계 인증이 필요하지만 이 배포에서는 꺼져 있으므로, 체크한 채로 저장하면 거부됩니다. 먼저 2단계 인증을 켜세요: 설정 → 인증에서 다단계 인증 필수를 켜거나(모든 조직에 적용됨), 배포에 OS_AUTH_TWO_FACTOR=true를 설정하세요.",
+      nowRequired: "인증 앱을 아직 설정하지 않은 이 조직의 모든 구성원은 이제 설정해야 합니다. 각 구성원은 이 변경 후 처음 앱을 사용할 때부터 MFA 유예 기간(변경하지 않으면 7일, 설정 → 인증에서 변경 가능)이 시작되며, 기간이 끝나면 데이터에 접근할 수 없습니다. 이미 인증 앱을 사용하는 구성원은 영향을 받지 않습니다.",
+    },
     studio: {
       title: "Studio",
       accessRequired: "Studio를 열려면 Studio 접근 권한이 필요합니다. 관리자가 '설정 → 권한 집합 할당'에서 권한 세트로 부여할 수 있습니다.",
@@ -2954,6 +2959,7 @@ const ko = {
         continue: "계속",
         preparing: "준비 중…",
         enrollFailed: "등록을 시작할 수 없습니다.",
+        unavailable: "이 배포에서는 2단계 인증이 꺼져 있어 아직 인증 앱을 등록할 수 없습니다. 관리자에게 설정 → 인증에서 켜 달라고 요청한 뒤 다시 시도하세요.",
         scanTitle: "인증 앱으로 스캔",
         scanBody: "Google Authenticator, 1Password, Authy 등으로 이 QR 코드를 스캔한 다음 6자리 코드를 입력하세요.",
         backupTitle: "백업 코드 저장",
@@ -4094,6 +4100,9 @@ const ko = {
       revoke: "취소",
       revoking: "취소하는 중…",
       revokedToast: "\"{{set}}\" 승인을 취소했습니다.",
+      reopen: "다시 검토",
+      reopening: "다시 여는 중…",
+      reopenedToast: "\"{{set}}\" 제안을 다시 열었습니다. 승인될 때까지 아무것도 부여되지 않습니다.",
     },
     title: "앱 마켓플레이스",
     subtitle: "ObjectStack 카탈로그에 게시된 승인된 앱을 탐색하세요. 앱을 클릭하여 세부 정보를 보고 환경 중 하나에 설치하세요.",
@@ -4604,6 +4613,12 @@ const ko = {
         dataset: '데이터 세트 {{count}}',
         dataset_one: '데이터 세트 {{count}}',
         dataset_other: '데이터 세트 {{count}}',
+        hook: '후크 {{count}}',
+        hook_one: '후크 {{count}}',
+        hook_other: '후크 {{count}}',
+        translation: '번역 {{count}}',
+        translation_one: '번역 {{count}}',
+        translation_other: '번역 {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

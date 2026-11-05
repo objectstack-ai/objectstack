@@ -352,9 +352,12 @@ export interface ScreenFieldSpec {
      * Widget hint (text/select/boolean/number/date/file/…); the client maps it
      * to a field widget.
      *
-     * Two members are value domains the server re-checks on resume
-     * (`validateScreenInputs`): `'number'` takes a finite JSON number, and
-     * `'file'` (#25801) takes the id of an uploaded `sys_file` — the client
+     * Four members are value domains the server re-checks on resume
+     * (`validateScreenInputs`): the three numeric kinds `'number'`,
+     * `'currency'` and `'percent'` take a finite JSON number (a numeric
+     * string is refused, ⛔ not coerced; the client renders all three as a
+     * numeric input, which posts a number), and `'file'` (#25801) takes the
+     * id of an uploaded `sys_file` — the client
      * renders the platform upload widget and answers with the id the upload
      * minted, never the expanded `{ id, name, url, … }` read form.
      *
@@ -377,8 +380,9 @@ export interface ScreenFieldSpec {
      * Unlike {@link visibleWhen}, these are NOT client-only: the server
      * re-checks them when the run resumes (`validateScreenInputs`), so a bound
      * holds against a caller that skips the dialog — with no "if the value
-     * happens to be a number" qualifier, because on a `type: 'number'` field a
-     * present non-number is refused outright (`invalid_type`) rather than
+     * happens to be a number" qualifier, because on a numeric field
+     * (`type: 'number'`, `'currency'` or `'percent'`) a present non-number is
+     * refused outright (`invalid_type`) rather than
      * passing the bound it cannot be compared against. ⛔ Not coerced. The
      * client still applies them so the user is stopped at the input rather
      * than at Submit.

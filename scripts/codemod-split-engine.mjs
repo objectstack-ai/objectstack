@@ -11,6 +11,14 @@
  *   node scripts/codemod-split-engine.mjs --write         # apply the split, then verify it
  *   node scripts/codemod-split-engine.mjs --verify --base <ref>
  *                                                         # re-prove a split on disk against engine.ts at <ref>
+ *   node scripts/codemod-split-engine.mjs --scoped [--write]
+ *                                                         # the second pass (#30052): plan (or apply) ObjectRepository and ScopedContext
+ *   node scripts/codemod-split-engine.mjs --scoped --verify --base <ref>
+ *                                                         # re-prove the second pass on disk against engine.ts at <ref>
+ *   node scripts/codemod-split-engine.mjs --hand-docs [--modules <a.ts,b.ts>] [--write]
+ *                                                         # the third pass (#30053): plan (or apply) the hand series' private docblocks
+ *   node scripts/codemod-split-engine.mjs --hand-docs --verify --base <ref>
+ *                                                         # re-prove the third pass on disk against engine.ts and its hand modules at <ref>
  *   node scripts/codemod-split-engine.mjs --self-test
  *   node scripts/codemod-split-engine.mjs --help          # this usage, on any tree (split or not)
  *
@@ -116,6 +124,29 @@
  * in source order or sorted, and the output is a pure function of the input:
  * two runs on one input write byte-identical trees (the plan prints the output
  * tree's sha256). Only the proof's leaf-reach walk reads sibling files.
+ *
+ * ## The second pass: `ObjectRepository` and `ScopedContext` (#30052)
+ *
+ * `engine.ts` declares two more classes after `ObjectQL`, the repository a
+ * hook reaches as `ctx.api.object(name)` and the context it reaches as
+ * `ctx.api`. `--scoped` facades them with this pass's cut pattern, stay rules
+ * and byte-identity proof, one facet module per class (`SCOPED_CLASSES`) and
+ * one host per INSTANCE (`SCOPED_HOSTS_MODULE`, #30051's shape keyed by the
+ * instance), and it touches no other byte: its input is the `engine.ts` the
+ * first pass left, and it is proved against that file, so it is re-run on the
+ * latest `main` at landing like the first. Its marker is `SCOPED_MARK`, so the
+ * two passes' stubs and files are told apart. Two stay reasons are its own:
+ * a body that reads a private member off another instance (`foreign-private`:
+ * the class body may, a module function may not) and one that reads a
+ * non-public static (`private-static`: the statics route is `ObjectQL`'s).
+ *
+ * ## The third pass: the hand series' private docblocks (#30053)
+ *
+ * `--hand-docs` moves a private hand-series stub's docblock into its hand
+ * module, onto the function the stub calls, as the first two passes move a
+ * private method's docblock with its body; a public or protected one stays on
+ * the class. Its section below (`HAND_STUB_MARK`) states the rule, the slices
+ * (`--modules`) and the proof, the undo of every move.
  *
  * ts-morph is a root devDependency, resolved from the root manifest, as the
  * pilot takes it.
@@ -280,6 +311,8 @@ const STAY_REASONS = Object.freeze({
   'module-write': 'it assigns a module-scope binding of engine.ts (an import is read-only)',
   'already-moved': 'its body is already a hand-series seam stub',
   'parameter-shadows': 'a parameter shadows a stub local (`host`, `readX`, `writeX`)',
+  'foreign-private': 'it reads a private or protected instance member off a receiver other than `this` (a module function cannot)',
+  'private-static': 'it reads a non-public static of its class (the statics route is `ObjectQL`\'s alone; the scoped classes declare none)',
 });
 
 /** Every reason a top-level declaration ahead of the class stays in engine.ts. */
@@ -559,6 +592,13 @@ function readMethod(tm, ctx, m) {
       if (kind === SyntaxKind.SuperKeyword) add('super');
       if (kind === SyntaxKind.ThisType) add('this-type');
       if (Node.isMetaProperty(node) && node.getKeywordToken() === SyntaxKind.NewKeyword) add('new-target');
+      if (Node.isPropertyAccessExpression(node) && node.getExpression().getKind() !== SyntaxKind.ThisKeyword) {
+        // `other.x` where `x` is a private or protected INSTANCE member of the
+        // class: legal in the class body, refused in a module function. (A
+        // static is the statics route's question, not this one.)
+        const foreign = foreignNonPublicMember(tm, ctx, checker, node);
+        if (foreign) add('foreign-private', foreign);
+      }
       if (kind === SyntaxKind.ThisKeyword) {
         if (thisContainer(tm, node) !== m) continue;
         if (m.isStatic()) { add('static-this'); continue; }
@@ -619,7 +659,7 @@ function readMethod(tm, ctx, m) {
         // for it) when it stayed. Two things a module function cannot do:
         // reach a non-public static of the class, and assign an import.
         const declName = decl.name && ts.isIdentifier(decl.name) ? decl.name.text : node.getText();
-        if (ts.isClassDeclaration(decl) && declName === CLASS_NAME) {
+        if (ts.isClassDeclaration(decl) && declName === (ctx.className ?? CLASS_NAME)) {
           const access = node.getParent();
           const info = !typePos && Node.isPropertyAccessExpression(access) && access.getExpression() === node
             ? ctx.statics.get(access.getName()) : null;
@@ -646,7 +686,10 @@ function readMethod(tm, ctx, m) {
   }
 
   const binding = ctx.scope.bindings.get(name);
-  if (binding && binding.kind === 'import' && SEAM_SPECIFIER.test(binding.specifier)) add('already-moved', binding.specifier);
+  // A hand-series seam stub calls the `engine-*` import of its own name; a
+  // method that only shares the name (`ObjectRepository#count` beside the
+  // hand-series `count`) and never reads that import is not one.
+  if (binding && binding.kind === 'import' && SEAM_SPECIFIER.test(binding.specifier) && imports.has(name)) add('already-moved', binding.specifier);
   for (const p of params) {
     const pn = p.getName();
     if (pn === 'host' || /^(read|write)[A-Z]/.test(pn)) add('parameter-shadows', pn);
@@ -659,6 +702,22 @@ function readMethod(tm, ctx, m) {
     if (classOther) add('static-route-conflict');
   }
   return result();
+}
+
+/** The name of the class's non-public instance member `pa` reads, or null. */
+function foreignNonPublicMember(tm, ctx, checker, pa) {
+  const ts = tm.ts;
+  const nameNode = pa.getNameNode();
+  if (!tm.Node.isIdentifier(nameNode)) return null;
+  const symbol = checker.getSymbolAtLocation(nameNode.compilerNode);
+  for (const decl of symbol?.declarations ?? []) {
+    const owner = ts.isParameter(decl) && decl.parent && ts.isConstructorDeclaration(decl.parent) ? decl.parent.parent : decl.parent;
+    if (owner !== ctx.cls.compilerNode) continue;
+    const flags = ts.getCombinedModifierFlags(decl);
+    if (flags & ts.ModifierFlags.Static) continue;
+    if (flags & (ts.ModifierFlags.Private | ts.ModifierFlags.Protected)) return nameNode.getText();
+  }
+  return null;
 }
 
 function isModuleScopeDecl(ts, decl) {
@@ -702,7 +761,7 @@ const STATICS_HOST_NAME = `${CLASS_NAME}StaticsHost`;
 const CLASS_TYPE_ALIAS = `${CLASS_NAME}Class`;
 
 /** The placeholder above a moved public or protected body: its docblock stays on the class. */
-const placeholderDoc = (name) => `/** The body of \`${CLASS_NAME}#${name}\`; the method's docblock there is its contract. */`;
+const placeholderDoc = (name, className = CLASS_NAME) => `/** The body of \`${className}#${name}\`; the method's docblock there is its contract. */`;
 
 /**
  * The statics block `engine.ts` carries for the routed facets: the type and
@@ -1160,7 +1219,7 @@ function importPair(specifier, uses) {
  * engine.ts's import order; then the moved top-level names, from the leaf;
  * then what stayed in engine.ts (lever (a)), including the class.
  */
-function importLines(scope, users, { needsHost = false, moduleRefs = new Map(), leafNames = new Map(), routed = false } = {}) {
+function importLines(scope, users, { needsHost = false, moduleRefs = new Map(), leafNames = new Map(), routed = false, className = CLASS_NAME } = {}) {
   const bySpecifier = new Map();
   for (const r of users) {
     for (const [local, use] of r.imports) {
@@ -1201,7 +1260,7 @@ function importLines(scope, users, { needsHost = false, moduleRefs = new Map(), 
     fromHost.delete(CLASS_NAME);
     fromHost.set(`${STATICS_NAME} as ${CLASS_NAME}`, { value: true });
     if (needsHost) fromHost.set(`${CLASS_NAME} as ${CLASS_TYPE_ALIAS}`, { value: false });
-  } else if (needsHost && !fromHost.has(CLASS_NAME)) fromHost.set(CLASS_NAME, { value: false });
+  } else if (needsHost && !fromHost.has(className)) fromHost.set(className, { value: false });
   out.push(...importPair(leafSpecifier(), fromLeaf));
   out.push(...importPair('./engine.js', fromHost));
   return out;
@@ -1368,7 +1427,7 @@ const DOC_MOVED = 'its docblock with it';
  * call. `node` is the method (base or head: the stub keeps its signature).
  * Pure: `verify` rebuilds every stub with it and compares.
  */
-function stubBody({ node, name, usesHost, docMoved }, moduleFile, closeIndent) {
+function stubBody({ node, name, usesHost, docMoved }, moduleFile, closeIndent, mark = MARK) {
   const ind = `${closeIndent}  `;
   const hostName = hostNameOf(moduleFile);
   // A generic method calls its body INSTANTIATED with its own type
@@ -1379,10 +1438,10 @@ function stubBody({ node, name, usesHost, docMoved }, moduleFile, closeIndent) {
   const args = forwardList(node).join(', ');
   const doc = docMoved ? `, ${DOC_MOVED}` : '';
   if (!usesHost) {
-    out.push(`${ind}// ${MARK} The body moved to \`${moduleFile}\`${doc}.`);
+    out.push(`${ind}// ${mark} The body moved to \`${moduleFile}\`${doc}.`);
     out.push(`${ind}return ${fn}(${args});`);
   } else {
-    out.push(`${ind}// ${MARK} The body moved to \`${moduleFile}\`${doc} (see \`${hostName}\`).`);
+    out.push(`${ind}// ${mark} The body moved to \`${moduleFile}\`${doc} (see \`${hostName}\`).`);
     out.push(`${ind}return ${fn}.call(${hostVarOf(moduleFile)}.of(this)${args ? `, ${args}` : ''});`);
   }
   out.push(`${closeIndent}}`);
@@ -1582,10 +1641,12 @@ function usedImportNames(tm, text) {
 /**
  * Drop every import binding `used` lacks. A declaration left with no binding
  * goes whole (its own text and the line break after it; the comments above it
- * stay); one left with some keeps them, a one-line `{ … }` on one line, a
- * multi-line one as one binding per line. Pure. Returns `{ text, removed }`.
+ * stay, unless `dropAttachedComments`: then the `//` lines directly above it,
+ * with no blank line between, go with it); one left with some keeps them, a
+ * one-line `{ … }` on one line, a multi-line one as one binding per line.
+ * Pure. Returns `{ text, removed }`.
  */
-function pruneImports(tm, text, used) {
+function pruneImports(tm, text, used, { dropAttachedComments = false } = {}) {
   const ts = tm.ts;
   const sf = parseSourceFile(HOST_PATH, text);
   const edits = [];
@@ -1607,7 +1668,18 @@ function pruneImports(tm, text, used) {
     const keepNamed = named.filter((e) => used.has(e.name.text));
     if (!keepDefault && !keepNs && keepNamed.length === 0) {
       const end = text[st.getEnd()] === '\n' ? st.getEnd() + 1 : st.getEnd();
-      edits.push({ start: st.getStart(sf), end, text: '' });
+      let start = st.getStart(sf);
+      if (dropAttachedComments) {
+        // Walk up the `//` lines that touch the declaration (no blank line between).
+        for (;;) {
+          const prevEnd = start - 1;
+          if (prevEnd <= 0 || text[prevEnd] !== '\n') break;
+          const lineStart = text.lastIndexOf('\n', prevEnd - 1) + 1;
+          if (!/^\s*\/\/.*$/.test(text.slice(lineStart, prevEnd))) break;
+          start = lineStart;
+        }
+      }
+      edits.push({ start, end, text: '' });
       continue;
     }
     if (nb && ts.isNamedImports(nb) && dropNamed.length > 0) {
@@ -2026,11 +2098,977 @@ function generatedModulesOnDisk() {
   return out;
 }
 
+// ── The scoped classes (#30052) ──────────────────────────────────────────────
+//
+// The second pass. `engine.ts` declares two more classes after `ObjectQL`:
+// `ObjectRepository` (what `ctx.api.object(name)` returns) and `ScopedContext`
+// (what a hook reaches as `ctx.api`). This pass facades them with the same cut
+// pattern, the same stay rules and the same byte-identity proof as the first,
+// and touches nothing else: its input is the `engine.ts` the first pass left
+// (any `main` after #29986), it is proved against that file, and so it is
+// re-run on the latest `main` at landing, never rebased.
+//
+//  - ONE section per class, so one facet module per class (`SCOPED_CLASSES`).
+//    Each `engine-<class>.ts` holds one stateless facet class whose static
+//    methods are the moved bodies, unedited, with `this` typed as a `Pick` of
+//    the class's host interface, the members typed AS the class members.
+//  - One host per INSTANCE (`SCOPED_HOSTS_MODULE`), built on the first call that
+//    needs it by the factory the class's own static block installs, and kept
+//    for the instance's life: `#30051`'s shape, keyed by the instance instead
+//    of the engine. The module imports types only, for the same reason the
+//    first pass's host module does.
+//  - Neither class declares a static or a top-level declaration ahead of it,
+//    so no statics route and no leaf: a body that reads a non-public static
+//    stays (`private-static`). A body that reads a private member off another
+//    instance stays too (`foreign-private`): the class body may, a module
+//    function may not.
+
+const SCOPED_CARD = '#30052';
+
+/** The marker every file and stub the second pass writes carries; its proof keys on it. */
+const SCOPED_MARK = `[${SCOPED_CARD} codemod]`;
+
+/** The scoped classes, in file order: the class, its facet module, its section title. */
+const SCOPED_CLASSES = Object.freeze([
+  ['ObjectRepository', 'engine-object-repository.ts', 'Repository bound to one object and one execution context'],
+  ['ScopedContext', 'engine-scoped-context.ts', 'Scoped execution context: repositories, elevation, transactions'],
+]);
+
+/** The module that holds each scoped facet's per-instance host. Types-only imports, like `HOSTS_MODULE`. */
+const SCOPED_HOSTS_MODULE = 'engine-scoped-hosts.ts';
+const SCOPED_HOSTS_CLASS = 'InstanceHost';
+
+/** The marker line of a scoped stub: the module it names, and whether the docblock moved. */
+const scopedStubMarker = () => new RegExp(
+  `^\\{\\s*// ${SCOPED_MARK.replace(/[[\]]/g, '\\$&')} The body moved to \`(engine-[a-z0-9-]+\\.ts)\`(, ${DOC_MOVED})?`);
+
+/**
+ * Read `text` (an `engine.ts` whose scoped classes are not split yet) and
+ * decide, per method of each scoped class, whether its body moves. Pure.
+ */
+function planScoped(tm, text, { classes = SCOPED_CLASSES } = {}) {
+  const { Node } = tm;
+  const sf = parse(tm, HOST_PATH, text);
+  const scope = moduleScope(tm, sf);
+  const targets = [];
+  for (const [className, moduleFile, title] of classes) {
+    const cls = sf.getClass(className);
+    if (!cls) refuse(`no class ${className} in ${HOST_BASENAME}`);
+    for (const n of [facetNameOf(moduleFile), hostNameOf(moduleFile), hostVarOf(moduleFile), SCOPED_HOSTS_CLASS]) {
+      if (scope.bindings.has(n)) refuse(`${HOST_BASENAME} already binds ${n}, a name this script generates`);
+    }
+    const statics = new Map();
+    for (const m of cls.getMembers()) {
+      if (typeof m.isStatic === 'function' && m.isStatic() && typeof m.getName === 'function') {
+        statics.set(m.getName(), { scope: typeof m.getScope === 'function' ? m.getScope() : 'public',
+          kind: Node.isMethodDeclaration(m) ? 'method' : 'field', overloaded: false });
+      }
+    }
+    const ctx = { text, sf, cls, className, members: instanceMembers(tm, cls), scope, statics, pins: {}, needles: {}, classNeedles: {} };
+    const records = [];
+    for (const m of cls.getMethods()) {
+      const read = readMethod(tm, ctx, m);
+      if (read.readsNonPublicStatic) read.reasons.push('private-static');
+      const name = m.getName();
+      for (const p of m.getParameters()) {
+        if (p.getName() === facetNameOf(moduleFile) || p.getName() === hostVarOf(moduleFile)) read.reasons.push(`parameter-shadows: ${p.getName()}`);
+      }
+      const startLine = m.getStartLineNumber(true);
+      const body = m.getBody();
+      const docStart = m.getStart(true);
+      const doc = m.getScope() === 'private' && docStart < m.getStart() ? text.slice(docStart, m.getStart()) : null;
+      const record = {
+        name, node: m, className, section: title, module: moduleFile, startLine,
+        lineCount: m.getEndLineNumber() - startLine + 1,
+        bodyLines: body ? body.getEndLineNumber() - body.getStartLineNumber() + 1 : 0,
+        doc, docLines: doc ? doc.split('\n').length - 1 : 0, ...read,
+      };
+      if (record.reasons.length === 0) {
+        record.stubLines = stubBody({ node: m, name, usesHost: read.host.size > 0, docMoved: Boolean(doc) }, moduleFile, '  ', SCOPED_MARK).split('\n').length;
+      }
+      records.push(record);
+    }
+    const movers = records.filter((r) => r.reasons.length === 0);
+    for (const r of movers) {
+      for (const local of [...r.imports.keys(), ...r.moduleRefs.keys()]) {
+        if (local === facetNameOf(moduleFile) || local === hostNameOf(moduleFile)) {
+          refuse(`${moduleFile}: ${r.name} reads ${local}, a name this script generates in that module`);
+        }
+      }
+    }
+    targets.push({ className, moduleFile, title, cls, records, movers });
+  }
+  // Lever (a): a staying top-level name of engine.ts a moved body reads, which
+  // engine.ts does not export yet, is exported for the facet modules.
+  const hostExports = new Map();
+  for (const t of targets) {
+    for (const r of t.movers) {
+      for (const [n, use] of r.moduleRefs) {
+        if (scope.exported.has(n)) continue;
+        const prev = hostExports.get(n);
+        hostExports.set(n, { value: Boolean(prev && prev.value) || use.value });
+      }
+    }
+  }
+  return { sf, scope, targets, hostExports };
+}
+
+/** A scoped facet's host members (member -> `method` | `getter`) and the fields its bodies assign. */
+function scopedFacetOf(t) {
+  const members = new Map();
+  const written = new Set();
+  for (const r of t.movers) for (const [member, kind] of r.host) members.set(member, kind);
+  for (const r of t.movers) for (const member of r.writes) written.add(member);
+  return { className: t.className, moduleFile: t.moduleFile, members, written };
+}
+
+/**
+ * The per-instance hosts: `SCOPED_HOSTS_MODULE`'s text, and, per class, the
+ * static block at the end of the class that installs its facet's factory.
+ * Each member forwards as the first pass's hosts do: a method as a closure
+ * called on the instance at call time, a field or accessor as a getter, and a
+ * field a body assigns with a setter too. Pure: the proof rebuilds both from
+ * the head's host interfaces and the base classes, and compares.
+ */
+function scopedHostsTexts(facets) {
+  const sorted = [...facets].sort((a, b) => (a.moduleFile < b.moduleFile ? -1 : a.moduleFile > b.moduleFile ? 1 : 0));
+  const classNames = [...new Set(sorted.map((f) => f.className))].sort();
+  const module = [
+    '// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.',
+    '',
+    '/**',
+    ` * ${SCOPED_MARK} The host of each facet of ${classNames.map((c) => `\`${c}\``).join(' and ')},`,
+    ' * built ONCE per instance: what every stub of a facet hands that facet\'s',
+    ' * bodies as `this`. Each host below is filled by the factory its class\'s',
+    ' * static block installs, the one place that can read the class\'s private',
+    ' * members; the host is built on the first call that needs it and kept for',
+    ' * the instance\'s life. A method goes as a closure that calls it on the',
+    ' * instance at call time, a field or accessor as a getter (and a setter when',
+    ' * a body assigns it), so a body reads and writes the instance exactly as',
+    ' * the method did.',
+    ' *',
+    ` * Written by \`${SCRIPT}\` (its second pass). It imports`,
+    ' * types only, so it forms no evaluation cycle and is evaluated before the',
+    ' * classes whichever module loads first. `index.ts` re-exports nothing from',
+    ' * this module.',
+    ' */',
+    '',
+    `import type { ${classNames.join(', ')} } from './engine.js';`,
+    ...sorted.map((f) => `import type { ${hostNameOf(f.moduleFile)} } from './${f.moduleFile.replace(/\.ts$/, '.js')}';`),
+    '',
+    '/** One facet\'s host for each instance of its class: built on first use, kept for the instance\'s life. */',
+    `export class ${SCOPED_HOSTS_CLASS}<E extends object, H> {`,
+    '  private readonly hosts = new WeakMap<E, H>();',
+    '  private build: ((instance: E) => H) | undefined;',
+    '',
+    '  constructor(private readonly facet: string, private readonly owner: string) {}',
+    '',
+    '  /** Called once, from the owning class\'s static block. */',
+    '  install(build: (instance: E) => H): void {',
+    '    this.build = build;',
+    '  }',
+    '',
+    '  /** The host of `instance`, built on first use. */',
+    '  of(instance: E): H {',
+    '    let host = this.hosts.get(instance);',
+    '    if (host === undefined) {',
+    '      if (this.build === undefined) {',
+    '        throw new Error(`${this.facet}: ${this.owner} has not installed its host factory`);',
+    '      }',
+    '      host = this.build(instance);',
+    '      this.hosts.set(instance, host);',
+    '    }',
+    '    return host;',
+    '  }',
+    '}',
+    '',
+    ...sorted.map((f) => `export const ${hostVarOf(f.moduleFile)} = new ${SCOPED_HOSTS_CLASS}<${f.className}, ${hostNameOf(f.moduleFile)}>` +
+      `('${facetNameOf(f.moduleFile)}', '${f.className}');`),
+    '',
+  ].join('\n');
+  const blocks = new Map();
+  for (const f of sorted) {
+    blocks.set(f.className, [
+      `  // ${SCOPED_MARK} Installs the host of \`${facetNameOf(f.moduleFile)}\` (\`${SCOPED_HOSTS_MODULE}\`): a static`,
+      '  // block adds no member to the class, so the published `.d.ts` does not move.',
+      '  static {',
+      `    ${hostVarOf(f.moduleFile)}.install((instance) => ({`,
+      ...[...f.members.keys()].sort().flatMap((member) => {
+        if (f.members.get(member) === 'getter') {
+          return [`      get ${member}() { return instance.${member}; },`,
+            ...(f.written.has(member) ? [`      set ${member}(v) { instance.${member} = v; },`] : [])];
+        }
+        return [`      ${member}: (...a) => instance.${member}(...a),`];
+      }),
+      '    }));',
+      '  }',
+    ].join('\n'));
+  }
+  return { module, blocks };
+}
+
+/** A scoped facet module: the header, the imports, the host interface, the facet class. Pure. */
+function scopedModuleText(t, scope) {
+  const { className, moduleFile, title, movers } = t;
+  const hostName = hostNameOf(moduleFile);
+  const facet = facetNameOf(moduleFile);
+  const { members: hostMembers, written } = scopedFacetOf(t);
+  const needsHost = hostMembers.size > 0;
+  const moduleRefs = new Map();
+  for (const r of movers) {
+    for (const [n, use] of r.moduleRefs) {
+      const prev = moduleRefs.get(n);
+      moduleRefs.set(n, { value: Boolean(prev && prev.value) || use.value });
+    }
+  }
+  const readsHostValues = [...moduleRefs.values()].some((use) => use.value);
+  const names = movers.map((r) => `\`${r.name}\`${r === movers[movers.length - 1] ? '' : ','}`);
+  const out = [];
+  out.push('// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.');
+  out.push('');
+  out.push('/**');
+  out.push(...wrapComment([SCOPED_MARK, 'The', ...`"${title}"`.split(' '), 'section:', 'the', 'bodies', 'of', `\`${className}\`'s`, 'methods',
+    ...names, 'moved', 'out', 'of', '`engine.ts`', 'whole', 'by', `\`${SCRIPT}\``, '(its', 'second', 'pass).']));
+  out.push(' *');
+  out.push(...wrapComment((`A MOVE, not a redesign. {@link ${facet}} is a stateless facet of \`${className}\`: each static ` +
+    `method of it is the body of the \`${className}\` method of the same name exactly as it stood: not re-indented, not ` +
+    'formatted, not edited. The method stays on the class as a one-call stub with its signature, so the published ' +
+    'surface, an instance spy and a subclass override are what they were. A public method keeps its docblock on the ' +
+    `class, the contract; a private method's docblock moved here with its body. The state stays on \`${className}\`.`).split(' ')));
+  out.push(' *');
+  if (needsHost) {
+    out.push(...wrapComment((`The bodies reach the instance through {@link ${hostName}}: exactly the \`${className}\` ` +
+      'members they read, private ones included. Every stub hands its body, by a `.call`, the same host: ' +
+      `\`${hostVarOf(moduleFile)}\` in \`${SCOPED_HOSTS_MODULE}\`, built once per instance by the class's static block. ` +
+      'Methods go as closures that call them on the instance at call time; fields and accessors go as GETTERS, read when ' +
+      'the body reads them, and a field a body assigns goes with a SETTER that assigns it on the instance.').split(' ')));
+  } else {
+    out.push(` * No body reads a \`${className}\` member, so each stub calls its body directly.`);
+  }
+  out.push(' *');
+  if (readsHostValues) {
+    out.push(' * Values declared in `engine.ts` are imported from it (lever (a) of');
+    out.push(' * ruling 6591753301); every use is inside a function body, so the import');
+    out.push(' * cycle is never read at evaluation time. `index.ts` re-exports nothing from');
+    out.push(' * this module.');
+  } else {
+    out.push(' * The module imports `engine.ts` for types only, so the two modules form no');
+    out.push(' * evaluation cycle. `index.ts` re-exports nothing from this module.');
+  }
+  out.push(' */');
+  out.push('');
+  out.push(...importLines(scope, movers, { needsHost, moduleRefs, leafNames: new Map(), className }));
+  if (needsHost) {
+    out.push('');
+    out.push('/**');
+    out.push(...wrapComment((`The \`${className}\` members the bodies of {@link ${facet}} read — every one of them, and ` +
+      'no other. Each is typed AS the class member (an indexed access on the class), so a change to a member\'s ' +
+      'signature on the class is a change here too. `readonly` members are the getters; the others are fields a body ' +
+      'assigns.').split(' ')));
+    out.push(' */');
+    out.push(`export interface ${hostName} {`);
+    for (const member of [...hostMembers.keys()].sort()) {
+      const ro = hostMembers.get(member) === 'getter' && !written.has(member);
+      out.push(`  ${ro ? 'readonly ' : ''}${member}: ${className}['${member}'];`);
+    }
+    out.push('}');
+  }
+  out.push('');
+  out.push(`/** The bodies of \`${className}\`'s methods: a stateless facet, called by the class's stubs. */`);
+  out.push(`export class ${facet} {`);
+  movers.forEach((r, i) => {
+    const m = r.node;
+    const picks = [...r.host.keys()].sort().map((k) => `'${k}'`).join(' | ');
+    const params = [...(r.host.size > 0 ? [`this: Pick<${hostName}, ${picks}>`] : []), ...paramsText(m)];
+    const ret = m.getReturnTypeNode() ? `: ${m.getReturnTypeNode().getText()}` : '';
+    if (i > 0) out.push('');
+    const typeParams = m.getTypeParameters().length > 0 ? `<${m.getTypeParameters().map((tp) => tp.getText()).join(', ')}>` : '';
+    out.push(`  ${r.doc ?? `${placeholderDoc(r.name, className)}\n  `}static ${m.isAsync() ? 'async ' : ''}${r.name}${typeParams}(${params.join(', ')})${ret} ${m.getBody().getText()}`);
+  });
+  out.push('}');
+  out.push('');
+  return out.join('\n');
+}
+
+/**
+ * Apply a scoped plan to `text`. Returns `{ host, modules, pruned }` as
+ * `generate` does. Pure.
+ */
+function generateScoped(tm, text, planned) {
+  const { sf, scope, targets, hostExports } = planned;
+  const edits = [];
+  const importBlock = [];
+  const facets = [];
+  for (const t of targets) {
+    if (t.movers.length === 0) continue;
+    const hostName = hostNameOf(t.moduleFile);
+    const anyHost = t.movers.some((r) => r.host.size > 0);
+    importBlock.push(`\n// ${SCOPED_MARK} ${t.title}: the methods of the same names on \`${t.className}\` hand the bodies` +
+      `${anyHost ? ` what they read (\`${hostName}\`)` : ' their arguments'}.`);
+    importBlock.push(`\nimport { ${facetNameOf(t.moduleFile)} } from './${t.moduleFile.replace(/\.ts$/, '.js')}';`);
+    for (const r of t.movers) {
+      const body = r.node.getBody();
+      const lineStart = text.lastIndexOf('\n', body.getEnd() - 1) + 1;
+      const closeIndent = text.slice(lineStart, body.getEnd() - 1);
+      if (!/^ *$/.test(closeIndent)) refuse(`${t.className}#${r.name}: the body's closing brace does not open its own line`);
+      const stub = stubBody({ node: r.node, name: r.name, usesHost: r.host.size > 0, docMoved: Boolean(r.doc) }, t.moduleFile, closeIndent, SCOPED_MARK);
+      edits.push({ start: body.getStart(), end: body.getEnd(), text: stub });
+      const asyncKw = r.node.getModifiers().find((x) => x.getKind() === tm.SyntaxKind.AsyncKeyword);
+      if (asyncKw) edits.push({ start: asyncKw.getStart(), end: r.node.getNameNode().getStart(), text: '' });
+      if (r.doc) edits.push({ start: r.node.getStart(true), end: r.node.getStart(), text: '' });
+    }
+    const facet = scopedFacetOf(t);
+    if (facet.members.size > 0) facets.push(facet);
+  }
+  const hosts = facets.length > 0 ? scopedHostsTexts(facets) : null;
+  if (hosts) {
+    for (const f of facets) {
+      const t = targets.find((x) => x.className === f.className);
+      const last = t.cls.getMembers().at(-1);
+      edits.push({ start: last.getEnd(), end: last.getEnd(), text: `\n\n${hosts.blocks.get(f.className)}` });
+    }
+    importBlock.push(`\n// ${SCOPED_MARK} The scoped facets' hosts, one per instance, which each class's static block builds.`);
+    importBlock.push(`\n${namedStatement('import', facets.map((f) => hostVarOf(f.moduleFile)).sort(), ` from './${SCOPED_HOSTS_MODULE.replace(/\.ts$/, '.js')}';`)}`);
+  }
+  if (hostExports.size > 0) {
+    const spelled = [...hostExports.keys()].sort().map((n) => {
+      const st = sf.getStatements().find((s) => (declaredNames(tm, s) ?? []).includes(n));
+      return st && (tm.Node.isInterfaceDeclaration(st) || tm.Node.isTypeAliasDeclaration(st)) ? `type ${n}` : n;
+    });
+    importBlock.push(`\n// ${SCOPED_MARK} Exported for the scoped facet modules above (lever (a)); \`index.ts\` re-exports by name, so none reaches the package.`);
+    importBlock.push(`\n${namedStatement('export', spelled, ';')}`);
+  }
+  const lastImport = sf.getImportDeclarations().at(-1);
+  if (!lastImport) refuse('engine.ts has no import declaration to place the generated imports after');
+  if (importBlock.length > 0) edits.push({ start: lastImport.getEnd(), end: lastImport.getEnd(), text: importBlock.join('') });
+  edits.sort((a, b) => b.start - a.start || b.end - a.end);
+  let out = text;
+  let floor = Infinity;
+  for (const e of edits) {
+    if (e.end > floor) refuse('overlapping edits');
+    out = out.slice(0, e.start) + e.text + out.slice(e.end);
+    floor = e.start;
+  }
+  const pruned = pruneImports(tm, out, usedImportNames(tm, out));
+  const moduleTexts = new Map();
+  for (const t of targets) if (t.movers.length > 0) moduleTexts.set(t.moduleFile, scopedModuleText(t, scope));
+  if (hosts) moduleTexts.set(SCOPED_HOSTS_MODULE, hosts.module);
+  return { host: pruned.text, modules: moduleTexts, pruned: pruned.removed };
+}
+
+/**
+ * Prove a scoped split against its base, from the texts alone, as `verify`
+ * proves the first pass: every generated function is its base method's text,
+ * every stub is the generated one-call stub, the host module and each install
+ * block are the generated ones, and undoing the split rebuilds the base
+ * `engine.ts` byte-for-byte once the base's import bindings the head no longer
+ * reads are pruned from it (each pruned binding must occur in moved text).
+ * The first pass's text, `ObjectQL` among it, is compared like every other
+ * byte: it must not move.
+ */
+function verifyScoped(tm, baseText, headText, moduleTexts, { classes = SCOPED_CLASSES } = {}) {
+  const { Node } = tm;
+  const failures = [];
+  const moved = [];
+  const baseSf = parse(tm, HOST_PATH, baseText);
+  const headSf = parse(tm, HOST_PATH, headText);
+  const prune = pruneImports(tm, baseText, usedImportNames(tm, headText));
+  const target = prune.text;
+  const ownModule = new Map(classes.map(([className, moduleFile]) => [moduleFile, className]));
+
+  const modules = new Map();
+  let hostsOnDisk = null;
+  for (const [file, text] of moduleTexts) {
+    if (!text.includes(SCOPED_MARK)) continue;
+    if (file === SCOPED_HOSTS_MODULE) { hostsOnDisk = text; continue; }
+    if (!ownModule.has(file)) { failures.push(`${file}: carries ${SCOPED_MARK} but is the module of no scoped class`); continue; }
+    const sf = parse(tm, join(SRC_DIR, file), text);
+    const fns = new Map();
+    const facet = facetNameOf(file);
+    for (const st of sf.getStatements()) {
+      if (Node.isImportDeclaration(st)) continue;
+      if (Node.isInterfaceDeclaration(st) && st.getName() === hostNameOf(file)) continue;
+      if (Node.isClassDeclaration(st) && st.getName() === facet && !fns.size) {
+        for (const member of st.getMembers()) {
+          if (Node.isMethodDeclaration(member) && member.isStatic() && member.getBody() && !fns.has(member.getName())) fns.set(member.getName(), member);
+          else failures.push(`${file}: ${facet} has a member that is not a moved body: ${member.getText().slice(0, 60)}`);
+        }
+        continue;
+      }
+      failures.push(`${file}: a top-level statement that is neither an import, the host interface nor the facet class ${facet}: ${st.getText().slice(0, 60)}`);
+    }
+    modules.set(file, { sf, text, fns, claimed: new Set() });
+  }
+
+  const marker = scopedStubMarker();
+  const movedDocs = [];
+  const edits = [];
+  const facets = [];
+  for (const [className, moduleFile] of classes) {
+    const headCls = headSf.getClass(className);
+    const baseCls = baseSf.getClass(className);
+    if (!headCls || !baseCls) { failures.push(`no class ${className} at base or head`); continue; }
+    const mod = modules.get(moduleFile);
+    for (const m of headCls.getMethods()) {
+      const body = m.getBody();
+      if (!body) continue;
+      const hit = marker.exec(body.getText());
+      if (!hit) continue;
+      const name = m.getName();
+      if (hit[1] !== moduleFile) { failures.push(`${className}#${name}: its stub names ${hit[1]}, not its class's module ${moduleFile}`); continue; }
+      const fn = mod && mod.fns.get(name);
+      if (!fn) { failures.push(`${className}#${name}: its stub names ${moduleFile}, which has no function ${name}`); continue; }
+      mod.claimed.add(name);
+      const lineStart = headText.lastIndexOf('\n', body.getEnd() - 1) + 1;
+      const closeIndent = headText.slice(lineStart, body.getEnd() - 1);
+      const usesHost = fn.getParameters().some((p) => p.getName() === 'this');
+      const want = stubBody({ node: m, name, usesHost, docMoved: Boolean(hit[2]) }, moduleFile, closeIndent, SCOPED_MARK);
+      if (body.getText() !== want) failures.push(`${className}#${name}: its stub is not the generated one-call stub (want ${JSON.stringify(want.split('\n').at(-2).trim())})`);
+      const base = baseCls.getMethods().find((x) => x.getName() === name && x.isStatic() === m.isStatic());
+      if (!base || !base.getBody()) { failures.push(`${className}#${name}: no method of that name with a body at base`); continue; }
+      const same = {
+        body: fn.getBody().getText() === base.getBody().getText(),
+        params: JSON.stringify(fn.getParameters().filter((p) => p.getName() !== 'this').map((p) => p.getText())) ===
+          JSON.stringify(base.getParameters().map((p) => p.getText())),
+        returnType: (fn.getReturnTypeNode()?.getText() ?? null) === (base.getReturnTypeNode()?.getText() ?? null),
+        async: fn.isAsync() === base.isAsync(),
+        typeParameters: JSON.stringify(fn.getTypeParameters().map((x) => x.getText())) === JSON.stringify(base.getTypeParameters().map((x) => x.getText())),
+        static: m.isStatic() === base.isStatic(),
+      };
+      const lead = mod.text.slice(fn.getStart(true), fn.getStart());
+      const docMoved = Boolean(hit[2]);
+      if (docMoved) {
+        if (m.getStart(true) !== m.getStart()) failures.push(`${className}#${name}: its stub says the docblock moved, but the class still carries one`);
+        if (m.getScope() !== 'private') failures.push(`${className}#${name}: a ${m.getScope()} method's docblock moved off the class (only a private one may)`);
+        edits.push({ start: m.getStart(), end: m.getStart(), text: lead });
+        movedDocs.push(lead);
+      } else if (lead !== `${placeholderDoc(name, className)}\n  `) {
+        failures.push(`${className}#${name}: the facet member's leading text is neither its moved docblock nor the placeholder`);
+      }
+      for (const [what, ok] of Object.entries(same)) if (!ok) failures.push(`${className}#${name}: the generated function's ${what} is not the base method's`);
+      moved.push({
+        name: `${className}#${name}`, module: moduleFile, lines: base.getBody().getEndLineNumber() - base.getBody().getStartLineNumber() + 1,
+        text: fn.getText(), docMoved, ...same,
+      });
+      edits.push({ start: body.getStart(), end: body.getEnd(), text: fn.getBody().getText() });
+      if (fn.isAsync()) edits.push({ start: m.getNameNode().getStart(), end: m.getNameNode().getStart(), text: 'async ' });
+    }
+    // The class's install block: exactly what `scopedHostsTexts` writes for
+    // the host interface on disk, each member forwarded as the BASE class
+    // declares it. Then the undo drops it.
+    const blocks = headCls.getMembers().filter((x) => Node.isClassStaticBlockDeclaration(x) && x.getFullText().includes(SCOPED_MARK));
+    const iface = mod ? mod.sf.getInterface(hostNameOf(moduleFile)) : undefined;
+    if (iface || blocks.length > 0) {
+      const baseMembers = instanceMembers(tm, baseCls);
+      const members = new Map();
+      const written = new Set();
+      for (const p of iface ? iface.getProperties() : []) {
+        const n = p.getName();
+        const info = baseMembers.get(n);
+        if (!info) { failures.push(`${moduleFile}: ${hostNameOf(moduleFile)}.${n} names no instance member of the base class ${className}`); continue; }
+        members.set(n, info.kind === 'method' ? 'method' : 'getter');
+        if (info.kind !== 'method' && !p.isReadonly()) written.add(n);
+      }
+      const facet = { className, moduleFile, members, written };
+      if (iface) facets.push(facet);
+      const want = scopedHostsTexts([facet]).blocks.get(className);
+      const blockAt = blocks.length === 1 ? headText.lastIndexOf(`  // ${SCOPED_MARK} Installs`, blocks[0].getStart()) : -1;
+      if (!iface || blocks.length !== 1 || blockAt < 0 || headText.slice(blockAt, blocks[0].getEnd()) !== want) {
+        failures.push(`${className}: its host static block is not the generated installer of ${hostNameOf(moduleFile)}`);
+      } else {
+        edits.push({ start: headText.lastIndexOf('\n\n', blockAt), end: blocks[0].getEnd(), text: '' });
+      }
+    }
+  }
+  for (const [file, mod] of modules) {
+    for (const name of mod.fns.keys()) if (!mod.claimed.has(name)) failures.push(`${file}: function ${name} has no stub on ${ownModule.get(file)}`);
+  }
+  if (facets.length > 0 || hostsOnDisk !== null) {
+    if (hostsOnDisk !== scopedHostsTexts(facets).module) failures.push(`${SCOPED_HOSTS_MODULE} is not the generated host module for the scoped facets on disk`);
+  }
+  const generatedSpecifier = (spec) => {
+    const hit = /^\.\/(engine-[a-z0-9-]+)\.js$/.exec(spec ?? '');
+    return Boolean(hit && (ownModule.has(`${hit[1]}.ts`) || `${hit[1]}.ts` === SCOPED_HOSTS_MODULE));
+  };
+  for (const st of headSf.getStatements()) {
+    const drop = (Node.isImportDeclaration(st) && generatedSpecifier(st.getModuleSpecifierValue())) ||
+      (Node.isExportDeclaration(st) && !st.getModuleSpecifier() && st.getFullText().includes(SCOPED_MARK));
+    if (drop) edits.push({ start: st.getFullStart(), end: st.getEnd(), text: '' });
+  }
+  edits.sort((a, b) => b.start - a.start || b.end - a.end);
+  let rebuilt = headText;
+  for (const e of edits) rebuilt = rebuilt.slice(0, e.start) + e.text + rebuilt.slice(e.end);
+
+  const movedText = [...moved.map((m) => m.text), ...movedDocs].join('\n');
+  for (const n of prune.removed) {
+    if (!new RegExp(`(^|[^\\w$])${n.replace(/\$/g, '\\$')}($|[^\\w$])`).test(movedText)) {
+      failures.push(`the head dropped the import \`${n}\`, which no moved body reads`);
+    }
+  }
+  if (rebuilt !== target) {
+    const a = rebuilt.split('\n');
+    const b = target.split('\n');
+    let i = 0;
+    while (i < Math.max(a.length, b.length) && a[i] === b[i]) i += 1;
+    failures.push(`undoing the scoped split does not rebuild the base engine.ts (its unread imports pruned): first difference at line ${i + 1}` +
+      `\n    rebuilt: ${JSON.stringify(a[i] ?? '<end>')}\n    base:    ${JSON.stringify(b[i] ?? '<end>')}`);
+  }
+  if (moved.length === 0) failures.push('no moved method found: a proof over nothing is not a proof');
+  return { failures, moved, pruned: prune.removed, linesBefore: lineCount(baseText), linesAfter: lineCount(headText) };
+}
+
+function planReportScoped(planned) {
+  const out = [];
+  const reasonCounts = new Map();
+  let movedLines = 0;
+  let stubLines = 0;
+  for (const t of planned.targets) {
+    const lines = t.movers.reduce((n, r) => n + r.bodyLines, 0);
+    const stubs = t.movers.reduce((n, r) => n + r.stubLines, 0);
+    movedLines += lines;
+    stubLines += stubs;
+    out.push(`§ ${t.className} -> ${t.moduleFile}: ${t.movers.length}/${t.records.length} methods move (${lines} body lines out, ${stubs} stub lines in)`);
+    for (const r of t.records) {
+      if (r.reasons.length === 0) out.push(`    move  ${r.name} (body ${r.bodyLines} -> stub ${r.stubLines})`);
+      else out.push(`    stay  ${r.name} (${r.lineCount}) — ${r.reasons.join('; ')}`);
+      for (const reason of r.reasons) {
+        const code = reason.split(':')[0];
+        reasonCounts.set(code, (reasonCounts.get(code) ?? 0) + 1);
+      }
+    }
+  }
+  out.push('');
+  out.push(`scoped total: ${planned.targets.reduce((n, t) => n + t.movers.length, 0)}/${planned.targets.reduce((n, t) => n + t.records.length, 0)} ` +
+    `methods move: ${movedLines} body lines out, ${stubLines} stub lines in`);
+  out.push(`stay reasons (a method may carry several): ${[...reasonCounts].sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c} ${n}`).join(', ') || 'none'}`);
+  out.push(`lever (a): ${planned.hostExports.size} engine.ts name(s) exported for the scoped facet modules` +
+    `${planned.hostExports.size ? ` (${[...planned.hostExports.keys()].sort().join(', ')})` : ''}`);
+  return out.join('\n');
+}
+
+function printVerifyScoped(v) {
+  for (const f of v.failures) console.error(`  ✗ ${f}`);
+  const identical = v.moved.filter((m) => m.body && m.params && m.returnType && m.async).length;
+  console.log(`byte-identity (scoped classes): ${identical}/${v.moved.length} moved bodies identical to base (body, parameters, return type, async); ` +
+    `engine.ts ${v.linesBefore} -> ${v.linesAfter} lines; undoing the split ${v.failures.some((f) => f.startsWith('undoing')) ? 'does NOT' : 'does'} rebuild the base byte-for-byte ` +
+    `once the ${v.pruned.length} import binding(s) only moved text reads are pruned from the base (${v.pruned.join(', ') || 'none'})`);
+}
+
+function scopedModulesOnDisk() {
+  const out = new Map();
+  for (const file of [SCOPED_HOSTS_MODULE, ...SCOPED_CLASSES.map((row) => row[1])]) {
+    const p = join(SRC_DIR, file);
+    if (existsSync(p)) out.set(file, readFileSync(p, 'utf8'));
+  }
+  return out;
+}
+
+/** `--scoped`: plan, write or re-prove the second pass. */
+async function mainScoped(tm, argv) {
+  if (argv.includes('--verify')) {
+    const i = argv.indexOf('--base');
+    const ref = i >= 0 ? argv[i + 1] : null;
+    if (!ref) refuse('--scoped --verify needs --base <ref>');
+    const v = verifyScoped(tm, gitShow(ref, `${SRC_REL}/${HOST_BASENAME}`), readFileSync(HOST_PATH, 'utf8'), scopedModulesOnDisk());
+    printVerifyScoped(v);
+    return v.failures.length === 0 ? 0 : 1;
+  }
+  const input = readFileSync(HOST_PATH, 'utf8');
+  if (input.includes(SCOPED_MARK)) {
+    refuse(`${HOST_BASENAME} already carries ${SCOPED_MARK} stubs: run the second pass on a file whose scoped classes are unsplit (re-run on the latest main, never on its own output)`);
+  }
+  const planned = planScoped(tm, input);
+  console.log(planReportScoped(planned));
+  const out = generateScoped(tm, input, planned);
+  const files = new Map([[HOST_BASENAME, out.host], ...out.modules]);
+  console.log(`output tree sha256: ${treeHash(files)} (input sha256 ${sha256(input)})`);
+  const v = verifyScoped(tm, input, out.host, out.modules);
+  printVerifyScoped(v);
+  if (v.failures.length > 0) {
+    console.error('✗ the generated scoped split fails byte-identity: nothing written. Report the fork; never hand-edit the split.');
+    return 1;
+  }
+  if (!argv.includes('--write')) {
+    console.log('plan only: nothing written (pass --write to apply).');
+    return 0;
+  }
+  for (const [file] of out.modules) {
+    const p = join(SRC_DIR, file);
+    if (existsSync(p) && !readFileSync(p, 'utf8').includes(SCOPED_MARK)) refuse(`${file} exists and was not written by this script`);
+  }
+  writeFileSync(HOST_PATH, out.host);
+  for (const [file, text] of out.modules) writeFileSync(join(SRC_DIR, file), text);
+  console.log(`✓ wrote ${HOST_BASENAME} and ${out.modules.size} module(s) under ${SRC_REL}`);
+  return 0;
+}
+
+// ── The third pass: the hand series' private docblocks (#30053) ──────────────
+
+/**
+ * The hand series (#25522, and the two later hand cuts #27495 and #29460)
+ * moved its bodies out of `engine.ts` before this codemod existed, and kept
+ * EVERY method's docblock on the class: each function in a hand module
+ * carries the placeholder `placeholderDoc` writes instead. This codemod's own
+ * cut pattern moves a PRIVATE method's docblock with its body (a private
+ * member is no part of the published surface, so nothing outside the class
+ * reads it there) and keeps a public or protected one on the class, the
+ * contract. `--hand-docs` applies that rule to the hand series, and touches
+ * nothing else:
+ *
+ *  - A hand-series stub is a method whose body opens with a hand marker
+ *    (`HAND_STUB_MARK`), naming its hand module.
+ *  - A private stub's docblock leaves the class and replaces its function's
+ *    placeholder, de-indented one level (the hand series re-indented every
+ *    body it moved, so the function stands at column 0); the stub's marker
+ *    gains `HAND_DOC_MOVED`; the module's header docblock gains
+ *    `HAND_DOCS_NOTE`, once, because its header says each docblock stays on
+ *    the class.
+ *  - A public or protected stub, a private stub with no docblock, and a stub
+ *    whose leading text is anything but one docblock stay as they are.
+ *  - `--modules a.ts,b.ts` moves only the stubs of the named hand modules, so
+ *    the pass can land in slices; a stub already moved is skipped, so a later
+ *    slice runs on an earlier one's output.
+ *
+ * The proof is the undo: putting every moved docblock back on its stub
+ * (re-indented), the placeholder back on its function, and taking the marker
+ * phrase and the header note out rebuilds the base `engine.ts` and every base
+ * hand module byte-for-byte (a base an earlier slice landed in is undone the
+ * same way first, so a slice is proved on its own), once the import bindings
+ * only a moved docblock's `{@link}` read (`noUnusedLocals` counts a link) are
+ * pruned from the base with the `//` lines directly above a declaration that
+ * goes whole; every pruned name must be one a moved docblock links. A
+ * one-character edit in a moved docblock, a block dropped on either side, a
+ * public docblock moved, or any other byte changed in those files fails it.
+ * The public `.d.ts` bar is a report reading on two built dists, as for the
+ * first two passes.
+ */
+const HAND_DOCS_CARD = '#30053';
+
+/**
+ * The marker a hand-series stub's body opens with: `[#25522 cut N]` or
+ * `[#27495]` then "The body moved to", or #29460's untagged "The body lives
+ * in". Group 1 is the module, group 2 the phrase once moved.
+ */
+const HAND_STUB_MARK = /^ *\/\/ (?:\[(?:#25522 cut \d+|#27495)\] )?The body (?:moved to|lives in) `(engine-[a-z0-9-]+\.ts)`(, its docblock with it)?/;
+
+/** The phrase a stub's marker gains after its module's backticked name. */
+const HAND_DOC_MOVED = `, ${DOC_MOVED}`;
+
+/** The paragraph a hand module's header docblock gains, above its closing line, when a docblock moves into it. */
+const HAND_DOCS_NOTE = [
+  ' *',
+  ` * [${HAND_DOCS_CARD} codemod] A PRIVATE method's docblock has since moved here,`,
+  ' * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),',
+  ' * and the class keeps none for it; a public or protected method\'s docblock',
+  ' * stays on the class, the contract, and its function keeps the placeholder.',
+].join('\n');
+
+/** One docblock and the indentation before the member, or null: the only leading text that moves. */
+function soleDocblock(lead) {
+  const m = /^(\/\*\*(?:(?!\*\/)[\s\S])*\*\/)\n( *)$/.exec(lead);
+  return m ? { doc: m[1], indent: m[2] } : null;
+}
+
+/** The docblock one level out (two spaces), or null when a line is not indented that far. */
+function deindentDoc(doc) {
+  const lines = doc.split('\n');
+  const out = [lines[0]];
+  for (const line of lines.slice(1)) {
+    if (line === '') out.push(line);
+    else if (line.startsWith('  ')) out.push(line.slice(2));
+    else return null;
+  }
+  return out.join('\n');
+}
+
+const reindentDoc = (doc) => doc.split('\n').map((line, i) => (i === 0 || line === '' ? line : `  ${line}`)).join('\n');
+
+/** The header docblock's closing line offset in a module, or -1: the first `/**` before any import or export. */
+function headerCloseAt(text) {
+  const open = text.indexOf('/**');
+  const firstStatement = text.search(/^(?:import|export) /m);
+  if (open < 0 || (firstStatement >= 0 && open > firstStatement)) return -1;
+  const close = text.indexOf('\n */\n', open);
+  return close < 0 || (firstStatement >= 0 && close > firstStatement) ? -1 : close;
+}
+
+/** Every hand-series stub of the class, in source order, with what moving its docblock needs. */
+function handStubs(tm, engineText, className = CLASS_NAME) {
+  const sf = parse(tm, HOST_BASENAME, engineText);
+  const cls = sf.getClass(className);
+  if (!cls) refuse(`${HOST_BASENAME} declares no class ${className}`);
+  const stubs = [];
+  for (const m of cls.getMethods()) {
+    const body = m.getBody();
+    if (!body) continue;
+    const line1Start = engineText.indexOf('\n', body.getStart()) + 1;
+    const line1 = engineText.slice(line1Start, engineText.indexOf('\n', line1Start));
+    const hit = HAND_STUB_MARK.exec(line1);
+    if (!hit) continue;
+    stubs.push({
+      node: m, name: m.getName(), scope: m.getScope(), module: hit[1], moved: Boolean(hit[2]),
+      lead: engineText.slice(m.getStart(true), m.getStart()), leadStart: m.getStart(true), memberStart: m.getStart(),
+      // The offset right after the module's closing backtick, where the phrase goes.
+      phraseAt: line1Start + hit.index + hit[0].length - (hit[2] ? hit[2].length : 0),
+    });
+  }
+  return stubs;
+}
+
+/** The exported function of that name in a hand module: its leading text and offsets, or null. */
+function handFunction(tm, file, text, name) {
+  const sf = parse(tm, file, text);
+  const fn = sf.getFunction(name);
+  if (!fn || !fn.isExported()) return null;
+  return { lead: text.slice(fn.getStart(true), fn.getStart()), leadStart: fn.getStart(true), start: fn.getStart() };
+}
+
+/** Text edits applied end to start; each is `{ start, end, text }`. */
+function applyEdits(text, edits) {
+  let out = text;
+  for (const e of [...edits].sort((a, b) => b.start - a.start)) out = out.slice(0, e.start) + e.text + out.slice(e.end);
+  return out;
+}
+
+/**
+ * The plan: each hand stub's verdict. `modules` is the slice (null: every
+ * hand module); `moduleTexts` maps a hand module file to its text.
+ */
+function planHandDocs(tm, engineText, moduleTexts, { modules = null, className = CLASS_NAME } = {}) {
+  const stubs = handStubs(tm, engineText, className);
+  const known = new Set(stubs.map((s) => s.module));
+  for (const file of modules ?? []) {
+    if (!known.has(file)) refuse(`--modules names ${file}, which no hand-series stub of ${className} delegates to (known: ${[...known].sort().join(', ')})`);
+  }
+  const records = [];
+  for (const s of stubs) {
+    const why = (() => {
+      if (s.moved) return 'already-moved';
+      if (s.scope !== 'private') return `${s.scope} (its docblock is the contract and stays on the class)`;
+      if (s.lead === '') return 'no-docblock';
+      if (modules && !modules.includes(s.module)) return 'not-in-slice';
+      const sole = soleDocblock(s.lead);
+      if (!sole) return 'leading-text (anything but one docblock stays)';
+      if (deindentDoc(sole.doc) === null) return 'indent (a docblock line is not indented one level)';
+      return '';
+    })();
+    let fn = null;
+    let reason = why;
+    if (why === '') {
+      const text = moduleTexts.get(s.module);
+      if (text == null) refuse(`${s.module}: the hand module ${s.name} delegates to is not on disk`);
+      fn = handFunction(tm, s.module, text, s.name);
+      if (!fn) refuse(`${s.module}: exports no function ${s.name}, the body ${className}#${s.name}'s marker names`);
+      if (headerCloseAt(text) < 0) refuse(`${s.module}: no header docblock closing in a bare \` */\` line before its first import or export`);
+      // A function whose docblock says more than the placeholder keeps it,
+      // and the method keeps its own: merging two docblocks is an edit, not a move.
+      if (fn.lead !== `${placeholderDoc(s.name, className)}\n`) reason = 'function-docblock (its function carries more than the placeholder)';
+    }
+    records.push({ ...s, reason, fn });
+  }
+  return { records, movers: records.filter((r) => r.reason === '') };
+}
+
+/** Apply the plan: the new `engine.ts` and every hand module it changed. */
+function generateHandDocs(tm, engineText, moduleTexts, planned) {
+  const hostEdits = [];
+  const perModule = new Map();
+  for (const r of planned.movers) {
+    hostEdits.push({ start: r.leadStart, end: r.memberStart, text: '' });
+    hostEdits.push({ start: r.phraseAt, end: r.phraseAt, text: HAND_DOC_MOVED });
+    const edits = perModule.get(r.module) ?? [];
+    edits.push({ start: r.fn.leadStart, end: r.fn.start, text: `${deindentDoc(soleDocblock(r.lead).doc)}\n` });
+    perModule.set(r.module, edits);
+  }
+  const modules = new Map();
+  for (const [file, edits] of [...perModule].sort(([a], [b]) => (a < b ? -1 : 1))) {
+    const text = moduleTexts.get(file);
+    if (!text.includes(HAND_DOCS_NOTE)) {
+      const at = headerCloseAt(text);
+      edits.push({ start: at, end: at, text: `\n${HAND_DOCS_NOTE}` });
+    }
+    modules.set(file, applyEdits(text, edits));
+  }
+  const moved = applyEdits(engineText, hostEdits);
+  // A JSDoc `{@link X}` is a read `noUnusedLocals` counts, so an import binding
+  // only a moved docblock linked is dropped, with the `//` lines that explain it.
+  const { text: host, removed: pruned } = pruneImports(tm, moved, usedImportNames(tm, moved), { dropAttachedComments: true });
+  return { host, modules, pruned };
+}
+
+/** The names a docblock links (`{@link X}`, `{@linkcode X}`, `@see X`; the leftmost name of a dotted one). */
+function linkedNames(doc) {
+  return new Set([...doc.matchAll(/\{@link(?:code|plain)?\s+([A-Za-z_$][\w$]*)|@see\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1] ?? m[2]));
+}
+
+/**
+ * Undo every move a tree's markers record: each moved docblock back on its
+ * stub (re-indented), the placeholder back on its function, the marker phrase
+ * and the header note out. `moduleTexts` maps a hand module file to its text.
+ * Returns the undone texts, the moves it undid, and every way the tree breaks
+ * the rule (a public docblock moved, a marker over a docblock still on the
+ * class, a function with no moved docblock, a header with no note).
+ */
+function undoHandDocs(tm, engineText, moduleTexts, className = CLASS_NAME) {
+  const failures = [];
+  const moved = [];
+  const hostEdits = [];
+  const perModule = new Map();
+  for (const s of handStubs(tm, engineText, className)) {
+    if (!s.moved) continue;
+    if (s.scope !== 'private') failures.push(`${s.name}: a ${s.scope} method's docblock moved off the class (only a private one may)`);
+    if (s.lead !== '') failures.push(`${s.name}: its stub says the docblock moved, but the class still carries leading text`);
+    const text = moduleTexts.get(s.module);
+    const fn = text == null ? null : handFunction(tm, s.module, text, s.name);
+    if (!fn) { failures.push(`${s.name}: ${s.module} exports no function of that name`); continue; }
+    const sole = soleDocblock(fn.lead);
+    if (!sole || sole.indent !== '' || fn.lead === `${placeholderDoc(s.name, className)}\n`) {
+      failures.push(`${s.name}: its stub says the docblock moved, but its function in ${s.module} carries no moved docblock`);
+      continue;
+    }
+    const indent = /^ */.exec(engineText.slice(engineText.lastIndexOf('\n', s.memberStart) + 1, s.memberStart))[0];
+    hostEdits.push({ start: s.memberStart, end: s.memberStart, text: `${reindentDoc(sole.doc)}\n${indent}` });
+    hostEdits.push({ start: s.phraseAt, end: s.phraseAt + HAND_DOC_MOVED.length, text: '' });
+    const edits = perModule.get(s.module) ?? [];
+    edits.push({ start: fn.leadStart, end: fn.start, text: `${placeholderDoc(s.name, className)}\n` });
+    perModule.set(s.module, edits);
+    moved.push({ name: s.name, module: s.module, lines: sole.doc.split('\n').length, doc: sole.doc });
+  }
+  const modules = new Map();
+  for (const [file, text] of moduleTexts) {
+    const edits = perModule.get(file) ?? [];
+    if (edits.length > 0 || text.includes(HAND_DOCS_NOTE)) {
+      const at = text.indexOf(`\n${HAND_DOCS_NOTE}\n */\n`);
+      if (at < 0) failures.push(`${file}: a docblock moved into it, but its header carries no note saying so above its closing line`);
+      else edits.push({ start: at, end: at + HAND_DOCS_NOTE.length + 1, text: '' });
+    }
+    modules.set(file, applyEdits(text, edits));
+  }
+  return { host: applyEdits(engineText, hostEdits), modules, moved, failures };
+}
+
+/**
+ * The proof: undoing every move in the head lands on exactly what undoing
+ * every move in the base lands on, `engine.ts` and each hand module byte for
+ * byte. A base no slice has touched undoes to itself, so against it this is
+ * "the undo rebuilds the base"; against a base an earlier slice landed in, it
+ * proves this slice without re-proving that one's text. `baseModules` and
+ * `headModules` map a hand module file to its text (a file absent from one
+ * side fails).
+ */
+function verifyHandDocs(tm, baseText, headText, baseModules, headModules, { className = CLASS_NAME } = {}) {
+  const head = undoHandDocs(tm, headText, headModules, className);
+  const base = undoHandDocs(tm, baseText, baseModules, className);
+  const failures = [...head.failures, ...base.failures.map((f) => `base: ${f}`)];
+  const firstDiff = (a, b) => {
+    const x = a.split('\n'); const y = b.split('\n');
+    let i = 0; while (i < Math.max(x.length, y.length) && x[i] === y[i]) i += 1;
+    return `line ${i + 1}: undone base ${JSON.stringify(x[i] ?? null)} | undone head ${JSON.stringify(y[i] ?? null)}`;
+  };
+  // The one edit the undo does not read back from the head is the import
+  // prune: recomputed from the head and applied to the base, and every binding
+  // it drops must be a name a moved docblock links.
+  const { text: prunedBase, removed: pruned } = pruneImports(tm, base.host, usedImportNames(tm, headText), { dropAttachedComments: true });
+  const links = new Set(head.moved.flatMap((m) => [...linkedNames(m.doc)]));
+  for (const name of pruned) if (!links.has(name)) failures.push(`${name}: the head no longer imports it, and no moved docblock links it`);
+  if (head.host !== prunedBase) failures.push(`undoing the moves does NOT rebuild the base ${HOST_BASENAME} (${firstDiff(prunedBase, head.host)})`);
+  const files = [...new Set([...baseModules.keys(), ...headModules.keys()])].sort();
+  for (const file of files) {
+    const b = base.modules.get(file); const h = head.modules.get(file);
+    if (b == null || h == null) { failures.push(`${file}: only in the ${b == null ? 'head' : 'base'}`); continue; }
+    if (h !== b) failures.push(`undoing the moves does NOT rebuild the base ${file} (${firstDiff(b, h)})`);
+  }
+  const baseMoved = new Set(base.moved.map((m) => m.name));
+  return {
+    failures, moved: head.moved.filter((m) => !baseMoved.has(m.name)), baseMoved: base.moved.length, pruned,
+    modules: files.length, linesBefore: lineCount(baseText), linesAfter: lineCount(headText),
+  };
+}
+
+function planReportHandDocs(planned) {
+  const out = [`# codemod-split-engine --hand-docs (${HAND_DOCS_CARD}): the hand series' private docblocks`, ''];
+  const byModule = new Map();
+  for (const r of planned.movers) byModule.set(r.module, [...(byModule.get(r.module) ?? []), r]);
+  let total = 0;
+  for (const [file, rs] of [...byModule].sort(([a], [b]) => (a < b ? -1 : 1))) {
+    const lines = rs.reduce((n, r) => n + soleDocblock(r.lead).doc.split('\n').length, 0);
+    total += lines;
+    out.push(`- ${file}: ${rs.length} docblock(s), ${lines} line(s): ${rs.map((r) => r.name).join(', ')}`);
+  }
+  out.push('', `moves: ${planned.movers.length}/${planned.records.length} hand-series stubs, ${total} docblock line(s)`);
+  const stays = new Map();
+  for (const r of planned.records) if (r.reason) stays.set(r.reason, [...(stays.get(r.reason) ?? []), r.name]);
+  for (const [reason, names] of stays) out.push(`stays (${reason}): ${names.length}: ${names.join(', ')}`);
+  return out.join('\n');
+}
+
+function printVerifyHandDocs(v) {
+  for (const f of v.failures) console.error(`  ✗ ${f}`);
+  console.log(`hand docblocks: ${v.moved.length} moved (${v.moved.reduce((n, m) => n + m.lines, 0)} lines) across ${new Set(v.moved.map((m) => m.module)).size} module(s), ${v.baseMoved} already moved at base; ` +
+    `${HOST_BASENAME} ${v.linesBefore} -> ${v.linesAfter} lines; undoing every move ${v.failures.some((f) => f.startsWith('undoing')) ? 'does NOT rebuild' : 'rebuilds'} the base, ` +
+    `undone the same way, for ${HOST_BASENAME} and its ${v.modules} hand module(s) byte-for-byte, once the ${v.pruned.length} import binding(s) ` +
+    `only a moved docblock linked are pruned from the base (${v.pruned.join(', ') || 'none'})`);
+}
+
+/** The hand modules `engine.ts`'s hand stubs name, read through `read(file)` (null: absent). */
+function handModuleTexts(tm, engineText, read) {
+  const out = new Map();
+  for (const file of [...new Set(handStubs(tm, engineText).map((s) => s.module))].sort()) {
+    const text = read(file);
+    if (text != null) out.set(file, text);
+  }
+  return out;
+}
+
+/** `--hand-docs`: plan, write or re-prove the third pass. */
+async function mainHandDocs(tm, argv) {
+  if (argv.includes('--verify')) {
+    const i = argv.indexOf('--base');
+    const ref = i >= 0 ? argv[i + 1] : null;
+    if (!ref) refuse('--hand-docs --verify needs --base <ref>');
+    const baseText = gitShow(ref, `${SRC_REL}/${HOST_BASENAME}`);
+    const headText = readFileSync(HOST_PATH, 'utf8');
+    const baseModules = handModuleTexts(tm, baseText, (f) => { try { return gitShow(ref, `${SRC_REL}/${f}`); } catch { return null; } });
+    const headModules = handModuleTexts(tm, baseText, readSibling);
+    const v = verifyHandDocs(tm, baseText, headText, baseModules, headModules);
+    printVerifyHandDocs(v);
+    return v.failures.length === 0 ? 0 : 1;
+  }
+  const j = argv.indexOf('--modules');
+  const modules = j >= 0 ? (argv[j + 1] ?? '').split(',').map((s) => s.trim()).filter(Boolean) : null;
+  if (j >= 0 && modules.length === 0) refuse('--modules needs a comma-separated list of hand module files');
+  const input = readFileSync(HOST_PATH, 'utf8');
+  const moduleTexts = handModuleTexts(tm, input, readSibling);
+  const planned = planHandDocs(tm, input, moduleTexts, { modules });
+  console.log(planReportHandDocs(planned));
+  const out = generateHandDocs(tm, input, moduleTexts, planned);
+  const files = new Map([[HOST_BASENAME, out.host], ...moduleTexts, ...out.modules]);
+  console.log(`output tree sha256: ${treeHash(files)} (input sha256 ${sha256(input)})`);
+  const v = verifyHandDocs(tm, input, out.host, moduleTexts, new Map([...moduleTexts, ...out.modules]));
+  printVerifyHandDocs(v);
+  if (v.failures.length > 0) {
+    console.error('✗ the generated moves fail the undo proof: nothing written. Report the fork; never hand-edit the moves.');
+    return 1;
+  }
+  if (!argv.includes('--write')) {
+    console.log('plan only: nothing written (pass --write to apply).');
+    return 0;
+  }
+  writeFileSync(HOST_PATH, out.host);
+  for (const [file, text] of out.modules) writeFileSync(join(SRC_DIR, file), text);
+  console.log(`✓ wrote ${HOST_BASENAME} and ${out.modules.size} hand module(s) under ${SRC_REL}`);
+  return 0;
+}
+
 // ── Entry ────────────────────────────────────────────────────────────────────
 
 const USAGE = [
   'usage: node scripts/codemod-split-engine.mjs [--write]   plan (or apply) the split of an UNSPLIT engine.ts',
   '       node scripts/codemod-split-engine.mjs --verify --base REF   re-prove a split on disk against engine.ts at REF',
+  '       node scripts/codemod-split-engine.mjs --scoped [--write]   plan (or apply) the second pass: ObjectRepository and ScopedContext',
+  '       node scripts/codemod-split-engine.mjs --scoped --verify --base REF   re-prove the second pass on disk against engine.ts at REF',
+  '       node scripts/codemod-split-engine.mjs --hand-docs [--modules A.ts,B.ts] [--write]   plan (or apply) the third pass: the hand series\' private docblocks',
+  '       node scripts/codemod-split-engine.mjs --hand-docs --verify --base REF   re-prove the third pass on disk against engine.ts and its hand modules at REF',
   '       node scripts/codemod-split-engine.mjs --self-test',
   '       node scripts/codemod-split-engine.mjs --help',
 ].join('\n');
@@ -2054,6 +3092,8 @@ async function main(argv) {
     return 0;
   }
   const tm = await loadTsMorph();
+  if (argv.includes('--scoped')) return mainScoped(tm, argv);
+  if (argv.includes('--hand-docs')) return mainHandDocs(tm, argv);
   if (argv.includes('--verify')) {
     const i = argv.indexOf('--base');
     const ref = i >= 0 ? argv[i + 1] : null;
@@ -2125,6 +3165,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'byte-identity proof': 10,
   'import prune': 4,
   'refusals': 6,
+  'scoped classes (second pass)': 16,
+  'hand-series docblocks (third pass)': 19,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
 
@@ -2300,6 +3342,176 @@ function needleInMethod(n: number): number {
   return n;
 }
 `;
+}
+
+const FIXTURE_SCOPED_CLASSES = Object.freeze([
+  ['ObjectRepository', 'engine-object-repository.ts', 'Repository'],
+  ['ScopedContext', 'engine-scoped-context.ts', 'Context'],
+]);
+
+/** An `engine.ts` whose `ObjectQL` the first pass already split, ahead of two unsplit scoped classes. */
+function scopedFixtureSource() {
+  return `import { helperImported } from './other.js';
+import { onlyScopedReads } from './scoped-only.js';
+import { count } from './engine-count-aggregate.js';
+import { LifecycleFacet } from './engine-lifecycle.js';
+
+export class ObjectQL {
+  run(n: number): number {
+    // ${MARK} The body moved to \`engine-lifecycle.ts\`.
+    return LifecycleFacet.run(n);
+  }
+}
+
+export class ObjectRepository {
+  constructor(
+    private objectName: string,
+    private engine: { find(o: string): Promise<any[]>; count(o: string): Promise<number> },
+  ) {}
+
+  /** A public docblock: it stays on the class. */
+  async find(query: any = {}): Promise<any[]> {
+    return this.engine.find(this.objectName + String(query));
+  }
+
+  async count(): Promise<number> {
+    return this.engine.count(this.objectName);
+  }
+
+  inferred() {
+    return 1;
+  }
+}
+
+export class ScopedContext {
+  constructor(private ctx: { user?: string }, private engine: any) {}
+
+  private flag = false;
+
+  private derive(ctx: { user?: string }): ScopedContext {
+    const child = new ScopedContext(ctx, this.engine);
+    child.flag = this.flag;
+    return child;
+  }
+
+  /** A private docblock: it moves with the body. */
+  private readFlag(): boolean {
+    return this.flag && Boolean(helperImported());
+  }
+
+  object(name: string): ObjectRepository {
+    return new ObjectRepository(name, this.engine);
+  }
+
+  sudo(): ScopedContext {
+    this.flag = this.readFlag() || Boolean(onlyScopedReads());
+    return this.derive({ ...this.ctx });
+  }
+
+  handsSelf(): ScopedContext {
+    void count;
+    return this;
+  }
+
+  get user() { return this.ctx.user; }
+}
+`;
+}
+
+function handFixtureEngine() {
+  return `import { privateDoc, publicDoc, noDoc, richer } from './engine-alpha.js';
+import { betaPrivate } from './engine-beta.js';
+// Type-only, for the link on betaPrivate's docblock.
+import type { LinkedOnly } from './engine-beta.js';
+
+export class ObjectQL {
+  private n = 1;
+
+  /**
+   * A private docblock: it moves.
+   *
+   * Second paragraph.
+   */
+  private privateDoc(n: number): number {
+    // [#25522 cut 1] The body moved to \`engine-alpha.ts\` (see \`AlphaHost\`).
+    return privateDoc.call({ n: this.n }, n);
+  }
+
+  /** A public docblock: it stays. */
+  publicDoc(): number {
+    // [#25522 cut 1] The body moved to \`engine-alpha.ts\` (see \`AlphaHost\`). PUBLIC
+    return publicDoc.call({ n: this.n });
+  }
+
+  private noDoc(): number {
+    // [#25522 cut 1] The body moved to \`engine-alpha.ts\`; it reads no member.
+    return noDoc();
+  }
+
+  /** Its function says more than the placeholder. */
+  private richer(): number {
+    // [#25522 cut 1] The body moved to \`engine-alpha.ts\`; it reads no member.
+    return richer();
+  }
+
+  /** A beta docblock, {@link LinkedOnly}. */
+  private betaPrivate(): number {
+    // The body lives in \`engine-beta.ts\`; it reads no member.
+    return betaPrivate();
+  }
+
+  /** Not a stub: no hand marker. */
+  private notAStub(): number {
+    return this.n;
+  }
+}
+`;
+}
+
+function handFixtureModules() {
+  const head = (what) => `// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * [#25522 cut 1] ${what}.
+ */
+
+import type { ObjectQL } from './engine.js';
+`;
+  return new Map([
+    ['engine-alpha.ts', `${head('The alpha bodies')}
+export interface AlphaHost { readonly n: ObjectQL['n'] }
+
+${placeholderDoc('privateDoc')}
+export function privateDoc(this: AlphaHost, n: number): number {
+  return this.n + n;
+}
+
+${placeholderDoc('publicDoc')}
+export function publicDoc(this: AlphaHost): number {
+  return this.n;
+}
+
+${placeholderDoc('noDoc')}
+export function noDoc(): number {
+  return 0;
+}
+
+/**
+ * ${placeholderDoc('richer').slice(4, -3)}
+ *
+ * And a note of its own.
+ */
+export function richer(): number {
+  return 1;
+}
+`],
+    ['engine-beta.ts', `${head('The beta body')}
+${placeholderDoc('betaPrivate')}
+export function betaPrivate(): number {
+  return 2;
+}
+`],
+  ]);
 }
 
 async function selfTest() {
@@ -2480,6 +3692,114 @@ async function selfTest() {
     // `--help` reads no tree: it answers before the "already split" guard, so
     // it exits 0 whether engine.ts on disk is split (as on a branch) or not.
     check('--help is answered, never refused, whatever engine.ts holds', (await main(['--help']).catch(() => 2)) === 0);
+  }
+
+  open('scoped classes (second pass)');
+  {
+    const input = scopedFixtureSource();
+    const planned = planScoped(tm, input, { classes: FIXTURE_SCOPED_CLASSES });
+    const record = (cls, name) => planned.targets.find((t) => t.className === cls)?.records.find((r) => r.name === name);
+    const why = (cls, name) => (record(cls, name)?.reasons ?? ['<absent>']).join('; ');
+    check('a forwarding method, an assigning one and one constructing a sibling class move',
+      ['find', 'count'].every((n) => why('ObjectRepository', n) === '') && ['object', 'sudo', 'readFlag'].every((n) => why('ScopedContext', n) === ''),
+      ['find', 'count'].map((n) => why('ObjectRepository', n)).concat(['object', 'sudo', 'readFlag'].map((n) => why('ScopedContext', n))).join(' | '));
+    check('a method that only shares a hand-series import\'s name is not a hand-series stub', why('ObjectRepository', 'count') === '', why('ObjectRepository', 'count'));
+    check('a body writing a private member of another instance stays (foreign-private)', why('ScopedContext', 'derive').startsWith('foreign-private'), why('ScopedContext', 'derive'));
+    check('a body handing the instance on stays (bare-this)', why('ScopedContext', 'handsSelf').startsWith('bare-this'), why('ScopedContext', 'handsSelf'));
+    check('a public method with an inferred return type stays (inferred-return-type)', why('ObjectRepository', 'inferred').startsWith('inferred-return-type'), why('ObjectRepository', 'inferred'));
+    const out = generateScoped(tm, input, planned);
+    const again = generateScoped(tm, input, planScoped(tm, input, { classes: FIXTURE_SCOPED_CLASSES }));
+    const v = verifyScoped(tm, input, out.host, out.modules, { classes: FIXTURE_SCOPED_CLASSES });
+    check('the generated scoped split proves against its base', v.failures.length === 0 && v.moved.length === 5,
+      [...v.failures, `moved: ${v.moved.map((m) => m.name).join()}`].join(' | '));
+    check('two runs on one input write byte-identical trees',
+      treeHash(new Map([['h', out.host], ...out.modules])) === treeHash(new Map([['h', again.host], ...again.modules])));
+    const ctxMod = out.modules.get('engine-scoped-context.ts') ?? '';
+    const hostsMod = out.modules.get(SCOPED_HOSTS_MODULE) ?? '';
+    check('each stub hands its body the one host of its own instance',
+      out.host.includes('return ScopedContextFacet.sudo.call(scopedContextHost.of(this));') &&
+      out.host.includes('return ObjectRepositoryFacet.find.call(objectRepositoryHost.of(this), query);'),
+      out.host.slice(out.host.indexOf('sudo(')));
+    check('the host module keeps one InstanceHost per class and imports types only',
+      hostsMod.includes("export const scopedContextHost = new InstanceHost<ScopedContext, ScopedContextHost>('ScopedContextFacet', 'ScopedContext');") &&
+      !/^import (?!type )/m.test(hostsMod));
+    check('a private docblock moves with its body; a public one stays on the class',
+      ctxMod.includes('  /** A private docblock: it moves with the body. */\n  static readFlag(') && !out.host.includes('A private docblock') &&
+      out.host.includes('  /** A public docblock: it stays on the class. */\n  find(query: any = {}): Promise<any[]> {'));
+    check('a field a body assigns gets a setter in its class\'s install block',
+      out.host.includes('      get flag() { return instance.flag; },\n      set flag(v) { instance.flag = v; },'));
+    check('the first pass\'s class is not touched', out.host.includes(`  run(n: number): number {\n    // ${MARK} The body moved to \`engine-lifecycle.ts\`.\n    return LifecycleFacet.run(n);\n  }`) &&
+      !out.host.slice(out.host.indexOf('export class ObjectQL'), out.host.indexOf('export class ObjectRepository')).includes(SCOPED_MARK));
+    const verifyWith = (host, mods) => verifyScoped(tm, input, host, mods, { classes: FIXTURE_SCOPED_CLASSES }).failures.length > 0;
+    check('one edited character in a moved body fails', verifyWith(out.host,
+      new Map([...out.modules, ['engine-scoped-context.ts', ctxMod.replace('{ ...this.ctx }', '{ ...this.ctx, x: 1 }')]])));
+    check('a stub handing the other class\'s host fails', verifyWith(out.host.replace('ScopedContextFacet.sudo.call(scopedContextHost.of(this))', 'ScopedContextFacet.sudo.call(objectRepositoryHost.of(this))'), out.modules));
+    check('a written field\'s setter left out of the install block fails', verifyWith(out.host.replace('      set flag(v) { instance.flag = v; },\n', ''), out.modules));
+    check('an edited host module fails', verifyWith(out.host, new Map([...out.modules, [SCOPED_HOSTS_MODULE, hostsMod.replace('this.hosts.set(instance, host);', '')]])));
+    check('an import only a moved body read is pruned, and the proof names it', out.pruned.includes('onlyScopedReads') && v.pruned.includes('onlyScopedReads'), out.pruned.join());
+    check('a scoped class the file does not declare refuses',
+      refused(() => planScoped(tm, input, { classes: [['Gone', 'engine-gone.ts', 'Gone']] })));
+  }
+
+  open('hand-series docblocks (third pass)');
+  {
+    const input = handFixtureEngine();
+    const mods = handFixtureModules();
+    const planned = planHandDocs(tm, input, mods);
+    const why = (name) => planned.records.find((r) => r.name === name)?.reason ?? '<absent>';
+    check('a private stub with one docblock moves; public, undocumented and richer-function stubs stay',
+      why('privateDoc') === '' && why('betaPrivate') === '' && why('publicDoc').startsWith('public') &&
+      why('noDoc') === 'no-docblock' && why('richer').startsWith('function-docblock') && why('notAStub') === '<absent>',
+      planned.records.map((r) => `${r.name}=${r.reason}`).join(' | '));
+    const out = generateHandDocs(tm, input, mods, planned);
+    const again = generateHandDocs(tm, input, mods, planHandDocs(tm, input, mods));
+    const alpha = out.modules.get('engine-alpha.ts') ?? '';
+    check('the moved docblock replaces the placeholder, one level out, and the class keeps none',
+      alpha.includes('/**\n * A private docblock: it moves.\n *\n * Second paragraph.\n */\nexport function privateDoc(') &&
+      !out.host.includes('A private docblock') && out.host.includes('  private privateDoc(n: number): number {\n'));
+    check('the stub\'s marker gains the phrase after its module',
+      out.host.includes(`// [#25522 cut 1] The body moved to \`engine-alpha.ts\`${HAND_DOC_MOVED} (see \`AlphaHost\`).`));
+    check('a public docblock stays on the class and its function keeps the placeholder',
+      out.host.includes('  /** A public docblock: it stays. */\n  publicDoc(') && alpha.includes(`${placeholderDoc('publicDoc')}\nexport function publicDoc(`));
+    check('the module header gains the note once, above its closing line',
+      alpha.split(HAND_DOCS_NOTE).length === 2 && alpha.includes(`${HAND_DOCS_NOTE}\n */\n`));
+    const v = verifyHandDocs(tm, input, out.host, mods, new Map([...mods, ...out.modules]));
+    check('the generated moves prove against their base', v.failures.length === 0 && v.moved.length === 2, v.failures.join(' | '));
+    check('two runs on one input write byte-identical trees',
+      treeHash(new Map([['h', out.host], ...out.modules])) === treeHash(new Map([['h', again.host], ...again.modules])));
+    const slice = generateHandDocs(tm, input, mods, planHandDocs(tm, input, mods, { modules: ['engine-alpha.ts'] }));
+    const sliceMods = new Map([...mods, ...slice.modules]);
+    const rest = generateHandDocs(tm, slice.host, sliceMods, planHandDocs(tm, slice.host, sliceMods));
+    check('a slice moves only its modules, and the next slice on its output lands where one run lands',
+      !slice.modules.has('engine-beta.ts') && slice.host.includes('A beta docblock') &&
+      rest.host === out.host && (rest.modules.get('engine-beta.ts') ?? '') === out.modules.get('engine-beta.ts') &&
+      planHandDocs(tm, slice.host, sliceMods).records.find((r) => r.name === 'privateDoc')?.reason === 'already-moved');
+    {
+      const restMods = new Map([...sliceMods, ...rest.modules]);
+      const onSlice = verifyHandDocs(tm, slice.host, rest.host, sliceMods, restMods);
+      const onBase = verifyHandDocs(tm, input, rest.host, mods, restMods);
+      check('the next slice proves against the earlier slice\'s output, counting only its own moves, and against the unsliced base',
+        onSlice.failures.length === 0 && onSlice.moved.length === 1 && onSlice.baseMoved === 1 && onBase.failures.length === 0 && onBase.moved.length === 2,
+        [...onSlice.failures, ...onBase.failures].join(' | '));
+    }
+    const fails = (host, edited) => verifyHandDocs(tm, input, host, mods, new Map([...mods, ...out.modules, ...edited])).failures.length > 0;
+    check('one edited character in a moved docblock fails', fails(out.host, [['engine-alpha.ts', alpha.replace('Second paragraph.', 'Second paragraph!')]]));
+    check('one edited character elsewhere in a hand module fails', fails(out.host, [['engine-alpha.ts', alpha.replace('return this.n + n;', 'return this.n - n;')]]));
+    check('a moved docblock dropped from its function fails', fails(out.host, [['engine-alpha.ts', alpha.replace(/\/\*\*\n \* A private docblock[\s\S]*?\*\/\n/, '')]]));
+    check('a staying docblock dropped from the class fails', fails(out.host.replace('  /** A public docblock: it stays. */\n', ''), []));
+    check('a public docblock moved off the class fails', fails(
+      out.host.replace('  /** A public docblock: it stays. */\n', '').replace('`engine-alpha.ts` (see `AlphaHost`). PUBLIC', `\`engine-alpha.ts\`${HAND_DOC_MOVED} (see \`AlphaHost\`). PUBLIC`),
+      [['engine-alpha.ts', alpha.replace(`${placeholderDoc('publicDoc')}\n`, '/** A public docblock: it stays. */\n')]]));
+    check('a marker that says moved over a docblock still on the class fails', fails(
+      out.host.replace('`engine-alpha.ts` (see `AlphaHost`). PUBLIC', `\`engine-alpha.ts\`${HAND_DOC_MOVED} (see \`AlphaHost\`). PUBLIC`), []));
+    check('a module missing its header note fails', fails(out.host, [['engine-alpha.ts', alpha.replace(`\n${HAND_DOCS_NOTE}`, '')]]));
+    check('an import only a moved docblock links is pruned with the // lines above it (not before its docblock moves), and the proof names it',
+      out.pruned.join() === 'LinkedOnly' && v.pruned.join() === 'LinkedOnly' && !out.host.includes('LinkedOnly }') &&
+      !out.host.includes('for the link on') && slice.host.includes('for the link on'), `${out.pruned} | ${v.pruned}`);
+    check('a binding the head dropped that no moved docblock links fails',
+      fails(out.host.replace("import { betaPrivate } from './engine-beta.js';\n", ''), []));
+    check('--modules naming a module no stub delegates to refuses',
+      refused(() => planHandDocs(tm, input, mods, { modules: ['engine-gone.ts'] })));
   }
 
   const declared = Object.keys(SELF_TEST_BATTERIES);

@@ -3388,7 +3388,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       namespace: {
         label: "Namespace",
-        help: "Manifest namespace (e.g. mail, branding, feature_flags)."
+        help: "Manifest namespace (e.g. mail, branding, storage)."
       },
       key: {
         label: "Key",

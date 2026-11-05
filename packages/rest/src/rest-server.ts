@@ -3660,9 +3660,13 @@ export class RestServer {
             navPruneLogged: this.navPruneLogged,
             isItemOfDisabledPackage: async ({ type, name, packageId }) => {
                 if (typeof p.getMetaItem !== 'function') return false;
+                // [#30218] The REQUEST's environment's engine, through the
+                // shared resolver: the raw `undefined` of the unscoped mount
+                // asked the host kernel's registry whether an environment's
+                // package is disabled.
                 const ql = await wiredEngineOrLoud(
                     Boolean(this.objectQLProvider),
-                    () => this.objectQLProvider!(environmentId),
+                    async () => this.objectQLProvider!(await this.resolveRequestEnvironmentId(environmentId, req)),
                 );
                 const registry = (ql as any)?.registry;
                 if (typeof registry?.isPackageDisabled !== 'function') return false;
@@ -5583,6 +5587,7 @@ export class RestServer {
         const objectStateHost: MetaObjectStateRouteHost = {
             routeManager: this.routeManager,
             get objectQLProvider() { return readObjectQLProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveProtocol: (...a) => this.resolveProtocol(...a),
         };
         registerMetaObjectStateRoute.call(objectStateHost, scope);
@@ -5604,6 +5609,7 @@ export class RestServer {
             metaItemReadGate: (...a) => this.metaItemReadGate(...a),
             maskObjectDocument: (...a) => this.maskObjectDocument(...a),
             get objectQLProvider() { return readObjectQLProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveMetadataService: (...a) => this.resolveMetadataService(...a),
         };
         registerMetaItemPublishedRoute.call(itemPublishedHost, scope);
@@ -6344,6 +6350,7 @@ export class RestServer {
             routeManager: this.routeManager,
             protocol: this.protocol,
             get objectQLProvider() { return readObjectQLProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveProtocol: (...a) => this.resolveProtocol(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
