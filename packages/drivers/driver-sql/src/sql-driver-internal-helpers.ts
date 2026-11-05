@@ -2,46 +2,104 @@
 
 /**
  * [#29520 codemod] The "Internal helpers" section of `SqlDriver`: the bodies of
- * `applyTenantScope`, `injectTenantOnInsert`, `auditMissingTenant` moved out of
- * `sql-driver.ts` whole by `scripts/codemod-split-sql-driver.mjs`.
+ * `getKnex`, `getBuilder`, `resolveTenantField`, `isMultiTenantMode`,
+ * `applyTenantScope`, `readableIdsSubquery`, `injectTenantOnInsert`,
+ * `auditMissingTenant` moved out of `sql-driver.ts` whole by
+ * `scripts/codemod-split-sql-driver.mjs`.
  *
- * A MOVE, not a redesign. Each function below is the body of the `SqlDriver`
+ * A MOVE, not a redesign. {@link InternalHelpersFacet} is a stateless facet of `SqlDriver`
+ * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
  * method of the same name exactly as it stood: not re-indented, not
- * formatted, not edited. The method stays on the class with its docblock and
- * signature, so the published `dist/*.d.ts`, an instance spy and a subclass
- * override are what they were; the docblock there is the contract.
+ * formatted, not edited. The method stays on the class as a one-call stub with
+ * its signature, so the published surface, an instance spy and a subclass
+ * override are what they were. A public or protected method keeps its
+ * docblock on the class, the contract; a private method's docblock moved here
+ * with its body. The state stays on `SqlDriver`.
  *
  * The bodies reach the class through {@link InternalHelpersHost}: exactly the
- * `SqlDriver` members they read. Each method hands its body one literal of the
- * members that body reads, plus a `.call`: methods go as closures that call
- * them on the driver at call time (the builder factory as a bound reference),
- * so a subclass override or an instance spy is still the one reached; fields
- * and accessors go as GETTERS, read when the body reads them, as they were on
- * the class.
+ * `SqlDriver` members they read, private ones included. Every stub hands its
+ * body, by a `.call`, the same host: `internalHelpersHost` in
+ * `sql-driver-facet-hosts.ts`, built once per driver by the class's static
+ * block. Methods go as closures that call them on the driver at call time, so a
+ * subclass override or an instance spy is still the one reached; fields and
+ * accessors go as GETTERS, read when the body reads them, as they were on the
+ * class, and a field a body assigns goes with a SETTER that assigns it on the
+ * driver.
  *
- * The module imports `sql-driver.ts` for types only, so the two modules form
- * no evaluation cycle. `index.ts` re-exports nothing from this module.
+ * The module imports `sql-driver.ts` for types only, so the two modules form no
+ * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
-import type { DriverOptions } from '@objectstack/spec/data';
+import type { ComposedReadableIds, DriverOptions } from '@objectstack/spec/data';
+import { StorageNameMapping } from '@objectstack/spec/system';
+import { resolveTenancyPosture } from '@objectstack/types';
+import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { Knex } from 'knex';
 import type { SqlDriver } from './sql-driver.js';
 
 /**
- * The `SqlDriver` members the functions below read — every one of them, and
- * no other. Each is typed AS the class member (an indexed access on the
- * class), so a change to a member's signature on the class is a change here
- * too. `readonly` members are the getters.
+ * The `SqlDriver` members the bodies of {@link InternalHelpersFacet} read — every one of
+ * them, and no other. Each is typed AS the class member (an indexed access on
+ * the class), so a change to a member's signature on the class is a change
+ * here too. `readonly` members are the getters; the others are fields a body
+ * assigns.
  */
 export interface InternalHelpersHost {
+  applyFilters: SqlDriver['applyFilters'];
+  applyTenantScope: SqlDriver['applyTenantScope'];
+  getBuilder: SqlDriver['getBuilder'];
   isMultiTenantMode: SqlDriver['isMultiTenantMode'];
+  readonly knex: SqlDriver['knex'];
   readonly logger: SqlDriver['logger'];
+  readonly physicalSchemaByObject: SqlDriver['physicalSchemaByObject'];
+  readonly physicalTableByObject: SqlDriver['physicalTableByObject'];
+  remoteColumn: SqlDriver['remoteColumn'];
   resolveTenantField: SqlDriver['resolveTenantField'];
   readonly tenantAuditWarned: SqlDriver['tenantAuditWarned'];
+  readonly tenantFieldByTable: SqlDriver['tenantFieldByTable'];
 }
 
-/** The body of `SqlDriver#applyTenantScope`; the method's docblock there is its contract. */
-export function applyTenantScope(this: Pick<InternalHelpersHost, 'resolveTenantField'>, builder: Knex.QueryBuilder, object: string, options?: DriverOptions): Knex.QueryBuilder {
+/** The bodies of the "Internal helpers" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
+export class InternalHelpersFacet {
+  /** The body of `SqlDriver#getKnex`; the method's docblock there is its contract. */
+  static getKnex(this: Pick<InternalHelpersHost, 'knex'>): Knex {
+    return this.knex;
+  }
+
+  /** The body of `SqlDriver#getBuilder`; the method's docblock there is its contract. */
+  static getBuilder(this: Pick<InternalHelpersHost, 'knex' | 'physicalSchemaByObject' | 'physicalTableByObject'>, object: string, options?: DriverOptions) {
+    // Federation (ADR-0015): an external object resolves to its remote table
+    // (`external.remoteName`, optionally schema-qualified). Managed objects miss
+    // both maps, so this is `this.knex(object)` — unchanged. `.withSchema()` is
+    // applied on the builder (not via `knex.withSchema().from()`) so the builder
+    // type is identical to the managed path for every downstream caller.
+    const physical = this.physicalTableByObject[object] ?? object;
+    let builder = this.knex(physical);
+    const remoteSchema = this.physicalSchemaByObject[object];
+    if (remoteSchema) {
+      builder = builder.withSchema(remoteSchema);
+    }
+    if (options?.transaction) {
+      builder = builder.transacting(options.transaction as Knex.Transaction);
+    }
+    return builder;
+  }
+
+  /** The body of `SqlDriver#resolveTenantField`; the method's docblock there is its contract. */
+  static resolveTenantField(this: Pick<InternalHelpersHost, 'tenantFieldByTable'>, object: string): string | null {
+    const tableName = StorageNameMapping.resolveTableName({ name: object } as any);
+    const cached =
+      this.tenantFieldByTable[tableName] ?? this.tenantFieldByTable[object];
+    return cached ?? null;
+  }
+
+  /** The body of `SqlDriver#isMultiTenantMode`; the method's docblock there is its contract. */
+  static isMultiTenantMode(): boolean {
+    return postureEnforcesWall(resolveTenancyPosture());
+  }
+
+  /** The body of `SqlDriver#applyTenantScope`; the method's docblock there is its contract. */
+  static applyTenantScope(this: Pick<InternalHelpersHost, 'resolveTenantField'>, builder: Knex.QueryBuilder, object: string, options?: DriverOptions): Knex.QueryBuilder {
     const tenantId = options?.tenantId;
     if (tenantId === undefined || tenantId === null || tenantId === '') return builder;
     const field = this.resolveTenantField(object);
@@ -74,8 +132,17 @@ export function applyTenantScope(this: Pick<InternalHelpersHost, 'resolveTenantF
     return builder.where(field, String(tenantId));
   }
 
-/** The body of `SqlDriver#injectTenantOnInsert`; the method's docblock there is its contract. */
-export function injectTenantOnInsert(this: Pick<InternalHelpersHost, 'resolveTenantField'>, object: string, row: Record<string, any>, options?: DriverOptions): void {
+  /** The body of `SqlDriver#readableIdsSubquery`; the method's docblock there is its contract. */
+  static readableIdsSubquery(this: Pick<InternalHelpersHost, 'applyFilters' | 'applyTenantScope' | 'getBuilder' | 'remoteColumn'>, leaf: ComposedReadableIds, options?: DriverOptions): Knex.QueryBuilder {
+    const parent = leaf.object;
+    const sub = this.getBuilder(parent).select(this.remoteColumn(parent, 'id', 'id'));
+    this.applyTenantScope(sub, parent, options);
+    if (leaf.scope !== undefined) this.applyFilters(sub, leaf.scope, options);
+    return sub;
+  }
+
+  /** The body of `SqlDriver#injectTenantOnInsert`; the method's docblock there is its contract. */
+  static injectTenantOnInsert(this: Pick<InternalHelpersHost, 'resolveTenantField'>, object: string, row: Record<string, any>, options?: DriverOptions): void {
     const tenantId = options?.tenantId;
     if (tenantId === undefined || tenantId === null || tenantId === '') return;
     const field = this.resolveTenantField(object);
@@ -85,8 +152,8 @@ export function injectTenantOnInsert(this: Pick<InternalHelpersHost, 'resolveTen
     }
   }
 
-/** The body of `SqlDriver#auditMissingTenant`; the method's docblock there is its contract. */
-export function auditMissingTenant(this: Pick<InternalHelpersHost, 'isMultiTenantMode' | 'logger' | 'resolveTenantField' | 'tenantAuditWarned'>, object: string, op: 'create' | 'update' | 'delete' | 'bulkCreate' | 'bulkDelete' | 'updateMany' | 'deleteMany' | 'upsert', options?: DriverOptions, insertRows?: readonly unknown[]): void {
+  /** The body of `SqlDriver#auditMissingTenant`; the method's docblock there is its contract. */
+  static auditMissingTenant(this: Pick<InternalHelpersHost, 'isMultiTenantMode' | 'logger' | 'resolveTenantField' | 'tenantAuditWarned'>, object: string, op: 'create' | 'update' | 'delete' | 'bulkCreate' | 'bulkDelete' | 'updateMany' | 'deleteMany' | 'upsert', options?: DriverOptions, insertRows?: readonly unknown[]): void {
     if (process.env.OS_TENANT_AUDIT === '0') return;
     if (options?.bypassTenantAudit === true) return;
     // A write that DID carry its tenant is the case this audit has nothing to
@@ -124,3 +191,4 @@ export function auditMissingTenant(this: Pick<InternalHelpersHost, 'isMultiTenan
       { object, op, tenantField: field },
     );
   }
+}

@@ -1282,7 +1282,7 @@
       "title": "Source-authored page tiers render by the RIGHT path: kind:'html' source is PARSED-never-executed (static, in-browser sdui-parser compile), kind:'react' source is EXECUTED behind its capability gate (live data + interactivity) — command-center-jsx / capability-map (html) vs crm-workbench (react)",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin (seeded admin@objectos.ai) driving the published showcase app as an end user"],
@@ -1290,7 +1290,7 @@
         "app": "showcase",
         "requires": [
           "seeded showcase_project rows (the react page's live KPI + <ListView> read them)",
-          "the react-pages capability ON — CAP_REACT_PAGES defaults OFF and the showcase turns it on in its committed .env (OS_PAGE_REACT_ENABLED=true); a boot with OS_PAGE_REACT_ENABLED=false flips it OFF (the both-sides gate check)"
+          "the react-pages capability ON — CAP_REACT_PAGES defaults OFF and the showcase turns it on in its committed .env (OS_PAGE_REACT_ENABLED=true); a boot with OS_PAGE_REACT_ENABLED=false flips it OFF (the both-sides gate check): the .claude/launch.json entry showcase-react-pages-off-3779 boots the showcase that way, on its own port and DB with OS_PORT exported. The exported value beats the .env one, because dotenv-flow skips a variable the process already has"
         ],
         "knownGaps": [
           "NO manual build step is needed to VIEW either tier in the running showcase (contra the task's guess): a kind:'html' page compiles IN-BROWSER via @object-ui/sdui-parser compile(source, manifest) at render, against a whitelist manifest built from the LIVE ComponentRegistry (packages/components/src/renderers/layout/page.tsx); a kind:'react' page is transpiled IN-BROWSER by a lazily-loaded Sucrase @object-ui/react-runtime chunk. The only build-shaped risk is the vendored /_console bundle being stale (stale-console-bundle) — a stale sdui-parser/react-runtime mis-compiles a page that is fine on a fresh build. ⚠ A FAULTING html source never reaches the RENDERED page on a stock boot: the metadata save door compiles an html page's source against the deployment's manifest with the same compiler `os validate` uses (packages/metadata-protocol/src/runtime-authoring-gate.ts#HTML_PAGE_SOURCE_COMPILE), so an active save or a publish of a faulting html page answers 422 INVALID_METADATA carrying the compile diagnostics, and nothing is served. The 'HTML page failed to compile (N)' panel is therefore reachable only in the page designer's DRAFT preview, where a ?mode=draft save of the faulting source is admitted and rendered (QA run #23166)",
@@ -1304,7 +1304,7 @@
         "crm-workbench (kind:'react'): open /_console/apps/showcase_app/page/showcase_crm_workbench; screenshot the workbench — the KPI strip (Total / Active) + the real <ListView> and <ObjectForm> master/detail over showcase_project",
         "prove the react tier is EXECUTED against LIVE data: the 'Total projects' KPI equals GET /api/v1/data/showcase_project's count (the page computes it via useAdapter().find('showcase_project'), reading the QueryResult .data envelope), and a showcase_project find query fires on the network — the number is computed at render, not authored",
         "prove react interactivity (executed handlers, not a parsed tree): click a ListView row → the ObjectForm binds THAT record (React useState); click '+ New project' → the form switches to create mode",
-        "both-sides gate: on a boot with OS_PAGE_REACT_ENABLED=false, re-open crm-workbench — it must render the NAMED 'React pages are disabled on this deployment' notice (CapabilityDisabledNotice), never a blank and never an executed page; the html pages still render (html is not gated). If the env toggle cannot be flipped on the stock fixture, record this clause blocked(environment)",
+        "both-sides gate: boot the launch entry showcase-react-pages-off-3779 (OS_PAGE_REACT_ENABLED=false), sign in as the seeded admin and re-open crm-workbench — it must render the NAMED 'React pages are disabled on this deployment' notice (CapabilityDisabledNotice), never a blank and never an executed page; the html pages still render (html is not gated). If that entry cannot boot, record this clause blocked(environment)",
         "degradation: (a) html — save a faulting html source at the ACTIVE door (or publish one) and capture the 422 INVALID_METADATA with its compile diagnostics; then save the same source as a ?mode=draft draft IN A WRITABLE PACKAGE (?package=PKG) that also holds an app whose navigation references the page, and open it in Studio at /_console/studio/PKG/interfaces?surface=page:NAME, where the draft preview's 'HTML page failed to compile (N)' panel renders with the diagnostic messages. An env-wide (package-less) draft has no Studio surface, and the save gate keeps a faulting html page off the rendered route, so the panel cannot be met anywhere else (knownGaps[0]); (b) react — a react runtime error shows the 'React page error' fallback on the rendered page. Neither may be a blank page"
       ],
       "acceptance": [
@@ -1369,7 +1369,8 @@
         { "revision": 2, "date": "2026-10-13", "change": "acceptance[5] (clause and verify), steps[7] and knownGaps[0] name where an html compile error is observable (assertion defect, minor, #23166 A5; parked on #23121, carried by #23169). The save door compiles an html page's source against the deployment's manifest (runtime-authoring-gate.ts HTML_PAGE_SOURCE_COMPILE), so a faulting html page is refused 422 INVALID_METADATA at save / publish and never publishes, and the compile-error panel is reachable only in the designer's draft preview. QA run #23166 met the 422 and the draft-preview panel. The react half is unchanged", "ref": "#23169" },
         { "revision": 3, "date": "2026-10-16", "change": "steps[7](a) names how to reach the draft preview (checklist-accuracy finding 8 of QA run #23942, wave #23878). The compile panel is reachable only for a page staged in a writable package that an app's navigation references, opened at /_console/studio/PKG/interfaces?surface=page:NAME; an env-wide draft has no Studio surface, which is what #23942 met. The clause is unchanged", "ref": "#24036" },
         { "revision": 4, "date": "2026-10-25", "change": "the react-pages tier defaults OFF (ADR-0081 amendment): fixtures.requires names the showcase's committed .env opt-in OS_PAGE_REACT_ENABLED=true, and the both-sides gate's off-state is a boot with OS_PAGE_REACT_ENABLED=false (steps[6], acceptance[4], negative[1], source rows). The clauses are unchanged", "ref": "claude/project-thread-80dotk" },
-        { "revision": 5, "date": "2026-10-28", "change": "knownGaps/source re-pointed from ui/e2e/live/showcase-smoke.spec.ts, deleted by the triage of the live specs that ran in no CI lane (ruling Q3 B) as a duplicate: every surface it swept and each of its four assertions are in examples/app-showcase/e2e/showcase-smoke.spec.ts, which Nightly Tiers runs, with a wider surface list and stricter waits. That sweep includes the three html/react pages, which the old note said it did not; it pins render-clean only, so the item stays browser-driven. No clause changed", "ref": "#25914" }
+        { "revision": 5, "date": "2026-10-28", "change": "knownGaps/source re-pointed from ui/e2e/live/showcase-smoke.spec.ts, deleted by the triage of the live specs that ran in no CI lane (ruling Q3 B) as a duplicate: every surface it swept and each of its four assertions are in examples/app-showcase/e2e/showcase-smoke.spec.ts, which Nightly Tiers runs, with a wider surface list and stricter waits. That sweep includes the three html/react pages, which the old note said it did not; it pins render-clean only, so the item stays browser-driven. No clause changed", "ref": "#25914" },
+        { "revision": 6, "date": "2026-11-04", "change": "fixtures.requires[1] and steps[6] name the .claude/launch.json entry showcase-react-pages-off-3779 as the off-state boot of the both-sides gate. QA run #29672 could not flip the env, because a runner that starts servers only from launch.json had no such entry. No clause changed", "ref": "#29819" }
       ]
     },
     {
@@ -2651,7 +2652,7 @@
       "title": "The flow state Studio shows is the state the deployment runs: the rail dot and the header read what GET /api/v1/automation/_status reports — Switched on, Switched off, Not running here with the platform's reason — and an enabled record-triggered flow actually runs",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2662,7 +2663,7 @@
         "requires": [
           "a fresh boot of the showcase on its own port and DB (dogfood §0) with OS_PORT exported, signed in as the seeded admin, and a console built from this tree with `pnpm console:build` — the root `pnpm build` does not refresh packages/console/dist (QA run #26715 needed the console build on every card)",
           "a writable package with a published object, a record-triggered flow on it (created Off), a manual flow, and a schedule flow",
-          "TWO boots for the schedule leg, named in the run record: a default boot (package-authored scheduled work OFF) and a boot with OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1 exported (RUNNER.md environment facts)"
+          "TWO boots for the schedule leg, named in the run record: a default boot (package-authored scheduled work OFF) and a boot with OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1 exported (RUNNER.md environment facts), which is the .claude/launch.json entry showcase-scheduled-work-3778 (its own port and DB, OS_PORT exported). Its DB starts fresh, so author the writable package and its schedule flow again on that boot"
         ]
       },
       "steps": [
@@ -2670,8 +2671,8 @@
         "enable the record-triggered flow with the header switch (it was Off by default); read the toast ('Switched on — publish to apply', engine.studio.auto.enabledToast); publish; re-read the rail, the header and _status",
         "create a record of the watched object (POST /api/v1/data/OBJ) and read the flow's runs for it",
         "read the schedule flow on the default boot: its dot and header read 'Not running here', titled with the platform's reason, and Problems carries a note (not counted as a problem); _status answers bound: false with that same reason",
-        "reboot with OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1 exported; re-read the schedule flow in Studio and _status, and wait for its first run",
-        "disable the record-triggered flow; publish; create another record and confirm no new run"
+        "boot the launch entry showcase-scheduled-work-3778 (OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1) beside the default boot and author the schedule flow there; re-read the schedule flow in Studio and _status, and wait for its first run",
+        "on the default boot, disable the record-triggered flow; publish; create another record and confirm no new run"
       ],
       "acceptance": [
         {
@@ -2693,7 +2694,7 @@
           "evidence": "the run reads"
         },
         {
-          "clause": "on the boot that enables scheduled work, the same schedule flow reads 'Switched on', _status reports bound: true, and it runs",
+          "clause": "on the boot that enables scheduled work, a schedule flow authored the same way reads 'Switched on', _status reports bound: true, and it runs",
           "oracle": "api",
           "verify": "Studio's words and _status agree on the second boot; a run with trigger type schedule completes within the schedule window",
           "evidence": "the second-boot pairing + the run"
@@ -2741,6 +2742,12 @@
           "date": "2026-11-04",
           "change": "title, steps[1], acceptance[0].clause and acceptance[3].clause respelled from QA run #29893 (W5-STUDIO, at 589049b0): rail sr-text and header Status read 'Switched on' / 'Switched off', and the toasts 'Switched on — publish to apply' / 'Switched off — publish to apply' (#29784 / #29841). Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-04",
+          "change": "fixtures.requires[2] and steps[4] name the .claude/launch.json entry showcase-scheduled-work-3778 as the schedule leg's second boot. QA run #29672 could not reboot with the switch, because a runner that starts servers only from launch.json had no such entry. That entry has its own port and DB, so it runs beside the default boot, the step authors the schedule flow again there, and steps[5] stays on the default boot. acceptance[3].clause now reads 'a schedule flow authored the same way' instead of 'the same schedule flow', since that boot holds a re-authored copy; what it asserts is unchanged",
+          "ref": "#29819"
         }
       ]
     },
@@ -3432,7 +3439,7 @@
       "title": "A package dashboard renders every widget type the spec declares — those Studio offers and those written through the API — and every global-filter type renders its control and re-scopes the widgets bound to it; Studio's two widget-type entries offer the same set",
       "since": "v18",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3443,7 +3450,7 @@
         "requires": [
           "a fresh boot of the showcase on its own port and DB (dogfood §0) with OS_PORT exported, signed in as the seeded admin, and a console built from this tree with `pnpm console:build` — the root `pnpm build` does not refresh packages/console/dist (QA run #26715 needed the console build on every card)",
           "a writable package with an app whose menu names one dashboard",
-          "a dataset over a package object, with at least one dimension and one measure, written with PUT /api/v1/meta/dataset/NAME?mode=draft&package=PKG and published — Studio has no dataset editor (expected: the Interfaces card read it no-entry), so reports and widgets bind to an API-written dataset. Give it several dimensions (a status-like category and a date) and a few measures over seeded multi-bucket rows — examples/app-showcase/src/ui/dashboards/chart-gallery.dashboard.ts is the model for each type's bindings. Sankey takes no source/target pair: it flows from one root node (the total) to each category of its first dimension; with a second dimension (two or more pivoted series) there is no root: each flow runs from a first-dimension category to a second-dimension value, two columns of nodes (ui/packages/plugin-charts/src/AdvancedChartImpl.tsx, the sankey arm and buildSankeyCellFlows, #27460; the gallery's sankey_flow binds dimensions ['status'])"
+          "a dataset over a package object, with at least one dimension and one measure, written with PUT /api/v1/meta/dataset/NAME?mode=draft&package=PKG and published — the fixture stays API-written for a known shape, though Studio can now create a dataset (the widget inspector's dataset picker and the New report dialog each carry a 'New dataset' button, ui/packages/app-shell/src/views/studio-design/datasetCreate.tsx DatasetCreateEntry, engine.studio.interfaces.newDataset.*), so reports and widgets bind to an API-written dataset. Give it several dimensions (a status-like category and a date) and a few measures over seeded multi-bucket rows — examples/app-showcase/src/ui/dashboards/chart-gallery.dashboard.ts is the model for each type's bindings. Sankey takes no source/target pair: it flows from one root node (the total) to each category of its first dimension; with a second dimension (two or more pivoted series) there is no root: each flow runs from a first-dimension category to a second-dimension value, two columns of nodes (ui/packages/plugin-charts/src/AdvancedChartImpl.tsx, the sankey arm and buildSankeyCellFlows, #27460; the gallery's sankey_flow binds dimensions ['status'])"
         ]
       },
       "steps": [
@@ -3546,6 +3553,12 @@
           "date": "2026-11-04",
           "change": "steps[5], acceptance[4].verify and fixtures.requires[2] corrected from QA run #29890 (W5-FAIL, at 589049b0): the wave-4 shape (Field filled, Options From begun; #29006, fixed by #29300) is its own case (d), and a two-dimension sankey draws no root node: its flows run from the first dimension's categories to the second's values (buildSankeyCellFlows). Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-04",
+          "change": "fixtures.requires[2]: the 'Studio has no dataset editor' parenthetical is stale, as #29906 found for interfaces-create-dialogs and report-authoring-options. Studio's New dataset entry (datasetCreate.tsx DatasetCreateEntry, objectstack#27518) sits beside the widget inspector's dataset picker (DashboardWidgetInspector.tsx) and the New report dialog's. The fixture stays API-written for a known shape. No clause changed. Read at base 232d3bb5ef",
+          "ref": "#30129"
         }
       ]
     },
@@ -4226,7 +4239,7 @@
       "title": "Authorable keys Studio has no control for still work when another door writes them: per metadata type, each key written into a package draft through the metadata API is stored, served after publish and takes its runtime effect",
       "since": "v18",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -4312,7 +4325,7 @@
         "view.list: searchableFields, userFilters, resizable, compactToolbar, selection, pagination, rowHeight, grouping, rowColor, hiddenFields, fieldOrder, rowActions, bulkActions, conditionalFormatting, inlineEdit, exportOptions (needs an export grant), appearance, addRecord, showRecordCount, allowPrinting, emptyState → each renders as its key describes; probe compactToolbar, showRecordCount and resizable at the value opposite to what the list does with the key unset, since at that default a stored key renders exactly like no key and proves nothing (gap-view card, 3fcafcd3)",
         "view.form: groups, subforms, submitBehavior, modalSize, allowSkip, showStepIndicator, buttons → render as described (buttons measured rendering, knownGaps[0]); splitDirection / splitSize / splitResizable → refused at parse (retired in @objectstack/spec 18.3.0 with the split form, ADR-0050); drawerSide / drawerWidth → refused at parse (retired in @objectstack/spec 18.3.0, ADR-0049: no form view opens in a drawer); defaults: partial (knownGaps[0]). layout, defaultTab and tabPosition are not rows: Studio offers a control for each (step 4, knownGaps[0]). modalSize acts only on the form view the record modal selects, the object's default form view, or for a create its `create` form view when one is declared (selectRecordFormView, ui/packages/app-shell/src/utils/recordFormNavigation.ts), so author it there",
         "dashboard.requiredPermissions → a viewer without the capability is refused the dashboard",
-        "dataset (Studio has no dataset editor): include, dimensions with nullLabel, measures count / sum / avg / filtered / ratio, currency format → a report bound to it shows the null bucket labelled and each measure's value",
+        "dataset (Studio's New dataset, ui/packages/app-shell/src/views/studio-design/datasetCreate.tsx DatasetCreateEntry, writes only a name, an object, the seed's count measure, group-by dimensions and sum measures, so it offers no control for the keys below): include, dimensions with nullLabel, measures count / sum / avg / filtered / ratio, currency format → a report bound to it shows the null bucket labelled and each measure's value",
         "permission.description / isDefault / allowExport / rowLevelSecurity[].positions → the Setup list shows the description; isDefault raises a suggestion; allowExport → export 200 with it, 403 EXPORT_NOT_PERMITTED without; positions limit the policy to holders of the position"
       ],
       "traps": [
@@ -4354,7 +4367,13 @@
           "ref": "#28345"
         },
         { "revision": 5, "date": "2026-11-03", "change": "the view.form row drops drawerSide, drawerWidth, layout, defaultTab and tabPosition as step 4 says, fixtures.knownGaps[0] records why, and the object titleFormat cell moves to a refusal. QA run #29672 read drawerSide and drawerWidth answer 422 (retired in spec 18.3.0, ADR-0049; their retiredKey tombstones in packages/spec/src/ui/view.zod.ts), so they are refused, not stored and inert; and Studio's form-view inspector now offers Layout, Columns, Default Tab and Tab Position (ViewVariantInspector.tsx hands the form variant's spec schema to SchemaForm), which step 4 moves out of the matrix. The run's layout:'horizontal' fail on the Studio canvas was #29676, fixed by #29759 (7ba8b11f52). The buttons cell follows revision 3's knownGaps[0] reading. titleFormat has been refused since 3557366c02 (title-format-retired); the run read the publish refuse it on studio-authoring.api-written-keys-survive-studio-save. The other view.form keys' Studio census was not re-read; the next run's step 4 decides it. The clauses are unchanged. Read at base 339f63da30. Card #29679, from QA run #29672", "ref": "#29679" },
-        { "revision": 6, "date": "2026-11-04", "change": "fixtures.knownGaps[0], variants[25], [32] and [33] and acceptance[0].verify corrected from QA run #29890 (W5-FAIL, at 589049b0): a lockedBy-only list view shows its lock indicator since #29312, so it leaves the failing rows; sortable names its observables (header, Sort picker, 400 INVALID_SORT; #29896, #30024); compactToolbar, showRecordCount and resizable are probed at a non-default value; modalSize acts on the form view the record modal selects; a conditionalFormatting condition is stored as a CEL envelope. Read at base f68b47ca", "ref": "#29906" }
+        { "revision": 6, "date": "2026-11-04", "change": "fixtures.knownGaps[0], variants[25], [32] and [33] and acceptance[0].verify corrected from QA run #29890 (W5-FAIL, at 589049b0): a lockedBy-only list view shows its lock indicator since #29312, so it leaves the failing rows; sortable names its observables (header, Sort picker, 400 INVALID_SORT; #29896, #30024); compactToolbar, showRecordCount and resizable are probed at a non-default value; modalSize acts on the form view the record modal selects; a conditionalFormatting condition is stored as a CEL envelope. Read at base f68b47ca", "ref": "#29906" },
+        {
+          "revision": 7,
+          "date": "2026-11-04",
+          "change": "variants[35]: the 'Studio has no dataset editor' parenthetical is stale, found while applying #30129 line 1 (dashboard-widget-and-filter-types). Studio's New dataset (datasetCreate.tsx DatasetCreateEntry, buildDatasetSkeleton) writes only a name, an object, the seed's count measure, group-by dimensions and sum measures, so include, nullLabel, the avg / filtered / ratio measures and a currency format still have no Studio control and the row stays in the matrix. No clause changed. Read at base 232d3bb5ef",
+          "ref": "#30129"
+        }
       ]
     },
     {

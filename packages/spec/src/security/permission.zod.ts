@@ -249,6 +249,15 @@ export function resolveObjectPermissionVerb(verb: string): ObjectPermissionVerbT
  *   (`export ⊆ list`), so a set granting export on an object the caller cannot
  *   read grants nothing — and the super-user bits, which do not imply export,
  *   still satisfy the read half.
+ * - **`allowEdit` and `allowDelete` are CONJUNCTIONS too: `read ∧ grant`.**
+ *   An object permission that edits or deletes a record also reads it. The
+ *   authoring schema refuses an entry that grants either without read
+ *   ({@link checkWriteImpliesRead}); this cell is the runtime half, so an entry
+ *   stored or built before that refusal existed grants neither verb unread.
+ *   `modifyAllRecords` satisfies both halves on its own, since it implies read.
+ *   Applied to the MERGED entry (`/me/permissions`, and the evaluator, which
+ *   merges the caller's resolved entries before it asks), the read half may
+ *   come from a different set than the grant, exactly as export's does.
  * - **An ABSENT entry is `false`, never an error.** An object no permission set
  *   mentions is an object with no grant; an effective map is allowed to omit it
  *   exactly as it is allowed to carry an all-`false` entry, and the two must
@@ -264,8 +273,8 @@ export function objectPermissionGrants(
   switch (target) {
     case 'allowRead': return read;
     case 'allowCreate': return permission.allowCreate === true;
-    case 'allowEdit': return permission.allowEdit === true || modifyAll;
-    case 'allowDelete': return permission.allowDelete === true || modifyAll;
+    case 'allowEdit': return read && (permission.allowEdit === true || modifyAll);
+    case 'allowDelete': return read && (permission.allowDelete === true || modifyAll);
     case 'allowTransfer': return permission.allowTransfer === true || modifyAll;
     case 'allowExport': return permission.allowExport === true && read;
   }
@@ -386,6 +395,58 @@ function checkScopeAgainstSuperUserBits(
 }
 
 /**
+ * An object permission that edits or deletes a record also reads it: an entry
+ * granting `allowEdit` or `allowDelete` with no read on the same entry is
+ * refused, one issue per bit, at that bit's own path.
+ *
+ * Read is any of the three bits {@link objectPermissionGrants} reads it from:
+ * `allowRead`, `viewAllRecords` or `modifyAllRecords`. So
+ * `{ modifyAllRecords: true }` (which parses to `allowDelete: true`) and
+ * `{ viewAllRecords: true, allowEdit: true }` stay accepted.
+ *
+ * The runtime half is the conjunction in {@link objectPermissionGrants}: an
+ * entry stored or built before this refusal existed grants neither verb
+ * unread, so refusing it here declares exactly what the evaluator enforces
+ * (ADR-0049 `declared ≠ enforced`). Only the AUTHORING schema carries it:
+ * {@link EffectiveObjectPermissionSchema} extends the unrefined base, so the
+ * wire surface stays tolerant of a row an older server still serves.
+ *
+ * Module-private for the reason {@link checkScopeAgainstSuperUserBits} is.
+ */
+function checkWriteImpliesRead(
+  value: {
+    allowRead?: boolean;
+    allowEdit?: boolean;
+    allowDelete?: boolean;
+    viewAllRecords?: boolean;
+    modifyAllRecords?: boolean;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  const read = value.allowRead === true || value.viewAllRecords === true || value.modifyAllRecords === true;
+  if (read) return;
+  for (const bit of ['allowEdit', 'allowDelete'] as const) {
+    if (value[bit] !== true) continue;
+    ctx.addIssue({ code: 'custom', path: [bit], message: writeWithoutReadMessage(bit) });
+  }
+}
+
+/**
+ * The refusal of `allowEdit` / `allowDelete` without read. It names both
+ * routes, because only the author knows whether the set should read the
+ * object or should not write it.
+ */
+function writeWithoutReadMessage(bit: 'allowEdit' | 'allowDelete'): string {
+  const verb = bit === 'allowEdit' ? 'edit' : 'delete';
+  return (
+    `${bit}: true is refused without read on the same object (ADR-0049): an object permission that ` +
+    `${verb}s a record also reads it, and the permission evaluator grants ${verb} only together with ` +
+    'read (allowRead, viewAllRecords or modifyAllRecords), so this grant is never enforced. Add ' +
+    `allowRead: true to this entry if the set should ${verb} the object, or delete ${bit} if it should not.`
+  );
+}
+
+/**
  * The refusal of `allowDelete: false` beside `modifyAllRecords: true`
  * (#25575). The text names the route the author is looking for, because the
  * author who writes this pair wants "edit every record, delete none", and
@@ -472,10 +533,16 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
   allowCreate: z.boolean().default(false).describe('Create permission'),
   /** R: Read (Owned records or Shared records) */
   allowRead: z.boolean().default(false).describe('Read permission'),
-  /** U: Edit (Owned records or Shared records) */
-  allowEdit: z.boolean().default(false).describe('Edit permission'),
-  /** D: Delete (Owned records or Shared records) */
-  allowDelete: z.boolean().default(false).describe('Delete permission'),
+  /**
+   * U: Edit (Owned records or Shared records). Requires read on the same
+   * entry: an object permission that edits a record also reads it.
+   */
+  allowEdit: z.boolean().default(false).describe('Edit permission. Requires read on the same entry (allowRead, viewAllRecords or modifyAllRecords): an object permission that edits a record also reads it.'),
+  /**
+   * D: Delete (Owned records or Shared records). Requires read on the same
+   * entry: an object permission that deletes a record also reads it.
+   */
+  allowDelete: z.boolean().default(false).describe('Delete permission. Requires read on the same entry (allowRead, viewAllRecords or modifyAllRecords): an object permission that deletes a record also reads it.'),
 
   /**
    * Export (data portability) — the user-level export axis (#3391 / #3544).
@@ -690,7 +757,10 @@ export const ObjectPermissionSchema = lazySchema(() =>
     // surface stays tolerant, which is the #4001 authorable/wire split: a
     // server still running an older toolchain may emit a stored pair in an
     // effective-permission response, and an older client must not crash on it.
-    ObjectPermissionBaseSchema.superRefine(checkScopeAgainstSuperUserBits),
+    ObjectPermissionBaseSchema.superRefine((value, ctx) => {
+      checkScopeAgainstSuperUserBits(value, ctx);
+      checkWriteImpliesRead(value, ctx);
+    }),
     OBJECT_PERMISSION_RETIRED_KEY_RESIDUE,
   )),
 );

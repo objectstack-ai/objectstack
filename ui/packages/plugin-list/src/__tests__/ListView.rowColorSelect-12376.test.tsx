@@ -168,8 +168,9 @@ describe('ListView — a row colour on a non-column field is projected (objectui
     const labels = within(listbox).getAllByRole('option').map((o) => o.textContent);
     // The rule in force as the outside value, which re-picking writes nothing
     // for (`ListView.sharedSelect-11865.test.tsx`), "None", and one entry per
-    // column (`subject` is the only one; a string column is labelled by its
-    // name here). No other object field: `is_escalated` is not offered.
-    expect(labels).toEqual(['is_sla_violated', 'None', 'subject']);
+    // column (`subject` is the only one; a string column with no label of its
+    // own is listed under the definition's label, objectstack#30077). No other
+    // object field: `is_escalated` is not offered.
+    expect(labels).toEqual(['is_sla_violated', 'None', 'Subject']);
   });
 });

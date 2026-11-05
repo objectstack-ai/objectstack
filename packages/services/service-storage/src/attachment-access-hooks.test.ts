@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
+import { assembleExecutionContextOrGuest } from '@objectstack/core';
 import { ObjectQL, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { renderOperationMessage } from '@objectstack/spec/system';
 import type { ControlledByParentWriteOutcome, ExplainAccessRequest } from '@objectstack/spec/contracts';
@@ -2013,5 +2014,50 @@ describe('attachment access — the file a row names must be one the caller may 
     await expect(beforeUpdate(repoint({ file_id: 'f-own', file_name: 'y.png' }))).resolves.toBeUndefined();
     await expect(beforeUpdate(repoint({ file_name: 'z.png' }))).resolves.toBeUndefined();
     expect(authorizeFileRead).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// The guest door through the WIRED engine. The create gate skips a call that
+// reaches it with no hook session (an internal, context-less engine call);
+// a request that came through the guest door must never read as one. The
+// envelope is the REAL guest entry's (`@objectstack/core`), handed to the
+// REAL engine, so both the envelope and the engine's session hop are the
+// production ones — the same rig as the unscoped-write blocks above, with
+// the same rebuild-before-trusting note.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('a guest request through the wired engine is refused at create, never treated as a bare-kernel call', () => {
+  const guestContext = () =>
+    assembleExecutionContextOrGuest({
+      // The anonymous resolver's answer for a request with no credential.
+      authz: {
+        positions: [],
+        permissions: [],
+        directPermissions: [],
+        systemPermissions: [],
+        org_user_ids: [],
+        accessible_org_ids: [],
+      },
+      oauth: undefined,
+      localization: undefined,
+      requestLocale: undefined,
+      accessToken: undefined,
+      authGate: undefined,
+    });
+  const attachData = () => ({ id: 'a_new', file_id: 'f_new', parent_object: 'att_secret', parent_id: 'r1' });
+
+  it('an anonymous create of an attachment is refused (403 RECORD_NOT_ACCESSIBLE) and writes no row', async () => {
+    const { ql, remaining } = await bootWired({ sharing: { canEdit: async () => true }, parents: ['r1'] });
+    await expect(
+      ql.insert('sys_attachment', attachData(), { context: guestContext() } as any),
+    ).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403 });
+    expect(remaining()).toBe(0);
+  });
+
+  it('CONTROL: the same create by a signed-in caller resolves and stamps that caller as the uploader', async () => {
+    const { ql, driver } = await bootWired({ sharing: { canEdit: async () => true }, parents: ['r1'] });
+    await ql.insert('sys_attachment', attachData(), { context: { userId: 'u1' } } as any);
+    expect(driver.stores.get('sys_attachment')!.get('a_new')).toMatchObject({ uploaded_by: 'u1' });
   });
 });

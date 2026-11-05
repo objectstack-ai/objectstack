@@ -38,11 +38,32 @@
  * environment whose kernel carries none of the five answers each door's own
  * "not configured" reply, and still records nothing: the host's occupant is
  * not a fallback.
+ *
+ * ## [#30192] The sixth door, and the audited seams
+ *
+ * The `security` seam joined the five: the suggested-binding list and confirm
+ * (ADR-0090 D5/D9) and `security/explain` (D6) are driven through the same
+ * matrix as DOORS rows, so a hosted owner can accept an installed app's default
+ * permission set. The last describe pins the seams #30192 audited on the same
+ * shape — `auth`, `settings`, `i18n`, `metadata`, and `security` as the record
+ * and meta doors reach it — with the host carrying its own occupant of each,
+ * so an answer from the host is seen.
+ *
+ * ## [#30218] The data engine
+ *
+ * The `objectql` engine was the last environment-blind provider. The last two
+ * describes boot the same shape with the host carrying an engine of its OWN,
+ * and drive the four doors that ask the provider for one: the transactional
+ * `POST /batch`, the `/meta` object-state and published reads, and the meta
+ * read gate's disabled-package owner step. Every engine call records which
+ * kernel's engine made it, so a batch for environment A is seen to open its
+ * transaction and write through A's engine alone, never B's or the host's.
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import type { PluginContext } from '@objectstack/core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { EMAIL_SEND_CAPABILITY } from './email-routes.js';
 
 const captured = vi.hoisted(() => ({ servers: [] as any[] }));
@@ -73,12 +94,15 @@ const ENV_A = 'env_alpha';
 const ENV_B = 'env_beta';
 /** An environment whose kernel carries NONE of the five services. */
 const ENV_BARE = 'env_bare';
+/** [#30192] An environment whose kernel carries no `auth` service either. */
+const ENV_NOAUTH = 'env_noauth';
 
 /** Which hostname the host's resolver maps to which environment. */
 const HOSTS: Record<string, string> = {
     'alpha.example.test': ENV_A,
     'beta.example.test': ENV_B,
     'bare.example.test': ENV_BARE,
+    'noauth.example.test': ENV_NOAUTH,
 };
 const HOST_OF: Record<string, string> = Object.fromEntries(Object.entries(HOSTS).map(([h, e]) => [e, h]));
 
@@ -102,6 +126,24 @@ function occupants(env: string, reached: Reached[]): Record<string, unknown> {
         sharingRules: { listRules: rec('sharingRules.listRules', [{ name: `rule_${env}` }]) },
         email: { send: rec('email.send', { status: 'sent', messageId: `mail_${env}` }) },
         analytics: { queryDataset: rec('analytics.queryDataset', { rows: [{ env }], fields: [] }) },
+        // [#30192] plugin-security's `security` service, as the three doors
+        // below call it: a suggestion is confirmable only where it was made.
+        security: {
+            listAudienceBindingSuggestions: rec('security.listAudienceBindingSuggestions', [
+                { id: `sugg_${env}`, permissionSet: 'crm_user', packageId: 'app.objectstack.hotcrm', status: 'pending' },
+            ]),
+            confirmAudienceBindingSuggestion: async (_ctx: unknown, id: string) => {
+                reached.push({ env, op: 'security.confirmAudienceBindingSuggestion' });
+                if (id !== `sugg_${env}`) {
+                    throw Object.assign(new Error(`No audience-binding suggestion '${id}'.`), {
+                        statusCode: 404, code: 'SUGGESTION_NOT_FOUND',
+                    });
+                }
+                return { id, status: 'accepted' };
+            },
+            dismissAudienceBindingSuggestion: rec('security.dismissAudienceBindingSuggestion', {}),
+            explain: rec('security.explain', { env, allowed: true }),
+        },
     };
 }
 
@@ -214,18 +256,28 @@ interface Hosted {
     kernels: ObjectKernel[];
 }
 
-async function bootHosted(): Promise<Hosted> {
+interface HostedOptions {
+    /** [#30192] More occupants for the host and for each serving environment. */
+    extra?: (env: string) => Record<string, unknown>;
+    /** [#30192] The host carries an `auth` of its own (a `u_host` session). */
+    hostAuth?: boolean;
+    /** [#30218] `ENV_BARE`'s kernel carries no `objectql` engine at all. */
+    bareWithoutEngine?: boolean;
+}
+
+async function bootHosted(opts: HostedOptions = {}): Promise<Hosted> {
     const reached: Reached[] = [];
-    const envKernel = (env: string, withServices: boolean) => bootKernel(`test.env.${env}`, {
-        auth: authServiceFor(`u_${env}`),
-        objectql: emptyQl(),
+    const envKernel = (env: string, withServices: boolean, withAuth = true) => bootKernel(`test.env.${env}`, {
+        ...(withAuth ? { auth: authServiceFor(`u_${env}`) } : {}),
+        ...(opts.bareWithoutEngine && env === ENV_BARE ? {} : { objectql: emptyQl() }),
         protocol: envProtocol(env),
-        ...(withServices ? occupants(env, reached) : {}),
+        ...(withServices ? { ...occupants(env, reached), ...opts.extra?.(env) } : {}),
     });
     const kernelsById: Record<string, ObjectKernel> = {
         [ENV_A]: await envKernel(ENV_A, true),
         [ENV_B]: await envKernel(ENV_B, true),
         [ENV_BARE]: await envKernel(ENV_BARE, false),
+        [ENV_NOAUTH]: await envKernel(ENV_NOAUTH, false, false),
     };
     const km = hostKernelManager(kernelsById);
     const resolver = hostKernelResolver();
@@ -239,6 +291,8 @@ async function bootHosted(): Promise<Hosted> {
         // The host's OWN occupants of all five slots: a request answered here
         // records `host`, which no case below may ever see.
         ...occupants('host', reached),
+        ...opts.extra?.('host'),
+        ...(opts.hostAuth ? { auth: authServiceFor('u_host') } : {}),
     }, [createRestApiPlugin({ api: { api: { enableProjectScoping: true, projectResolution: 'auto' } } } as any)]);
     expect(captured.servers, 'the plugin must construct exactly one RestServer').toHaveLength(1);
     return {
@@ -259,6 +313,8 @@ interface Door {
     /** Path below the base, scoped or unscoped. */
     path: string;
     params: (env: string) => Record<string, string>;
+    /** The query string, for a door that reads one. */
+    query?: Record<string, string>;
     body?: unknown;
     /** The downstream call serving the request makes. */
     op: string;
@@ -318,6 +374,26 @@ const DOORS: Door[] = [
         op: 'approvals.listRequests', answeredBy: (b) => b?.data?.approvals?.requests?.[0]?.id,
         absent: { status: 200 },
     },
+    {
+        // [#30192] The ADR-0090 D5/D9 suggestion list an owner reviews.
+        provider: 'security', method: 'GET', path: '/security/suggested-bindings', params: () => ({}),
+        op: 'security.listAudienceBindingSuggestions', answeredBy: (b) => b?.data?.[0]?.id,
+        absent: { status: 501 },
+    },
+    {
+        // [#30192] …and the accept that gives every member the app's set.
+        provider: 'security', method: 'POST', path: '/security/suggested-bindings/:id/confirm',
+        params: (env) => ({ id: `sugg_${env}` }),
+        op: 'security.confirmAudienceBindingSuggestion', answeredBy: (b) => b?.data?.id,
+        absent: { status: 501 },
+    },
+    {
+        // [#30192] The D6 access explanation the list row menu reads.
+        provider: 'security', method: 'GET', path: '/security/explain', params: () => ({}),
+        query: { object: 'account', operation: 'read' },
+        op: 'security.explain', answeredBy: (b) => b?.env,
+        absent: { status: 501 },
+    },
 ];
 
 /** What a served door's body names, per environment. */
@@ -328,6 +404,9 @@ const EXPECTED_ANSWER: Record<string, (env: string) => unknown> = {
     'sharingRules.listRules': (env) => `rule_${env}`,
     'email.send': (env) => `mail_${env}`,
     'analytics.queryDataset': (env) => env,
+    'security.listAudienceBindingSuggestions': (env) => `sugg_${env}`,
+    'security.confirmAudienceBindingSuggestion': (env) => `sugg_${env}`,
+    'security.explain': (env) => env,
 };
 
 async function drive(h: Hosted, door: Door, mount: Mount, env: string) {
@@ -342,7 +421,7 @@ async function drive(h: Hosted, door: Door, mount: Mount, env: string) {
         path: url,
         url,
         params: { ...params, ...(mount === 'scoped' ? { environmentId: env } : {}) },
-        query: {},
+        query: { ...door.query },
         body: door.body,
         headers: {
             // A scoped request comes from a hostname no environment binds, so
@@ -434,6 +513,32 @@ describe('[#30011] hosted shape: two environment kernels behind one host REST pl
         ]);
     }, 60_000);
 
+    it('[#30192] security: environment A\'s suggestion cannot be confirmed through environment B', async () => {
+        h.reached.length = 0;
+        const door = DOORS.find((d) => d.op === 'security.confirmAudienceBindingSuggestion')!;
+        for (const mount of ['scoped', 'hostname'] as const) {
+            const handler = h.table.get(`POST ${mount === 'scoped' ? SCOPED : BASE}${door.path}`)!;
+            let status = 0; let body: any;
+            const res: any = {
+                status(c: number) { status = c; return res; },
+                json(b: any) { body = b; return res; },
+                setHeader() { return res; },
+            };
+            await handler({
+                method: 'POST', url: '', path: '', query: {}, body: {},
+                params: { id: `sugg_${ENV_A}`, ...(mount === 'scoped' ? { environmentId: ENV_B } : {}) },
+                headers: { host: mount === 'scoped' ? 'unbound.example.test' : HOST_OF[ENV_B], cookie: 'session=whatever' },
+            }, res);
+            // B's service was asked, and B made no such suggestion.
+            expect(status, JSON.stringify(body)).toBe(404);
+            expect(body?.error?.code).toBe('SUGGESTION_NOT_FOUND');
+        }
+        expect(h.reached).toEqual([
+            { env: ENV_B, op: 'security.confirmAudienceBindingSuggestion' },
+            { env: ENV_B, op: 'security.confirmAudienceBindingSuggestion' },
+        ]);
+    }, 60_000);
+
     it('no kernel is bought to learn an environment id, and a cold environment is built once per request', async () => {
         h.resolver.resolveKernel.mockClear();
         h.resolver.resolveEnvironment.mockClear();
@@ -497,5 +602,349 @@ describe('[#30011] single kernel: the same doors read the plugin\'s own kernel, 
                 } finally { restore(); }
             }, 60_000);
         }
+    }
+});
+
+/**
+ * [#30192] The seams #30192 audited, on the hosted shape, each pinned at the
+ * `RestServer` seam its routes call. The host carries its OWN occupant of every
+ * one of them — its own `auth` (a `u_host` session), `settings` (its own time
+ * zone), `i18n` and `metadata` — so an answer from the host is seen, not merely
+ * absent. `ENV_BARE` carries none of the four but `auth`; `ENV_NOAUTH` carries
+ * no `auth` either.
+ */
+const TIME_ZONES: Record<string, string> = {
+    [ENV_A]: 'Asia/Tokyo',
+    [ENV_B]: 'Europe/Paris',
+    host: 'America/New_York',
+};
+
+function auditedOccupants(env: string): Record<string, unknown> {
+    return {
+        settings: {
+            get: async (namespace: string, key: string) => ({
+                value: namespace === 'localization' && key === 'timezone' ? TIME_ZONES[env] : undefined,
+            }),
+        },
+        i18n: { __env: env, t: (key: string) => key },
+        metadata: { __env: env },
+    };
+}
+
+/** A request routed by hostname alone, as a hosted environment's browser sends it. */
+function hostnameRequest(env: string): any {
+    return {
+        method: 'GET', url: `${BASE}/probe`, path: `${BASE}/probe`, params: {}, query: {},
+        headers: { host: HOST_OF[env], cookie: 'session=whatever' },
+    };
+}
+
+/** The same request on the scoped mount, from a hostname no environment binds. */
+function scopedRequest(env: string): any {
+    return {
+        method: 'GET', url: `${BASE}/environments/${env}/probe`, path: `${BASE}/environments/${env}/probe`,
+        params: { environmentId: env }, query: {},
+        headers: { host: 'unbound.example.test', cookie: 'session=whatever' },
+    };
+}
+
+describe('[#30192] hosted shape: the audited seams answer from the request\'s environment, never the host', () => {
+    let h: Hosted;
+    beforeAll(async () => { h = await bootHosted({ extra: auditedOccupants, hostAuth: true }); }, 60_000);
+    afterAll(async () => { for (const k of h?.kernels ?? []) await k.shutdown(); });
+
+    it('auth: an environment whose kernel carries no auth authenticates nobody — the host\'s session is not its identity', async () => {
+        // The control: an environment with its own auth is the identity that answers.
+        const served = await h.server.resolveExecCtx(undefined, hostnameRequest(ENV_A));
+        expect(served?.userId).toBe(`u_${ENV_A}`);
+        for (const req of [hostnameRequest(ENV_NOAUTH), scopedRequest(ENV_NOAUTH)]) {
+            const ctx = await h.server.resolveExecCtx(req.params.environmentId, req);
+            expect(ctx?.userId, 'the host\'s identity store answered for the environment').toBeUndefined();
+            expect(ctx).toBeUndefined();
+        }
+    }, 60_000);
+
+    it('settings: the execution context localizes from the request\'s environment\'s settings, never the host\'s', async () => {
+        for (const env of [ENV_A, ENV_B]) {
+            for (const req of [hostnameRequest(env), scopedRequest(env)]) {
+                const ctx = await h.server.resolveExecCtx(req.params.environmentId, req);
+                expect(ctx?.userId).toBe(`u_${env}`);
+                expect(ctx?.timezone, `${env} (${req.params.environmentId ? 'scoped' : 'hostname'})`).toBe(TIME_ZONES[env]);
+            }
+        }
+        // An environment with no settings service of its own reads the default,
+        // not the host's reference time zone.
+        const bare = await h.server.resolveExecCtx(undefined, hostnameRequest(ENV_BARE));
+        expect(bare?.userId).toBe(`u_${ENV_BARE}`);
+        expect(bare?.timezone).not.toBe(TIME_ZONES.host);
+    }, 60_000);
+
+    it('i18n and metadata: an environment\'s own occupant answers, and the host\'s is not a fallback', async () => {
+        for (const env of [ENV_A, ENV_B]) {
+            for (const req of [hostnameRequest(env), scopedRequest(env)]) {
+                expect((await h.server.resolveI18nService(req.params.environmentId, req))?.__env).toBe(env);
+                expect((await h.server.resolveMetadataService(req.params.environmentId, req) as any)?.__env).toBe(env);
+            }
+        }
+        for (const req of [hostnameRequest(ENV_BARE), scopedRequest(ENV_BARE)]) {
+            expect(await h.server.resolveI18nService(req.params.environmentId, req)).toBeUndefined();
+            expect(await h.server.resolveMetadataService(req.params.environmentId, req)).toBeUndefined();
+        }
+    }, 60_000);
+
+    it('security: the record, export and meta doors reach the request\'s environment\'s service, and the host\'s is not a fallback', async () => {
+        for (const env of [ENV_A, ENV_B]) {
+            for (const req of [hostnameRequest(env), scopedRequest(env)]) {
+                const id = req.params.environmentId;
+                const viaServer = await h.server.resolveSecurityService(id, req);
+                const viaMetaGate = await h.server.metaReadAudienceSources(id, req).resolveSecurityService();
+                h.reached.length = 0;
+                await viaServer?.explain?.({}, {});
+                await viaMetaGate?.explain?.({}, {});
+                expect(h.reached).toEqual([{ env, op: 'security.explain' }, { env, op: 'security.explain' }]);
+            }
+        }
+        for (const req of [hostnameRequest(ENV_BARE), scopedRequest(ENV_BARE)]) {
+            const id = req.params.environmentId;
+            expect(await h.server.resolveSecurityService(id, req)).toBeUndefined();
+            expect(await h.server.metaReadAudienceSources(id, req).resolveSecurityService()).toBeUndefined();
+        }
+    }, 60_000);
+});
+
+/**
+ * [#30218] The engine each kernel carries in the last two describes. Every
+ * call a door makes records the kernel whose engine answered (`env`) and, for
+ * a write, the transaction it joined (`trx`), so a write that reached another
+ * kernel's store, or joined another kernel's transaction, is seen. Identity
+ * lookups the execution context makes answer empty, as `emptyQl` does.
+ *
+ * The registry knows ONE object, `acct_<env>`, and disables ONE package,
+ * `pkg_<env>`, so a read judged by another kernel's registry answers
+ * differently on the wire as well as in the record.
+ */
+interface EngineCall { env: string; op: string; trx?: string }
+
+function recordingEngine(env: string, calls: EngineCall[]): unknown {
+    const empty = async () => [];
+    const own: Record<string, unknown> = {
+        registry: {
+            getObject: (name: string) => {
+                calls.push({ env, op: 'registry.getObject' });
+                return name === `acct_${env}` ? { name, fields: {} } : undefined;
+            },
+            isObjectPackageDisabled: () => false,
+            isPackageDisabled: (packageId: unknown) => {
+                calls.push({ env, op: 'registry.isPackageDisabled' });
+                return packageId === `pkg_${env}`;
+            },
+        },
+        transaction: async (fn: (trx: unknown) => unknown) => {
+            calls.push({ env, op: 'transaction' });
+            return fn({ __trx: env });
+        },
+        update: async (_object: string, data: any, options: any) => {
+            assertEngineUpdateDispatch(data, options);
+            calls.push({ env, op: 'update', trx: options?.context?.__trx });
+            return { id: data?.id, env };
+        },
+        delete: async (_object: string, options: any) => {
+            assertEngineDeleteDispatch(options);
+            calls.push({ env, op: 'delete', trx: options?.context?.__trx });
+            return { id: options?.where?.id, env };
+        },
+    };
+    return new Proxy(own, { get: (t, k: string) => (k === 'then' ? undefined : k in t ? t[k] : empty) });
+}
+
+/** A `metadata` service with the code/package store the published read falls back to. */
+function publishedStore(env: string): unknown {
+    return { getPublished: async (type: string, name: string) => ({ type, name, env }) };
+}
+
+/**
+ * The environment's protocol, with the create ingress the batch's create op
+ * goes through, recording the transaction the create joined. An item that is
+ * not an object names its owner package, `pkg_<env>`.
+ */
+function engineProtocol(env: string, calls: EngineCall[]): unknown {
+    return {
+        ...(envProtocol(env) as Record<string, unknown>),
+        getMetaItem: async (request: { type?: string }) => (request?.type === 'object' ? undefined : { packageId: `pkg_${env}` }),
+        createData: async ({ object, data, context }: { object: string; data: any; context: any }) => {
+            calls.push({ env, op: 'protocol.createData', trx: context?.__trx });
+            return { object, record: { id: `new_${env}`, ...data } };
+        },
+    };
+}
+
+/** The batch every case sends: one create, one update, one delete. */
+const BATCH_BODY = {
+    operations: [
+        { object: 'account', action: 'create', data: { name: 'Acme' } },
+        { object: 'account', action: 'update', id: 'r1', data: { name: 'Acme 2' } },
+        { object: 'account', action: 'delete', id: 'r2' },
+    ],
+};
+
+const ENGINE_DOORS: Record<'batch' | 'state' | 'published', Door> = {
+    batch: {
+        provider: 'objectql', method: 'POST', path: '/batch', params: () => ({}), body: BATCH_BODY,
+        op: 'transaction', answeredBy: (b) => b?.results?.map((r: any) => r?.id ?? r?.env),
+        absent: { status: 501 },
+    },
+    state: {
+        provider: 'objectql', method: 'GET', path: '/meta/object/:name/state/:field',
+        params: (env) => ({ name: `acct_${env}`, field: 'status' }),
+        op: 'registry.getObject', answeredBy: (b) => b?.object,
+        absent: { status: 404 },
+    },
+    published: {
+        provider: 'objectql', method: 'GET', path: '/meta/:type/:name/published',
+        params: () => ({ type: 'view', name: 'v_list' }),
+        op: 'registry.isPackageDisabled', answeredBy: (b) => b,
+        absent: { status: 404 },
+    },
+};
+
+/** The batch's engine calls, in order, all made by `env`'s engine and in `env`'s transaction. */
+function batchCalls(env: string): EngineCall[] {
+    return [
+        { env, op: 'transaction' },
+        { env, op: 'protocol.createData', trx: env },
+        { env, op: 'update', trx: env },
+        { env, op: 'delete', trx: env },
+    ];
+}
+
+const BATCH_OPS = new Set(['transaction', 'protocol.createData', 'update', 'delete']);
+
+/** A protocol for the meta read gate's owner step: the plain read serves no item, and names `pkg_<env>`. */
+function ownerStepProtocol(env: string): any {
+    return { getMetaItem: async () => ({ item: undefined, packageId: `pkg_${env}` }) };
+}
+
+describe('[#30218] hosted shape: the data engine is the request\'s environment\'s, never the host\'s', () => {
+    let h: Hosted;
+    const calls: EngineCall[] = [];
+    beforeAll(async () => {
+        h = await bootHosted({
+            extra: (env) => ({
+                objectql: recordingEngine(env, calls),
+                protocol: engineProtocol(env, calls),
+                metadata: publishedStore(env),
+            }),
+            bareWithoutEngine: true,
+        });
+    }, 60_000);
+    afterAll(async () => { for (const k of h?.kernels ?? []) await k.shutdown(); });
+
+    for (const mount of ['scoped', 'hostname'] as const) {
+        for (const env of [ENV_A, ENV_B]) {
+            it(`⭐ POST /batch (${mount}) for ${env} opens its transaction and writes through ${env}'s engine alone`, async () => {
+                calls.length = 0;
+                const out = await drive(h, ENGINE_DOORS.batch, mount, env);
+                expect(out.status, JSON.stringify(out.body)).toBe(200);
+                expect(out.body?.results?.map((r: any) => r?.id)).toEqual([`new_${env}`, 'r1', 'r2']);
+                expect(calls.filter((c) => BATCH_OPS.has(c.op))).toEqual(batchCalls(env));
+                // Nothing at all went through the other environment's engine,
+                // or the host's: no read, no transaction, no write.
+                expect(calls.filter((c) => c.env !== env)).toEqual([]);
+            }, 60_000);
+
+            it(`GET /meta/object/:name/state/:field (${mount}) for ${env} is judged by ${env}'s engine registry`, async () => {
+                calls.length = 0;
+                const out = await drive(h, ENGINE_DOORS.state, mount, env);
+                expect(out.status, JSON.stringify(out.body)).toBe(200);
+                // `acct_<env>` is known to `env`'s registry alone.
+                expect(out.body).toEqual({ object: `acct_${env}`, field: 'status', from: null, next: null });
+                expect(calls.some((c) => c.op === 'registry.getObject')).toBe(true);
+                expect(calls.filter((c) => c.env !== env)).toEqual([]);
+            }, 60_000);
+
+            it(`GET /meta/:type/:name/published (${mount}) for ${env} asks ${env}'s engine whether the owner package is disabled`, async () => {
+                calls.length = 0;
+                const out = await drive(h, ENGINE_DOORS.published, mount, env);
+                // `pkg_<env>` is disabled on `env`'s registry alone, so the item
+                // is withheld: the door's own 404. Any other kernel's registry
+                // would have served the published document.
+                expect(out.status, JSON.stringify(out.body)).toBe(404);
+                expect(calls.filter((c) => c.op === 'registry.isPackageDisabled')).toEqual([{ env, op: 'registry.isPackageDisabled' }]);
+                expect(calls.filter((c) => c.env !== env)).toEqual([]);
+            }, 60_000);
+
+            it(`the meta read gate's disabled-package owner step (${mount}) for ${env} asks ${env}'s engine`, async () => {
+                const req = mount === 'scoped' ? scopedRequest(env) : hostnameRequest(env);
+                calls.length = 0;
+                const sources = h.server.metaItemReadGateSources(req.params.environmentId, req, ownerStepProtocol(env));
+                await expect(sources.isItemOfDisabledPackage({ type: 'view', name: 'v_list' })).resolves.toBe(true);
+                expect(calls).toEqual([{ env, op: 'registry.isPackageDisabled' }]);
+            }, 60_000);
+        }
+
+        it(`POST /batch (${mount}) for an environment whose kernel carries no engine answers 501 — the host's engine is NOT a fallback`, async () => {
+            calls.length = 0;
+            const out = await drive(h, ENGINE_DOORS.batch, mount, ENV_BARE);
+            expect(out.status, JSON.stringify(out.body)).toBe(501);
+            expect(out.body?.code).toBe('NOT_IMPLEMENTED');
+            expect(calls).toEqual([]);
+        }, 60_000);
+    }
+});
+
+describe('[#30218] single kernel: the data engine is the plugin\'s own kernel\'s, exactly as before', () => {
+    let h: Hosted;
+    const calls: EngineCall[] = [];
+    beforeAll(async () => {
+        const http = recordingHttp();
+        captured.servers.length = 0;
+        const kernel = await bootKernel('test.single.engine', {
+            'http.server': http,
+            protocol: engineProtocol('host', calls),
+            auth: authServiceFor('u_host'),
+            objectql: recordingEngine('host', calls),
+            metadata: publishedStore('host'),
+        }, [createRestApiPlugin({ api: { api: { enableProjectScoping: true, projectResolution: 'auto' } } } as any)]);
+        expect(captured.servers).toHaveLength(1);
+        h = {
+            table: http.table,
+            reached: [],
+            km: hostKernelManager({}),
+            resolver: hostKernelResolver(),
+            server: captured.servers[0],
+            kernels: [kernel],
+        };
+    }, 60_000);
+    afterAll(async () => { for (const k of h?.kernels ?? []) await k.shutdown(); });
+
+    for (const mount of ['scoped', 'hostname'] as const) {
+        it(`POST /batch (${mount}) runs in the one kernel's transaction`, async () => {
+            calls.length = 0;
+            const out = await drive(h, ENGINE_DOORS.batch, mount, 'host');
+            expect(out.status, JSON.stringify(out.body)).toBe(200);
+            expect(calls.filter((c) => BATCH_OPS.has(c.op))).toEqual(batchCalls('host'));
+        }, 60_000);
+
+        it(`GET /meta/object/:name/state/:field (${mount}) is judged by the one kernel's registry`, async () => {
+            calls.length = 0;
+            const out = await drive(h, ENGINE_DOORS.state, mount, 'host');
+            expect(out.status, JSON.stringify(out.body)).toBe(200);
+            expect(out.body?.object).toBe('acct_host');
+        }, 60_000);
+
+        it(`GET /meta/:type/:name/published (${mount}) asks the one kernel's registry`, async () => {
+            calls.length = 0;
+            const out = await drive(h, ENGINE_DOORS.published, mount, 'host');
+            expect(out.status, JSON.stringify(out.body)).toBe(404);
+            expect(calls.filter((c) => c.op === 'registry.isPackageDisabled')).toEqual([{ env: 'host', op: 'registry.isPackageDisabled' }]);
+        }, 60_000);
+
+        it(`the meta read gate's owner step (${mount}) asks the one kernel's registry`, async () => {
+            const req = mount === 'scoped' ? scopedRequest('host') : hostnameRequest('host');
+            calls.length = 0;
+            const sources = h.server.metaItemReadGateSources(req.params.environmentId, req, ownerStepProtocol('host'));
+            await expect(sources.isItemOfDisabledPackage({ type: 'view', name: 'v_list' })).resolves.toBe(true);
+            expect(calls).toEqual([{ env: 'host', op: 'registry.isPackageDisabled' }]);
+        }, 60_000);
     }
 });

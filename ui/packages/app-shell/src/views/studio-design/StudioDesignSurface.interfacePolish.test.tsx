@@ -138,7 +138,7 @@ function renderWorkbench() {
 async function publishButton(): Promise<HTMLElement> {
   // The rail's labelled leaf appears once the app has loaded, by which time the
   // header's draft count has resolved too.
-  await screen.findByRole('button', { name: '客户仪表盘 仪表板' });
+  await screen.findByRole('button', { name: '客户仪表盘 仪表盘' });
   return screen.getByRole('button', { name: /^发布/ });
 }
 
@@ -163,7 +163,7 @@ describe('Studio top bar — the Publish button with nothing to publish (objectu
   it('a pending draft: enabled, the primary button, and no "nothing to publish" text', async () => {
     drafts = [{ type: 'dashboard', name: 'b2r4_customer_dashboard', packageId: PACKAGE_ID }];
     renderWorkbench();
-    await screen.findByRole('button', { name: '客户仪表盘 仪表板' });
+    await screen.findByRole('button', { name: '客户仪表盘 仪表盘' });
     const btn = await vi.waitFor(() => {
       const b = screen.getByRole('button', { name: /^发布/ });
       if ((b as HTMLButtonElement).disabled) throw new Error('draft count not resolved yet');
@@ -179,8 +179,8 @@ describe('Studio top bar — the Publish button with nothing to publish (objectu
 describe('Studio nav rail — the accessible name of a nav item (objectui#8219)', () => {
   it('a labelled leaf is NAMED by its display label; the internal pair is only its description', async () => {
     renderWorkbench();
-    const item = await screen.findByRole('button', { name: '客户仪表盘 仪表板' });
-    expect(item).toHaveAccessibleName('客户仪表盘 仪表板');
+    const item = await screen.findByRole('button', { name: '客户仪表盘 仪表盘' });
+    expect(item).toHaveAccessibleName('客户仪表盘 仪表盘');
     expect(item).toHaveAccessibleDescription('dashboard · b2r4_customer_dashboard');
     expect(
       screen.queryByRole('button', { name: 'dashboard · b2r4_customer_dashboard' }),

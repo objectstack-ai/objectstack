@@ -1,9 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // [ADR-0090 D12; ruling of record 5985885287] A delegated administrator's
-// refused assignment write answers the same for a row it cannot read as for a
-// missing one — measured at the HTTP data door of the showcase behind a real
-// organization wall (`multiTenant: 'posture-only'`, the `isolated` posture).
+// assignment write to a row it cannot read, or to an id naming none, answers
+// the read door's not-found, as a read does — measured at the HTTP data door
+// of the showcase behind a real organization wall (`multiTenant:
+// 'posture-only'`, the `isolated` posture).
 //
 // ── what is pinned ─────────────────────────────────────────────────────────
 //
@@ -12,10 +13,9 @@
 // Operations" subtree): a member of A, and A's owner — an organization
 // administrator who also holds the scope. A position assignment of
 // organization B, anchored at one of B's units, sits behind the wall, so
-// neither reads it. `PATCH` and `DELETE` of it by id answer exactly what the
-// same request answers for an id that names no row: status, code, sentence
-// and details, the one difference being the id the request itself carried.
-// The row stays.
+// neither reads it. `PATCH` and `DELETE` of it by id, and of an id naming no
+// row, answer exactly what a `GET` of that id answers — the read door's `404
+// RECORD_NOT_FOUND`, status and body. The row stays.
 //
 // Controls, so a green run is not "every write is answered alike":
 //
@@ -51,7 +51,7 @@ const withoutId = (a: Answer, id: string): Answer =>
 const codeOf = (a: Answer): unknown => (a.body as any)?.code ?? (a.body as any)?.error?.code;
 const idOf = (b: any): string => String(b?.id ?? b?.record?.id ?? b?.data?.id ?? '');
 
-describe("behind the organization wall, a delegated administrator's refused assignment write answers the same for a row it cannot read as for a missing one", () => {
+describe("behind the organization wall, a delegated administrator's assignment write to a row it cannot read, or to an id naming none, answers the read door's not-found", () => {
   let stack: VerifyStack;
   let ql: any;
   const tokens: Record<'delegate' | 'owner', string> = { delegate: '', owner: '' };
@@ -164,15 +164,16 @@ describe("behind the organization wall, a delegated administrator's refused assi
     expect((await stored(positionB))?.organization_id, 'the row lives in B').toBe(orgB);
   });
 
-  it('PATCH and DELETE of a row the caller cannot read answer exactly what an id naming no row answers, and leave the row', async () => {
+  it("PATCH and DELETE of a row the caller cannot read, and of an id naming no row, answer exactly what a GET of that id answers — the read door's not-found — and leave the row", async () => {
     const before = await stored(positionB);
     for (const [who, token] of Object.entries(tokens)) {
-      for (const method of ['PATCH', 'DELETE'] as const) {
-        const hit = await write(token, method, positionB);
-        const miss = await write(token, method, MISSING);
-        expect({ status: miss.status, code: codeOf(miss) }, `${who} ${method}, no row — ${JSON.stringify(miss.body)}`)
-          .toEqual({ status: 403, code: 'PERMISSION_DENIED' });
-        expect(withoutId(hit, positionB), `${who} ${method}: the unreadable row answers as no row`).toEqual(withoutId(miss, MISSING));
+      for (const target of [positionB, MISSING]) {
+        const readDoor = await call(token, 'GET', `/data/sys_user_position/${target}`);
+        expect({ status: readDoor.status, code: codeOf(readDoor) }, `${who} GET ${target} — ${JSON.stringify(readDoor.body)}`)
+          .toEqual({ status: 404, code: 'RECORD_NOT_FOUND' });
+        for (const method of ['PATCH', 'DELETE'] as const) {
+          expect(await write(token, method, target), `${who} ${method} ${target}: the read door's answer`).toEqual(readDoor);
+        }
       }
     }
     expect(await stored(positionB), 'refused writes leave the row as it was').toEqual(before);

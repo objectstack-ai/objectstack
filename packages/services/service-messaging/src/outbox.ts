@@ -157,6 +157,14 @@ export interface DueWorkOptions {
     now?: number;
 }
 
+/** [#29919] Options for {@link INotificationOutbox.nextDueAt}. */
+export interface NextDueOptions {
+    /** Visibility timeout — an `in_flight` row becomes reapable once claimed longer ago than this. */
+    claimTtlMs: number;
+    /** "Now" reference, ms. Defaults to the store's clock. */
+    now?: number;
+}
+
 export interface AckSuccess {
     success: true;
     durationMs?: number;
@@ -296,6 +304,19 @@ export interface INotificationOutbox {
      * implement it.
      */
     hasDueWork?(opts: DueWorkOptions): Promise<boolean>;
+    /**
+     * [#29919] The earliest instant (ms) at which a row becomes claimable
+     * without anyone writing to the outbox — a `pending` row's `nextAttemptAt`
+     * still after `now` (a retry, quiet hours, a digest window closing), or the
+     * instant an `in_flight` row's claim passes `claimTtlMs` (already past if
+     * no reap has run since) — or `null` when there is none. The dispatcher's loop sleeps no later than this after an idle tick.
+     *
+     * A read and nothing more, stale the moment it returns like
+     * {@link hasDueWork}: a row written afterwards reaches the loop by the
+     * writer's `wake()`. Optional: without it the dispatcher sleeps by its idle
+     * backoff alone. Both built-in stores implement it.
+     */
+    nextDueAt?(opts: NextDueOptions): Promise<number | null>;
     claim(opts: ClaimOptions): Promise<ClaimedDeliveryRecord[]>;
     /**
      * Record the outcome of ONE dispatch attempt on a row this caller claimed,

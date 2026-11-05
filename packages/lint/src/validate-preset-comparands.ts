@@ -54,7 +54,7 @@ import { indexObjectGraph, recordsOf, resolveFieldPath, type ObjectGraph } from 
  *   and every alias `normalizeFilterOperator` folds onto them. An ORDERED
  *   comparison against a declared preset name has no legitimate reading on
  *   ANY column, so no field type is needed to refuse it.
- * - **Only the 13 declared names.** A near-miss (`last_60_days`) is not this
+ * - **Only the declared names.** A near-miss (`last_60_days`) is not this
  *   rule's business — on a temporal field the engine's field-typed door
  *   catches it; judging undeclared strings here would be a guessed superset.
  *

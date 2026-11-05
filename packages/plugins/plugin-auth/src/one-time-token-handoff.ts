@@ -19,8 +19,9 @@
  * 1. The shell makes a random `code_verifier` (RFC 7636 §4.1) and keeps it.
  * 2. The shell opens, in the system auth session,
  *    `GET /api/v1/auth/one-time-token/handoff?redirect_uri=SCHEME://PATH&code_challenge=C&code_challenge_method=S256`
- *    with `C = BASE64URL(SHA-256(code_verifier))`, after (or as the end of) a
- *    sign-in there.
+ *    with `C = BASE64URL(SHA-256(code_verifier))`. That URL is the shell's only
+ *    entry: a browser that has yet to sign in is sent to the sign-in page from
+ *    here, and comes back here afterwards (see "The sign-in entry" below).
  * 3. This route checks that `redirect_uri` names a REGISTERED app scheme,
  *    mints a token from the signed-in session through the vendor plugin's own
  *    generate endpoint (called server-side; the plugin refuses it over HTTP),
@@ -58,12 +59,12 @@
  * with its own challenge, in a browser that already holds the user's session.
  * Two refusals close that:
  *
- *  - **Freshness.** The session must have been created within
- *    {@link ONE_TIME_TOKEN_HANDOFF_SESSION_MAX_AGE_SECONDS}; an older one
- *    answers `401 UNAUTHENTICATED` (the remedy is a sign-in, the same remedy
- *    as no session). So the shell completes a full sign-in in the system auth
- *    session before every hand-off (an ephemeral session is fine); an existing
- *    Safari or Custom Tabs session is not enough.
+ *  - **Freshness.** A token is minted only for a session created within
+ *    {@link ONE_TIME_TOKEN_HANDOFF_SESSION_MAX_AGE_SECONDS}. An older one is
+ *    refused the way no session is, because the remedy is the same: a sign-in.
+ *    So every hand-off follows a full sign-in in the system auth session (an
+ *    ephemeral session is fine); an existing Safari or Custom Tabs session is
+ *    not enough.
  *  - **Cross-site navigation.** A request carrying `Sec-Fetch-Site:
  *    cross-site` answers `400 VALIDATION_ERROR` before anything else is read:
  *    a malformed request context, not a missing sign-in. The header is judged
@@ -73,6 +74,64 @@
  * the plugin's generate endpoint refuses every HTTP request
  * (`disableClientRequest`), and a server-side call made outside this route's
  * scope stores a key no redemption can reach, so it fails closed.
+ *
+ * ## The sign-in entry (maintainer ruling: 「改成服务端入口」)
+ *
+ * The app opens this route and nothing else, so the Console's sign-in route
+ * stays internal to this repository and its release: an installed app lives
+ * for months, and a Console upgrade must not be able to strand it. A valid
+ * request whose session is missing or too old therefore answers one of two
+ * ways, and every `400` this route answers is decided before either:
+ *
+ *  - **A page navigation** ({@link isPageNavigation}) answers `302` to this
+ *    deployment's sign-in page, with `redirect` naming this same request, so
+ *    the user sees a form instead of raw JSON.
+ *  - **Anything else** answers `401 UNAUTHENTICATED`. The app's anonymous probe
+ *    is one of these, and it reads `401` as "this server registered me".
+ *
+ * Which is which rests on no single header, because neither has been measured
+ * in a real `ASWebAuthenticationSession` or Custom Tabs. `Sec-Fetch-Dest` decides
+ * when a browser sends it (`document` for a top-level page, `empty` for a
+ * `fetch`); a browser without Fetch Metadata still asks for `text/html` on a
+ * navigation. A request carrying neither gets the `401`, which is what this
+ * route answered before the entry existed.
+ *
+ * Three more rules:
+ *
+ *  - **The browser stays on the origin it arrived on.** The session cookie and
+ *    the sign-in page's same-origin match of `redirect` both depend on it, so
+ *    `Location` is root-relative. `AuthManager.getConsoleUrl` composes from the
+ *    canonical origin; {@link resolveHandoffSignInEntry} takes only the PATH of
+ *    its answer, which keeps `uiBasePath` and any base path in `baseUrl`. A path
+ *    starting with `//` would name another host, so it counts as no sign-in page.
+ *  - **No Console, no redirect.** The browser is sent to a sign-in page only when
+ *    this process answers that page with an HTML document, asked the way the
+ *    browser would be about to ask. `--no-ui`, a Console that was not built, a
+ *    host that redirects the Console elsewhere and a Console served by something
+ *    in front of this process all keep the `401`; the first refused navigation
+ *    logs why at `warn`, once.
+ *  - **It does not bounce.** The sign-in page's own age check reads the device's
+ *    clock and this route reads the server's, so on a device whose clock is
+ *    behind, that check alone would forward a session this route refuses, and a
+ *    redirect back would repeat. Two things stop that:
+ *
+ *    1. The redirect carries {@link HANDOFF_REFUSED_AT_PARAM}, the server's time
+ *       of the refusal, and the sign-in page holds its form for any session not
+ *       created after it, whatever the device's clock says
+ *       (`handoffRedirect.ts` in the Console). This reads no request header, so
+ *       it holds with or without Fetch Metadata. On several nodes behind one host
+ *       the time and `createdAt` come from two clocks, so skew can hold the form
+ *       until a sign-in makes a later `createdAt`, which clears it.
+ *    2. A navigation reporting `Sec-Fetch-Site: same-origin` that this route still
+ *       refuses is one the sign-in page forwarded, so it gets the `401`, never
+ *       another redirect.
+ *
+ *    The page can still forward a session this route refuses when that session
+ *    was created after the mark: a URL reopened more than five minutes later, or a
+ *    session the page can read and this route cannot (a bearer token with no
+ *    cookie). A browser with Fetch Metadata stops at the `401`. A browser without
+ *    it gets one more redirect, whose newer mark holds the form, so what follows
+ *    waits for a person to sign in.
  *
  * ## The registered app-scheme list
  *
@@ -124,6 +183,22 @@ export const ONE_TIME_TOKEN_EXPIRES_IN_MINUTES = 1;
  * second factor.
  */
 export const ONE_TIME_TOKEN_HANDOFF_SESSION_MAX_AGE_SECONDS = 5 * 60;
+
+/**
+ * On the redirect to the sign-in page, beside `redirect`: when this route
+ * refused the browser's session, in epoch milliseconds on the SERVER's clock. The
+ * Console's `handoffRedirect.ts` restates the name.
+ *
+ * A session whose `createdAt` is not later than this is one the route has
+ * already refused, whatever the device's clock says, so the page holds its form
+ * for it; a session made after it (a sign-in on the page, or a provider's
+ * sign-in that returned to the same URL) is forwarded. On one process the
+ * comparison is between two readings of one clock. On several nodes behind one
+ * host it is two clocks, so skew can hold the form until a sign-in makes a later
+ * `createdAt`, which clears it. The page's verdict is never a security question:
+ * this route refuses on its own.
+ */
+export const HANDOFF_REFUSED_AT_PARAM = 'handoff_refused_at';
 
 /** The route's CLOSED query-parameter set. */
 export const ONE_TIME_TOKEN_HANDOFF_QUERY_PARAMS: readonly string[] = [
@@ -254,6 +329,14 @@ export interface HandoffAnswer {
   headers: Record<string, string>;
 }
 
+/** Where a page navigation goes to sign in, both root-relative: see "The sign-in entry" above. */
+export interface HandoffSignInEntry {
+  /** This deployment's sign-in page. */
+  signInPage: string;
+  /** This route, as the page navigates back to it. */
+  handoff: string;
+}
+
 export interface HandoffDeps {
   /** The registered app schemes ({@link registeredAppSchemesOf}). */
   registeredSchemes: readonly string[];
@@ -267,6 +350,12 @@ export interface HandoffDeps {
   now?: () => number;
   /** The vendor plugin's generate endpoint, called server-side with the caller's headers. */
   generate(headers: Headers): Promise<{ token: string }>;
+  /**
+   * Where a page navigation goes to sign in, or `null` when this deployment
+   * serves no sign-in page ({@link resolveHandoffSignInEntry}). Asked only for a
+   * valid request whose session is refused.
+   */
+  signInEntry(headers: Headers): Promise<HandoffSignInEntry | null>;
 }
 
 export interface HandoffRequest {
@@ -289,6 +378,128 @@ function single(queries: Record<string, readonly string[]>, name: string): { val
   return { value: values[0] };
 }
 
+/** The request's `Sec-Fetch-Site`, `undefined` when it carries none. */
+function fetchSite(headers: Headers): string | undefined {
+  return headers.get('sec-fetch-site')?.trim().toLowerCase();
+}
+
+/**
+ * Whether the request is a browser navigating to a page, not a client calling an
+ * API. `Sec-Fetch-Dest` decides when present, so a `fetch` asking for HTML stays
+ * a call and an iframe is not the top-level page. A browser without Fetch
+ * Metadata still names `text/html` in `Accept` on a navigation; the app's probe
+ * (`Accept: application/json`) and a bare `curl` (which accepts anything) do not.
+ */
+export function isPageNavigation(headers: Headers): boolean {
+  const dest = headers.get('sec-fetch-dest')?.trim().toLowerCase();
+  if (dest) return dest === 'document';
+  return (headers.get('accept') ?? '')
+    .split(',')
+    .some((range) => range.split(';')[0].trim().toLowerCase() === 'text/html');
+}
+
+/**
+ * The sign-in entry of this deployment, when this process serves its sign-in
+ * page. Only the PATH of the manager's absolute URLs is taken, so the browser
+ * stays on the origin the request arrived on; they are never composed a second
+ * time, so `uiBasePath` and a base path in `baseUrl` mean what they mean in every
+ * link this deployment mails.
+ *
+ * Whether the page exists is asked of the composed server, per request, the way
+ * the Console's own document asks for its branding: a route being registered
+ * would not tell a Console from the `503` a server answers on the same paths when
+ * its build is missing. No execution context goes with it, and none is lost:
+ * `@hono/node-server` hands the real request `env` alone, and no code on this
+ * server reads `c.executionCtx`, whose getter throws when absent. A middleware
+ * that did would answer `500` here, which keeps the `401` and says why.
+ */
+export async function resolveHandoffSignInEntry(source: {
+  /** `AuthManager.getConsoleUrl` for the sign-in page. */
+  signInPageUrl: string;
+  /** `AuthManager.getAuthIssuer`: the canonical origin, any base path, and the auth mount. */
+  authBaseUrl: string;
+  /** The path this process mounts the auth routes at. */
+  authMountPath: string;
+  requestUrl: string;
+  requestHost: string | null;
+  /** The composed server, which answers in-process, and the transport's bindings it runs under. */
+  server: { fetch(request: Request, env?: unknown): Response | Promise<Response> };
+  serverEnv?: unknown;
+  /** Told why no entry exists; the caller says so once. */
+  onUnserved(path: string, reason: string): void;
+}): Promise<HandoffSignInEntry | null> {
+  let signInPage: string;
+  let authBase: string;
+  try {
+    signInPage = new URL(source.signInPageUrl).pathname;
+    authBase = new URL(source.authBaseUrl).pathname.replace(/\/+$/, '');
+  } catch {
+    source.onUnserved(source.signInPageUrl, 'it is not a URL: check uiBasePath and baseUrl');
+    return null;
+  }
+  // A base path in `baseUrl` belongs to whatever is in front of this process, so
+  // the browser's path carries it and this process's own route does not.
+  const deploymentBase = authBase.endsWith(source.authMountPath)
+    ? authBase.slice(0, authBase.length - source.authMountPath.length)
+    : '';
+  const localPath = deploymentBase && signInPage.startsWith(`${deploymentBase}/`)
+    ? signInPage.slice(deploymentBase.length)
+    : signInPage;
+  const handoff = `${authBase}${ONE_TIME_TOKEN_HANDOFF_PATH}`;
+  // Config alone reaches this: a `baseUrl` ending in `//` composes a path starting
+  // with `//`, which as a root-relative `Location` names another host.
+  if (signInPage.startsWith('//') || handoff.startsWith('//')) {
+    source.onUnserved(signInPage, 'it would be a protocol-relative Location: check baseUrl and uiBasePath');
+    return null;
+  }
+
+  const headers = new Headers({ accept: 'text/html' });
+  if (source.requestHost) headers.set('host', source.requestHost);
+  let answer: Response;
+  try {
+    answer = await source.server.fetch(new Request(new URL(localPath, source.requestUrl), { headers }), source.serverEnv);
+  } catch (error) {
+    source.onUnserved(localPath, `asking for it threw: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+  const served = answer.status === 200 && (answer.headers.get('content-type') ?? '').toLowerCase().startsWith('text/html');
+  try {
+    await answer.body?.cancel();
+  } catch {
+    // The body is never read; a stream that cannot be cancelled changes nothing.
+  }
+  if (!served) {
+    source.onUnserved(localPath, `it answers ${answer.status}`);
+    return null;
+  }
+  return { signInPage, handoff };
+}
+
+/**
+ * The answer to a valid request whose session is refused: `refused` (the `401`),
+ * or for a page navigation the `302` to the sign-in page. See "The sign-in entry"
+ * in the module docblock.
+ */
+async function refusedSessionAnswer(
+  deps: HandoffDeps,
+  request: HandoffRequest,
+  validated: URLSearchParams,
+  now: number,
+  refused: HandoffAnswer,
+): Promise<HandoffAnswer> {
+  if (!isPageNavigation(request.headers)) return refused;
+  // The sign-in page forwarded a session this route refuses, so sending it back
+  // could only repeat; the shell's own entry reports `none`.
+  if (fetchSite(request.headers) === 'same-origin') return refused;
+  const entry = await deps.signInEntry(request.headers);
+  if (entry === null) return refused;
+  const query = new URLSearchParams({
+    redirect: `${entry.handoff}?${validated}`,
+    [HANDOFF_REFUSED_AT_PARAM]: String(now),
+  });
+  return { status: 302, headers: { ...NO_STORE, Location: `${entry.signInPage}?${query}` } };
+}
+
 /** `GET /api/v1/auth/one-time-token/handoff` — see the module docblock. */
 export async function runOneTimeTokenHandoff(deps: HandoffDeps, request: HandoffRequest): Promise<HandoffAnswer> {
   // A navigation another site started (a link, a form, a script) arrives with
@@ -296,7 +507,7 @@ export async function runOneTimeTokenHandoff(deps: HandoffDeps, request: Handoff
   // sends it on a top-level GET. The shell opens the hand-off itself, which a
   // browser reports as `none`. Judged only when the header is present: a
   // browser that sends none is not refused for its absence (ruling A).
-  if (request.headers.get('sec-fetch-site')?.trim().toLowerCase() === 'cross-site') {
+  if (fetchSite(request.headers) === 'cross-site') {
     return refusal(
       400,
       'VALIDATION_ERROR',
@@ -344,17 +555,35 @@ export async function runOneTimeTokenHandoff(deps: HandoffDeps, request: Handoff
     return refusal(400, 'VALIDATION_ERROR', 'The "code_challenge_method" query parameter accepts only "S256".');
   }
 
+  // Every parameter is valid from here on, so these are what `redirect` is
+  // rebuilt from: nothing else the request carried reaches the sign-in page.
+  const validated = new URLSearchParams({ redirect_uri: redirect.value, code_challenge: challenge.value });
+  if (method.value !== undefined) validated.set('code_challenge_method', method.value);
+
+  const now = (deps.now ?? Date.now)();
   const createdAt = await deps.sessionCreatedAt(request.headers);
   if (!createdAt) {
-    return refusal(401, 'UNAUTHENTICATED', 'Sign in first: the hand-off carries the signed-in session of this browser to the app.');
+    return refusedSessionAnswer(
+      deps,
+      request,
+      validated,
+      now,
+      refusal(401, 'UNAUTHENTICATED', 'Sign in first: the hand-off carries the signed-in session of this browser to the app.'),
+    );
   }
-  const ageMs = (deps.now ?? Date.now)() - createdAt.getTime();
+  const ageMs = now - createdAt.getTime();
   if (!(ageMs <= ONE_TIME_TOKEN_HANDOFF_SESSION_MAX_AGE_SECONDS * 1000)) {
-    return refusal(
-      401,
-      'UNAUTHENTICATED',
-      `Sign in again: the hand-off carries only a session signed in within the last ${ONE_TIME_TOKEN_HANDOFF_SESSION_MAX_AGE_SECONDS / 60} minutes, ` +
-        'so the app completes a sign-in in its system auth session before every hand-off.',
+    return refusedSessionAnswer(
+      deps,
+      request,
+      validated,
+      now,
+      refusal(
+        401,
+        'UNAUTHENTICATED',
+        `Sign in again: the hand-off carries only a session signed in within the last ${ONE_TIME_TOKEN_HANDOFF_SESSION_MAX_AGE_SECONDS / 60} minutes, ` +
+          'so the app completes a sign-in in its system auth session before every hand-off.',
+      ),
     );
   }
 

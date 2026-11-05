@@ -2,51 +2,71 @@
 
 /**
  * [#29520 codemod] The "Managed-schema drift & reconcile (#2186)" section of
- * `SqlDriver`: the bodies of `isProductionEnv`,
- * `probeNullSafeUniqueDuplicates`, `buildRebuiltColumn`, `dropIndexIfExists`,
+ * `SqlDriver`: the bodies of `dialectName`, `isProductionEnv`,
+ * `probeNullSafeUniqueDuplicates`, `buildRebuiltColumn`, `buildIndexName`,
+ * `getExistingIndexNames`, `uniqueIndexesFromFields`, `dropIndexIfExists`,
  * `syncTableIndexes` moved out of `sql-driver.ts` whole by
  * `scripts/codemod-split-sql-driver.mjs`.
  *
- * A MOVE, not a redesign. Each function below is the body of the `SqlDriver`
+ * A MOVE, not a redesign. {@link ManagedDriftFacet} is a stateless facet of `SqlDriver`
+ * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
  * method of the same name exactly as it stood: not re-indented, not
- * formatted, not edited. The method stays on the class with its docblock and
- * signature, so the published `dist/*.d.ts`, an instance spy and a subclass
- * override are what they were; the docblock there is the contract.
+ * formatted, not edited. The method stays on the class as a one-call stub with
+ * its signature, so the published surface, an instance spy and a subclass
+ * override are what they were. A public or protected method keeps its
+ * docblock on the class, the contract; a private method's docblock moved here
+ * with its body. The state stays on `SqlDriver`.
  *
  * The bodies reach the class through {@link ManagedDriftHost}: exactly the
- * `SqlDriver` members they read. Each method hands its body one literal of the
- * members that body reads, plus a `.call`: methods go as closures that call
- * them on the driver at call time (the builder factory as a bound reference),
- * so a subclass override or an instance spy is still the one reached; fields
- * and accessors go as GETTERS, read when the body reads them, as they were on
- * the class.
+ * `SqlDriver` members they read, private ones included. Every stub hands its
+ * body, by a `.call`, the same host: `managedDriftHost` in
+ * `sql-driver-facet-hosts.ts`, built once per driver by the class's static
+ * block. Methods go as closures that call them on the driver at call time, so a
+ * subclass override or an instance spy is still the one reached; fields and
+ * accessors go as GETTERS, read when the body reads them, as they were on the
+ * class, and a field a body assigns goes with a SETTER that assigns it on the
+ * driver.
  *
- * The module imports `sql-driver.ts` for types only, so the two modules form
- * no evaluation cycle. `index.ts` re-exports nothing from this module.
+ * The module imports `sql-driver.ts` for types only, so the two modules form no
+ * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
-import { GLOBAL_TENANT } from './schema-drift.js';
+import { GLOBAL_TENANT, buildIndexName, uniqueIndexesFromFields } from './schema-drift.js';
+import type { SqlDialectName } from './schema-drift.js';
 import type { Knex } from 'knex';
 import { uniqueProbeNotNullClause } from './sql-driver-top-level.js';
 import type { IntrospectedColumn } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
 
 /**
- * The `SqlDriver` members the functions below read — every one of them, and
- * no other. Each is typed AS the class member (an indexed access on the
- * class), so a change to a member's signature on the class is a change here
- * too. `readonly` members are the getters.
+ * The `SqlDriver` members the bodies of {@link ManagedDriftFacet} read — every one of
+ * them, and no other. Each is typed AS the class member (an indexed access on
+ * the class), so a change to a member's signature on the class is a change
+ * here too. `readonly` members are the getters; the others are fields a body
+ * assigns.
  */
 export interface ManagedDriftHost {
+  introspectIndexes: SqlDriver['introspectIndexes'];
   readonly isMysql: SqlDriver['isMysql'];
   readonly isPostgres: SqlDriver['isPostgres'];
+  readonly isSqlite: SqlDriver['isSqlite'];
   readonly knex: SqlDriver['knex'];
   syncDeclaredIndexes: SqlDriver['syncDeclaredIndexes'];
   uniqueIndexesFromFields: SqlDriver['uniqueIndexesFromFields'];
 }
 
-/** The body of `SqlDriver#isProductionEnv`; the method's docblock there is its contract. */
-export function isProductionEnv(): boolean {
+/** The bodies of the "Managed-schema drift & reconcile (#2186)" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
+export class ManagedDriftFacet {
+  /** The body of `SqlDriver#dialectName`; the method's docblock there is its contract. */
+  static dialectName(this: Pick<ManagedDriftHost, 'isMysql' | 'isPostgres' | 'isSqlite'>): SqlDialectName {
+    if (this.isSqlite) return 'sqlite';
+    if (this.isPostgres) return 'postgres';
+    if (this.isMysql) return 'mysql';
+    return 'unknown';
+  }
+
+  /** The body of `SqlDriver#isProductionEnv`; the method's docblock there is its contract. */
+  static isProductionEnv(): boolean {
     try {
       return (process.env.NODE_ENV ?? '').toLowerCase() === 'production';
     } catch {
@@ -54,8 +74,8 @@ export function isProductionEnv(): boolean {
     }
   }
 
-/** The body of `SqlDriver#probeNullSafeUniqueDuplicates`; the method's docblock there is its contract. */
-export async function probeNullSafeUniqueDuplicates(this: Pick<ManagedDriftHost, 'knex'>, table: string, columns: string[], nullSafeColumns: string[]): Promise<Array<{ key: string; rows: number }>> {
+  /** The body of `SqlDriver#probeNullSafeUniqueDuplicates`; the method's docblock there is its contract. */
+  static async probeNullSafeUniqueDuplicates(this: Pick<ManagedDriftHost, 'knex'>, table: string, columns: string[], nullSafeColumns: string[]): Promise<Array<{ key: string; rows: number }>> {
     const ns = new Set(nullSafeColumns);
     const q = (id: string) => this.knex.ref(id).toQuery();
     const parts = columns.map((c) =>
@@ -75,8 +95,8 @@ export async function probeNullSafeUniqueDuplicates(this: Pick<ManagedDriftHost,
     }));
   }
 
-/** The body of `SqlDriver#buildRebuiltColumn`; the method's docblock there is its contract. */
-export function buildRebuiltColumn(t: Knex.CreateTableBuilder, c: IntrospectedColumn): any {
+  /** The body of `SqlDriver#buildRebuiltColumn`; the method's docblock there is its contract. */
+  static buildRebuiltColumn(t: Knex.CreateTableBuilder, c: IntrospectedColumn): any {
     if (c.name === 'id') return t.string('id').primary();
     const ty = (c.type || 'text').toLowerCase();
     if (ty.includes('int')) return t.integer(c.name);
@@ -91,8 +111,28 @@ export function buildRebuiltColumn(t: Knex.CreateTableBuilder, c: IntrospectedCo
     return t.string(c.name);
   }
 
-/** The body of `SqlDriver#dropIndexIfExists`; the method's docblock there is its contract. */
-export async function dropIndexIfExists(this: Pick<ManagedDriftHost, 'isMysql' | 'isPostgres' | 'knex'>, tableName: string, indexName: string): Promise<boolean> {
+  /** The body of `SqlDriver#buildIndexName`; the method's docblock there is its contract. */
+  static buildIndexName(tableName: string, fields: string[], unique: boolean): string {
+    return buildIndexName(tableName, fields, unique);
+  }
+
+  /** The body of `SqlDriver#getExistingIndexNames`; the method's docblock there is its contract. */
+  static async getExistingIndexNames(this: Pick<ManagedDriftHost, 'introspectIndexes'>, tableName: string): Promise<Set<string>> {
+    return new Set((await this.introspectIndexes(tableName, { onFailure: 'partial' })).map((i) => i.name));
+  }
+
+  /** The body of `SqlDriver#uniqueIndexesFromFields`; the method's docblock there is its contract. */
+  static uniqueIndexesFromFields(tableName: string, fields: Record<string, any>, tenantField: string | null): Array<{ name: string; fields: string[]; unique: true; nullSafeColumns?: string[] }> {
+    return uniqueIndexesFromFields(tableName, fields, tenantField).map((i) => ({
+      name: i.name,
+      fields: i.columns,
+      unique: true as const,
+      ...(i.nullSafeColumns ? { nullSafeColumns: i.nullSafeColumns } : {}),
+    }));
+  }
+
+  /** The body of `SqlDriver#dropIndexIfExists`; the method's docblock there is its contract. */
+  static async dropIndexIfExists(this: Pick<ManagedDriftHost, 'isMysql' | 'isPostgres' | 'knex'>, tableName: string, indexName: string): Promise<boolean> {
     const attempts: string[] = this.isPostgres
       ? [
           `ALTER TABLE ?? DROP CONSTRAINT IF EXISTS ??`,
@@ -118,8 +158,8 @@ export async function dropIndexIfExists(this: Pick<ManagedDriftHost, 'isMysql' |
     return dropped;
   }
 
-/** The body of `SqlDriver#syncTableIndexes`; the method's docblock there is its contract. */
-export async function syncTableIndexes(this: Pick<ManagedDriftHost, 'syncDeclaredIndexes' | 'uniqueIndexesFromFields'>, tableName: string, fields: Record<string, any>, declaredIndexes: any[] | undefined, tenantField: string | null, physicalColumns: Set<string>): Promise<void> {
+  /** The body of `SqlDriver#syncTableIndexes`; the method's docblock there is its contract. */
+  static async syncTableIndexes(this: Pick<ManagedDriftHost, 'syncDeclaredIndexes' | 'uniqueIndexesFromFields'>, tableName: string, fields: Record<string, any>, declaredIndexes: any[] | undefined, tenantField: string | null, physicalColumns: Set<string>): Promise<void> {
     const fromFields = this.uniqueIndexesFromFields(tableName, fields, tenantField);
     const declared = Array.isArray(declaredIndexes) ? declaredIndexes : [];
     if (fromFields.length === 0 && declared.length === 0) return;
@@ -129,3 +169,4 @@ export async function syncTableIndexes(this: Pick<ManagedDriftHost, 'syncDeclare
     // (ADR-0120 D1) must scope against exactly that column.
     await this.syncDeclaredIndexes(tableName, [...fromFields, ...declared], physicalColumns, tenantField, fields);
   }
+}

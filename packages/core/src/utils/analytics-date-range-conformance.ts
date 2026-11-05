@@ -197,7 +197,7 @@ export async function analyticsDateRangeConformanceFindings(
   const say = (msg: string) => findings.push(`${face.name}: ${msg}`);
   const seenWindows = new Set<string>();
 
-  // ── The thirteen declared names must resolve, and resolve identically ────
+  // ── Every declared name must resolve, and resolve identically ──────────
   for (const preset of DATE_RANGE_PRESETS) {
     const expected: ResolvedAnalyticsDateRange = resolveAnalyticsDateRangeString(preset, options);
     const got = await attempt(face, preset);

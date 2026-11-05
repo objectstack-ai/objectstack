@@ -49,11 +49,13 @@ afterEach(() => {
 });
 
 describe('the types Studio customizes (objectstack#28562)', () => {
-  it.each(['view', 'dashboard', 'report'])('%s is customized', (type) => {
+  // objectstack#30059 — the app, whose navigation the Interfaces rail customizes.
+  // objectstack#30063 — the page, edited in its designer as a dashboard is.
+  it.each(['view', 'dashboard', 'report', 'page', 'app'])('%s is customized', (type) => {
     expect(isStudioCustomizeType(type)).toBe(true);
   });
 
-  it.each(['page', 'object', 'flow', 'app', 'translation', '', undefined, null])(
+  it.each(['object', 'flow', 'translation', '', undefined, null])(
     '%s is not: no pillar here customizes it, or it is not overridable',
     (type) => {
       expect(isStudioCustomizeType(type as string | undefined)).toBe(false);

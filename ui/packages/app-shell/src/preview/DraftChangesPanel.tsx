@@ -867,6 +867,9 @@ const TYPE_COUNT: Readonly<Record<string, (t: Translate, count: number) => strin
   // objectstack#29704 — what customizing a base package's object writes (ADR-0146 D10).
   object_extension: (t, count) =>
     t('preview.changes.typeCount.object_extension', { count, defaultValue: '{{count}} object extensions' }),
+  // A Studio-authored dataset publishes in the same batch as the report or
+  // dashboard that reads it; without a row it read as the raw type name.
+  dataset: (t, count) => t('preview.changes.typeCount.dataset', { count, defaultValue: '{{count}} datasets' }),
 };
 
 function summaryTypeSegment(t: Translate, type: string, count: number): string {

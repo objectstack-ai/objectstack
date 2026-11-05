@@ -72,7 +72,21 @@ afterEach(async () => {
   for (const rig of rigs.splice(0)) await rig.teardown();
 });
 
-async function boot(): Promise<Rig> {
+/**
+ * The rig's knobs, for the read-refused caller's suite below: a read the
+ * object gates on a capability (and the write does not), and no row-level
+ * policies at all. Defaults are the rig the first suites run on.
+ */
+interface BootOptions {
+  /** `requiredPermissions` on the child object (ADR-0066 D3/⑤). */
+  childRequiredPermissions?: Record<string, string[]>;
+  /** Keep the child's row-level policies (the default) or run with none. */
+  rls?: boolean;
+  /** Capabilities the caller's permission set grants. */
+  capabilities?: string[];
+}
+
+async function boot(opts: BootOptions = {}): Promise<Rig> {
   const engine = new ObjectQL();
   engine.registerDriver(
     new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }) as never,
@@ -99,6 +113,7 @@ async function boot(): Promise<Rig> {
         name: CHILD,
         label: 'Child',
         sharingModel: 'public_read_write',
+        ...(opts.childRequiredPermissions ? { requiredPermissions: opts.childRequiredPermissions } : {}),
         fields: {
           id: { name: 'id', type: 'text', primaryKey: true },
           name: { name: 'name', type: 'text' },
@@ -127,11 +142,12 @@ async function boot(): Promise<Rig> {
 
   const set = PermissionSetSchema.parse({
     name: 'qa_nf_guard',
+    ...(opts.capabilities ? { systemPermissions: opts.capabilities } : {}),
     objects: {
       [PARENT]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
       [CHILD]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
     },
-    rowLevelSecurity: [
+    rowLevelSecurity: opts.rls === false ? [] : [
       { name: 'child_read', object: CHILD, operation: 'select', using: 'record.owner == current_user.id || record.shared == true' },
       { name: 'child_update', object: CHILD, operation: 'update', using: 'record.owner == current_user.id' },
       { name: 'child_delete', object: CHILD, operation: 'delete', using: 'record.owner == current_user.id' },
@@ -224,6 +240,51 @@ describe('a by-id write to a row the caller cannot read answers what a nonexiste
       const after = await r.stored(CHILD, 'c_own');
       if (verb === 'update') expect(after?.name).toBe('renamed');
       else expect(after).toBeNull();
+    });
+  }
+});
+
+describe('a caller the read door refuses gets that refusal from every by-id write it addresses, a row or none', () => {
+  // The read is gated on a capability the caller lacks, and the write is not
+  // (ADR-0066 ⑤ lets an object be read-gated and write-open), so the write
+  // door admits a caller the read door refuses: the one shape outside the
+  // permission model that still does, now that an object permission which
+  // edits or deletes a record also reads it.
+  const READ_GATED = { childRequiredPermissions: { read: ['qa_nf_read_cap'] } };
+
+  for (const verb of ['update', 'delete'] as const) {
+    it(`${verb}, no row-level policy: the row, a row the caller would not see, and a missing id all get the read door's refusal`, async () => {
+      const r = await boot({ ...READ_GATED, rls: false });
+      const read = await outcome(r.engine.findOne(CHILD, { where: { id: 'c_own' }, context: { ...CALLER } } as never));
+      expect(read).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
+
+      const answers = [];
+      for (const id of ['c_own', 'c_hidden', 'c_nowhere']) {
+        answers.push(verb === 'update' ? await r.update(CHILD, id) : await r.remove(CHILD, id));
+      }
+      for (const got of answers) expect(got).toEqual(read);
+      // Refused means untouched.
+      expect((await r.stored(CHILD, 'c_own'))?.name).toBe('mine');
+      expect((await r.stored(CHILD, 'c_hidden'))?.name).toBe('theirs, private');
+    });
+
+    it(`${verb}, under row-level policies: the row and a missing id get one refusal`, async () => {
+      const r = await boot(READ_GATED);
+      const own = verb === 'update' ? await r.update(CHILD, 'c_own') : await r.remove(CHILD, 'c_own');
+      const missing = verb === 'update' ? await r.update(CHILD, 'c_nowhere') : await r.remove(CHILD, 'c_nowhere');
+      expect(own).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
+      expect(missing).toEqual(own);
+      expect((await r.stored(CHILD, 'c_own'))?.name).toBe('mine');
+    });
+
+    it(`${verb}: a caller holding the capability the read asks for keeps the ordinary answers`, async () => {
+      const r = await boot({ ...READ_GATED, rls: false, capabilities: ['qa_nf_read_cap'] });
+      expect(await outcome(r.engine.findOne(CHILD, { where: { id: 'c_own' }, context: { ...CALLER } } as never)))
+        .toEqual({ kind: 'landed' });
+      const own = verb === 'update' ? await r.update(CHILD, 'c_own') : await r.remove(CHILD, 'c_own');
+      const missing = verb === 'update' ? await r.update(CHILD, 'c_nowhere') : await r.remove(CHILD, 'c_nowhere');
+      expect(own).toEqual({ kind: 'landed' });
+      expect(missing).toMatchObject({ kind: 'refused', code: 'RECORD_NOT_FOUND', status: 404 });
     });
   }
 });
@@ -344,7 +405,11 @@ async function bootGateRig(): Promise<GateRig> {
         [CHILD]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
       },
     }),
-    PermissionSetSchema.parse({ name: 'qa_nf_blind_writer', objects: grant(false, true) }),
+    // A write grant without a read grant: the authoring schema refuses this
+    // shape (an object permission that edits or deletes a record also reads
+    // it), so it is built raw — the shape a row stored before that refusal
+    // existed still carries.
+    { name: 'qa_nf_blind_writer', objects: grant(false, true) } as unknown as ReturnType<typeof PermissionSetSchema.parse>,
     PermissionSetSchema.parse({ name: 'qa_nf_reader', objects: grant(true, false) }),
   ];
   const services: Record<string, unknown> = {

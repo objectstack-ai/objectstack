@@ -78,7 +78,7 @@ const SWEEP_ZONES: ReadonlyArray<string | undefined> = [
 ];
 
 describe('#16322 — every declared preset resolves to a real window', () => {
-    it('resolves all thirteen, and none of them is the name of the preset', () => {
+    it('resolves every declared preset, and none of them is the name of the preset', () => {
         for (const preset of DATE_RANGE_PRESETS) {
             const w = resolveAnalyticsDateRangePreset(preset, { now: NOW });
             expect(w.start, preset).toMatch(ISO_INSTANT);
@@ -105,7 +105,7 @@ describe('#16322 — every declared preset resolves to a real window', () => {
         }
     });
 
-    it('the thirteen windows are DISTINCT — the fallback made twelve of them identical', () => {
+    it('the declared windows are DISTINCT — the fallback made twelve of thirteen identical', () => {
         const seen = new Set(
             DATE_RANGE_PRESETS.map((p) => {
                 const w = resolveAnalyticsDateRangePreset(p, { now: NOW });
@@ -134,7 +134,7 @@ describe('#16322 — the START of every window is the token the spec already pre
 });
 
 describe('#16322 — the upper bound is half-open for every preset, the rolling ones included', () => {
-    it('all thirteen presets are endExclusive', () => {
+    it('every declared preset is endExclusive', () => {
         for (const preset of DATE_RANGE_PRESETS) {
             const w = resolveAnalyticsDateRangePreset(preset, { now: NOW });
             expect(w.endExclusive, preset).toBe(true);
@@ -192,6 +192,9 @@ describe('#16322 — the upper bound is half-open for every preset, the rolling 
             ['last_month', 'this_month'],
             ['last_quarter', 'this_quarter'],
             ['last_year', 'this_year'],
+            // [#30076] The forward calendar presets continue the tiling.
+            ['this_month', 'next_month'],
+            ['this_quarter', 'next_quarter'],
         ];
         for (const [earlier, later] of pairs) {
             const a = resolveAnalyticsDateRangePreset(earlier, { now: NOW });
@@ -208,6 +211,68 @@ describe('#16322 — the upper bound is half-open for every preset, the rolling 
             end: '2026-09-10T00:00:00.000Z',
             endExclusive: true,
         });
+    });
+});
+
+describe('#30076 — the forward presets: next_month, next_quarter, next_30_days', () => {
+    // `next_month` and `next_quarter` stop before the month / quarter AFTER
+    // next, which no token names: the end is `next_*_start` re-anchored on the
+    // day `next_*_start` names. Each row below is a concrete window, so the
+    // re-anchoring is measured against hand-stated instants, not against the
+    // code that computes it. The sweep in the #17341 block holds all three to
+    // the spec's inclusive last day as well, across every SWEEP zone and
+    // instant.
+    const at = (iso: string) => new Date(iso);
+    const ROWS: ReadonlyArray<{
+        preset: DateRangePreset; now: string; tz?: string; start: string; end: string; why: string;
+    }> = [
+        { preset: 'next_month', now: '2026-09-09T12:34:56.789Z', start: '2026-10-01T00:00:00.000Z', end: '2026-11-01T00:00:00.000Z', why: 'UTC, mid-month' },
+        { preset: 'next_quarter', now: '2026-09-09T12:34:56.789Z', start: '2026-10-01T00:00:00.000Z', end: '2027-01-01T00:00:00.000Z', why: 'UTC, crosses the year' },
+        { preset: 'next_30_days', now: '2026-09-09T12:34:56.789Z', start: '2026-09-09T00:00:00.000Z', end: '2026-10-10T00:00:00.000Z', why: 'UTC, today plus 30 days' },
+        // Timezone: 20:00Z on Jan 31 is already Feb 1 in Shanghai, so "next
+        // month" is MARCH there and February in UTC.
+        { preset: 'next_month', now: '2026-01-31T20:00:00.000Z', tz: 'Asia/Shanghai', start: '2026-02-28T16:00:00.000Z', end: '2026-03-31T16:00:00.000Z', why: 'Shanghai day is already February' },
+        { preset: 'next_month', now: '2026-01-31T20:00:00.000Z', start: '2026-02-01T00:00:00.000Z', end: '2026-03-01T00:00:00.000Z', why: 'UTC control, from Jan 31' },
+        // DST: November opens in EDT and December in EST, an hour apart.
+        { preset: 'next_month', now: '2026-10-15T12:00:00.000Z', tz: 'America/New_York', start: '2026-11-01T04:00:00.000Z', end: '2026-12-01T05:00:00.000Z', why: 'New York DST ends Nov 1' },
+        { preset: 'next_quarter', now: '2026-12-10T12:00:00.000Z', tz: 'America/New_York', start: '2027-01-01T05:00:00.000Z', end: '2027-04-01T04:00:00.000Z', why: 'New York, EST start, EDT end' },
+        { preset: 'next_30_days', now: '2026-10-20T12:00:00.000Z', tz: 'America/New_York', start: '2026-10-20T04:00:00.000Z', end: '2026-11-20T05:00:00.000Z', why: 'New York, window crosses DST end' },
+        // A non-whole-hour zone on both sides of its DST end (Apr 5 2026).
+        { preset: 'next_month', now: '2026-03-15T00:00:00.000Z', tz: 'Pacific/Chatham', start: '2026-03-31T10:15:00.000Z', end: '2026-04-30T11:15:00.000Z', why: 'Chatham +13:45 then +12:45' },
+        // A zone that springs forward AT 00:00 on the period's first day:
+        // 2023-10-01 has no midnight in Asuncion, so its first instant is
+        // 01:00 -03 (04:00Z) and the zone helper settles on 03:00Z, which
+        // reads as Sep 30. Re-anchoring there gave an EMPTY window
+        // (end === start); the noon anchor keeps the resolver inside Oct 1.
+        { preset: 'next_month', now: '2023-09-15T12:00:00.000Z', tz: 'America/Asuncion', start: '2023-10-01T03:00:00.000Z', end: '2023-11-01T03:00:00.000Z', why: 'Asuncion springs forward at 00:00 on Oct 1' },
+        { preset: 'next_quarter', now: '2023-08-15T12:00:00.000Z', tz: 'America/Asuncion', start: '2023-10-01T03:00:00.000Z', end: '2024-01-01T03:00:00.000Z', why: 'Asuncion, quarter opens on the gap day' },
+    ];
+
+    it.each(ROWS)('$preset @ $now ($why)', ({ preset, now, tz, start, end }) => {
+        expect(resolveAnalyticsDateRangePreset(preset, { now: at(now), timezone: tz }))
+            .toEqual({ start, end, endExclusive: true });
+    });
+
+    it("next_month's and next_quarter's ends are where the month / quarter after next opens", () => {
+        // The re-anchoring, stated as the property it stands for: the end of
+        // `next_X` is the start of `next_X` as seen from inside next X.
+        for (const now of SWEEP_INSTANTS) {
+            for (const tz of SWEEP_ZONES) {
+                for (const preset of ['next_month', 'next_quarter'] as const) {
+                    const w = resolveAnalyticsDateRangePreset(preset, { now, timezone: tz });
+                    const inside = new Date(w.start);
+                    expect(resolveAnalyticsDateRangePreset(preset, { now: inside, timezone: tz }).start,
+                        `${preset} @ ${tz ?? 'UTC'} @ ${now.toISOString()}`).toBe(w.end);
+                }
+            }
+        }
+    });
+
+    it('next_30_days counts a row five days ahead, and neither a row five days ago nor one 31 days ahead', () => {
+        const rows = ['2026-09-04T00:00:00.000Z', '2026-09-14T00:00:00.000Z', '2026-10-10T00:00:00.000Z'];
+        const w = resolveAnalyticsDateRangePreset('next_30_days', { now: NOW });
+        const counted = rows.filter((r) => Date.parse(r) >= Date.parse(w.start) && Date.parse(r) < Date.parse(w.end));
+        expect(counted).toEqual(['2026-09-14T00:00:00.000Z']);
     });
 });
 

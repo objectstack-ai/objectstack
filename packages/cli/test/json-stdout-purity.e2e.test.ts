@@ -156,6 +156,10 @@ const FAMILY: Record<string, string[]> = {
   // and BEFORE the `finally` shutdown, so the shutdown's diagnostics follow
   // the document and must stay off stdout.
   'migrate record-currency-codes': ['--object', 'jp_ticket', '--field', 'title', '--code', 'USD'],
+  // [ADR-0144] Its sibling's shape: `--object` is required, the dry run is
+  // the default, and the face driven here is the same "No app objects are
+  // loaded" refusal after the read-only boot.
+  'migrate recompute-home-amounts': ['--object', 'jp_ticket'],
   'migrate recorded-by': [],
   'migrate resume': [],
   // A preview is its DEFAULT and the only form driven here: without `--apply`

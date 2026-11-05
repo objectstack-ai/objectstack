@@ -268,19 +268,14 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                 } catch { return undefined; }
             };
 
-            // Auth service resolver — used by RestServer.resolveExecCtx in
-            // single-kernel deployments where there is no kernelManager.
-            // Multi-kernel paths look up auth via kernelManager.getOrCreate,
-            // so this provider is the single-kernel fallback.
-            const authServiceProvider = async (_environmentId?: string): Promise<IAuthService | undefined> => {
-                try {
-                    return ctx.getService<IAuthService>('auth');
-                } catch { return undefined; }
-            };
-
             // [#15256 — maintainer ruling 2026-09-04, decision 1A] Tenancy
             // service resolver — the SAME single-kernel fallback shape as
-            // `authServiceProvider` directly above, for the seam that had none.
+            // `authServiceProvider` had, for the seam that had none.
+            //
+            // [#30192] This plugin's own kernel is RIGHT here on a hosted
+            // runtime: every consumer reads the bound environment kernel's
+            // `tenancy` first (`computeExecCtx`, `resolveAnonymousFormTenancy`),
+            // so only a request in no environment, or a single kernel, reaches it.
             //
             // ## What its absence measured
             //
@@ -349,6 +344,18 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // ObjectQL resolver — single-kernel fallback so resolveExecCtx
             // can run sys_member / sys_user_permission_set lookups when
             // there is no kernelManager wired (e.g. `pnpm dev:crm`).
+            //
+            // [#30218] What is written below is the OWN-KERNEL leg only: the
+            // provider itself is `environmentScopedProvider('objectql', …)`,
+            // built after that seam is declared, so a request for an
+            // environment reads THAT environment's engine and never this
+            // plugin's. The hosted host kernel is a routing shell: the
+            // transactional `POST /batch`, the `/meta` object-state and
+            // published reads, and the meta read gate's disabled-package
+            // owner step all asked this kernel's engine for a request that
+            // resolved to an environment, while `computeExecCtx` read the
+            // environment's — two kernels, one request. The legs, the
+            // classification and the sync leg below are otherwise unchanged.
             // [#4251 B3] `IObjectQLEngine`, not `IDataEngine`: the `objectql`
             // slot is the SAME instance as `data` seen whole, and the consumer
             // (`resolveExecCtx`, and the `transaction` probe behind the batch
@@ -385,7 +392,7 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // its accessor has exactly ONE fault to report — not registered —
             // and absorbing it is the same classification, not a second
             // collapse.
-            const objectQLProvider = async (_environmentId?: string): Promise<IObjectQLEngine | undefined> => {
+            const objectQLOnOwnKernel = async (): Promise<IObjectQLEngine | undefined> => {
                 const kernel = typeof ctx.getKernel === 'function' ? ctx.getKernel() : undefined;
                 if (kernel && typeof kernel.getServiceAsync === 'function') {
                     try {
@@ -401,15 +408,17 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             };
 
             // [#30011] The ENVIRONMENT-SCOPED provider seams: email, sharing,
-            // approvals, sharing rules and analytics. Each slot is filled by a
+            // approvals, sharing rules and analytics — [#30192] security,
+            // auth, settings, i18n and metadata — and [#30218] the `objectql`
+            // engine. Each slot is filled by a
             // plugin the ENVIRONMENT's kernel mounts. A host that fronts many
             // environment kernels with this one plugin (cloud's hosted runtime)
             // therefore holds the occupant a request needs on that request's
-            // kernel, never on this plugin's own. These five used to read
+            // kernel, never on this plugin's own. These used to read
             // `ctx.getService` here whatever environment they were asked for,
             // so a hosted request was answered by the HOST kernel's occupant —
             // absent there: the approvals list answered `[]` and a single
-            // request 501 (#29999).
+            // request 501 (#29999), and so did every `/security` door (#30192).
             //
             // The legs, in order:
             //  - an environment id AND a kernel manager → that environment's
@@ -432,10 +441,16 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             //    own kernel, exactly as before.
             //
             // On the environment's kernel the classification is the registry's,
-            // as in `objectQLProvider` above: "never registered" (branded) is
+            // as in `objectQLOnOwnKernel` above: "never registered" (branded) is
             // `undefined`, and any other fault — a factory that threw — is
             // re-raised rather than folded into "not configured".
-            const environmentScopedProvider = <T>(slot: string) =>
+            //
+            // [#30218] `onOwnKernel` replaces the last leg for a seam whose
+            // own-kernel read is classified more strictly than `ctx.getService`'s
+            // catch-all — the `objectql` engine, whose own leg keeps its
+            // factory-aware async read and its `LiteKernel` sync leg. The
+            // environment leg is the same for every seam.
+            const environmentScopedProvider = <T>(slot: string, onOwnKernel?: () => Promise<T | undefined>) =>
                 async (environmentId?: string): Promise<T | undefined> => {
                     if (kernelManager && environmentId && environmentId !== 'platform') {
                         const kernel = await kernelManager.getOrCreate(environmentId);
@@ -446,10 +461,19 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                             throw err;
                         }
                     }
+                    if (onOwnKernel) return onOwnKernel();
                     try {
                         return ctx.getService<T>(slot);
                     } catch { return undefined; }
                 };
+
+            // [#30218] The data engine — `resolveExecCtx`'s single-kernel
+            // lookups, the transactional `POST /batch`, the `/meta` object-state
+            // and published reads, and the meta read gate's disabled-package
+            // owner step. Environment-scoped like the seams below: a request for
+            // environment A is answered by A's engine or by nothing, so a batch
+            // for A opens its transaction on A's store and writes nowhere else.
+            const objectQLProvider = environmentScopedProvider<IObjectQLEngine>('objectql', objectQLOnOwnKernel);
 
             // Email service resolver — used by POST /email/send.
             const emailServiceProvider = environmentScopedProvider<IEmailService>('email');
@@ -465,13 +489,12 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             const sharingRulesServiceProvider = environmentScopedProvider<ISharingRuleService>('sharingRules');
 
             // i18n service resolver — used to localize view / action / object
-            // metadata. Single-kernel fallback so labels and select options
-            // get translated even without a full multi-tenant kernelManager.
-            const i18nServiceProvider = async (_environmentId?: string): Promise<II18nService | undefined> => {
-                try {
-                    return ctx.getService<II18nService>('i18n');
-                } catch { return undefined; }
-            };
+            // metadata. [#30192] Environment-scoped: an environment's
+            // translation bundles live on its own kernel, so the host's bundle
+            // never translates another environment's labels. A single kernel
+            // still reads its own, so labels and select options get translated
+            // without a kernelManager.
+            const i18nServiceProvider = environmentScopedProvider<II18nService>('i18n');
 
             // Analytics service resolver — used by /analytics/dataset/query
             // (ADR-0021 dataset preview/query). Environment-scoped like the four
@@ -485,11 +508,11 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // reference timezone/locale (localization manifest) through the 4-tier
             // cascade incl. the `OS_LOCALIZATION_TIMEZONE` env override. Returns
             // undefined when no settings service is registered (UTC default).
-            const settingsServiceProvider = async (_environmentId?: string): Promise<SettingsReadSurface | undefined> => {
-                try {
-                    return ctx.getService<SettingsReadSurface>('settings');
-                } catch { return undefined; }
-            };
+            // [#30192] Environment-scoped: an environment's localization
+            // settings are stored and served by its own kernel, which the
+            // runtime dispatcher's execution context already reads; the host's
+            // occupant answered every hosted REST request instead.
+            const settingsServiceProvider = environmentScopedProvider<SettingsReadSurface>('settings');
 
             // [#5224] Metadata service resolver — the endpoint matcher behind
             // `IMetadataService.matchEndpoint`. The two machine-readable
@@ -498,23 +521,31 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // so neither can publish an endpoint that answers 404. Returns
             // undefined when no `metadata` service is registered; the faces
             // then say so loudly rather than inventing a verdict.
-            const metadataServiceProvider = async (
-                _environmentId?: string,
-            ): Promise<IMetadataService | undefined> => {
-                try {
-                    return ctx.getService<IMetadataService>('metadata');
-                } catch { return undefined; }
-            };
+            // [#30192] Environment-scoped: the matcher is built from the `api`
+            // items its OWN kernel stores, so the host's would judge an
+            // environment's endpoints against the host's declarations.
+            const metadataServiceProvider = environmentScopedProvider<IMetadataService>('metadata');
 
             // Security service resolver — used by the ADR-0090 D5/D9
             // /security/suggested-bindings routes and the D6 /security/explain
             // route (plugin-security). Returns undefined when plugin-security
             // is not mounted so the routes fail cleanly (501).
-            const securityServiceProvider = async (_environmentId?: string): Promise<ISecurityService | undefined> => {
-                try {
-                    return ctx.getService<ISecurityService>('security');
-                } catch { return undefined; }
-            };
+            // [#30192] Environment-scoped: plugin-security registers `security`
+            // on the environment's kernel, bound to that kernel's data engine,
+            // and the hosted host kernel has no occupant, so every `/security`
+            // door answered 501 and no owner could accept an installed app's
+            // default permission set.
+            const securityServiceProvider = environmentScopedProvider<ISecurityService>('security');
+
+            // Auth service resolver — used by RestServer.resolveExecCtx after
+            // the request's environment kernel (and the default environment's)
+            // answered no `auth`. [#30192] Environment-scoped: identity is
+            // per environment (ADR-0006), so a request for an environment whose
+            // kernel carries no `auth`, or whose `auth` failed to build, is
+            // authenticated by nobody — never by the host's identity store, which
+            // the caller would then record as that environment's. A single
+            // kernel still reads its own.
+            const authServiceProvider = environmentScopedProvider<IAuthService>('auth');
 
             if (!server) {
                 ctx.logger.warn(`RestApiPlugin: HTTP Server service '${serverService}' not found. REST routes skipped.`);

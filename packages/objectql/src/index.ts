@@ -546,6 +546,29 @@ export type {
     RecordCurrencyBackfillLogger,
     RecordCurrencyBackfillOptions,
 } from './record-currency-backfill.js';
+// [ADR-0144 D5, D7 parameter 1, Open item 8] The explicit recompute of stored
+// home amounts behind `os migrate recompute-home-amounts`: the write's own
+// projection over stored rows. Same split as the two backfills above.
+export {
+    recomputeHomeAmounts,
+    assertHomeAmountRecomputeSince,
+    formatHomeAmountRecomputeReport,
+    homeAmountRecomputeComplete,
+    HOME_AMOUNT_SKIP_REASONS,
+} from './home-amount-recompute.js';
+export type {
+    HomeAmountRecomputeReport,
+    HomeAmountRecomputeChange,
+    HomeAmountRecomputeSkip,
+    HomeAmountSkipReason,
+    HomeAmountRecomputeOrganization,
+    HomeAmountRecomputeFailure,
+    HomeAmountRecomputeAudit,
+    HomeAmountRecomputeEngine,
+    HomeAmountRecomputeLogger,
+    HomeAmountRecomputeOptions,
+} from './home-amount-recompute.js';
+export type { HomeAmountReads, HomeAmountServing, ExchangeRateRow } from './home-amount-projection.js';
 export { summaryEmptySetValue, summaryNullIsBackfillable, aggregateSummaryValue } from './summary-aggregate.js';
 export type { SummaryDescriptor, SummaryAggregateEngine } from './summary-aggregate.js';
 export { evaluateValidationRules, needsPriorRecord, legalNextStates } from './validation/rule-validator.js';

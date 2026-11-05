@@ -2536,10 +2536,13 @@ jobs:
           # The build step above still builds the closure once, so the closure's
           # `build` tasks REPLAY here (identical hashes: nothing run-level is
           # hashed into them any more) and only `dogfood#test` executes.
+          # `--summarize` writes `.turbo/runs/<id>.json` and moves no task hash;
+          # it names the closure's `build` tasks and `dogfood#test` alike, and
+          # the prune before the seed save keeps exactly those entries.
           export OS_TEST_SHARD="${{ matrix.shard }}/3"
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/dogfood.log" --stall-minutes 10 \
             --report-dir "$RUNNER_TEMP/stall-reports" -- \
-            pnpm turbo run test --filter=@objectstack/dogfood --log-order=stream
+            pnpm turbo run test --filter=@objectstack/dogfood --summarize --log-order=stream
 
       # Test leftovers, step 2 of 2 (#23880, ruling 乙): what the dogfood test
       # run added to the working tree. Report only -- exits 0 on every path, no
@@ -2574,10 +2577,28 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      # Keeps only the entries the test step's run summary (`.turbo/runs/`)
+      # names, as Test Core's prune step does (#25452): the restore step takes
+      # the newest seed by prefix and turbo never evicts its local cache, so a
+      # seed saved whole is every seed before it plus this run (~3.69 GB per
+      # seed in #25452's pool reading). That one summary names the whole
+      # closure -- the test run plans the closure step's `build` tasks with the
+      # same hashes -- so no `--extra-summaries` is needed, and the closure
+      # `upgrade-harness-optin.yml` restores this seed for stays in it. No
+      # summary -- the test step was cancelled or never ran -- means no save,
+      # and the previous seed stays the newest. Exits 0 on every run-time
+      # path, so it cannot withhold the attestation below.
+      - name: Prune the Turbo cache to this run's tasks (main only)
+        id: prune-turbo-cache
+        if: always() && github.event_name == 'push'
+        run: |
+          node scripts/ci/prune-turbo-cache.mjs --site 'Dogfood Regression Gate (${{ matrix.shard }}/3)' \
+            --cache .turbo/cache --run-summaries .turbo/runs
+
       # Seed the shared Turbo cache from main only (see the restore step
       # above); shard-scoped key so the two matrix jobs don't collide.
       - name: Save Turbo cache (main only)
-        if: always() && github.event_name == 'push'
+        if: always() && github.event_name == 'push' && steps.prune-turbo-cache.outputs.save == 'true'
         uses: actions/cache/save@v6
         with:
           path: .turbo/cache

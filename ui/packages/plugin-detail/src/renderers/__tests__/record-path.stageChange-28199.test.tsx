@@ -11,6 +11,13 @@
  * a server refusal is shown in place; a reader who may not edit the status
  * field — and every path that does not opt in — keeps the readout.
  *
+ * The last two groups pin objectstack#30075 (ruling: option A): the
+ * synthesized default record page's path carries the opt-in, mounted here as
+ * the JSON document `buildDefaultPageSchema` emits, through the real
+ * `SchemaRenderer`; an authored `highlights` slot keeps its declared value;
+ * and a stage the field's blocking `state_machine` cannot reach from the
+ * stored value is never offered as a press.
+ *
  * The subject is imported relatively and `@object-ui/*` resolves to source
  * through the root vitest alias table, so nothing here reads a `dist/`.
  */
@@ -19,7 +26,7 @@ import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { InlineEditProvider, RecordContextProvider, useInlineEdit } from '@object-ui/react';
+import { InlineEditProvider, RecordContextProvider, SchemaRenderer, useInlineEdit } from '@object-ui/react';
 
 const { permsStub, perms } = vi.hoisted(() => {
   const perms: { isLoaded: boolean; writeDenied: string[] } = { isLoaded: true, writeDenied: [] };
@@ -49,6 +56,9 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
 });
 
 import { RecordPathRenderer } from '../record-path';
+import { buildDefaultPageSchema } from '../../synth/buildDefaultPageSchema';
+// Registers `record:path` for the `SchemaRenderer` mounts below.
+import '../../index';
 
 const STAGES = [
   { value: 'draft', label: 'Draft' },
@@ -270,5 +280,153 @@ describe('record:path allowStageChange — who sees the readout', () => {
   it('while the record\'s inline edit holds a draft, the path is a readout', async () => {
     const { container } = mount({ allowStageChange: true, editing: true });
     await waitFor(() => noButtons(container));
+  });
+});
+
+/** The object as a host binds it: a stage picklist the default page derives its path from. */
+const QUOTE_DEF = {
+  name: 'crm_quote',
+  fields: {
+    name: { type: 'text', label: 'Name' },
+    status: {
+      type: 'select',
+      label: 'Status',
+      options: STAGES.map(({ value, label }) => ({ value, label })),
+    },
+    amount: { type: 'currency', label: 'Amount' },
+  },
+  stageField: 'status',
+};
+
+/** A blocking machine: from draft only in_review (or declined); never straight to accepted. */
+const MACHINE = {
+  type: 'state_machine',
+  name: 'quote_flow',
+  field: 'status',
+  message: 'A quote cannot skip review.',
+  transitions: { draft: ['in_review', 'declined'], in_review: ['accepted', 'declined'] },
+};
+
+/** Every `record:path` node among a synthesized page's top-level components. */
+const pathNodesOf = (page: any): any[] =>
+  page.regions[0].components.filter((c: any) => c?.type === 'record:path');
+
+function mountNode(node: unknown, opts: Omit<MountOptions, 'allowStageChange'> = {}) {
+  const dataSource = opts.dataSource ?? makeDataSource();
+  const refresh = opts.refresh ?? vi.fn(async () => {});
+  const r = render(
+    <RecordContextProvider
+      objectName="crm_quote"
+      recordId="q1"
+      data={{ id: 'q1', status: 'draft', updated_at: VERSION }}
+      objectSchema={opts.objectSchema ?? QUOTE_DEF}
+      dataSource={dataSource as any}
+      refresh={refresh}
+    >
+      <InlineEditProvider canEdit={opts.canEdit ?? true}>
+        <SchemaRenderer schema={node as never} />
+      </InlineEditProvider>
+    </RecordContextProvider>,
+  );
+  return { ...r, dataSource, refresh };
+}
+
+const buttonNames = (row: HTMLElement): (string | null)[] =>
+  within(row).queryAllByRole('button').map((b) => b.getAttribute('aria-label'));
+
+describe('#30075 the default record page turns click-to-advance on', () => {
+  it('the synthesized page writes allowStageChange: true on its path node', () => {
+    const [path] = pathNodesOf(buildDefaultPageSchema(QUOTE_DEF as never));
+    expect(path.properties).toMatchObject({ statusField: 'status', allowStageChange: true });
+  });
+
+  it('a reader who may edit the stage field gets a press, with a confirmation, through the record update', async () => {
+    const [path] = pathNodesOf(buildDefaultPageSchema(QUOTE_DEF as never));
+    const { container, dataSource, refresh } = mountNode(path);
+    expect(rows(container)).toHaveLength(2);
+    for (const row of rows(container)) {
+      expect(buttonNames(row)).toEqual(['Move to In review', 'Move to Accepted', 'Move to Declined']);
+    }
+    fireEvent.click(within(rows(container)[0]).getByRole('button', { name: 'Move to In review' }));
+    // Nothing is written before the reader confirms.
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dataSource.update).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
+    expect(dataSource.update).toHaveBeenCalledWith('crm_quote', 'q1', { status: 'in_review' }, { ifMatch: VERSION });
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+  });
+
+  it('a reader the page may not let edit this record keeps the read-only path', () => {
+    const [path] = pathNodesOf(buildDefaultPageSchema(QUOTE_DEF as never));
+    const { container } = mountNode(path, { canEdit: false });
+    expect(rows(container)).toHaveLength(2);
+    for (const row of rows(container)) expect(row.querySelectorAll('button,[tabindex]')).toHaveLength(0);
+  });
+
+  it('a reader without the edit grant on the stage field keeps the read-only path', () => {
+    perms.writeDenied = ['status'];
+    const [path] = pathNodesOf(buildDefaultPageSchema(QUOTE_DEF as never));
+    const { container } = mountNode(path);
+    expect(rows(container)).toHaveLength(2);
+    for (const row of rows(container)) expect(row.querySelectorAll('button,[tabindex]')).toHaveLength(0);
+  });
+
+  it.each([true, false])('an authored highlights slot keeps its declared allowStageChange: %s', (declared) => {
+    const authored = { type: 'record:path', properties: { statusField: 'status', stages: STAGES, allowStageChange: declared } };
+    const page = buildDefaultPageSchema(QUOTE_DEF as never, { slots: { highlights: [authored] } } as never);
+    const [path] = pathNodesOf(page);
+    expect(path.properties.allowStageChange).toBe(declared);
+    const { container } = mountNode(path);
+    const names = buttonNames(rows(container)[0]);
+    expect(names.length > 0).toBe(declared);
+  });
+
+  it('an authored highlights slot that leaves the key out keeps the readout', () => {
+    const authored = { type: 'record:path', properties: { statusField: 'status', stages: STAGES } };
+    const page = buildDefaultPageSchema(QUOTE_DEF as never, { slots: { highlights: [authored] } } as never);
+    const [path] = pathNodesOf(page);
+    expect('allowStageChange' in path.properties).toBe(false);
+    for (const row of rows(mountNode(path).container)) expect(buttonNames(row)).toEqual([]);
+  });
+});
+
+describe('#30075 the press offers only the moves the field\'s state machine admits', () => {
+  const MACHINED = { ...QUOTE_DEF, validations: [MACHINE] };
+
+  it('a stage the machine cannot reach from the stored value is a readout, not a button', () => {
+    const [path] = pathNodesOf(buildDefaultPageSchema(MACHINED as never));
+    const { container } = mountNode(path, { objectSchema: MACHINED });
+    for (const row of rows(container)) {
+      expect(buttonNames(row)).toEqual(['Move to In review', 'Move to Declined']);
+      // The unreachable stage is still drawn, as a plain listitem.
+      expect(within(row).getByText('Accepted').closest('button')).toBeNull();
+    }
+  });
+
+  it('control: a warning-severity machine does not narrow the press (the server would not refuse)', () => {
+    const warned = { ...QUOTE_DEF, validations: [{ ...MACHINE, severity: 'warning' }] };
+    const [path] = pathNodesOf(buildDefaultPageSchema(warned as never));
+    const { container } = mountNode(path, { objectSchema: warned });
+    expect(buttonNames(rows(container)[0])).toEqual(['Move to In review', 'Move to Accepted', 'Move to Declined']);
+  });
+
+  it('a move the server still refuses (here a required field elsewhere) is shown in place, nothing else changes', async () => {
+    const refusal = Object.assign(new Error('VALIDATION_FAILED'), {
+      code: 'VALIDATION_FAILED',
+      fields: [{ field: 'amount', code: 'required', message: 'is required to send a quote for review' }],
+    });
+    const [path] = pathNodesOf(buildDefaultPageSchema(MACHINED as never));
+    const { container, refresh } = mountNode(path, {
+      objectSchema: MACHINED,
+      dataSource: makeDataSource(async () => { throw refusal; }),
+    });
+    await pressAndConfirm(container, 'In review');
+    const alert = await within(container).findByRole('alert');
+    expect(alert).toHaveTextContent('Amount: is required to send a quote for review');
+    expect(refresh).not.toHaveBeenCalled();
+    for (const row of rows(container)) {
+      expect(row.querySelector('[aria-current="step"]')).toHaveAttribute('aria-label', 'Draft, current stage');
+    }
   });
 });

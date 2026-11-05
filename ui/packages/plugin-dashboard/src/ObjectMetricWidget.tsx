@@ -696,6 +696,8 @@ export const ObjectMetricWidget: React.FC<ObjectMetricWidgetProps> = ({
       vsLastQuarter: 'vs last quarter',
       vsLastYear: 'vs last year',
       vsYesterday: 'vs yesterday',
+      vsThisMonth: 'vs this month',
+      vsThisQuarter: 'vs this quarter',
     };
     const labelText = tProp ? tProp(fullKey, defaults[labelKey] || labelKey) : (defaults[labelKey] || labelKey);
     return { value: delta.value, direction: delta.direction, label: labelText };

@@ -2,90 +2,137 @@
 
 /**
  * [#29520 codemod] The "Filter helpers" section of `SqlDriver`: the bodies of
- * `tableNameForBuilder`, `toDateOnly`, `coerceFilterValue`,
+ * `tableNameForBuilder`, `coercionKey`, `toDateOnly`, `toTimeOnly`,
+ * `coerceFilterValue`, `storageDatetimeValue`, `needsLegacyDatetimeRepair`,
  * `sqliteCanonicalDatetimeSql`, `sqliteNonTemporalTextSql`,
- * `sqliteCanonicalTimeSql`, `readPresentationKind`, `presentReadValue`,
- * `presentReadColumns`, `filterColumnExpr`, `logWithheldFilterDiagnostic`,
- * `compileFilters` moved out of `sql-driver.ts` whole by
- * `scripts/codemod-split-sql-driver.mjs`.
+ * `needsLegacyTimeRepair`, `sqliteCanonicalTimeSql`, `temporalFieldKind`,
+ * `readPresentationKind`, `presentReadValue`, `presentReadColumns`,
+ * `sqliteTemporalArg`, `filterColumnExpr`, `temporalFilterValue`,
+ * `temporalFilterColumnSql`, `isJsonColumn`, `jsonColumnFieldClass`,
+ * `isNonTextColumn`, `applyTextOperatorOverNonTextColumn`,
+ * `declaredValueShape`, `assertOperatorAppliesToColumn`, `applyFilters`,
+ * `logWithheldFilterDiagnostic`, `withWithheldFilterLog`, `compileFilters`,
+ * `applyContainsLike`, `declaredFieldsFor`, `applyFalseConstant` moved out of
+ * `sql-driver.ts` whole by `scripts/codemod-split-sql-driver.mjs`.
  *
- * A MOVE, not a redesign. Each function below is the body of the `SqlDriver`
+ * A MOVE, not a redesign. {@link FilterHelpersFacet} is a stateless facet of `SqlDriver`
+ * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
  * method of the same name exactly as it stood: not re-indented, not
- * formatted, not edited. The method stays on the class with its docblock and
- * signature, so the published `dist/*.d.ts`, an instance spy and a subclass
- * override are what they were; the docblock there is the contract.
+ * formatted, not edited. The method stays on the class as a one-call stub with
+ * its signature, so the published surface, an instance spy and a subclass
+ * override are what they were. A public or protected method keeps its
+ * docblock on the class, the contract; a private method's docblock moved here
+ * with its body. The state stays on `SqlDriver`.
  *
  * The bodies reach the class through {@link FilterHelpersHost}: exactly the
- * `SqlDriver` members they read. Each method hands its body one literal of the
- * members that body reads, plus a `.call`: methods go as closures that call
- * them on the driver at call time (the builder factory as a bound reference),
- * so a subclass override or an instance spy is still the one reached; fields
- * and accessors go as GETTERS, read when the body reads them, as they were on
- * the class.
+ * `SqlDriver` members they read, private ones included. Every stub hands its
+ * body, by a `.call`, the same host: `filterHelpersHost` in
+ * `sql-driver-facet-hosts.ts`, built once per driver by the class's static
+ * block. Methods go as closures that call them on the driver at call time, so a
+ * subclass override or an instance spy is still the one reached; fields and
+ * accessors go as GETTERS, read when the body reads them, as they were on the
+ * class, and a field a body assigns goes with a SETTER that assigns it on the
+ * driver.
  *
- * The module imports `sql-driver.ts` for types only, so the two modules form
- * no evaluation cycle. `index.ts` re-exports nothing from this module.
+ * The module imports `sql-driver.ts` for types only, so the two modules form no
+ * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
-import type { DriverOptions } from '@objectstack/spec/data';
-import { presentAsNumber, temporalStorageForm } from '@objectstack/core';
+import type { DriverOptions, ValueShapeFieldDef } from '@objectstack/spec/data';
+import { JSON_COLUMN_INCOMPATIBLE_OPERATORS, findMisplacedReadableIds, presentAsNumber, refuseReadableIdsOnce, temporalStorageForm } from '@objectstack/core';
+import type { JsonColumnFieldClass } from '@objectstack/core';
+import { StorageNameMapping } from '@objectstack/spec/system';
 import type { Knex } from 'knex';
 import {
   AUDIT_TIMESTAMP_COLUMNS, SQLITE_TIME_EXPR_REFS, WITHHELD_FILTER_LOGGED, assertCompilableComparand,
-  assertDefinedComparands, canonicalTimeOfDay, emptyFieldConstraintError, filterArrayReachedDriverError,
-  isEmptyFieldConstraint, normalizeSqliteDatetimeOutput, presentAuditTimestampOutput, refusalSubtree,
-  withheldFilterDiagnosticOf,
+  assertDefinedComparands, canonicalTimeOfDay, canonicalUtcDatetime, emptyFieldConstraintError,
+  filterArrayReachedDriverError, isEmptyFieldConstraint, jsonColumnOperatorError, mysqlDatetimeLiteral,
+  normalizeSqliteDatetimeOutput, presentAuditTimestampOutput, refusalSubtree, withheldFilterDiagnosticOf,
 } from './sql-driver-top-level.js';
 import type { ReadPresentationKind } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
 
 /**
- * The `SqlDriver` members the functions below read — every one of them, and
- * no other. Each is typed AS the class member (an indexed access on the
- * class), so a change to a member's signature on the class is a change here
- * too. `readonly` members are the getters.
+ * The `SqlDriver` members the bodies of {@link FilterHelpersFacet} read — every one of
+ * them, and no other. Each is typed AS the class member (an indexed access on
+ * the class), so a change to a member's signature on the class is a change
+ * here too. `readonly` members are the getters; the others are fields a body
+ * assigns.
  */
 export interface FilterHelpersHost {
+  applyFalseConstant: SqlDriver['applyFalseConstant'];
   applyFilterCondition: SqlDriver['applyFilterCondition'];
+  applyLike: SqlDriver['applyLike'];
   applyNormalizedComparison: SqlDriver['applyNormalizedComparison'];
   assertOperatorAppliesToColumn: SqlDriver['assertOperatorAppliesToColumn'];
   readonly booleanFields: SqlDriver['booleanFields'];
+  readonly canonicalDatetimeFields: SqlDriver['canonicalDatetimeFields'];
+  readonly canonicalTimeFields: SqlDriver['canonicalTimeFields'];
   coerceFilterValue: SqlDriver['coerceFilterValue'];
   coercionKey: SqlDriver['coercionKey'];
+  compileFilters: SqlDriver['compileFilters'];
+  readonly dateFields: SqlDriver['dateFields'];
+  readonly datetimeFields: SqlDriver['datetimeFields'];
   filterColumnExpr: SqlDriver['filterColumnExpr'];
+  isJsonColumn: SqlDriver['isJsonColumn'];
   readonly isMysql: SqlDriver['isMysql'];
   readonly isSqlite: SqlDriver['isSqlite'];
+  jsonColumnFieldClass: SqlDriver['jsonColumnFieldClass'];
+  readonly jsonFields: SqlDriver['jsonFields'];
   readonly logger: SqlDriver['logger'];
+  readonly managedObjectFields: SqlDriver['managedObjectFields'];
+  readonly mediaFields: SqlDriver['mediaFields'];
   needsLegacyDatetimeRepair: SqlDriver['needsLegacyDatetimeRepair'];
   needsLegacyTimeRepair: SqlDriver['needsLegacyTimeRepair'];
   readonly numericFields: SqlDriver['numericFields'];
+  readonly objectByPhysicalTable: SqlDriver['objectByPhysicalTable'];
   presentReadValue: SqlDriver['presentReadValue'];
+  readonly readableIdsDriverName: SqlDriver['readableIdsDriverName'];
+  readonly readableIdsRefusalLog: SqlDriver['readableIdsRefusalLog'];
   remoteColumn: SqlDriver['remoteColumn'];
+  resolveWithheldFilterRefusal: SqlDriver['resolveWithheldFilterRefusal'];
   sqliteCanonicalDatetimeSql: SqlDriver['sqliteCanonicalDatetimeSql'];
   sqliteCanonicalTimeSql: SqlDriver['sqliteCanonicalTimeSql'];
   storageDatetimeValue: SqlDriver['storageDatetimeValue'];
+  tableNameForBuilder: SqlDriver['tableNameForBuilder'];
   temporalFieldKind: SqlDriver['temporalFieldKind'];
+  readonly timeFields: SqlDriver['timeFields'];
   toDateOnly: SqlDriver['toDateOnly'];
   toTimeOnly: SqlDriver['toTimeOnly'];
+  readonly valueShapeFields: SqlDriver['valueShapeFields'];
 }
 
-/** The body of `SqlDriver#tableNameForBuilder`; the method's docblock there is its contract. */
-export function tableNameForBuilder(builder: any): string | null {
+/** The bodies of the "Filter helpers" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
+export class FilterHelpersFacet {
+  /** The body of `SqlDriver#tableNameForBuilder`; the method's docblock there is its contract. */
+  static tableNameForBuilder(builder: any): string | null {
     const t = builder?._single?.table;
     if (typeof t === 'string') return t;
     return null;
   }
 
-/** The body of `SqlDriver#toDateOnly`; the method's docblock there is its contract. */
-export function toDateOnly(value: any): any {
+  /** The body of `SqlDriver#coercionKey`; the method's docblock there is its contract. */
+  static coercionKey(this: Pick<FilterHelpersHost, 'objectByPhysicalTable' | 'tableNameForBuilder'>, builder: any): string | null {
+    const physical = this.tableNameForBuilder(builder);
+    if (physical == null) return null;
+    return this.objectByPhysicalTable[physical] ?? physical;
+  }
+
+  /** The body of `SqlDriver#toDateOnly`; the method's docblock there is its contract. */
+  static toDateOnly(value: any): any {
     // [#20176] The rule — UTC getters included — is `@objectstack/core`'s
     // `temporalStorageForm`, the function `driver-memory` and the engine's
     // per-aggregation `filter` / `having` read too; this body was a copy of it.
     return temporalStorageForm(value, 'date');
   }
 
-/** The body of `SqlDriver#coerceFilterValue`; the method's docblock there is its contract. */
-export function coerceFilterValue(this: Pick<FilterHelpersHost, 'coerceFilterValue' | 'storageDatetimeValue' | 'temporalFieldKind' | 'toDateOnly'>, table: string | null, field: string, value: any): any {
+  /** The body of `SqlDriver#toTimeOnly`; the method's docblock there is its contract. */
+  static toTimeOnly(value: any): any {
+    return canonicalTimeOfDay(value);
+  }
+
+  /** The body of `SqlDriver#coerceFilterValue`; the method's docblock there is its contract. */
+  static coerceFilterValue(this: Pick<FilterHelpersHost, 'coerceFilterValue' | 'storageDatetimeValue' | 'temporalFieldKind' | 'toDateOnly'>, table: string | null, field: string, value: any): any {
     if (value == null || !table) return value;
     if (Array.isArray(value)) return value.map((v) => this.coerceFilterValue(table, field, v));
 
@@ -98,8 +145,21 @@ export function coerceFilterValue(this: Pick<FilterHelpersHost, 'coerceFilterVal
     return this.toDateOnly(value);
   }
 
-/** The body of `SqlDriver#sqliteCanonicalDatetimeSql`; the method's docblock there is its contract. */
-export function sqliteCanonicalDatetimeSql(columnSql: string): string {
+  /** The body of `SqlDriver#storageDatetimeValue`; the method's docblock there is its contract. */
+  static storageDatetimeValue(this: Pick<FilterHelpersHost, 'isMysql'>, value: unknown): unknown {
+    const canonical = canonicalUtcDatetime(value);
+    return this.isMysql ? mysqlDatetimeLiteral(canonical) : canonical;
+  }
+
+  /** The body of `SqlDriver#needsLegacyDatetimeRepair`; the method's docblock there is its contract. */
+  static needsLegacyDatetimeRepair(this: Pick<FilterHelpersHost, 'canonicalDatetimeFields' | 'datetimeFields' | 'isSqlite'>, table: string | null | undefined, field: string): boolean {
+    if (!table || !this.isSqlite) return false;
+    if (this.datetimeFields[table]?.has(field) !== true) return false;
+    return this.canonicalDatetimeFields[table]?.has(field) !== true;
+  }
+
+  /** The body of `SqlDriver#sqliteCanonicalDatetimeSql`; the method's docblock there is its contract. */
+  static sqliteCanonicalDatetimeSql(columnSql: string): string {
     return (
       `(case when typeof(${columnSql}) in ('integer','real') ` +
       `then strftime('%Y-%m-%dT%H:%M:%fZ', ${columnSql}/1000.0, 'unixepoch') ` +
@@ -107,8 +167,8 @@ export function sqliteCanonicalDatetimeSql(columnSql: string): string {
     );
   }
 
-/** The body of `SqlDriver#sqliteNonTemporalTextSql`; the method's docblock there is its contract. */
-export function sqliteNonTemporalTextSql(columnSql: string): string {
+  /** The body of `SqlDriver#sqliteNonTemporalTextSql`; the method's docblock there is its contract. */
+  static sqliteNonTemporalTextSql(columnSql: string): string {
     return (
       `(typeof(${columnSql}) not in ('integer','real') ` +
       `and instr(${columnSql}, '-') = 0 and instr(${columnSql}, ':') = 0 ` +
@@ -116,8 +176,15 @@ export function sqliteNonTemporalTextSql(columnSql: string): string {
     );
   }
 
-/** The body of `SqlDriver#sqliteCanonicalTimeSql`; the method's docblock there is its contract. */
-export function sqliteCanonicalTimeSql(columnSql: string): string {
+  /** The body of `SqlDriver#needsLegacyTimeRepair`; the method's docblock there is its contract. */
+  static needsLegacyTimeRepair(this: Pick<FilterHelpersHost, 'canonicalTimeFields' | 'isSqlite' | 'timeFields'>, table: string | null | undefined, field: string): boolean {
+    if (!table || !this.isSqlite) return false;
+    if (this.timeFields[table]?.has(field) !== true) return false;
+    return this.canonicalTimeFields[table]?.has(field) !== true;
+  }
+
+  /** The body of `SqlDriver#sqliteCanonicalTimeSql`; the method's docblock there is its contract. */
+  static sqliteCanonicalTimeSql(columnSql: string): string {
     const canonText = (args: string) =>
       `case when strftime('%H:%M:%f', ${args}) like '%.000' ` +
       `then strftime('%H:%M:%S', ${args}) ` +
@@ -129,8 +196,17 @@ export function sqliteCanonicalTimeSql(columnSql: string): string {
     );
   }
 
-/** The body of `SqlDriver#readPresentationKind`; the method's docblock there is its contract. */
-export function readPresentationKind(this: Pick<FilterHelpersHost, 'booleanFields' | 'isMysql' | 'isSqlite' | 'numericFields' | 'temporalFieldKind'>, table: string | null | undefined, field: string): ReadPresentationKind | null {
+  /** The body of `SqlDriver#temporalFieldKind`; the method's docblock there is its contract. */
+  static temporalFieldKind(this: Pick<FilterHelpersHost, 'dateFields' | 'datetimeFields' | 'timeFields'>, table: string | null | undefined, field: string): 'datetime' | 'date' | 'time' | null {
+    if (!table) return null;
+    if (this.datetimeFields[table]?.has(field)) return 'datetime';
+    if (this.dateFields[table]?.has(field)) return 'date';
+    if (this.timeFields[table]?.has(field)) return 'time';
+    return null;
+  }
+
+  /** The body of `SqlDriver#readPresentationKind`; the method's docblock there is its contract. */
+  static readPresentationKind(this: Pick<FilterHelpersHost, 'booleanFields' | 'isMysql' | 'isSqlite' | 'numericFields' | 'temporalFieldKind'>, table: string | null | undefined, field: string): ReadPresentationKind | null {
     if (!table) return null;
     const temporal = this.temporalFieldKind(table, field);
     if (temporal) return temporal;
@@ -147,8 +223,8 @@ export function readPresentationKind(this: Pick<FilterHelpersHost, 'booleanField
     return null;
   }
 
-/** The body of `SqlDriver#presentReadValue`; the method's docblock there is its contract. */
-export function presentReadValue(this: Pick<FilterHelpersHost, 'toDateOnly' | 'toTimeOnly'>, kind: ReadPresentationKind, value: any): any {
+  /** The body of `SqlDriver#presentReadValue`; the method's docblock there is its contract. */
+  static presentReadValue(this: Pick<FilterHelpersHost, 'toDateOnly' | 'toTimeOnly'>, kind: ReadPresentationKind, value: any): any {
     if (value == null) return value;
     switch (kind) {
       case 'date':
@@ -186,8 +262,8 @@ export function presentReadValue(this: Pick<FilterHelpersHost, 'toDateOnly' | 't
     }
   }
 
-/** The body of `SqlDriver#presentReadColumns`; the method's docblock there is its contract. */
-export function presentReadColumns(this: Pick<FilterHelpersHost, 'presentReadValue'>, rows: any, columns: Map<string, ReadPresentationKind>): any {
+  /** The body of `SqlDriver#presentReadColumns`; the method's docblock there is its contract. */
+  static presentReadColumns(this: Pick<FilterHelpersHost, 'presentReadValue'>, rows: any, columns: Map<string, ReadPresentationKind>): any {
     if (columns.size === 0 || !Array.isArray(rows)) return rows;
     for (const row of rows) {
       if (!row || typeof row !== 'object') continue;
@@ -198,8 +274,14 @@ export function presentReadColumns(this: Pick<FilterHelpersHost, 'presentReadVal
     return rows;
   }
 
-/** The body of `SqlDriver#filterColumnExpr`; the method's docblock there is its contract. */
-export function filterColumnExpr(this: Pick<FilterHelpersHost, 'needsLegacyDatetimeRepair' | 'needsLegacyTimeRepair' | 'sqliteCanonicalDatetimeSql' | 'sqliteCanonicalTimeSql'>, table: string | null | undefined, field: string, column: string): { sql: string; bindings: any[] } | null {
+  /** The body of `SqlDriver#sqliteTemporalArg`; the method's docblock there is its contract. */
+  static sqliteTemporalArg(this: Pick<FilterHelpersHost, 'needsLegacyDatetimeRepair' | 'sqliteCanonicalDatetimeSql'>, field: string, table: string | null | undefined): { sql: string; bindings: any[] } {
+    if (!this.needsLegacyDatetimeRepair(table, field)) return { sql: '??', bindings: [field] };
+    return { sql: this.sqliteCanonicalDatetimeSql('??'), bindings: [field, field, field, field] };
+  }
+
+  /** The body of `SqlDriver#filterColumnExpr`; the method's docblock there is its contract. */
+  static filterColumnExpr(this: Pick<FilterHelpersHost, 'needsLegacyDatetimeRepair' | 'needsLegacyTimeRepair' | 'sqliteCanonicalDatetimeSql' | 'sqliteCanonicalTimeSql'>, table: string | null | undefined, field: string, column: string): { sql: string; bindings: any[] } | null {
     if (this.needsLegacyDatetimeRepair(table, field)) {
       return {
         sql: this.sqliteCanonicalDatetimeSql('??'),
@@ -215,8 +297,141 @@ export function filterColumnExpr(this: Pick<FilterHelpersHost, 'needsLegacyDatet
     return null;
   }
 
-/** The body of `SqlDriver#logWithheldFilterDiagnostic`; the method's docblock there is its contract. */
-export function logWithheldFilterDiagnostic(this: Pick<FilterHelpersHost, 'logger'>, err: unknown): void {
+  /** The body of `SqlDriver#temporalFilterValue`; the method's docblock there is its contract. */
+  static temporalFilterValue(this: Pick<FilterHelpersHost, 'coerceFilterValue'>, objectName: string, field: string, value: any): unknown {
+    return this.coerceFilterValue(objectName, field, value);
+  }
+
+  /** The body of `SqlDriver#temporalFilterColumnSql`; the method's docblock there is its contract. */
+  static temporalFilterColumnSql(this: Pick<FilterHelpersHost, 'needsLegacyDatetimeRepair' | 'needsLegacyTimeRepair' | 'sqliteCanonicalDatetimeSql' | 'sqliteCanonicalTimeSql'>, objectName: string, field: string, columnSql: string): string {
+    if (this.needsLegacyDatetimeRepair(objectName, field)) {
+      return this.sqliteCanonicalDatetimeSql(columnSql);
+    }
+    if (this.needsLegacyTimeRepair(objectName, field)) {
+      return this.sqliteCanonicalTimeSql(columnSql);
+    }
+    return columnSql;
+  }
+
+  /** The body of `SqlDriver#isJsonColumn`; the method's docblock there is its contract. */
+  static isJsonColumn(this: Pick<FilterHelpersHost, 'jsonFields'>, table: string | null | undefined, localField: string): boolean {
+    if (!table) return false;
+    return this.jsonFields[table]?.includes(localField) === true;
+  }
+
+  /** The body of `SqlDriver#jsonColumnFieldClass`; the method's docblock there is its contract. */
+  static jsonColumnFieldClass(this: Pick<FilterHelpersHost, 'isJsonColumn' | 'mediaFields'>, table: string | null | undefined, localField: string): JsonColumnFieldClass | undefined {
+    if (!table || !this.isJsonColumn(table, localField)) return undefined;
+    return this.mediaFields[table]?.includes(localField) === true ? 'single-value-media' : 'multi-value-or-json';
+  }
+
+  /** The body of `SqlDriver#isNonTextColumn`; the method's docblock there is its contract. */
+  static isNonTextColumn(this: Pick<FilterHelpersHost, 'booleanFields' | 'isJsonColumn' | 'numericFields' | 'temporalFieldKind'>, table: string | null | undefined, localField: string): boolean {
+    if (!table) return false;
+    return (
+      this.numericFields[table]?.includes(localField) === true ||
+      (this.booleanFields[table]?.includes(localField) === true && !this.isJsonColumn(table, localField)) ||
+      (this.temporalFieldKind(table, localField) !== null && !this.isJsonColumn(table, localField))
+    );
+  }
+
+  /**
+   * [#14079] Emit the DECLARED answer for a text operator aimed at a column
+   * whose stored value is never text ({@link isNonTextColumn}): the positive
+   * operators (`$contains` / `$startsWith` / `$endsWith` / `$icontains` /
+   * `$like` / `$ilike`) compile to the FALSE constant — no row's number
+   * contains a substring — and `$notContains` to the TRUE constant, its exact
+   * complement. `FILTER_TEXT_CASES`' `score` rows are the pin, on every face.
+   *
+   * # What compiled before, per dialect — three answers to one filter
+   *
+   * Measured on `origin/main` over a `Field.number` column holding `5`
+   * (#14079): the SQLite dialects compiled `col GLOB '*5*'` and COERCED the
+   * REAL to text in the storage class's own spelling (`'5.0'`, so
+   * `$contains: '.0'` matched and `$endsWith: '5'` did not); live Postgres
+   * compiled `col LIKE $1 ESCAPE $2` and REFUSED at query time with SQLSTATE
+   * 42883 (`operator does not exist: real ~~ text`) — a 500 for a filter the
+   * spec accepts; MySQL's `CAST(col AS BINARY) LIKE ?` reads as coercion (not
+   * executed — no server was provisionable). The maintainer ruled the cell on
+   * 2026-09-05 (option A, type-gate; coercion refused on the measurement) and
+   * the constants are that ruling compiled: the same row set on every dialect,
+   * decided by the DECLARED type at compile time because the stored value is
+   * not visible until run time.
+   *
+   * # Why constants compose with the NULL rules rather than fight them
+   *
+   * A row with no value already satisfies `$notContains` (#5298,
+   * {@link SqlDriver.applyNullSafeNegative}) and fails every positive
+   * operator, so `1 = 1` / `1 = 0` agree with the null polarity on every row —
+   * there is no cell where the two rules disagree. Under `$not` the leaf is
+   * totalised first (the shared lowering's rule 3, at the seams): `NOT (col IS NOT NULL
+   * AND 1 = 0)` is TRUE for every row, which is what the JS faces answer for
+   * `!contains` on a number, and `NOT (col IS NULL OR 1 = 1)` is FALSE for
+   * every row, what they answer for `!notContains`. Complementarity holds
+   * through the negation too.
+   *
+   * Every refusal stays AHEAD of this: the comparand gates on the validating
+   * walk (`reduceFilterKey`: an empty or non-string `$icontains` comparand, a
+   * non-string or dangling `$like` pattern) and {@link assertCompilableComparand}
+   * all run before the caller reaches here, so a filter the contract refuses
+   * is still refused — the constant answers only a filter the contract
+   * accepts. `1 = 0` is {@link applyFalseConstant}'s spelling; `1 = 1` is its
+   * mirror, valid on every dialect this driver targets and free of bindings.
+   */
+  static applyTextOperatorOverNonTextColumn(this: Pick<FilterHelpersHost, 'applyFalseConstant'>, builder: any, logicalOp: 'and' | 'or', op: string): void {
+    if (op === '$notContains') {
+      builder[logicalOp === 'or' ? 'orWhereRaw' : 'whereRaw']('1 = 1');
+      return;
+    }
+    this.applyFalseConstant(builder, logicalOp);
+  }
+
+  /** The body of `SqlDriver#declaredValueShape`; the method's docblock there is its contract. */
+  static declaredValueShape(this: Pick<FilterHelpersHost, 'valueShapeFields'>, table: string | null | undefined, localField: string): ValueShapeFieldDef | undefined {
+    if (!table) return undefined;
+    const shapes = this.valueShapeFields[table];
+    return shapes && Object.prototype.hasOwnProperty.call(shapes, localField) ? shapes[localField] : undefined;
+  }
+
+  /** The body of `SqlDriver#assertOperatorAppliesToColumn`; the method's docblock there is its contract. */
+  static assertOperatorAppliesToColumn(this: Pick<FilterHelpersHost, 'jsonColumnFieldClass'>,
+    table: string | null | undefined,
+    localField: string,
+    column: string,
+    op: string,
+    bare = false,
+    // [#8197] The filter node this constraint was read from, so the refusal can
+    // be resolved against the query's `where` root like every other withheld
+    // one. Optional, and absent means WITHHELD — a subclass that overrides this
+    // method without threading it degrades onto the fail-closed branch rather
+    // than onto the disclosing one.
+    subtree?: unknown,
+  ): void {
+    if (!JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op)) return;
+    // [#21236] The same JSON-column question {@link isJsonColumn} answers, with
+    // the column's class beside it, so the refusal names the class's repair.
+    const fieldClass = this.jsonColumnFieldClass(table, localField);
+    if (fieldClass === undefined) return;
+    throw jsonColumnOperatorError(column, op, bare, fieldClass, subtree);
+  }
+
+  /** The body of `SqlDriver#applyFilters`; the method's docblock there is its contract. */
+  static applyFilters(this: Pick<FilterHelpersHost, 'compileFilters' | 'logger' | 'readableIdsDriverName' | 'readableIdsRefusalLog' | 'resolveWithheldFilterRefusal'>, builder: Knex.QueryBuilder, filters: any, options?: DriverOptions) {
+    // [ADR-0139 D3] A `ReadableIds` leaf this compiler will not evaluate — an
+    // UNCOMPOSED one anywhere, a composed one outside a `$in` comparand — is
+    // refused before anything compiles: INTERNAL_ERROR / 500, logged at
+    // `error` once per driver. ⛔ Never evaluated as "no restriction".
+    const misplaced = findMisplacedReadableIds(filters, true);
+    if (misplaced) throw refuseReadableIdsOnce(this.readableIdsDriverName, misplaced, this.logger, this.readableIdsRefusalLog);
+    try {
+      this.compileFilters(builder, filters, options);
+    } catch (err) {
+      throw this.resolveWithheldFilterRefusal(err, filters);
+    }
+  }
+
+  /** The body of `SqlDriver#logWithheldFilterDiagnostic`; the method's docblock there is its contract. */
+  static logWithheldFilterDiagnostic(this: Pick<FilterHelpersHost, 'logger'>, err: unknown): void {
     const diagnostic = withheldFilterDiagnosticOf(err);
     if (diagnostic === null) return;
     const marked = err as Record<symbol, unknown>;
@@ -235,8 +450,23 @@ export function logWithheldFilterDiagnostic(this: Pick<FilterHelpersHost, 'logge
     );
   }
 
-/** The body of `SqlDriver#compileFilters`; the method's docblock there is its contract. */
-export function compileFilters(this: Pick<FilterHelpersHost, 'applyFilterCondition' | 'applyNormalizedComparison' | 'assertOperatorAppliesToColumn' | 'coerceFilterValue' | 'coercionKey' | 'filterColumnExpr' | 'remoteColumn'>, builder: Knex.QueryBuilder, filters: any, options?: DriverOptions) {
+  /** The body of `SqlDriver#withWithheldFilterLog`; the method's docblock there is its contract. */
+  static withWithheldFilterLog<T>(this: Pick<FilterHelpersHost, 'resolveWithheldFilterRefusal'>, rootFilter: unknown, fn: () => T): T {
+    try {
+      return fn();
+    } catch (err) {
+      // [#8220] The same provenance resolution `applyFilters` applies, against
+      // the same `where` ROOT — threaded into this frame because a lazily
+      // invoked group callback is past that entry point's catch. Resolving
+      // against the local branch instead would lose every mark set on an
+      // ANCESTOR (the merge boundaries mark the arms of their own `$and`), so
+      // an author's nested `$or` refusal would stay redacted for no reason.
+      throw this.resolveWithheldFilterRefusal(err, rootFilter);
+    }
+  }
+
+  /** The body of `SqlDriver#compileFilters`; the method's docblock there is its contract. */
+  static compileFilters(this: Pick<FilterHelpersHost, 'applyFilterCondition' | 'applyNormalizedComparison' | 'assertOperatorAppliesToColumn' | 'coerceFilterValue' | 'coercionKey' | 'filterColumnExpr' | 'remoteColumn'>, builder: Knex.QueryBuilder, filters: any, options?: DriverOptions) {
     if (!filters) return;
 
     // [#5158] `where` is a `FilterCondition` OBJECT. It always was — the spec
@@ -324,3 +554,36 @@ export function compileFilters(this: Pick<FilterHelpersHost, 'applyFilterConditi
     // dialect, and widening the refusal is a separate change with its own
     // blast radius.
   }
+
+  /**
+   * Apply a `contains` substring match as a parameterized `LIKE '%…%'`, escaping
+   * the LIKE metacharacters `%` / `_` (and the escape char `\`) in the user value
+   * so they match literally instead of acting as wildcards — otherwise a value of
+   * `%` matches every row (a filter-bypass, P0). Binds an explicit `ESCAPE '\'`
+   * because SQLite does not honour a default escape character (MySQL/Postgres do,
+   * but the explicit clause is correct for all three).
+   */
+  static applyContainsLike(this: Pick<FilterHelpersHost, 'applyLike'>, builder: any, method: string, field: string, value: unknown): void {
+    this.applyLike(builder, method, field, value, 'contains');
+  }
+
+  /** The body of `SqlDriver#declaredFieldsFor`; the method's docblock there is its contract. */
+  static declaredFieldsFor(this: Pick<FilterHelpersHost, 'managedObjectFields'>, object: string): Record<string, any> | undefined {
+    const tableName = StorageNameMapping.resolveTableName({ name: object } as any);
+    return this.managedObjectFields.get(tableName) ?? this.managedObjectFields.get(object);
+  }
+
+  /**
+   * [#5134] Emit the dialect FALSE constant — a predicate that matches no row.
+   *
+   * `1 = 0` is the spelling already used for this condition on both sides of the
+   * repo: `read-scope-sql.ts` compiles an empty `$in` to it, and Knex itself
+   * renders an empty `whereIn` as `1 = 0`. It is valid on every dialect this
+   * driver targets (unlike a bare `FALSE`, which MySQL accepts but older SQL
+   * Server does not), needs no bindings, and keeps the query a normal SELECT so
+   * `LIMIT`/`ORDER BY`/aggregates all still behave.
+   */
+  static applyFalseConstant(builder: any, logicalOp: 'and' | 'or'): void {
+    builder[logicalOp === 'or' ? 'orWhereRaw' : 'whereRaw']('1 = 0');
+  }
+}

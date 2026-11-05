@@ -73,7 +73,7 @@
 - 从根在当前 `origin/main` 的那条起走父-tip 链即真实排队序;`ls-remote` 的字典序无意义。
 - 名形里的 `<PARENT>` 是推测基:实测晚十余分钟才落 `main` ⇒ ⛔ 不读作该基已落地。
 - 该读法零配额,答 timeline 答不了的排第几;⛔ 只读现在、不重建历史。
-- 队列踢出先认签名再决定重投:核对失败签名与已知 flaky 一致 ⇒ 原样重投。
+- 队列踢出先认签名:与已知 flaky(如 `Checkout repository` 超时)一致 ⇒ 原样重投,理由记 PR。
 - 止血修复合入后同一签名再现就不再是那条 flaky,是新问题须重新诊断,⛔ 禁反射式重投。
 - 第三种签名:本 PR 名下没有任何 `merge_group` run,且批次同伴的 run 全部 `success`。
 - 队列重建的连带取消不是红 ⇒ 带签名收据重投一次,收据留在 PR 上,⛔ 无收据不重投。
@@ -129,8 +129,7 @@
 - `performed_via_github_app`、`GET /user` 与 core 限流头对两类同答 ⇒ 三者都不是判别式。
 - 封号隐藏其全部评论、无 timeline 事件;assignee、PR、正文存活;分诊没了挂 `pm:retriage`。
 - ⇒ 耐久算按令牌类重算,⛔ 不假定署名恒 `claude[bot]`;用户类下请 PR 作者复审回 422。
-- GraphQL 池 5000/时,只留给没有 REST 对应物的几件。
-- 那几件 = `rest-channel.md`〈不可迁移〉那三件;draft 翻转与 auto-merge 挂载有中继 op、不在内。
+- GraphQL 池 5000/时只留给 `rest-channel.md`〈不可迁移〉三件;draft 翻转与挂载走中继 op。
 - 逐操作通道归属、写侧配方与队列路由三读法见 `rest-channel.md`,⛔ 不在本表复述。
 - MCP list/search 家族整个走 GraphQL 稀缺池,`issue_write` 连查找半边都吃。
 - 配额红时认领类动作排队,评论走 REST 桶先行把结论发出去。
@@ -140,13 +139,11 @@
 - 红窗调度:守候只给上面那几件 GraphQL-only 的,⛔ 其余一切不为配额空等。
 - 走队列的仓落地仍必经 auto-merge,红窗里照样走中继 op 挂载;直合仓合并本身有 REST 端点。
 - 被挡住的翻转是在等窗口,不是关于该 PR 的信号 ⇒ ⛔ 不据它重挂、不据它改判状态。
-- 报文里的 user ID 只是报文:据它推 MCP 池跨席共享与本节首条冲突,⛔ 未裁不写成事实。
 - `issue transfer` 因配额或权限拿不到 ⇒ 当轮改走多仓协调条款的在目的仓重建配方。
 - 该配方 = 出处头加裸 `#N` 改全名加关源单为 moved:纯 REST、配额免疫,⛔ 不为它空等重置。
 - 两个瘦身参数都不省池。`fields` 省载荷:MCP list/search 服务器端无条件抓 Project field_values。
 - ⇒ 池枯竭时最小字段请求同样全体失败,报错串是 failed to fetch issue field values。
-- ⛔ `minimal_output: true` 不裁 `list_issues` 的 `body`,⛔ 永不当省额度手段写进任何 skill。
-- 没有参数能关掉 `body`:要么整表 107 点,要么换窄接口(点数未测)。
+- `minimal_output` 不裁 `list_issues` 的 `body`,也无参数关得掉;⛔ 永不当省额度手段写进 skill。
 - 站得住的证据是直接观察 `body` 在,不是前后体积对比 —— 两次调用之间 population 已变。
 - git 先行:本地检出、`git log`、`ls-remote` 不花配额,断粮期分支存在性检查照常可用。
 - PR 文件读取同走 git:REST PR files 端点可瞬态 404。
@@ -287,8 +284,11 @@
 - 读数:带链接与管道的 `git push` 被拒,裸 `git push origin <分支>` 放行,拒绝文案不点名元素。
 - 判定跨天翻面 ⇒ ⛔ 一次拒绝不是能力边界;`permissions.allow` 条目才是仓库侧确定性通道。
 - `rerun_failed_jobs` 复用原 run 的提交与合并 ref,不拿新 main 重算。
-- ⇒ 基上缺已合修复时重跑无效,只能 `git merge origin/main` 推提交;判别看修复合并时间。
+- ⇒ 基上缺已合修复(修复合入晚于该 run 建立)时重跑无效,改 merge main。
 - 经 `rerun-failed.mjs` 重跑 PR `ci.yml` 失败 job 仅一次,先在 PR 或卡写明 flake 理由;二败即真红。
+- `run_rerun_failed` 只收 `ci.yml`;他 workflow 的 flake 走下两条,⛔ 永不空提交、永不关了重开。
+- `pr-automation.yml`(`Check Changeset` 取消无后继):席位改正文记下 flake 理由,其 `edited` 即重跑。
+- `lint.yml`(检出超时):`main` 前进后中继 `pr_update_branch` 出真新 head 整套重跑;齐平即空操作。
 - 同一 head 上轻量兄弟 workflow `success` 加重量级载体 `cancelled` 是普通取代的预期签名。
 - 同名 `failure` 也会被带另一诊断的后一次 `failure` 取代 ⇒ 任何判定前先按名取最新一次。
 - cancel-in-progress 窗口只罩得住慢载体 ⇒ 先比对 run `head_sha` 与 PR 当前 head,不开调查。

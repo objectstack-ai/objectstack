@@ -182,7 +182,11 @@ export const SystemFile = ObjectSchema.create({
 
     // The uploader: a row's uploader is read-only after creation, like a
     // comment's author. The upload doors record it from the session, under
-    // the system context; `readonly` makes the engine's update-side strip drop
+    // the system context, and any other create records the session's user,
+    // over whatever it carried, or is refused when the session names none
+    // (`sys-file-storage-owned-columns.ts`, "The uploader"), so a stored
+    // file's uploader is the user who created it; `readonly` makes the
+    // engine's update-side strip drop
     // a non-system caller's value and report it (`droppedFields`), a holder of
     // the ownership-transfer grant included, since this column is authorship
     // and not a transferable record owner. The reason is provenance

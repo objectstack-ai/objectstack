@@ -39,15 +39,15 @@
 - 判据是同块点名声明该符号的模块那份移动了的产物,或具名探针;缺则记 INCONCLUSIVE。
 - 报告证据里有 git 本可回答的 API 读吗:`list_issues`/`search_issues` 一类,或重跑去重读数。
 - ⛔ 不因此判 REWORK,ACCEPT 照给,但把这条记进 ACCEPT 评论。
-- 翻 ready、挂 auto-merge 或入队前,亲核 Lint & Repo Gates 与 TypeScript Type Check 两个 job。
-- 两个 job 的 `conclusion` 都须为 `success`,门禁族跑在其内;⛔ 不因报告写了本地绿跳过。
+- 翻 ready、挂 auto-merge 或入队前,亲核 Lint & Repo Gates 与 TypeScript Type Check 皆 `success`。
 - 两 job 只是 required 地板,入队另要求全 check 绿(第三种情形见 SKILL.md);跑法见 `true-green.md`。
 - 收敛期转红走补丁轮续派原 dev,⛔ 不作 REWORK 的理由;重量级卡可在派发令写本单等 CI。
-- 每个门禁读数先钉到 PR 当前 head:比对 run `head_sha` 与 `head.sha`,不一致的双向都不入账。
+- 门禁读数钉当前 head:run `head_sha` 或 dev 所抄短 sha 不符 `head.sha`、或没抄 ⇒ 双向不入账。
 - ⛔ 非当前 head 上的 `cancelled` 零动作、永不重跑:新推送自带全套 run。
-- 席位核对门禁证据 = 钉 head 的 check-runs(名+结论);本地并集只证本地子集,⛔ 不替缺席者。
-- dev 本地并集钉 head:所抄 `git rev-parse --short HEAD` 不符 PR `head.sha` 或没抄 ⇒ 双向都不入账。
+- 席位核对门禁证据 = check-runs(名+结论);本地并集只证本地子集,⛔ 不替缺席者。
 - `!` 或 `(narrowing)`:入队前核 `dogfood_battery` 钉 head、全量、红已修/已报;缺或收窄 ⇒ REWORK。
+- 把发送或写挪到应答之后的 PR:dogfood 门禁不跑于 PR 与队列,全绿照样红 `main` 的 push 全量。
+- ⇒ 入队前 grep `packages/qa/dogfood/test` 里应答后紧读该副作用的用例,同一 PR 改为有界等待。
 
 ## 断言与收益
 

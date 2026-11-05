@@ -425,8 +425,9 @@ describe('date-range preset vocabulary — one source, in the spec', () => {
   it('is a closed vocabulary — counts pinned so a silent add/drop is loud', () => {
     // ADR-0122 receipt convention: assert the count, not just membership, so a
     // name appearing or vanishing cannot ride in under a passing test.
-    expect(DATE_RANGE_PRESETS).toHaveLength(13);
-    expect(DATE_RANGE_DEFAULT_RANGES).toHaveLength(14);
+    // 13 shipped, plus next_month, next_quarter and next_30_days.
+    expect(DATE_RANGE_PRESETS).toHaveLength(16);
+    expect(DATE_RANGE_DEFAULT_RANGES).toHaveLength(17);
 
     // `custom` names no window — it is a `defaultRange` sentinel only.
     expect(DATE_RANGE_PRESETS).not.toContain('custom');

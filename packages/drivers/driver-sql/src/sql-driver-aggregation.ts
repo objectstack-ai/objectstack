@@ -2,31 +2,37 @@
 
 /**
  * [#29520 codemod] The "Aggregation" section of `SqlDriver`: the bodies of
- * `aggregate`, `foldEmptyAggregateAnswers` moved out of `sql-driver.ts` whole
- * by `scripts/codemod-split-sql-driver.mjs`.
+ * `aggregate`, `aggregandColumnClassOf`, `foldEmptyAggregateAnswers` moved out
+ * of `sql-driver.ts` whole by `scripts/codemod-split-sql-driver.mjs`.
  *
- * A MOVE, not a redesign. Each function below is the body of the `SqlDriver`
+ * A MOVE, not a redesign. {@link AggregationFacet} is a stateless facet of `SqlDriver`
+ * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
  * method of the same name exactly as it stood: not re-indented, not
- * formatted, not edited. The method stays on the class with its docblock and
- * signature, so the published `dist/*.d.ts`, an instance spy and a subclass
- * override are what they were; the docblock there is the contract.
+ * formatted, not edited. The method stays on the class as a one-call stub with
+ * its signature, so the published surface, an instance spy and a subclass
+ * override are what they were. A public or protected method keeps its
+ * docblock on the class, the contract; a private method's docblock moved here
+ * with its body. The state stays on `SqlDriver`.
  *
  * The bodies reach the class through {@link AggregationHost}: exactly the
- * `SqlDriver` members they read. Each method hands its body one literal of the
- * members that body reads, plus a `.call`: methods go as closures that call
- * them on the driver at call time (the builder factory as a bound reference),
- * so a subclass override or an instance spy is still the one reached; fields
- * and accessors go as GETTERS, read when the body reads them, as they were on
- * the class.
+ * `SqlDriver` members they read, private ones included. Every stub hands its
+ * body, by a `.call`, the same host: `aggregationHost` in
+ * `sql-driver-facet-hosts.ts`, built once per driver by the class's static
+ * block. Methods go as closures that call them on the driver at call time, so a
+ * subclass override or an instance spy is still the one reached; fields and
+ * accessors go as GETTERS, read when the body reads them, as they were on the
+ * class, and a field a body assigns goes with a SETTER that assigns it on the
+ * driver.
  *
- * The module imports `sql-driver.ts` for types only, so the two modules form
- * no evaluation cycle. `index.ts` re-exports nothing from this module.
+ * The module imports `sql-driver.ts` for types only, so the two modules form no
+ * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
 import { emptyGroupValueFor } from '@objectstack/spec/data';
 import type { DriverOptions } from '@objectstack/spec/data';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import { AGGREGATE_ANSWER_KIND, aggregandOperandSql } from '@objectstack/core';
+import type { AggregandColumnClass } from '@objectstack/core';
 import {
   refuseDateBucketedGroupBy, refuseDistinctAggregateWithoutField, unsupportedAggregationFilterError,
 } from './sql-driver-top-level.js';
@@ -34,10 +40,11 @@ import type { ReadPresentationKind } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
 
 /**
- * The `SqlDriver` members the functions below read — every one of them, and
- * no other. Each is typed AS the class member (an indexed access on the
- * class), so a change to a member's signature on the class is a change here
- * too. `readonly` members are the getters.
+ * The `SqlDriver` members the bodies of {@link AggregationFacet} read — every one of
+ * them, and no other. Each is typed AS the class member (an indexed access on
+ * the class), so a change to a member's signature on the class is a change
+ * here too. `readonly` members are the getters; the others are fields a body
+ * assigns.
  */
 export interface AggregationHost {
   aggregandColumnClassOf: SqlDriver['aggregandColumnClassOf'];
@@ -45,21 +52,26 @@ export interface AggregationHost {
   aliasIdentifierSql: SqlDriver['aliasIdentifierSql'];
   applyFilters: SqlDriver['applyFilters'];
   applyTenantScope: SqlDriver['applyTenantScope'];
+  readonly booleanFields: SqlDriver['booleanFields'];
   buildDateBucketExpr: SqlDriver['buildDateBucketExpr'];
   coercionKey: SqlDriver['coercionKey'];
   readonly config: SqlDriver['config'];
   readonly dateGranularityCapabilities: SqlDriver['dateGranularityCapabilities'];
   readonly dialectName: SqlDriver['dialectName'];
   foldEmptyAggregateAnswers: SqlDriver['foldEmptyAggregateAnswers'];
+  readonly fractionalNumericFields: SqlDriver['fractionalNumericFields'];
   getBuilder: SqlDriver['getBuilder'];
   readonly knex: SqlDriver['knex'];
   mapAggregateFunc: SqlDriver['mapAggregateFunc'];
+  readonly numericFields: SqlDriver['numericFields'];
   presentReadColumns: SqlDriver['presentReadColumns'];
   readPresentationKind: SqlDriver['readPresentationKind'];
 }
 
-/** The body of `SqlDriver#aggregate`; the method's docblock there is its contract. */
-export async function aggregate(this: Pick<AggregationHost, 'aggregandColumnClassOf' | 'aggregateBackendFault' | 'aliasIdentifierSql' | 'applyFilters' | 'applyTenantScope' | 'buildDateBucketExpr' | 'coercionKey' | 'config' | 'dateGranularityCapabilities' | 'dialectName' | 'foldEmptyAggregateAnswers' | 'getBuilder' | 'knex' | 'mapAggregateFunc' | 'presentReadColumns' | 'readPresentationKind'>, object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+/** The bodies of the "Aggregation" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
+export class AggregationFacet {
+  /** The body of `SqlDriver#aggregate`; the method's docblock there is its contract. */
+  static async aggregate(this: Pick<AggregationHost, 'aggregandColumnClassOf' | 'aggregateBackendFault' | 'aliasIdentifierSql' | 'applyFilters' | 'applyTenantScope' | 'buildDateBucketExpr' | 'coercionKey' | 'config' | 'dateGranularityCapabilities' | 'dialectName' | 'foldEmptyAggregateAnswers' | 'getBuilder' | 'knex' | 'mapAggregateFunc' | 'presentReadColumns' | 'readPresentationKind'>, object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     const builder = this.getBuilder(object, options);
     this.applyTenantScope(builder, object, options);
 
@@ -331,8 +343,17 @@ export async function aggregate(this: Pick<AggregationHost, 'aggregandColumnClas
     return this.presentReadColumns(this.foldEmptyAggregateAnswers(rows, foldedOutput), presentedOutput);
   }
 
-/** The body of `SqlDriver#foldEmptyAggregateAnswers`; the method's docblock there is its contract. */
-export function foldEmptyAggregateAnswers(rows: any, identities: Map<string, number>): any {
+  /** The body of `SqlDriver#aggregandColumnClassOf`; the method's docblock there is its contract. */
+  static aggregandColumnClassOf(this: Pick<AggregationHost, 'booleanFields' | 'fractionalNumericFields' | 'numericFields'>, table: string | null, field: string): AggregandColumnClass | undefined {
+    if (table === null) return undefined;
+    if (this.booleanFields[table]?.includes(field)) return 'boolean';
+    if (this.fractionalNumericFields[table]?.includes(field)) return 'fractional';
+    if (this.numericFields[table]?.includes(field)) return 'integral';
+    return undefined;
+  }
+
+  /** The body of `SqlDriver#foldEmptyAggregateAnswers`; the method's docblock there is its contract. */
+  static foldEmptyAggregateAnswers(rows: any, identities: Map<string, number>): any {
     if (identities.size === 0 || !Array.isArray(rows)) return rows;
     for (const row of rows) {
       if (!row || typeof row !== 'object') continue;
@@ -342,3 +363,4 @@ export function foldEmptyAggregateAnswers(rows: any, identities: Map<string, num
     }
     return rows;
   }
+}
