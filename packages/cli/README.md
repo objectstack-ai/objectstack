@@ -387,9 +387,10 @@ resolve is exactly this map — a subpath is added here on purpose, with a
 | `@objectstack/cli` | The command classes `bin/run.js` loads — the oclif entry. |
 | `@objectstack/cli/console` | Exactly three Console SPA mounting helpers — `resolveConsolePath`, `hasConsoleDist`, `createConsoleStaticPlugin` — consumed by cloud's `objectos-runtime` node server to mount the Console. The drift guards and the rest of `utils/console.ts` are **not** on this subpath (#16046). |
 | `@objectstack/cli/hook-body` | The hook-body extractor `os build` and `os lint` apply, for an app harness that must run the **same** body-only lowering the build ships (below). |
+| `@objectstack/cli/scenario-score` | The deterministic scenario scorer — `scoreGraph`, `scoreGraphShape`, `deriveShape`, `artifactToEvalGraph`, `gradeRun` and the types they name — for an eval harness that scores a built metadata graph and grades an agent's answer with the platform's own scorer rather than a copy (below). |
 | `@objectstack/cli/package.json` | The manifest itself, for the ordinary tooling idiom of reading a dependency's own version. |
 
-The three code subpaths (`.`, `./console`, `./hook-body`) are **ESM**: the package is `"type": "module"` and each maps to an ES module. Load them with `import`. A CommonJS caller reaches them through `import()`, or through `require()` only on a Node that loads ES modules synchronously (22.12 and later).
+The four code subpaths (`.`, `./console`, `./hook-body`, `./scenario-score`) are **ESM**: the package is `"type": "module"` and each maps to an ES module. Load them with `import`. A CommonJS caller reaches them through `import()`, or through `require()` only on a Node that loads ES modules synchronously (22.12 and later).
 
 ### `@objectstack/cli/hook-body`
 
@@ -422,6 +423,32 @@ diverging from the rule the build actually applies. `os lint`'s
 `hook-body/not-lowerable` rule answers the pass/fail question; this entry hands
 a test the lowered `source` to run. The four names above are the whole surface
 — the entry re-exports them and nothing else.
+
+### `@objectstack/cli/scenario-score`
+
+```typescript
+import { artifactToEvalGraph, deriveShape, gradeRun, scoreGraph, scoreGraphShape } from '@objectstack/cli/scenario-score';
+import type { EvalGraph, ScenarioExpectation, ScoreResult } from '@objectstack/cli/scenario-score';
+
+// Read a built artifact (`dist/objectstack.json`, as JSON.parse returns it) into
+// the graph both scorers take.
+const graph: EvalGraph = artifactToEvalGraph(artifact);
+
+// By exact api-name, when the names are part of the scenario ...
+const byName: ScoreResult = scoreGraph(graph, expectation);
+// ... or by shape, so a correct build whose author chose other names still passes.
+const byShape: ScoreResult = scoreGraphShape(graph, deriveShape(expectation));
+byShape.score;   // passed / total, in [0, 1]
+byShape.checks;  // every check, with pass and detail
+
+// The run half: one agent turn graded against the question's computed truth.
+const grade = gradeRun(truth, hidden, { replyText, toolCalls });
+grade.correct; grade.cited; grade.leaks;
+```
+
+Deterministic throughout: no model call, no network. The five functions and
+the thirteen types their signatures name are the whole surface; the helpers
+beside them stay internal.
 
 ## Default capability slate (always-on)
 
