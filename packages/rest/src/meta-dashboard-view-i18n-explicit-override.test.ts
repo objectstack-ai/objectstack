@@ -295,6 +295,11 @@ describe('#20730 §1 packagedObjectBaseOf — one per-type packaged-base resolve
         getPackagedDashboardBase: vi.fn((name: string) => ({ kind: 'dashboard', name })),
         getPackagedViewBase: vi.fn((name: string) => ({ kind: 'view', name })),
         getPackagedReportBase: vi.fn((name: string) => ({ kind: 'report', name })),
+        // [#30062] A pair's declared override of a page, dataset, app or book replaces the base's item too.
+        getPackagedPageBase: vi.fn((name: string) => ({ kind: 'page', name })),
+        getPackagedDatasetBase: vi.fn((name: string) => ({ kind: 'dataset', name })),
+        getPackagedAppBase: vi.fn((name: string) => ({ kind: 'app', name })),
+        getPackagedBookBase: vi.fn((name: string) => ({ kind: 'book', name })),
     });
 
     it('asks each type its own accessor, handing the served name through unchanged', () => {
@@ -309,17 +314,24 @@ describe('#20730 §1 packagedObjectBaseOf — one per-type packaged-base resolve
         expect(p.getPackagedDashboardBase).toHaveBeenCalledTimes(1);
         expect(p.getPackagedViewBase).toHaveBeenCalledTimes(1);
         expect(p.getPackagedReportBase).toHaveBeenCalledTimes(1);
+        // [#30062] The four sealed types a pair's declared override replaces.
+        expect(packagedObjectBaseOf(p, 'page', 'crm_welcome')).toEqual({ kind: 'page', name: 'crm_welcome' });
+        expect(packagedObjectBaseOf(p, 'dataset', 'opportunity_metrics')).toEqual({ kind: 'dataset', name: 'opportunity_metrics' });
+        expect(packagedObjectBaseOf(p, 'app', 'crm')).toEqual({ kind: 'app', name: 'crm' });
+        expect(packagedObjectBaseOf(p, 'book', 'crm_manual')).toEqual({ kind: 'book', name: 'crm_manual' });
+        for (const accessor of ['getPackagedPageBase', 'getPackagedDatasetBase', 'getPackagedAppBase', 'getPackagedBookBase'] as const) {
+            expect(p[accessor], accessor).toHaveBeenCalledTimes(1);
+        }
     });
 
     it('asks nothing for a type with no packaged base', () => {
         const p = protocol();
-        for (const type of ['action', 'app', 'dataset', 'page', 'toString', 'constructor']) {
+        for (const type of ['action', 'flow', 'pages', 'toString', 'constructor']) {
             expect(packagedObjectBaseOf(p, type, 'x'), type).toBeUndefined();
         }
-        expect(p.getPackagedObjectBase).not.toHaveBeenCalled();
-        expect(p.getPackagedDashboardBase).not.toHaveBeenCalled();
-        expect(p.getPackagedViewBase).not.toHaveBeenCalled();
-        expect(p.getPackagedReportBase).not.toHaveBeenCalled();
+        for (const accessor of Object.keys(p) as (keyof typeof p)[]) {
+            expect(p[accessor], accessor).not.toHaveBeenCalled();
+        }
     });
 
     it('answers undefined for an empty name, a protocol without the accessor, and an accessor that throws', () => {
