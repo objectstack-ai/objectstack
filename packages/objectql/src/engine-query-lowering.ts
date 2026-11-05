@@ -53,6 +53,11 @@
  * module this one imports, so the evaluation order of every module is what it
  * was. The published build bundles both files into one, where the cycle does
  * not exist.
+ *
+ * [#30053 codemod] A PRIVATE method's docblock has since moved here,
+ * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * and the class keeps none for it; a public or protected method's docblock
+ * stays on the class, the contract, and its function keeps the placeholder.
  */
 
 import type { FilterCondition, FilterLoweringOptions, QueryAST } from '@objectstack/spec/data';
@@ -87,7 +92,42 @@ export interface QueryLoweringHost {
   find: ObjectQL['find'];
 }
 
-/** The body of `ObjectQL#resolveWhereTokens`; the method's docblock there is its contract. */
+/**
+ * Expand `{filter-placeholder}` values in a read AST's `where` against the
+ * request (framework#3582).
+ *
+ * Filters travel as JSON, so a time- or user-scoped slice authored in a view,
+ * dashboard, related list or REST query writes `'{current_year_start}'` /
+ * `'{current_user_id}'` rather than a literal. Until now nothing on the server
+ * substituted them: the placeholder reached the driver as a string, compared
+ * as text, and matched nothing — an empty grid with no error anywhere.
+ *
+ * The engine is the right seam because it is the ONE gate every server-side
+ * read passes through (REST, SDK, related lists, flow `find_records`, sharing
+ * graph reads), so a surface that follows the filter contract works the day it
+ * ships instead of waiting for its own resolver. It runs BEFORE the middleware
+ * chain so only author-supplied filters are inspected; the RLS/sharing filters
+ * injected downstream are built from concrete context values and carry no
+ * placeholders.
+ *
+ * Cheap by construction: {@link resolveFilterTokens} returns the input by
+ * reference when the tree holds no placeholder, which is every internal query.
+ * An unresolvable placeholder throws (see the resolver's module doc) — the one
+ * outcome an author can act on.
+ *
+ * [#20334] `position` names the AST's filter slot: `where` (every read verb)
+ * or `having` (`aggregate`). One resolver for both, so a placeholder reads the
+ * same in either position: `{current_year_start}` resolves, and an unknown one
+ * is `FILTER_TOKEN_UNKNOWN` / 400. The resolver needs no field type — it walks
+ * values, never keys — so a `having` keyed by aggregate aliases resolves as a
+ * `where` keyed by fields does.
+ *
+ * [ADR-0053 D-D1, amended — #5930] …and then LOWERS the position, through
+ * {@link resolveThenLowerWhere}: resolution and lowering are one stage, so a
+ * verb cannot run one without the other. `lowering` is required for that
+ * reason — the position's declared-type reader (`where`: the object's
+ * fields; `having`: the aggregated row's columns).
+ */
 export async function resolveWhereTokens(
   this: Pick<QueryLoweringHost, '_registry' | 'resolveRelateThenLowerWhere'>,
   ast: QueryAST | undefined,
@@ -118,7 +158,29 @@ export async function resolveWhereTokens(
   );
 }
 
-/** The body of `ObjectQL#lowerRelationConditions`; the method's docblock there is its contract. */
+/**
+ * [#20802] Lower every nested-relation condition in one `where` —
+ * `{ owner: { region: 'NA' } }` beneath a relation field — into a filter
+ * every driver answers, by READING the related object: the ids of the
+ * records the condition matches become `$in` on a single-valued relation, or
+ * an `$or` of `$contains` per id on a multi-valued one
+ * (`relation-filter-lowering.ts` holds the forms, the cap and the words).
+ *
+ * **As the caller.** The read is this engine's own `find` on the related
+ * object with the caller's execution context — not a driver call and not a
+ * system read — so the related object's CRUD gate, row scope and field
+ * permissions apply exactly as they do to a direct read of it, and its own
+ * doors judge the condition's comparands against its own declarations. A
+ * refusal from any of them is the answer, loudly; nothing is swallowed.
+ *
+ * **Bounded.** The read asks for one id more than
+ * {@link RELATION_FILTER_ID_CAP}; receiving it, the filter is refused
+ * (`INVALID_FILTER` / 400, the two-step route in the words), never run over
+ * a cut-off list.
+ *
+ * Returns `where` by reference when it holds no condition — the common path
+ * reads nothing and allocates nothing beyond one walk.
+ */
 export async function lowerRelationConditions<W>(
   this: Pick<QueryLoweringHost, '_registry' | 'relatedSchemaOf' | 'find'>,
   object: string,
@@ -155,7 +217,16 @@ export async function lowerRelationConditions<W>(
   });
 }
 
-/** The body of `ObjectQL#resolveSearchQueryableFields`; the method's docblock there is its contract. */
+/**
+ * [#25672] The fields `context` may query on `object`, asked of the
+ * registered `security` service's `getQueryableFields` — the answer the
+ * field-read predicate guard is the complement of. `undefined` narrows
+ * nothing, and is the answer when no context is carried (a context-less
+ * read is never asked about, as `searchAll` does), when no security service
+ * is registered or it has no such method, or when it gives no answer: the
+ * guard still judges the search, so an absent answer can only leave the
+ * request as strict as it was. A throw from the method propagates.
+ */
 export async function resolveSearchQueryableFields(
   this: Pick<QueryLoweringHost, typeof SECURITY_SERVICE_SOURCE_SLOT>,
   object: string,
