@@ -499,6 +499,17 @@ export const SpecifierSchema = lazySchema(() => z.object({
    * `sms.provider` — where "legal" means "this deployment ships an adapter for
    * it", not "some registrar published it". Do not add `valueDomain` to those.
    *
+   * **The one other boundary mover is a runtime option source.** A select whose
+   * legal values are what the running deployment supports (`localization.locale`:
+   * the languages its i18n service reports) has its table served by the
+   * settings service from that system, not from this declaration. Where a
+   * source answers, its options are what a write is judged against and what
+   * every manifest read serves (the namespace read and the manifest list
+   * alike); the declared `options` are the fallback, standing only while the
+   * source has no answer (the system it reads is absent from the composition).
+   * That is a runtime registration, not an authorable key: a manifest cannot
+   * declare one.
+   *
    * `pattern` / `minLength` / `maxLength` still apply and still narrow: they
    * constrain the *shape* of the string, the domain constrains its
    * *membership*. A value must satisfy both. Reach for `valueDomain` precisely
@@ -533,6 +544,19 @@ export const SpecifierSchema = lazySchema(() => z.object({
   /** `action_button`: handler invoked on click. */
   handler: SpecifierHandlerSchema.optional().describe('Action handler (action_button)'),
 
+  /**
+   * `toggle`: the confirm dialog text shown before the value changes to off
+   * (omit = no confirm). The name mirrors a handler's `confirmText`; it is
+   * asked only on the turn to OFF, the one direction a toggle such as
+   * `auth.email_password_enabled` takes away from people. Translated under
+   * `settings.<namespace>.keys.<key>.confirmOffText`, beside the toggle's
+   * `label`. The parse refuses it on every other specifier type, which would
+   * never ask it.
+   */
+  confirmOffText: I18nLabelSchema
+    .optional()
+    .describe("Confirm dialog text shown before a toggle's value changes to off (omit = no confirm)"),
+
   /** `child_pane`: namespace of the sub-manifest to navigate to. */
   childNamespace: SnakeCaseIdentifierSchema.optional().describe('Sub-namespace (child_pane)'),
 
@@ -565,6 +589,16 @@ export const SpecifierSchema = lazySchema(() => z.object({
       code: z.ZodIssueCode.custom,
       path: ['valueDomain'],
       message: `Specifier of type '${spec.type}' carries no value, so it must not declare a 'valueDomain'.`,
+    });
+  }
+  // A turn to OFF is asked about only on a `toggle`, the one specifier with an
+  // off. On any other type the renderer never asks it, so the declaration is a
+  // silent no-op, the shape Prime Directive #10 refuses (ruling 6657805240).
+  if (spec.confirmOffText !== undefined && spec.type !== 'toggle') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['confirmOffText'],
+      message: `Specifier of type '${spec.type}' has no off to confirm, so it must not declare a 'confirmOffText' (only a 'toggle' may).`,
     });
   }
   // select/radio/multiselect require options.

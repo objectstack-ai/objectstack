@@ -163,11 +163,19 @@ component silently skips it and the page renders one item short.
 
 Which object a component binds follows `dataSource.object` → `properties.object`
 → the page's `object`, so a multi-object page is checked per element rather than
-against one page-wide guess. A `record:related_list`'s `columns`/`sort`/`filter`
+against one page-wide guess. A `record:related_list`'s `columns`/`filter`
 resolve against its **related** object (`objectName`), and its add-picker against
 its own. Advisory, like form-layout field references — every consumer degrades
 rather than failing. The same descriptor table drives the react page surface
 (§10), so a component is described once and checked wherever it is authored.
+
+A page **sort** is the exception, because no consumer degrades it: the list door
+answers an unknown sort field `400 INVALID_SORT` on every load. So every stored
+page sort (an element's `dataSource.sort`, a related list's `sort` and
+`parentDataSource.sort`, a list block's own `sort`, `interfaceConfig.sort`, an app
+page's `record.sort`) naming a field the bound object lacks is a
+`page-field-unknown` **error**, and the page publish door refuses the save with
+`422 INVALID_METADATA`.
 
 Skipped, to keep false positives at zero: relationship paths (`account.name`,
 resolved by the query engine), registry-injected system fields (`created_at`,
@@ -737,6 +745,13 @@ findings the item **added** (#4463). Its package dimension narrows that context 
 the written item's **package closure** — the written package, its declared
 dependencies, and unconditionally both platform/system objects and rows carrying
 no package provenance (#9612); a provenance it cannot read narrows nothing at all.
+A dashboard or report write also keeps the base object of each dataset it binds
+(a widget's `dataset`; a report's `dataset` and each joined block's), because the
+datasets are never narrowed and the dataset query resolves a filter against that
+object whichever package ships it: a filter key that neither the object nor the
+dataset's dimensions name is refused there just as it is on a dataset inside the
+closure (#30005). No other write type keeps it, so a flow or a list view never
+reaches an outside object through a dataset.
 That changes what a rule can **resolve**, never which rules run, and nothing at
 this door walks `packages[]`. Two rules are told the closure is in force. A flow
 whose trigger object is outside it is refused with `flow-trigger-unknown-object`

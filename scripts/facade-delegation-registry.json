@@ -31,49 +31,49 @@
       "file": "packages/metadata-protocol/src/protocol.ts",
       "member": "getDiscovery",
       "card": "#30054",
-      "reason": "inferred-return-type (#29985 report: stays on the class until the return type is spelled)"
+      "reason": "return type spelled on the signature (#30054 step 1, public .d.ts byte-equal); the body stays until the protocol.ts codemod can move a member of the landed facade (it refuses its own output, and the split no longer re-proves from its #29985 base)"
     },
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
       "member": "findData",
       "card": "#30054",
-      "reason": "inferred-return-type (#29985 report: stays on the class until the return type is spelled)"
+      "reason": "return type spelled on the signature (#30054 step 1, public .d.ts byte-equal); the body stays until the protocol.ts codemod can move a member of the landed facade (it refuses its own output, and the split no longer re-proves from its #29985 base)"
     },
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
       "member": "getData",
       "card": "#30054",
-      "reason": "inferred-return-type (#29985 report: stays on the class until the return type is spelled)"
+      "reason": "return type spelled on the signature (#30054 step 1, public .d.ts byte-equal); the body stays until the protocol.ts codemod can move a member of the landed facade (it refuses its own output, and the split no longer re-proves from its #29985 base)"
     },
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
       "member": "cloneData",
       "card": "#30054",
-      "reason": "inferred-return-type (#29985 report: stays on the class until the return type is spelled)"
+      "reason": "return type spelled on the signature (#30054 step 1, public .d.ts byte-equal); the body stays until the protocol.ts codemod can move a member of the landed facade (it refuses its own output, and the split no longer re-proves from its #29985 base)"
     },
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
       "member": "saveMetaItem",
       "card": "#30054",
-      "reason": "inferred-return-type (#29985 report: stays on the class until the return type is spelled)"
+      "reason": "return type spelled on the signature (#30054 step 1, public .d.ts byte-equal); the body stays until the protocol.ts codemod can move a member of the landed facade (it refuses its own output, and the split no longer re-proves from its #29985 base)"
     },
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
       "member": "publishMetaItem",
       "card": "#30054",
-      "reason": "inferred-return-type (#29985 report: stays on the class until the return type is spelled)"
+      "reason": "return type spelled on the signature (#30054 step 1, public .d.ts byte-equal); the body stays until the protocol.ts codemod can move a member of the landed facade (it refuses its own output, and the split no longer re-proves from its #29985 base)"
     },
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
       "member": "rollbackMetaItem",
       "card": "#30054",
-      "reason": "inferred-return-type (#29985 report: stays on the class until the return type is spelled)"
+      "reason": "return type spelled on the signature (#30054 step 1, public .d.ts byte-equal); the body stays until the protocol.ts codemod can move a member of the landed facade (it refuses its own output, and the split no longer re-proves from its #29985 base)"
     },
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
       "member": "deleteMetaItem",
       "card": "#30054",
-      "reason": "inferred-return-type (#29985 report: stays on the class until the return type is spelled)"
+      "reason": "return type spelled on the signature (#30054 step 1, public .d.ts byte-equal); the body stays until the protocol.ts codemod can move a member of the landed facade (it refuses its own output, and the split no longer re-proves from its #29985 base)"
     },
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
@@ -296,98 +296,21 @@
       "class": "ObjectQL",
       "member": "registerApp",
       "card": "#30054",
-      "reason": "inferred-return-type (#29986 report: stays on the class until the return type is spelled)"
+      "reason": "return type spelled on the signature (#30054, public .d.ts byte-equal); the codemod --members pass refuses to move it: engine-registration.ts's header is no longer as the first pass wrote it (a hand-written member was added there)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
       "class": "ObjectQL",
       "member": "registerHook",
       "card": "#30054",
-      "reason": "inferred-return-type (#29986 report: stays on the class until the return type is spelled)"
+      "reason": "return type spelled on the signature (#30054, public .d.ts byte-equal); the codemod --members pass cannot prove its move: undoing it does not rebuild engine-hooks-and-functions.ts byte for byte (first difference at line 44, in its import block)"
     },
     {
       "file": "packages/objectql/src/engine.ts",
       "class": "ObjectQL",
       "member": "registerDriver",
       "card": "#30054",
-      "reason": "inferred-return-type (#29986 report: stays on the class until the return type is spelled)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "init",
-      "card": "#30054",
-      "reason": "inferred-return-type (#29986 report: stays on the class until the return type is spelled)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "triggerHooks",
-      "card": "#30054",
-      "reason": "inferred-return-type (#29986 report: stays on the class until the return type is spelled)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "destroy",
-      "card": "#30054",
-      "reason": "inferred-return-type (#29986 report: stays on the class until the return type is spelled)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "setDatasourceMapping",
-      "card": "#30054",
-      "reason": "inferred-return-type (#29986 report: stays on the class until the return type is spelled)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "getStatus",
-      "card": "#30054",
-      "reason": "inferred-return-type (#29986 report: stays on the class until the return type is spelled)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "seedAutonumber",
-      "card": "#30055",
-      "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "probeReferencingRows",
-      "card": "#30055",
-      "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "resolveMasterDetailParent",
-      "card": "#30055",
-      "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "resolveMasterDetailParents",
-      "card": "#30055",
-      "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "inspectDanglingReferences",
-      "card": "#30055",
-      "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "referenceExists",
-      "card": "#30055",
-      "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
+      "reason": "return type spelled on the signature (#30054, public .d.ts byte-equal); the codemod --members pass refuses to move it: engine-registration.ts's header is no longer as the first pass wrote it (a hand-written member was added there)"
     },
     {
       "file": "packages/objectql/src/engine.ts",

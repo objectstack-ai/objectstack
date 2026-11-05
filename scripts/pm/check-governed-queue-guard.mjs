@@ -450,7 +450,7 @@
  * ⭐ AN AUTHORIZED APPROVAL LIFTS THIS LIMB (maintainer ruling 2026-09-27,
  * #20153), exactly as it lifts a Tier H path. Until that day the landed
  * predicate said a human MERGE and nothing else — 「人工审核」 landed as the same
- * terminal a governed diff has (ACCEPT on the card, `needs-user-decision` on
+ * terminal a governed diff has (ACCEPT on the card, `pm:awaiting-merge` on
  * the PR, a final 维护者速读, review requested from `GOVERNED_APPROVERS`) and
  * the maintainer's own click (人工直合); the 2026-08-27 ruling had said
  * "approval lifts" of PATHS, nothing had said it of the NUMBER, and this file
@@ -2324,7 +2324,7 @@ export function renderSizeVerdict(verdict) {
     '           remote that it is in neither the queue nor `origin/main` — the pull-back of AGENTS.md Prime',
     '           Directive #14. Out of the queue and in draft is the SAFE state.',
     '        2. Then ONE of the landings — the same terminal a Tier H governed diff has: ACCEPT on the card,',
-    '           `needs-user-decision` on the PR, a final 维护者速读, review requested from GOVERNED_APPROVERS',
+    '           `pm:awaiting-merge` on the PR, a final 维护者速读, review requested from GOVERNED_APPROVERS',
     `           (${GOVERNED_APPROVERS.join(', ')}); and then EITHER`,
     '           (a) an APPROVED review by one of those accounts, on ANY commit (2026-09-27, objectstack#20153) —',
     '               the OWNING seat then lands it through the queue (席位落地): ready, auto-merge, this check',

@@ -1494,9 +1494,12 @@ const SEED_APPLIED_LANDED_DESCRIPTION =
   'Per object, the stored rows the seed landed on: `inserted` (created by this publish) and '
   + '`matched` (pre-existing rows a seed key matched), each capped at '
   + '`SEED_APPLIED_LANDED_IDS_CAP` (200) ids with `total` and `truncated` stating any cut. One '
-  + 'entry per object the loader ran, empty lists included. ABSENT means "not reported" — the '
-  + 'apply failed before or while loading (see `error`), or the producer reports no ids — never '
-  + '"no rows landed".';
+  + 'entry per object the loader ran, empty lists included. When the load threw part-way '
+  + '(`success: false` with `error`), it lists only the datasets that FINISHED before the throw, '
+  + 'and is EMPTY when none had; the dataset that threw is not listed (its rows are in the counts, '
+  + 'its object in `error`). '
+  + 'ABSENT means "not reported" — the apply failed before any load ran (see `error`), or the '
+  + 'producer reports no ids — never "no rows landed".';
 
 /**
  * Publish Metadata Item Response
@@ -1529,8 +1532,12 @@ const SEED_APPLIED_LANDED_DESCRIPTION =
  *   created, the only ones a reader may treat as the seed's own — and
  *   `matched` — pre-existing rows a seed key matched, possibly a customer's.
  *   Each list carries at most {@link SEED_APPLIED_LANDED_IDS_CAP} (200) ids
- *   and declares a cut with `truncated: true` beside the uncut `total`;
- *   absent `landed` means "not reported", never "nothing landed". The same
+ *   and declares a cut with `truncated: true` beside the uncut `total`.
+ *   [#30429] A load that threw part-way still reports `landed` for the
+ *   datasets that FINISHED before the throw, and an empty `landed` when the
+ *   throw came before any had; the dataset that threw is not listed (its ids
+ *   are only partly known), though its rows are in the counts. Absent `landed` means "not reported" (no load ran, or the
+ *   producer reports no ids), never "nothing landed". The same
  *   key, same schema, rides {@link PublishPackageDraftsResponseSchema}'s
  *   `seedApplied`. Accepted cost (objectstack-ai/cloud#3598 ruling A): row
  *   ids on the public publish responses, bounded by the cap.
@@ -3706,7 +3713,10 @@ export const RegisterDeviceRequestSchema = lazySchema(() => z.object({
     + 'android means fcm. web has no default vendor: a web registration names apns or fcm, and one without vendor is refused',
   ),
   appId: z.string().optional().describe('App the token was issued to: the iOS bundle ID or the Android application ID'),
-  locale: LocaleSchema.optional().describe('Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in'),
+  locale: LocaleSchema.optional().describe(
+    'Device locale (BCP 47, for example zh-CN). Stored on the device row; no push renders by it: a push arrives in the '
+    + 'recipient\'s language (sys_user.locale, then the deployment default)',
+  ),
   origin: z.string().regex(PUSH_SERVER_ORIGIN_PATTERN, { message: PUSH_SERVER_ORIGIN_MESSAGE }).optional().describe(
     '[PLANNED — not yet stored] The origin the Console was loaded from (window.location.origin, for example '
     + 'https://crm.example.com): the address the mobile shell saved for this server. The Console writes it; the server '

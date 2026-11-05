@@ -17,7 +17,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import { UploadProvider } from '@object-ui/providers';
+import { UploadProvider } from './UploadProvider';
 import { useUploadingScope, UploadingScopeProvider } from './uploadingScope.js';
 import { FileField } from './FileField.js';
 import { ImageField } from './ImageField.js';

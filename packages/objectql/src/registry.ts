@@ -752,6 +752,68 @@ function isLeftOutExtension(contributor: ObjectContributor, options: ObjectExten
 }
 
 /**
+ * The `extend` contributions a disable withholds from a served fold, and the
+ * member names only they add ({@link SchemaRegistry.withholdDisabledExtensions}).
+ */
+interface WithheldExtensions {
+  kept: ObjectContributor[];
+  withheldFields: ReadonlySet<string>;
+  withheldRules: ReadonlySet<string>;
+  /** Each withheld index by its structural key ({@link indexKeysOf}). */
+  withheldIndexes: ReadonlySet<string>;
+}
+
+/** The field names a body declares in the record spelling the merge reads. */
+function fieldNamesOf(body: unknown): string[] {
+  const fields = isPlainRecord(body) ? body.fields : undefined;
+  return isPlainRecord(fields) ? Object.keys(fields) : [];
+}
+
+/** The validation rule names a body declares. */
+function ruleNamesOf(body: unknown): string[] {
+  const rules = isPlainRecord(body) ? body.validations : undefined;
+  if (!Array.isArray(rules)) return [];
+  return rules
+    .map((rule) => (isPlainRecord(rule) ? rule.name : undefined))
+    .filter((name): name is string => typeof name === 'string' && name !== '');
+}
+
+/** The indexes a body declares, each by its structural key (the key the fold's index subtraction compares by). */
+function indexKeysOf(body: unknown): string[] {
+  const indexes = isPlainRecord(body) ? body.indexes : undefined;
+  return Array.isArray(indexes) ? indexes.map((index) => stableStringify(index)) : [];
+}
+
+/**
+ * `base` without the fields, rules and indexes a withheld extension alone adds. By
+ * reference when it carries none of them, which is the ordinary case (a base
+ * that was never folded).
+ */
+function withoutWithheldMembers(base: ServiceObject, withheld: WithheldExtensions): ServiceObject {
+  const fields = isPlainRecord((base as { fields?: unknown }).fields) ? (base as { fields: Record<string, unknown> }).fields : undefined;
+  const rules = (base as { validations?: unknown }).validations;
+  const dropFields = fields !== undefined && Object.keys(fields).some((name) => withheld.withheldFields.has(name));
+  const dropRules = Array.isArray(rules)
+    && rules.some((rule) => isPlainRecord(rule) && typeof rule.name === 'string' && withheld.withheldRules.has(rule.name));
+  const indexes = (base as { indexes?: unknown }).indexes;
+  const dropIndexes = Array.isArray(indexes) && indexes.some((index) => withheld.withheldIndexes.has(stableStringify(index)));
+  if (!dropFields && !dropRules && !dropIndexes) return base;
+  const out = { ...base } as ServiceObject & Record<string, unknown>;
+  if (dropFields) {
+    out.fields = Object.fromEntries(Object.entries(fields!).filter(([name]) => !withheld.withheldFields.has(name))) as ServiceObject['fields'];
+  }
+  if (dropRules) {
+    out.validations = (rules as unknown[]).filter(
+      (rule) => !(isPlainRecord(rule) && typeof rule.name === 'string' && withheld.withheldRules.has(rule.name)),
+    ) as ServiceObject['validations'];
+  }
+  if (dropIndexes) {
+    out.indexes = (indexes as unknown[]).filter((index) => !withheld.withheldIndexes.has(stableStringify(index))) as ServiceObject['indexes'];
+  }
+  return out;
+}
+
+/**
  * Deep merge two ServiceObject definitions.
  *
  * The merge set is CLOSED and enumerable — this is NOT "every prop, later
@@ -3622,6 +3684,41 @@ export class SchemaRegistry {
   /** See {@link onPackageUninstalled}. */
   private packageUninstalledListeners = new Set<(packageId: string) => void>();
 
+  /** See {@link onPackageEnabled}. */
+  private packageEnabledListeners = new Set<(packageId: string) => void>();
+
+  /**
+   * [#30377] Be told that {@link enablePackage} has switched a DISABLED package
+   * back on, after its served folds are dropped: never for an enable of a
+   * package that was already enabled (`enableOnInstall: true` on a fresh
+   * install). Returns the unsubscribe.
+   *
+   * For state derived from what a disable withholds, so it is brought current
+   * on every enable door at once (`PATCH /packages/:id/enable`, an install's
+   * `enableOnInstall`, the protocol's install), never per door. The engine is
+   * the one today: a roll-up `summary` a package contributes by extension is
+   * withheld with its package, so the child writes made during the disable
+   * recompute nothing, and the engine recomputes it on enable.
+   */
+  onPackageEnabled(listener: (packageId: string) => void): () => void {
+    this.packageEnabledListeners.add(listener);
+    return () => { this.packageEnabledListeners.delete(listener); };
+  }
+
+  /** Tell every {@link onPackageEnabled} listener. Never throws: the enable has happened, and a failing listener is logged at `error`. */
+  private announcePackageEnabled(id: string): void {
+    for (const listener of this.packageEnabledListeners) {
+      try {
+        listener(id);
+      } catch (err) {
+        console.error(
+          `[Registry] package "${id}" was enabled, but a listener bringing state derived from it current failed `
+            + `(${(err as Error)?.message ?? err}) — that state may still read as it did while the package was disabled.`,
+        );
+      }
+    }
+  }
+
   /**
    * [#30215] Be told, once per package, that {@link uninstallPackage} has
    * withdrawn it — after its record is gone, never for a refused uninstall
@@ -4737,11 +4834,103 @@ export class SchemaRegistry {
     // registry-direct consumer reads — does not move. Only what the registry
     // REMEMBERS changes: the packaged owner is still here, underneath.
     const baseContrib = contributors.find(c => c.ownership === 'overlay') ?? ownerContrib;
-    const merged = this.foldExtenders(contributors, baseContrib);
+    // A disabled package's `extend` contributions are withheld from the served
+    // fold ({@link withholdDisabledExtensions}); the cache is dropped by every
+    // enable and disable ({@link invalidateAll}).
+    const withheld = this.withholdDisabledExtensions(contributors);
+    const merged = withheld
+      ? this.foldExtendersOntoDefinition(withheld.kept, withoutWithheldMembers(baseContrib.definition, withheld))
+      : this.foldExtenders(contributors, baseContrib);
 
     // Cache the result
     this.mergedObjectCache.set(fqn, merged);
     return merged;
+  }
+
+  /**
+   * An object as the STORAGE layer must see it: every `extend` contribution
+   * folded in, whether or not its package is disabled. Schema sync (the
+   * driver's `syncSchema`, the federated binding) reads this, so a disable
+   * never takes a column, an index or a driver's read coercion away from the
+   * data it keeps: the physical schema follows the full contribution, the
+   * served object ({@link resolveObject}) follows enablement. With no disabled
+   * package among the object's extenders it IS {@link resolveObject}'s answer.
+   *
+   * Accepts a short name or an FQN, as {@link getObject} does.
+   */
+  getStorageObject(name: string): ServiceObject | undefined {
+    const fqn = this.resolveObjectKey(name);
+    return fqn === undefined ? undefined : this.resolveStorageObject(fqn);
+  }
+
+  /** {@link getAllObjects} at the storage layer ({@link getStorageObject}), each tagged with its owner's `_packageId`. */
+  getAllStorageObjects(): ServiceObject[] {
+    // Nothing disabled: the two layers are one answer, read through the one walk.
+    if (!this.hasDisabledPackage()) return this.getAllObjects();
+    const results: ServiceObject[] = [];
+    for (const fqn of this.objectContributors.keys()) {
+      const merged = this.resolveStorageObject(fqn);
+      if (!merged) continue;
+      (merged as any)._packageId = this.getObjectOwner(fqn)?.packageId;
+      results.push(merged);
+    }
+    return results;
+  }
+
+  /** See {@link getStorageObject}. Uncached when it differs from the served fold, as {@link resolveOwnerLayer} is. */
+  private resolveStorageObject(fqn: string): ServiceObject | undefined {
+    const contributors = this.objectContributors.get(fqn);
+    if (!contributors || !contributors.some((c) => c.ownership === 'extend' && this.isPackageDisabled(c.packageId))) {
+      return this.resolveObject(fqn);
+    }
+    const ownerContrib = contributors.find(c => c.ownership === 'own');
+    if (!ownerContrib) return this.resolveObject(fqn);
+    return this.foldExtenders(contributors, contributors.find(c => c.ownership === 'overlay') ?? ownerContrib);
+  }
+
+  /**
+   * The `extend` contributions of a DISABLED package are withheld from every
+   * served fold of the object they extend, as the package's own objects,
+   * flows, navigation and actions are: "disabled" means hidden, refused on the
+   * data plane, data kept. The served object loses the fields, rules and
+   * indexes such an extension adds and the patches it makes, so the data
+   * plane's field map (its default projection and its unknown-field refusal)
+   * loses them too; the storage layer keeps them ({@link getStorageObject}).
+   *
+   * `withheldFields` / `withheldRules` / `withheldIndexes` are the members a
+   * withheld extension adds that neither the owner's own declaration nor a
+   * kept extension also declares (indexes compared structurally, as the fold's
+   * own index subtraction compares them). A base body that already carries them (a tenant overlay saved
+   * from a served read, a metadata-service copy seeded from a resolved body)
+   * has them taken off ({@link withoutWithheldMembers}), so where the base
+   * came from does not decide what a disable hides.
+   *
+   * `undefined` when no extension of the object is withheld, so the ordinary
+   * fold runs unchanged.
+   */
+  private withholdDisabledExtensions(contributors: readonly ObjectContributor[]): WithheldExtensions | undefined {
+    const withheld = contributors.filter((c) => c.ownership === 'extend' && this.isPackageDisabled(c.packageId));
+    if (withheld.length === 0) return undefined;
+    const kept = contributors.filter((c) => !withheld.includes(c));
+    const owner = contributors.find((c) => c.ownership === 'own')?.definition;
+    const keptFields = new Set<string>(ownFieldNamesOf(owner) ?? []);
+    const keptRules = new Set<string>(ruleNamesOf(owner));
+    const keptIndexes = new Set<string>(indexKeysOf(owner));
+    for (const c of kept) {
+      if (c.ownership !== 'extend') continue;
+      for (const name of fieldNamesOf(c.definition)) keptFields.add(name);
+      for (const name of ruleNamesOf(c.definition)) keptRules.add(name);
+      for (const key of indexKeysOf(c.definition)) keptIndexes.add(key);
+    }
+    const withheldFields = new Set<string>();
+    const withheldRules = new Set<string>();
+    const withheldIndexes = new Set<string>();
+    for (const c of withheld) {
+      for (const name of fieldNamesOf(c.definition)) if (!keptFields.has(name)) withheldFields.add(name);
+      for (const name of ruleNamesOf(c.definition)) if (!keptRules.has(name)) withheldRules.add(name);
+      for (const key of indexKeysOf(c.definition)) if (!keptIndexes.has(key)) withheldIndexes.add(key);
+    }
+    return { kept, withheldFields, withheldRules, withheldIndexes };
   }
 
   /**
@@ -4767,7 +4956,12 @@ export class SchemaRegistry {
     const kept = contributors.filter((c) => !isLeftOutExtension(c, options!));
     const ownerContrib = kept.find(c => c.ownership === 'own');
     if (!ownerContrib) return undefined;
-    return this.foldExtenders(kept, kept.find(c => c.ownership === 'overlay') ?? ownerContrib);
+    const base = kept.find(c => c.ownership === 'overlay') ?? ownerContrib;
+    // …and a disabled package's, as on every served fold ({@link withholdDisabledExtensions}).
+    const withheld = this.withholdDisabledExtensions(kept);
+    return withheld
+      ? this.foldExtendersOntoDefinition(withheld.kept, withoutWithheldMembers(base.definition, withheld))
+      : this.foldExtenders(kept, base);
   }
 
   /**
@@ -5585,11 +5779,18 @@ export class SchemaRegistry {
     // [#29903, #29872] The contributions `options` names are left out, as on
     // {@link getAllObjects} ({@link ObjectExtensionFoldOptions}).
     const registered = this.objectContributors.get(fqn);
-    const contributors = leavesExtensionsOut(options) ? registered?.filter((c) => !isLeftOutExtension(c, options)) : registered;
-    if (!contributors || !contributors.some((c) => c.ownership === 'extend')) return this.finishServedObject(base);
+    const listed = leavesExtensionsOut(options) ? registered?.filter((c) => !isLeftOutExtension(c, options)) : registered;
+    // A disabled package's `extend` contributions are withheld, and taken off
+    // a base that already carries them, as on {@link resolveObject}.
+    const withheld = listed ? this.withholdDisabledExtensions(listed) : undefined;
+    const contributors = withheld?.kept ?? listed;
+    const served = withheld ? withoutWithheldMembers(base as unknown as ServiceObject, withheld) : base as unknown as ServiceObject;
+    if (!contributors || !contributors.some((c) => c.ownership === 'extend')) {
+      return this.finishServedObject(served as unknown as T);
+    }
     return this.foldExtendersOntoDefinition(
       contributors,
-      this.subtractExtenderContributions(contributors, base as unknown as ServiceObject),
+      this.subtractExtenderContributions(contributors, served),
     ) as unknown as T;
   }
 
@@ -8067,6 +8268,10 @@ export class SchemaRegistry {
     }
     this.noteItem('package', manifest.id);
     collection.set(manifest.id, pkg);
+    // A row that lands disabled withholds the package's `extend` contributions
+    // from every served fold ({@link withholdDisabledExtensions}), and a fold
+    // cached before the row existed read it as enabled.
+    if (this.isPackageDisabled(manifest.id)) this.invalidateAll();
     // The names this package now holds, recorded whether or not an item store
     // entry will carry them (see `securityCatalogClaims`).
     if (selfId !== undefined) this.recordSecurityCatalogClaims(selfId, manifest);
@@ -8279,6 +8484,7 @@ export class SchemaRegistry {
   enablePackage(id: string): InstalledPackage | undefined {
     const pkg = this.getPackage(id);
     if (pkg) {
+      const wasDisabled = this.isPackageDisabled(id);
       pkg.enabled = true;
       pkg.status = 'installed';
       pkg.statusChangedAt = new Date().toISOString();
@@ -8287,6 +8493,7 @@ export class SchemaRegistry {
       // [#24400] A disabled package's bound actions are not attached
       // ({@link boundCodeActions}), so every object's fold is re-derived.
       this.invalidateAll();
+      if (wasDisabled) this.announcePackageEnabled(id);
     }
     return pkg;
   }

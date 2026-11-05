@@ -44,6 +44,21 @@ export interface EmailSenderSurface {
         organizationId?: string;
     }): Promise<{ id?: string } | unknown>;
     /**
+     * Structural mirror of `IEmailService.isConfigured` — whether mail sent
+     * through the service is actually delivered, answered by the package that
+     * owns the transport. plugin-email answers `false` while its live
+     * transport is the LogTransport (no `mail` settings saved: every send
+     * resolves and writes `sys_email`, and no mail leaves the process), and
+     * reads the live transport on every call, so the answer follows a
+     * transport the `mail` settings swap in without a restart.
+     *
+     * OPTIONAL, as on the contract. An implementation without it is UNKNOWN,
+     * and this channel keeps treating it as it always has (available): only an
+     * explicit `false` is evidence that nothing would be delivered
+     * ({@link emailTransportRefusal}).
+     */
+    isConfigured?(): boolean;
+    /**
      * Structural mirror of `IEmailService.sendTemplate` (#9205) — resolves a
      * `sys_email_template` bundle by `(template, locale)` with the documented
      * en-US fallback ladder, renders it against `data`, and delivers. OPTIONAL
@@ -96,7 +111,9 @@ export interface EmailChannelOptions {
      * {@link MessagingChannel.isAvailable} reports as
      * `transport_not_configured` and {@link MessagingChannel.send} REFUSES with
      * the same reason (commit 879b51270). ⛔ Not a no-op success: a delivery nothing was
-     * sent for is never reported as delivered.
+     * sent for is never reported as delivered. A resolved service whose
+     * `isConfigured()` answers `false` (only the log transport is live) is
+     * answered the same way (#30510).
      */
     getEmail(): EmailSenderSurface | undefined;
     /** Resolve the data engine (recipient address lookup). */
@@ -197,6 +214,33 @@ export async function templateRefusalAfterCurrencyReadFault(
  * text, and the same convention already applies to `sendTemplate`'s codes.
  */
 const TRANSPORT_NOT_CONFIGURED: ChannelUnavailableReason = 'transport_not_configured';
+
+/**
+ * [#30510, cloud#2549 ruling B item ③] Why a resolved email service cannot
+ * deliver, or `undefined` when nothing says it cannot.
+ *
+ * A registered `email` service is not a transport. plugin-email registers one
+ * on every boot, and with no `mail` settings saved it holds the LogTransport:
+ * a send resolves, writes `sys_email`, and no mail leaves the process. Before
+ * this, the channel read "a service is registered" as "available", so every
+ * e-mail notification on such a deployment dispatched to `success` while
+ * nobody was mailed.
+ *
+ * Asked of the service, ⛔ never of the options it was built from: the answer
+ * must follow a transport the `mail` settings swap in after boot, and only the
+ * service sees its live transport. Read on every call, never cached.
+ *
+ * Only an explicit `false` refuses. `isConfigured` is optional on the
+ * contract, and an implementation without it is unknown, not a log transport:
+ * reading its absence as "no transport" would mute every host-supplied email
+ * service that predates the member, which is not what the ruling decided.
+ */
+function emailTransportRefusal(email: EmailSenderSurface): string | undefined {
+    if (typeof email.isConfigured !== 'function') return undefined;
+    return email.isConfigured() === false
+        ? "the 'email' service has no delivering transport (only the log transport is active; configure the mail settings)"
+        : undefined;
+}
 
 const EMAIL_SHAPE = (s: string): boolean => {
     // Linear, non-backtracking "looks like an email" — same shape as the
@@ -343,9 +387,13 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
             // it causes is announced ONCE per emit by the service and recorded
             // durably on `sys_notification.suppressed_channels` — a line per
             // emit here would be the noisy half of an answer already written down.
-            return opts.getEmail()
+            //
+            // [#30510] A registered service whose live transport only logs is
+            // the same condition as no service: nothing would be delivered.
+            const email = opts.getEmail();
+            return email && emailTransportRefusal(email) === undefined
                 ? { available: true }
-                : { available: false, reason: 'transport_not_configured' };
+                : { available: false, reason: TRANSPORT_NOT_CONFIGURED };
         },
 
         async send(ctx: MessagingChannelContext, delivery: Delivery): Promise<SendResult> {
@@ -376,6 +424,21 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
                 return {
                     ok: false,
                     error: `${TRANSPORT_NOT_CONFIGURED}: no 'email' service is registered; nothing was sent to '${delivery.recipient}'`,
+                };
+            }
+            // [#30510] The same answer for a service whose live transport only
+            // logs, which `isAvailable()` above gives too. This is the residue
+            // fan-out's suppression cannot cover: a row written while a real
+            // transport was live and dispatched after the settings dropped back
+            // to the log transport. ⛔ Never handed to the service: its
+            // LogTransport would "send" it, write `sys_email`, and the row
+            // would read `success` with nobody mailed.
+            const refusal = emailTransportRefusal(email);
+            if (refusal !== undefined) {
+                ctx.logger.warn(`[email] ${refusal}; '${delivery.recipient}' was NOT emailed`);
+                return {
+                    ok: false,
+                    error: `${TRANSPORT_NOT_CONFIGURED}: ${refusal}; nothing was sent to '${delivery.recipient}'`,
                 };
             }
 

@@ -286,12 +286,47 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // [#30023] `page` joins: since the projection's `author-declared` verdict
   // the member also walks every stored PAGE sort (element `dataSource.sort`, a
   // block's own `sort`, `interfaceConfig.sort`, `record.sort`) and judges it
-  // by the sortability projection alone. It resolves only against
+  // by the sortability projection. [#30093] It also asks each page sort
+  // existence (`page-field-unknown`, `error`) and provenance
+  // (`page-field-unprovisioned`, `warning`), which `validatePageFieldBindings`
+  // no longer reads, so the page door refuses an unknown page sort field too.
+  // It resolves only against
   // `stack.objects`, which the per-write page snapshot carries, so it has no
   // missing-collection false-positive channel — the #9313 reason, one write
   // type over. It is the only member that declares `page`, so a page write
   // dispatches nothing else from this suite.
-  { name: 'validateSortableFields', runtimeTypes: ['flow', 'view', 'page'], run: validateSortableFields },
+  //
+  // [#30095] `object` joins, on the #15254 note's terms (below, at
+  // `validateObjectFieldRefs`) and its own measurement. Its first rung walks
+  // `objects[].listViews.*.sort`, a list view that lives on the OBJECT, the
+  // artifact Studio's app builder mints; before this the object door read that
+  // sort with nothing, so an object whose list view sorts by a field it
+  // declares `sortable: false` (or a `formula`, or a name it does not have)
+  // saved green and that list view answered `400 INVALID_SORT` on every load,
+  // while `os validate` refused the same body. Its two list-view siblings
+  // crossed in #15495; this member was held back for its own adjudication (the
+  // note at `validateListViewFieldRefs` says so), and this is it.
+  //
+  // Safe for the #9313 reason, unchanged by the new type: it resolves only
+  // against `stack.objects`, the collection every per-write snapshot carries,
+  // so there is no missing-collection false-positive channel. Its `views[]`
+  // and `pages[]` rungs find no such collection on an object snapshot and
+  // contribute nothing — rungs that are ABSENT, not rungs that read dead.
+  //
+  // ⚠️ A REFUSAL narrowing, like #15254's: an object republished with a list
+  // view sort the list door refuses is now refused (422) rather than stored.
+  // The gate's differential keeps it honest in the one direction that matters
+  // (#4463 D4): a STORED sibling already in violation is never charged to this
+  // write. MEASURED before crossing, on the shipped object corpus, through the
+  // door's own shape (`runRuntimeAuthoringRules`, type `object`, the other
+  // objects as context): 127 objects, every `*.object.ts` under `packages/`
+  // and `examples/`, 45 of them carrying 102 built-in list views with 113 sort
+  // keys — 0 findings, precision 1.0. The zero is a fact about the corpus AND
+  // the rule: the same sweep's synthetic probe (a list view sorting by a
+  // `sortable: false` field) is refused with `sort-field-unsortable` at
+  // `error`, and the door controls in `runtime-gate.object-writes.test.ts`
+  // are that probe made permanent.
+  { name: 'validateSortableFields', runtimeTypes: ['flow', 'view', 'page', 'object'], run: validateSortableFields },
   // [#14107] The REST of the same list view's field surface. The two members
   // above own `sort` and `searchableFields`; every OTHER field-naming position
   // on a list view — `columns`, filter keys, `grouping`, `rowColor`,
@@ -332,6 +367,7 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // here: it measured equally clean (0 findings over the same corpus) but its
   // crossing is its own adjudication with its own non-vacuity control, and
   // this card was scoped to the two axes its title names.
+  // [#30095] That adjudication is made: see the member's own note above.
   //
   // [#24563] A member that reads `packageScope` (#27827: so does
   // `validateObjectReferences` above, for its fix line only). Under a package

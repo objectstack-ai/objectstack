@@ -65,6 +65,7 @@ import MigrateApply from '../commands/migrate/apply.js';
 import MigrateAuditKeyMaterial from '../commands/migrate/audit-key-material.js';
 import MigrateAuditMailBodies from '../commands/migrate/audit-mail-bodies.js';
 import MigrateAuditMetadataBodies from '../commands/migrate/audit-metadata-bodies.js';
+import MigrateBlankMultiValues from '../commands/migrate/blank-multi-values.js';
 import MigrateBlankSingleValues from '../commands/migrate/blank-single-values.js';
 import MigrateOptionCodes from '../commands/migrate/option-codes.js';
 import MigrateTextScalars from '../commands/migrate/text-scalars.js';
@@ -193,6 +194,11 @@ const CALLERS: Record<string, Caller> = {
     run: invoke(MigrateActivityChangedFields),
     noWrite: [{ label: 'migrate activity-changed-fields', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate activity-changed-fields --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
+  'commands/migrate/blank-multi-values.ts': {
+    run: invoke(MigrateBlankMultiValues),
+    noWrite: [{ label: 'migrate blank-multi-values', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [{ label: 'migrate blank-multi-values --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
   },
   'commands/migrate/blank-single-values.ts': {
     run: invoke(MigrateBlankSingleValues),

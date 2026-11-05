@@ -1146,11 +1146,54 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
           [`flow '${name}' · edge 'e1' (start→route) condition`, severity],
         ]);
         for (const i of found) {
+          // [#30250] No write fires a sweep's run: its sentence names none.
           expect(i.message, `${name} ${i.where}`).toContain(
-            severity === 'error' ? 'the write that fired it still lands' : 'so this is a warning, not a refusal',
+            severity === 'error'
+              ? 'the time-relative sweep starts one run per row it finds, the run for this row stops at this condition'
+              : 'so this is a warning, not a refusal',
           );
+          expect(i.message, `${name} ${i.where}`).not.toMatch(/still lands|write that fired/);
         }
       }
+    });
+
+    // [#30250] A time-relative sweep's run is fired by no write. The type
+    // verdict's run-fails sentence says the run for that row fails and nothing
+    // else happens; the nullable-comparison twin is not served on a sweep at
+    // all (it runs on record-triggered flows only). Control: the same flow
+    // record-triggered keeps the sentence about the write that fired it.
+    it('names no firing write on a time-relative sweep, and keeps it on a record-triggered flow (#30250)', () => {
+      const objects = [{
+        name: 'crm_opportunity',
+        fields: { title: { type: 'text', required: true }, budget: { type: 'number' }, close_date: { type: 'date' } },
+      }];
+      const flowOf = (name: string, startConfig: Record<string, unknown>) => ({
+        name,
+        nodes: [
+          { id: 'start', type: 'start', config: { objectName: 'crm_opportunity', condition: 'title > 5', ...startConfig } },
+          { id: 'end', type: 'end' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end', condition: 'budget > 100' }],
+      });
+      const sweep = validateStackExpressions({
+        objects,
+        flows: [flowOf('tr_sweep', {
+          schedule: '0 * * * *', timeRelative: { object: 'crm_opportunity', dateField: 'close_date', offsetDays: 3 },
+        })],
+      });
+      const sweepType = typeMismatches(sweep);
+      expect(sweepType.map(i => i.severity)).toEqual(['error']);
+      expect(sweepType[0]!.message).toContain('and nothing else happens (the sweep logs the failure and goes on to the next row)');
+      for (const i of sweep) expect(i.message, i.where).not.toMatch(/still lands|write that fired/);
+      const recordTriggered = validateStackExpressions({
+        objects, flows: [flowOf('rt', { triggerType: 'record-after-update' })],
+      });
+      const rtType = typeMismatches(recordTriggered);
+      expect(rtType.map(i => i.severity)).toEqual(['error']);
+      expect(rtType[0]!.message).toContain('the write that fired it still lands');
+      // The null-guard twin on the record-triggered edge: its sentence too.
+      expect(recordTriggered.filter(i => /budget/.test(i.message) && /still lands/.test(i.message)).map(i => i.where))
+        .toEqual(["flow 'rt' · edge 'e1' (start→end) condition"]);
     });
 
     // [#30026] Where the sweep is of another object, the author is told why the
@@ -1308,17 +1351,68 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       }
     });
 
-    it('keeps the null sentence on a record-scoped validation rule\'s date arithmetic (#30016 control)', () => {
+    // [#30250] An `error` validation rule fails closed: its date arithmetic
+    // refuses the write, so it says so. Control: a formula field's date
+    // arithmetic reads null, and keeps the null sentence.
+    it('says a fail-closed validation rule\'s date arithmetic refuses the write; a formula keeps the null sentence (#30250)', () => {
       const issues = validateStackExpressions({
         objects: [{
           name: 'crm_opportunity',
-          fields: { close_date: { type: 'date' } },
-          validations: [{ name: 'late', condition: 'record.close_date + 1 > 3' }],
+          fields: {
+            close_date: { type: 'date' },
+            end_date: { type: 'date' },
+            next_day: { type: 'formula', expression: 'record.close_date + 1' },
+          },
+          validations: [
+            { name: 'late', condition: 'record.close_date + 1 > 3' },
+            { name: 'long', condition: 'record.end_date - record.close_date > duration("24h")' },
+          ],
         }],
       });
       const found = issues.filter(i => /^date arithmetic/.test(i.message));
-      expect(found.map(i => i.severity)).toEqual(['error']);
-      expect(found[0]!.message).toContain('this faults at runtime, so the field silently evaluates to null');
+      expect(found.map(i => i.severity)).toEqual(['error', 'error', 'error']);
+      const rules = found.filter(i => /validation/.test(i.where));
+      expect(rules).toHaveLength(2);
+      for (const i of rules) {
+        expect(i.message, i.where).toContain('fails closed: the write (or the operation a hook guards) is refused, not skipped');
+        expect(i.message, i.where).not.toMatch(/evaluates to null/);
+      }
+      const formula = found.filter(i => !/validation/.test(i.where));
+      expect(formula).toHaveLength(1);
+      expect(formula[0]!.message).toContain('this faults at runtime, so the field silently evaluates to null');
+    });
+
+    // [#30494] An advisory (`warning` / `info`) validation rule fails open: a
+    // fault skips the rule and the write proceeds, so its date arithmetic says
+    // so, still an error. Control: a formula field keeps the null sentence.
+    it('says an advisory validation rule\'s date arithmetic skips the rule; a formula keeps the null sentence (#30494)', () => {
+      const issues = validateStackExpressions({
+        objects: [{
+          name: 'crm_opportunity',
+          fields: {
+            close_date: { type: 'date' },
+            end_date: { type: 'date' },
+            next_day: { type: 'formula', expression: 'record.close_date + 1' },
+          },
+          validations: [
+            { name: 'late', condition: 'record.close_date + 1 > 3', severity: 'warning' },
+            { name: 'long', condition: 'record.end_date - record.close_date > duration("24h")', severity: 'info' },
+          ],
+        }],
+      });
+      const found = issues.filter(i => /^date arithmetic/.test(i.message));
+      expect(found.map(i => i.severity)).toEqual(['error', 'error', 'error']);
+      const rules = found.filter(i => /validation/.test(i.where));
+      expect(rules).toHaveLength(2);
+      for (const i of rules) {
+        expect(i.message, i.where).toContain(
+          'the rule is advisory, so a rule that cannot be evaluated is skipped, not refused: the write proceeds',
+        );
+        expect(i.message, i.where).not.toMatch(/evaluates to null|is refused, not skipped/);
+      }
+      const formula = found.filter(i => !/validation/.test(i.where));
+      expect(formula).toHaveLength(1);
+      expect(formula[0]!.message).toContain('this faults at runtime, so the field silently evaluates to null');
     });
 
     // [#29959] `seedRunVariables` seeds the flow's declared variables before it

@@ -50,10 +50,11 @@ import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLoc
 // (objectui#5134).
 import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema } from '@objectstack/spec/ui';
 import type { GroupingConfig } from '@objectstack/spec/ui';
-import { resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
+import { platformProvisionsStorage, resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { usePermissions } from '@object-ui/permissions';
 import { RecordDetailPanel } from '@object-ui/plugin-detail';
+import { resolveBulkActions, useBulkActionItems, useUndeclaredActionNamesWarning } from '@object-ui/plugin-grid';
 
 /**
  * The `case 'map'` branch below builds an `object-map` schema by flattening
@@ -999,8 +1000,16 @@ const NO_QUEUE_SITTING_CONDITIONS: ReadonlyArray<QueueSittingCondition> = [];
  * records can sit in a queue (the `ownership: 'user'` tier) and refuses an
  * author's own `queue` field on. The filter is offered only there: anywhere
  * else it would name a column the object does not have.
+ *
+ * The column must also have storage behind it. On an ADR-0015 `external`
+ * (federated) object the remote database owns the schema, so the injected
+ * `queue` column exists in the registered definition and nowhere else, and no
+ * row of that table can ever sit in a queue (assignment rules skip such
+ * objects too). The spec's `platformProvisionsStorage` is the one spelling of
+ * that verdict, read here rather than re-derived.
  */
 export function objectHasOwnershipQueue(objectDef: unknown): boolean {
+  if (!platformProvisionsStorage(objectDef)) return false;
   const raw = (objectDef as { fields?: unknown } | null | undefined)?.fields;
   const queue = Array.isArray(raw)
     ? raw.find((f) => (f as { name?: unknown } | null)?.name === 'queue')
@@ -2534,6 +2543,76 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     if (bulkDeleteVerdict.allowed) return declared;
     return declared.filter((a: unknown) => String(a).toLowerCase() !== 'delete');
   }, [schema.bulkActions, bulkDeleteVerdict]);
+
+  /**
+   * [objectstack#30394] What the non-grid bar DRAWS out of `permittedBulkActions`:
+   * the grid's own rule (objectstack#30169, ruling C), folded by the grid's own
+   * `resolveBulkActions` so the two bars cannot drift.
+   *
+   * A bare name draws only when the object declares an action of that name,
+   * labelled from that declaration (through the app's i18n bundle, as the grid
+   * labels it). The canonical `delete` keeps its own path: it is not an object
+   * action but the built-in bulk delete, gated above by `bulkDeleteVerdict`,
+   * so it is held out of the fold exactly as the grid holds it out. Any other
+   * name draws nothing; `undeclared` exists only for the development warning
+   * below. Before this fold every member drew a button, so a name the object
+   * never declared, an action a disabled package withholds included, showed a
+   * button that only toasted "not executable" when pressed.
+   *
+   * [objectstack#30535] A declared action then passes the grid bar's OWN gate,
+   * `useBulkActionItems`, before it draws: its `requiredPermissions` (ADR-0066
+   * D4, the caller's held capabilities), its activation switch, and its
+   * `visible`, evaluated once per selected record and offered when at least
+   * one record passes. The fold carried the resolved definition all along; the
+   * bar read only its label, so a gated action drew for every user and every
+   * selection. A repeated name draws once, as the fold surfaces it once.
+   */
+  const nonGridBulkFold = React.useMemo(() => {
+    const seen = new Set<string>();
+    const names = ((permittedBulkActions ?? []) as unknown[]).filter((a): a is string => {
+      if (typeof a !== 'string' || a === '') return false;
+      // The built-in `delete` is one button whatever its spelling's case.
+      const key = a.toLowerCase() === 'delete' ? 'delete' : a;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    const { defs, undeclared } = resolveBulkActions({
+      bulkActions: names.filter((a) => a.toLowerCase() !== 'delete'),
+      objectActions: objectDef?.actions,
+      localizeLabel: (actionName, fallback) =>
+        schema.objectName && typeof resolveActionLabel === 'function'
+          ? resolveActionLabel(schema.objectName, actionName, fallback)
+          : fallback,
+    });
+    return { names, defs, undeclared };
+  }, [permittedBulkActions, objectDef, schema.objectName, resolveActionLabel]);
+  const nonGridBulkItems = useBulkActionItems({
+    selectedRows,
+    actions: undefined,
+    actionDefs: nonGridBulkFold.defs,
+    objectFields: objectDef?.fields,
+  });
+  const nonGridBulkBar = React.useMemo(() => {
+    const labels = new Map(nonGridBulkItems.defs.map((def) => [def.name, def.label]));
+    // Authored order, the built-in `delete` where the author put it.
+    const drawn = nonGridBulkFold.names
+      .filter((a) => a.toLowerCase() === 'delete' || labels.has(a))
+      .map((name) => ({ name, label: labels.get(name) }));
+    return { drawn, undeclared: nonGridBulkFold.undeclared };
+  }, [nonGridBulkFold, nonGridBulkItems]);
+  // The grid says its own (ObjectGrid warns for the names it leaves undrawn),
+  // so this one speaks only while a non-grid view is on screen, and only once
+  // the object's schema read has settled. A list with an object but no schema
+  // in hand (no `getObjectSchema`, or the read failed) reports the names as
+  // unread, never as undeclared: the grid's own reading.
+  useUndeclaredActionNamesWarning({
+    key: 'bulkActions',
+    names: nonGridBulkBar.undeclared,
+    ready: objectDefLoaded && currentView !== 'grid',
+    basis: schema.objectName && objectDef == null ? 'unread' : 'declared',
+    address: { component: 'ListView', blockType: currentView, objectName: schema.objectName, label: schema.label },
+  });
 
   /**
    * [objectui#4420] The PER-RECORD half of the same key, for the same bar.
@@ -7352,7 +7431,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       )}
 
       {/* Bulk Actions Bar — skip for grid view since ObjectGrid renders its own BulkActionBar */}
-      {permittedBulkActions && permittedBulkActions.length > 0 && selectedRows.length > 0 && currentView !== 'grid' && (
+      {nonGridBulkBar.drawn.length > 0 && selectedRows.length > 0 && currentView !== 'grid' && (
         <div
           className="border-t border-primary/30 px-4 py-2 flex items-center gap-2 text-xs bg-primary/10 text-foreground shrink-0 shadow-sm"
           role="region"
@@ -7364,8 +7443,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             {selectedRows.length} {selectedRows.length === 1 ? 'item' : 'items'} selected
           </span>
           <div className="flex items-center gap-1.5 ml-3">
-            {permittedBulkActions.map((action: any) => {
-              const actionStr = String(action).toLowerCase();
+            {nonGridBulkBar.drawn.map(({ name: action, label }) => {
+              const actionStr = action.toLowerCase();
               const isDestructive = actionStr.includes('delete') || actionStr.includes('remove') || actionStr.includes('destroy');
               const Icon = isDestructive ? Trash2 : null;
               // [objectui#4420] The built-in `delete` runs over the ALLOWED
@@ -7388,7 +7467,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   data-testid={`bulk-action-${action}`}
                 >
                   {Icon && <Icon className="h-3 w-3" />}
-                  {tActionLabel(action)}
+                  {label ?? tActionLabel(action)}
                 </Button>
               );
             })}
@@ -7402,7 +7481,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               the dialog's slot: one name for one fact, whichever surface says
               it. */}
           {bulkDeleteEligibility.skipped > 0
-            && permittedBulkActions.some((a: any) => String(a).toLowerCase() === 'delete') && (
+            && nonGridBulkBar.drawn.some(({ name }) => name.toLowerCase() === 'delete') && (
             <span
               className="text-muted-foreground ml-3"
               data-testid="bulk-skipped-notice"

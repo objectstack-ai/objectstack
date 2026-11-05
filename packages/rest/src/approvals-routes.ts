@@ -48,6 +48,11 @@
 // `@objectstack/types` because the producer is a PLUGIN and rest cannot
 // import one.
 import { strandedDecisionDetails, sendError as sendEnvelopeError, sendOk } from '@objectstack/types';
+// [#29880] The declared value set of `sys_approval_request.status`. The
+// object's select options are built FROM this list (#3786), so it is the
+// object's own declaration, read where the object reads it, and not a second
+// list kept beside it.
+import { APPROVAL_STATUSES, type ApprovalStatus } from '@objectstack/spec/contracts';
 import {
     classifiedRefusalAnswer,
     nestedRefusalEnvelope,
@@ -73,6 +78,60 @@ import {
  * refused with the located 400 (AGENTS.md route rule 5), never dropped.
  */
 export const APPROVAL_RECORD_LOCK_PARAMS: readonly string[] = [];
+
+/**
+ * [#29880] Read `?status=` on `GET {basePath}/approvals/requests` against the
+ * value set `sys_approval_request.status` declares.
+ *
+ * **Measured** at c5800818: the route checked parameter NAMES (#7527) and
+ * handed the VALUE to the service as is, so `?status=bogus` (or `Pending`)
+ * answered 200 `{"data":[]}`. A caller could not tell "nothing in that
+ * state" from "that state does not exist", and an integration polling the
+ * inbox with a misspelt status skipped every pending approval in silence.
+ * The same reading forwarded a comma list (`?status=pending,returned`, the
+ * spelling `@objectstack/client`'s `approvals.listRequests` sends for an
+ * array) as ONE string, which matched no row either.
+ *
+ * Now each comma-separated entry must be one of {@link APPROVAL_STATUSES},
+ * spelt exactly. One entry goes to the service as a string, several as the
+ * array `IApprovalService.listRequests` already accepts (it pushes the array
+ * down as `$in`). An empty value or an empty entry (`?status=`,
+ * `?status=pending,`) names no status, so it is refused too: read as absent it
+ * would widen the answer to every status. A known value with no rows still
+ * answers 200 `[]`.
+ *
+ * Returns the filter value, `undefined` when the parameter is absent, or the
+ * located refusal sentence.
+ */
+function readApprovalStatusFilter(
+    raw: unknown,
+): { status: ApprovalStatus | ApprovalStatus[] | undefined } | { refusal: string } {
+    if (raw === undefined) return { status: undefined };
+    const allowed: readonly string[] = APPROVAL_STATUSES;
+    // [#30525] A value the query parser built into something other than a
+    // string (`?status[$ne]=pending` arrives as an object) has no entry to
+    // name: quoting `String(raw)` printed `"[object Object]"`. Say what shape
+    // the parameter takes instead. Same 400, same envelope, service not asked.
+    if (typeof raw !== 'string') {
+        return {
+            refusal: 'The "status" query parameter must be one status, or several separated by '
+                + `commas, given as plain text. Allowed values: ${allowed.join(', ')}.`,
+        };
+    }
+    const entries = raw.split(',').map((s) => s.trim());
+    const unknown = entries.filter((s) => !allowed.includes(s));
+    if (unknown.length > 0) {
+        const named = [...new Set(unknown)].map((s) => `"${s}"`).join(', ');
+        return {
+            refusal: `The "status" query parameter does not accept ${named}: an approval request `
+                + `has no such status. Allowed values: ${allowed.join(', ')}. Supply one, or several `
+                + 'separated by commas. This endpoint will not answer an empty list for a status '
+                + 'that does not exist, because that answer reads the same as "nothing in that status".',
+        };
+    }
+    const statuses = [...new Set(entries)] as ApprovalStatus[];
+    return { status: statuses.length === 1 ? statuses[0] : statuses };
+}
 
 /**
  * The `RestServer` members {@link registerApprovalsEndpoints} reads — every one
@@ -307,10 +366,19 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
                     handleRouteError(res, refusal);
                     return;
                 }
+                // [#29880] The status VALUE, read against the declared set —
+                // after the name and arity gates above, so a request committing
+                // several errors still gets the more fundamental answer first.
+                // Same nested envelope as both of them.
+                const statusRead = readApprovalStatusFilter(q.status);
+                if ('refusal' in statusRead) {
+                    res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: statusRead.refusal } });
+                    return;
+                }
                 const listFilter = {
                     object: q.object,
                     recordId: q.recordId ?? q.record_id,
-                    status: q.status,
+                    status: statusRead.status,
                     approverId: approverIds.length ? approverIds : undefined,
                     submitterId: q.submitterId ?? q.submitter_id,
                     q: typeof q.q === 'string' ? q.q : undefined,

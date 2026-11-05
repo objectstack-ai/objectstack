@@ -39,7 +39,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       banned: {
         label: "已封禁",
-        help: "为 true 时，用户无法登录。可通过“封禁用户 / 解除封禁”操作切换。"
+        help: "开启后，用户无法登录。可通过“封禁用户 / 解除封禁”操作切换。"
       },
       ban_reason: {
         label: "封禁原因"
@@ -70,7 +70,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       must_change_password: {
         label: "须修改密码",
-        help: "为 true 时，用户会被阻止访问（403 PASSWORD_RESET_REQUIRED），直到修改密码。由管理员用户管理接口写入；系统维护。"
+        help: "开启后，用户必须先修改密码才能继续使用。管理员创建账号、导入用户或重置密码时会自动开启；系统维护。"
       },
       mfa_required_at: {
         label: "MFA 强制生效时间",
@@ -557,7 +557,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       require_mfa: {
         label: "强制多因素认证",
-        help: "为 true 时，该组织的每位成员都必须注册身份验证器 App 才能访问数据。"
+        help: "开启后，该组织的每位成员都必须先绑定身份验证器 App，才能访问数据。需要本部署开启双重验证（OS_AUTH_TWO_FACTOR=true）；双重验证关闭时，保存为开启会被拒绝。"
       },
       timezone: {
         label: "时区",
@@ -995,7 +995,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       kind: {
         label: "类型",
-        help: "分类提示——不会改变图谱语义。",
+        help: "仅用于分类和报表，不会改变该单元在组织中的位置和覆盖范围。",
         options: {
           company: "公司",
           division: "事业部",
@@ -1006,7 +1006,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_business_unit_id: {
         label: "上级业务单元",
-        help: "组织树的自关联字段。Null 表示租户根节点。仍有下级单元的业务单元无法删除，须先将下级单元改挂到其他上级或删除。"
+        help: "该单元的上级单元。留空表示顶级单元。仍有下级单元的业务单元无法删除，须先将下级单元改挂到其他上级或删除。"
       },
       timezone: {
         label: "时区",
@@ -1022,19 +1022,19 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       active: {
         label: "启用",
-        help: "为 false 时，图谱查询不会展开该业务单元成员。"
+        help: "关闭后即停用该单元：授予该单元或其上级单元的共享等访问权限，将不再覆盖其成员及下级单元。"
       },
       effective_from: {
         label: "生效时间",
-        help: "该业务单元生效的时间（HRIS 同步）。"
+        help: "该业务单元成立的时间，通常由 HR 系统同步填写。"
       },
       effective_to: {
         label: "失效时间",
-        help: "该业务单元停用的时间（HRIS 同步）。"
+        help: "该业务单元撤销的时间，通常由 HR 系统同步填写。"
       },
       external_ref: {
         label: "外部引用",
-        help: "上游 HRIS 中的 ID（Workday / SAP HR / 北森）。"
+        help: "该单元在 HR 系统（如 Workday、SAP HR、北森）中的编号，每次同步时用它对应到本单元。"
       },
       id: {
         label: "业务单元 ID"

@@ -133,8 +133,8 @@ export const SysUserPermissionSet = ObjectSchema.create({
       label: 'Valid From',
       required: false,
       description:
-        'Grant is inactive before this instant. Null = active immediately. ' +
-        'Enforced fail-closed at resolution time — never by a background job.',
+        'The assignment takes effect at this time. Leave empty for it to take effect at once. ' +
+        'It starts on time, with no scheduled job to wait for.',
     }),
 
     // [ADR-0091 D1; mandatory on D4 break-glass and D6 agent grants; enforced by the D2 predicate]
@@ -142,9 +142,9 @@ export const SysUserPermissionSet = ObjectSchema.create({
       label: 'Valid Until',
       required: false,
       description:
-        'Grant is inactive AT and AFTER this instant (half-open [from, until), UTC). ' +
-        'Null = never expires. Mandatory on break-glass activations and agent grants. ' +
-        'Enforced at resolution time.',
+        'The assignment ends at this time (UTC). Leave empty for no end date. ' +
+        'Required on emergency access and on an assignment to an AI agent. ' +
+        'It ends on time, with no scheduled job to wait for.',
     }),
 
     reason: Field.text({
@@ -153,8 +153,8 @@ export const SysUserPermissionSet = ObjectSchema.create({
       maxLength: 500,
       // [ADR-0091 D1; required on D3 delegation and D4 break-glass rows; D6 agent grants]
       description:
-        'Why this grant exists. Free text; REQUIRED on delegation and break-glass rows. ' +
-        'Agent grants carry the task/run attribution here.',
+        'Why this assignment exists. Required on delegated and emergency-access assignments. ' +
+        'For an AI agent, name the task it was given access for.',
     }),
 
     // [#9730] `delegated_from` was RETIRED from this object (maintainer ruling

@@ -94,6 +94,13 @@ export interface Specifier {
   pattern?: string;
   rows?: number;
   handler?: SpecifierHandler;
+  /**
+   * `toggle` only: the question asked before the switch goes from on to off
+   * (omit = no confirm). Mirrors `SpecifierSchema.confirmOffText`, an
+   * `I18nLabel`: the default-language string, or an inline locale map
+   * (`{ en, 'zh-CN' }`).
+   */
+  confirmOffText?: string | Record<string, string>;
   childNamespace?: string;
   bannerText?: string;
   bannerSeverity?: 'info' | 'success' | 'warning' | 'error';

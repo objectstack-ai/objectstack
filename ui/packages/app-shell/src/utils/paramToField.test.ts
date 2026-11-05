@@ -380,3 +380,63 @@ describe('paramDegradesWithoutTarget — one answer to "did this param degrade?"
     }
   });
 });
+
+describe('paramToField — an authored `widget` draws the param (#30260)', () => {
+  // `ActionParamDef.widget` is the spec's `ActionParamSchema.widget`, which
+  // shares `FieldSchema.widget`'s meaning: a registered name wins over `type`,
+  // an unregistered one degrades to the `type` widget.
+
+  it('draws the registered widget a text param names, in place of the text widget', () => {
+    expect(paramToField(p({ type: 'text', widget: 'permission-ref' })).type).toBe('permission-ref');
+    expect(paramToField(p({ type: 'text', widget: 'position-ref' })).type).toBe('position-ref');
+  });
+
+  it('CONTROL: the same param without a widget is the text widget', () => {
+    expect(paramToField(p({ type: 'text' })).type).toBe('text');
+  });
+
+  it('falls back to the `type` widget when the name is not registered', () => {
+    expect(paramToField(p({ type: 'text', widget: 'no_such_widget' })).type).toBe('text');
+    // Not the text fallback: the param's OWN type widget.
+    expect(paramToField(p({ type: 'select', widget: 'no_such_widget' })).type).toBe('select');
+    expect(paramToField(p({ type: 'textarea', widget: 'no_such_widget' })).type).toBe('textarea');
+  });
+
+  it('an authored `text` widget is honoured as the text widget, not read as "unregistered"', () => {
+    expect(paramToField(p({ type: 'textarea', widget: 'text' })).type).toBe('text');
+  });
+
+  it('a registered widget on a targetless picker param is drawn, and the param does not degrade', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const param = p({ type: 'lookup', widget: 'permission-ref' });
+      expect(paramToField(param).type).toBe('permission-ref');
+      expect(paramDegradesWithoutTarget(param)).toBe(false);
+      expect(warn).not.toHaveBeenCalled();
+      // CONTROL: an unregistered widget leaves the degradation exactly as before.
+      const unregistered = p({ type: 'lookup', widget: 'no_such_widget' });
+      expect(paramToField(unregistered).type).toBe('text');
+      expect(paramDegradesWithoutTarget(unregistered)).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('a widget that names a picker with no target degrades like the picker type does, and warns', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const param = p({ type: 'text', widget: 'lookup' });
+      expect(paramDegradesWithoutTarget(param)).toBe(true);
+      expect(paramToField(param).type).toBe('text');
+      expect(warn).toHaveBeenCalledTimes(1);
+      // CONTROL: with a target the named picker is drawn, and nothing warns.
+      warn.mockClear();
+      const targeted = p({ type: 'text', widget: 'lookup', referenceTo: 'accounts' });
+      expect(paramDegradesWithoutTarget(targeted)).toBe(false);
+      expect(paramToField(targeted).type).toBe('lookup');
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});

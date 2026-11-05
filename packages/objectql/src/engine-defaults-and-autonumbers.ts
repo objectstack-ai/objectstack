@@ -5,8 +5,9 @@
  * the bodies of `resolveNowDefault`, `normalizeExpressionDefault`,
  * `resolveOptionDefault`, `applyFieldDefaults`, `defaultFieldEntries`,
  * `applyAutonumbers`, `adoptExplicitAutonumber`, `createWithAutonumberResync`,
- * `isIssuedAutonumberCollision`, `warnAutonumberReadersUnserved` moved out of
- * `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
+ * `isIssuedAutonumberCollision`, `warnAutonumberReadersUnserved`,
+ * `seedAutonumber` moved out of `engine.ts` whole by
+ * `scripts/codemod-split-engine.mjs`.
  *
  * A MOVE, not a redesign. {@link DefaultsAndAutonumbersFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -32,14 +33,17 @@
  */
 
 import { isCurrentUserDefaultToken, isNowDefaultToken, missingFieldValues, parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat } from '@objectstack/spec/data';
-import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
+import { isUniqueViolationError, keysetWalk, uniqueViolationColumn } from '@objectstack/types';
+import type { KeysetPageQuery } from '@objectstack/types';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { isMissingTableError } from '@objectstack/metadata/errors';
 import { envelopeDriverWriteRefusal } from './not-null-refusal-error.js';
 import { ExpressionEngine } from '@objectstack/formula';
 import type { EvalPermissions } from '@objectstack/formula';
 import {
-  AUTONUMBER_COLLISION_ATTEMPTS, declaredMultiValued, isExpressionDefault, readStoredAutonumberCounter,
-  recomputeAutonumberReaders,
+  AUTONUMBER_COLLISION_ATTEMPTS, AUTONUMBER_SEED_PAGE_SIZE, declaredMultiValued, isExpressionDefault,
+  readStoredAutonumberCounter, recomputeAutonumberReaders,
 } from './engine-top-level.js';
 import type { AutonumberReaders, FormulaPlanEntry, IssuedAutonumber } from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
@@ -57,6 +61,7 @@ export interface DefaultsAndAutonumbersHost {
   readonly autonumberCounters: ObjectQL['autonumberCounters'];
   readonly autonumberReadersUnservedReported: ObjectQL['autonumberReadersUnservedReported'];
   defaultFieldEntries: ObjectQL['defaultFieldEntries'];
+  find: ObjectQL['find'];
   getSchema: ObjectQL['getSchema'];
   isIssuedAutonumberCollision: ObjectQL['isIssuedAutonumberCollision'];
   readonly logger: ObjectQL['logger'];
@@ -853,5 +858,154 @@ export class DefaultsAndAutonumbersFacet {
       undefined,
       { object, fields, driver: driverName },
     );
+  }
+
+  /**
+   * Seed the autonumber counter from the current max in store, scoped to
+   * `prefix`. With a non-empty prefix (date/field formats) only rows in the
+   * same scope count.
+   *
+   * # Locating the counter inside a stored value (#6468)
+   *
+   * `renderAutonumber` composes `prefix + zero-padded(seq) + suffix`, and
+   * `suffix` is a DECLARED return value: every token after the `{0..0}` slot
+   * renders behind the counter (`{000}-{YYYY}` → `001-2026`). So the counter is
+   * NOT "the digits at the end of the string" — reading it that way took the
+   * year for the counter and seeded `2026` against a true counter of `1`, which
+   * jumps the next issued number to `2027-2026` and burns the band in between.
+   *
+   * Both the rendered `prefix` and the rendered `suffix` therefore come in from
+   * the caller (they are `renderAutonumber`'s own output — this method does not
+   * re-derive any format understanding of its own, and neither does the SQL
+   * driver's `scanMaxNumericTail`, which is handed the same two strings):
+   *
+   *   - **Either one declared ⇒ the slot is ANCHORED**: the counter is the digit
+   *     run at the START of what follows the prefix, after removing the declared
+   *     suffix when this row carries it. That half is spec's
+   *     `readAutonumberCounter` — the declared inverse of `renderAutonumber`,
+   *     which the SQL driver's scan calls too, so one edit moves both sides
+   *     (#6560).
+   *   - **Neither declared ⇒ UNANCHORED**: the legacy reading is kept — the LAST
+   *     digit run of the whole value. A format with no `{0..0}` slot renders a
+   *     bare trailing counter, and values predating any format have no anchor to
+   *     read from, so this stays exactly as it was. The SQL driver's legacy
+   *     reading of this case differs on purpose, which is why it stays per-side.
+   *
+   * The two together are {@link readStoredAutonumberCounter}, module-level
+   * rather than inline, because #6806's resync must read an exempt writer's
+   * supplied value by exactly these rules.
+   *
+   * The suffix is *stripped when it matches*, never *required* to match: a
+   * dynamic suffix renders differently per row (`{000}-{YYYY}` is `-2025` on
+   * last year's rows) while the counter scope is the rendered PREFIX — here `''`
+   * — so those rows share this very counter and must still be counted. Skipping
+   * them would seed BELOW the real max, which is the duplicate-record-number
+   * harm #6249 fixed on the scan side. Reading the leading digit run gets them
+   * right regardless; the strip only adds precision when a suffix begins with a
+   * digit (`{0000}{YYYY}`, whose values are ambiguous by construction — the
+   * compile lint nudges authors to a delimiter).
+   *
+   * # Why this walks every row in the scope (#6249)
+   *
+   * The seed used to be one `find` with `limit: 5000`, no `orderBy` and no
+   * filter: the max of an ARBITRARY 5000-row window (on SQL, typically the
+   * oldest 5000 rows), which for any object past that size — or any scope
+   * whose rows sit outside the window because other scopes filled it — seeds
+   * BELOW the real MAX. The counter then issues numbers from an already-taken
+   * band, and on a `unique` record-number field that is a duplicate business
+   * identifier: a value written wrong, which no retry and no restart repairs
+   * (the same class of harm as the read-outage half fixed in #5979/#6114).
+   *
+   * The scan is therefore complete rather than windowed, in the shape the
+   * SQL driver's own seeding already uses (`scanMaxNumericTail` pushes
+   * `like 'prefix%'` down with NO limit). Two deliberate choices:
+   *
+   *   - **The numeric max is computed here, never delegated to an ORDER BY or
+   *     an aggregate `max`.** Both of those rank the stored value as TEXT, and
+   *     lexicographic order equals numeric order only when every value in the
+   *     scope is zero-padded to one fixed width — which the format language
+   *     does not guarantee (`{0}` pads to nothing, and any width OVERFLOWS
+   *     once the counter passes it, putting `CASE-99999` above `CASE-100000`).
+   *     The empty-prefix legacy path, which reads the LAST digit run of the
+   *     whole value, has no lexicographic reading at all. Parsing every value
+   *     keeps one code path correct for every format instead of a fast path
+   *     guarded by assumptions a format author can silently break.
+   *   - **Seek pagination, not `offset`** — `keysetWalk`'s own rationale
+   *     (#4363): an offset walk cannot promise it visited every row, and a
+   *     row it skips is exactly a number this seed must not miss.
+   *
+   * `prefix` is pushed down as `$startsWith` so a date/`{field}` scope reads
+   * its own rows instead of paging through every other scope's. The JS-side
+   * `startsWith` re-check below is kept as the authority: a driver whose
+   * matching is LOOSER (a case-insensitive `LIKE`) must not be able to inflate
+   * the max with another scope's rows.
+   */
+  static async seedAutonumber(this: Pick<DefaultsAndAutonumbersHost, 'find'>, object: string, field: string, prefix: string, suffix: string, execCtx?: ExecutionContext): Promise<number> {
+    try {
+      // Canonical `fields`, not the wire spelling `select` — this call sat on
+      // the exact #4371 silent drop (the projection never applied; the scan
+      // worked only because an unprojected row still carries `field`), and the
+      // catch below would have swallowed the guard's rejection into "seed
+      // from 0", i.e. duplicate autonumbers.
+      const walk = keysetWalk<Record<string, unknown>>(
+        (q: KeysetPageQuery) => this.find(object, {
+          // The walk spells its `where` `unknown` (this scan's filter AND-ed
+          // with the seek predicate); it is read as the engine's `where` slot.
+          ...(q as Omit<KeysetPageQuery, 'where'> & { where?: EngineQueryOptions['where'] }),
+          fields: ['id', field],
+          context: execCtx,
+        }),
+        {
+          where: prefix ? { [field]: { $startsWith: prefix } } : undefined,
+          pageSize: AUTONUMBER_SEED_PAGE_SIZE,
+        },
+      );
+      let max = 0;
+      for await (const page of walk.pages()) {
+        for (const r of page) {
+          const v = r?.[field];
+          if (v == null) continue;
+          // The reading itself lives in `readStoredAutonumberCounter` (the
+          // section above describes it) because #6806's adopt-on-exempt-write
+          // resync must read a supplied value by the SAME rules this scan reads
+          // a stored one — two copies of it would drift into two different
+          // answers for one row, which is a duplicate record number. Its
+          // anchored half is spec's `readAutonumberCounter`, the one the SQL
+          // driver's own scan calls (#6560).
+          const counter = readStoredAutonumberCounter(String(v), prefix, suffix);
+          if (counter != null) max = Math.max(max, counter);
+        }
+      }
+      // The walk is unbounded (no `max`), so truncation here means the scan
+      // could not COMPLETE: a row carried no `id` to seek past, or the reader
+      // never applied the seek predicate. Either way rows were left unread, and
+      // the max over what was read is a floor, not the max. Answering with it
+      // is the "seed below the real MAX" defect this method was fixed for, so
+      // it fails loudly instead — the same disposition #6114 gave the read
+      // outage: allocate nothing, write nothing.
+      if (walk.truncated) {
+        throw new Error(
+          `Cannot seed the autonumber counter for "${object}.${field}": the seeding scan ` +
+            `could not visit every stored row (it stopped after ${walk.scanned} rows without ` +
+            `reaching the end). Seeding from a partial scan would issue record numbers that ` +
+            `collide with existing ones, so no number was allocated.`,
+        );
+      }
+      return max;
+    } catch (error) {
+      // [#5979] Discriminate by error TYPE. Seeding from 0 is the truth for
+      // exactly ONE failure reason — the table has not been provisioned, so
+      // there are genuinely no rows and number 1 collides with nothing.
+      if (isMissingTableError(error, object)) return 0;
+      // Every other failure (connection drop, timeout, permission denial,
+      // query error) means the rows may well exist and simply were not seen.
+      // Answering 0 there restarts the sequence at 1 against a table already
+      // holding N rows and issues autonumbers that COLLIDE with existing ones
+      // — a value written wrong, which no retry and no restart repairs. So the
+      // read failure propagates and the caller allocates nothing: the write
+      // fails loudly instead of succeeding with a forged business identifier.
+      // This is the hazard the #4371 comment above the read already named.
+      throw error;
+    }
   }
 }
