@@ -28,6 +28,14 @@
 // refusing edits to a code-defined datasource and lists it as before, and
 // validate and the existing federated objects answer as before.
 //
+// [#30469 item 2, ruling B] The showcase package is read-only, so an import
+// over its datasource is SAVED into its customization package
+// `com.example.showcase.custom` and named in that package's namespace
+// (`showcase_custom`); the draft door keeps the showcase's own. The last case
+// of the first block pins the landing, the pair's export and an older
+// package-less import left where it was; the second block pins that under a
+// walled posture the import never creates the pair.
+//
 // The verify harness does not mount the federation service, so this file
 // mounts `ExternalDatasourceServicePlugin` itself, as `objectstack dev` and
 // `serve` do. The working directory is a temporary one because the showcase's
@@ -47,9 +55,19 @@ const DATASOURCE = 'showcase_external';
 /** The package that declares it, and that package's ADR-0028 namespace. */
 const PACKAGE_ID = 'com.example.showcase';
 const NAMESPACE = 'showcase';
+/**
+ * [#30469 item 2] The package an import over it is SAVED into: the showcase is
+ * read-only, so its customization package, whose namespace is the import's.
+ */
+const IMPORT_NAMESPACE = 'showcase_custom';
+const PAIR_ID = `${PACKAGE_ID}.custom`;
+/** The object an import of `customers` with no name override makes there. */
+const LANDED = `${IMPORT_NAMESPACE}_customers`;
+/** The name that import used to get, as a package-less row: what a deployment already holds. */
+const LEGACY = `${NAMESPACE}_customers`;
 /** An explicit import name with no namespace prefix: the defect's shape. */
 const UNPREFIXED = 'dogfood_ext_order_21889';
-const PREFIXED = `${NAMESPACE}_${UNPREFIXED}`;
+const PREFIXED = `${IMPORT_NAMESPACE}_${UNPREFIXED}`;
 
 const ext = `/datasources/${DATASOURCE}/external`;
 
@@ -174,5 +192,123 @@ describe('an import over a code-defined datasource is held to its package\'s nam
     const entry = (await admin.listDatasources()).find((d) => d.name === DATASOURCE);
     expect(entry).toMatchObject({ origin: 'code', label: 'External Analytics (SQLite)' });
     expect(entry).not.toHaveProperty('_packageId');
+  });
+
+  // [#30469 item 2, ruling B] The showcase package is read-only (a booted code
+  // package), so an object imported over the datasource it declares is saved
+  // into its customization package, and travels with that package's export.
+  it('an import with no name lands in the showcase\'s customization package, and the package export carries it', async () => {
+    // An object imported before the placement changed: package-less, under the
+    // base-namespace name, bound to the same remote table. It is not moved or
+    // renamed, and importing the table again makes the new object beside it.
+    const legacy = await call('PUT', `/meta/object/${LEGACY}`, {
+      name: LEGACY,
+      label: 'Legacy Customers',
+      datasource: DATASOURCE,
+      external: { remoteName: 'customers' },
+      fields: { name: { type: 'text', label: 'Name' } },
+      sharingModel: 'public_read',
+    });
+    expect(legacy.status, JSON.stringify(legacy.json)).toBe(200);
+
+    const imported = await call('POST', `${ext}/tables/customers/import`, {});
+    expect(imported.status, JSON.stringify(imported.json)).toBe(201);
+    expect((imported.json.data as { object?: { name?: string } }).object?.name).toBe(LANDED);
+
+    const listed = await call('GET', '/meta/object');
+    const items = (listed.json as { data?: unknown; items?: unknown }).data ?? (listed.json as { items?: unknown }).items;
+    const entry = (Array.isArray(items) ? items : (items as { items?: unknown[] })?.items ?? [])
+      .find((i) => (i as { name?: string }).name === LANDED) as { _packageId?: string } | undefined;
+    expect(entry?._packageId).toBe(PAIR_ID);
+
+    const pairExport = await call('GET', `/packages/${PAIR_ID}/export`);
+    expect(pairExport.status, JSON.stringify(pairExport.json)).toBe(200);
+    expect(JSON.stringify(pairExport.json)).toContain(`"${LANDED}"`);
+
+    const whole = await call('GET', '/packages/export');
+    expect(whole.status, JSON.stringify(whole.json)).toBe(200);
+    expect(JSON.stringify(whole.json)).toContain(`"${LANDED}"`);
+
+    const rows = await call('GET', `/data/${LANDED}`);
+    expect(rows.status, JSON.stringify(rows.json)).toBe(200);
+    expect(rows.json.records?.length).toBeGreaterThan(0);
+
+    const kept = (Array.isArray(items) ? items : (items as { items?: unknown[] })?.items ?? [])
+      .find((i) => (i as { name?: string }).name === LEGACY) as { _packageId?: string } | undefined;
+    expect(kept?._packageId).toBe('sys_metadata');
+    expect(JSON.stringify(pairExport.json)).not.toContain(`"${LEGACY}"`);
+  });
+});
+
+// [#30469 item 2, ruling B] Under a walled posture the platform operator
+// creates a customization package, through its ensure door (ADR-0146 D3,
+// ADR-0131 D3). The import never creates one: while the pair is absent the
+// import is refused, naming the operator and that door, and nothing is saved
+// anywhere; once the pair exists the import lands in it.
+describe('group: an import never creates the customization package (showcase)', () => {
+  let stack: VerifyStack;
+  let token: string;
+  let prevCwd: string;
+  let dir: string;
+  const previous = process.env.OS_TENANCY_POSTURE;
+
+  const call = async (method: string, path: string, body?: unknown) => {
+    const res = await stack.apiAs(token, method, path, body);
+    const json = (await res.json().catch(() => ({}))) as Envelope;
+    return { status: res.status, json };
+  };
+
+  beforeAll(async () => {
+    prevCwd = process.cwd();
+    dir = mkdtempSync(join(tmpdir(), 'dogfood-30469-'));
+    process.chdir(dir);
+    process.env.OS_TENANCY_POSTURE = 'group';
+    await onEnable({ logger: { info() {}, warn() {} } } as never);
+    stack = await bootShowcase({
+      databaseFile: join(dir, 'showcase.db'),
+      multiTenant: 'posture-only',
+      extraPlugins: [new ExternalDatasourceServicePlugin()],
+    });
+    // The seeded administrator is the platform operator on this harness.
+    token = await stack.signIn();
+  }, 180_000);
+
+  afterAll(async () => {
+    await stack?.stop();
+    if (previous === undefined) delete process.env.OS_TENANCY_POSTURE;
+    else process.env.OS_TENANCY_POSTURE = previous;
+    if (prevCwd) process.chdir(prevCwd);
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('guard the guard: a real, non-degraded walled posture', async () => {
+    const tenancy = await stack.kernel.getServiceAsync<{ posture: string; degraded: boolean }>('tenancy');
+    expect(tenancy.posture).toBe('group');
+    expect(tenancy.degraded).toBe(false);
+  });
+
+  it('with no pair, the import is refused naming the platform operator and the ensure door, and nothing is saved', async () => {
+    const refused = await call('POST', `${ext}/tables/customers/import`, {});
+
+    expect(refused.status, JSON.stringify(refused.json)).toBe(400);
+    expect(refused.json.error?.code).toBe('EXTERNAL_IMPORT_ERROR');
+    expect(refused.json.error?.message).toContain('platform operator');
+    expect(refused.json.error?.message).toContain(`/packages/${PACKAGE_ID}/ensure-customization`);
+
+    expect((await call('GET', `/meta/object/${LANDED}`)).status).toBe(404);
+    expect((await call('GET', '/meta/object/showcase_customers')).status).toBe(404);
+    expect((await call('GET', `/packages/${PAIR_ID}`)).status).toBe(404);
+  });
+
+  it('once the operator has created the pair through its door, the import lands in it', async () => {
+    const ensured = await call('POST', `/packages/${PACKAGE_ID}/ensure-customization`, {});
+    expect(ensured.status, JSON.stringify(ensured.json)).toBe(201);
+
+    const imported = await call('POST', `${ext}/tables/customers/import`, {});
+    expect(imported.status, JSON.stringify(imported.json)).toBe(201);
+    expect((imported.json.data as { object?: { name?: string } }).object?.name).toBe(LANDED);
+
+    const pairExport = await call('GET', `/packages/${PAIR_ID}/export`);
+    expect(JSON.stringify(pairExport.json)).toContain(`"${LANDED}"`);
   });
 });
