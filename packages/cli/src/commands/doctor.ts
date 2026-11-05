@@ -120,7 +120,14 @@ function renderHealthCheckResult(result: HealthCheckResult, verbose: boolean): v
  * Reading `.env` into a check that reports no attribution is precisely the
  * defect #5387 closed, and it would otherwise creep back one variable at a time.
  */
-export const DOCTOR_ENV_INPUTS = ['OS_TENANCY_POSTURE', 'OS_MULTI_ORG_ENABLED', SCHEDULED_WORK_ENV] as const;
+export const DOCTOR_ENV_INPUTS = [
+  'OS_TENANCY_POSTURE',
+  'OS_MULTI_ORG_ENABLED',
+  SCHEDULED_WORK_ENV,
+  // [#30217] Where the installed-package ledger lives: `<OS_HOME>/installed-packages`
+  // when set (`readInstalledPackageEntries`).
+  'OS_HOME',
+] as const;
 
 /** Where one environment value actually came from. */
 export interface EnvValueProvenance {
@@ -1248,7 +1255,10 @@ interface SkippedLedgerEntry {
  * absorbed by the config `catch` and misreported as "Could not load config for
  * analysis". The named reading replaces both the guess and the throw.
  */
-async function readInstalledPackageEntries(cwd: string): Promise<InstalledPackageLedgerReading> {
+async function readInstalledPackageEntries(
+  cwd: string,
+  dotenvReading: DotenvReading,
+): Promise<InstalledPackageLedgerReading> {
   // Dynamic, like serve.ts's cloud-connection load: `os doctor` must still run
   // in a checkout where the optional package is not resolvable.
   const load = await loadOptionalPackage('@objectstack/cloud-connection');
@@ -1285,7 +1295,9 @@ async function readInstalledPackageEntries(cwd: string): Promise<InstalledPackag
   // that failed, reported as such rather than thrown out of doctor.
   let dir: string;
   try {
-    dir = (resolveDir as (opts: { cwd: string }) => { dir: string })({ cwd }).dir;
+    // Under the `.env*` overlay, like every other env-derived read here: `os
+    // serve` loads that cascade before the ledger resolves `OS_HOME`.
+    dir = withDotenvOverlay(dotenvReading, () => (resolveDir as (opts: { cwd: string }) => { dir: string })({ cwd })).dir;
   } catch (cause) {
     return { entries: [], skipped: [], readerFailure: { cause } };
   }
@@ -2424,7 +2436,7 @@ export default class Doctor extends Command {
     //
     // The same reading is handed to the D5e advisory further down instead of
     // being read a second time, which is what keeps one bad ledger to one row.
-    const ledgerReading = await readInstalledPackageEntries(cwd);
+    const ledgerReading = await readInstalledPackageEntries(cwd, dotenvReading);
     results.push(...installedPackageLedgerChecks(ledgerReading));
 
     // Display environment results
