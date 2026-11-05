@@ -123,7 +123,7 @@ describe('#29934 — the key file an earlier `os start` kept in the project', ()
   ] as const)('%s: the child reads its secret back with the %s key', async (_shape, sealer) => {
     const keys = { legacy: writeKey(legacyFile()), canonical: writeKey(canonicalFile()) };
     const handle = await new LocalCryptoProvider({ key: keys[sealer] }).encrypt('sk-30042', ctx);
-    const stored = async () => ({ namespace: ctx.namespace, key: ctx.key, ciphertext: handle.ciphertext });
+    const stored = async () => [{ namespace: ctx.namespace, key: ctx.key, ciphertext: handle.ciphertext }];
     for (const { child } of [await startChild(), await devChild()]) {
       const quiet = vi.spyOn(console, 'warn').mockImplementation(() => {});
       // What the child's settings service does at start(), the database open.

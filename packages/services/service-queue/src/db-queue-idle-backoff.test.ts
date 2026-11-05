@@ -55,6 +55,7 @@ function makeCountingEngine() {
                 switch (op) {
                     case '$lte': if (cell == null || !(String(cell) <= String(target))) return false; break;
                     case '$lt': if (cell == null || !(String(cell) < String(target))) return false; break;
+                    case '$gt': if (cell == null || !(String(cell) > String(target))) return false; break;
                     case '$ne': if (cell === target) return false; break;
                     case '$in': if (!(target as unknown[]).includes(cell)) return false; break;
                     default: throw new Error(`fake driver: unsupported operator ${op}`);
@@ -162,8 +163,9 @@ describe('#17612 DbQueueAdapter — idle poll cost', () => {
         await vi.advanceTimersByTimeAsync(HOUR);
         await adapter.stop();
 
-        // 3600 s / 1 s, plus the tick `start()` runs immediately.
-        expect(engine.calls.find).toBe(3601);
+        // 3600 s / 1 s, plus the tick `start()` runs immediately, plus the ONE
+        // due-time read of the idle streak (#29919) — once, not once a tick.
+        expect(engine.calls.find).toBe(3602);
     });
 
     it('backs off while idle: the same hour, same queue, is 124 reads instead of 3600', async () => {
@@ -176,8 +178,9 @@ describe('#17612 DbQueueAdapter — idle poll cost', () => {
         await adapter.stop();
 
         // 1s,2s,4s,8s,16s then the 30 s ceiling — pinned exactly, because a
-        // bound alone is met by a loop that stopped.
-        expect(engine.calls.find).toBe(124);
+        // bound alone is met by a loop that stopped — plus the streak's one
+        // due-time read (#29919).
+        expect(engine.calls.find).toBe(125);
         // Nothing was claimed, so nothing was written.
         expect(engine.calls.update).toBe(0);
     });
@@ -288,3 +291,93 @@ describe('#17612 DbQueueAdapter — idle poll cost', () => {
         expect(engine.calls.find).toBe(findsAtStop);
     });
 });
+
+describe('#29919 DbQueueAdapter — wake at the next due time, no ramp for a sole writer', () => {
+    const FIVE_MINUTES = 5 * 60_000;
+
+    it('a sole writer on an idle queue ticks ONCE in a fresh kernel\'s first minute: two reads, not five', async () => {
+        vi.useFakeTimers();
+        const engine = makeCountingEngine();
+        const adapter = adapterOn(engine, { soleWriter: true, maxIdleIntervalMs: FIVE_MINUTES });
+        await adapter.subscribe('q1', async () => {});
+        adapter.start();
+        await vi.advanceTimersByTimeAsync(60_000);
+        await adapter.stop();
+
+        // The cold-start tick's claim read and its one due-time read.
+        expect(engine.calls.find).toBe(2);
+    });
+
+    it('CONTROL: without soleWriter the same minute still ramps — 1 + 5 claim reads and the due read', async () => {
+        vi.useFakeTimers();
+        const engine = makeCountingEngine();
+        const adapter = adapterOn(engine, { maxIdleIntervalMs: FIVE_MINUTES });
+        await adapter.subscribe('q1', async () => {});
+        adapter.start();
+        await vi.advanceTimersByTimeAsync(60_000);
+        await adapter.stop();
+
+        // Ticks at 0, 2, 6, 14, 30 s (1 s base, doubling), then 62 s.
+        expect(engine.calls.find).toBe(6);
+    });
+
+    it('a row scheduled before boot is claimed within one tick of coming due, under a five-minute ceiling', async () => {
+        vi.useFakeTimers();
+        const engine = makeCountingEngine();
+        const writer = adapterOn(engine);
+        const t0 = Date.now();
+        await writer.publish('q1', { n: 1 }, { delay: 20_000 });
+
+        const adapter = adapterOn(engine, { soleWriter: true, maxIdleIntervalMs: FIVE_MINUTES });
+        const at: number[] = [];
+        await adapter.subscribe('q1', async () => { at.push(Date.now()); });
+        adapter.start();
+        await vi.advanceTimersByTimeAsync(60_000);
+        await adapter.stop();
+
+        expect(at).toHaveLength(1);
+        expect(at[0]! - t0).toBe(20_000);
+    });
+
+    it('a deferred publish in this process goes out on time with no extra read — it hints, it does not wake', async () => {
+        vi.useFakeTimers();
+        const engine = makeCountingEngine();
+        const adapter = adapterOn(engine, { soleWriter: true, maxIdleIntervalMs: FIVE_MINUTES });
+        const at: number[] = [];
+        await adapter.subscribe('q1', async () => { at.push(Date.now()); });
+        adapter.start();
+        await vi.advanceTimersByTimeAsync(10_000);
+        const findsWhileIdle = engine.calls.find;
+
+        const publishedAt = Date.now();
+        await adapter.publish('q1', { n: 1 }, { delay: 20_000 });
+        await vi.advanceTimersByTimeAsync(1);
+        // No tick and no read now — the publish's own dedup reads nothing (no key).
+        expect(engine.calls.find).toBe(findsWhileIdle);
+
+        await vi.advanceTimersByTimeAsync(60_000);
+        await adapter.stop();
+        expect(at).toHaveLength(1);
+        expect(at[0]! - publishedAt).toBe(20_000);
+    });
+
+    it('a failing retry is re-attempted at its backoff, not at the ceiling', async () => {
+        vi.useFakeTimers();
+        const engine = makeCountingEngine();
+        const adapter = adapterOn(engine, { soleWriter: true, maxIdleIntervalMs: FIVE_MINUTES });
+        const at: number[] = [];
+        await adapter.subscribe('q1', async () => {
+            at.push(Date.now());
+            if (at.length === 1) throw new Error('first attempt fails');
+        });
+        adapter.start();
+        await vi.advanceTimersByTimeAsync(10_000);
+        await adapter.publish('q1', { n: 1 }, { backoff: { type: 'fixed', delayMs: 15_000 } });
+        await vi.advanceTimersByTimeAsync(60_000);
+        await adapter.stop();
+
+        expect(at).toHaveLength(2);
+        expect(at[1]! - at[0]!).toBe(15_000);
+    });
+});
+

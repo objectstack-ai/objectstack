@@ -212,8 +212,10 @@
     {
       "key": "signs:body|timestamp.body",
       "label": "api trigger declared signature scheme",
-      "exempt": "generated-reference-only",
-      "reason": "An api flow start node's `config.signature` (#29983, the contract half): content/docs/references/automation/api-trigger-signature.mdx is generated from ApiTriggerSignatureSchema. No hand-written guide teaches it yet on purpose: the api trigger does not verify the key until the domain:server slice lands, so a guide written now would teach a hook that refuses every post. That slice writes the automation/flows.mdx section naming `body` and `timestamp.body` beside the `secretRef` paragraph and binds it here, replacing this exemption."
+      "docs": [
+        "content/docs/automation/flows.mdx"
+      ],
+      "note": "An api flow start node's `config.signature` (#29983; the trigger verifies it since #30009). automation/flows.mdx teaches both forms beside the `secretRef` paragraph, in its `signs` table."
     }
   ]
 }

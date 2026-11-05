@@ -1220,6 +1220,65 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       expect(issues).toEqual([]);
     });
 
+    // [#30016] The date verdicts were left saying a flow condition "silently
+    // evaluates to null"; `evaluateCondition` throws on a fault on every flow.
+    // Where the ledger proves the run holds the field (`run-fails`) the fault
+    // fails the run; on any other flow it does wherever the name holds the
+    // date (an API body may hand a number). An error at every site, as before.
+    it('says a date-arithmetic fault in a flow condition fails the run, at start, edge and decision (#30016)', () => {
+      const objects = [{ name: 'crm_opportunity', fields: { close_date: { type: 'date' }, open_date: { type: 'date' } } }];
+      const dateVerdicts = (issues: ReturnType<typeof validateStackExpressions>) =>
+        issues.filter(i => /^date arithmetic/.test(i.message));
+      for (const [name, startConfig, flowType, proven] of [
+        ['rt_flow', { triggerType: 'record-after-update' }, undefined, true],
+        ['sched_flow', { schedule: '0 * * * *' }, undefined, false],
+        ['api_flow', {}, 'api', false],
+      ] as const) {
+        const issues = validateStackExpressions({
+          objects,
+          flows: [{
+            name,
+            ...(flowType ? { type: flowType } : {}),
+            nodes: [
+              { id: 'start', type: 'start', config: { objectName: 'crm_opportunity', condition: 'close_date + 1 > 3', ...startConfig } },
+              { id: 'route', type: 'decision', config: { conditions: [{ label: 'Late', expression: 'close_date - open_date > duration("1h")' }] } },
+              { id: 'end', type: 'end' },
+            ],
+            edges: [
+              { id: 'e1', source: 'start', target: 'route', condition: 'close_date + 7 > 3' },
+              { id: 'e2', source: 'route', target: 'end', label: 'Late' },
+            ],
+          }],
+        });
+        const found = dateVerdicts(issues);
+        expect(found.map(i => [i.where, i.severity]), name).toEqual([
+          [`flow '${name}' · node 'start' (start) condition`, 'error'],
+          [`flow '${name}' · node 'route' (decision) decision branch expression at config.conditions[0].expression`, 'error'],
+          [`flow '${name}' · edge 'e1' (start→route) condition`, 'error'],
+        ]);
+        for (const i of found) {
+          expect(i.message, `${name} ${i.where}`).toContain('a flow condition that cannot be evaluated fails the run');
+          expect(i.message, `${name} ${i.where}`).toMatch(
+            proven ? /: this faults at runtime, and a flow condition/ : /: this faults wherever `close_date` holds (the date|that text) when the condition runs/,
+          );
+          expect(i.message, `${name} ${i.where}`).not.toMatch(/evaluates to null/);
+        }
+      }
+    });
+
+    it('keeps the null sentence on a record-scoped validation rule\'s date arithmetic (#30016 control)', () => {
+      const issues = validateStackExpressions({
+        objects: [{
+          name: 'crm_opportunity',
+          fields: { close_date: { type: 'date' } },
+          validations: [{ name: 'late', condition: 'record.close_date + 1 > 3' }],
+        }],
+      });
+      const found = issues.filter(i => /^date arithmetic/.test(i.message));
+      expect(found.map(i => i.severity)).toEqual(['error']);
+      expect(found[0]!.message).toContain('this faults at runtime, so the field silently evaluates to null');
+    });
+
     // [#29959] `seedRunVariables` seeds the flow's declared variables before it
     // flattens the record, and the flattening skips a name already bound: a
     // bare `title` here reads the NUMBER variable and `title > 5` runs. Only
