@@ -32,12 +32,29 @@
  * This module imports nothing from the engine, so there is no module cycle at
  * run time, and nothing re-exports it, so the published surface does not
  * move.
+ *
+ * [#30053 codemod] A PRIVATE method's docblock has since moved here,
+ * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * and the class keeps none for it; a public or protected method's docblock
+ * stays on the class, the contract, and its function keeps the placeholder.
  */
 
 import type { HookContext } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 
-/** The body of `ObjectQL#buildSession`; the method's docblock there is its contract. */
+/**
+ * Build a HookContext.session from ExecutionContext — WHO is calling.
+ *
+ * Returns `undefined` when the context yields nothing session-worthy, which
+ * keeps `!ctx.session` meaning exactly one thing for hooks: "no identity
+ * envelope was supplied" — the bare-kernel / programmatic call that
+ * caller-gating hooks skip for. A context carrying only write PROVENANCE
+ * (`{ flowRunId }`, all an identity-less flow run has — #3712) is such a
+ * case: it says what produced the write, not who is calling, and surfaces
+ * through {@link buildProvenance} instead. Every real transport resolves
+ * `positions` into the context, so an anonymous HTTP request still yields a
+ * session and stays gated.
+ */
 export function buildSession(execCtx?: ExecutionContext): HookContext['session'] {
   if (!execCtx) return undefined;
   const session = {
@@ -90,7 +107,32 @@ export function buildSession(execCtx?: ExecutionContext): HookContext['session']
   return session;
 }
 
-/** The body of `ObjectQL#buildProvenance`; the method's docblock there is its contract. */
+/**
+ * Build the HookContext.provenance envelope — WHERE this write came from.
+ *
+ * Deliberately separate from {@link buildSession}: provenance is server-
+ * stamped, evaluated by no security middleware, and can exist with no
+ * identity beside it. A schedule-triggered flow run resolves no principal
+ * yet still owns its writes, and that is the case the approvals record lock
+ * needs to recognize (#3456 / #3712).
+ *
+ * `attributedUserId` rides the SAME envelope for the same reason (#4586):
+ * a better-auth-originated write authorizes as the system, so the human who
+ * triggered it must reach the audit writer WITHOUT appearing in `session` —
+ * where every caller-gating hook would read them as the caller. Attribution
+ * here, authorization in `session`/`isSystem`, never the two mixed.
+ *
+ * `performedByClientId` rides it for the THIRD time on the same reasoning
+ * (#17022, ADR-0090 D10 rule 4): an MCP OAuth agent's write authorizes as
+ * the human it acts for, so the acting client can only reach the audit
+ * writer through a channel that is not `session` — putting it there would
+ * make every caller-gating hook read the client as the caller, which is the
+ * opposite of what the delegation means. This copy list is the whole reason
+ * the field is not inert: `HookContext` is built from a CLOSED literal whose
+ * `provenance` value is exactly what this function returns, so a key
+ * declared on `hook.zod.ts` and missing here is declared and never
+ * populated (ADR-0049).
+ */
 export function buildProvenance(execCtx?: ExecutionContext): HookContext['provenance'] {
   const flowRunId = (execCtx as any)?.flowRunId;
   const attributedUserId = (execCtx as any)?.attributedUserId;
@@ -103,7 +145,12 @@ export function buildProvenance(execCtx?: ExecutionContext): HookContext['proven
   };
 }
 
-/** The body of `ObjectQL#buildEvalUser`; the method's docblock there is its contract. */
+/**
+ * Build the acting-user object (ADR-0068 EvalUser shape) surfaced to
+ * validation-time predicates as `current_user` — notably per-option
+ * `visibleWhen` authorization gating (objectui#2284). Returns undefined for
+ * system / unauthenticated writes, where membership predicates then fail-open.
+ */
 export function buildEvalUser(
   execCtx?: ExecutionContext,
 ): { id: string; positions: string[]; organizationId: string | null } | undefined {
@@ -115,7 +162,17 @@ export function buildEvalUser(
   };
 }
 
-/** The body of `ObjectQL#buildUser`; the method's docblock there is its contract. */
+/**
+ * Build the `HookContext.user` shortcut — the ergonomic "current user"
+ * object surfaced to JS hooks. Carries `organizationId` (the blessed name
+ * for the caller's active org, identical to `session.organizationId` and
+ * `current_user.organizationId`) so a hook author who needs "the current org
+ * to filter by" writes `ctx.user.organizationId` with zero relearning (#3280).
+ *
+ * Returns undefined for system / unauthenticated writes (no acting user) —
+ * hooks that need an org regardless of a resolved user read
+ * `ctx.session.organizationId`, which is populated whenever a session is.
+ */
 export function buildUser(execCtx?: ExecutionContext): HookContext['user'] {
   if (!execCtx || execCtx.userId == null) return undefined;
   return {

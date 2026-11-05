@@ -15,6 +15,10 @@
  *                                                         # the second pass (#30052): plan (or apply) ObjectRepository and ScopedContext
  *   node scripts/codemod-split-engine.mjs --scoped --verify --base <ref>
  *                                                         # re-prove the second pass on disk against engine.ts at <ref>
+ *   node scripts/codemod-split-engine.mjs --hand-docs [--modules <a.ts,b.ts>] [--write]
+ *                                                         # the third pass (#30053): plan (or apply) the hand series' private docblocks
+ *   node scripts/codemod-split-engine.mjs --hand-docs --verify --base <ref>
+ *                                                         # re-prove the third pass on disk against engine.ts and its hand modules at <ref>
  *   node scripts/codemod-split-engine.mjs --self-test
  *   node scripts/codemod-split-engine.mjs --help          # this usage, on any tree (split or not)
  *
@@ -135,6 +139,14 @@
  * a body that reads a private member off another instance (`foreign-private`:
  * the class body may, a module function may not) and one that reads a
  * non-public static (`private-static`: the statics route is `ObjectQL`'s).
+ *
+ * ## The third pass: the hand series' private docblocks (#30053)
+ *
+ * `--hand-docs` moves a private hand-series stub's docblock into its hand
+ * module, onto the function the stub calls, as the first two passes move a
+ * private method's docblock with its body; a public or protected one stays on
+ * the class. Its section below (`HAND_STUB_MARK`) states the rule, the slices
+ * (`--modules`) and the proof, the undo of every move.
  *
  * ts-morph is a root devDependency, resolved from the root manifest, as the
  * pilot takes it.
@@ -2677,6 +2689,315 @@ async function mainScoped(tm, argv) {
   return 0;
 }
 
+// ── The third pass: the hand series' private docblocks (#30053) ──────────────
+
+/**
+ * The hand series (#25522, and the two later hand cuts #27495 and #29460)
+ * moved its bodies out of `engine.ts` before this codemod existed, and kept
+ * EVERY method's docblock on the class: each function in a hand module
+ * carries the placeholder `placeholderDoc` writes instead. This codemod's own
+ * cut pattern moves a PRIVATE method's docblock with its body (a private
+ * member is no part of the published surface, so nothing outside the class
+ * reads it there) and keeps a public or protected one on the class, the
+ * contract. `--hand-docs` applies that rule to the hand series, and touches
+ * nothing else:
+ *
+ *  - A hand-series stub is a method whose body opens with a hand marker
+ *    (`HAND_STUB_MARK`), naming its hand module.
+ *  - A private stub's docblock leaves the class and replaces its function's
+ *    placeholder, de-indented one level (the hand series re-indented every
+ *    body it moved, so the function stands at column 0); the stub's marker
+ *    gains `HAND_DOC_MOVED`; the module's header docblock gains
+ *    `HAND_DOCS_NOTE`, once, because its header says each docblock stays on
+ *    the class.
+ *  - A public or protected stub, a private stub with no docblock, and a stub
+ *    whose leading text is anything but one docblock stay as they are.
+ *  - `--modules a.ts,b.ts` moves only the stubs of the named hand modules, so
+ *    the pass can land in slices; a stub already moved is skipped, so a later
+ *    slice runs on an earlier one's output.
+ *
+ * The proof is the undo: putting every moved docblock back on its stub
+ * (re-indented), the placeholder back on its function, and taking the marker
+ * phrase and the header note out rebuilds the base `engine.ts` and every base
+ * hand module byte-for-byte. A one-character edit in a moved docblock, a block
+ * dropped on either side, a public docblock moved, or any other byte changed
+ * in those files fails it. The public `.d.ts` bar is a report reading on two
+ * built dists, as for the first two passes.
+ */
+const HAND_DOCS_CARD = '#30053';
+
+/** The marker a hand-series stub's body opens with; group 1 is the module, group 2 the phrase once moved. */
+const HAND_STUB_MARK = /^ *\/\/ \[(?:#25522 cut \d+|#27495|#29460)\] The body (?:moved to|lives in) `(engine-[a-z0-9-]+\.ts)`(, its docblock with it)?/;
+
+/** The phrase a stub's marker gains after its module's backticked name. */
+const HAND_DOC_MOVED = `, ${DOC_MOVED}`;
+
+/** The paragraph a hand module's header docblock gains, above its closing line, when a docblock moves into it. */
+const HAND_DOCS_NOTE = [
+  ' *',
+  ` * [${HAND_DOCS_CARD} codemod] A PRIVATE method's docblock has since moved here,`,
+  ' * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),',
+  ' * and the class keeps none for it; a public or protected method\'s docblock',
+  ' * stays on the class, the contract, and its function keeps the placeholder.',
+].join('\n');
+
+/** One docblock and the indentation before the member, or null: the only leading text that moves. */
+function soleDocblock(lead) {
+  const m = /^(\/\*\*(?:(?!\*\/)[\s\S])*\*\/)\n( *)$/.exec(lead);
+  return m ? { doc: m[1], indent: m[2] } : null;
+}
+
+/** The docblock one level out (two spaces), or null when a line is not indented that far. */
+function deindentDoc(doc) {
+  const lines = doc.split('\n');
+  const out = [lines[0]];
+  for (const line of lines.slice(1)) {
+    if (line === '') out.push(line);
+    else if (line.startsWith('  ')) out.push(line.slice(2));
+    else return null;
+  }
+  return out.join('\n');
+}
+
+const reindentDoc = (doc) => doc.split('\n').map((line, i) => (i === 0 || line === '' ? line : `  ${line}`)).join('\n');
+
+/** The header docblock's closing line offset in a module, or -1: the first `/**` before any import or export. */
+function headerCloseAt(text) {
+  const open = text.indexOf('/**');
+  const firstStatement = text.search(/^(?:import|export) /m);
+  if (open < 0 || (firstStatement >= 0 && open > firstStatement)) return -1;
+  const close = text.indexOf('\n */\n', open);
+  return close < 0 || (firstStatement >= 0 && close > firstStatement) ? -1 : close;
+}
+
+/** Every hand-series stub of the class, in source order, with what moving its docblock needs. */
+function handStubs(tm, engineText, className = CLASS_NAME) {
+  const sf = parse(tm, HOST_BASENAME, engineText);
+  const cls = sf.getClass(className);
+  if (!cls) refuse(`${HOST_BASENAME} declares no class ${className}`);
+  const stubs = [];
+  for (const m of cls.getMethods()) {
+    const body = m.getBody();
+    if (!body) continue;
+    const line1Start = engineText.indexOf('\n', body.getStart()) + 1;
+    const line1 = engineText.slice(line1Start, engineText.indexOf('\n', line1Start));
+    const hit = HAND_STUB_MARK.exec(line1);
+    if (!hit) continue;
+    stubs.push({
+      node: m, name: m.getName(), scope: m.getScope(), module: hit[1], moved: Boolean(hit[2]),
+      lead: engineText.slice(m.getStart(true), m.getStart()), leadStart: m.getStart(true), memberStart: m.getStart(),
+      // The offset right after the module's closing backtick, where the phrase goes.
+      phraseAt: line1Start + hit.index + hit[0].length - (hit[2] ? hit[2].length : 0),
+    });
+  }
+  return stubs;
+}
+
+/** The exported function of that name in a hand module: its leading text and offsets, or null. */
+function handFunction(tm, file, text, name) {
+  const sf = parse(tm, file, text);
+  const fn = sf.getFunction(name);
+  if (!fn || !fn.isExported()) return null;
+  return { lead: text.slice(fn.getStart(true), fn.getStart()), leadStart: fn.getStart(true), start: fn.getStart() };
+}
+
+/** Text edits applied end to start; each is `{ start, end, text }`. */
+function applyEdits(text, edits) {
+  let out = text;
+  for (const e of [...edits].sort((a, b) => b.start - a.start)) out = out.slice(0, e.start) + e.text + out.slice(e.end);
+  return out;
+}
+
+/**
+ * The plan: each hand stub's verdict. `modules` is the slice (null: every
+ * hand module); `moduleTexts` maps a hand module file to its text.
+ */
+function planHandDocs(tm, engineText, moduleTexts, { modules = null, className = CLASS_NAME } = {}) {
+  const stubs = handStubs(tm, engineText, className);
+  const known = new Set(stubs.map((s) => s.module));
+  for (const file of modules ?? []) {
+    if (!known.has(file)) refuse(`--modules names ${file}, which no hand-series stub of ${className} delegates to (known: ${[...known].sort().join(', ')})`);
+  }
+  const records = [];
+  for (const s of stubs) {
+    const why = (() => {
+      if (s.moved) return 'already-moved';
+      if (s.scope !== 'private') return `${s.scope} (its docblock is the contract and stays on the class)`;
+      if (s.lead === '') return 'no-docblock';
+      if (modules && !modules.includes(s.module)) return 'not-in-slice';
+      const sole = soleDocblock(s.lead);
+      if (!sole) return 'leading-text (anything but one docblock stays)';
+      if (deindentDoc(sole.doc) === null) return 'indent (a docblock line is not indented one level)';
+      return '';
+    })();
+    let fn = null;
+    let reason = why;
+    if (why === '') {
+      const text = moduleTexts.get(s.module);
+      if (text == null) refuse(`${s.module}: the hand module ${s.name} delegates to is not on disk`);
+      fn = handFunction(tm, s.module, text, s.name);
+      if (!fn) refuse(`${s.module}: exports no function ${s.name}, the body ${className}#${s.name}'s marker names`);
+      if (headerCloseAt(text) < 0) refuse(`${s.module}: no header docblock closing in a bare \` */\` line before its first import or export`);
+      // A function whose docblock says more than the placeholder keeps it,
+      // and the method keeps its own: merging two docblocks is an edit, not a move.
+      if (fn.lead !== `${placeholderDoc(s.name, className)}\n`) reason = 'function-docblock (its function carries more than the placeholder)';
+    }
+    records.push({ ...s, reason, fn });
+  }
+  return { records, movers: records.filter((r) => r.reason === '') };
+}
+
+/** Apply the plan: the new `engine.ts` and every hand module it changed. */
+function generateHandDocs(tm, engineText, moduleTexts, planned) {
+  const hostEdits = [];
+  const perModule = new Map();
+  for (const r of planned.movers) {
+    hostEdits.push({ start: r.leadStart, end: r.memberStart, text: '' });
+    hostEdits.push({ start: r.phraseAt, end: r.phraseAt, text: HAND_DOC_MOVED });
+    const edits = perModule.get(r.module) ?? [];
+    edits.push({ start: r.fn.leadStart, end: r.fn.start, text: `${deindentDoc(soleDocblock(r.lead).doc)}\n` });
+    perModule.set(r.module, edits);
+  }
+  const modules = new Map();
+  for (const [file, edits] of [...perModule].sort(([a], [b]) => (a < b ? -1 : 1))) {
+    const text = moduleTexts.get(file);
+    if (!text.includes(HAND_DOCS_NOTE)) {
+      const at = headerCloseAt(text);
+      edits.push({ start: at, end: at, text: `\n${HAND_DOCS_NOTE}` });
+    }
+    modules.set(file, applyEdits(text, edits));
+  }
+  return { host: applyEdits(engineText, hostEdits), modules };
+}
+
+/**
+ * The proof. Undo every move the head's markers record and require the base
+ * `engine.ts` and the base hand modules back, byte-for-byte. `baseModules` and
+ * `headModules` map a hand module file to its text (a file absent from one
+ * side fails).
+ */
+function verifyHandDocs(tm, baseText, headText, baseModules, headModules, { className = CLASS_NAME } = {}) {
+  const failures = [];
+  const moved = [];
+  const hostEdits = [];
+  const perModule = new Map();
+  for (const s of handStubs(tm, headText, className)) {
+    if (!s.moved) continue;
+    if (s.scope !== 'private') failures.push(`${s.name}: a ${s.scope} method's docblock moved off the class (only a private one may)`);
+    if (s.lead !== '') failures.push(`${s.name}: its stub says the docblock moved, but the class still carries leading text`);
+    const text = headModules.get(s.module);
+    const fn = text == null ? null : handFunction(tm, s.module, text, s.name);
+    if (!fn) { failures.push(`${s.name}: ${s.module} exports no function of that name`); continue; }
+    const sole = soleDocblock(fn.lead);
+    if (!sole || sole.indent !== '' || fn.lead === `${placeholderDoc(s.name, className)}\n`) {
+      failures.push(`${s.name}: its stub says the docblock moved, but its function in ${s.module} carries no moved docblock`);
+      continue;
+    }
+    const indent = /^ */.exec(headText.slice(headText.lastIndexOf('\n', s.memberStart) + 1, s.memberStart))[0];
+    hostEdits.push({ start: s.memberStart, end: s.memberStart, text: `${reindentDoc(sole.doc)}\n${indent}` });
+    hostEdits.push({ start: s.phraseAt, end: s.phraseAt + HAND_DOC_MOVED.length, text: '' });
+    const edits = perModule.get(s.module) ?? [];
+    edits.push({ start: fn.leadStart, end: fn.start, text: `${placeholderDoc(s.name, className)}\n` });
+    perModule.set(s.module, edits);
+    moved.push({ name: s.name, module: s.module, lines: sole.doc.split('\n').length });
+  }
+  const firstDiff = (a, b) => {
+    const x = a.split('\n'); const y = b.split('\n');
+    let i = 0; while (i < Math.max(x.length, y.length) && x[i] === y[i]) i += 1;
+    return `line ${i + 1}: base ${JSON.stringify(x[i] ?? null)} | undone head ${JSON.stringify(y[i] ?? null)}`;
+  };
+  const rebuilt = applyEdits(headText, hostEdits);
+  if (rebuilt !== baseText) failures.push(`undoing the moves does NOT rebuild the base ${HOST_BASENAME} (${firstDiff(baseText, rebuilt)})`);
+  const files = [...new Set([...baseModules.keys(), ...headModules.keys()])].sort();
+  for (const file of files) {
+    const base = baseModules.get(file); const head = headModules.get(file);
+    if (base == null || head == null) { failures.push(`${file}: only in the ${base == null ? 'head' : 'base'}`); continue; }
+    const edits = perModule.get(file) ?? [];
+    if (edits.length > 0 || head.includes(HAND_DOCS_NOTE)) {
+      const at = head.indexOf(`\n${HAND_DOCS_NOTE}\n */\n`);
+      if (at < 0) failures.push(`${file}: a docblock moved into it, but its header carries no note saying so before its closing line`);
+      else edits.push({ start: at, end: at + HAND_DOCS_NOTE.length + 1, text: '' });
+    }
+    const undone = applyEdits(head, edits);
+    if (undone !== base) failures.push(`undoing the moves does NOT rebuild the base ${file} (${firstDiff(base, undone)})`);
+  }
+  return { failures, moved, modules: files.length, linesBefore: lineCount(baseText), linesAfter: lineCount(headText) };
+}
+
+function planReportHandDocs(planned) {
+  const out = [`# codemod-split-engine --hand-docs (${HAND_DOCS_CARD}): the hand series' private docblocks`, ''];
+  const byModule = new Map();
+  for (const r of planned.movers) byModule.set(r.module, [...(byModule.get(r.module) ?? []), r]);
+  let total = 0;
+  for (const [file, rs] of [...byModule].sort(([a], [b]) => (a < b ? -1 : 1))) {
+    const lines = rs.reduce((n, r) => n + soleDocblock(r.lead).doc.split('\n').length, 0);
+    total += lines;
+    out.push(`- ${file}: ${rs.length} docblock(s), ${lines} line(s): ${rs.map((r) => r.name).join(', ')}`);
+  }
+  out.push('', `moves: ${planned.movers.length}/${planned.records.length} hand-series stubs, ${total} docblock line(s)`);
+  const stays = new Map();
+  for (const r of planned.records) if (r.reason) stays.set(r.reason, [...(stays.get(r.reason) ?? []), r.name]);
+  for (const [reason, names] of stays) out.push(`stays (${reason}): ${names.length}: ${names.join(', ')}`);
+  return out.join('\n');
+}
+
+function printVerifyHandDocs(v) {
+  for (const f of v.failures) console.error(`  ✗ ${f}`);
+  console.log(`hand docblocks: ${v.moved.length} moved (${v.moved.reduce((n, m) => n + m.lines, 0)} lines) across ${new Set(v.moved.map((m) => m.module)).size} module(s); ` +
+    `${HOST_BASENAME} ${v.linesBefore} -> ${v.linesAfter} lines; undoing the moves ${v.failures.some((f) => f.startsWith('undoing')) ? 'does NOT' : 'does'} rebuild the base ` +
+    `${HOST_BASENAME} and its ${v.modules} hand module(s) byte-for-byte`);
+}
+
+/** The hand modules `engine.ts`'s hand stubs name, read through `read(file)` (null: absent). */
+function handModuleTexts(tm, engineText, read) {
+  const out = new Map();
+  for (const file of [...new Set(handStubs(tm, engineText).map((s) => s.module))].sort()) {
+    const text = read(file);
+    if (text != null) out.set(file, text);
+  }
+  return out;
+}
+
+/** `--hand-docs`: plan, write or re-prove the third pass. */
+async function mainHandDocs(tm, argv) {
+  if (argv.includes('--verify')) {
+    const i = argv.indexOf('--base');
+    const ref = i >= 0 ? argv[i + 1] : null;
+    if (!ref) refuse('--hand-docs --verify needs --base <ref>');
+    const baseText = gitShow(ref, `${SRC_REL}/${HOST_BASENAME}`);
+    const headText = readFileSync(HOST_PATH, 'utf8');
+    const baseModules = handModuleTexts(tm, baseText, (f) => { try { return gitShow(ref, `${SRC_REL}/${f}`); } catch { return null; } });
+    const headModules = handModuleTexts(tm, baseText, readSibling);
+    const v = verifyHandDocs(tm, baseText, headText, baseModules, headModules);
+    printVerifyHandDocs(v);
+    return v.failures.length === 0 ? 0 : 1;
+  }
+  const j = argv.indexOf('--modules');
+  const modules = j >= 0 ? (argv[j + 1] ?? '').split(',').map((s) => s.trim()).filter(Boolean) : null;
+  if (j >= 0 && modules.length === 0) refuse('--modules needs a comma-separated list of hand module files');
+  const input = readFileSync(HOST_PATH, 'utf8');
+  const moduleTexts = handModuleTexts(tm, input, readSibling);
+  const planned = planHandDocs(tm, input, moduleTexts, { modules });
+  console.log(planReportHandDocs(planned));
+  const out = generateHandDocs(tm, input, moduleTexts, planned);
+  const files = new Map([[HOST_BASENAME, out.host], ...moduleTexts, ...out.modules]);
+  console.log(`output tree sha256: ${treeHash(files)} (input sha256 ${sha256(input)})`);
+  const v = verifyHandDocs(tm, input, out.host, moduleTexts, new Map([...moduleTexts, ...out.modules]));
+  printVerifyHandDocs(v);
+  if (v.failures.length > 0) {
+    console.error('✗ the generated moves fail the undo proof: nothing written. Report the fork; never hand-edit the moves.');
+    return 1;
+  }
+  if (!argv.includes('--write')) {
+    console.log('plan only: nothing written (pass --write to apply).');
+    return 0;
+  }
+  writeFileSync(HOST_PATH, out.host);
+  for (const [file, text] of out.modules) writeFileSync(join(SRC_DIR, file), text);
+  console.log(`✓ wrote ${HOST_BASENAME} and ${out.modules.size} hand module(s) under ${SRC_REL}`);
+  return 0;
+}
+
 // ── Entry ────────────────────────────────────────────────────────────────────
 
 const USAGE = [
@@ -2684,6 +3005,8 @@ const USAGE = [
   '       node scripts/codemod-split-engine.mjs --verify --base REF   re-prove a split on disk against engine.ts at REF',
   '       node scripts/codemod-split-engine.mjs --scoped [--write]   plan (or apply) the second pass: ObjectRepository and ScopedContext',
   '       node scripts/codemod-split-engine.mjs --scoped --verify --base REF   re-prove the second pass on disk against engine.ts at REF',
+  '       node scripts/codemod-split-engine.mjs --hand-docs [--modules A.ts,B.ts] [--write]   plan (or apply) the third pass: the hand series\' private docblocks',
+  '       node scripts/codemod-split-engine.mjs --hand-docs --verify --base REF   re-prove the third pass on disk against engine.ts and its hand modules at REF',
   '       node scripts/codemod-split-engine.mjs --self-test',
   '       node scripts/codemod-split-engine.mjs --help',
 ].join('\n');
@@ -2708,6 +3031,7 @@ async function main(argv) {
   }
   const tm = await loadTsMorph();
   if (argv.includes('--scoped')) return mainScoped(tm, argv);
+  if (argv.includes('--hand-docs')) return mainHandDocs(tm, argv);
   if (argv.includes('--verify')) {
     const i = argv.indexOf('--base');
     const ref = i >= 0 ? argv[i + 1] : null;
@@ -2780,6 +3104,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'import prune': 4,
   'refusals': 6,
   'scoped classes (second pass)': 16,
+  'hand-series docblocks (third pass)': 15,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
 
@@ -3031,6 +3356,100 @@ export class ScopedContext {
 `;
 }
 
+function handFixtureEngine() {
+  return `import { privateDoc, publicDoc, noDoc, richer } from './engine-alpha.js';
+import { betaPrivate } from './engine-beta.js';
+
+export class ObjectQL {
+  private n = 1;
+
+  /**
+   * A private docblock: it moves.
+   *
+   * Second paragraph.
+   */
+  private privateDoc(n: number): number {
+    // [#25522 cut 1] The body moved to \`engine-alpha.ts\` (see \`AlphaHost\`).
+    return privateDoc.call({ n: this.n }, n);
+  }
+
+  /** A public docblock: it stays. */
+  publicDoc(): number {
+    // [#25522 cut 1] The body moved to \`engine-alpha.ts\` (see \`AlphaHost\`). PUBLIC
+    return publicDoc.call({ n: this.n });
+  }
+
+  private noDoc(): number {
+    // [#25522 cut 1] The body moved to \`engine-alpha.ts\`; it reads no member.
+    return noDoc();
+  }
+
+  /** Its function says more than the placeholder. */
+  private richer(): number {
+    // [#25522 cut 1] The body moved to \`engine-alpha.ts\`; it reads no member.
+    return richer();
+  }
+
+  /** A beta docblock. */
+  private betaPrivate(): number {
+    // [#29460] The body lives in \`engine-beta.ts\`; it reads no member.
+    return betaPrivate();
+  }
+
+  /** Not a stub: no hand marker. */
+  private notAStub(): number {
+    return this.n;
+  }
+}
+`;
+}
+
+function handFixtureModules() {
+  const head = (what) => `// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * [#25522 cut 1] ${what}.
+ */
+
+import type { ObjectQL } from './engine.js';
+`;
+  return new Map([
+    ['engine-alpha.ts', `${head('The alpha bodies')}
+export interface AlphaHost { readonly n: ObjectQL['n'] }
+
+${placeholderDoc('privateDoc')}
+export function privateDoc(this: AlphaHost, n: number): number {
+  return this.n + n;
+}
+
+${placeholderDoc('publicDoc')}
+export function publicDoc(this: AlphaHost): number {
+  return this.n;
+}
+
+${placeholderDoc('noDoc')}
+export function noDoc(): number {
+  return 0;
+}
+
+/**
+ * ${placeholderDoc('richer').slice(4, -3)}
+ *
+ * And a note of its own.
+ */
+export function richer(): number {
+  return 1;
+}
+`],
+    ['engine-beta.ts', `${head('The beta body')}
+${placeholderDoc('betaPrivate')}
+export function betaPrivate(): number {
+  return 2;
+}
+`],
+  ]);
+}
+
 async function selfTest() {
   const tm = await loadTsMorph();
   const batterySeen = new Map();
@@ -3256,6 +3675,53 @@ async function selfTest() {
     check('an import only a moved body read is pruned, and the proof names it', out.pruned.includes('onlyScopedReads') && v.pruned.includes('onlyScopedReads'), out.pruned.join());
     check('a scoped class the file does not declare refuses',
       refused(() => planScoped(tm, input, { classes: [['Gone', 'engine-gone.ts', 'Gone']] })));
+  }
+
+  open('hand-series docblocks (third pass)');
+  {
+    const input = handFixtureEngine();
+    const mods = handFixtureModules();
+    const planned = planHandDocs(tm, input, mods);
+    const why = (name) => planned.records.find((r) => r.name === name)?.reason ?? '<absent>';
+    check('a private stub with one docblock moves; public, undocumented and richer-function stubs stay',
+      why('privateDoc') === '' && why('betaPrivate') === '' && why('publicDoc').startsWith('public') &&
+      why('noDoc') === 'no-docblock' && why('richer').startsWith('function-docblock') && why('notAStub') === '<absent>',
+      planned.records.map((r) => `${r.name}=${r.reason}`).join(' | '));
+    const out = generateHandDocs(tm, input, mods, planned);
+    const again = generateHandDocs(tm, input, mods, planHandDocs(tm, input, mods));
+    const alpha = out.modules.get('engine-alpha.ts') ?? '';
+    check('the moved docblock replaces the placeholder, one level out, and the class keeps none',
+      alpha.includes('/**\n * A private docblock: it moves.\n *\n * Second paragraph.\n */\nexport function privateDoc(') &&
+      !out.host.includes('A private docblock') && out.host.includes('  private privateDoc(n: number): number {\n'));
+    check('the stub\'s marker gains the phrase after its module',
+      out.host.includes(`// [#25522 cut 1] The body moved to \`engine-alpha.ts\`${HAND_DOC_MOVED} (see \`AlphaHost\`).`));
+    check('a public docblock stays on the class and its function keeps the placeholder',
+      out.host.includes('  /** A public docblock: it stays. */\n  publicDoc(') && alpha.includes(`${placeholderDoc('publicDoc')}\nexport function publicDoc(`));
+    check('the module header gains the note once, above its closing line',
+      alpha.split(HAND_DOCS_NOTE).length === 2 && alpha.includes(`${HAND_DOCS_NOTE}\n */\n`));
+    const v = verifyHandDocs(tm, input, out.host, mods, new Map([...mods, ...out.modules]));
+    check('the generated moves prove against their base', v.failures.length === 0 && v.moved.length === 2, v.failures.join(' | '));
+    check('two runs on one input write byte-identical trees',
+      treeHash(new Map([['h', out.host], ...out.modules])) === treeHash(new Map([['h', again.host], ...again.modules])));
+    const slice = generateHandDocs(tm, input, mods, planHandDocs(tm, input, mods, { modules: ['engine-alpha.ts'] }));
+    const sliceMods = new Map([...mods, ...slice.modules]);
+    const rest = generateHandDocs(tm, slice.host, sliceMods, planHandDocs(tm, slice.host, sliceMods));
+    check('a slice moves only its modules, and the next slice on its output lands where one run lands',
+      !slice.modules.has('engine-beta.ts') && slice.host.includes('A beta docblock') &&
+      rest.host === out.host && (rest.modules.get('engine-beta.ts') ?? '') === out.modules.get('engine-beta.ts') &&
+      planHandDocs(tm, slice.host, sliceMods).records.find((r) => r.name === 'privateDoc')?.reason === 'already-moved');
+    const fails = (host, edited) => verifyHandDocs(tm, input, host, mods, new Map([...mods, ...out.modules, ...edited])).failures.length > 0;
+    check('one edited character in a moved docblock fails', fails(out.host, [['engine-alpha.ts', alpha.replace('Second paragraph.', 'Second paragraph!')]]));
+    check('a moved docblock dropped from its function fails', fails(out.host, [['engine-alpha.ts', alpha.replace(/\/\*\*\n \* A private docblock[\s\S]*?\*\/\n/, '')]]));
+    check('a staying docblock dropped from the class fails', fails(out.host.replace('  /** A public docblock: it stays. */\n', ''), []));
+    check('a public docblock moved off the class fails', fails(
+      out.host.replace('  /** A public docblock: it stays. */\n', '').replace('`engine-alpha.ts` (see `AlphaHost`). PUBLIC', `\`engine-alpha.ts\`${HAND_DOC_MOVED} (see \`AlphaHost\`). PUBLIC`),
+      [['engine-alpha.ts', alpha.replace(`${placeholderDoc('publicDoc')}\n`, '/** A public docblock: it stays. */\n')]]));
+    check('a marker that says moved over a docblock still on the class fails', fails(
+      out.host.replace('`engine-alpha.ts` (see `AlphaHost`). PUBLIC', `\`engine-alpha.ts\`${HAND_DOC_MOVED} (see \`AlphaHost\`). PUBLIC`), []));
+    check('a module missing its header note fails', fails(out.host, [['engine-alpha.ts', alpha.replace(`\n${HAND_DOCS_NOTE}`, '')]]));
+    check('--modules naming a module no stub delegates to refuses',
+      refused(() => planHandDocs(tm, input, mods, { modules: ['engine-gone.ts'] })));
   }
 
   const declared = Object.keys(SELF_TEST_BATTERIES);
