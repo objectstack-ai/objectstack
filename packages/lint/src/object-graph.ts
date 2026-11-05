@@ -378,6 +378,14 @@ export interface VisibleObjectExtension {
   priority: number;
   /** Its field records, name folded in ({@link recordsOf}). */
   fields: AnyRec[];
+  /**
+   * [#30471] Its validation rule records ({@link recordsOf}), carried for the
+   * one reader that addresses an object's rules by name
+   * (`validate-translation-references.ts`, `_validations.RULE`). Carrying them
+   * changes nothing about which entries survive: a replaced entry's rules go
+   * with it, as its fields do.
+   */
+  validations: AnyRec[];
 }
 
 /**
@@ -430,6 +438,7 @@ export function objectExtensionsByTarget(stack: unknown): Map<string, VisibleObj
         path: `${at}objectExtensions[${i}]`,
         priority: typeof ext.priority === 'number' ? ext.priority : 200,
         fields: recordsOf(ext.fields),
+        validations: recordsOf(ext.validations),
       });
       byTarget.set(ext.extend, kept);
     });

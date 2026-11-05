@@ -34,6 +34,12 @@ import { RLS_PREDICATE_UNKNOWN_FIELD, validateRlsPredicateEnforceability } from 
 import { SHARING_RULE_UNLOWERABLE_CONDITION, validateSharingRuleEnforceability } from './validate-sharing-rule-enforceability.js';
 import { THANK_YOU_RECORD_FIELD, validateThankYouRecordFields } from './validate-thank-you-record-fields.js';
 import { MEASURE_AGGREGATE_INCOHERENT, WIDGET_FILTER_FIELD_UNKNOWN, validateWidgetBindings } from './validate-widget-bindings.js';
+import { validateStackExpressions } from './validate-expressions.js';
+import { FLOW_NODE_WRITE_UNKNOWN_FIELD, validateFlowNodeWrites } from './validate-flow-node-writes.js';
+import { ACTION_BODY_WRITE_UNKNOWN_FIELD, validateActionBodyWrites } from './validate-action-body-writes.js';
+import { HOOK_BODY_WRITE_UNKNOWN_FIELD, validateHookBodyWrites } from './validate-hook-body-writes.js';
+import { validateReactPageProps } from './validate-react-page-props.js';
+import { TRANSLATION_TARGET_UNKNOWN, validateTranslationReferences } from './validate-translation-references.js';
 // [#16340] Read back the registry's OWN definition table to assert the graph
 // derives its injected types rather than carrying a second copy of them.
 import { injectedSystemColumnDefs } from '@objectstack/spec/data';
@@ -803,5 +809,138 @@ describe('[#30383] the field-path rules read the objects as served', () => {
         expect(findings[0].message).toContain('is a text field');
       }
     });
+  });
+});
+
+// [#30471] The field-NAME indexes outside the graph read the same fold: the
+// `record.FIELD` index of the expression passes (validations, formulas, flows,
+// hooks, sharing-rule conditions), the write rules' index (flow nodes, action
+// and hook bodies), a react page's field props and the translation universe.
+// The #30383 artifact, plus one extension rule for the translation rung.
+describe('[#30471] the field-name indexes read the objects as served', () => {
+  type Rec = Record<string, unknown>;
+  type Finding = { rule: string; severity?: unknown; where?: unknown; path?: unknown; message?: unknown };
+  type Run = (stack: Rec) => ReadonlyArray<Finding>;
+  const deal = { name: 'xs_deal', label: 'Deal', fields: { name: { type: 'text' }, amount: { type: 'number' } } };
+  const account = { name: 'xs_account', label: 'Account', fields: { name: { type: 'text' } } };
+  const added = { region: { type: 'text' }, score: { type: 'number' } };
+  const extensions = [{
+    extend: 'xs_deal',
+    fields: added,
+    validations: [{ name: 'region_set', type: 'script', condition: 'record.region == null', message: 'Set a region' }],
+  }];
+  const artifact = (extra: Rec, objectExtensions: unknown[] = extensions, objects: unknown[] = [deal, account]): Rec => ({
+    objects,
+    packages: [
+      { manifest: { id: 'app', objects } },
+      { manifest: { id: 'mod', objectExtensions } },
+    ],
+    ...extra,
+  });
+  // The per-package leg of `os build` (`packageBodyAsStack` in the cli).
+  const perPackage = (extra: Rec, objectExtensions: unknown[] = extensions): Rec => {
+    const body = { id: 'app', objects: [deal, account], ...extra };
+    return { ...body, manifest: body, packages: [{ manifest: body }, { manifest: { id: 'mod', objectExtensions } }] };
+  };
+  const ids = (run: Run, stack: Rec) => run(stack).map((f) => f.rule);
+  // The expression passes carry no rule id: every issue they raise on these
+  // stacks is about the one expression each names, read as `expression`.
+  const expressions: Run = (stack) => validateStackExpressions(stack).map((issue) => ({ ...issue, rule: 'expression' }));
+  const validationOn = (condition: string): Rec => ({
+    objects: [{ ...deal, validations: [{ name: 'v', type: 'script', condition, message: 'M' }] }, account],
+  });
+
+  // rule · its unknown-field id · the stack naming FIELD
+  const existence: Array<[string, string, Run, (field: string) => Rec]> = [
+    ['validate-expressions (a validation condition)', 'expression', expressions, (f) => validationOn(`record.${f} == 'x'`)],
+    ['validate-expressions (a sharing-rule condition)', 'expression', expressions, (f) => ({
+      sharingRules: [{ name: 'sr', object: 'xs_deal', condition: `record.${f} == 'x'`, sharedWith: { type: 'role', value: 'r' }, accessLevel: 'read' }],
+    })],
+    ['validate-flow-node-writes', FLOW_NODE_WRITE_UNKNOWN_FIELD, validateFlowNodeWrites, (f) => ({
+      flows: [{ name: 'fl', nodes: [{ id: 'n', type: 'update_record', config: { objectName: 'xs_deal', fields: { [f]: 'x' } } }] }],
+    })],
+    ['validate-action-body-writes', ACTION_BODY_WRITE_UNKNOWN_FIELD, validateActionBodyWrites, (f) => ({
+      actions: [{ name: 'act', label: 'Act', body: { language: 'js', source: `await ctx.api.object('xs_deal').updateById(id, { ${f}: 'x' });` } }],
+    })],
+    ['validate-hook-body-writes', HOOK_BODY_WRITE_UNKNOWN_FIELD, (stack) => validateHookBodyWrites(stack), (f) => ({
+      hooks: [{ name: 'h', object: 'xs_deal', events: ['beforeInsert'], body: { language: 'js', source: `ctx.input.${f} = 'x';` } }],
+    })],
+    ['validate-react-page-props', PAGE_FIELD_UNKNOWN, validateReactPageProps, (f) => ({
+      pages: [{
+        name: 'p', kind: 'react',
+        source: `function Page(){ return <ListView data={{ provider: 'object', object: 'xs_deal' }} columns={['name', '${f}']} />; }`,
+      }],
+    })],
+    ['validate-translation-references', TRANSLATION_TARGET_UNKNOWN, validateTranslationReferences, (f) => ({
+      translations: [{ 'zh-CN': { objects: { xs_deal: { fields: { [f]: { label: 'L' } } } } } }],
+    })],
+  ];
+
+  it.each(existence)('%s: an extension-added field passes; a field nothing adds is still refused', (_rule, id, run, naming) => {
+    expect(ids(run, artifact(naming('region')))).not.toContain(id);
+    expect(ids(run, artifact(naming('region'), []))).toContain(id);
+    expect(ids(run, artifact(naming('nowhere')))).toContain(id);
+  });
+
+  it.each(existence)('%s, on the per-package leg: the same verdicts', (_rule, id, run, naming) => {
+    expect(ids(run, perPackage(naming('region')))).not.toContain(id);
+    expect(ids(run, perPackage(naming('region'), []))).toContain(id);
+    expect(ids(run, perPackage(naming('nowhere')))).toContain(id);
+  });
+
+  it.each(existence)('%s: a field nothing adds is refused byte-for-byte as on the declared objects alone', (_rule, id, run, naming) => {
+    const refusal = (stack: Rec) => run(stack)
+      .filter((f) => f.rule === id)
+      .map(({ severity, where, path, message }) => ({ severity, where, path, message }));
+    const served = refusal(artifact(naming('zq_absent')));
+    expect(served).toHaveLength(1);
+    expect(served).toEqual(refusal(artifact(naming('zq_absent'), [])));
+  });
+
+  it('validate-translation-references: a `_validations` key for a rule an extension adds resolves', () => {
+    const bundle = (rule: string) => ({ translations: [{ 'zh-CN': { objects: { xs_deal: { _validations: { [rule]: { message: 'M' } } } } } }] });
+    expect(ids(validateTranslationReferences, artifact(bundle('region_set')))).toEqual([]);
+    expect(ids(validateTranslationReferences, artifact(bundle('region_set'), []))).toEqual([TRANSLATION_TARGET_UNKNOWN]);
+    expect(ids(validateTranslationReferences, artifact(bundle('nowhere')))).toEqual([TRANSLATION_TARGET_UNKNOWN]);
+  });
+
+  // The retired private reader kept every entry; the fold keeps one per
+  // package per target, so a later entry of the same package replaces an
+  // earlier one whole, its rules with its fields.
+  it('validate-translation-references: a key only a replaced entry adds is an orphan, as the registry serves it', () => {
+    const replaced = [...extensions, { extend: 'xs_deal', fields: { mood: { type: 'text' } } }];
+    const keys = (fields: Rec, rules: Rec = {}) => ({ translations: [{ 'zh-CN': { objects: { xs_deal: { fields, _validations: rules } } } }] });
+    expect(ids(validateTranslationReferences, artifact(keys({ mood: { label: 'M' } }), replaced))).toEqual([]);
+    expect(ids(validateTranslationReferences, artifact(keys({ region: { label: 'R' } }), replaced))).toEqual([TRANSLATION_TARGET_UNKNOWN]);
+    expect(ids(validateTranslationReferences, artifact(keys({}, { region_set: { message: 'M' } }), replaced))).toEqual([TRANSLATION_TARGET_UNKNOWN]);
+  });
+
+  // The write rules leave an object that declares no field unjudged (an
+  // external, introspected schema): an extension adding to it does not make
+  // its other fields knowable.
+  it('the write rules keep an object that declares no field unjudged, extended or not', () => {
+    const bare = { name: 'xs_deal', label: 'Deal', fields: {} };
+    const write = { flows: [{ name: 'fl', nodes: [{ id: 'n', type: 'update_record', config: { objectName: 'xs_deal', fields: { remote_col: 'x' } } }] }] };
+    expect(ids(validateFlowNodeWrites, artifact(write, extensions, [bare, account]))).toEqual([]);
+    expect(ids(validateFlowNodeWrites, artifact(write, [], [bare, account]))).toEqual([]);
+  });
+
+  // A field two packages write at the deciding priority: its name is served,
+  // its definition is registration order. The expression type check leaves it
+  // untyped; each pair lists last the definition the check would refuse.
+  it('validate-expressions: a field two packages tie on is a served name with no type', () => {
+    const tie = (a: Rec, b: Rec, extra: Rec): Rec => ({
+      objects: [deal, account],
+      packages: [
+        { manifest: { id: 'app', objects: [deal, account] } },
+        { manifest: { id: 'mod', objectExtensions: [{ extend: 'xs_deal', fields: a }] } },
+        { manifest: { id: 'mod2', objectExtensions: [{ extend: 'xs_deal', fields: b }] } },
+      ],
+      ...extra,
+    });
+    const sum = validationOn('record.score + 1 > 2');
+    expect(ids(expressions, tie({ score: { type: 'number' } }, { score: { type: 'text' } }, sum))).toEqual([]);
+    expect(ids(expressions, tie({ score: { type: 'text' } }, {}, sum))).toEqual(['expression']);
+    expect(ids(expressions, tie({ score: { type: 'number' } }, {}, sum))).toEqual([]);
   });
 });
