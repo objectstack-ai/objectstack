@@ -20,6 +20,7 @@ import {
   type RecycleBinRetentionResolver,
 } from './recycle-bin';
 import { DataEventType } from '../api/events.zod';
+import { RealtimeEventType } from '../api/realtime.zod';
 import { REGISTERED_ERROR_CODES } from '../api/error-code-ledger.zod';
 import { ObjectPermissionSchema } from '../security/permission.zod';
 
@@ -99,9 +100,17 @@ describe('the restore refusals (ADR-0148 D2)', () => {
 });
 
 describe('the restored event (ADR-0148 D2)', () => {
-  it('is a member of the data event vocabulary, never a create', () => {
-    expect(DataEventType.options).toContain(RECORD_RESTORED_EVENT);
+  it('is named in the record-event pattern, never a create', () => {
+    expect(RECORD_RESTORED_EVENT).toBe('data.record.restored');
     expect(RECORD_RESTORED_EVENT).not.toBe('data.record.created');
+  });
+
+  it('stays out of the emitted-event enums until the engine emits it', () => {
+    // The enums are the emitted set (realtime.test.ts pins them equal). The
+    // engine's restore adds the member to both in the change that emits it,
+    // and flips this pin then.
+    expect(DataEventType.options).not.toContain(RECORD_RESTORED_EVENT);
+    expect(RealtimeEventType.options).not.toContain(RECORD_RESTORED_EVENT);
   });
 });
 

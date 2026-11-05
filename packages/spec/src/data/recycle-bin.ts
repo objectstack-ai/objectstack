@@ -170,11 +170,18 @@ export type RecycleBinRestoreRefusalCode =
 /** The HTTP status every restore refusal answers. */
 export const RECYCLE_BIN_RESTORE_REFUSAL_STATUS = 409 as const;
 
+// [#30235] named here; [#30237] the engine's restore emits it, and adds it to
+// `DataEventType` and `RealtimeEventType` in the change that emits it, spelled
+// through this constant.
 /**
- * The event a restore emits (ADR-0148 D2), a member of `DataEventType`. A
- * restore is never a create: a flow triggered on record creation does not
- * fire, flow enrollments are not restored, audit records a restore as a
- * restore, and rollups recompute from the rows that are back.
+ * The event a restore emits (ADR-0148 D2). A restore is never a create: a
+ * flow triggered on record creation does not fire, flow enrollments are not
+ * restored, audit records a restore as a restore, and rollups recompute from
+ * the rows that are back.
+ *
+ * NAMED, NOT YET EMITTED. `DataEventType` and `RealtimeEventType` list only
+ * the events the engine emits, so a subscription can never wait on a name
+ * that does not fire; this name joins both in the change that emits it.
  */
 export const RECORD_RESTORED_EVENT = 'data.record.restored' as const;
 
