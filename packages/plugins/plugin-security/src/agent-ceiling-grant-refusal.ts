@@ -43,11 +43,17 @@
  *
  * It stands down on:
  *
- * - every `isSystem` write — seed replay and the platform's own grant writers
- *   (the platform-admin promotion, the organization-admin reconcile,
- *   self-registration), none of which names an agent ceiling set: the
- *   stand-down the sibling refusals on this table and the security middleware
- *   take;
+ * - every `isSystem` write: the stand-down the sibling refusals on this table
+ *   and the security middleware take. Which system writer can store an
+ *   agent ceiling set, writer by writer:
+ *   - the platform-admin promotion and the organization-admin reconcile name
+ *     their sets in code, and neither is a ceiling;
+ *   - the self-registration grant writes the configured
+ *     `audience.selfRegistrationPermissionSet`, and the audience validation
+ *     that admits that configuration (`assertAudienceConfig`,
+ *     `@objectstack/plugin-auth`) refuses an agent ceiling set there;
+ *   - seed replay, and the development-only demo-staff seed, write the sets
+ *     their stack declares, and nothing judges those against this rule;
  * - a value no by-name reader matches to any set (not a string, or blank):
  *   the engine's `required` and the catalog refusal answer those.
  *

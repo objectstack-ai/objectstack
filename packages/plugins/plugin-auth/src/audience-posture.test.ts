@@ -22,6 +22,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { ERROR_CODE_LEDGER } from '@objectstack/spec/api';
+import { MCP_AGENT_PERMISSION_SETS } from '@objectstack/spec/ai';
 import { AuthManager } from './auth-manager';
 import { bindTestSecurityCatalog, catalogFromTables } from './__tests__/security-catalog.testkit.js';
 import {
@@ -450,6 +451,24 @@ describe('entry validation: assertAudienceConfig (#11739)', () => {
     expect(() =>
       assertAudienceConfig({ posture: 'open', selfRegistrationPermissionSet: 'admin_full_access' }, undefined),
     ).toThrow(/admin_full_access/);
+  });
+
+  it.each(MCP_AGENT_PERMISSION_SETS)('refuses the agent ceiling set %s as the self-registration permission set, under each self-registration posture', (name) => {
+    const domains = { allowedEmailDomains: ['acme.com'] };
+    for (const audience of [{ posture: 'open' as const }, { posture: 'email_domain' as const, ...domains }]) {
+      expect(
+        () => assertAudienceConfig({ ...audience, selfRegistrationPermissionSet: name }, undefined),
+        audience.posture,
+      ).toThrow(
+        new RegExp(`^\\[audience\\] invalid audience configuration: selfRegistrationPermissionSet must not be '${name}' — it is the permission ceiling of an AI assistant connected over MCP`),
+      );
+    }
+  });
+
+  it('control: a permission set meant for people stays a declarable self-registration set', () => {
+    for (const set of ['member_default', 'portal_user']) {
+      expect(() => assertAudienceConfig({ posture: 'open', selfRegistrationPermissionSet: set }, undefined), set).not.toThrow();
+    }
   });
 
   it('email_domain: an explicit verification-off stays refused, from ANY declarant (the domain list is the only gate there)', () => {
