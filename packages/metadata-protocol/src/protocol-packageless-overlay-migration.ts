@@ -146,8 +146,7 @@ import {
     overlayPairFixOf,
     overrideDeclarationRefusedByShape,
     overrideWriteMemberOf,
-    type OverrideWriteSubject,
-    type OverrideWriteVerdict,
+    type OverrideWriteVerdictAsk,
 } from './protocol-packaged-base-refusal.js';
 import { readOnlyShippingPackages, shippingPackageIds } from './protocol-environment-rows.js';
 import { isServedOverrideRowOf } from './served-override.js';
@@ -706,8 +705,12 @@ export interface PackagelessCloseHost {
     readonly rethrowUnlessMetadataStoreUnprovisioned: ObjectStackProtocolImplementation['rethrowUnlessMetadataStoreUnprovisioned'];
     /** The read-only code packages that ship a name of an overlay type ([] for any other type). */
     readonly overlayBaseShippers: (type: string, name: string) => string[];
-    /** The override write gate, as the ceremony's step 2 meets it through the save door. */
-    readonly overrideWriteVerdict: (request: OverrideWriteSubject) => OverrideWriteVerdict;
+    /**
+     * The override write gate, as the ceremony's step 2 meets it through the
+     * save door: on a pair step 1 has not ensured yet, with the closure the
+     * ensure door gives it (`OverlayPairFix.pendingPairScope`).
+     */
+    readonly overrideWriteVerdict: OverrideWriteVerdictAsk;
 }
 
 /** The package-less write {@link packagelessCloseSubject} judges, and the row it would write. */
