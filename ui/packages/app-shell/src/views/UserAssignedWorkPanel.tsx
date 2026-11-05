@@ -38,15 +38,10 @@ import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import { useAdapter, useMetadata } from '@object-ui/react';
 import { getLazyFieldWidget } from '@object-ui/fields';
 import type { ObjectStackAdapter } from '@object-ui/data-objectstack';
+import { splitAssignedWork, type AssignedWorkSummary, type AssignedWorkTransferReport } from './userAssignedWork.js';
 
-type AssignedWorkApi = ReturnType<ObjectStackAdapter['getClient']>['security']['assignedWork'];
-/** The count answer (`UserAssignedWorkSummary` of `@objectstack/client`). */
-export type AssignedWorkSummary = Awaited<ReturnType<AssignedWorkApi['count']>>;
-/** The hand-over answer (`UserWorkTransferReport` of `@objectstack/client`). */
-export type AssignedWorkTransferReport = Awaited<ReturnType<AssignedWorkApi['transfer']>>;
-
-/** The platform owner field: a record whose owner is the user is "owned". */
-export const OWNER_FIELD = 'owner_id';
+/** The `user` field widget the hand-over picks its person with (lazy until drawn). */
+const UserWidget = getLazyFieldWidget('user');
 
 /** The id of the picked person, whatever shape the user picker hands back. */
 function pickedUserId(value: unknown): string | undefined {
@@ -62,16 +57,8 @@ function failureText(err: unknown): string {
   return typeof message === 'string' && message ? message : String(err);
 }
 
-/** Owned and assigned totals of a count answer. */
-export function splitAssignedWork(summary: AssignedWorkSummary): { owned: number; assigned: number } {
-  let owned = 0;
-  let assigned = 0;
-  for (const row of summary.objects) {
-    if (row.field === OWNER_FIELD) owned += row.count;
-    else assigned += row.count;
-  }
-  return { owned, assigned };
-}
+/** The slice of an object definition the panel labels rows with. */
+type ObjectDefLike = { name?: unknown; label?: string; fields?: Record<string, { label?: string } | undefined> };
 
 type CountState =
   | { phase: 'loading' }
@@ -101,7 +88,6 @@ export function UserAssignedWorkPanel({ userId }: UserAssignedWorkPanelProps) {
 
   useEffect(() => {
     let live = true;
-    setCount({ phase: 'loading' });
     void (async () => {
       try {
         if (!adapter) {
@@ -118,8 +104,8 @@ export function UserAssignedWorkPanel({ userId }: UserAssignedWorkPanelProps) {
   }, [adapter, userId, generation]);
 
   const objectDefOf = useCallback(
-    (name: string) => (objects ?? []).find((o: any) => o?.name === name) as
-      { name: string; label?: string; fields?: Record<string, { label?: string }> } | undefined,
+    (name: string) => ((objects ?? []) as ReadonlyArray<ObjectDefLike | null | undefined>)
+      .find((o) => o?.name === name) ?? undefined,
     [objects],
   );
   const objectText = useCallback((name: string) => {
@@ -131,7 +117,6 @@ export function UserAssignedWorkPanel({ userId }: UserAssignedWorkPanelProps) {
     return fieldLabel(object, field, declared || field);
   }, [objectDefOf, fieldLabel]);
 
-  const UserWidget = useMemo(() => getLazyFieldWidget('user'), []);
   // The candidate list leaves out the person being banned; the user picker
   // itself leaves out every banned user.
   const pickerField = useMemo(() => ({
@@ -149,6 +134,8 @@ export function UserAssignedWorkPanel({ userId }: UserAssignedWorkPanelProps) {
     try {
       const report = await adapter.getClient().security.assignedWork.transfer(userId, { toUserId: targetId });
       setTransfer({ phase: 'done', report });
+      // Read the counts again: what moved no longer holds the user.
+      setCount({ phase: 'loading' });
       setGeneration((g) => g + 1);
     } catch (err) {
       const fields = (err as { fields?: Array<{ code?: unknown }> } | null)?.fields;

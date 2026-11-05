@@ -719,7 +719,9 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
           data-testid="action-param-body"
         >
           {state.companion?.kind === 'user-assigned-work' && (
-            <UserAssignedWorkPanel userId={state.companion.userId} />
+            // Keyed by the user: another user is another subject, never a
+            // stale count carried over.
+            <UserAssignedWorkPanel key={state.companion.userId} userId={state.companion.userId} />
           )}
           {visibleParams.map((rawParam) => {
             const param = {

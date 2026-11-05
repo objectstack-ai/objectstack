@@ -43,7 +43,7 @@ vi.mock('@object-ui/fields', async (importOriginal) => ({
 
 import { AdapterCtx, MetadataCtx } from '@object-ui/react';
 import { ActionParamDialog } from './ActionParamDialog';
-import { splitAssignedWork } from './UserAssignedWorkPanel';
+import { splitAssignedWork } from './userAssignedWork';
 
 const USER_ID = 'u_lee';
 const PARAMS: ActionParamDef[] = [{ name: 'banReason', label: 'Ban Reason', type: 'text' }];
