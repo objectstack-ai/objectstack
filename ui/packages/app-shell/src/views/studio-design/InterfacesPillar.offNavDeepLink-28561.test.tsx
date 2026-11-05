@@ -96,6 +96,7 @@ function seedWithApp() {
   server.published.set('view', [
     { name: 'crm_lead.mine', label: 'Mine', object: 'crm_lead', viewKind: 'list', config: { type: 'grid', columns: ['name'] } },
     { name: 'crm_lead.hot', label: 'Hot Leads', object: 'crm_lead', viewKind: 'list', config: { type: 'grid', columns: ['name'] } },
+    { name: 'crm_lead.web_form', label: 'Web Form', object: 'crm_lead', viewKind: 'form', config: { type: 'simple', sections: [] } },
     // The container the server keeps beside the expanded items: no item of its own.
     { name: 'crm_lead', object: 'crm_lead', listViews: { hot: { columns: ['name'] } } },
   ]);
@@ -134,11 +135,13 @@ const surfaceParam = () => new URLSearchParams(screen.getByTestId('where').textC
 const canvas = () => screen.findByTestId('stub-canvas', undefined, { timeout: 8000 });
 
 describe('objectstack#28561 — Interfaces opens an off-nav item by `?surface=`', () => {
+  // objectstack#30046 — a form view: a link to a LIST view lands on its
+  // object's page instead (`InterfacesPillar.offNavListViews-30046`).
   it('a view no nav entry opens: the view, not the first leaf', async () => {
     seedWithApp();
-    renderPillar('view:crm_lead.hot');
-    expect(await canvas()).toHaveTextContent('view:crm_lead.hot');
-    expect(surfaceParam()).toBe('view:crm_lead.hot');
+    renderPillar('view:crm_lead.web_form');
+    expect(await canvas()).toHaveTextContent('view:crm_lead.web_form');
+    expect(surfaceParam()).toBe('view:crm_lead.web_form');
   });
 
   it('a report and a record page no entry opens', async () => {

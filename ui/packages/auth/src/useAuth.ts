@@ -31,6 +31,7 @@ export function useAuth(): AuthContextValue {
       user: null,
       session: null,
       isAuthenticated: false,
+      sessionEndedBySignOut: false,
       isAuthEnabled: false,
       isLoading: false,
       error: null,

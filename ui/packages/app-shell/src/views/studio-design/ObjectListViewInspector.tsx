@@ -36,7 +36,8 @@
  * packageId })`) under its own version guard (objectui#11773), debounced by the
  * pillar's autosave like every other Studio editor. A view that does not exist
  * yet is created by the first edit, seeded with the columns the running app
- * shows an object that has no view (`defaultListColumnsFromObject`).
+ * shows an object that has no view (`defaultListColumnsFromObject`); for a
+ * draft-only object, from this package's drafted definition (objectstack#30317).
  *
  * ## Switching views, and adding one
  *
@@ -130,6 +131,7 @@ import {
   listViewTypeHeldEdit,
 } from './ListViewTypeSection.js';
 import { ListViewChartSection } from './ListViewChartSection.js';
+import { ListViewMoreSection } from './ListViewMoreSection.js';
 import { ListViewBulkActionsSection, listViewHasSelectionBar } from './ListViewBulkActionsSection.js';
 import {
   addedArrayElements,
@@ -395,6 +397,11 @@ export interface ObjectListViewDraft {
    * a pending edit is the caller's to send first.
    */
   showView: (viewId: string) => void;
+  /**
+   * objectstack#30046 — open the leaf `surface` (the host opens it) on its
+   * view `viewId`, as a link naming that view would (`ListViewLink`).
+   */
+  openView: (surface: SurfaceIdentity, viewId: string) => void;
   /** Send the buffer to the package draft — the autosave's `save`. */
   save: (sent: DraftSendClaim) => Promise<void>;
   /** The version-conflict dialog of this buffer's guard; render it once. */
@@ -561,7 +568,34 @@ export function useObjectListViewDraft({
     objectName && !holding ? listViewChoicesOf(objectName, publishedViews, draftViewRows, entryTarget, target) : [];
   const viewId = target?.viewId ?? '';
   const targetKey = viewId ? listViewBufferKey(viewId) : '';
-  const seedColumns = React.useMemo(() => defaultListColumnsFromObject(objectDef, 5), [objectDef]);
+  // objectstack#30317 — a draft-only object is absent from the merged
+  // metadata, so the columns a view created here starts with are read off
+  // this package's drafted definition, read with the drafts overlaid (the
+  // read `useObjectFields` makes for the panel's field picker). Only when the
+  // merged definition is missing; a failed or empty answer seeds nothing.
+  const [draftedDef, setDraftedDef] = React.useState<{ for: string; def: Row | null }>({ for: '', def: null });
+  const needsDraftedDef = !!objectName && !objectDef;
+  React.useEffect(() => {
+    if (!objectName || !needsDraftedDef) return;
+    let cancelled = false;
+    const forKey = JSON.stringify([packageId, objectName]);
+    client
+      .withPreviewDrafts(true)
+      .get<Row>('object', objectName, { packageId })
+      .then(
+        (def) => {
+          if (!cancelled) setDraftedDef({ for: forKey, def: isPlainObject(def) ? def : null });
+        },
+        () => {
+          if (!cancelled) setDraftedDef({ for: forKey, def: null });
+        },
+      );
+    return () => {
+      cancelled = true;
+    };
+  }, [client, packageId, objectName, needsDraftedDef, publishNonce]);
+  const seedDef = objectDef ?? (needsDraftedDef && draftedDef.for === viewDraftsKey ? draftedDef.def : undefined);
+  const seedColumns = React.useMemo(() => defaultListColumnsFromObject(seedDef, 5), [seedDef]);
 
   const [buffer, setBuffer] = React.useState<{
     for: string;
@@ -737,6 +771,14 @@ export function useObjectListViewDraft({
     },
     [entryViewId, entryKey],
   );
+  // objectstack#30046 — a door outside the header (a list view picked under
+  // 不在导航中, a link to the view itself) opens the leaf `surface` on its
+  // view `viewId`: the link's own rule, so it shows once that leaf is open
+  // and expires as a link does.
+  const openView = React.useCallback((surface: SurfaceIdentity, next: string) => {
+    setPicked(null);
+    setLink({ surface, viewId: next });
+  }, []);
 
   const row = buffer.row;
   const notList = !!row && !isListViewRow(row);
@@ -815,6 +857,7 @@ export function useObjectListViewDraft({
     edit,
     createView,
     showView,
+    openView,
     save,
     conflictDialog,
     canvas,
@@ -1205,7 +1248,10 @@ function KanbanCardSection({
  * type's own settings (`ListViewTypeSection`, objectstack#27895); on a chart
  * view, its dataset binding (`ListViewChartSection`, objectstack#27933). The
  * object's other list views are one pick away in the header's title
- * (`ObjectListViewTitle`, objectstack#30046), not here.
+ * (`ObjectListViewTitle`, objectstack#30046), not here. Below them, what only
+ * the view's own page offered before a list view opened here from every door:
+ * its conditional formatting and the spec form's sections
+ * (`ListViewMoreSection`, objectstack#30046).
  */
 export function ObjectListViewInspector({
   listView,
@@ -1213,6 +1259,7 @@ export function ObjectListViewInspector({
   locale,
   selection,
   onSelectionChange,
+  onBlockingIssuesChange,
 }: {
   listView: ObjectListViewDraft;
   readOnly: boolean;
@@ -1224,6 +1271,12 @@ export function ObjectListViewInspector({
    */
   selection?: ListViewColumnSelection | null;
   onSelectionChange?: (selection: ListViewColumnSelection | null) => void;
+  /**
+   * objectstack#30046 — how many conditional-formatting rules' CEL does not
+   * parse (`ListViewMoreSection`): the host holds the view's autosave while
+   * it is not 0.
+   */
+  onBlockingIssuesChange?: (count: number) => void;
 }): React.ReactElement | null {
   const { target, row, notList, seedColumns, failure, saving, hasDraft, edit, loadedFor, targetKey, draftChanges, published } =
     listView;
@@ -1542,6 +1595,17 @@ export function ObjectListViewInspector({
                 locale={locale}
               />
             )}
+            {/* objectstack#30046 — what only the view's own page offered: 条件格式化 and the spec form's sections. */}
+            <ListViewMoreSection
+              body={body}
+              writeBody={writeBody}
+              objectName={objectName}
+              fieldNames={fields.map((f) => f.name)}
+              fieldCatalog={fieldCatalog}
+              readOnly={readOnly}
+              locale={locale}
+              onBlockingIssuesChange={onBlockingIssuesChange}
+            />
             {latestMark && (
               // objectui#12725 — the 来源 line: who drafted the marked settings, and when.
               <DraftSourceLine mark={latestMark} locale={locale} items={addedLabels} className="border-t pt-3" />

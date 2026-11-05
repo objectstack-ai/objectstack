@@ -150,6 +150,7 @@ const pt = {
     notAvailableHere: '"{{action}}" não está disponível na página atual.',
     notAvailableForRecord: 'Não disponível para este registro',
     completedSuccessfully: 'A ação foi concluída com sucesso',
+    completedNamed: 'Ação concluída: {{action}}',
     failed: 'A ação falhou',
     parallelFailed: 'Uma ou mais ações paralelas falharam',
     selectExactlyOneRow: 'Esta ação é executada em um único registro — selecione exatamente uma linha.',
@@ -912,12 +913,12 @@ const pt = {
   },
   managedByBadge: {
     systemWritable: {
-      short: "Esquema da plataforma",
+      short: "Integrado · editável",
       title: "Definido pela plataforma, gravável pelo administrador",
       body: "O esquema deste objeto é definido pela plataforma, mas as linhas são suas para criar e editar aqui. Quem pode gravar é determinado pela administração delegada e pela segurança em nível de registro, não por este selo.",
     },
     config: {
-      short: "Config. de admin",
+      short: "Configurado aqui",
       title: "Configuração do administrador",
       body: "Estas linhas definem o comportamento da plataforma em tempo de execução. Crie-as aqui; os dados de tempo de execução produzidos ficam em uma tabela separada.",
     },
@@ -932,7 +933,7 @@ const pt = {
       body: "Log de auditoria imutável. As linhas não podem ser criadas, editadas ou excluídas pela interface: a plataforma as grava quando os eventos ocorrem. Use Exportar para baixar para revisão de conformidade.",
     },
     betterAuth: {
-      short: "Identidade",
+      short: "Via serviço de identidade",
       title: "Gravado pelo serviço de identidade integrado",
       body: "O esquema deste objeto pertence a {{provider}}, o serviço de identidade integrado da plataforma. Crie e altere esses registros com as ações desta página ou pelos fluxos de login, convite e segurança; todos passam por esse serviço. Editar a tabela diretamente ignoraria o hash de senhas, a validação de sessões, as verificações de dois fatores e os hooks de auditoria.",
     },
@@ -4297,6 +4298,10 @@ const pt = {
         unreadableRange: "{{packageId}} declara {{dependency}} com o intervalo de versões {{range}}, que não pode ser lido. Corrija o intervalo e publique o pacote novamente.",
         unreadableVersion: "Instale uma versão publicada de {{dependency}} dentro de {{range}}. A versão instalada {{installedVersion}} não está no formato MAJOR.MINOR.PATCH.",
         unreadableDeclaration: "{{packageId}} declara as suas dependências num formato que a instalação não consegue ler. Escreva-as como um mapa de ID de pacote para intervalo de versões e publique o pacote novamente.",
+      },
+      protocolCheckSkipped: {
+        noRange: "{{packageId}} não indica qual protocolo de plataforma suporta, por isso foi instalado sob o protocolo {{protocolVersion}} sem verificação de compatibilidade e pode não funcionar nesta versão da plataforma. Uma compilação do pacote que declara o protocolo suportado (engines.protocol) é verificada na instalação.",
+        unparsedRange: "{{packageId}} declara o seu protocolo de plataforma como {{requiredRange}}, que este runtime não consegue ler, por isso foi instalado sob o protocolo {{protocolVersion}} sem verificação de compatibilidade e pode não funcionar nesta versão da plataforma. Uma compilação do pacote que declara um intervalo legível (engines.protocol) é verificada na instalação.",
       },
       localUnauthorized: "Faça login neste runtime primeiro.",
       localMarketplaceUnavailable: "Este runtime não tem OS_CLOUD_URL configurado.",

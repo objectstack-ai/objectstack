@@ -150,6 +150,7 @@ const fr = {
     notAvailableHere: '« {{action}} » n\'est pas disponible sur la page actuelle.',
     notAvailableForRecord: 'Non disponible pour cet enregistrement',
     completedSuccessfully: 'Action effectuée avec succès',
+    completedNamed: 'Action effectuée : {{action}}',
     failed: "Échec de l'action",
     parallelFailed: 'Une ou plusieurs actions parallèles ont échoué',
     selectExactlyOneRow: 'Cette action porte sur un seul enregistrement — sélectionnez exactement une ligne.',
@@ -912,12 +913,12 @@ const fr = {
   },
   managedByBadge: {
     systemWritable: {
-      short: "Schéma de la plateforme",
+      short: "Intégré · modifiable",
       title: "Défini par la plateforme, modifiable par l'administrateur",
       body: "Le schéma de cet objet est défini par la plateforme, mais ses lignes vous appartiennent : vous pouvez les créer et les modifier ici. Qui peut écrire est déterminé par l'administration déléguée et la sécurité au niveau des enregistrements, pas par ce badge.",
     },
     config: {
-      short: "Config admin",
+      short: "Configuré ici",
       title: "Configuration administrateur",
       body: "Ces lignes définissent le comportement de la plateforme à l'exécution. Créez-les ici ; les données d'exécution produites résident dans une table séparée.",
     },
@@ -932,7 +933,7 @@ const fr = {
       body: "Journal d'audit immuable. Les lignes ne peuvent pas être créées, modifiées ni supprimées depuis l'interface : la plateforme les écrit lors des événements. Utilisez Exporter pour les télécharger à des fins de conformité.",
     },
     betterAuth: {
-      short: "Identité",
+      short: "Via le service d'identité",
       title: "Écrit via le service d'identité intégré",
       body: "Le schéma de cet objet appartient à {{provider}}, le service d'identité intégré de la plateforme. Créez et modifiez ces enregistrements avec les actions de cette page ou via les flux de connexion, d'invitation et de sécurité ; tous passent par ce service. Modifier la table directement contournerait le hachage des mots de passe, la validation des sessions, les contrôles à deux facteurs et les hooks d'audit.",
     },
@@ -4298,6 +4299,10 @@ const fr = {
         unreadableRange: "{{packageId}} déclare {{dependency}} avec la plage de versions {{range}}, qui ne peut pas être lue. Corrigez la plage et republiez le paquet.",
         unreadableVersion: "Installez une version publiée de {{dependency}} comprise dans {{range}}. La version installée {{installedVersion}} n’est pas au format MAJOR.MINOR.PATCH.",
         unreadableDeclaration: "{{packageId}} déclare ses dépendances sous une forme que l’installation ne peut pas lire. Écrivez-les sous forme de correspondance entre ID de paquet et plage de versions, puis republiez le paquet.",
+      },
+      protocolCheckSkipped: {
+        noRange: "{{packageId}} n’indique pas quel protocole de plateforme il prend en charge : il a donc été installé sous le protocole {{protocolVersion}} sans vérification de compatibilité et risque de ne pas fonctionner sur cette version de la plateforme. Une version du paquet qui déclare le protocole pris en charge (engines.protocol) est vérifiée à l’installation.",
+        unparsedRange: "{{packageId}} déclare son protocole de plateforme comme {{requiredRange}}, que ce runtime ne sait pas lire : il a donc été installé sous le protocole {{protocolVersion}} sans vérification de compatibilité et risque de ne pas fonctionner sur cette version de la plateforme. Une version du paquet qui déclare une plage lisible (engines.protocol) est vérifiée à l’installation.",
       },
       localUnauthorized: "Connectez-vous d'abord à ce runtime.",
       localMarketplaceUnavailable: "Ce runtime n'a pas de OS_CLOUD_URL configuré.",

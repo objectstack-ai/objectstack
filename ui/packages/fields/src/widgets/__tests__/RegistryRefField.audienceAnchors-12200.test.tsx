@@ -17,14 +17,18 @@
  *  - a registry that lists nothing BUT anchors offers no picker;
  *  - a stored anchor still shows, by its label beside its name, unflagged, and
  *    is not offered when the row holds another value;
- *  - `permission-ref` filters nothing: a permission set named like an anchor is
- *    an ordinary set.
+ *  - `permission-ref` does not apply the anchor list: a permission set named
+ *    like an anchor is an ordinary set;
+ *  - `permission-ref` leaves out exactly the spec's `MCP_AGENT_PERMISSION_SETS`,
+ *    the AI assistant ceiling sets a person is never granted, and a stored one
+ *    still shows as the row's value.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import React from 'react';
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { AUDIENCE_ANCHOR_POSITIONS } from '@objectstack/spec';
+import { MCP_AGENT_PERMISSION_SETS } from '@objectstack/spec/ai';
 import { PositionRefField, PermissionRefField } from '../RegistryRefField';
 
 /** The assignable positions, by label beside name, as the picker reads them. */
@@ -118,7 +122,7 @@ describe('a stored anchor still shows, and is not offered as a fresh choice (obj
   });
 });
 
-describe('permission-ref filters nothing (objectui#12200)', () => {
+describe('permission-ref does not apply the anchor list (objectui#12200)', () => {
   it('lists, and writes, a permission set named like an anchor', async () => {
     const sets = lister([
       { name: 'everyone', label: 'Everyone Baseline' },
@@ -130,5 +134,53 @@ describe('permission-ref filters nothing (objectui#12200)', () => {
     expect(await openOptions()).toEqual(['Everyone Baseline (everyone)', 'guest', 'Sales User (sales_user)']);
     fireEvent.click(screen.getByText('Everyone Baseline (everyone)'));
     expect(onChange).toHaveBeenCalledWith('everyone');
+  });
+});
+
+describe('permission-ref leaves the MCP agent sets out of what it offers', () => {
+  /** The person-assignable sets, by label beside name, as the picker reads them. */
+  const PERSON_SETS = ['Sales User (sales_user)', 'Standard User (standard_user)'];
+
+  const SETS = [
+    { name: 'standard_user', label: 'Standard User' },
+    { name: 'sales_user', label: 'Sales User' },
+    // The agent ceiling sets, as the permission registry serves them: listed
+    // beside the sets a person can hold.
+    { name: 'mcp_agent_data_read', label: 'MCP Agent — Read Only' },
+    { name: 'mcp_agent_data_write', label: 'MCP Agent — Read & Write' },
+    { name: 'mcp_agent_restricted', label: 'MCP Agent — No Data Access' },
+  ];
+
+  it('offers the sets a person can hold and no agent set', async () => {
+    // The names the registry serves are the ones the spec publishes.
+    expect([...MCP_AGENT_PERMISSION_SETS].sort()).toEqual(
+      ['mcp_agent_data_read', 'mcp_agent_data_write', 'mcp_agent_restricted'],
+    );
+
+    mount(PermissionRefField, { dataSource: lister(SETS) });
+
+    expect(await openOptions()).toEqual(PERSON_SETS);
+    for (const set of MCP_AGENT_PERMISSION_SETS) {
+      expect(screen.queryByText(new RegExp(`\\(${set}\\)$`))).toBeNull();
+    }
+  });
+
+  it('a stored agent set still shows by its label beside its name, unflagged, and writes nothing', async () => {
+    const { onChange } = mount(PermissionRefField, { dataSource: lister(SETS), value: 'mcp_agent_data_read' });
+
+    const trigger = await screen.findByRole('combobox');
+    expect(trigger).toHaveTextContent('MCP Agent — Read Only (mcp_agent_data_read)');
+    expect(trigger).not.toHaveAttribute('data-not-found');
+    expect(onChange).not.toHaveBeenCalled();
+    // Its own option, as the row's value; the other agent sets are not offered.
+    expect(await openOptions()).toEqual(['MCP Agent — Read Only (mcp_agent_data_read)', ...PERSON_SETS]);
+  });
+
+  it('position-ref does not apply the agent list: a position named like an agent set is ordinary', async () => {
+    mount(PositionRefField, {
+      dataSource: lister([{ name: 'mcp_agent_restricted', label: 'Restricted Desk' }, { name: 'auditor' }]),
+    });
+
+    expect(await openOptions()).toEqual(['auditor', 'Restricted Desk (mcp_agent_restricted)']);
   });
 });

@@ -104,7 +104,10 @@ function seedWithApp() {
   server.published.set('report', [{ name: 'pipeline', label: 'Pipeline' }]);
   server.published.set('view', [
     { name: 'crm_lead.mine', label: 'Mine', object: 'crm_lead', viewKind: 'list', config: { type: 'grid', columns: ['name'] } },
-    { name: 'crm_lead.hot', label: 'Hot Leads', object: 'crm_lead', viewKind: 'list', config: { type: 'grid', columns: ['name'] } },
+    // objectstack#30046 — a form view: a list view of `crm_lead`, which an
+    // entry opens, is reached by that entry's header dropdown and not listed
+    // here (`InterfacesPillar.offNavListViews-30046`).
+    { name: 'crm_lead.web_form', label: 'Web Form', object: 'crm_lead', viewKind: 'form', config: { type: 'simple', sections: [] } },
     // The container the server keeps beside the expanded items: no item of its own.
     { name: 'crm_lead', object: 'crm_lead', listViews: { hot: { columns: ['name'] } } },
   ]);
@@ -156,7 +159,7 @@ describe('objectstack#26889 — Interfaces lists what no navigation entry names'
       'page · welcome',
       'dashboard · sales_overview',
       'report · pipeline',
-      'view · crm_lead.hot',
+      'view · crm_lead.web_form',
     ]);
     // A draft-only page reads as the label its `_drafts` row carries.
     expect(within(sections).getByRole('button', { name: 'Welcome' })).toHaveAttribute('title', 'page · welcome');
@@ -188,7 +191,7 @@ describe('objectstack#26889 — Interfaces lists what no navigation entry names'
     renderPillar();
     const sections = await offNav();
     for (const [label, opened] of [
-      ['Hot Leads', 'view:crm_lead.hot'],
+      ['Web Form', 'view:crm_lead.web_form'],
       ['Lead Detail', 'page:lead_detail'],
       ['Sales Overview', 'dashboard:sales_overview'],
     ] as const) {

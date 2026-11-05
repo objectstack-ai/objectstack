@@ -40,7 +40,7 @@ import {
   useFilterScope,
   useResolvedFilter,
 } from '@object-ui/react';
-import { useLocalization, useDisplayLocale, useObjectLabel, resolveFieldCurrency, formatDisplayNumber } from '@object-ui/i18n';
+import { useLocalization, useDisplayLocale, resolveFieldCurrency, formatDisplayNumber } from '@object-ui/i18n';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
   RecordDetailPanel,
@@ -692,7 +692,6 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
   // language → 'en' (objectui#4272). Read unconditionally at component level.
   const displayLocale = useDisplayLocale();
   const { t } = useGanttTranslation();
-  const { objectLabel } = useObjectLabel();
 
   // Surface write-back failures (drag / link / delete / inline edit) as an error
   // toast — silent revert alone leaves the user wondering why nothing stuck (#2473).
@@ -2578,12 +2577,12 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
           }
           taskColumnLabel={
             // The name column is headed by what its rows are: the bound
-            // object's label, translated the way every other surface names
-            // the object. A mixed-object tree (`objectField`) holds rows of
-            // other objects, and an inline data set has no object, so both
-            // keep the generic heading.
+            // object's label as the server serves it — already translated, so
+            // drawn as given (objectstack#30390). A mixed-object tree
+            // (`objectField`) holds rows of other objects, and an inline data
+            // set has no object, so both keep the generic heading.
             !ganttConfig?.objectField && resource && typeof objectSchema?.label === 'string' && objectSchema.label
-              ? objectLabel({ name: resource, label: objectSchema.label })
+              ? objectSchema.label
               : undefined
           }
           inlineEdit

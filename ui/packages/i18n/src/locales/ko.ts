@@ -148,6 +148,7 @@ const ko = {
     notAvailableHere: '"{{action}}"은(는) 현재 페이지에서 사용할 수 없습니다.',
     notAvailableForRecord: '이 레코드에서는 사용할 수 없습니다',
     completedSuccessfully: '작업이 완료되었습니다',
+    completedNamed: '{{action}} 완료',
     failed: '작업 실패',
     parallelFailed: '하나 이상의 병렬 작업이 실패했습니다',
     selectExactlyOneRow: '이 작업은 단일 레코드에서 실행됩니다. 행을 하나만 선택하세요.',
@@ -887,12 +888,12 @@ const ko = {
   },
   managedByBadge: {
     systemWritable: {
-      short: "플랫폼 스키마",
+      short: "기본 제공 · 편집 가능",
       title: "플랫폼 정의, 관리자 쓰기 가능",
       body: "이 객체의 스키마는 플랫폼이 정의하지만, 행은 여기서 직접 만들고 편집할 수 있습니다. 누가 쓸 수 있는지는 이 배지가 아니라 위임 관리와 레코드 수준 보안이 결정합니다.",
     },
     config: {
-      short: "관리 구성",
+      short: "여기서 설정",
       title: "관리자 구성",
       body: "이 행들은 플랫폼의 런타임 동작을 정의합니다. 여기에서 작성하세요. 생성되는 런타임 데이터는 별도의 테이블에 저장됩니다.",
     },
@@ -907,7 +908,7 @@ const ko = {
       body: "변경할 수 없는 감사 로그입니다. 행은 이벤트 발생 시 플랫폼이 기록하며 UI에서 생성·편집·삭제할 수 없습니다. 규정 준수 검토를 위해 내보내기를 사용하세요.",
     },
     betterAuth: {
-      short: "아이덴티티",
+      short: "ID 서비스 경유",
       title: "내장 ID 서비스를 통해 기록",
       body: "이 개체의 스키마는 플랫폼 내장 ID 서비스인 {{provider}}에 속합니다. 이 페이지의 작업이나 로그인, 초대, 보안 흐름으로 레코드를 만들고 변경하세요. 모두 이 서비스를 거칩니다. 테이블을 직접 편집하면 비밀번호 해싱, 세션 검증, 2단계 인증 확인 및 감사 후크를 우회하게 됩니다.",
     },
@@ -4214,6 +4215,10 @@ const ko = {
         unreadableRange: "{{packageId}}이(가) {{dependency}}에 선언한 버전 범위 {{range}}을(를) 읽을 수 없습니다. 범위를 수정한 뒤 패키지를 다시 게시하세요.",
         unreadableVersion: "{{range}} 범위 안의 {{dependency}} 정식 버전을 설치하세요. 설치된 버전 {{installedVersion}}은(는) MAJOR.MINOR.PATCH 형식이 아닙니다.",
         unreadableDeclaration: "{{packageId}}의 종속성 선언 형식을 읽을 수 없습니다. 패키지 ID에서 버전 범위로의 맵으로 작성한 뒤 패키지를 다시 게시하세요.",
+      },
+      protocolCheckSkipped: {
+        noRange: "{{packageId}}은(는) 지원하는 플랫폼 프로토콜을 명시하지 않아 호환성 검사 없이 프로토콜 {{protocolVersion}}에서 설치되었으며, 이 플랫폼 버전에서 작동하지 않을 수 있습니다. 지원 프로토콜(engines.protocol)을 명시한 패키지 빌드는 설치 시 검사됩니다.",
+        unparsedRange: "{{packageId}}은(는) 플랫폼 프로토콜을 {{requiredRange}}(으)로 명시했지만 이 런타임이 읽을 수 없어 호환성 검사 없이 프로토콜 {{protocolVersion}}에서 설치되었으며, 이 플랫폼 버전에서 작동하지 않을 수 있습니다. 읽을 수 있는 범위(engines.protocol)를 명시한 패키지 빌드는 설치 시 검사됩니다.",
       },
       localUnauthorized: "먼저 이 런타임에 로그인하세요.",
       localMarketplaceUnavailable: "이 런타임에 OS_CLOUD_URL이 구성되지 않았습니다.",
