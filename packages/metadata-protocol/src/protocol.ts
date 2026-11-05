@@ -3814,7 +3814,13 @@ export class ObjectStackProtocolImplementation implements
         return throwMetadataServiceUnavailable(errors);
     }
 
-    async getMetaItems(request: { type: string; packageId?: string; previewDrafts?: boolean }) {
+    /**
+     * The served list of one metadata type. [#29236] `names` narrows it to the
+     * items of those names (`GetMetaItemsRequestSchema.names`): a name that
+     * matches nothing is absent, and the narrowing runs before the serving
+     * decorations, so they are computed for the named items only.
+     */
+    async getMetaItems(request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean }) {
         // [#25467 E1] The body moved to `protocol-meta-list-reads.ts`; it reaches this class through `protocol-host.ts`.
         return getMetaItems(protocolHost(this), request);
     }
@@ -3988,7 +3994,7 @@ export class ObjectStackProtocolImplementation implements
      * `request` arrives already folded by the calling face (#4432).
      */
     private async readFlattenedMetaItems(
-        request: { type: string; packageId?: string; previewDrafts?: boolean },
+        request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean },
         audience: 'served' | 'execution',
         layer: 'effective' | 'per-package' = 'effective',
     ) {

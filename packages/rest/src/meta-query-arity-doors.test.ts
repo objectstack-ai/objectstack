@@ -20,7 +20,14 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { META_QUERY_ARITY_DOORS, metaQueryArityRefusal, type MetaQueryArityDoor } from './meta-item-read-gate.js';
+import {
+    META_LIST_QUERY_PARAMS,
+    META_QUERY_ARITY_DOORS,
+    metaListQueryRefusal,
+    metaQueryArityRefusal,
+    type MetaQueryArityDoor,
+} from './meta-item-read-gate.js';
+import { unknownQueryParamMessage } from './query-allowlist.js';
 import { repeatedQueryParamMessage } from './query-multiplicity.js';
 import { RestServer } from './rest-server.js';
 
@@ -257,5 +264,90 @@ describe('a BRACKETED `packageId` or `type` key on `_drafts`', () => {
             .toHaveBeenCalledWith({ packageId: 'com.acme', type: 'view' });
         expect((await drive('drafts', {})).protocol.listDrafts)
             .toHaveBeenCalledWith({ packageId: undefined, type: undefined });
+    });
+});
+
+/**
+ * [#29236] The list's closed query set. `GET /meta/:type` declared none, so a
+ * name it does not read was dropped: `?names=` before it was served, a misspelt
+ * `?name=` or `?ids=`, each answered the whole list with `200`. Recognition now
+ * runs first at the list's entry, on both transports (`metaListQueryRefusal`;
+ * the dispatcher's side is pinned in `packages/runtime/src/domains/
+ * dispatcher-query-arity.test.ts` and the parity census).
+ */
+const SUPPORTED_LIST_PARAMS = [...META_LIST_QUERY_PARAMS].sort();
+const unknownListParam = (...names: string[]) => unknownQueryParamMessage(names, SUPPORTED_LIST_PARAMS);
+
+async function driveList(type: string, query: Record<string, unknown>) {
+    const { protocol, route } = bootRest();
+    const path = '/api/v1/meta/:type';
+    const res = mockRes();
+    await route(path).handler({ method: 'GET', path, params: { type }, query, headers: {}, body: {} }, res);
+    return { protocol, status: res.statusCode, body: res.json.mock.calls.at(-1)?.[0] };
+}
+
+describe('[#29236] the list\'s closed query set — recognition before arity', () => {
+    it('declares the ruled six, and `locale`, which the list already reads', () => {
+        expect(SUPPORTED_LIST_PARAMS).toEqual(['id', 'include', 'locale', 'names', 'object', 'package', 'preview']);
+    });
+
+    it.each(['name', 'ids', 'filter', 'select', 'names_', 'Names'])(
+        'an undeclared `%s` is refused as data with the located sentence', (name) => {
+            expect(metaListQueryRefusal('object', { [name]: 'a,b' })).toEqual({
+                status: 400, code: 'VALIDATION_ERROR', message: unknownListParam(name), rule: 'unknown-parameter',
+            });
+        },
+    );
+
+    it('names every unknown key, sorted, and outranks a repeat of a declared one', () => {
+        expect(metaListQueryRefusal('object', { zeta: '1', alpha: '2', names: ['a', 'b'] })?.message)
+            .toBe(unknownListParam('alpha', 'zeta'));
+        expect(metaListQueryRefusal('object', { names: ['a', 'b'] })?.rule).toBe('repeated-parameter');
+    });
+
+    it('leaves every declared name, once, to the rest of the list (controls)', () => {
+        const query = { package: 'crm', preview: 'draft', object: 'lead', include: 'content', id: 'crm', names: 'a,b', locale: 'zh-CN' };
+        expect(metaListQueryRefusal('object', query)).toBeUndefined();
+        expect(metaListQueryRefusal('object', {})).toBeUndefined();
+        expect(metaListQueryRefusal('object', undefined)).toBeUndefined();
+    });
+
+    it('leaves a bracketed spelling to its own located sentence only on the type whose step reads it', () => {
+        // `package[` on every type: the arity step's bracketed refusal answers it.
+        expect(metaListQueryRefusal('object', { 'package[]': 'crm' })?.rule).toBe('bracketed-parameter');
+        // `id[` on `app` and `object[` on `view` are the chain's: recognition passes them on.
+        expect(metaListQueryRefusal('app', { 'id[]': 'crm' })).toBeUndefined();
+        expect(metaListQueryRefusal('view', { 'object[0]': 'lead' })).toBeUndefined();
+        // Anywhere else no step reads them, so they are names the list does not read.
+        expect(metaListQueryRefusal('object', { 'id[]': 'crm' })?.message).toBe(unknownListParam('id[]'));
+        expect(metaListQueryRefusal('app', { 'object[]': 'lead' })?.message).toBe(unknownListParam('object[]'));
+        expect(metaListQueryRefusal('object', { 'names[]': 'a' })?.message).toBe(unknownListParam('names[]'));
+    });
+
+    it('RestServer: an undeclared key answers the nested 400 before any protocol read', async () => {
+        for (const type of ['object', 'app', 'view']) {
+            const { protocol, status, body } = await driveList(type, { name: 'account' });
+            expect({ type, status, body }).toEqual({
+                type, status: 400, body: { error: { code: 'VALIDATION_ERROR', message: unknownListParam('name') } },
+            });
+            expect(protocol.getMetaItems).not.toHaveBeenCalled();
+            expect(protocol.getMetaTypes).not.toHaveBeenCalled();
+        }
+    });
+
+    it('RestServer: `?locale=zh-CN` and every other declared name still answer 200 (controls)', async () => {
+        for (const query of [{ locale: 'zh-CN' }, { names: 'account' }, { include: 'content' }, { preview: 'draft' }, {}]) {
+            const { protocol, status } = await driveList('object', query);
+            expect({ query, status }).toEqual({ query, status: 200 });
+            expect(protocol.getMetaItems).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    it('RestServer: `?names[]=` is refused by recognition; `?id[]=` keeps the app list\'s own sentence', async () => {
+        expect((await driveList('object', { 'names[]': 'account' })).body)
+            .toEqual({ error: { code: 'VALIDATION_ERROR', message: unknownListParam('names[]') } });
+        const app = await driveList('app', { 'id[]': 'crm' });
+        expect(app.status).toBe(400);
+        expect(JSON.stringify(app.body)).toContain("Query parameter 'id[]' names no app");
     });
 });

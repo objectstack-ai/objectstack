@@ -38,7 +38,13 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
-import { META_QUERY_ARITY_DOORS, assertFilterParamSuppliedOnce, repeatedQueryParamMessage } from '@objectstack/rest';
+import {
+    META_LIST_QUERY_PARAMS,
+    META_QUERY_ARITY_DOORS,
+    assertFilterParamSuppliedOnce,
+    repeatedQueryParamMessage,
+    unknownQueryParamRefusalMessage,
+} from '@objectstack/rest';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 const SCHEMA = {
@@ -123,7 +129,7 @@ function expectArityRefusal(answer: Answer, name: string, count = 2): void {
 describe('[#23214] /meta — the four arity doors, over the list both transports read', () => {
     it('declares exactly the doors and names RestServer refuses (the one list)', () => {
         expect(META_QUERY_ARITY_DOORS).toEqual({
-            list: ['package', 'preview', 'object', 'include', 'id'],
+            list: ['package', 'preview', 'object', 'include', 'id', 'names'],
             'book-tree': ['package'],
             drafts: ['packageId', 'type'],
             state: ['from'],
@@ -193,6 +199,41 @@ describe('[#23214] /meta — the four arity doors, over the list both transports
         it('leaves a name it does not declare alone (`locale` falls back to the default locale)', async () => {
             const { dispatcher } = boot();
             expect((await get(dispatcher, '/meta/view', { locale: ['en', 'fr'] })).status).toBe(200);
+        });
+
+        // [#29236] The list's closed query set, asked before arity, as
+        // `RestServer`'s list asks it (`metaListQueryRefusal`).
+        it('refuses a name outside the closed set with the located sentence, before any list read', async () => {
+            for (const name of ['name', 'ids', 'names[]']) {
+                const { dispatcher, protocol } = boot();
+                const answer = await get(dispatcher, '/meta/view', { [name]: 'task_grid' });
+                expect({ name, status: answer.status, code: answer.body?.error?.code, message: answer.body?.error?.message }).toEqual({
+                    name, status: 400, code: 'VALIDATION_ERROR',
+                    message: unknownQueryParamRefusalMessage({ [name]: 'task_grid' }, META_LIST_QUERY_PARAMS),
+                });
+                expect(protocol.getMetaItems).not.toHaveBeenCalled();
+            }
+        });
+
+        it('`?names=` narrows the list and is pushed down to the protocol read; `?locale=` still answers 200', async () => {
+            const named = boot();
+            const answer = await get(named.dispatcher, '/meta/view', { names: 'task_grid,nope' });
+            expect(answer.status).toBe(200);
+            // This protocol double ignores `names`: the chain's step holds the answer.
+            expect(answer.body?.data.map((v: any) => v.name)).toEqual(['task_grid']);
+            expect(named.protocol.getMetaItems.mock.calls[0][0]).toMatchObject({ type: 'view', names: ['task_grid', 'nope'] });
+
+            const localised = boot();
+            expect((await get(localised.dispatcher, '/meta/view', { locale: 'fr' })).status).toBe(200);
+            expect(localised.protocol.getMetaItems.mock.calls[0][0]).not.toHaveProperty('names');
+        });
+
+        it('refuses an EMPTY `names` with 400 VALIDATION_ERROR before the protocol read', async () => {
+            const { dispatcher, protocol } = boot();
+            const answer = await get(dispatcher, '/meta/view', { names: '' });
+            expect({ status: answer.status, code: answer.body?.error?.code }).toEqual({ status: 400, code: 'VALIDATION_ERROR' });
+            expect(answer.body?.error?.message).toMatch(/^Query parameter 'names' names no item; got ""\./);
+            expect(protocol.getMetaItems).not.toHaveBeenCalled();
         });
     });
 

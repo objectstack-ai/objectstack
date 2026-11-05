@@ -271,12 +271,11 @@ export const GetMetaItemsRequestSchema = lazySchema(() => z.object({
     .min(1, 'Name at least one item, or leave `names` out to list every item')
     .optional()
     .describe(
-      '[PLANNED — not yet served] Item names to narrow the list to: only the named items of the type '
+      'Item names to narrow the list to: only the named items of the type '
       + 'are answered, among those the list would answer without it. Sent over HTTP as one '
       + 'comma-separated value (`?names=a,b,c`). A name that matches no item is simply absent from the '
       + 'answer (no 404). An empty value is refused with 400 rather than read as every item; leave the '
-      + 'key out to list every item. No list door reads it yet: until one does, a request carrying it '
-      + 'is answered as if it were absent.',
+      + 'key out to list every item.',
     ),
   previewDrafts: z.boolean().optional().describe(
     'Draft-visibility switch (ADR-0033 draft-overlay preview): when true, '
