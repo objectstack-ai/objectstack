@@ -264,7 +264,7 @@ create/update payload.
 
 - **list_objects()** — list available objects (system \`sys_*\` objects are hidden).
 - **describe_object({ objectName })** — an object's fields and features.
-- **validate_expression({ objectName, expression, site?, severity?, triggerKind? })** — check a CEL
+- **validate_expression({ objectName, expression, site?, severity?, triggerKind?, sweepObject? })** — check a CEL
   expression against an object's schema *before* you author it into a formula,
   validation, or flow condition. Returns build-time errors (bare field refs,
   unknown fields/functions) and advisory warnings (text/boolean fields misused
@@ -274,7 +274,9 @@ create/update payload.
   stdlib functions in scope. \`site\` is \`formula\` | \`validation\` |
   \`flow_condition\` | \`template\` (default \`formula\`). Pass the rule's
   \`severity\` or the flow's \`triggerKind\` (\`record_change\` by default) to
-  get the verdict the publish gate gives that rule or flow.
+  get the verdict the publish gate gives that rule or flow; for a
+  \`time_relative\` flow that sweeps another object than \`objectName\`, also
+  pass its \`timeRelative.object\` as \`sweepObject\` (then a mismatch warns).
 - **query_records({ objectName, where?, fields?, limit?, offset?, orderBy? })** —
   read records. \`where\` is a field→value match, e.g. \`{ "status": "open" }\`.
   Results are page-capped; use \`limit\`/\`offset\` to page.
