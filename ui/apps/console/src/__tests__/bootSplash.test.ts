@@ -302,3 +302,147 @@ describe('apps/console/index.html — boot splash behaviour', () => {
     expect(() => localStorage.getItem(THEME_STORAGE_KEY)).not.toThrow();
   });
 });
+
+/**
+ * objectstack#30126 row 14 — a page opened while the server restarts retries.
+ *
+ * The entry module failing to load before anything mounted (the server went
+ * away between serving the page and serving its entry, as during an `os dev`
+ * restart) makes the page reload itself, backing off, at most five times per
+ * tab. The count is cleared on the first mount; where sessionStorage cannot be
+ * read nothing retries, because the count could not be bounded.
+ */
+// Every run of the script installs a `window` error listener; each test's are
+// removed after it, so a failure dispatched in one test reaches only the
+// script that test ran. File-wide: every describe here runs the script.
+const installedListeners: Array<[string, EventListenerOrEventListenerObject, boolean]> = [];
+const windowAddEventListener = window.addEventListener;
+beforeEach(() => {
+  window.addEventListener = function (
+    this: Window,
+    type: string,
+    fn: EventListenerOrEventListenerObject,
+    opts?: boolean | AddEventListenerOptions,
+  ) {
+    installedListeners.push([type, fn, typeof opts === 'boolean' ? opts : !!opts?.capture]);
+    return windowAddEventListener.call(this, type, fn, opts);
+  } as typeof window.addEventListener;
+});
+afterEach(() => {
+  window.addEventListener = windowAddEventListener;
+  for (const [type, fn, capture] of installedListeners.splice(0)) window.removeEventListener(type, fn, capture);
+});
+
+describe('apps/console/index.html — boot splash retries a failed entry', () => {
+  const RETRY_KEY = 'os-boot-entry-retries';
+  let reload: ReturnType<typeof vi.fn>;
+
+  function runBootSplash(): void {
+    new Function(extractBootSplashSource())();
+  }
+
+  /**
+   * A script whose load failed, as `window`'s capture listener sees it: an
+   * `error` event whose target is the script. Built detached and handed to
+   * `window` directly, because happy-dom would otherwise try to fetch the
+   * `src` of a connected script and report a second failure of its own.
+   */
+  function failScript(attrs: { type?: string; src?: string } = { type: 'module', src: '/src/main.tsx' }): void {
+    const script = document.createElement('script');
+    if (attrs.type) script.type = attrs.type;
+    if (attrs.src) script.setAttribute('src', attrs.src);
+    const event = new Event('error');
+    Object.defineProperty(event, 'target', { value: script });
+    window.dispatchEvent(event);
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    sessionStorage.clear();
+    document.body.innerHTML = `<div id="${SPLASH_ID}"></div><div id="root"></div>`;
+    reload = vi.fn();
+    vi.stubGlobal('location', { ...window.location, reload });
+    vi.stubGlobal('matchMedia', () => ({ matches: false }));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+    sessionStorage.clear();
+    document.documentElement.removeAttribute('data-boot-theme');
+    document.body.innerHTML = '';
+  });
+
+  it('reloads after a failed entry, backing off, and counts the attempt', () => {
+    runBootSplash();
+    failScript();
+    expect(sessionStorage.getItem(RETRY_KEY)).toBe('1');
+    vi.advanceTimersByTime(999);
+    expect(reload).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(reload).toHaveBeenCalledTimes(1);
+
+    // The reloaded page's attempt waits twice as long. A reload is a fresh
+    // page: the first page's listener goes with it.
+    reload.mockClear();
+    for (const [type, fn, capture] of installedListeners.splice(0)) window.removeEventListener(type, fn, capture);
+    runBootSplash();
+    failScript();
+    expect(sessionStorage.getItem(RETRY_KEY)).toBe('2');
+    vi.advanceTimersByTime(1999);
+    expect(reload).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops after five attempts in a tab: the splash stays', () => {
+    sessionStorage.setItem(RETRY_KEY, '5');
+    runBootSplash();
+    failScript();
+    vi.advanceTimersByTime(60_000);
+    expect(reload).not.toHaveBeenCalled();
+    expect(document.getElementById(SPLASH_ID)).not.toBeNull();
+  });
+
+  it('clears the count on the first mount', async () => {
+    sessionStorage.setItem(RETRY_KEY, '3');
+    vi.useRealTimers();
+    runBootSplash();
+    document.getElementById('root')!.appendChild(document.createElement('div'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sessionStorage.getItem(RETRY_KEY)).toBeNull();
+  });
+
+  it('controls: a classic script, a module failing after the mount, and blocked storage never reload', () => {
+    runBootSplash();
+    failScript({ src: '/vendor.js' });
+    vi.advanceTimersByTime(60_000);
+    expect(reload).not.toHaveBeenCalled();
+
+    document.getElementById('root')!.appendChild(document.createElement('div'));
+    failScript();
+    vi.advanceTimersByTime(60_000);
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it('control: with sessionStorage blocked the count cannot be bounded, so nothing retries', () => {
+    const storedDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
+    const blocked = () => {
+      throw new Error('storage blocked');
+    };
+    Object.defineProperty(globalThis, 'sessionStorage', {
+      configurable: true,
+      value: { getItem: blocked, setItem: blocked, removeItem: blocked, clear: blocked, key: blocked, length: 0 },
+    });
+    try {
+      expect(() => sessionStorage.getItem(RETRY_KEY)).toThrow('storage blocked');
+      runBootSplash();
+      failScript();
+      vi.advanceTimersByTime(60_000);
+      expect(reload).not.toHaveBeenCalled();
+    } finally {
+      if (storedDescriptor) Object.defineProperty(globalThis, 'sessionStorage', storedDescriptor);
+    }
+  });
+});

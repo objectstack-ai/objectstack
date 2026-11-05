@@ -1204,6 +1204,9 @@ export function registerObjectTools(
             scope,
             ...(optionFields ? { optionFields } : {}),
             ...(faultOutcome ? { faultOutcome } : {}),
+            // [#30250] A time-relative sweep's run is fired by no write: the
+            // gate's run-fails sentence there names none, and so does this one.
+            ...(site === 'flow_condition' && triggerKind === 'time_relative' ? { timeRelativeSweep: true } : {}),
           } as const;
           // The gate's envelope verdict first: `validateExpression` treats a
           // blank source as "not authored" and answers ok, while the save gate

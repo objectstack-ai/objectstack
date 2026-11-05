@@ -1,6 +1,6 @@
 import React, { useRef, useState, useCallback, lazy, Suspense } from 'react';
 import { Button, EmptyValue } from '@object-ui/components';
-import { useUpload } from '@object-ui/providers';
+import { useUpload } from './UploadProvider.js';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { X, Image as ImageIcon, Images, Camera, Crop as CropIcon, Loader2 } from 'lucide-react';
 import { FieldWidgetComponentProps } from './types.js';

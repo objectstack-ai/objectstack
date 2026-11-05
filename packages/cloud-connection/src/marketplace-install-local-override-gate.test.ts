@@ -195,8 +195,8 @@ describe('install-local 2d — the override write gate at the managed install (A
         expect(res.payload.data).not.toHaveProperty('overrideCollisions');
     });
 
-    it('[#28412] the paired .custom installs its declared FLOW override; a declared action override still waits', async () => {
-        // ADR-0146 D9: flow's conditions are delivered, so the gate admits it.
+    it('[#28412, #30065] the paired .custom installs its declared FLOW and ACTION overrides', async () => {
+        // ADR-0146 D9: flow's and action's conditions are delivered, so the gate admits them.
         const flow = await install({
             id: PAIR, version: '1.0.0', namespace: 'crm_custom', dependencies: deps(BASE),
             flows: [{ name: 'crm_followup', label: 'Ours', overrides: { package: BASE, basedOn: '1.0.0' } }],
@@ -209,8 +209,26 @@ describe('install-local 2d — the override write gate at the managed install (A
             id: PAIR, version: '1.0.0', namespace: 'crm_custom', dependencies: deps(BASE),
             actions: [{ name: 'crm_call', label: 'Ours', overrides: { package: BASE, basedOn: '1.0.0' } }],
         });
-        expect(action.res.status).toBe(403);
-        expect(refusedOf(action.res)).toEqual([['action', 'crm_call', 'declared_type_not_yet_available']]);
+        expect(action.res.status, JSON.stringify(action.res.payload)).toBe(200);
+        expect(action.registered).toEqual([]);
+        expect(action.saved).toEqual([['action', 'crm_call']]);
+    });
+
+    it('[#30065] a declared action override that widens who may run the base\'s action is refused 403, and nothing is written', async () => {
+        const holdings: Holdings = {
+            [BASE]: { action: [{ name: 'crm_call', label: 'Call', requiredPermissions: ['crm_admin'], ai: { exposed: false } }] },
+        };
+        const wider = { name: 'crm_call', label: 'Ours', overrides: { package: BASE, basedOn: '1.0.0' }, requiredPermissions: ['crm_admin'], ai: { exposed: true } };
+        const { res, registered, saved, ledger } = await install(
+            { id: PAIR, version: '1.0.0', namespace: 'crm_custom', dependencies: deps(BASE), actions: [wider] },
+            [{ id: BASE }],
+            holdings,
+        );
+        expect(res.status, JSON.stringify(res.payload)).toBe(403);
+        expect(res.payload?.error?.code).toBe('NOT_OVERRIDABLE');
+        expect(refusedOf(res)).toEqual([['action', 'crm_call', 'declared_action_widens_access']]);
+        expect(res.payload.error.details.refusals[0].message).toContain('`ai.exposed: true`');
+        expect([registered, saved, ledger]).toEqual([[], [], []]);
     });
 
     it('CONTROL: a dependent shipping its own names installs, and its answer carries no collision key', async () => {

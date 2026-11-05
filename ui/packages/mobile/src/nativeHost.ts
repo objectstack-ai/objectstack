@@ -56,6 +56,16 @@ export interface NativeConnectionRemovedEvent extends Event {
   waitUntil(promise: Promise<unknown>): void;
 }
 
+/**
+ * The window event the shell dispatches when the OS rotates this device's push
+ * token, announced as the `pushTokenChanged` capability. `detail` is the new
+ * `NativePushToken`. The shell holds a rotation until the page posts `ready()`,
+ * so a listener installed in the commit that posts `ready` receives it. The
+ * event can repeat an unchanged token: treat each one as "register this token".
+ * See `NativePushTokenChangedEvent`.
+ */
+export const NATIVE_PUSH_TOKEN_CHANGED_EVENT = 'objectstack-native:pushTokenChanged';
+
 /** Haptic feedback kinds the shell accepts. */
 export type NativeHapticKind =
   | 'light'
@@ -71,6 +81,9 @@ export interface NativePushToken {
   token: string;
   vendor: 'apns' | 'fcm';
 }
+
+/** The `objectstack-native:pushTokenChanged` event: a window `CustomEvent` carrying the new token. */
+export type NativePushTokenChangedEvent = CustomEvent<NativePushToken>;
 
 /** Safe-area insets in CSS pixels. Also published as `--os-native-safe-top|bottom|left|right`. */
 export interface NativeSafeArea {
@@ -165,6 +178,13 @@ export interface ObjectStackNative {
   /** Feature-detect with `has()`. */
   readonly capabilities: readonly string[];
   readonly safeArea: NativeSafeArea;
+  /**
+   * A random id for this app install that survives WebView storage loss: the
+   * `deviceId` a push registration sends. Exposed only to pages on the shell's
+   * configured server origin; every other page reads `null`. Optional: a shell
+   * older than it does not carry it, so use it only when it is a string.
+   */
+  readonly installId?: string | null;
   has(capability: string): boolean;
 
   getPushToken(): Promise<NativePushToken | null>;

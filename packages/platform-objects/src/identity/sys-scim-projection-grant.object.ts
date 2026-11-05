@@ -38,9 +38,8 @@ export const SysScimProjectionGrant = ObjectSchema.create({
   // wins over `titleFormat`) drew the raw id as the record page's H1. The
   // retired `titleFormat` template beside it is gone (refused at save and by
   // `os validate`); `identity-display-title.test.ts` holds the formula to the
-  // text that template drew. `user_id` is a lookup, so the formula reads its
-  // stored id: a formula is evaluated on the stored row, before `$expand`, and
-  // cannot reach the related record's own title.
+  // text that template drew. The formula names the PERSON, read one hop
+  // through `user_id` (ADR-0079 addendum 2026-10-18), never the stored id.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   highlightFields: ['role', 'source_kind', 'user_id', 'connection_id'],
@@ -76,11 +75,16 @@ export const SysScimProjectionGrant = ObjectSchema.create({
 
     // [ADR-0079] The record title (`nameField` above). A formula is computed on
     // read and has no stored column. Every source column is required, so the
-    // expression needs no null guard.
+    // expression needs no null guard. It names the platform user the grant is
+    // projected onto, not the stored id: their `name`, or their `email` where
+    // the name is blank, read ONE hop through `user_id` (ADR-0079 addendum,
+    // 2026-10-18), as `sys_business_unit_member`'s title does. The hop is read
+    // under the READER's own authority: a user the reader may not read, or one
+    // that no longer exists, leaves the title null, never the id.
     display_title: Field.formula({
       label: 'Title',
       returnType: 'text',
-      expression: F`record.role + ' → ' + record.user_id`,
+      expression: F`record.role + ' → ' + (isBlank(trim(record.user_id.name)) ? record.user_id.email : record.user_id.name)`,
       description: 'Record title: the projected role and the user it is granted to (computed on read)',
       group: 'Grant',
     }),

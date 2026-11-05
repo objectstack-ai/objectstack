@@ -136,6 +136,12 @@ export { readEnvelopeFailureText } from './utils/apiErrorEnvelope.js';
 // build-time edition flag. See ./hooks/useAiSurface.
 export { useAiSurfaceEnabled } from './hooks/useAiSurface.js';
 
+// The sign-in page saves a language picked there as the person's own when
+// they have none, before it navigates away (objectstack#30399). The pick is
+// this module's page-load memory, so the sign-in host asks it here.
+export { hasSignInLanguagePick, saveSignInLanguagePick } from './hooks/useUserLocale.js';
+export type { SignInLanguagePickWriter } from './hooks/useUserLocale.js';
+
 // Layout chrome
 export {
   ConsoleLayout,
@@ -304,6 +310,9 @@ export {
   useInvitationPreview,
   type InvitationArrival,
 } from './console/auth/invitationArrival.js';
+// Registering from an invitation link accepts that invitation and enters its
+// organization, on both register pages (#30125).
+export { useInvitationSignUpJoin, type InvitationSignUpJoin } from './console/auth/invitationSignUpJoin.js';
 export { ForgotPasswordPage as DefaultForgotPasswordPage } from './console/auth/ForgotPasswordPage.js';
 export { HomeLayout as DefaultHomeLayout, HomeLayout } from './console/home/HomeLayout.js';
 export { HomePage as DefaultHomePage, HomePage } from './console/home/HomePage.js';

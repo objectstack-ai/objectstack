@@ -98,17 +98,36 @@ describe('#28410 — findOverrideDeclarationRefusals walks the artifact under th
       manifest: manifest(PAIR, [BASE]),
       dashboards: [{ name: 'crm_board', overrides: { package: BASE, basedOn: '1.0.0' } }],
       objects: [{ name: 'crm_account', overrides: { package: BASE, basedOn: '1.0.0' } }],
-      // [#28412, ADR-0146 D9] A declared flow override is admitted now (its D9
-      // conditions are delivered); an `action` declaration still waits.
+      // [#28412, #30065, ADR-0146 D9] Declared flow and action overrides are
+      // admitted (their D9 conditions are delivered).
       flows: [{ name: 'crm_flow', overrides: { package: BASE, basedOn: '1.0.0' } }],
       actions: [{ name: 'crm_call', objectName: 'crm_account', label: 'Call', overrides: { package: BASE, basedOn: '1.0.0' } }],
       pages: [{ name: 'crm_home', overrides: { package: 'com.unlisted', basedOn: '1.0.0' } }],
     });
     expect(rows.map((r) => [r.path, r.rule])).toEqual([
       ['objects[0]', 'declared_object'],
-      ['actions[0]', 'declared_type_not_yet_available'],
       ['pages[0]', 'declared_outside_pair'],
     ]);
+  });
+
+  it('[#30065] a declared action override is judged against the base\'s own action: a widening is refused, a narrowing admitted', () => {
+    const gates = { requiredPermissions: ['crm_admin'], ai: { requiresConfirmation: true } };
+    const gatedBase = pkg(BASE, [], { actions: [{ name: 'log_call', objectName: 'crm_account', label: 'Log', ...gates }] });
+    const overrides = { package: BASE, basedOn: '1.0.0' };
+    const wider = { name: 'log_call', objectName: 'crm_account', label: 'Ours', overrides, requiredPermissions: [], ai: { requiresConfirmation: true } };
+    const narrower = { name: 'log_call', objectName: 'crm_account', label: 'Ours', overrides, ...gates, requiredPermissions: ['crm_admin', 'crm_auditor'] };
+    const rows = findOverrideDeclarationRefusals({
+      manifest: manifest('com.acme.bundle'),
+      packages: [gatedBase, pkg(PAIR, [BASE], { actions: [wider] })],
+    });
+    expect(rows.map((r) => [r.path, r.code, r.rule])).toEqual([
+      ['packages[1].manifest.actions[0]', 'NOT_OVERRIDABLE', 'declared_action_widens_access'],
+    ]);
+    expect(rows[0].message).toContain("drops 'crm_admin' from `requiredPermissions`");
+    expect(findOverrideDeclarationRefusals({
+      manifest: manifest('com.acme.bundle'),
+      packages: [gatedBase, pkg(PAIR, [BASE], { actions: [narrower] })],
+    })).toEqual([]);
   });
 
   it('a dependent carrying `overrides` is refused, and a declaration of an item the base does not ship is refused', () => {

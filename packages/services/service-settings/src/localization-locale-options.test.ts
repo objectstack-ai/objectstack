@@ -121,9 +121,46 @@ describe('localization.locale serves the deployment\'s locale list', () => {
     expect(options.map((o) => o.value)).toEqual(['en-US', 'zh-CN', 'fr', 'vi-VN']);
     expect(options.slice(0, 3).map((o) => o.label)).toEqual(['English', '简体中文', 'Français']);
     expect(options[3].label).toBe(localeSelfName('vi-VN'));
-    // The registered manifest is left as declared.
+    // The registered manifest is left as declared: once the source has no
+    // answer, the manifest read is the declared four again.
+    booted.i18n.locales = [];
     const declared = (booted.service.getManifest('localization').specifiers as any[]).find((s) => s.key === 'locale');
     expect(declared.options.map((o: { value: string }) => o.value)).toEqual(['en-US', 'zh-CN', 'ja-JP', 'es-ES']);
+  });
+
+  it('the manifest list serves the table the namespace read serves and the save judges against', async () => {
+    booted.i18n.locales = ['en', 'zh-CN', 'fr-FR', 'vi-VN'];
+    // An offered value in effect, so the namespace read offers the list as reported.
+    expect((await save(booted.http, { locale: 'fr-FR' })).status).toBe(200);
+
+    const list = await call(booted.http, 'GET /api/settings');
+    expect(list.status).toBe(200);
+    const listed = (list.body.data.manifests as any[])
+      .find((m) => m.namespace === 'localization')
+      .specifiers.find((s: { key?: string }) => s.key === 'locale').options as Array<{ value: string; label: string }>;
+    const page = servedLocaleOptions((await getPage(booted.http)).body);
+    expect(listed).toEqual(page);
+    expect(listed.map((o) => o.value)).toEqual(['en', 'zh-CN', 'fr-FR', 'vi-VN']);
+    // In-process readers are told the same table.
+    const read = (booted.service.getManifest('localization').specifiers as any[]).find((s) => s.key === 'locale');
+    expect(read.options).toEqual(listed);
+    const inProcess = booted.service.listManifests().find((m) => m.namespace === 'localization')!;
+    expect((inProcess.specifiers as any[]).find((s) => s.key === 'locale').options).toEqual(listed);
+
+    // The save's boundary is that table: every listed value saves, the
+    // declared `ja-JP` the list leaves out is refused naming the listed values.
+    for (const { value } of listed) {
+      expect((await save(booted.http, { locale: value })).status).toBe(200);
+    }
+    const refused = await save(booted.http, { locale: 'ja-JP' });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error.details.fields).toEqual([
+      expect.objectContaining({
+        field: 'locale',
+        code: 'invalid_option',
+        constraint: { allowed: listed.map((o) => o.value).join(', ') },
+      }),
+    ]);
   });
 
   it('accepts a language the deployment supports that the declared four never named', async () => {

@@ -236,6 +236,8 @@ describe('the decision that ends an approval tells its submitter (approval.appro
       title: 'Request approved',
       body: 'Your Deal won was approved.',
       actionUrl: `/system/approvals?request=${encodeURIComponent(req.id)}`,
+      // [#30509] The approval e-mail's link (relative: no public origin here).
+      approvalUrl: `/system/approvals?request=${encodeURIComponent(req.id)}`,
     });
     expect(told[0].source).toEqual({ object: 'sys_approval_request', id: req.id });
     expect(told[0].actorId).toBe('u_alice');
@@ -253,6 +255,8 @@ describe('the decision that ends an approval tells its submitter (approval.appro
       title: 'Request rejected',
       body: `Your Deal lost was rejected.\n\n${REJECT_NOTE}`,
       actionUrl: `/system/approvals?request=${encodeURIComponent(req.id)}`,
+      // [#30509] The approval e-mail's link (relative: no public origin here).
+      approvalUrl: `/system/approvals?request=${encodeURIComponent(req.id)}`,
     });
     expect(told[0].actorId).toBe('u_alice');
   });

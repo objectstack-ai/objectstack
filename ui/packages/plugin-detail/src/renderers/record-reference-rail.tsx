@@ -72,8 +72,10 @@ import {
   declaredNameField,
   isMultiValueRelationship,
   recordDisplayValueAt,
+  servedObjectPluralLabel,
   type FieldContainerLike,
 } from '@object-ui/core';
+import { useObjectTranslation } from '@object-ui/i18n';
 import { ChevronRight } from 'lucide-react';
 import type { ReferenceRailEntry } from '@objectstack/spec/ui';
 import { useDetailTranslation } from '../useDetailTranslation';
@@ -287,6 +289,7 @@ export const RecordReferenceRailRenderer: React.FC<RecordReferenceRailRendererPr
   const ctx = useRecordContext();
   const i18n = useSafeFieldLabel() as any;
   const { t } = useDetailTranslation();
+  const { language } = useObjectTranslation();
   const { designer } = splitDesigner(props);
   const routeParams = useParams<{ appName?: string }>();
   const appName = routeParams.appName;
@@ -372,6 +375,13 @@ export const RecordReferenceRailRenderer: React.FC<RecordReferenceRailRendererPr
   // (objectui#12110 item 3). Absent for an object that declares none, and for
   // an adapter that cannot serve the schema: the row ladder applies then.
   const [entryNameFields, setEntryNameFields] = React.useState<Record<string, string>>({});
+  // The CHILD objects' SERVED names (objectstack#30486), keyed by object name,
+  // from the same schema read: the `label` and `pluralLabel` the server
+  // translated for the session, a `.custom` rename included. What titles a
+  // card with no authored `title`, by the served-object-label rule below.
+  const [entryObjectNames, setEntryObjectNames] = React.useState<
+    Record<string, { label?: unknown; pluralLabel?: unknown }>
+  >({});
   // One warning per (object, field) per mounted rail — the link suppression
   // below is silent on screen by construction, so the developer channel is the
   // only place it can be said at all. Fired from the effect, never from render.
@@ -579,6 +589,7 @@ export const RecordReferenceRailRenderer: React.FC<RecordReferenceRailRendererPr
       // empty rail on every entry in the app.
       const fieldsFor = new Map<string, FieldContainerLike>();
       const nameFieldFor = new Map<string, string>();
+      const objectNamesFor = new Map<string, { label?: unknown; pluralLabel?: unknown }>();
       if (typeof dataSource.getObjectSchema === 'function') {
         await Promise.all(
           Array.from(new Set(entries.map((e) => e.objectName))).map(async (name) => {
@@ -590,6 +601,8 @@ export const RecordReferenceRailRenderer: React.FC<RecordReferenceRailRendererPr
               // with everything else but `fields`.
               const nameField = declaredNameField(schema);
               if (typeof nameField === 'string' && nameField !== '') nameFieldFor.set(name, nameField);
+              // And the object's served name, for the card title.
+              objectNamesFor.set(name, { label: schema?.label, pluralLabel: schema?.pluralLabel });
             } catch {
               // Equality it is — the wire this rail has always sent.
             }
@@ -599,6 +612,7 @@ export const RecordReferenceRailRenderer: React.FC<RecordReferenceRailRendererPr
       if (!isCurrent()) return;
       setEntryFields(Object.fromEntries(fieldsFor));
       setEntryNameFields(Object.fromEntries(nameFieldFor));
+      setEntryObjectNames(Object.fromEntries(objectNamesFor));
       for (const entry of entries) {
         if (!isMultiValueRelationship(fieldsFor.get(entry.objectName), entry.relationshipField)) {
           continue;
@@ -640,6 +654,22 @@ export const RecordReferenceRailRenderer: React.FC<RecordReferenceRailRendererPr
 
   const hideEmpty = schema.hideEmpty !== false;
 
+  // A card's title: the entry's authored `title`, else the related object's
+  // list name by the served-object-label rule (`servedObjectPluralLabel`,
+  // `@object-ui/core`) — its served `pluralLabel`, else its served `label`,
+  // drawn as given, and only with neither served (no schema read yet, or an
+  // adapter that serves none) the client bundle's plural, the humanized
+  // object name as its own last resort. The card lists records, so it is
+  // named as that object's list page is (objectui#11733).
+  const entryTitle = (entry: ReferenceRailEntry): string =>
+    entry.title ||
+    servedObjectPluralLabel(
+      { name: entry.objectName, ...entryObjectNames[entry.objectName] },
+      language,
+      i18n?.objectPluralLabel ? i18n.objectPluralLabel : (def) => def.label,
+      humanize(entry.objectName),
+    );
+
   // Stable partition: an entry is "empty" only once it has finished loading
   // with total === 0. While loading or on error, we render it so users
   // don't see flicker / disappearing cards.
@@ -657,13 +687,7 @@ export const RecordReferenceRailRenderer: React.FC<RecordReferenceRailRendererPr
   );
   const emptyTitles = entries
     .filter((e) => emptyKeys.has(e.objectName))
-    .map(
-      (e) =>
-        e.title ||
-        (i18n?.objectPluralLabel
-          ? i18n.objectPluralLabel({ name: e.objectName, label: humanize(e.objectName) })
-          : humanize(e.objectName)),
-    );
+    .map((e) => entryTitle(e));
 
   return (
     <div ref={railRef} className={cn('flex flex-col gap-3', schema.className, className)} {...designer}>
@@ -682,11 +706,7 @@ export const RecordReferenceRailRenderer: React.FC<RecordReferenceRailRendererPr
           entryFields[key],
           entry.relationshipField,
         );
-        const title =
-          entry.title ||
-          (i18n?.objectPluralLabel
-            ? i18n.objectPluralLabel({ name: entry.objectName, label: humanize(entry.objectName) })
-            : humanize(entry.objectName));
+        const title = entryTitle(entry);
 
         return (
           <Card key={key} className="overflow-hidden">

@@ -94,6 +94,7 @@ import { actionErrorDetail } from '@object-ui/core';
 // The LEAF module, for the reason its own header gives: this section joins the
 // page's graph, and the page is imported eagerly by `services/builtinComponents`.
 import { apiBase } from '../../utils/apiBase.js';
+import { servedObjectLabel } from '../../hooks/servedObjectLabel.js';
 import { envelopeData, envelopeRefused } from './packagedFlows.js';
 import {
   collectPackagedActions,
@@ -125,18 +126,25 @@ async function readJson(res: Response): Promise<unknown> {
   return res.json().catch(() => null);
 }
 
-async function getJson(path: string, signal: AbortSignal): Promise<Response> {
+async function getJson(path: string, signal: AbortSignal, language?: string): Promise<Response> {
   return fetch(`${apiBase()}${path}`, {
     credentials: 'include',
-    headers: JSON_HEADERS,
+    headers: language ? { ...JSON_HEADERS, 'Accept-Language': language } : JSON_HEADERS,
     cache: 'no-store',
     signal,
   });
 }
 
-/** The `object` metadata list — every object, for its embedded `actions[]`. */
-async function fetchObjectMetadata(signal: AbortSignal): Promise<unknown[]> {
-  const res = await getJson('/meta/object', signal);
+/**
+ * The `object` metadata list — every object, for its embedded `actions[]` and
+ * its name. Asked in the SESSION's language (objectstack#30486): the server
+ * translates each served `label` for the request's `Accept-Language`, a
+ * `.custom` rename included, so the object column can draw it as given. A
+ * bare fetch carried the browser's language instead, and a zh-CN session in an
+ * English browser was served English names.
+ */
+async function fetchObjectMetadata(signal: AbortSignal, language: string | undefined): Promise<unknown[]> {
+  const res = await getJson('/meta/object', signal, language);
   if (!res.ok) throw new Error(`object metadata HTTP ${res.status}`);
   return readMetadataItems(await readJson(res));
 }
@@ -208,7 +216,7 @@ function rowKey(row: Pick<PackagedActionRow, 'name' | 'objectName'>): string {
 }
 
 export function PackagedActionsSection({ nonce = 0, headed = true }: PackagedActionsSectionProps) {
-  const { t } = useObjectTranslation();
+  const { t, language } = useObjectTranslation();
   const { objectLabel } = useObjectLabel();
 
   const [rows, setRows] = React.useState<PackagedActionRow[] | null>(null);
@@ -231,7 +239,7 @@ export function PackagedActionsSection({ nonce = 0, headed = true }: PackagedAct
     (async () => {
       try {
         const [objects, standalone, activation] = await Promise.all([
-          fetchObjectMetadata(controller.signal),
+          fetchObjectMetadata(controller.signal, language),
           fetchStandaloneActionMetadata(controller.signal),
           fetchActivationLedger(controller.signal),
         ]);
@@ -253,7 +261,7 @@ export function PackagedActionsSection({ nonce = 0, headed = true }: PackagedAct
       cancelled = true;
       controller.abort();
     };
-  }, [nonce, t]);
+  }, [nonce, t, language]);
 
   const clearRefusal = React.useCallback((key: string) => {
     setRefusals((prev) => {
@@ -408,10 +416,16 @@ export function PackagedActionsSection({ nonce = 0, headed = true }: PackagedAct
                     {/* The object's label in the reader's language, over the
                         machine name, which is also the `:object` segment the
                         flip addresses — `global` for an object-less action,
-                        the platform's own spelling, drawn alone. */}
+                        the platform's own spelling, drawn alone. The label is
+                        the one the server served for this session's language,
+                        drawn as given (the served-object-label rule,
+                        objectstack#30486), never re-translated by the client
+                        bundle, whose base-package name would win a rename
+                        back. An object served without a label shows its
+                        machine name alone. */}
                     {row.objectLabel && (
                       <div data-testid="packaged-action-object-label">
-                        {objectLabel({ name: row.objectName, label: row.objectLabel })}
+                        {servedObjectLabel({ name: row.objectName, label: row.objectLabel }, language, objectLabel)}
                       </div>
                     )}
                     <code className="font-mono text-xs text-muted-foreground break-all">{row.objectName}</code>
