@@ -69,6 +69,7 @@ import {
 import { registerLastAdminGuard } from './last-admin-guard.js';
 import { registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
 import { registerOrganizationMfaEnrollmentGuard } from './organization-mfa-enrollment-guard.js';
+import { registerMfaRequiredEnrollmentPredicate } from './mfa-required-enrollment-predicate.js';
 import { registerPersonalViewHooks } from './personal-view-hooks.js';
 import { registerUserPreferenceHooks } from './user-preference-hooks.js';
 import { personalViewCallerResolver, registerPersonalViewRoutes, PERSONAL_VIEW_REMOVE_ROUTE, type PersonalViewEngine } from './personal-view-routes.js';
@@ -2271,6 +2272,9 @@ export class AuthPlugin implements Plugin {
         // gated users would have no way to comply. [#20412] So the enforcement
         // and the plugin are ONE piece: a refused plugins block leaves MFA at
         // its standing value too, never enforced without its enrollment path.
+        // The env var OS_AUTH_TWO_FACTOR outranks this piece's plugin flag, so
+        // under a pin to off the save itself is refused, before this pass
+        // (mfa-required-enrollment-predicate.ts).
         if (isExplicit('mfa_required')) {
           const on = asBoolean(values.mfa_required, false);
           if (on) {
@@ -2590,6 +2594,11 @@ export class AuthPlugin implements Plugin {
         );
       }
     }
+
+    // The save door refuses turning `mfa_required` on while OS_AUTH_TWO_FACTOR
+    // pins enrollment off; the pass below would store it and enforce nothing.
+    // See mfa-required-enrollment-predicate.ts.
+    registerMfaRequiredEnrollmentPredicate(settings, ctx.logger);
 
     await applySettings();
     if (typeof settings.subscribe === 'function') {
