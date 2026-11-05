@@ -259,7 +259,7 @@ describe('served sms/test — answers in the caller\'s language', () => {
   });
 
   it('control: with no language, or one off the platform locale table, the answer stays English', async () => {
-    for (const headers of [{}, { 'accept-language': 'sw-KE' }]) {
+    for (const headers of [{}, { 'accept-language': 'sw-KE' }] as Array<Record<string, string>>) {
       const { pressSendTest } = await serve([{ id: ADMIN_ID, phone_number: null }]);
       const answer = await pressSendTest(TWILIO_DRAFT, headers);
       expect(String(answer.body?.error?.details?.message).startsWith('Your account has no phone number')).toBe(true);
