@@ -159,3 +159,28 @@ describe('the density and the hidden fields are two more parts of a view\'s entr
     expect(resetViewPreference(state, 'v1')).toEqual({ viewOrder: ['v2', 'v1'], perView: { v2: { rowHeight: 'short' } } });
   });
 });
+
+describe('the added fields are one more part of a view\'s entry (objectstack#30077)', () => {
+  it('keeps the added fields as names, once each, and drops an empty list: nothing added is the view\'s own', () => {
+    expect(sanitizeObjectListPreference({
+      perView: {
+        v1: { addedFields: ['owner', 3, '', 'owner', 'discount'] },
+        v2: { addedFields: [] },
+        v3: { addedFields: 'owner' },
+      },
+    })).toEqual({ perView: { v1: { addedFields: ['owner', 'discount'] } } });
+  });
+
+  it('a patch sets the added fields beside the hidden ones; an empty list or `null` clears only that part', () => {
+    let state = patchViewPreference({}, 'v1', { hiddenFields: ['amount'] });
+    state = patchViewPreference(state, 'v1', { addedFields: ['owner'] });
+    expect(state).toEqual({ perView: { v1: { hiddenFields: ['amount'], addedFields: ['owner'] } } });
+    expect(patchViewPreference(state, 'v1', { addedFields: [] })).toEqual({ perView: { v1: { hiddenFields: ['amount'] } } });
+    expect(patchViewPreference(state, 'v1', { addedFields: null })).toEqual({ perView: { v1: { hiddenFields: ['amount'] } } });
+  });
+
+  it('"Reset view" drops the added fields with the rest of the view\'s entry', () => {
+    const state = { perView: { v1: { addedFields: ['owner'] }, v2: { addedFields: ['discount'] } } };
+    expect(resetViewPreference(state, 'v1')).toEqual({ perView: { v2: { addedFields: ['discount'] } } });
+  });
+});

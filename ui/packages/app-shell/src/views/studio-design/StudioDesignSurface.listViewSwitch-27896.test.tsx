@@ -1,9 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#27896 — the list-view panel's view picker: the object's list
- * views by label, a draft one included, and a pick opens that view's settings
- * in the panel, where an edit saves to that view.
+ * objectstack#27896, objectstack#30046 — an `object` leaf's view switcher, in
+ * the header's title (object / view ▾, as the running list's title reads): the
+ * object's list views by label, a draft one included, and a pick opens that
+ * view's settings in the panel, where an edit saves to that view.
  *
  * Through the mounted Interfaces pillar, its real list-view autosave and the
  * real panel; the client is a recorder. The object has three list views: its
@@ -12,22 +13,26 @@
  * draft-overlaid view list).
  *
  * Pinned:
- *  - the picker lists all three by label, the draft one marked, and the nav
- *    entry's view is the one the panel opens with;
+ *  - the switcher lists all three by label, and the nav entry's view is the
+ *    one the panel opens with; the panel's title is the switcher's label;
  *  - picking the drafted view shows its settings, and an edit there saves to
  *    that view, never to the nav entry's;
  *  - a pending edit is sent to the view it was made on before the switch, and
  *    asks nothing;
  *  - a held edit asks first: declined, the panel stays on that view and
  *    nothing is written; accepted, the other view opens;
- *  - CONTROL: an object with one list view shows no picker.
+ *  - an object with one list view still shows the switcher, with New view;
+ *  - the panel holds no view picker, no Add view and no "Back to …";
+ *  - the open view rides in the address (`?view=`), and a link carrying it
+ *    (a reload, a shared link) opens that view; the entry's own view writes
+ *    none; CONTROL: a link to another entry's view is not taken.
  */
 
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { ComponentRegistry } from '@object-ui/core';
 import { MetadataCtx, type MetadataContextValue } from '@object-ui/react';
 
@@ -162,14 +167,29 @@ beforeEach(() => {
   window.confirm = confirm as unknown as typeof window.confirm;
 });
 
-async function openObjectLeaf() {
+/** The address the pillar writes, as a reload or a shared link reads it. */
+let address = new URLSearchParams();
+function AddressProbe() {
+  const { search } = useLocation();
+  React.useEffect(() => {
+    address = new URLSearchParams(search);
+  }, [search]);
+  return null;
+}
+
+function mountPillar(search = '', readOnly = false) {
   render(
-    <MemoryRouter initialEntries={['/studio/com.acme.app/interfaces']}>
+    <MemoryRouter initialEntries={[`/studio/com.acme.app/interfaces${search}`]}>
       <MetadataCtx.Provider value={metadata()}>
-        <InterfacesPillar packageId="com.acme.app" readOnly={false} />
+        <InterfacesPillar packageId="com.acme.app" readOnly={readOnly} />
+        <AddressProbe />
       </MetadataCtx.Provider>
     </MemoryRouter>,
   );
+}
+
+async function openObjectLeaf() {
+  mountPillar();
   fireEvent.click(await screen.findByTitle('object · showcase_task'));
   await screen.findByTestId('studio-list-view-inspector', undefined, { timeout: 8000 });
   await waitFor(() => expect(shownView()).toBe('showcase_task.default'));
@@ -181,6 +201,10 @@ async function draftsRead() {
   await new Promise((r) => setTimeout(r, 50));
 }
 
+/** The panel's title: the view's name, as the switcher names it. */
+const panelTitle = () =>
+  screen.getByTestId('studio-list-view-inspector').parentElement?.parentElement?.querySelector('div.mt-1[title]')?.textContent;
+
 /** The view item name the panel shows beneath its title. */
 const shownView = () => screen.queryByTestId('list-view-name')?.textContent;
 
@@ -188,17 +212,25 @@ function viewSaves(): Array<[string, string, Record<string, unknown>, Record<str
   return mockClient.save.mock.calls.filter((c: unknown[]) => c[0] === 'view') as never;
 }
 
-/** The picker's options, as an author reads them. */
-async function pickerOptions(): Promise<HTMLElement[]> {
-  const trigger = await screen.findByTestId('list-view-switcher-trigger', undefined, { timeout: 4000 });
-  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
-  return within(await screen.findByRole('listbox')).getAllByRole('option');
+/** The header's view switcher (the title's ▾). */
+const switcher = () => within(screen.getByTestId('if-item-header')).getByTestId('list-view-switcher');
+
+/** The switcher's rows, as an author reads them: each row's own button. */
+async function switcherRows(): Promise<HTMLElement[]> {
+  await waitFor(() => expect(within(screen.getByTestId('if-item-header')).getByTestId('list-view-switcher')).toBeInTheDocument(), {
+    timeout: 4000,
+  });
+  fireEvent.click(switcher());
+  const menu = await screen.findByTestId('list-view-switcher-menu');
+  return Array.from(menu.querySelectorAll<HTMLElement>('[data-testid^="view-switcher-row-"]')).map(
+    (row) => within(row).getAllByRole('button')[0]!,
+  );
 }
 
-/** Pick the view labelled `label` in the panel's view picker. */
+/** Pick the view labelled `label` in the header's view switcher. */
 async function pickView(label: string) {
-  const hit = (await pickerOptions()).find((o) => within(o).queryByTestId('list-view-switcher-label')?.textContent === label);
-  if (!hit) throw new Error(`the view picker lists no "${label}"`);
+  const hit = (await switcherRows()).find((b) => b.textContent === label);
+  if (!hit) throw new Error(`the view switcher lists no "${label}"`);
   fireEvent.click(hit);
 }
 
@@ -220,15 +252,35 @@ async function pickSetting(key: string, text: string) {
   fireEvent.click(hit);
 }
 
-describe('the list-view panel switches between the object’s list views (objectstack#27896)', () => {
-  it('lists all three views by label, the drafted one marked, opened on the nav entry’s view', async () => {
+describe('the header’s view switcher switches between the object’s list views (objectstack#27896, objectstack#30046)', () => {
+  it('lists all three views by label, opened on the nav entry’s view; the title reads object / view, the panel the same view name', async () => {
     await openObjectLeaf();
     await draftsRead();
-    const options = await pickerOptions();
-    expect(options.map((o) => within(o).queryByTestId('list-view-switcher-label')?.textContent)).toEqual(['All tasks', 'Due dates', 'My calendar']);
-    const draftMarks = options.map((o) => within(o).queryByTestId('list-view-switcher-draft')?.textContent ?? null);
-    expect(draftMarks).toEqual([null, null, t('engine.studio.inspector.listView.switchViewDraft', 'en')]);
-    expect(screen.getByTestId('list-view-switcher-trigger')).toHaveTextContent('All tasks');
+    const rows = await switcherRows();
+    expect(rows.map((b) => b.textContent)).toEqual(['All tasks', 'Due dates', 'My calendar']);
+    expect(switcher()).toHaveTextContent('All tasks');
+    expect(screen.getByTestId('if-list-view-title-object')).toHaveTextContent('Tasks');
+    expect(panelTitle()).toBe('All tasks');
+    // A Studio author keeps no list of their own: no ☆, no 📌, no recent views, no Save as my view.
+    const menu = screen.getByTestId('list-view-switcher-menu');
+    expect(within(menu).queryAllByTestId('view-switcher-star')).toHaveLength(0);
+    expect(within(menu).queryAllByTestId('view-switcher-pin')).toHaveLength(0);
+    expect(within(menu).queryByTestId('list-view-switcher-recent')).toBeNull();
+    expect(within(menu).queryByTestId('list-view-switcher-save-mine')).toBeNull();
+    expect(within(menu).getByTestId('list-view-switcher-new')).toBeInTheDocument();
+    expect(within(menu).getByTestId('list-view-switcher-search')).toBeInTheDocument();
+  });
+
+  it('the panel holds no view picker, no Add view and no “Back to …”', async () => {
+    await openObjectLeaf();
+    await draftsRead();
+    const panel = screen.getByTestId('studio-list-view-inspector');
+    expect(within(panel).queryByTestId('list-view-switcher')).toBeNull();
+    expect(within(panel).queryByTestId('list-view-switcher-trigger')).toBeNull();
+    expect(screen.queryByTestId('list-view-add-view')).toBeNull();
+    await pickView('Due dates');
+    await waitFor(() => expect(shownView()).toBe('showcase_task.due'));
+    expect(screen.queryByTestId('list-view-back-to-entry')).toBeNull();
   });
 
   it('picking the drafted view shows its settings, and an edit there saves to it, not to the nav entry’s view', async () => {
@@ -248,7 +300,6 @@ describe('the list-view panel switches between the object’s list views (object
 
   it('a pending edit is sent to its own view before the switch, and nothing asks', async () => {
     await openObjectLeaf();
-    await waitFor(() => expect(screen.getByTestId('list-view-switcher-trigger')).toBeInTheDocument(), { timeout: 4000 });
     await pickView('Due dates');
     await waitFor(() => expect(setting('startDateField')).toHaveTextContent('Due date'));
 
@@ -263,7 +314,6 @@ describe('the list-view panel switches between the object’s list views (object
   it('a held edit asks first: declined, the panel stays and writes nothing; accepted, the other view opens', async () => {
     const question = t('engine.edit.unsavedLeaveConfirm', 'en');
     await openObjectLeaf();
-    await waitFor(() => expect(screen.getByTestId('list-view-switcher-trigger')).toBeInTheDocument(), { timeout: 4000 });
     await pickView('Due dates');
     await waitFor(() => expect(setting('startDateField')).toHaveTextContent('Due date'));
     await pickSetting('startDateField', t('engine.form.none', 'en'));
@@ -282,12 +332,58 @@ describe('the list-view panel switches between the object’s list views (object
     expect(viewSaves()).toEqual([]);
   });
 
-  it('CONTROL: an object with one list view shows no picker', async () => {
+  it('an object with one list view still shows the switcher, so New view stays reachable', async () => {
     published = { [DEFAULT_VIEW.name]: DEFAULT_VIEW };
     drafts = {};
     await openObjectLeaf();
     await draftsRead();
-    expect(screen.queryByTestId('list-view-switcher')).toBeNull();
-    expect(screen.getByTestId('list-view-add-view')).toBeInTheDocument();
+    const rows = await switcherRows();
+    expect(rows.map((b) => b.textContent)).toEqual(['All tasks']);
+    expect(screen.getByTestId('list-view-switcher-new')).toBeInTheDocument();
+  });
+
+  it('a read-only package switches views and offers no New view', async () => {
+    mountPillar('', true);
+    fireEvent.click(await screen.findByTitle('object · showcase_task'));
+    await screen.findByTestId('studio-list-view-inspector', undefined, { timeout: 8000 });
+    await draftsRead();
+    await switcherRows();
+    expect(screen.queryByTestId('list-view-switcher-new')).toBeNull();
+    fireEvent.click(screen.getByTestId('view-switcher-row-showcase_task.due').querySelector('button')!);
+    await waitFor(() => expect(shownView()).toBe('showcase_task.due'));
+    expect(viewSaves()).toEqual([]);
+  });
+});
+
+describe('the open view rides in the address (objectstack#30046)', () => {
+  it('a pick writes `?view=` beside the leaf; the entry’s own view writes none', async () => {
+    await openObjectLeaf();
+    await waitFor(() => expect(address.get('surface')).toBe('object:showcase_task'));
+    expect(address.get('nav')).toBe('nav_obj');
+    expect(address.has('view')).toBe(false);
+
+    await pickView('Due dates');
+    await waitFor(() => expect(address.get('view')).toBe('showcase_task.due'));
+    expect(address.get('surface')).toBe('object:showcase_task');
+
+    await pickView('All tasks');
+    await waitFor(() => expect(address.has('view')).toBe(false));
+  });
+
+  it('a link carrying the view (a reload, a shared link) opens that view, a drafted one included', async () => {
+    mountPillar('?surface=object%3Ashowcase_task&nav=nav_obj&view=showcase_task.mine');
+    await screen.findByTestId('studio-list-view-inspector', undefined, { timeout: 8000 });
+    await waitFor(() => expect(shownView()).toBe('showcase_task.mine'));
+    await waitFor(() => expect(switcher()).toHaveTextContent('My calendar'));
+    // The address keeps saying so, once every write the open has made has landed.
+    await new Promise((r) => setTimeout(r, 200));
+    expect(address.get('view')).toBe('showcase_task.mine');
+  });
+
+  it('CONTROL: a link naming a view of another object is not taken: the entry’s view opens', async () => {
+    mountPillar('?surface=object%3Ashowcase_task&nav=nav_obj&view=other_object.board');
+    await screen.findByTestId('studio-list-view-inspector', undefined, { timeout: 8000 });
+    await waitFor(() => expect(shownView()).toBe('showcase_task.default'));
+    await waitFor(() => expect(address.has('view')).toBe(false));
   });
 });

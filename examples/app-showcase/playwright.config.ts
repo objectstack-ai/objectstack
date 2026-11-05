@@ -31,6 +31,12 @@ declare const process: { env: Record<string, string | undefined> };
  * when the browser cache holds a different build than this `@playwright/test`
  * resolves, in which case every test dies at launch (RUNNER.md, "Environment
  * facts"). Unset, Playwright resolves its own browser exactly as before.
+ *
+ * ## What it registers
+ *
+ * `OS_TRUSTED_APP_SCHEMES` on the `webServer`: the one app scheme
+ * `e2e/mobile-signin-handoff.spec.ts` hands a token to, set the way a deployment
+ * sets it. No other spec reaches the hand-off.
  */
 const BASE_URL = new URL(process.env.SMOKE_API_URL || 'http://localhost:3000');
 const PORT = BASE_URL.port || '3000';
@@ -58,6 +64,7 @@ export default defineConfig({
   }],
   webServer: {
     command: `node node_modules/@objectstack/cli/bin/run.js serve --dev -p ${PORT}`,
+    env: { OS_TRUSTED_APP_SCHEMES: 'com.example.showcase.e2e' },
     url: `${BASE_URL.origin}/api/v1/runtime/config`,
     timeout: 180_000,
     reuseExistingServer: !process.env.CI,
