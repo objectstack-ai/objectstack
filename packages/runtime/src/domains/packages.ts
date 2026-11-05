@@ -753,6 +753,19 @@ interface PackageRowRegistryHost {
 }
 
 /**
+ * [#30377] An enable of a disabled package recomputes the roll-up summaries the
+ * package adds to other packages' objects by extension (`ObjectQL`'s
+ * `onPackageEnabled` listener; the child writes made during the disable
+ * recomputed nothing). The enable doors answer once that recompute has
+ * settled, so the first read after the answer serves current values. An
+ * engine without the member (a test double) answers at once, as before.
+ */
+async function summaryRefreshSettled(engine: unknown): Promise<void> {
+    const host = engine as { summaryRefreshSettled?: () => Promise<void> } | null | undefined;
+    if (typeof host?.summaryRefreshSettled === 'function') await host.summaryRefreshSettled();
+}
+
+/**
  * [#28318] The disable door's verdict on `id`: `PATCH /packages/:id/disable`
  * accepts the package (as far as the PACKAGE goes) exactly when this answers
  * `true` — a writable base ({@link isWritablePackage}) or a module of an
@@ -1847,6 +1860,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             if (requestedEnabled === true) {
                 const enabled = registry.enablePackage(pkgId);
                 if (enabled) pkg = enabled;
+                await summaryRefreshSettled(qlService);
             } else if (requestedEnabled === false) {
                 const disabled = registry.disablePackage(pkgId);
                 if (disabled) pkg = disabled;
@@ -1912,6 +1926,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const pkg = registry.enablePackage(id);
             if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+            await summaryRefreshSettled(qlService);
             try {
                 setPackageDisabled(_context?.environmentId, id, false);
             } catch (err) {
