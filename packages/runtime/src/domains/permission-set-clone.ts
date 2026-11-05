@@ -243,12 +243,13 @@ export function clonePermissionSetDefinition(
 }
 
 /**
- * [#30255] The grant keys of a copy's `objects` map — what the save is told the
- * copy inherits ({@link handlePermissionSetCloneWrite} step 7). Every one is the
- * source's own key, carried by {@link clonePermissionSetDefinition} unchanged.
+ * [#30255] The grant keys of the SOURCE's `objects` map — what the save is told
+ * the copy inherits ({@link handlePermissionSetCloneWrite} step 7). Read from the
+ * source, not from the copy, so only a key the source already holds is ever
+ * passed, whatever {@link clonePermissionSetDefinition} does to the copy.
  */
-export function inheritedGrantObjectsOf(copy: Readonly<Record<string, unknown>>): string[] {
-    const objects = copy.objects;
+export function inheritedGrantObjectsOf(source: Readonly<Record<string, unknown>>): string[] {
+    const objects = source.objects;
     return objects && typeof objects === 'object' && !Array.isArray(objects) ? Object.keys(objects) : [];
 }
 
@@ -402,9 +403,9 @@ function readCloneBody(body: unknown): { name: string; label: string; package?: 
  *     `packageId` (none for environment-wide): the same save the `/meta` door
  *     makes, so the same schema, publish gates and hooks judge it. A save that
  *     loses the race for the name (a row written under it after step 5's read)
- *     is step 5's 409, in step 5's words. [#30255] The copy's grant keys go
- *     with it as `inheritedGrantObjects`: they are the source's grants, so the
- *     save's unknown-grant refusal does not judge them as this write's.
+ *     is step 5's 409, in step 5's words. [#30255] The source's grant keys go
+ *     with it as `inheritedGrantObjects`: the copy's grants are the source's,
+ *     so the save's unknown-grant refusal does not judge them as this write's.
  */
 export async function handlePermissionSetCloneWrite(
     deps: DomainHandlerDeps,
@@ -549,12 +550,13 @@ export async function handlePermissionSetCloneWrite(
                 item: clone,
                 parentVersion: null,
                 ...(landing.packageId !== null ? { packageId: landing.packageId } : {}),
-                // [#30255] The copy's grants are the source's, so the save's
-                // unknown-grant refusal does not judge them as this write's: a
+                // [#30255] The copy's grants are the source's — the keys are
+                // read from the source itself — so the save's unknown-grant
+                // refusal does not judge them as this write's: a
                 // platform set may grant on an object of a platform plugin this
                 // deployment does not install (`member_default` on
                 // `sys_comment` / `sys_activity`, `@objectstack/plugin-audit`).
-                inheritedGrantObjects: inheritedGrantObjectsOf(clone),
+                inheritedGrantObjects: inheritedGrantObjectsOf(source.definition),
             });
         } catch (err: unknown) {
             // [#23577] The create-only pin refused: a row was written under the
