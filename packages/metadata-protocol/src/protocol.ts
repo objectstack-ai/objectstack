@@ -10306,7 +10306,16 @@ export class ObjectStackProtocolImplementation implements
      *    a set), since the batch promotes as one unit in no type order;
      *  - the set's current definition already grants on it: the grant is not
      *    this write's. A re-save or a restore that keeps it is not judged, and
-     *    neither is an object that has gone since the grant was made.
+     *    neither is an object that has gone since the grant was made;
+     *  - [#30255] the save copies it verbatim from a set that already holds it
+     *    (`inherited`, the request's `inheritedGrantObjects`: the permission-set
+     *    clone door's copy). The grant is the source's, not this write's — the
+     *    rule above, for a copy. A platform set may grant on an object of an
+     *    optional platform plugin this deployment does not install
+     *    (`member_default` on `sys_comment` / `sys_activity`, which
+     *    `@objectstack/plugin-audit` registers): the grant applies to nothing
+     *    here, in the source and in the copy alike, and the copy is what the
+     *    clone door promises.
      *
      * Asked in draft and in publish mode by {@link saveMetaItem} after the
      * schema gate (except a `migrate-stored` re-save, the platform healing
@@ -10327,6 +10336,7 @@ export class ObjectStackProtocolImplementation implements
         pending?: 'drafts' | ReadonlySet<string>,
         writeFace?: MetadataWriteFace,
         door?: 'save' | 'publish',
+        inherited?: readonly string[],
     ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
         const readEngine = () => this.engine;
         const host: ThisParameterType<typeof unknownGrantObjectSaveRefusal> = {
@@ -10334,7 +10344,7 @@ export class ObjectStackProtocolImplementation implements
             listDrafts: (...a) => this.listDrafts(...a),
             readMetaItem: (...a) => this.readMetaItem(...a),
         };
-        return unknownGrantObjectSaveRefusal.call(host, singularType, item, name, pending, writeFace, door);
+        return unknownGrantObjectSaveRefusal.call(host, singularType, item, name, pending, writeFace, door, inherited);
     }
 
     /**
