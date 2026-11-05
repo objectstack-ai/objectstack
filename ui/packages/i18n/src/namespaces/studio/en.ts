@@ -3369,7 +3369,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.area.formEditor.translationWhole': 'Customizing a translation replaces {package}’s whole {locale} bundle: every string in it is then served from your copy, the ones you leave unchanged included.',
   // objectstack#30064 — the area's editor of a read-only package's dataset.
   'engine.studio.area.formEditor.datasetWhole': 'Customizing a dataset copies {package}’s whole dataset into your customization: every measure and dimension is then served from your copy, the ones you leave unchanged included.',
-  'engine.studio.area.formEditor.usedByOne': 'Once published, a change here reaches the one item built on this dataset:',
+  'engine.studio.area.formEditor.usedByOne': 'Once published, a change here reaches the {count} item built on this dataset:',
   'engine.studio.area.formEditor.usedByOther': 'Once published, a change here reaches the {count} items built on this dataset:',
   'engine.studio.area.formEditor.usedByNone': 'Nothing uses this dataset yet: no dashboard, report or other item names it.',
   'engine.studio.area.formEditor.usedByError': 'The dashboards and reports that use this dataset could not be read, so what a change here reaches is not known.',
