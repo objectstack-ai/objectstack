@@ -391,12 +391,6 @@
     },
     {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "logDurabilityFailure",
-      "card": "#30147",
-      "reason": "path-reader (#30105 report: check-durability-degradation-log-level follows a catch's log helper to its body in the same file)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
       "member": "get supports",
       "card": "#30147",
       "reason": "codemod limit: inferred-return-type, a get accessor whose object type the base leaves inferred, with a docblock on each key (MOVED_ACCESSORS moves a getter whose type is written, #30147 phase 2a)"
@@ -412,24 +406,6 @@
       "member": "initObjects",
       "card": "#30147",
       "reason": "path-reader (#30105 report: packages/cli generate-* pins read its text in sql-driver.ts); its field-call: knex half is retired (#30147 phase 2a)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "migrateMysqlDatetimeColumns",
-      "card": "#30147",
-      "reason": "path-reader (#30105 report: check-durability-degradation-log-level resolves its catch's log helper in the same file)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "migrateMysqlTimeColumns",
-      "card": "#30147",
-      "reason": "path-reader (#30105 report: check-durability-degradation-log-level resolves its catch's log helper in the same file)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "resolveWithheldFilterRefusal",
-      "card": "#30147",
-      "reason": "path-reader (#30105 report: sql-driver-compile-refusal-seam.test.ts enumerates the unsupportedFilterError callers)"
     },
     {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
