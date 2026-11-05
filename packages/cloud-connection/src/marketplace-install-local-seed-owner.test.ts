@@ -43,6 +43,7 @@ vi.mock('@objectstack/spec/data', async (importOriginal) => ({
     SeedLoaderRequestSchema: { parse: (x: any) => x },
 }));
 
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { SEED_OWNER_STAMP_BATCH, SEED_OWNER_STAMP_CTX, stampSeedOwner } from './marketplace-install-local-seed-owner.js';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { declareInstallerPlatformOwner, installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
@@ -68,7 +69,9 @@ function memoryEngine(schemas: Record<string, any>, rows: Record<string, Row[]>,
     return {
         writes,
         getSchema: (name: string) => schemas[name],
-        update: async (object: string, data: Row, options: { where: Row; context: unknown }) => {
+        update: async (object: string, data: Row, options: { where: Row; multi?: boolean; context: unknown }) => {
+            // Refuses what ObjectQL.update refuses: neither by id nor `multi`.
+            assertEngineUpdateDispatch(data, options);
             writes.push({ object, data, where: options.where, context: options.context });
             if (refuse?.(object, options.where)) throw new Error(`'display_title' on '${object}' is computed from its expression on every write`);
             let n = 0;
@@ -276,7 +279,11 @@ async function bootDoors(opts: { posture: 'single' | 'isolated'; activeOrg?: str
             // (`sys_user` is answered by the installer fixture: the installer, `admin`.)
             find: vi.fn(async () => []),
             getSchema: (name: string) => SCHEMAS[name],
-            update: vi.fn(async (object: string, data: Row, o: { where: Row }) => { updates.push({ object, data, where: o.where }); return 1; }),
+            update: vi.fn(async (object: string, data: Row, o: { where: Row; multi?: boolean }) => {
+                assertEngineUpdateDispatch(data, o);
+                updates.push({ object, data, where: o.where });
+                return 1;
+            }),
         }),
         metadata: {},
     };
