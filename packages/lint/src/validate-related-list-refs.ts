@@ -26,9 +26,12 @@
  * The children are the stack's `objects` (map or array form) as the registry
  * serves them, since an extension can be the one that adds the FK: every
  * `objectExtensions` field folded in through the package's one fold
- * (`objectsAsServed`, #30383), and a child only an extension reaches (another
- * package's object) carrying its extensions' fields alone. A field record is
- * read by name in either `fields` shape.
+ * (`objectsAsServed`, #30383). A field record is read by name in either
+ * `fields` shape. An object the stack does not declare is not a child here
+ * even when an extension targets it: its own declaration, and so the FKs it
+ * declares, may live in a package this stack does not carry (the per-package
+ * leg of `os build` holds one body's objects), so its extensions alone are not
+ * its field set, and it falls to the rule for an unknown child below.
  *
  *  - A named child that IS in the stack but carries no such FK is refused on
  *    every surface: that child's fields are known.
@@ -61,7 +64,7 @@
  */
 
 import { fieldGroupBodyTableRefusal, type NamedInboundRelationship } from '@objectstack/spec/data';
-import { objectExtensionsByTarget, objectsAsServed, recordsOf } from './object-graph.js';
+import { objectsAsServed, recordsOf } from './object-graph.js';
 
 /** A related-list entry that matches no inbound relationship of its object. */
 export const RELATED_LIST_REF_UNKNOWN = 'related-list-ref-unknown';
@@ -135,10 +138,6 @@ export function validateRelatedListRefs(stack: AnyRec, options?: RelatedListRefO
   };
   for (const obj of objectsAsServed(stack).objects) {
     if (typeof obj.name === 'string') merge(obj.name, recordsOf(obj.fields));
-  }
-  for (const [target, extensions] of objectExtensionsByTarget(stack)) {
-    if (fieldsByObject.has(target)) continue; // folded in above
-    for (const ext of extensions) merge(target, ext.fields);
   }
 
   // Parent name → its inbound relationships, in child then field order.

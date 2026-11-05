@@ -57,7 +57,12 @@ import { RUNTIME_OWNED_FIELD_TYPES } from '@objectstack/spec/data';
 import { anonymousFormObjectName, thankYouRecordFieldNames } from '@objectstack/spec/ui';
 
 import { collectionEntries } from './collection-entries.js';
-import { indexServedObjectGraph, type GraphObject } from './object-graph.js';
+import {
+  indexObjectGraph,
+  objectExtensionsByTarget,
+  objectsAsServed,
+  type GraphObject,
+} from './object-graph.js';
 import { walkPageComponents } from './page-walk.js';
 
 export const THANK_YOU_RECORD_FIELD = 'thank-you-record-field';
@@ -163,6 +168,31 @@ function refusalReason(object: GraphObject, name: string, admitted: ReadonlySet<
 }
 
 /**
+ * [#30383] For a field two packages write at the priority that decides it
+ * (`objectsAsServed`'s `tied`), which definition the registry serves is the
+ * registration order, which a stack does not state. The panel is shown to an
+ * anonymous visitor, so this fails closed: such a field is admitted only when
+ * every definition at that priority is engine-generated, and is otherwise
+ * refused naming the first one that is not.
+ */
+function tiedFieldRefusal(
+  stack: AnyRec,
+  tied: ReadonlyMap<string, ReadonlySet<string>>,
+  admitted: ReadonlySet<string>,
+): (objectName: string, name: string) => string | undefined {
+  if (tied.size === 0) return () => undefined;
+  const extensions = objectExtensionsByTarget(stack);
+  return (objectName, name) => {
+    if (!tied.get(objectName)?.has(name)) return undefined;
+    const writers = (extensions.get(objectName) ?? []).flatMap((ext) =>
+      ext.fields.filter((f) => f.name === name).map((f) => ({ priority: ext.priority, type: f.type })));
+    const deciding = Math.max(...writers.map((w) => w.priority));
+    const refused = writers.find((w) => w.priority === deciding && !(typeof w.type === 'string' && admitted.has(w.type)));
+    return refused ? `a ${typeof refused.type === 'string' ? refused.type : 'untyped'} field` : undefined;
+  };
+}
+
+/**
  * Refuse every name a `thank-you` panel interpolates that is not an
  * engine-generated field. Empty = clean.
  *
@@ -178,7 +208,10 @@ export function validateThankYouRecordFields(
   const findings: ThankYouRecordFieldFinding[] = [];
   const sites = panelSites(stack);
   if (sites.length === 0) return findings;
-  const graph = indexServedObjectGraph(stack);
+  // [#30383] The objects as served, every `objectExtensions` field folded in.
+  const served = objectsAsServed(stack);
+  const graph = indexObjectGraph({ objects: served.objects });
+  const tiedRefusal = tiedFieldRefusal(stack, served.tied, admitted);
 
   for (const site of sites) {
     const names = thankYouRecordFieldNames(site.submitBehavior);
@@ -186,7 +219,7 @@ export function validateThankYouRecordFields(
     const object = graph.get(site.objectName);
     if (!object) continue;
     for (const name of names) {
-      const reason = refusalReason(object, name, admitted);
+      const reason = refusalReason(object, name, admitted) ?? tiedRefusal(site.objectName, name);
       if (reason === undefined) continue;
       findings.push({
         severity: 'error',

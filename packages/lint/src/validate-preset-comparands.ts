@@ -743,7 +743,9 @@ export function validatePresetComparands(
   if (!stack || typeof stack !== 'object') return [];
   const out: PresetComparandFinding[] = [];
 
-  const graph = indexServedObjectGraph(stack);
+  // [#30383] Served, a field two packages tie on left out: which definition
+  // wins is registration order, so its type is not judged here.
+  const graph = indexServedObjectGraph(stack, { tied: 'drop' });
   const datasets = new Map<string, AnyRec>();
   for (const dataset of recordsOf(stack.datasets)) {
     const name = strName(dataset.name);

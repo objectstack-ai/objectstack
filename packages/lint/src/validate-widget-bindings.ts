@@ -10,6 +10,7 @@ import {
   isUnjudgeable,
   joinablePrefixes,
   objectsAsServed,
+  objectsWithoutTiedFields,
   packagesOf,
   recordsOf,
   resolveFieldPath,
@@ -816,9 +817,12 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
   // whose object's field types are known. Advisory — the page still renders.
   // [#30383] Read over the objects as served, every `objectExtensions` field
   // folded in, as the graph below is: the runtime aggregates the served field.
-  const served = objectsAsServed(stack).objects;
+  // A field two packages tie on is left out of this TYPE map: which definition
+  // wins is registration order.
+  const servedStack = objectsAsServed(stack);
+  const served = servedStack.objects;
   const objectFieldTypes = new Map<string, Map<string, string>>();
-  for (const o of served) {
+  for (const o of objectsWithoutTiedFields(servedStack)) {
     if (typeof o.name !== 'string') continue;
     const fm = new Map<string, string>();
     for (const f of recordsOf(o.fields)) {

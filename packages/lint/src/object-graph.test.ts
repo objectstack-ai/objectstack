@@ -624,12 +624,34 @@ describe('[#30383] the field-path rules read the objects as served', () => {
       mappings: [{ name: 'm', targetObject: 'xs_deal', fieldMapping: [{ source: 'R', target: f }] }],
     })],
   ];
+  // The per-package leg of `os build` (`packageBodyAsStack` in the cli): the
+  // app body is the stack, its own collections at the top level and under
+  // `manifest`, and the artifact's `packages[]` beside them.
+  const perPackage = (extra: Rec, objectExtensions: unknown[] = extensions): Rec => {
+    const body = { id: 'app', objects: [deal, account, note], ...extra };
+    return { ...body, manifest: body, packages: [{ manifest: body }, { manifest: { id: 'mod', objectExtensions } }] };
+  };
   it.each(existence)('%s: an extension-added field passes; a field nothing adds is still %s', (_rule, id, run, naming) => {
     // `ref_no` (an autonumber) is the one name every member admits, the
     // thank-you panel included.
     expect(ids(run, artifact(naming('ref_no')))).not.toContain(id);
     expect(ids(run, artifact(naming('ref_no'), []))).toContain(id);
     expect(ids(run, artifact(naming('nowhere')))).toContain(id);
+  });
+
+  it.each(existence)('%s, on the per-package leg: the same verdicts', (_rule, id, run, naming) => {
+    expect(ids(run, perPackage(naming('ref_no')))).not.toContain(id);
+    expect(ids(run, perPackage(naming('ref_no'), []))).toContain(id);
+    expect(ids(run, perPackage(naming('nowhere')))).toContain(id);
+  });
+
+  it.each(existence)('%s: a field nothing adds is refused byte-for-byte as on the declared objects alone', (_rule, id, run, naming) => {
+    const refusal = (stack: Rec) => run(stack)
+      .filter((f) => f.rule === id)
+      .map((f) => { const { severity, where, path, message } = f as Rec; return { severity, where, path, message }; });
+    const served = refusal(artifact(naming('zq_absent')));
+    expect(served).toHaveLength(1);
+    expect(served).toEqual(refusal(artifact(naming('zq_absent'), [])));
   });
 
   it('validate-dataset-references: a path through an extension-added relationship resolves', () => {
@@ -667,6 +689,17 @@ describe('[#30383] the field-path rules read the objects as served', () => {
     expect(validateFieldConsumers(artifact({ datasets: [dataset('name')] })).filter((f) => f.field in added)).toEqual([]);
   });
 
+  it('validate-related-list-refs, on the per-package leg: a child another body owns stays unjudged', () => {
+    // `lib` owns `xs_note` and its FK; `mod` extends `xs_note` with something
+    // else. The app body's leg holds neither declaration, so it must not read
+    // `mod`'s extension as `xs_note`'s whole field set.
+    const body = { id: 'app', objects: [{ ...deal, relatedLists: ['xs_note', 'xs_note.deal_id'] }, account] };
+    const lib = { id: 'lib', objects: [{ name: 'xs_note', fields: { deal_id: { type: 'lookup', reference: 'xs_deal' } } }] };
+    const mod = { id: 'mod', objectExtensions: [{ extend: 'xs_note', fields: { mood: { type: 'text' } } }] };
+    const stack = { ...body, manifest: body, packages: [{ manifest: body }, { manifest: lib }, { manifest: mod }] };
+    expect(ids(validateRelatedListRefs, stack)).toEqual([]);
+  });
+
   it('validate-related-list-refs: an FK a sibling package adds is an inbound relationship', () => {
     const lists = (relatedLists: string[]) => ({ objects: [{ ...deal, relatedLists }, account, note] });
     expect(ids(validateRelatedListRefs, artifact(lists(['xs_note', 'xs_note.deal_id'])))).toEqual([]);
@@ -689,5 +722,56 @@ describe('[#30383] the field-path rules read the objects as served', () => {
     const mapping = (target: string) => ({ mappings: [{ name: 'm', targetObject: 'xs_deal', fieldMapping: [{ source: 'R', target }] }] });
     expect(ids(validateMappingTargetFields, artifact(mapping('score'), replaced))).toEqual([]);
     expect(ids(validateMappingTargetFields, artifact(mapping('region'), replaced))).toEqual([MAPPING_TARGET_FIELD_UNKNOWN]);
+  });
+
+  // Two packages writing one field at the deciding priority: the name is
+  // served, but which definition wins is registration order, which the stack
+  // does not state. The type arms leave it unjudged; the thank-you panel,
+  // shown to anonymous visitors, fails closed.
+  describe('a field two packages tie on', () => {
+    const tie = (a: Rec, b: Rec): Rec => ({
+      objects: [deal, account, note],
+      packages: [
+        { manifest: { id: 'app', objects: [deal, account, note] } },
+        { manifest: { id: 'mod', objectExtensions: [{ extend: 'xs_deal', fields: a }] } },
+        { manifest: { id: 'mod2', objectExtensions: [{ extend: 'xs_deal', fields: b }] } },
+      ],
+    });
+    const numberOrText = (extra: Rec) => ({ ...tie({ score: { type: 'number' } }, { score: { type: 'text' } }), ...extra });
+    const dateOrText = (extra: Rec) => ({ ...tie({ closed_on: { type: 'date' } }, { closed_on: { type: 'text' } }), ...extra });
+
+    it('is still a served name for the existence rules', () => {
+      expect(ids(validateDatasetReferences, numberOrText({ datasets: [{ ...dataset('score'), include: [] }] }))).toEqual([]);
+      expect(ids(validateDatasetReferences, numberOrText({ datasets: [{ ...dataset('zq_absent'), include: [] }] }))).toEqual([DATASET_FIELD_UNKNOWN]);
+    });
+
+    it('is not judged on its type by the type arms', () => {
+      const sum = { datasets: [{ name: 'deals', object: 'xs_deal', measures: [{ name: 's', aggregate: 'sum', field: 'score' }] }] };
+      expect(ids(validateDatasetMeasureAggregates, numberOrText(sum))).toEqual([]);
+      expect(ids(validateDatasetMeasureAggregates, { ...tie({ score: { type: 'text' } }, {}), ...sum }))
+        .toEqual([MEASURE_AGGREGATE_FIELD_TYPE_REFUSED]);
+      expect(ids(validatePresetComparands, dateOrText(widget({ closed_on: 'last_30_days' })))).toEqual([]);
+      const rule = { sharingRules: [{ name: 'sr', object: 'xs_deal', condition: 'record.closed_on == record.name', sharedWith: { type: 'role', value: 'r' }, accessLevel: 'read' }] };
+      expect(ids(validateSharingRuleEnforceability, dateOrText(rule))).toEqual([]);
+    });
+
+    it('is admitted on a thank-you panel only when every tied definition is engine-generated', () => {
+      const panel = (stack: Rec) => ({
+        ...stack,
+        views: [{
+          name: 'vv',
+          form: {
+            type: 'simple', data: { provider: 'object', object: 'xs_deal' }, sections: [{ name: 'a', fields: ['name'] }],
+            submitBehavior: { kind: 'thank-you', title: 'T', message: 'Ref {{record.ref_no}}' },
+          },
+        }],
+      });
+      expect(ids(validateThankYouRecordFields, panel(tie({ ref_no: { type: 'autonumber' } }, { ref_no: { type: 'autonumber' } })))).toEqual([]);
+      for (const [a, b] of [['autonumber', 'text'], ['text', 'autonumber']]) {
+        const findings = validateThankYouRecordFields(panel(tie({ ref_no: { type: a } }, { ref_no: { type: b } })));
+        expect(findings.map((f) => f.rule)).toEqual([THANK_YOU_RECORD_FIELD]);
+        expect(findings[0].message).toContain('is a text field');
+      }
+    });
   });
 });

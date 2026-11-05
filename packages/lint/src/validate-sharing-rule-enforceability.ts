@@ -192,7 +192,7 @@
 
 import { compileCelToFilter } from '@objectstack/formula';
 import { referenceCarrierOf } from '@objectstack/spec/data';
-import { indexObjectGraph, objectsAsServed, recordsOf, type ObjectGraph } from './object-graph.js';
+import { indexObjectGraph, objectsAsServed, objectsWithoutTiedFields, recordsOf, type ObjectGraph } from './object-graph.js';
 import {
   crossClassComparisons,
   crossClassVerdict,
@@ -576,10 +576,18 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
   // reads the same `sharingModel`, and a `controlled_by_parent` anchor's master
   // is the `master_detail` the served object carries, as the security posture
   // rule's merge (#23210) reads it.
+  const served = objectsAsServed(cfg);
   const objectsByName = new Map<string, AnyRec>();
-  for (const obj of objectsAsServed(cfg).objects) {
+  for (const obj of served.objects) {
     const name = str(obj.name);
     if (name) objectsByName.set(name, obj);
+  }
+  // The comparison arms judge a field's TYPE, so a field two packages tie on
+  // is left out of their graph: which definition wins is registration order.
+  const judgedByName = new Map<string, AnyRec>();
+  for (const obj of objectsWithoutTiedFields(served)) {
+    const name = str(obj.name);
+    if (name) judgedByName.set(name, obj);
   }
   // [#19886] The served field map of a rule's ANCHOR, for the list-holding
   // arm — the only object a lowered sharing criterion can address (a
@@ -589,7 +597,7 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
   // keeps its precedence.
   const graphs = new Map<string, ObjectGraph>();
   const anchorGraph = (object: string): ObjectGraph | null => {
-    const target = objectsByName.get(object);
+    const target = judgedByName.get(object);
     if (!target) return null;
     let graph = graphs.get(object);
     if (!graph) {
