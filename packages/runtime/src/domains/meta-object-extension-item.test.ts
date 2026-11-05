@@ -348,3 +348,59 @@ describe('[#28574] refused at the door, leaving no row', () => {
         expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'draft' }]);
     }, 60_000);
 });
+
+describe('[ADR-0146 D10] a module\'s extension that re-declares the base\'s field beyond its display properties', () => {
+    /** A writable module package that depends on the base: the account is inside its closure. */
+    const MODULE = 'com.acme.module';
+    const bootWithModule = async () => {
+        const rig = await boot();
+        await rig.protocol.installPackage({
+            manifest: { id: MODULE, name: 'module', version: '0.1.0', type: 'module', namespace: 'module', dependencies: { [BASE]: '^3' } },
+        });
+        return rig;
+    };
+
+    it('a type change is refused at the save door, VALIDATION_ERROR / 400 at `fields.name`, leaving no row', async () => {
+        const rig = await bootWithModule();
+        let caught: any;
+        try {
+            await rig.protocol.saveMetaItem({
+                type: TYPE, name: TARGET, mode: 'draft', packageId: MODULE,
+                item: { extend: TARGET, fields: { name: { type: 'textarea', label: 'Name' } } },
+            });
+        } catch (e) {
+            caught = e;
+        }
+        expect(caught, 'the save was admitted').toBeDefined();
+        expect({ code: caught.code, status: caught.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+        expect((caught.issues ?? []).map((i: any) => i.path)).toEqual(['fields.name']);
+        expect(String(caught.message)).toContain('`fieldPatches`');
+        expect(await rig.rows()).toEqual([]);
+        expect(rig.extenders()).toEqual([]);
+    }, 60_000);
+
+    it('a draft stored before the rule is refused at publish, and stays a draft', async () => {
+        const rig = await bootWithModule();
+        await rig.engine.insert('sys_metadata', {
+            type: TYPE, name: TARGET, package_id: MODULE, state: 'draft', organization_id: null,
+            metadata: JSON.stringify({ extend: TARGET, fields: { name: { type: 'textarea', label: 'Name' } } }),
+        }, { context: { isSystem: true } });
+        let caught: any;
+        try {
+            await rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: MODULE });
+        } catch (e) {
+            caught = e;
+        }
+        expect(caught, 'the publish was admitted').toBeDefined();
+        expect({ code: caught.code, status: caught.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+        expect(await rig.rows()).toEqual([{ name: TARGET, package_id: MODULE, state: 'draft' }]);
+        expect(rig.extenders()).toEqual([]);
+    }, 60_000);
+
+    it('lit control: a display-only re-declaration saves and publishes', async () => {
+        const rig = await bootWithModule();
+        await rig.saveAndPublish(MODULE, { extend: TARGET, fields: { name: { name: 'name', type: 'text', label: 'Company name' } } });
+        expect(await rig.rows()).toEqual([{ name: TARGET, package_id: MODULE, state: 'active' }]);
+        expect(rig.extenders()).toEqual([MODULE]);
+    }, 60_000);
+});
