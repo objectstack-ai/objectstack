@@ -2194,6 +2194,8 @@ const ko = {
       sourceBadgeInherited: "{{source}}에서 상속됨",
       sourceBadgeOverrides: "{{source}} 재정의",
       resetToDefault: "기본값으로 재설정",
+      sourceBadgeModified: "수정됨",
+      defaultValueHint: "기본값: {{value}}",
       envLockBadge: "환경 변수로 잠김",
       envLockBadgeTitle: "환경 변수로 고정되어 UI에서 편집할 수 없습니다.",
       deprecatedBadge: "지원 중단됨",

@@ -2251,6 +2251,8 @@ const pt = {
       sourceBadgeInherited: "Herdado de {{source}}",
       sourceBadgeOverrides: "Substitui {{source}}",
       resetToDefault: "Restaurar padrão",
+      sourceBadgeModified: "Modificado",
+      defaultValueHint: "Padrão: {{value}}",
       envLockBadge: "Bloqueado pelo ambiente",
       envLockBadgeTitle: "Fixado por uma variável de ambiente — não pode ser editado pela interface.",
       deprecatedBadge: "Obsoleto",

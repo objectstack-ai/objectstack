@@ -1964,6 +1964,8 @@ const zh = {
       sourceBadgeInherited: '继承自{{source}}',
       sourceBadgeOverrides: '覆盖{{source}}',
       resetToDefault: '恢复默认',
+      sourceBadgeModified: '已修改',
+      defaultValueHint: '默认：{{value}}',
       envLockBadge: '环境变量锁定',
       envLockBadgeTitle: '由环境变量固定,无法在界面中编辑。',
       deprecatedBadge: '已弃用',

@@ -2341,6 +2341,10 @@ const en = {
       // layer's value in the draft, and Save sends it as `null` (unset), so the
       // row falls back to the value the layer above carries.
       resetToDefault: 'Reset to default',
+      // A value set at the scope this page writes (objectstack#30329), and
+      // the default its Reset returns to. `{{value}}` is that default in words.
+      sourceBadgeModified: 'Modified',
+      defaultValueHint: 'Default: {{value}}',
       // The chips on a settings row's header (objectui#12821): the env-lock
       // chip and the title it shows when the server sends no reason, and the
       // `Deprecated` chip, with `{{replacedBy}}` the key that replaces it.

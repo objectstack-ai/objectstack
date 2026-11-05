@@ -2252,6 +2252,8 @@ const fr = {
       sourceBadgeInherited: "Hérité de {{source}}",
       sourceBadgeOverrides: "Remplace {{source}}",
       resetToDefault: "Rétablir la valeur par défaut",
+      sourceBadgeModified: "Modifié",
+      defaultValueHint: "Par défaut : {{value}}",
       envLockBadge: "Verrouillé par l'env.",
       envLockBadgeTitle: "Fixé par une variable d'environnement — modification impossible depuis l'interface.",
       deprecatedBadge: "Obsolète",
