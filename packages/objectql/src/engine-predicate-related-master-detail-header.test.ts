@@ -233,6 +233,11 @@ async function refusalOf(run: () => Promise<unknown>): Promise<unknown> {
 
 /** ADR-0137 D2: the rule has no verdict over a header that is not there. */
 const UNEVALUABLE = { status: 400, code: 'VALIDATION_FAILED', fields: [{ field: '_record', code: 'rule_violation' }] };
+/**
+ * [#29029] A header the write itself names is judged by the reference check
+ * before the record's rules: the answer is the master-detail field's.
+ */
+const NOT_FOUND = { status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'invoice', code: 'reference_not_found' }] };
 
 /** The rule's own verdict: it read the header's stored state and refused (the bulk path adds the row id). */
 function expectRuleVerdict(answer: Answer): void {
@@ -251,6 +256,8 @@ describe('[#22892] a predicate rule reading its master through the master-detail
 
   type Door = 'insert' | 'batch insert' | 'update by id' | 'repoint by id' | 'bulk update';
   const DOORS: Door[] = ['insert', 'batch insert', 'update by id', 'repoint by id', 'bulk update'];
+  /** [#29029] The doors whose write names the header; the other two carry a stored one. */
+  const namesHeader = (door: Door) => door === 'insert' || door === 'batch insert' || door === 'repoint by id';
 
   /** One write through `door` that lands the line under `header`. */
   const write = (door: Door, header: string, context: Record<string, unknown> = ALICE) => {
@@ -275,8 +282,12 @@ describe('[#22892] a predicate rule reading its master through the master-detail
       const before = [...storeFor(LINE).values()];
       const nowhere = await refusalOf(() => write(door, NOWHERE));
       expect(nowhere).toBeInstanceOf(ValidationError);
-      expect(answerOf(nowhere, NOWHERE)).toMatchObject(UNEVALUABLE);
-      expect(answerOf(nowhere, NOWHERE).message).toContain('the related record was not found');
+      if (namesHeader(door)) {
+        expect(answerOf(nowhere, NOWHERE)).toMatchObject(NOT_FOUND);
+      } else {
+        expect(answerOf(nowhere, NOWHERE)).toMatchObject(UNEVALUABLE);
+        expect(answerOf(nowhere, NOWHERE).message).toContain('the related record was not found');
+      }
       for (const header of UNREADABLE) {
         expect(answerOf(await refusalOf(() => write(door, header)), header)).toEqual(answerOf(nowhere, NOWHERE));
       }
@@ -289,9 +300,13 @@ describe('[#22892] a predicate rule reading its master through the master-detail
 
     it.each(DOORS)('%s — a refused read of the header object answers as a header that exists nowhere', async (door) => {
       const nowhere = answerOf(await refusalOf(() => write(door, NOWHERE, CAROL)), NOWHERE);
-      expect(nowhere).toMatchObject(UNEVALUABLE);
+      expect(nowhere).toMatchObject(namesHeader(door) ? NOT_FOUND : UNEVALUABLE);
       // Alice's headers exist; Carol's read door refuses the object, whatever they hold.
-      for (const header of ['h_mine_open', 'h_mine_locked']) {
+      // [#29029] The batch's first row and the repoint's stored line are
+      // `h_mine_open` itself, the door's own fixture: those doors take the
+      // locked header only.
+      const headers = door === 'batch insert' || door === 'repoint by id' ? ['h_mine_locked'] : ['h_mine_open', 'h_mine_locked'];
+      for (const header of headers) {
         expect(answerOf(await refusalOf(() => write(door, header, CAROL)), header)).toEqual(nowhere);
       }
     });
@@ -302,7 +317,7 @@ describe('[#22892] a predicate rule reading its master through the master-detail
         return (out.results?.[0]?.errors ?? []).map((e: any) => ({ field: e.field, code: e.code, message: String(e.message).split(header).join('ID') }));
       };
       const nowhere = await preview(NOWHERE);
-      expect(nowhere).toEqual([expect.objectContaining({ field: '_record', code: 'rule_violation' })]);
+      expect(nowhere).toEqual([expect.objectContaining({ field: 'invoice', code: 'reference_not_found' })]);
       for (const header of UNREADABLE) expect(await preview(header)).toEqual(nowhere);
       // CONTROL: a readable header is judged on its stored state.
       expect(await preview('h_mine_locked')).toEqual([{ field: '_record', code: 'rule_violation', message: RULE_MESSAGE }]);
@@ -320,7 +335,7 @@ describe('[#22892] a predicate rule reading its master through the master-detail
       expect(out.map((o) => o.ok)).toEqual([false, false, false, false, true]);
       const errors = out.map((o) => (o.ok ? undefined : o.error));
       const nowhere = answerOf(errors[2], NOWHERE);
-      expect(nowhere).toMatchObject(UNEVALUABLE);
+      expect(nowhere).toMatchObject(NOT_FOUND);
       expect(answerOf(errors[0], 'h_other_open')).toEqual(nowhere);
       expect(answerOf(errors[1], 'h_other_locked')).toEqual(nowhere);
       expectRuleVerdict(answerOf(errors[3], 'h_mine_locked'));
@@ -329,7 +344,9 @@ describe('[#22892] a predicate rule reading its master through the master-detail
 
     it('the mechanism: the caller\'s read door first, and no elevated read of a header it did not return', async () => {
       await refusalOf(() => engine.insert(LINE, { invoice: 'h_other_locked', quantity: 1 }, { context: ALICE } as any));
+      // The rule's binding read and the reference check's [#29029], each through the read door.
       expect(headerReads).toEqual([
+        { operation: 'find', elevated: false, where: { id: 'h_other_locked' } },
         { operation: 'find', elevated: false, where: { id: 'h_other_locked' } },
       ]);
       headerReads.length = 0;

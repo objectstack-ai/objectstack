@@ -353,7 +353,8 @@ describe('[#22519] an unreadable master-detail header answers what a nonexistent
   describe('(b) requiredWhen over parent', () => {
     it('insert — an unreadable header in either state answers what a nonexistent one does', async () => {
       const nowhere = await refusalOf(() => engine.insert(REQ_LINE, { invoice: NOWHERE, quantity: 1 }, { context: ALICE } as any));
-      expect(envelopeOf(nowhere)).toEqual(UNEVALUABLE);
+      // [#29029] The header the write names is judged before the record's rules.
+      expect(envelopeOf(nowhere)).toEqual(NOT_FOUND);
       for (const header of UNREADABLE) {
         const err = await refusalOf(() => engine.insert(REQ_LINE, { invoice: header, quantity: 1 }, { context: ALICE } as any));
         expect(envelopeOf(err)).toEqual(envelopeOf(nowhere));
@@ -386,7 +387,8 @@ describe('[#22519] an unreadable master-detail header answers what a nonexistent
       };
       for (const bulk of [false, true]) {
         const nowhere = await repoint(NOWHERE, bulk);
-        expect(envelopeOf(nowhere)).toEqual(UNEVALUABLE);
+        // [#29029] The header the repoint names is judged before the record's rules.
+        expect(envelopeOf(nowhere)).toEqual(NOT_FOUND);
         for (const header of UNREADABLE) {
           const err = await repoint(header, bulk);
           expect(envelopeOf(err)).toEqual(envelopeOf(nowhere));
@@ -449,7 +451,8 @@ describe('[#22519] an unreadable master-detail header answers what a nonexistent
 
     it('a controlled_by_parent detail takes the same rule under an unreadable header', async () => {
       const nowhere = envelopeOf(await refusalOf(() => engine.insert(CBP_LINE, { invoice: NOWHERE, quantity: 1 }, { context: ALICE } as any)));
-      expect(nowhere).toEqual(UNEVALUABLE);
+      // [#29029] The header the write names is judged before the record's rules.
+      expect(nowhere).toEqual(NOT_FOUND);
       for (const header of UNREADABLE) {
         expect(envelopeOf(await refusalOf(() => engine.insert(CBP_LINE, { invoice: header, quantity: 1 }, { context: ALICE } as any)))).toEqual(nowhere);
       }
