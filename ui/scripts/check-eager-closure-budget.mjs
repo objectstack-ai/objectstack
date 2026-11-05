@@ -2226,7 +2226,45 @@ export const PER_CHUNK_GZIP_CEILINGS = Object.freeze({
   //
   // ⚠️ RAISED ×1.20 by objectui#12653 (2026-10-16), the maintainer's 20%
   // ruling, from 50,000 (the entry on MAX_EAGER_CLOSURE_GZIP_BYTES).
-  'i18n-locale-en': 60_000,
+  //
+  // ⚠️ RAISED by objectstack#30206 (2026-11-05), the administrator's first-run
+  // checklist on Home, from 60,000 by exactly the measured +203 bytes, at the
+  // claim seat's direction once trimming the new copy was measured short of
+  // the overage.
+  //
+  // WHAT THE BYTES ARE: one container, one instrument, `CI=true pnpm exec
+  // vite build` in `apps/console`, reading `apps/console/dist/eager-closure.json`.
+  // The control is the PR's base, `main` at `48b3ae6e`: the same tree with
+  // `ui/apps/console`, `ui/packages/i18n` and `ui/e2e` restored to that commit,
+  // every other package identical. The branch is `cda63e74`. Gzipped bytes:
+  //
+  //   | chunk                 | `48b3ae6e` | `cda63e74` | delta  |
+  //   |-----------------------|-----------:|-----------:|-------:|
+  //   | `vendor-objectstack`  |    601,485 |    601,485 |      0 |
+  //   | `ui-components`       |    319,512 |    319,508 |     -4 |
+  //   | `framework`           |     83,794 |     83,794 |      0 |
+  //   | `i18n-locale-en`      |     59,935 |     60,138 |   +203 |
+  //   | ⇒ aggregate           |  2,202,867 |  2,205,356 | +2,489 |
+  //
+  // Both builds have 104 eager chunks with the same names, except that the
+  // settings field module moved from a `SettingsField` chunk (4,009) to a
+  // `settingsFieldRefusals` one (4,549). Most of the aggregate's other bytes
+  // are the checklist itself, in `index` (+1,737).
+  //
+  // WHAT THEY BUY: the `console.firstRunChecklist.*` copy (six rows, their
+  // actions and saved lines) and the three `console.settingsView.invalidFormat*`
+  // sentences, net of the 14 retired `console.workspaceTimezonePrompt.*` keys.
+  // The checklist draws on Home for an administrator, so its copy belongs to
+  // the eager catalogue. Measured alternative: dropping the description, the
+  // timezone line's explanation, the saved lines and the shared button labels
+  // saves 122 bytes, short of the 138 over, and leaves the rows unexplained.
+  //
+  // Headroom stays at the 65 bytes `main` had over its own reading (60,000 -
+  // 59,935), and this ceiling minus the baseline below stays at 19,585, both
+  // moved by the same amount. ⛔ Not moved: the aggregate
+  // MAX_EAGER_CLOSURE_GZIP_BYTES (the branch passes it), BASELINE,
+  // REGRESSION_THIS_GATE_MUST_CATCH_BYTES and every other key.
+  'i18n-locale-en': 60_203,
   // Raised by the maintainer ruling of 2026-09-08, ⛔ not by a measurement here:
   // `main` had been red on this line since `f76f43628`. The bytes that put it
   // there were UNATTRIBUTED when this moved and have since been measured to
@@ -2470,7 +2508,13 @@ export const PER_CHUNK_BASELINE = Object.freeze({
   // BASELINE above, so the two are directly comparable, and the same instrument
   // and container as the control build it is subtracted from. It supersedes
   // objectui#8816's `ba20b0bc0` reading of the retired `i18n-locales` key.
-  'i18n-locale-en': 40_415,
+  //
+  // Moved with its ceiling by objectstack#30206 (2026-11-05), from 40,415 by
+  // the same measured +203 bytes (the table on that key of
+  // PER_CHUNK_GZIP_CEILINGS). ⚠️ So this is no longer one build's reading: it
+  // is the `755d34a5f` reading plus the checklist's measured delta, which keeps
+  // the ceiling-minus-baseline gap this key carried.
+  'i18n-locale-en': 40_618,
   // `3f775eeb8`, its OWN console build — ⛔ not the one above it and not
   // BASELINE's. Moved with the ceiling in the same commit, per the maintainer
   // ruling of 2026-09-08 and the rule stated under "Raising one".
