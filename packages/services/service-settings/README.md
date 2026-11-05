@@ -29,7 +29,7 @@ a resolver that layers `OS_* env > Tenant > User > Default`.
 `process.env[OS_NAMESPACE_KEY]` (uppercased, with dots / hyphens converted
 to underscores) takes precedence over any stored value. For example,
 `mail.smtp_host` resolves from `OS_MAIL_SMTP_HOST`, and
-`feature_flags.ai_enabled` resolves from `OS_FEATURE_FLAGS_AI_ENABLED`.
+`ai.log_prompts` resolves from `OS_AI_LOG_PROMPTS`.
 Such fields are returned with `source: 'env', locked: true` and writes
 (service or REST) fail with HTTP 409.
 
@@ -52,9 +52,18 @@ The default is `LocalCryptoProvider` — AES-256-GCM keyed off a single
    across every restart and every node, or previously-encrypted secrets
    become undecryptable.
 2. `OS_DEV_CRYPTO_KEY` — dev convenience key (same format).
-3. A persisted file at `~/.objectstack/dev-crypto-key` (mode 0600). In
+3. A persisted file, `dev-crypto-key` (mode 0600) under `OS_HOME` (legacy
+   `OBJECTSTACK_HOME`, a leading `~` expanded), else `~/.objectstack`. In
    development this is auto-created so single-host dev loops survive
-   restarts; in production it is only *read*, never minted.
+   restarts; in production it is only *read*, never minted. Under the CLI
+   (`os dev`, `os start`, the one-shot commands) a project whose own
+   `.objectstack/dev-crypto-key` (left by an earlier `os start`) is the only
+   file holding a key reads that one instead. When both files hold
+   *different* keys, the boot trial-opens the newest stored `sys_secret`
+   rows (up to ten) under each key once the database is open, and reads the
+   file whose key opens more of them; a split between the two keys is a boot
+   error naming both files, and a production boot where neither key opens any
+   of them refuses to start (`DataKeyOpensNothingError`).
 
 **Fail-loud in production.** When `NODE_ENV=production` and no stable key
 source (env var or pre-existing file) is available, the provider refuses
@@ -108,7 +117,6 @@ the following built-in manifests are pre-registered out of the box:
 | `mail`         | `EmailServicePlugin`        | SMTP / Resend / Postmark + `mail/test`      |
 | `storage`      | `StorageServicePlugin`      | Local FS / S3 + encrypted secret + `storage/test` |
 | `branding`     | (built-in fallback)         | Name, logo and colour served to the console by `RuntimeConfigPlugin` (name also read by `plugin-auth`); offered under the `single` tenancy posture only |
-| `feature_flags`| (built-in fallback)         | Opt-in experimental features                |
 
 ## License
 

@@ -531,6 +531,26 @@ export type {
     SummaryBackfillLogger,
     SummaryBackfillOptions,
 } from './summary-backfill.js';
+// [#29961] The backfill behind `os migrate stored-expressions`: stored computed
+// fields over rows no write has computed since the field was declared, and the
+// boot advisory naming it. Same split as the roll-up backfill above.
+export {
+    backfillStoredExpressions,
+    formatStoredExpressionBackfillReport,
+    storedExpressionBackfillComplete,
+    announceStoredExpressionHoles,
+    sampleStoredExpressionHoles,
+} from './stored-expression-backfill.js';
+export type {
+    StoredExpressionBackfillReport,
+    StoredExpressionBackfillFieldOutcome,
+    StoredExpressionBackfillFailure,
+    StoredExpressionFault,
+    StoredExpressionBackfillEngine,
+    StoredExpressionBackfillLogger,
+    StoredExpressionBackfillOptions,
+    StoredExpressionHoleSample,
+} from './stored-expression-backfill.js';
 // [ADR-0144, ruling 6492000994] The explicit code backfill behind
 // `os migrate record-currency-codes`: rows stored before an amount switched to
 // `currencyMode: 'record'`. Same split as the roll-up backfill above.
@@ -546,6 +566,29 @@ export type {
     RecordCurrencyBackfillLogger,
     RecordCurrencyBackfillOptions,
 } from './record-currency-backfill.js';
+// [ADR-0144 D5, D7 parameter 1, Open item 8] The explicit recompute of stored
+// home amounts behind `os migrate recompute-home-amounts`: the write's own
+// projection over stored rows. Same split as the two backfills above.
+export {
+    recomputeHomeAmounts,
+    assertHomeAmountRecomputeSince,
+    formatHomeAmountRecomputeReport,
+    homeAmountRecomputeComplete,
+    HOME_AMOUNT_SKIP_REASONS,
+} from './home-amount-recompute.js';
+export type {
+    HomeAmountRecomputeReport,
+    HomeAmountRecomputeChange,
+    HomeAmountRecomputeSkip,
+    HomeAmountSkipReason,
+    HomeAmountRecomputeOrganization,
+    HomeAmountRecomputeFailure,
+    HomeAmountRecomputeAudit,
+    HomeAmountRecomputeEngine,
+    HomeAmountRecomputeLogger,
+    HomeAmountRecomputeOptions,
+} from './home-amount-recompute.js';
+export type { HomeAmountReads, HomeAmountServing, ExchangeRateRow } from './home-amount-projection.js';
 export { summaryEmptySetValue, summaryNullIsBackfillable, aggregateSummaryValue } from './summary-aggregate.js';
 export type { SummaryDescriptor, SummaryAggregateEngine } from './summary-aggregate.js';
 export { evaluateValidationRules, needsPriorRecord, legalNextStates } from './validation/rule-validator.js';

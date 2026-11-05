@@ -301,6 +301,17 @@ export interface HomeLocalization {
 /** Reads an organization's {@link HomeLocalization}; the engine's host bridge to the settings service. */
 export type HomeLocalizationResolver = (organizationId: string | undefined) => Promise<HomeLocalization | undefined>;
 
+/**
+ * What the write-time projection reads, handed to a caller that projects a
+ * STORED row as a write would (the explicit recompute): the serving a write
+ * reads its home currency, timezone and rate rows through, and the
+ * organization a write converts a given row under.
+ */
+export interface HomeAmountReads {
+  readonly serving: HomeAmountServing;
+  organizationOf(row: Record<string, unknown>): string | undefined;
+}
+
 /** Wrap a serving so each (organization, currency, date) and each organization's home currency and timezone are read once. */
 export function memoizeHomeAmountServing(serving: HomeAmountServing): HomeAmountServing {
   const homes = new Map<string, Promise<string | undefined>>();

@@ -31,6 +31,17 @@
  * edit never moves into another member. A translation is one locale bundle
  * whose override replaces the whole bundle (ADR-0146 D2), and the editor says
  * so before the first save.
+ *
+ * ## A dataset (objectstack#30064)
+ *
+ * On a read-only base the area opens a dataset here too
+ * (`metadataArea.ts#AREA_CUSTOMIZE_EDITOR_TYPES`): the type's registered
+ * designer (`DatasetDefaultInspector`) in place of the form, beside its
+ * preview, customized as above, the whole dataset copied into the pair. A
+ * dataset feeds every dashboard and report built on it, so the editor lists
+ * what uses it, from the references read (`client.references`), before
+ * anything is published; and a refusal the header's Publish kept for it is
+ * shown here, at the item, as on its Pending changes entry.
  */
 
 import * as React from 'react';
@@ -44,21 +55,23 @@ import {
   cn,
 } from '@object-ui/components';
 import { extractDraftBody, formatMetadataError } from '@object-ui/data-objectstack';
-import { History, Lock, MoreHorizontal } from 'lucide-react';
+import { History, Link2, Lock, MoreHorizontal } from 'lucide-react';
 import { SchemaForm } from '../metadata-admin/SchemaForm.js';
 import { resolveResourceConfig } from '../metadata-admin/registry.js';
 import { useRegisteredMetadataPreview } from '../metadata-admin/preview-registry.js';
+import { useRegisteredMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry.js';
+import { useReferencesScan, type ReferencesState } from '../item-tools/ReferencesPanel.js';
 import { useMetadataClient, useMetadataTypes } from '../metadata-admin/useMetadata.js';
 import { readDraftForSave, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
 import { t, tFormat, translateMetadataType, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import { plainRefusal, type StudioRefusal } from './metadataError.js';
+import { StudioRefusalStrip } from './StudioRefusalStrip.js';
 import { useDraftAutoSave, type DraftSend } from './useDraftAutoSave.js';
 import {
   StudioCustomizeButton,
   StudioOverrideChip,
   StudioRestoreOriginalDialog,
-  StudioRestoreOriginalItem,
   overrideDraftBody,
   useServedOverride,
   type CustomizeBlock,
@@ -80,10 +93,119 @@ function savedBody(doc: Record<string, unknown>): Record<string, unknown> {
   return body;
 }
 
+/** The referring items of a references read, one per item: a dashboard binding it twice is one dashboard. */
+function referringItems(state: ReferencesState): Array<{ type: string; name: string; label: string }> {
+  if (state.status !== 'loaded') return [];
+  const seen = new Set<string>();
+  const out: Array<{ type: string; name: string; label: string }> = [];
+  for (const ref of state.items) {
+    const key = `${ref.fromType}/${ref.fromName}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ type: ref.fromType, name: ref.fromName, label: ref.fromLabel || ref.fromName });
+  }
+  return out;
+}
+
+/**
+ * objectstack#30064 — what uses this item, read once by the references read
+ * (`client.references`, the item tools' 引用关系): a dataset's dashboards and
+ * reports, each opening in the area. A failed read says it failed and offers
+ * the read again; it never reads as "nothing uses it".
+ */
+function StudioBundleUsedBy({
+  type,
+  name,
+  packageId,
+  basePath,
+  locale,
+}: {
+  type: string;
+  name: string;
+  packageId: string;
+  basePath: string;
+  locale: string;
+}): React.ReactElement {
+  const navigate = useNavigate();
+  const client = useMetadataClient();
+  const { state, load } = useReferencesScan(client, type, name);
+  const loadRef = React.useRef(load);
+  React.useLayoutEffect(() => {
+    loadRef.current = load;
+  });
+  React.useEffect(() => {
+    void loadRef.current();
+  }, []);
+  const items = referringItems(state);
+  return (
+    <section
+      data-testid="studio-bundle-editor-used-by"
+      data-state={state.status}
+      aria-label={t('engine.edit.references', locale)}
+      className="border-b bg-amber-500/5 px-4 py-2 text-xs text-foreground"
+    >
+      {state.status === 'error' ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <p role="alert" className="min-w-0 flex-1">
+            {t('engine.studio.area.formEditor.usedByError', locale)}
+          </p>
+          <button
+            type="button"
+            data-testid="studio-bundle-editor-used-by-retry"
+            onClick={() => void load()}
+            className="inline-flex h-6 shrink-0 items-center rounded-md border bg-background px-2 text-[11px] font-medium hover:bg-muted"
+          >
+            {t('engine.edit.refsRetry', locale)}
+          </button>
+        </div>
+      ) : state.status !== 'loaded' ? (
+        <p role="status" className="text-muted-foreground">
+          {t('engine.edit.refsScanning', locale)}
+        </p>
+      ) : items.length === 0 ? (
+        <p className="text-muted-foreground">{t('engine.studio.area.formEditor.usedByNone', locale)}</p>
+      ) : (
+        <>
+          <p className="flex items-center gap-1.5 font-medium">
+            <Link2 className="h-3.5 w-3.5 shrink-0 text-amber-700 dark:text-amber-300" aria-hidden="true" />
+            {tFormat(
+              items.length === 1 ? 'engine.studio.area.formEditor.usedByOne' : 'engine.studio.area.formEditor.usedByOther',
+              locale,
+              { count: items.length },
+            )}
+          </p>
+          <ul className="mt-1.5 flex flex-wrap gap-1.5">
+            {items.map((item) => (
+              <li key={`${item.type}/${item.name}`}>
+                <button
+                  type="button"
+                  data-testid="studio-bundle-editor-used-by-item"
+                  data-type={item.type}
+                  data-name={item.name}
+                  title={item.name}
+                  onClick={() =>
+                    navigate(
+                      `${basePath}/${encodeURIComponent(item.type)}/${encodeURIComponent(item.name)}?${new URLSearchParams({ package: packageId })}`,
+                    )
+                  }
+                  className="inline-flex h-6 max-w-full items-center gap-1.5 rounded-md border bg-background px-2 hover:bg-muted"
+                >
+                  <span className="truncate">{item.label}</span>
+                  <span className="shrink-0 text-[10px] text-muted-foreground">{translateMetadataType(item.type, locale)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
+  );
+}
+
 export interface StudioBundleItemEditorProps {
   /** The package the area is open on. */
   packageId: string;
-  /** `email_template` or `translation` (`AREA_FORM_EDITOR_TYPES`). */
+  /** `email_template` or `translation` (`AREA_FORM_EDITOR_TYPES`), or a read-only package's `dataset`. */
   type: string;
   name: string;
   /** The bundle member the URL names (`?member=`); absent for the canonical one and for a translation. */
@@ -98,6 +220,8 @@ export interface StudioBundleItemEditorProps {
   onDraftSaved?: (saved?: { type: string; name: string }) => void;
   /** The area's root (`MetadataAreaHost.basePath`), for the item's history link. */
   basePath: string;
+  /** objectstack#30064 — what the header's last Publish refused for this item, kept until it is resolved. */
+  publishRefusal?: StudioRefusal | null;
 }
 
 export function StudioBundleItemEditor({
@@ -110,6 +234,7 @@ export function StudioBundleItemEditor({
   publishNonce = 0,
   onDraftSaved,
   basePath,
+  publishRefusal = null,
 }: StudioBundleItemEditorProps): React.ReactElement {
   const locale = useMetadataLocale();
   const navigate = useNavigate();
@@ -122,6 +247,10 @@ export function StudioBundleItemEditor({
     (entry?.schema as Record<string, unknown> | undefined) ??
     (config.defaultSchema as Record<string, unknown> | undefined);
   const Preview = useRegisteredMetadataPreview(type);
+  // objectstack#30064 — a type with a designer of its own (a dataset) is edited in it, not in the form.
+  const Designer = useRegisteredMetadataDefaultInspector(type);
+  // What the designer reports as blocking (a dimension with no field): held, never sent.
+  const [blocking, setBlocking] = React.useState(0);
   const memberScope = React.useMemo(() => (member ? { member } : {}), [member]);
   const target = JSON.stringify([packageId, type, name, member ?? '']);
 
@@ -305,7 +434,7 @@ export function StudioBundleItemEditor({
     target,
     loadedFor,
     dirty,
-    blocked: !editable || restoring,
+    blocked: !editable || restoring || blocking > 0,
     snapshot: draft,
     save: doSave,
   });
@@ -339,6 +468,11 @@ export function StudioBundleItemEditor({
 
   const onChange = React.useCallback((next: Record<string, unknown>) => {
     setDraft(next);
+    setDirty(true);
+  }, []);
+  // The designer's shallow patch, as the generic item page applies it.
+  const onPatch = React.useCallback((patch: Record<string, unknown>) => {
+    setDraft((prev) => ({ ...prev, ...patch }));
     setDirty(true);
   }, []);
 
@@ -375,7 +509,14 @@ export function StudioBundleItemEditor({
           </span>
         )}
         {customizing && served.declaration && (
-          <StudioOverrideChip baseLabel={baseLabel} basedOn={served.declaration.basedOn} locale={locale} />
+          <StudioOverrideChip
+            baseLabel={baseLabel}
+            basedOn={served.declaration.basedOn}
+            locale={locale}
+            // objectstack#29692 — Restore lives on the mark that names the customization.
+            onRestore={inPair ? () => setRestoreOpen(true) : undefined}
+            restoreDisabled={restoring || saving || (customization?.pairId == null && pairRef.current === null)}
+          />
         )}
         {status && (
           <span data-testid="studio-bundle-editor-status" className="shrink-0 text-xs text-muted-foreground">
@@ -418,13 +559,6 @@ export function StudioBundleItemEditor({
               <History className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
               {t('engine.edit.history', locale)}
             </DropdownMenuItem>
-            {customizing && inPair && (
-              <StudioRestoreOriginalItem
-                disabled={restoring || saving || (customization?.pairId == null && pairRef.current === null)}
-                locale={locale}
-                onSelect={() => setRestoreOpen(true)}
-              />
-            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -445,8 +579,21 @@ export function StudioBundleItemEditor({
           })}
         </p>
       )}
+      {customizing && !inPair && type === 'dataset' && (
+        <p role="note" data-testid="studio-bundle-editor-whole-dataset" className="border-b bg-sky-500/5 px-4 py-2 text-xs text-foreground">
+          {tFormat('engine.studio.area.formEditor.datasetWhole', locale, { package: baseLabel })}
+        </p>
+      )}
+      {customizing && type === 'dataset' && (
+        <StudioBundleUsedBy type={type} name={name} packageId={packageId} basePath={basePath} locale={locale} />
+      )}
       {customizing && unlocked && (
         <p className="border-b px-4 py-1.5 text-[11px] text-muted-foreground">{t('engine.studio.customize.draftFooter', locale)}</p>
+      )}
+      {publishRefusal && (
+        <div data-testid="studio-bundle-editor-publish-refusal" className="border-b px-4 py-2">
+          <StudioRefusalStrip refusal={publishRefusal} locale={locale} className="px-2 py-1.5 text-xs" />
+        </div>
       )}
       {shownError && (
         <div data-testid="studio-bundle-editor-error" className="border-b bg-destructive/10 px-4 py-2 text-xs text-destructive">
@@ -474,15 +621,29 @@ export function StudioBundleItemEditor({
           )}
         >
           <div className="min-w-0 p-4 lg:overflow-auto" data-testid="studio-bundle-editor-form">
-            <SchemaForm
-              schema={schema}
-              form={entry?.form}
-              value={draft}
-              onChange={onChange}
-              hiddenFields={hiddenFieldsOf(type)}
-              fieldOrder={config.fieldOrder}
-              readOnly={!editable}
-            />
+            {Designer ? (
+              // eslint-disable-next-line react-hooks/static-components -- useRegisteredMetadataDefaultInspector returns a registered component (stable), not one created during render
+              <Designer
+                type={type}
+                name={name}
+                draft={draft}
+                onPatch={onPatch}
+                onBlockingIssuesChange={setBlocking}
+                readOnly={!editable}
+                locale={locale}
+                serverSchema={entry?.schema as Record<string, unknown> | undefined}
+              />
+            ) : (
+              <SchemaForm
+                schema={schema}
+                form={entry?.form}
+                value={draft}
+                onChange={onChange}
+                hiddenFields={hiddenFieldsOf(type)}
+                fieldOrder={config.fieldOrder}
+                readOnly={!editable}
+              />
+            )}
           </div>
           {Preview && (
             <div className="min-w-0 border-t lg:overflow-auto lg:border-l lg:border-t-0" data-testid="studio-bundle-editor-preview">

@@ -64,7 +64,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
     assertEngineDeleteDispatch,
@@ -126,9 +126,11 @@ function matchesWhere(r: Row, where: Record<string, unknown>): boolean {
 }
 
 /** One `sys_metadata_commit` row in the driver's snake_case wire shape. */
+/** [#29414] Recorded for `PKG`, the package the rows below are bound to: a commit's revert addresses its own package's rows. */
 const commitRow = (items: unknown[]) => ({
     id: 'c1',
     commit_id: 'c1',
+    package_id: PKG,
     organization_id: null,
     operation: 'apply',
     message: 'the commit under revert',
@@ -494,13 +496,25 @@ describe('every projecting door goes through runMutationProjector', () => {
         fileURLToPath(new URL('./protocol.ts', import.meta.url)),
         'utf8',
     );
+    // [#29985] The codemod split moved door bodies into `protocol-*.ts`
+    // modules (ruling E's host split), where the class is spelled `host.`; a
+    // census of call sites reads every module the split can move a body to
+    // (the census's own pattern, `HOST_SPLIT.module` in
+    // `scripts/check-durability-degradation-log-level.mjs`), tests excluded.
+    const splitSources = readdirSync(fileURLToPath(new URL('.', import.meta.url)))
+        .filter((file) => /^protocol-[a-z0-9-]+\.ts$/.test(file))
+        .sort()
+        .map((file) => readFileSync(fileURLToPath(new URL(`./${file}`, import.meta.url)), 'utf8'));
+    /** Every match of `pattern` in `protocol.ts` and every split module. */
+    const sitesOf = (pattern: RegExp) => [source, ...splitSources].flatMap((text) => text.match(pattern) ?? []);
 
     it('has exactly seven `this.runMutationProjector(` call sites — three original, four recovery-door sites', () => {
         // saveMetaItem · runPublishSideEffects · deleteMetaItem (repository)
         //   + rollbackMetaItem
         //   + revertCommit restore limb + revertCommit soft-remove limb
         //   + deleteMetaItem (legacy raw-engine)
-        const callSites = source.match(/this\.runMutationProjector\(/g) ?? [];
+        // [#29985] `host.` in a moved body is the same call (ruling E's rewrite set).
+        const callSites = sitesOf(/\b(?:this|host)\.runMutationProjector\(/g);
         expect(callSites).toHaveLength(7);
         // Non-vacuity: the declaration is not one of them.
         expect(source.match(/private async runMutationProjector\(/g) ?? []).toHaveLength(1);

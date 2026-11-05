@@ -175,10 +175,13 @@ async function boot() {
   const sets = [
     ...defaultPermissionSets,
     PermissionSetSchema.parse({ name: SET.unadmittedA, objects: { [DETAIL]: CRUD, [LINE]: CRUD } }),
-    PermissionSetSchema.parse({
+    // Edit or delete without read: the authoring schema refuses this shape (an
+    // object permission that edits or deletes a record also reads it), so it is
+    // built raw — the shape a row stored before that refusal still carries.
+    {
       name: SET.unadmittedB,
       objects: { [MASTER]: { allowEdit: true }, [DETAIL]: CRUD, [LINE]: CRUD },
-    }),
+    } as unknown as ReturnType<typeof PermissionSetSchema.parse>,
     PermissionSetSchema.parse({
       name: SET.masterReadRowScoped,
       objects: { [MASTER]: { allowRead: true, allowEdit: true }, [DETAIL]: CRUD, [LINE]: CRUD },

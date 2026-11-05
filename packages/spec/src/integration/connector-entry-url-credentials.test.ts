@@ -224,3 +224,262 @@ describe('an authored connector URL holds no credential part', () => {
     });
   });
 });
+
+// One value-level rule at both connector doors: a URL is judged where a URL
+// parser reads it — after its leading and trailing C0 control characters and
+// spaces are trimmed (the WHATWG URL Standard's first step) — and a credential
+// query parameter is refused in ANY string under `providerConfig` and `auth`,
+// whether or not it starts with a scheme. The read rewrites exactly what the
+// write refuses, at the position the write judged, and serves every other
+// character byte for byte.
+describe('a URL is judged after trimming surrounding whitespace; a credential query parameter is refused in any string of the entry', () => {
+  const TAB = String.fromCharCode(0x09);
+  const LF = String.fromCharCode(0x0a);
+  const CR = String.fromCharCode(0x0d);
+  const NUL = String.fromCharCode(0x00);
+  const CLEAN = 'https://api.vendor.example.com/v1';
+  const withNote = (note: string) => ({ ...rest(CLEAN), providerConfig: { baseUrl: CLEAN, note } });
+
+  describe('REFUSED, located at the string', () => {
+    it.each([
+      ['a userinfo password in a URL behind a leading space', rest(` https://user:${PLACEHOLDER}@api.vendor.example.com/v1`), 'providerConfig.baseUrl'],
+      ['a userinfo token in a URL behind a leading tab', rest(`${TAB}https://${PLACEHOLDER}@api.vendor.example.com/v1`), 'providerConfig.baseUrl'],
+      ['a userinfo in a URL between a leading NUL and a trailing newline', rest(`${NUL}https://u:${PLACEHOLDER}@api.vendor.example.com/v1${LF}`), 'providerConfig.baseUrl'],
+      ['`api_key` in the query of a URL behind a leading space', rest(` https://api.vendor.example.com/v1?api_key=${PLACEHOLDER}`), 'providerConfig.baseUrl'],
+      ['`token` in the query of a string with no scheme', rest(`api.vendor.example.com/v1?page=2&token=${PLACEHOLDER}`), 'providerConfig.baseUrl'],
+      ['`signature` in the query of a string that is not a URL', withNote(`see ?signature=${PLACEHOLDER}`), 'providerConfig.note'],
+      [
+        'the instance\'s own `auth.paramName` in the query of a string with no scheme',
+        rest(`api.vendor.example.com/v1?vendor_key=${PLACEHOLDER}`, { type: 'api-key', credentialRef: 'VENDOR_KEY', paramName: 'vendor_key' }),
+        'providerConfig.baseUrl',
+      ],
+      ['a userinfo in `auth.tokenUrl` behind a leading space', oauth2({ tokenUrl: ` https://c:${PLACEHOLDER}@auth.vendor.example.com/token` }), 'auth.tokenUrl'],
+      ['`client_secret` in the query of an `auth.tokenUrl` behind a leading tab', oauth2({ tokenUrl: `${TAB}https://auth.vendor.example.com/token?client_secret=${PLACEHOLDER}` }), 'auth.tokenUrl'],
+    ] as const)('%s', (_label, entry, at) => {
+      const { located, messages } = refusals(entry);
+      expect(located).toEqual([['custom', at]]);
+      expect(messages[0]).toContain(`\`${at}\``);
+      expect(messages[0]).toContain('auth: { type, credentialRef }');
+      expect(messages[0]).not.toContain(PLACEHOLDER);
+    });
+  });
+
+  describe('CONTROL: a string holding no credential part is accepted, surrounding whitespace or not', () => {
+    it.each([
+      ['a URL behind a leading space', rest(` ${CLEAN}`)],
+      ['a URL with an ordinary query between a leading tab and a trailing carriage return', rest(`${TAB}${CLEAN}?region=eu${CR}`)],
+      ['a string with no scheme and an ordinary query', rest('api.vendor.example.com/v1?region=eu')],
+      ['a string with no scheme whose credential parameter is empty', rest('api.vendor.example.com/v1?token=')],
+      ['a string that is not a URL', withNote('Billing API, EU region')],
+      ['a string that is not a URL whose credential parameter is empty', withNote('for the next page append ?page=2&token=')],
+    ] as const)('%s', (_label, entry) => accepts(entry));
+  });
+
+  describe('the read rewrites exactly what the write refuses, at the position the write judged', () => {
+    it.each([
+      [` https://user:${PLACEHOLDER}@api.vendor.example.com/v1`, ' https://api.vendor.example.com/v1'],
+      [`${TAB}https://${PLACEHOLDER}@api.vendor.example.com/v1?page=2${LF}`, `${TAB}https://api.vendor.example.com/v1?page=2${LF}`],
+      [` https://api.vendor.example.com/v1?api_key=${PLACEHOLDER}`, ' https://api.vendor.example.com/v1'],
+      [` https://u:${PLACEHOLDER}@api.vendor.example.com/v1?region=eu&token=${PLACEHOLDER} `, ' https://api.vendor.example.com/v1?region=eu'],
+      [`api.vendor.example.com/v1?page=2&token=${PLACEHOLDER}`, 'api.vendor.example.com/v1?page=2'],
+    ] as const)('%j is served as %j', (stored, servedUrl) => {
+      const entry = rest(stored);
+      expect(refusals(entry).located).toEqual([['custom', 'providerConfig.baseUrl']]);
+      const { item: served, redactedKeys } = redactConnectorItem(entry);
+      expect(redactedKeys).toEqual(['providerConfig.baseUrl']);
+      expect((served.providerConfig as Record<string, unknown>).baseUrl).toBe(servedUrl);
+      // The served form is what the write door accepts: nothing it judges is left.
+      accepts(served);
+    });
+
+    it('a credential query parameter in a string that is not a URL is rewritten the same way', () => {
+      const entry = withNote(`see ?page=2&signature=${PLACEHOLDER}`);
+      const { item: served, redactedKeys } = redactConnectorItem(entry);
+      expect(redactedKeys).toEqual(['providerConfig.note']);
+      expect((served.providerConfig as Record<string, unknown>).note).toBe('see ?page=2');
+      accepts(served);
+    });
+
+    // `auth` endpoints are URLs by their own declared format, so a string with
+    // no scheme is judged at a `providerConfig` position only.
+    it.each([
+      [` ${CLEAN}`, true],
+      [`${TAB}${CLEAN}?region=eu${CR}`, true],
+      [` https://user:${PLACEHOLDER}@api.vendor.example.com/v1`, true],
+      [`${NUL}https://${PLACEHOLDER}@api.vendor.example.com/v1`, true],
+      [` https://api.vendor.example.com/v1?apikey=${PLACEHOLDER}`, true],
+      ['api.vendor.example.com/v1?token=', false],
+      [`api.vendor.example.com/v1?token=${PLACEHOLDER}`, false],
+      [`see ?page=2&token=${PLACEHOLDER}`, false],
+    ] as const)('refused ⇔ rewritten: %j', (value, hasScheme) => {
+      const entries = [rest(value), withNote(value), ...(hasScheme ? [oauth2({ tokenUrl: value })] : [])];
+      for (const entry of entries) {
+        const refused = !DeclarativeConnectorEntrySchema.safeParse(entry).success;
+        const rewritten = redactConnectorItem(entry as Record<string, unknown>).redactedKeys.length > 0;
+        expect(refused, 'refused ⇔ rewritten').toBe(rewritten);
+      }
+    });
+  });
+});
+
+// The same rule, as a URL parser cleans a string: it also deletes every ASCII
+// tab, LF and CR anywhere in it, so a value is judged with them deleted. And
+// one userinfo grammar serves both doors: an authority starts at `scheme://`
+// or a scheme-relative `//`.
+describe('a URL is judged as a URL parser cleans it: tab and newline characters deleted, and one userinfo grammar at both doors', () => {
+  const TAB = String.fromCharCode(0x09);
+  const LF = String.fromCharCode(0x0a);
+  const CR = String.fromCharCode(0x0d);
+  const CLEAN = 'https://api.vendor.example.com/v1';
+  const withNote = (note: string) => ({ ...rest(CLEAN), providerConfig: { baseUrl: CLEAN, note } });
+
+  describe('REFUSED, located at the string', () => {
+    it.each([
+      ['a credential query parameter whose name holds a tab', rest(`${CLEAN}?page=2&api${TAB}_key=${PLACEHOLDER}`), 'providerConfig.baseUrl'],
+      ['a credential query parameter whose name holds a newline, in a string that is not a URL', withNote(`see ?to${LF}ken=${PLACEHOLDER}`), 'providerConfig.note'],
+      ['a userinfo behind a scheme that holds a tab', rest(`ht${TAB}tps://u:${PLACEHOLDER}@api.vendor.example.com/v1`), 'providerConfig.baseUrl'],
+      ['a userinfo behind a `//` that holds a carriage return', rest(`https:/${CR}/${PLACEHOLDER}@api.vendor.example.com/v1`), 'providerConfig.baseUrl'],
+      ['a userinfo in a scheme-relative authority', rest(`//u:${PLACEHOLDER}@api.vendor.example.com/v1`), 'providerConfig.baseUrl'],
+      ['a userinfo in a scheme-relative authority, in a string that is not the base URL', withNote(`//${PLACEHOLDER}@hooks.vendor.example.com`), 'providerConfig.note'],
+    ] as const)('%s', (_label, entry, at) => {
+      const { located, messages } = refusals(entry);
+      expect(located).toEqual([['custom', at]]);
+      expect(messages[0]).toContain(`\`${at}\``);
+      expect(messages[0]).toContain('auth: { type, credentialRef }');
+      expect(messages[0]).not.toContain(PLACEHOLDER);
+    });
+  });
+
+  describe('CONTROL: a value holding no credential part once cleaned is accepted', () => {
+    it.each([
+      ['an ordinary query parameter whose name holds a tab', rest(`${CLEAN}?reg${TAB}ion=eu`)],
+      ['a credential query parameter whose value is only tab and newline characters', rest(`${CLEAN}?token=${TAB}${LF}`)],
+      ['a scheme that holds a tab, with no userinfo', rest(`ht${TAB}tps://api.vendor.example.com/v1`)],
+      ['a scheme-relative authority with no userinfo', rest('//api.vendor.example.com/v1')],
+      ['an `@` in the path of a scheme-relative string', rest('//api.vendor.example.com/v1/users/@me')],
+    ] as const)('%s', (_label, entry) => accepts(entry));
+  });
+
+  describe('the read rewrites exactly what the write refuses, at the matching position of the authored string', () => {
+    it.each([
+      [`${CLEAN}?page=2&api${TAB}_key=${PLACEHOLDER}`, `${CLEAN}?page=2`],
+      [`ht${TAB}tps://u:${PLACEHOLDER}@api.vendor.example.com/v1`, `ht${TAB}tps://api.vendor.example.com/v1`],
+      [`https:/${CR}/${PLACEHOLDER}@api.vendor.example.com/v1`, `https:/${CR}/api.vendor.example.com/v1`],
+      [`//u:${PLACEHOLDER}@api.vendor.example.com/v1`, '//api.vendor.example.com/v1'],
+      [` //u:${PLACEHOLDER}@api.vendor.example.com/v1?to${LF}ken=${PLACEHOLDER}&page=2`, ' //api.vendor.example.com/v1?page=2'],
+      [`https://u${TAB}:${PLACEHOLDER}@api.vendor.example.com/v1`, CLEAN],
+    ] as const)('%j is served as %j', (stored, servedUrl) => {
+      const entry = rest(stored);
+      expect(refusals(entry).located).toEqual([['custom', 'providerConfig.baseUrl']]);
+      const { item: served, redactedKeys } = redactConnectorItem(entry);
+      expect(redactedKeys).toEqual(['providerConfig.baseUrl']);
+      expect((served.providerConfig as Record<string, unknown>).baseUrl).toBe(servedUrl);
+      accepts(served);
+    });
+
+    it.each([
+      `${CLEAN}?reg${TAB}ion=eu`,
+      `${CLEAN}?token=${TAB}`,
+      `${CLEAN}?api${TAB}_key=${PLACEHOLDER}`,
+      `ht${TAB}tps://${PLACEHOLDER}@api.vendor.example.com/v1`,
+      '//api.vendor.example.com/v1',
+      `//u:${PLACEHOLDER}@api.vendor.example.com/v1`,
+      `see ?to${CR}ken=${PLACEHOLDER}`,
+    ])('refused ⇔ rewritten: %j', (value) => {
+      for (const entry of [rest(value), withNote(value)]) {
+        const refused = !DeclarativeConnectorEntrySchema.safeParse(entry).success;
+        const rewritten = redactConnectorItem(entry as Record<string, unknown>).redactedKeys.length > 0;
+        expect(refused, 'refused ⇔ rewritten').toBe(rewritten);
+      }
+    });
+  });
+});
+
+// A URL with a special scheme — `http`, `https`, `ws`, `wss`, `ftp`, in any
+// letter case — is read for credentials the way a URL parser reads it: its
+// authority starts after the whole run of `/` and `\` that follows the scheme,
+// however long, none included. Every other scheme keeps `scheme://` (or a
+// scheme-relative `//`), and `file:` carries no userinfo. Both doors read the
+// one grammar, so the write refusal and the read rewrite move together.
+describe('a URL with a special scheme is read for credentials the way a URL parser reads it, however many slashes follow the scheme', () => {
+  const BS = String.fromCharCode(0x5c);
+  const HOST = 'api.vendor.example.com/v1';
+  const withNote = (note: string) => ({ ...rest(`https://${HOST}`), providerConfig: { baseUrl: `https://${HOST}`, note } });
+  /** [form, the scheme and the run after it] — `s` is the scheme. */
+  const FORMS: Array<[string, (s: string) => string]> = [
+    ['no slash', (s) => `${s}:`],
+    ['one slash', (s) => `${s}:/`],
+    ['a backslash', (s) => `${s}:${BS}`],
+    ['three slashes', (s) => `${s}:///`],
+    ['a run of slashes and backslashes', (s) => `${s}:/${BS}/`],
+    ['an uppercase scheme and no slash', (s) => `${s.toUpperCase()}:`],
+    ['an uppercase scheme and three slashes', (s) => `${s.toUpperCase()}:///`],
+  ];
+  const leadsOf = (schemes: readonly string[]) =>
+    schemes.flatMap((scheme) => FORMS.map(([form, lead]) => [`\`${scheme}:\` with ${form}`, lead(scheme)] as [string, string]));
+  const SPECIAL = leadsOf(['http', 'https', 'ws', 'wss', 'ftp']);
+  const NO_AUTHORITY = leadsOf(['file', 'postgres', 'libsql']).filter(([, lead]) => !lead.endsWith('///'));
+
+  describe('REFUSED at the string, and the read rewrites it at the position the write judged', () => {
+    it.each(SPECIAL)('a userinfo after %s', (_label, lead) => {
+      for (const userinfo of [`u:${PLACEHOLDER}@`, `${PLACEHOLDER}@`]) {
+        const entry = rest(`${lead}${userinfo}${HOST}`);
+        const { located, messages } = refusals(entry);
+        expect(located).toEqual([['custom', 'providerConfig.baseUrl']]);
+        expect(messages[0]).toContain('auth: { type, credentialRef }');
+        expect(messages[0]).not.toContain(PLACEHOLDER);
+        const { item: served, redactedKeys } = redactConnectorItem(entry);
+        expect(redactedKeys).toEqual(['providerConfig.baseUrl']);
+        expect((served.providerConfig as Record<string, unknown>).baseUrl).toBe(`${lead}${HOST}`);
+        accepts(served);
+      }
+    });
+
+    it.each(SPECIAL)('a userinfo after %s, in a string that is not the base URL', (_label, lead) => {
+      const entry = withNote(`${lead}u:${PLACEHOLDER}@hooks.vendor.example.com`);
+      expect(refusals(entry).located).toEqual([['custom', 'providerConfig.note']]);
+      const { item: served, redactedKeys } = redactConnectorItem(entry);
+      expect(redactedKeys).toEqual(['providerConfig.note']);
+      expect((served.providerConfig as Record<string, unknown>).note).toBe(`${lead}hooks.vendor.example.com`);
+      accepts(served);
+    });
+  });
+
+  describe('CONTROL: what a URL parser reads no userinfo from is accepted and served as stored', () => {
+    it.each(SPECIAL)('a URL after %s with no userinfo, and with an `@` only in its path', (_label, lead) => {
+      for (const value of [`${lead}${HOST}`, `${lead}${HOST}/users/@me`]) {
+        accepts(rest(value));
+        expect(redactConnectorItem(rest(value)).redactedKeys).toEqual([]);
+      }
+    });
+
+    it.each(NO_AUTHORITY)('no authority without `//` after a scheme that is not special, or `file:` — %s', (_label, lead) => {
+      const value = `${lead}u:${PLACEHOLDER}@${HOST}`;
+      accepts(rest(value));
+      expect(redactConnectorItem(rest(value)).redactedKeys).toEqual([]);
+    });
+
+    it.each(['file', 'postgres', 'libsql'])('a `%s:///` authority is empty, so what follows the third slash is path', (scheme) => {
+      const value = `${scheme}:///u:${PLACEHOLDER}@${HOST}`;
+      accepts(rest(value));
+      expect(redactConnectorItem(rest(value)).redactedKeys).toEqual([]);
+    });
+
+    it('the `//` forms keep their reading: a userinfo after `scheme://` or `//` is refused, none is accepted', () => {
+      for (const value of [`https://u:${PLACEHOLDER}@${HOST}`, `postgres://u:${PLACEHOLDER}@${HOST}`, `//u:${PLACEHOLDER}@${HOST}`]) {
+        expect(refusals(rest(value)).located).toEqual([['custom', 'providerConfig.baseUrl']]);
+      }
+      for (const value of [`https://${HOST}`, `postgres://${HOST}`, `//${HOST}`]) accepts(rest(value));
+    });
+  });
+
+  it.each([...SPECIAL, ...NO_AUTHORITY])('refused ⇔ rewritten after %s', (_label, lead) => {
+    for (const value of [`${lead}u:${PLACEHOLDER}@${HOST}`, `${lead}${PLACEHOLDER}@${HOST}`, `${lead}${HOST}`]) {
+      for (const entry of [rest(value), withNote(value)]) {
+        const refused = !DeclarativeConnectorEntrySchema.safeParse(entry).success;
+        const rewritten = redactConnectorItem(entry as Record<string, unknown>).redactedKeys.length > 0;
+        expect(refused, 'refused ⇔ rewritten').toBe(rewritten);
+      }
+    }
+  });
+});

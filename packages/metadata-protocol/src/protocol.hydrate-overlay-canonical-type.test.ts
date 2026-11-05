@@ -371,7 +371,10 @@ describe('[#9111] the `hydrateOverlayIntoRegistry` caller set stays closed', () 
         // `PLURAL_TO_SINGULAR` (tolerant AND incomplete). Pinned positively so
         // a "simplification" to the manifest map fails here rather than
         // silently re-opening the six spellings section 1 measures.
-        expect(source).toContain("err.code = 'REGISTRY_TYPE_NOT_CANONICAL';");
-        expect(source).toMatch(/const canonicalType = canonicalMetaType\(type\);/);
+        // [#29985] The hydrator's body moved to `protocol-registry-hydration.ts`
+        // with the codemod split; the assert is read where the body now is.
+        const hydration = readFileSync(fileURLToPath(new URL('./protocol-registry-hydration.ts', import.meta.url)), 'utf8');
+        expect(hydration).toContain("err.code = 'REGISTRY_TYPE_NOT_CANONICAL';");
+        expect(hydration).toMatch(/const canonicalType = canonicalMetaType\(type\);/);
     });
 });

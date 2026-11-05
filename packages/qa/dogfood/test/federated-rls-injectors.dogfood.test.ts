@@ -14,13 +14,20 @@
  * that the real registry still produces one — expectation and reality would
  * share a source, and the pin could not fail.
  *
- * This file supplies the independent witness. Nothing here constructs a schema:
- * the showcase's `showcase_ext_customer` is registered by `applySystemFields`
- * exactly as a deployed app's would be, and the assertions read what that
- * produced. If the registry ever stops injecting phantom anchors into federated
- * objects — the root fix this card deliberately did not take (it lives in
- * `@objectstack/objectql`, outside this lane) — the premise case below goes red
- * and says so, which is the correct way to learn that the ground moved.
+ * This file supplies the independent witness. The showcase's
+ * `showcase_ext_customer` is registered by `applySystemFields` exactly as a
+ * deployed app's would be, and the assertions read what that produced.
+ *
+ * ## [ADR-0015 §10] Under a walled posture every external object states its scope
+ *
+ * The shipped object declares `tenancy: { enabled: false }` — its remote table
+ * carries no organization column — so the registry injects no `organization_id`
+ * into it at all, Layer 0 composes no predicate, and every organization reads
+ * it. An external object that states NOTHING is the other case, and it is not
+ * read as shared: one registered at boot is refused by name, and one registered
+ * after the boot (the fixture below, registered against the live registry so
+ * the phantom anchor is injected exactly as it would be) is DENIED — the read
+ * filter is the deny sentinel, zero rows for every organization.
  *
  * ## Dialect
  *
@@ -39,11 +46,20 @@ import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 import type { IObjectQLEngine, ISecurityService } from '@objectstack/spec/contracts';
 import type { ServiceObject } from '@objectstack/spec/data';
+import { RLS_DENY_FILTER } from '@objectstack/plugin-security';
 
 /** The federated object the showcase ships, bound to remote table `customers`. */
 const FEDERATED = 'showcase_ext_customer';
 /** A LOCAL showcase object — the control: its `organization_id` IS provisioned. */
 const LOCAL = 'showcase_project';
+/** An external object registered AFTER the boot that states no organization scope. */
+const UNDECLARED = 'dogfood_ext_undeclared';
+
+/** The registry seam the fixture registers through (`IObjectQLEngine` does not declare it). */
+interface RegistrarEngine {
+  registry: { registerObject(def: Record<string, unknown>): unknown };
+  syncObjectSchema(object: string): Promise<unknown>;
+}
 
 function fieldNames(schema: unknown): string[] {
   const fields = (schema as { fields?: unknown } | null)?.fields;
@@ -89,20 +105,47 @@ describe('[#7835] federated objects and the plugin-security tenant wall', () => 
 
   afterAll(async () => { await stack?.stop?.(); });
 
-  it('PREMISE: the registry injects a phantom `organization_id` into the federated object', () => {
-    // Not an aspiration — the state of the tree this fix was written against.
-    // `Engine.syncObjectSchema` returns early for `external != null` and issues
-    // no DDL, so this column exists in the registry and in no table.
+  it('PREMISE: the shipped federated object declares its organization scope, so the registry injects no `organization_id` into it', () => {
+    // [ADR-0015 §10] `tenancy: { enabled: false }` is the declaration; a declared
+    // opt-out is not injected over, so the column is absent — neither a remote
+    // column nor a phantom anchor.
     // `IObjectQLEngine.getSchema` declares `unknown` on purpose — the engine's
-    // own return type (`ServiceObject | undefined`, `engine.ts:4766`) is a spec
-    // type, but the contract keeps its edges loose so `spec` never depends on
-    // the engine package, and tells consumers to narrow at the call site. This
-    // is that narrowing, to the type the implementation already declares.
+    // own return type (`ServiceObject | undefined`) is a spec type, but the
+    // contract keeps its edges loose so `spec` never depends on the engine
+    // package, and tells consumers to narrow at the call site.
     const schema = ql.getSchema(FEDERATED) as ServiceObject | undefined;
     expect(schema?.external, `${FEDERATED} must be a federated object`).toBeTruthy();
-    expect(fieldNames(schema)).toContain('organization_id');
+    expect((schema as { tenancy?: { enabled?: boolean } } | undefined)?.tenancy?.enabled).toBe(false);
+    expect(fieldNames(schema)).not.toContain('organization_id');
     // The remote table's real columns, for contrast.
     expect(fieldNames(schema)).toEqual(expect.arrayContaining(['name', 'email', 'region']));
+  });
+
+  it('an external object registered after the boot that states no scope carries the injected anchor, and the wall DENIES it', async () => {
+    // Registered against the LIVE registry, so `applySystemFields` injects the
+    // anchors exactly as it would for an authored object that said nothing.
+    const registrar = ql as unknown as RegistrarEngine;
+    registrar.registry.registerObject({
+      name: UNDECLARED,
+      label: 'Undeclared federated customer',
+      datasource: 'showcase_external',
+      external: { remoteName: 'customers' },
+      sharingModel: 'public_read_write',
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        email: { type: 'text', label: 'Email' },
+        region: { type: 'text', label: 'Region' },
+      },
+    });
+    await registrar.syncObjectSchema(UNDECLARED);
+    expect(fieldNames(ql.getSchema(UNDECLARED))).toContain('organization_id');
+    // The verdict, by identity with the spec's frozen deny sentinel — for a
+    // member of either organization. Not "no predicate": an unstated scope is
+    // a configuration defect and fails toward isolation.
+    for (const org of ['org_alpha', 'org_beta']) {
+      const filter = await security.getReadFilter(UNDECLARED, { userId: 'usr_dogfood_member', tenantId: org, positions: [] as string[] });
+      expect(filter, `the wall denies ${UNDECLARED} for ${org}`).toBe(RLS_DENY_FILTER);
+    }
   });
 
   it('a walled posture composes NO organization_id predicate for the federated object', async () => {

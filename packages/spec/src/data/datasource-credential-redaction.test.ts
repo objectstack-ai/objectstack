@@ -263,6 +263,92 @@ describe('write-door alignment: redactUrlPassword removes exactly what urlUserin
   });
 });
 
+describe('the datasource read rewrites a URL\'s userinfo password exactly where the write door judges it', () => {
+  const TAB = String.fromCharCode(0x09);
+  const LF = String.fromCharCode(0x0a);
+  const CR = String.fromCharCode(0x0d);
+  const NUL = String.fromCharCode(0x00);
+
+  // [stored, served]: the URL is judged trimmed of its leading and trailing C0
+  // control characters and spaces, as a URL parser reads it, and the password
+  // is removed at that trimmed position — every other character, the
+  // surrounding ones included, is served byte for byte.
+  const TRIMMED: Array<[string, string]> = [
+    [' mysql://svc:hunter2@db:3306/app', ' mysql://svc@db:3306/app'],
+    [`${TAB}postgresql://svc:hunter2@db:5432/app`, `${TAB}postgresql://svc@db:5432/app`],
+    [`${NUL}mongodb://svc:hunter2@db:27017/app${LF}`, `${NUL}mongodb://svc@db:27017/app${LF}`],
+    [` postgres://svc:p@ss@host/db${CR}`, ` postgres://svc@host/db${CR}`],
+  ];
+  // [stored, served]: the write door's own userinfo boundaries — a
+  // scheme-relative authority, and a userinfo that ends at the LAST `@` of the
+  // authority whatever precedes its first `:`.
+  const BOUNDARIES: Array<[string, string]> = [
+    ['//svc:hunter2@db:5432/app', '//svc@db:5432/app'],
+    [' //svc:hunter2@db:5432/app', ' //svc@db:5432/app'],
+    ['postgres://svc@corp:hunter2@db:5432/app', 'postgres://svc@corp@db:5432/app'],
+  ];
+
+  it.each([...TRIMMED, ...BOUNDARIES])('%j is served as %j, which the write door accepts', (stored, served) => {
+    expect(urlUserinfoPassword(stored), 'the write door refuses the stored URL').toBeDefined();
+    expect(redactUrlPassword(stored)).toBe(served);
+    expect(urlUserinfoPassword(served), 'the served URL passes the write door').toBeUndefined();
+    expect(urlUserinfoUsername(served), 'the username is kept').toBe(urlUserinfoUsername(stored));
+  });
+
+  it.each([
+    ' mysql://svc@db:3306/app',
+    `${TAB}postgresql://db:5432/app${LF}`,
+    ' //svc@db/app',
+    ' a:b@c ',
+    ` https://host/a:b@c${CR}`,
+  ])('CONTROL: %j holds no password, passes the write door, and is served byte for byte', (url) => {
+    expect(urlUserinfoPassword(url)).toBeUndefined();
+    expect(redactUrlPassword(url)).toBe(url);
+  });
+
+  // [stored, served]: every ASCII tab, LF and CR is deleted before the URL is
+  // judged, as a URL parser deletes them; the password is removed at the
+  // matching offsets of the authored string, and every other character —
+  // the deleted ones outside the password included — is served as stored.
+  const CLEANED: Array<[string, string]> = [
+    [`postgre${TAB}sql://svc:hunter2@db:5432/app`, `postgre${TAB}sql://svc@db:5432/app`],
+    [`postgresql:/${LF}/svc:hunter2@db:5432/app`, `postgresql:/${LF}/svc@db:5432/app`],
+    [`postgresql://s${CR}vc:hun${TAB}ter2@db:5432/app`, `postgresql://s${CR}vc@db:5432/app`],
+  ];
+
+  it.each(CLEANED)('%j is served as %j, which the write door accepts', (stored, served) => {
+    expect(urlUserinfoPassword(stored), 'the write door refuses the stored URL').toBeDefined();
+    expect(redactUrlPassword(stored)).toBe(served);
+    expect(urlUserinfoPassword(served), 'the served URL passes the write door').toBeUndefined();
+    expect(urlUserinfoUsername(served), 'the username is kept').toBe(urlUserinfoUsername(stored));
+  });
+
+  it('a credential query parameter whose name holds a tab or newline is removed whole, the rest of the query as stored', () => {
+    for (const char of [TAB, LF, CR]) {
+      const stored = `postgresql://svc@db:5432/app?sslmode=require&pass${char}word=hunter2&connect_timeout=10`;
+      expect(urlCredentialQueryParams(stored, CREDENTIAL_URL_QUERY_PARAM_NAMES)).toEqual(['password']);
+      const served = redactUrlCredentials(stored);
+      expect(served).toBe('postgresql://svc@db:5432/app?sslmode=require&connect_timeout=10');
+      expect(urlCredentialQueryParams(served, CREDENTIAL_URL_QUERY_PARAM_NAMES)).toEqual([]);
+    }
+  });
+
+  it.each([
+    `postgre${TAB}sql://svc@db:5432/app`,
+    `postgresql://svc:${TAB}@db:5432/app?ssl${LF}mode=require`,
+  ])('CONTROL: %j holds no credential once cleaned and keeps its query', (url) => {
+    expect(urlUserinfoPassword(url)).toBeUndefined();
+    expect(urlCredentialQueryParams(url, CREDENTIAL_URL_QUERY_PARAM_NAMES)).toEqual([]);
+    expect(redactUrlCredentialQueryParams(url)).toBe(url);
+  });
+
+  it('redactDatasourceConfig serves a stored URL behind surrounding whitespace with its password removed, naming `url`', () => {
+    const { config, redactedKeys } = redactDatasourceConfig('mysql', { url: ' mysql://svc:hunter2@db:3306/app' });
+    expect(config).toEqual({ url: ' mysql://svc@db:3306/app' });
+    expect(redactedKeys).toEqual(['url']);
+  });
+});
+
 describe('redactUrlCredentialQueryParams — the read half: a credential query parameter is never served back', () => {
   it('strips the credential pair whole and serves the parameter-absent shape', () => {
     expect(redactUrlCredentialQueryParams('libsql://x.turso.io?authToken=eyJhbGci.x.y'))
@@ -726,5 +812,64 @@ describe('driver identity: every accepted spelling of a builtin driver is redact
       expect(config, name).toEqual({ host: 'fixture-host' });
       expect(redactedKeys, name).toEqual(['password']);
     }
+  });
+});
+
+// A URL with a special scheme — `http`, `https`, `ws`, `wss`, `ftp`, in any
+// letter case — is read for a password the way a URL parser reads it, however
+// many `/` or `\` follow the scheme (none included); the datasource read
+// removes the password exactly where the write door judges it, at every
+// URL-bearing driver key, turso `syncUrl` included.
+describe('the datasource read rewrites a special-scheme URL\'s password where the write door judges it, however many slashes follow the scheme', () => {
+  const BS = String.fromCharCode(0x5c);
+  const KEYS: Array<[name: string, driver: string, key: string, make: (url: string) => Record<string, unknown>]> = [
+    ['postgres url', 'postgres', 'url', (url) => ({ url })],
+    ['mysql url', 'mysql', 'url', (url) => ({ url })],
+    ['mongodb url', 'mongodb', 'url', (url) => ({ url })],
+    ['turso url', 'turso', 'url', (url) => ({ url })],
+    ['turso syncUrl', 'turso', 'syncUrl', (syncUrl) => ({ url: 'file:./data/replica.db', syncUrl })],
+  ];
+  const FORMS: Array<[string, (s: string) => string]> = [
+    ['no slash', (s) => `${s}:`],
+    ['one slash', (s) => `${s}:/`],
+    ['a backslash', (s) => `${s}:${BS}`],
+    ['three slashes', (s) => `${s}:///`],
+    ['an uppercase scheme and no slash', (s) => `${s.toUpperCase()}:`],
+  ];
+  const leadsOf = (schemes: readonly string[]) =>
+    schemes.flatMap((scheme) => FORMS.map(([form, lead]) => [`\`${scheme}:\` with ${form}`, lead(scheme)] as [string, string]));
+  const SPECIAL = leadsOf(['http', 'https', 'ws', 'wss', 'ftp']);
+  const NO_AUTHORITY = leadsOf(['file', 'postgresql', 'libsql']).filter(([, lead]) => !lead.endsWith('///'));
+
+  /** Whether the write door refuses `config` for a password in the userinfo at `key`. */
+  const writeRefuses = (driver: string, key: string, config: Record<string, unknown>): boolean => {
+    const result = getDriverConfigSchema(driver)!.safeParse(config);
+    return !result.success && result.error.issues.some(
+      (i) => i.path.join('.') === key && i.message.includes('embeds a password in its userinfo'),
+    );
+  };
+
+  describe.each(KEYS)('%s', (_name, driver, key, make) => {
+    it.each(SPECIAL)('after %s: refused at the write door, served with the password removed, and the served form passes', (_label, lead) => {
+      const stored = make(`${lead}svc:hunter2@db.example.com/prod`);
+      expect(writeRefuses(driver, key, stored), 'the write door refuses the stored URL').toBe(true);
+      const { config, redactedKeys } = redactDatasourceConfig(driver, stored);
+      expect(config[key]).toBe(`${lead}svc@db.example.com/prod`);
+      expect(redactedKeys).toContain(key);
+      expect(writeRefuses(driver, key, config), 'the served URL passes the write door').toBe(false);
+    });
+
+    it.each([...SPECIAL, ...NO_AUTHORITY])('refused ⇔ rewritten after %s', (_label, lead) => {
+      for (const url of [`${lead}svc:hunter2@db.example.com/prod`, `${lead}svc@db.example.com/prod`, `${lead}db.example.com/prod`]) {
+        const config = make(url);
+        const rewritten = redactDatasourceConfig(driver, config).redactedKeys.includes(key);
+        expect(writeRefuses(driver, key, config), 'refused ⇔ rewritten').toBe(rewritten);
+      }
+    });
+
+    it.each(NO_AUTHORITY)('CONTROL: after %s there is no authority, so the URL is served as stored', (_label, lead) => {
+      const stored = make(`${lead}svc:hunter2@db.example.com/prod`);
+      expect(redactDatasourceConfig(driver, stored).config[key]).toBe(stored[key]);
+    });
   });
 });

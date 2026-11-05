@@ -17,7 +17,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x and @objectstack/core 18.x (Zod v4 schemas), Node 22+
 metadata:
   author: objectstack-ai
-  version: "18.2.0"
+  version: "18.3.0"
   domain: platform
   tags: project, defineStack, driver, hono, plugin, kernel, service, requires, capability, DI, lifecycle, cli, deploy, ops
 ---
@@ -39,7 +39,7 @@ are `manifest`, `packages`, `objects`, `objectExtensions`, `picklists`,
 `agents`, `tools`, `skills`, `hooks`, `functions`, `mappings`,
 `analyticsCubes`, `connectors`, `data` (seed), `datasources`,
 `datasourceMapping`, `translations`, `i18n`, `plugins`, `devPlugins`,
-`devHint`, `devLogins`, `demoStaff`, `requires`, `tiers`, `onEnable`, `appName`, `email`, `sms`.
+`devHint`, `devLogins`, `demoStaff`, `requires`, `tiers`, `onEnable`, `appName`, `email`, `sms`, `push`.
 
 There is deliberately **no** top-level `workflows` or `approvals` collection:
 an approval is a flow with Approval nodes, and record
@@ -67,10 +67,6 @@ Undeclared keys are handled per surface, in two postures:
   `defineStack: connectors.stripe.bogusKey: 'bogusKey' is not a declared connector key, so its value is dropped at load.`
   Treat these as errors-in-waiting: a key that only warns today is expected
   to be refused later.
-
-Exact shape: `ObjectStackDefinitionSchema` in
-`node_modules/@objectstack/spec/src/stack.zod.ts`; each collection's item
-schema sits in its domain folder (`data/object.zod.ts`, `ui/view.zod.ts`, …).
 
 → Moved verbatim to [references/bootstrap.md](./references/bootstrap.md) § Map Format (Key → Name) · § Barrel Import Pattern.
 
@@ -129,9 +125,11 @@ to a new protocol major — never to silence a mismatch.
 
 **`manifest.namespace` (ADR-0048):** Optional, but **enforced once set**. When a package declares `manifest.namespace: 'crm'`, every `object.name` must start with `crm_` or `defineStack` errors (`validateNamespacePrefix` in `@objectstack/spec`); the legacy `<ns>__<short>` double-underscore form is rejected, and `sys_`-prefixed names are platform-reserved and exempt. The namespace is also a package-ownership key — installing two packages that both claim `crm` fails with `NamespaceConflictError` (downgrade to a warning with `OS_METADATA_COLLISION=warn`). `os lint` additionally emits a non-fatal `naming/namespace-prefix` warning for bare-named UI/automation items (app, page, dashboard, flow, action, report, dataset) when a namespace is set.
 
-**Customizing an installed package (ADR-0146):** Customize an installed base `hotcrm` in its paired writable package `hotcrm.custom`, which depends on it: a same-named item there with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (its `manifest.id`/`manifest.version`) replaces the base's document whole. The read honours it only from the pair (the row's `package_id`), today only for a view, dashboard, report, email_template, translation or flow, never judges `basedOn` and ignores any other package's declaration. An email template is one item per (name, locale): an override names a locale the base ships; a locale the base does not ship is added without `overrides`. Then no `?package`, `?package=hotcrm`, the layered read and both lists serve it; the env-wide list holds one item per name one code package ships (a dependent's stays under its own `?package=`); a pre-D11 unbound Setup row wins over the base's until `os migrate packageless-overlays` moves it, and its package-less save, reset and rollback are refused once movable (D11). The base's address serves the pair's added locale too (both lists, the layered read with `code` null and `effective` the pair's, the execution list, a send in that locale); a locale a dependent adds under the base's name is served only under its own `?package=`, never by a base-named or package-less read. An undeclared pair row or a dependent's row at a locale the base ships is an orphan in the layered read's `overlay`, `effective` = the base's. An override may narrow a public form's anonymous intake, never re-open one any honoured body withdrew. `GET /packages/hotcrm.custom/export` carries it with `overrides`.
+**Customizing an installed package (ADR-0146):** Customize an installed base `hotcrm` in its paired writable package `hotcrm.custom`, which depends on it: a same-named item there with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (its `manifest.id`/`manifest.version`) replaces the base's document whole. The read honours it only from the pair (the row's `package_id`), today only for a view, dashboard, report, email_template, translation or flow, never judges `basedOn` and ignores any other package's declaration. An email template is one item per (name, locale): an override names a locale the base ships; a locale the base does not ship is added without `overrides`. Then no `?package`, `?package=hotcrm`, the layered read and both lists serve it; the env-wide list holds one item per name one code package ships (a dependent's stays under its own `?package=`); a pre-D11 unbound Setup row wins over the base's until `os migrate packageless-overlays` moves it, and once movable as a declared override, its package-less save, publish, reset and rollback are refused (D11); an email-template row at a locale the base does not ship moves as the pair's own member and keeps that write. The base's address serves the pair's added locale too (both lists, the layered read with `code` null and `effective` the pair's, the execution list, a send in that locale); a locale a dependent adds under the base's name is served only under its own `?package=`, never by a base-named or package-less read. An undeclared pair row or a dependent's row at a locale the base ships is an orphan in the layered read's `overlay`, `effective` = the base's. An override may narrow a public form's anonymous intake, never re-open one any honoured body withdrew. `GET /packages/hotcrm.custom/export` carries it with `overrides`.
 
 The pair comes from `POST /api/v1/packages/hotcrm/ensure-customization`: `namespace` = the base's + `_custom`, `dependencies: { hotcrm: '^<major>' }`; `GET /packages/hotcrm/customizations` lists its overrides, extensions and switched-off items, and uninstalling the base is refused (`409`) while the pair exists. Only the pair declares: the save, publish and install doors, `os validate` and `os build` refuse `overrides` from any other package, and a dependent's item under a base item's name — its one fix is a new name. A permission set, position or capability is never overridden: copy it under a new name ("new similar", landing in the pair). An object is extended (`__c` fields, **objectstack-data**); a flow is overridden or copied (**objectstack-automation**).
+
+That read's `contributions` lists what other packages add to the base, one entry per item with its `packageId`: a `field` or `flow` names the base's `object` it is on, a `nav` item the base's `app`, its `group` if any, and its id as `name`; `counts.contributions` counts items, not packages.
 
 ---
 
@@ -144,7 +142,7 @@ what the platform owns.
 
 - **Business features belong in the app; capability belongs in the platform.**
   A missing default, a wrong diagnostic, a shape the spec refuses — the fix is
-  upstream. Raise it there; do not compensate for it here.
+  upstream.
 - **Could this be written by something that has only the metadata, and no
   knowledge of this company?** *No* — it encodes this company's own judgement (a
   discount ceiling, who a case is assigned to, how won/lost is booked) ⇒ the
@@ -304,12 +302,12 @@ production fails loudly): [Ports & networking](./references/operations.md#ports-
 Step 4's list is the fixed core. Every other service plugin is opt-in, and
 `requires: [...]` on the stack root is what turns it on. The CLI expands each
 token through the `CAPABILITY_PROVIDERS` registry in
-`packages/cli/src/commands/serve.ts` — its 19 opt-in entries:
+`@objectstack/core`:
 
 | Token | Provider package |
 |:--|:--|
 | `automation` | `@objectstack/service-automation` — flows, and any declarative `connectors:` entry |
-| `analytics` `cache` `storage` `queue` `job` `messaging` `realtime` `settings` `sms` | `@objectstack/service-` + the token |
+| `analytics` `cache` `storage` `queue` `job` `messaging` `realtime` `settings` `sms` `push` | `@objectstack/service-` + the token |
 | `marketplace` | `@objectstack/service-package` |
 | `audit` `email` `sharing` `approvals` `webhooks` | `@objectstack/plugin-` + the token |
 | `pinyin-search` | `@objectstack/plugin-pinyin-search` |
@@ -403,14 +401,7 @@ boot writes `manager_id` itself once every account exists and keeps one set
 by hand, so no seed hook writes it; a display name, an address no entry
 has, the entry itself or a loop is refused at load; `os build` drops the
 key and a non-dev boot creates nothing. `devLogins` creates and grants nothing — it only prints an
-existing account on the boot banner. Pick `demoStaff` whenever the demo
-needs an account to exist.
-
----
-
-## CLI Commands
-
-Daily commands are in [Part 3 — Operations](./references/operations.md#part-3--operations-cli-testing-deployment).
+existing account on the boot banner.
 
 ---
 

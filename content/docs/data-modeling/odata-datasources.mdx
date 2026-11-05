@@ -15,7 +15,8 @@ works on those records, and no row is stored on the platform side.
 
 The OData driver is a **plugin driver**, so everything [Virtual objects](/docs/data-modeling/virtual-objects)
 says about plugin drivers holds here too: the engine re-applies every query, a read
-matches at most 1000 rows, and the sharing model needs a deliberate choice. The one
+matches at most 1000 rows unless the datasource raises `external.rowCap`, and the
+sharing model needs a deliberate choice. The one
 difference is that this driver is already written.
 [Which way in](/docs/data-modeling/virtual-objects#which-way-in-odata-a-plugin-driver-or-a-real-object)
 says when to choose it over a driver of your own or a synced copy.
@@ -279,18 +280,21 @@ Prefer: odata.maxpagesize=500
   translated, so the service never returns fewer rows than match. This is also why a
   service that compares text case-insensitively still answers correctly.
 - **`$orderby`** carries the sort, then the entity key, so pages partition the result.
-- **Paging** follows `@odata.nextLink` until 1001 rows are read. A link to another
-  origin is refused, so the credential never goes to a host you did not configure.
+- **Paging** follows `@odata.nextLink` until the cap plus one row is read (`$top=1001`
+  above, at the default cap). A link to another origin is refused, so the credential
+  never goes to a host you did not configure.
 - **The page size and the total** are the engine's, applied to the rows read. A count
   is computed the same way. The engine aggregates in memory.
 
-**The 1000-row cap applies.** A read that matches more than 1000 rows answers
+**The row cap applies.** A read that matches more rows than the cap (1000 unless the
+datasource sets `external.rowCap`, at most 10,000) answers
 `422 EXTERNAL_ROW_CAP_EXCEEDED` rather than a partial set
-([the cap](/docs/data-modeling/virtual-objects#the-engine-re-applies-every-query)). Every
+([the row cap](/docs/data-modeling/virtual-objects#the-row-cap)). Every
 `$filter` the driver can push down makes the service return only matching rows, so the cap
 counts matching rows, not the whole entity set. Give list views a filter the service
-can run. For an entity set users must browse whole, mirror it into a real object
-instead.
+can run. The driver honours whatever `$top` it is sent, so a raised cap needs no
+driver change. For an entity set users must browse whole past the ceiling, mirror it
+into a real object instead.
 
 ## 5. Writes
 
@@ -382,7 +386,7 @@ The driver then speaks the public v2 protocol. Everything above holds, spelled t
 | A read the service refuses for its own sake (`400`, `404`, `422`) | `400 INVALID_QUERY`, with a message naming the entity set, the status and the service's own text |
 | A write the service refuses | `422 EXTERNAL_WRITE_REFUSED`, with the service's message |
 | A `5xx`, a timeout, an unreachable service, a `401` after the retry, a `403` or a `429` | `503 ERR_DATASOURCE_UNAVAILABLE`; the cause goes to the server log |
-| A read that matches more than 1000 rows | `422 EXTERNAL_ROW_CAP_EXCEEDED` |
+| A read that matches more rows than the cap (1000, or `external.rowCap`) | `422 EXTERNAL_ROW_CAP_EXCEEDED` |
 
 An outage is never answered as an empty list. A read refusal's message is withheld, and
 goes to the server log, when the read carries a predicate the caller did not write, such
@@ -397,7 +401,8 @@ as a sharing scope. The full mapping is in
   its own; an imported foreign key becomes a `lookup` onto it.
 - **Actions and functions** of the service. `execute` is refused.
 - **Transactions and `$batch`.** Each write is one request.
-- **More than 1000 matching rows** in one read (the cap above).
+- **More matching rows than the cap** in one read (the cap above: 1000, or the
+  datasource's `external.rowCap`, at most 10,000).
 - **A read scoped by a parent's access** (an object `controlled_by_parent`): it is
   refused, because `$filter` has no form of that join.
 

@@ -109,11 +109,13 @@ const BIT_STATES: Array<boolean | undefined> = [true, false, undefined];
 /** The fold, restated from the rule — deliberately NOT the spec helper. */
 function referenceFold(p: Record<string, unknown>, verb: 'create' | 'read' | 'edit' | 'delete'): boolean {
   const modifyAll = p.modifyAllRecords === true;
+  const read = p.allowRead === true || p.viewAllRecords === true || modifyAll;
   switch (verb) {
     case 'create': return p.allowCreate === true;
-    case 'read': return p.allowRead === true || p.viewAllRecords === true || modifyAll;
-    case 'edit': return p.allowEdit === true || modifyAll;
-    case 'delete': return p.allowDelete === true || modifyAll;
+    case 'read': return read;
+    // An object permission that edits or deletes a record also reads it.
+    case 'edit': return read && (p.allowEdit === true || modifyAll);
+    case 'delete': return read && (p.allowDelete === true || modifyAll);
   }
 }
 

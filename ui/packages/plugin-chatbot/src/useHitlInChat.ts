@@ -38,6 +38,7 @@
 import * as React from 'react';
 import type { ChatbotEnhancedMessage as ChatMessage, ToolDecisionState } from './ChatbotEnhanced';
 import type { ApproveOutcome, RejectOutcome } from './usePendingActions';
+import { hitlContinuationTag } from './hitlContinuation';
 
 export type { ToolDecisionState };
 
@@ -84,6 +85,12 @@ export interface UseHitlInChatOptions {
    * Failures (`status: 'failed'`, transport errors) still surface in
    * `decisions[toolCallId]` but do NOT trigger a continuation prompt — the
    * operator is expected to read the error and decide what to do next.
+   *
+   * The prompt starts with the `[HITL <id>]` tag, and that tag is how every
+   * reader knows the turn is not the person's own words: the chat transcript
+   * draws no bubble for it, and the conversation list and language probe skip
+   * it (`isHitlContinuation`, objectstack#30223). Send it unchanged — a host
+   * that rewrites or prefixes it puts the text back in front of the person.
    */
   continueConversation?: (prompt: string, context: ContinueContext) => void;
 }
@@ -200,9 +207,13 @@ export function useHitlInChat(options: UseHitlInChatOptions): UseHitlInChatRetur
         return;
       }
       const { pendingActionId: id, toolName } = entry;
+      // Which button was pressed rides on every state (cloud#3565): a card
+      // that draws its own outcome reads it rather than the English message.
+      const decision = approved ? 'approved' : 'rejected';
       setDecision(toolCallId, {
         state: 'pending',
         message: approved ? 'Approving…' : 'Rejecting…',
+        decision,
       });
       inflightRef.current += 1;
       setIsDeciding(true);
@@ -223,7 +234,7 @@ export function useHitlInChat(options: UseHitlInChatOptions): UseHitlInChatRetur
             typeof payload.error === 'string'
               ? payload.error
               : `Approval failed: HTTP ${response.status}`;
-          setDecision(toolCallId, { state: 'error', message });
+          setDecision(toolCallId, { state: 'error', message, decision });
           // Not a wire response: on a non-2xx there IS no decision response, so
           // this envelope is synthesized locally to notify `onDecided`. The
           // `id` stays on it deliberately — it has been part of what consumers
@@ -245,19 +256,22 @@ export function useHitlInChat(options: UseHitlInChatOptions): UseHitlInChatRetur
           setDecision(toolCallId, {
             state: 'success',
             message: 'Approved — action executed.',
+            decision,
+            result: payload.result,
           });
           succeeded = true;
         } else if (status === 'rejected') {
           setDecision(toolCallId, {
             state: 'success',
             message: reason ? `Rejected: ${reason}` : 'Rejected.',
+            decision,
           });
           succeeded = true;
         } else if (status === 'failed') {
           const errMsg = (payload.error as string) ?? 'Action approved but execution failed.';
-          setDecision(toolCallId, { state: 'error', message: errMsg });
+          setDecision(toolCallId, { state: 'error', message: errMsg, decision });
         } else {
-          setDecision(toolCallId, { state: 'success', message: `Status: ${status}` });
+          setDecision(toolCallId, { state: 'success', message: `Status: ${status}`, decision });
           succeeded = true;
         }
         onDecided?.(toolCallId, payload as ApproveOutcome | RejectOutcome);
@@ -287,7 +301,7 @@ export function useHitlInChat(options: UseHitlInChatOptions): UseHitlInChatRetur
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        setDecision(toolCallId, { state: 'error', message });
+        setDecision(toolCallId, { state: 'error', message, decision: approved ? 'approved' : 'rejected' });
       } finally {
         inflightRef.current -= 1;
         if (inflightRef.current <= 0) {
@@ -316,7 +330,10 @@ function buildContinuationPrompt(input: {
   reason?: string;
 }): string | undefined {
   const { approved, status, toolName, pendingActionId, outcome, reason } = input;
-  const tag = `[HITL ${pendingActionId}]`;
+  // The leading tag is the continuation marker every reader filters on
+  // (`isHitlContinuation`): keep it first, and keep its spelling in
+  // `./hitlContinuation` (objectstack#30223).
+  const tag = hitlContinuationTag(pendingActionId);
   if (approved && status === 'executed') {
     const result = outcome.result;
     const resultText =

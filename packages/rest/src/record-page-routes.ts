@@ -42,7 +42,7 @@ import {
     type FindDataRequest,
     type RecordPageRequest,
 } from '@objectstack/spec/api';
-import { isMultiValueField, parseFilterAST } from '@objectstack/spec/data';
+import { isMultiValueField, parseFilterAST, referenceTargetOf } from '@objectstack/spec/data';
 import { measureServerTiming } from '@objectstack/observability';
 import { sendError, sendOk } from '@objectstack/types';
 import { recordNotFoundError } from '@objectstack/core';
@@ -53,9 +53,6 @@ import { apiAccessDenialFromEnable, type RestServer } from './rest-server.js';
 
 /** The closed query-parameter set of `POST {basePath}/data/:object/:id/page`: EMPTY. */
 export const RECORD_PAGE_PARAMS: readonly string[] = [];
-
-/** The relationship field types a related list follows back to its parent. */
-const RELATIONSHIP_TYPES = new Set(['lookup', 'master_detail']);
 
 /** [#28470] The objects the record's stream parts read. */
 const COMMENT_OBJECT = 'sys_comment';
@@ -87,6 +84,7 @@ export interface RecordPageRouteHost {
     readonly routeManager: RestServer['routeManager'];
     readonly approvalsServiceProvider: ((environmentId?: string) => Promise<any | undefined>) | undefined;
     resolveProtocol: RestServer['resolveProtocol'];
+    resolveRequestEnvironmentId: RestServer['resolveRequestEnvironmentId'];
     resolveExecCtx: RestServer['resolveExecCtx'];
     enforceAuth: RestServer['enforceAuth'];
     enforceApiAccess: RestServer['enforceApiAccess'];
@@ -120,10 +118,29 @@ function fieldDefOf(item: any, name: string): any | undefined {
     return undefined;
 }
 
-/** The target object a relationship field declares (`reference`, the spec's one spelling). */
-function referenceOf(def: any): string | undefined {
-    const ref = def?.reference;
-    return typeof ref === 'string' && ref ? ref : undefined;
+/**
+ * [#29946] The object a related list's field points back at, by the spec's ONE
+ * arbiter of a field's target ({@link referenceTargetOf}): the reference value
+ * types (`lookup`, `master_detail`, `user`, `tree`), with a `user` field's
+ * target fixed to `sys_user` by its type whatever its carrier spells. It is the
+ * judgement the engine's own reads ask (`$expand`, the referential delete
+ * walk), so the related list's row query (`{ [field]: id }`) and this check
+ * cannot disagree about which fields relate a child to its parent.
+ *
+ * 18.3.0 kept a private `lookup`/`master_detail` list here and read `reference`
+ * raw, so a related list on `sys_user` keyed by a `user` field (an owner, an
+ * assignee) was a 400 `invalid_relationship` the row query would have answered.
+ *
+ * A carrier no reader can read (an object- or array-valued `reference` that
+ * never went through parse) throws in the arbiter; here it is simply not a
+ * relationship to this object, the located 400 it was before.
+ */
+function referenceOf(def: unknown): string | undefined {
+    try {
+        return referenceTargetOf(def);
+    } catch {
+        return undefined;
+    }
 }
 
 /**
@@ -201,11 +218,11 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                     const item = childItems[index];
                     if (!item || apiAccessDenialFromEnable(item.enable, entry.object, 'list')) return;
                     const def = fieldDefOf(item, entry.field);
-                    if (!def || !RELATIONSHIP_TYPES.has(String(def.type)) || referenceOf(def) !== object) {
+                    if (!def || referenceOf(def) !== object) {
                         malformed.push({
                             field: `related.${index}.field`,
                             code: 'invalid_relationship',
-                            message: `'${entry.field}' on '${entry.object}' is not a lookup or master-detail field that references '${object}'.`,
+                            message: `'${entry.field}' on '${entry.object}' is not a lookup, master-detail, user or tree field that references '${object}'.`,
                         });
                     }
                 });
@@ -413,7 +430,14 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                 const answerApprovals = async () => {
                     try {
                         const provider = this.approvalsServiceProvider;
-                        const svc = provider ? await provider(environmentId).catch(() => undefined) : undefined;
+                        // [#30011] The REQUEST's environment, through the shared
+                        // resolver, as the `/approvals` door asks it — the raw
+                        // `undefined` of the unscoped mount read the host's.
+                        const svc = provider
+                            ? await this.resolveRequestEnvironmentId(environmentId, req)
+                                .then((envId) => provider(envId))
+                                .catch(() => undefined)
+                            : undefined;
                         if (!svc) return { requests: [], lock: null };
                         const rows: any[] = (await svc.listRequests({ object, recordId: id }, context ?? {})) ?? [];
                         const pending = rows.find((r) => r?.status === 'pending');

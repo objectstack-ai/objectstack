@@ -25,7 +25,8 @@
  *    draft stays a draft and no active row is written;
  *  - the rollback of a row bound to the base: refused, the row unchanged;
  *  - CONTROLS, open as on `main`: a delete naming the base removes such a row
- *    (the one way to clear it: the ceremony moves package-less rows only), a
+ *    (one way to clear it; [#29392] `os migrate packageless-overlays` moves it
+ *    into the pair, and the sentence names both), a
  *    draft discard naming it, the pair's declared save (served over a row
  *    bound to the base), a server-stated rewrite (`source` set), a writable
  *    package's same name, a name the base does not ship (ADR-0070 D1's own
@@ -52,12 +53,20 @@ const BASE_VERSION = '3.2.0';
 const NO_PAIR_BASE = 'com.legacy.app';
 /** A writable runtime package: no manifest booted it. */
 const WRITABLE = 'com.acme.workspace';
+/** A read-only code package whose id forms no pair: an id ending in `.custom` (ADR-0146 D3). */
+const NO_PAIR_ID_BASE = 'com.vendor.custom';
+/** A read-only code package that records no version, with its pair already installed. */
+const NO_VERSION_BASE = 'com.nover.app';
+const NO_VERSION_PAIR = 'com.nover.app.custom';
 
 const MANIFESTS: Record<string, Record<string, unknown>> = {
     [BASE]: { dependencies: {}, version: BASE_VERSION, namespace: 'acme' },
     [PAIR]: { dependencies: { [BASE]: '^3' }, version: '0.1.0', namespace: 'acme_custom' },
     [NO_PAIR_BASE]: { dependencies: {}, version: '1.0.0' },
     [WRITABLE]: { dependencies: {} },
+    [NO_PAIR_ID_BASE]: { dependencies: {}, version: '1.0.0', namespace: 'vendor' },
+    [NO_VERSION_BASE]: { dependencies: {}, namespace: 'nover' },
+    [NO_VERSION_PAIR]: { dependencies: { [NO_VERSION_BASE]: '*' }, version: '0.1.0', namespace: 'nover_custom' },
 };
 
 /** One item of each overlay type the base ships, and a body a write carries. */
@@ -78,6 +87,8 @@ const VIEW = ITEMS[0]!;
 const SHIPPED = [
     ...ITEMS.map((i) => ({ type: i.type, name: i.name, pkg: BASE })),
     { type: 'dashboard', name: 'legacy_board', pkg: NO_PAIR_BASE },
+    { type: 'dashboard', name: 'vendor_board', pkg: NO_PAIR_ID_BASE },
+    { type: 'dashboard', name: 'nover_board', pkg: NO_VERSION_BASE },
 ];
 const PACKAGED = 'Packaged';
 
@@ -95,7 +106,12 @@ function matches(row: Row, where: Record<string, unknown> = {}): boolean {
     });
 }
 
-function makeProtocol() {
+/**
+ * `pairInstalled: false` boots the base with no pair yet: a fresh install,
+ * before anything ensured `<base>.custom` (the ensure door, or the ceremony's
+ * step 1, creates it on the first write that needs it).
+ */
+function makeProtocol({ pairInstalled = true }: { pairInstalled?: boolean } = {}) {
     const tables = new Map<string, Row[]>();
     const table = (n: string) => {
         if (!tables.has(n)) tables.set(n, []);
@@ -106,10 +122,11 @@ function makeProtocol() {
         const hit = SHIPPED.find((i) => i.type === type && i.name === name);
         return hit ? { ...ITEMS.find((i) => i.type === type && i.name === name)?.body(PACKAGED), name, label: PACKAGED, _packageId: hit.pkg, _provenance: 'package' } : undefined;
     };
-    const packageRecord = (id: string) => (MANIFESTS[id] ? { manifest: { id, ...MANIFESTS[id] } } : undefined);
+    const installed = (id: string) => MANIFESTS[id] !== undefined && (pairInstalled || id !== PAIR);
+    const packageRecord = (id: string) => (installed(id) ? { manifest: { id, ...MANIFESTS[id] } } : undefined);
     const engine: any = {
         // A booted code package is read-only (`isWritablePackage` reads `manifests` first).
-        manifests: new Map([[BASE, {}], [NO_PAIR_BASE, {}]]),
+        manifests: new Map([[BASE, {}], [NO_PAIR_BASE, {}], [NO_PAIR_ID_BASE, {}], [NO_VERSION_BASE, {}]]),
         async find(t: string, q?: { where?: Record<string, unknown>; limit?: number }) {
             const rows = table(t).filter((r) => matches(r, q?.where));
             return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
@@ -151,7 +168,7 @@ function makeProtocol() {
             getItem: (type: string, name: string) => artifact(type, name),
             getObject: () => undefined,
             getPackage: packageRecord,
-            getAllPackages: () => Object.keys(MANIFESTS).map(packageRecord),
+            getAllPackages: () => Object.keys(MANIFESTS).filter(installed).map(packageRecord),
             isPackageDisabled: () => false,
             getArtifactItem: artifact,
             applyNavContributions: (a: unknown) => a,
@@ -195,6 +212,10 @@ function expectClosedSentence(message: string, type: string, name: string, verb:
     expect(message).toContain('ADR-0146 D1, D11');
     if (verb === 'rollback') expect(message).toContain('a rollback of its row bound to the read-only base is closed');
     else expect(message).toContain(`${verb} it into '${PAIR}'`);
+    // [#29392] The ceremony moves a row bound to the base into the pair: the
+    // sentence points an operator holding one to it, beside the other two doors.
+    expect(message).toContain('is served until moved by `os migrate packageless-overlays`, overridden by the pair, '
+        + 'or deleted naming the base.');
     // The REST door cuts a refusal's text at 500 characters
     // (`CLIENT_MESSAGE_MAX`, `@objectstack/types`): the whole sentence fits.
     expect(message.length).toBeLessThan(500);
@@ -377,6 +398,91 @@ describe('CONTROLS: the writes the close leaves open, as on main', () => {
  * the commit CREATED is reverted by removing the row, which writes nothing and
  * stays open.
  */
+/**
+ * Each step of "the fix the refusal names can be taken" (the pair id, the
+ * ensure door, the base's version, the override write gate admitting the
+ * declared body) leaves the write naming the base open where it fails: the
+ * refusal would name a door the author cannot take. The ensure door's step is
+ * the CONTROL above (`a read-only base whose pair cannot be ensured`); a
+ * shipped member's closed save is the five-type case at the top.
+ */
+describe('CONTROLS: every step the fix takes, failing, leaves the write naming the base open (ADR-0146 D1, D11)', () => {
+    it('a read-only base whose id forms no pair (an id ending in `.custom`) keeps the write naming it: there is no pair to name', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const saved = await protocol.saveMetaItem({
+            type: 'dashboard', name: 'vendor_board', item: { name: 'vendor_board', label: 'Vendor', widgets: [] }, packageId: NO_PAIR_ID_BASE,
+        });
+
+        expect(saved).toMatchObject({ success: true });
+        expect(rows('dashboard', 'vendor_board')).toEqual([{ package_id: NO_PAIR_ID_BASE, state: 'active', label: 'Vendor' }]);
+    });
+
+    it('a read-only base that records no version, its pair installed, keeps the write naming it: there is no `basedOn` to declare', async () => {
+        // The ensure door answers an installed pair without reading the base's
+        // version, so this is the version step's own case.
+        const { protocol, rows } = makeProtocol();
+
+        const saved = await protocol.saveMetaItem({
+            type: 'dashboard', name: 'nover_board', item: { name: 'nover_board', label: 'Nover', widgets: [] }, packageId: NO_VERSION_BASE,
+        });
+
+        expect(saved).toMatchObject({ success: true });
+        expect(rows('dashboard', 'nover_board')).toEqual([{ package_id: NO_VERSION_BASE, state: 'active', label: 'Nover' }]);
+    });
+
+    it('an email template at a locale the base does not ship keeps the write naming the base: the override write gate refuses its declared body', async () => {
+        const { protocol, rows } = makeProtocol();
+        const email = ITEMS.find((i) => i.type === 'email_template')!;
+
+        const saved = await protocol.saveMetaItem({
+            type: email.type, name: email.name, item: { ...email.body('Bienvenue'), locale: 'fr-FR' }, packageId: BASE,
+        });
+
+        expect(saved).toMatchObject({ success: true });
+        expect(rows(email.type, email.name)).toEqual([{ package_id: BASE, state: 'active', label: 'Bienvenue' }]);
+    });
+});
+
+describe('a fresh install, the pair not yet ensured: an email template at a locale the base does not ship stays open (ADR-0146 D11)', () => {
+    // The close asks the override write gate about the declared body written
+    // into the pair. Before the pair exists, that question is the one the
+    // ensured pair would meet (its closure: the base and what the base
+    // reaches), never "no such package, not concerned" read as "admitted".
+    const email = ITEMS.find((i) => i.type === 'email_template')!;
+    const unshipped = (label: string) => ({ ...email.body(label), locale: 'fr-FR' });
+
+    it('the package-less save is accepted and served as the environment\'s own member', async () => {
+        const { protocol, rows } = makeProtocol({ pairInstalled: false });
+
+        const saved = await protocol.saveMetaItem({ type: email.type, name: email.name, item: unshipped('Bienvenue') });
+
+        expect(saved).toMatchObject({ success: true });
+        expect(rows(email.type, email.name)).toEqual([{ package_id: null, state: 'active', label: 'Bienvenue' }]);
+    });
+
+    it('the save naming the base is accepted, as it is with the pair installed', async () => {
+        const { protocol, rows } = makeProtocol({ pairInstalled: false });
+
+        const saved = await protocol.saveMetaItem({ type: email.type, name: email.name, item: unshipped('Bienvenue'), packageId: BASE });
+
+        expect(saved).toMatchObject({ success: true });
+        expect(rows(email.type, email.name)).toEqual([{ package_id: BASE, state: 'active', label: 'Bienvenue' }]);
+    });
+
+    it('CONTROL: a member the base ships is still closed onto the pair, naming it, with the pair not yet ensured', async () => {
+        const { protocol, rows } = makeProtocol({ pairInstalled: false });
+
+        const packageless = await thrown(() => protocol.saveMetaItem({ type: email.type, name: email.name, item: email.body('Mine') }));
+        const namedBase = await thrown(() => protocol.saveMetaItem({ type: email.type, name: email.name, item: email.body('Mine'), packageId: BASE }));
+
+        expect(resolveThrownHttpError(packageless)).toMatchObject({ status: 403, code: 'NOT_OVERRIDABLE' });
+        expect(String(packageless.message)).toContain(`'${PAIR}' (?package=${PAIR})`);
+        expectClosed(namedBase, email.type, email.name, 'save');
+        expect(rows(email.type, email.name)).toEqual([]);
+    });
+});
+
 describe('the commit doors: restoring a row bound to the base is closed, removing one stays open (#29390)', () => {
     /** Each commit a second apart, so the package rollback's "strictly newer" reads an order. */
     let clock = Date.parse('2026-11-02T00:00:00.000Z');
@@ -475,5 +581,201 @@ describe('the commit doors: restoring a row bound to the base is closed, removin
         expect(result).toMatchObject({ success: true, revertedCount: 1, failed: [], reverted: [{ type: VIEW.type, name: VIEW.name, action: 'restored' }] });
         expect(rows(VIEW.type, VIEW.name)).toEqual([{ package_id: PAIR, state: 'active', label: 'PairFirst' }]);
         expect((await protocol.getMetaItem({ type: VIEW.type, name: VIEW.name })).item.label).toBe('PairFirst');
+    });
+
+    // [#29414] The plan and both revert limbs address the committing package's
+    // own row. Before, each read any package's active row, so the pair's
+    // commit beside a row bound to the base addressed the base row.
+    const planOf = async (protocol: any, packageId: string, commitId: string) =>
+        ((await protocol.listCommits({ packageId })) as Array<{ id: string; items: unknown[] }>).find((c) => c.id === commitId)?.items;
+
+    it('[#29414] the pair\'s first commit beside a row bound to the base records a create, and its revert removes the pair row; the base row is served again', async () => {
+        const { protocol, rows } = makeProtocol();
+        await intoBaseBeforeClose(protocol, 'BaseRow');
+        const created = await publishCommit(protocol, PAIR, declared('PairFirst'));
+        expect(await planOf(protocol, PAIR, created)).toEqual([
+            expect.objectContaining({ type: VIEW.type, name: VIEW.name, existedBefore: false, prevVersion: null }),
+        ]);
+
+        tick();
+        const result = await protocol.revertCommit({ commitId: created, packageId: PAIR, actor: 'admin' });
+
+        expect(result).toMatchObject({ success: true, revertedCount: 1, failed: [], reverted: [{ type: VIEW.type, name: VIEW.name, action: 'removed' }] });
+        expect(rows(VIEW.type, VIEW.name)).toEqual([{ package_id: BASE, state: 'active', label: 'BaseRow' }]);
+        expect((await protocol.getMetaItem({ type: VIEW.type, name: VIEW.name })).item.label).toBe('BaseRow');
+    });
+
+    it('[#29414] the pair\'s edit commit beside a row bound to the base restores the pair\'s own row; the base row is untouched', async () => {
+        const { protocol, rows } = makeProtocol();
+        await intoBaseBeforeClose(protocol, 'BaseRow');
+        await publishCommit(protocol, PAIR, declared('PairFirst'));
+        const edit = await publishCommit(protocol, PAIR, declared('PairSecond'));
+        expect(await planOf(protocol, PAIR, edit)).toEqual([
+            expect.objectContaining({ type: VIEW.type, name: VIEW.name, existedBefore: true }),
+        ]);
+
+        tick();
+        const result = await protocol.revertCommit({ commitId: edit, packageId: PAIR, actor: 'admin' });
+
+        expect(result).toMatchObject({ success: true, revertedCount: 1, failed: [], reverted: [{ type: VIEW.type, name: VIEW.name, action: 'restored' }] });
+        expect(rows(VIEW.type, VIEW.name)).toEqual([
+            { package_id: BASE, state: 'active', label: 'BaseRow' },
+            { package_id: PAIR, state: 'active', label: 'PairFirst' },
+        ]);
+    });
+
+    it('[#29414] a revert of the base\'s edit commit whose row was since deleted restores into the base\'s own row, so the named-base close refuses it; nothing is written', async () => {
+        const { protocol, rows } = makeProtocol();
+        await intoBaseBeforeClose(protocol, 'First');
+        const edit = await intoBaseBeforeClose(protocol, 'Second');
+        expect(await protocol.deleteMetaItem({ type: VIEW.type, name: VIEW.name, packageId: BASE })).toMatchObject({ success: true });
+        expect(rows(VIEW.type, VIEW.name)).toEqual([]);
+
+        tick();
+        const result = await protocol.revertCommit({ commitId: edit, packageId: BASE, actor: 'admin' });
+
+        expect(result).toMatchObject({ success: false, revertedCount: 0, failedCount: 1, reverted: [] });
+        expect(result.failed).toEqual([expect.objectContaining({ type: VIEW.type, name: VIEW.name, code: 'NOT_OVERRIDABLE' })]);
+        expectClosedSentence(result.failed[0].error, VIEW.type, VIEW.name, 'rollback');
+        expect(rows(VIEW.type, VIEW.name)).toEqual([]);
+        expect((await protocol.getMetaItem({ type: VIEW.type, name: VIEW.name })).item.label).toBe(PACKAGED);
+    });
+
+    it('[#29414] a pair commit recorded before #29414 beside a row bound to the base names the base row\'s version: its revert is refused by the override write gate, and the pair\'s declared row is unchanged', async () => {
+        const { protocol, rows } = makeProtocol();
+        await intoBaseBeforeClose(protocol, 'BaseRow');
+        const created = await publishCommit(protocol, PAIR, declared('PairFirst'));
+        // The plan such a commit recorded before #29414: the base row's version, read off any package's row.
+        const engine = protocol.engine;
+        const baseVersion = (await engine.findOne('sys_metadata', { where: { type: VIEW.type, name: VIEW.name, state: 'active', package_id: BASE } })).version;
+        expect(typeof baseVersion).toBe('number');
+        await engine.update('sys_metadata_commit', {
+            items: JSON.stringify([{ type: VIEW.type, name: VIEW.name, existedBefore: true, prevVersion: baseVersion }]),
+        }, { where: { id: created } });
+        expect(await planOf(protocol, PAIR, created)).toEqual([
+            expect.objectContaining({ existedBefore: true, prevVersion: baseVersion }),
+        ]);
+
+        tick();
+        const result = await protocol.revertCommit({ commitId: created, packageId: PAIR, actor: 'admin' });
+
+        expect(result).toMatchObject({ success: false, revertedCount: 0, failedCount: 1, reverted: [] });
+        expect(result.failed).toEqual([expect.objectContaining({ type: VIEW.type, name: VIEW.name, code: 'NOT_OVERRIDABLE' })]);
+        expect(rows(VIEW.type, VIEW.name)).toEqual([
+            { package_id: BASE, state: 'active', label: 'BaseRow' },
+            { package_id: PAIR, state: 'active', label: 'PairFirst' },
+        ]);
+        const pairRow = await engine.findOne('sys_metadata', { where: { type: VIEW.type, name: VIEW.name, state: 'active', package_id: PAIR } });
+        expect(JSON.parse(pairRow.metadata).overrides).toEqual({ package: BASE, basedOn: BASE_VERSION });
+        expect((await protocol.getMetaItem({ type: VIEW.type, name: VIEW.name })).item.label).toBe('PairFirst');
+    });
+
+    it('[#29414] CONTROL: the pair\'s edit commit whose row was since deleted restores the pair\'s declared row again', async () => {
+        const { protocol, rows } = makeProtocol();
+        await publishCommit(protocol, PAIR, declared('PairFirst'));
+        const edit = await publishCommit(protocol, PAIR, declared('PairSecond'));
+        expect(await protocol.deleteMetaItem({ type: VIEW.type, name: VIEW.name, packageId: PAIR })).toMatchObject({ success: true });
+        expect(rows(VIEW.type, VIEW.name)).toEqual([]);
+
+        tick();
+        const result = await protocol.revertCommit({ commitId: edit, packageId: PAIR, actor: 'admin' });
+
+        expect(result).toMatchObject({ success: true, revertedCount: 1, failed: [], reverted: [{ type: VIEW.type, name: VIEW.name, action: 'restored' }] });
+        expect(rows(VIEW.type, VIEW.name)).toEqual([{ package_id: PAIR, state: 'active', label: 'PairFirst' }]);
+        expect((await protocol.getMetaItem({ type: VIEW.type, name: VIEW.name })).item.label).toBe('PairFirst');
+    });
+
+    it('[#29414] CONTROL: a writable package\'s edit commit whose row was since deleted restores into that package\'s row, never a package-less one', async () => {
+        const { protocol, rows } = makeProtocol();
+        await publishCommit(protocol, WRITABLE, VIEW.body('First'));
+        const edit = await publishCommit(protocol, WRITABLE, VIEW.body('Second'));
+        expect(await protocol.deleteMetaItem({ type: VIEW.type, name: VIEW.name, packageId: WRITABLE })).toMatchObject({ success: true });
+
+        tick();
+        const result = await protocol.revertCommit({ commitId: edit, packageId: WRITABLE, actor: 'admin' });
+
+        expect(result).toMatchObject({ success: true, revertedCount: 1, failed: [], reverted: [{ type: VIEW.type, name: VIEW.name, action: 'restored' }] });
+        expect(rows(VIEW.type, VIEW.name)).toEqual([{ package_id: WRITABLE, state: 'active', label: 'First' }]);
+    });
+});
+
+/**
+ * [#29848, ADR-0146 D2, D8 item 2, D11] The per-item rollback
+ * (`POST /api/v1/meta/:type/:name/rollback`) beside a row bound to the base.
+ * The door names no package: it restores into the row the by-name read naming
+ * no package SERVES (the pair's declared override over a row bound to the
+ * base, `findServedOverlayRow`), never whichever active row of the name the
+ * store returns first. Before, the binding read and the restore's active-row
+ * read were both package-agnostic, so with the base row stored first the
+ * rollback of the pair's override addressed the base row and was refused by
+ * the named-base close, naming a row the caller never meant.
+ */
+describe('the per-item rollback addresses the row the read serves: the pair\'s declared override beside a row bound to the base (#29848)', () => {
+    const declared = (label: string) => ({ ...VIEW.body(label), overrides: { package: BASE, basedOn: BASE_VERSION } });
+
+    /** The history version whose body carries `label`. */
+    async function versionOf(protocol: any, label: string): Promise<number> {
+        const history = (await protocol.engine.find('sys_metadata_history', { where: { type: VIEW.type, name: VIEW.name } })) as Row[];
+        const hit = history.filter((h) => h.metadata != null && JSON.parse(h.metadata).label === label);
+        expect(hit, `one history row labelled ${label}`).toHaveLength(1);
+        return hit[0]!.version as number;
+    }
+
+    async function savePair(protocol: any, label: string) {
+        const saved = await protocol.saveMetaItem({ type: VIEW.type, name: VIEW.name, packageId: PAIR, item: declared(label) });
+        expect(saved, JSON.stringify(saved)).toMatchObject({ success: true });
+    }
+
+    it('the measured two-row state (the base row stored first): the pair\'s row rolls back, the base row is untouched', async () => {
+        const { protocol, rows, storeBaseRow } = makeProtocol();
+        await storeBaseRow(VIEW.type, VIEW.name, VIEW.body('BaseRow'));
+        await savePair(protocol, 'PairFirst');
+        await savePair(protocol, 'PairSecond');
+        expect((await protocol.getMetaItem({ type: VIEW.type, name: VIEW.name })).item.label).toBe('PairSecond');
+
+        const receipt = await protocol.rollbackMetaItem({
+            type: VIEW.type, name: VIEW.name, toVersion: await versionOf(protocol, 'PairFirst'), actor: 'admin',
+        });
+
+        expect(receipt).toMatchObject({ success: true });
+        expect(rows(VIEW.type, VIEW.name)).toEqual([
+            { package_id: BASE, state: 'active', label: 'BaseRow' },
+            { package_id: PAIR, state: 'active', label: 'PairFirst' },
+        ]);
+        const pairRow = await protocol.engine.findOne('sys_metadata', { where: { type: VIEW.type, name: VIEW.name, state: 'active', package_id: PAIR } });
+        expect(JSON.parse(pairRow.metadata).overrides).toEqual({ package: BASE, basedOn: BASE_VERSION });
+        expect((await protocol.getMetaItem({ type: VIEW.type, name: VIEW.name })).item.label).toBe('PairFirst');
+        expect((await protocol.getMetaItem({ type: VIEW.type, name: VIEW.name, packageId: BASE })).item.label).toBe('PairFirst');
+    });
+
+    it('the pair\'s rollback to the base row\'s version is the override write gate\'s refusal, not the named-base close; nothing is written', async () => {
+        const { protocol, rows, storeBaseRow } = makeProtocol();
+        await storeBaseRow(VIEW.type, VIEW.name, VIEW.body('BaseRow'));
+        await savePair(protocol, 'PairFirst');
+
+        const toVersion = await versionOf(protocol, 'BaseRow');
+        const refused = await thrown(() => protocol.rollbackMetaItem({ type: VIEW.type, name: VIEW.name, toVersion, actor: 'admin' }));
+
+        expect(resolveThrownHttpError(refused)).toMatchObject({ status: 403, code: 'NOT_OVERRIDABLE' });
+        expect(String(refused.message)).not.toContain('a rollback of its row bound to the read-only base is closed');
+        expect(rows(VIEW.type, VIEW.name)).toEqual([
+            { package_id: BASE, state: 'active', label: 'BaseRow' },
+            { package_id: PAIR, state: 'active', label: 'PairFirst' },
+        ]);
+    });
+
+    it('once the pair\'s row is deleted, the read serves the base row again and its rollback is refused by the named-base close', async () => {
+        const { protocol, rows, storeBaseRow } = makeProtocol();
+        await storeBaseRow(VIEW.type, VIEW.name, VIEW.body('BaseFirst'));
+        await storeBaseRow(VIEW.type, VIEW.name, VIEW.body('BaseSecond'));
+        await savePair(protocol, 'PairFirst');
+        expect(await protocol.deleteMetaItem({ type: VIEW.type, name: VIEW.name, packageId: PAIR })).toMatchObject({ success: true });
+        expect((await protocol.getMetaItem({ type: VIEW.type, name: VIEW.name })).item.label).toBe('BaseSecond');
+
+        const toVersion = await versionOf(protocol, 'BaseFirst');
+        const refused = await thrown(() => protocol.rollbackMetaItem({ type: VIEW.type, name: VIEW.name, toVersion, actor: 'admin' }));
+
+        expectClosed(refused, VIEW.type, VIEW.name, 'rollback');
+        expect(rows(VIEW.type, VIEW.name)).toEqual([{ package_id: BASE, state: 'active', label: 'BaseSecond' }]);
     });
 });

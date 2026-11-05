@@ -241,6 +241,7 @@
     "OWNERSHIP_QUEUE_SERVICE (const)",
     "ObjectDraft (interface)",
     "OwnershipFloorAlternate (interface)",
+    "OwnershipQueueFailedReadAnswer (type)",
     "PRINCIPAL_SESSION_MAX_TTL_SECONDS (const)",
     "PendingActionRow (interface)",
     "PendingActionStatus (type)",

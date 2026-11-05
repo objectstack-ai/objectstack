@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/cli",
-  "version": "18.2.0",
+  "version": "18.3.0",
   "description": "Command Line Interface for ObjectStack Protocol",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -94,6 +94,7 @@
     "@objectstack/service-mailbox": "workspace:*",
     "@objectstack/service-messaging": "workspace:*",
     "@objectstack/service-package": "workspace:*",
+    "@objectstack/service-push": "workspace:*",
     "@objectstack/service-queue": "workspace:*",
     "@objectstack/service-realtime": "workspace:*",
     "@objectstack/service-settings": "workspace:*",

@@ -32,6 +32,23 @@ export {
   // `os secret rewrap` classifies rows with this grammar, not a restated one.
   ciphertextDerivationStatus,
   type CiphertextDerivationStatus,
+  // #29934 — the one key-file answer `os dev` and `os start` both hand their
+  // `serve` child, on the channel the provider's file tier reads.
+  resolvePersistedKeyFile,
+  type PersistedKeyFile,
+  KEY_FILE_CHANNEL_ENV,
+  // When those two files hold different keys, the process that opens the
+  // database rules between them by trial-opening its newest stored secrets, or refuses.
+  KEY_FILE_CANDIDATE_CHANNEL_ENV,
+  chooseKeyFileByTrialOpen,
+  settleKeyFileChannel,
+  storedSecretReaderOverEngine,
+  deferredLocalCryptoProvider,
+  DataKeyOpensNothingError,
+  type KeyFileChoice,
+  type StoredSecretReader,
+  type StoredSecretSample,
+  type DeferredLocalCryptoProvider,
 } from './local-crypto-provider.js';
 export {
   type SettingsActionHandler,
@@ -138,13 +155,12 @@ export {
   SETTINGS_PLUGIN_VERSION,
 } from './manifest.js';
 
-// Reference manifests (mail / branding / feature flags) and the
+// Reference manifests (mail / branding / storage) and the
 // convenience aggregate. Hosts can pass `builtinSettingsManifests`
 // directly to `new SettingsServicePlugin({ manifests })`.
 export {
   builtinSettingsManifests,
   brandingSettingsManifest,
-  featureFlagsSettingsManifest,
   mailSettingsManifest,
   mailTestActionHandler,
   smsSettingsManifest,

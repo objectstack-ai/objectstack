@@ -270,6 +270,16 @@ export interface ProbeInput {
 }
 
 /**
+ * [#29879] What a {@link DatasourceAdminServiceConfig.reregisterPool} seam
+ * reports about the rebuild it ran. `previousPoolKept: true` = the new
+ * configuration failed to come up and the pool built from the previous one is
+ * still the one serving, so the update must store none of the new one.
+ */
+export interface ReregisterPoolOutcome {
+  previousPoolKept: boolean;
+}
+
+/**
  * Injected dependencies. The plugin supplies real implementations backed by the
  * driver registry, `IMetadataService` (runtime store), and the secret store;
  * tests supply fakes.
@@ -370,8 +380,17 @@ export interface DatasourceAdminServiceConfig {
    * Optional: a host that wired only `registerPool` falls back to it, whose
    * idempotency guard retains the old pool — the pre-#13804 behaviour, and
    * the safe direction for a host that cannot express a swap.
+   *
+   * [#29879] Answer `{ previousPoolKept: true }` when the rebuild failed and
+   * the previous pool is the one still serving: the update then stores
+   * nothing of the new configuration and takes back the secret it sealed for
+   * it. Answering nothing (a host written before this) keeps the old reading:
+   * the new record is stored whatever the rebuild did.
    */
-  reregisterPool?: (previous: StoredDatasource, next: StoredDatasource) => Promise<void> | void;
+  reregisterPool?: (
+    previous: StoredDatasource,
+    next: StoredDatasource,
+  ) => Promise<ReregisterPoolOutcome | void> | ReregisterPoolOutcome | void;
   /**
    * [#13805] Converge THIS replica's live pool for `name` after a PEER wrote
    * the shared datasource record — the receive half of
@@ -490,11 +509,17 @@ export function datasourceNotFoundError(name: string): Error {
  * a script or an SDK call that clears the field is what reached it.
  *
  * `null` and an absent `secret` are unchanged: they keep the stored
- * credential. A whitespace-only value is a value, sealed and used as sent.
- * Only the empty string is judged, so the answer cannot echo a credential.
+ * credential.
+ *
+ * [#29879] A whitespace-only value (`"   "`, a tab and a newline) is refused
+ * by this same guard: it seals nothing usable, and a rotation to it broke
+ * the datasource at its next connect exactly as the empty string did. A
+ * value with whitespace around other characters is a value, sealed as sent.
+ * Only blank values are judged, so the answer cannot echo a credential.
  */
 function assertSecretNotEmpty(heading: string, secret: SecretInput | undefined): void {
-  if (secret == null || (secret as { value?: unknown }).value !== '') return;
+  const value = (secret as { value?: unknown } | null | undefined)?.value;
+  if (secret == null || typeof value !== 'string' || value.trim() !== '') return;
   throw new Error(
     `${heading}\nThe \`secret\` is empty. Send the credential to store, or leave \`secret\` out (or null) `
       + 'to keep the stored one. Nothing was written.',
@@ -952,11 +977,16 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // `active: false` unreachable.
     if (patch.external !== undefined) await this.assertConnectorLendable(merged);
 
+    // [#29879] The new secret is sealed BEFORE the rebuild (the rebuild
+    // dereferences the merged record's `credentialsRef`), but the working one
+    // is retired only once the merged record is stored, below: a rebuild that
+    // keeps the previous pool stores nothing, and the binding it keeps must
+    // still resolve.
+    const prevRef = existing.external?.credentialsRef;
+    let newRef: string | undefined;
     if (secret) {
-      const prevRef = existing.external?.credentialsRef;
-      const credentialsRef = await this.config.writeSecret(secret, { name });
-      merged.external = { ...(merged.external ?? {}), credentialsRef };
-      if (prevRef && prevRef !== credentialsRef) await this.tryRemoveSecret(prevRef);
+      newRef = await this.config.writeSecret(secret, { name });
+      merged.external = { ...(merged.external ?? {}), credentialsRef: newRef };
     }
 
     // Carry forward the credential material `getDatasource()` redacts (#8081)
@@ -995,8 +1025,6 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       merged.ssl = { ...merged.ssl, [SSL_PRIVATE_KEY]: storedKey };
     }
 
-    await this.config.putDatasourceRecord(merged);
-
     // [#13804] What "Save" means for the LIVE pool, decided by what actually
     // changed — never unconditionally. The old tail called `registerPool` on
     // every update, and the connect path's idempotency guard turned that into
@@ -1023,12 +1051,38 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // cannot see: a rewrap-in-place keeps the `credentialsRef` string while
     // changing the credential it dereferences to, and the pool reads the
     // credential only at build time.
+    //
+    // [#29879] The rebuild runs BEFORE the record is stored, and a rebuild
+    // that keeps the previous pool stores nothing: not the record, not the
+    // new `credentialsRef`, not any other key of this patch. The answer says
+    // the new configuration is NOT in force, so the stored record has to be
+    // the one still serving, or the next restart connects the configuration
+    // that just failed — with the working credential already removed. One
+    // write path: the record is stored once, after the pool settles, and the
+    // working secret is retired only after that write.
     const rebuildNeeded = secret !== undefined || datasourceConnectivityChanged(existing, merged);
+    if (merged.active !== false && rebuildNeeded) {
+      const { previousPoolKept } = await this.tryReregisterPool(existing, merged);
+      if (previousPoolKept) {
+        await this.discardUnstoredSecret(name, newRef, prevRef);
+        // Nothing was stored, so there is nothing for a peer to converge on.
+        return this.toSummary(existing);
+      }
+    }
+
+    try {
+      await this.config.putDatasourceRecord(merged);
+    } catch (err) {
+      // The stored record still names the working secret; the one sealed for
+      // this write has no referrer, so take it back out rather than orphan it.
+      if (newRef && newRef !== prevRef) await this.tryRemoveSecret(newRef);
+      throw err;
+    }
+    if (newRef && prevRef && prevRef !== newRef) await this.tryRemoveSecret(prevRef);
+
     if (merged.active === false) {
       if (rebuildNeeded) await this.tryUnregisterPool(name);
-    } else if (rebuildNeeded) {
-      await this.tryReregisterPool(existing, merged);
-    } else {
+    } else if (!rebuildNeeded) {
       await this.tryRegisterPool(merged);
     }
     // [#13805] Unconditionally — a label-only edit included. The peer, not the
@@ -1036,6 +1090,29 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // same `datasourceConnectivityChanged` reading this door just applied.
     this.publishDatasourceMutation(name);
     return this.toSummary(merged);
+  }
+
+  /**
+   * [#29879] Take back the secret an update sealed for a configuration that
+   * never came into force. A binder that mints a fresh reference per write
+   * (the shipped `sys_secret` binder) leaves the working row untouched, so
+   * removing the new one restores the stored binding exactly. A binder that
+   * rewrites in place under the SAME reference has already overwritten the
+   * working credential: that row is the binding the stored record still
+   * names, so it is never removed, and the loss is said once, at `error`.
+   */
+  private async discardUnstoredSecret(name: string, newRef: string | undefined, prevRef: string | undefined): Promise<void> {
+    if (!newRef) return;
+    if (newRef !== prevRef) {
+      await this.tryRemoveSecret(newRef);
+      return;
+    }
+    this.logger?.error?.(
+      `datasource '${name}': the new secret did not connect and the previous pool was kept, but the `
+        + `secret store rewrote credential '${newRef}' in place, so the stored record now names the `
+        + 'credential that failed and the datasource will not connect after a restart. Send the working '
+        + 'credential again as `secret` to restore it.',
+    );
   }
 
   /**
@@ -1523,15 +1600,20 @@ export class DatasourceAdminService implements IDatasourceAdminService {
    * re-registered would honour the rebuild but lose the "keep the old pool on
    * failure" half of the ruling.
    */
-  private async tryReregisterPool(previous: StoredDatasource, next: StoredDatasource): Promise<void> {
+  private async tryReregisterPool(
+    previous: StoredDatasource,
+    next: StoredDatasource,
+  ): Promise<{ previousPoolKept: boolean }> {
     if (!this.config.reregisterPool) {
       await this.tryRegisterPool(next);
-      return;
+      return { previousPoolKept: false };
     }
     try {
-      await this.config.reregisterPool(previous, next);
+      const outcome = await this.config.reregisterPool(previous, next);
+      return { previousPoolKept: outcome?.previousPoolKept === true };
     } catch (err) {
       this.logger?.warn(`reregisterPool('${next.name}') failed`, err);
+      return { previousPoolKept: false };
     }
   }
 

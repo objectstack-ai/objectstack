@@ -1166,6 +1166,22 @@ export const ERROR_CODE_LEDGER = {
     // routes answer through `handleRouteError`, which resolves the thrown
     // refusal through this table. The code itself is metadata-protocol's.
     'METADATA_CONFLICT',
+    // The data API's host-configured per-query row budget
+    // (`query-read-limits.ts`, `OS_DATA_QUERY_ROW_BUDGET`):
+    // `QueryRowBudgetExceededError` declares it, 400, naming the budget.
+    // Thrown by `metadata-protocol`'s `findData` (the list doors) and
+    // `service-analytics`' `query` / `queryDataset` (the analytics, report and
+    // dashboard reads), before the driver is asked, or on a budget probe's
+    // answer.
+    //
+    // Deliberately NOT the standard `MAX_RECORDS_EXCEEDED` (400, `errors.zod.ts`:
+    // a caller-side limit, the request asked for more than a request may
+    // carry), which is what the same module answers for a page size over
+    // `OS_DATA_MAX_PAGE_SIZE`. The budget bounds how DEEP a query walks:
+    // `offset` plus the page, so a page well within the maximum is refused at
+    // a deep enough offset, and the remedy is a narrower filter or a shallower
+    // offset rather than a smaller page.
+    'QUERY_ROW_BUDGET_EXCEEDED',
     'UNIQUE_VIOLATION',
   ],
   '@objectstack/hono': [
@@ -1957,7 +1973,9 @@ export const STANDARD_SYNONYM_WAIVERS: readonly StandardSynonymWaiver[] = [
   {
     code: 'NOT_FOUND',
     shadows: 'RESOURCE_NOT_FOUND',
-    reason: 'Pre-gate synonym on the wire from @objectstack/rest and plugin-sharing. ' +
+    reason: 'Pre-gate synonym on the wire from @objectstack/rest and plugin-sharing; ' +
+      'service-messaging lists the same pre-existing wire value under its own provenance row ' +
+      '(its device-registry unregister 404). ' +
       'Wire value kept; consolidation deferred until it has a measured victim.',
   },
   {

@@ -1,5 +1,438 @@
 # @object-ui/auth
 
+## 18.3.0
+
+### Patch Changes
+
+- 4daad78: docs: the README's Contributing Guide and Roadmap links point at the ObjectStack repository (objectstack#26080)
+  
+  Every package README linked its "Contributing Guide" and "Roadmap" to `CONTRIBUTING.md` and `ROADMAP.md` in the archived `objectstack-ai/objectui` repository. Those documents now live at the root of `objectstack-ai/objectstack`, which is where the links point; the `@object-ui/console` README's roadmap links move there too. No code, export or behaviour changes.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 319d6fa: feat(auth,app-shell,i18n,console): an invitation link opened signed out names the inviter and the organization on the sign-in and sign-up pages
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A visitor who opened an invitation link while signed out landed on 「接受邀请 · 请使用收到邀请的邮箱。」 and then 「注册账号并加入」, and neither page said who had invited them or to which organization. The server has answered that question anonymously since `GET /api/v1/auth/organization/invitation-preview?id=ID`, but no page read it.
+  
+  - **`@object-ui/auth`:** `getInvitationPreview(invitationId)` on the auth client, `AuthProvider` and `useAuth()`, with the `AuthInvitationPreview` type (`organizationName`, `inviterName`, `email`). It needs no session. It resolves the preview, resolves `null` for the server's not-found answer, and rejects with the server's `code` and the HTTP `status` on any other failure.
+  - **`@object-ui/app-shell`:** `useInvitationPreview(redirect)` and `invitationArrivalCopy(page, preview, t)`. `DefaultLoginPage` and `DefaultRegisterPage` use them for a visitor arriving from `/accept-invitation/ID`, and the card reads 「林晓 邀请你加入 晓林装饰工作室」. The masked invited address (`z***@example.com`) is shown as the address to use. It never fills the email field, because a masked value is not an address. An unknown or expired invitation, a failed read, or a server without the route keeps the generic copy.
+  - **`@object-ui/console`:** the console's own `/login` and `/register` do the same.
+  - **`@object-ui/i18n`:** `auth.login.invitationPreviewTitle`, `auth.login.invitationPreviewTitleNoInviter`, `auth.login.invitationPreviewDescription` and `auth.register.invitationPreviewDescription`, in all ten locale packs.
+  
+  What to do: nothing. A host that mocks `useAuth()` without `getInvitationPreview` keeps the generic invitation copy.
+- 4373103: fix(auth): sign-out follows the provider-logout redirect that better-auth answers, so signing out of a hosted environment also ends the cloud session
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On an environment signed in through an identity provider (ObjectOS Cloud, or any OIDC provider wired through `oidcProviders`), 退出登录 ended only the environment session. better-auth's `POST /sign-out` already answers `{ success: true, url, redirect: true }` for such a user, with `url` pointing at the provider's end-session endpoint, but the Console ignored it. The provider session survived, and 「使用 ObjectOS Cloud 继续」 signed the next person on a shared browser straight back in as the user who had just signed out, with no password.
+  
+  - `createAuthClient().signOut()` now sends `callbackURL` = the SPA's own sign-in page (`<basename>/login`, so `/_console/login` on a hosted environment). better-auth passes it to the provider as `post_logout_redirect_uri`.
+  - When the answer carries `redirect: true` with an absolute `http:` or `https:` URL, the client clears the bearer token and then sends the window there with `window.location.assign`. Any other URL is ignored.
+  - `AuthProvider.signOut()` still resets its state and purges the tab's cached metadata before the page unloads. The header's 退出登录, the user menu and the remediation overlay's sign-out link all go through it.
+  
+  What to do: nothing. A deployment without a provider gets `{ success: true }` from better-auth, and sign-out keeps its in-app route to the sign-in page. To end the provider session as well, register the environment's sign-in page (`<origin>/_console/login`) as a post-logout redirect URI with the provider.
+- 7587fd4: docs(ui): package homepages and README links point at objectstack.ai/docs; objectui.org is retired
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The ObjectUI documentation site at objectui.org is retired. Its pages now live in the ObjectStack docs, mostly under [User Interface](https://objectstack.ai/docs/frontend). Every `@object-ui/*` package's `homepage` and README links now go to the matching page there, and the old objectui.org addresses answer with a permanent redirect to the same page. The `description` fields spell the product name "ObjectUI". The `@objectstack/skills` bundle's ObjectUI skill links to the same pages. Nothing else changes in what these packages ship.
+- 0561a98: fix(console-auth): an invitation link the server no longer knows reads "This invitation link is no longer valid" instead of offering a sign-up it will refuse, and a refused invitee is told which address the invitation was sent to
+  
+  Clause-②: no (`getInvitationPreview`'s exported signature is unchanged; it now resolves `null` only for the preview door's own not-found body, which is what its documented contract already said)
+  
+  Metadata-protocol: none
+  
+  The signed-out invitation preview answers one 404 for an unknown, expired, accepted, rejected or cancelled invitation. The login and register pages read that 404 as "no preview", kept the "Accept your invitation … Create an account and join" flow, and the sign-up then failed with "Self-registration is not open on this system. Ask an administrator for an invitation." — telling a person holding an invitation link to go and get one.
+  
+  - **A dead link.** All four pages (the console's `/login` and `/register`, and app-shell's `DefaultLoginPage` and `DefaultRegisterPage`) now show "This invitation link is no longer valid" with a link to the plain sign-in, and no sign-up prompt or form. The copy does not say which of the five cases it is, because the server does not say.
+  - **A refused invitation sign-up.** A `SELF_REGISTRATION_CLOSED` refusal on a register page opened from an invitation link reads the preview again. If the invitation is gone, the page shows the same notice. If it is still pending, the refusal reads "This invitation was sent to i***@example.com. Register with that address to accept it.", using the masked address the preview already returns.
+  - **`@object-ui/auth`.** `getInvitationPreview` resolves `null` only for a 404 that carries the door's `RESOURCE_NOT_FOUND` body. A 404 without it (a server that does not have the route) now rejects like any other failed read, so a page keeps its generic invitation copy instead of calling a valid link dead.
+  - **`@object-ui/app-shell`.** New `useInvitationArrival` (`preview`, `gone`, `recheck`) and `InvitationGoneNotice`; `useInvitationPreview` is unchanged. `signUpRefusalMessages` takes an optional invitation argument.
+  - **`@object-ui/i18n`.** Five new keys in all ten packs: `auth.login.invitationGoneTitle`, `auth.login.invitationGoneDescription`, `auth.login.invitationGoneSignIn`, `auth.register.errors.invitationSentTo`, `auth.register.errors.invitationAddressOnly`.
+- b339465: fix(plugin-auth): Create User with no email names Email, and a wrong password on the password-change screen reads in the user's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The refusal.** Create User with neither an email nor a phone number used to answer "Either email or phoneNumber is required", naming a request key the dialog does not show. It now answers "Email is required", or "Email or phone number is required" where phone sign-in is on. The status (400) and code (`INVALID_REQUEST`) are unchanged.
+  - **The password-change screen.** A wrong current or temporary password is refused with the code `INVALID_PASSWORD` and the English message "Invalid password", but `createAuthClient`'s `changePassword` threw a bare `Error` that dropped the code, and the screen showed the message as it came. `changePassword` now keeps the code on the thrown error, and the screen shows a translated sentence for that code in every console language pack. Any other refusal still shows the server's message.
+- fc5d509: feat(plugin-auth): opt-in Cloudflare Turnstile on email sign-up — off unless both `OS_TURNSTILE_SITE_KEY` and `OS_TURNSTILE_SECRET_KEY` are set
+  
+  Clause-②: yes (widening: the public auth config gains `features.turnstileSiteKey`, served only while the challenge is on; `PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS` and `AuthFeaturesConfigSchema` gain `turnstileSiteKey`; with the challenge on, `/sign-up/email` answers better-auth's `captcha` refusals `400 MISSING_RESPONSE`, `403 VERIFICATION_FAILED` and `500 UNKNOWN_ERROR`; two new env vars; `@object-ui/auth` gains `TurnstileWidget`, `TURNSTILE_SCRIPT_URL`, `RegisterForm`'s `turnstileSiteKey` prop and `captchaFailed`/`captchaRetry` labels, `SignUpData.captchaToken` and a fifth `signUp` argument; `@object-ui/app-shell` gains `signUpCaptchaFailedMessage`)
+  Metadata-protocol: added
+  
+  A deployment can now ask for a human check before an email/password account is created. Set both variables and:
+  
+  - **The server** mounts better-auth's `captcha` plugin with the `cloudflare-turnstile` provider on `/sign-up/email` only. A sign-up without a token in the `x-captcha-response` header is refused before anything is read or written, a token is verified with Cloudflare using the secret, and a verification that cannot complete fails closed. Sign-in and password reset are not challenged (better-auth's default list would have included them; it is overridden). The per-address rate limit still runs first. Server-side registrations through `auth.api.signUpEmail` (the development admin seed, demo staff) are unaffected.
+  - **The public auth config** (`GET /api/v1/auth/config`) serves `features.turnstileSiteKey`, the public site key, and never the secret.
+  - **The Console** renders the challenge on `/register` and on the first-run `/setup` wizard, holds submit until it is solved, and sends the token. A failed, expired or refused challenge shows one retry message, never Cloudflare's code or the plugin's text. The Console document's content-security-policy admits `https://challenges.cloudflare.com` in `script-src` and `frame-src` only while both variables are set.
+  
+  With either variable unset or blank nothing changes: no plugin, no config key, no widget, the same policy. A deployment that sets only one gets one boot `warn` naming the missing variable.
+- 49aba82: fix(auth): sign-in, password reset and the authenticator set-up work at phone width
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured in a real Console at 375 and 390 px, against the showcase and CRM examples. No page scrolled sideways, but three things failed on a phone, and all three are fixed. Above the `sm` breakpoint nothing changes.
+  
+  - Every control on the sign-in, forgot-password and reset-password pages, and in the remediation overlay, was under the 44 px touch-target floor: 40 px fields and buttons, a 28 px show-password toggle, text links 14 to 17 px tall, the 32 px language button. Below `sm` each is now at least 44 px. Links inside a sentence keep their size.
+  - The sign-in and forgot-password fields used 14 px text, so iOS zoomed the page each time one took focus. They use 16 px on a phone.
+  - The authenticator set-up step of the remediation overlay (QR code, backup codes, code field) is taller than a phone screen once the keyboard is up, and the overlay did not scroll: the heading went off the top and the Verify button under the keyboard, out of reach. The overlay now scrolls.
+  
+  What to do: nothing.
+- d8b7ef4: fix(auth): a user with two-factor sign-in on is asked for their code after the password, instead of staying on the sign-in page
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A user who turned on two-factor sign-in (an authenticator app) and signed in with their password could not get into the Console: the server accepted the password and asked for the second factor, the Console dropped that answer, and the sign-in page stayed as it was, with no code field and no message.
+  
+  The sign-in form now shows a second step: the 6-digit code from the authenticator app, or one of the backup codes saved at set-up. A wrong code says so in place and the user can try again; "Back to sign in" returns to the password step. When the server ends the attempt (too many wrong codes, or ten minutes passed), the password step comes back with the reason. Both login pages (the Console's and `DefaultLoginPage`) show the step, in every language pack.
+  
+  Added to `@object-ui/auth`: `AuthClient.signIn` answers `{ twoFactor: { methods } }` for such an account (exported `SignInResult`, `TwoFactorChallenge`, `TwoFactorMethod`); `AuthClient.verifySignInTwoFactor(code, 'totp' | 'backup-code')` finishes it (`SignInTwoFactorCodeKind`); `useAuth()` gains `twoFactorChallenge`, `verifySignInTwoFactor` and `cancelTwoFactorChallenge`, and its `signIn` resolves `{ twoFactorRequired }`; `LoginFormLabels` gains ten `twoFactor*` labels. `@object-ui/i18n` gains the matching `auth.login.twoFactor*` and `auth.login.errors.twoFactor*` keys.
+  
+  What to do: nothing, unless you pass your own `AuthClient` to `AuthProvider`. `verifySignInTwoFactor` is a required member of `AuthClient`, so such an implementation must add it to type-check (and its `signIn` may now answer `{ twoFactor }`).
+- f2bf293: fix(auth): the sign-in card says no sign-in method is available instead of showing SSO-only copy when email+password is off and nothing else is advertised
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  With email+password sign-in turned off (`PUT /api/settings/auth {"email_password_enabled": false}`) and no SSO, the sign-in page read "Sign in with your organization's single sign-on" with no SSO button, plus a "Use a password instead" link to a form the server refuses (`EMAIL_PASSWORD_DISABLED`). Nobody could tell why there was no way in.
+  
+  - **`@object-ui/auth`:** `LoginForm` reads SSO enforcement only from the server's `features.ssoEnforced`; `emailPassword.enabled: false` now means the password door is shut, not that an identity provider stands in front of it. When the server also advertises no SSO, no social or OIDC provider and no phone sign-in, the card shows "No sign-in method is available. Contact your administrator." with nothing to click and no sign-up link. The SSO line is drawn only under declared enforcement or when SSO is on, and the "Use a password instead" link only while the form it opens holds a method the server accepts (email+password, the SSO button or phone sign-in). New optional label `LoginFormLabels.noSignInMethodText`.
+  - **`@object-ui/i18n`:** `auth.login.noSignInMethodText` in all ten locale packs.
+  - **`@object-ui/app-shell`, `@object-ui/console`:** both sign-in pages pass the translated label.
+  
+  Unchanged: an SSO-enforced deployment keeps its SSO-only view and break-glass link, and a failed `/auth/config` read still falls back to the password form.
+  
+  What to do: nothing. A host that does not pass `noSignInMethodText` gets the English default.
+- 925e860: fix(auth): when SSO is the way in, the sign-in card offers the SSO email field and "Sign in with SSO" on first paint
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a deployment that advertises SSO (`features.sso`) and either enforces it (`features.ssoEnforced`) or has email+password sign-in turned off (`emailPassword.enabled: false`), the sign-in card first showed only the SSO-only sentence and a "Use a password instead" link. The email-routed "Sign in with SSO" button, the deployment's only working way in, sat inside the password form and appeared only after that link was clicked; with the password door shut, that link opened a form whose password half the server refuses.
+  
+  `LoginForm` now draws the email field and the "Sign in with SSO" button in the SSO-only view itself, with no password field. Under enforcement, "Use a password instead" still reveals the password form for the break-glass admin, and "Back to single sign-on" returns to the SSO view. With email+password sign-in turned off, that link is now offered only when phone+password sign-in is on, since otherwise the form it opens is one the server refuses. A deployment with federated providers only, a server whose password form is shown, and the no-method state are unchanged. No new label: the field reuses `emailLabel` and `emailPlaceholder`, the button `ssoButton`.
+  
+  What to do: nothing.
+- Updated dependencies [ea025d3]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [4793aa4]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [0c64014]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [7e3822c]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [f23e051]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [8ce974c]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [ba0084e]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [e7a6cc7]
+- Updated dependencies [4d278c9]
+- Updated dependencies [76bf6c5]
+- Updated dependencies [1a95c74]
+- Updated dependencies [5114b0e]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [bc02a77]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [c594e1c]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [7b293c4]
+- Updated dependencies [3fb74b6]
+- Updated dependencies [b399cb8]
+- Updated dependencies [a9782b3]
+- Updated dependencies [8196881]
+- Updated dependencies [8d208a4]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [c708de6]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [bf03ebb]
+- Updated dependencies [2c3574c]
+- Updated dependencies [1335c6b]
+- Updated dependencies [bdb19ca]
+- Updated dependencies [d8c611d]
+- Updated dependencies [ec0316e]
+- Updated dependencies [8bb2417]
+- Updated dependencies [2ac698b]
+- Updated dependencies [462b4f9]
+- Updated dependencies [138dacf]
+- Updated dependencies [7f4258f]
+- Updated dependencies [1ac1c24]
+- Updated dependencies [97ca257]
+- Updated dependencies [104cd1a]
+- Updated dependencies [f1d795b]
+- Updated dependencies [b3d1415]
+- Updated dependencies [078e581]
+- Updated dependencies [18e4ac1]
+- Updated dependencies [51058ef]
+- Updated dependencies [f125ce4]
+- Updated dependencies [b16ee8b]
+- Updated dependencies [86d0a8c]
+- Updated dependencies [d089dac]
+- Updated dependencies [3557366]
+- Updated dependencies [29c70ca]
+- Updated dependencies [b5e7ba5]
+- Updated dependencies [38a278b]
+- Updated dependencies [bb82da1]
+- Updated dependencies [85ea12f]
+- Updated dependencies [e9fb529]
+- Updated dependencies [7b55ea9]
+- Updated dependencies [53dda03]
+- Updated dependencies [ba1f164]
+- Updated dependencies [20f052d]
+- Updated dependencies [9467a1b]
+- Updated dependencies [8b65633]
+- Updated dependencies [c268b72]
+- Updated dependencies [d68d129]
+- Updated dependencies [a20dcae]
+- Updated dependencies [5d46f43]
+- Updated dependencies [c9aaee9]
+- Updated dependencies [3d6f230]
+- Updated dependencies [7eb0b19]
+- Updated dependencies [8e6ab05]
+- Updated dependencies [e756782]
+- Updated dependencies [aee9c47]
+- Updated dependencies [0e75081]
+- Updated dependencies [45b4922]
+- Updated dependencies [31204d1]
+- Updated dependencies [2c881fb]
+- Updated dependencies [1bdf674]
+- Updated dependencies [5f99582]
+- Updated dependencies [63f962f]
+- Updated dependencies [df8d020]
+- Updated dependencies [6f09464]
+- Updated dependencies [772b356]
+- Updated dependencies [4008e62]
+- Updated dependencies [b64bb72]
+- Updated dependencies [b861525]
+- Updated dependencies [6903c93]
+- Updated dependencies [4b06a54]
+- Updated dependencies [ebbb5b8]
+- Updated dependencies [a81b7cb]
+- Updated dependencies [eeb3117]
+- Updated dependencies [a5fcd06]
+- Updated dependencies [56076fd]
+- Updated dependencies [fdb9a07]
+- Updated dependencies [57958aa]
+- Updated dependencies [59775a0]
+- Updated dependencies [744211f]
+- Updated dependencies [87956dc]
+- Updated dependencies [3482f3d]
+- Updated dependencies [a6a369e]
+- Updated dependencies [5c4e752]
+- Updated dependencies [4ab2e7e]
+- Updated dependencies [589049b]
+- Updated dependencies [d0f308c]
+- Updated dependencies [4dc41e6]
+- Updated dependencies [eb05ea2]
+- Updated dependencies [55a4898]
+- Updated dependencies [f87239a]
+- Updated dependencies [2ae8c89]
+- Updated dependencies [a4daa85]
+- Updated dependencies [b64980a]
+- Updated dependencies [bbb98c4]
+- Updated dependencies [1bb9536]
+- Updated dependencies [2bf71ce]
+- Updated dependencies [c1af99c]
+- Updated dependencies [99a6a78]
+- Updated dependencies [1a8ba3f]
+- Updated dependencies [1a8ba3f]
+- Updated dependencies [3ac22c9]
+- Updated dependencies [ceef714]
+- Updated dependencies [b388cfe]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [cfd237f]
+  - @objectstack/spec@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

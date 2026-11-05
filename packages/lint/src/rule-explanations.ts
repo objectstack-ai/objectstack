@@ -2066,6 +2066,32 @@ const FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const FLOW_API_TRIGGER_SIGNATURE_UNUSABLE_EXPLANATION: RuleExplanation = {
+  rule: 'flow-api-trigger-signature-unusable',
+  covers: 'why a hook with a broken sender signature admits nothing',
+  paragraphs: [
+    'An inbound api hook may declare how a third-party sender signs its posts, in its start node\'s ' +
+      '`config.signature`: the header the sender writes its digest in, `hmac-sha256`, `hex` or `base64`, and ' +
+      'what is signed, the raw body (`signs: \'body\'`, as DocuSign Connect signs it) or `<t>.<raw body>` ' +
+      '(`signs: \'timestamp.body\'`, a Stripe-style `t=…,v1=…` header). The key is the one ' +
+      '`config.secretRef` names, never a literal. A declared scheme REPLACES the `x-objectstack-signature` ' +
+      'check for its hook: the hook has that one verifier and never reads the platform header.',
+    'The finding means the declaration is present and the spec refuses it: an unknown algorithm or ' +
+      'encoding, a reserved header name, a timestamped scheme without its elements, no `config.secretRef`, ' +
+      'or a literal `config.secret` beside it. The verdict names the key the spec refuses at; the flow ' +
+      'parse prints the refusal itself in full.',
+    'A broken declaration never falls back to `x-objectstack-signature` and is never admitted unsigned. The ' +
+      'automation engine\'s flow parse refuses the flow at registration, and a trigger handed it anyway ' +
+      'refuses every post to its hook with the one `401 INVALID_SIGNATURE` every unverified post gets, so ' +
+      'the flow never receives a post. Fix the declaration, or remove `config.signature` to verify ' +
+      '`x-objectstack-signature` under the hook\'s secret.',
+    'A usable declaration is ready: the hook verifies the sender\'s header under the named key, a ' +
+      'timestamped scheme inside the same 300-second window `x-objectstack-signature` has, a body-only ' +
+      'scheme with no replay window because the sender signs no time.',
+    FLOW_GATE_REACH,
+  ],
+};
+
 // `flow-trigger-unknown-object` lives in the same rule file but is not one of
 // the five: its verdict depends on packages a build cannot see, so it warns —
 // except under a package closure the runtime publish gate states, where the
@@ -2479,7 +2505,7 @@ const SORT_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
 
 const SORT_FIELD_UNSORTABLE_EXPLANATION: RuleExplanation = {
   rule: 'sort-field-unsortable',
-  covers: 'why a formula field cannot be sorted by',
+  covers: 'why a formula or `sortable: false` field cannot sort',
   paragraphs: [
     VIRTUAL_FIELD_STORAGE,
     'Measured before the runtime refused it: an ORDER BY over a formula returned \'asc\' and \'desc\' ' +
@@ -2487,6 +2513,13 @@ const SORT_FIELD_UNSORTABLE_EXPLANATION: RuleExplanation = {
       'under a success. Both runtime doors now refuse it with `400 INVALID_SORT` — the REST ingress ' +
       '(`assertSortFieldsExist`) and the engine (`assertOrderByIsMaterializable`) — so the declaration ' +
       'breaks the view\'s first fetch, and every fetch after it.',
+    'A stored field whose author declared `sortable: false` is refused the same way at the REST ingress ' +
+      '(`400 INVALID_SORT`, "a field that declares `sortable: false`"), though a column stands behind it: ' +
+      'the key says what the platform offers, so the list header and the Sort picker do not offer it and ' +
+      'the Data API does not perform it. Both verdicts are the served sortability projection\'s ' +
+      '`sortable: false`, which this rule reads, so it and the door agree. A list view\'s sort and every ' +
+      'stored page sort (a block\'s `sort` or `dataSource.sort`, a list page\'s `interfaceConfig.sort`, an ' +
+      'app page\'s `record.sort`) are judged. Sort by another field, or remove `sortable: false`.',
     LIST_VIEW_FIELD_SKIPS,
   ],
 };
@@ -5490,6 +5523,30 @@ const REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION: RuleExplanation = {
   paragraphs: REPORT_DATE_RANGE_SHARED_PARAGRAPHS,
 };
 
+// ── Report runtime filter (`validate-report-runtime-filter.ts`) ─────────────
+
+const REPORT_FILTER_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'report-filter-field-unknown',
+  covers: 'what an unresolved report filter key does',
+  paragraphs: [
+    'A report\'s `runtimeFilter` is ANDed into its dataset query, exactly as a dashboard widget\'s own ' +
+      '`filter` is. The dataset query refuses a key it cannot bind, so a report whose filter names a ' +
+      'field its dataset\'s object lacks shows every reader a "Dataset query failed" panel instead of ' +
+      'numbers. On a `joined` report the report-level `runtimeFilter` is merged into every block\'s ' +
+      'query, so it is judged against each block\'s dataset, and each block\'s own filter against its ' +
+      'own.',
+    'Each key is judged as `widget-filter-field-unknown` judges a widget filter key — a dotted ' +
+      '`relationship.field` path hop by hop, a bare name against the authored and registry-injected ' +
+      'columns — and one more name is accepted: a bare key naming a dimension of the bound dataset, ' +
+      'which the dataset query binds through that dimension. Not reported: a `dataset` that resolves to ' +
+      'nothing (`chart-dataset-unknown` reports that once), an object this stack does not define, or ' +
+      'one with no readable field map.',
+    'To fix it, filter on a field of the dataset\'s object, on a dimension of the dataset, or on a ' +
+      '`relationship[.relationship].field` path whose prefix the dataset\'s `include` declares. The ' +
+      'verdict\'s "Did you mean" names the nearest field of the object the miss landed on.',
+  ],
+};
+
 // The pairing rule lives in `@objectstack/spec/kernel`'s `customization-package.ts`
 // (`customizationNamespace`, `MAX_CUSTOMIZATION_BASE_NAMESPACE_LENGTH`,
 // `CUSTOMIZATION_NAMESPACE_SUFFIX`); `rule-explanations.test.ts` holds the
@@ -5630,6 +5687,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FLOW_TRIGGER_UNROUTABLE_EXPLANATION.rule]: FLOW_TRIGGER_UNROUTABLE_EXPLANATION,
   [FLOW_TRIGGER_UNKNOWN_EVENT_EXPLANATION.rule]: FLOW_TRIGGER_UNKNOWN_EVENT_EXPLANATION,
   [FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION.rule]: FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION,
+  [FLOW_API_TRIGGER_SIGNATURE_UNUSABLE_EXPLANATION.rule]: FLOW_API_TRIGGER_SIGNATURE_UNUSABLE_EXPLANATION,
   [FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION.rule]: FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION,
   [FLOW_INPUT_UNKNOWN_OBJECT_EXPLANATION.rule]: FLOW_INPUT_UNKNOWN_OBJECT_EXPLANATION,
   [VALIDATION_RULE_REGEX_UNCOMPILABLE_EXPLANATION.rule]: VALIDATION_RULE_REGEX_UNCOMPILABLE_EXPLANATION,
@@ -5762,6 +5820,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [REPORT_DATE_RANGE_DIMENSION_NOT_DATE_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_NOT_DATE_EXPLANATION,
   [REPORT_DATE_RANGE_DIMENSION_AMBIGUOUS_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_AMBIGUOUS_EXPLANATION,
   [REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION,
+  [REPORT_FILTER_FIELD_UNKNOWN_EXPLANATION.rule]: REPORT_FILTER_FIELD_UNKNOWN_EXPLANATION,
   [NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION.rule]: NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION,
   [FLOW_REGION_SHAPE_INVALID_EXPLANATION.rule]: FLOW_REGION_SHAPE_INVALID_EXPLANATION,
 });

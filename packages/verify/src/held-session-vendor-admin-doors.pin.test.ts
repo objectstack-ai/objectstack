@@ -255,7 +255,9 @@ const HELD_STATES: readonly HeldState[] = [
   {
     code: 'MFA_REQUIRED',
     async arm() {
-      auth.applyConfigPatch({ mfaRequired: true, mfaGracePeriodDays: 0 });
+      // Two-factor with it, as the `auth.mfa_required` setting applies them: the
+      // gate holds a user for MFA only while they can enroll.
+      auth.applyConfigPatch({ mfaRequired: true, mfaGracePeriodDays: 0, plugins: { twoFactor: true } });
       const lapsed = new Date(Date.now() - 10 * DAY_MS);
       for (const id of everyone()) await ql.update('sys_user', { id, mfa_required_at: lapsed }, SYS);
     },
@@ -330,10 +332,16 @@ for (const state of HELD_STATES) {
 
 describe("a hold only the session's organization declares (MFA required by the organization)", () => {
   let organizationId: string | undefined;
+  let twoFactorBefore: boolean | undefined;
 
   beforeAll(async () => {
     organizationId = (await sessionOf(await stack.signIn())).organizationId;
     if (!organizationId) throw new Error('the platform admin session operates in no organization');
+    // Two-factor on, by this block itself: an organization cannot require MFA
+    // while nobody can enroll (the write is refused), and the gate holds no one
+    // then. Not inherited from whichever held state ran before.
+    twoFactorBefore = auth.isTwoFactorEnabled();
+    auth.applyConfigPatch({ plugins: { twoFactor: true } });
     await ql.update('sys_organization', { id: organizationId, require_mfa: true }, SYS);
     // The 60-second "does any organization require MFA" cache, primed as the
     // background refresh would after this write.
@@ -346,6 +354,7 @@ describe("a hold only the session's organization declares (MFA required by the o
   afterAll(async () => {
     if (organizationId) await ql.update('sys_organization', { id: organizationId, require_mfa: false }, SYS);
     auth._orgMfaCache = { value: false, at: Date.now() };
+    if (twoFactorBefore === false) auth.applyConfigPatch({ plugins: { twoFactor: false } });
   });
 
   it('holds the admin in that organization and in no other reading (the floor holds no one)', async () => {

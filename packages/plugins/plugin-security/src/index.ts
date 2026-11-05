@@ -106,6 +106,18 @@ export type {
   WithheldAcceptance,
   DeploymentAcceptance,
 } from './suggested-audience-bindings.js';
+// [ADR-0015 §10] Under a walled tenancy posture every external object states
+// its organization scope: the one reading of the declaration, the boot refusal
+// and the three ways out, as every door spells them.
+export {
+  externalOrganizationScopeOf,
+  externalOrganizationScopeIsUndeclared,
+  refuseUndeclaredExternalObjectScope,
+  undeclaredExternalObjectsOf,
+  ExternalObjectOrganizationScopeUndeclaredError,
+  EXTERNAL_SCOPE_REMEDY,
+} from './external-organization-scope.js';
+export type { ExternalOrganizationScope, UndeclaredExternalObject } from './external-organization-scope.js';
 // [maintainer ruling 2026-08-24 — 「同意 第一步(创业阶段,Salesforce 式)」]
 // Lock the base, clone to customize: the write-door provenance rule and its
 // refusals, plus the DETECTION READING for overlays that already exist.

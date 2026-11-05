@@ -225,7 +225,7 @@ import { getMetadataTypeRedactor } from '@objectstack/spec/kernel';
  * handle took any spelling at all.
  */
 export type PackagesDomainProtocol =
-    Partial<Pick<MetadataProtocol, 'getMetaItem' | 'getMetaItems' | 'saveMetaItem'>>
+    Partial<Pick<MetadataProtocol, 'getMetaItem' | 'getMetaItems' | 'getMetaTypes' | 'saveMetaItem'>>
     & Partial<Pick<PackageProtocol, 'installPackage'>>
     & {
         /** Declared by the producer (`@objectstack/metadata-protocol`), #9960. */
@@ -3451,6 +3451,92 @@ function ownDocumentsOf(items: any[], type: string, packageId: string, registry:
     return out;
 }
 
+/**
+ * [#29872, ADR-0146 D8 item 3 / D10] The `objectExtensions` entries of
+ * `packageId` that its `object_extension` `items` do not already carry: each
+ * `'extend'` contribution the registry holds for the package
+ * (`SchemaRegistry.getObjectExtensionsOf`), whose target no item names. Those
+ * are the extensions a manifest's `objectExtensions` registered
+ * (`ObjectQL.registerApp`, which files no item): a package installed through
+ * install-local, or a code package. Without them the package's export carried
+ * none of its extensions, so a deployment restored from an export lost the
+ * fields on its next export.
+ *
+ * A registry that cannot answer (a double predating the method) adds none,
+ * as before. ⛔ Never the owner's: an extension is exported once, by the
+ * package that contributes it; the owner's export carries its object without
+ * it (the per-package layer's `onlyExtensionsOf`).
+ */
+function registeredExtensionsOf(items: readonly any[], packageId: string, registry: any): any[] {
+    if (typeof registry?.getObjectExtensionsOf !== 'function') return [];
+    const named = new Set(items.map((it) => (it as { extend?: unknown } | null)?.extend));
+    const registered = registry.getObjectExtensionsOf(packageId);
+    return (Array.isArray(registered) ? registered : []).filter((ext: { extend?: unknown }) => !named.has(ext?.extend));
+}
+
+/**
+ * [#29760] Whether this runtime serves metadata type `type` (the canonical
+ * singular): whether its live type vocabulary lists it under either spelling
+ * (`getMetaTypes`, the one accessor that answers "which types exist here" for
+ * the `/meta` listing too; each listed name folded through
+ * `PLURAL_TO_SINGULAR`, as its other callers fold it). The question
+ * {@link assemblePackageManifest} asks only after a per-type read threw, to
+ * tell the one throw it may skip, a type this runtime does not serve, from a
+ * failed read of a type it does.
+ *
+ * Fail closed: a protocol that brings no `getMetaTypes`, or whose vocabulary
+ * cannot be read, has not shown the type unknown, so the type counts as served
+ * and its failed read refuses the export. ⛔ The listing's own failure is not
+ * reported: the refusal carries the read's failure, which is the one asked
+ * about.
+ */
+async function runtimeServesMetadataType(protocol: PackagesDomainProtocol, type: string): Promise<boolean> {
+    if (typeof protocol.getMetaTypes !== 'function') return true;
+    let types: unknown;
+    try {
+        types = (await protocol.getMetaTypes())?.types;
+    } catch {
+        return true;
+    }
+    if (!Array.isArray(types)) return true;
+    // The listing spells each type as its source stores it, singular or
+    // plural; folded to the singular the export loop asks with.
+    return types.some((listed) => typeof listed === 'string' && (PLURAL_TO_SINGULAR[listed] ?? listed) === type);
+}
+
+/**
+ * [#29760] The refusal of a package export one of whose per-type reads failed,
+ * for a type this runtime serves ({@link runtimeServesMetadataType}). The
+ * export is the package's whole content or no answer (the exit right, and the
+ * whole-or-absent rule of `PackageExportBundleSchema`, whose entries this
+ * function's caller produces): an export without the type's collection reads
+ * complete, and a reinstall from it lands without the type, telling nobody.
+ *
+ * The route's refusal family is kept, not a new code minted: the read's own
+ * declared `status` / `statusCode` and string `code` ride on unchanged (a `503`
+ * stays a `503`), so the door's `errorFromThrown(e, 500)` answers what it
+ * answered for the read's throw everywhere else, and an undeclared throw is
+ * its `500`. The sentence names the package and the type, and quotes the
+ * read's own message only where ADR-0112's disclosure rule lets a caught
+ * sentence be quoted ({@link clientFacingFailureText}); the read's error stays
+ * on `cause` for the server-side record.
+ */
+function packageExportTypeReadRefusal(packageId: string, type: string, cause: unknown): Error {
+    const quoted = clientFacingFailureText(cause, '');
+    const err: Error & { status?: number; code?: string; cause?: unknown } = new Error(
+        `Reading the '${type}' items of package '${packageId}' failed, so its export is refused `
+        + `rather than answered without them${quoted ? `: ${quoted}` : '.'}`,
+    );
+    err.cause = cause;
+    const thrown = cause as { status?: unknown; statusCode?: unknown; code?: unknown } | null | undefined;
+    const status = typeof thrown?.status === 'number' ? thrown.status
+        : typeof thrown?.statusCode === 'number' ? thrown.statusCode
+        : undefined;
+    if (status !== undefined) err.status = status;
+    if (typeof thrown?.code === 'string' && thrown.code !== '') err.code = thrown.code;
+    return err;
+}
+
 async function assemblePackageManifest(
 deps: DomainHandlerDeps,
 packageId: string,
@@ -3515,9 +3601,13 @@ context: HttpProtocolContext,
                 ? await protocol.getMetaItemsPerPackage({ type: singular, packageId })
                 : await protocol.getMetaItems({ type: singular, packageId });
             items = Array.isArray(res?.items) ? res.items : [];
-        } catch {
-            // Unknown/unsupported type for this runtime — skip.
-            continue;
+        } catch (e) {
+            // [#29760] Only a type this runtime does not serve is skipped. A
+            // failed read of a type it serves refuses the export, naming the
+            // package and the type: an export without that collection reads
+            // complete and is not (see {@link packageExportTypeReadRefusal}).
+            if (!(await runtimeServesMetadataType(protocol, singular))) continue;
+            throw packageExportTypeReadRefusal(packageId, singular, e);
         }
         // [#29563, ADR-0146 D8 item 3] …and, from that layer, never an item
         // that declares it overrides THIS package: that is the pair's
@@ -3546,6 +3636,16 @@ context: HttpProtocolContext,
         // `registerApp` filled, which the bare-slot copy never reaches), the
         // same body the layer serves for the name while no override is live.
         if (perPackageLayer) items = ownDocumentsOf(items, singular, packageId, registry);
+        // [#29872, ADR-0146 D8 item 3] …and a package's `objectExtensions` are
+        // every extension it contributes, however it was installed. The layer
+        // lists only the `object_extension` items (the stored rows the `/meta`
+        // doors write); a manifest's `objectExtensions` (a package installed
+        // through install-local, or a code package) are registered as the
+        // package's `'extend'` contributors with no item, so they are read back
+        // from the registry ({@link registeredExtensionsOf}). An item of the
+        // same target is the one exported: it is the stored body the registry's
+        // contribution was registered from.
+        if (plural === EXTENSIONS_KEY) items = [...items, ...registeredExtensionsOf(items, packageId, registry)];
         if (items.length === 0) continue;
         // [#5320] `views` is partitioned rather than dumped: the registry's
         // ADR-0017 dual-read returns the container AND its expanded per-view
@@ -3864,7 +3964,8 @@ _context: HttpProtocolContext,
     const parsedRequest = SeedLoaderRequestSchema.safeParse({
         seeds: datasets,
         config: {
-            defaultMode: 'upsert',
+            // [#30081] No mode of its own: each seed's `mode` is the spec
+            // default (`ignore`, create-only) unless the seed declares one.
             multiPass: true,
         },
     });

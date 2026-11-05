@@ -7,10 +7,10 @@
  * the read redactor (`./connector-credential-redaction.ts`), never exported on
  * its own.
  *
- * ## The URLs judged
+ * ## The strings judged
  *
- * Every string that starts with `scheme://` under the two places an entry
- * keeps a URL ({@link CONNECTOR_URL_ROOTS}):
+ * Every string under the two places an entry keeps a URL
+ * ({@link CONNECTOR_URL_ROOTS}):
  *
  *  - `providerConfig` — the provider's own vocabulary: `baseUrl` (`rest`,
  *    `openapi`), `transport.url` (`mcp` over http), a URL `spec` (`openapi`),
@@ -25,14 +25,24 @@
  * ## The credential parts
  *
  *  - **the userinfo**, whole: `https://user:pass@host`, and `https://<token>@host`,
- *    the form several HTTP APIs read as a token;
- *  - **each credential query parameter** with a non-empty value: the names in
+ *    the form several HTTP APIs read as a token. Located by `urlUserinfoSpan`
+ *    (`data/driver/url-boundary.ts`), the one userinfo grammar the datasource
+ *    doors read too: on the string as a URL parser reads it — trimmed of its
+ *    leading and trailing C0 control characters and spaces, with every ASCII
+ *    tab, LF and CR deleted — whose authority starts where a URL parser
+ *    starts it: after a special scheme (`http`, `https`, `ws`, `wss`, `ftp`,
+ *    any letter case) and however many `/` or `\` follow it, none included;
+ *    after `scheme://` or a scheme-relative `//` otherwise;
+ *  - **each credential query parameter** with a non-empty value, in ANY
+ *    judged string, whether or not it starts with a scheme: the names in
  *    {@link CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES}, plus the
- *    `auth.paramName` an `api-key` instance itself names. A pair is judged by
- *    `credentialQueryParamOf` (`data/driver/common.zod.ts`), the boundary
- *    definition the datasource doors share: the query runs from the first `?`
- *    to the fragment, names match case-insensitively on the percent-decoded
- *    key, and an empty value carries nothing.
+ *    `auth.paramName` an `api-key` instance itself names. The query is read by
+ *    `urlCredentialQueryParams` (`data/driver/common.zod.ts`), the single
+ *    value-level parse the datasource doors run too, and a pair is judged by
+ *    `credentialQueryParamOf` beside it: the query runs from the first `?` to
+ *    the fragment, every ASCII tab, LF and CR is deleted from a pair before it
+ *    is read, names match case-insensitively on the percent-decoded key, and
+ *    an empty value carries nothing.
  *
  * ## One traversal, two doors
  *
@@ -47,6 +57,7 @@
  */
 
 import { CREDENTIAL_URL_QUERY_PARAM_NAMES, urlCredentialQueryParams } from '../data/driver/common.zod';
+import { urlUserinfoSpan } from '../data/driver/url-boundary';
 
 /**
  * The header and environment maps a provider sends upstream — withheld WHOLE by
@@ -89,15 +100,19 @@ export const CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES: readonly string[] = Obj
   'x-api-key',
 ]);
 
-/** `scheme://` — the strings judged as URLs. */
-export const URL_SCHEME_RE = /^[a-z][a-z0-9+.\-]*:\/\//i;
-
 /**
- * `scheme://userinfo@` — the whole userinfo. Every class excludes `/?#`, so the
- * `@` must sit in the authority; the greedy class backtracks to the LAST `@`
- * before the path, the userinfo boundary RFC 3986 defines.
+ * `value` with its whole userinfo and the `@` that ends it removed, or `value`
+ * itself when it holds none — the userinfo half's ONE judgement, which the
+ * write door asks (does this change the value?) and the read redactor applies,
+ * so the read rewrites exactly what the write refuses. The userinfo is located
+ * by `urlUserinfoSpan` on the string as a URL parser reads it, and removed at
+ * the matching offsets of `value`: every other character, the surrounding and
+ * the parser-deleted ones included, is kept byte for byte.
  */
-export const URL_USERINFO_RE = /^([a-z][a-z0-9+.\-]*:\/\/)[^/?#]*@/i;
+export function connectorUrlWithoutUserinfo(value: string): string {
+  const span = urlUserinfoSpan(value);
+  return span === undefined ? value : `${value.slice(0, span.start)}${value.slice(span.end + 1)}`;
+}
 
 const isPlainRecord = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === 'object' && !Array.isArray(v);
@@ -126,13 +141,17 @@ export interface ConnectorUrlCredentialParts {
   params: string[];
 }
 
-/** The credential parts `value` holds, or `undefined` when it is not a URL or holds none. */
+/**
+ * The credential parts `value` holds, or `undefined` when it holds none: the
+ * userinfo ({@link connectorUrlWithoutUserinfo}), and the
+ * credential query parameters in any string, scheme or none (see the module
+ * note).
+ */
 export function connectorUrlCredentialPartsOf(
   value: string,
   params: readonly string[],
 ): ConnectorUrlCredentialParts | undefined {
-  if (!URL_SCHEME_RE.test(value)) return undefined;
-  const userinfo = URL_USERINFO_RE.test(value);
+  const userinfo = connectorUrlWithoutUserinfo(value) !== value;
   const found = urlCredentialQueryParams(value, params);
   return userinfo || found.length > 0 ? { userinfo, params: found } : undefined;
 }
@@ -146,8 +165,9 @@ export interface ConnectorUrlCredential extends ConnectorUrlCredentialParts {
 }
 
 /**
- * Every URL under {@link CONNECTOR_URL_ROOTS} that holds a credential part, at
- * any depth — inside arrays and under keys whose own name carries a dot too —
+ * Every string under {@link CONNECTOR_URL_ROOTS} that holds a credential part
+ * (see the module note), at any depth — inside arrays and under keys whose own
+ * name carries a dot too —
  * except inside the maps of {@link CONNECTOR_CREDENTIAL_MAP_PATHS}, whatever a
  * map position holds. The one traversal both doors run (see the module note):
  * the write door refuses every URL returned, the read redactor withholds each

@@ -266,6 +266,32 @@ import { ListView } from '@object-ui/plugin-list';
 />
 ```
 
+### Host props: `addedFields` and `onAddedFieldsChange`
+
+A host that lets a reader add fields to their own list wires
+`onAddedFieldsChange`. The Hide Fields popover (the toolbar's and the Display
+panel's section) then lists, after the view's columns, every other field of the
+object the reader may read and the definition does not mark `hidden`, unticked.
+Ticking one calls `onAddedFieldsChange` with the whole new list of added names;
+the host stores it as the reader's own and appends those fields to
+`schema.columns`, naming them in `addedFields`, so unticking an added column
+takes it off the list instead of hiding it. These are React props for the host
+app, not schema keys: list metadata cannot set them. Without
+`onAddedFieldsChange` the popover lists the view's columns alone. The console
+wires both on the object list page, where the added fields are kept with the
+reader's other list preferences and cleared by "Reset to view".
+
+```tsx
+import { ListView } from '@object-ui/plugin-list';
+
+// The view declares `name` and `amount`; the reader has added `owner`.
+<ListView
+  schema={{ type: 'list-view', objectName: 'deals', columns: ['name', 'amount', 'owner'] }}
+  addedFields={['owner']}
+  onAddedFieldsChange={(added) => console.log('Added:', added)}
+/>
+```
+
 ## Schema
 
 The ListView component accepts a `ListViewSchema`, exported from

@@ -131,7 +131,7 @@ import { errorCodeIs } from '@object-ui/types';
 import { formatMetadataError, type MetadataError } from '@object-ui/data-objectstack';
 import { PermissionSetCloneDialog } from './PermissionSetCloneDialog.js';
 import { isStudioHiddenSystemField } from '../studio-design/studioHiddenSystemField.js';
-import type { PermissionSetCloned } from './permission-set-clone.js';
+import { permissionSetCloneNoticeText, type PermissionSetCloned } from './permission-set-clone.js';
 import {
   mergePermissionSlice,
   scopePermissionSet,
@@ -1328,6 +1328,18 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       const nextObj: ObjectPerm = { ...cur, [action]: value };
       // Cascade: viewAllRecords implies allowRead.
       if (action === 'viewAllRecords' && value) nextObj.allowRead = true;
+      // An object permission that edits or deletes a record also reads it —
+      // the spec refuses Edit or Delete without read on the entry. So Edit or
+      // Delete on ticks Read, and unticking any bit that reads (Read, View
+      // All, Modify All) clears Edit and Delete once no bit that reads is left.
+      // While one still is, the entry stays valid as it is (and clearing
+      // Delete beside Modify All would author the refused #25575 pair).
+      if ((action === 'allowEdit' || action === 'allowDelete') && value) nextObj.allowRead = true;
+      const unticksARead = !value && (action === 'allowRead' || action === 'viewAllRecords' || action === 'modifyAllRecords');
+      if (unticksARead && !nextObj.allowRead && !nextObj.viewAllRecords && !nextObj.modifyAllRecords) {
+        if (nextObj.allowEdit) nextObj.allowEdit = false;
+        if (nextObj.allowDelete) nextObj.allowDelete = false;
+      }
       if (action === 'modifyAllRecords' && value) {
         nextObj.allowEdit = true;
         nextObj.allowRead = true;
@@ -1978,7 +1990,8 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           <Copy className="h-4 w-4 mt-0.5 shrink-0" />
           <div className="space-y-1">
             {cloned.name !== name && <p>{tFormat('perm.clone.done', locale, { name: cloned.name })}</p>}
-            {cloned.notice && <p>{cloned.notice}</p>}
+            {/* objectstack#29727 — in the console's language by the answer's code; the wire notice otherwise. */}
+            {cloned.notice && <p>{permissionSetCloneNoticeText(cloned, locale)}</p>}
           </div>
         </div>
       )}

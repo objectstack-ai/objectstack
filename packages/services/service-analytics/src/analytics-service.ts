@@ -32,6 +32,12 @@ import {
 // only reason this package depends on `@objectstack/types` — see the module's
 // docblock for why the edge is acyclic and why it was worth adding.
 import { matchMissingColumnOfRelation } from '@objectstack/types';
+import {
+  assertQueryReadRows,
+  planQueryReadWindow,
+  resolveQueryReadLimits,
+  type QueryReadRequest,
+} from '@objectstack/types';
 import { CubeRegistry } from './cube-registry.js';
 import { cubeNotFoundError, isCubePublic } from './cube-visibility.js';
 import { cubeNameRequiredError } from './cube-name-refusal.js';
@@ -1209,6 +1215,10 @@ export interface AnalyticsServiceConfig {
    *   Such an amount has one currency per ROW, so its column carries the
    *   `currencyField` pointer instead of a `currency`, and the cube door
    *   refuses an aggregate of it that does not group by that field.
+   *   [ADR-0144 D6, #27195] `homeAmountField` is that amount's stored
+   *   home-currency field: answer `currencyConfig.homeAmount.field` ONLY
+   *   beside a `currencyField`, and `undefined` otherwise. One reader: the
+   *   cube door's refusal names it as the consolidated-total remedy.
    * - Percent scale (objectui#3136): a measure over a `percent` field inherits
    *   that field's storage scale via `percentScaleOf`, so a renderer scales by
    *   declared metadata instead of guessing from the value.
@@ -1238,7 +1248,14 @@ export interface AnalyticsServiceConfig {
   sourceFieldMeta?: (
     object: string,
     field: string,
-  ) => { type?: string; multiple?: boolean; defaultCurrency?: string; currencyField?: string; max?: number } | undefined;
+  ) => {
+    type?: string;
+    multiple?: boolean;
+    defaultCurrency?: string;
+    currencyField?: string;
+    homeAmountField?: string;
+    max?: number;
+  } | undefined;
   /**
    * [#15684] The SQL dialect of the datasource backing `object` — `'sqlite'`,
    * `'postgres'`, `'mysql'`, or `undefined` when the host cannot answer.
@@ -1548,6 +1565,9 @@ export class AnalyticsService implements IAnalyticsService {
 
   constructor(config: AnalyticsServiceConfig = {}) {
     this.logger = config.logger || createLogger({ level: 'info', format: 'pretty' });
+    // Fail at construction on a misconfigured read limit (`OS_DATA_*`): a typo
+    // is a boot fault naming the variable, never a guard that is silently off.
+    resolveQueryReadLimits();
     // [#22663] Every write to the shared registry is admitted by the
     // generic-exit gate's registration face: a cube that reads an object the
     // API does not serve for the aggregate operation can never answer a query,
@@ -2493,7 +2513,22 @@ export class AnalyticsService implements IAnalyticsService {
    * Any other error propagates untouched.
    */
   async query(queryInput: AnalyticsQuery, context?: ExecutionContext): Promise<AnalyticsResult> {
-    return this.queryIn(this.requestScope(), queryInput, context);
+    // The deployment's read limits (`OS_DATA_*`, `@objectstack/types`'
+    // `query-read-limits.ts`) judge the caller's own window here, at the
+    // public door, and never inside `queryIn`: the dataset executor's
+    // sub-queries (totals, measure-scoped passes) run unwindowed by design and
+    // are judged as the one selection `queryDataset` was asked for.
+    const read: QueryReadRequest = {
+      surface: 'analytics',
+      object: String(queryInput?.cube ?? ''),
+      limit: queryInput?.limit,
+      offset: queryInput?.offset,
+    };
+    const plan = planQueryReadWindow(read, resolveQueryReadLimits(), this.logger);
+    const windowed = plan.limit !== queryInput?.limit ? { ...queryInput, limit: plan.limit } : queryInput;
+    const result = await this.queryIn(this.requestScope(), windowed, context);
+    assertQueryReadRows(read, plan, result.rows?.length ?? 0, this.logger);
+    return result;
   }
 
   /**
@@ -2763,7 +2798,19 @@ export class AnalyticsService implements IAnalyticsService {
     context?: ExecutionContext,
     options?: { previewDrafts?: boolean },
   ): Promise<AnalyticsResult> {
-    const answer = await this.answerDataset(dataset, selection, context, options);
+    // The deployment's read limits judge the selection's own window — the
+    // one a report or dashboard asked for — before anything runs (see
+    // {@link query} for why not per sub-query).
+    const read: QueryReadRequest = {
+      surface: 'analytics',
+      object: dataset.object,
+      limit: selection?.limit,
+      offset: selection?.offset,
+    };
+    const plan = planQueryReadWindow(read, resolveQueryReadLimits(), this.logger);
+    const windowed = plan.limit !== selection?.limit ? { ...selection, limit: plan.limit } : selection;
+    const answer = await this.answerDataset(dataset, windowed, context, options);
+    assertQueryReadRows(read, plan, answer.rows?.length ?? 0, this.logger);
     // A copy rather than a write onto `answer`, which may be the very object a
     // strategy returned (the same ownership rule `applySqlEchoPolicy` keeps).
     return { ...answer, object: dataset.object };
@@ -3900,7 +3947,11 @@ export class AnalyticsService implements IAnalyticsService {
           path: sql,
         };
       },
-      (o, field) => fieldMeta(o, field)?.currencyField,
+      (o, field) => {
+        const meta = fieldMeta(o, field);
+        if (meta?.currencyField === undefined) return undefined;
+        return { codeField: meta.currencyField, homeField: meta.homeAmountField };
+      },
     );
   }
 

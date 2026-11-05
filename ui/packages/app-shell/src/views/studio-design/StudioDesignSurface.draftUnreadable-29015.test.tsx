@@ -106,6 +106,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 import { InterfacesPillar } from './StudioDesignSurface';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { registerMetadataPreview, getMetadataPreview } from '../metadata-admin/preview-registry';
+import { areaItemPillarPath } from './metadataArea';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
@@ -133,6 +134,15 @@ function renderPillar() {
     <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
       <InterfacesPillar packageId={PKG} />
     </MemoryRouter>,
+  );
+}
+
+/** Default-inspector stand-in: one edit through `onPatch`, as the Properties form offers. */
+function StubInspector({ onPatch }: { onPatch: (patch: Record<string, unknown>) => void }) {
+  return (
+    <button type="button" data-testid="stub-inspector-edit" onClick={() => onPatch({ label: 'Sales (inspector)' })}>
+      inspect
+    </button>
   );
 }
 
@@ -208,4 +218,154 @@ describe('StudioDesignSurface — a dashboard draft the server refuses to read i
     expect(opts).toMatchObject({ mode: 'draft', packageId: PKG, ifNoneMatch: '*' });
     expect(opts).not.toHaveProperty('ifMatch');
   });
+});
+
+/**
+ * objectstack#29884 — the same contract whatever order the designers arrive
+ * in. The package entry registers the built-in designers through a dynamic
+ * import, so the pillar's first render can find no dashboard preview. That
+ * render installs the leaf's clean `{}` buffer (objectui#11272) and stamps it
+ * as the leaf's; the read of the draft starts only once the preview
+ * registers. A refusal then must take that stamp back, as it must on a reload
+ * of a leaf whose earlier read was answered: a stamped buffer is a loaded
+ * buffer to the autosave, the canvas, the inspector and the item tools.
+ *
+ * The designer registries are module state with no unregister, and every
+ * test above registers the dashboard preview. So each late-registration case
+ * below loads the pillar and its registries afresh (`vi.resetModules`), with
+ * nothing registered, and registers the designers itself inside `act`.
+ */
+describe('StudioDesignSurface — a refused dashboard draft stays unopened when the designer registers late or the leaf reloads (objectstack#29884)', () => {
+  async function freshPillarWithNoDesigners() {
+    vi.resetModules();
+    const previews = await import('../metadata-admin/preview-registry');
+    const inspectors = await import('../metadata-admin/default-inspector-registry');
+    const { InterfacesPillar: FreshPillar } = await import('./StudioDesignSurface');
+    expect(previews.getMetadataPreview('dashboard')).toBeUndefined();
+    expect(inspectors.getMetadataDefaultInspector('dashboard')).toBeUndefined();
+    return {
+      FreshPillar,
+      registerDesigners: () =>
+        act(() => {
+          previews.registerMetadataPreview('dashboard', StubCanvas as never);
+          inspectors.registerMetadataDefaultInspector('dashboard', StubInspector as never);
+        }),
+    };
+  }
+
+  /** Before registration: the leaf's `{}` buffer is stamped as loaded, and its draft is not read yet. */
+  async function expectStampedBeforeRegistration() {
+    expect(await screen.findByTestId('studio-item-tool-source', undefined, { timeout: 8000 })).toBeInTheDocument();
+    expect(mockClient.getDraft).not.toHaveBeenCalledWith('dashboard', 'sales_board', expect.anything());
+  }
+
+  async function expectRefusedAndUnopened() {
+    await waitFor(
+      () => expect(mockClient.getDraft).toHaveBeenCalledWith('dashboard', 'sales_board', { packageId: PKG }),
+      { timeout: 8000 },
+    );
+    expect(
+      await screen.findByText(t('engine.studio.refusal.draftUnreadable', 'en-US'), undefined, { timeout: 8000 }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('studio-refusal')).toHaveTextContent(GATE_REFUSAL);
+    // Red on base: the stamped `{}` buffer stayed the leaf's, so the canvas,
+    // the Properties inspector and the item tools (Source) opened on it.
+    expect(screen.queryByTestId('surface-draft')).toBeNull();
+    expect(screen.queryByTestId('stub-edit')).toBeNull();
+    expect(screen.queryByTestId('stub-inspector-edit')).toBeNull();
+    expect(screen.queryByTestId('studio-item-tool-source')).toBeNull();
+    await pastTheAutosave();
+    expect(server.saves).toEqual([]);
+    expect(server.drafts.get(key('dashboard', 'sales_board'))).toStrictEqual(wire(GATED_DRAFT));
+  }
+
+  it('the Interfaces route: a preview registered after the first render opens no buffer over the refused draft', async () => {
+    server.drafts.set(key('dashboard', 'sales_board'), wire(GATED_DRAFT));
+    server.gated.add(key('dashboard', 'sales_board'));
+    const { FreshPillar, registerDesigners } = await freshPillarWithNoDesigners();
+
+    render(
+      <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
+        <FreshPillar packageId={PKG} />
+      </MemoryRouter>,
+    );
+    await expectStampedBeforeRegistration();
+    registerDesigners();
+    await expectRefusedAndUnopened();
+  }, 30000);
+
+  it("the area's deep link: the item URL lands on the same leaf load, and opens no buffer over the refused draft", async () => {
+    server.drafts.set(key('dashboard', 'sales_board'), wire(GATED_DRAFT));
+    server.gated.add(key('dashboard', 'sales_board'));
+    const { FreshPillar, registerDesigners } = await freshPillarWithNoDesigners();
+    // Where `/studio/PKG/metadata/dashboard/sales_board` sends a dashboard (`StudioMetadataArea`).
+    const landing = areaItemPillarPath({
+      packageId: PKG,
+      type: 'dashboard',
+      name: 'sales_board',
+      search: new URLSearchParams(),
+    });
+    expect(landing?.startsWith(`/studio/${PKG}/interfaces?`)).toBe(true);
+
+    render(
+      <MemoryRouter initialEntries={[landing!]}>
+        <FreshPillar packageId={PKG} />
+      </MemoryRouter>,
+    );
+    await expectStampedBeforeRegistration();
+    registerDesigners();
+    await expectRefusedAndUnopened();
+  }, 30000);
+
+  it('a reload of a leaf whose earlier read was answered: the refusal takes the loaded buffer back', async () => {
+    // Readable at first: the pending draft opens as the buffer.
+    server.drafts.set(key('dashboard', 'sales_board'), wire(GATED_DRAFT));
+    const { rerender } = render(
+      <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
+        <InterfacesPillar packageId={PKG} publishNonce={0} />
+      </MemoryRouter>,
+    );
+    await waitFor(
+      () =>
+        expect(JSON.parse(screen.getByTestId('surface-draft').textContent ?? '{}')).toStrictEqual(wire(GATED_DRAFT)),
+      { timeout: 8000 },
+    );
+    // The same leaf read again (a publish) is refused now.
+    server.gated.add(key('dashboard', 'sales_board'));
+    mockClient.getDraft.mockClear();
+    rerender(
+      <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
+        <InterfacesPillar packageId={PKG} publishNonce={1} />
+      </MemoryRouter>,
+    );
+    await expectRefusedAndUnopened();
+  }, 30000);
+
+  it('CONTROL: a readable pending draft still opens editable after a late registration, and its save is pinned to the version read', async () => {
+    server.drafts.set(key('dashboard', 'sales_board'), wire(GATED_DRAFT));
+    const { FreshPillar, registerDesigners } = await freshPillarWithNoDesigners();
+
+    render(
+      <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
+        <FreshPillar packageId={PKG} />
+      </MemoryRouter>,
+    );
+    await expectStampedBeforeRegistration();
+    registerDesigners();
+    await waitFor(
+      () =>
+        expect(JSON.parse(screen.getByTestId('surface-draft').textContent ?? '{}')).toStrictEqual(wire(GATED_DRAFT)),
+      { timeout: 8000 },
+    );
+    expect(screen.queryByText(t('engine.studio.refusal.draftUnreadable', 'en-US'))).toBeNull();
+    expect(screen.getByTestId('studio-item-tool-source')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('stub-inspector-edit'));
+    await waitFor(() => expect(server.saves).toHaveLength(1), { timeout: 8000 });
+    const { body, opts } = server.saves[0]!;
+    expect(body.label).toBe('Sales (inspector)');
+    // The draft's gate rides the save: the buffer is the served draft.
+    expect(body.requiredPermissions).toEqual(['showcase.export_data']);
+    expect(opts).toMatchObject({ mode: 'draft', packageId: PKG, ifMatch: 'v1' });
+  }, 30000);
 });

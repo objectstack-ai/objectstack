@@ -2,6 +2,11 @@
   "$comment": "GENERATED — the RETAINED ledger of check-engine-double-contract.mjs (#9680). Regenerate with `node scripts/check-engine-double-contract.mjs --write`; never hand-edit. Each row is one (file, verb) whose engine double routes through the producer's dispatch predicate. This is the OPPOSITE polarity to engine-double-contract.baseline.json: that ledger records DEBT and may only shrink, this one records COVERAGE and may only grow. A row that disappears is a pinned double that left the population — the blind spot #9680 measured, where deleting a double's delete() member took 319 pinned to 318 with the gate green. Read a removal in this file's diff as a coverage loss and check it was intended.",
   "entries": [
     {
+      "file": "packages/cli/src/commands/migrate/recompute-home-amounts.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/cli/src/commands/serve-datasource-secret-resolver.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2087,6 +2092,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.unknown-picklist-binding-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.unknown-picklist-binding-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.unknown-picklist-binding-refusal.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.unrecognised-meta-type.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3992,6 +4012,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/external-organization-scope.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/external-population.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -4457,6 +4482,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/email-send-display-name.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/meta-compound-save-force-parity.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -4599,6 +4629,16 @@
     {
       "file": "packages/rest/src/rest-declared-refusal-relay.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/rest-environment-scoped-providers.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/rest-environment-scoped-providers.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {
@@ -5052,6 +5092,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-automation/src/builtin/notify-push-delivery.integration.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/notify-push-delivery.integration.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/notify-push-delivery.integration.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-automation/src/builtin/notify-written-address-channels.integration.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -5192,6 +5247,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-datasource/src/__tests__/datasource-update-kept-pool-stores-nothing.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-datasource/src/__tests__/datasource-update-kept-pool-stores-nothing.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-datasource/src/__tests__/datasource-update-kept-pool-stores-nothing.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-job/src/db-job-adapter.degraded-outcome.test.ts",
       "verb": "update",
       "pinned": 1
@@ -5274,6 +5344,21 @@
     {
       "file": "packages/services/service-messaging/src/preference-resolver.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/push-channel.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/push-channel.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/push-channel.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

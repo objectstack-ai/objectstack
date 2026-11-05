@@ -96,7 +96,7 @@ import {
   buildScope,
   declaresOptionsOnceServed,
 } from '@objectstack/formula';
-import type { RelationshipTraversalAnalysis } from '@objectstack/formula';
+import type { ExprFaultOutcome, RelationshipTraversalAnalysis } from '@objectstack/formula';
 import {
   collectFlowGraphs,
   flowNodeConfigRefusals,
@@ -125,7 +125,7 @@ import { actionCopyTemplateIssues } from './validate-action-copy-templates.js';
 // authored"), the CEL rule in `validateExpression('value', …)`. Neither
 // refusal string is spelled here.
 import { FlowValueSlotSchema, VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/automation';
-import type { FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automation';
+import type { FlowNodeParsed, FlowEdgeParsed, FlowTriggerKind } from '@objectstack/spec/automation';
 // [#17495] The blank-source half of the structural-condition refusal, imported
 // rather than restated: this is the EDGE door's own rule
 // (`FlowEdgeSchema.condition` composes it since #15807) and the very schema
@@ -141,7 +141,7 @@ import { isStoredMetadataBodyObject, STORED_METADATA_BODY_PRESCRIPTION } from '@
 // off the schema at first use, never restated here.
 import { EvalUserSchema } from '@objectstack/spec/identity';
 
-import { collectFlowVariableNames, shadowedFieldReads, shadowedFieldMessage } from './flow-variable-scope.js';
+import { collectFlowVariableNames, collectScreenFieldNames, shadowedFieldReads, shadowedFieldMessage } from './flow-variable-scope.js';
 import {
   flowCelEntrances,
   flowCelRootScope,
@@ -529,6 +529,18 @@ function isAlwaysValuedSummary(def: AnyRec): boolean {
  * `celScope`. Subtracted from the null-guard gate's bare-name set.
  */
 const FLOW_ENGINE_BOUND_NAMES: ReadonlySet<string> = new Set(['record', 'previous', 'vars', 'current_user']);
+
+/**
+ * [#29959, #30025] What one flow's bare condition names can hold instead of
+ * the trigger record's field, read once per flow and handed to every flow
+ * condition site's type verdict (see `check()`'s `flowBare`).
+ */
+interface FlowBareNames {
+  /** The names the run binds over the flattening: never typed as the field. */
+  readonly variables: readonly string[];
+  /** The run can bind a name no reader sees: a bare-name mismatch is the warning. */
+  readonly unproven: boolean;
+}
 
 function buildNullableFieldIndex(objects: AnyRec[]): Map<string, Set<string>> {
   const idx = new Map<string, Set<string>>();
@@ -1283,10 +1295,75 @@ function isFlattenedNearMissFor(diagnostic: string, roots: readonly string[]): b
 }
 
 /**
+ * [#29904, #29926] The FAULT-OUTCOME ledger: what each predicate site's runtime
+ * does once an expression there faults, decided here and nowhere else. The
+ * answer is handed to the shared validator as `ExprSchemaHint.faultOutcome`
+ * (the `type-mismatch` verdict: a text or boolean field ordered or
+ * arithmetic'd against a number) and to {@link checkNullGuards} as its
+ * `NullGuardOutcome` (the nullable-comparison verdict) — the same token, so
+ * the two verdicts never tell one rule two different stories.
+ *
+ * Read off each evaluator:
+ *
+ * | site                                   | runtime on a fault                                         | outcome |
+ * |:---------------------------------------|:-----------------------------------------------------------|:--------|
+ * | validation rule `condition` / `when`, nested branches — `severity: 'error'` (the default) | `rule-validator.ts` `checkPredicate` / `checkConditional`: "write rejected" (#4649) | `fail-closed` |
+ * | the same, `severity: 'warning'` / `'info'` (the TOP-LEVEL rule's; a nested branch inherits it) | `evaluateValidationRules`: logged, "write proceeded: the rule is advisory" (#24782) | `fail-open` |
+ * | field `requiredWhen`, `readonlyWhen`   | `rule-validator.ts`: refuses the write (ADR-0137 D2)         | `fail-closed` |
+ * | option `visibleWhen`                   | `evaluateOptionVisibility`: refuses a write picking it (ADR-0137 D2, #22402) | `fail-closed` |
+ * | hook `condition`                       | `hook-wrappers.ts`: aborts the operation (#4775)             | `fail-closed` |
+ * | flow start / edge condition, `decision` branch — record-triggered flow | `evaluateCondition` throws (ADR-0032 §1c); the trigger isolates the write: the run fails, the write lands. A bare name and its `record.<name>` read are the same total trigger record (#29959) | `run-fails` |
+ * | the same, time-relative flow sweeping the flow's own object | `evaluateCondition` throws; `time-relative-trigger.ts` launches each run with the swept row of that object as `record` (`{ record: row }`, the stored row a find returns), so the field's type is what the name holds there too (#29959) | `run-fails` |
+ * | flow condition, any other flow (API, schedule, no trigger, or a sweep of another object than the one the conditions are typed against) | `evaluateCondition` throws there too, but no row of the typed object is bound (see `validate-null-guards.ts`'s ledger): the run holds what its entrance handed it — an API request body, an action's partial record, a parent's record, or nothing — so the field's type is not proven to be what the name holds | — not declared: the `type-mismatch-run-may-fail` WARNING, worded for the run (#29959) |
+ * | a bare name the flow's run binds as a variable (a declared variable, a node id, a `screen` field's `name`) | the run seeds it before the flattening, which skips a bound name, or a screen's resume lands it over the flattened field: it holds the variable, not the field | — not typed as the field at all (`ExprSchemaHint.flowVariables`); `record.<name>` still is (#29959, #30025) |
+ | a bare name in a flow a node of which can bind names no reader sees (`flowCelRootScope` read with no entrance: an open binder — `script`, `connector_action`, `wait`, `subflow`, `map` —, a screen with no input contract) | the run can bind the name to a value no reader sees | — no declared outcome for a bare-name mismatch: the `type-mismatch-run-may-fail` WARNING (`ExprSchemaHint.bareNamesUnproven`); `record.<name>` keeps the row's outcome (#30025) |
+ * | a flow node's `condition` other than the top-level start node's | inert (`flow-inert-node-condition`) | — the same warning |
+ * | field `expression` (formula)           | reads null                                                   | — the warning's text is true |
+ * | field `visibleWhen` / `settledWhen`, `conditionalFormatting`, field group `visibleWhen`, action `visible` / `disabled` / `pressed`, app landing `visible` | evaluated by the renderer: shows, hides or styles, never refuses a write | — |
+ * | sharing rule `condition`               | compiled to a query filter, not evaluated as CEL per row     | — |
+ *
+ * RLS / permission-set row predicates never reach this validator: they are
+ * judged by their own enforceability gates and compiled to a filter too.
+ * Where a site declares an outcome, a `type-mismatch` is an ERROR under that
+ * outcome's own code, the severity the null-guard verdict has there; where it
+ * declares none, it stays the advisory warning. An advisory rule is graded
+ * `error` too: the twin refuses it, and a rule that can never be evaluated
+ * never gives its advisory — the message says so instead of a refused write.
+ * The date verdicts (`date-arithmetic`, `date-text-arithmetic`) are an error
+ * at every site; in a flow condition the same outcome picks their sentence:
+ * `-run-fails` under `run-fails`, `-run-may-fail` anywhere else (#30016).
+ */
+type FaultSite =
+  | { readonly kind: 'validation rule'; readonly severity: unknown }
+  | { readonly kind: 'field write rule' | 'option visibleWhen' | 'hook condition' }
+  | {
+      readonly kind: 'flow condition';
+      readonly triggerKind: FlowTriggerKind | undefined;
+      /** A time-relative sweep's object is the one the conditions are typed against. */
+      readonly sweepsTypedObject: boolean;
+    };
+
+/** The ledger above, as the one function every call site asks. */
+function faultOutcomeOf(site: FaultSite): (ExprFaultOutcome & NullGuardOutcome) | undefined {
+  switch (site.kind) {
+    case 'validation rule':
+      // The runtime's own test: `severity !== 'error'` (default `'error'`).
+      return site.severity === 'warning' || site.severity === 'info' ? 'fail-open' : 'fail-closed';
+    case 'flow condition':
+      return site.triggerKind === 'record_change' || (site.triggerKind === 'time_relative' && site.sweepsTypedObject)
+        ? 'run-fails'
+        : undefined;
+    default:
+      return 'fail-closed';
+  }
+}
+
+/**
  * [#20078] The field-level predicate slots a read THROUGH a reference field is
  * refused on: the two field-rule slots the server evaluates on a write, and a
  * select option's own `visibleWhen`.
  */
+
 type FieldTraversalSlot = 'requiredWhen' | 'readonlyWhen' | 'option visibleWhen';
 
 /** [#20078] A root a field-level predicate binds, with the record shape it binds. */
@@ -2124,6 +2201,13 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
  */
 export function runStackExpressionPasses(stack: AnyRec, options: StackExpressionOptions): ExprIssue[] {
   const issues: ExprIssue[] = [];
+  // [#30026] How many `type-mismatch-run-may-fail` warnings {@link check} has
+  // served: a flow whose own count moved is one an author is told why of,
+  // where the reason is the flow's own (the time-relative note in the flow
+  // walk). Only that code: the date verdicts' `-run-may-fail` arm is an error
+  // whatever the outcome, so a sweep of another object does not soften it and
+  // there is nothing to explain.
+  let runMayFailServed = 0;
   // [#22019] See {@link StackExpressionOptions.runtimeWriteType}: on an object
   // write only the passes over the object's own body judge: the field-formula
   // pass and (#22032) the validation-rule, field-rule-slot, per-option
@@ -2410,24 +2494,53 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
      * byte for byte what it was.
      */
     extraRoots?: readonly string[],
+    /**
+     * [#29904, #29926] What this site's runtime does when the predicate
+     * faults, from {@link faultOutcomeOf} — never spelled at a call site.
+     * Absent where the ledger declares none.
+     */
+    faultOutcome?: ExprFaultOutcome,
+    /**
+     * [#29959, #30025] What a flow site's bare names can hold instead of the
+     * field: `variables`, the names its run binds as variables (declared
+     * variables, node ids, screen fields, the engine's own), handed to the
+     * shared validator as `ExprSchemaHint.flowVariables`, so a bare read of one
+     * is not typed as the field it shadows; `unproven`, a node of the flow can
+     * bind a name no reader sees (`flowCelRootScope` with no entrance), handed on as
+     * `ExprSchemaHint.bareNamesUnproven`, so a bare-name mismatch is the
+     * run-may-fail warning, not the declared outcome. Absent, the call is byte
+     * for byte what it was.
+     */
+    flowBare?: FlowBareNames,
   ): void => {
     if (raw == null) return;
     // Absent unless this is a served-row site on an object that declares a
     // read attachment.
     const attachedOnRead = objectName && servedRowSite ? attachedOnReadIndex.get(objectName) : undefined;
     const fields = objectName ? withAttachedBlocks(fieldIndex.get(objectName), attachedOnRead) : undefined;
-    // Field types feed the #1928 tier-4 soundness warning; only consulted for
-    // `record`-scoped sites, so it is harmless to pass for flattened ones too.
+    // Field types feed the #1928 tier-4 soundness check, at both scopes: the
+    // `record.<field>` read at a `record` site; the bare name and its
+    // `record.<field>` / `previous.<field>` read at a flattened one (#29959).
     const fieldTypes = objectName ? fieldTypeIndex.get(objectName) : undefined;
     // Spread only when given, so every other site's hint is unchanged.
     const roots = extraRoots ? { roots: extraRoots } : {};
     const res = validateExpression('predicate', raw as string | { dialect?: string; source?: string },
-      objectName ? { objectName, fields, attachedOnRead, fieldTypes, scope, traversalHydration, ...roots } : { scope, ...roots });
+      objectName
+        ? {
+          objectName, fields, attachedOnRead, fieldTypes, scope, traversalHydration, ...roots,
+          ...(faultOutcome ? { faultOutcome } : {}),
+          ...(flowBare ? { flowVariables: flowBare.variables } : {}),
+          ...(flowBare?.unproven ? { bareNamesUnproven: true } : {}),
+        }
+        : { scope, ...roots });
     for (const e of res.errors) {
       if (fieldRuleVerdictIssued && isBareReferenceToAny(e.message, FIELD_RULE_NOWHERE_BOUND_ROOTS)) continue;
       issues.push({ where, message: e.message, source: e.source, severity: 'error' });
     }
-    for (const w of res.warnings) issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
+    for (const w of res.warnings) {
+      if (w.code === 'type-mismatch-run-may-fail') runMayFailServed++;
+      issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
+    }
     if (objectName && traversalHydration) refuseStoredMetadataBodyHop(where, raw, objectName, 'rule');
     if (objectName && traversalHydration) refuseUndeclaredHopField(where, raw, objectName, 'rule');
     // [#8116] Provenance rides every object-bound predicate this helper
@@ -2492,8 +2605,22 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
    * A declared bare-CEL slot (#4027). No object schema is passed: these slots
    * bind the *screen's own* collected values, not the trigger record's fields, so
    * a field-existence pass would report every field name as unknown.
+   *
+   * [#29959] `flowCondition` — set for a slot the engine evaluates like an
+   * edge (a `decision` branch's `expression`, `builtin/logic-nodes.ts`, over
+   * the same run variables): there the trigger record IS flattened in, so the
+   * slot is judged by {@link check} exactly as an edge condition is — the
+   * object's fields and types, and the flow's declared fault outcome.
    */
-  const checkDeclaredPredicate = (where: string, raw: unknown): { refused: boolean } => {
+  const checkDeclaredPredicate = (
+    where: string,
+    raw: unknown,
+    flowCondition?: {
+      readonly objectName: string | undefined;
+      readonly faultOutcome: ExprFaultOutcome | undefined;
+      readonly flowBare: FlowBareNames;
+    },
+  ): { refused: boolean } => {
     // [#19961] No `raw == null` early return: whether an absent value is a
     // finding is the resolver's call, not this pass's. It emits absent / `null`
     // only for a `required` ledger slot (a `decision` branch's `expression`),
@@ -2516,6 +2643,13 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     if (shapeRefusal) {
       issues.push({ where, message: shapeRefusal.message, source: shapeRefusal.source, severity: 'error' });
       return { refused: true };
+    }
+    if (flowCondition) {
+      check(
+        where, raw, flowCondition.objectName, undefined, undefined, undefined, undefined, undefined,
+        flowCondition.faultOutcome, flowCondition.flowBare,
+      );
+      return { refused: false };
     }
     const res = validateExpression('predicate', raw as string | { dialect?: string; source?: string });
     for (const e of res.errors) issues.push({ where, message: e.message, source: e.source, severity: 'error' });
@@ -2589,10 +2723,22 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // contractually typed `(stack) => Issue[]` — the crash `lintFlowPatterns`
     // was filed for, reached through this rule instead, on the same document.
     const edges = recordsOf(flow.edges);
-    // The record-change target object — `record.*` refs resolve against it.
+    // The object the flow's conditions are typed against — `record.*` refs and
+    // bare names resolve against its fields: the start node's `objectName`
+    // (a record-change run's trigger object), else, on a time-relative flow,
+    // the object it sweeps. `TimeRelativeTriggerSchema` requires
+    // `timeRelative.object`, and `time-relative-trigger.ts` launches each run
+    // with a row of that object as `record`, whatever the start node names, so
+    // a sweep whose start names no `objectName` is typed against the swept
+    // object: its record IS that row.
     const startNode = nodes.find(n => n.type === 'start');
     const startCfg = (startNode?.config ?? {}) as AnyRec;
-    const objectName = typeof startCfg.objectName === 'string' ? startCfg.objectName : undefined;
+    const startObject = typeof startCfg.objectName === 'string' ? startCfg.objectName : undefined;
+    const triggerKind = resolveFlowTriggerKind(flow);
+    const sweep = startCfg.timeRelative && typeof startCfg.timeRelative === 'object' ? startCfg.timeRelative as AnyRec : {};
+    const sweepObject = triggerKind === 'time_relative' && typeof sweep.object === 'string' ? sweep.object : undefined;
+    const objectName = startObject ?? sweepObject;
+    const runMayFailBefore = runMayFailServed;
 
     // #4347 — every graph in the flow, not just `flow.nodes`/`flow.edges`. An
     // ADR-0031 container keeps a whole sub-graph in its `config`, so the
@@ -2698,11 +2844,47 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
      *  - Outcome `run-fails`: the condition throws, the run fails, and the
      *    trigger isolates the write that fired it.
      */
-    const nullGuardObject = resolveFlowTriggerKind(flow) === 'record_change' ? objectName : undefined;
+    const nullGuardObject = triggerKind === 'record_change' ? objectName : undefined;
+    // [#29926] The ledger's flow rows: `run-fails` on a record-triggered flow,
+    // for both verdicts, and on a time-relative sweep of the typed object
+    // (#29959; the null-guard twin stays on record-triggered flows, the one
+    // entrance that binds `previous` too); nothing declared on any other flow.
+    // The sweep's object is `timeRelative.object` and nothing else: the schema
+    // requires the key, and a descriptor without it never binds
+    // (`flow-time-relative-descriptor-invalid`), so no run of such a flow
+    // binds a row of the typed object and none is declared. The typed object
+    // is the swept one wherever the start names no `objectName` (above).
+    const flowFaultOutcome = faultOutcomeOf({
+      kind: 'flow condition',
+      triggerKind,
+      sweepsTypedObject: sweepObject !== undefined && sweepObject === objectName,
+    });
+    // [#29959] The names the run binds over the flattening — its declared
+    // variables and node ids, and the engine's own — which a bare read holds
+    // instead of the field: the type check never types them as the field.
+    // [#30025] A screen's declared field names too: a resume lands the
+    // collected values under their plain names, over the flattened field. And
+    // where a NODE of the flow can bind a name no reader sees (an open binder
+    // such as `script` / `connector_action` / `wait` / `subflow` / `map`, or a
+    // screen with no input contract), a bare name is not proven to be the field
+    // at all: the type verdict stands down to the run-may-fail warning on it.
+    // The judge is `flowCelRootScope`'s own, read with no entrance: an entrance
+    // whose record is not in hand (and the runtime publish gate's per-write
+    // snapshot, which sees none) changes which record `record.<name>` and the
+    // bare name both read, not whether a node rebinds the bare name, so it
+    // moves neither verdict here — while the null-guard twin keeps standing
+    // its bare names down on the whole `rootScope`, as before.
+    const screenFields = collectScreenFieldNames(graphs);
+    const flowBare: FlowBareNames = {
+      variables: [...new Set([...declaredVariables, ...screenFields, ...FLOW_ENGINE_BOUND_NAMES])],
+      unproven: !flowCelRootScope(flow, graphs, objectName, fieldIndex).provable,
+    };
     const nullGuardBare = new Set<string>();
     if (nullGuardObject && rootScope.provable) {
       for (const name of nullableIndex.get(nullGuardObject) ?? []) {
-        if (!declaredVariables.has(name) && !FLOW_ENGINE_BOUND_NAMES.has(name)) nullGuardBare.add(name);
+        if (!declaredVariables.has(name) && !screenFields.has(name) && !FLOW_ENGINE_BOUND_NAMES.has(name)) {
+          nullGuardBare.add(name);
+        }
       }
     }
     const startConditionSource = nullGuardObject ? celSourceOf(startCfg.condition) : undefined;
@@ -2711,7 +2893,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       : new Set<string>();
     const checkFlowNullGuards = (where: string, raw: unknown, afterStart: boolean): void => {
       if (!nullGuardObject) return;
-      checkNullGuards(where, where, raw, nullGuardObject, 'run-fails', {
+      checkNullGuards(where, where, raw, nullGuardObject, flowFaultOutcome, {
         bareFields: nullGuardBare,
         ...(afterStart ? { presumed: nullGuardPresumed } : {}),
       });
@@ -2832,13 +3014,19 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         nodeSlotKeys.set(nodeCondWhere, 'config.condition');
         if (!checkStructuralCondition(nodeCondWhere, cfg.condition).refused) {
           const from = issues.length;
-          check(nodeCondWhere, cfg.condition, objectName);
+          // [#29926] The outcome only on the trigger gate: on any other node the
+          // key is inert (see the null-guard call below), so nothing fails there.
+          const isTriggerGate = node.type === 'start' && graph.path.length === 0;
+          check(
+            nodeCondWhere, cfg.condition, objectName, undefined, undefined, undefined, undefined, undefined,
+            isTriggerGate ? flowFaultOutcome : undefined, flowBare,
+          );
           warnShadowedFieldReads(nodeCondWhere, cfg.condition);
           refuseUnboundRoots(nodeCondWhere, cfg.condition, from, 'predicate');
           // [#29026] The start node's is the trigger gate; on any other node
           // the key is inert (`flow-inert-node-condition` says so) and judging
           // it would only add a second finding about a predicate nothing runs.
-          if (node.type === 'start' && graph.path.length === 0) checkFlowNullGuards(nodeCondWhere, cfg.condition, false);
+          if (isTriggerGate) checkFlowNullGuards(nodeCondWhere, cfg.condition, false);
         }
 
         // Descriptor-declared expression slots (#4027). Before this, the traversal
@@ -2905,7 +3093,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           // [#15572] A slot refused on SHAPE gets no second diagnostic: the
           // shadowing warning is about which scope a CEL source resolves in,
           // and a value that is not CEL text has no source to resolve.
-          if (checkDeclaredPredicate(slotWhere, found.value).refused) continue;
+          // [#29959] A `decision` branch is evaluated like an edge, so it is
+          // judged like one: the object's field types and the flow's outcome.
+          const branchCondition = nodeType === 'decision' ? { objectName, faultOutcome: flowFaultOutcome, flowBare } : undefined;
+          if (checkDeclaredPredicate(slotWhere, found.value, branchCondition).refused) continue;
           // [#14288] The shadowing warning is about the SCOPE an expression is
           // evaluated in, not about which key it was authored under — so it
           // belongs on every `predicate` slot the ledger declares, not just the
@@ -3064,7 +3255,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         const first = issues.length;
         if (!checkStructuralCondition(edgeCondWhere, edge.condition).refused) {
           const from = issues.length;
-          check(edgeCondWhere, edge.condition, objectName);
+          check(
+            edgeCondWhere, edge.condition, objectName, undefined, undefined, undefined, undefined, undefined,
+            flowFaultOutcome, flowBare,
+          );
           warnShadowedFieldReads(edgeCondWhere, edge.condition);
           refuseUnboundRoots(edgeCondWhere, edge.condition, from, 'predicate');
           checkFlowNullGuards(edgeCondWhere, edge.condition, true);
@@ -3080,6 +3274,28 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           for (let k = first; k < issues.length; k++) issues[k] = { ...issues[k]!, path };
         }
       }
+    }
+
+    // [#30026] Why a sweep of another object keeps the run-may-fail warning:
+    // the conditions are typed against the start node's `objectName`, while
+    // each run's `record` is a row of the swept object. Said once per flow, at
+    // the key that makes it so, and only where a warning it explains was served.
+    if (startObject !== undefined && sweepObject !== undefined && startObject !== sweepObject
+      && runMayFailServed > runMayFailBefore) {
+      const startIndex = flowIndex >= 0 && startNode && Array.isArray(flow.nodes) ? flow.nodes.indexOf(startNode) : -1;
+      issues.push({
+        where: `flow '${flowName}' · node '${String(startNode?.id)}' (start) config.objectName`,
+        message:
+          `this time-relative flow sweeps '${sweepObject}' (config.timeRelative.object), so each run's record is a ` +
+          `row of '${sweepObject}', while its conditions are checked against the fields of '${startObject}' (the ` +
+          `start node's config.objectName). That is why a type mismatch in its conditions is a warning here and ` +
+          `not a refusal: the names hold a '${sweepObject}' row, not the '${startObject}' fields they were checked ` +
+          `against. Set config.objectName to '${sweepObject}', or remove it: the conditions are then checked ` +
+          `against the swept object, and a type mismatch in them is refused, as on a record-triggered flow.`,
+        source: startObject,
+        severity: 'warning',
+        ...(startIndex >= 0 ? { path: `flows[${flowIndex}].nodes[${startIndex}].config.objectName` } : {}),
+      });
     }
   }
 
@@ -3099,6 +3315,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // position, so the door's findings and their order are the build's.
     for (const rule of recordsOf(validations)) {
       const where = `object '${objectName}' · validation '${(rule.name as string) ?? '?'}'`;
+      // [#29926] One outcome for every predicate the rule carries: a nested
+      // branch is governed by the top-level rule's severity at runtime.
+      const ruleOutcome = faultOutcomeOf({ kind: 'validation rule', severity: rule.severity });
       // [#27643] Every finding below also carries the judged slot's key path
       // (`objects[0].validations[1].condition`), indexed over the lists the
       // author wrote, in the spelling a flow edge's findings use (#26858), so
@@ -3122,10 +3341,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // (#22042), and on a formula field's `expression` (`judgeFieldFormula`,
       // #24197), and NOWHERE else.
       let first = issues.length;
-      check(where, rule.condition, objectName, 'record', undefined, true);
+      check(where, rule.condition, objectName, 'record', undefined, true, undefined, undefined, ruleOutcome);
       atSlot('condition', first);
       first = issues.length;
-      check(`${where} when`, (rule as AnyRec).when, objectName, 'record', undefined, true);
+      check(`${where} when`, (rule as AnyRec).when, objectName, 'record', undefined, true, undefined, undefined, ruleOutcome);
       atSlot('when', first);
       const predicates = rulePredicates(rule, '');
       // [#22042] The same verdict one level down, and every level below it: a
@@ -3142,7 +3361,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       for (const p of predicates) {
         if (p.depth === 0) continue;
         first = issues.length;
-        check(`object '${objectName}' · ${p.label}`, p.raw, objectName, 'record', undefined, true);
+        check(`object '${objectName}' · ${p.label}`, p.raw, objectName, 'record', undefined, true, undefined, undefined, ruleOutcome);
         atSlot(p.key, first);
       }
       // [#24720] The rule's root verdict, over every predicate it carries,
@@ -3166,7 +3385,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // `then`/`otherwise` branches included.
       for (const p of predicates) {
         first = issues.length;
-        checkNullGuards(`object '${objectName}' · ${p.label}`, p.label, p.raw, objectName);
+        checkNullGuards(`object '${objectName}' · ${p.label}`, p.label, p.raw, objectName, ruleOutcome);
         atSlot(p.key, first);
       }
     }
@@ -3366,7 +3585,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         // root this rule has claimed so the two partitions stay disjoint; the
         // push order below is the pre-#13935 one.
         const verdict = fieldRuleRootVerdict(key, raw);
-        check(where, raw, objectName, 'record', verdict !== null);
+        // [#29904] Only the two slots the server judges a write by fail closed
+        // (ADR-0137 D2); `visibleWhen` / `settledWhen` are display only.
+        const writeGate = key === 'requiredWhen' || key === 'readonlyWhen' ? faultOutcomeOf({ kind: 'field write rule' }) : undefined;
+        check(where, raw, objectName, 'record', verdict !== null, undefined, undefined, undefined, writeGate);
         if (verdict) {
           issues.push({ where, message: verdict.message, source: verdict.source, severity: 'error' });
         }
@@ -3440,7 +3662,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       for (const [oi, opt] of recordsOf(f.options).entries()) {
         const label = typeof opt.value === 'string' ? `'${opt.value}'` : `#${oi}`;
         const optionWhere = `object '${objectName}' · field '${fname}' option ${label} visibleWhen`;
-        check(optionWhere, opt.visibleWhen, objectName, 'record');
+        // [#29904] Fail-closed on the write path (ADR-0137 D2, #22402): a fault
+        // refuses every write that picks this option.
+        check(optionWhere, opt.visibleWhen, objectName, 'record', undefined, undefined, undefined, undefined, faultOutcomeOf({ kind: 'option visibleWhen' }));
         // [#22157] After `check`, before the traversal refusal: every root this
         // verdict judges is declared in the strict env, so `check` never
         // reports a bare reference to it and the two stay disjoint.
@@ -3695,7 +3919,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   for (const hook of objectWrite ? [] : recordsOf(stack.hooks)) {
     const hookName = (hook.name as string) ?? '?';
     if (typeof hook.object === 'string') {
-      check(`hook '${hookName}' (${hook.object}) condition`, hook.condition, hook.object, 'record');
+      check(`hook '${hookName}' (${hook.object}) condition`, hook.condition, hook.object, 'record', undefined, undefined, undefined, undefined, faultOutcomeOf({ kind: 'hook condition' }));
       // #4763 — the third instance the issue found lived on exactly this path.
       checkNullGuards(
         `hook '${hookName}' (${hook.object}) condition`,
@@ -3728,7 +3952,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     const kept: ExprIssue[] = [];
     for (const target of targets) {
       const mark = issues.length;
-      check(`hook '${hookName}' (${target}) condition`, hook.condition, target, 'record');
+      check(`hook '${hookName}' (${target}) condition`, hook.condition, target, 'record', undefined, undefined, undefined, undefined, faultOutcomeOf({ kind: 'hook condition' }));
       checkNullGuards(
         `hook '${hookName}' (${target}) condition`,
         `hook '${hookName}' condition`,

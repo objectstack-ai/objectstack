@@ -77,6 +77,14 @@
  * inherit this chokepoint (`driver-sqlite-wasm`, `driver-turso`). Scanning the
  * subclasses is what stops a new door being added one layer down.
  *
+ * And every `sql-driver-*.ts` module beside `sql-driver.ts` (tests excepted),
+ * listed from the directory (#29520, ruling 6591753301). Splitting the class
+ * moves method bodies into those modules as functions whose `this` is a host
+ * the method hands them, so a door can sit one FILE over as well as one layer
+ * down. A module-level function is read as a member is, under its own name;
+ * the readings line (`getBuilder` bindings, read doors, tenant predicates, D8
+ * arms) is what a split compares before and after, and it must not move.
+ *
  * `driver-memory` and `driver-mongodb` are outside it, and NOT because #5499
  * froze them: they do not use this mechanism at all. Neither file contains
  * `getBuilder` or `applyTenantScope` (mongodb enforces its own wall in
@@ -157,7 +165,7 @@
  * (no class found, a builder it cannot classify, or a DISCOVERED floor missed).
  */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requireDefaultExport } from './import-prerequisite.mjs';
@@ -167,11 +175,38 @@ import { isEntrypoint } from './invoked-as.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
-/** The `SqlDriver` family — every class that inherits this chokepoint. */
+/**
+ * Which basenames of `driver-sql/src` are seam modules this gate reads:
+ * `sql-driver-<anything>.ts`, never a test or spec file. A pure function of
+ * the listing, so the self-test can drive it without the repo.
+ */
+export function seamModulesOf(basenames) {
+  return basenames
+    .filter((n) => /^sql-driver-.+\.ts$/.test(n) && !/\.(test|spec)\.ts$/.test(n) && !n.endsWith('.d.ts'))
+    .sort();
+}
+
+/** A directory's basenames, or none when it is absent (main() then refuses on the driver file). */
+function listing(rel) {
+  return existsSync(join(ROOT, rel)) ? readdirSync(join(ROOT, rel)) : [];
+}
+
+/**
+ * The `SqlDriver` family — every class that inherits this chokepoint — and
+ * every `sql-driver-*.ts` module its methods' bodies have moved into (#29520,
+ * ruling 6591753301). A moved body keeps its `this.getBuilder(…)` and
+ * `this.applyTenantScope(…)` calls on the host its method hands it, so the
+ * door it builds is still a door, one file over; a gate that read only
+ * `sql-driver.ts` would count fewer doors after every cut while reporting
+ * clean. The population is LISTED from the directory, not enumerated by hand,
+ * so a new seam module is read the day it lands.
+ */
 const SCAN_FILES = [
   join('packages', 'drivers', 'driver-sql', 'src', 'sql-driver.ts'),
   join('packages', 'drivers', 'driver-sqlite-wasm', 'src', 'sqlite-wasm-driver.ts'),
   join('packages', 'drivers', 'driver-turso', 'src', 'turso-driver.ts'),
+  ...seamModulesOf(listing(join('packages', 'drivers', 'driver-sql', 'src')))
+    .map((n) => join('packages', 'drivers', 'driver-sql', 'src', n)),
 ];
 
 /**
@@ -181,9 +216,9 @@ const SCAN_FILES = [
  * derivation — which reads SOURCE TEXT — saw a handful of bare words and no path
  * at all. This gate was scored `undetermined` for EVERY card: absent from every
  * dispatch brief and every `--commands` harvest, while CI ran it on each pull
- * request. Worse than the usual cost, because this gate's population is THREE
- * FILES: the cards that actually implicate it are rare and precisely nameable,
- * and it was reaching none of them.
+ * request. Worse than the usual cost, because this gate's population is a
+ * handful of FILES: the cards that actually implicate it are rare and
+ * precisely nameable, and it was reaching none of them.
  *
  * The spelling is `DECLARED_WATCH_HINTS` rather than the directory idiom: this
  * is an enumerated population, not a walked subtree, and each hint is a whole
@@ -192,7 +227,17 @@ const SCAN_FILES = [
  *
  * ⛔ Not `packages/drivers/**`, and not a whole-tree marker. Both would put this
  * gate on cards it does not read a byte for; a lead that is wrong on thousands
- * of files is worse than the silence it replaces.
+ * of files is worse than the silence it replaces. ⛔ And not
+ * `sql-driver-*.ts` either, although that is the population's own shape: the
+ * same directory holds a few hundred `sql-driver-*.test.ts` files this gate
+ * never reads, and a glob would name it on every one of them. Measured through
+ * `hintCovers` itself (#29520): the extractor does accept that glob and judges
+ * it as a pattern, and it covers 31 seam modules and 234 test files, plus any
+ * `.d.ts`. A hint has no negation, and `?` and `[…]` are not admitted, so no
+ * spelling covers the modules and leaves the tests out. So the seam modules
+ * are declared one by one, and the self-test holds the list to the directory's
+ * listing in both directions. A seam module added, renamed or removed reds the
+ * self-test, and the failure names the exact string to add or remove here.
  *
  * The self-test derives the coupling from `SCAN_FILES` on both sides rather than
  * re-spelling it, so a driver added to or removed from the family cannot leave
@@ -204,6 +249,42 @@ const DECLARED_WATCH_HINTS = [
   'packages/drivers/driver-sql/src/sql-driver.ts',
   'packages/drivers/driver-sqlite-wasm/src/sqlite-wasm-driver.ts',
   'packages/drivers/driver-turso/src/turso-driver.ts',
+  'packages/drivers/driver-sql/src/sql-driver-aggregation.ts',
+  'packages/drivers/driver-sql/src/sql-driver-autonumber.ts',
+  'packages/drivers/driver-sql/src/sql-driver-balanced-group.ts',
+  'packages/drivers/driver-sql/src/sql-driver-bulk-operations.ts',
+  'packages/drivers/driver-sql/src/sql-driver-class-head.ts',
+  'packages/drivers/driver-sql/src/sql-driver-column-creation.ts',
+  'packages/drivers/driver-sql/src/sql-driver-cross-field-comparison.ts',
+  'packages/drivers/driver-sql/src/sql-driver-crud.ts',
+  'packages/drivers/driver-sql/src/sql-driver-database-helpers.ts',
+  'packages/drivers/driver-sql/src/sql-driver-date-bucket.ts',
+  'packages/drivers/driver-sql/src/sql-driver-deferred-ddl.ts',
+  'packages/drivers/driver-sql/src/sql-driver-distinct.ts',
+  'packages/drivers/driver-sql/src/sql-driver-facet-hosts.ts',
+  'packages/drivers/driver-sql/src/sql-driver-field-mapping.ts',
+  'packages/drivers/driver-sql/src/sql-driver-filter-helpers.ts',
+  'packages/drivers/driver-sql/src/sql-driver-internal-helpers.ts',
+  'packages/drivers/driver-sql/src/sql-driver-introspection.ts',
+  'packages/drivers/driver-sql/src/sql-driver-lifecycle.ts',
+  'packages/drivers/driver-sql/src/sql-driver-managed-drift.ts',
+  'packages/drivers/driver-sql/src/sql-driver-predicate-emitters.ts',
+  'packages/drivers/driver-sql/src/sql-driver-presumed-timestamp.ts',
+  'packages/drivers/driver-sql/src/sql-driver-query-plan.ts',
+  'packages/drivers/driver-sql/src/sql-driver-raw-execution.ts',
+  'packages/drivers/driver-sql/src/sql-driver-read-exit-fault.ts',
+  'packages/drivers/driver-sql/src/sql-driver-rotation.ts',
+  'packages/drivers/driver-sql/src/sql-driver-schema-introspection.ts',
+  'packages/drivers/driver-sql/src/sql-driver-schema-sync-section.ts',
+  'packages/drivers/driver-sql/src/sql-driver-schema-sync.ts',
+  'packages/drivers/driver-sql/src/sql-driver-sequence-semantics.ts',
+  'packages/drivers/driver-sql/src/sql-driver-sqlite-serialisation.ts',
+  'packages/drivers/driver-sql/src/sql-driver-top-level.ts',
+  'packages/drivers/driver-sql/src/sql-driver-transactions.ts',
+  'packages/drivers/driver-sql/src/sql-driver-transactions-section.ts',
+  'packages/drivers/driver-sql/src/sql-driver-upsert-conflict-target.ts',
+  'packages/drivers/driver-sql/src/sql-driver-window-function-builder.ts',
+  'packages/drivers/driver-sql/src/sql-driver-window-functions.ts',
 ];
 
 /**
@@ -579,6 +660,13 @@ export function analyzeSource(fileName, text) {
         }
       }
     }
+    // A module-level function is a moved method body (#29520): its `this` is
+    // the host its method hands it, so `this.getBuilder(…)` there builds the
+    // same door. Read under the function's name, which is the method's.
+    // Top-level only: a function nested in a member is walked with the member.
+    if (ts.isFunctionDeclaration(node) && node.name && ts.isSourceFile(node.parent)) {
+      visitMethod(node.name.text, node.body);
+    }
     ts.forEachChild(node, walkTop);
   };
   walkTop(sf);
@@ -638,6 +726,9 @@ const SELF_TEST_VERDICT = 'check-tenant-chokepoint self-test reached its verdict
 // does not make. The hoisted single battery is the shape PR #14896 and PR #15003
 // landed for exactly this case.
 //
+// #29520 adds a third, `moved bodies (#29520)`, opened by its own `battery()`
+// call ahead of the population declaration: the widened scan's own cases.
+//
 // ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
 // keeps a total "right" the moment a sibling grows.
 //
@@ -647,11 +738,12 @@ const SELF_TEST_VERDICT = 'check-tenant-chokepoint self-test reached its verdict
 const SELF_TEST_BATTERIES = Object.freeze({
   'check-tenant-chokepoint self-test': 17,
   'D8 null-arm rule': 24,
+  'moved bodies (#29520)': 9,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 2;
+const SELF_TEST_BATTERY_FLOOR = 3;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -972,18 +1064,72 @@ function selfTest() {
     );
   }
 
+  // ── #29520: a body moved to a sql-driver-*.ts module is still a door ──────
+  battery('moved bodies (#29520)');
+  {
+    // The shape the codemod writes: the body as a module function whose `this`
+    // is the host its method hands it.
+    const moved = (body) => analyzeSource('m.ts', `export async function door(this: Pick<H, 'getBuilder'>, object: string, options?: unknown) {\n${body}\n}\n`);
+    const unscoped = moved(`  const builder = this.getBuilder(object, options);\n  return await builder;`);
+    assert(unscoped.builders.length === 1 && violationsOf('m.ts', unscoped).length === 1,
+      'a moved body that builds and never scopes must REPORT — the module is no hiding place');
+    const scoped = moved(`  const builder = this.getBuilder(object, options);\n  this.applyTenantScope(builder, object, options);\n  return await builder;`);
+    assert(scoped.builders.length === 1 && violationsOf('m.ts', scoped).length === 0,
+      'a moved body that scopes its builder is counted and silent');
+    assert(scoped.builders[0]?.method === 'door', 'a moved body is read under its function name, which is its method\'s');
+    const inline = moved(`  return await this.getBuilder(object, options).select('*');`);
+    assert(violationsOf('m.ts', inline).some((p) => p.fatal), 'an inline getBuilder() in a moved body is fatal, as on the class');
+    // A function nested in a class member is walked with the member, once.
+    const nested = analyzeSource('t.ts', wrap(`async outer(object, options) {
+       function inner() { return 1; }
+       const builder = this.getBuilder(object, options);
+       this.applyTenantScope(builder, object, options);
+       return await builder;
+     }`));
+    assert(nested.builders.length === 1, 'a member is not counted twice');
+    // The stub's host hands the factory as a bound reference: not a call, so
+    // neither a binding nor an inline read — the call is the moved body's.
+    const stub = analyzeSource('t.ts', wrap(`async door(object, options) {
+       const host = { getBuilder: this.getBuilder.bind(this), applyTenantScope: (...a) => this.applyTenantScope(...a) };
+       return door.call(host, object, options);
+     }`));
+    assert(stub.builders.length === 0 && stub.unclassifiable.length === 0,
+      'a bound getBuilder reference in a stub is neither a door nor an unclassifiable read');
+    // The D8 rule already walks module functions; a moved arm is still refused.
+    assert(nullArmsOf('m.ts', `export function applyTenantScope(this: H, builder: any, object: string) {
+       const field = this.resolveTenantField(object);
+       builder.where(field, 'org').orWhereNull(field);
+     }`).arms.length === 1, 'D8: an IS NULL arm in a moved body reports');
+    // The population: every sql-driver-*.ts module, never a test.
+    const listed = seamModulesOf(['sql-driver.ts', 'sql-driver-crud.ts', 'sql-driver-crud.test.ts',
+      'sql-driver-x.spec.ts', 'sql-driver-types.d.ts', 'schema-drift.ts', 'sql-driver-top-level.ts']);
+    assert(JSON.stringify(listed) === JSON.stringify(['sql-driver-crud.ts', 'sql-driver-top-level.ts']),
+      `the seam population is sql-driver-*.ts minus tests, specs and declaration files (got ${listed.join(', ')})`);
+    assert(SCAN_FILES.length > 3, 'the live scan reads seam modules beside the three driver files');
+  }
+
   // ── the dispatch-gates population declaration ────────────────────────────
   battery('check-tenant-chokepoint self-test');
   const scannedPosix = SCAN_FILES.map((f) => f.split(sep).join('/'));
+  // Each failure names the exact entries and the one edit that fixes it: a new
+  // sql-driver-*.ts module lands from an unrelated PR (#29911 added
+  // sql-driver-balanced-group.ts), and its author meets this line first.
+  const undeclared = scannedPosix.filter((f) => !DECLARED_WATCH_HINTS.includes(f));
   assert(
-    scannedPosix.every((f) => DECLARED_WATCH_HINTS.includes(f)),
+    undeclared.length === 0,
     'every SCAN_FILES entry is declared for dispatch-gates — a join()-assembled path is invisible to '
-      + 'the hint extractor, which is how this gate came to declare nothing at all',
+      + 'the hint extractor, which is how this gate came to declare nothing at all. Fix: add '
+      + undeclared.map((f) => `'${f}'`).join(', ')
+      + ' to DECLARED_WATCH_HINTS in this gate (one string per module; a new sql-driver-*.ts module '
+      + 'is scanned the day it lands, so it is declared the same day)',
   );
+  const unread = DECLARED_WATCH_HINTS.filter((h) => !scannedPosix.includes(h));
   assert(
-    DECLARED_WATCH_HINTS.every((h) => scannedPosix.includes(h)),
+    unread.length === 0,
     'and nothing is declared that this gate does not read — a declaration that has drifted from the '
-      + 'scan replaces a silent gate with a lying one',
+      + 'scan replaces a silent gate with a lying one. Fix: remove '
+      + unread.map((h) => `'${h}'`).join(', ')
+      + ' from DECLARED_WATCH_HINTS in this gate (a module that was renamed or removed)',
   );
   assert(
     DECLARED_WATCH_HINTS.every((h) => !h.includes('*')),
@@ -1056,7 +1202,9 @@ function main() {
   const problems = [];
   const nullArms = [];
   let tenantPredicates = 0;
+  let armsSeen = 0;
   let discovered = 0;
+  let readDoors = 0;
   let scannedFiles = 0;
 
   for (const rel of SCAN_FILES) {
@@ -1073,10 +1221,12 @@ function main() {
     const text = readFileSync(abs, 'utf8');
     const analysis = analyzeSource(rel, text);
     discovered += analysis.builders.length;
+    readDoors += analysis.builders.filter((b) => !b.write).length;
     const posix = relative(ROOT, abs).replace(/\\/g, '/');
     problems.push(...violationsOf(posix, analysis));
     const d8 = nullArmsOf(rel, text);
     tenantPredicates += d8.predicates;
+    armsSeen += d8.arms.length;
     nullArms.push(...nullArmViolationsOf(posix, d8.arms));
   }
 
@@ -1156,6 +1306,14 @@ predicate: do it outside the driver's tenant scope, or record the exemption in
 NULL_ARM_EXEMPT in scripts/check-tenant-chokepoint.mjs — which reverses an ADR
 decision and needs a superseding ADR first.`);
   }
+
+  // The readings, on one line a base and a head can be compared by (#29520):
+  // a split that moves a door out of the files read changes one of them.
+  console.log(
+    `check:tenant-chokepoint readings: ${discovered} getBuilder() binding(s), ${readDoors} read door(s), ` +
+    `${discovered - readDoors} insert builder(s), ${tenantPredicates} tenant predicate(s), ` +
+    `${armsSeen} D8 arm(s) across ${scannedFiles} file(s)`,
+  );
 
   if (problems.length > 0 || nullArms.length > 0) process.exit(1);
 

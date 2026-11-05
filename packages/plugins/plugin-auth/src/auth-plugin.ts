@@ -68,11 +68,13 @@ import {
 } from './identity-write-guard.js';
 import { registerLastAdminGuard } from './last-admin-guard.js';
 import { registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
+import { registerOrganizationMfaEnrollmentGuard } from './organization-mfa-enrollment-guard.js';
 import { registerPersonalViewHooks } from './personal-view-hooks.js';
 import { registerUserPreferenceHooks } from './user-preference-hooks.js';
 import { personalViewCallerResolver, registerPersonalViewRoutes, PERSONAL_VIEW_REMOVE_ROUTE, type PersonalViewEngine } from './personal-view-routes.js';
 import { registerMembershipEndedSessionTrigger } from './membership-ended-session.js';
 import { registerMemberRoleCanonicalization } from './member-role-canonical.js';
+import { registerUserLocaleCaseFold } from './sys-user-locale-case.js';
 import { registerSessionFirstActivity } from './session-first-activity.js';
 import { registerExternalMembershipGuard } from './external-membership.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
@@ -81,7 +83,7 @@ import { runSetInitialPassword } from './set-initial-password.js';
 import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runVerifyDomain, type AuthRequestHandler } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
 import { runSysSessionRevoke, sysSessionRevokeDepsFor } from './sys-session-revoke.js';
-import { runOneTimeTokenHandoff } from './one-time-token-handoff.js';
+import { resolveHandoffSignInEntry, runOneTimeTokenHandoff } from './one-time-token-handoff.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import {
   seedCreatedOrganizationCurrency,
@@ -1847,6 +1849,15 @@ export class AuthPlugin implements Plugin {
           packageId: 'com.objectstack.plugin-auth.member-role-canonical',
           logger: ctx.logger,
         });
+        // `sys_user.locale` is stored in its BCP-47 case (`zh-cn` → `zh-CN`) on
+        // every ObjectQL write, at priority 5 like the role fold above: the
+        // console picks a UI language by exact match, so a mis-cased stored
+        // tag rendered English. The fold is `LocaleSchema`'s, the one #29833
+        // gave translation locales. See sys-user-locale-case.ts.
+        registerUserLocaleCaseFold(engine, {
+          packageId: 'com.objectstack.plugin-auth.user-locale-case',
+          logger: ctx.logger,
+        });
         // [Ruling 6355206139 E5/E6] The `external` role is held alone, and its
         // holder is never placed in the organization's business units — at
         // priority 6, judging the canonical spelling the hook above wrote.
@@ -1867,6 +1878,14 @@ export class AuthPlugin implements Plugin {
         registerApiKeyRestoreGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.api-key-restore-guard',
           logger: ctx.logger,
+        });
+        // [#30201] ADR-0069 D3 — an organization's `require_mfa` is refused
+        // while nobody can enroll a second factor, the pairing the global
+        // `auth.mfa_required` switch gets from its settings piece below. Asks
+        // the live manager per write. See organization-mfa-enrollment-guard.ts.
+        registerOrganizationMfaEnrollmentGuard(engine, {
+          packageId: 'com.objectstack.plugin-auth.organization-mfa-enrollment-guard',
+          isTwoFactorEnabled: () => this.authManager?.isTwoFactorEnabled() ?? false,
         });
         // A reader's own named list views: the body is judged on every save as
         // a ListView for the row's own object. See personal-view-hooks.ts.
@@ -4020,10 +4039,13 @@ export class AuthPlugin implements Plugin {
     // the app redeems at better-auth's own `/one-time-token/verify`, bound to
     // the shell's PKCE challenge so an intercepted callback cannot be
     // redeemed. Mounted unconditionally: with no registered scheme every
-    // target is refused with a 400 that says how to register one. A session
-    // signed in within the last five minutes is required, and a cross-site
-    // navigation is refused (ruling A); the reasons for every refusal live in
+    // target is refused with a 400 that says how to register one. Only a session
+    // signed in within the last five minutes is handed off, and a cross-site
+    // navigation is refused (ruling A). A page navigation without such a session
+    // goes to this deployment's sign-in page and comes back, so the app opens this
+    // route and never names the Console's. The reasons for every answer live in
     // `one-time-token-handoff.ts`. Ledgered in auth-route-ledger.ts.
+    let reportedNoHandoffSignInPage = false;
     rawApp.get(`${basePath}/one-time-token/handoff`, async (c: any) => {
       try {
         const manager = this.authManager!;
@@ -4040,6 +4062,25 @@ export class AuthPlugin implements Plugin {
               const api: any = await manager.getApi();
               return api.generateOneTimeToken({ headers });
             },
+            signInEntry: (headers) =>
+              resolveHandoffSignInEntry({
+                signInPageUrl: manager.getConsoleUrl('/login'),
+                authBaseUrl: manager.getAuthIssuer(),
+                authMountPath: basePath,
+                requestUrl: c.req.url,
+                requestHost: headers.get('host'),
+                server: rawApp,
+                serverEnv: c.env,
+                onUnserved: (path, reason) => {
+                  if (reportedNoHandoffSignInPage) return;
+                  reportedNoHandoffSignInPage = true;
+                  ctx.logger.warn(
+                    `[AuthPlugin] one-time-token/handoff: this server does not serve a sign-in page at ${path} (${reason}), ` +
+                      'so a signed-out browser that opens the mobile sign-in hand-off sees a JSON 401 instead of a sign-in form. ' +
+                      'Mount the Console, or set uiBasePath to where it is mounted. Reported once.',
+                  );
+                },
+              }),
           },
           { queries: (c.req.queries() ?? {}) as Record<string, string[]>, headers: c.req.raw.headers },
         );

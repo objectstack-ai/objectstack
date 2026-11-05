@@ -57,6 +57,18 @@ export type CelFieldRole = Exclude<FieldRole, 'template'>;
  */
 export type ExpressionSourceKind = 'array' | 'object' | 'number' | 'boolean' | 'bigint' | 'symbol' | 'function';
 
+/**
+ * The params every `type-mismatch*` code interpolates: the CEL operand types,
+ * the `operator`, what the field holds, and the field as written when known.
+ * The four codes differ in the outcome their sentence states, never in params.
+ */
+interface TypeMismatchParams {
+  readonly operands: string;
+  readonly operator: string;
+  readonly held: 'text' | 'boolean';
+  readonly reference?: string;
+}
+
 /** Code → the params its message interpolates. The keys ARE the closed set. */
 export interface ExpressionRefusalParams {
   /** An envelope whose `source` is present but is not text. */
@@ -152,16 +164,35 @@ export interface ExpressionRefusalParams {
   'bare-reference': { readonly name: string };
   /**
    * Arithmetic on a date field against a number. `operands` are the CEL
-   * operand types; `reference` is the field as written, when it is known.
+   * operand types; `reference` is the field as written, when it is known. A
+   * flattened (flow) condition is `date-arithmetic-run-fails` /
+   * `date-arithmetic-run-may-fail`.
    */
   'date-arithmetic': { readonly operands: string; readonly reference?: string };
   /**
    * Arithmetic on a date field's runtime TEXT that the evaluator cannot answer
    * (`record.end_date - record.start_date`), judged with the field declared as
    * that text. `operands` are the CEL operand types (the text is `DateText`);
-   * `reference` is the field as written, when it is known.
+   * `reference` is the field as written, when it is known. A flattened (flow)
+   * condition is `date-text-arithmetic-run-fails` / `-run-may-fail`.
    */
   'date-text-arithmetic': { readonly operands: string; readonly reference?: string };
+  /**
+   * [#30016] ERROR: `date-arithmetic` in a flow condition whose run is proven
+   * to hold the field there (`faultOutcome: 'run-fails'`) — the condition
+   * faults, so the run fails at it. It never reads null.
+   */
+  'date-arithmetic-run-fails': { readonly operands: string; readonly reference?: string };
+  /**
+   * [#30016] ERROR: `date-arithmetic` in any other flow condition — it faults,
+   * and so fails the run, wherever the name holds the field's date when the
+   * condition runs; what the run binds under the name is not proven there.
+   */
+  'date-arithmetic-run-may-fail': { readonly operands: string; readonly reference?: string };
+  /** [#30016] ERROR: `date-text-arithmetic`, at a `date-arithmetic-run-fails` site. */
+  'date-text-arithmetic-run-fails': { readonly operands: string; readonly reference?: string };
+  /** [#30016] ERROR: `date-text-arithmetic`, at a `date-arithmetic-run-may-fail` site. */
+  'date-text-arithmetic-run-may-fail': { readonly operands: string; readonly reference?: string };
   /**
    * A formula that computes a `google.protobuf.Duration`
    * (`today() - record.start_date`), which a field reads as `{}`. `reference`
@@ -170,14 +201,38 @@ export interface ExpressionRefusalParams {
   'date-duration-value': { readonly reference?: string };
   /**
    * WARNING, never an error: a text or boolean field used with an arithmetic
-   * or ordering `operator` against a number.
+   * or ordering `operator` against a number, at a `record`-scoped site where a
+   * fault reads null (a formula field) or whose fault outcome the caller did
+   * not declare. A flattened (flow) condition is `type-mismatch-run-may-fail`.
    */
-  'type-mismatch': {
-    readonly operands: string;
-    readonly operator: string;
-    readonly held: 'text' | 'boolean';
-    readonly reference?: string;
-  };
+  'type-mismatch': TypeMismatchParams;
+  /**
+   * [#29926] ERROR: the same mismatch at a site that FAILS CLOSED — the
+   * expression faulting refuses the write (or aborts the operation a hook
+   * guards). Served as `type-mismatch` with `outcome: 'fail-closed'` by #29904
+   * until this code gave the sentence its own name.
+   */
+  'type-mismatch-fail-closed': TypeMismatchParams;
+  /**
+   * [#29926] ERROR: the same mismatch in a record-triggered flow's start or
+   * edge condition — the run fails at the condition, the write that fired it
+   * lands.
+   */
+  'type-mismatch-run-fails': TypeMismatchParams;
+  /**
+   * [#29926] ERROR: the same mismatch in an advisory (`warning` / `info`)
+   * validation rule — the rule is skipped, the write proceeds, and the
+   * advisory never fires.
+   */
+  'type-mismatch-fail-open': TypeMismatchParams;
+  /**
+   * [#29959] WARNING, never an error: the same mismatch in a flow condition
+   * whose caller declared no fault outcome — a flow that is not
+   * record-triggered, or a node condition nothing evaluates. A flow condition
+   * that faults fails the run (it never reads null), but what the run binds
+   * under the name is not proven to be the field's value there.
+   */
+  'type-mismatch-run-may-fail': TypeMismatchParams;
   /**
    * WARNING, never an error: a bare identifier in a flattened condition that
    * is one typo away from a field. Absent `objectName` reads "the trigger object".
@@ -238,8 +293,16 @@ const CODE_TABLE = {
   'bare-reference': true,
   'date-arithmetic': true,
   'date-text-arithmetic': true,
+  'date-arithmetic-run-fails': true,
+  'date-arithmetic-run-may-fail': true,
+  'date-text-arithmetic-run-fails': true,
+  'date-text-arithmetic-run-may-fail': true,
   'date-duration-value': true,
   'type-mismatch': true,
+  'type-mismatch-fail-closed': true,
+  'type-mismatch-run-fails': true,
+  'type-mismatch-fail-open': true,
+  'type-mismatch-run-may-fail': true,
   'field-near-miss': true,
   'traversal-bare-and-traversed': true,
   'traversal-multi-hop': true,

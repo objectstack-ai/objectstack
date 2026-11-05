@@ -111,6 +111,7 @@ import { validatePageFieldBindings } from './validate-page-field-bindings.js';
 import { validatePageVisualizationBindings } from './validate-page-visualization-bindings.js';
 import { validateChartBindings } from './validate-chart-bindings.js';
 import { validateReportDateRange } from './validate-report-date-range.js';
+import { validateReportRuntimeFilters } from './validate-report-runtime-filter.js';
 import { validateDatasetReferences } from './validate-dataset-references.js';
 import { validateMappingTargetFields } from './validate-mapping-target-fields.js';
 import { validateNavAccess } from './validate-nav-access.js';
@@ -281,7 +282,16 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // `assertSortFieldsExist` (#6994) and `assertOrderByIsMaterializable` (#7095)
   // both answer `400 INVALID_SORT` — and a view's sort is its FIRST fetch, so
   // the refusal is the whole view, on every load, traced to nothing.
-  { name: 'validateSortableFields', runtimeTypes: ['flow', 'view'], run: validateSortableFields },
+  //
+  // [#30023] `page` joins: since the projection's `author-declared` verdict
+  // the member also walks every stored PAGE sort (element `dataSource.sort`, a
+  // block's own `sort`, `interfaceConfig.sort`, `record.sort`) and judges it
+  // by the sortability projection alone. It resolves only against
+  // `stack.objects`, which the per-write page snapshot carries, so it has no
+  // missing-collection false-positive channel — the #9313 reason, one write
+  // type over. It is the only member that declares `page`, so a page write
+  // dispatches nothing else from this suite.
+  { name: 'validateSortableFields', runtimeTypes: ['flow', 'view', 'page'], run: validateSortableFields },
   // [#14107] The REST of the same list view's field surface. The two members
   // above own `sort` and `searchableFields`; every OTHER field-naming position
   // on a list view — `columns`, filter keys, `grouping`, `rowColor`,
@@ -514,6 +524,23 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // report declares `dateRange`, so 0 findings by construction, and the door
   // test's lit probes are refused (`runtime-gate.inert-type-writes.test.ts`).
   { name: 'validateReportDateRange', runtimeTypes: ['flow', 'report'], run: validateReportDateRange },
+  // [#29900] The same report, its `runtimeFilter` KEYS: each resolved on the
+  // bound dataset's object graph by `judgeDatasetFilterKeys`, the judgement the
+  // dashboard twin `widget-filter-field-unknown` runs on a widget's own
+  // `filter` (a dimension name of the dataset is accepted too: the dataset door
+  // binds a bare key through the cube's members first). Without it a report
+  // whose filter names a field the object lacks published 200 and every reader
+  // got "Dataset query failed", while the identical key on a widget was refused.
+  //
+  // `report` joins the `['flow']` default for its siblings' reason: the two
+  // collections it resolves into, `stack.datasets` and `stack.objects`, are both
+  // carried by the per-write report snapshot (`RuntimeStackContext`), and its
+  // skips (a dataset that resolves to nothing, an object this snapshot does not
+  // carry, one with no readable field map, a registry-injected column) keep a
+  // partial snapshot from manufacturing a refusal. A refusal NARROWING: MEASURED
+  // over the shipped report corpus before crossing (see the PR), with lit
+  // probes refused at the door (`runtime-gate.inert-type-writes.test.ts`).
+  { name: 'validateReportRuntimeFilters', runtimeTypes: ['flow', 'report'], run: validateReportRuntimeFilters },
   // [#14105] One level BELOW the two members above it. `validateChartBindings`
   // and `validateWidgetBindings` resolve a presentation's binding against the
   // dataset (#7529/#8902); this one resolves the DATASET's own references —

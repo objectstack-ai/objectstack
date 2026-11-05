@@ -16,19 +16,24 @@
  * What this file proves, against the registry a deployed app would really run:
  *
  *  1. BEFORE-PICTURE PRESERVED — direction B keeps injecting: the federated
- *     `showcase_ext_customer` still registers all 8 platform anchors (the
- *     card's 7 plus the ownership `queue`, ADR-0142 D3) over the
- *     4-column remote table, byte-identical to the shipped definition tables
- *     (no `provisioned` key in any served or registered field definition —
- *     the #7865 fence: the marker changes what no consumer accepts).
- *  2. THE MARKER — the 8 anchors, and only they, answer
+ *     `showcase_ext_customer` still registers the 7 platform anchors it is
+ *     owed (the card's 7 plus the ownership `queue`, ADR-0142 D3, less the
+ *     tenant anchor — see 0 below) over the 4-column remote table,
+ *     byte-identical to the shipped definition tables (no `provisioned` key in
+ *     any served or registered field definition — the #7865 fence: the marker
+ *     changes what no consumer accepts).
+ *  0. THE DECLARED SCOPE — [ADR-0015 §10] under a walled posture every
+ *     external object states its organization scope, and the showcase's
+ *     declares `tenancy: { enabled: false }` (its remote table carries no
+ *     organization column), so the registry injects NO `organization_id` into
+ *     it: that column's provenance answers `'absent'`, not a phantom anchor.
+ *  2. THE MARKER — the 7 anchors, and only they, answer
  *     `'injected-unprovisioned'`; the local control answers
  *     `'injected-provisioned'`; declared columns answer `'author'`.
- *  3. GUARD PARITY — the marker agrees with the #7859 Layer-0 guard's live
- *     behaviour on the same boot (no predicate for the federated object, wall
- *     intact on the local control), through plugin-security's public surface —
- *     the guard itself is deliberately untouched (opportunistic convergence,
- *     per the ruling).
+ *  3. GUARD PARITY — the marker agrees with the Layer-0 wall's live behaviour
+ *     on the same boot (no predicate for the federated object, which declared
+ *     itself shared; wall intact on the local control), through
+ *     plugin-security's public surface.
  *  4. `/meta` NO-REGRESSION — the served document (the post-injection document,
  *     #6562) reports the same field set as the registry and carries no new
  *     keys and no `_diagnostics` invalidity.
@@ -56,9 +61,12 @@ const FEDERATED = 'showcase_ext_customer';
 /** A LOCAL showcase object — the control: its anchors ARE provisioned. */
 const LOCAL = 'showcase_project';
 
-/** The 7 anchors the #7865 card measured on this exact object. */
-const SEVEN_ANCHORS = [
-  'organization_id',
+/**
+ * The anchors the #7865 card measured on this exact object, less the tenant
+ * anchor: since the object declares `tenancy: { enabled: false }` (ADR-0015
+ * §10) the registry injects no `organization_id` into it.
+ */
+const SIX_ANCHORS = [
   'created_at',
   'created_by',
   'updated_at',
@@ -67,8 +75,8 @@ const SEVEN_ANCHORS = [
   'owning_business_unit_id',
 ] as const;
 
-/** Every injected anchor today: the measured seven plus the ownership `queue` (ADR-0142 D3). */
-const INJECTED_ANCHORS = [...SEVEN_ANCHORS, 'queue'] as const;
+/** Every injected anchor today: the measured six plus the ownership `queue` (ADR-0142 D3). */
+const INJECTED_ANCHORS = [...SIX_ANCHORS, 'queue'] as const;
 
 /** The remote table's real columns, as the showcase declares them. */
 const DECLARED = ['name', 'email', 'region', 'lifetime_value'] as const;
@@ -125,10 +133,20 @@ describe('[#7865] injected-anchor provenance on a real showcase boot', () => {
     await stack?.stop?.();
   });
 
-  it('BEFORE-PICTURE: the registry still injects all 8 anchors into the federated object (direction B keeps injecting)', () => {
+  it('BEFORE-PICTURE: the registry still injects all 7 anchors into the federated object (direction B keeps injecting)', () => {
     const names = Object.keys(fieldMap(federated));
     for (const anchor of INJECTED_ANCHORS) expect(names, 'anchors').toContain(anchor);
     for (const declared of DECLARED) expect(names, 'declared').toContain(declared);
+  });
+
+  it('THE DECLARED SCOPE: the shipped external object states its organization scope, so no tenant anchor is injected', () => {
+    // [ADR-0015 §10] Under a walled posture every external object states its
+    // organization scope. The showcase's remote `customers` table carries no
+    // organization column, so the object declares itself shared — and a declared
+    // opt-out is not injected over: the column is absent, not a phantom anchor.
+    expect((federated as { tenancy?: { enabled?: boolean } }).tenancy?.enabled).toBe(false);
+    expect(Object.keys(fieldMap(federated))).not.toContain('organization_id');
+    expect(resolveInjectedColumnProvenance(federated, 'organization_id')).toBe('absent');
   });
 
   it('FENCE: every registered anchor definition is byte-identical to the shipped table — the marker adds nothing to the data', () => {
@@ -139,7 +157,7 @@ describe('[#7865] injected-anchor provenance on a real showcase boot', () => {
     }
   });
 
-  it('THE MARKER: the 8 anchors — and only they — are unprovisioned on the federated object', () => {
+  it('THE MARKER: the 7 anchors — and only they — are unprovisioned on the federated object', () => {
     expect(platformProvisionsStorage(federated)).toBe(false);
     expect(unprovisionedInjectedColumns(federated).sort()).toEqual([...INJECTED_ANCHORS].sort());
     for (const anchor of INJECTED_ANCHORS) {
@@ -161,16 +179,18 @@ describe('[#7865] injected-anchor provenance on a real showcase boot', () => {
     expect(resolveInjectedColumnProvenance(localControl, 'owner_id')).toBe('injected-provisioned');
   });
 
-  it('GUARD PARITY (#7859, behavioural): the marker and the live Layer-0 verdict agree on both objects', async () => {
-    // The guard is NOT rewritten by #7865 (opportunistic convergence, per the
-    // ruling) — so its live behaviour is the reference the marker must match:
-    // marker says unprovisioned ⇒ Layer 0 composes no organization_id
-    // predicate; marker says provisioned ⇒ the wall stands.
+  it('GUARD PARITY (behavioural): the declared scope and the live Layer-0 verdict agree on both objects', async () => {
+    // The wall's live behaviour is the reference the marker must match: the
+    // federated object declared itself shared and carries no organization
+    // column ⇒ Layer 0 composes no organization_id predicate; the local
+    // control's anchor is provisioned ⇒ the wall stands. (An external object
+    // stating NO scope is a third case — denied, not shared — pinned in
+    // `federated-rls-injectors.dogfood.test.ts`.)
     const ctx = { userId: 'usr_dogfood_member', tenantId: 'org_alpha', positions: [] as string[] };
     const federatedFilter = await security.getReadFilter(FEDERATED, ctx);
     expect(
       mentionsOrgColumn(federatedFilter),
-      `marker says unprovisioned ⇒ no tenant predicate, got ${JSON.stringify(federatedFilter)}`,
+      `declared shared ⇒ no tenant predicate, got ${JSON.stringify(federatedFilter)}`,
     ).toBe(false);
     const localFilter = await security.getReadFilter(LOCAL, ctx);
     expect(

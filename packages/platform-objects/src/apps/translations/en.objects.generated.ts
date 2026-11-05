@@ -369,7 +369,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       revoke_reason: {
         label: "Revoke Reason",
-        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, user_revoked, admin, organization_membership_ended, admin_password_reset, …)."
+        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
       },
       active_organization_id: {
         label: "Active Organization"
@@ -3388,7 +3388,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       namespace: {
         label: "Namespace",
-        help: "Manifest namespace (e.g. mail, branding, feature_flags)."
+        help: "Manifest namespace (e.g. mail, branding, storage)."
       },
       key: {
         label: "Key",

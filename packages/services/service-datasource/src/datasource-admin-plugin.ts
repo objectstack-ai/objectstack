@@ -616,13 +616,40 @@ export class DatasourceAdminServicePlugin implements Plugin {
       // [#27750] The rebuild carries the objects bound to the NEW record, the
       // way `registerPool` does on create: a changed `config` can open a new,
       // empty database, and without them the bound objects had no table there.
+      //
+      // [#29879] It reports whether the previous pool was kept, which the
+      // update door reads to store none of a configuration that never came
+      // into force. The reading is the state the rebuild left: the new
+      // configuration is not available, yet a driver still answers the name —
+      // `reconnect` put the previous pool back, the only driver a failed
+      // rebuild leaves registered. The pool record follows the pool, so a
+      // later cluster convergence compares the shared row against the
+      // configuration actually serving.
       reregisterPool: async (previous, next) => {
+        const connection = this.connection;
+        if (!connection) return { previousPoolKept: false };
         this.livePoolRecords.set(next.name, next);
-        await this.connection?.reconnect(next, {
-          objects: managedObjectsBoundTo(next),
-          previous,
-          context: { origin: next.origin ?? 'runtime', trigger: 'runtime-admin' },
-        });
+        let failure: { error: unknown } | undefined;
+        try {
+          await connection.reconnect(next, {
+            objects: managedObjectsBoundTo(next),
+            previous,
+            context: { origin: next.origin ?? 'runtime', trigger: 'runtime-admin' },
+          });
+        } catch (error) {
+          failure = { error };
+        }
+        const engine = engineOf() as ConnectionEngineLike | undefined;
+        const previousPoolKept =
+          connection.getConnectionState(next.name)?.availability !== 'available'
+          && engine?.getDriverByName?.(next.name) !== undefined;
+        if (!previousPoolKept) {
+          if (failure) throw failure.error;
+          return { previousPoolKept };
+        }
+        this.livePoolRecords.set(next.name, previous);
+        if (failure) logger?.warn(`reregisterPool('${next.name}') failed`, failure.error);
+        return { previousPoolKept };
       },
 
       // [#13805] The receive half of the datasource cluster bridge — see

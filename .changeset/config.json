@@ -49,6 +49,7 @@
       "@objectstack/plugin-security",
       "@objectstack/plugin-sharing",
       "@objectstack/service-sms",
+      "@objectstack/service-push",
       "@objectstack/plugin-webhooks",
       "@objectstack/trigger-record-change",
       "@objectstack/trigger-api",

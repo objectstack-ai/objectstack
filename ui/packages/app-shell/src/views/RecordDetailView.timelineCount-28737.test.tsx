@@ -42,7 +42,7 @@ vi.mock('sonner', () => ({
   }),
 }));
 
-import { MetadataCtx } from '@object-ui/react';
+import { MetadataCtx, useMutationInvalidationBridge } from '@object-ui/react';
 import { RelatedCountStore } from '@object-ui/components';
 import { ObjectStackAdapter } from '@object-ui/data-objectstack';
 import { __clearRecordEditableCache } from '../../../plugin-detail/src/useRecordEditable';
@@ -128,6 +128,7 @@ function pageAnswer(id: string, body: any, answers: Answers) {
 }
 
 function answerFor(h: Held, answers: Answers): unknown {
+  if (h.method === 'PATCH') return { success: true, data: { object: OBJECT, id: 'c1', record: { id: 'c1', name: 'Contact c1', account: 'a1', ...h.body } } };
   const meta = /\/api\/v1\/meta\/object\/([^/?]+)/.exec(h.path);
   if (meta) return { success: true, data: ALL.find((o) => o.name === meta[1]) ?? null };
   const page = /\/api\/v1\/data\/[^/?]+\/([^/?]+)\/page$/.exec(h.path);
@@ -184,13 +185,20 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-async function boot(answers: Answers = {}, entry = `/apps/demo/${OBJECT}/record/c1`) {
+// The console's bridge from a dataSource write to the invalidation bus
+// (`AppContent` mounts it once): the edit dialog's save reaches the page by it.
+function Bridge({ dataSource }: { dataSource: unknown }) {
+  useMutationInvalidationBridge(dataSource);
+  return null;
+}
+
+async function boot(answers: Answers = {}, entry = `/apps/demo/${OBJECT}/record/c1`, objects: readonly unknown[] = ALL, embedded = false) {
   const { fetch, held } = heldTransport(answers);
   vi.stubGlobal('fetch', fetch);
   const ds = new ObjectStackAdapter({ baseUrl: BASE, fetch, autoReconnect: false });
   await ds.connect();
   const metadata = {
-    objects: ALL, pages: [], loading: false, error: null,
+    objects, pages: [], loading: false, error: null,
     refresh: async () => {}, invalidate: () => {},
     ensureType: async () => [], getItem: async () => null, getItemsByType: () => [],
   } as never;
@@ -198,7 +206,8 @@ async function boot(answers: Answers = {}, entry = `/apps/demo/${OBJECT}/record/
     <React.StrictMode>
       <MemoryRouter initialEntries={[entry]}>
         <MetadataCtx.Provider value={metadata}>
-          <RecordDetailView dataSource={ds as never} objects={ALL as never} onEdit={() => {}} objectNameOverride={OBJECT} recordIdOverride="c1" />
+          <Bridge dataSource={ds} />
+          <RecordDetailView dataSource={ds as never} objects={objects as never} onEdit={() => {}} objectNameOverride={OBJECT} recordIdOverride="c1" embedded={embedded} />
         </MetadataCtx.Provider>
       </MemoryRouter>
     </React.StrictMode>,
@@ -270,5 +279,90 @@ describe('objectstack#28737 — the 动态 count is the server\'s, and the page 
     await settle(held);
     // One comment + five activity rows: what the page holds, not the record's stream.
     expect(chipOf(view.container)).toBe('6');
+  });
+});
+
+/**
+ * objectstack#29878 — the page's `timeline` ask counts the field changes when
+ * the record's object declares `enable.trackHistory` and the objects the view
+ * is handed hold `sys_audit_log` (the record route asks it by name for such an
+ * object: `appObjectScope.ts`). Without the audit object in hand it asks none.
+ */
+describe('objectstack#29878 — the timeline ask counts the field changes of a tracked object', () => {
+  const tracked = { ...contactDef, enable: { ...contactDef.enable, trackHistory: true } };
+  const auditDef = { name: 'sys_audit_log', label: 'Audit Log', fields: { id: { label: 'Id', type: 'text' } } };
+
+  it('with sys_audit_log in the objects, the page asks fieldChanges: true', async () => {
+    const { held, open } = await boot({ timeline: { total: 3 } }, undefined, [tracked, accountDef, childDef, auditDef]);
+    open();
+    await settle(held);
+    const [page] = held.filter(isPage);
+    expect(page.body.timeline).toEqual({ discussion: true, activity: true, fieldChanges: true });
+  });
+
+  it('CONTROL: without sys_audit_log in the objects, it asks fieldChanges: false', async () => {
+    const { held, open } = await boot({ timeline: { total: 3 } }, undefined, [tracked, accountDef, childDef]);
+    open();
+    await settle(held);
+    const [page] = held.filter(isPage);
+    expect(page.body.timeline).toEqual({ discussion: true, activity: true, fieldChanges: false });
+  });
+});
+
+/**
+ * objectstack#30035 — a save through the edit dialog (the adapter's `update`,
+ * whose MutationEvent the console's bridge puts on the invalidation bus) reads
+ * the 动态 stream again: its count and its rows hold the activity row the save
+ * wrote, with no reload, on the record page and in the drawer. The server
+ * writes that row inside the update (plugin-audit's `afterUpdate` writer, which
+ * the engine awaits before it answers), so the answer to one ask after the
+ * save holds it; nothing polls.
+ */
+describe('objectstack#30035 — the 动态 stream is read again after a save', () => {
+  const UPDATED = { ...ACTIVITY, id: 'ac2', type: 'updated', summary: 'changed the amount', timestamp: '2026-10-03T10:00:00.000Z' };
+
+  async function saveAndRead(embedded: boolean) {
+    const answers: Answers = { activity: { total: 1, records: [ACTIVITY] }, timeline: { total: 2 } };
+    const { held, open, ds } = await boot(answers, undefined, ALL, embedded);
+    const view = open();
+    await settle(held);
+    expect(chipOf(view.container)).toBe('2');
+    expect(view.container.textContent).not.toContain('changed the amount');
+    const before = held.length;
+
+    // The server's state after the save: the update wrote its activity row.
+    answers.activity = { total: 2, records: [UPDATED, ACTIVITY] };
+    answers.timeline = { total: 3 };
+    await act(async () => { void ds.update(OBJECT, 'c1', { name: 'Renamed' }); });
+    await settle(held);
+    return { view, after: held.slice(before) };
+  }
+
+  for (const [surface, embedded] of [['the record page', false], ['the drawer', true]] as const) {
+    it(`${surface}: the count and the rows hold the save's activity row without a reload`, async () => {
+      const { view, after } = await saveAndRead(embedded);
+      expect(chipOf(view.container)).toBe('3');
+      expect(view.container.textContent).toContain('changed the amount');
+      // One ask of the streams the open asked, and only those: no related
+      // list, verdict, projection or approval rides it.
+      const rereads = after.filter(isPage);
+      expect(rereads).toHaveLength(1);
+      expect(rereads[0].body).toEqual({
+        related: [],
+        discussion: true,
+        activity: { top: 5 },
+        timeline: { discussion: true, activity: true, fieldChanges: false },
+      });
+    });
+  }
+
+  it('a change to another record of the object reads nothing again', async () => {
+    const { held, open, ds } = await boot({ activity: { total: 1, records: [ACTIVITY] }, timeline: { total: 2 } });
+    open();
+    await settle(held);
+    const before = held.length;
+    await act(async () => { void ds.update(OBJECT, 'c2', { name: 'Other' }); });
+    await settle(held);
+    expect(held.slice(before).filter(isPage)).toEqual([]);
   });
 });

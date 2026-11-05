@@ -431,6 +431,12 @@ than guarding it to `null`. To match an empty field, write the literal `null`
 operator map, `{ dialect: { $eq: 'x' } }`, since an object naming a string
 `dialect` at an operand is read as an envelope.
 
+**A computed operand is a value, never a query operator**: a string, number,
+bigint, boolean or date, or at an `$in` / `$nin` / `$between` comparand a list
+of them with no empty entry. Anything else fails the node as a guard before the
+query runs. Make the expression evaluate to the compared value (for a record,
+its `id`), and write conditions in the filter itself.
+
 **Where an envelope is data, the remedy names none there.** An envelope
 evaluates only as the top-level value of a value slot — `fields`,
 `assignments`, a callee's `input` / `inputs`, a screen's `defaults`,
@@ -568,6 +574,57 @@ would send.
 <Callout type="warn" title="Do not put a secret in an http node's url or headers">
 A flow definition, including an `http` node's `url` and `headers`, is served to every member who can read flows. A token, API key or signed webhook url written there is readable by all of them. Route an outbound credential by where it sits, and call the connector with a `connector_action` node instead — see [Connectors](/docs/automation/connectors#authentication). A credential in a header goes to a declarative connector with `bearer`, `basic` or `api-key` auth, whose `auth.credentialRef` names the secret. A key in the query string goes to `api-key` auth with `paramName`. No `credentialRef` variant carries a secret in the url path, so an incoming-webhook url (whose path is the secret) cannot be routed that way: call the service through a token-authenticated connector instead, such as the `slack` connector, whose bot token is supplied to the plugin by host code rather than written in the flow (it is registered by that plugin, not declared as a `connectors:` instance). Otherwise such a url is served with the definition. Only `signingSecret` and a start node's `secret` are kept out of a flow saved through the metadata API: the metadata save door stores each in a write-only, encrypted flow credential store, a read never returns it, and the engine reads it only to verify an inbound post or sign an outbound request. A flow that ships in a package names its inbound hook secret instead of carrying it: the start node's `config.secretRef` holds the name the deployment fills (an environment variable of that name in the open tier, resolved through the same credential resolver as a connector's `auth.credentialRef`), and the engine reads it at every post, so no credential is published with the package. A post that arrives while the name has no value is answered `503`, never verified. The reference is a name, not a credential: it is served as written, it may not sit beside a literal `secret`, and it may not name a variable in the platform's `OS_` namespace. A packaged flow that carries a literal keeps it in its package source; the literal is withheld when the definition is served, and a credential store row for that flow, where one exists, wins when the engine verifies or signs. `url` and `headers` are stored and served as written.
 </Callout>
+
+#### An inbound hook that verifies its sender's own signature — `config.signature`
+
+By default an `api` flow's hook admits a post only by ObjectStack's own
+`x-objectstack-signature`. A vendor that signs its callbacks its own way
+(DocuSign Connect's `X-DocuSign-Signature-1`, a Stripe-style `t=…,v1=…`
+header, a GitHub-style `sha256=` header) is admitted by declaring how it signs
+on the start node, as `config.signature`, beside the `config.secretRef` that
+names the key:
+
+```ts
+export const EnvelopeStatus = defineFlow({
+  name: 'envelope_status', label: 'Envelope status', type: 'api', runAs: 'system',
+  nodes: [
+    { id: 'start', type: 'start', label: 'DocuSign Connect', config: {
+      hookId: 'docusign',
+      secretRef: 'DOCUSIGN_CONNECT_KEY',
+      signature: { signs: 'body', header: 'X-DocuSign-Signature-1', algorithm: 'hmac-sha256', encoding: 'base64' },
+    } },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [{ id: 'e1', source: 'start', target: 'end' }],
+});
+```
+
+`signs` says what the sender signs, and picks the form:
+
+| `signs` | The sender signs | The header carries | Replay window |
+|:--|:--|:--|:--|
+| `body` | the raw body alone (DocuSign Connect; GitHub-style with `prefix: 'sha256='`) | the one digest, after `prefix` when one is declared | none: the sender signs no time, so a captured post verifies again while the key is unchanged |
+| `timestamp.body` | `<t>.<raw body>` (Stripe-style) | `NAME=value` elements: one `timestampElement` (`t`) and one or more `digestElement`s (`v1`, one per key while the sender rolls its key) | the same 300 seconds as `x-objectstack-signature` |
+
+`header` is matched without regard to case; a field the sender repeats is
+read as its one value, the copies joined with `, `, so a body-only header sent
+twice does not verify. `algorithm` is `hmac-sha256`, `encoding` is `hex` or
+`base64`, and the digest must decode to the 32 bytes of the HMAC, compared in
+constant time over the body exactly as received. The key is only ever the one
+`config.secretRef` names, read at every post like any hook secret (`503` while
+it has no value); a literal `secret` beside `signature` is refused.
+
+A declared scheme **replaces** the `x-objectstack-signature` check for its hook:
+the hook has that one verifier, so a post that carries only a valid
+`x-objectstack-signature` is refused, and so is one without the declared
+header. Every refusal is the same `401 INVALID_SIGNATURE` an unsigned post
+gets, with its cause in the server log only. A declaration the flow parse
+refuses (an unknown algorithm, a reserved header such as `authorization` or
+`x-objectstack-signature`, a timestamped scheme without its elements) never
+falls back to the platform check: `os validate` reports it as
+`flow-api-trigger-signature-unusable`, and a hook armed with it admits no post.
+The declared keys are listed in
+[api-trigger-signature](/docs/references/automation/api-trigger-signature).
 
 **Script:**
 
@@ -743,11 +800,12 @@ field's declared contract is the only contract behind it — there is no object
 schema to catch a bad bag downstream.
 
 That sentence carries no "if the value is a number" qualifier, because the
-shape is checked first: on a `type: 'number'` field a submitted value that is
-not a JSON number is **refused** on resume with `invalid_type`. `"25"` — the
-same quantity as a *string* — is **not coerced** into `25` and does not reach
-the bound; it is rejected as the wrong shape. The bound then compares numbers
-only, which is all a bound can do.
+shape is checked first: on a numeric field — `type: 'number'`, `'currency'` or
+`'percent'` — a submitted value that is not a JSON number is **refused** on
+resume with `invalid_type`. `"25"` — the same quantity as a *string* — is **not
+coerced** into `25` and does not reach the bound; it is rejected as the wrong
+shape. The bound then compares numbers only, which is all a bound can do. The
+console renders all three kinds as a numeric input, which posts a number.
 
 **What these keys refuse:**
 
@@ -778,7 +836,8 @@ only, which is all a bound can do.
 - **A bound on a non-numeric field.** A screen field's `type` has no closed
   vocabulary, so this schema cannot judge which types a bound is meaningful on.
   A bound on a `text` field constrains nothing and is not an error — the shape
-  check above reads `type: 'number'` alone, never the presence of a bound.
+  check above reads the three numeric kinds alone (not `rating`, `slider` or
+  `progress`), never the presence of a bound.
 - **An absent value.** A bound constrains a value that is present — an optional
   bounded field left empty is conformant. Presence is `required`'s question.
 - **A bound on a field the user was never shown.** Like `required`, a bound on a
@@ -1296,8 +1355,9 @@ POST /api/v1/automation/{flow}/runs/{runId}/resume
 ```
 
 These conditions are refused, all reported at once and all with
-`code: 'INVALID_SCREEN_INPUT'` (the value shapes of `type: 'number'` and
-`type: 'file'`, and the `min` / `max` bounds, are described with those fields
+`code: 'INVALID_SCREEN_INPUT'` (the value shapes of the numeric kinds
+`number` / `currency` / `percent` and of `type: 'file'`, and the `min` / `max`
+bounds, are described with those fields
 above):
 
 - a **`required` field the caller was actually asked for** is missing (an empty
@@ -1810,7 +1870,7 @@ Edges connect nodes and define the execution path:
 | `source` | `string` | ✅ | Source node ID |
 | `target` | `string` | ✅ | Target node ID |
 | `type` | `enum` | optional | `'default'` (success), `'fault'` (error), `'conditional'` (expression-guarded), or `'back'` (declared back-edge, ADR-0044); defaults to `'default'` |
-| `condition` | `string` | optional | Boolean CEL predicate for branching (a bare string is stored as `{ dialect: 'cel', source }`) |
+| `condition` | `string` | optional | Boolean CEL predicate for branching (a bare string is stored as `{ dialect: 'cel', source }`); on a record-triggered flow a nullable field needs its `!= null` guard — see [Expressions in flows](#expressions-in-flows) |
 | `label` | `string` | optional | Label displayed on the connector — cosmetic only. It does **not** select a path except on a branching node (`decision` / `approval`), which picks its out-edge by label. |
 | `isDefault` | `boolean` | optional | BPMN default flow — the **"otherwise" branch**. Traversed only when no sibling `condition` on the same source node matched; never part of the unconditional parallel fan-out. Mutually exclusive with `condition`, at most one per node |
 
@@ -1983,7 +2043,8 @@ succeed, **and** the fix is to edit metadata. In practice that is a missing
 required config key (a data node with no `objectName`, an `http` node with no
 `url`, a `subflow` or `map` with no `flowName`, a `connector_action` with no
 `connectorId`/`actionId`), a filter operand that evaluated to nothing (`null`),
-so the condition would have widened the query, a graph that recurses past the nesting
+so the condition would have widened the query, a filter operand that evaluated to
+something other than a value, a graph that recurses past the nesting
 ceiling, or a run that would execute unscoped.
 
 The split is deliberate. A dropped filter condition does not narrow a query, it
@@ -2443,6 +2504,18 @@ and is read as `vars["current_user"]` / `vars["vars"]`.
 4. **A single-brace token in a text slot** — `title: 'Deal won: {record.name}'`
    — is refused with its `{{ }}` spelling ([text slots](#text-slots-read-double-brace-holes)): it is no placeholder there,
    and would go out as literal text.
+5. **An ordering or arithmetic operator on a nullable field, unguarded** — on a
+   record-triggered flow (`triggerType: 'record-*'`), `os validate` and the
+   runtime publish gate refuse a start `condition`, an edge `condition` (nested
+   regions too) or a `decision` branch `expression` that applies `< <= > >=` or
+   `+ - * / %` to a field of the trigger object with no `required: true`,
+   `defaultValue` or default option (a `count` / `sum` roll-up reads `0` when
+   empty; `min` / `max` / `avg` stay nullable), unguarded by `!= null` /
+   `== null` / `!isBlank()` in the same branch: the run binds every declared
+   field, `null` when empty, CEL has no `>` for null, and the run fails there
+   while the write that fired it still lands. A bare `budget` is `record.budget`,
+   and `os validate` judges it too; a start guard holds at every edge and branch — spell
+   it `record.budget != null`, which both doors accept, and `has()` is no guard.
 </Callout>
 
 <Callout type="info">

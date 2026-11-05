@@ -21,6 +21,14 @@
 // end-appended list, the tail-appended definitions and the old array's tail are
 // the lit controls — each MUST conflict, or a clean result would be equally
 // explained by a harness that cannot see a conflict at all.
+//
+// [#29987 codemod] Since the codemod split (`scripts/codemod-split-conversions-registry.mjs`)
+// each conversion is DEFINED in a module of its own, `src/conversions/entries/18/<id>.ts`,
+// which a retirement adds as a new file and which therefore never conflicts. What a
+// retirement still edits in `registry.ts` is two lines: the import of its conversion and
+// its entry in the list. The imports stand in the order the definitions stood, so the
+// placement rule reads them where it read the definitions: an import is a definition's
+// place in this file, and the module it names is read for the definition itself.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
@@ -46,10 +54,14 @@ const CLOSE = '];\n';
 const ENTRY = /  \{ conversion: ([A-Za-z_$][\w$]*), order: (\d+(?:\.\d+)?) \},\n/y;
 /** A blank line — which is what a comment between entries is once `maskComments` has blanked it; it belongs to the entry below it. */
 const BLANK = /[ \t]*\n/y;
-/** A conversion definition and its id, which every definition in the file spells on the next line. */
-const DEFINITION = /^(?:export )?const ([A-Za-z_$][\w$]*): MetadataConversion = \{\n  id: '([^'\n]+)',$/gm;
-/** Where a conversion that sorts last is defined: directly above this declaration's doc comment. */
-const TAIL_ANCHOR = '\ninterface OrderedConversion {\n';
+/**
+ * A conversion's place in the file: its import, from the module named for its id
+ * (`./entries/<toMajor>/<id>.js`). The module itself is read for the definition
+ * ({@link definitionInModule}).
+ */
+const DEFINITION = /^import \{ ([A-Za-z_$][\w$]*) \} from '\.\/entries\/18\/([^'\n]+)\.js';$/gm;
+/** The module a conversion is defined in, from its id. */
+const MODULE_PATH = (id: string): string => path.resolve(HERE, `../src/conversions/entries/18/${id}.ts`);
 /** How `CONVERSIONS_BY_MAJOR` reads the entries (the annotation: see that table's docblock). */
 const WIRING = '  18: /* @__PURE__ */ inApplicationOrder(MAJOR_18_CONVERSIONS),\n';
 
@@ -128,9 +140,24 @@ function entriesOf(source: string): { entries: Entry[]; end: number } {
   return { entries, end: at };
 }
 
-/** Every conversion definition in the file, in file order — a commented-out one is not a definition. */
+/** Every conversion's import in the file, in file order — a commented-out one is not an import. */
 function definitionsOf(source: string): { ident: string; id: string; at: number }[] {
   return [...maskOnce(source).matchAll(DEFINITION)].map((m) => ({ ident: m[1]!, id: m[2]!, at: m.index! }));
+}
+
+/** Where a conversion that sorts last is imported: directly after every other conversion's import. */
+function definitionsTail(source: string): number {
+  const defs = definitionsOf(source);
+  expect(defs.length, 'the conversions\' imports').toBeGreaterThan(0);
+  const last = defs.at(-1)!;
+  return source.indexOf('\n', last.at) + 1;
+}
+
+/** The definition in a conversion's module: `const IDENT: MetadataConversion = {` with its id on the next line, exported by name. */
+function definitionInModule(ident: string, id: string): boolean {
+  const text = maskComments(readFileSync(MODULE_PATH(id), 'utf8'));
+  return text.includes(`\nconst ${ident}: MetadataConversion = {\n  id: '${id}',\n  toMajor: 18,\n`)
+    && text.endsWith(`\nexport { ${ident} };\n`);
 }
 
 /** Rule 1, as findings: the entries are sorted strictly by identifier. */
@@ -147,13 +174,13 @@ function placementFindings(source: string): string[] {
   return entries.flatMap((e, i) => {
     if (PLACED_BEFORE_THE_RULE.has(e.ident)) return [];
     const at = index.get(e.ident);
-    if (at === undefined) return [`${e.ident}: no \`const ${e.ident}: MetadataConversion\` definition in the file`];
+    if (at === undefined) return [`${e.ident}: no import of \`${e.ident}\` from its module in the file`];
     const want = entries[i + 1]?.ident;
     const next = defs[at + 1]?.ident;
     if (next === want) return [];
     return [
-      `${e.ident} is defined above ${next ?? 'nothing (it is the last conversion defined)'}; define it directly above `
-        + (want ? `${want}'s definition, the entry that follows it` : 'OrderedConversion, after every other conversion'),
+      `${e.ident} is imported above ${next ?? 'nothing (it is the last conversion imported)'}; import it directly above `
+        + (want ? `${want}'s import, the entry that follows it` : 'nothing, after every other conversion\'s import'),
     ];
   });
 }
@@ -165,17 +192,20 @@ function docStart(source: string, offset: number): number {
 }
 
 const kebab = (ident: string): string => `synthetic-${ident.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
-const definition = (ident: string): string => `/** A synthetic major-18 retirement. */\nconst ${ident}: MetadataConversion = {\n`
+/** A retirement's line in `registry.ts`: the import of its conversion (the module is a new file, so it never conflicts). */
+const definition = (ident: string): string => `import { ${ident} } from './entries/18/${kebab(ident)}.js';\n`;
+/** The pre-split shape, for the old-shape control only: the definition itself, in the one file. */
+const legacyDefinition = (ident: string): string => `/** A synthetic major-18 retirement. */\nconst ${ident}: MetadataConversion = {\n`
   + `  id: '${kebab(ident)}',\n  toMajor: 18,\n  surface: 'synthetic.key',\n  summary: 'synthetic',\n`
   + '  apply: (stack) => stack,\n  fixture: { before: {}, after: {}, expectedNotices: 0 },\n};\n\n';
 const entry = (ident: string, order: number): string => `  { conversion: ${ident}, order: ${order} },\n`;
 
-/** Offset of the definition the doc comment asks for: above the next entry's, or above `OrderedConversion`. */
+/** Offset of the import the doc comment asks for: above the next entry's, or after every other conversion's. */
 function definitionSite(source: string, ident: string): number {
   const next = entriesOf(source).entries.find((e) => e.ident > ident);
-  if (!next) return docStart(source, source.indexOf(TAIL_ANCHOR) + 1);
+  if (!next) return definitionsTail(source);
   const def = definitionsOf(source).find((d) => d.ident === next.ident);
-  expect(def, `${next.ident}'s definition`).toBeDefined();
+  expect(def, `${next.ident}'s import`).toBeDefined();
   return docStart(source, def!.at);
 }
 
@@ -198,9 +228,9 @@ function retireAtListEnd(source: string, ident: string, order: number): string {
   return insert(withDefinition, entriesOf(withDefinition).end, entry(ident, order));
 }
 
-/** The definition half done the old way: defined after every other conversion (the entry still sorted). */
+/** The definition half done the old way: imported after every other conversion (the entry still sorted). */
 function retireAtDefinitionsEnd(source: string, ident: string, order: number): string {
-  const tail = docStart(source, source.indexOf(TAIL_ANCHOR) + 1);
+  const tail = definitionsTail(source);
   return sortedEntry(insert(source, tail, definition(ident)), ident, order);
 }
 
@@ -302,9 +332,10 @@ describe('major 18 in the conversions registry — the shape the merge needs (#2
     ).toEqual([]);
   });
 
-  it('each entry is a major-18 conversion defined in this file, and the list is all of them', () => {
+  it('each entry is a major-18 conversion imported from the module that defines it, and the list is all of them', () => {
     const ids = new Map(definitionsOf(SOURCE).map((d) => [d.ident, d.id]));
     expect(IDENTS.filter((i) => !ids.has(i))).toEqual([]);
+    expect(IDENTS.filter((i) => !definitionInModule(i, ids.get(i)!)), 'each module defines its conversion under its id').toEqual([]);
     expect(new Set(IDENTS.map((i) => ids.get(i)))).toEqual(new Set(APPLIED));
     expect(APPLIED).toHaveLength(IDENTS.length);
     expect(CONVERSIONS_BY_MAJOR[18]!.every((c) => c.toMajor === 18)).toBe(true);
@@ -321,7 +352,7 @@ describe('major 18 in the conversions registry — the shape the merge needs (#2
     expect(MIGRATIONS_BY_MAJOR[18]!.conversionIds).toEqual(order);
   });
 
-  it('a conversion added after the rule is defined directly above the entry that follows it', () => {
+  it('a conversion added after the rule is imported directly above the entry that follows it', () => {
     expect(PLACED_BEFORE_THE_RULE.size, '⛔ the exemption is closed: place a new conversion by the rule').toBe(46);
     expect(placementFindings(SOURCE)).toEqual([]);
   });
@@ -376,9 +407,9 @@ describe('major 18 in the conversions registry — two retirements, no merge dri
     expect(placementFindings(retireAtDefinitionsEnd(SOURCE, A, NEXT_ORDER))).toEqual([
       ...(PLACED_BEFORE_THE_RULE.has(neighbour)
         ? []
-        : [`${neighbour} is defined above ${IDENTS[k]}; define it directly above ${A}'s definition, the entry that follows it`]),
-      `${A} is defined above nothing (it is the last conversion defined); define it directly above ${IDENTS[k]}'s `
-        + 'definition, the entry that follows it',
+        : [`${neighbour} is imported above ${IDENTS[k]}; import it directly above ${A}'s import, the entry that follows it`]),
+      `${A} is imported above nothing (it is the last conversion imported); import it directly above ${IDENTS[k]}'s `
+        + 'import, the entry that follows it',
     ]);
   });
 
@@ -408,7 +439,7 @@ describe('major 18 in the conversions registry — two retirements, no merge dri
     expect(m.conflicted).toEqual([REL]);
   });
 
-  it('the same two conversions defined after every other conversion conflict — the definitions have a tail too', () => {
+  it('the same two conversions imported after every other conversion conflict — the imports have a tail too', () => {
     const m = repo.merge('definitions-end-a', 'definitions-end-b');
     expect(m.status).toBe(1);
     expect(m.conflicted).toEqual([REL]);
@@ -419,7 +450,7 @@ describe('major 18 in the conversions registry — two retirements, no merge dri
       + "  id: 'view-list-tabs-removed',\n};\n\n"
       + 'export const CONVERSIONS_BY_MAJOR = {\n  18: [\n    viewListTabsRemoved,\n  ],\n};\n';
     const append = (ident: string) => old
-      .replace('export const CONVERSIONS_BY_MAJOR', `${definition(ident)}export const CONVERSIONS_BY_MAJOR`)
+      .replace('export const CONVERSIONS_BY_MAJOR', `${legacyDefinition(ident)}export const CONVERSIONS_BY_MAJOR`)
       .replace('    viewListTabsRemoved,\n', `    viewListTabsRemoved,\n    ${ident},\n`);
     const legacy = new FileRepo(old);
     try {

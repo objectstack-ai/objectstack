@@ -289,6 +289,10 @@ const response = await fetch('http://localhost:3000/api/v1/auth/request-password
 });
 ```
 
+The request answers `{ status: true }` the same way for any address. The reset
+mail is sent after the response; a send that fails is logged on the server and
+never changes the answer.
+
 #### Reset Password with Token
 
 {/* os:check */}
@@ -298,10 +302,17 @@ const response = await fetch('http://localhost:3000/api/v1/auth/reset-password',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
     token: 'reset-token-from-email',
-    password: 'newSecurePassword456'
+    newPassword: 'newSecurePassword456'
   })
 });
 ```
+
+A completed reset ends every existing session of the account — the emailed link
+and the phone OTP reset alike, the same as an administrator's forced reset — so
+the user signs in again with the new password. It is not a setting: the former
+`emailAndPassword.revokeSessionsOnPasswordReset` key is retired, and a
+configuration that still carries it, at any value, is refused at boot — delete
+the key.
 
 #### Setting a first local password
 

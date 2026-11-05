@@ -85,7 +85,7 @@
  *
  * | surface                        | binding | evidence                                                    | verdict |
  * |:-------------------------------|:--------|:------------------------------------------------------------|:--------|
- * | object validation rules        | TOTAL   | `rule-validator.ts` `materializeDeclaredFields(merged, …)`   | covered |
+ * | object validation rules        | TOTAL   | `rule-validator.ts` `materializeDeclaredFields(merged, …)`   | covered; outcome `fail-closed`, or `fail-open` for an advisory rule (#29926) |
  * | lifecycle hook `condition`     | TOTAL   | `hook-wrappers.ts` `materializeDeclaredFields(…)`            | covered |
  * | field `requiredWhen`           | TOTAL   | same `merged` in `evaluateValidationRules` — fail-OPEN, so an unguarded predicate enforces NOTHING in silence | covered (#4811) |
  * | field `readonlyWhen`           | TOTAL   | `rule-validator.ts` `readonlyWhenBindings` materialises BOTH roots (#4953 clause 1, landed in #6454) | excluded — NOT on totality; see below |
@@ -259,9 +259,14 @@
  *         included, wherever no variable holds the name. So a bare name is
  *         judged as `record.<name>` when the flow's bound set is provable
  *         (`flowCelRootScope`) and the name is not one of its declared
- *         variables or node ids (`collectFlowVariableNames`) — those win, and
- *         a flow whose nodes can bind names nobody declared leaves its bare
- *         names unjudged. Guarding either spelling guards both.
+ *         variables or node ids (`collectFlowVariableNames`) or a screen's
+ *         field names (`collectScreenFieldNames`, which a resume binds) —
+ *         those win, and a flow whose nodes can bind names nobody declared
+ *         leaves its bare names unjudged. The type verdict reads the same names
+ *         and the same judge, on the flow's nodes alone
+ *         (`validate-expressions.ts`, `flowBare`): there a bare-name mismatch
+ *         stands down to a warning instead (#30025). Guarding either spelling
+ *         guards both.
  *      3. **The start condition gates every run.** `execute()` evaluates it
  *         before any node, whatever the entrance, so what it proves non-null
  *         is presumed at every edge and `decision` branch of the flow
@@ -739,15 +744,16 @@ export function findUnguardedNullableOperands(
  * surface's runtime and name what it really implements.
  */
 export type NullGuardOutcome =
-  /** Validation rules + hook conditions: the fault propagates, the write is refused (#4761). */
+  /** `error` validation rules + hook conditions: the fault propagates, the write is refused (#4761). */
   | 'fail-closed'
   /**
    * A surface whose runtime logs and SKIPS the aborted predicate, so nothing is
-   * enforced. Written for the field `requiredWhen` (#4811), which no longer
-   * behaves this way: since ADR-0137 D2 a faulting `requiredWhen` refuses the
-   * write and takes `'fail-closed'`. No surface passes this outcome today, and
-   * its clause below still describes the `requiredWhen` runtime it was written
-   * for — re-word it before a surface that genuinely skips adopts it.
+   * enforced and the write proceeds: an ADVISORY (`severity: 'warning'` /
+   * `'info'`) validation rule, whose unevaluable predicate is logged as "write
+   * proceeded: the rule is advisory" and never gives its advisory (#24782,
+   * adopted by #29926). Written for the field `requiredWhen` (#4811), which no
+   * longer behaves this way: since ADR-0137 D2 a faulting `requiredWhen`
+   * refuses the write and takes `'fail-closed'`.
    */
   | 'fail-open'
   /**
@@ -767,9 +773,8 @@ const OUTCOME_CLAUSE: Record<NullGuardOutcome, string> = {
     'so the rule enforces nothing and the write is rejected fail-closed (a predicate that cannot ' +
     'evaluate refuses the write rather than being skipped)',
   'fail-open':
-    'so the predicate is SKIPPED fail-open — the field is never actually required, the write ' +
-    'proceeds unchecked, and the only trace is a `requiredWhen … failed to evaluate — skipped` ' +
-    'log line',
+    'so the rule is SKIPPED fail-open: it is advisory, so the write proceeds, the rule is never applied ' +
+    '(its advisory never fires), and the only trace is a log line saying it could not be evaluated',
 };
 
 /**

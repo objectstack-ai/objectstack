@@ -36,7 +36,10 @@ import { findReferenceableFile, unreadableFileMessage, type FileReferenceReadAut
  *    "Parent EDIT" below; Salesforce parity, #2970 item 3 — v1 asked read
  *    visibility, which is now only the degraded mode). Fail-closed 403
  *    `ATTACHMENT_PARENT_ACCESS`. `uploaded_by` is server-stamped from the
- *    session — a client-supplied value never wins. A refusal also hands the
+ *    session — a client-supplied value never wins, and a create whose
+ *    session names no user is refused (403 `RECORD_NOT_ACCESSIBLE`). On
+ *    update the column is read-only: a row's uploader is read-only after
+ *    creation, like a comment's author. A refusal also hands the
  *    refused `file_id` to the lifecycle, which tombstones the caller's own
  *    never-attached upload (#22466, `createRefusedAttachTombstoner`).
  *  - beforeUpdate (commit da891e0ef): the caller must be the uploader OR hold edit on
@@ -190,6 +193,15 @@ const MULTI_WRITE_AUTH_LIMIT = 1_000;
  * already maps this code 403 + object-preserving (`error-response.ts`).
  */
 const UPDATE_DENY_CODE = 'RECORD_NOT_ACCESSIBLE';
+
+/**
+ * The wire code a non-system create whose session names no user is refused
+ * with. The same standard catalog member, for the same reason as
+ * {@link UPDATE_DENY_CODE}: it is the code the comment kit answers its own
+ * no-user refusals with (`DENY_CODE` in `comment-access-hooks.ts`), and the
+ * ledger refuses a new extension code that shadows a standard member.
+ */
+const NO_UPLOADER_DENY_CODE = 'RECORD_NOT_ACCESSIBLE';
 
 function forbid(code: string, message: string, object?: string): never {
   const err: any = new Error(message);
@@ -689,9 +701,18 @@ export function installAttachmentAccessHooks(
       const data: any = ctx?.input?.data;
       if (!data || typeof data !== 'object') return;
 
-      // Server stamps provenance: the session identity wins over whatever
-      // the client sent (spoofable field otherwise).
-      if (ctx.session.userId) data.uploaded_by = ctx.session.userId;
+      // The uploader is the session's user, recorded over whatever the client
+      // sent: the row's provenance names who attached it. A session with no
+      // user has nobody to record, so the create is refused — never left to
+      // the client's value (the comment kit refuses its own create the same
+      // way). The column is read-only on update (`sys_attachment` in
+      // `@objectstack/platform-objects`), so this stamp is the row's uploader
+      // for life.
+      const uploaderId: unknown = ctx.session.userId;
+      if (typeof uploaderId !== 'string' || uploaderId === '') {
+        forbid(NO_UPLOADER_DENY_CODE, 'Cannot attach: there is no signed-in user to record as the uploader');
+      }
+      data.uploaded_by = uploaderId;
 
       const parentObject = data.parent_object;
       const parentId = data.parent_id;
@@ -741,16 +762,18 @@ export function installAttachmentAccessHooks(
       if (!rows.length) return;
       await authorizeRows(ctx, rows, 'update', UPDATE_DENY_CODE);
 
-      // NOTE `uploaded_by` is deliberately NOT re-stamped here: the insert
-      // stamp records provenance at creation, and re-stamping on update would
-      // hand the row to whoever edits it. Nor is a client-supplied value
-      // refused: to reach this point at all the caller is already the
-      // uploader or a parent editor, and a parent editor already holds every
-      // verb the uploader shortcut grants — so rewriting `uploaded_by` buys
-      // no privilege the row rule did not just verify. (Same posture as the
-      // derived comment kit takes for `author_id` on update. The escalation
-      // the issue names — rewrite `uploaded_by`, then delete as "uploader" —
-      // is closed by the row rule itself, not by stamping.)
+      // NOTE `uploaded_by` is neither re-stamped nor judged here. The rule is
+      // that a row's uploader is read-only after creation, like a comment's
+      // author: `sys_attachment.uploaded_by` declares `readonly: true`, so the
+      // engine's update-side strip drops a non-system caller's value after
+      // this hook and reports it (`droppedFields`), while the rest of the
+      // write lands. The reason is provenance integrity: the row names the
+      // user who attached it, recorded once by the create stamp above, and an
+      // edit — the uploader's own or a parent editor's — is not a change of
+      // who that was. Re-stamping here would instead hand the row to whoever
+      // edits it. System writes and the system principal's historical import
+      // (`preserveAudit`) keep the value they supply. The comment kit holds
+      // `author_id` by the same rule.
 
       // Re-pointing an attachment is an INSERT into the new parent's files
       // panel: the NEW parent must satisfy the attach rule (parent EDIT, the

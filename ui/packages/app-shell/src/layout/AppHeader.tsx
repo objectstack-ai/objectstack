@@ -733,10 +733,14 @@ export function AppHeader({
                   () => metadata.pages,
                   metadata.getTypeStatus?.('page'),
                 ).item;
-        // A page's `label` may be an inline locale map; drawn raw, the phone
-        // bar's title blanked the page (objectui#13488).
-        const fallback = metadataText(pageDef?.label, language) ?? humanizeSlug(pageName);
-        routeTitle = pageLabel({ name: pageName, label: fallback });
+        // A page the read served carries its label already translated, by
+        // the server's order for an overridden item (objectstack#30244), so it
+        // is drawn as given, as the dashboard's above is. Only the humanized
+        // slug, which no server translated, goes through the bundle. The label
+        // may be an inline locale map; drawn raw, the phone bar's title blanked
+        // the page (objectui#13488).
+        routeTitle = metadataText(pageDef?.label, language)
+          ?? pageLabel({ name: pageName, label: humanizeSlug(pageName) });
       }
     } else if (routeType === 'report') {
       // No 「Reports」 type crumb either (objectui#12273), for the dashboard
@@ -744,10 +748,14 @@ export function AppHeader({
       if (pathParts[3]) {
         const reportName = pathParts[3];
         const reportDef = preferLocal(metadata.reports as any[], reportName, (currentApp as any)?._packageId);
-        // A report's `label` may be an inline locale map; drawn raw, the crumb
+        // A served report's label is already translated (objectstack#30244),
+        // so it is drawn as given; only the humanized slug goes through the
+        // bundle. The label may be an inline locale map; drawn raw, the crumb
         // blanked the report page (objectui#13470).
-        const fallback = metadataText(reportDef?.label, language) ?? humanizeSlug(reportName);
-        extraSegments.push({ label: reportLabel({ name: reportName, label: fallback }) });
+        extraSegments.push({
+          label: metadataText(reportDef?.label, language)
+            ?? reportLabel({ name: reportName, label: humanizeSlug(reportName) }),
+        });
       }
     } else if (routeType === 'system') {
       extraSegments.push({ label: t('console.breadcrumb.system') });

@@ -71,6 +71,7 @@ import {
   resolveDcrEnabled,
   resolveOidcProviderEnabled,
   resolveScimEnabled,
+  resolveTwoFactorEnabled,
   type AuthManager,
 } from './auth-manager.js';
 import {
@@ -81,6 +82,7 @@ import {
   buildTwoFactorPluginSchema,
 } from './auth-schema-config.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
+import { logAfterResponseSendFailure, sendAfterResponseOnPublicDoor } from './run-after-response.js';
 import {
   ONE_TIME_TOKEN_EXPIRES_IN_MINUTES,
   oneTimeTokenStoreHasher,
@@ -187,11 +189,13 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
   // better-auth build would otherwise mount SCIM with its ADR-0134
   // deprovisioning path silently declined.
   assertScimAdminCoherence(pluginConfig);
-  const twoFactorFromEnv = readBooleanEnv('OS_AUTH_TWO_FACTOR');
   const hibpFromEnv = readBooleanEnv('OS_AUTH_PASSWORD_REJECT_BREACHED');
   const enabled = {
     organization: pluginConfig.organization ?? true,
-    twoFactor: twoFactorFromEnv ?? pluginConfig.twoFactor ?? false,
+    // [#30201] Shared decision point (env → config), see
+    // resolveTwoFactorEnabled — the MFA gate and the require_mfa write guard
+    // ask the same question, so a requirement is never enforced unenrollable.
+    twoFactor: resolveTwoFactorEnabled(pluginConfig),
     passwordRejectBreached: hibpFromEnv ?? pluginConfig.passwordRejectBreached ?? false,
     passkeys: pluginConfig.passkeys ?? false,
     magicLink: pluginConfig.magicLink ?? false,
@@ -354,6 +358,15 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
     // by the admin create-user/import routes with a placeholder email
     // (see placeholder-email.ts), never by OTP self-signup.
     const otpCfg = this.config.phoneOtp ?? {};
+    // The reset text, sent the way the emailed reset sends its mail
+    // (`sendResetPassword`, `auth-manager-auth-instance.ts`): on the public
+    // door after the response, its failure logged on the server.
+    const sendPasswordResetText = sendAfterResponseOnPublicDoor(
+      async ({ phoneNumber: phone, code }: { phoneNumber: string; code: string }) => {
+        await this.deliverPhoneOtp(phone, code);
+      },
+      (error) => logAfterResponseSendFailure(this.config.logger, 'phone password-reset text', error),
+    );
     return phoneNumber({
       schema: buildPhoneNumberPluginSchema(),
       // Wrong-code attempts before the stored OTP is invalidated. Explicit
@@ -373,13 +386,19 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
         await this.deliverPhoneOtp(phone, code);
       },
       // Self-service password reset OTP (`/phone-number/request-password-
-      // reset`). better-auth invokes this via runInBackgroundOrAwait —
-      // errors are logged, the route still answers {status:true} — so a
-      // throw here can neither 500 the request nor leak whether the number
-      // is registered.
-      sendPasswordResetOTP: async ({ phoneNumber: phone, code }) => {
-        await this.deliverPhoneOtp(phone, code);
-      },
+      // reset`). The request answers the same way for any number, answers
+      // at once and does not wait on the SMS send, as the emailed reset
+      // does: a call that carries a `Request` — the public door — resolves
+      // immediately and the text is built and sent after the response
+      // (`sendAfterResponseOnPublicDoor`); what the send does is logged on
+      // the server and never reaches the caller, who is answered
+      // `{ status: true }` either way. better-auth hands this callback the
+      // endpoint context, not the `Request` the emailed reset is handed
+      // (`sendPasswordResetOTP(data, ctx)`, better-auth 1.7.12
+      // `plugins/phone-number/routes.mjs`), so the context's own `request`
+      // is what decides: a server-side `auth.api.*` call carries none and
+      // still awaits its send.
+      sendPasswordResetOTP: (data, ctx) => sendPasswordResetText(data, ctx?.request),
     });
     });
   }

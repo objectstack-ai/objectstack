@@ -156,6 +156,10 @@ const FAMILY: Record<string, string[]> = {
   // and BEFORE the `finally` shutdown, so the shutdown's diagnostics follow
   // the document and must stay off stdout.
   'migrate record-currency-codes': ['--object', 'jp_ticket', '--field', 'title', '--code', 'USD'],
+  // [ADR-0144] Its sibling's shape: `--object` is required, the dry run is
+  // the default, and the face driven here is the same "No app objects are
+  // loaded" refusal after the read-only boot.
+  'migrate recompute-home-amounts': ['--object', 'jp_ticket'],
   'migrate recorded-by': [],
   'migrate resume': [],
   // A preview is its DEFAULT and the only form driven here: without `--apply`
@@ -164,6 +168,8 @@ const FAMILY: Record<string, string[]> = {
   // `sys_metadata` hydration, so it deletes nothing. No table exists in the
   // fixture, so the face driven here is its empty listing.
   'migrate security-catalog-overlays': [],
+  // Its dry run takes the `summary-nulls` shape: a read-only boot, no row written.
+  'migrate stored-expressions': [],
   'migrate summary-nulls': [],
   // One object per run, so it needs a name: the fixture's own `jp_ticket`,
   // which the composed host config registers. No database file exists, so the

@@ -15,7 +15,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.2.0"
+  version: "18.3.0"
   domain: data
   tags: object, field, validation, index, relationship, hook, schema, permission, rls, security, seed, fixture
 ---
@@ -35,7 +35,7 @@ metadata:
 
 ## Quick Reference — Detailed Rules
 
-For comprehensive documentation with incorrect/correct examples:
+Detailed rules, with incorrect/correct examples:
 
 - **[Naming Conventions](./rules/naming.md)** — snake_case rules, option values, config properties
 - **[Field Types](./rules/field-types.md)** — All field types and configs
@@ -85,9 +85,9 @@ the publish door rejects it before that:
 | `highlightFields` | derived | Ordered field keys used as a record's compact face: the columns a **related list** renders on the parent's detail page, and what a lookup picker shows. Declare it on the CHILD object (see [Relationships](./rules/relationships.md)) |
 | `namespace` | — | **Not a schema key** — `ObjectSchema.create()` rejects unknown keys, so authoring it is a build error. Embed the prefix directly in `name` instead (e.g. `name: 'crm_account'`) |
 | `datasource` | `'default'` | Target datasource ID for virtualized data |
-| `nameField` | derived (e.g. `'name'`/`'title'`) | **Canonical** record-title field — the stored field used as the record's display name. Use a single text/email field; a composite title to import, sort or search by is a stored computed field (a non-`formula` field with an `expression`, computed and stored on write); a text formula is display-only |
+| `nameField` | derived (e.g. `'name'`/`'title'`) | **Canonical** record-title field — the stored field used as the record's display name. Use a single text/email field; a composite title to import, sort or search by is a stored computed field (a non-`formula` field with an `expression`); a text formula is display-only |
 | `displayNameField` | — | **Deprecated** alias for `nameField` (still honored as a fallback) |
-| `titleFormat` | — | **Deprecated, not removed (ADR-0079)** — render-only: the server can't return or query it. Use `nameField` (it wins); a composite title follows the `nameField` row |
+| `titleFormat` | — | **Refused (ADR-0079)**: a save and `os validate` refuse it (`title-format-retired`). Move it to `nameField`; a composite title follows the `nameField` row |
 | `enable` | — | Capability flags (trackHistory, searchable, apiEnabled, etc.) |
 | `fieldGroups` | — | Ordered list of logical field groups for forms/detail pages (see [Field Groups](./references/examples-objects.md#field-groups-mvp)) |
 | `lifecycle` | `record` semantics (permanent) | Data retention/rotation/archival contract. **Required for append-only, high-write-rate objects** — a `telemetry`/`transient`/`event`/`audit` class must declare a bounding policy or parsing fails (see [Data Lifecycle & Retention](./rules/lifecycle.md)) |
@@ -114,8 +114,10 @@ Toggle system behaviours per object:
 `searchableFields` on the object is the canonical set `$search` scans (ADR-0061).
 Leave it unset and search auto-defaults to the `nameField` plus the object's
 short-text and enum columns (`text` / `email` / `phone` / `url` / `autonumber` /
-`textarea` / `markdown` / `select` / `status`); declare it to pin the set
-explicitly. Views may narrow it, never widen it.
+`textarea` / `markdown` / `select`) plus every field marked `searchable: true`,
+of any type except `secret` / `password` / `vector` or a virtual `formula`. `searchable: false`, the
+default, never removes a field the type default scans; declare
+`searchableFields` to choose the set. Views may narrow it, never widen it.
 
 ### ⛔ Searching by a related record's title — mirror the value, always
 
@@ -137,14 +139,14 @@ declare *that* field searchable. A task list searched by project name:
   fields: {
     name:         { type: 'text', required: true },
     project_id:   { type: 'lookup', reference: 'project' },
-    project_name: { type: 'text', label: 'Project Name' },   // ← the mirror
+    project_name: { type: 'text', label: 'Project Name' },
   },
   searchableFields: ['name', 'project_name'],
 }
 ```
 
 `?search=apollo` expands to `name $contains 'apollo' OR project_name $contains
-'apollo'` — one single-table scan, every driver, no traversal.
+'apollo'` — one single-table scan, every driver.
 
 ❌ **Never mirror onto a `formula` field.** It is *virtual* (no column to scan)
 and CEL reads only this record's own fields, so it cannot hold the related title;
@@ -154,12 +156,8 @@ a `formula` entry in any `searchableFields` is refused — `os validate`
 **Mirror maintenance is the trade-off** — a mirror is only as fresh as whatever
 writes it. Cover both paths: a `beforeInsert` / `beforeUpdate` hook on `task`
 stamps `project_name` from the incoming `project_id`'s parent; an `afterUpdate`
-hook on `project` re-stamps its tasks when it is renamed. Rows written by a path that bypasses hooks (bulk import, direct SQL) need a
+hook on `project` re-stamps its tasks when it is renamed. Rows written past the hooks (bulk import, direct SQL) need a
 one-off backfill. See [Lifecycle Hooks](./references/data-hooks.md).
-
----
-
-→ Moved verbatim to [references/examples-objects.md](./references/examples-objects.md) § Field Groups (MVP).
 
 ---
 

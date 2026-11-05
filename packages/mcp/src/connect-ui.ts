@@ -9,9 +9,9 @@
  * dies with the capability — no MCP plugin, no entry). The page body is the
  * SDUI widget `mcp:connect-agent`, provided by objectui's console app-shell:
  * it reads `/discovery` for the environment's MCP URL, renders per-client
- * connect cards (claude.ai / Claude Desktop / Claude Code / Cursor / VS Code /
- * Codex), mints API keys for headless callers, and links the SKILL.md
- * download (`GET /api/v1/mcp/skill`).
+ * connect cards (claude.ai / Claude Desktop / Claude Code / Codex / Cursor,
+ * then WorkBuddy / Doubao Work / QwenWork), mints API keys for headless
+ * callers, and links the SKILL.md download (`GET /api/v1/mcp/skill`).
  *
  * Registered by {@link MCPServerPlugin} on `kernel:ready`, gated on the same
  * default-on switch as the HTTP surface — an opted-out deployment
@@ -31,7 +31,7 @@
  * entry stays for admins. ⛔ Ungating Setup is NOT the fix and was measured:
  * the app-level `setup.access` gate fires BEFORE the group gate, so dropping
  * the group gate alone changes nothing, and dropping both serves 14+ unrelated
- * Setup surfaces (Users, Organization, Branding, Feature Flags, …) to every
+ * Setup surfaces (Users, Organization, Branding, Company, …) to every
  * signed-in user — far past what this card asks for. ⛔ Nor is a
  * `requiresService: 'mcp'` gate on an `account.app.ts` entry: the `mcp` service
  * registers unconditionally in `init()` while this bundle registers behind

@@ -3613,7 +3613,12 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
             : undefined,
         });
         if (!res.ok) {
-          throw new Error(`discovery ${res.status} ${res.statusText}`);
+          // The server answered: its status rides on the error, so the
+          // ConnectionError below carries the server's status rather than
+          // none (objectstack#29916).
+          throw Object.assign(new Error(`discovery ${res.status} ${res.statusText}`), {
+            status: res.status,
+          });
         }
         const body = await res.json();
         return body && typeof body.success === 'boolean' && 'data' in body
@@ -3635,10 +3640,15 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       this.setConnectionState('connected');
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to connect to ObjectStack server';
+      // A status only when discovery was answered (the `!res.ok` throw above);
+      // a rejected `fetch` got no answer and the error carries no status
+      // (objectstack#29916).
+      const answeredStatus = (error as { status?: unknown } | null)?.status;
       const connectionError = new ConnectionError(
         errorMessage,
         undefined,
-        { originalError: error }
+        { originalError: error },
+        typeof answeredStatus === 'number' ? answeredStatus : undefined,
       );
 
       this.setConnectionState('error', connectionError);
@@ -3788,6 +3798,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       if (this.connectionState !== 'reconnecting') this.setConnectionState('reconnecting');
       return;
     }
+    // No status: nothing answered this request (objectstack#29916).
     this.setConnectionState(
       'error',
       new ConnectionError(
@@ -5714,7 +5725,17 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
         throw error;
       }
       
-      throw createErrorFromResponse(errorObj, `getObjectSchema(${objectName})`);
+      // objectstack#29728 — the rewrap keeps the transport's own error as its
+      // cause, as the 404 arm above does. `createErrorFromResponse` replaces
+      // the server's ADR-0112 code with its own taxonomy (`CONNECTION_ERROR`,
+      // `UNKNOWN_ERROR`) and its sentence with its own ("Connection error:
+      // ..."), so the wrapper alone cannot say what the server answered (a
+      // dropped connection carries no status, objectstack#29885). The cause can: the
+      // by-name route read throws `status` + the server's `code` and sentence
+      // for an answer, and the bare fetch failure for none.
+      const wrapped = createErrorFromResponse(errorObj, `getObjectSchema(${objectName})`);
+      wrapped.details = { ...wrapped.details, originalError: error };
+      throw wrapped;
     }
   }
 

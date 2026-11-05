@@ -131,13 +131,16 @@ import {
 } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { storedRowDocument } from './item-lock.js';
-import { OVERLAY_MEMBER_COLUMN, overlayMemberField, overlayMemberOfBody, overlayMemberValue } from './migrations/overlay-index.js';
+import { OVERLAY_MEMBER_COLUMN, overlayMemberOfBody, overlayMemberValue } from './migrations/overlay-index.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
-import { customizationPairEnsureRefusal, type PairRegistry } from './protocol-customization-package.js';
-import { overrideWriteMemberOf, type OverrideWriteSubject, type OverrideWriteVerdict } from './protocol-packaged-base-refusal.js';
+import {
+    overlayPairFixAdmits,
+    overlayPairFixOf,
+    overrideWriteMemberOf,
+    type OverrideWriteVerdictAsk,
+} from './protocol-packaged-base-refusal.js';
 import { readOnlyShippingPackages, shippingPackageIds } from './protocol-environment-rows.js';
 import { isServedOverrideRowOf } from './served-override.js';
-import { SysMetadataRepository } from './sys-metadata-repository.js';
 
 /** The class members this module reads, typed as the class declares them. */
 export interface PackagelessOverlayMigrationHost {
@@ -150,6 +153,10 @@ export interface PackagelessOverlayMigrationHost {
     readonly isWritablePackage: ObjectStackProtocolImplementation['isWritablePackage'];
     readonly ensureCustomizationPackage: ObjectStackProtocolImplementation['ensureCustomizationPackage'];
     readonly saveMetaItem: ObjectStackProtocolImplementation['saveMetaItem'];
+    /** [#30000] THE repository every `sys_metadata` write goes through; step 4's delete takes it. */
+    readonly getOverlayRepo: ObjectStackProtocolImplementation['getOverlayRepo'];
+    /** [#30000] The delete door's heal, run after step 4 removes an active row. */
+    readonly restoreArtifactRegistryView: ObjectStackProtocolImplementation['restoreArtifactRegistryView'];
 }
 
 /** How the ceremony classified one package-less row (module header, "The population"). */
@@ -536,7 +543,7 @@ export async function migratePackagelessOverlays(
         }
         return answer;
     };
-    const repository = new SysMetadataRepository({ engine: this.engine as never, orgLabel: 'env' });
+    const repo = this.getOverlayRepo();
     const rowsById = new Map<string, any>();
     for (const row of await overlayRows.call(this)) rowsById.set(String(row.id), row);
     if (census.incompleteDeclarations.length > 0) {
@@ -596,7 +603,7 @@ export async function migratePackagelessOverlays(
             }
             // Step 4: only now, the unbound row (or the row bound to the
             // base), by its own address.
-            await repository.delete(
+            await repo.delete(
                 { type: row.storedType, name: row.name, org: 'env' } as never,
                 {
                     parentVersion: (typeof stored.checksum === 'string' ? stored.checksum : null) as string,
@@ -612,6 +619,12 @@ export async function migratePackagelessOverlays(
                     ...(row.member !== undefined ? { member: row.member } : {}),
                 } as never,
             );
+            // [#30000] The registry follows the removed row, as the delete
+            // door's heal makes it follow: the row's registration and the
+            // record of what a view container expanded to leave with it, and
+            // the pair's row saved in step 2 is registered again. A draft never
+            // hydrated, so its removal heals nothing.
+            if (row.state === 'active') await this.restoreArtifactRegistryView(row.type, row.name, null, row.member);
             movedFrom.set(itemKey, bound);
             line.moved += 1;
             outcomes.push(addedMember === undefined
@@ -675,8 +688,12 @@ export interface PackagelessCloseHost {
     readonly rethrowUnlessMetadataStoreUnprovisioned: ObjectStackProtocolImplementation['rethrowUnlessMetadataStoreUnprovisioned'];
     /** The read-only code packages that ship a name of an overlay type ([] for any other type). */
     readonly overlayBaseShippers: (type: string, name: string) => string[];
-    /** The override write gate, as the ceremony's step 2 meets it through the save door. */
-    readonly overrideWriteVerdict: (request: OverrideWriteSubject) => OverrideWriteVerdict;
+    /**
+     * The override write gate, as the ceremony's step 2 meets it through the
+     * save door: on a pair step 1 has not ensured yet, with the closure the
+     * ensure door gives it (`OverlayPairFix.pendingPairScope`).
+     */
+    readonly overrideWriteVerdict: OverrideWriteVerdictAsk;
 }
 
 /** The package-less write {@link packagelessCloseSubject} judges, and the row it would write. */
@@ -710,14 +727,15 @@ export interface PackagelessWriteSubject {
  *    read-only package ships). `shadowed` applies to a stored row only: a
  *    first write has nothing in the pair to be shadowed by;
  *  - its move must be able to succeed, read from the steps the ceremony
- *    takes: the ensure door would ensure the pair
- *    ({@link customizationPairEnsureRefusal}), the base records a version
- *    (`basedOn`), and the override write gate admits the declared body into
- *    the pair. An `email_template` member at a locale the base does not ship
- *    is refused there (#28777) and stays open: the ceremony moves such a row
- *    as the pair's own member, declaring nothing (#28904), and the close
- *    reaches only the declared-override moves, so its package-less write is
- *    the one it had before the close.
+ *    takes: `overlayPairFixOf` and `overlayPairFixAdmits`
+ *    (`protocol-packaged-base-refusal.ts`), the predicate the close of the
+ *    write naming the base asks too — the ensure door would ensure the pair,
+ *    the base records a version (`basedOn`), and the override write gate
+ *    admits the declared body into the pair. An `email_template` member at a
+ *    locale the base does not ship is refused there (#28777) and stays open:
+ *    the ceremony moves such a row as the pair's own member, declaring
+ *    nothing (#28904), and the close reaches only the declared-override
+ *    moves, so its package-less write is the one it had before the close.
  *
  * Registry reads first; the one store read (the item's rows) only for a name
  * the registry has not already left open.
@@ -731,14 +749,9 @@ export async function packagelessCloseSubject(
     const shippers = this.overlayBaseShippers(request.type, request.name);
     if (shippers.length !== 1) return null; // environment metadata, or `multi_shipped`
     const base = shippers[0]!;
-    const pairId = customizationPackageId(base);
-    if (!pairId.ok) return null; // `no_pair`
-    const pair = pairId.value;
-    const registry = (this.engine as { registry?: PairRegistry } | undefined)?.registry;
-    if (!registry || typeof registry.getPackage !== 'function') return null;
-    if (customizationPairEnsureRefusal(this.engine, registry, base, pair) !== undefined) return null; // step 1 fails
-    const basedOn = baseVersionOf(this, base);
-    if (basedOn === undefined) return null; // no `basedOn` to record
+    // `no_pair`, a pair step 1 cannot ensure, or no `basedOn` to record.
+    const fix = overlayPairFixOf(this, base);
+    if (fix === null) return null;
 
     // The item's stored rows, both spellings, every package: the census's read.
     const spellings = [...new Set([type, SINGULAR_TO_PLURAL[type] ?? type])];
@@ -768,12 +781,6 @@ export async function packagelessCloseSubject(
     if (classified.disposition !== 'movable') return null;
 
     // Step 2's gate: the declared body, into the pair.
-    const disc = member === undefined ? undefined : overlayMemberField(type);
-    const declaredBody = {
-        ...(body ?? { name: request.name, ...(disc && member !== null ? { [disc]: member } : {}) }),
-        overrides: { package: base, basedOn },
-    };
-    const verdict = this.overrideWriteVerdict({ type, name: request.name, packageId: pair, item: declaredBody });
-    if (verdict.verdict === 'refuse') return null;
-    return { base, pair };
+    if (!overlayPairFixAdmits(this, fix, { type, name: request.name, body, member })) return null;
+    return { base, pair: fix.pair };
 }

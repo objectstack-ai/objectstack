@@ -505,3 +505,72 @@ describe('MetadataResourceEditPage — a refusal is read off the parsed error on
     expect(saveButton()).toBeEnabled();
   }, 20000);
 });
+
+/**
+ * The toolbar's save-status chip tells the truth while a refusal holds the
+ * auto-save (objectstack#29901).
+ *
+ * The auto-save effect returns early on `refusalBlocking`, so after a 422 no
+ * save is coming — yet the chip used to keep its "auto-saving" state for as
+ * long as the page stayed dirty, beside banners saying the opposite. These
+ * pins read the chip's KIND (`data-state`), never its copy.
+ *
+ * Every "held" assertion is paired with the CONTROL below: the same edit on the
+ * same harness, with no refusal, reads the auto-save state and saves.
+ */
+describe('MetadataResourceEditPage — the save-status chip while a refusal holds auto-save (#29901)', () => {
+  const chipState = () => screen.queryByTestId('save-status')?.getAttribute('data-state') ?? null;
+
+  it('CONTROL: an ordinary dirty edit reads the auto-save state, then saves', async () => {
+    openEditor();
+    const box = await selectAndOpenCel('bystander');
+    fireEvent.change(box, { target: { value: 'record.amount > 11' } });
+
+    await waitFor(() => expect(chipState()).toBe('autosave-pending'), { timeout: 6000 });
+    await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 6000 });
+    await waitFor(() => expect(chipState()).toBe('saved'), { timeout: 6000 });
+  }, 20000);
+
+  it("the card's path: after a 422 the chip reads the refused state and no second save is sent", async () => {
+    mockClient.save.mockRejectedValueOnce(await refusal(REFUSED_PATH));
+
+    openEditor();
+    const offenderBox = await selectAndOpenCel('offender');
+    fireEvent.change(offenderBox, { target: { value: 'record.amount > 21' } });
+    await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 6000 });
+
+    await waitFor(() => expect(chipState()).toBe('held'), { timeout: 6000 });
+    // The chip carries the reason Save is withheld, the button's own words.
+    expect(screen.getByTestId('save-status')).toHaveAttribute(
+      'title',
+      expect.stringContaining('The server refused this draft'),
+    );
+
+    // Past the debounce, and again after an UNRELATED edit: still held, and
+    // still the one save — the chip promised nothing that did not come.
+    await pastAutoSaveWindow();
+    expect(chipState()).toBe('held');
+    const bystanderBox = await selectAndOpenCel('bystander');
+    fireEvent.change(bystanderBox, { target: { value: 'record.amount > 12' } });
+    await pastAutoSaveWindow();
+    expect(chipState()).toBe('held');
+    expect(mockClient.save).toHaveBeenCalledTimes(1);
+  }, 25000);
+
+  it('recovers: an edit the server accepts returns the chip to saving / saved', async () => {
+    mockClient.save.mockRejectedValueOnce(await refusal(REFUSED_PATH));
+
+    openEditor();
+    let offenderBox = await selectAndOpenCel('offender');
+    fireEvent.change(offenderBox, { target: { value: 'record.amount > 21' } });
+    await waitFor(() => expect(chipState()).toBe('held'), { timeout: 6000 });
+
+    // Editing the slice the server named releases the hold; the next save is
+    // accepted.
+    offenderBox = await selectAndOpenCel('offender');
+    fireEvent.change(offenderBox, { target: { value: 'record.amount > 22' } });
+    await waitFor(() => expect(chipState()).not.toBe('held'), { timeout: 6000 });
+    await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(2), { timeout: 6000 });
+    await waitFor(() => expect(chipState()).toBe('saved'), { timeout: 6000 });
+  }, 25000);
+});

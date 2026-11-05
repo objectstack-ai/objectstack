@@ -96,7 +96,9 @@ export interface ExprSchemaHint {
    * text or boolean field used with an arithmetic/ordering operator against a
    * number faults at runtime and the expression silently evaluates to `null`,
    * so it is surfaced as a NON-blocking warning. Absent ⇒ the check is skipped.
-   * Only consulted for `scope: 'record'` sites (where refs are `record.<field>`).
+   * Consulted at both scopes: `record.<field>` at a `'record'` site, the bare
+   * `<field>` and its `record.<field>` / `previous.<field>` read at a
+   * `'flattened'` one (#29959).
    */
   fieldTypes?: Readonly<Record<string, string>>;
   /**
@@ -222,7 +224,68 @@ export interface ExprSchemaHint {
    * {@link fields}; without it nothing is judged.
    */
   optionFields?: readonly string[];
+  /**
+   * [#29904, #29926] What the site's runtime does when this expression FAULTS,
+   * as declared by the caller that knows the site — the validator cannot tell a
+   * validation rule's `predicate` from a flow condition's. The tokens are the
+   * null-guard verdict's `NullGuardOutcome` (`@objectstack/lint`), so one site
+   * names one outcome to both verdicts.
+   *
+   * `'fail-closed'`: an expression that cannot be evaluated refuses the write
+   * (or aborts the operation) it guards instead of being skipped — a
+   * `severity: 'error'` object validation rule, a field `requiredWhen` /
+   * `readonlyWhen`, an option `visibleWhen` on the write path, a hook
+   * `condition`.
+   *
+   * `'run-fails'`: a record-triggered flow's start, edge or `decision` branch condition — the
+   * engine's `evaluateCondition` throws on the fault (ADR-0032 §1c), so the
+   * run fails there, while the record-change trigger isolates the write that
+   * fired it: the write lands, the flow's work is not done.
+   *
+   * `'fail-open'`: an advisory (`severity: 'warning' | 'info'`) validation
+   * rule — a rule that cannot be evaluated is skipped and logged, the write
+   * proceeds, and the rule never gives its advisory (#24782).
+   *
+   * With any of the three, a `type-mismatch` (text or a boolean ordered /
+   * arithmetic'd against a number) is an ERROR under that outcome's own code
+   * and wording — the severity the nullable-comparison verdict already has at
+   * the same sites. Absent at a `record`-scoped site: a fault reads as null (a
+   * formula field), and `type-mismatch` stays the advisory warning whose
+   * "evaluates to null" text is true there. Absent at a `'flattened'` (flow)
+   * site: `type-mismatch-run-may-fail`, a warning saying the run fails where
+   * the condition faults (#29959) — a flow condition never reads null.
+   */
+  faultOutcome?: ExprFaultOutcome;
+  /**
+   * [#29959] `'flattened'` scope only: the names the flow's run binds BEFORE it
+   * flattens the record's fields — its declared variables and node ids
+   * (`@objectstack/lint`'s `collectFlowVariableNames`), and the names the
+   * engine binds over the flattening. `seedRunVariables` seeds those first and
+   * the flattening skips a name already bound, so a bare read of one holds the
+   * variable, not the field: the type-soundness check does not type it as the
+   * field. `record.<name>` / `previous.<name>` still read the field and stay
+   * typed. Absent ⇒ every bare field name is typed, exactly as before this key.
+   */
+  flowVariables?: readonly string[];
+  /**
+   * [#30025] `'flattened'` scope only: the flow's run can bind a name no static
+   * reader sees — a node that hands out the live variable map or folds a
+   * resume bag in (`script`, `connector_action`, `wait`, `subflow`, `map`, a
+   * screen with no input contract; `@objectstack/lint`'s `flowCelRootScope`
+   * over the flow's nodes, `provable: false`). A bare name
+   * is then not proven to hold the field, so a bare-name `type-mismatch` takes
+   * no declared {@link faultOutcome}: it is the `type-mismatch-run-may-fail`
+   * warning. A `record.<name>` / `previous.<name>` read still reads the field
+   * and keeps the outcome. Absent ⇒ every verdict is exactly as before this key.
+   */
+  bareNamesUnproven?: boolean;
 }
+
+/**
+ * [#29926] What a site's runtime does once an expression there faults — see
+ * {@link ExprSchemaHint.faultOutcome}.
+ */
+export type ExprFaultOutcome = 'fail-closed' | 'run-fails' | 'fail-open';
 
 /**
  * One refusal (in `errors[]`) or advisory (in `warnings[]`).
@@ -301,17 +364,63 @@ function toCelFieldTypes(fieldTypes: Readonly<Record<string, string>>): Record<s
 }
 
 /**
+ * [#29926] The `type-mismatch` verdict at a site that declares its fault
+ * outcome ({@link ExprSchemaHint.faultOutcome}): the code each outcome is
+ * served under, and the clause that says what the runtime really does. Keyed
+ * by the outcome, so a new outcome without its own code and wording does not
+ * compile.
+ */
+const TYPE_MISMATCH_FAULT_ARMS: {
+  readonly [O in ExprFaultOutcome]: {
+    readonly code: 'type-mismatch-fail-closed' | 'type-mismatch-run-fails' | 'type-mismatch-fail-open';
+    readonly clause: string;
+  };
+} = {
+  'fail-closed': {
+    code: 'type-mismatch-fail-closed',
+    clause:
+      'an expression that cannot be evaluated fails closed: the write (or the operation a hook guards) ' +
+      'is refused, not skipped.',
+  },
+  'run-fails': {
+    code: 'type-mismatch-run-fails',
+    clause:
+      'a flow condition that cannot be evaluated fails the run: the flow stops at this condition, the ' +
+      'write that fired it still lands, and the work the flow exists to do is not done.',
+  },
+  'fail-open': {
+    code: 'type-mismatch-fail-open',
+    clause:
+      'the rule is advisory, so a rule that cannot be evaluated is skipped, not refused: the write ' +
+      'proceeds, the rule is never applied (its advisory never fires), and the only trace is a log line ' +
+      'saying it could not be evaluated.',
+  },
+};
+
+/**
  * #1928 / #3306 — a type-soundness verdict for an expression, or `null` when
  * sound. Two categories, with different severities:
  *  - `date-arith` (**error**): arithmetic on a date field against a number
- *    (`date − date + 1`, `today() + 30`) — always nulls at runtime and never
- *    recovers, so it blocks the build.
+ *    (`date − date + 1`, `today() + 30`) — always faults at runtime and never
+ *    recovers, so it blocks the build. A formula reads that fault as null; a
+ *    flattened (flow) condition's fault fails the run, under the
+ *    `date-arithmetic-run-fails` / `-run-may-fail` codes (#30016,
+ *    {@link dateFlowArm}).
  *  - `type-mismatch` (**warning**): a text/boolean field used with an
  *    arithmetic/ordering operator against a number — nulls unless the text value
- *    happens to be numeric, so it stays advisory.
+ *    happens to be numeric, so it stays advisory. An **error** where the caller
+ *    declares the site's fault outcome (`faultOutcome`, #29904 / #29926):
+ *    there the fault is not a null but a refused write, a failed flow run or a
+ *    rule that never applies, each under its own code
+ *    ({@link TYPE_MISMATCH_FAULT_ARMS}). In a flattened (flow) condition with
+ *    no declared outcome it is `type-mismatch-run-may-fail`, still a warning,
+ *    worded for the failed run a fault there is (#29959); a flattened
+ *    condition's `record.<field>` / `previous.<field>` read is judged as its
+ *    bare name is.
  *  - `date-text-arithmetic` / `date-duration-value` (**error**, #28944): what
  *    the Timestamp typing passes, re-checked with a date field declared as the
- *    text the runtime holds — see {@link dateTextIssue}.
+ *    text the runtime holds — see {@link dateTextIssue}; in a flow condition
+ *    the fault takes the same two flow codes as `date-arith`.
  * `scope` selects `record.<field>` vs bare field binding, shaping the message.
  */
 function typeSoundnessIssue(
@@ -319,32 +428,117 @@ function typeSoundnessIssue(
   fieldTypes: Readonly<Record<string, string>>,
   scope: 'record' | 'flattened',
   role: 'predicate' | 'value',
+  faultOutcome: ExprSchemaHint['faultOutcome'],
+  flowVariables?: readonly string[],
+  bareNamesUnproven?: boolean,
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
   const celFieldTypes = toCelFieldTypes(fieldTypes);
-  const mismatch = firstTypeMismatch(source, celFieldTypes, scope);
-  if (!mismatch) return dateTextIssue(source, celFieldTypes, scope, role);
+  // [#29959] A bare name a flow variable holds is not the field (see
+  // `ExprSchemaHint.flowVariables`), for every bare-name verdict here.
+  const shadowed = scope === 'flattened' && flowVariables && flowVariables.length > 0
+    ? new Set(flowVariables)
+    : undefined;
+  let mismatch = firstTypeMismatch(source, celFieldTypes, scope, shadowed);
+  // [#30025] Where the run can bind a bare name no reader sees
+  // (`ExprSchemaHint.bareNamesUnproven`), a bare-name mismatch is not proven to
+  // be the field's, so it takes no declared outcome. A `record.<field>` /
+  // `previous.<field>` mismatch in the same source still does: with every bare
+  // name left `dyn`, only the record-root pass can answer, and its answer wins.
+  let outcome = faultOutcome;
+  if (
+    mismatch && scope === 'flattened' && bareNamesUnproven && faultOutcome !== undefined
+    && mismatch.category === 'type-mismatch' && mismatch.root === undefined
+  ) {
+    const rootRead = firstTypeMismatch(source, celFieldTypes, scope, new Set(Object.keys(celFieldTypes)));
+    if (rootRead && rootRead.root !== undefined) mismatch = rootRead;
+    else outcome = undefined;
+  }
+  if (!mismatch) {
+    const bareCelTypes = shadowed
+      ? Object.fromEntries(Object.entries(celFieldTypes).filter(([name]) => !shadowed.has(name)))
+      : celFieldTypes;
+    return dateTextIssue(source, bareCelTypes, scope, role, dateFlowArm(scope, faultOutcome, bareNamesUnproven));
+  }
   const reference = mismatch.field
-    ? (scope === 'record' ? `record.${mismatch.field}` : mismatch.field)
+    ? (mismatch.root !== undefined
+      ? `${mismatch.root}.${mismatch.field}`
+      : scope === 'record' ? `record.${mismatch.field}` : mismatch.field)
     : undefined;
   const ref = reference !== undefined ? `\`${reference}\`` : null;
   if (mismatch.category === 'date-arith') {
     const subject = ref ? `${ref} is a date` : 'a date field';
+    const params = { operands: mismatch.operands, ...(reference !== undefined ? { reference } : {}) };
+    const head = `date arithmetic \`${mismatch.operands}\` — ${subject}, and CEL can't do arithmetic on dates: `;
+    const use =
+      `Use \`daysBetween(a, b)\` for the span in whole days, and \`daysFromNow(n)\` / ` +
+      `\`addDays(d, n)\` / \`addMonths(d, n)\` to shift a date.`;
+    const arm = dateFlowArm(scope, faultOutcome, bareNamesUnproven);
     return {
       severity: 'error',
+      issue: arm
+        ? refusal(`date-arithmetic-${arm}`, params, source, `${head}${dateFlowFault(arm, ref, 'date')} ${use}`)
+        : refusal(
+          'date-arithmetic',
+          params,
+          source,
+          `${head}this faults at runtime, so the field silently evaluates to null. ${use}`,
+        ),
+    };
+  }
+  const heldKind: 'boolean' | 'text' = mismatch.celType === 'bool' ? 'boolean' : 'text';
+  const held = heldKind === 'boolean' ? 'a boolean' : 'text';
+  const subject = ref ? `${ref} holds ${held}` : `${held === 'a boolean' ? 'a boolean' : 'a text'} field`;
+  const params = {
+    operands: mismatch.operands,
+    operator: mismatch.operator,
+    held: heldKind,
+    ...(reference !== undefined ? { reference } : {}),
+  };
+  // [#29904] Measured on the evaluator: `record.name > 5` faults on `"abc"`
+  // and on null, and the ADR-0032 §1c rescue answers only numeric text
+  // (`"7"`). `size()` answers text; `double()` / `int()` validate clean but
+  // fault on text that is not a number — so the hint says so.
+  const operand = reference ?? (heldKind === 'boolean' ? 'the field' : 'the text');
+  const convert = heldKind === 'boolean'
+    ? 'Compare a boolean with `true` / `false`, or use a number field.'
+    : `Compare like with like: use a number field, compare text with text, or convert ` +
+      `explicitly — \`size(${operand})\` for its length, \`double(${operand})\` for its value ` +
+      `(which itself faults on text that is not a number).`;
+  const faults =
+    `type mismatch \`${mismatch.operands}\` — ${subject} but is used with \`${mismatch.operator}\` ` +
+    `against a number. CEL has no such operation, so wherever the value is not numeric text ` +
+    `(an empty value included) the expression faults`;
+  if (outcome !== undefined) {
+    // [#29926] One code per outcome: a code names ONE message template
+    // (`expression-refusal.ts`), and the three outcomes are three sentences.
+    const arm = TYPE_MISMATCH_FAULT_ARMS[outcome];
+    return {
+      severity: 'error',
+      issue: refusal(arm.code, params, source, `${faults}, and here ${arm.clause} ${convert}`),
+    };
+  }
+  if (scope === 'flattened') {
+    // [#29959] A flattened condition is a flow's, and the engine's
+    // `evaluateCondition` throws on a fault (ADR-0032 §1c) on every flow: it
+    // never reads null. The caller declared no outcome because what the run
+    // binds under the name is not proven to be the field's value there — a
+    // flow whose entrance hands over an API request body, an action's partial
+    // record, a parent's record or nothing; a node's inert `condition` — so
+    // the mismatch stays a warning, worded for the run without naming the
+    // flow's kind (the engine's registration log serves it on every flow).
+    return {
+      severity: 'warning',
       issue: refusal(
-        'date-arithmetic',
-        { operands: mismatch.operands, ...(reference !== undefined ? { reference } : {}) },
+        'type-mismatch-run-may-fail',
+        params,
         source,
-        `date arithmetic \`${mismatch.operands}\` — ${subject}, and CEL can't do arithmetic on ` +
-          `dates: this faults at runtime, so the field silently evaluates to null. Use ` +
-          `\`daysBetween(a, b)\` for the span in whole days, and \`daysFromNow(n)\` / ` +
-          `\`addDays(d, n)\` / \`addMonths(d, n)\` to shift a date.`,
+        `${faults}, and a flow condition that faults when it is evaluated fails the run: the flow stops ` +
+          `at this condition and the work it exists to do is not done (it does not read null). Whether ` +
+          `${ref ?? 'the field'} holds ${held} there depends on what the run binds, which this check cannot ` +
+          `prove here, so this is a warning, not a refusal. ${convert}`,
       ),
     };
   }
-  const heldKind = mismatch.celType === 'bool' ? 'boolean' : 'text';
-  const held = heldKind === 'boolean' ? 'a boolean' : 'text';
-  const subject = ref ? `${ref} holds ${held}` : `${held === 'a boolean' ? 'a boolean' : 'a text'} field`;
   return {
     severity: 'warning',
     issue: refusal(
@@ -364,12 +558,44 @@ function typeSoundnessIssue(
 }
 
 /**
+ * [#30016] Which flow sentence a date verdict takes, or `null` off a flow. A
+ * flattened site is a flow condition, and the engine's `evaluateCondition`
+ * throws on a fault (ADR-0032 §1c) on every flow: a date verdict there never
+ * reads null. `run-fails` where the caller declares the run proven to hold the
+ * field (`faultOutcome: 'run-fails'`) and no node can rebind a bare name
+ * (`bareNamesUnproven`) — the date verdicts read bare names only. Anywhere
+ * else in a flow the name holds what the entrance handed the run (an API body
+ * whose value is a number answers `close_date + 1`), so the run fails only
+ * where it holds the date: `run-may-fail`. The grade stays an error either way.
+ */
+type DateFlowArm = 'run-fails' | 'run-may-fail';
+function dateFlowArm(
+  scope: 'record' | 'flattened',
+  faultOutcome: ExprSchemaHint['faultOutcome'],
+  bareNamesUnproven: boolean | undefined,
+): DateFlowArm | null {
+  if (scope !== 'flattened') return null;
+  return faultOutcome === 'run-fails' && !bareNamesUnproven ? 'run-fails' : 'run-may-fail';
+}
+
+/** [#30016] The fault clause of a flow date verdict; `held` names what the field holds at run time. */
+function dateFlowFault(arm: DateFlowArm, ref: string | null, held: 'date' | 'text'): string {
+  const fails =
+    'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the ' +
+    'work the flow exists to do is not done (it does not read null).';
+  if (arm === 'run-fails') return `this faults at runtime, and ${fails}`;
+  return `this faults wherever ${ref ?? 'the field'} holds ${held === 'date' ? 'the date' : 'that text'} ` +
+    `when the condition runs, and ${fails}`;
+}
+
+/**
  * #28944 — the date shapes the Timestamp typing of {@link firstTypeMismatch}
  * passes and the runtime cannot answer, judged by {@link firstDateTextVerdict}
  * with every `date`/`datetime` field declared as the text the runtime holds:
  *  - `date-text-arithmetic`: arithmetic on that text the evaluator faults on —
  *    `record.end_date - record.start_date` (either field kind), `record.d -
- *    duration('24h')` — so the expression reads null. Any role.
+ *    duration('24h')` — so the expression reads null (in a flow condition the
+ *    run fails instead: `flowArm`, #30016). Any role.
  *  - `date-duration-value`: a formula (`value` role) that computes a
  *    `google.protobuf.Duration` — `today() - record.start_date` — which a field
  *    serialises as `{}`. A predicate that COMPARES a duration
@@ -382,6 +608,7 @@ function dateTextIssue(
   celFieldTypes: Readonly<Record<string, FieldCelType>>,
   scope: 'record' | 'flattened',
   role: 'predicate' | 'value',
+  flowArm: DateFlowArm | null,
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
   if (role !== 'value' && !Object.values(celFieldTypes).includes('timestamp')) return null;
   const verdict = firstDateTextVerdict(source, celFieldTypes, scope);
@@ -393,17 +620,22 @@ function dateTextIssue(
   const shift = `\`daysFromNow(n)\` / \`addDays(d, n)\` / \`addMonths(d, n)\` to shift a date.`;
   if (verdict.kind === 'fault') {
     const subject = ref ? `${ref} is a date field` : 'a date field is an operand';
+    const params = { operands: verdict.operands, ...(reference !== undefined ? { reference } : {}) };
+    const head =
+      `date arithmetic \`${verdict.operands}\` — ${subject}, and the runtime holds a date field as ` +
+      `its text (\`YYYY-MM-DD\`, or an ISO-8601 instant for a date-time), which CEL can't do ` +
+      `arithmetic on: `;
+    const use = `Use \`daysBetween(a, b)\` for the span in whole days, and ${shift}`;
     return {
       severity: 'error',
-      issue: refusal(
-        'date-text-arithmetic',
-        { operands: verdict.operands, ...(reference !== undefined ? { reference } : {}) },
-        source,
-        `date arithmetic \`${verdict.operands}\` — ${subject}, and the runtime holds a date field as ` +
-          `its text (\`YYYY-MM-DD\`, or an ISO-8601 instant for a date-time), which CEL can't do ` +
-          `arithmetic on: this faults at runtime, so the field silently evaluates to null. Use ` +
-          `\`daysBetween(a, b)\` for the span in whole days, and ${shift}`,
-      ),
+      issue: flowArm
+        ? refusal(`date-text-arithmetic-${flowArm}`, params, source, `${head}${dateFlowFault(flowArm, ref, 'text')} ${use}`)
+        : refusal(
+          'date-text-arithmetic',
+          params,
+          source,
+          `${head}this faults at runtime, so the field silently evaluates to null. ${use}`,
+        ),
     };
   }
   if (role !== 'value' || verdict.type !== 'google.protobuf.Duration') return null;
@@ -1208,10 +1440,11 @@ export function validateExpression(
         // #1928 / #3306 — with per-field types in hand, flag a type-unsound
         // operator use that faults at runtime and silently nulls: a text/boolean
         // field arithmetic'd/ordered against a number (advisory warning — a
-        // numeric text value can succeed), or date-field arithmetic (hard error —
+        // numeric text value can succeed — or an error where the site fails
+        // closed, #29904), or date-field arithmetic (hard error —
         // always nulls). Only runs when there is no bare-ref error (the typed
         // check needs the canonical `record.<field>` form).
-        const r = typeSoundnessIssue(source, schema.fieldTypes, 'record', role);
+        const r = typeSoundnessIssue(source, schema.fieldTypes, 'record', role, schema.faultOutcome);
         if (r) (r.severity === 'error' ? errors : warnings).push(r.issue);
       }
     } else if (schema?.fields && schema.fields.length > 0) {
@@ -1246,7 +1479,8 @@ export function validateExpression(
       // date-field arithmetic (error). Flow variables stay `dyn` (never flagged);
       // equality/ordering of a date is runtime-safe (never flagged).
       if (schema.fieldTypes) {
-        const r = typeSoundnessIssue(source, schema.fieldTypes, 'flattened', role);
+        const r = typeSoundnessIssue(source, schema.fieldTypes, 'flattened', role, schema.faultOutcome, schema.flowVariables,
+          schema.bareNamesUnproven);
         if (r) (r.severity === 'error' ? errors : warnings).push(r.issue);
       }
     }

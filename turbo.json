@@ -283,6 +283,7 @@
         "$TURBO_ROOT$/examples/app-showcase/src/data/objects/semantic-zoo.object.ts",
         "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/task-triage.page.ts",
         "$TURBO_ROOT$/content/docs/deployment/cli.mdx",
+        "$TURBO_ROOT$/content/docs/deployment/environment-variables.mdx",
         "$TURBO_ROOT$/content/docs/deployment/index.mdx",
         "$TURBO_ROOT$/content/docs/deployment/troubleshooting.mdx",
         "$TURBO_ROOT$/content/docs/getting-started/index.mdx",

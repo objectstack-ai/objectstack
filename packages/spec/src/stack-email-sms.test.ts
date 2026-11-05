@@ -37,6 +37,7 @@ import {
 } from './stack.zod';
 import { EmailServiceConfigSchema, StackEmailConfigSchema } from './system/email-config.zod';
 import { StackSmsConfigSchema } from './system/sms-config.zod';
+import { PushServiceConfigSchema } from './system/push-config.zod';
 
 const manifest = {
   id: 'com.example.mailer',
@@ -241,5 +242,106 @@ describe('compose — an identical configuration passes, a different one is name
 
     const c = stackWith('three', { provider: 'log', persist: true });
     expect(() => composeStacks([a, c])).toThrow("top-level key 'email'");
+  });
+});
+
+// ─── PUSH — the `push` key carries the push service configuration ───
+//
+// The top-level `push` key is `PushServiceConfigSchema` itself, read by
+// `resolvePushCapabilityArg` (`@objectstack/service-push`) when the stack
+// declares `requires: ['push']`. Authoring accepts both transports and the
+// absence: refusing the not-yet-served relay is the boot's job, which names the
+// missing sender (pinned in the CLI and in `@objectstack/verify`). What
+// authoring refuses is an inline secret, by key name or inside a
+// `credentialRef`, because the stack is compiled into the published artifact.
+
+const apns = { teamId: 'ABCDE12345', keyId: 'KEY1234567', topic: 'com.example.app', environment: 'production' as const };
+
+describe('push — the stack key carries the push service configuration', () => {
+  it('a direct block with credentialRef builds and carries through, transport filled in', () => {
+    const stack = defineStack({
+      manifest,
+      requires: ['push'],
+      push: {
+        transport: 'direct',
+        apns: { ...apns, credentialRef: 'APNS_SIGNING_KEY' },
+        fcm: { projectId: 'example-app', credentialRef: 'FCM_SERVICE_ACCOUNT' },
+      },
+    });
+    expect(stack.push).toEqual({
+      transport: 'direct',
+      apns: { ...apns, credentialRef: 'APNS_SIGNING_KEY' },
+      fcm: { projectId: 'example-app', credentialRef: 'FCM_SERVICE_ACCOUNT' },
+    });
+  });
+
+  it('a vendor block with no transport reads as direct', () => {
+    const stack = defineStack({ manifest, push: { fcm: { projectId: 'example-app', credentialRef: 'FCM_SERVICE_ACCOUNT' } } });
+    expect(stack.push).toEqual({ transport: 'direct', fcm: { projectId: 'example-app', credentialRef: 'FCM_SERVICE_ACCOUNT' } });
+  });
+
+  it('a relay block and an empty block are accepted at authoring and read as the relay', () => {
+    expect(defineStack({ manifest, push: { transport: 'relay' } }).push).toEqual({ transport: 'relay' });
+    expect(defineStack({ manifest, push: {} }).push).toEqual({ transport: 'relay' });
+  });
+
+  it('absence is accepted and left absent — no push key is invented', () => {
+    const verdict = parse({ manifest });
+    expect(verdict.success).toBe(true);
+    if (!verdict.success) return;
+    expect('push' in verdict.data).toBe(false);
+  });
+
+  it('the key reads as PushServiceConfigSchema, a declared top-level key composed as a single value', () => {
+    // Same verdict as the operator contract, on each transport and on a refusal.
+    for (const push of [{}, { transport: 'relay' }, { apns: { ...apns, credentialRef: 'APNS_SIGNING_KEY' } }, { transport: 'direct' }]) {
+      const viaStack = parse({ manifest, push });
+      const direct = PushServiceConfigSchema.safeParse(push);
+      expect(viaStack.success, JSON.stringify(push)).toBe(direct.success);
+      if (viaStack.success && direct.success) expect(viaStack.data.push).toEqual(direct.data);
+    }
+    expect(STACK_DEFINITION_KEYS).toContain('push');
+    expect(COMPOSE_KEY_DISPOSITIONS.push).toBe('single');
+  });
+
+  it('an inline APNs key is refused by name at authoring, prescribing credentialRef', () => {
+    const raw = { manifest, push: { transport: 'direct', apns: { ...apns, credentialRef: 'APNS_SIGNING_KEY', key: 'PRIVATE KEY BODY' } } };
+    const issue = unrecognized(parse(raw));
+    expect(issue?.path).toEqual(['push', 'apns']);
+    expect(issue?.keys).toEqual(['key']);
+    expect(issue?.message).toContain('`credentialRef`');
+
+    const err = refusalOf(raw);
+    expect(err.code).toBe('STACK_SCHEMA_INVALID');
+    expect(err.status).toBe(422);
+    expect(err.message).toContain('`key`');
+    // The refusal names the key, never the value it carried.
+    expect(err.message).not.toContain('PRIVATE KEY BODY');
+  });
+
+  it('a secret pasted into credentialRef is refused at its path', () => {
+    const raw = {
+      manifest,
+      push: { transport: 'direct', fcm: { projectId: 'example-app', credentialRef: '{"type": "service_account"}' } },
+    };
+    const verdict = parse(raw);
+    expect(verdict.success).toBe(false);
+    if (verdict.success) return;
+    const issue = verdict.error.issues.find((i) => i.path.join('.') === 'push.fcm.credentialRef');
+    expect(issue?.message).toContain('never contains it');
+
+    const err = refusalOf(raw);
+    expect(err.code).toBe('STACK_SCHEMA_INVALID');
+    expect(err.status).toBe(422);
+  });
+
+  it('two stacks declaring different push blocks are named on compose', () => {
+    const stackWith = (id: string, projectId: string) => defineStack({
+      manifest: { ...manifest, id: `com.example.${id}`, name: id, namespace: id },
+      push: { fcm: { projectId, credentialRef: 'FCM_SERVICE_ACCOUNT' } },
+    });
+    expect(composeStacks([stackWith('one', 'a'), stackWith('two', 'a')]).push)
+      .toEqual({ transport: 'direct', fcm: { projectId: 'a', credentialRef: 'FCM_SERVICE_ACCOUNT' } });
+    expect(() => composeStacks([stackWith('one', 'a'), stackWith('three', 'b')])).toThrow("top-level key 'push'");
   });
 });

@@ -10,8 +10,9 @@
  *    in the query string (better-auth's oauth-provider redirects the
  *    unauthenticated user here before issuing a code).
  *  - Post-login orchestration: replay the original `/oauth2/authorize`
- *    request, auto-select the user's single organization, or honour a
- *    safe `?redirect=` target.
+ *    request, forward to the mobile sign-in hand-off when `?redirect=` names
+ *    it (#29971, `./handoffRedirect`), auto-select the user's single
+ *    organization, or honour a safe `?redirect=` target.
  *  - Offers the "Sign up" link only when the server would accept a sign-up
  *    from this visitor: never under `emailPassword.disableSignUp === true`,
  *    and under an audience posture closed to strangers (`invite_only`) only
@@ -73,6 +74,7 @@ import {
 import { AuthLayout } from './AuthLayout';
 import { AuthFooter, readLegalLinks } from './AuthFooter';
 import { followOauthAuthorize } from './followAuthorize';
+import { handoffMarkQuery, useHandoffRedirect } from './handoffRedirect';
 // Was module-private here; lifted to a shared module so `SetupPage` (whose
 // first-run exits went without it) and `RegisterPage` (which had copied it)
 // share ONE implementation — objectui#4181. Behaviour here is unchanged.
@@ -103,6 +105,7 @@ export function LoginPage() {
   const redirect = params.get('redirect');
   const {
     user,
+    session,
     isLoading,
     organizations,
     isOrganizationsLoading,
@@ -110,6 +113,13 @@ export function LoginPage() {
     switchOrganization,
     getAuthConfig,
   } = useAuth();
+  // #29971 — a `redirect` naming the mobile sign-in hand-off: where to go
+  // after sign-in, and whether the signed-in session is too old for it, in
+  // which case the form shows instead (see `./handoffRedirect`).
+  const handoff = useHandoffRedirect(redirect, { user, session, isLoading });
+  // Nobody signed in, or a session the hand-off would refuse: either way this
+  // page is talking to someone who has to sign in.
+  const signInNeeded = !user || handoff.holdForSignIn;
 
   // The public auth config and where its read stands (objectui#11806):
   // `loading` until `getAuthConfig()` settles, `failed` once it rejected — the
@@ -141,6 +151,8 @@ export function LoginPage() {
   // The OAuth hand-off fetch must fire at most once even though the post-login
   // effect re-runs as org state settles (it navigates away on success).
   const ssoHandoffStartedRef = useRef(false);
+  // The same once-only latch for the mobile sign-in hand-off navigation.
+  const mobileHandoffStartedRef = useRef(false);
 
   // `isLoading` from useAuth() is overloaded: it is true both during the
   // initial session check AND during every in-flight signIn. The full-page
@@ -159,7 +171,7 @@ export function LoginPage() {
   // did not come from an invitation; see app-shell's `decideSignUpOffer`.
   const invitationRedirect = isInvitationRedirect(redirect);
   const bootstrap = useBootstrapStatus(
-    hasBootstrapped && !user && needsBootstrapProbe(authConfig, invitationRedirect),
+    hasBootstrapped && signInNeeded && needsBootstrapProbe(authConfig, invitationRedirect),
   );
   const signUpOffer = decideSignUpOffer(authConfig, { invitationRedirect, bootstrap });
   // #26473 — who invited this visitor, and to what; `null` keeps the generic
@@ -249,7 +261,21 @@ export function LoginPage() {
       }
     }
 
-    // 2. Auto-select a single org so post-login redirect doesn't bounce
+    // 2. The mobile sign-in hand-off (#29971), before the organization steps:
+    //    it carries the session and nothing else, and the app's WebView picks
+    //    the organization after it. Navigated to unprefixed, by script from
+    //    this page, so the route sees `Sec-Fetch-Site: same-origin`. A session
+    //    the route would refuse for its age keeps the form up instead.
+    if (handoff.target) {
+      if (handoff.holdForSignIn) return;
+      if (!mobileHandoffStartedRef.current) {
+        mobileHandoffStartedRef.current = true;
+        window.location.assign(handoff.target);
+      }
+      return;
+    }
+
+    // 3. Auto-select a single org so post-login redirect doesn't bounce
     //    off `RequireOrganization`.
     if (!activeOrganization) {
       if (isOrganizationsLoading || autoSelectingOrg) return;
@@ -282,9 +308,11 @@ export function LoginPage() {
     autoSelectingOrg,
     redirect,
     switchOrganization,
+    handoff.target,
+    handoff.holdForSignIn,
   ]);
 
-  if ((isLoading && !hasBootstrapped) || user) {
+  if ((isLoading && !hasBootstrapped) || !signInNeeded) {
     return (
       <AuthLayout>
         <div className="flex flex-col items-center gap-3 py-10 text-sm text-muted-foreground">
@@ -296,9 +324,9 @@ export function LoginPage() {
   }
 
   // Build search-aware sign-up URL so the redirect param survives the
-  // bounce from /login → /register → /login.
+  // bounce from /login → /register → /login, and the hand-off route's mark with it.
   const registerUrl = redirect
-    ? `/register?redirect=${encodeURIComponent(redirect)}`
+    ? `/register?redirect=${encodeURIComponent(redirect)}${handoffMarkQuery(redirect)}`
     : '/register';
   const legalLinks = readLegalLinks(authConfig);
   const offerSignUp = configRead === 'known' && signUpOffer === 'form';

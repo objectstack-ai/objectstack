@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/connector-app-github",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "GitHub connector app (open edition): GitHub's remote MCP server as a declarative `mcp` connector instance with a read-tool allowlist, authenticated by a personal access token the administrator supplies through the credential store.",
   "license": "Apache-2.0",
   "private": true,

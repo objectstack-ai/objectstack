@@ -5301,3 +5301,135 @@ describe('the connector save door carries connector-credential-literal as an adv
         expect(connectorRows(rows).map((r) => r.name)).toEqual(['vendor_api']);
     });
 });
+
+// #30023 — a stored sort naming a field whose author declared `sortable: false`
+// is refused at the publish door, judged by the sortability projection the
+// Data API list door refuses by (`400 INVALID_SORT`, reason `author-declared`,
+// #29896). Before it, the body saved green and its first fetch, and every
+// fetch after it, answered 400. The precedent is #9257's `formula` verdict,
+// graded `error`; the virtual field keeps that verdict here.
+describe('runtime authoring gate — a stored sort on a `sortable: false` field (#30023)', () => {
+    const OBJECT = 'help_ticket';
+    const ticket = {
+        name: OBJECT,
+        label: 'Ticket',
+        fields: {
+            subject: { type: 'text', label: 'Subject' },
+            body: { type: 'textarea', label: 'Body', sortable: false },
+            priority: { type: 'number', label: 'Priority', sortable: true },
+            score: { type: 'formula', label: 'Score', expression: 'priority * 2' },
+        },
+    };
+    function host() {
+        const { engine, rows } = makeStubEngine();
+        engine.registry.listItems = (type: string) => (type === 'object' ? [ticket] : []);
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any;
+        return { protocol, rows };
+    }
+    const DECLARED = '"body", a field on object "help_ticket" that declares `sortable: false`';
+    const sortIssues = (err: any) => (err?.issues ?? []).filter((i: any) => i.rule === 'sort-field-unsortable');
+    const activeRows = (rows: Map<string, Row>, type: string) =>
+        Array.from(rows.values()).filter((r) => r.type === type && r.state === 'active');
+
+    /** A standalone list view, the shape `PUT /api/v1/meta/view` carries. */
+    const listView = (sort: unknown) => ({
+        name: 'ticket_inbox', object: OBJECT, viewKind: 'list', type: 'grid',
+        columns: [{ field: 'subject' }], sort,
+    });
+    const saveView = (protocol: any, item: unknown) =>
+        protocol.saveMetaItem({ type: 'view', name: 'ticket_inbox', item });
+
+    /** One page per stored page slot, each sorting by `field`. */
+    const pages = (field: string): Array<[slot: string, page: Record<string, unknown>]> => [
+        ['record:related_list sort', {
+            name: 'ticket_page', label: 'Tickets', type: 'record', object: OBJECT,
+            regions: [{ name: 'main', components: [{
+                type: 'record:related_list',
+                properties: { objectName: OBJECT, relationshipField: 'subject', sort: [{ field, order: 'asc' }] },
+            }] }],
+        }],
+        ['element dataSource.sort', {
+            name: 'ticket_page', label: 'Tickets', type: 'record', object: OBJECT,
+            regions: [{ name: 'main', components: [{
+                type: 'record:related_list',
+                dataSource: { object: OBJECT, sort: [{ field, order: 'desc' }] },
+                properties: { objectName: OBJECT, relationshipField: 'subject' },
+            }] }],
+        }],
+        ['list page interfaceConfig.sort', {
+            name: 'ticket_page', label: 'Tickets', type: 'list', object: OBJECT,
+            interfaceConfig: { source: OBJECT, sort: [{ field, order: 'asc' }] },
+        }],
+        ['app page record.sort', {
+            name: 'ticket_page', label: 'Tickets', type: 'app',
+            record: { object: OBJECT, sort: [{ field, order: 'asc' }] },
+            regions: [{ name: 'main', components: [{ type: 'page:header', properties: { title: 'Tickets' } }] }],
+        }],
+    ];
+    const PATHS: Record<string, string> = {
+        'record:related_list sort': 'pages[0].regions[0].components[0].properties.sort[0]',
+        'element dataSource.sort': 'pages[0].regions[0].components[0].dataSource.sort[0]',
+        'list page interfaceConfig.sort': 'pages[0].interfaceConfig.sort[0]',
+        'app page record.sort': 'pages[0].record.sort[0]',
+    };
+    const savePage = (protocol: any, item: unknown) =>
+        protocol.saveMetaItem({ type: 'page', name: 'ticket_page', item });
+
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+    });
+
+    it('refuses a list view whose `sort` names it, 422 with the door\'s field and reason, and stores nothing', async () => {
+        const { protocol, rows } = host();
+        const err = await saveView(protocol, listView([{ field: 'body', order: 'asc' }])).catch((e: any) => e);
+        expect(err?.status).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(sortIssues(err)).toEqual([expect.objectContaining({
+            severity: 'error',
+            path: 'views[0].sort[0]',
+            message: expect.stringContaining(DECLARED),
+        })]);
+        expect(activeRows(rows, 'view')).toEqual([]);
+    });
+
+    it.each(pages('body').map(([slot, page]) => [slot, page] as const))(
+        'refuses a page whose %s names it, at its slot path',
+        async (slot, page) => {
+            const { protocol, rows } = host();
+            const err = await savePage(protocol, page).catch((e: any) => e);
+            expect(err?.status, JSON.stringify(err?.issues ?? err?.message)).toBe(422);
+            expect(sortIssues(err).map((i: any) => i.path)).toEqual([PATHS[slot]]);
+            expect(sortIssues(err)[0].message).toContain(DECLARED);
+            expect(activeRows(rows, 'page')).toEqual([]);
+        },
+    );
+
+    it('CONTROL — no `sortable` key and `sortable: true` save, on the view and on every page slot', async () => {
+        for (const field of ['subject', 'priority']) {
+            const { protocol, rows } = host();
+            await expect(saveView(protocol, listView([{ field, order: 'asc' }]))).resolves.toMatchObject({ success: true });
+            for (const [slot, page] of pages(field)) {
+                await expect(savePage(protocol, page), `${field} · ${slot}`).resolves.toMatchObject({ success: true });
+            }
+            expect(activeRows(rows, 'view')).toHaveLength(1);
+        }
+    });
+
+    it('CONTROL — a virtual field keeps its own verdict, the storage one', async () => {
+        const { protocol } = host();
+        const viewErr = await saveView(protocol, listView([{ field: 'score', order: 'asc' }])).catch((e: any) => e);
+        expect(sortIssues(viewErr).map((i: any) => i.message)).toEqual([
+            expect.stringContaining("a virtual 'formula' field"),
+        ]);
+        const pageErr = await savePage(protocol, pages('score')[0]![1]).catch((e: any) => e);
+        expect(sortIssues(pageErr).map((i: any) => i.message)).toEqual([
+            expect.stringContaining("a virtual 'formula' field"),
+        ]);
+        expect(sortIssues(pageErr)[0].message).not.toContain('sortable: false');
+    });
+});

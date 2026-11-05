@@ -350,6 +350,8 @@ export {
   detectProposedPlan,
   detectBuilderHandoff,
   detectRecordHandoff,
+  detectRecordWrite,
+  detectSampleDataCleanup,
   detectProposedChanges,
   detectReplayOutcome,
   detectAuthoringVerdict,
@@ -364,6 +366,9 @@ export type {
   DraftReview,
   ProposedPlan,
   BuilderHandoff,
+  RecordWrite,
+  RecordWriteField,
+  SampleDataCleanup,
   ProposedChanges,
   ReplayOutcome,
 } from './mapMessages';
@@ -428,3 +433,7 @@ export type {
   UseHitlInChatReturn,
   ContinueContext,
 } from './useHitlInChat';
+// objectstack#30223 — the marker on the continuation turn `useHitlInChat`
+// sends after 确认 / 取消; readers skip such a turn instead of showing it as
+// the person's own words.
+export { isHitlContinuation } from './hitlContinuation';

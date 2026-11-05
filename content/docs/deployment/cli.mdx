@@ -1303,10 +1303,12 @@ where the data lives.
 | `os migrate files-to-references` | Convert legacy file-field values to `sys_file` references, verify the ownership ledger, and record the deployment's migration flag |
 | `os migrate value-shapes` | Scan stored reference and structured-JSON field values against the platform's value contract, and record the deployment's migration flag when clean |
 | `os migrate summary-nulls` | Backfill roll-up `count` / `sum` columns still stored as `NULL` on parent rows created before the insert-time seed. Repairs values; no flag, nothing depends on it having run |
+| `os migrate stored-expressions` | Fill a stored computed field (a non-formula field declaring `expression`) on the rows stored before the field was declared, which hold `NULL` until each is next written; the boot warns, naming the field, when a sample of rows holds such a `NULL`. `--changed` also recomputes values an edited expression no longer gives. Rows an expression cannot compute while they hold a value are listed, never written. No flag; idempotent |
 | `os migrate blank-single-values` | Rewrite the empty strings (`''`) still stored on optional single-value option, reference and file columns to `null`, the form a cleared value is stored in today, so `$empty` finds those rows. Repairs values; no flag, nothing depends on it having run. See [below](#os-migrate-blank-single-values) |
 | `os migrate option-codes` | Rewrite option values still stored as a number, a boolean or SQLite `"N.0"` text (rows written before option fields stored the code string) to that code string, so filters, reads and unique keys see one value. Values it cannot decide are listed, never rewritten. No flag; idempotent. See [below](#os-migrate-option-codes) |
 | `os migrate text-scalars` | Rewrite numbers and booleans still stored raw on text fields (rows written before text fields stored the string) to that string, so filters, reads and unique keys see one value. SQLite `"N.0"` text it cannot decide is listed, never rewritten. No flag; idempotent. See [below](#os-migrate-text-scalars) |
 | `os migrate record-currency-codes` | Write the currency code you give into the rows of a record-mode currency field that hold an amount and no code, the rows stored before the field was switched to `currencyMode: 'record'`. The code is never derived. No flag; idempotent. See [below](#os-migrate-record-currency-codes) |
+| `os migrate recompute-home-amounts` | Recompute the home-currency amounts a record-mode currency field stores, at the exchange rates in force now, after a rate is corrected or added. Reports the rows that change and lists, without writing, the rows it cannot convert. No flag; idempotent. See [below](#os-migrate-recompute-home-amounts) |
 | `os migrate comment-reactions` | Carry the emoji reactions a 17.x deployment stored in the retired `sys_comment.reactions` column into `sys_comment_reaction` records, list every stored value that does not read, and record the verified run that lets `os migrate apply --allow-destructive` drop the column |
 | `os migrate organization-ownership` | The v18 ownership ceremony (ADR-0131 D10): write a plan of what each table's rows will become, then `--apply` that reviewed plan. It upgrades a database 17.x or an 18.0 pre-release (`18.0.0-next.*`) created; a v18 server refuses to start on one until it has run. See [below](#os-migrate-organization-ownership) |
 | `os migrate activity-changed-fields` | Stamp the two read-rule columns (`changed_fields`, `milestone_key`) on the `sys_activity` rows written before they existed. Until it runs, those rows are withheld from every reader but the system, so run it at once after upgrading. No flag; idempotent |
@@ -1621,6 +1623,68 @@ every write turns a blank code into a code, so a second run finds nothing to wri
 Re-running until the report says zero *is* the verification, which is why this
 command records no flag.
 
+#### `os migrate recompute-home-amounts`
+
+A record-mode amount that declares a home amount is converted into the organization's home
+currency when it is written, and stored with the rate it used
+([Currency fields](/docs/data-modeling/currency#converting-into-the-home-currency)). A rate
+row corrected or added later does not rewrite what was stored. This command does, after a
+report.
+
+```bash
+os migrate recompute-home-amounts --object invoice                               # Dry run: reports, writes none
+os migrate recompute-home-amounts --object invoice --since 2026-01-01            # Documents dated on or after Jan 1 only
+os migrate recompute-home-amounts --object invoice --field amount --apply        # Write (prompts)
+os migrate recompute-home-amounts --object invoice --apply --yes --json          # CI / scripts
+```
+
+**The write's own numbers.** Each stored row is projected exactly as a write projects it:
+the rate row with the latest effective date on or before the document date, in the row's
+own organization; the amount divided by the rate in exact decimal arithmetic, rounded once
+to the home currency's decimal places; rate `1` for an amount in the home currency; and a
+`datetime` document date read as its day in the organization's timezone. An applied row is
+written through the engine, which converts it again, so it holds what a fresh write of the
+row would store. Each organization converts into its own home currency at its own rates,
+and the report counts each organization apart.
+
+**What is written.** Only rows whose stored home amount or rate differs, and in them only
+the home and rate fields: `updated_at` keeps its stored value. Because each one is an
+ordinary write of the home field, whatever reads that field moves with it, as it would for
+a fresh write: stored formulas, parent summaries, and, where audit capture is installed
+(it is in the command's own boot), one per-row `sys_audit_log` `update` row for each row
+rewritten. ⚠️ Since `updated_at` does not move, a consumer that syncs incrementally by
+`updated_at` does not see a recomputed row; resync the object, or the rows the report
+lists. (`os migrate record-currency-codes` does move `updated_at`.) `--field` limits the run to
+one amount; without it, every amount of the object that declares a home amount is
+recomputed. `--since YYYY-MM-DD` keeps the rows whose **document date** (the field
+`homeAmount.rateDate` names, the date that picks the rate) is on or after that day, a
+`datetime` read as its day in the organization's timezone; a row with no document date is
+outside every `--since` window. A malformed `--since` is refused with `VALIDATION_FAILED` /
+400 before the database is opened; an object the deployment does not declare
+(`OBJECT_NOT_FOUND`), or one or a `--field` that declares no home amount (`INVALID_FIELD`),
+is refused after the boot and before any row is read.
+
+**Rows it cannot convert are listed and skipped**, each with its reason, and never written:
+
+| Reason | The row | Fix, then re-run |
+|:---|:---|:---|
+| `rate_missing` | No rate for its currency is in force on its document date (the report names both). | Add the rate. |
+| `code_blank` | An amount with no currency code: stored before the field switched to record mode. | [`os migrate record-currency-codes`](#os-migrate-record-currency-codes). It writes its one code into the codeless rows of **every** organization, so check the report's `code_blank` count per organization first. |
+| `document_date_blank` | A foreign-currency amount with no document date. | Fill the document date. |
+| `home_currency_unset` | Its organization has no `localization.currency`. | Set **Localization → Default currency**. |
+| `unconvertible` | A code, amount or document date the write itself refuses. | Correct the value. |
+
+A skipped row keeps whatever it stored, so a total over the home field leaves it out (a
+`sum` skips an empty home amount silently). That gap stays visible: the command exits 1,
+on a dry run and on an apply, for as long as any row is listed, and an applied run's
+run-level `sys_audit_log` entry (one per run beside the per-row rows, no record,
+`action: update`, `metadata.event: home_amount.recompute`) records the counts per
+organization and reason and every skipped row. A run that an unexpected error stops
+partway still writes that entry, marked `aborted` with the counts it reached, before the
+command fails. A walk cut short by `--max-records` also exits 1: rows past the bound were
+not looked at. Idempotent: re-running until it lists nothing and changes nothing *is* the
+verification, which is why it records no flag.
+
 #### `os migrate comment-reactions`
 
 v18 retired `sys_comment.reactions`, the JSON column that held every emoji
@@ -1838,6 +1902,15 @@ os migrate organization-ownership --out plan.json            # the plan: reads o
 os migrate organization-ownership --apply --plan-file plan.json --backup-taken
 os migrate organization-ownership --dev …                    # boot as `os serve --dev` does
 ```
+
+- **Run it with the auth secret the deployment serves with.** The ceremony
+  composes the security plugin only when an auth secret resolves
+  (`OS_AUTH_SECRET`), as `os serve` does; without it the apply can stop at its
+  `authored-conversion` step. A deployment `os start` serves with the secret
+  it generated keeps that secret in `<home>/auth-secret`, and its refusal names
+  both commands with it exported:
+  `OS_AUTH_SECRET="$(cat <home>/auth-secret)" os migrate organization-ownership …`.
+  `--dev` composes the plugin as a development boot does.
 
 - **The plan writes nothing.** Per table it lists the fate (column dropped,
   mirror rows deleted, owner attributed, rows reported), the row counts, and the
@@ -2269,6 +2342,8 @@ os g dashboard sales                          # Generate a dashboard
 os g app sales --object customer              # Generate an app whose navigation opens Customer
 os g skill lead_qual                          # Generate an AI skill
 os g picklist industry                        # Generate a shared option list select fields name
+os g permission sales_user --object customer  # Generate a permission set that grants Customer
+os g dataset customer_metrics --object customer  # Generate a dataset dashboard widgets bind to
 
 os g action escalate --object customer --flow customer_changed_flow  # Name the flow when there are several
 os g object task -d lib/                      # Override target directory
@@ -2287,6 +2362,8 @@ os g object task --dry-run                    # Preview without writing
 | `app` | `src/apps/` | `NAME.app.ts` | `apps` | Application navigation |
 | `skill` | `src/skills/` | `NAME.skill.ts` | `skills` | AI skill — the ADR-0063 extension primitive |
 | `picklist` | `src/picklists/` | `NAME.picklist.ts` | `picklists` | Shared option list that select fields reference by name |
+| `permission` | `src/security/` | `NAME.permission.ts` | `permissions` | Permission set: what a signed-in user may do with an object |
+| `dataset` | `src/datasets/` | `NAME.dataset.ts` | `datasets` | Analytics dataset: the dimensions and measures dashboard widgets bind to |
 
 <Callout type="info" title="Why generated files carry a type infix">
 Every scaffold is written as `NAME.TYPE.ts`, and the infix is read from the
@@ -2340,12 +2417,12 @@ the rules a JSON Schema can express and names the rest under
 **Options:**
 - `-d, --dir <directory>` — Override target directory
 - `--dry-run` — Preview without writing files
-- `--object <object>` — The object a `flow`, `action` or `app` binds; default: the stack's only object
+- `--object <object>` — The object a `flow`, `action`, `app`, `permission` or `dataset` binds; default: the stack's only object
 - `--flow <flow>` — The flow an `action` runs; default: the stack's only flow
 
 **What it does:**
-1. For a type that names an object (`object`, `view`, `action`, `flow`, `app`), reads `manifest.namespace` from the project config (`objectstack.config.ts`, `.js` or `.mjs`) and prefixes the object name with it, and resolves every object or flow the scaffold binds against the stack that config loads (see above)
-2. Creates the TypeScript file — an `object` declared with `ObjectSchema.create({ … })`, the same shape the `os init` templates write; a `skill` declared with `defineSkill({ … })`; a `picklist` declared with `definePicklist({ … })`, which a select field names with `Field.select({ picklist: 'NAME' })` in place of its own `options`, and which the server resolves into that field's `options`; the other types as typed literals (`UI.View`, `UI.Action`, `Automation.Flow`, `UI.Dashboard`, `UI.App`)
+1. For a type that names an object (`object`, `view`, `action`, `flow`, `app`, `permission`, `dataset`), reads `manifest.namespace` from the project config (`objectstack.config.ts`, `.js` or `.mjs`) and prefixes the object name with it, and resolves every object or flow the scaffold binds against the stack that config loads (see above)
+2. Creates the TypeScript file — an `object` declared with `ObjectSchema.create({ … })`, the same shape the `os init` templates write; a `skill` declared with `defineSkill({ … })`; a `picklist` declared with `definePicklist({ … })`, which a select field names with `Field.select({ picklist: 'NAME' })` in place of its own `options`, and which the server resolves into that field's `options`; a `permission` set declared with `definePermissionSet({ … })`, granting the bound object; a `dataset` declared with `defineDataset({ … })` over the bound object, with a record-count measure; the other types as typed literals (`UI.View`, `UI.Action`, `Automation.Flow`, `UI.Dashboard`, `UI.App`)
 3. Creates or updates the barrel `index.ts` in the target directory
 4. Shows a hint to run `objectstack validate`
 
@@ -2583,12 +2660,12 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    measure of a bound widget that is a count, a sum, or a derived measure over
    those, fixture rows are written through the seed door
    on every preset's first and last day and the day either side (never after
-   today), stamped at UTC noon, owned by the caller and holding every column
+   today, except a forward preset's own edges, which are future days), stamped at UTC noon, owned by the caller and holding every column
    the widget's own filter, the dataset's filter and the measure's filter
    compare (the smallest record first, every synthesized field if the seed
    door refuses it), and read back. The widget is then asked through
    `POST /analytics/dataset/query` as the signed-in admin with no window and
-   under each of the 13 presets, before and after the fixtures. A preset is
+   under each preset, before and after the fixtures. A preset is
    handed as the spec's `{date-macro}` window for it
    (`{ $gte: '{7_days_ago}', $lte: '{today}' }` for `last_7_days`, `{ $gte: '{month_start}', $lte: '{month_end}' }` for
    `this_month`), ANDed with the widget's filter, and the server resolves the

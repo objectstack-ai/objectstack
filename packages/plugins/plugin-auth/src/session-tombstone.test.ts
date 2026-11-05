@@ -22,6 +22,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { runWithEndpointContext } from '@better-auth/core/context';
+import { emailOTP } from 'better-auth/plugins/email-otp';
 import { AuthManager } from './auth-manager';
 import { BETTER_AUTH_MOUNTED_SURFACE } from './auth-route-ledger';
 import {
@@ -33,6 +34,11 @@ import {
   isRevokedSessionRow,
   reconcileSessionDelete,
 } from './session-tombstone';
+import { FORCED_RESET_REVOKE_REASON } from './forced-reset-revocation';
+
+/** Every route that sets a password from a reset token or code. */
+const EMAIL_OTP_RESET_DOOR = '/email-otp/reset-password';
+const RESET_DOORS = ['/reset-password', '/phone-number/reset-password', EMAIL_OTP_RESET_DOOR];
 
 /**
  * In-memory IDataEngine — the `session-of-record.test.ts` harness, unchanged
@@ -439,6 +445,16 @@ describe('#7732 — the path ledger', () => {
     expect(INTERACTIVE_REVOKE_REASON['/revoke-sessions']).toBe('user_revoked');
   });
 
+  it('every reset door records password_reset — neither the owner\'s own revoke nor the forced reset', async () => {
+    for (const path of RESET_DOORS) {
+      expect({ path, reason: INTERACTIVE_REVOKE_REASON[path] }).toEqual({ path, reason: 'password_reset' });
+    }
+    // The administrator's forced reset writes its own value, and no route in
+    // this ledger writes it: the value is the only record of who ended it.
+    expect(FORCED_RESET_REVOKE_REASON).toBe('admin_password_reset');
+    expect(Object.values(INTERACTIVE_REVOKE_REASON)).not.toContain(FORCED_RESET_REVOKE_REASON);
+  });
+
   it('leaves every other path — and no path at all — as a plain delete', async () => {
     for (const path of ['/sign-out', '/get-session', '/admin/ban-user', '/delete-user', undefined]) {
       const engine = tombstoneEngine();
@@ -498,16 +514,50 @@ describe('#7732 — the path ledger', () => {
     await expect(currentAuthEndpointPath()).resolves.toBeUndefined();
   });
 
+  /**
+   * Every path the platform can mount: the pinned maximal surface, plus the
+   * phone-number family, which `plugins.phoneNumber` mounts and that surface
+   * does not switch on — read off a manager that does.
+   */
+  const platformMountedPaths = async (): Promise<Set<string>> => {
+    const mounted = new Set(
+      BETTER_AUTH_MOUNTED_SURFACE.map((route) => route.replace(/^[A-Z]+ \/api\/v1\/auth/, '')),
+    );
+    const manager = new AuthManager({
+      secret: SECRET,
+      baseUrl: 'http://localhost:3000',
+      plugins: { phoneNumber: true },
+    } as any);
+    const auth = (await manager.getAuthInstance()) as unknown as { api: Record<string, { path?: unknown }> };
+    for (const endpoint of Object.values(auth.api)) {
+      if (typeof endpoint?.path === 'string') mounted.add(endpoint.path);
+    }
+    return mounted;
+  };
+
   it('every ledgered path is a route better-auth actually mounts', async () => {
     // The ledger is keyed on better-auth's own endpoint paths. An upstream
     // rename would leave every entry matching nothing — the fix would go
     // silently inert with no test failing anywhere else, which is the failure
     // `auth-route-ledger.ts` exists to make impossible for the SDK surface.
-    const mounted = new Set(
-      BETTER_AUTH_MOUNTED_SURFACE.map((route) => route.replace(/^[A-Z]+ \/api\/v1\/auth/, '')),
-    );
+    const mounted = await platformMountedPaths();
     for (const path of [...Object.keys(INTERACTIVE_REVOKE_REASON), ...SESSION_ERASURE_PATHS]) {
+      if (path === EMAIL_OTP_RESET_DOOR) continue; // the one vendor door, pinned below
       expect({ path, mounted: mounted.has(path) }).toEqual({ path, mounted: true });
     }
+  });
+
+  it('the email-OTP reset door is ledgered on the vendor plugin\'s own path, which the platform does not mount', async () => {
+    // The vendor's email-OTP plugin sets a password from a code through its
+    // own route, so a deployment that mounted it would end sessions there
+    // too. Its path is read off the plugin itself, so an upstream rename
+    // fails here the way a mounted route's would fail above. The second half
+    // is a tripwire: once the platform mounts it, it joins the mounted check
+    // and gets a door test of its own.
+    const declared = Object.values(emailOTP({ sendVerificationOTP: async () => {} }).endpoints).map(
+      (endpoint) => (endpoint as { path?: unknown }).path,
+    );
+    expect(declared).toContain(EMAIL_OTP_RESET_DOOR);
+    expect((await platformMountedPaths()).has(EMAIL_OTP_RESET_DOOR)).toBe(false);
   });
 });

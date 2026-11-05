@@ -39,7 +39,7 @@ export function PageDefaultInspector({
     () =>
       mergeServerFields({
         bundledSchema: getPageSchema(),
-        bundledForm: getPageForm(),
+        bundledForm: getPageForm(locale),
         serverSchema,
         excludeFields: PAGE_FIELDS_OWNED_ELSEWHERE,
         sectionTitle: t('engine.inspector.moreFields', locale),

@@ -22,7 +22,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import {
   StudioCustomizeButton,
@@ -49,11 +49,13 @@ afterEach(() => {
 });
 
 describe('the types Studio customizes (objectstack#28562)', () => {
-  it.each(['view', 'dashboard', 'report'])('%s is customized', (type) => {
+  // objectstack#30059 — the app, whose navigation the Interfaces rail customizes.
+  // objectstack#30063 — the page, edited in its designer as a dashboard is.
+  it.each(['view', 'dashboard', 'report', 'page', 'app'])('%s is customized', (type) => {
     expect(isStudioCustomizeType(type)).toBe(true);
   });
 
-  it.each(['page', 'object', 'flow', 'app', 'translation', '', undefined, null])(
+  it.each(['object', 'flow', 'translation', '', undefined, null])(
     '%s is not: no pillar here customizes it, or it is not overridable',
     (type) => {
       expect(isStudioCustomizeType(type as string | undefined)).toBe(false);
@@ -224,13 +226,43 @@ describe('the Customize button and the override badge (objectstack#28562)', () =
     expect(document.getElementById(button.getAttribute('aria-describedby')!)).toHaveTextContent(reason);
   });
 
-  it('the badge names the base, and its title the version the override is based on', () => {
+  it('the badge names the base; pressed, its popover says the version the override is based on', () => {
     render(<StudioOverrideChip baseLabel="HotCRM" basedOn="4.0.0" locale="en" />);
     const chip = screen.getByTestId('studio-override-chip');
     expect(chip).toHaveTextContent(tFormat('engine.studio.customize.overrides', 'en', { package: 'HotCRM' }));
-    expect(chip).toHaveAttribute(
-      'title',
+    fireEvent.click(chip);
+    expect(screen.getByTestId('studio-override-popover-facts')).toHaveTextContent(
       tFormat('engine.studio.customize.overridesTitle', 'en', { package: 'HotCRM', basedOn: '4.0.0' }),
     );
+  });
+});
+
+describe('the override mark is where Restore is asked (objectstack#29692)', () => {
+  it('its popover offers Restore package original; pressing it asks the host once and closes the popover', () => {
+    const onRestore = vi.fn();
+    render(<StudioOverrideChip baseLabel="HotCRM" basedOn="4.0.0" locale="en" onRestore={onRestore} />);
+    fireEvent.click(screen.getByTestId('studio-override-chip'));
+    const restore = screen.getByTestId('studio-override-restore');
+    expect(restore).toHaveTextContent(t('engine.studio.customize.restore', 'en'));
+    fireEvent.click(restore);
+    expect(onRestore).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('studio-override-popover')).toBeNull();
+  });
+
+  it('disabled while the host cannot restore: pressing it asks nothing', () => {
+    const onRestore = vi.fn();
+    render(<StudioOverrideChip baseLabel="HotCRM" basedOn="4.0.0" locale="en" onRestore={onRestore} restoreDisabled />);
+    fireEvent.click(screen.getByTestId('studio-override-chip'));
+    const restore = screen.getByTestId('studio-override-restore');
+    expect(restore).toBeDisabled();
+    fireEvent.click(restore);
+    expect(onRestore).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: without onRestore the popover states the facts and offers no Restore', () => {
+    render(<StudioOverrideChip baseLabel="HotCRM" basedOn="4.0.0" locale="en" />);
+    fireEvent.click(screen.getByTestId('studio-override-chip'));
+    expect(screen.getByTestId('studio-override-popover')).toBeInTheDocument();
+    expect(screen.queryByTestId('studio-override-restore')).toBeNull();
   });
 });

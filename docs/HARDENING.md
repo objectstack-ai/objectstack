@@ -260,7 +260,7 @@ ObjectStack uses [better-auth](https://www.better-auth.com/) via
 | Session TTL       | 7 days                                    | `session.expiresIn` (seconds)             |
 | Access token TTL  | inherited from session                    | configure in better-auth                  |
 | Refresh           | better-auth `/auth/get-session` rolls TTL | `session.updateAge` (seconds)             |
-| Revocation        | DELETE on `session` row                   | `revokeSessionsOnPasswordReset: true`     |
+| Revocation        | Sign-out deletes the `session` row. A revoke, and a completed password reset (which ends every session of the account), keep the row stamped `revoked_at` / `revoke_reason` (`password_reset` for the reset) and refuse it | — unconditional; no setting (the retired `emailAndPassword.revokeSessionsOnPasswordReset` key is refused at any value) |
 | Idle / absolute / concurrent caps | Off (opt-in)              | `session_idle_timeout_minutes` / `session_absolute_max_hours` / `max_concurrent_sessions_per_user` (Setup → Authentication) |
 | Email verify TTL  | 1 hour                                    | `emailVerification.expiresIn`             |
 
@@ -276,8 +276,8 @@ curl -X POST -H "Authorization: Bearer $TOK" $API/auth/sign-out
 curl -H "Authorization: Bearer $TOK" $API/data/account
 # → 401 Unauthorized
 
-# 3. Confirm password reset revokes all other sessions for that user
-#    (requires revokeSessionsOnPasswordReset: true)
+# 3. Confirm a completed password reset ends the user's other sessions
+#    (unconditional: a session signed in before the reset answers 401 after it)
 ```
 
 ## CORS
@@ -344,7 +344,6 @@ Run the production hardening checklist before each release:
 - [ ] `server.security.rateLimit` enabled with a sized budget; `server.trustProxy`
       matches the topology (`true` only behind a proxy that overwrites
       `X-Forwarded-For`); multi-node: the `cache` service is shared
-- [ ] `revokeSessionsOnPasswordReset: true`
 - [ ] CORS origin list is explicit, not `*`
 - [ ] `enforceProjectMembership: true` on scoped routes
 - [ ] `osv-scanner --lockfile=pnpm-lock.yaml` clean (npm retired the

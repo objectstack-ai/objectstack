@@ -145,6 +145,7 @@ export {
   FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
   FLOW_TRIGGER_UNROUTABLE,
   FLOW_API_TRIGGER_SECRET_MISSING,
+  FLOW_API_TRIGGER_SIGNATURE_UNUSABLE,
 } from './validate-flow-trigger-readiness.js';
 export type {
   FlowTriggerReadinessFinding,
@@ -521,9 +522,13 @@ export type {
 // ingress, `assertOrderByIsMaterializable` #7095 in the engine); this is the
 // authoring-time half, which is what makes the refusal traceable back to the
 // declaration that caused it.
+// [#30023] `indexObjectSortability` builds the optional trailing argument of
+// `checkSortDeclaration` that answers the author-declared verdict
+// (`sortable: false`), so an out-of-repo caller of the core can pass it.
 export {
   validateSortableFields,
   checkSortDeclaration,
+  indexObjectSortability,
   SORT_FIELD_UNKNOWN,
   SORT_FIELD_UNSORTABLE,
   SORT_FIELD_UNPROVISIONED,
@@ -531,6 +536,7 @@ export {
 export type {
   SortableFieldFinding,
   SortableFieldSeverity,
+  SortabilityFields,
 } from './validate-sortable-fields.js';
 
 // [#14107] The rest of the list view's field surface — the two rules above own
@@ -720,6 +726,14 @@ export {
   REPORT_DATE_RANGE_DIMENSION_NONE,
 } from './validate-report-date-range.js';
 export type { ReportDateRangeFinding } from './validate-report-date-range.js';
+
+// [#29900] A report's `runtimeFilter` keys resolved on its dataset's object
+// graph, by the dashboard twin's own judgement (`widget-filter-field-unknown`).
+export {
+  validateReportRuntimeFilters,
+  REPORT_FILTER_FIELD_UNKNOWN,
+} from './validate-report-runtime-filter.js';
+export type { ReportRuntimeFilterFinding } from './validate-report-runtime-filter.js';
 
 // [#28473] ADR-0146 D3: a package namespace too long to have a paired
 // customization namespace, judged with `customizationNamespace` itself.

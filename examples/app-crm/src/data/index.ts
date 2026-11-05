@@ -8,8 +8,15 @@ import { Opportunity } from '../objects/opportunity.object.js';
 import { Lead } from '../objects/lead.object.js';
 import { Activity } from '../objects/activity.object.js';
 
+// Every dataset below is the customer's business data, so none declares a
+// `mode`: a replay (each boot, a package install or upgrade) inserts a record
+// whose row is missing and leaves an existing row as the customer left it —
+// the seed default, create-only. A changed value here therefore reaches only
+// a database the seed has not loaded yet; relative dates (`daysFromNow`,
+// `daysAgo`) are resolved when the row is first inserted. Start from a clean
+// database (`os dev --fresh`) to see an edit here or to re-anchor the dates.
+
 const accounts = defineSeed(Account, {
-  mode: 'upsert',
   externalId: 'name',
   records: [
     { name: 'Acme Corp',     industry: 'technology', annual_revenue: 5_000_000, website: 'https://acme.example' },
@@ -19,7 +26,6 @@ const accounts = defineSeed(Account, {
 });
 
 const contacts = defineSeed(Contact, {
-  mode: 'upsert',
   externalId: 'email',
   records: [
     { first_name: 'Ada',    last_name: 'Lovelace', email: 'ada@acme.example',    account: 'Acme Corp' },
@@ -29,7 +35,6 @@ const contacts = defineSeed(Contact, {
 });
 
 const opportunities = defineSeed(Opportunity, {
-  mode: 'upsert',
   externalId: 'name',
   records: [
     // --- Open pipeline (no close yet) -----------------------------------
@@ -57,7 +62,6 @@ const opportunities = defineSeed(Opportunity, {
 });
 
 const leads = defineSeed(Lead, {
-  mode: 'upsert',
   externalId: 'email',
   // No `assigned_to` on these rows. It is a user field, and no user exists
   // when the seed runs: people come from sign-up, and the dev admin is
@@ -101,7 +105,6 @@ const leads = defineSeed(Lead, {
 });
 
 const activities = defineSeed(Activity, {
-  mode: 'upsert',
   externalId: 'subject',
   records: [
     {

@@ -1028,15 +1028,18 @@ export function contractReviewClaimLapse(claim, { headSha, now, postedAt } = {})
  * Who holds this pull request's current head, read off its comment thread:
  *
  *   live        a live claim names the current head -- `holder` is the claim to respect: the earliest
- *               posted, except that a legacy `triage#N` claim yields to any other live claim (`tie` true)
+ *               posted, a review seat's and a lane seat's alike (the rule's 「先贴者持有」, which is what
+ *               keeps two review seats off one head), except that a legacy `triage#N` claim yields to
+ *               any other live claim (`tie` true)
  *   lapsed      claims named the current head, and every one has expired
  *   none        no claim names the current head (claims on earlier heads lapsed when it moved)
  *   unreadable  the thread, the head or the clock could not be read
  *
  * A claim's SIDE is read off its comment's signature line (`readSignatureLine`): a claim signed
  * `triage#N · …` -- posted before triage stopped taking contract reviews -- is the `triage` side,
- * and every other claim -- a lane seat's, a review seat's, a sibling lane seat's, an unsigned one
- * -- is the `lane` side, among which the earliest posted holds. Unreadable claim lines are
+ * one signed `review#N · …` is the `review` side (`lanes/review.md`), and every other claim -- a
+ * lane seat's, a sibling lane seat's, an unsigned one -- is the `lane` side. Between the review
+ * and lane sides there is no precedence: the earliest posted holds. Unreadable claim lines are
  * returned by comment id and hold nothing.
  *
  * @param {{ id?: number, body?: string, created_at?: string }[]} rows  the PR's comment rows
@@ -1061,13 +1064,14 @@ export function contractReviewClaims(rows, headSha, { now } = {}) {
     }
     const stamped = Date.parse(row?.created_at ?? '');
     const postedAt = Number.isFinite(stamped) ? stamped : line.at;
-    const side = readSignatureLine(row?.body)?.lane === 'triage' ? 'triage' : 'lane';
+    const signedLane = readSignatureLine(row?.body)?.lane ?? null;
+    const side = signedLane === 'triage' ? 'triage' : signedLane === 'review' ? 'review' : 'lane';
     const lapse = contractReviewClaimLapse(line, { headSha: head, now, postedAt });
     claims.push({ id: row?.id ?? null, session: line.session, head: line.head, time: line.time, postedAt, side, lapse });
   }
   const live = claims.filter((c) => c.lapse === 'live').sort((a, b) => a.postedAt - b.postedAt);
-  const tie = live.some((c) => c.side === 'lane') && live.some((c) => c.side === 'triage');
-  const holder = live.find((c) => c.side === 'lane') ?? live[0] ?? null;
+  const tie = live.some((c) => c.side !== 'triage') && live.some((c) => c.side === 'triage');
+  const holder = live.find((c) => c.side !== 'triage') ?? live[0] ?? null;
   const state = holder !== null ? 'live' : claims.some((c) => c.lapse === 'expired') ? 'lapsed' : 'none';
   return { state, holder, tie, claims, unreadable };
 }
@@ -1262,7 +1266,20 @@ export function contractReviewHold(rows, headSha, { now } = {}) {
  * lanes had already invented off-table; the others are events measured with no
  * doorbell at all. `seat-online` carries the seat's patrol trigger (`patrol
  * TRIGGER_ID`, or `patrol none` for a seat with no patrol by rule), the same
- * value its seat post's `Patrol:` line records.
+ * value its seat post's `Patrol:` line records. The `progress` pair was
+ * admitted by ruling (maintainer 「同意29775 A」, record 6595514258, with the
+ * card's amendments 6595244387 and 6595840476): a nudge is no longer 「不敲」
+ * but a RATE — one `Request: progress` per item per 60 min, read off the
+ * item's own progress, answered with `Notify: progress` naming the record.
+ * `main-green` was admitted on the maintainer's word about PRs a lane parks
+ * while main is red, verbatim and untranslated: 「如果到时候发现有哪个 PR 确实因为
+ * 这次红被挡住（比如有车道把 PR 停下来等 main 绿），我会敲对应车道的邮箱，让它继续
+ * 推进。」 — the held PR says what it waits on (a line-leading `Waits-on:
+ * main-red #n` in its body, `landing-operations.md` §C), and when the
+ * anchor card closes triage (the director when triage is absent) rings the
+ * seat of every open PR carrying that line, one knock per PR, in the same
+ * round (`triage-duties.md`); the seat merges `origin/main`, drops the line
+ * and resumes its landing. No gate, label, state or patrol row rides on it.
  *
  * `from` / `to` / `when` are the row in English, for the printout; the rules
  * text is the authority on who rings whom.
@@ -1277,6 +1294,7 @@ export const MAILBOX_KEYS = Object.freeze([
   { id: 'request:urgent-triage', kind: 'Request', key: 'urgent-triage', from: 'any seat', to: 'triage', when: 'a p0 suspect, main red, a deterministic queue red', template: 'Request: urgent-triage · #n · ONE-LINE-CRITERION' },
   { id: 'request:main-red', kind: 'Request', key: 'main-red', from: 'the seat that files the main-red anchor card', to: 'triage, or the director when triage is absent', when: 'the anchor card is filed', template: 'Request: main-red · CHECK-NAME · anchor #n · suggested lane X' },
   { id: 'notify:main-red', kind: 'Notify', key: 'main-red', from: 'the seat that files the main-red anchor card', to: 'the seat that landed the breaking PR, and the anchor card\'s lane', when: 'the anchor card is filed', template: 'Notify: main-red · anchor #n · breaking PR #m or none' },
+  { id: 'notify:main-green', kind: 'Notify', key: 'main-green', from: 'triage, or the director when triage is absent', to: 'the seat of each open PR whose body carries a line-leading `Waits-on: main-red #n` naming the closed anchor', when: 'the main-red anchor card closes: one knock per held PR, all in the same round, the count in the round record; the seat merges `origin/main`, drops the line and resumes its landing', template: 'Notify: main-green · anchor #n · PR #m' },
   { id: 'notify:contract-review', kind: 'Notify', key: 'contract-review', from: 'the review seat or sibling lane seat that rendered the record', to: 'lane', when: 'with the record, only when the lane is not subscribed to the PR', template: 'Notify: contract-review PASS or FAIL · PR #n · record ID' },
   { id: 'notify:release-blocker', kind: 'Notify', key: 'release-blocker', from: 'triage', to: 'the lane it is graded into', when: 'a p0/p1 release blocker is graded into a lane', template: 'Notify: release-blocker · #n' },
   { id: 'notify:unblocked', kind: 'Notify', key: 'unblocked', from: 'the seat that moved the card to `pm:queue` (triage or an epic seat)', to: 'the card\'s lane seats', when: 'a p0/p1 card\'s `Blocked-by` target closed', template: 'Notify: unblocked · #n · p0 or p1' },
@@ -1287,6 +1305,8 @@ export const MAILBOX_KEYS = Object.freeze([
   { id: 'notify:seat-offline', kind: 'Notify', key: 'seat-offline', from: 'the signing-off session', to: 'the lane\'s sibling seats and triage', when: 'at sign-off', template: 'Notify: seat-offline · LANE#N · in-flight: … · stay-behind: … · brief ID' },
   { id: 'notify:split', kind: 'Notify', key: 'split', from: 'a seat of a multi-seat lane', to: 'its sibling seats', when: 'at round open, only when the list changed', template: 'Notify: split · LANE#N · takes: … · leaves: …' },
   { id: 'notify:security', kind: 'Notify', key: 'security', from: 'the seat holding the finding (a dev\'s or a QA runner\'s reaches its PM session privately first); triage, for a public card it labelled `security`', to: 'security#1', when: 'the seat\'s relay `advisory_create` draft landed: the opaque advisory id ALONE; or triage labelled a public card `security`: its number ALONE — never a mechanism, a path or an object name', template: 'Notify: security · GHSA-ID or #n' },
+  { id: 'request:progress', kind: 'Request', key: 'progress', from: 'triage', to: 'the claiming seat (or the online sibling an off-shift seat\'s items went to)', when: 'a claimed card or an open PR whose last PROGRESS (its head commit, any non-triage comment, a label change by its seat — never `updated_at`) is 3 h old: at most one per item per 60 min; none while an answered ETA stands, or while the item is parked (`Blocked-by:` / `Resume-from:`) or waits on a decision card; two unanswered ⇒ the round record lists it and the seat reads as possibly down', template: 'Request: progress · #n · idle since TIME' },
+  { id: 'notify:progress', kind: 'Notify', key: 'progress', from: 'the claiming seat', to: 'triage', when: 'answering a progress knock — the record is a comment on #n giving the next act and an ETA, the park (`Blocked-by:` / `Resume-from:`), or the release', template: 'Notify: progress · #n · record ID' },
 ]);
 /** One event, one line: the longest a mailbox line may be, in bytes (the text's 「≤200 字节」). */
 export const MAILBOX_LINE_MAX_BYTES = 200;
@@ -1303,6 +1323,8 @@ const HEAD_REF = /^head `?([0-9a-fA-F]{7,40})`?$/;
 const ANCHOR_REF = /^anchor #([1-9][0-9]*)$/;
 const MAILBOX_REF = /^mailbox #([1-9][0-9]*)$/;
 const RECORD_REF = /^record `?#?([1-9][0-9]*)`?$/;
+/** `idle since TIME` — the item's last progress, a `Z` time in `CLAIM_TIME`'s spelling (the placeholder `TIME` is not one). */
+const IDLE_SINCE_REF = /^idle since `?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?Z)`?$/;
 const BRIEF_REF = /^brief `?#?([1-9][0-9]*)`?$/;
 const LANE_REF = /^suggested lane ([A-Za-z][A-Za-z0-9:_-]*)$/;
 const VERDICT_REF = /^contract-review (PASS|FAIL)$/;
@@ -1401,6 +1423,13 @@ const MAILBOX_FIELD_READERS = Object.freeze({
     const breaking = pr[1] === undefined ? null : Number(pr[1]);
     return { anchor: Number(anchor[1]), pr: breaking, numbers: breaking === null ? [Number(anchor[1])] : [Number(anchor[1]), breaking] };
   },
+  // The closed anchor and the ONE held PR this knock resumes: a seat holding two PRs is rung twice.
+  'notify:main-green': (p) => {
+    if (p.length !== 3) return null;
+    const anchor = ANCHOR_REF.exec(p[1]);
+    const pr = PR_REF.exec(p[2]);
+    return anchor && pr ? { anchor: Number(anchor[1]), pr: Number(pr[1]), numbers: [Number(anchor[1]), Number(pr[1])] } : null;
+  },
   'notify:release-blocker': (p) => {
     if (p.length !== 2) return null;
     const card = NUMBER_REF.exec(p[1]);
@@ -1468,6 +1497,20 @@ const MAILBOX_FIELD_READERS = Object.freeze({
     const takes = readList(p[2], 'takes');
     const leaves = readList(p[3], 'leaves');
     return seat && takes && leaves ? { seat, takes, leaves, numbers: [...takes, ...leaves] } : null;
+  },
+  // The item is a claimed card OR an open PR, so its number rides bare (`#n`), as `serial` spells its pair —
+  // never `PR #n`; the time is when its last progress was read, not when the bell rang.
+  'request:progress': (p) => {
+    if (p.length !== 3) return null;
+    const item = NUMBER_REF.exec(p[1]);
+    const since = IDLE_SINCE_REF.exec(p[2]);
+    return item && since ? { item: Number(item[1]), since: since[1], numbers: [Number(item[1])] } : null;
+  },
+  'notify:progress': (p) => {
+    if (p.length !== 3) return null;
+    const item = NUMBER_REF.exec(p[1]);
+    const record = RECORD_REF.exec(p[2]);
+    return item && record ? { item: Number(item[1]), record: Number(record[1]), numbers: [Number(item[1])] } : null;
   },
 });
 
@@ -2220,9 +2263,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // verbatim-template pin, the placeholder-is-no-event pin, the `--mailbox-keys` printout, the invented
   // keys that stay refused, and the two end-to-end pins through check-half-states H72 (31 → 44 cases).
   // Raised 40 → 41 with the `Notify: security · #n` reading (a labelled public card handed to the security seat).
-  '⭐ the mailbox doorbell: `To: <seat>`, then one key of the table read — seat, kind, numbers, sha, login, time — and anything else refused': 41,
+  // Raised 41 → 42 with the `Notify: main-green` reading (the knock that resumes a PR held for a main red).
+  '⭐ the mailbox doorbell: `To: <seat>`, then one key of the table read — seat, kind, numbers, sha, login, time — and anything else refused': 42,
   '⭐ the signature line: the reader reads LANE#N · ACCOUNT · SESSION exactly, and one leading signature changes no first-line reading': 22,
-  '⭐ the `Contract-review-claim:` line — session, FULL head, time; lapses on a moved head or after two hours; the earliest live claim holds': 21,
+  '⭐ the `Contract-review-claim:` line — session, FULL head, time; lapses on a moved head or after two hours; the earliest live claim holds': 24,
   '⭐ the `Contract-review-hold:` line — session, head, reason, until; a new head clears it; at 24 hours it reads overdue and still holds': 23,
 });
 
@@ -2706,6 +2750,13 @@ export async function selfTest() {
   t('⭐ a legacy `triage#N` claim YIELDS: a triage claim posted FIRST and a lane claim posted later, both live ⇒ the later claim holds, tie named', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z')], CL_HEAD, { now: CL_NOW }); return r.state === 'live' && r.tie === true && r.holder.side === 'lane' && r.holder.session === CL_LANE_SESSION; })());
   t('two claims on one side: the EARLIEST posted holds, and no tie is declared', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION)), 2, '2026-10-28T12:30:00Z'), CL_ROW(CL_BODY(null, CL_LINE(CL_SESSION)), 1, '2026-10-28T12:10:00Z')], CL_HEAD, { now: CL_NOW }); return r.holder.id === 1 && r.tie === false; })());
   t('an UNSIGNED claim is the lane side — only a `triage#N` signature makes a claim triage\'s', contractReviewClaims([CL_ROW(CL_BODY(null))], CL_HEAD, { now: CL_NOW }).holder.side === 'lane');
+  const CL_REVIEW_SESSION = 'session_01ReviewSeatFixture7Qx';
+  const CL_REVIEW2_SESSION = 'session_01ReviewSeatTwoFixt9Zz';
+  const CL_REVIEW_SIG = `review#1 · os-zhuang · ${CL_REVIEW_SESSION}`;
+  const CL_REVIEW2_SIG = `review#2 · os-tesla · ${CL_REVIEW2_SESSION}`;
+  t('⭐ a `review#N`-signed claim is the review side, and between a review seat and a lane seat the EARLIEST posted holds with no tie — the review seat first ⇒ the review seat holds', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION)), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z')], CL_HEAD, { now: CL_NOW }); return r.state === 'live' && r.holder.side === 'review' && r.holder.session === CL_REVIEW_SESSION && r.tie === false; })());
+  t('…and the lane seat first ⇒ the lane seat holds: a review seat has no precedence over a lane seat, only over a legacy triage claim', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION)), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z'), CL_ROW(CL_BODY(), 3, '2026-10-28T12:10:00Z')], CL_HEAD, { now: CL_NOW }); return r.holder.side === 'lane' && r.holder.session === CL_LANE_SESSION && r.tie === true; })());
+  t('⭐ two review seats on one head: the EARLIEST posted holds, the later withdraws — the rule the review seats share with every other pair, no tie', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_REVIEW2_SIG, CL_LINE(CL_REVIEW2_SESSION, CL_HEAD, '2026-10-28T12:25Z')), 2, '2026-10-28T12:25:10Z'), CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION)), 1, '2026-10-28T12:18:56Z')], CL_HEAD, { now: CL_NOW }); return r.holder.id === 1 && r.holder.side === 'review' && r.tie === false && r.claims.every((c) => c.side === 'review'); })());
   t('⭐ the head MOVED past every claim ⇒ none; every claim on this head expired ⇒ lapsed; nothing holds either way', (() => { const moved = contractReviewClaims([CL_ROW(CL_BODY())], 'a'.repeat(40), { now: CL_NOW }); const old = contractReviewClaims([CL_ROW(CL_BODY())], CL_HEAD, { now: Date.parse('2026-10-28T14:19:00Z') }); return moved.state === 'none' && moved.holder === null && old.state === 'lapsed' && old.holder === null && old.claims[0].lapse === 'expired'; })());
   t('an unreadable claim line holds nothing and is returned by comment id', (() => { const r = contractReviewClaims([CL_ROW(`${CL_TRIAGE_SIG}\n${CL_LINE(CL_SESSION, CL_HEAD.slice(0, 8))}`, 77)], CL_HEAD, { now: CL_NOW }); return r.state === 'none' && r.unreadable.length === 1 && r.unreadable[0].id === 77; })());
   t('a thread that is not an array, an abbreviated head, or no clock is a read that could not be made', contractReviewClaims(null, CL_HEAD, { now: CL_NOW }).state === 'unreadable' && contractReviewClaims([], CL_HEAD.slice(0, 12), { now: CL_NOW }).state === 'unreadable' && contractReviewClaims([], CL_HEAD, {}).state === 'unreadable' && contractReviewClaims([], CL_HEAD, { now: CL_NOW }).state === 'none');
@@ -2787,12 +2838,15 @@ export async function selfTest() {
     sp: MSG('Notify: split · domain:skills#2 · takes: #27077 #27062 · leaves: #27047', 'domain:skills#1'),
     tq: MSG('Request: triage · #27123 · may it close, or does it route to server?', 'triage'),
     nm: MSG('Notify: main-red · anchor #28622 · breaking PR #28595', 'domain:server#2'),
+    mg: MSG('Notify: main-green · anchor #29426 · PR #29444', 'domain:skills#3'),
     rb: MSG('Notify: release-blocker · #28657', 'domain:devx#1'),
     ub: MSG('Notify: unblocked · #28560 · p1', 'domain:spec#4'),
     ru: MSG('Notify: ruling · #28117 · A · record 6545646924', 'domain:server#2'),
     se: MSG('Notify: serial · #28572 behind #28562', 'domain:ui#5'),
     la: MSG('Notify: landed · #28562', 'domain:ui#5'),
     sec: MSG('Notify: security · GHSA-7q4h-9x2m-5c8v', 'security#1'),
+    rp: MSG('Request: progress · #29420 · idle since 2026-11-03T00:06Z', 'domain:skills#1'),
+    np: MSG('Notify: progress · #29420 · record 6599000001', 'triage'),
   };
   t('⭐ `Request: contract-review` reads the PR, the head (7–40 hex) and the reason — the reason may carry a comma', (() => { const r = readMailboxLine(DB.cr); return r.state === 'read' && r.id === 'request:contract-review' && r.kind === 'Request' && r.key === 'contract-review' && r.pr === 26766 && r.head === HO_HEAD && r.reason === `${CONTRACT_REVIEW_TIER_NAME} refused, HTTP 429` && r.numbers.join() === '26766'; })());
   t('⭐ `Request: urgent-triage` reads the card and the one-line criterion', (() => { const r = readMailboxLine(DB.ut); return r.state === 'read' && r.id === 'request:urgent-triage' && r.card === 27047 && r.criterion === 'main red on the merge group, deterministic' && r.numbers.join() === '27047'; })());
@@ -2805,6 +2859,7 @@ export async function selfTest() {
   t('⭐ `Notify: split` reads the seat and the takes and leaves lists', (() => { const r = readMailboxLine(DB.sp); return r.state === 'read' && r.id === 'notify:split' && r.seat.lane === 'domain:skills' && r.takes.join() === '27077,27062' && r.leaves.join() === '27047' && r.numbers.join() === '27077,27062,27047'; })());
   t('⭐ `Request: triage` reads the card and the one-line question — the question may carry a comma', (() => { const r = readMailboxLine(DB.tq); return r.state === 'read' && r.id === 'request:triage' && r.to === 'triage#1' && r.card === 27123 && r.question === 'may it close, or does it route to server?' && r.numbers.join() === '27123'; })());
   t('⭐ `Notify: main-red` reads the anchor card and the breaking PR — a key of its own beside `Request: main-red`, told apart by its kind', (() => { const r = readMailboxLine(DB.nm); const q = readMailboxLine(DB.mr); return r.state === 'read' && r.id === 'notify:main-red' && r.anchor === 28622 && r.pr === 28595 && r.numbers.join() === '28622,28595' && q.id === 'request:main-red'; })());
+  t('⭐ `Notify: main-green` reads the closed anchor and the ONE held PR it resumes — both in `numbers`; the misspelt variants `maingreen`, `main-grean` and `green` are keys outside the table and REFUSED, while the anchor alone, a bare `#m`, `PR none`, a bare anchor number, a trailing reason and the placeholder stay unreadable', (() => { const r = readMailboxLine(DB.mg); return r.state === 'read' && r.id === 'notify:main-green' && r.kind === 'Notify' && r.key === 'main-green' && r.to === 'domain:skills#3' && r.anchor === 29426 && r.pr === 29444 && r.numbers.join() === '29426,29444' && ['Notify: maingreen · anchor #29426 · PR #29444', 'Notify: main-grean · anchor #29426 · PR #29444', 'Notify: green · anchor #29426 · PR #29444', 'Request: main-green · anchor #29426 · PR #29444'].every((l) => { const u = readMailboxLine(MSG(l)); return u.state === 'refused' && /not a key of the table/.test(u.reason); }) && ['Notify: main-green · anchor #29426', 'Notify: main-green · anchor #29426 · #29444', 'Notify: main-green · anchor #29426 · PR none', 'Notify: main-green · #29426 · PR #29444', 'Notify: main-green · anchor #29426 · PR #29444 · resume now', 'Notify: main-green · anchor #n · PR #m'].every((l) => { const u = readMailboxLine(MSG(l)); return u.state === 'unreadable' && /does not spell/.test(u.reason); }); })());
   t('⭐ `Notify: release-blocker` reads the card', (() => { const r = readMailboxLine(DB.rb); return r.state === 'read' && r.id === 'notify:release-blocker' && r.card === 28657 && r.numbers.join() === '28657'; })());
   t('⭐ `Notify: unblocked` reads the card and its priority — p0 and p1 only, the priorities it is owed for', (() => { const r = readMailboxLine(DB.ub); const p0 = readMailboxLine(DB.ub.replace('p1', 'p0')); return r.state === 'read' && r.id === 'notify:unblocked' && r.card === 28560 && r.priority === 'p1' && p0.priority === 'p0' && r.numbers.join() === '28560' && ['p2', 'P1', 'p0 or p1'].every((v) => readMailboxLine(DB.ub.replace('p1', v)).state === 'unreadable'); })());
   t('⭐ `Notify: ruling` reads the card, the letter and the record id — a primed or CJK letter reads, a sentence does not', (() => { const r = readMailboxLine(DB.ru); return r.state === 'read' && r.id === 'notify:ruling' && r.card === 28117 && r.letter === 'A' && r.record === 6545646924 && r.numbers.join() === '28117' && readMailboxLine(DB.ru.replace(' A ', ' B′ ')).letter === 'B′' && readMailboxLine(DB.ru.replace(' A ', ' 乙 ')).letter === '乙' && readMailboxLine(MSG('Notify: ruling · #28117 A (record 6545646924, 「同意」) · your draft #28430')).state === 'unreadable'; })());
@@ -2812,6 +2867,8 @@ export async function selfTest() {
   t('⭐ `Notify: security` under `To: security#1` reads to the security seat (a bare lane `seatKey` spells) with the advisory\'s opaque id and nothing else — it names no card, so `numbers` is empty', (() => { const r = readMailboxLine(DB.sec); return r.state === 'read' && r.to === 'security#1' && r.id === 'notify:security' && r.kind === 'Notify' && r.key === 'security' && r.advisory === 'GHSA-7q4h-9x2m-5c8v' && r.numbers.length === 0 && readMailboxLine(MSG('Notify: security · GHSA-7q4h-9x2m-5c8v', 'security')).to === 'security#1'; })());
   t('⛔ `Notify: security` carrying free text, a second field, an upper-case or short id, or no id at all is unreadable — nothing but the opaque id, or a labelled card\'s number alone, rides the doorbell', ['Notify: security · see the advisory', 'Notify: security · GHSA-7q4h-9x2m-5c8v · packages/x/src/door.ts', 'Notify: security · GHSA-7q4h-9x2m-5c8v · see the advisory', 'Notify: security · GHSA-7Q4H-9X2M-5C8V', 'Notify: security · GHSA-7q4h-9x2m', 'Notify: security'].every((l) => readMailboxLine(MSG(l)).state === 'unreadable'));
   t('⭐ `Notify: security · #n` — triage handing a public card it labelled `security` to the seat — reads the card ALONE; the card beside an id, a second field, a PR, `#0` and the bare template stay unreadable', (() => { const r = readMailboxLine(MSG('Notify: security · #29761', 'security#1')); return r.state === 'read' && r.to === 'security#1' && r.id === 'notify:security' && r.card === 29761 && r.advisory === undefined && r.numbers.join() === '29761' && ['Notify: security · #29761 · GHSA-7q4h-9x2m-5c8v', 'Notify: security · #29761 · see the card', 'Notify: security · PR #29761', 'Notify: security · #0', 'Notify: security · GHSA-ID or #n'].every((l) => readMailboxLine(MSG(l)).state === 'unreadable'); })());
+  t('⭐ `Request: progress` reads the item (a card or a PR, bare `#n`) and the time its last progress was read — with seconds too; the placeholder `TIME`, a duration, a date without a time, a local time and `PR #n` stay unreadable', (() => { const r = readMailboxLine(DB.rp); const sec = readMailboxLine(DB.rp.replace('T00:06Z', 'T00:06:30Z')); return r.state === 'read' && r.id === 'request:progress' && r.kind === 'Request' && r.key === 'progress' && r.to === 'domain:skills#1' && r.item === 29420 && r.since === '2026-11-03T00:06Z' && r.numbers.join() === '29420' && sec.state === 'read' && sec.since === '2026-11-03T00:06:30Z' && ['Request: progress · #29420 · idle since TIME', 'Request: progress · #29420 · idle since 3h', 'Request: progress · #29420 · idle since 2026-11-03', 'Request: progress · #29420 · idle since 2026-11-03T00:06', 'Request: progress · #29420 · idle since 2026-11-03T00:06+08:00', 'Request: progress · PR #29420 · idle since 2026-11-03T00:06Z', 'Request: progress · #29420', 'Request: progress · #29420 · idle since 2026-11-03T00:06Z · please answer'].every((l) => { const u = readMailboxLine(MSG(l)); return u.state === 'unreadable' && /does not spell/.test(u.reason); }); })());
+  t('⭐ `Notify: progress` reads the item and the record id (the comment on it with the next act and an ETA, the park, or the release) — `record none`, a sentence and a second field stay unreadable', (() => { const r = readMailboxLine(DB.np); return r.state === 'read' && r.id === 'notify:progress' && r.kind === 'Notify' && r.key === 'progress' && r.to === 'triage#1' && r.item === 29420 && r.record === 6599000001 && r.numbers.join() === '29420' && readMailboxLine(MSG('Notify: progress · #29420 · record #6599000001', 'triage')).record === 6599000001 && ['Notify: progress · #29420 · record none', 'Notify: progress · #29420 · record ID', 'Notify: progress · #29420 · ETA 11:00Z', 'Notify: progress · #29420', 'Notify: progress · #29420 · record 6599000001 · ETA 11:00Z'].every((l) => { const u = readMailboxLine(MSG(l, 'triage')); return u.state === 'unreadable' && /does not spell/.test(u.reason); }); })());
   t('⭐ every key of the table is named, as `Kind: key` in a code span, in the protocol text (`references/project-forms.md` 〈信箱 PR〉), and that section names NO other key — the table in both directions — and points at `--mailbox-keys` for the full spellings', (() => { const forms = readFileSync(new URL('../../.claude/skills/pm-dispatch/references/project-forms.md', import.meta.url), 'utf8'); const at = forms.indexOf('\n## 信箱 PR\n'); const section = at < 0 ? '' : forms.slice(at + 1).split(/\n## /)[0]; const named = new Set([...section.matchAll(/`(Request|Notify): ([a-z-]+)`/g)].map((m) => `${m[1]}: ${m[2]}`)); const table = new Set(MAILBOX_KEYS.map((k) => `${k.kind}: ${k.key}`)); return section !== '' && named.size === table.size && [...table].every((k) => named.has(k)) && section.includes('--mailbox-keys'); })());
   t('⭐ every template, sent VERBATIM, is not an event — a placeholder (`#n`, `SHA`, `LANE#N`, `p0 or p1`, `TRIGGER_ID`, `ID`) never reads as one', MAILBOX_KEYS.every((k) => readMailboxLine(MSG(k.template)).state === 'unreadable'));
   t('⭐ `--mailbox-keys` prints exactly `mailboxKeyLines()` — every template, with its row under it — and exits 0', (() => { const r = faceCli(['--mailbox-keys']); return r.status === 0 && r.stdout === `${mailboxKeyLines().join('\n')}\n` && MAILBOX_KEYS.every((k) => r.stdout.includes(`${k.template}\n    ${k.from} → ${k.to}; ${k.when}\n`)) && usageLines().join('\n').includes('--mailbox-keys'); })());
@@ -2855,7 +2912,7 @@ export async function selfTest() {
     t('⭐ ONE reader: check-half-states H72 judges the REAL reader\'s readings — a free-form question, an off-table key and a five-field `seat-online` are listed, a table key is not, and a bell older than the window has aged out', row.includes('3 comment(s)') && ['comment 7002', 'comment 7003', 'comment 7004'].every((c) => row.includes(c)) && !row.includes('comment 7001') && !row.includes('comment 7005') && hs.h72OffTableMailboxLines(mailboxEvents([rows72[0]]), NOW72) === null);
     t('⭐ …and its population is the OPENER\'s label — an open mailbox touched inside the window owes a page, the same PR without the label does not', hs.h72NeedsThread({ number: 28646, state: 'open', labels: [{ name: MAILBOX_LABEL }], updated_at: '2026-11-01T13:00:00Z' }, MAILBOX_LABEL, NOW72) === true && hs.h72NeedsThread({ number: 28646, state: 'open', labels: [], updated_at: '2026-11-01T13:00:00Z' }, MAILBOX_LABEL, NOW72) === false);
   }
-  t('the roster: fifteen keys, unique ids, each of the two kinds with a reader, every row spelled (from, to, when), the byte cap the text states', MAILBOX_KEYS.length === 15 && new Set(MAILBOX_KEYS.map((k) => k.id)).size === 15 && MAILBOX_KEYS.every((k) => ['Request', 'Notify'].includes(k.kind) && k.id === `${k.kind.toLowerCase()}:${k.key}` && k.template.startsWith(`${k.kind}: ${k.key}`) && typeof MAILBOX_FIELD_READERS[k.id] === 'function' && [k.from, k.to, k.when].every((v) => typeof v === 'string' && v !== '')) && Object.keys(MAILBOX_FIELD_READERS).length === 15 && MAILBOX_LINE_MAX_BYTES === 200);
+  t('the roster: eighteen keys, unique ids, each of the two kinds with a reader, every row spelled (from, to, when), the byte cap the text states', MAILBOX_KEYS.length === 18 && new Set(MAILBOX_KEYS.map((k) => k.id)).size === 18 && MAILBOX_KEYS.every((k) => ['Request', 'Notify'].includes(k.kind) && k.id === `${k.kind.toLowerCase()}:${k.key}` && k.template.startsWith(`${k.kind}: ${k.key}`) && typeof MAILBOX_FIELD_READERS[k.id] === 'function' && [k.from, k.to, k.when].every((v) => typeof v === 'string' && v !== '')) && Object.keys(MAILBOX_FIELD_READERS).length === 18 && MAILBOX_LINE_MAX_BYTES === 200);
 
   // -- the signature line (#27113) ----------------------------------------------
   //

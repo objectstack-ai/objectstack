@@ -43,7 +43,7 @@ A `slotted` record page has no `tabs` slot — see [Record Page](./record-page.m
 
 | `type`               | Use |
 |:---------------------|:----|
-| `page:header`        | `title` / `subtitle` templates + `actions: string[]` — ids of the bound object's actions, never a sibling action node |
+| `page:header`        | `title` / `subtitle` templates + `actions` (ids of the bound object's actions, never action nodes) or `placedActions: true` (all placed, read live) |
 | `page:card`          | Bordered/un-bordered card with `children: Component[]` (plus an optional `footer: Component[]` slot) |
 | `flex`               | Generic styleable box (`properties.children`) — the workhorse for custom layout; style via `responsiveStyles` (see Styling below) |
 | `element:text`       | Text node — `properties.content`; style via `responsiveStyles` |
@@ -68,7 +68,7 @@ An invoice, a delivery order, a letter or a report is an ordinary page with a
 the document. Only a `kind: 'full'` page of `type: 'record'`, `'home'` or
 `'app'` with its blocks in `regions` may declare it: the parse refuses `print`
 on a `list` page (its switch is `interfaceConfig.allowPrinting`), a `utility`
-page, a `slotted` / `html` / `react` page and a `full` page with no regions.
+page and a `slotted` / `html` / `react` page.
 
 `print` keys, each mapped to print CSS: `paperSize` (`'A4'` default, `'A5'`,
 `'Letter'`, `'Legal'`) and `orientation` (`'portrait'` default, `'landscape'`);

@@ -215,16 +215,25 @@ describe('the connector redactor — credentials inside a URL under `providerCon
     expect(served.auth).toEqual({ type: 'api-key', credentialRef: 'VENDOR_KEY', paramName: 'appid' });
   });
 
-  it('a URL with no credential part, and a string that is not a URL, are untouched', () => {
+  it('a URL with no credential part, and a string that is not a URL holding none, are untouched', () => {
     const item = {
       ...base,
       providerConfig: {
         baseUrl: 'https://api.vendor.example/v1?region=eu',
-        note: `call ?token=${P(38)} by hand`,
+        note: 'call the regional endpoint by hand',
         include: ['search'],
       },
     };
     expect(redactConnectorItem(item)).toEqual({ item, redactedKeys: [] });
+  });
+
+  it('a credential query parameter is rewritten out of any string, a string that is not a URL included', () => {
+    const { item: served, redactedKeys } = at({
+      baseUrl: 'https://api.vendor.example/v1?region=eu',
+      note: `call ?page=2&token=${P(38)}`,
+    });
+    expect(redactedKeys).toEqual(['providerConfig.note']);
+    expect((served.providerConfig as Record<string, unknown>).note).toBe('call ?page=2');
   });
 
   it('withholds whole an array holding a URL with credential parts, at any depth', () => {

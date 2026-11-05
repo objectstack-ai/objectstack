@@ -47,7 +47,12 @@ import {
 } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useAdapter } from '@object-ui/react';
-import { readDraftChanges, type DraftChange, type MetadataClient } from '@object-ui/data-objectstack';
+import {
+  dropServedPicklistOptions,
+  readDraftChanges,
+  type DraftChange,
+  type MetadataClient,
+} from '@object-ui/data-objectstack';
 // The `/meta` URL-spelling fold (objectstack#7894, objectstack-ai/objectstack#8424), applied once in
 // `listPendingDrafts` below.
 //
@@ -664,6 +669,19 @@ function fieldLabelOf(def: Record<string, unknown> | undefined): string | undefi
  * an author row: the platform injects the same definition on both reads, so a
  * difference there is an edit someone made.
  *
+ * An `object`'s two bodies are compared in the form the publish door STORES
+ * for a picklist-bound field (objectstack#29899): without `options`. The live
+ * read serves such a field with the options the runtime resolved from its
+ * picklist (`PicklistServedFieldSchema`), while the strict draft read serves
+ * the draft row as stored, and the authoring door refuses `picklist` and
+ * `options` together, so a stored draft never carries them. Compared as read,
+ * every bound field listed `~ FIELD · Options` on every publish, an edit
+ * nobody made. Both sides go through `dropServedPicklistOptions`, the writers'
+ * own served-to-authored step, rather than skipping a key in the diff: it
+ * touches a field only when that definition names a picklist, so a field with
+ * inline `options` keeps every options change, and a field moving between a
+ * picklist and inline options still lists both keys.
+ *
  * Why not `computeDiffRows` from `LayeredDiff.tsx`, which splits top-level keys
  * the same way: that module imports the metadata-admin string table
  * (`./i18n.js`) at module scope, and this panel sits on the console's EAGER
@@ -675,8 +693,11 @@ export function computeChangeDetail(
   draft: Record<string, unknown> | null,
   type?: string,
 ): EntryChangeDetail {
-  const pub = withoutProtectionEnvelope(published ?? {});
-  const cur = withoutProtectionEnvelope(draft ?? {});
+  // objectstack#29899 — the stored form of a picklist-bound field, on both sides.
+  const stored = (body: Record<string, unknown>): Record<string, unknown> =>
+    type === 'object' ? dropServedPicklistOptions(body) : body;
+  const pub = stored(withoutProtectionEnvelope(published ?? {}));
+  const cur = stored(withoutProtectionEnvelope(draft ?? {}));
   let fields: EntryChangeDetail['fields'] = null;
   const generatedFields: EntryChangeDetail['generated'] = [];
   if (pub.fields != null || cur.fields != null) {
@@ -846,6 +867,9 @@ const TYPE_COUNT: Readonly<Record<string, (t: Translate, count: number) => strin
   // objectstack#29704 — what customizing a base package's object writes (ADR-0146 D10).
   object_extension: (t, count) =>
     t('preview.changes.typeCount.object_extension', { count, defaultValue: '{{count}} object extensions' }),
+  // A Studio-authored dataset publishes in the same batch as the report or
+  // dashboard that reads it; without a row it read as the raw type name.
+  dataset: (t, count) => t('preview.changes.typeCount.dataset', { count, defaultValue: '{{count}} datasets' }),
 };
 
 function summaryTypeSegment(t: Translate, type: string, count: number): string {

@@ -1,6 +1,6 @@
 # Relationship Patterns
 
-- [Relationship Types](#relationship-types) · [When to Use lookup vs master_detail](#when-to-use-lookup-vs-master_detail)
+- [Relationship Types](#relationship-types)
 - [Patterns](#patterns) — [lookup](#one-to-many-lookup) · [master_detail](#one-to-many-master_detail) · [Junction Object](#many-to-many-junction-object) · [tree](#hierarchical-tree-self-reference)
 - [Delete Behaviors](#delete-behaviors) · [Roll-up Summaries](#roll-up-summaries)
 - [Inline Editing (Master-Detail Entry)](#inline-editing-master-detail-entry) · [Detail-page related lists](#detail-page-related-lists-the-read-side-mirror)
@@ -15,20 +15,6 @@ Guide for modeling relationships between objects using `lookup`, `master_detail`
 | `lookup` | Independent | Optional by default | Independent | Supported via `summary` | "Related to" |
 | `master_detail` | Coupled (cascade delete) | Forced only under `controlled_by_parent`; else lint-warned | Inherits parent; owner opt-in `ownerMayEdit` (below) | Supported via `summary` | "Owned by" |
 | `tree` | Self-reference | Optional — and so is `reference`, which when written must name this object itself; any other object is refused at parse, not lint-warned | N/A | Not available | Hierarchical |
-
-## When to Use lookup vs master_detail
-
-### Use `lookup` When:
-- Child record can exist independently
-- Parent deletion should only clear the FK (`deleteBehavior: 'set_null'`, the default)
-- Relationship is optional
-- **Example:** `task.assigned_to → user` (task can exist without assignment)
-
-### Use `master_detail` When:
-- Child record is meaningless without parent
-- Parent deletion should cascade to children
-- Relationship is mandatory
-- **Example:** `invoice_line_item.invoice_id → invoice` (line items belong to invoice)
 
 ## Patterns
 
@@ -186,6 +172,14 @@ an authored `set_null` is refused at publish (it would orphan the detail row).
 }
 ```
 
+The walk also reads `lookup` and `tree` (`set_null` by default — the field is
+cleared; a `multiple` field loses only that member — or an authored `cascade` /
+`restrict`), and a `user` field only when it declares a value: deleting the user
+then cascades, clears or refuses exactly as a `lookup` does; undeclared, the
+field keeps the deleted user's id. `restrict`, and `set_null` on a `required`
+field (a `multiple` one only when the removal would empty it), refuse the delete
+with `409 DELETE_RESTRICTED`.
+
 ## Roll-up Summaries
 
 A parent `summary` field aggregates a child collection. The engine recomputes it
@@ -341,12 +335,11 @@ audit_ref: { type: 'master_detail', reference: 'invoice', relatedList: false },
 
 `relatedList` is tri-state — placement (ADR-0085):
 
-- `'primary'` — main content: a full-width table in the details column after
-  the first field section (in the Details tab, no tab of its own). Default for a
-  `master_detail` FK with `inlineEdit`.
-- `false` — hidden from the parent's page.
-- `true`, or omitted (except inline-edited `master_detail`) — a side card
-  (the shared **Related** tab).
+- `'primary'` — part of the record's main content: a full-width table in the
+  record's detail body. Default for a `master_detail` FK with `inlineEdit`.
+- `false` — the child object is not shown on the parent record page.
+- `true`, or omitted (except inline-edited `master_detail`) — an auxiliary
+  panel on the record page.
 - Order is the parent's: `relatedLists: ['task', 'event.related_to']` (child, or
   `object.field`) lists those first. A child in the stack with no inbound FK is
   refused everywhere; one that exists nowhere is refused by `os validate` /

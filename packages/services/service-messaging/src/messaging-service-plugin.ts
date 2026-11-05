@@ -13,6 +13,7 @@ import { DEFAULT_MAX_IDLE_INTERVAL_MS, NotificationDispatcher, type DispatchClus
 import { HttpDispatcher } from './http-dispatcher.js';
 import { createEmailChannel } from './email-channel.js';
 import { createSmsChannel } from './sms-channel.js';
+import { createPushChannel } from './push-channel.js';
 import {
     NotificationTemplateStore,
     TEMPLATE_DECLARED_FALLBACK_LOCALE,
@@ -122,12 +123,24 @@ export interface MessagingServicePluginOptions {
      * this; a tick that claims work snaps it back, and the write that makes work
      * wakes its dispatcher at once — `emit()` enqueueing deliveries,
      * `enqueueHttp()` enqueueing a callout, `redeliverHttp()` resetting one.
-     * While idle it bounds how late a dispatcher notices work nobody woke it
-     * for: a deferred delivery coming due (retry, quiet hours, digest window), a
-     * row enqueued by another process, a crashed node's claim passing its
-     * timeout. A value at or below `dispatchIntervalMs` disables the backoff.
+     * While idle it bounds how late a dispatcher notices a row enqueued by
+     * another process; a deferred delivery coming due (retry, quiet hours,
+     * digest window) and a crashed node's claim passing its timeout wake the
+     * dispatcher at their due time instead (#29919). A value at or below
+     * `dispatchIntervalMs` disables the backoff.
      */
     dispatchMaxIdleIntervalMs?: number;
+    /**
+     * [#29919] This kernel is the only process that writes its database's
+     * delivery outboxes (a hosted tenant kernel: one kernel per tenant
+     * database), so every row is enqueued here and wakes its dispatcher. Both
+     * dispatchers then sleep straight from an idle tick to the next due row or
+     * `dispatchMaxIdleIntervalMs`, instead of re-running the backoff's ramp
+     * from `dispatchIntervalMs` after every boot and every burst (default
+     * `false`). Leave it off when another process — a second node, a worker —
+     * writes the same tables: the ramp is what notices its rows sooner.
+     */
+    dispatchSoleWriter?: boolean;
     /**
      * Topics that bypass the per-user preference matrix (ADR-0030 P2) — e.g.
      * security/system alerts users must not be able to mute. Exact match, or a
@@ -217,6 +230,7 @@ export class MessagingServicePlugin implements Plugin {
             partitionCount: 8,
             dispatchIntervalMs: 500,
             dispatchMaxIdleIntervalMs: DEFAULT_MAX_IDLE_INTERVAL_MS,
+            dispatchSoleWriter: false,
             mandatoryTopics: [],
             ...options,
         };
@@ -509,6 +523,25 @@ export class MessagingServicePlugin implements Plugin {
                     logger: ctx.logger,
                 }));
             });
+
+            // Push channel (#29041): same pattern — mounted while a `push`
+            // service (`@objectstack/service-push`) is resolvable. The devices
+            // it addresses are this service's own registry (`sys_user_device`).
+            const getPush = () => {
+                try {
+                    return ctx.getService<import('./push-channel.js').PushSenderSurface>('push');
+                } catch {
+                    return undefined;
+                }
+            };
+            ctx.hook('kernel:ready', async () => {
+                service.registerChannelProvider('push', lazyChannelMount({
+                    resolveTransport: getPush,
+                    create: () => createPushChannel({ getPush, devices: service }),
+                    announce: '[messaging] push channel registered (delivers to the recipient\'s enabled sys_user_device rows through the push service)',
+                    logger: ctx.logger,
+                }));
+            });
         }
 
         // Reliable delivery (P1): wire the outbox + dispatcher once the engine
@@ -541,6 +574,7 @@ export class MessagingServicePlugin implements Plugin {
                     partitionCount: this.options.partitionCount,
                     intervalMs: this.options.dispatchIntervalMs,
                     maxIdleIntervalMs: this.options.dispatchMaxIdleIntervalMs,
+                    soleWriter: this.options.dispatchSoleWriter,
                     logger: ctx.logger,
                     textRenderer,
                 });
@@ -563,6 +597,7 @@ export class MessagingServicePlugin implements Plugin {
                     partitionCount: this.options.partitionCount,
                     intervalMs: this.options.dispatchIntervalMs,
                     maxIdleIntervalMs: this.options.dispatchMaxIdleIntervalMs,
+                    soleWriter: this.options.dispatchSoleWriter,
                     logger: ctx.logger,
                 });
                 this.httpDispatcher.start();

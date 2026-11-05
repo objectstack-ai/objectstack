@@ -57,3 +57,8 @@ export { detectPendingApproval } from './mapMessages';
 // cache share with the live one, so a stored chart has one dialect.
 export { chartsFromParts, chartAnswerParts } from './mapMessages';
 export type { ChartAnswerPart } from './mapMessages';
+
+// objectstack#30223 — the HITL continuation marker. The chat transcript, the
+// conversation list preview and the conversation-language probe all skip a
+// user turn that `useHitlInChat` composed for the model.
+export { isHitlContinuation } from './hitlContinuation';

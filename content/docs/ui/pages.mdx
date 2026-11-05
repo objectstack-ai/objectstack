@@ -295,7 +295,8 @@ unknown or retired key (`description`, `icon`, `breadcrumb`, `showStar`) is refu
 | :--- | :--- | :--- |
 | `title` | Derived from the record on a record page | Heading; `{field}` tokens interpolate against the record, and a token that resolves to nothing renders empty. Set it on a non-record page |
 | `subtitle` | — | The line under the title, interpolated the same way |
-| `actions` | — | Ids of actions declared on the page's object. An authored list is the whole set: an action that declares `record_header` but is not named is not drawn, and omitting the key draws none of the object's actions. Only the synthesized page draws every `record_header` / `record_more` action |
+| `actions` | — | Ids of actions declared on the page's object. An authored list is the whole set: an action that declares `record_header` but is not named is not drawn, and omitting the key draws none of the object's actions. `placedActions` is the other way to say which actions |
+| `placedActions` | — | `true` asks for every action of the object placed at `record_header` / `record_more`, read live, in place of an `actions` list, so an action another package adds is drawn without editing the page. Refused beside an authored `actions` list: keep one. The platform's user, organization and approval request pages set it |
 | `recordChrome` | `true` | Draw the title as the record chip (object label, copy-id button, the record's picture when the object names an `imageField`); `false` keeps a bare heading |
 | `showCopyId` | `true` | The copy-record-id button in the chip |
 | `maxVisible` / `mobileMaxVisible` | 3 / 1 | How many actions render inline before the rest fold into the `⋯` menu |

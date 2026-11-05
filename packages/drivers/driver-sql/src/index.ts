@@ -18,6 +18,11 @@ export { withheldFilterDiagnosticOf } from './sql-driver.js';
 // rewrites. Exported because the Turso remote backfill applies the same rule to
 // its own residue, and a second copy there is how the two faces would drift.
 export { recoverUnencodedJsonText } from './unencoded-json-text.js';
+// [cloud#3485] How a large `$and` / `$or` group is emitted so the expression
+// tree it parses to stays shallow (#29888). Exported because the Turso remote
+// face compiles SQL text with its own compiler, and must regroup by the same
+// rule the knex path does.
+export { FLAT_GROUP_MAX_MEMBERS, joinBalancedGroup } from './sql-driver-balanced-group.js';
 // [#11991] The #11756 emission-scope refusal. Exported because a host that
 // renders its own diagnostics (Studio, `os migrate plan`, an installer) needs
 // the structured `client` / `supportedClients` and the stable `code` — the

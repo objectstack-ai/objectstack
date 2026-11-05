@@ -76,10 +76,12 @@ import MigrateMultiValueColumns from '../commands/migrate/multi-value-columns.js
 import MigrateOrganizationOwnership from '../commands/migrate/organization-ownership.js';
 import MigratePackagelessOverlays from '../commands/migrate/packageless-overlays.js';
 import MigratePlan from '../commands/migrate/plan.js';
+import MigrateRecomputeHomeAmounts from '../commands/migrate/recompute-home-amounts.js';
 import MigrateRecordCurrencyCodes from '../commands/migrate/record-currency-codes.js';
 import MigrateRecordedBy from '../commands/migrate/recorded-by.js';
 import MigrateResume from '../commands/migrate/resume.js';
 import MigrateSecurityCatalogOverlays from '../commands/migrate/security-catalog-overlays.js';
+import MigrateStoredExpressions from '../commands/migrate/stored-expressions.js';
 import MigrateSummaryNulls from '../commands/migrate/summary-nulls.js';
 import MigrateUnmappedColumns from '../commands/migrate/unmapped-columns.js';
 import MigrateValueShapes from '../commands/migrate/value-shapes.js';
@@ -301,6 +303,17 @@ const CALLERS: Record<string, Caller> = {
     noWrite: [{ label: 'migrate recorded-by', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate recorded-by --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
   },
+  'commands/migrate/recompute-home-amounts.ts': {
+    run: invoke(MigrateRecomputeHomeAmounts),
+    // The fixture's app declares no home amount, so the recompute refuses
+    // `osf_lead` (INVALID_FIELD) after the boot and writes nothing. The boot
+    // is what these cases are about.
+    noWrite: [{ label: 'migrate recompute-home-amounts', argv: ['--object', 'osf_lead', '--database-url', '@DB@', '--json'] }],
+    write: [{
+      label: 'migrate recompute-home-amounts --apply',
+      argv: ['--apply', '--yes', '--object', 'osf_lead', '--database-url', '@DB@', '--json'],
+    }],
+  },
   'commands/migrate/record-currency-codes.ts': {
     run: invoke(MigrateRecordCurrencyCodes),
     // The fixture's app declares no record-mode amount, so the backfill
@@ -331,6 +344,13 @@ const CALLERS: Record<string, Caller> = {
       label: 'migrate security-catalog-overlays --apply',
       argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'],
     }],
+  },
+  'commands/migrate/stored-expressions.ts': {
+    run: invoke(MigrateStoredExpressions),
+    // The fixture's app declares no stored computed field, so the walk finds
+    // nothing and `--apply` writes nothing — the boot is what these cases are about.
+    noWrite: [{ label: 'migrate stored-expressions', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [{ label: 'migrate stored-expressions --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
   },
   'commands/migrate/summary-nulls.ts': {
     run: invoke(MigrateSummaryNulls),

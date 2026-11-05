@@ -735,8 +735,8 @@ function isInReadonlyScope(name: string, def: FieldDef, scope: ReadonlyValueScop
  * [#20308] A BLANK string on a non-string-typed column is that column's typed
  * blank, `null` — the write door's one reading of it. [#29176] So is `''` on
  * an optional text-like column a unique constraint covers, and [#29277] `''`
- * on an optional single-value option, reference or file column (each its own
- * section below).
+ * on an optional single-value option, reference or file column, and [#29343]
+ * `[]` or `''` on an optional list-valued column (each its own section below).
  *
  * "Blank" is exactly what {@link isMissing} calls missing: `''` or a string of
  * whitespace. "Non-string-typed" is the spec's `NON_TEXT_STORED_VALUE_TYPES` —
@@ -789,23 +789,36 @@ function isInReadonlyScope(name: string, def: FieldDef, scope: ReadonlyValueScop
  * The same edges as the text arm: never whitespace (a value), never a
  * `required` column, and a blank on insert takes a declared `defaultValue`.
  *
+ * ## [#29343] List-valued columns on the `$empty` table's `multi_value` row
+ *
+ * The empty list `[]`, or exactly `''`, on an optional column on the
+ * `multi_value` row (`multiselect`, `checkboxes`, `tags`, a multi-capable type
+ * with `multiple: true`) is `null` from the door on, unique or not — the same
+ * ruling's execution step 2. An empty list holds no member, and `''` is never
+ * one (`normalizeMultiValueFields` leaves a blank unwrapped); stored as the
+ * JSON text `'[]'` / `'""'`, the second record cleared on a unique column was
+ * refused `409`. The ruled table reads `null` and `[]` as empty on that row,
+ * and is unchanged. The same edges: never whitespace, never a `required`
+ * column, a non-empty list untouched, and a blank on insert takes a declared
+ * `defaultValue`.
+ *
  * ## What it does NOT touch
  *
- * ⛔ Every other string-stored column — text no unique constraint covers, a
- * `multiple: true` option, reference or file column (the table's
- * `multi_value` row), and the `null_only` types that do not store one string
+ * ⛔ Every other string-stored column — text no unique constraint covers, and
+ * the `null_only` types that do not store one string
  * (object/array-stored and engine-owned; `@objectstack/core`'s
  * `blank-storage-form.ts` says why each is out). There `''` is a value, and the
  * spec's value round-trip fixture pins it on text (`str_empty`: an empty
- * string must not become null). ⛔ A non-blank value, and every non-string value, of any
- * type: `null`, `0`, `false`, `'abc'` pass through untouched, so every type
- * check and refusal downstream sees what it saw.
+ * string must not become null). ⛔ A non-blank value, and every non-string value
+ * but a list-valued column's `[]`, of any type: `null`, `0`, `false`, `'abc'`,
+ * `['a']` pass through untouched, so every type check and refusal downstream
+ * sees what it saw.
  *
  * ## One rule, two readers
  *
  * Which columns, and which blanks, is `blankAsNullColumns` /
  * `blankStorageForm` in `@objectstack/core` (`blank-storage-form.ts`) — the
- * one spelling of all three arms. This door applies it; the seed loader's
+ * one spelling of all four arms. This door applies it; the seed loader's
  * replay (`@objectstack/metadata-protocol`, the `blankAsNull` replay
  * comparand) compares a seed value in the form it stores, so a seed `''` the
  * door stores as `null` is not a change on every replay.
@@ -857,7 +870,8 @@ function normalizeBlankTypedRow(
   if (!isPlainRecord(row)) return row;
   let out: Record<string, unknown> | undefined;
   for (const [name, value] of Object.entries(row)) {
-    if (typeof value !== 'string' || !isMissing(value)) continue;
+    const blank = typeof value === 'string' ? isMissing(value) : Array.isArray(value) && value.length === 0;
+    if (!blank) continue;
     if (blankStorageForm(value, reachOf(name)) !== null) continue;
     (out ??= { ...row })[name] = null;
   }

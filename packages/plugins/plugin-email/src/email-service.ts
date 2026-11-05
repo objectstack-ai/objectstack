@@ -405,14 +405,22 @@ const UNSTATED_COLUMN = '(none)';
  * because canonicalization threw, so the row records what the caller actually
  * passed, verbatim, rather than throwing a second time while trying to
  * describe the first throw.
+ *
+ * It judges nothing — {@link formatCallerAddress} is the one place a caller's
+ * address shape is refused — so it reads every part as `unknown` (#29891): a
+ * JSON body can carry a number, object, array or `null` as a display name,
+ * and calling `.trim()` on one turned the caller's 400 into a 500. A
+ * non-string name is left out of the row; the `error` column already names it.
  */
 function rawAddressText(v: EmailAddress | EmailAddress[] | undefined): string {
   if (v == null) return '';
   const one = (a: EmailAddress): string => {
     if (a == null) return '';
     if (typeof a === 'string') return a.trim();
+    if (typeof a !== 'object') return '';
     const address = String(a.address ?? '').trim();
-    const name = a.name?.trim();
+    const rawName: unknown = a.name;
+    const name = typeof rawName === 'string' ? rawName.trim() : '';
     return name ? `${name} <${address}>` : address;
   };
   return (Array.isArray(v) ? v : [v]).map(one).filter(Boolean).join(', ');

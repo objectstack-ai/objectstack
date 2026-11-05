@@ -475,6 +475,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'V3: the real repository is the case that matters -- this gate\'s own vocabulary': 10,
   'W1-W6 (#22485): the parser-rot witness is GENERATED at head, never read from a committed copy': 9,
   'GR1-GR7 (#22554): the migration ledger is GENERATED at build, read from its template and entry files': 13,
+  'CR1-CR3 (#29987): the conversions ledger is split per entry, read from registry.ts and its modules': 3,
   'Unit pins on the two pattern-shaped judgements': 29,
   'the floors: what the new vocabulary must refuse': 9,
   'the floors: labels that are NOT mentions, and mentions that ARE evidenced': 9,
@@ -497,7 +498,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 59;
+const SELF_TEST_BATTERY_FLOOR = 60;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -530,6 +531,16 @@ export const MIGRATION_LEDGER_ENTRY_DIRS = [
   'packages/spec/src/migrations/entries/retired-keys',
   'packages/spec/src/migrations/entries/retired-defs',
 ];
+
+/**
+ * Where `LEDGER_SOURCES[1]`'s conversions live since the #29987 codemod split
+ * (`scripts/codemod-split-conversions-registry.mjs`): one module per conversion
+ * under this directory, plus the shared helpers. `registry.ts` itself still
+ * exists and lists them, but no conversion's `id:` line is in it any more. A rev
+ * that tracks no `.ts` file here is a rev from before the split, and the
+ * registry is the whole text. See `conversionLedgerTextAt`.
+ */
+export const CONVERSION_LEDGER_ENTRY_DIR = 'packages/spec/src/conversions/entries';
 
 /**
  * The generator whose output proves the source parser still matches (#4690), and
@@ -2341,7 +2352,7 @@ export function ledgerAt(rev, cwd) {
   const bySource = {};
   const missingSources = [];
   for (const path of LEDGER_SOURCES) {
-    const src = path === LEDGER_SOURCES[0] ? migrationLedgerTextAt(rev, cwd) : showOrNull(rev, path, cwd);
+    const src = path === LEDGER_SOURCES[0] ? migrationLedgerTextAt(rev, cwd) : conversionLedgerTextAt(rev, cwd);
     if (src === null) { missingSources.push(path); continue; }
     const found = extractIds(src);
     bySource[path] = found.length;
@@ -2379,6 +2390,33 @@ export function migrationLedgerTextAt(rev, cwd) {
   const texts = showManyOrNull(rev, entries, cwd);
   if (texts.size !== entries.length) return null;
   return [template, ...entries.map((p) => texts.get(p))].join('\n');
+}
+
+/**
+ * The text of the conversions ledger at a rev: `registry.ts` followed by every
+ * `.ts` module under `CONVERSION_LEDGER_ENTRY_DIR` (sorted), which `extractIds`
+ * reads as a set. Before the #29987 split no module exists there and the
+ * registry is the whole text; after it, the registry's own text carries no id.
+ * `null` when the rev has no registry: a red in `assertInputs`.
+ *
+ * Exported for the self-test's CR battery.
+ *
+ * @returns {string | null}
+ */
+export function conversionLedgerTextAt(rev, cwd) {
+  const registry = showOrNull(rev, LEDGER_SOURCES[1], cwd);
+  if (registry === null) return null;
+  let listed;
+  try {
+    listed = git(['ls-tree', '-r', '--name-only', rev, '--', CONVERSION_LEDGER_ENTRY_DIR], cwd);
+  } catch {
+    return null;
+  }
+  const entries = listed.split('\n').map((p) => p.trim()).filter((p) => p.endsWith('.ts')).sort();
+  if (entries.length === 0) return registry;
+  const texts = showManyOrNull(rev, entries, cwd);
+  if (texts.size !== entries.length) return null;
+  return [registry, ...entries.map((p) => texts.get(p))].join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -5837,7 +5875,7 @@ function ledgerTouchingCommits(path, head, cwd) {
     try { names = git(['show', '--name-only', '--format=', sha], cwd); } catch { continue; }
     // The generated era (#22554): a registration commit adds an entry file and
     // touches no registry, so the ledger's two committed sources count too.
-    if ([...LEDGER_SOURCES, MIGRATION_LEDGER_TEMPLATE, ...MIGRATION_LEDGER_ENTRY_DIRS].some((src) => names.includes(src))) hits.push(sha);
+    if ([...LEDGER_SOURCES, MIGRATION_LEDGER_TEMPLATE, ...MIGRATION_LEDGER_ENTRY_DIRS, CONVERSION_LEDGER_ENTRY_DIR].some((src) => names.includes(src))) hits.push(sha);
   }
   return { available: true, shas: hits };
 }
@@ -8869,6 +8907,46 @@ function selfTest() {
     }));
     green('GR7 transition: an entry added in the generated era is a new registration', transition('beta'));
     red('GR7 transition: an entry carried over from the committed era is not new', transition('alpha'), [/none of those ids is NEW in this diff/]);
+  }
+
+  // ---- CR1-CR3 (#29987): the conversions ledger is split per entry ----------
+  //
+  // After the codemod split, `registry.ts` imports and lists the conversions and
+  // each conversion's `id:` line lives in its own module under
+  // `CONVERSION_LEDGER_ENTRY_DIR`. A ledger read off `registry.ts` alone would
+  // find ZERO ids there -- every `registered` claim on a conversion would fail.
+  battery('CR1-CR3 (#29987): the conversions ledger is split per entry, read from registry.ts and its modules');
+  {
+    const splitRepo = (files) => {
+      const dir = mkdtempSync(join(tmpdir(), 'adr0087-conversions-split-'));
+      cleanup.push(dir);
+      const w = (rel, text) => { mkdirSync(dirname(join(dir, rel)), { recursive: true }); writeFileSync(join(dir, rel), text); };
+      git(['init', '-q', '-b', 'main'], dir);
+      git(['config', 'user.email', 't@t'], dir);
+      git(['config', 'user.name', 't'], dir);
+      for (const [rel, text] of Object.entries(files)) w(rel, text);
+      git(['add', '-A'], dir);
+      git(['commit', '-qm', 'split'], dir);
+      return dir;
+    };
+    const HOST = "import { a } from './entries/18/conv-a.js';\nexport const ALL = [a];\n";
+    const MODULE = (id) => `const a = {\n  id: '${id}',\n  toMajor: 18,\n};\n\nexport { a };\n`;
+    const c1 = splitRepo({
+      [LEDGER_SOURCES[1]]: HOST,
+      [`${CONVERSION_LEDGER_ENTRY_DIR}/18/conv-a.ts`]: MODULE('conv-a'),
+      [`${CONVERSION_LEDGER_ENTRY_DIR}/README.md`]: "  id: 'readme-example',\n",
+    });
+    // CR1 control: the host alone carries no id, so a green below is the modules'.
+    assert(extractIds(showOrNull('HEAD', LEDGER_SOURCES[1], c1)).length === 0, 'CR1 control: the split host must carry no id line');
+    const t1 = conversionLedgerTextAt('HEAD', c1);
+    assert(t1 !== null && extractIds(t1).join() === 'conv-a', `CR1: the split ledger reads the module's id -- got ${JSON.stringify(t1 && extractIds(t1))}`);
+    const l1 = ledgerAt('HEAD', c1);
+    assert(l1.ids.has('conv-a') && l1.bySource[LEDGER_SOURCES[1]] === 1, `CR1: ledgerAt reads the split ledger -- got ${JSON.stringify(l1.bySource)}`);
+    // CR2: a non-`.ts` file under the entries directory is not read.
+    assert(!extractIds(t1 ?? '').includes('readme-example'), 'CR2: an id-shaped line in a non-.ts file under entries/ must not be read');
+    // CR3: before the split (no module under entries/) the registry is the whole text.
+    const c3 = splitRepo({ [LEDGER_SOURCES[1]]: MODULE('pre-split') });
+    assert(conversionLedgerTextAt('HEAD', c3) === MODULE('pre-split'), 'CR3: an unsplit rev reads registry.ts alone');
   }
 
   // ---- Unit pins on the two pattern-shaped judgements ----------------------

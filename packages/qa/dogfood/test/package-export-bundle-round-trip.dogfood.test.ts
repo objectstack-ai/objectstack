@@ -25,6 +25,29 @@
 //      order, with the same namespace, dependencies, and the same item names
 //      and counts per collection.
 //
+// [#29871] A second describe pins the bundle's "enabled or not" for a
+// DISABLED package: a runtime-authored package (`POST /packages`, an object
+// drafted into it and published) is disabled before the export; the bundle
+// and its per-package export still carry the object, and a fresh runtime that
+// installs the entry serves it (`GET /meta/object/<name>` 200), where before
+// the entry was an empty package and the object came back 404.
+//
+// [#29903] A third describe pins that the pair's object extension travels
+// once: the pair publishes an extension of the base's object (a `__c` field and
+// a relabelled base field). The base's bundle entry carries the object as the
+// base declares it and the pair's entry carries the extension as its
+// `objectExtensions`, so the field is declared once in the bundle; a fresh
+// runtime that installs both entries serves the object with the field and the
+// pair's label, and the base's own export there carries neither.
+//
+// [#29872] The extending package of the first describe is installed through
+// install-local, which registers its `objectExtensions` with no
+// `object_extension` item. Its export carries the entry on the source and,
+// installed from that export, on the target (the second hop), and the base's
+// entry carries its object without the extender's field on both; the third
+// describe's pair, installed on the target from its entry the same way,
+// re-exports its extension there.
+//
 // Boots fixture stacks of its own (the install-local plugin mounted on both),
 // so it stays out of `SHARED_SHOWCASE`. Every credential below is an
 // obviously-fake placeholder, and every assertion on one is its absence.
@@ -123,6 +146,16 @@ function inventory(entry: Record<string, any>): Record<string, unknown> {
 }
 
 const ids = (bundle: any): string[] => (bundle?.packages ?? []).map((p: any) => p.id);
+
+/** [#29872] The `objectExtensions` targets of one bundle entry, and whether the entry's own `OBJECT` carries `field`. */
+function extensionReading(bundle: any, id: string, field: string): { extends: string[]; objectCarries: boolean } {
+  const entry = (bundle?.packages ?? []).find((p: any) => p.id === id);
+  const object = (entry?.objects ?? []).find((o: any) => o?.name === OBJECT);
+  return {
+    extends: (entry?.objectExtensions ?? []).map((e: any) => e?.extend),
+    objectCarries: Object.keys(object?.fields ?? {}).includes(field),
+  };
+}
 
 describe('dogfood: the whole-deployment export round-trips onto a fresh runtime, and carries no secret', () => {
   let previousRef: string | undefined;
@@ -226,5 +259,217 @@ describe('dogfood: the whole-deployment export round-trips onto a fresh runtime,
     expect(targetBundle.packages.map(inventory)).toEqual(sourceBundle.packages.map(inventory));
     const pair = targetBundle.packages.find((p: any) => p.id === PAIR);
     expect((pair?.dashboards ?? []).map((d: any) => [d.name, d.label, d.overrides?.package])).toEqual([[DASHBOARD, EDITED, BASE]]);
+  });
+
+  it('[#29872] the install-local extender carries its `objectExtensions` on both hops, and the base\'s object never carries its field', () => {
+    const field = Object.keys(EXT_INSTALL.manifest.objectExtensions[0].fields)[0];
+    for (const [hop, bundle] of [['source', sourceBundle], ['target', targetBundle]] as const) {
+      expect(extensionReading(bundle, EXT, field), `${hop}: ${EXT}`).toEqual({ extends: [OBJECT], objectCarries: false });
+      expect(extensionReading(bundle, BASE, field), `${hop}: ${BASE}`).toEqual({ extends: [], objectCarries: false });
+      // CONTROL: the base's entry still carries its object, with its own field.
+      const base = bundle.packages.find((p: any) => p.id === BASE);
+      expect(Object.keys((base?.objects ?? []).find((o: any) => o?.name === OBJECT)?.fields ?? {}), `${hop}: the base's object`).toContain('title');
+      const ext = bundle.packages.find((p: any) => p.id === EXT);
+      expect(ext.objectExtensions, `${hop}: the extender's entry`).toEqual(EXT_INSTALL.manifest.objectExtensions);
+    }
+  });
+});
+
+const OFF = 'com.dogfood.exportoff';
+const OFF_OBJECT = 'exportoff_note';
+
+describe('dogfood: a disabled package exports its items, and a fresh runtime that installs the entry serves them', () => {
+  const dirs: string[] = [];
+  const answers: Record<string, Answer> = {};
+  let offEntry: any;
+  let previousHome: string | undefined;
+
+  beforeAll(async () => {
+    // Each runtime gets its own home: a disable is persisted there
+    // (`package-state/`) and replayed at boot, so a shared home would carry
+    // the source's disable onto the target, which no fresh runtime has.
+    previousHome = process.env.OS_HOME;
+    const sourceDir = mkdtempSync(join(tmpdir(), 'dogfood-export-disabled-source-'));
+    dirs.push(sourceDir);
+    process.env.OS_HOME = join(sourceDir, 'home');
+    const source = await bootShowcase({
+      extraPlugins: [new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: sourceDir })],
+    });
+    try {
+      const token = await source.signIn();
+      answers.created = await call(source, token, 'POST', '/packages', {
+        manifest: { id: OFF, name: 'Export disabled', version: '0.1.0', type: 'app', namespace: 'exportoff' },
+      });
+      answers.saved = await call(source, token, 'PUT', `/meta/object/${OFF_OBJECT}?mode=draft&package=${OFF}`, {
+        name: OFF_OBJECT, label: 'Note', sharingModel: 'private', fields: { body: { type: 'text', label: 'Body' } },
+      });
+      answers.published = await call(source, token, 'POST', `/packages/${OFF}/publish-drafts`, {});
+      answers.enabledExport = await call(source, token, 'GET', `/packages/${OFF}/export`);
+      answers.disabled = await call(source, token, 'PATCH', `/packages/${OFF}/disable`);
+      answers.servedAfterDisable = await call(source, token, 'GET', `/meta/object/${OFF_OBJECT}`);
+      answers.disabledExport = await call(source, token, 'GET', `/packages/${OFF}/export`);
+      answers.bundle = await call(source, token, 'GET', '/packages/export');
+      offEntry = (answers.bundle.body?.data?.packages ?? []).find((p: any) => p?.id === OFF);
+    } finally {
+      await source.stop();
+    }
+
+    const targetDir = mkdtempSync(join(tmpdir(), 'dogfood-export-disabled-target-'));
+    dirs.push(targetDir);
+    process.env.OS_HOME = join(targetDir, 'home');
+    const target = await bootShowcase({
+      extraPlugins: [new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: targetDir })],
+    });
+    try {
+      const token = await target.signIn();
+      answers.installed = await call(target, token, 'POST', ROUTE, { manifest: offEntry });
+      answers.targetServed = await call(target, token, 'GET', `/meta/object/${OFF_OBJECT}`);
+    } finally {
+      await target.stop();
+    }
+  }, 900_000);
+
+  afterAll(() => {
+    if (previousHome === undefined) delete process.env.OS_HOME;
+    else process.env.OS_HOME = previousHome;
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  });
+
+  const objectsOf = (manifest: any): string[] => (manifest?.objects ?? []).map((o: any) => o?.name);
+
+  it('source: the package is created, its object published, and the disable lands (preconditions)', () => {
+    for (const key of ['created', 'saved', 'published', 'disabled'] as const) {
+      expect(answers[key]?.status, `${key}: ${JSON.stringify(answers[key]?.body)}`).toBeLessThan(300);
+    }
+    expect(answers.disabled.body?.data?.enabled).toBe(false);
+    // CONTROL: enabled, the export carries the object; disabled, the served read hides it.
+    expect(objectsOf(answers.enabledExport.body?.data)).toEqual([OFF_OBJECT]);
+    expect(answers.servedAfterDisable.status).toBe(404);
+  });
+
+  it('source: the disabled package\'s export and its bundle entry still carry its object', () => {
+    expect(answers.disabledExport.status, JSON.stringify(answers.disabledExport.body)).toBe(200);
+    expect(answers.disabledExport.body?.data).toEqual(answers.enabledExport.body?.data);
+    expect(answers.bundle.status, JSON.stringify(answers.bundle.body)).toBe(200);
+    expect(PackageExportBundleSchema.safeParse(answers.bundle.body?.data).success).toBe(true);
+    expect(objectsOf(offEntry), JSON.stringify(offEntry)).toEqual([OFF_OBJECT]);
+  });
+
+  it('target: the entry installs, and the object is served', () => {
+    expect(answers.installed.status, JSON.stringify(answers.installed.body)).toBe(200);
+    expect(answers.installed.body?.data?.manifestId).toBe(OFF);
+    expect(answers.targetServed.status, JSON.stringify(answers.targetServed.body)).toBe(200);
+  });
+});
+
+const XBASE = 'com.dogfood.exportxbase';
+const XPAIR = pairOf(XBASE);
+const XOBJECT = 'exportxbase_account';
+const REGION = 'region__c';
+const TITLE_EDITED = 'Title (customized)';
+/** The pair's extension of the base's object, as Studio's Customize writes it. */
+const EXTENSION = { extend: XOBJECT, fields: { [REGION]: { type: 'text', label: 'Region' } }, fieldPatches: { title: { label: TITLE_EDITED } } };
+
+describe('[#29903] dogfood: the pair\'s object extension travels in the pair\'s entry only, and installs once', () => {
+  const dirs: string[] = [];
+  const answers: Record<string, Answer> = {};
+  let bundle: any;
+
+  beforeAll(async () => {
+    const sourceDir = mkdtempSync(join(tmpdir(), 'dogfood-export-extension-source-'));
+    dirs.push(sourceDir);
+    const source = await bootShowcase({
+      extraPlugins: [new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: sourceDir })],
+    });
+    try {
+      const token = await source.signIn();
+      answers.base = await call(source, token, 'POST', ROUTE, {
+        manifest: {
+          id: XBASE, namespace: 'exportxbase', name: 'Export extension base', version: '1.0.0', type: 'app',
+          objects: [{ name: XOBJECT, label: 'Account', fields: { title: { type: 'text', label: 'Title' } } }],
+        },
+      });
+      answers.baseBefore = await call(source, token, 'GET', `/packages/${XBASE}/export`);
+      await ensurePair(source, token, XBASE);
+      answers.extended = await call(source, token, 'PUT', inPair(`/meta/object_extension/${XOBJECT}?mode=draft`, XBASE), EXTENSION);
+      answers.published = await call(source, token, 'POST', `/packages/${XPAIR}/publish-drafts`, {});
+      answers.sourceServed = await call(source, token, 'GET', `/meta/object/${XOBJECT}`);
+      answers.baseAfter = await call(source, token, 'GET', `/packages/${XBASE}/export`);
+      answers.bundle = await call(source, token, 'GET', '/packages/export');
+      bundle = answers.bundle.body?.data;
+    } finally {
+      await source.stop();
+    }
+
+    const targetDir = mkdtempSync(join(tmpdir(), 'dogfood-export-extension-target-'));
+    dirs.push(targetDir);
+    const target = await bootShowcase({
+      extraPlugins: [new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: targetDir })],
+    });
+    try {
+      const token = await target.signIn();
+      for (const entry of bundle?.packages ?? []) {
+        answers[`install:${entry.id}`] = await call(target, token, 'POST', ROUTE, { manifest: entry });
+      }
+      answers.targetServed = await call(target, token, 'GET', `/meta/object/${XOBJECT}`);
+      answers.targetBase = await call(target, token, 'GET', `/packages/${XBASE}/export`);
+      answers.targetPair = await call(target, token, 'GET', `/packages/${XPAIR}/export`);
+    } finally {
+      await target.stop();
+    }
+  }, 900_000);
+
+  afterAll(() => {
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  });
+
+  const servedObject = (answer: Answer) => answer.body?.item ?? answer.body?.data?.item;
+  const exportedObject = (manifest: any) => (manifest?.objects ?? []).find((o: any) => o?.name === XOBJECT);
+
+  it('source: the base installs and the pair\'s extension publishes, and the served object folds it in (preconditions)', () => {
+    for (const key of ['base', 'baseBefore', 'extended', 'published', 'sourceServed', 'baseAfter', 'bundle'] as const) {
+      expect(answers[key]?.status, `${key}: ${JSON.stringify(answers[key]?.body)}`).toBe(200);
+    }
+    const served = servedObject(answers.sourceServed);
+    expect(Object.keys(served?.fields ?? {}), JSON.stringify(answers.sourceServed.body).slice(0, 400)).toContain(REGION);
+    expect(served?.fields?.title?.label).toBe(TITLE_EDITED);
+  });
+
+  it('source: the base\'s export is unchanged by the extension, and the field is declared once in the bundle, by the pair', () => {
+    expect(answers.baseAfter.body?.data).toEqual(answers.baseBefore.body?.data);
+    const object = exportedObject(answers.baseAfter.body?.data);
+    expect(Object.keys(object?.fields ?? {}), JSON.stringify(object)).not.toContain(REGION);
+    expect(object?.fields?.title?.label).toBe('Title');
+
+    expect(PackageExportBundleSchema.safeParse(bundle).success).toBe(true);
+    expect(ids(bundle)).toEqual([XBASE, XPAIR]);
+    const base = bundle.packages.find((p: any) => p.id === XBASE);
+    expect(base).toEqual(answers.baseBefore.body?.data);
+    const pair = bundle.packages.find((p: any) => p.id === XPAIR);
+    expect(pair?.objectExtensions).toEqual([EXTENSION]);
+    const declaring = bundle.packages.flatMap((p: any) => [
+      ...(p.objects ?? []).filter((o: any) => o?.fields?.[REGION]).map(() => `${p.id}:objects`),
+      ...(p.objectExtensions ?? []).filter((e: any) => e?.fields?.[REGION]).map(() => `${p.id}:objectExtensions`),
+    ]);
+    expect(declaring).toEqual([`${XPAIR}:objectExtensions`]);
+  });
+
+  it('target: both entries install, the object is served with the field and the pair\'s label, and the base exports without them', () => {
+    for (const id of [XBASE, XPAIR]) {
+      expect(answers[`install:${id}`]?.status, `${id}: ${JSON.stringify(answers[`install:${id}`]?.body)}`).toBe(200);
+    }
+    expect(answers.targetServed.status, JSON.stringify(answers.targetServed.body)).toBe(200);
+    const served = servedObject(answers.targetServed);
+    expect(Object.keys(served?.fields ?? {})).toContain(REGION);
+    expect(served?.fields?.title?.label).toBe(TITLE_EDITED);
+    expect(answers.targetBase.status).toBe(200);
+    const object = exportedObject(answers.targetBase.body?.data);
+    expect(Object.keys(object?.fields ?? {}), JSON.stringify(object)).not.toContain(REGION);
+    expect(object?.fields?.title?.label).toBe('Title');
+  });
+
+  it('[#29872] target: the pair installed from its entry re-exports its extension (the second hop)', () => {
+    expect(answers.targetPair?.status, JSON.stringify(answers.targetPair?.body)).toBe(200);
+    expect(answers.targetPair.body?.data?.objectExtensions).toEqual([EXTENSION]);
   });
 });

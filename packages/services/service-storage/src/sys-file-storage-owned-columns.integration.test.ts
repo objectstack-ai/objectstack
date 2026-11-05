@@ -24,6 +24,12 @@
  * create-side guard drops them from a non-system create, while the lifecycle's
  * claim, release and copy, all under the system context, still write them.
  *
+ * The same guard records the row's uploader: a stored file's uploader
+ * (`owner_id`) is the user who created it, as an attachment's and a comment's
+ * author are. A non-system create records the caller over whatever it named,
+ * and one whose context names no user is refused; the upload doors and every
+ * system write keep the uploader they record.
+ *
  * Driven through the doors as they ship, as the #26479 rig is: one real
  * `ObjectQL` engine over sqlite `:memory:`, `StorageServicePlugin` booted on
  * the local adapter, the upload doors called as routes, and the data writes
@@ -434,5 +440,68 @@ describe('sys_file storage-owned columns are not writable outside the storage se
     expect(copyRow.status).toBe('committed');
     expect(typeof copyRow.key === 'string' && copyRow.key.length > 0, JSON.stringify(copyRow)).toBe(true);
     expect(copyRow.key).not.toBe(committedRow.key);
+  });
+
+  // ── The uploader (`owner_id`) ──────────────────────────────────────
+
+  const SOMEONE_ELSE = 'u_someone_else';
+  const uploaderOf = async (id: string) => (await fileRow(id))?.owner_id ?? null;
+
+  it('a stored file\'s uploader is the user who created it: a create records the caller over an owner_id naming another user', async () => {
+    const fileId = `f_uploader_${++seq}`;
+
+    await engine.insert('sys_file', { id: fileId, name: 'mine.png', owner_id: SOMEONE_ELSE } as any, { context: WRITER_CTX });
+
+    expect(await uploaderOf(fileId)).toBe(WRITER);
+    expect((await fileRow(fileId))?.name).toBe('mine.png');
+  });
+
+  it('a batch create records the caller as the uploader on every row', async () => {
+    const a = `f_uploader_${++seq}`;
+    const b = `f_uploader_${++seq}`;
+
+    await engine.insert('sys_file', [
+      { id: a, name: 'a.png', owner_id: SOMEONE_ELSE },
+      { id: b, name: 'b.png' },
+    ] as any, { context: WRITER_CTX });
+
+    expect(await uploaderOf(a)).toBe(WRITER);
+    expect(await uploaderOf(b)).toBe(WRITER);
+  });
+
+  it('a create whose context names no signed-in user is refused 403 RECORD_NOT_ACCESSIBLE, and no row is written', async () => {
+    const fileId = `f_uploader_${++seq}`;
+
+    expect(await failureOf(
+      engine.insert('sys_file', { id: fileId, name: 'nobody.png', owner_id: SOMEONE_ELSE } as any, { context: { actor: 'svc:flow:importer' } as any }),
+    )).toMatchObject({ status: 403, code: 'RECORD_NOT_ACCESSIBLE' });
+    expect(await fileRow(fileId)).toBeUndefined();
+  });
+
+  it('the upload doors still record the uploading user, under the system context', async () => {
+    const { fileId: presigned } = await presign();
+    expect(await uploaderOf(presigned)).toBe(WRITER);
+
+    const committed = await committedUpload();
+    expect(await uploaderOf(committed)).toBe(WRITER);
+  });
+
+  it('a system create and a system update keep the uploader they write', async () => {
+    const fileId = `f_uploader_${++seq}`;
+
+    await engine.insert('sys_file', { id: fileId, name: 'import.png', owner_id: SOMEONE_ELSE } as any, { context: SYS });
+    expect(await uploaderOf(fileId)).toBe(SOMEONE_ELSE);
+
+    await engine.update('sys_file', { id: fileId, owner_id: WRITER } as any, { context: SYS });
+    expect(await uploaderOf(fileId)).toBe(WRITER);
+  });
+
+  it('an update leaves the uploader the create recorded, whoever sends it', async () => {
+    const fileId = await committedUpload();
+
+    await engine.update('sys_file', { id: fileId, name: 'renamed.png', owner_id: SOMEONE_ELSE } as any, { context: WRITER_CTX });
+
+    expect(await uploaderOf(fileId)).toBe(WRITER);
+    expect((await fileRow(fileId))?.name).toBe('renamed.png');
   });
 });

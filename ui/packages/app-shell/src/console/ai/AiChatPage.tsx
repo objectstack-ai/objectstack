@@ -63,6 +63,8 @@ import {
   detectProposedPlan,
   detectBuilderHandoff,
   detectRecordHandoff,
+  detectRecordWrite,
+  detectSampleDataCleanup,
   detectProposedChanges,
   detectReplayOutcome,
   detectAuthoringVerdict,
@@ -109,6 +111,7 @@ import {
 import { AppHeader } from '../../layout/AppHeader.js';
 import { CONSOLE_TOP_BAR } from '../../layout/consoleTopBar.js';
 import { armChatDockExpanded, readDockReturnLocation } from '../../layout/chatDockState.js';
+import type { ChatSurfaceContext } from '../../layout/chatSurfaceContext.js';
 import {
   useAdvertiseShortcut,
   type AdvertisedShortcut,
@@ -142,6 +145,29 @@ import { isConversationZh } from './conversationLanguage.js';
 import { resolveOutboundAgentText, type OutboundAgentTextKey } from './outboundAgentText.js';
 import { resolveApiBase } from './resolveApiBase.js';
 import { AiUnavailable } from './AiUnavailable.js';
+import { recordFormPrefillQuery } from './recordFormPrefill.js';
+
+/**
+ * The app segment a record of `objectName` lives under: the object's owning
+ * package, read from `/api/v1/meta/object/<name>` (`_packageId`), with `setup`
+ * as the fallback shell for an object no package claims. Best-effort: a failed
+ * read still lands on the record. Shared by the record hand-off (cloud#1658)
+ * and the record-write card's form hand-off (cloud#3565).
+ */
+async function appOfObject(objectName: string): Promise<string> {
+  try {
+    const r = await fetch(`/api/v1/meta/object/${encodeURIComponent(objectName)}`, {
+      credentials: 'include',
+    });
+    if (r.ok) {
+      const j = (await r.json()) as { item?: { _packageId?: unknown } };
+      if (typeof j?.item?._packageId === 'string' && j.item._packageId) return j.item._packageId;
+    }
+  } catch {
+    /* resolution is best-effort; the caller's fallback still lands on the record */
+  }
+  return 'setup';
+}
 
 function partString(part: HydratedUIMessagePart, key: string): string | undefined {
   const value = part[key];
@@ -237,6 +263,10 @@ export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): C
         // four; this is its hydration counterpart.
         const builderHandoff = detectBuilderHandoff(result);
         const recordHandoff = detectRecordHandoff(result);
+        // cloud#3565 — the record-write card rides the pending approval the
+        // id below is lifted from; it must survive a reload like the rest.
+        const recordWrite = detectRecordWrite(result);
+        const sampleDataCleanup = detectSampleDataCleanup(result);
         const proposedChanges = detectProposedChanges(result);
         // objectui#5695 — a confirm-replay result becomes a terminal state on
         // the original 确认修改 card; it must never rehydrate as an ordinary
@@ -284,6 +314,8 @@ export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): C
           ...(proposedPlan ? { proposedPlan } : {}),
           ...(builderHandoff ? { builderHandoff } : {}),
           ...(recordHandoff ? { recordHandoff } : {}),
+          ...(recordWrite ? { recordWrite } : {}),
+          ...(sampleDataCleanup ? { sampleDataCleanup } : {}),
           ...(proposedChanges ? { proposedChanges } : {}),
           ...(replayOutcome ? { replayOutcome } : {}),
           ...(part.errorText ? { errorText: String(part.errorText) } : {}),
@@ -1572,11 +1604,7 @@ interface ChatPaneProps {
    * `context.surface` on every turn (the transport reads the body per send),
    * and surfaced to the user as a chip above the composer.
    */
-  surfaceContext?: {
-    pillar?: string;
-    artifact?: { type: string; name: string };
-    mode?: string;
-  };
+  surfaceContext?: ChatSurfaceContext;
   /**
    * objectui#8219 — the display label of `surfaceContext.artifact`, when the
    * host knows it (Studio: the Interfaces pillar's open leaf). Display-only: the
@@ -1597,6 +1625,13 @@ interface ChatPaneProps {
   /** ADR-0070 "Edit with AI": the package the user opened to edit (from `?package=`),
    *  forwarded to the build agent as `context.packageId` to scope it to that app. */
   editPackageId?: string;
+  /**
+   * objectstack#30043 — the app the user has selected, by its package: the
+   * console app the dock sits in, whichever agent it runs. Sent as
+   * `context.activeApp`; absent, `editPackageId` (the app picked for editing)
+   * is the selection, and with neither the key is omitted, never a placeholder.
+   */
+  activeAppPackageId?: string;
   /** A1.b bind-on-create: fired when this pane's build history binds to a package
    *  while the surface has no `?package=` — the page re-keys the conversation to
    *  `app:${pkg}:build` and writes `?package=` onto the URL. */
@@ -1636,6 +1671,7 @@ export function ChatPane({
   apiBase,
   conversationId,
   editPackageId,
+  activeAppPackageId,
   surfaceContext,
   surfaceArtifactLabel,
   onPackageBound,
@@ -1701,21 +1737,36 @@ export function ChatPane({
   // shell for an object no package claims.
   const openRecord = useCallback(
     async (handoff: { objectName: string; recordId: string }) => {
-      let app = 'setup';
-      try {
-        const r = await fetch(`/api/v1/meta/object/${encodeURIComponent(handoff.objectName)}`, {
-          credentials: 'include',
-        });
-        if (r.ok) {
-          const j = (await r.json()) as { item?: { _packageId?: unknown } };
-          if (typeof j?.item?._packageId === 'string' && j.item._packageId) app = j.item._packageId;
-        }
-      } catch {
-        /* resolution is best-effort; the fallback below still lands on the record */
-      }
+      const app = await appOfObject(handoff.objectName);
       navigate(
         `/apps/${encodeURIComponent(app)}/${encodeURIComponent(handoff.objectName)}/record/${encodeURIComponent(handoff.recordId)}`,
       );
+    },
+    [navigate],
+  );
+
+  // cloud#3565 — 打开完整表单 on a record-write card. A create opens the New
+  // form with the card's values through the query-string prefill
+  // `RecordFormPage` already reads for related-list "+ New" (one `field=value`
+  // pair per card field; the form's own defaults fill the rest). An update
+  // opens the record's edit form: the card has shown old → new, and the form
+  // opens on the stored record. The card cancelled the pending write before
+  // calling this, so a record saved here is never written a second time.
+  const openRecordForm = useCallback(
+    async (write: {
+      operation: 'create' | 'update';
+      objectName: string;
+      recordId?: string;
+      fields: Array<{ name: string; value: unknown }>;
+    }) => {
+      const app = await appOfObject(write.objectName);
+      const base = `/apps/${encodeURIComponent(app)}/${encodeURIComponent(write.objectName)}`;
+      if (write.operation === 'update' && write.recordId) {
+        navigate(`${base}/record/${encodeURIComponent(write.recordId)}/edit`);
+        return;
+      }
+      const query = recordFormPrefillQuery(write.fields);
+      navigate(`${base}/new${query ? `?${query}` : ''}`);
     },
     [navigate],
   );
@@ -1869,6 +1920,7 @@ export function ChatPane({
   // pane mounts while the catalog is still loading, and a server without an
   // AI service answers that catalog empty and `/models` with a 501.
   const { models: aiModels, defaultModelId } = useAiModels({ apiBase, enabled: agents.length > 0 });
+  const selectedApp = activeAppPackageId || editPackageId || undefined;
   const [selectedModelId, setSelectedModelId] = useState<string | undefined>(undefined);
   const effectiveModelId = selectedModelId ?? defaultModelId;
 
@@ -1892,7 +1944,10 @@ export function ChatPane({
     onError: handleChatError,
     body: {
       context: {
-        activeApp: 'AI',
+        // objectstack#30043 — the app the user has selected, never a constant:
+        // the agent was told "AI" while the user stood in their CRM. Omitted
+        // when nothing is selected.
+        ...(selectedApp ? { activeApp: selectedApp } : {}),
         agentName: activeAgent,
         // Tell the agent the environment's publish posture so its narration
         // matches reality (an auto-published build is live, not "to publish").
@@ -1902,6 +1957,7 @@ export function ChatPane({
         ...(editPackageId ? { packageId: editPackageId } : {}),
         // cloud#1610 — what the user is currently discussing (advisory; the
         // transport reads the body per send, so this stays fresh per turn).
+        // The console dock sends the page in view too (objectstack#30043).
         ...(surfaceContext ? { surface: surfaceContext } : {}),
       },
     },
@@ -2602,6 +2658,23 @@ export function ChatPane({
         builderHandoffOpenLabel={t('console.ai.builderHandoffOpen')}
         builderHandoffSupersededTitle={t('console.ai.builderHandoffSuperseded')}
         onOpenRecord={openRecord}
+        // cloud#3565 — the record-write card's three buttons and its states.
+        onOpenRecordForm={openRecordForm}
+        recordWriteCreateTitle={(objectLabel) => t('console.ai.recordWriteCreateTitle', { object: objectLabel })}
+        recordWriteUpdateTitle={(objectLabel) => t('console.ai.recordWriteUpdateTitle', { object: objectLabel })}
+        recordWriteConfirmLabel={t('console.ai.recordWriteConfirm')}
+        recordWriteOpenFormLabel={t('console.ai.recordWriteOpenForm')}
+        recordWriteCancelLabel={t('console.ai.recordWriteCancel')}
+        recordWriteCancelReason={t('console.ai.recordWriteCancelReason')}
+        recordWriteOpenFormReason={t('console.ai.recordWriteOpenFormReason')}
+        recordWriteDroppedLabel={t('console.ai.recordWriteDropped')}
+        recordWriteSubmittingLabel={t('console.ai.recordWriteSubmitting')}
+        recordWriteWrittenLabel={t('console.ai.recordWriteWritten')}
+        recordWriteCancelledLabel={t('console.ai.recordWriteCancelled')}
+        sampleDataCleanupTitleLabel={t('console.ai.sampleDataCleanupTitle')}
+        sampleDataCleanupIrreversibleLabel={t('console.ai.sampleDataCleanupIrreversible')}
+        sampleDataCleanupAbsentLabel={(count) => t('console.ai.sampleDataCleanupAbsent', { count })}
+        sampleDataCleanupEditedLabel={(count) => t('console.ai.sampleDataCleanupEdited', { count })}
         surface="plain"
         maxHeight="100%"
         headerSlot={headerSlot}

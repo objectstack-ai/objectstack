@@ -199,9 +199,18 @@ describe('record:activity — the declared read-side inputs change what is rende
   });
 
   it('filterMode seeds which slice of the feed the panel opens on', async () => {
-    mountBound({ filterMode: 'changes_only' }, makeDataSource());
-    expect(await screen.findByText('Stage: draft to qualified')).toBeTruthy();
+    mountBound({ filterMode: 'tasks_only', showCompleted: true }, makeDataSource());
+    expect(await screen.findByText('Follow-up call closed')).toBeTruthy();
+    expect(screen.queryByText('Stage: draft to qualified')).toBeNull();
     expect(screen.queryByText('Assignment rule ran')).toBeNull();
+  });
+
+  it('`changes_only` holds no activity event: the `updated` row is not a field change (objectstack#30074, ruling C)', async () => {
+    const dataSource = makeDataSource();
+    mountBound({ filterMode: 'changes_only', showCompleted: true }, dataSource);
+    await waitFor(() => expect(dataSource.find).toHaveBeenCalled());
+    expect(await screen.findByText(EMPTY_FEED)).toBeTruthy();
+    expect(screen.queryByText('Stage: draft to qualified')).toBeNull();
   });
 
   it('an unrecognised filterMode falls back to "all" rather than a filter nothing matches', async () => {

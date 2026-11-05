@@ -60,11 +60,16 @@ os compile
 | `os generate <type> <name>` | Generate metadata files (alias: `os g`) |
 | `os create <type> [name]` | Scaffold a standalone **kernel code** plugin project (the `Plugin` contract, built by `tsc`) from a built-in template |
 
-Available generate types: `object`, `view`, `action`, `flow`, `dashboard`, `app`, `skill`, `picklist`
+Available generate types: `object`, `view`, `action`, `flow`, `dashboard`, `app`, `skill`, `picklist`, `permission`, `dataset`
 
 `picklist` writes a shared option list (`src/picklists/<name>.picklist.ts`, with
 `definePicklist`). A select field names it with `Field.select({ picklist: '<name>' })`
 in place of its own `options`, and the server serves that field with the list's options.
+
+`permission` writes a permission set (`src/security/<name>.permission.ts`, with
+`definePermissionSet`) granting the object `--object` names, or the stack's only object.
+`dataset` writes an analytics dataset (`src/datasets/<name>.dataset.ts`, with
+`defineDataset`) over that object, which dashboard and report widgets bind to by name.
 
 `agent` is **retired** (ADR-0063 §2): agents are platform-internal, so a scaffolded
 `src/agents/*.ts` validated, published and was then filtered out of the runtime
@@ -428,7 +433,7 @@ service plugins for every preset **except** `--preset minimal`:
 | `queue`     | `QueueServicePlugin`         | Background retries (mail, audit batching) need a queue.      |
 | `job`       | `JobServicePlugin`           | Scheduled jobs (cleanup, reports, cron).                     |
 | `cache`     | `CacheServicePlugin`         | In-memory adapter; performance baseline.                     |
-| `settings`  | `SettingsServicePlugin`      | Mail / storage / branding / feature-flag UI + persistence.   |
+| `settings`  | `SettingsServicePlugin`      | Mail / storage / branding settings UI + persistence.         |
 | `email`     | `EmailServicePlugin`         | Auth callbacks (verify, reset, magic-link) hard-depend.      |
 | `storage`   | `StorageServicePlugin`       | Avatars, attachments, exports. Local fallback in dev.        |
 
@@ -437,8 +442,8 @@ Apps no longer need to list these in `requires: [...]`.
 **Opt-out:** run `objectstack serve --preset minimal` to skip the slate
 and only load core + your explicit `requires`.
 
-**Built-in Settings manifests:** `mail`, `storage`, `branding`,
-`feature_flags` are pre-registered. Both `mail` and `storage` expose a
+**Built-in Settings manifests:** `mail`, `storage` and `branding`
+are among those pre-registered. Both `mail` and `storage` expose a
 "Test connection" action that exercises the live transport / adapter
 end-to-end. Switching the storage adapter does **not** migrate
 previously uploaded files — the plugin logs a warning on every swap.

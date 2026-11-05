@@ -52,9 +52,8 @@ service, so the OData datasource cannot read it. Serve Salesforce objects from a
 driver over its REST API, built to the contract on this page.
 
 A virtual object pays for its freshness on every request: each list read is a round
-trip to the remote, and a read can match at most 1000 rows
-([the cap](#the-engine-re-applies-every-query)). That is the trade the table above
-decides.
+trip to the remote, and a read can match at most 1000 rows by default, 10,000 at most
+([the row cap](#the-row-cap)). That is the trade the table above decides.
 
 ## The recipe
 
@@ -435,9 +434,9 @@ driver behind a correctness floor. It does not change a federated database on a 
 driver.
 
 - **What the driver is sent.** `find` gets `where` and `orderBy`, which it may push
-  down, and `limit: 1001`. It never gets `offset` or `fields`. `findOne` and `count`
-  reach your driver as that same `find`. `aggregate` is never called; the engine
-  aggregates in memory.
+  down, and a `limit` of the [row cap](#the-row-cap) plus one (`limit: 1001` by
+  default). It never gets `offset` or `fields`. `findOne` and `count` reach your driver
+  as that same `find`. `aggregate` is never called; the engine aggregates in memory.
 - **What the engine does with the rows.** It applies the whole query itself: `where`
   (the engine's own operator vocabulary, `$like` and `$ilike` included), the sort (no
   value sorts last), `offset` and `limit` (a paged read breaks ties by `id`), and the
@@ -450,11 +449,12 @@ driver.
 So a driver grows in three steps, each correct:
 
 1. **Return every row.** Ignore the query and answer the resource's rows. The answer is
-   correct for any resource with at most 1000 rows. Honour `limit` by paging the remote:
-   a remote whose page is smaller than 1001 rows, and that you do not page through,
-   answers fewer rows than match, and the engine cannot detect it.
+   correct for any resource with at most the row cap's rows. Honour the `limit` you are
+   sent by paging the remote: a remote whose page is smaller than that limit, and that you
+   do not page through, answers fewer rows than match, and the engine cannot detect it.
+   Never hard-code `1001`: a datasource that raises its cap sends a larger limit.
 2. **Push `where` and `orderBy` down.** The remote returns only the matching rows, so the
-   1000-row cap now counts matching rows, not the whole resource, and less travels. The
+   row cap now counts matching rows, not the whole resource, and less travels. The
    engine still re-checks every row, so a translation slip shows up as a missing row
    (step 1's rule), never as an extra one.
 3. **Skip the floor with a conformance-tested driver.** This is planned for a later
@@ -463,13 +463,8 @@ So a driver grows in three steps, each correct:
    The kit ships ([Run the conformance kit](#run-the-conformance-kit)); the trust does
    not exist yet.
 
-**The 1000-row cap.** A read that matches more than 1000 rows is refused with
-`422 EXTERNAL_ROW_CAP_EXCEEDED` rather than answered from a partial set. The fix is to
-narrow the filter so fewer rows match, or, for data that size, to mirror it into a real
-object with a [scheduled pull](/docs/automation/jobs#pulling-a-mapping) and read that.
-The cap applies to plugin drivers only. It also means a list cannot page past its first
-1000 matching rows: when more than 1000 rows match, every page of that read is refused,
-the one at offset 1000 included. The cap is fixed and not configurable.
+Because the engine needs every matching row to answer correctly, a read that matches
+more rows than the [row cap](#the-row-cap) is refused, never answered from a part.
 
 **Not covered by the floor.**
 
@@ -479,6 +474,75 @@ the one at offset 1000 included. The cap is fixed and not configurable.
 - A read whose scope composes a `ReadableIds` leaf, such as an object
   `controlled_by_parent`, is refused (ADR-0139): the engine has no semi-join over a
   plugin driver's rows.
+
+### The row cap
+
+A read that matches more rows than the datasource's row cap is refused with
+`422 EXTERNAL_ROW_CAP_EXCEEDED` rather than answered from a partial set. The cap applies
+to plugin drivers only, OData included, and it counts every read: a list page, its total,
+a record, and the by-id reads before a write.
+
+- **The default is 1000 rows.** A datasource raises or lowers it with `external.rowCap`,
+  a whole number from 1 to the platform maximum of **10,000**. The schema refuses a
+  larger value, and refuses the key on a built-in driver or a managed datasource, where it
+  would do nothing.
+
+  ```typescript
+  external: {
+    allowWrites: true,
+    validation: { onMismatch: 'fail', checkOnBoot: false },
+    rowCap: 5000,   // this remote's widest read matches about 5,000 rows
+  },
+  ```
+
+- **What a higher cap costs.** The engine's own share is small: decoding and re-applying
+  the query over 5,000 rows takes about 15 ms and 1 MiB, and over 10,000 about 35 ms and
+  2 MiB. The remote pays more. Every list page reads every matching row up to the cap,
+  twice (the rows, then the total), so a cap of 5,000 can mean 10,000 rows from the
+  remote for one page of 50. Raise it only as far as the widest read needs, and push
+  `where` down so the cap counts matching rows, not the resource.
+- **A list cannot page past the cap.** When more rows match than the cap allows, every
+  page of that read is refused, the first page and the one that starts at the cap
+  included.
+- **Past the cap**, narrow the filter so fewer rows match, raise `external.rowCap` up to
+  10,000, or, for data that size, mirror it into a real object with a
+  [scheduled pull](/docs/automation/jobs#pulling-a-mapping) and read that. The refusal's
+  message names the datasource and its cap.
+
+### Views that read the whole set
+
+A grid reads one page at a time. A gantt, a tree, a calendar and a map do not: each needs
+the whole filtered set at once, because a gantt cannot draw its date range or roll up its
+groups from one page, and a map cannot fit its camera to markers it never received. So
+each of the four sends one read for every matching row, and two ceilings apply to it, in
+this order:
+
+| Ceiling | Where | Number | Past it |
+| :--- | :--- | :--- | :--- |
+| The row cap | the server, on a plugin-driver datasource | 1000, or `external.rowCap` up to 10,000 | the whole view fails with `422 EXTERNAL_ROW_CAP_EXCEEDED` |
+| The view's row ceiling | the browser, on every datasource | 2,000 rows, not configurable | the view draws the first 2,000 rows in its sort order and says so: "Showing the first 2,000 of 5,000 records. Narrow the filter." |
+
+Each of the four views asks for 2,001 rows, the ceiling plus one row to detect the cut.
+On a plugin-driver datasource at the default cap, any filtered set past 1000 rows fails
+the whole view, and raising the cap is what turns the failure into a drawn view:
+
+- **Up to 1000 matching rows:** the view draws everything with the default cap.
+- **1001 to 2,000:** set `external.rowCap` to at least the largest set the view's filter
+  admits, and the view draws everything.
+- **More than 2,000:** a cap of at least that size lets the view draw its first 2,000 rows
+  with the note instead of failing. It never draws all of them. A cut gantt or tree is
+  missing whole branches, so a planner should not work from one. Give the view a filter
+  that keeps the set under 2,000 rows: a date window, a project, a status. Or split the
+  view, one per project or per line.
+
+Two habits keep a whole-set view working as the data grows:
+
+- **Put the narrowing in the view's `filter`**, not only in a quick filter a planner can
+  clear. Clearing a quick filter, or widening a date range, is how a view that worked in
+  testing reaches the cap in production.
+- **Size the cap from the widest filter the view allows**, not from today's row count, and
+  keep it at or below 10,000. A set that will outgrow 10,000 matching rows belongs in a
+  real object fed by a [scheduled pull](/docs/automation/jobs#pulling-a-mapping).
 
 ### Credentials
 
@@ -556,7 +620,7 @@ Measured on the reference test, request by request, with the engine's floor
 | The platform does | Your driver is called with |
 | :--- | :--- |
 | Boots | `connect()` once. No `syncSchema`, no `introspectSchema` (`checkOnBoot: false`). |
-| Serves a list (`GET /data/berth_slot` with the view's filter, sort and page size) | `find(object, { where, orderBy, limit: 1001 })`, then `find(object, { where, limit: 1001 })` for the total. The page size is applied by the engine. |
+| Serves a list (`GET /data/berth_slot` with the view's filter, sort and page size) | `find(object, { where, orderBy, limit: 1001 })`, then `find(object, { where, limit: 1001 })` for the total. The page size is applied by the engine. `1001` is the default [row cap](#the-row-cap) plus one; a datasource's `external.rowCap` moves it. |
 | Serves a record (`GET /data/berth_slot/:id`) | `find(object, { where: { id }, limit: 1001 })` |
 | Writes (`PATCH /data/berth_slot/:id`) | several by-id reads as `find` (the pre-image for hooks and checks), then `update(object, id, patch)` with the extra keys above |
 | Refuses a caller with no grant on a list read | nothing |

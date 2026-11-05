@@ -3660,9 +3660,13 @@ export class RestServer {
             navPruneLogged: this.navPruneLogged,
             isItemOfDisabledPackage: async ({ type, name, packageId }) => {
                 if (typeof p.getMetaItem !== 'function') return false;
+                // [#30218] The REQUEST's environment's engine, through the
+                // shared resolver: the raw `undefined` of the unscoped mount
+                // asked the host kernel's registry whether an environment's
+                // package is disabled.
                 const ql = await wiredEngineOrLoud(
                     Boolean(this.objectQLProvider),
-                    () => this.objectQLProvider!(environmentId),
+                    async () => this.objectQLProvider!(await this.resolveRequestEnvironmentId(environmentId, req)),
                 );
                 const registry = (ql as any)?.registry;
                 if (typeof registry?.isPackageDisabled !== 'function') return false;
@@ -3709,8 +3713,13 @@ export class RestServer {
                     mayWriteItem: RestServer.metaSaveVerdict(caller).allowed,
                 });
             },
+            // [#30192] The REQUEST's environment, through the shared resolver,
+            // as every other `security` consumer asks it: the raw `undefined`
+            // of the unscoped mount read the host's occupant.
             resolveSecurityService: async () => (
-                this.securityServiceProvider ? this.securityServiceProvider(environmentId) : undefined
+                this.securityServiceProvider
+                    ? this.securityServiceProvider(await this.resolveRequestEnvironmentId(environmentId, req))
+                    : undefined
             ),
         };
     }
@@ -5578,6 +5587,7 @@ export class RestServer {
         const objectStateHost: MetaObjectStateRouteHost = {
             routeManager: this.routeManager,
             get objectQLProvider() { return readObjectQLProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveProtocol: (...a) => this.resolveProtocol(...a),
         };
         registerMetaObjectStateRoute.call(objectStateHost, scope);
@@ -5599,6 +5609,7 @@ export class RestServer {
             metaItemReadGate: (...a) => this.metaItemReadGate(...a),
             maskObjectDocument: (...a) => this.maskObjectDocument(...a),
             get objectQLProvider() { return readObjectQLProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveMetadataService: (...a) => this.resolveMetadataService(...a),
         };
         registerMetaItemPublishedRoute.call(itemPublishedHost, scope);
@@ -5743,6 +5754,7 @@ export class RestServer {
             routeManager: this.routeManager,
             get approvalsServiceProvider() { return readApprovalsServiceProvider(); },
             resolveProtocol: (...a) => this.resolveProtocol(...a),
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
             enforceApiAccess: (...a) => this.enforceApiAccess(...a),
@@ -5874,11 +5886,17 @@ export class RestServer {
 
     /**
      * [#3547] Resolve the environment's `security` service — the ENVIRONMENT's
-     * kernel service first (its evaluator / FieldMasker are bound to that
-     * kernel's data engine), the host provider as the single-kernel fallback.
-     * Mirrors the resolver in registerSecurityExplainEndpoints. Returns
-     * `undefined` when no security service is reachable (no plugin-security /
-     * single-kernel without a provider), so callers degrade gracefully.
+     * kernel service (its evaluator / FieldMasker are bound to that kernel's
+     * data engine). Mirrors the resolver in registerSecurityExplainEndpoints.
+     * Returns `undefined` when no security service is reachable (no
+     * plugin-security / single-kernel without a provider), so callers degrade
+     * gracefully.
+     *
+     * [#30192] The provider resolves the environment's kernel itself now
+     * (`rest-api-plugin`'s environment-scoped seam), so this asks it for the
+     * REQUEST's environment, the shared resolver's answer, and nothing else.
+     * The host's occupant is no longer a fallback: an environment whose kernel
+     * carries no security service, or cannot be acquired, answers `undefined`.
      *
      * Typed as a PARTIAL {@link ISecurityService}: an implementation may omit a
      * method it cannot honour, so every call site must keep feature-detecting
@@ -5888,16 +5906,11 @@ export class RestServer {
         environmentId?: string,
         req?: any,
     ): Promise<Partial<ISecurityService> | undefined> {
+        if (!this.securityServiceProvider) return undefined;
         try {
             const envId = await this.resolveRequestEnvironmentId(environmentId, req);
-            if (envId && envId !== 'platform' && this.kernelManager) {
-                const kernel = await this.kernelManager.getOrCreate(envId);
-                const svc = await kernel.getServiceAsync<any>('security').catch(() => undefined);
-                if (svc) return svc;
-            }
-        } catch { /* fall back to the host provider */ }
-        if (!this.securityServiceProvider) return undefined;
-        try { return await this.securityServiceProvider(environmentId); }
+            return await this.securityServiceProvider(envId);
+        }
         catch { return undefined; }
     }
 
@@ -5954,6 +5967,7 @@ export class RestServer {
         const host: EmailRouteHost = {
             routeManager: this.routeManager,
             get emailServiceProvider() { return readEmailServiceProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
         };
@@ -6124,12 +6138,10 @@ export class RestServer {
         // [#23050 slice 5] The body moved to `analytics-routes.ts`. This literal
         // hands it every member it reads — the list IS its dependency on this
         // class (see `AnalyticsRouteHost`, and that module's header for why
-        // `kernelManager` and `analyticsServiceProvider` are getters).
-        const readKernelManager = () => this.kernelManager;
+        // `analyticsServiceProvider` is a getter).
         const readAnalyticsServiceProvider = () => this.analyticsServiceProvider;
         const host: AnalyticsRouteHost = {
             routeManager: this.routeManager,
-            get kernelManager() { return readKernelManager(); },
             get analyticsServiceProvider() { return readAnalyticsServiceProvider(); },
             resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
@@ -6170,12 +6182,10 @@ export class RestServer {
         // [#23050 slice 6] The body moved to `security-routes.ts`. This literal
         // hands it every member it reads — the list IS its dependency on this
         // class (see `SecurityExplainRouteHost`, and that module's header for why
-        // `kernelManager` and `securityServiceProvider` are getters).
-        const readKernelManager = () => this.kernelManager;
+        // `securityServiceProvider` is a getter).
         const readSecurityServiceProvider = () => this.securityServiceProvider;
         const host: SecurityExplainRouteHost = {
             routeManager: this.routeManager,
-            get kernelManager() { return readKernelManager(); },
             get securityServiceProvider() { return readSecurityServiceProvider(); },
             resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
@@ -6210,6 +6220,7 @@ export class RestServer {
             config: this.config,
             routeManager: this.routeManager,
             get sharingServiceProvider() { return readSharingServiceProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
         };
@@ -6237,6 +6248,7 @@ export class RestServer {
         const host: SharingRuleRouteHost = {
             routeManager: this.routeManager,
             get sharingRulesServiceProvider() { return readSharingRulesServiceProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
         };
@@ -6284,6 +6296,7 @@ export class RestServer {
         const host: SecurityRouteHost = {
             routeManager: this.routeManager,
             get securityServiceProvider() { return readSecurityServiceProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
         };
@@ -6316,6 +6329,7 @@ export class RestServer {
         const host: ApprovalsRouteHost = {
             routeManager: this.routeManager,
             get approvalsServiceProvider() { return readApprovalsServiceProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
         };
@@ -6336,6 +6350,7 @@ export class RestServer {
             routeManager: this.routeManager,
             protocol: this.protocol,
             get objectQLProvider() { return readObjectQLProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveProtocol: (...a) => this.resolveProtocol(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),

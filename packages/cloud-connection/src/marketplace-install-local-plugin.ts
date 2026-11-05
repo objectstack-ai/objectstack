@@ -191,6 +191,9 @@ import {
     resolveInstallModes,
     deriveNamespaceFromPackageId,
     unmanagedInstallValueCarries,
+    // [ADR-0146 D3, #30106] The one spelling of the pair suffix: which ids are a
+    // base's paired customization package.
+    customizationBasePackageId,
     type InstallMode,
 } from '@objectstack/spec/kernel';
 // [#28640 ruling ③A] The export's list of the connector maps it withheld whole,
@@ -236,6 +239,7 @@ import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import { matchSeedRows, purgeSeedRows, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
+import { planCustomizationPairInstall, type PairInstallItem } from './marketplace-install-local-customization-pair.js';
 import type {
     AuthSessionApi, ConnectorCredentialRef, IAuthService, IAutomationService, IHttpServer, IMetadataService, IObjectQLEngine,
 } from '@objectstack/spec/contracts';
@@ -251,7 +255,11 @@ import type {
 // import verb raises (answered here after the payload, id and handshake checks,
 // before any write), the read-only-package rule (a namespace held by a WRITABLE base is
 // this environment's own metadata), and the client-facing sentence rule.
-import { unmanagedInstallPostureRefusal, isWritablePackage, clientFacingFailureText, captureUninstallDeclared } from '@objectstack/metadata-protocol';
+import { unmanagedInstallPostureRefusal, isWritablePackage, READ_ONLY_PACKAGE_SCOPES, clientFacingFailureText, captureUninstallDeclared } from '@objectstack/metadata-protocol';
+// [ADR-0146 D3, #30106] What a pair-shaped package's manifest must declare —
+// the predicate every package install asks of such an id — asked by the pair
+// install before the pair's ensure door.
+import { customizationPairManifestRefusal } from '@objectstack/metadata-protocol';
 // [ADR-0146 D2, #28410] The override write gate's one rule and its item walk,
 // asked at the managed install exactly as the publish doors ask them.
 import { judgeOverrideWrite, overrideWriteIdentityOf, overrideWriteItemsOf, type OverrideWriteItem, type OverrideWriteRule } from '@objectstack/metadata-protocol';
@@ -523,6 +531,19 @@ type UnmanagedImporter = {
 };
 
 /**
+ * [ADR-0146 D2 / D3, #30106] The three verbs a pair install composes, typed
+ * from the producer's own method signatures and asked as a capability
+ * question at the call site, as {@link UnmanagedImporter} is: the pair's
+ * ensure door (its one creation path), the save door each item is written
+ * through, and the package delete that undoes a pair this install created.
+ */
+type CustomizationPairInstaller = {
+    ensureCustomizationPackage?: ObjectStackProtocolImplementation['ensureCustomizationPackage'];
+    saveMetaItem?: ObjectStackProtocolImplementation['saveMetaItem'];
+    deletePackage?: ObjectStackProtocolImplementation['deletePackage'];
+};
+
+/**
  * [ADR-0131 D6] What the managed-after-unmanaged refusal reads off the
  * `objectql` slot: who holds a namespace, and — through ADR-0070's one
  * predicate, whose own structural contract this extends — whether a holder is
@@ -574,6 +595,46 @@ export interface OverrideUpgradeCollision {
     packageId: string;
     rule: OverrideWriteRule;
     message: string;
+}
+
+/**
+ * [ADR-0146 D3] The sentence a pair install answers for a refusal of the
+ * pair's ensure door or of the save door: the refusal's own text when it
+ * declared a client status, and `fallback` otherwise. `clientFacingFailureText`
+ * reads the declaration off `status`; the ensure door spells its refusals with
+ * `statusCode` (`protocol-customization-package.ts`), and its own route,
+ * `POST /packages/:id/ensure-customization`, answers them with their text —
+ * so this door says what that route says, never "see the log" for a refusal
+ * whose remedy is the caller's. A server-band status is withheld, as there.
+ */
+function pairDoorRefusalText(err: any, resolved: { status: number }, fallback: string): string {
+    const quoted = clientFacingFailureText(err, fallback);
+    if (quoted !== fallback) return quoted;
+    const declared = typeof err?.statusCode === 'number' && err.statusCode === resolved.status;
+    return declared && resolved.status >= 400 && resolved.status < 500 && typeof err?.message === 'string' && err.message !== ''
+        ? err.message
+        : fallback;
+}
+
+/**
+ * The answer of a managed or pair install the override write gate refused
+ * (status `403`): `NOT_OVERRIDABLE`, the publish doors' code, the first item's
+ * sentence, and every refusal in `details`. One builder, so both installs that
+ * ask the gate answer it alike.
+ */
+function overrideGateRefusalBody(manifestId: string, refusals: readonly OverrideInstallRefusal[]) {
+    const n = refusals.length;
+    return {
+        success: false,
+        error: {
+            code: 'NOT_OVERRIDABLE',
+            message: `Package '${manifestId}' cannot be installed: ${n} of its item${n > 1 ? 's are' : ' is'} refused by `
+                + `the override write gate (ADR-0146 D2). ${refusals[0].message}`
+                + (n > 1 ? ` (${n - 1} more in \`details.refusals\`.)` : '')
+                + ' Nothing was installed or written.',
+            details: { refusals },
+        },
+    };
 }
 
 function dependencyIdsOf(manifest: unknown): string[] {
@@ -655,7 +716,11 @@ function judgeWithheldMaps(
  * withheld maps: each one named, once, at `warn` — the connector is installed
  * and runs, without the headers or environment variables the export held back.
  */
-function withheldMapsLogLine(manifestId: string, mode: InstallMode, withheldMaps: readonly WithheldMap[]): string {
+function withheldMapsLogLine(
+    manifestId: string,
+    mode: InstallMode | 'into its writable pair',
+    withheldMaps: readonly WithheldMap[],
+): string {
     const named = withheldMaps.map((m) => `${m.type} '${m.name}' ${m.path}`).join(', ');
     return `[MarketplaceInstallLocal] installed ${manifestId} ${mode} with ${withheldMaps.length} connector map(s) the `
         + `package export withheld whole, each now absent: ${named}. The connector sends none of those headers or `
@@ -2013,6 +2078,51 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             });
         }
 
+        // ── [ADR-0146 D2 / D3, #30106] A base's PAIRED CUSTOMIZATION PACKAGE
+        //    is installed as what it is, never as code: the target's own
+        //    writable pair, created by its ensure door when absent, holding
+        //    every item of the body as a stored item written through the save
+        //    door ({@link installCustomizationPair}). Registered as code, a
+        //    pair served none of its overrides, listed none on the
+        //    customization read and left the pair read-only, while this door
+        //    answered success. Asked here, before the conflict check and every
+        //    later step of the managed install: those steps register, ledger
+        //    and sync the package as code, and none of them is a pair's.
+        //    ⛔ A multi-package artifact never carries a pair: each pair is
+        //    installed from its own export, after its base.
+        const pairBaseId = customizationBasePackageId(manifestId);
+        const bundledPairs: string[] = Array.isArray(manifest.packages)
+            ? manifest.packages
+                .map((entry: unknown) => (isPlainObject(entry) && isPlainObject((entry as any).manifest) ? manifestIdOf((entry as any).manifest) : undefined))
+                .filter((id: unknown): id is string => typeof id === 'string' && customizationBasePackageId(id) !== null)
+            : [];
+        if (Array.isArray(manifest.packages) && (pairBaseId !== null || bundledPairs.length > 0)) {
+            const named = pairBaseId !== null ? [manifestId, ...bundledPairs] : bundledPairs;
+            return c.json({
+                success: false,
+                error: {
+                    code: UNRUNNABLE_REFUSAL_CODE,
+                    message: `Package '${manifestId}' cannot be installed: it carries the paired customization `
+                        + `package${named.length > 1 ? 's' : ''} ${named.map((id) => `'${id}'`).join(', ')} inside a `
+                        + 'multi-package artifact. A pair is installed on its own, from its own export, after its base '
+                        + '(ADR-0146 D3), so that its items are written into the writable pair. Nothing was installed or '
+                        + 'written.',
+                    details: { pairs: named },
+                },
+            }, UNRUNNABLE_REFUSAL_STATUS);
+        }
+        if (pairBaseId !== null) {
+            return this.installCustomizationPair(c, ctx, {
+                manifest,
+                manifestId,
+                baseId: pairBaseId,
+                version,
+                versionId: resolvedVersionId,
+                userId,
+                withheldMaps,
+            });
+        }
+
         // 1f. [ADR-0131 D6] ⭐ A MANAGED INSTALL NEVER TAKES OVER AN UNMANAGED
         //     COPY, on BOTH branches, before any write. A copy keeps the
         //     package's namespace under a writable base of its own, so a
@@ -2186,20 +2296,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     this version now ships are listed on the answer
         //     (`overrideCollisions`), never refused.
         const overrideGate = await this.evaluateOverrideWriteGate(ctx, manifestId, converted);
-        if (overrideGate.refusals.length > 0) {
-            const n = overrideGate.refusals.length;
-            return c.json({
-                success: false,
-                error: {
-                    code: 'NOT_OVERRIDABLE',
-                    message: `Package '${manifestId}' cannot be installed: ${n} of its item${n > 1 ? 's are' : ' is'} refused by `
-                        + `the override write gate (ADR-0146 D2). ${overrideGate.refusals[0].message}`
-                        + (n > 1 ? ` (${n - 1} more in \`details.refusals\`.)` : '')
-                        + ' Nothing was installed or written.',
-                    details: { refusals: overrideGate.refusals },
-                },
-            }, 403);
-        }
+        if (overrideGate.refusals.length > 0) return c.json(overrideGateRefusalBody(manifestId, overrideGate.refusals), 403);
 
         // 2e. [ADR-0146 D10, second rule] ⭐ THE FIELD-PATCH TARGET CHECK,
         //     beside the override gate and before any write: a patch naming a
@@ -3598,7 +3695,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *    (uncopyable content, collisions, an owned namespace, an existing
      *    target) and this door answers each with the verb's own code and
      *    status, the message when the verb declared it a refusal, and
-     *    `details`; a 5xx's message is withheld and logged;
+     *    `details`; any other message is withheld and logged, at any
+     *    status, so the log line the answer points at exists;
      *  - translation bundles are COPIED by the verb as `translation` items, so
      *    they reload at every boot with the environment's translations — this
      *    install writes no ledger entry for a rehydrate to replay;
@@ -3651,9 +3749,19 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             } as Parameters<NonNullable<UnmanagedImporter['importUnmanagedPackage']>>[0]);
         } catch (err: any) {
             const resolved = resolveThrownHttpError(err, 500);
-            if (resolved.status >= 500) {
+            // [#29822] One rule, whatever the status: the fallback sentence
+            // promises a log line, so whenever it IS the answer, the line is
+            // written. `clientFacingFailureText` quotes only a refusal that
+            // declared a 4xx `status`; a 4xx this door resolves from another
+            // declaration (`statusCode`, the validation shape) gets the
+            // fallback too, and used to get no log line. A quoted reason
+            // needs no log line: the caller already has it.
+            const fallback = `The unmanaged install of '${manifestId}' failed; the reason is in the server log.`;
+            const message = clientFacingFailureText(err, fallback);
+            if (message === fallback) {
                 ctx.logger?.warn?.(
-                    `[MarketplaceInstallLocal] the unmanaged install of ${manifestId} failed: ${err?.message ?? err}`,
+                    `[MarketplaceInstallLocal] the unmanaged install of ${manifestId} failed (${resolved.status} `
+                    + `${resolved.code}): ${err?.message ?? err}`,
                 );
             }
             const details = isPlainObject(err?.details) ? err.details : undefined;
@@ -3661,10 +3769,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 success: false,
                 error: {
                     code: resolved.code,
-                    message: clientFacingFailureText(
-                        err,
-                        `The unmanaged install of '${manifestId}' failed; the reason is in the server log.`,
-                    ),
+                    message,
                     ...(details ? { details } : {}),
                 },
             }, resolved.status as any);
@@ -3712,6 +3817,308 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     + 'and it follows no upgrade. Refresh the console to see it.',
             },
         }, 200);
+    };
+
+    /**
+     * [ADR-0146 D2 / D3, #30106] The install of a base's paired customization
+     * package `<base>.custom` — what `GET /packages/<base>.custom/export`
+     * wrote on another environment — into THIS environment's own writable
+     * pair. The body's items become items of the pair exactly as Studio makes
+     * them: stored rows bound to the pair, each written through the save door,
+     * so every read that serves a declared override serves it, the
+     * customization read lists it, and an administrator here keeps
+     * customizing. The module header of
+     * `marketplace-install-local-customization-pair.ts` says why a pair is never
+     * registered as code.
+     *
+     * In order, nothing written before step 4 (a runtime whose protocol
+     * lacks the pair's ensure door, the save door or the package delete is
+     * answered `503` after the refusals below, before step 4):
+     *  1. the body is converted forward ({@link convertPackageBodyForward}, as a
+     *     managed install converts its artifact) and walked into its items
+     *     ({@link planCustomizationPairInstall}); a key with no item form, a
+     *     nameless item or two items claiming one name refuse it whole;
+     *  2. the override write gate and the field-patch target check — the
+     *     managed install's steps 2d and 2e, the same answers;
+     *  3. the pair here: its manifest must declare what the ensure door
+     *     writes (`customizationPairManifestRefusal`, the predicate every
+     *     package install asks of a pair-shaped id); a pair already installed
+     *     READ-ONLY — registered as code by an earlier install through this
+     *     door (until a restart, even once uninstalled), or provided by this
+     *     runtime's code — is refused before the ensure door is asked, naming
+     *     the uninstall and restart that clear it; otherwise the ensure door answers the
+     *     writable pair, creating it when absent (ADR-0146 D3: its one
+     *     creation path), and its refusals are answered as it states them;
+     *  4. every item, in load order, through `saveMetaItem` with `mode:
+     *     'publish'` and the pair as its package — the save door a Studio edit
+     *     takes, which judges each item as it judges that edit.
+     *
+     * A write the save door refuses answers failure, never success, naming the
+     * item, with the save's own code and status. A pair THIS install created
+     * is deleted again (its ensure and every write undone), so nothing of the
+     * package remains; a pair that existed before is kept, and the answer
+     * lists the items already written (they stay published) and the ones not
+     * written — the install is written to be run again: every item is saved
+     * again on the next run.
+     *
+     * Nothing is registered as code, ledgered under the pair's id or
+     * rehydrated at boot: the pair's rows and its `sys_packages` record are its
+     * persistence, as on the environment that authored it. An item the pair
+     * already holds that the body does not carry is left as it is — the install
+     * writes the package's items, it deletes none. Seed `data` is not loaded
+     * (it is data, not an item), and the answer says so.
+     */
+    private installCustomizationPair = async (
+        c: any,
+        ctx: PluginContext,
+        args: {
+            manifest: Record<string, any>; manifestId: string; baseId: string;
+            version: string; versionId: string; userId: string | null;
+            /** [#28640 ruling ③A] The connector maps the export withheld ({@link judgeWithheldMaps}). */
+            withheldMaps: readonly WithheldMap[];
+        },
+    ): Promise<Response> => {
+        const { manifest, manifestId, baseId, version, versionId, userId, withheldMaps } = args;
+        const refuse = (status: number, code: string, message: string, details?: Record<string, unknown>) =>
+            c.json({ success: false, error: { code, message, ...(details ? { details } : {}) } }, status as any);
+
+        // 1. The body, converted forward, walked into its items.
+        const converted = flattenPackageBody(this.convertPackageBodyForward(ctx, manifest));
+        const plan = planCustomizationPairInstall(converted);
+        if (!plan.ok) {
+            const shown = plan.problems.slice(0, 5).join('; ');
+            return refuse(UNRUNNABLE_REFUSAL_STATUS, UNRUNNABLE_REFUSAL_CODE,
+                `Package '${manifestId}' cannot be installed as the paired customization package of '${baseId}': `
+                + `${shown}${plan.problems.length > 5 ? ` (+${plan.problems.length - 5} more)` : ''}. Nothing was installed `
+                + 'or written.',
+                { problems: [...plan.problems] });
+        }
+
+        // 2. The managed install's 2d and 2e, before any write.
+        const overrideGate = await this.evaluateOverrideWriteGate(ctx, manifestId, converted);
+        if (overrideGate.refusals.length > 0) return c.json(overrideGateRefusalBody(manifestId, overrideGate.refusals), 403);
+        const patchTargetRefusals = this.fieldPatchTargetRefusalsOf(ctx, converted);
+        if (patchTargetRefusals.length > 0) {
+            return refuse(UNRUNNABLE_REFUSAL_STATUS, UNRUNNABLE_REFUSAL_CODE,
+                fieldPatchTargetRefusalMessage(manifestId, patchTargetRefusals), { refusals: patchTargetRefusals });
+        }
+
+        // 3. The pair here: declared as the ensure door writes it, writable.
+        let ql: PackageWritabilityEngine | undefined;
+        try { ql = ctx.getService<PackageWritabilityEngine>('objectql'); } catch { /* no data engine */ }
+        const getInstalled = (id: string) => ql?.registry?.getPackage?.(id);
+        const manifestRefusal = customizationPairManifestRefusal(declaredPackageManifest(converted), getInstalled);
+        if (manifestRefusal !== undefined) {
+            return refuse(400, 'PLUGIN_MANIFEST_INVALID', `${manifestRefusal} Nothing was installed or written.`);
+        }
+        if (!isWritablePackage(ql, manifestId)) {
+            // Asked BEFORE the ensure door, which would otherwise create a
+            // pair row here only to answer it read-only. An uninstall through
+            // this door withdraws a package from the registry, but the
+            // engine keeps its code registration until a restart — the
+            // signal `isWritablePackage` reads first — so a pair installed
+            // as code stays read-only until then.
+            // Read-only by its manifest scope is an installed app's posture;
+            // read-only with neither that scope, a ledger entry nor a boot
+            // registration is a code registration this door made and
+            // withdrew — even when the pair's ensure door has been asked
+            // since, which records the pair without lifting it.
+            const ledgered = this.ledger.has(manifestId);
+            const scope = (getInstalled(manifestId) as { manifest?: { scope?: unknown } } | undefined)?.manifest?.scope;
+            const readOnlyByScope = typeof scope === 'string' && READ_ONLY_PACKAGE_SCOPES.includes(scope);
+            const withdrawn = !ledgered && !this.bootUserCodeIds.has(manifestId) && !readOnlyByScope;
+            return refuse(409, 'RESOURCE_CONFLICT', ledgered
+                ? `Package '${manifestId}' is installed here as code, by an earlier install of it through this door, so `
+                    + 'its items are read-only and none of its overrides is served. Uninstall it '
+                    + `(\`DELETE ${ROUTE_BASE}/${manifestId}\`), restart this runtime (the uninstall withdraws the package, `
+                    + 'but its code registration stays until a restart), and install it again: a paired customization '
+                    + `package is installed into the writable pair of '${baseId}' (ADR-0146 D3). Nothing was installed or written.`
+                : withdrawn
+                    ? `Package '${manifestId}' was installed here as code earlier and has been uninstalled, but its code `
+                        + 'registration stays in this runtime until it restarts, so the pair is still read-only. Restart '
+                        + `this runtime and install it again: it is then installed into the writable pair of '${baseId}' `
+                        + '(ADR-0146 D3). Nothing was installed or written.'
+                    : `Package '${manifestId}' is provided read-only here — by this runtime's code or an installed app — so `
+                        + `its items cannot be written into it. The paired customization package of '${baseId}' is a `
+                        + 'writable package (ADR-0146 D3): remove the read-only one first. Nothing was installed or written.',
+                { packageId: manifestId });
+        }
+        // 3b. The doors the write takes — asked once every refusal the body
+        //     and this environment decide has been asked.
+        let protocol: CustomizationPairInstaller | undefined;
+        try { protocol = ctx.getService<CustomizationPairInstaller>('protocol'); } catch { /* no protocol service */ }
+        const ensure = protocol?.ensureCustomizationPackage;
+        const save = protocol?.saveMetaItem;
+        const remove = protocol?.deletePackage;
+        if (typeof ensure !== 'function' || typeof save !== 'function' || typeof remove !== 'function') {
+            return refuse(503, 'SERVICE_UNAVAILABLE',
+                `Package '${manifestId}' is the paired customization package of '${baseId}', and this runtime cannot `
+                + 'install it: its metadata protocol has no ensure door for the pair or no save door for its items. '
+                + 'Upgrade @objectstack/metadata-protocol alongside @objectstack/cloud-connection. Nothing was installed '
+                + 'or written.');
+        }
+
+        let created: boolean;
+        try {
+            const ensured = await ensure.call(protocol, { basePackageId: baseId });
+            created = ensured.created === true;
+            if (ensured.writable !== true) {
+                return refuse(409, 'RESOURCE_CONFLICT',
+                    `Package '${manifestId}' is installed here read-only, so its items cannot be written into it. The `
+                    + `paired customization package of '${baseId}' is a writable package (ADR-0146 D3): remove the `
+                    + 'read-only one first. Nothing was installed or written.',
+                    { packageId: manifestId });
+            }
+        } catch (err: any) {
+            const resolved = resolveThrownHttpError(err, 500);
+            const fallback = `The paired customization package '${manifestId}' could not be ensured; the reason is in the server log.`;
+            const message = pairDoorRefusalText(err, resolved, fallback);
+            if (message === fallback) {
+                ctx.logger?.warn?.(`[MarketplaceInstallLocal] ensuring ${manifestId} for its install failed (${resolved.status} `
+                    + `${resolved.code}): ${err?.message ?? err}`);
+            }
+            return refuse(resolved.status, resolved.code,
+                `Package '${manifestId}' cannot be installed: ${message} Nothing was installed or written.`);
+        }
+
+        // 4. Every item, through the save door.
+        const written: Array<{ type: string; name: string }> = [];
+        for (const [at, entry] of plan.items.entries()) {
+            try {
+                await save.call(protocol, {
+                    type: entry.type,
+                    name: entry.name,
+                    item: entry.item,
+                    mode: 'publish',
+                    packageId: manifestId,
+                    ...(userId ? { actor: userId } : {}),
+                });
+                written.push({ type: entry.type, name: entry.name });
+            } catch (err: any) {
+                const notWritten = plan.items.slice(at + 1).map((i) => ({ type: i.type, name: i.name }));
+                // Logged here, at `error`, with the save's own words: the
+                // install the operator asked for did not land, and the pair
+                // this environment holds is not what the export describes —
+                // removed again when this install created it, partly written
+                // when it existed before. The answer says the same, but its
+                // text withholds a reason the save door did not declare.
+                const status = resolveThrownHttpError(err, 500);
+                ctx.logger.error(
+                    `[MarketplaceInstallLocal] the install of ${manifestId} into the pair of '${baseId}' failed: `
+                    + `${entry.type} '${entry.name}' (${entry.path}) was refused by the save door (${status.status} `
+                    + `${status.code}): ${err?.message ?? err}. `
+                    + (created
+                        ? 'The pair this install created is removed again.'
+                        : `The pair existed before and is kept: ${written.length} item(s) written before it stay `
+                            + `published, ${notWritten.length} were not written.`)
+                    + ' Correct the item and install the package again.',
+                );
+                return this.pairInstallWriteFailure(c, ctx, remove.bind(protocol), {
+                    manifestId, baseId, created, userId, err, failed: entry, written, notWritten,
+                });
+            }
+        }
+
+        ctx.logger?.info?.(
+            `[MarketplaceInstallLocal] installed ${manifestId} into the writable pair of '${baseId}'`
+            + `${created ? ', created by its ensure door,' : ''}: ${written.length} item(s) written through the save door`
+            + `${userId ? ` by ${userId}` : ''}. Nothing is registered as code or ledgered under '${manifestId}'.`,
+        );
+        if (withheldMaps.length > 0) ctx.logger?.warn?.(withheldMapsLogLine(manifestId, 'into its writable pair', withheldMaps));
+        return c.json({
+            success: true,
+            data: {
+                manifestId,
+                version,
+                versionId,
+                installedAt: new Date().toISOString(),
+                // What a pair install did, in place of a managed install's
+                // `hotLoaded` / `storageDir`: the pair the items went into.
+                customizationPair: { basePackageId: baseId, packageId: manifestId, created, writable: true },
+                writtenCount: written.length,
+                written,
+                // [#28640 ruling ③A] Omitted when the export withheld none.
+                ...(withheldMaps.length > 0 ? { withheldMaps: [...withheldMaps] } : {}),
+                ...(plan.carriesSeedData
+                    ? {
+                        seeded: {
+                            mode: 'skipped',
+                            reason: 'a paired customization package installs its items, not data: its sample data was not loaded',
+                        },
+                    }
+                    : {}),
+                note: `The package's items are items of the writable pair '${manifestId}' of '${baseId}': served now, and `
+                    + 'editable here. Refresh the console to see them.',
+            },
+        }, 200);
+    };
+
+    /**
+     * [ADR-0146 D3, #30106] The answer of a pair install whose item `failed`
+     * the save door refused — failure, never success, with the save's own
+     * code and status, naming the item. A pair the install `created` is
+     * deleted again, so nothing of the package remains; a deletion that does
+     * not finish is logged at `error`, since the environment then holds a
+     * partial pair while the install answered failure. A pair that existed
+     * before is kept: the answer lists what was written and what was not.
+     */
+    private pairInstallWriteFailure = async (
+        c: any,
+        ctx: PluginContext,
+        deletePackage: NonNullable<CustomizationPairInstaller['deletePackage']>,
+        args: {
+            manifestId: string; baseId: string; created: boolean; userId: string | null; err: any;
+            failed: PairInstallItem;
+            written: ReadonlyArray<{ type: string; name: string }>;
+            notWritten: ReadonlyArray<{ type: string; name: string }>;
+        },
+    ): Promise<Response> => {
+        const { manifestId, baseId, created, userId, err, failed, written, notWritten } = args;
+        const resolved = resolveThrownHttpError(err, 500);
+        // The caller logged the save's own words at `error` before handing
+        // the failure here, so the fallback's promise of a log line holds.
+        const fallback = 'the reason is in the server log';
+        const reason = pairDoorRefusalText(err, resolved, fallback);
+        let outcome: string;
+        if (created) {
+            let residue: string | undefined;
+            try {
+                const undone = await deletePackage({ packageId: manifestId, ...(userId ? { actor: userId } : {}) });
+                if (undone.failedCount > 0) residue = `${undone.failedCount} of its items could not be removed`;
+            } catch (deleteError) {
+                residue = `its deletion failed: ${clientFacingFailureText(deleteError, 'deletion failed')}`;
+            }
+            if (residue !== undefined) {
+                ctx.logger?.error?.(
+                    `[MarketplaceInstallLocal] the install of ${manifestId} failed and the pair it created was NOT fully `
+                    + `removed (${residue}): this environment still holds a partial '${manifestId}' while the install `
+                    + `answered failure. Delete the package '${manifestId}' to remove it.`,
+                );
+            }
+            outcome = residue === undefined
+                ? 'The pair this install created was removed again, so nothing of the package remains.'
+                : `The pair this install created could NOT be fully removed (${residue}): delete the package `
+                    + `'${manifestId}' to finish.`;
+        } else {
+            outcome = `The pair '${manifestId}' existed before this install, so it is kept: the ${written.length} item(s) `
+                + 'written before this one stay published (`details.written`), and the rest were not written '
+                + '(`details.notWritten`). Correct the item and install again — every item is written again.';
+        }
+        const details = isPlainObject(err?.details) ? err.details : undefined;
+        return c.json({
+            success: false,
+            error: {
+                code: resolved.code,
+                message: `Package '${manifestId}' was not installed into the pair of '${baseId}': ${failed.type} `
+                    + `'${failed.name}' (\`${failed.path}\`) could not be written — ${reason.replace(/[.\s]+$/, '')}. ${outcome}`,
+                details: {
+                    failed: { type: failed.type, name: failed.name, path: failed.path },
+                    written: [...written],
+                    notWritten: [...notWritten],
+                    ...(details ? { cause: details } : {}),
+                },
+            },
+        }, resolved.status as any);
     };
 
     /**
@@ -3775,11 +4182,17 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     /**
      * POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data
      *
-     * Re-runs SeedLoaderService against the cached manifest's `data` arrays.
-     * Idempotent (upsert by id). Useful when:
+     * Re-runs SeedLoaderService against the cached manifest's `data` arrays,
+     * each dataset in the mode the installed body carries ([#30081] the spec
+     * default `ignore`, create-only, when it declares none). Idempotent.
+     * Useful when:
      *   • The user installed an app and skipped sample data
-     *   • A purge was undone
-     *   • The user wants a clean baseline back after editing demo rows
+     *   • A purge was undone, or demo rows were deleted
+     * It puts back the rows that are missing and leaves an edited row as it
+     * is; to get the shipped values back over edits, purge first, then
+     * reseed. A ledger entry installed from an artifact built before #30081
+     * carries a written `mode: "upsert"` and still writes the shipped values
+     * back on every reseed until the rebuilt artifact is re-installed.
      *
      * A success answers the loader's four counts — `inserted`, `updated`,
      * `skipped`, `errors` — so the caller sees why nothing changed. A run over
@@ -3919,7 +4332,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * {@link purgeSeedRows} carries the rules; this handler supplies the scope.
      *
      *   • A seed row is matched by the seed's own key — each dataset's
-     *     `externalId`, the key the install's upsert and the reseed match on.
+     *     `externalId`, the key the install and the reseed match on.
      *     A row whose key no seed record declares (user-authored data) is never
      *     touched; a key carried by more than one row in scope is not guessed.
      *   • Scope is the install's: under an organization wall, the caller's
@@ -4610,7 +5023,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
-     * One SeedLoaderService run over `datasets` (upsert, multi-pass) — the
+     * One SeedLoaderService run over `datasets` (multi-pass, each dataset in
+     * its own `mode`, the spec default `ignore` when it declares none) — the
      * shared engine behind install-time seeding, the reseed endpoint and the
      * rehydrate-time healer. Throws when objectql/metadata are unavailable;
      * per-row write failures are counted into `errors`, not thrown.
@@ -4634,7 +5048,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // ADR-0036 / seed rename: the field is `seeds` (was `datasets`).
             seeds: datasets,
             config: {
-                defaultMode: 'upsert',
+                // [#30081] No mode of its own: an install, an upgrade or a
+                // reseed inserts the rows a dataset is missing and leaves the
+                // customer's existing rows alone, unless the dataset declares
+                // `mode: 'upsert'` (the spec default, ruling 6631016988).
                 multiPass: true,
                 ...(organizationId ? { organizationId } : {}),
             },

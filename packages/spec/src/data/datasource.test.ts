@@ -996,7 +996,7 @@ describe('[#29762] external.rowCap — a plugin-driver datasource\'s row cap, bo
   });
 
   it('folds the near-miss spellings onto `rowCap`', () => {
-    for (const spelling of ['maxRows', 'rowLimit']) {
+    for (const spelling of ['maxRows', 'rowLimit', 'maxRowCount']) {
       const result = DatasourceSchema.safeParse({ ...plugin, external: { [spelling]: 5000 } });
       const messages = result.success ? [] : result.error.issues.map((i) => i.message);
       expect(messages.join('\n'), spelling).toContain(`\`${spelling}\` → \`rowCap\``);

@@ -83,8 +83,10 @@
  * package reading, the same class as `findViewContainerNameRefusals`, and both
  * doors call it (`validate.ts` step 2d, `compile.ts` step 3a-bis).
  *
- * ⚠️ Bound, stated rather than hidden: the runtime metadata write path (a field
- * saved through Studio or REST `/meta`) is not judged here.
+ * The runtime metadata write path (a field saved through Studio or REST
+ * `/meta`) is not judged here: the metadata save and publish doors judge it
+ * against the engine's registry (`unknownPicklistBindingSaveRefusal`,
+ * `@objectstack/metadata-protocol`).
  *
  * Reads the PARSED stack — what `defineStack()` hands the boot wrap, and what
  * `os build` serializes.

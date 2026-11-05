@@ -6,7 +6,6 @@ import { spawn, spawnSync } from 'child_process';
 import crypto from 'crypto';
 import dotenvFlow from 'dotenv-flow';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { printHeader, printKV, printStep, printError } from '../utils/format.js';
 import { makeDirectorySync } from '../utils/make-directory.js';
@@ -23,6 +22,9 @@ import {
 } from '../utils/artifact-precedence.js';
 import { ServeRestartCoordinator } from '../utils/dev-restart.js';
 import { readEnvWithDeprecation } from '@objectstack/types';
+import { writeAuthSecretFileChannel } from '../utils/internal-auth-secret-channel.js';
+import { applyCryptoKeyFileChannel } from '../utils/internal-crypto-key-file-channel.js';
+import { resolveStartHome } from '../utils/start-home.js';
 // The ONE port contract, shared with `dev` and with the `serve` child this
 // command spawns (#12673). ⛔ Nothing about ports is declared in this file —
 // no range, no reader, no wording; a second copy of the bound is exactly what
@@ -185,7 +187,7 @@ export default class Start extends Command {
     // ── Home directory ──────────────────────────────────────────────
     // Priority: --home > $OS_HOME > <cwd>/.objectstack (project mode)
     //         > ~/.objectstack (global mode)
-    const homeDir = resolveHome(flags.home, { hasProjectConfig, cwd });
+    const homeDir = resolveStartHome(flags.home, { hasProjectConfig, cwd });
     try {
       // Bounded (#23858): a home that can never be made — a name under
       // `/proc` — is refused here, at once, with the OS's code and the path.
@@ -312,9 +314,15 @@ export default class Start extends Command {
     // return 404 and breaks the Console's login flow.
     // Quick-start should "just work" without the user having to
     // export AUTH_SECRET.
-    const authSecret = flags['auth-secret']
-      ?? readEnvWithDeprecation('OS_AUTH_SECRET', ['AUTH_SECRET', 'BETTER_AUTH_SECRET'], { silent: true })
-      ?? readOrCreateAuthSecret(homeDir);
+    //
+    // Where the secret came from travels to the child too: a persisted secret
+    // is not in the operator's shell, so a command the child prints for them
+    // to run (the v18 ownership refusal) has to export it from its file
+    // (`utils/internal-auth-secret-channel.ts`).
+    const operatorAuthSecret = flags['auth-secret']
+      ?? readEnvWithDeprecation('OS_AUTH_SECRET', ['AUTH_SECRET', 'BETTER_AUTH_SECRET'], { silent: true });
+    const persistedAuthSecret = operatorAuthSecret === undefined ? readOrCreateAuthSecret(homeDir) : undefined;
+    const authSecret = persistedAuthSecret ? persistedAuthSecret.secret : operatorAuthSecret;
 
     // ── Banner ──────────────────────────────────────────────────────
     // `Config:` only when the cwd config takes part in this boot — the same
@@ -454,6 +462,7 @@ export default class Start extends Command {
       ...(flags['database-auth-token'] ? { OS_DATABASE_AUTH_TOKEN: flags['database-auth-token'] } : {}),
       AUTH_SECRET: authSecret,
     };
+    writeAuthSecretFileChannel(localEnv, persistedAuthSecret?.file);
     // NODE_ENV is only forced to production when the user has not set it.
     // Allows `NODE_ENV=development objectstack start` to work for debugging.
     //
@@ -474,13 +483,25 @@ export default class Start extends Command {
     // Single-node self-host quickstart: forcing production above would make
     // LocalCryptoProvider refuse to boot without OS_SECRET_KEY, breaking the
     // documented zero-config `os start`. Opt the crypto provider into minting
-    // + persisting a key file (~/.objectstack/dev-crypto-key) so it works out
-    // of the box. A multi-node deploy (OS_CLUSTER_DRIVER set) must provision a
-    // shared OS_SECRET_KEY instead — each node minting its own key would
-    // diverge — so we do NOT opt in there; the provider still fails loud.
+    // + persisting a key file so it works out of the box. A multi-node deploy
+    // (OS_CLUSTER_DRIVER set) must provision a shared OS_SECRET_KEY instead —
+    // each node minting its own key would diverge — so we do NOT opt in
+    // there; the provider still fails loud.
     if (!localEnv.OS_CLUSTER_DRIVER && !localEnv.OS_SECRET_KEY) {
       localEnv.OS_CRYPTO_AUTOKEY = '1';
     }
+    // WHICH key file: the one `os dev` uses for this project
+    // (~/.objectstack/dev-crypto-key, or $OS_HOME's), never a second one under
+    // this command's own home (#29934). `localEnv.OS_HOME` above is this
+    // command's state dir, so the key's location travels on its own channel;
+    // the file an earlier `os start` minted here is still read, and named.
+    const keyFileNotice = await applyCryptoKeyFileChannel(localEnv, {
+      env: process.env,
+      cwd,
+      hasProjectConfig,
+      homeFlag: flags.home,
+    });
+    if (keyFileNotice) console.log(chalk.yellow(`  ⚠ ${keyFileNotice}`));
 
     const binPath = process.argv[1];
 
@@ -579,34 +600,18 @@ export async function resolveStartDatabase(opts: {
   });
 }
 
-function resolveHome(
-  flagValue: string | undefined,
-  opts: { hasProjectConfig: boolean; cwd: string },
-): string {
-  const raw = flagValue ?? process.env.OS_HOME;
-  if (raw && raw.trim().length > 0) {
-    const v = raw.trim();
-    if (v.startsWith('~')) return path.resolve(os.homedir(), v.slice(1).replace(/^[/\\]/, ''));
-    return path.resolve(v);
-  }
-  // Project mode: keep state next to the source so each project is
-  // self-contained and `os start` from another cwd doesn't reuse it.
-  if (opts.hasProjectConfig) {
-    return path.resolve(opts.cwd, '.objectstack');
-  }
-  return path.resolve(os.homedir(), '.objectstack');
-}
-
 /**
  * Read the persisted AUTH_SECRET from `<home>/auth-secret`, or generate
  * one on first run and persist it so subsequent restarts keep existing
  * sessions valid. Mode 0o600 to keep the secret reasonably private.
+ * `file` is the path only when the file holds the returned secret: a
+ * generated one whose write failed lives in this process alone.
  */
-function readOrCreateAuthSecret(homeDir: string): string {
+function readOrCreateAuthSecret(homeDir: string): { secret: string; file?: string } {
   const secretPath = path.join(homeDir, 'auth-secret');
   try {
     const existing = fs.readFileSync(secretPath, 'utf8').trim();
-    if (existing.length >= 32) return existing;
+    if (existing.length >= 32) return { secret: existing, file: secretPath };
   } catch {
     // file missing or unreadable — fall through to generation
   }
@@ -614,8 +619,9 @@ function readOrCreateAuthSecret(homeDir: string): string {
   try {
     makeDirectorySync(homeDir);
     fs.writeFileSync(secretPath, secret + '\n', { mode: 0o600 });
+    return { secret, file: secretPath };
   } catch {
     // best-effort persist; secret is still returned for this process
   }
-  return secret;
+  return { secret };
 }

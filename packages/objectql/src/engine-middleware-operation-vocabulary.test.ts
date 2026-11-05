@@ -148,13 +148,19 @@ function readDispatchedUnionFromEngineSource(): string[] {
   if (!testPath) {
     throw new Error('vitest did not report a testPath — the #7809 weld cannot locate engine.ts.');
   }
-  const enginePath = join(dirname(testPath), 'engine.ts');
-  const src = readFileSync(enginePath, 'utf8');
+  // [#29986] The codemod split moved engine.ts's top-level declarations, this
+  // interface among them, into `engine-top-level.ts`; engine.ts re-exports it
+  // by name. Both files are read so the weld follows the declaration wherever
+  // the split put it (ruling 6597555122 A: a by-path reader gains the new
+  // modules in its reading list).
+  const src = ['engine.ts', 'engine-top-level.ts']
+    .map((file) => readFileSync(join(dirname(testPath), file), 'utf8'))
+    .join('\n');
 
   const iface = src.match(/export interface OperationContext\s*\{([\s\S]*?)\n\}/);
   if (!iface) {
     throw new Error(
-      'Could not locate `export interface OperationContext` in engine.ts. ' +
+      'Could not locate `export interface OperationContext` in engine.ts or engine-top-level.ts. ' +
         'The #7809 vocabulary weld cannot verify itself — fix this parse rather than deleting it.',
     );
   }

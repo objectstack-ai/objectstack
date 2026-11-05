@@ -132,6 +132,12 @@
       "reason": "Loader-derived. Authors write the `list` / `listViews` / `formViews` containers; the loader expands them and stamps `viewKind`. No author ever types it."
     },
     {
+      "key": "code:QUOTA_EXCEEDED|RATE_LIMIT_EXCEEDED|UNAUTHENTICATED",
+      "label": "push relay error",
+      "exempt": "not-authorable",
+      "reason": "Wire protocol between a server's push channel and the hosted push relay: the relay answers it and nobody writes it into metadata. The generated page at content/docs/references/api/push-relay.mdx is the reference."
+    },
+    {
       "key": "type:ack|cursor|edit|error|event|ping|pong|presence|subscribe|unsubscribe",
       "label": "websocket message",
       "exempt": "not-authorable",
@@ -202,6 +208,14 @@
         "content/docs/api/metadata-api.mdx"
       ],
       "note": "The per-kind entry of GET /packages/:id/customizations `contributions` (#27928, ruling 6566915346 letter E). Not authored (the server answers it), but GOVERNED rather than exempt, as the flow registration verdict is: Studio draws each kind differently, and api/metadata-api.mdx names the list and its `nav` kind. The `field` / `flow` arm discriminates by a `z.enum`; the walker reads its members into the key, so adding or dropping a kind there moves the key and sends the author back to that doc."
+    },
+    {
+      "key": "signs:body|timestamp.body",
+      "label": "api trigger declared signature scheme",
+      "docs": [
+        "content/docs/automation/flows.mdx"
+      ],
+      "note": "An api flow start node's `config.signature` (#29983; the trigger verifies it since #30009). automation/flows.mdx teaches both forms beside the `secretRef` paragraph, in its `signs` table."
     }
   ]
 }

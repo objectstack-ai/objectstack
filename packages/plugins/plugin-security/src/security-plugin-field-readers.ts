@@ -262,6 +262,7 @@ export async function resolveCallerPosture(
     tenancyDisabled: false,
     isBetterAuthManaged: false,
     tenantAnchorIsPhantom: false,
+    externalOrganizationScopeUndeclared: false,
     owdOpensRowWrites: false,
     requiredPermissions: EMPTY_REQUIRED_PERMISSIONS,
     fieldRequiredPermissions: posture.fieldRequiredPermissions,

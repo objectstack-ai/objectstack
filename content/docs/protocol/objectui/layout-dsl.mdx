@@ -91,7 +91,10 @@ of actions declared on that object — there is no built-in id registry, so
 `edit` / `delete` / `share` resolve nowhere (the host draws its own Edit /
 Delete chrome). The list is the whole set the header draws: an action that
 declares `record_header` but is not named is not drawn there, and a header with
-no `actions` draws none of the object's own actions. Declare the action,
+no `actions` draws none of the object's own actions. `placedActions: true` in
+place of the list asks for every action placed at `record_header` /
+`record_more`, read live, so an action another package places on the object is
+drawn without editing the page; it is refused beside a list. Declare the action,
 placed at `record_header`, then name it:
 
 {/* os:check-yaml action */}

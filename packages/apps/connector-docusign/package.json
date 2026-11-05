@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/connector-app-docusign",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DocuSign eSignature connector app (open edition, sandbox first): DocuSign's eSignature OpenAPI document, trimmed offline to three envelope operations, as a declarative `openapi` connector instance authorized by OAuth 2.0 (`authorization_code`) with an OAuth client each deployment's administrator registers and enters on the connection.",
   "license": "Apache-2.0",
   "private": true,

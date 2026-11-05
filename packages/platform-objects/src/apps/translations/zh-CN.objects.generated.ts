@@ -369,7 +369,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       revoke_reason: {
         label: "撤销原因",
-        help: "会话被撤销的原因（idle_timeout、absolute_max、concurrent_cap、user_revoked、admin、organization_membership_ended、admin_password_reset 等）。"
+        help: "会话被撤销的原因（idle_timeout、absolute_max、concurrent_cap、user_revoked、admin、organization_membership_ended、admin_password_reset、password_reset 等）。"
       },
       active_organization_id: {
         label: "当前组织"
@@ -3388,7 +3388,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       namespace: {
         label: "命名空间",
-        help: "Manifest 命名空间（例如 mail、branding、feature_flags）。"
+        help: "Manifest 命名空间（例如 mail、branding、storage）。"
       },
       key: {
         label: "键",

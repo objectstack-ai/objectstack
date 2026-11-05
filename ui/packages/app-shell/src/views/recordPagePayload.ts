@@ -238,6 +238,24 @@ export function recordPageRequestOf(plan: {
   };
 }
 
+/** The record's streams a page asked when it opened (objectstack#30035): the feed's parts of its plan. */
+export interface RecordPageStreamsAsk {
+  discussion?: boolean;
+  activity?: number;
+  timeline?: { discussion: boolean; activity: boolean; fieldChanges: boolean };
+}
+
+/**
+ * The request body for the feed's re-read after a change to the record
+ * (objectstack#30035): the streams the open asked, as asked, and no other
+ * part — no related list, verdict, projection or approval, which their own
+ * readers read again on the same change. The route answers the record with
+ * it, as its read gate.
+ */
+export function recordPageStreamsRequestOf(streams: RecordPageStreamsAsk): RecordPageRequest {
+  return recordPageRequestOf({ expand: [], related: [], explain: [], fieldAccess: false, approvals: false, ...streams });
+}
+
 /** A refused part, thrown as the read it replaces throws its refusal. */
 function refusal(error: RecordPagePartRefusal | undefined, fallback: string): Error {
   return Object.assign(new Error(error?.message ?? fallback), {

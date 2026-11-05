@@ -722,6 +722,36 @@ function admittedFieldPatches(
 type ServedObjectLayer = 'served' | 'code';
 
 /**
+ * [#29903, #29872] The options that leave `extend` contributions out of an
+ * object fold ({@link SchemaRegistry.getAllObjects}, `listItems`,
+ * `foldObjectExtendersOnto`):
+ *
+ *  - `withoutExtensionsOf` — that package's contributions are left out;
+ *  - `onlyExtensionsOf` — every OTHER package's contributions are left out,
+ *    so only that package's own extensions fold. The protocol's per-package
+ *    layer passes it, naming the listed package.
+ *
+ * Both may be given; a contribution either one leaves out is left out. The
+ * base layer (`own` / `overlay`) is never left out.
+ */
+export interface ObjectExtensionFoldOptions {
+  withoutExtensionsOf?: string;
+  onlyExtensionsOf?: string;
+}
+
+/** Whether `options` leaves any contribution out (otherwise the fold is the ordinary one). */
+function leavesExtensionsOut(options: ObjectExtensionFoldOptions | undefined): options is ObjectExtensionFoldOptions {
+  return options?.withoutExtensionsOf !== undefined || options?.onlyExtensionsOf !== undefined;
+}
+
+/** [#29903, #29872] Whether `options` leaves `contributor` out of the fold. */
+function isLeftOutExtension(contributor: ObjectContributor, options: ObjectExtensionFoldOptions): boolean {
+  if (contributor.ownership !== 'extend') return false;
+  if (options.withoutExtensionsOf !== undefined && contributor.packageId === options.withoutExtensionsOf) return true;
+  return options.onlyExtensionsOf !== undefined && contributor.packageId !== options.onlyExtensionsOf;
+}
+
+/**
  * Deep merge two ServiceObject definitions.
  *
  * The merge set is CLOSED and enumerable — this is NOT "every prop, later
@@ -3589,6 +3619,47 @@ export class SchemaRegistry {
     this.initialDisabledPackageIds = new Set(ids);
   }
 
+  /** See {@link onPackageUninstalled}. */
+  private packageUninstalledListeners = new Set<(packageId: string) => void>();
+
+  /**
+   * [#30215] Be told, once per package, that {@link uninstallPackage} has
+   * withdrawn it — after its record is gone, never for a refused uninstall
+   * (that one removes nothing). Returns the unsubscribe.
+   *
+   * For a holder of state keyed by package id OUTSIDE this registry, so it is
+   * withdrawn on every uninstall door at once (the protocol's `deletePackage`,
+   * `DELETE /packages/:id`, the install-local DELETE), never per door. The
+   * engine is the one today: its manifest map (`registerApp` → `manifests`) is
+   * the code-package signal ADR-0070's `isWritablePackage` reads first, and an
+   * id left in it kept an uninstalled package read-only until a restart.
+   */
+  onPackageUninstalled(listener: (packageId: string) => void): () => void {
+    this.packageUninstalledListeners.add(listener);
+    return () => { this.packageUninstalledListeners.delete(listener); };
+  }
+
+  /**
+   * Tell every {@link onPackageUninstalled} listener. Never throws: the
+   * uninstall has already happened, so a throwing listener must not read as a
+   * refused one to the door that called {@link uninstallPackage}. It is logged
+   * at `error` instead, because that listener's state now disagrees with this
+   * registry while everything looks healthy.
+   */
+  private announcePackageUninstalled(id: string): void {
+    for (const listener of this.packageUninstalledListeners) {
+      try {
+        listener(id);
+      } catch (err) {
+        console.error(
+          `[Registry] package "${id}" was uninstalled, but a listener keeping state keyed by its id failed to drop it `
+            + `(${(err as Error)?.message ?? err}) — that state still names the package until the next restart, `
+            + 'while the registry no longer does. Restart the runtime to bring the two back in line.',
+        );
+      }
+    }
+  }
+
   // ==========================================
   // Restore on refusal
   // ==========================================
@@ -4674,6 +4745,32 @@ export class SchemaRegistry {
   }
 
   /**
+   * [#29903, #29872, ADR-0146 D8 item 3] An object as {@link resolveObject}
+   * resolves it, but with the `extend` contributions `options` names left out
+   * of the fold ({@link ObjectExtensionFoldOptions}), as if those packages had
+   * never extended it: the same base layer (`overlay ?? own`), every other
+   * extender folded in the same order, the same tail. With no such
+   * contribution it IS {@link resolveObject}'s answer (the cached body).
+   * Uncached otherwise, as {@link resolveOwnerLayer} is.
+   *
+   * The reader is the protocol's per-package layer, which serves a package's
+   * objects to the package's own export as the package declares them: never
+   * with an extension another package contributes (its `.custom` pair's, or
+   * any other installed package's). That extension travels in its own
+   * package's export, as its `objectExtensions` entry
+   * ({@link getObjectExtensionsOf}); folded in here too, its field and field
+   * patches travel twice, the second time as if the owner shipped them.
+   */
+  private resolveObjectLeavingExtensionsOut(fqn: string, options: ObjectExtensionFoldOptions | undefined): ServiceObject | undefined {
+    const contributors = leavesExtensionsOut(options) ? this.objectContributors.get(fqn) : undefined;
+    if (!contributors || !contributors.some((c) => isLeftOutExtension(c, options!))) return this.resolveObject(fqn);
+    const kept = contributors.filter((c) => !isLeftOutExtension(c, options!));
+    const ownerContrib = kept.find(c => c.ownership === 'own');
+    if (!ownerContrib) return undefined;
+    return this.foldExtenders(kept, kept.find(c => c.ownership === 'overlay') ?? ownerContrib);
+  }
+
+  /**
    * Fold every `extend` contribution over a chosen base layer, in the list's
    * (priority-sorted) order. Extracted from {@link resolveObject} so the
    * code-layer resolution ({@link resolveOwnerLayer}) folds extenders exactly
@@ -5477,7 +5574,7 @@ export class SchemaRegistry {
    * matching {@link resolveObject}, so this narrows nothing the fold was doing
    * on an unfolded base.
    */
-  foldObjectExtendersOnto<T>(name: string, base: T): T {
+  foldObjectExtendersOnto<T>(name: string, base: T, options?: ObjectExtensionFoldOptions): T {
     if (base === null || typeof base !== 'object') return base;
     const fqn = this.resolveObjectKey(name);
     // With nothing to fold, the body still gets its picklist-bound fields
@@ -5485,7 +5582,10 @@ export class SchemaRegistry {
     // registry never saw is served in the one shape every other read uses.
     // By reference when no field names a picklist.
     if (fqn === undefined) return this.finishServedObject(base);
-    const contributors = this.objectContributors.get(fqn);
+    // [#29903, #29872] The contributions `options` names are left out, as on
+    // {@link getAllObjects} ({@link ObjectExtensionFoldOptions}).
+    const registered = this.objectContributors.get(fqn);
+    const contributors = leavesExtensionsOut(options) ? registered?.filter((c) => !isLeftOutExtension(c, options)) : registered;
     if (!contributors || !contributors.some((c) => c.ownership === 'extend')) return this.finishServedObject(base);
     return this.foldExtendersOntoDefinition(
       contributors,
@@ -6224,8 +6324,14 @@ export class SchemaRegistry {
    * Get all registered objects (merged).
    * 
    * @param packageId - Optional filter: only objects contributed by this package
+   * @param options - [#29903, #29872] each object is resolved with the `extend`
+   *   contributions these name left out of the fold
+   *   ({@link ObjectExtensionFoldOptions}, {@link resolveObjectLeavingExtensionsOut}):
+   *   `withoutExtensionsOf` one package's, `onlyExtensionsOf` every package's
+   *   but one. The protocol's per-package layer passes `onlyExtensionsOf`,
+   *   naming the listed package.
    */
-  getAllObjects(packageId?: string): ServiceObject[] {
+  getAllObjects(packageId?: string, options?: ObjectExtensionFoldOptions): ServiceObject[] {
     const results: ServiceObject[] = [];
 
     for (const fqn of this.objectContributors.keys()) {
@@ -6236,7 +6342,7 @@ export class SchemaRegistry {
         if (!hasContribution) continue;
       }
 
-      const merged = this.resolveObject(fqn);
+      const merged = this.resolveObjectLeavingExtensionsOut(fqn, options);
       if (merged) {
         // Tag with contributor info for UI
         (merged as any)._packageId = this.getObjectOwner(fqn)?.packageId;
@@ -6252,6 +6358,47 @@ export class SchemaRegistry {
    */
   getObjectContributors(fqn: string): ObjectContributor[] {
     return this.objectContributors.get(fqn) || [];
+  }
+
+  /**
+   * [#29872, ADR-0146 D8 item 3 / D10] Every `extend` contribution `packageId`
+   * makes, as the `objectExtensions` entry it registers from: the inverse of
+   * {@link registerObjectExtension}. One entry per extended object, in
+   * registration order, whichever door registered it: a manifest's
+   * `objectExtensions` (`ObjectQL.registerApp` — a code package, or a package
+   * installed through install-local, which files no `object_extension` item)
+   * or a stored `object_extension` row.
+   *
+   * Each entry is the contribution's body with its address put back: `extend`
+   * is the object it is filed under, `priority` its merge priority (absent when
+   * it is {@link DEFAULT_EXTENDER_PRIORITY}, the value an entry that names none
+   * parses to), and its `name` and every envelope key the registration stamped
+   * (`_packageId`, `_provenance`, …) are left out. A key the registration left
+   * `undefined` is left out too. Shallow: the nested bodies are the
+   * registry's, never to be mutated.
+   *
+   * The reader is the package export: a package's export carries its own
+   * extensions as `objectExtensions`, however they were installed, and the
+   * extended object's owner's export carries none of them
+   * ({@link getAllObjects}'s `onlyExtensionsOf`).
+   */
+  getObjectExtensionsOf(packageId: string): Array<{ extend: string; priority?: number } & Record<string, unknown>> {
+    const out: Array<{ extend: string; priority?: number } & Record<string, unknown>> = [];
+    for (const [fqn, contributors] of this.objectContributors) {
+      const contribution = contributors.find((c) => c.ownership === 'extend' && c.packageId === packageId);
+      if (!contribution) continue;
+      const body: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(contribution.definition)) {
+        if (value === undefined || key === 'name' || key.startsWith('_')) continue;
+        body[key] = value;
+      }
+      out.push({
+        extend: fqn,
+        ...body,
+        ...(contribution.priority !== DEFAULT_EXTENDER_PRIORITY ? { priority: contribution.priority } : {}),
+      });
+    }
+    return out;
   }
 
   /**
@@ -7589,11 +7736,26 @@ export class SchemaRegistry {
 
   /**
    * Universal List Method
+   *
+   * [#29871] `options.includeDisabledPackages` keeps a disabled package's
+   * items. Only the protocol's per-package layer passes it (the package
+   * export, which carries a package's own items enabled or not); every
+   * served read leaves it unset and hides them.
+   *
+   * [#29903, #29872] `options.withoutExtensionsOf` / `options.onlyExtensionsOf`
+   * resolve each listed object with those `extend` contributions left out of
+   * the fold ({@link getAllObjects}); no other type reads them. The per-package
+   * layer passes `onlyExtensionsOf`, naming the listed package, so a base's
+   * export carries the base's objects unchanged by its `.custom` pair and by
+   * every other package that extends them.
    */
-  listItems<T>(type: string, packageId?: string): T[] {
+  listItems<T>(type: string, packageId?: string, options?: { includeDisabledPackages?: boolean } & ObjectExtensionFoldOptions): T[] {
     // Special handling for 'object' and 'objects' types - use objectContributors
     if (type === 'object' || type === 'objects') {
-      return this.getAllObjects(packageId) as unknown as T[];
+      return this.getAllObjects(packageId, {
+        withoutExtensionsOf: options?.withoutExtensionsOf,
+        onlyExtensionsOf: options?.onlyExtensionsOf,
+      }) as unknown as T[];
     }
 
     const items = Array.from(this.metadata.get(type)?.values() || []) as T[];
@@ -7606,7 +7768,7 @@ export class SchemaRegistry {
     // `package` type itself is never filtered — the Packages page must still
     // list disabled packages so they can be re-enabled. Disable is reversible:
     // items remain registered and reappear on enable.
-    if (type !== 'package') {
+    if (type !== 'package' && options?.includeDisabledPackages !== true) {
       result = result.filter((item: any) => !this.isPackageDisabled((item as any)?._packageId));
     }
     return result;
@@ -8098,6 +8260,9 @@ export class SchemaRegistry {
     if (collection) {
       collection.delete(id);
       this.log(`[Registry] Uninstalled package: ${id}`);
+      // …and, last, whoever keeps its own state keyed by this package's id
+      // (the engine's manifest map) drops it, on every uninstall door at once.
+      this.announcePackageUninstalled(id);
       return true;
     }
     return false;

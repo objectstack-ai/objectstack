@@ -84,6 +84,7 @@ export const APPROVAL_RECORD_LOCK_PARAMS: readonly string[] = [];
 export interface ApprovalsRouteHost {
     readonly routeManager: RestServer['routeManager'];
     readonly approvalsServiceProvider: RestServer['approvalsServiceProvider'];
+    resolveRequestEnvironmentId: RestServer['resolveRequestEnvironmentId'];
     resolveExecCtx: RestServer['resolveExecCtx'];
     enforceAuth: RestServer['enforceAuth'];
 }
@@ -102,9 +103,18 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
     const dataPath = basePath;
     const isScoped = basePath.includes('/environments/:environmentId');
 
-    const resolveService = async (environmentId?: string) => {
+    // [#30011] The provider is asked for the environment the REQUEST is in,
+    // through the one resolver every REST-owned route shares: the scoped
+    // param when the mount carries one, else the host's request→environment
+    // answer (a hostname-routed request arrives here with no id at all).
+    // Passing the raw `undefined` on the unscoped mount is how a hosted
+    // environment's approvals were read from the host kernel.
+    const resolveService = async (environmentId: string | undefined, req: any) => {
         if (!this.approvalsServiceProvider) return undefined;
-        try { return await this.approvalsServiceProvider(environmentId); }
+        try {
+            const envId = await this.resolveRequestEnvironmentId(environmentId, req);
+            return await this.approvalsServiceProvider(envId);
+        }
         catch { return undefined; }
     };
     const respond501 = (res: any) => res.status(501).json({
@@ -236,7 +246,7 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
-                const svc = await resolveService(environmentId);
+                const svc = await resolveService(environmentId, req);
                 if (!svc) {
                     // No approvals plugin loaded — return empty list rather than 501
                     // so Console badge polls don't spam the error log on deployments
@@ -332,7 +342,7 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
-                const svc = await resolveService(environmentId);
+                const svc = await resolveService(environmentId, req);
                 if (!svc) return respond501(res);
                 const row = await readableRequestOr404(svc, req.params.id, context, res);
                 if (!row) return;
@@ -362,7 +372,7 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
                 if (refuseUnknownQueryParams(req, res, APPROVAL_RECORD_LOCK_PARAMS)) return;
-                const svc = await resolveService(environmentId);
+                const svc = await resolveService(environmentId, req);
                 if (!svc || typeof svc.getRecordLock !== 'function') return respond501(res);
                 const { object, recordId } = req.params;
                 const lock = await svc.getRecordLock(object, recordId, context ?? {});
@@ -401,7 +411,7 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
                     const context = await this.resolveExecCtx(environmentId, req);
                     if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
+                    const svc = await resolveService(environmentId, req);
                     if (!svc) return respond501(res);
                     const body = req.body ?? {};
                     try {
@@ -441,7 +451,7 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
-                const svc = await resolveService(environmentId);
+                const svc = await resolveService(environmentId, req);
                 if (!svc || typeof svc.recall !== 'function') return respond501(res);
                 const body = req.body ?? {};
                 try {
@@ -480,7 +490,7 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
                     const context = await this.resolveExecCtx(environmentId, req);
                     if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
+                    const svc = await resolveService(environmentId, req);
                     if (!svc) return respond501(res);
                     const body = req.body ?? {};
                     try {
@@ -529,7 +539,7 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
                     const context = await this.resolveExecCtx(environmentId, req);
                     if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
+                    const svc = await resolveService(environmentId, req);
                     if (!svc) return respond501(res);
                     const body = req.body ?? {};
                     try {
@@ -585,7 +595,7 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
-                const svc = await resolveService(environmentId);
+                const svc = await resolveService(environmentId, req);
                 if (!svc) return respond501(res);
                 // The parent door's lookup and 404 first: an unknown id and a
                 // request the caller cannot see are not an empty audit trail.

@@ -12,6 +12,7 @@ import { provisionTelemetryDatasource, standaloneTelemetryPrimary } from '../uti
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
 import { registerInstalledPlugins } from '../utils/installed-plugins-boot.js';
 import { readInternalArtifactPath, readInternalConfigOutputPath } from '../utils/internal-artifact-channel.js';
+import { readAuthSecretFileChannel } from '../utils/internal-auth-secret-channel.js';
 import { compileForDevBoot, devCompilesAtBoot } from '../utils/dev-compile-at-boot.js';
 import { makeDirectorySync } from '../utils/make-directory.js';
 // The precedence's last rung — whether the cwd config takes part — decided by
@@ -124,6 +125,7 @@ import {
   resolveStackCollection,
   stackDeclaredCapabilities,
   stackBootPlugins,
+  hasMetadataPlugin,
 } from '../utils/stack-collections.js';
 import { redactConnectionUrl, describeDriverConnection, describeDriverSqliteFile } from '../utils/connection-display.js';
 import { captureServedDatabaseFile, watchServedDatabaseFile } from '../utils/served-database-file.js';
@@ -3024,6 +3026,11 @@ export default class Serve extends Command {
       const tiers: Set<string> = resolveStackTiers({ declaredTiers, requires, preset: presetName });
       const tierEnabled = (t: string) => tiers.has(t);
       const requiresCapability = (c: string) => requires.includes(c);
+      // [#29820] A stack `push` key with no `push` in `requires` mounts nothing
+      // and is read by nothing: push is requested, never on the always-on
+      // slate. Say so once instead of booting as if the key took effect.
+      const unrequestedPushKey = formatUnrequestedPushKeyWarning(config, requires);
+      if (unrequestedPushKey) console.warn(chalk.yellow(`  ⚠ ${unrequestedPushKey}`));
 
       // Import ObjectStack runtime
       const { Runtime } = await import('@objectstack/runtime');
@@ -3505,7 +3512,7 @@ export default class Serve extends Command {
       // points except by the AppPlugin append below, and an AppPlugin is not a
       // MetadataPlugin.
       let devArtifactDoor: any;
-      if (isDev && flags.server && !plugins.some((p: any) => p?.constructor?.name === 'MetadataPlugin')) {
+      if (isDev && flags.server && !hasMetadataPlugin(plugins)) {
         try {
           const { resolveDefaultArtifactPath } = await import('@objectstack/runtime');
           // `os dev` is the only caller that reaches here, and it is a
@@ -3646,7 +3653,7 @@ export default class Serve extends Command {
       if (
         !devArtifactDoor
         && isHostConfig(config)
-        && !plugins.some((p: any) => p?.name === 'com.objectstack.metadata' || p?.constructor?.name === 'MetadataPlugin')
+        && !hasMetadataPlugin(plugins)
       ) {
         const { MetadataPlugin } = await import('@objectstack/metadata');
         hostConfigMetadataDoor = new MetadataPlugin({
@@ -4194,8 +4201,13 @@ export default class Serve extends Command {
         const { OrganizationOwnershipBootGuardPlugin } = await import('@objectstack/runtime');
         // A development boot's refusal names the ceremony with `--dev`, so the
         // ceremony boots the way this one did (its secret, .env* files and
-        // `telemetry` sibling).
-        await kernel.use(new OrganizationOwnershipBootGuardPlugin({ dev: isDev }));
+        // `telemetry` sibling). A boot `os start` supervises with the secret it
+        // persisted in its home names that file, so the ceremony runs with the
+        // secret this server composes its security plugin with.
+        await kernel.use(new OrganizationOwnershipBootGuardPlugin({
+          dev: isDev,
+          authSecretFile: readAuthSecretFileChannel(process.env),
+        }));
         trackPlugin('OrganizationOwnershipBootGuard');
       }
 
@@ -4352,6 +4364,12 @@ export default class Serve extends Command {
               appName: resolveDeploymentAppName((config as any).email ?? {}, process.env, (config as any).appName),
               socialProviders: Object.keys(socialProviders).length > 0 ? socialProviders : undefined,
               trustedOrigins: trustedOrigins.length ? trustedOrigins : undefined,
+              // The native app schemes the mobile sign-in hand-off may redirect a
+              // token to, from `OS_TRUSTED_APP_SCHEMES` (#29972). Unset stays
+              // unset: no scheme registered, the `one-time-token` plugin is not
+              // mounted and the hand-off refuses every target. A bad entry is
+              // refused by AuthPlugin at construction, never dropped.
+              trustedAppSchemes: resolveTrustedAppSchemes(process.env),
               // The stack's `server.trustProxy`, the same authored value the
               // dispatcher's inbound rate limiter receives below: whether the
               // ADR-0069 D5 IP allow-list and the D7 login audit may believe
@@ -5303,29 +5321,35 @@ export default class Serve extends Command {
           };
 
           // Fail-closed binder over the shared dev crypto provider. If the
-          // provider can't be created, leave `secrets` undefined — the plugin
+          // binder can't be built, leave `secrets` undefined — the plugin
           // then rejects secret-bearing create/update instead of storing
           // cleartext (by design).
           let secrets: any = undefined;
           try {
-            const { LocalCryptoProvider } = await import(
+            const { deferredLocalCryptoProvider } = await import(
               /* webpackIgnore: true */ '@objectstack/service-settings'
             );
             // First block to touch `sharedCryptoProvider` (still undefined
-            // here), so create it directly; the secret-field wiring below
-            // reuses this instance so every sys_secret shares one key.
-            sharedCryptoProvider = new LocalCryptoProvider();
+            // here); the secret-field wiring below reuses this instance so
+            // every sys_secret shares one key. Built at its FIRST USE, not
+            // here: the database is not open yet, and when two key files hold
+            // different keys the boot chooses between them only once it is
+            // (the settings service's `start()`). The binder first decrypts at
+            // `kernel:ready`, after that choice.
+            sharedCryptoProvider = deferredLocalCryptoProvider();
             secrets = createDatasourceSecretBinder({
               engine: lazySecretEngine,
               cryptoProvider: sharedCryptoProvider,
             });
           } catch (cryptoErr: any) {
-            // Best-effort fail-closed: leave `secrets` undefined so the plugin
-            // rejects secret-bearing create/update rather than storing
-            // cleartext. A production deployment with no stable key still
-            // aborts boot loudly at the secret-field wiring below (where
-            // LocalCryptoProvider's "Refusing to start in production" error is
-            // rethrown), so we don't duplicate that abort here.
+            // Reached only when the module or the binder fails to load: the
+            // deferred provider constructs nothing here, so a key problem
+            // never lands in this catch. Leave `secrets` undefined so the
+            // plugin rejects secret-bearing create/update rather than storing
+            // cleartext. A key problem surfaces where the provider is first
+            // built, the secret-field wiring below (`resolve()`), which
+            // rethrows a production "Refusing to start in production" error,
+            // so the boot still refuses and nothing is duplicated here.
             console.warn(
               chalk.yellow(
                 `  ⚠ datasource admin: no CryptoProvider (${cryptoErr?.message ?? cryptoErr}); secret-bearing datasource create/update will fail closed`,
@@ -5614,6 +5638,11 @@ export default class Serve extends Command {
             // every sys_secret value after a restart. Let that error be loud:
             // secret writes must not proceed under an unstable key.
             sharedCryptoProvider = new LocalCryptoProvider();
+          } else if (typeof sharedCryptoProvider.resolve === 'function') {
+            // The deferred instance the datasource binder shares: build it now
+            // (the key file was chosen during `runtime.start()`), so the same
+            // production refusal stays at boot rather than at the first write.
+            sharedCryptoProvider.resolve();
           }
           dataEngine.setCryptoProvider(sharedCryptoProvider);
           if (isDev) {
@@ -6481,6 +6510,22 @@ export function resolveTenancyPostureOrRefusal(): TenancyPostureGateVerdict {
 
 
 /**
+ * The boot warning for a stack whose `push` key is set while its served
+ * capabilities do not include `push` (#29820), or `null` when there is nothing
+ * to say. Push is a requested capability, never on the always-on slate, so
+ * without the token `PushServicePlugin` is not mounted and the key is read by
+ * nothing; the operator who wrote the key is told how to turn it on.
+ *
+ * Returns PLAIN text; the caller owns the channel (`console.warn`, stderr).
+ */
+export function formatUnrequestedPushKeyWarning(stack: unknown, requires: readonly string[]): string | null {
+  const push = stack && typeof stack === 'object' ? (stack as { push?: unknown }).push : undefined;
+  if (push === undefined || push === null || requires.includes('push')) return null;
+  return "The stack definition sets a push key, but requires does not name 'push', so the push service is not "
+    + "started and the key is not read. Add 'push' to requires to turn mobile push on.";
+}
+
+/**
  * The diagnosis the optional i18n service load prints when it fails — a
  * DIAGNOSIS ahead of behaviour that does not change (#14042's rule, applied at
  * the one site its repair did not reach).
@@ -6868,6 +6913,35 @@ export function formatUnusableAuthBaseUrlDiagnostic(
     + '    Fix: set OS_AUTH_URL to this deployment\'s public origin (e.g.\n'
     + '    https://app.example.com), or remove the variable entirely to fall back to\n'
     + '    OS_BASE_URL / http://localhost:<port>.';
+}
+
+/** The variable `serve` reads the deployment's registered app schemes from (#29972). */
+export const TRUSTED_APP_SCHEMES_ENV_NAME = 'OS_TRUSTED_APP_SCHEMES';
+
+/**
+ * The app schemes this deployment registers for the mobile sign-in hand-off
+ * (`AuthConfig.trustedAppSchemes`), read from `OS_TRUSTED_APP_SCHEMES` in the
+ * shape `OS_TRUSTED_ORIGINS` is read: comma-separated, each entry trimmed,
+ * empty entries dropped, repeats folded (#29972).
+ *
+ * Unset (or nothing but separators and spaces) answers `undefined`: no scheme
+ * is registered, so plugin-auth mounts no `one-time-token` plugin and the
+ * hand-off route refuses every target. There is no default scheme — the
+ * hand-off is opt-in per deployment.
+ *
+ * ⛔ An entry is never validated, lower-cased or dropped here. A bad one goes
+ * through to `new AuthPlugin(...)` as typed, where `assertTrustedAppSchemes`
+ * refuses it at construction naming the entry, so a misspelt scheme fails the
+ * boot instead of booting a hand-off that refuses the deployment's own app.
+ */
+export function resolveTrustedAppSchemes(env: NodeJS.ProcessEnv): string[] | undefined {
+  const raw = env[TRUSTED_APP_SCHEMES_ENV_NAME];
+  if (raw === undefined) return undefined;
+  const schemes: string[] = [];
+  for (const entry of raw.split(',').map((s) => s.trim()).filter(Boolean)) {
+    if (!schemes.includes(entry)) schemes.push(entry);
+  }
+  return schemes.length ? schemes : undefined;
 }
 
 // [#22301] The constructor arguments a served boot hands the `storage`, `email`

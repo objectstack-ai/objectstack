@@ -31,7 +31,7 @@ import {
   useIsMobile,
   RelatedCountStore,
 } from '@object-ui/components';
-import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
+import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, isPermissionError, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
 import {
   Plus,
   ExternalLink,
@@ -50,7 +50,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import type { DataSource, FieldMetadata } from '@object-ui/types';
 import type { ViewFilterElement } from '@objectstack/spec/ui';
-import { getCellRenderer, resolveCellRendererType, RecordPickerDialog, deriveLookupColumns, MaskedCellRenderer, RecordHoverCard } from '@object-ui/fields';
+import { getCellRenderer, resolveCellRendererType, RecordPickerDialog, deriveLookupColumns, MaskedCellRenderer, RecordHoverCard, formatCurrency } from '@object-ui/fields';
 import {
   buildExpandFields,
   collectPredicateFieldRefs,
@@ -72,6 +72,7 @@ import {
   resolveNameField,
   composeParentScopeFilter,
   isMultiValueRelationship,
+  leadWithNameField,
   mergeFilterNodes,
   readObjectSortability,
   filterRefusalSubject,
@@ -85,9 +86,9 @@ import {
   type ActionResult,
   type FilterNode,
 } from '@object-ui/core';
-import { useSafeFieldLabel } from '@object-ui/react';
+import { useSafeFieldLabel, useRecordContext } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
-import { useDisplayLocale } from '@object-ui/i18n';
+import { useDisplayLocale, useLocalization, resolveFieldCurrency } from '@object-ui/i18n';
 import { useDetailTranslation } from './useDetailTranslation';
 import { isMaskedDetailFieldType } from './fieldEnrichment';
 import {
@@ -691,46 +692,110 @@ const RelatedListLoadFailed: React.FC<{ error: unknown; onRetry: () => void }> =
  * seam itself — `@object-ui/core`'s `parent-scope` — so one place answers it.
  */
 
-/** Field types a body table totals (objectstack#27055, Target 8). */
-const TOTALLED_FIELD_TYPES = new Set(['currency', 'number', 'integer', 'decimal']);
+/**
+ * The number types a body table totals ONLY when a roll-up declares the column
+ * additive (objectstack#29943). A `number` / `integer` / `decimal` is as often
+ * an ordinal (a version number, an instalment number) as a quantity, and the
+ * type alone cannot tell them apart: objectstack#27055 Target 8 summed both,
+ * which printed 「版本号 10」 under versions v1–v4.
+ */
+const ROLLED_UP_FIELD_TYPES = new Set(['number', 'integer', 'decimal']);
 
 /**
- * The totals line of a body table: the sum of each numeric column over the
- * rows on show (the page), labelled as the page's — never as the whole
- * list's, which a windowed list does not hold. Currency sums keep the field's
- * declared currency. Nothing is drawn without a numeric column.
+ * The child fields the record's own object rolls up with `sum`: a `summary`
+ * field on the parent whose `summaryOperations` sums `field` of this child
+ * `object` is the author's own declaration that the column adds up. Read off
+ * the parent schema the record page already holds (`useRecordContext`), in
+ * either container shape the metadata API serves. The roll-up's
+ * `relationshipField` is not compared: which foreign key a sum runs through
+ * does not change whether the child column is additive.
  */
-const BodyTableTotals: React.FC<{ rows: readonly any[]; columns: any[] | undefined; objectSchema: any }> = ({
+function rolledUpSumFields(parentFields: unknown, childObject: string | undefined): ReadonlySet<string> {
+  const out = new Set<string>();
+  if (!childObject || !parentFields || typeof parentFields !== 'object') return out;
+  const defs: unknown[] = Array.isArray(parentFields) ? parentFields : Object.values(parentFields as Record<string, unknown>);
+  for (const def of defs) {
+    const d = def as { type?: unknown; summaryOperations?: { object?: unknown; field?: unknown; function?: unknown } } | null;
+    const ops = d?.type === 'summary' ? d.summaryOperations : undefined;
+    if (ops?.function === 'sum' && ops.object === childObject && typeof ops.field === 'string' && ops.field !== '') {
+      out.add(ops.field);
+    }
+  }
+  return out;
+}
+
+/**
+ * The one currency a currency column's counted rows are in, or `undefined`
+ * when any row's currency is unknown or two rows disagree: each row resolves
+ * through `resolveFieldCurrency`, the cell's own reader (a `fixed` code, the
+ * tenant default for `dynamic`, the row's sibling code field for `record`).
+ * A sum across currencies, or in a currency nobody named, is not a total.
+ */
+function agreedRowCurrency(def: any, rows: readonly any[], tenantCurrency: string | undefined): string | undefined {
+  let agreed: string | undefined;
+  for (const row of rows) {
+    const code = resolveFieldCurrency(def, tenantCurrency, row);
+    if (!code) return undefined;
+    if (agreed === undefined) agreed = code;
+    else if (agreed.toUpperCase() !== code.toUpperCase()) return undefined;
+  }
+  return agreed;
+}
+
+/**
+ * The totals line of a body table: the sum of each additive column over the
+ * rows on show (the page), labelled as the page's — never as the whole
+ * list's, which a windowed list does not hold. Which columns are additive
+ * (objectstack#29943):
+ *
+ *  1. a `currency` column — amounts add up by type — totalled only when every
+ *     counted row is in one known currency, and formatted in it;
+ *  2. a `number` / `integer` / `decimal` column only when the record's object
+ *     rolls it up with `sum` (`rolledUpSumFields`);
+ *  3. nothing else. A line with nothing to total is not drawn.
+ */
+const BodyTableTotals: React.FC<{ rows: readonly any[]; columns: any[] | undefined; objectSchema: any; childObject: string | undefined }> = ({
   rows,
   columns,
   objectSchema,
+  childObject,
 }) => {
   const { t } = useDetailTranslation();
   // The totals format in the reader's display locale, never the machine's.
   const displayLocale = useDisplayLocale();
+  // The tenant default currency (ADR-0053) a `dynamic` amount displays in.
+  const { currency: tenantCurrency } = useLocalization();
+  // The record page's own object: the parent whose roll-ups name this child.
+  const parentSchema = useRecordContext()?.objectSchema as { fields?: unknown } | undefined;
+  const rolledUp = rolledUpSumFields(parentSchema?.fields, childObject);
   const fields: Record<string, any> = (objectSchema?.fields as any) ?? {};
   const totals: Array<{ key: string; label: string; text: string }> = [];
   for (const col of columns ?? []) {
     const key = col?.accessorKey || columnIdentity(col);
     const def = key ? fields[key] : undefined;
-    if (!key || !def || !TOTALLED_FIELD_TYPES.has(def.type)) continue;
+    if (!key || !def) continue;
+    const isCurrency = def.type === 'currency';
+    if (!isCurrency && !(ROLLED_UP_FIELD_TYPES.has(def.type) && rolledUp.has(key))) continue;
     let sum = 0;
-    let counted = 0;
+    const counted: any[] = [];
     for (const row of rows) {
       const n = typeof row?.[key] === 'number' ? row[key] : Number(row?.[key]);
       if (row?.[key] === null || row?.[key] === undefined || row?.[key] === '' || !Number.isFinite(n)) continue;
       sum += n;
-      counted += 1;
+      counted.push(row);
     }
-    if (counted === 0) continue;
-    const currency = def.type === 'currency' ? def.currencyConfig?.defaultCurrency ?? def.currency : undefined;
+    if (counted.length === 0) continue;
     let text: string;
-    try {
-      text = currency
-        ? new Intl.NumberFormat(displayLocale, { style: 'currency', currency }).format(sum)
-        : new Intl.NumberFormat(displayLocale, { maximumFractionDigits: 2 }).format(sum);
-    } catch {
-      text = String(sum);
+    if (isCurrency) {
+      const currency = agreedRowCurrency(def, counted, tenantCurrency);
+      if (!currency) continue;
+      text = formatCurrency(sum, currency, displayLocale);
+    } else {
+      try {
+        text = new Intl.NumberFormat(displayLocale, { maximumFractionDigits: 2 }).format(sum);
+      } catch {
+        text = String(sum);
+      }
     }
     totals.push({ key, label: col.header || col.label || def.label || key, text });
   }
@@ -2313,8 +2378,16 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         )
       : [];
     if (declaredHighlights.length > 0) {
+      // `highlightFields` is what the record page features BESIDE its title, so
+      // it never lists the title. A list has no title above it, so the record's
+      // name (ADR-0079, `leadWithNameField`) leads the set, listed once even
+      // when a highlight names it, and the grid links that first column to the
+      // record. It passes the same gates as the rest: an unreadable or redacted
+      // name, or a name that is the key back to this record, is still dropped.
       const hf = pruneEmpty(
-        filterFLS(filterFK(filterRedacted(declaredHighlights.map(normalizeColumn)))),
+        filterFLS(
+          filterFK(filterRedacted(leadWithNameField(objectSchema, declaredHighlights).map(normalizeColumn))),
+        ),
       );
       if (hf.length > 0) return hf.slice(0, Math.max(1, maxColumns));
     }
@@ -2397,6 +2470,13 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       if (aIsStatus !== bIsStatus) return aIsStatus ? -1 : 1;
       return 0;
     });
+    // The record's name (ADR-0079) leads the walk too, when it survived the
+    // filters above: the name-ish ranking is a guess, the declared name is not.
+    // Only moves an entry that is already there, so a field the filters dropped
+    // never comes back.
+    const lead = leadWithNameField(objectSchema, entries.map(([key]) => key))[0];
+    const leadAt = entries.findIndex(([key]) => key === lead);
+    if (leadAt > 0) entries.unshift(...entries.splice(leadAt, 1));
 
     const generated = entries.map(([key, def]: [string, any]) => {
       const col: any = {
@@ -2737,6 +2817,13 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const ownRelationshipId = objectName && referenceField ? relatedCardId(objectName, referenceField) : null;
   const bodyTable = !compact && !!ownRelationshipId && bodyTableIds.has(ownRelationshipId);
   const isCollapsible = collapsible || bodyTable;
+  // objectstack#29945 — whether the body table is wider than the details
+  // column it sits in (ADR-0085 keeps it there). While it is, the first
+  // column stays pinned as the row's identity and ⤢ is offered with a label;
+  // the right-edge shadow is the table's own (objectui#12708). Read off the
+  // table's scroll box by the effect below the empty answer.
+  const bodyTableHostRef = React.useRef<HTMLDivElement | null>(null);
+  const [bodyTableOverflows, setBodyTableOverflows] = React.useState(false);
 
   // The row click hands the host the rows on show beside the clicked one
   // (objectstack#26679), so its drawer can step through them.
@@ -2825,6 +2912,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           type: 'data-table',
           data: paginatedData,
           columns: compact ? tableColumns.slice(0, 1) : tableColumns,
+          // A body table wider than its column keeps its first column, the
+          // row's identity, in view while it scrolls (objectstack#29945).
+          ...(bodyTable && bodyTableOverflows ? { frozenColumns: 1 } : {}),
           pagination: false, // We handle pagination ourselves
           pageSize: effectivePageSize || 10,
           searchable: false,
@@ -2862,7 +2952,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       default:
         return { type: 'div', children: 'No view configured' };
     }
-  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, enlargedFace, api, objectSchema, activeSort, handleTableSort]);
+  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, enlargedFace, api, objectSchema, activeSort, handleTableSort, bodyTable, bodyTableOverflows]);
 
   const enlargedGrid = enlargedFace && !schema && (type === 'grid' || type === 'table');
 
@@ -2966,6 +3056,51 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   React.useEffect(() => {
     if (enlargedFace && enlargedChip === 'all' && !filterActive && !loading && !loadFailure) setAllCount(recordCount);
   }, [enlargedFace, enlargedChip, filterActive, loading, loadFailure, recordCount]);
+  // objectstack#29945 — `bodyTableOverflows`, read where the table scrolls:
+  // its scroll box is wider inside than out. Re-read when the box or the
+  // table resizes (rows arrive, columns size themselves), and whenever the
+  // table is drawn afresh (opened, loaded). A body table that fits reads
+  // `false` and shows none of the overflow cues.
+  const bodyTableDrawn = bodyTable && !enlargedFace && !collapsed && !isEmpty && !loadFailure
+    && !(loading && relatedData.length === 0);
+  React.useLayoutEffect(() => {
+    const host = bodyTableDrawn ? bodyTableHostRef.current : null;
+    if (!host) {
+      setBodyTableOverflows(false);
+      return;
+    }
+    let resizes: ResizeObserver | null = null;
+    let mounts: MutationObserver | null = null;
+    const findBox = () => host.querySelector<HTMLElement>('[data-table-scroll-box]');
+    const watch = (box: HTMLElement) => {
+      const read = () => setBodyTableOverflows(box.scrollWidth - box.clientWidth > 1);
+      read();
+      if (typeof ResizeObserver === 'undefined') return;
+      resizes = new ResizeObserver(read);
+      resizes.observe(box);
+      const table = box.querySelector('table');
+      if (table) resizes.observe(table);
+    };
+    const box = findBox();
+    if (box) {
+      watch(box);
+    } else if (typeof MutationObserver !== 'undefined') {
+      // The table can mount after this list does (a deferred renderer): wait
+      // for its scroll box, then read it.
+      mounts = new MutationObserver(() => {
+        const found = findBox();
+        if (!found) return;
+        mounts?.disconnect();
+        mounts = null;
+        watch(found);
+      });
+      mounts.observe(host, { childList: true, subtree: true });
+    }
+    return () => {
+      mounts?.disconnect();
+      resizes?.disconnect();
+    };
+  }, [bodyTableDrawn, isMobile]);
   // When the consumer explicitly enables `filterable`, always render the
   // filter input — they're opting in. (data-table's own auto-search is
   // suppressed via the viewSchema below to avoid a duplicate input.)
@@ -3287,7 +3422,16 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       mine: t('detail.relatedChipMine', { defaultValue: 'Mine' }),
       overdue: t('detail.relatedChipOverdue', { defaultValue: 'Overdue' }),
     };
+    // The list page's export question, asked of the child object: the
+    // server-resolved effective API operation set (`/me/permissions`
+    // `apiOperations`), read through the same `usePermissions()` source
+    // `ListView`'s `exportPermitted` reads. A missing set (an unrestricted
+    // object, an old backend, no provider) keeps the button, as there. A UI
+    // mirror only: the export route still answers 403 on its own.
+    const childApiOps = api ? perms.getObjectApiOperations(api) : undefined;
+    const exportPermitted = childApiOps ? childApiOps.includes('export') : true;
     const exportable = typeof (dataSource as DataSource | undefined)?.exportDownload === 'function'
+      && exportPermitted
       && !!api && !!referenceField && parentId != null && parentId !== '';
     const handleExport = () => {
       if (!exportable || exportState.busy) return;
@@ -3318,7 +3462,13 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           URL.revokeObjectURL(url);
           setExportState({ busy: false, error: null });
         } catch (err) {
-          setExportState({ busy: false, error: err instanceof Error ? err.message : String(err) });
+          // A refusal says the Console's sentence, never the server's text.
+          setExportState({
+            busy: false,
+            error: isPermissionError(err)
+              ? t('view.exportNotPermitted')
+              : err instanceof Error ? err.message : String(err),
+          });
         }
       })();
     };
@@ -3466,7 +3616,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 </Button>
               </div>
             )}
-            {bodyTable && <BodyTableTotals rows={paginatedData} columns={effectiveColumns} objectSchema={objectSchema} />}
+            {bodyTable && <BodyTableTotals rows={paginatedData} columns={effectiveColumns} objectSchema={objectSchema} childObject={api || objectName} />}
           </>
         )}
         {trailingDialogs}
@@ -3555,7 +3705,21 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 {add.label || t('detail.add', { defaultValue: 'Add' })}
               </Button>
             )}
-            {bodyTable && enlargeRelated && ownRelationshipId && (
+            {bodyTable && enlargeRelated && ownRelationshipId && (bodyTableOverflows ? (
+              // A table wider than its column offers ⤢ in words: the enlarged
+              // tab is where every column fits (objectstack#29945).
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1 h-11 sm:h-7 text-xs shadow-none"
+                data-related-card-enlarge=""
+                data-overflow="true"
+                onClick={(e) => { e.stopPropagation(); enlargeRelated(ownRelationshipId); }}
+              >
+                <Maximize2 className="h-3.5 w-3.5" aria-hidden />
+                {t('detail.relatedCardAllColumns', { defaultValue: 'All columns' })}
+              </Button>
+            ) : (
               <Button
                 variant="ghost"
                 size="sm"
@@ -3566,7 +3730,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               >
                 <Maximize2 className="h-3.5 w-3.5" />
               </Button>
-            )}
+            ))}
             {onNew && (
               <Button
                 variant={isEmpty ? 'ghost' : 'outline'}
@@ -3665,7 +3829,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             {t('detail.loading')}
           </div>
         ) : (
-          <div className={cn(loading && 'opacity-60 pointer-events-none transition-opacity')}>
+          <div
+            ref={bodyTableHostRef}
+            className={cn(loading && 'opacity-60 pointer-events-none transition-opacity')}
+            data-body-table-overflow={bodyTable ? (bodyTableOverflows ? 'true' : 'false') : undefined}
+          >
             <SchemaRenderer schema={viewSchema} />
           </div>
         )}
@@ -3705,7 +3873,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             truncation condition: the full list page is worth opening even when
             every row fits here (sort, filter, export, a shareable URL). An
             empty list has nothing to see in full. */}
-        {bodyTable && <BodyTableTotals rows={paginatedData} columns={effectiveColumns} objectSchema={objectSchema} />}
+        {bodyTable && <BodyTableTotals rows={paginatedData} columns={effectiveColumns} objectSchema={objectSchema} childObject={api || objectName} />}
 
         {onViewAll && !isEmpty && !bodyTable && (
           <div className="mt-3 pt-3 border-t flex justify-center">

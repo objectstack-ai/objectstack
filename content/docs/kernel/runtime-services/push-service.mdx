@@ -1,0 +1,180 @@
+---
+title: services.push — the mobile push service API
+navTitle: services.push
+description: Mobile push delivery to APNs and FCM, configured from the stack's push key with credentials by reference.
+---
+
+- **Stability:** `experimental`
+- **Canonical source:** `packages/services/service-push/src/push-service.ts`
+- **Registry slot:** `push` — resolve with `ctx.getService('push')`.
+
+## Methods
+
+```ts
+services.push.vendors(): PushVendor[]
+services.push.send(message: PushMessage): Promise<PushSendResult>
+```
+
+`PushMessage` is one push to one device: the `vendor` the token belongs to
+(`apns` or `fcm`), the device `token`, a plain-text `title` and `body`, and
+`data`, the delivery data the app shell reads (string values only, because FCM
+accepts only strings there).
+
+`vendors()` lists the vendors this deployment has a transport for. An empty list
+means push delivers nothing.
+
+Application code rarely calls this service directly. A `notify` flow node or a
+`NotificationService.emit` that names the `push` channel goes through the
+messaging service, whose `push` channel reads the recipient's devices and sends
+through this service.
+
+## Returns
+
+`PushSendResult`, one of:
+
+- `{ status: 'sent', messageId? }`: the vendor accepted the push. `messageId`
+  is APNs' `apns-id` or FCM's message `name`.
+- `{ status: 'invalid_token', reason }`: the vendor reported the token dead
+  (APNs `BadDeviceToken` / `Unregistered`, FCM `UNREGISTERED`).
+- `{ status: 'failed', error, retryable }`: anything else. `retryable` is true
+  for a timeout, a 429 or a 5xx, and false for a refused credential or payload.
+
+`send()` never throws: a transport error is answered `failed`.
+
+## Turning it on
+
+Push is a requested capability, never on by default. A stack turns it on with
+`requires: ['push']` and configures it with the top-level `push` key, which is
+`PushServiceConfigSchema`:
+
+```ts
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
+  manifest: { /* … */ },
+  requires: ['push'],
+  push: {
+    transport: 'direct',
+    apns: {
+      teamId: 'ABCDE12345',
+      keyId: 'KEY1234567',
+      topic: 'com.example.app',
+      environment: 'production',
+      credentialRef: 'APNS_SIGNING_KEY',
+    },
+    fcm: { projectId: 'example-app', credentialRef: 'FCM_SERVICE_ACCOUNT' },
+  },
+});
+```
+
+A `push` key without `push` in `requires` is not read: `objectstack serve` logs
+one boot warning naming the key and the fix. With the token, `objectstack serve`
+mounts `PushServicePlugin` from
+`@objectstack/service-push`, which the CLI ships with. `@objectstack/verify`'s
+`bootStack` mounts it the same way, so an app's tests run with the same push
+service its server gets.
+
+### The two vendors
+
+- **APNs** (Apple Push Notification service), token-based authentication: the
+  Apple Developer `teamId`, the auth key's `keyId`, the app bundle ID as
+  `topic`, and the `environment`, `sandbox` for development builds or
+  `production` for TestFlight and App Store builds.
+- **FCM** (Firebase Cloud Messaging) over the HTTP v1 API: the Firebase
+  `projectId`, authenticated by a service account.
+
+Each vendor block is optional, and at least one is required. A vendor with no
+block is a vendor this deployment does not push to; devices registered on it are
+skipped. Other Android vendors (HMS, Xiaomi, OPPO, vivo) are not transports of
+this service: they plug in as separate channel implementations.
+
+### Credential references
+
+Each vendor has one secret, the APNs `.p8` signing key and the FCM
+service-account JSON, and the stack names it by `credentialRef`, never inline.
+In the open tier a `credentialRef` is the name of an environment variable, read
+when the transport first signs a request. For the example above, set
+`APNS_SIGNING_KEY` to the contents of the `.p8` file and `FCM_SERVICE_ACCOUNT` to
+the service-account JSON.
+
+The stack definition is compiled into the published artifact, so an inline
+secret is refused twice:
+
+- at authoring, by `defineStack` and `os validate`. A key an operator would reach
+  for (`key`, `privateKey`, `serviceAccount`, …) is refused by name with
+  `credentialRef` as the remedy, and a PEM block or JSON document pasted into
+  `credentialRef` itself is refused, because a reference never contains
+  whitespace or braces;
+- at boot, because a compiled artifact or a plain config object can reach
+  `objectstack serve` without passing `defineStack`. The `push` capability fails
+  to start, naming each refused path and its remedy. The refusal never repeats
+  the value.
+
+A `credentialRef` that names an unset variable is not a boot error: the push to
+that vendor fails with `credential_unresolved`, naming the reference.
+
+### The hosted relay: not served yet
+
+`PushServiceConfigSchema` has a second transport, `transport: 'relay'`, and it is
+the schema's default: a `push` block with no vendor block, `push: {}` and an
+absent `push` key all read as the relay. The relay delivers to the
+store-published ObjectOS app, whose APNs key and Firebase project stay with
+ObjectStack, and authenticates the server by its cloud binding credential.
+
+**Its sender has not shipped.** Until it does, a stack that requires `push` with
+a relay configuration (including no `push` key) fails at boot:
+
+```
+Capability "push" (@objectstack/service-push) failed to start: PushServicePlugin: the hosted push relay
+(transport: 'relay', which is also what an empty push config reads as) is not served yet: its sender has
+not shipped, and nothing would deliver through it. …
+```
+
+The fix is the direct transport: `transport: 'direct'` with an `apns` and/or
+`fcm` block for an app signed with your own APNs key and Firebase project. The
+boot refuses rather than serving the relay because a served relay would mount
+the push channel and answer every push as sent while nothing left the server.
+Authoring still accepts a relay block, so a stack written for the relay does not
+need to change when the sender ships.
+
+## Devices
+
+The push channel addresses the recipient's devices in the device registry,
+`sys_user_device`, owned by the messaging service. A signed-in app registers
+its device and removes it through two routes:
+
+- `POST /api/v1/notifications/devices` registers the current user's device, or
+  refreshes it when its `deviceId` is already registered
+  (`RegisterDeviceRequestSchema`: `token`, `platform`, optional `deviceId`,
+  `vendor`, `appId`, `locale`, `origin`).
+- `DELETE /api/v1/notifications/devices/:deviceId` removes one of the current
+  user's devices. A device the user does not hold answers 404.
+
+### Dead-token retirement
+
+When a vendor answers `invalid_token`, the push channel retires that device: the
+row is kept, disabled, with the time it was retired
+(`INotificationService.invalidateDeviceToken`). The channel does it, not the
+dispatcher, because one notification fans out to every device of the recipient
+and only the channel knows which token died. The recipient's other devices
+still receive the push.
+
+## How a delivery is graded
+
+The push channel grades one delivery, one recipient user, by what all of that
+user's devices answered:
+
+| What happened | Outcome |
+|:--|:--|
+| at least one device accepted it | delivered; a device that failed beside it is logged, never retried, so the devices that received it are not pushed twice |
+| every addressed device was reported dead | `invalid_recipient`: suppressed, not dead-lettered |
+| the user has no enabled device | `invalid_recipient` |
+| devices exist, but none on a vendor this deployment has a transport for, or the vendor refused the push for a reason no retry repairs | `permanent` |
+| a timeout, a 429 or a 5xx with nothing delivered | `retryable` |
+| no push service registered | refused `transport_not_configured`, `permanent`, as the email and SMS channels answer it |
+
+## Consumers
+
+- **Messaging `push` channel**: `notify(channels: ['push'])` renders the
+  notification in each recipient's language and pushes it to their enabled
+  devices. It is mounted while a `push` service is registered.

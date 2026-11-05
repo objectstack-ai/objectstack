@@ -172,6 +172,16 @@ export const SHARD_COUNT = liveShardTotal('test');
 // numerator up.
 export const MAX_SHARD_OVER_MEAN = 1.3;
 
+// The band pin 3c judges a configured slice count against, as a fraction of
+// its limit, on both halves (ruling record 6634084947; see
+// sliceCountProblems()). It is the observed noise width of the CLI's median: a
+// refresh moves that median by a few percent with no change to the suite, and
+// a pin that accepts exactly one count flips on that noise -- every flip reds
+// the generated refresh PR until a hand-written lane PR changes this map. It
+// bounds only which hand-written count the self-test accepts; no run's split,
+// density cap or whole-leg cap reads it.
+export const SLICE_COUNT_HYSTERESIS = 0.05;
+
 // The factor a shard's MEASURED test total may exceed its PREDICTED total by
 // before `--check-drift` names it DRIFT -- a `::warning::`, never a red (see
 // "TIMING IS A READING" below). The durable half of #16173.
@@ -388,7 +398,10 @@ export function timingModeNote(event) {
 //   n = 1   1432.04s   2.53x                  the CLI IS the run's floor
 //   n = 2    716.02s   1.26x                  meets -- metadata-protocol is the floor
 //
-// The margin is 20s (finding #29826). The whole split is now balanced, so the
+// The margin is 20s (finding #29826), inside the CLI's own run-to-run spread
+// (1339-1493s), so pin 3c judges both halves against a 5% band
+// (SLICE_COUNT_HYSTERESIS): this count holds up to 1546s, and a raised count of
+// 3 would hold down to 1399s. The whole split is now balanced, so the
 // density cap equals the 8-shard mean; the slice that reads built declarations
 // is admitted by closureAllowance() (#29777 ruling B).
 //
@@ -845,6 +858,9 @@ export function assertSlicesSpread(bins) {
 //   SMALLEST  at n - 1 it is not -- otherwise the slices past n - 1 cost a
 //             turbo leg and a closure build each, and buy nothing.
 //
+// Each half is read through the SLICE_COUNT_HYSTERESIS band, so a count is
+// refused only once the dataset is past that band on the side it names.
+//
 // The FILE_SHARDED_PACKAGES docblock has the arithmetic on today's dataset.
 // Why the serial floor and not the bins: slicing redistributes weight and never
 // moves the mean, so a bin-sum bound reads the same at every n -- it is the
@@ -856,10 +872,21 @@ export function assertSlicesSpread(bins) {
 // a count below 2 -- 1 is no slicing at all, and 0 would make expandSlices emit
 // NO item for the package, a package no shard runs.
 //
+// Both halves judge against a band of SLICE_COUNT_HYSTERESIS around the limit
+// (ruling record 6634084947), not the limit itself: RAISE refuses only a slice
+// past (1 + h) x limit, LOWER only an n - 1 slice at or under (1 - h) x limit,
+// and a count inside the band passes. The count a RAISE names is still the
+// smallest that meets the bare limit, so a raised count lands with margin.
+//
 // `packages` is whole-package `{name, weight, tasks?}`. `judged` is returned
 // beside the problems so a caller can tell "every sliced package is derived"
 // apart from "no package was looked at".
-export function sliceCountProblems(packages, sliced = FILE_SHARDED_PACKAGES, bound = MAX_SHARD_OVER_MEAN) {
+export function sliceCountProblems(
+  packages,
+  sliced = FILE_SHARDED_PACKAGES,
+  bound = MAX_SHARD_OVER_MEAN,
+  hysteresis = SLICE_COUNT_HYSTERESIS
+) {
   const weights = new Map(packages.map((p) => [p.name, p.weight]));
   const problems = [];
   let judged = 0;
@@ -885,20 +912,25 @@ export function sliceCountProblems(packages, sliced = FILE_SHARDED_PACKAGES, bou
     );
     const floor = Math.max(0, ...others.map(serialFloorOf));
     const limit = bound * floor;
+    const raiseAbove = (1 + hysteresis) * limit;
+    const lowerAtOrBelow = (1 - hysteresis) * limit;
+    const band = `${+(hysteresis * 100).toFixed(2)}%`;
     const meets = (count) => weight / count <= limit;
-    if (!meets(n)) {
+    if (weight / n > raiseAbove) {
       let enough = n + 1;
       while (!meets(enough)) enough++;
       problems.push(
-        `${name}: sliced ${n} ways at ${weight}s, one slice is ${(weight / n).toFixed(0)}s -- past ${bound}x ` +
-          `the heaviest other serial task (${floor.toFixed(0)}s, so ${limit.toFixed(0)}s), so the package is still ` +
-          `the list's serial floor on its own. Raise it to ${enough}.`
+        `${name}: sliced ${n} ways at ${weight}s, one slice is ${(weight / n).toFixed(2)}s -- past ${bound}x ` +
+          `the heaviest other serial task (${floor.toFixed(0)}s, so ${limit.toFixed(2)}s) by more than its ${band} ` +
+          `band (${raiseAbove.toFixed(2)}s), so the package is still the list's serial floor on its own. ` +
+          `Raise it to ${enough}.`
       );
-    } else if (meets(n - 1)) {
+    } else if (weight / (n - 1) <= lowerAtOrBelow) {
       problems.push(
-        `${name}: sliced ${n} ways at ${weight}s, but at ${n - 1} one slice (${(weight / (n - 1)).toFixed(0)}s) ` +
+        `${name}: sliced ${n} ways at ${weight}s, but at ${n - 1} one slice (${(weight / (n - 1)).toFixed(2)}s) ` +
           `already sits within ${bound}x the heaviest other serial task (${floor.toFixed(0)}s, so ` +
-          `${limit.toFixed(0)}s). ${n - 1 === 1 ? 'Retire the entry' : `Lower it to ${n - 1}`}: ` +
+          `${limit.toFixed(2)}s) with more than its ${band} band to spare (${lowerAtOrBelow.toFixed(2)}s). ` +
+          `${n - 1 === 1 ? 'Retire the entry' : `Lower it to ${n - 1}`}: ` +
           'a slice count a smaller one could replace is one no pin can hold.'
       );
     }
@@ -1884,10 +1916,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // testing anything. Flooring at the measured count makes that loud, and the
   // remedy is the one the pin itself names -- pick a new inversion pair from
   // the dataset -- never lowering this number.
-  // 8 of these 25 are pins 3b and 3c, the file-level slicing's (#16173), and
+  // 12 of these 29 are pins 3b and 3c, the file-level slicing's (#16173), and
   // every one of them runs unconditionally: 3c's fixtures and 3b's cut of the
-  // heaviest package do not depend on what the live map slices.
-  'the balancing pins (#10472)': 25,
+  // heaviest package do not depend on what the live map slices. 4 of the 12 are
+  // 3c's band fixtures (SLICE_COUNT_HYSTERESIS): 2 in-band passes, 2 refusals.
+  'the balancing pins (#10472)': 29,
   // 1 grades the committed dataset's split; 4 are fixtures, both directions.
   'the whole-package leg cap and the load-sensitive pair (#25870)': 5,
   // 4 grade the committed dataset and the live tree, 1 drives planRun() on
@@ -2205,7 +2238,8 @@ function selfTest() {
   //     and a count nothing can fail on is how a slicing outlives its reason.
   //     sliceCountProblems() asks both halves of the serial-floor derivation
   //     (see FILE_SHARDED_PACKAGES) of the committed dataset for every entry:
-  //     the count meets it, and n - 1 does not.
+  //     the count meets it, and n - 1 does not, each read through the
+  //     SLICE_COUNT_HYSTERESIS band.
   //
   //     The fixtures after it hold every refusal sliceCountProblems() makes, in
   //     both directions, on numbers that do not move with a refresh.
@@ -2251,6 +2285,48 @@ function selfTest() {
     const r = sliceCountProblems(fixture(300), { big: 2 });
     if (!r.problems.some((m) => m.includes('Raise it to 5'))) {
       throw new Error(`slice derivation: a count whose slice is still the floor was accepted (${r.problems.join(' | ') || 'no problem named'})`);
+    }
+  });
+  // The SLICE_COUNT_HYSTERESIS band on the same fixture: 5% of 65s puts RAISE
+  // past 68.25s and LOWER at or under 61.75s. Each in-band pass is also run
+  // with no band, where it must be refused -- otherwise it sits inside the bare
+  // limit and proves nothing about the band. Each out-of-band refusal sits
+  // within a second of the band's edge and must carry its measured slice.
+  const withoutBand = (packages, sliced) => sliceCountProblems(packages, sliced, MAX_SHARD_OVER_MEAN, 0);
+  check(() => {
+    // RAISE side, in band: 134s in two is 67s, past 65s but within 68.25s.
+    const r = sliceCountProblems(fixture(134), { big: 2 });
+    const bare = withoutBand(fixture(134), { big: 2 });
+    if (r.problems.length > 0 || !bare.problems.some((m) => m.includes('Raise it to 3'))) {
+      throw new Error(
+        `slice derivation: a count of 2 inside the RAISE band was not passed by the band alone ` +
+          `(band: ${r.problems.join(' | ') || 'ok'}; bare: ${bare.problems.join(' | ') || 'ok'})`
+      );
+    }
+  });
+  check(() => {
+    // LOWER side, in band: 125s in two is 62.5s, within 65s but above 61.75s.
+    const r = sliceCountProblems(fixture(125), { big: 3 });
+    const bare = withoutBand(fixture(125), { big: 3 });
+    if (r.problems.length > 0 || !bare.problems.some((m) => m.includes('Lower it to 2'))) {
+      throw new Error(
+        `slice derivation: a count of 3 inside the LOWER band was not passed by the band alone ` +
+          `(band: ${r.problems.join(' | ') || 'ok'}; bare: ${bare.problems.join(' | ') || 'ok'})`
+      );
+    }
+  });
+  check(() => {
+    // RAISE side, past the band: 138s in two is 69s, past 68.25s.
+    const r = sliceCountProblems(fixture(138), { big: 2 });
+    if (!r.problems.some((m) => m.includes('Raise it to 3') && m.includes('one slice is 69.00s'))) {
+      throw new Error(`slice derivation: a count of 2 past the RAISE band was accepted (${r.problems.join(' | ') || 'no problem named'})`);
+    }
+  });
+  check(() => {
+    // LOWER side, past the band: 122s in two is 61s, at or under 61.75s.
+    const r = sliceCountProblems(fixture(122), { big: 3 });
+    if (!r.problems.some((m) => m.includes('Lower it to 2') && m.includes('one slice (61.00s)'))) {
+      throw new Error(`slice derivation: a count of 3 past the LOWER band was accepted (${r.problems.join(' | ') || 'no problem named'})`);
     }
   });
   check(() => {

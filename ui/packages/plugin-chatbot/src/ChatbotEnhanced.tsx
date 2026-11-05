@@ -48,6 +48,7 @@ import {
   type MessageProps,
 } from './elements/message';
 import { RecordLinkContext } from './recordLink';
+import { isHitlContinuation } from './hitlContinuation';
 import type { PublishHealth, PublishOutcome } from './publishHealth';
 import {
   PromptInput,
@@ -96,6 +97,8 @@ import {
   type ProposedChanges,
   type ProposedPlan,
   type ProposedPlanCard,
+  type RecordWrite,
+  type SampleDataCleanup,
   type ReplayOutcome,
 } from './mapMessages';
 
@@ -380,6 +383,19 @@ export interface ChatbotEnhancedToolInvocation {
     label?: string;
     reason?: string;
   };
+  /**
+   * cloud#3565 — the ONE-record write the user confirms on a card before it is
+   * written (`create_record` / `update_record`). Rides the same pending
+   * approval as `pendingActionId`; the card draws the record, old → new on an
+   * update, and three buttons: 确认 / 打开完整表单 / 取消.
+   */
+  recordWrite?: RecordWrite;
+  /**
+   * cloud#3565 — 「清理示例数据」: the tables and counts the seed ledger
+   * recorded, listed on the card before the user confirms (the generic
+   * Approve / Deny strip is the decision).
+   */
+  sampleDataCleanup?: SampleDataCleanup;
   /**
    * objectui#5695 — the terminal verdict of a confirm-replay (`replay_<id>`
    * tool results; cloud `runApprovedProposalReplay`). Rendered as a terminal
@@ -801,6 +817,48 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
   recordHandoffTitleLabel?: string;
   /** cloud#1658 — the record hand-off card's action label. */
   recordHandoffOpenLabel?: string;
+  /**
+   * cloud#3565 — "打开完整表单" on a record-write card: the host opens the New
+   * form prefilled with the card's values (create) or the record's edit form
+   * (update). The pending write is cancelled first, so a record saved in the
+   * form cannot be written a second time from the card. Absent → the button
+   * is disabled.
+   */
+  onOpenRecordForm?: (write: RecordWrite) => void;
+  /** cloud#3565 — the record-write card's title for a create, given the object's label (default "New {object}"). */
+  recordWriteCreateTitle?: (objectLabel: string) => string;
+  /** cloud#3565 — the record-write card's title for an update, given the object's label (default "Change {object}"). */
+  recordWriteUpdateTitle?: (objectLabel: string) => string;
+  /** cloud#3565 — the confirm button (default "Confirm"): writes the record as the user. */
+  recordWriteConfirmLabel?: string;
+  /** cloud#3565 — the open-form button (default "Open the full form"). */
+  recordWriteOpenFormLabel?: string;
+  /** cloud#3565 — the cancel button (default "Cancel"): nothing is written. */
+  recordWriteCancelLabel?: string;
+  /** cloud#3565 — the reason stored on a cancelled write (default "Cancelled from the card"). */
+  recordWriteCancelReason?: string;
+  /** cloud#3565 — the reason stored when the user opens the full form instead (default "Opened the full form instead"). */
+  recordWriteOpenFormReason?: string;
+  /** cloud#3565 — the label before the fields the server did not include (default "Not included"). */
+  recordWriteDroppedLabel?: string;
+  /** cloud#3565 — the card's state while the decision is in flight (default "Writing…"). */
+  recordWriteSubmittingLabel?: string;
+  /** cloud#3565 — the card's state once the record was written (default "Written"). */
+  recordWriteWrittenLabel?: string;
+  /** cloud#3565 — the card's state once the write was cancelled (default "Cancelled"). */
+  recordWriteCancelledLabel?: string;
+  /** cloud#3565 — the sample-data cleanup card's title (default "Remove the sample data"). */
+  sampleDataCleanupTitleLabel?: string;
+  /**
+   * cloud#3565 — the sample-data cleanup card's warning that the removal cannot
+   * be undone (default "Removed rows cannot be recovered."). Always shown: there
+   * is no recycle bin until objectstack#3146 lands.
+   */
+  sampleDataCleanupIrreversibleLabel?: string;
+  /** cloud#3565 — the line for the recorded rows the card does not list (shown when `absent` > 0). */
+  sampleDataCleanupAbsentLabel?: (count: number) => string;
+  /** cloud#3565 — the line for the recorded rows kept because someone edited them (shown when `edited` > 0). */
+  sampleDataCleanupEditedLabel?: (count: number) => string;
   /** Label for the publish-drafts button (default "Publish"). */
   publishDraftsLabel?: string;
   /** Label for the published-state badge that replaces the button (default "Published"). */
@@ -984,15 +1042,45 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
 export { publishHealthFromResponse } from './publishHealth';
 export type { PublishHealth, PublishOutcome } from './publishHealth';
 
+/**
+ * `decision` says which button the operator pressed, and on an approved
+ * `success` `result` is what the dispatcher answered (cloud#3565 — the
+ * record-write card draws "written" and the record's link from them; the
+ * generic approval strip reads `message` alone, as before).
+ */
 export type ToolDecisionState =
-  | { state: 'pending'; message?: string }
-  | { state: 'success'; message?: string }
-  | { state: 'error'; message: string };
+  | { state: 'pending'; message?: string; decision?: 'approved' | 'rejected' }
+  | { state: 'success'; message?: string; decision?: 'approved' | 'rejected'; result?: unknown }
+  | { state: 'error'; message: string; decision?: 'approved' | 'rejected' };
 
 export interface ChatbotModelOption {
   id: string;
   label?: string;
   provider?: string;
+}
+
+/** A record-write card value as a person reads it: nothing, a list, or the value itself. */
+function formatRecordWriteValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—';
+  if (Array.isArray(value)) return value.map((v) => formatRecordWriteValue(v)).join(', ');
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+/**
+ * The record a confirmed write answered with — `{ status:'written', objectName,
+ * recordId, label? }` from the dispatcher — so the card can link to it.
+ */
+function writtenRecordOf(
+  result: unknown,
+): { objectName: string; recordId: string; label?: string } | undefined {
+  if (!result || typeof result !== 'object') return undefined;
+  const r = result as Record<string, unknown>;
+  if (r.status !== 'written') return undefined;
+  const objectName = typeof r.objectName === 'string' ? r.objectName : '';
+  const recordId = typeof r.recordId === 'string' ? r.recordId : '';
+  if (!objectName || !recordId) return undefined;
+  return { objectName, recordId, ...(typeof r.label === 'string' && r.label ? { label: r.label } : {}) };
 }
 
 /** The item a selected model none of the offered models carries is shown by. */
@@ -2174,6 +2262,24 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       builderHandoffOpenLabel = 'Open in Builder →',
       recordHandoffTitleLabel = 'Open this record',
       recordHandoffOpenLabel = 'Open record →',
+      onOpenRecordForm,
+      recordWriteCreateTitle = (objectLabel) => `New ${objectLabel}`,
+      recordWriteUpdateTitle = (objectLabel) => `Change ${objectLabel}`,
+      recordWriteConfirmLabel = 'Confirm',
+      recordWriteOpenFormLabel = 'Open the full form',
+      recordWriteCancelLabel = 'Cancel',
+      recordWriteCancelReason = 'Cancelled from the card',
+      recordWriteOpenFormReason = 'Opened the full form instead',
+      recordWriteDroppedLabel = 'Not included',
+      recordWriteSubmittingLabel = 'Writing…',
+      recordWriteWrittenLabel = 'Written',
+      recordWriteCancelledLabel = 'Cancelled',
+      sampleDataCleanupTitleLabel = 'Remove the sample data',
+      sampleDataCleanupIrreversibleLabel = 'Removed rows cannot be recovered.',
+      sampleDataCleanupAbsentLabel = (count) =>
+        `${count} recorded ${count === 1 ? 'row is' : 'rows are'} not listed: you cannot see ${count === 1 ? 'it' : 'them'}, or ${count === 1 ? 'it is' : 'they are'} already gone.`,
+      sampleDataCleanupEditedLabel = (count) =>
+        `${count} ${count === 1 ? 'row' : 'rows'} edited since being seeded ${count === 1 ? 'stays' : 'stay'}.`,
       builderHandoffSupersededTitle = 'A newer request is available',
       onOpenBuilder,
       onOpenRecord,
@@ -3068,6 +3174,10 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       const decision = toolDecisions?.[tool.toolCallId];
       const isAwaitingApproval =
         state === 'approval-requested' && Boolean(onToolApprove) && !decision;
+      // cloud#3565 — a record-write card draws the record itself and its own
+      // three buttons; the generic Approve / Deny strip, its decision line and
+      // the raw payload stay out of the way.
+      const isRecordWriteCard = Boolean(tool.recordWrite);
       const hidePendingPayload =
         state === 'approval-requested' && Boolean(tool.pendingActionId);
       // objectui#7254 / cloud#1658 — `humanizeToolName`'s translator seam has
@@ -3090,7 +3200,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       // the whole-app blueprint JSON and "status: drafted" envelopes stay hidden.
       const showPayload =
         processVisibility === 'debug' ||
-        isAwaitingApproval;
+        (isAwaitingApproval && !isRecordWriteCard && !tool.sampleDataCleanup);
       // Lifecycle truth for this card's draft package, in precedence order:
       // the server's live pending-draft count (host wired
       // `fetchPendingDraftCount`), else this session's in-memory publish
@@ -3164,6 +3274,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
             // ADR-0057 P4 — open so the "Open in Builder →" action is visible.
             Boolean(tool.builderHandoff) ||
             Boolean(tool.recordHandoff) ||
+            Boolean(tool.recordWrite) ||
             // Fallback confirm gate (unstructured proposal) must open so its
             // "Build it" button is visible without an extra click.
             isUnstructuredBuildProposal(tool)
@@ -3185,7 +3296,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                 errorText={tool.errorText}
               />
             ) : null}
-            {decision ? (
+            {decision && !isRecordWriteCard ? (
               <div
                 className={
                   'flex items-center gap-2 p-3 border-t text-xs ' +
@@ -3213,7 +3324,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                 </span>
               </div>
             ) : null}
-            {isAwaitingApproval ? (
+            {isAwaitingApproval && !isRecordWriteCard ? (
               <div className="flex gap-2 p-3 border-t bg-muted/30">
                 <button
                   type="button"
@@ -3452,6 +3563,180 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                     </button>
                   );
                 })()}
+              </div>
+            ) : null}
+            {/* cloud#3565 — 「清理示例数据」: what the seed ledger recorded, per
+                table, so the user confirms a list rather than a payload, and
+                that the removal cannot be undone (the maintainer's note on
+                cloud#3565: no recycle bin until objectstack#3146). The rows
+                the list leaves out — hidden from the user or already gone —
+                and the rows kept because someone edited them are each said
+                when there are any. The generic Approve / Deny strip below
+                stays the decision. */}
+            {tool.sampleDataCleanup ? (
+              <div
+                className="flex flex-col gap-2 border-t bg-muted/20 px-3 py-2.5"
+                data-testid="sample-data-cleanup"
+              >
+                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground/80">
+                  <Table2 className="size-3.5" />
+                  {sampleDataCleanupTitleLabel}
+                </span>
+                <ul className="flex flex-col gap-0.5 text-xs" data-testid="sample-data-cleanup-tables">
+                  {tool.sampleDataCleanup.tables.map((t) => (
+                    <li key={t.objectName} className="flex items-baseline justify-between gap-3">
+                      <span className="min-w-0 truncate">{t.label}</span>
+                      <span className="tabular-nums text-muted-foreground">{t.count}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-xs font-medium text-destructive" data-testid="sample-data-cleanup-irreversible">
+                  {sampleDataCleanupIrreversibleLabel}
+                </p>
+                {tool.sampleDataCleanup.edited > 0 ? (
+                  <p className="text-xs text-muted-foreground" data-testid="sample-data-cleanup-edited">
+                    {sampleDataCleanupEditedLabel(tool.sampleDataCleanup.edited)}
+                  </p>
+                ) : null}
+                {tool.sampleDataCleanup.absent > 0 ? (
+                  <p className="text-xs text-muted-foreground" data-testid="sample-data-cleanup-absent">
+                    {sampleDataCleanupAbsentLabel(tool.sampleDataCleanup.absent)}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+            {/* cloud#3565 — the ONE-record write the user confirms. The card is
+                the whole affordance: the record as it will be written (old → new
+                on an update), what the server left out and why, and the three
+                buttons the ruling names. 确认 approves the pending action, which
+                writes AS THE USER; 取消 rejects it; 打开完整表单 rejects it too
+                and hands the host the values, so a record saved in the form is
+                never written a second time from here. */}
+            {tool.recordWrite ? (
+              <div
+                className="flex flex-col gap-2 border-t bg-muted/20 px-3 py-2.5"
+                data-testid="record-write"
+                data-operation={tool.recordWrite.operation}
+              >
+                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground/80">
+                  <Sparkles className="size-3.5" />
+                  {tool.recordWrite.operation === 'create'
+                    ? recordWriteCreateTitle(tool.recordWrite.objectLabel)
+                    : recordWriteUpdateTitle(tool.recordWrite.objectLabel)}
+                  {tool.recordWrite.label ? (
+                    <span className="font-normal text-muted-foreground">· {tool.recordWrite.label}</span>
+                  ) : null}
+                </span>
+                {tool.recordWrite.reason ? (
+                  <p className="text-xs text-muted-foreground">{tool.recordWrite.reason}</p>
+                ) : null}
+                <dl
+                  className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs"
+                  data-testid="record-write-fields"
+                >
+                  {tool.recordWrite.fields.map((f) => (
+                    <React.Fragment key={f.name}>
+                      <dt className="text-muted-foreground">{f.label}</dt>
+                      <dd className="min-w-0 break-words" data-testid={`record-write-field-${f.name}`}>
+                        {'current' in f ? (
+                          <>
+                            <span className="text-muted-foreground line-through">
+                              {formatRecordWriteValue(f.current)}
+                            </span>
+                            <span aria-hidden="true"> → </span>
+                          </>
+                        ) : null}
+                        <span className="font-medium">{formatRecordWriteValue(f.value)}</span>
+                      </dd>
+                    </React.Fragment>
+                  ))}
+                </dl>
+                {tool.recordWrite.dropped.length > 0 ? (
+                  <p className="text-xs text-muted-foreground" data-testid="record-write-dropped">
+                    {recordWriteDroppedLabel}:{' '}
+                    {tool.recordWrite.dropped
+                      .map((d) => `${d.field} (${d.detail ?? d.reason.replace(/_/g, ' ')})`)
+                      .join(', ')}
+                  </p>
+                ) : null}
+                {decision ? (
+                  <p
+                    data-testid="record-write-decision"
+                    data-state={decision.state}
+                    className={
+                      'inline-flex flex-wrap items-center gap-1.5 text-xs ' +
+                      (decision.state === 'error'
+                        ? 'text-destructive'
+                        : decision.state === 'success'
+                          ? 'text-emerald-700 dark:text-emerald-400'
+                          : 'text-muted-foreground')
+                    }
+                  >
+                    {decision.state === 'error' ? (
+                      <>
+                        <XCircle className="size-3.5" />
+                        {decision.message}
+                      </>
+                    ) : decision.state === 'pending' ? (
+                      <>
+                        <Loader2 className="size-3.5 animate-spin" />
+                        {recordWriteSubmittingLabel}
+                      </>
+                    ) : decision.decision === 'rejected' ? (
+                      recordWriteCancelledLabel
+                    ) : (
+                      <>
+                        <CheckCircle2 className="size-3.5" />
+                        {recordWriteWrittenLabel}
+                        {(() => {
+                          const written = writtenRecordOf(decision.result);
+                          return written && onOpenRecord ? (
+                            <button
+                              type="button"
+                              onClick={() => onOpenRecord(written)}
+                              data-testid="record-write-open-written"
+                              className="underline underline-offset-2 hover:text-foreground"
+                            >
+                              {written.label ?? written.recordId}
+                            </button>
+                          ) : null;
+                        })()}
+                      </>
+                    )}
+                  </p>
+                ) : null}
+                {isAwaitingApproval ? (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onToolApprove?.(tool.toolCallId, true)}
+                      data-testid="record-write-confirm"
+                      className="inline-flex h-7 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+                    >
+                      {recordWriteConfirmLabel}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onToolApprove?.(tool.toolCallId, false, recordWriteOpenFormReason);
+                        onOpenRecordForm?.(tool.recordWrite!);
+                      }}
+                      disabled={!onOpenRecordForm}
+                      data-testid="record-write-open-form"
+                      className="inline-flex h-7 items-center rounded-md border bg-background px-3 text-xs font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {recordWriteOpenFormLabel}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onToolApprove?.(tool.toolCallId, false, recordWriteCancelReason)}
+                      data-testid="record-write-cancel"
+                      className="inline-flex h-7 items-center rounded-md border bg-background px-3 text-xs font-medium hover:bg-accent"
+                    >
+                      {recordWriteCancelLabel}
+                    </button>
+                  </div>
+                ) : null}
               </div>
             ) : null}
             {/* cloud#1658 — the record hand-off: the agent resolved the record a
@@ -4249,6 +4534,11 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
             ) : (
               messages.map((message) => {
                 const isUser = message.role === 'user';
+                // objectstack#30223 — the follow-up turn `useHitlInChat` sends
+                // the model after 确认 / 取消 is not the person's words, so it
+                // draws no bubble: live, after a reload, or on a shared
+                // transcript. The model still received it.
+                if (isUser && isHitlContinuation(message.content)) return null;
                 const tools = message.toolInvocations ?? [];
                 const reasoning = message.reasoning?.trim();
                 const sources = message.sources ?? [];

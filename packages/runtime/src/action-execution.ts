@@ -1380,6 +1380,32 @@ function unresolvedApiTargetRecordRefusal(name: string, target: string, missing:
 }
 
 /**
+ * [#29881] The refusal for an action declared `execution: 'perRecord'` called
+ * with no record id (an empty one is none): `undefined` when the action is not
+ * declared per-record, or an id was given. The declaration is the action's own
+ * statement that its body runs on ONE record (`ActionSchema.execution`), so a
+ * call naming none is refused at the door, naming `recordId`, before anything
+ * runs — the #28932 shape, read from the declaration instead of a `target`
+ * token. Without it the body ran and failed on its own: a flow endpoint
+ * answered `400 FLOW_FAILED` naming the flow's internal node.
+ *
+ * Read by the api arm ({@link buildApiActionRequest}) and the flow arm
+ * ({@link dispatchFlowAction}); both doors reach both. An `aggregate` action,
+ * or one that declares no `execution`, runs record-less as before (#29173).
+ */
+export function perRecordActionRecordIdRefusal(action: any, recordId: unknown): ApiActionRequestRefusal | undefined {
+    if (action?.execution !== 'perRecord') return undefined;
+    if (recordId !== undefined && recordId !== null && recordId !== '') return undefined;
+    const name: string = action?.name ?? 'unknown';
+    return {
+        status: 400,
+        message:
+            `Action '${name}' is declared \`execution: 'perRecord'\` — it runs on one record — and no \`recordId\` was given. ` +
+            `Pass the id of the record to run it on as \`recordId\`. Nothing was run.`,
+    };
+}
+
+/**
  * Assemble the request a same-origin `type: 'api'` action makes — method,
  * path and JSON body — from its DECLARATION and the dispatch inputs, by the
  * same rules the console's api handler applies at a click
@@ -1428,6 +1454,10 @@ export function buildApiActionRequest(
     // An empty id is no id: `${ctx.recordId}` and `{id}` stay unresolved, and
     // are refused below by name, rather than blanked into a path naming no record.
     const routedRecordId: unknown = input.recordId || (input.record as any)?.id || undefined;
+    // [#29881] A per-record action names its record whatever its `target`
+    // says: with none, nothing is forwarded.
+    const perRecordRefusal = perRecordActionRecordIdRefusal(action, routedRecordId);
+    if (perRecordRefusal) return perRecordRefusal;
     let path = substituteApiTargetTokens(target, {
         param: input.params,
         ctx: {
@@ -2586,6 +2616,14 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
     },
 ): Promise<any> {
     const { objectName, subject, params, recordId, ec, envId } = wiring;
+    // [#29881] A per-record flow action with no record id is refused before
+    // the flow starts: no run exists, and no node's diagnostic reaches the caller.
+    const perRecordRefusal = perRecordActionRecordIdRefusal(action, recordId);
+    if (perRecordRefusal) {
+        throw Object.assign(new Error(perRecordRefusal.message), {
+            code: standardErrorCodeForHttpStatus(perRecordRefusal.status), status: perRecordRefusal.status,
+        });
+    }
     const record = subject.record;
     const automation = await resolveAutomationService(deps, requestContext, envId);
     if (!automation) {
@@ -3715,10 +3753,19 @@ export function refuseDeniedSubjectLoadBeforeDispatch(
  * `type: 'api'` action (the doors refuse an off-origin one earlier) whose
  * request can be built without the row. A declarative update is never one,
  * whatever its `type` says: `operation` before `type`.
+ *
+ * [#29881] Nor is an action declared `execution: 'perRecord'`: it says it runs
+ * on that record, so a record the caller's scope does not resolve (an unknown
+ * id, or a row it cannot read: one answer, by design) gets the door's own
+ * `404 RECORD_NOT_FOUND` before anything runs, as a flow or script body does,
+ * instead of whatever its target's body made of the missing row (a flow
+ * endpoint answered `400 FLOW_FAILED` naming its internal node). The #28657
+ * approvals shape declares no `execution`, and keeps forwarding.
  */
 export function forwardsOnDeniedSubjectLoad(action: any): boolean {
     return !isDeclarativeUpdateAction(action)
         && action?.type === 'api'
+        && action?.execution !== 'perRecord'
         && isSameOriginApiTarget(action?.target)
         && !apiActionRequestReadsSubjectRow(action);
 }

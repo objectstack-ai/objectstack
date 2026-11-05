@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useRef, lazy, Suspense, type ReactNode } from 'react';
-import { DENSITY_MODE_TO_ROW_HEIGHT, normalizeListViewSchema, type FilterTokenScope } from '@object-ui/core';
+import { DENSITY_MODE_TO_ROW_HEIGHT, columnIdentity, normalizeListViewSchema, type FilterTokenScope } from '@object-ui/core';
 import { buildListFilterKey, writeListFilterState } from './listFilterStorage.js';
 import type { useObjectListPreferences, ListViewPreference, ListViewPreferencePatch } from '../context/ListPreferencesProvider.js';
 const ObjectChart = lazy(() =>
@@ -17,6 +17,7 @@ const ObjectChart = lazy(() =>
 );
 import { ListView, type ListViewProps } from '@object-ui/plugin-list';
 import type { ListViewSchema, TreeViewConfig } from '@object-ui/types';
+import type { FilterBuilderRowGroup } from '@object-ui/components';
 import type { useAuth } from '@object-ui/auth';
 import type { useActionTextLocalizer } from '@object-ui/react';
 import { useLocalization, type useObjectLabel, type useObjectTranslation } from '@object-ui/i18n';
@@ -42,6 +43,29 @@ import type { useObjectViewRecordNavigation } from './objectViewRecordNavigation
 import type { useObjectViewToolbarAffordances } from './objectViewToolbarAffordances.js';
 import type { useObjectViewListUrlState, useObjectViewUrlFilters } from './objectViewListUrlState.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
+
+/**
+ * objectstack#30077 — the view's columns with the fields this user added
+ * appended, in the shape the view's own columns take (a bare name beside bare
+ * names, `{ field }` beside column objects), and the added names that are not
+ * already one of the view's columns. A name the view itself declares is the
+ * view's column, not an addition: it is left out of both, so hiding it goes
+ * through `hiddenFields` as before. With nothing added the columns are
+ * returned as they came.
+ */
+export function withAddedListColumns(
+    columns: ListViewSchema['columns'],
+    added: readonly string[] | undefined,
+): { columns: ListViewSchema['columns']; addedFields: string[] } {
+    if (!added || added.length === 0) return { columns, addedFields: [] };
+    const declared = Array.isArray(columns) ? (columns as unknown[]) : [];
+    const names = new Set(declared.map((c) => columnIdentity(c)).filter((n): n is string => !!n));
+    const addedFields = added.filter((name) => !names.has(name));
+    if (addedFields.length === 0) return { columns, addedFields };
+    const asObjects = declared.some((c) => typeof c !== 'string');
+    const appended = addedFields.map((field) => (asObjects ? { field } : field));
+    return { columns: [...declared, ...appended] as ListViewSchema['columns'], addedFields };
+}
 
 export function useObjectViewListRenderer({
     objectName,
@@ -77,6 +101,7 @@ export function useObjectViewListRenderer({
     initialUfSelections,
     handleUserFilterSelectionsChange,
     handleListTotalChange,
+    viewPanelFilters,
 }: {
     objectName: string | undefined;
     inSetup: ReturnType<typeof isSetupAppSegment>;
@@ -121,6 +146,13 @@ export function useObjectViewListRenderer({
     handleUserFilterSelectionsChange: ReturnType<typeof useObjectViewUrlFilters>['handleUserFilterSelectionsChange'];
     /** objectstack#27594 — the records the active view matched, for the title's count. */
     handleListTotalChange: (total: number) => void;
+    /**
+     * objectstack#30073 — the active view's own conditions when the Filter
+     * panel holds them as rows (a personal view, `personalViewPanelFilters`):
+     * the panel opens on them, they are not applied under the list a second
+     * time, and the list judges its 「Personalized」 filters against them.
+     */
+    viewPanelFilters?: FilterBuilderRowGroup;
 }) {
     // objectui#10694 — does the active view, as AUTHORED, declare a non-empty
     // `columns`? Booleans, so the relay keys on values and not on the memo's
@@ -384,6 +416,27 @@ export function useObjectViewListRenderer({
         };
 
         /**
+         * objectstack#30077 (ruling 6631126993, option A) — the object's fields
+         * this user ADDED to their list as columns with the same popover, stored
+         * beside their hidden fields (`addedFields`) and dropped with the rest of
+         * the entry by "Reset to view". The `columns` rung below appends them to
+         * the view's columns, so the list fetches, expands and draws them as it
+         * does a declared column; `ListView` offers only fields the caller may
+         * read. Offered where a Hide Fields choice is stored, never on the
+         * system view or fallback tab whose hide is session-only (objectui#10694
+         * ruling 5839344270): there the door is not wired, so the popover lists
+         * the view's columns alone, as before.
+         */
+        const addedFieldsStored = activeViewDeclaresColumns || activeViewIsSaved;
+        const listColumns = withAddedListColumns(
+            listSchema.columns,
+            addedFieldsStored ? viewPref?.addedFields : undefined,
+        );
+        const persistAddedFields = (added: string[]) => {
+            listPrefs.patchView(viewDef.id, { addedFields: added });
+        };
+
+        /**
          * objectui#12949 — the VIEW'S OWN density and hidden fields, before
          * this user's preference (objectui#12474) is laid over them by the
          * `rowHeight` and `hiddenFields` rungs below. `ListView` reads these
@@ -457,7 +510,9 @@ export function useObjectViewListRenderer({
             // objectstack#27626 — `columns` is named by identity in `ListView`'s
             // fetch effect too, and opening or closing a record hands this page
             // new object documents of equal content: hold it like the blocks.
-            columns: holdBlock('columns', listSchema.columns),
+            // objectstack#30077 — plus the fields this user added (see
+            // `withAddedListColumns`).
+            columns: holdBlock('columns', listColumns.columns),
             // objectui#10035 — the refresh signal, in place of the remount the
             // key used to force. The spread above carries only the plugin
             // ObjectView's counter; this page's own counter (actions, import,
@@ -529,7 +584,9 @@ export function useObjectViewListRenderer({
             // URL filters). Now: base ?? listSchema, concatenated with the URL
             // filters, and substituted as a whole.
             filter: (() => {
-                const base = (viewDef as any).filter ?? listSchema.filter;
+                // A view whose conditions the panel holds is filtered by the
+                // panel (objectstack#30073), never by its stored list as well.
+                const base = viewPanelFilters ? undefined : ((viewDef as any).filter ?? listSchema.filter);
                 const baseArr = Array.isArray(base) ? base : base ? [base] : [];
                 const combined = urlFilters.length ? [...baseArr, ...urlFilters] : base;
                 const resolved = substituteFilterTokens(combined, filterScope);
@@ -885,7 +942,7 @@ export function useObjectViewListRenderer({
                 // objectstack#28950 — and the view's own grouping, under a
                 // grouping the URL carries (the `grouping` rung above), so the
                 // list can tell the reader's from the view's.
-                viewDefaults={{ hiddenFields: viewHiddenFields, rowHeight: viewRowHeight, sort: viewSort, grouping: listSchema.grouping }}
+                viewDefaults={{ hiddenFields: viewHiddenFields, rowHeight: viewRowHeight, sort: viewSort, grouping: listSchema.grouping, filters: viewPanelFilters }}
                 // objectstack#28948 — those resets clear the user's state.
                 onRestoreViewDefaults={restoreViewDefaults}
                 // objectstack#28950 — what of the list differs from the view,
@@ -946,12 +1003,18 @@ export function useObjectViewListRenderer({
                     writeListUrlState({ search });
                 }}
                 onHiddenFieldsChange={persistHiddenFields}
+                // objectstack#30077 — the fields this user added as columns, and
+                // the door that stores a change to them (see `persistAddedFields`).
+                addedFields={listColumns.addedFields}
+                onAddedFieldsChange={addedFieldsStored ? persistAddedFields : undefined}
                 // objectui#5144 (ruling E): session-only, writes nothing.
                 onInlineEditChange={keepInlineEditModeForTheSession}
                 onColumnStateChange={persistListColumnState}
                 userFilterSelections={initialUfSelections}
                 onUserFilterSelectionsChange={handleUserFilterSelectionsChange}
-                initialFilters={listSeed?.filters}
+                // objectstack#30073 — with no list state of the reader's own,
+                // a personal view's panel opens on the view's own conditions.
+                initialFilters={listSeed?.filters ?? viewPanelFilters}
                 initialSearchTerm={listSeed?.search}
                 // objectui#12606 — Setup's list opens without row numbers in
                 // the leading cell. A host prop, not a view key: a console
@@ -979,7 +1042,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, handleListRowsChange, phoneTitle, handleListPersonalizationChange, workspaceTimeZone]);
+    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, handleListRowsChange, phoneTitle, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters]);
 
     return { renderListView };
 }

@@ -18,6 +18,7 @@ import { TranslationBundleSchema, TranslationConfigSchema } from './system/trans
 import { StackServerConfigSchema } from './system/stack-server.zod';
 import { StackEmailConfigSchema } from './system/email-config.zod';
 import { StackSmsConfigSchema } from './system/sms-config.zod';
+import { PushServiceConfigSchema } from './system/push-config.zod';
 import { DevLoginSchema } from './system/dev-login.zod';
 import { DemoStaffSchema } from './system/demo-staff.zod';
 import { hasPlatformObjectPrefix, isPlatformProvidedObjectName } from './system/constants/platform-object-names';
@@ -1132,6 +1133,23 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
     ),
 
   /**
+   * Mobile push configuration — {@link PushServiceConfigSchema}, the transport
+   * selection `PushServicePlugin` (`@objectstack/service-push`) is built from.
+   * Read by `resolvePushCapabilityArg` when `objectstack serve` / `bootStack`
+   * mount the `push` capability (`requires: ['push']`); nothing reads it
+   * without that token. Secrets are named by `credentialRef` (ADR-0143 D3),
+   * never written inline: the stack definition is compiled into the published
+   * artifact. Absent reads as `{}`, the hosted relay, which the boot refuses
+   * until the relay sender ships; a direct block is what is served.
+   */
+  push: PushServiceConfigSchema.optional()
+    .describe(
+      'Mobile push configuration, read when requires names push: transport direct with apns and/or fcm blocks, each '
+      + 'naming its secret by credentialRef (never inline). Absent or transport relay is the hosted relay, which the '
+      + 'boot refuses until the relay sender ships',
+    ),
+
+  /**
    * ObjectAI: Artificial Intelligence Layer
    *
    * Three-tier composition (Agent → Skill → Tool) aligned with Salesforce
@@ -1298,8 +1316,9 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    * using the specified conflict resolution strategy.
    * 
    * Uses the standard SeedSchema which supports:
-   * - `externalId`: Idempotency key for upsert matching (default: 'name')
-   * - `mode`: Conflict resolution (upsert, insert, ignore, replace)
+   * - `externalId`: Idempotency key that matches a record to an existing row (default: 'name')
+   * - `mode`: Conflict resolution (default `ignore`, create-only; `upsert` for
+   *   reference data a replay keeps current; `insert`, `update`, `replace`)
    * - `env`: Environment scoping (prod, dev, test)
    * 
    * @example
@@ -1307,7 +1326,6 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    * data: [
    *   {
    *     object: 'account',
-   *     mode: 'upsert',
    *     externalId: 'name',
    *     records: [
    *       { name: 'Acme Corp', type: 'customer', industry: 'technology' },
@@ -1673,12 +1691,13 @@ export const COMPOSE_KEY_DISPOSITIONS = Object.freeze({
   // #5051: the last key still on last-wins; aligned here, see the note above.
   i18n: 'single',
   // Deployment configuration the boot reads off the top level — one product
-  // name, one mail configuration and one SMS configuration per booted stack,
-  // so two stacks declaring different ones is a conflict to name, like
-  // `api` / `server`.
+  // name, one mail configuration, one SMS configuration and one push
+  // configuration per booted stack, so two stacks declaring different ones is
+  // a conflict to name, like `api` / `server`.
   appName: 'single',
   email: 'single',
   sms: 'single',
+  push: 'single',
 } as const satisfies Record<StackDefinitionKey, ComposeDisposition>);
 
 /**

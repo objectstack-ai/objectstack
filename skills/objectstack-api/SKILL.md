@@ -14,7 +14,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.2.0"
+  version: "18.3.0"
   domain: api
   tags: rest, endpoint, auth, realtime, server
 ---
@@ -129,16 +129,18 @@ policy layer over an existing pipeline, never a second execution dialect.
 | **`defineStack({ apis })`** | The endpoint is a *projection* of something the platform already executes: query/return records, or trigger a flow. No code, no deploy artifact, publish-gated. **Prefer this.** |
 | **A flow that runs your code** | The endpoint needs real handler CODE: point a `type: 'flow'` endpoint at a flow whose `script` node names a stack function (`defineStack({ functions })`), or whose `connector_action` node calls a declared connector (outbound). The URL stays declarative; the code runs where the automation surface already runs it. |
 
-An inbound webhook from a sender you control is a `type: 'api'` flow
-(objectstack-automation → **Inbound webhook (`api`) triggers**): it verifies
-ObjectStack's own `x-objectstack-signature`, enqueues, and answers `202`.
+An inbound webhook is a `type: 'api'` flow (objectstack-automation →
+**Inbound webhook (`api`) triggers**): it verifies ObjectStack's own
+`x-objectstack-signature`, or a vendor's own HMAC-SHA256 header its start node
+declares as `config.signature` (DocuSign Connect, Stripe-style), enqueues, and
+answers `202`.
 **An app never mounts on `http.server`** — that service is the platform
 plugins' own door-building primitive, and a code-mounted route gets no caller
 identity, auth gate, rate limit, namespace carve-out or OpenAPI entry. Three
 cases have no app surface today; say so rather than invent one: a third-party
-callback verified by its own signature over the raw body (the hook checks only
-`x-objectstack-signature`), a streaming response (a declared endpoint answers
-one JSON envelope), and a protocol the platform does not speak.
+callback signed in a form `config.signature` cannot declare (not HMAC-SHA256),
+a streaming response (a declared endpoint answers one JSON envelope), and a
+protocol the platform does not speak.
 
 <!-- os:check -->
 ```typescript

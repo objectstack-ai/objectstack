@@ -281,6 +281,15 @@ const STUDIO_EN: Record<string, string> = {
     'The clone was created, but the server\'s answer did not name it. Open it from the permission-set list.',
   // Embedded hosts have no route to navigate to, so the clone is announced.
   'perm.clone.done': 'Cloned as {name}. Open it from the permission-set list to edit.',
+  // objectstack#29727 — the clone door's notice, by the code it names it with
+  // (`noticeCode`, one per landing); `{package}` is the answer's `package`. A
+  // code this console does not know shows the door's `notice` as sent.
+  'perm.clone.notice.environmentWide':
+    'The copy was saved environment-wide, in no package, as the set it was copied from is. The copy is a new permission set authored in this system, with no link to the set it was copied from: changes to that set do not reach it. Not copied: delegated-admin scope (`adminScope`) and the everyone-baseline suggestion (`isDefault`) — grant either deliberately on the copy if it needs one. The copy is held by nobody yet: add it to a position, or assign it to users.',
+  'perm.clone.notice.inPackage':
+    'The copy was saved in package \'{package}\', beside the original rather than in place of it, and travels with that package. The copy is a new permission set authored in this system, with no link to the set it was copied from: changes to that set do not reach it. Not copied: delegated-admin scope (`adminScope`) and the everyone-baseline suggestion (`isDefault`) — grant either deliberately on the copy if it needs one. The copy is held by nobody yet: add it to a position, or assign it to users.',
+  'perm.clone.notice.inCreatedPackage':
+    'The copy was saved in package \'{package}\', created for it to hold your changes to the package the set came from, beside the original rather than in place of it, and travels with that package. The copy is a new permission set authored in this system, with no link to the set it was copied from: changes to that set do not reach it. Not copied: delegated-admin scope (`adminScope`) and the everyone-baseline suggestion (`isDefault`) — grant either deliberately on the copy if it needs one. The copy is held by nobody yet: add it to a position, or assign it to users.',
   // A save that still reached the server and was refused as a packaged set:
   // the same guidance as the lock, keyed on the refusal's code (never its
   // prose), instead of the transport's generic message.
@@ -1147,6 +1156,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.refusal.widget': 'the widget “{widget}”',
   'engine.studio.refusal.widgetInput': '{input} on the widget “{widget}”',
   'engine.studio.refusal.reportInput': '“{input}” in the report’s properties',
+  // objectstack#30064 — a refused dataset publish, placed on its measure or dimension.
+  'engine.studio.refusal.datasetMeasure': 'the measure “{member}”',
+  'engine.studio.refusal.datasetMeasureInput': '{input} of the measure “{member}”',
+  'engine.studio.refusal.datasetDimension': 'the dimension “{member}”',
+  'engine.studio.refusal.datasetDimensionInput': '{input} of the dimension “{member}”',
   'engine.studio.refusal.publishIssue': 'Not published. Check {where} — {problem}',
   'engine.studio.refusal.publishWhere': 'Not published. Check {where}: Details say what to change.',
   'engine.studio.refusal.publishUnlocated': 'Not published: the server refused this draft. Details say why.',
@@ -1573,6 +1587,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.objectPicker.showSystem': 'Show system objects ({count})',
   'engine.inspector.objectPicker.hideSystem': 'Hide system objects',
   'engine.inspector.objectPicker.noMatch': 'No object matches. Press Enter to keep what you typed.',
+  // A picker that takes objects only (the new-automation trigger object).
+  'engine.inspector.objectPicker.noMatchObjectsOnly': 'No object matches. Choose one from the list.',
+  'engine.inspector.objectPicker.notChosen': 'No object chosen: \u201c{text}\u201d is not an object. Choose one from the list.',
   // objectstack#28240 — objects outside the edited package's closure.
   'engine.inspector.objectPicker.groupOutside': 'Outside this package\u2019s dependencies',
   'engine.inspector.objectPicker.showOutside': 'Show objects outside this package\u2019s dependencies ({count})',
@@ -1662,6 +1679,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.edit.autoSaveOn': 'Auto-save is on — click to disable',
   'engine.edit.autoSaveOff': 'Auto-save is off — click to enable',
   'engine.edit.autoSavingShortly': 'Auto-saving…',
+  'engine.edit.notSavedHeld': 'Not saved — fix the errors to save',
   'engine.edit.destructive': 'Destructive change',
   'engine.edit.destructiveHint':
     'The change would break existing references. Review the issues and confirm to force-save.',
@@ -2463,6 +2481,18 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.data.form.sourceLabel': 'Preview source',
   'engine.studio.data.form.sourceDraft': 'Draft',
   'engine.studio.data.form.sourcePublished': 'Published',
+  // objectstack#30057 — which layout the Form tab edits: the form view the
+  // app's create and edit dialogs open, or the object's field groups when it
+  // has none; and, where create and edit open different form views, which one.
+  'engine.studio.data.form.layoutSource.formView': 'Form view: {name}',
+  'engine.studio.data.form.layoutSource.formViewTitle':
+    'New and Edit in the app open this form view, so the layout here is saved to it.',
+  'engine.studio.data.form.layoutSource.fieldGroups': 'Field groups',
+  'engine.studio.data.form.layoutSource.fieldGroupsTitle':
+    'This object has no form view: New and Edit in the app lay out its fields by these groups.',
+  'engine.studio.data.form.flowLabel': 'Form opened by',
+  'engine.studio.data.form.flowCreate': 'New',
+  'engine.studio.data.form.flowEdit': 'Edit',
   'engine.studio.data.fieldProps': 'Field properties',
   'engine.studio.data.groupProps': 'Group properties',
   'engine.studio.data.fieldInspectorMissing':
@@ -2491,6 +2521,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.newSimilar.submit': 'Create copy',
   'engine.studio.auto.newSimilar.failedHttp': 'Could not create the copy (HTTP {status}).',
   'engine.studio.auto.newSimilar.failed': 'Could not create the copy.',
+  // objectstack#29727 — the clone door's notice for the code
+  // `FLOW_CLONE_DISABLED_COPY`; any other code shows the door's `notice` as sent.
+  'engine.studio.auto.newSimilar.notice':
+    'The copy is switched off and does not run until you switch it on, and it still uses the same subflows, actions and objects as the original.',
   'engine.studio.auto.newSimilar.done': 'Saved the copy {name} in package {package}.',
   'engine.studio.auto.newSimilar.noPackage':
     'The server saved the copy {name}, but its answer does not name the package it landed in, so nothing was opened.',
@@ -2517,6 +2551,20 @@ const STUDIO_EN: Record<string, string> = {
   // the platform's sentence is shown instead).
   'engine.studio.auto.notRunning': 'Not running here',
   'engine.studio.auto.notRunningTitle': 'Enabled, but its trigger is not armed on this deployment',
+  // The run note's line for each of the contract's FLOW_UNBOUND_CAUSES: what
+  // this deployment does not do, and who can change it.
+  'engine.studio.auto.unboundCause.deployment_policy':
+    'This deployment keeps scheduled work that comes with a package switched off. Whoever operates this deployment can switch it on.',
+  'engine.studio.auto.unboundCause.disabled_subflow':
+    'A packaged subflow this flow calls is switched off, so this flow does not start. An admin can switch that subflow on.',
+  'engine.studio.auto.unboundCause.notice_after_suspending_subflow':
+    'A save notice in this flow comes after a subflow that can pause, so this flow does not start. Move the save notice ahead of that step, or use a notify step.',
+  'engine.studio.auto.unboundCause.suspending_subflow_in_region':
+    'A subflow inside a loop, parallel branch or error handler calls a flow that can pause, so this flow does not start. Move that call onto the main path of the flow.',
+  'engine.studio.auto.unboundCause.missing_trigger':
+    'This deployment does not run flows started by this kind of trigger. A developer can add the trigger package to the app, and the flow will start running.',
+  'engine.studio.auto.unboundCause.binding_failure':
+    'The trigger is installed, but connecting this flow to it failed. A developer can find the error in the server startup warnings.',
   'engine.studio.auto.unpublishedTitle': 'Not deployed yet — publish to deploy it',
   // objectui#12349 — the engine's registration verdict on a flow. A refused
   // flow is titled with the engine's own message, as sent; an unregistered one
@@ -2587,6 +2635,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.suggestRevoke': 'Revoke',
   'engine.studio.access.suggestRevoking': 'Revoking…',
   'engine.studio.access.suggestRevokedToast': 'Acceptance of "{set}" revoked.',
+  'engine.studio.access.suggestReopen': 'Reconsider',
+  'engine.studio.access.suggestReopening': 'Reopening…',
+  'engine.studio.access.suggestReopenedToast': 'Suggestion for "{set}" reopened: nothing is granted until it is accepted.',
   'engine.studio.access.heading': 'Permission sets',
   'engine.studio.access.search': 'Search permissions…',
   'engine.studio.access.none': 'No permission sets yet — click “+” above to create one',
@@ -3326,6 +3377,12 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.area.formEditor.locale': 'Locale {locale}',
   'engine.studio.area.formEditor.oneLocale': 'Only the {locale} version of this template is customized. {package}’s other languages of it stay as they are.',
   'engine.studio.area.formEditor.translationWhole': 'Customizing a translation replaces {package}’s whole {locale} bundle: every string in it is then served from your copy, the ones you leave unchanged included.',
+  // objectstack#30064 — the area's editor of a read-only package's dataset.
+  'engine.studio.area.formEditor.datasetWhole': 'Customizing a dataset copies {package}’s whole dataset into your customization: every measure and dimension is then served from your copy, the ones you leave unchanged included.',
+  'engine.studio.area.formEditor.usedByOne': 'Once published, a change here reaches the {count} item built on this dataset:',
+  'engine.studio.area.formEditor.usedByOther': 'Once published, a change here reaches the {count} items built on this dataset:',
+  'engine.studio.area.formEditor.usedByNone': 'Nothing uses this dataset yet: no dashboard, report or other item names it.',
+  'engine.studio.area.formEditor.usedByError': 'The dashboards and reports that use this dataset could not be read, so what a change here reaches is not known.',
   'engine.studio.publishedAllFlows': 'Published {count} flows',
   'engine.studio.publishedAllFlowsOne': 'Published flow "{label}"',
   'engine.studio.designer.search': 'Search…',
@@ -3344,6 +3401,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.designer.dropHere': 'Drag fields here',
   'engine.studio.designer.relatedTable': 'Related table: {name} — this group places a related list, so it holds no fields',
   'engine.studio.designer.ungrouped': 'Ungrouped',
+  // objectstack#30057 — on a form view, the fields no section lists.
+  'engine.studio.designer.offForm': 'Not on this form',
+  'engine.studio.designer.sectionDeleteTitle': 'Delete section (its fields leave the form)',
   'engine.studio.designer.newGroup': 'New group',
   // objectui#12453 — a read-only field card's title: what a click still does.
   'engine.studio.designer.fieldTitleReadOnly': 'Click a field to view its properties',
@@ -4178,6 +4238,9 @@ const STUDIO_EN: Record<string, string> = {
   // Problems panel (ProblemsPanel).
   'engine.flowProblems.title': 'Problems',
   'engine.flowProblems.empty': 'No problems — this flow is structurally valid.',
+  // Shown instead of `empty` when the run note above says the flow does not run
+  // here: "no problems" beneath that note read as a contradiction.
+  'engine.flowProblems.emptyNotRunning': 'The structure checks found nothing to fix. The note above is why this flow does not run here.',
   'engine.flowProblems.sourceSchema': 'schema',
   'engine.flowProblems.sourceExpression': 'expression',
   // objectui#11772 — one extra copy of a connection (`edgeRouteKey`): the
@@ -4251,11 +4314,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.inspector.listView.kind': 'List view',
   'engine.studio.inspector.listView.intro':
     'The list on the canvas. Its columns, filter and sort save to this package\'s draft and show on the canvas at once.',
-  // objectui#13151 — a view with no label is named by its object's display
-  // name and its role, never by its qualified name (`{view}` below is the
-  // panel's title, the same string).
-  'engine.studio.inspector.listView.defaultTitle': '{object} · Default view',
-  'engine.studio.inspector.listView.namedTitle': '{object} · {view}',
+  // objectui#13151 — a view with no label is named by its role, never by its
+  // qualified name (`{view}` below is the panel's title, the same string).
+  // objectstack#30046 — the header's title names the object before it.
+  'engine.studio.inspector.listView.defaultView': 'Default view',
   'engine.studio.inspector.listView.notCreated':
     'There is no list view “{view}” yet. Your first change here creates it in this package\'s draft.',
   'engine.studio.inspector.listView.readOnly': 'This package is read-only: the list view is shown here, not edited.',
@@ -4265,13 +4327,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.inspector.listView.addSort': '+ Add sort…',
   'engine.studio.inspector.listView.sortAsc': '{field} ascending',
   'engine.studio.inspector.listView.sortDesc': '{field} descending',
-  // objectstack#27836 — "Add view": a new list view of the object, its type picked first.
-  'engine.studio.inspector.listView.addView': 'Add view',
+  // objectstack#27836 — New view, from the header's view switcher: a new list view of the object.
   'engine.studio.inspector.listView.addViewTaken': 'A view named “{name}” already exists. Choose another key.',
-  'engine.studio.inspector.listView.backToEntry': 'Back to {view}',
-  // objectstack#27896 — the panel's view picker: the object's list views, a draft one marked.
-  'engine.studio.inspector.listView.switchView': 'View',
-  'engine.studio.inspector.listView.switchViewDraft': 'Draft',
   // objectui#12725 — a kanban view's card section: a card click on the canvas selects it.
   'engine.studio.inspector.listView.kanbanCard': 'Kanban card',
   'engine.studio.inspector.listView.kanbanCard.intro': 'What each card on the board shows, and what a click on a card opens.',

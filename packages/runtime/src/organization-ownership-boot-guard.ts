@@ -121,16 +121,44 @@ const ORG = 'organization_id';
  * a development boot (`os dev`, `os serve --dev`) composes its security
  * plugin, `.env*` files and `telemetry` sibling as a development boot, and the
  * ceremony has to boot the same way to see the same database, so the command
- * it names carries `--dev`.
+ * it names carries `--dev`. A production boot whose auth secret came from a
+ * file the operator never exported (`os start`'s `<home>/auth-secret`) names
+ * the command with that secret exported from the file, for the same reason:
+ * the ceremony composes the security plugin only with it.
  */
-function ceremonyCommand(dev: boolean | undefined): string {
-  return dev ? 'os migrate organization-ownership --dev' : 'os migrate organization-ownership';
+function ceremonyCommand(opts: OrganizationOwnershipBootGuardOptions): string {
+  if (opts.dev) return 'os migrate organization-ownership --dev';
+  if (opts.authSecretFile) {
+    return `OS_AUTH_SECRET="$(cat ${shellWord(opts.authSecretFile)})" os migrate organization-ownership`;
+  }
+  return 'os migrate organization-ownership';
+}
+
+/**
+ * A path as one POSIX shell word: bare when it holds only characters no shell
+ * reads specially, otherwise double-quoted with the four characters a double
+ * quote still interprets escaped.
+ */
+function shellWord(value: string): string {
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(value)) return value;
+  return '"' + value.replace(/[\\"$\x60]/g, (c) => '\\' + c) + '"';
 }
 
 /** How the boot that runs the guard was started — what the refusal's command must match. */
 export interface OrganizationOwnershipBootGuardOptions {
   /** A development boot (`os dev` / `os serve --dev`): the named ceremony command carries `--dev`. */
   dev?: boolean;
+  /**
+   * The file this production boot read its auth secret from because the
+   * operator set none: `os start`'s `<home>/auth-secret`. The ceremony
+   * composes the security plugin only with the secret the deployment serves
+   * with, and the operator's shell does not hold this one, so on a boot that
+   * is not a development boot the named commands export it from this file
+   * (`OS_AUTH_SECRET="$(cat FILE)" os migrate organization-ownership …`).
+   * Without it the plan is written and the apply can stop at its authored-
+   * conversion step.
+   */
+  authSecretFile?: string;
 }
 
 export class OrganizationOwnershipBootRefusal extends Error {
@@ -273,10 +301,10 @@ export function organizationOwnershipRefusalMessage(
   marker: OrganizationOwnershipMarkerState,
   opts: OrganizationOwnershipBootGuardOptions & { generation?: number } = {},
 ): string {
-  const ceremony = ceremonyCommand(opts.dev);
+  const ceremony = ceremonyCommand(opts);
   const run =
     `Run '${ceremony} --out PLAN' to write and review its plan, take a backup, then run ` +
-    `'${ceremony} --apply --plan-file PLAN --backup-taken', and start again.`;
+    `'${ceremony} --apply --plan-file PLAN --backup-taken', and start again.${secretNote(opts)}`;
   const columns = tables.length > 0
     ? ` ${tables.join(', ')} still carr${tables.length === 1 ? 'ies' : 'y'} a physical organization_id column its ` +
       'object no longer declares.'
@@ -308,7 +336,21 @@ export function organizationOwnershipRefusalMessage(
     `'${ORGANIZATION_OWNERSHIP_MIGRATION_ID}') is not verified, so the post-check still found rows the ceremony has ` +
     `not carried.${columns} The server refuses to start rather than serve rows of an organization-owned object with ` +
     `no organization. Resolve what the apply report names, then run '${ceremony} --out PLAN' again, review it, run ` +
-    `'${ceremony} --apply --plan-file PLAN --backup-taken', and start again.`
+    `'${ceremony} --apply --plan-file PLAN --backup-taken', and start again.${secretNote(opts)}`
+  );
+}
+
+/**
+ * Why the named commands export the auth secret, on a boot that read it from
+ * a file ({@link OrganizationOwnershipBootGuardOptions.authSecretFile}). A
+ * development boot's `--dev` composes the security plugin itself.
+ */
+function secretNote(opts: OrganizationOwnershipBootGuardOptions): string {
+  if (opts.dev || !opts.authSecretFile) return '';
+  return (
+    ` Both commands export the auth secret this server read from ${opts.authSecretFile}: the ceremony composes ` +
+    'the security plugin only with the secret the deployment serves with, and without it the apply can stop at its ' +
+    'authored-conversion step.'
   );
 }
 
@@ -527,7 +569,7 @@ export async function assertOrganizationOwnershipMigrated(
   logger?: { info?: (msg: string) => void },
   opts: OrganizationOwnershipBootGuardOptions & { now?: () => Date } = {},
 ): Promise<void> {
-  const ceremony = ceremonyCommand(opts.dev);
+  const ceremony = ceremonyCommand(opts);
   let tables: string[];
   try {
     tables = await findV17ShapeTables(engine);

@@ -295,14 +295,37 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'on dates: this faults at runtime, so the field silently evaluates to null. Use `daysBetween(a, b)` for the span ' +
         'in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
     },
+  ],
+  // [#30016] A flattened (flow) condition: the fault fails the run, it never
+  // reads null — `run-fails` where the run is proven to hold the field.
+  'date-arithmetic-run-fails': [
+    {
+      produce: () =>
+        onlyError('predicate', 'close_date + 1 > 3', {
+          fields: ['close_date'],
+          fieldTypes: { close_date: 'date' },
+          faultOutcome: 'run-fails',
+        }),
+      params: { operands: 'google.protobuf.Timestamp + int', reference: 'close_date' },
+      message:
+        'date arithmetic `google.protobuf.Timestamp + int` — `close_date` is a date, and CEL can\'t do arithmetic ' +
+        'on dates: this faults at runtime, and ' +
+        'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the work the flow ' +
+        'exists to do is not done (it does not read null). ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+  ],
+  'date-arithmetic-run-may-fail': [
     {
       produce: () =>
         onlyError('predicate', 'close_date + 1 > 3', { fields: ['close_date'], fieldTypes: { close_date: 'date' } }),
       params: { operands: 'google.protobuf.Timestamp + int', reference: 'close_date' },
       message:
         'date arithmetic `google.protobuf.Timestamp + int` — `close_date` is a date, and CEL can\'t do arithmetic ' +
-        'on dates: this faults at runtime, so the field silently evaluates to null. Use `daysBetween(a, b)` for the span ' +
-        'in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+        'on dates: this faults wherever `close_date` holds the date when the condition runs, and ' +
+        'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the work the flow ' +
+        'exists to do is not done (it does not read null). ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
     },
   ],
   'date-text-arithmetic': [
@@ -319,6 +342,26 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'faults at runtime, so the field silently evaluates to null. Use `daysBetween(a, b)` for the span in whole days, ' +
         'and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
     },
+  ],
+  'date-text-arithmetic-run-fails': [
+    {
+      produce: () =>
+        onlyError('predicate', 'end_at - start_at > duration("1h")', {
+          fields: ['start_at', 'end_at'],
+          fieldTypes: { start_at: 'datetime', end_at: 'datetime' },
+          faultOutcome: 'run-fails',
+        }),
+      params: { operands: 'DateText - DateText', reference: 'start_at' },
+      message:
+        'date arithmetic `DateText - DateText` — `start_at` is a date field, and the runtime holds a date field ' +
+        'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: ' +
+        'this faults at runtime, and ' +
+        'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the work the flow ' +
+        'exists to do is not done (it does not read null). ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+  ],
+  'date-text-arithmetic-run-may-fail': [
     {
       produce: () =>
         onlyError('predicate', 'end_at - start_at > duration("1h")', {
@@ -328,9 +371,11 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
       params: { operands: 'DateText - DateText', reference: 'start_at' },
       message:
         'date arithmetic `DateText - DateText` — `start_at` is a date field, and the runtime holds a date field ' +
-        'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: this ' +
-        'faults at runtime, so the field silently evaluates to null. Use `daysBetween(a, b)` for the span in whole days, ' +
-        'and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+        'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: ' +
+        'this faults wherever `start_at` holds that text when the condition runs, and ' +
+        'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the work the flow ' +
+        'exists to do is not done (it does not read null). ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
     },
   ],
   'date-duration-value': [
@@ -369,6 +414,91 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'type mismatch `bool + int` — `record.active` holds a boolean but is used with `+` against a number. This faults ' +
         'at runtime, so the expression silently evaluates to null (unless the value happens to be numeric). Use a number ' +
         'field, or drop the arithmetic/comparison.',
+    },
+  ],
+  // [#29926] One code per fault outcome the caller declares (`faultOutcome`):
+  // the three sentences differ in what the runtime does, so they are three
+  // codes. `type-mismatch-fail-closed` is the sentence #29904 served as
+  // `type-mismatch` with `outcome: 'fail-closed'`, byte for byte.
+  'type-mismatch-fail-closed': [
+    {
+      produce: () =>
+        onlyError('predicate', 'record.name > 5', { scope: 'record', fieldTypes: { name: 'text' }, faultOutcome: 'fail-closed' }),
+      params: { operands: 'string > int', operator: '>', held: 'text', reference: 'record.name' },
+      message:
+        'type mismatch `string > int` — `record.name` holds text but is used with `>` against a number. CEL has no such operation, so ' +
+        'wherever the value is not numeric text (an empty value included) the expression faults, and here ' +
+        'an expression that cannot be evaluated fails closed: the write (or the operation a hook guards) is refused, not ' +
+        'skipped. ' +
+        'Compare like with like: use a number field, compare text with text, or convert explicitly — `size(record.name)` for its ' +
+        'length, `double(record.name)` for its value (which itself faults on text that is not a number).',
+    },
+    {
+      produce: () =>
+        onlyError('predicate', 'record.active > 0', { scope: 'record', fieldTypes: { active: 'boolean' }, faultOutcome: 'fail-closed' }),
+      params: { operands: 'bool > int', operator: '>', held: 'boolean', reference: 'record.active' },
+      message:
+        'type mismatch `bool > int` — `record.active` holds a boolean but is used with `>` against a number. CEL has no such operation, so ' +
+        'wherever the value is not numeric text (an empty value included) the expression faults, and here ' +
+        'an expression that cannot be evaluated fails closed: the write (or the operation a hook guards) is refused, not ' +
+        'skipped. Compare a boolean with `true` / `false`, or use a number field.',
+    },
+  ],
+  'type-mismatch-run-fails': [
+    {
+      produce: () =>
+        onlyError('predicate', 'name > 5', { scope: 'flattened', fields: ['name'], fieldTypes: { name: 'text' }, faultOutcome: 'run-fails' }),
+      params: { operands: 'string > int', operator: '>', held: 'text', reference: 'name' },
+      message:
+        'type mismatch `string > int` — `name` holds text but is used with `>` against a number. CEL has no such operation, so ' +
+        'wherever the value is not numeric text (an empty value included) the expression faults, and here ' +
+        'a flow condition that cannot be evaluated fails the run: the flow stops at this condition, the write that fired ' +
+        'it still lands, and the work the flow exists to do is not done. ' +
+        'Compare like with like: use a number field, compare text with text, or convert explicitly — `size(name)` for its ' +
+        'length, `double(name)` for its value (which itself faults on text that is not a number).',
+    },
+  ],
+  'type-mismatch-fail-open': [
+    {
+      produce: () =>
+        onlyError('predicate', 'record.name > 5', { scope: 'record', fieldTypes: { name: 'text' }, faultOutcome: 'fail-open' }),
+      params: { operands: 'string > int', operator: '>', held: 'text', reference: 'record.name' },
+      message:
+        'type mismatch `string > int` — `record.name` holds text but is used with `>` against a number. CEL has no such operation, so ' +
+        'wherever the value is not numeric text (an empty value included) the expression faults, and here ' +
+        'the rule is advisory, so a rule that cannot be evaluated is skipped, not refused: the write proceeds, the rule is ' +
+        'never applied (its advisory never fires), and the only trace is a log line saying it could not be evaluated. ' +
+        'Compare like with like: use a number field, compare text with text, or convert explicitly — `size(record.name)` for its ' +
+        'length, `double(record.name)` for its value (which itself faults on text that is not a number).',
+    },
+  ],
+  // [#29959] A flow condition the caller declared no outcome for: still a
+  // warning, worded for the failed run a fault is there (never a null). The
+  // second case is the `record.<field>` read, judged as its bare name is.
+  'type-mismatch-run-may-fail': [
+    {
+      produce: () => onlyWarning('predicate', 'name > 5', { scope: 'flattened', fields: ['name'], fieldTypes: { name: 'text' } }),
+      params: { operands: 'string > int', operator: '>', held: 'text', reference: 'name' },
+      message:
+        'type mismatch `string > int` — `name` holds text but is used with `>` against a number. CEL has no such operation, so ' +
+        'wherever the value is not numeric text (an empty value included) the expression faults, and a flow condition that ' +
+        'faults when it is evaluated fails the run: the flow stops at this condition and the work it exists to do is not done ' +
+        '(it does not read null). Whether `name` holds text there depends on what the run binds, which this check cannot ' +
+        'prove here, so this is a warning, not a refusal. ' +
+        'Compare like with like: use a number field, compare text with text, or convert explicitly — `size(name)` for its ' +
+        'length, `double(name)` for its value (which itself faults on text that is not a number).',
+    },
+    {
+      produce: () =>
+        onlyWarning('predicate', 'record.active > 0', { scope: 'flattened', fields: ['active'], fieldTypes: { active: 'boolean' } }),
+      params: { operands: 'bool > int', operator: '>', held: 'boolean', reference: 'record.active' },
+      message:
+        'type mismatch `bool > int` — `record.active` holds a boolean but is used with `>` against a number. CEL has no such ' +
+        'operation, so wherever the value is not numeric text (an empty value included) the expression faults, and a flow ' +
+        'condition that faults when it is evaluated fails the run: the flow stops at this condition and the work it exists ' +
+        'to do is not done (it does not read null). Whether `record.active` holds a boolean there depends on what the run ' +
+        'binds, which this check cannot prove here, so this is a warning, not a refusal. ' +
+        'Compare a boolean with `true` / `false`, or use a number field.',
     },
   ],
   'field-near-miss': [
@@ -509,6 +639,7 @@ const SWEEP_SOURCES: readonly string[] = [
   'close_date + 1 > 3',
   'record.close_date - record.close_date',
   'today() - record.close_date',
+  'close_date - close_date > duration("1h")',
   'record.name > 5',
   'record.active + 1 > 5',
   "record.account == 'a1' && record.account.name == 'x'",
@@ -546,6 +677,22 @@ const SWEEP_SCHEMAS: readonly (ExprSchemaHint | undefined)[] = [
     optionFields: ['status'],
   },
   { fields: ['status', 'close_date'], objectName: 'deal', fieldTypes: { close_date: 'date' } },
+  // [#30016] The same flow condition where the run is proven to hold the
+  // field: the date verdicts' `-run-fails` codes (the line above reaches
+  // `-run-may-fail`).
+  { fields: ['status', 'close_date'], objectName: 'deal', fieldTypes: { close_date: 'date' }, faultOutcome: 'run-fails' },
+  // [#29926] The deal schema once per declared fault outcome, so the sweep
+  // reaches each `type-mismatch-*` code and holds its params to its message.
+  ...(['fail-closed', 'run-fails', 'fail-open'] as const).map((faultOutcome): ExprSchemaHint => ({
+    scope: 'record',
+    objectName: 'deal',
+    fields: ['amount', 'name', 'active'],
+    fieldTypes: { name: 'text', active: 'boolean' },
+    faultOutcome,
+  })),
+  // [#29959] A flattened (flow) condition with no declared outcome reaches
+  // `type-mismatch-run-may-fail`, bare and through `record.`.
+  { scope: 'flattened', objectName: 'deal', fields: ['amount', 'name', 'active'], fieldTypes: { name: 'text', active: 'boolean' } },
   { fields: ['status'] },
   { fieldTypes: { account: 'lookup' }, traversalHydration: true },
 ];

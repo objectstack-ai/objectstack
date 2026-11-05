@@ -83,6 +83,27 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
         layer: 'effective' | 'per-package' = 'effective',) {
     const { packageId } = request;
     const servedOverride = layer === 'effective';
+    // [#29871] The per-package layer is each package's own address, and a
+    // disable empties none: a disabled package's items stay stored and come
+    // back on enable. So this layer keeps them (the package export reads it,
+    // and exports every package, enabled or not); the effective and the
+    // execution reads hide them, at the registry and after the merges below.
+    const keepDisabledPackages = layer === 'per-package';
+    // [#29903, #29872, ADR-0146 D8 item 3] …and it serves a package's objects
+    // as the package declares them: another package's extension of one (the
+    // `.custom` pair's, or any other installed package's) is that package's,
+    // exported as its own `objectExtensions` entry, never folded into the
+    // owner's object for the owner's export (a field and its patches would
+    // travel twice, the second time as the owner's). Only the package's own
+    // extensions fold, and the effective and execution reads keep every
+    // extension in the object they serve.
+    const onlyExtensionsOf = layer === 'per-package' && packageId ? packageId : undefined;
+    const listRegistry = (type: string): unknown[] => (keepDisabledPackages
+        ? host.engine.registry.listItems(type, packageId, {
+            includeDisabledPackages: true,
+            ...(onlyExtensionsOf !== undefined ? { onlyExtensionsOf } : {}),
+        })
+        : host.engine.registry.listItems(type, packageId));
     // ── [ADR-0131 D6] The environment → code read ──────────────────────
     //
     // The list serves the environment's stored rows over the code
@@ -101,11 +122,11 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
     // (plugin-auth, plugin-security, plugin-audit, …) — those are globally
     // shared and must be visible at every project's meta endpoint.
     if (host.environmentId === undefined) {
-        items = [...host.engine.registry.listItems(request.type, packageId)];
+        items = [...listRegistry(request.type)];
         // Normalize singular/plural using explicit mapping
         if (items.length === 0) {
             const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-            if (alt) items = [...host.engine.registry.listItems(alt, packageId)];
+            if (alt) items = [...listRegistry(alt)];
         }
     } else {
         // For project kernels: the SchemaRegistry is owned by THIS
@@ -115,10 +136,10 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
         // package alike. The `_packageId` tag added by `listItems`
         // (registry.ts) is preserved for the sidebar to compute the
         // correct navigation URL.
-        items = [...host.engine.registry.listItems(request.type, packageId)];
+        items = [...listRegistry(request.type)];
         if (items.length === 0) {
             const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-            if (alt) items = [...host.engine.registry.listItems(alt, packageId)];
+            if (alt) items = [...listRegistry(alt)];
         }
     }
 
@@ -242,8 +263,10 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
                 // object disagree the moment a row exists. Both routes were
                 // wrong here together, which is why #7556's byName===listed
                 // pin stayed green through this defect.
+                // [#29903, #29872] …with only the package's own extensions on
+                // the per-package layer, as its registry items are listed.
                 return host.foldObjectExtendersFromRegistry(
-                    request.type, (data as { name?: unknown } | null)?.name, data,
+                    request.type, (data as { name?: unknown } | null)?.name, data, onlyExtensionsOf,
                 );
             }, unseated, { servedOverride });
 
@@ -746,7 +769,12 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
     //
     // [#24210] The predicate is {@link isItemOfDisabledPackage}, the one the
     // by-name read asks, so the list and the by-name read hide the same items.
-    if (request.type !== 'package') {
+    //
+    // [#29871] …on the effective and execution reads. The per-package layer
+    // keeps them (see `keepDisabledPackages` above): a package's export is
+    // what the package holds, and an export that dropped a disabled
+    // package's items installed elsewhere as an empty package.
+    if (request.type !== 'package' && !keepDisabledPackages) {
         items = (items as any[]).filter((it) => !isItemOfDisabledPackage(host.engine.registry, it));
     }
     // [#28877] …and, on the effective served list, an action that launches

@@ -712,6 +712,130 @@ describe('attachments permission matrix (#2755)', () => {
   });
 });
 
+// A row's uploader is read-only after creation, like a comment's author: the
+// join row's `uploaded_by` and the file's `owner_id` both declare `readonly`,
+// so the data door strips a non-system caller's value on update and reports it
+// in `droppedFields`, while the rest of the write lands. Their create stamps
+// are pinned in the matrix above, (e) and (f), and the file's at the data door
+// below: a stored file's uploader is the user who created it, as an
+// attachment's and a comment's author are. A system write keeps the value it
+// supplies. Org-bound like the matrix: memberA holds the attachment-manager
+// set and PATCHes the join row it created, which the floor admits; only an
+// administrator reaches a `sys_file` create or PATCH (the baseline names no
+// grant on it).
+describe('attachments: a row\'s uploader is read-only after creation (sys_attachment.uploaded_by, sys_file.owner_id)', () => {
+  let stack: VerifyStack;
+  let rootDir: string;
+  let ql: any;
+  let adminTok: string, memberATok: string;
+  let adminId: string, memberAId: string, memberBId: string;
+  let caseAId: string;
+
+  const uid = async (email: string) =>
+    (await ql.findOne('sys_user', { where: { email }, context: SYS }))?.id;
+  /** Does a write answer's `droppedFields` name `field` with reason `readonly`? */
+  const dropsReadonly = (json: any, field: string): boolean =>
+    ((json?.droppedFields ?? []) as Array<{ fields: string[]; reason: string }>).some(
+      (d) => d.reason === 'readonly' && d.fields.includes(field),
+    );
+  /** memberA uploads a file and attaches it to its own case; returns both ids. */
+  const attachedUpload = async (): Promise<{ fileId: string; attachmentId: string }> => {
+    const fileId = await uploadFile(stack, memberATok);
+    const created = await stack.apiAs(memberATok, 'POST', '/data/sys_attachment', {
+      parent_object: 'att_case',
+      parent_id: caseAId,
+      file_id: fileId,
+      file_name: 'hello.txt',
+    });
+    expect(created.status).toBeLessThan(300);
+    return { fileId, attachmentId: await createdId(created) };
+  };
+
+  beforeAll(async () => {
+    const boot = bootFixture({ orgContext: true });
+    rootDir = boot.rootDir;
+    stack = await boot.stack;
+    adminTok = await stack.signIn();
+    memberATok = await stack.signUp('att-ro-member-a@verify.test');
+    await stack.signUp('att-ro-member-b@verify.test');
+    ql = await stack.kernel.getServiceAsync('objectql');
+    adminId = await uid('admin@objectos.ai');
+    memberAId = await uid('att-ro-member-a@verify.test');
+    memberBId = await uid('att-ro-member-b@verify.test');
+    expect(adminId, 'the administrator resolved').toBeTruthy();
+    expect(memberAId, 'memberA resolved').toBeTruthy();
+    expect(memberBId, 'memberB resolved, a different user').toBeTruthy();
+    expect(memberBId).not.toBe(memberAId);
+    expect(adminId).not.toBe(memberBId);
+    const managerSet = await catalogPermissionSet(ql, 'att_attachment_manager');
+    expect(managerSet, 'fixture permission set served by the security catalog').toBeTruthy();
+    await ql.insert('sys_user_permission_set', { user_id: memberAId, permission_set: managerSet.name }, { context: { ...SYS } });
+    const caseRes = await stack.apiAs(memberATok, 'POST', '/data/att_case', { name: 'uploader case' });
+    expect(caseRes.status).toBeLessThan(300);
+    caseAId = await createdId(caseRes);
+  }, 120_000);
+
+  afterAll(async () => {
+    await stack?.stop();
+    if (rootDir) await fs.rm(rootDir, { recursive: true, force: true });
+  });
+
+  it('an edit never changes an attachment\'s uploader: the PATCH answers 200, droppedFields names uploaded_by, and the description lands', async () => {
+    const { attachmentId } = await attachedUpload();
+    const patched = await stack.apiAs(memberATok, 'PATCH', `/data/sys_attachment/${attachmentId}`, {
+      description: 'memberA edited this',
+      uploaded_by: memberBId,
+    });
+    const json = (await patched.json()) as any;
+    expect(patched.status, JSON.stringify(json)).toBe(200);
+    expect(
+      dropsReadonly(json, 'uploaded_by'),
+      `droppedFields names uploaded_by with reason readonly — got ${JSON.stringify(json.droppedFields ?? null)}`,
+    ).toBe(true);
+    const row = await ql.findOne('sys_attachment', { where: { id: attachmentId }, context: SYS });
+    expect(row?.uploaded_by, 'the uploader the create stamped').toBe(memberAId);
+    expect(row?.description, 'the editable field in the same request still lands').toBe('memberA edited this');
+  });
+
+  it('an edit never changes a file\'s uploader: an administrator\'s PATCH answers 200, droppedFields names owner_id, and the name lands', async () => {
+    const fileId = await uploadFile(stack, memberATok);
+    const patched = await stack.apiAs(adminTok, 'PATCH', `/data/sys_file/${fileId}`, {
+      name: 'renamed.txt',
+      owner_id: memberBId,
+    });
+    const json = (await patched.json()) as any;
+    expect(patched.status, JSON.stringify(json)).toBe(200);
+    expect(
+      dropsReadonly(json, 'owner_id'),
+      `droppedFields names owner_id with reason readonly — got ${JSON.stringify(json.droppedFields ?? null)}`,
+    ).toBe(true);
+    const file = await ql.findOne('sys_file', { where: { id: fileId }, context: SYS });
+    expect(file?.owner_id, 'the uploader the upload door stamped').toBe(memberAId);
+    expect(file?.name, 'the editable field in the same request still lands').toBe('renamed.txt');
+  });
+
+  it('control: a system write keeps the uploader it supplies, on the join row and on the file', async () => {
+    const { fileId, attachmentId } = await attachedUpload();
+    await ql.update('sys_attachment', { uploaded_by: memberBId }, { where: { id: attachmentId }, context: { ...SYS } });
+    await ql.update('sys_file', { owner_id: memberBId }, { where: { id: fileId }, context: { ...SYS } });
+    expect((await ql.findOne('sys_attachment', { where: { id: attachmentId }, context: SYS }))?.uploaded_by).toBe(memberBId);
+    expect((await ql.findOne('sys_file', { where: { id: fileId }, context: SYS }))?.owner_id).toBe(memberBId);
+  });
+
+  it('a stored file\'s uploader is the user who created it: an administrator\'s data-door create naming another user answers 201 and records the administrator', async () => {
+    const created = await stack.apiAs(adminTok, 'POST', '/data/sys_file', { name: 'created.txt', owner_id: memberBId });
+    expect(created.status, 'the create is admitted').toBe(201);
+    const file = await ql.findOne('sys_file', { where: { id: await createdId(created) }, context: SYS });
+    expect(file?.owner_id, 'the creator, not the user the request named').toBe(adminId);
+    expect(file?.name, 'the rest of the row lands').toBe('created.txt');
+  });
+
+  it('control: a system create keeps the uploader it supplies', async () => {
+    const created = await ql.insert('sys_file', { name: 'imported.txt', owner_id: memberBId }, { context: { ...SYS } });
+    expect((await ql.findOne('sys_file', { where: { id: created.id }, context: SYS }))?.owner_id).toBe(memberBId);
+  });
+});
+
 // ── (a′) without service-storage, the floor is the last word (#21729) ────
 // The ruling's other half. `sys_attachment` is DEFINED in platform-objects and
 // gated by service-storage, so the alternate match that relieves the delete

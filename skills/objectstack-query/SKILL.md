@@ -11,7 +11,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.2.0"
+  version: "18.3.0"
   domain: query
   tags: query, filter, sort, paginate, aggregate, ObjectQL, full-text
 ---
@@ -316,11 +316,15 @@ to stored values.
 protocol normalizes `$searchFields` onto it, and the object form
 `search: { query, fields }` spells the same narrowing `fields`.
 
-Omit it to search the object's declared `searchableFields` (or an auto-default
-of name/title + short-text fields), resolved server-side. It can only **narrow**
-that set, never widen it: over the REST/protocol ingress a name outside it is
-`400 INVALID_FIELD`, not a silent fall-back to a full scan. The object form
-`search: { query, fields }` stays available for the Tier-2 knobs below.
+Omit it to search the object's declared `searchableFields` (or, with none
+declared, an auto-default: name/title + short-text fields, plus every field
+marked `searchable: true` of any type except `secret` / `password` / `vector` or a virtual `formula`),
+resolved server-side. It can only **narrow** that set, never widen it: over the
+REST/protocol ingress a name outside it is `400 INVALID_FIELD`, not a silent
+fall-back to a full scan. `searchable: false`, the default, never removes a
+field the type default already scans; declare `searchableFields` to choose the
+set. The object form `search: { query, fields }` stays available for the Tier-2
+knobs below.
 
 > ⚠️ **Validates, then silently ignored — never emit these.** `fuzzy`, `boost`,
 > `operator`, `minScore`, `language` and `highlight` are the whole set; their
