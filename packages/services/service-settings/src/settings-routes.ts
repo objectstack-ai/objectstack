@@ -273,8 +273,9 @@ export function registerSettingsRoutes(
   };
 
   mountFamilyRoute('get', base, {
-    async serve(_req, res, ctx) {
-      const manifests = service.listManifests(ctx);
+    async serve(req, res, ctx) {
+      // Served as the namespace read serves them: a sourced key's options.
+      const manifests = service.listManifests(ctx, { locale: requestLocaleOf(req) });
       sendOk(res, { manifests });
     },
     refuse(res, err) {
