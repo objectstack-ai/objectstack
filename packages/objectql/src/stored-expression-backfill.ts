@@ -460,9 +460,9 @@ export function formatStoredExpressionBackfillReport(report: StoredExpressionBac
       ? '✓ Every stored computed value already equals its expression — nothing to recompute.'
       : '✓ No NULL a stored computed field\'s expression would fill — nothing to backfill.');
   } else {
-    const verb = report.applied ? 'Wrote' : 'Would write';
-    lines.push(`${verb} ${report.applied ? report.writtenRows : report.nullRows + (report.changed ? report.staleRows : 0)} `
-      + `value(s) in ${pending.length} field(s):`);
+    lines.push(report.applied
+      ? `Wrote ${report.fields.reduce((n, f) => n + f.written, 0)} value(s) on ${report.writtenRows} row(s) in ${pending.length} field(s):`
+      : `Would write ${report.nullRows + (report.changed ? report.staleRows : 0)} value(s) in ${pending.length} field(s):`);
     for (const f of pending) {
       const parts = [`${f.nullRows} NULL row(s)`];
       if (report.changed) parts.push(`${f.staleRows} stale row(s)`);
