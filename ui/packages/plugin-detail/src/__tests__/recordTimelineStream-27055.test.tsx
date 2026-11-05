@@ -59,7 +59,7 @@ describe('the stream, pure (objectstack#27055)', () => {
     expect(mergeTimelineStream([comment, updated], null).map((i) => i.id)).toEqual(['a2', 'c1']);
   });
 
-  it('the four chips: 变更 holds the audit's field changes, the activity's `created` row is 活动 (objectstack#30074, ruling C)', () => {
+  it("the four chips: 变更 holds the audit's field changes, the activity's `created` row is 活动 (objectstack#30074, ruling C)", () => {
     const stream = mergeTimelineStream([comment, call, created], audit);
     expect(filterTimelineStream(stream, 'all')).toHaveLength(4);
     expect(filterTimelineStream(stream, 'discussion').map((i) => i.id)).toEqual(['c1']);
@@ -239,7 +239,7 @@ describe('an activity row sits under 活动 whatever the history flag; 变更 ho
     for (const event of events) expect(screen.queryByText(`Event ${event.activityType}`)).toBeNull();
   });
 
-  it('the panel's `changes_only` keeps the same rule as the stream', () => {
+  it("the panel's `changes_only` keeps the same rule as the stream", () => {
     render(<RecordActivityTimeline items={[call, created, ...audit]} filterMode="changes_only" />);
     expect(screen.getByText('Status')).toBeTruthy();
     expect(screen.queryByText('Created the lead')).toBeNull();

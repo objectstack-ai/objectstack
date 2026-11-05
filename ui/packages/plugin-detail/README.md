@@ -817,7 +817,9 @@ the header row opens the panel's whole face, the host's `?related=`): first
 `enable.trackHistory`, the field changes, shown as a one-line composer, the
 newest entries and 「查看全部 N 条 →」, which opens the stream in full with its
 All / Activity / Discussion chips, a Changes chip while the record shows its
-field history (the host's `RecordFieldHistoryContext`), and paging
+field history (the host's `RecordFieldHistoryContext`; it holds the audit's
+field changes with their before and after values, and every activity event,
+`created` and `updated` included, sits under Activity), and paging
 (`?related=timeline`) — then each related list in the reader's arrangement, then Approvals and
 Attachments. The reader's ⊟ (`rightColumn`) takes the right column out of the
 two-column tiers; there is no tabbed tier.
