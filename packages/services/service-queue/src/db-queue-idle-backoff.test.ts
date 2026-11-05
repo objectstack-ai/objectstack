@@ -187,9 +187,9 @@ describe('#17612 DbQueueAdapter — idle poll cost', () => {
         // 1s,2s,4s,8s,16s then the 30 s ceiling — pinned exactly, because a
         // bound alone is met by a loop that stopped. [#30228] Plus the
         // lease-reclaim read, at most once per 30 s lease window: on the first
-        // tick and on every ceiling tick (the 1/3/7/15 s ramp ticks fall inside
-        // the first window), 124 - 4 = 120 of them.
-        expect(engine.calls.find).toBe(124 + 120);
+        // tick and on every ceiling tick (the ramp ticks at 2, 6 and 14 s fall
+        // inside the first window), 124 - 3 = 121 of them.
+        expect(engine.calls.find).toBe(124 + 121);
         // Nothing was claimed, so nothing was written.
         expect(engine.calls.update).toBe(0);
     });
