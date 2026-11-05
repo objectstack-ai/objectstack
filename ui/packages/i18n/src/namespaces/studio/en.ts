@@ -1980,6 +1980,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.datasource.deleteTitle': 'Delete datasource "{item}"?',
   'engine.datasource.deleteBody': 'The connection {name} is removed. This cannot be undone.',
   'engine.datasource.delete': 'Delete',
+  // The objects bound to a datasource, read from object metadata (each object's
+  // `datasource`): the delete confirm lists them, and a refused delete names them.
+  'engine.datasource.deleteBoundBody': 'These objects still use {name}, so it cannot be deleted yet. Delete each object or move it to another datasource first:',
+  'engine.datasource.deleteBoundRefused': '{name} was not deleted: {objects} still use it. Delete these objects or move them to another datasource, then delete {name} again.',
+  'engine.datasource.boundObjectSeparator': ', ',
   // objectui#13460 — the datasource page's own copy. Author data (names, driver
   // labels and descriptions, server messages) and the driver config schema's enum
   // option values (objectui#13353) are not rows here.
