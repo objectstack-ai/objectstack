@@ -637,8 +637,9 @@ describe('#19403 round 5 — the blind spot, FIFTH shape: one schema, two forms,
     // `repeater-row-properties.test.ts` derives a row property for every child
     // of a `type: 'repeater'` field. On `actionForm` that is exactly ONE
     // repeater — `params`, with eighteen children — and every one of those
-    // carried its own text in all three locales before this round.
-    expect(ACTION_ENUMERATED.covered.length).toBe(18);
+    // carried its own text in all three locales before this round. Nineteen
+    // since #30259 added `params.widget`, authored in all three locales too.
+    expect(ACTION_ENUMERATED.covered.length).toBe(19);
     expect(ACTION_ENUMERATED.covered).toContain('params.carryOver');
     expect(ACTION_ENUMERATED.covered).toContain('params.requiresFeature');
     for (const [locale, forms] of TRANSLATED_LOCALES) {

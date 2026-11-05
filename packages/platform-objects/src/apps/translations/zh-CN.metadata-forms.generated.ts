@@ -1880,6 +1880,9 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "params.type": {
         label: "类型"
       },
+      "params.widget": {
+        label: "控件覆盖"
+      },
       "params.required": {
         label: "必填"
       },

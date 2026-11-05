@@ -801,13 +801,58 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // access, and mark-read is served by `/api/v1/notifications` rather than the
       // generic data API — so no create/edit bit is needed by the flow, and
       // `allowDelete` stays false like everything else in this anchor-bound set.
-      // `sys_activity` is deliberately NOT included: it is not a per-user-scoped
-      // shape (no `user_id` to scope by), and it is a separate question if it ever
-      // matters. Two NAMED additions in #5491's explicit-allow shape — the
+      // `sys_activity` was left out of THIS pair because it has no `user_id` for
+      // a `_self` policy to scope by; it is granted further down, on its own
+      // ruling and under its own row scope (the parent-record gate, not a `_self`
+      // policy). Two NAMED additions in #5491's explicit-allow shape — the
       // `_self` policies below scope both to the caller — not a widening pattern
       // and not a step back toward a wildcard.
       sys_inbox_message: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
       sys_notification_receipt: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      // [#30108 — maintainer ruling 6633054352, verbatim 「同意 A」] A record's
+      // comments and its activity timeline, for every member who can read the
+      // record. `enable.feeds` and `enable.activities` are opt-OUT (on unless an
+      // object says `false`), so the record page offers both on every object of
+      // every app; with neither object named by any shipped set, a member of an
+      // app whose sets name only the app's own objects was refused both (`403`
+      // on `sys_comment` and on `sys_activity`), on records they can read — the
+      // "declared, not reachable" shape ADR-0049 forbids. The rule the comment
+      // gate already states is "a user who may READ a record may discuss it".
+      //
+      // These two lines open the OBJECTS. WHICH ROWS is not decided here, and ⛔
+      // no row policy is added for either: neither object has an owner or user
+      // column to scope by, and each row's parent is a different object. The
+      // rows are decided by plugin-audit's parent-record gates, which ask the
+      // engine and this plugin "can this caller read that record":
+      //   - `comment-access-hooks.ts`: a comment is listed, read and posted only
+      //     on a thread whose parent record the caller can read; an edit needs
+      //     the comment's author or an editor of the parent record, and the
+      //     `owner_only_writes` floor below keeps a member's edit to the
+      //     comments they wrote;
+      //   - `activity-read-visibility.ts`: an activity row is served only when
+      //     the record it is about is readable. A parent object the caller
+      //     holds no read on is skipped through `canReadObject`, never read as
+      //     the caller, so a feed read logs no access denial per skipped object.
+      // So a member reads and writes the comments, and reads the history, of
+      // exactly the records they can read, and nothing on any other record.
+      //
+      // The capability switches stay orthogonal and in force: on an object
+      // with `enable.feeds: false`, plugin-audit's `enforceFeedsCapability`
+      // refuses a comment's create and its re-thread into that object
+      // (`403 FEEDS_DISABLED`), and `enable.activities: false` writes no
+      // activity row for that object to read.
+      //
+      // ⛔ No `allowDelete` on either, for the anchor reason above. Removing a
+      // comment stays the moderation path (`sys_comment_moderation` below, with
+      // a delete bit an ordinary set grants). `sys_activity` is READ only: its
+      // writer is the audit mirror, and the object serves `get` / `list` alone.
+      //
+      // An external member (`org_external`) holds no `everyone` anchor and
+      // resolves `external_default` in place of this set, so neither line
+      // reaches a portal user: theirs come only through an explicit grant, under
+      // the same two gates.
+      sys_comment: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+      sys_activity: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
     },
     // [#21237] The identity object's `Admin` group is admin-review data, not a
     // staff directory: `sys_user_org_members` below opens every org peer's row,

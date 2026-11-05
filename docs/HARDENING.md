@@ -239,7 +239,7 @@ production deployment, enable at least:
 | ----------- | ------------------------------------------------------------------------------------ |
 | Password    | `password_reject_breached: true`, `password_require_complexity: true`, `password_history_count: 3–5`, `password_expiry_days: 90` |
 | Anti-abuse  | `lockout_threshold: 5`, `lockout_duration_minutes: 15`, `rate_limit_max` / `rate_limit_window_seconds` |
-| MFA         | `mfa_required: true` (or per-org `require_mfa`), `mfa_grace_period_days: 7`            |
+| MFA         | `mfa_required: true` (or per-org `require_mfa`, which needs two-factor enrollment on), `mfa_grace_period_days: 7`; neither saves while `OS_AUTH_TWO_FACTOR=false` |
 | Sessions    | `session_idle_timeout_minutes: 30–60`, `session_absolute_max_hours: 8–12`, `max_concurrent_sessions_per_user` |
 | Network     | `allowed_ip_ranges` (IPv4 CIDR) for tenant- or office-scoped access                   |
 

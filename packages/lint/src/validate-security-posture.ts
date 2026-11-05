@@ -124,7 +124,16 @@
 import { parseCelToAst, sqlPredicateToCel, type CelAstNode } from '@objectstack/formula';
 import { controlledByParentOwnerMayEdit, isControlledByParentMasterField, referenceCarrierOf } from '@objectstack/spec/data';
 import { describeAnchorForbiddenBits, type AnchorBindingContext } from '@objectstack/spec/security';
-import { indexObjectGraph, nearestName, packagesOf, recordsOf, type ObjectGraph } from './object-graph.js';
+import {
+  indexObjectGraph,
+  nearestName,
+  objectExtensionsByTarget,
+  objectsAsServed,
+  packagesOf,
+  recordsOf,
+  type ObjectGraph,
+  type VisibleObjectExtension,
+} from './object-graph.js';
 import { injectedColumnsFor } from './system-fields.js';
 import {
   PUBLIC_READ_WRITE_WAY_OUT,
@@ -666,18 +675,6 @@ function pushCbpAmbiguousRelation(
   });
 }
 
-/** One `objectExtensions` entry as the registry registers it — see {@link pushExtensionMergedCbpFindings}. */
-interface VisibleExtension {
-  /** The position of the package that ships it: registration order across packages. */
-  carrier: number;
-  /** The entry's path, e.g. `objectExtensions[0]`. */
-  path: string;
-  /** `ext.priority ?? 200`, the registry's default. */
-  priority: number;
-  /** Its field records, name folded in (`recordsOf`). */
-  fields: AnyRec[];
-}
-
 /**
  * [#23210 · ADR-0055 §1] `security-controlled-by-parent-no-relation` and
  * `security-controlled-by-parent-ambiguous-relation`, judged on the MERGED
@@ -746,38 +743,16 @@ function pushExtensionMergedCbpFindings(findings: SecurityFinding[], stack: AnyR
     declare(recordsOf(stack.objects).filter((obj) => typeof obj.name === 'string' && !owners.has(obj.name)), bodies.length);
   }
 
-  // Target name → its extensions, one per package.
-  const extensions = new Map<string, Map<number, VisibleExtension>>();
-  const collect = (entries: unknown, carrier: number, at: string) => {
-    if (!Array.isArray(entries)) return;
-    entries.forEach((entry: unknown, i: number) => {
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return;
-      const ext = entry as AnyRec;
-      if (typeof ext.extend !== 'string' || !targets.get(ext.extend)) return;
-      const byCarrier = extensions.get(ext.extend) ?? new Map<number, VisibleExtension>();
-      byCarrier.set(carrier, {
-        carrier,
-        path: `${at}objectExtensions[${i}]`,
-        priority: typeof ext.priority === 'number' ? ext.priority : 200,
-        fields: recordsOf(ext.fields),
-      });
-      extensions.set(ext.extend, byCarrier);
-    });
-  };
-  if (!multi) collect(stack.objectExtensions, 0, '');
-  else bodies.forEach((body, j) => collect(body.objectExtensions, j, `packages[${j}].manifest.`));
-
-  for (const [target, byCarrier] of extensions) {
+  // Target name → its extensions, one per package, in fold order: the shared
+  // fold (#30303), which the FLS-key check below reads too.
+  for (const [target, ordered] of objectExtensionsByTarget(stack)) {
     const obj = targets.get(target);
     if (!obj || owdOf(obj) !== 'controlled_by_parent') continue;
     if (cbpMasterCandidates(obj).length !== 1) continue;
 
     const baseFields = new Map(recordsOf(obj.fields).map((f) => [String(f.name ?? '?'), f] as const));
     const merged = new Map(baseFields);
-    const ordered = [...byCarrier.values()].sort(
-      (left, right) => left.priority - right.priority || left.carrier - right.carrier,
-    );
-    const writers = new Map<string, VisibleExtension>();
+    const writers = new Map<string, VisibleObjectExtension>();
     // Per key, how many packages wrote it at the priority of its last writer.
     const tiedWriters = new Map<string, number>();
     for (const visible of ordered) {
@@ -793,7 +768,7 @@ function pushExtensionMergedCbpFindings(findings: SecurityFinding[], stack: AnyR
 
     const candidates = cbpMasterCandidates({ ...obj, fields: [...merged.values()] });
     if (candidates.length === 1) continue;
-    const blamed = new Set<VisibleExtension>();
+    const blamed = new Set<VisibleObjectExtension>();
     for (const [key, visible] of writers) {
       if (merged.get(key)?.type === 'master_detail' || baseFields.get(key)?.type === 'master_detail') blamed.add(visible);
     }
@@ -1031,7 +1006,17 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
   // define, an object with no readable field map, registry-injected system
   // columns) are exactly the three this rule must take, and re-deriving them
   // here would be the drift that module exists to prevent.
-  const flsGraph: ObjectGraph = indexObjectGraph(stack);
+  //
+  // [#30303] …indexed over the objects as the registry SERVES them
+  // (`objectsAsServed`): with every `objectExtensions` entry that extends one
+  // folded in, a sibling body's included, through the same fold the
+  // controlled-by-parent merge above reads. The runtime evaluator matches a
+  // key against the served object's columns, so a key naming a field an
+  // extension adds is a key that enforces; read against the declaration
+  // alone, it was refused, and an app package could grant no access to a
+  // field its module package adds. A field no body declares or extends is
+  // still unknown, and the three skips are unchanged.
+  const flsGraph: ObjectGraph = indexObjectGraph({ objects: objectsAsServed(stack).objects });
 
   // ── ADR-0066 / D5/D9: permission-set posture ─────────────────────────
   for (let i = 0; i < permissionSets.length; i++) {
