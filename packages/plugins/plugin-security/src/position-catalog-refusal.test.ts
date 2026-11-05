@@ -37,6 +37,7 @@ import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { namesWithoutCatalogRow, positionNotInCatalogMessage } from './position-catalog-refusal.js';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
+import { provisionRigUsers } from './rig-users.testkit.js';
 
 // ---------------------------------------------------------------------------
 // Fixture
@@ -104,6 +105,14 @@ const ADMIN_IN_GRANT_ORG = { ...ADMIN, tenantId: GRANT_ORG };
 /** A position record id — the spelling the measured authors wrote where the position's NAME belongs. */
 const AUDITOR_POSITION_ID = 'position_mtur8hz5jp7ptm3r';
 
+/** [#29029] Every user this suite's writes name or act as: each gets a `sys_user` row. */
+const RIG_USERS = [
+  'u_admin', 'u_b1', 'u_b2', 'u_bx', 'u_echo', 'u_fossil', 'u_holder', 'u_member', 'u_multi',
+  'u_named', 'u_ns', 'u_nsu', 'u_ob', 'u_ob2', 'u_op', 'u_org_admin', 'u_plain', 'u_reg',
+  'u_retired', 'u_sys', 'u_tok', 'u_tok_ok', 'u_up', 'u_wa', 'u_wb', 'u_wc', 'u_wf', 'u_wm',
+  'u_wo', 'u_x',
+];
+
 const engines: ObjectQL[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -143,6 +152,11 @@ async function boot(opts: { walled?: boolean } = {}) {
   for (const o of [SysUser, SysMember, SysUserPosition, SysUserPermissionSet]) {
     if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as never, 'qa.authz-read-set');
   }
+  // [#29029] …except `sys_user`, which is provisioned with a row for every
+  // holder the writes name: the engine's `user_id` reference check reads the
+  // holder through the caller's read door, so the position check is what is
+  // measured.
+  await provisionRigUsers(engine, RIG_USERS);
   engines.push(engine);
 
   const warn = vi.fn();

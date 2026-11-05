@@ -40,6 +40,7 @@ import {
   registerGrantHolderMembershipRefusal,
 } from './grant-holder-membership-refusal.js';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
+import { provisionRigUsers } from './rig-users.testkit.js';
 
 // ---------------------------------------------------------------------------
 // Fixture
@@ -95,6 +96,12 @@ const MEMBERSHIPS = [
   { id: 'm_both_b', user_id: 'u_both', organization_id: ORG_B, role: 'member' },
 ];
 
+/** [#29029] Every user this suite's writes name or act as: each gets a `sys_user` row. */
+const RIG_USERS = [
+  'u_admin', 'u_admin_a', 'u_both', 'u_member_a', 'u_member_a2', 'u_member_b', 'u_nobody',
+  'u_platform', 'u_ro_a',
+];
+
 const engines: ObjectQL[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -143,10 +150,12 @@ async function boot(opts: BootOptions = {}) {
   // The organization-less holdings and rows below exist only on a store built
   // before 18.x (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is it.
   await relaxTenantColumns(engine, ['sys_position', 'sys_user_position', 'sys_user_permission_set']);
-  // `sys_user` stays registered and unprovisioned, as in the sibling suites:
-  // the engine's own `user_id` existence probe then cannot run and stands
-  // down, so what is measured here is the membership predicate alone.
+  // [#29029] `sys_user` is provisioned with a row for every user the writes
+  // name: the engine's own `user_id` reference check reads the holder through
+  // the caller's read door and finds it, so what is measured here is the
+  // membership predicate alone.
   if (!engine.registry.getObject(SysUser.name)) engine.registry.registerObject(SysUser as never, 'qa.authz-read-set');
+  await provisionRigUsers(engine, RIG_USERS);
   if (opts.members === 'unprovisioned') engine.registry.registerObject(SysMember as never, 'qa.authz-read-set');
   engines.push(engine);
 

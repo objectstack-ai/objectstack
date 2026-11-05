@@ -44,6 +44,7 @@ import {
   registerGrantPermissionSetNameHooks,
 } from './grant-permission-set-name.js';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
+import { provisionRigUsers } from './rig-users.testkit.js';
 
 // ---------------------------------------------------------------------------
 // Fixture
@@ -69,6 +70,12 @@ const CATALOG = [MEMBER_DEFAULT, QA_ADMIN, QA_ALPHA, QA_BETA];
 
 const SYS = { isSystem: true } as const;
 const ADMIN = { userId: 'u_admin', positions: [], permissions: ['qa_admin'] };
+
+/** [#29029] Every user this suite's writes name or act as: each gets a `sys_user` row. */
+const RIG_USERS = [
+  'u_1', 'u_2', 'u_3', 'u_3b', 'u_4', 'u_5', 'u_6', 'u_7', 'u_admin', 'u_b1', 'u_c1', 'u_c2',
+  'u_c3', 'u_c4', 'u_d1', 'u_p1', 'u_r1', 'u_s1', 'u_s2', 'u_u1',
+];
 
 const engines: ObjectQL[] = [];
 afterEach(async () => {
@@ -103,6 +110,9 @@ async function boot() {
   for (const o of [SysUser, SysMember]) {
     if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as never, 'qa.authz-read-set');
   }
+  // [#29029] Each grant's holder is a user the writer reads, so the grant-name
+  // check is what is measured.
+  await provisionRigUsers(engine, RIG_USERS);
   engines.push(engine);
 
   const services: Record<string, unknown> = {
