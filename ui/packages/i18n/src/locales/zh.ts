@@ -153,6 +153,7 @@ const zh = {
     notAvailableHere: '「{{action}}」在当前页面不可用。',
     notAvailableForRecord: '对此记录不可用',
     completedSuccessfully: '操作已成功完成',
+    completedNamed: '“{{action}}”已完成',
     failed: '操作失败',
     parallelFailed: '一个或多个并行操作失败',
     selectExactlyOneRow: '此操作针对单条记录，请只选择一行。',

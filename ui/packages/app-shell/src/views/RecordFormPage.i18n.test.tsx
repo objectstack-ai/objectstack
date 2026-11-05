@@ -181,8 +181,10 @@ describe('RecordFormPage title resolves from the locale packs (#3469)', () => {
     // the title is Chinese. No inline English `defaultValue` can satisfy this
     // assertion, so it fails loudly if the packs ever stop being consulted.
     renderPage('create', { language: 'zh' });
-    expect(title()).toBe(String(builtInLocales.zh.form.createTitle).replace('{{object}}', 'Contacts'));
-    expect(title()).toBe('新建Contacts');
+    // The pack's `新建{{object}}`, with the zh spacing between Han text and a
+    // Latin label that `createI18n` applies to this key.
+    expect(String(builtInLocales.zh.form.createTitle)).toBe('新建{{object}}');
+    expect(title()).toBe('新建 Contacts');
   });
 });
 

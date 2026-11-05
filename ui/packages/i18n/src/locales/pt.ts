@@ -150,6 +150,7 @@ const pt = {
     notAvailableHere: '"{{action}}" não está disponível na página atual.',
     notAvailableForRecord: 'Não disponível para este registro',
     completedSuccessfully: 'A ação foi concluída com sucesso',
+    completedNamed: 'Ação concluída: {{action}}',
     failed: 'A ação falhou',
     parallelFailed: 'Uma ou mais ações paralelas falharam',
     selectExactlyOneRow: 'Esta ação é executada em um único registro — selecione exatamente uma linha.',
