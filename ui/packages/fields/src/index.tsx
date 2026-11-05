@@ -5420,7 +5420,18 @@ export * from './widgets/types.js';
 // File field value shapes (ObjectStack ADR-0104 D3 wave 2) — the single
 // arbiter of reference vs expanded vs legacy-blob form, shared by the upload
 // widgets and by action-param serialization.
-export * from './widgets/file-value.js';
+// isImageValue, uploadResultView, withRecentUploads and FILE_STORAGE_BASE_PATH
+// stay module-level: the upload widgets read them; no host does.
+export {
+  fileIdOf,
+  fileUrlFromId,
+  readFileValue,
+  readFileValues,
+  fileValueForSubmit,
+  isFileIdToken,
+  UploadIncompleteError,
+} from './widgets/file-value.js';
+export type { FileValueView, UploadResultLike } from './widgets/file-value.js';
 export * from './FieldEditWidget.js';
 export * from './widgets/TextField.js';
 export * from './widgets/NumberField.js';
@@ -5445,7 +5456,7 @@ export * from './widgets/RichTextField.js';
 export * from './widgets/LookupField.js';
 export * from './widgets/CapabilityMultiSelectField.js';
 export * from './widgets/ObjectRefField.js';
-export * from './widgets/FilterConditionField.js';
+export { condToMongo, kvToCondition, isMatchAllCriteria, FilterConditionField } from './widgets/FilterConditionField.js';
 export * from './widgets/RecipientPickerField.js';
 // The kind table and the two spellings the reference widgets share with a host
 // face (objectui#12613), published so the face names a stored value as the
@@ -5468,6 +5479,11 @@ export * from './widgets/RecordPickerDialog.js';
 // lookup picker and a related-list Add dialog of the same object agree on
 // columns (#3365).
 export * from './widgets/deriveLookupColumns.js';
+// The ambient upload adapter the file, image and avatar widgets upload through.
+// The adapter contract is `@object-ui/types`'s, re-exported here so a host wires
+// `UploadProvider` and types its own adapter from one import.
+export { UploadProvider, useUpload, type UploadProviderProps } from './widgets/UploadProvider.js';
+export type { UploadAdapter, UploadOptions, UploadResult } from '@object-ui/types';
 export * from './widgets/FileField.js';
 export * from './widgets/ImageField.js';
 export { ImageCropperDialog } from './widgets/ImageCropperDialog.js';
@@ -5479,7 +5495,8 @@ export * from './widgets/AutoNumberField.js';
 export * from './widgets/UserField.js';
 export * from './widgets/ObjectField.js';
 export * from './widgets/VectorField.js';
-export * from './widgets/GridField.js';
+export { evalArith, lookupAutofillPatch, computeRow, GridField, LineItemsField } from './widgets/GridField.js';
+export type { GridColumn } from './widgets/GridField.js';
 export * from './widgets/lookupAutofill.js';
 // New widgets according to @objectstack/spec
 export * from './widgets/ColorField.js';

@@ -159,6 +159,7 @@ const valueKeyedChart = () =>
     ],
     object: 'crm_opportunity',
     dimensionFields: { competitor_name: 'competitor_name' },
+    drillScopes: { deals: {}, total: {} },
     drillRawRows: [
       { competitor_name: 'orion' },
       { competitor_name: 'cabot' },
@@ -179,6 +180,7 @@ const serverResolvedChart = () =>
     ],
     object: 'crm_opportunity',
     dimensionFields: { competitor_name: 'competitor_name' },
+    drillScopes: { deals: {}, total: {} },
     drillRawRows: [{ competitor_name: 'orion' }, { competitor_name: 'cabot' }],
   });
 

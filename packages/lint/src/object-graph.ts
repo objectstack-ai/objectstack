@@ -378,6 +378,14 @@ export interface VisibleObjectExtension {
   priority: number;
   /** Its field records, name folded in ({@link recordsOf}). */
   fields: AnyRec[];
+  /**
+   * [#30471] Its validation rule records ({@link recordsOf}), carried for the
+   * one reader that addresses an object's rules by name
+   * (`validate-translation-references.ts`, `_validations.RULE`). Carrying them
+   * changes nothing about which entries survive: a replaced entry's rules go
+   * with it, as its fields do.
+   */
+  validations: AnyRec[];
 }
 
 /**
@@ -430,6 +438,7 @@ export function objectExtensionsByTarget(stack: unknown): Map<string, VisibleObj
         path: `${at}objectExtensions[${i}]`,
         priority: typeof ext.priority === 'number' ? ext.priority : 200,
         fields: recordsOf(ext.fields),
+        validations: recordsOf(ext.validations),
       });
       byTarget.set(ext.extend, kept);
     });
@@ -466,6 +475,13 @@ export function objectExtensionsByTarget(stack: unknown): Map<string, VisibleObj
  * name is served whichever wins) and named in `tied`, for a caller whose
  * verdict depends on which definition wins: registration order decides that,
  * and a stack does not state it.
+ *
+ * Contract, which `indexObjectFields` (validate-hook-body-writes.ts) joins on
+ * by position: `objects` is one to one and in order with
+ * `recordsOf(stack.objects)`. `objectsAsServed(stack).objects[i]` is the
+ * served form of `recordsOf(stack.objects)[i]`, on the early return (nothing
+ * extends anything: the declared array itself) as on the fold. No object is
+ * dropped, added or reordered.
  */
 export function objectsAsServed(stack: unknown): { objects: AnyRec[]; tied: Map<string, Set<string>> } {
   const objects = isRec(stack) ? recordsOf(stack.objects) : [];

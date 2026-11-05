@@ -825,7 +825,9 @@ function withoutWithheldMembers(base: ServiceObject, withheld: WithheldExtension
  *     the tenant's `message` and `active`, never the tenant's condition.
  *   - The three {@link OBJECT_FOLD_SCALAR_KEYS} (`label`, `pluralLabel`,
  *     `description`) are overridden last-writer-wins, subject to the
- *     `tenantAuthored` yield rule below.
+ *     `tenantAuthored` yield rule below. [#30391] A `label` that renames the
+ *     object without a `pluralLabel` beside it also takes the running
+ *     `pluralLabel` off: the plural named the old label.
  *   - `fieldPatches` [ADR-0146 D10, second rule] is APPLIED, never carried:
  *     after the merges above, each patch writes its `BASE_FIELD_DISPLAY_WHITELIST`
  *     keys onto the named field and its option labels onto the options whose
@@ -905,7 +907,17 @@ function mergeObjectDefinitions(
   // Override scalar props (last writer wins) — [ADR-0029 D9.2a] unless the base has been
   // authored by the tenant, in which case the extender's packaged default yields.
   const yields = (key: ObjectFoldScalarKey): boolean => tenantAuthored?.has(key) === true;
-  if (extension.label !== undefined && !yields('label')) merged.label = extension.label;
+  if (extension.label !== undefined && !yields('label')) {
+    // [#30391] `pluralLabel` is the plural OF `label`: an extension that renames
+    // the object and declares no plural leaves the running plural naming the
+    // old label, so the object is served as one that declares no
+    // `pluralLabel`. A plural the tenant authored stays (the D9.2a yield), and
+    // an extension that repeats the label it extends renames nothing.
+    if (extension.pluralLabel === undefined && extension.label !== merged.label && !yields('pluralLabel')) {
+      delete merged.pluralLabel;
+    }
+    merged.label = extension.label;
+  }
   if (extension.pluralLabel !== undefined && !yields('pluralLabel')) {
     merged.pluralLabel = extension.pluralLabel;
   }
@@ -3683,6 +3695,41 @@ export class SchemaRegistry {
 
   /** See {@link onPackageUninstalled}. */
   private packageUninstalledListeners = new Set<(packageId: string) => void>();
+
+  /** See {@link onPackageEnabled}. */
+  private packageEnabledListeners = new Set<(packageId: string) => void>();
+
+  /**
+   * [#30377] Be told that {@link enablePackage} has switched a DISABLED package
+   * back on, after its served folds are dropped: never for an enable of a
+   * package that was already enabled (`enableOnInstall: true` on a fresh
+   * install). Returns the unsubscribe.
+   *
+   * For state derived from what a disable withholds, so it is brought current
+   * on every enable door at once (`PATCH /packages/:id/enable`, an install's
+   * `enableOnInstall`, the protocol's install), never per door. The engine is
+   * the one today: a roll-up `summary` a package contributes by extension is
+   * withheld with its package, so the child writes made during the disable
+   * recompute nothing, and the engine recomputes it on enable.
+   */
+  onPackageEnabled(listener: (packageId: string) => void): () => void {
+    this.packageEnabledListeners.add(listener);
+    return () => { this.packageEnabledListeners.delete(listener); };
+  }
+
+  /** Tell every {@link onPackageEnabled} listener. Never throws: the enable has happened, and a failing listener is logged at `error`. */
+  private announcePackageEnabled(id: string): void {
+    for (const listener of this.packageEnabledListeners) {
+      try {
+        listener(id);
+      } catch (err) {
+        console.error(
+          `[Registry] package "${id}" was enabled, but a listener bringing state derived from it current failed `
+            + `(${(err as Error)?.message ?? err}) — that state may still read as it did while the package was disabled.`,
+        );
+      }
+    }
+  }
 
   /**
    * [#30215] Be told, once per package, that {@link uninstallPackage} has
@@ -8409,6 +8456,9 @@ export class SchemaRegistry {
     // …and the default record pages it declared, so the next package may
     // declare a default for those objects.
     this.forgetDefaultRecordPageClaims(id);
+    // [#30581] …and the navigation entries it put into other packages' apps:
+    // with no row left, the fold's disabled check cannot withhold them.
+    this.setPackageNavContributions(id, []);
 
     // [#18877] The boot seed forgets the id together with the row. A package
     // that no longer exists has no lifecycle state to preserve, so the next
@@ -8449,6 +8499,7 @@ export class SchemaRegistry {
   enablePackage(id: string): InstalledPackage | undefined {
     const pkg = this.getPackage(id);
     if (pkg) {
+      const wasDisabled = this.isPackageDisabled(id);
       pkg.enabled = true;
       pkg.status = 'installed';
       pkg.statusChangedAt = new Date().toISOString();
@@ -8457,6 +8508,7 @@ export class SchemaRegistry {
       // [#24400] A disabled package's bound actions are not attached
       // ({@link boundCodeActions}), so every object's fold is re-derived.
       this.invalidateAll();
+      if (wasDisabled) this.announcePackageEnabled(id);
     }
     return pkg;
   }
@@ -8565,6 +8617,60 @@ export class SchemaRegistry {
         (contribution.group ? `/${contribution.group}` : '') +
         ` (${list[list.length - 1].items.length} items)`,
     );
+  }
+
+  /**
+   * [#30581] Make `contributions` the WHOLE set of navigation contributions
+   * `packageId` holds, in every app: what the package registered before is
+   * replaced, never added to. The door a package BODY takes (`registerApp`'s
+   * manifest step), so registering the same body again (an artifact reload,
+   * whose `metadata:reloaded` re-registers every package of the artifact, a
+   * manifest replay, an upgrade) leaves each entry once, instead of one more
+   * copy of every module's entries per registration until a restart.
+   *
+   * Replaced IN PLACE: an app's list keeps the package's entries where its
+   * first registration put them, so the fold's ties (equal priority, the
+   * common case at the default 200) resolve in the order a fresh boot gives.
+   * An app the package newly contributes to gets them at the end; an app it no
+   * longer names loses them. {@link registerAppNavContribution} stays the
+   * additive verb, for a caller adding one contribution at a time.
+   */
+  setPackageNavContributions(
+    packageId: string,
+    contributions: ReadonlyArray<{ app: string; group?: string; priority?: number; items?: any[] }>,
+  ): void {
+    const incoming = new Map<string, Array<{ packageId?: string; group?: string; priority: number; items: any[] }>>();
+    for (const contribution of contributions) {
+      if (!contribution || !contribution.app) continue;
+      const list = incoming.get(contribution.app) ?? [];
+      list.push({
+        packageId,
+        group: contribution.group,
+        priority: contribution.priority ?? 200,
+        items: Array.isArray(contribution.items) ? contribution.items : [],
+      });
+      incoming.set(contribution.app, list);
+    }
+    for (const [app, list] of [...this.appNavContributions]) {
+      const at = list.findIndex((c) => c.packageId === packageId);
+      if (at === -1) continue;
+      const kept = list.filter((c) => c.packageId !== packageId);
+      kept.splice(at, 0, ...(incoming.get(app) ?? []));
+      incoming.delete(app);
+      if (kept.length > 0) this.appNavContributions.set(app, kept);
+      else this.appNavContributions.delete(app);
+    }
+    for (const [app, list] of incoming) {
+      this.appNavContributions.set(app, [...(this.appNavContributions.get(app) ?? []), ...list]);
+    }
+    for (const c of contributions) {
+      if (!c || !c.app) continue;
+      this.log(
+        `[Registry] Navigation contribution: ${packageId} -> ${c.app}` +
+          (c.group ? `/${c.group}` : '') +
+          ` (${Array.isArray(c.items) ? c.items.length : 0} items)`,
+      );
+    }
   }
 
   /** Contributions registered for an app (empty array when none). */

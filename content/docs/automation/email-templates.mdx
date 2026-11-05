@@ -257,8 +257,10 @@ one `EmailServicePlugin` wires), walks:
 1. **this locale, folded** against the locale tags the template's bundle carries
    by `resolveBundleLocale` (`@objectstack/spec/system`, the BCP-47 fold
    plugin-email imports rather than copying): exact, then case-insensitive
-   (`zh-cn` → `zh-CN`), then base language (`en-GB` → `en`), then variant
-   expansion (`zh` and `zh-TW` → `zh-CN`), the first match in ascending tag
+   (`zh-cn` → `zh-CN`), then the same platform locale table language (`zh-TW`
+   → a `zh-Hant` row, `zh` → a `zh-CN` row, in any tag order), then base
+   language (`en-GB` → `en`), then variant expansion (`zh-TW` → `zh-CN` when
+   the bundle has no Traditional row), the first match in ascending tag
    order;
 2. **the stack's declared fallback locale**, as
    `II18nService.getFallbackLocale()` answers it (`i18n.fallbackLocale`, else

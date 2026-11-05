@@ -54,7 +54,7 @@ import { platformProvisionsStorage, resolveInjectedSystemColumns, resolveSearchF
 import { SystemFieldName } from '@objectstack/spec/system';
 import { usePermissions } from '@object-ui/permissions';
 import { RecordDetailPanel } from '@object-ui/plugin-detail';
-import { resolveBulkActions, useUndeclaredActionNamesWarning } from '@object-ui/plugin-grid';
+import { resolveBulkActions, useBulkActionItems, useUndeclaredActionNamesWarning } from '@object-ui/plugin-grid';
 
 /**
  * The `case 'map'` branch below builds an `object-map` schema by flattening
@@ -2558,9 +2558,25 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    * below. Before this fold every member drew a button, so a name the object
    * never declared, an action a disabled package withholds included, showed a
    * button that only toasted "not executable" when pressed.
+   *
+   * [objectstack#30535] A declared action then passes the grid bar's OWN gate,
+   * `useBulkActionItems`, before it draws: its `requiredPermissions` (ADR-0066
+   * D4, the caller's held capabilities), its activation switch, and its
+   * `visible`, evaluated once per selected record and offered when at least
+   * one record passes. The fold carried the resolved definition all along; the
+   * bar read only its label, so a gated action drew for every user and every
+   * selection. A repeated name draws once, as the fold surfaces it once.
    */
-  const nonGridBulkBar = React.useMemo(() => {
-    const names = (permittedBulkActions ?? []).filter((a: unknown) => typeof a === 'string' && a !== '') as string[];
+  const nonGridBulkFold = React.useMemo(() => {
+    const seen = new Set<string>();
+    const names = ((permittedBulkActions ?? []) as unknown[]).filter((a): a is string => {
+      if (typeof a !== 'string' || a === '') return false;
+      // The built-in `delete` is one button whatever its spelling's case.
+      const key = a.toLowerCase() === 'delete' ? 'delete' : a;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
     const { defs, undeclared } = resolveBulkActions({
       bulkActions: names.filter((a) => a.toLowerCase() !== 'delete'),
       objectActions: objectDef?.actions,
@@ -2569,13 +2585,22 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           ? resolveActionLabel(schema.objectName, actionName, fallback)
           : fallback,
     });
-    const labels = new Map(defs.map((def) => [def.name, def.label]));
+    return { names, defs, undeclared };
+  }, [permittedBulkActions, objectDef, schema.objectName, resolveActionLabel]);
+  const nonGridBulkItems = useBulkActionItems({
+    selectedRows,
+    actions: undefined,
+    actionDefs: nonGridBulkFold.defs,
+    objectFields: objectDef?.fields,
+  });
+  const nonGridBulkBar = React.useMemo(() => {
+    const labels = new Map(nonGridBulkItems.defs.map((def) => [def.name, def.label]));
     // Authored order, the built-in `delete` where the author put it.
-    const drawn = names
+    const drawn = nonGridBulkFold.names
       .filter((a) => a.toLowerCase() === 'delete' || labels.has(a))
       .map((name) => ({ name, label: labels.get(name) }));
-    return { drawn, undeclared };
-  }, [permittedBulkActions, objectDef, schema.objectName, resolveActionLabel]);
+    return { drawn, undeclared: nonGridBulkFold.undeclared };
+  }, [nonGridBulkFold, nonGridBulkItems]);
   // The grid says its own (ObjectGrid warns for the names it leaves undrawn),
   // so this one speaks only while a non-grid view is on screen, and only once
   // the object's schema read has settled. A list with an object but no schema

@@ -489,7 +489,8 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Ordering comparands naming a date-range preset — `last_30_days` in a `>=` position (#8793) | ✓ | ✓ | ✓ | ✓ᵈᵛᵒᵖᶠ |
 | Empty filter combinators — `$and: []`, `$or: []`, `$not: {}` (#5330) | ✓ | ✓ | ✓ | ✓ᶠ |
 | Object & action name references (#3583) | ✓ | ✓ | ✓ | — |
-| Flow reference integrity — node writes, template paths, read-only writes (#3583) | ✓ | ✓ | ✓ | ✓ᶠ |
+| Reference integrity — flow node writes, template paths, read-only writes (#3583); at the publish door each write type runs only the members that declare it, and the flow members run on `flow` alone (#9313) | ✓ | ✓ | ✓ | ✓ᶠᵛᵒᵈᵗʳᵖ |
+| List-view field members — a list view's `sort` (a `sortable: false` field, a `formula`, an unknown name: `sort-field-unsortable`), its `searchableFields` (`searchable-field-unknown`) and its field references, columns, filter keys, grouping and the board bindings (`list-view-field-unknown`); the row merges three members, so its codes follow no one rule's order, and the `page` door runs the sort member only (#9313, #15495, #30095) | ✓ | ✓ | ✓ | ✓ᶠᵛᵒᵖ |
 | Page-component field bindings (#3583) | ✓ | ✓ | ✓ | — |
 | React page block field bindings — §10 (#4340) | ✓ | ✓ | ✓ | — |
 | Chart bindings outside dashboards (#3583) | ✓ | ✓ | ✓ | — |
@@ -525,11 +526,11 @@ orthogonal to both, and no cell here can carry it; it is written out in
 **Every superscript in the `runtime publish` column is one metadata type whose
 writes that rule inspects: `✓ᶠ` `flow`, `✓ᵛ` `view`, `✓ᵈ` `dashboard`, `✓ᵒ`
 `object`, `✓ᵖ` `page`, `✓ˢ` `seed`, `✓ᵇ` `book`, `✓ᵖᵉ` `permission`,
-`✓ᵖᵒ` `position`, `✓ᵃ` `app`, `✓ᵉ` `email_template`** — the two
+`✓ᵖᵒ` `position`, `✓ᵃ` `app`, `✓ᵉ` `email_template`, `✓ᵈᵗ` `dataset`, `✓ʳ` `report`** — the two
 `ᵖ`-initial pairs carry a second letter because `page` already holds `ᵖ` on its
-own. Read the codes **longest-first**: `ᵖᵒ` is `position`, never `page`
-followed by `object`, and `ᵖᵉ` is `permission`, never `page` followed by
-`email_template`. A cell lists one superscript per declared type, in the order the rule declares them, and that
+own, and `dataset` carries `ᵈᵗ` because `dashboard` holds `ᵈ`. Read the codes **longest-first**: `ᵖᵒ` is `position`, never `page`
+followed by `object`, `ᵖᵉ` is `permission`, never `page` followed by
+`email_template`, and `ᵈᵗ` is `dataset`. A cell lists one superscript per declared type, in the order the rule declares them, and that
 rule's own `runtimeTypes` in `AUTHORING_RULES` is the authority — the set has
 grown a type at a time (#4463 shipped P1 as `flow` and four rule families, #7220
 moved the whole `views[]` visibility-predicate family across in one edit, #7529
@@ -748,9 +749,10 @@ no package provenance (#9612); a provenance it cannot read narrows nothing at al
 A dashboard or report write also keeps the base object of each dataset it binds
 (a widget's `dataset`; a report's `dataset` and each joined block's), because the
 datasets are never narrowed and the dataset query resolves a filter against that
-object whichever package ships it: a filter key the object lacks is refused there
-just as it is on a dataset inside the closure (#30005). No other write type keeps
-it, so a flow or a list view never reaches an outside object through a dataset.
+object whichever package ships it: a filter key that neither the object nor the
+dataset's dimensions name is refused there just as it is on a dataset inside the
+closure (#30005). No other write type keeps it, so a flow or a list view never
+reaches an outside object through a dataset.
 That changes what a rule can **resolve**, never which rules run, and nothing at
 this door walks `packages[]`. Two rules are told the closure is in force. A flow
 whose trigger object is outside it is refused with `flow-trigger-unknown-object`

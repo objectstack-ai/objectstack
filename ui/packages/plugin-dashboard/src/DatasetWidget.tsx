@@ -33,7 +33,7 @@
  * objectui bumps its `@objectstack/spec` dependency (cross-repo spec skew).
  */
 
-import { useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useState, type ReactElement, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 // `useDatasetDimensionMeta` is the analytics label net's SHARED React glue
 // (objectui#4389): the locale-free metadata read this widget and the dataset
 // report block both take, lifted out of the two longhand copies PR #4388 left
@@ -105,6 +105,8 @@ import {
   metricTileValueTitle,
 } from './metricTile';
 import { DrillDownDrawer } from './DrillDownDrawer';
+import { metricDrillFilter, readMeasureDrillScope } from './metricDrill';
+import { sharedMeasureDrillScope, scopeDrillFilter } from './measureDrill';
 import { specDefaultWidgetType } from './widgetDispatch';
 import { DASHBOARD_WIDGET_MULTI_MEASURE_TYPES } from '@objectstack/spec/ui';
 
@@ -113,7 +115,7 @@ type Row = Record<string, unknown>;
 // `@objectstack/spec/api`'s `DatasetTotals`, which since 17.5.0 is the REQUEST side
 // (`{ groupings }`, what to compute) — objectui#11073.
 interface DatasetResultTotals { dimensions: string[]; rows: Row[] }
-interface DatasetResult { rows: Row[]; fields?: DatasetResultField[]; object?: string; dimensionFields?: Record<string, string>; drillRawRows?: Row[]; drillRanges?: Array<Record<string, DatasetDrillRange>>; totals?: DatasetResultTotals[] }
+interface DatasetResult { rows: Row[]; fields?: DatasetResultField[]; object?: string; dimensionFields?: Record<string, string>; drillRawRows?: Row[]; drillRanges?: Array<Record<string, DatasetDrillRange>>; totals?: DatasetResultTotals[]; drillScopes?: Record<string, unknown> }
 interface DatasetCapableSource {
   queryDataset?: (dataset: string, selection: unknown) => Promise<DatasetResult>;
 }
@@ -898,7 +900,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
 
   // `signature` is the query an `ok` answer was read for, and `refreshing` marks
   // a re-read of that same query in flight (objectui#10815, see the effect).
-  const [state, setState] = useState<{ status: 'idle' | 'loading' | 'ok' | 'error'; rows: Row[]; fields?: DatasetResultField[]; object?: string; dimensionFields?: Record<string, string>; drillRawRows?: Array<Record<string, unknown>>; drillRanges?: Array<Record<string, DatasetDrillRange>>; totals?: DatasetResultTotals[]; error?: string; forbidden?: boolean; signature?: string; refreshing?: boolean }>({ status: 'idle', rows: [] });
+  const [state, setState] = useState<{ status: 'idle' | 'loading' | 'ok' | 'error'; rows: Row[]; fields?: DatasetResultField[]; object?: string; dimensionFields?: Record<string, string>; drillRawRows?: Array<Record<string, unknown>>; drillRanges?: Array<Record<string, DatasetDrillRange>>; totals?: DatasetResultTotals[]; drillScopes?: unknown; error?: string; forbidden?: boolean; signature?: string; refreshing?: boolean }>({ status: 'idle', rows: [] });
   // Drill-through (ADR-0021 D2): the clicked bucket's record-list filter + title.
   const [drill, setDrill] = useState<{ filter: Record<string, unknown>; title: string } | null>(null);
   // ── The flat table's client-side sort (objectui#5827) ────────────────────
@@ -967,7 +969,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
     })
       .then((res) => {
         if (cancelled) return;
-        setState({ status: 'ok', rows: Array.isArray(res?.rows) ? res.rows : [], fields: Array.isArray(res?.fields) ? res.fields : [], object: res?.object, dimensionFields: res?.dimensionFields, drillRawRows: Array.isArray(res?.drillRawRows) ? res.drillRawRows : undefined, drillRanges: Array.isArray(res?.drillRanges) ? res.drillRanges : undefined, totals: Array.isArray(res?.totals) ? res.totals : undefined, signature });
+        setState({ status: 'ok', rows: Array.isArray(res?.rows) ? res.rows : [], fields: Array.isArray(res?.fields) ? res.fields : [], object: res?.object, dimensionFields: res?.dimensionFields, drillRawRows: Array.isArray(res?.drillRawRows) ? res.drillRawRows : undefined, drillRanges: Array.isArray(res?.drillRanges) ? res.drillRanges : undefined, totals: Array.isArray(res?.totals) ? res.totals : undefined, drillScopes: res?.drillScopes, signature });
         if (typeof res?.object === 'string' && res.object) setDatasetObject(res.object);
       })
       .catch((e) => {
@@ -1313,8 +1315,14 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
   // objectstack-ai/objectstack#1752: a date-only widget has no equality drill dim but still drills by the
   // server's per-row date RANGE, so the presence of ranges makes it drillable too.
   const canDrill = !!drillObject && (drillDims.length > 0 || !!drillRanges?.length);
-  const openDrill = (index: number, title: string) => {
+  // objectstack-ai/objectstack#30615 — a drill stands for the MEASURES the
+  // clicked mark or cell shows: a chart mark its series' measure, a cross-tab
+  // cell its column's, a table row every measure it holds. It opens only when
+  // the answer's `drillScopes` states one record list for them (`./measureDrill`).
+  const openDrill = (index: number, title: string, measures: readonly string[]) => {
     if (!drillObject) return;
+    const scope = sharedMeasureDrillScope(state, measures);
+    if (!scope) return;
     // objectui#10789 — composing the widget's filter with the clicked bucket
     // lowers both through the throwing converter form. A widget filter the
     // dataset query carried to the server can still be one this layer refuses
@@ -1325,7 +1333,8 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
     // drill handler). Only a `FilterOperatorError` is caught.
     let merged: Record<string, unknown>;
     try {
-      merged = buildDrillFilter(drillRawRows?.[index], drillDims, dimensionFields ?? {}, runtimeFilter, drillRanges?.[index]);
+      // The clicked bucket AND the widget filter AND the measure's scope.
+      merged = buildDrillFilter(drillRawRows?.[index], drillDims, dimensionFields ?? {}, scopeDrillFilter(runtimeFilter, scope), drillRanges?.[index]);
     } catch (error) {
       if (!(error instanceof FilterOperatorError)) throw error;
       console.warn(`[DatasetWidget] drill-down refused — the drilled list cannot be scoped: ${error.message}`);
@@ -1392,11 +1401,43 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
     // the title's tooltip (objectstack#27430).
     const caption = heading?.description || measureLabel;
     const shownValue = formatMeasure(value, f?.format, f?.currency, f?.percentScale, displayLocale);
+    // ── The records behind the number (ADR-0021 D2) ────────────────────────
+    // The tile opens the list its number counts, through the same drawer the
+    // chart and table drills open. `null` means the list could not be proven
+    // to match the number (see `./metricDrill`), and the tile then offers no
+    // click at all: its markup stays exactly the no-click markup.
+    const tileDrillFilter = metricDrillFilter({
+      object: drillObject,
+      measureScope: readMeasureDrillScope(state, tileMeasure),
+      runtimeFilter,
+      ranges: drillRanges?.[0],
+    });
+    const openTileDrill = tileDrillFilter
+      ? () => setDrill({ filter: tileDrillFilter, title: heading?.title || measureLabel })
+      : undefined;
+    const tileDrillProps = openTileDrill
+      ? {
+          role: 'button' as const,
+          tabIndex: 0,
+          'data-testid': 'dataset-metric-drill',
+          onClick: openTileDrill,
+          onKeyDown: (e: ReactKeyboardEvent) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTileDrill(); }
+          },
+        }
+      : {};
+    // The drawer is a SIBLING of the tile, never its child: React bubbles a
+    // portal's events through the component tree, so a click or a space typed
+    // inside the drawer would otherwise reach the tile's own handlers.
     return (
-      // Positioned only while a re-read is in flight, for the refresh bar: the
-      // idle tile's markup is pinned byte-for-byte (`DatasetWidget.colorVariant`,
-      // `.subCaption`, `.unrenderedMeasures-8894` tests), and it moves by nothing.
-      <div className={cn('flex h-full w-full flex-col items-start justify-center gap-1 p-2', heading && cn('min-w-0', METRIC_TILE_CONTAINER_CLASS), state.refreshing && 'relative')}>
+      <>
+      {/* Positioned only while a re-read is in flight, for the refresh bar: the
+          idle tile's markup is pinned byte-for-byte (`DatasetWidget.colorVariant`,
+          `.subCaption`, `.unrenderedMeasures-8894` tests), and it moves by nothing. */}
+      <div
+        className={cn('flex h-full w-full flex-col items-start justify-center gap-1 p-2', heading && cn('min-w-0', METRIC_TILE_CONTAINER_CLASS), state.refreshing && 'relative', openTileDrill && 'cursor-pointer rounded-md transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring')}
+        {...tileDrillProps}
+      >
         {refreshBar}
         {/* objectui#12623 — with a heading, the title owns the first line, the
             value never wraps, and the caption (the description, else the
@@ -1428,6 +1469,8 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
         )}
         {!heading && <span className="text-xs text-muted-foreground">{measureLabel}</span>}
       </div>
+      {drillDrawer}
+      </>
     );
   }
 
@@ -1647,7 +1690,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
                   {cellCols.map((cc) => {
                     const index = pivot.cellIndex.get(pivotCellKey(rh.id, cc.col.id));
                     const fr = index != null ? state.rows[index] : undefined;
-                    const clickable = canDrill && index != null;
+                    const clickable = canDrill && index != null && readMeasureDrillScope(state, cc.measure) !== undefined;
                     const title = [...rh.labels, cc.col.label].filter(Boolean).join(' / ');
                     return (
                       <td
@@ -1655,7 +1698,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
                         // A drillable cell is a 44 px touch target below `sm` (#29078).
                         className={cn('px-2 py-1 text-right tabular-nums whitespace-nowrap', clickable && 'cursor-pointer hover:bg-accent/40 max-sm:h-11 max-sm:min-w-11')}
                         data-testid={clickable ? 'dataset-drill-cell' : undefined}
-                        onClick={clickable ? () => openDrill(index as number, title) : undefined}
+                        onClick={clickable ? () => openDrill(index as number, title, [cc.measure]) : undefined}
                       >
                         {fr ? fmtMeasure(fr[cc.measure], cc.measure) : '—'}
                         {compareStack(fr, cc.measure)}
@@ -1704,6 +1747,16 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
 
     // table (and a 1-dimension pivot) → a flat grouped table.
     const columns = [...dimensions, ...measureColumns];
+    // objectstack-ai/objectstack#30615 — a row stands for every measure it
+    // holds, so the ROW drills only when they share one scope. Otherwise each
+    // measure cell with a scope of its own drills its own records, and a
+    // measure with none (a derived one) is not clickable. `cellDrills()` with
+    // no measure answers whether ANY cell of a row drills.
+    const lineDrills = canDrill && sharedMeasureDrillScope(state, values) !== undefined;
+    const cellDrills = (measure: string | undefined): boolean =>
+      canDrill && !lineDrills && (measure === undefined
+        ? values.some((m) => readMeasureDrillScope(state, m) !== undefined)
+        : readMeasureDrillScope(state, measure) !== undefined);
 
     // ── Which columns are NUMBERS (objectui#5827) ─────────────────────────
     // Right-alignment is a claim about the values, so it is decided from them.
@@ -1887,7 +1940,9 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
             </tr>
           </thead>
           <tbody>
-            {orderedEntries.map(({ row, index }) => (
+            {orderedEntries.map(({ row, index }) => {
+              const rowTitle = drillDims.map((d) => formatDimensionValue(row[d], displayLocale)).filter(Boolean).join(' / ');
+              return (
               <tr
                 key={index}
                 // Hover feedback on EVERY row, not only a drillable one — the
@@ -1896,17 +1951,30 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
                 // drillable row keeps its stronger accent fill: `cn` runs
                 // tailwind-merge, so the later `hover:bg-accent/40` replaces
                 // `hover:bg-muted/40` rather than stacking with it.
-                className={cn('border-t transition-colors hover:bg-muted/40', canDrill && 'cursor-pointer hover:bg-accent/40')}
-                data-testid={canDrill ? 'dataset-drill-row' : undefined}
-                onClick={canDrill ? () => openDrill(index, drillDims.map((d) => formatDimensionValue(row[d], displayLocale)).filter(Boolean).join(' / ')) : undefined}
+                className={cn('border-t transition-colors hover:bg-muted/40', lineDrills && 'cursor-pointer hover:bg-accent/40')}
+                data-testid={lineDrills ? 'dataset-drill-row' : undefined}
+                onClick={lineDrills ? () => openDrill(index, rowTitle, values) : undefined}
               >
                 {columns.map((c) => {
                   // A comparison column formats as the measure it compares.
                   const measure = compareOf(c) ?? (values.includes(c) ? c : undefined);
+                  // objectstack-ai/objectstack#30615 — when the row's measures
+                  // are no one list, each measure cell drills its OWN records.
+                  const cellDrill = values.includes(c) && cellDrills(c);
                   return (
                     // A drillable row is a 44 px touch target below `sm` (#29078);
                     // a `td`'s height is its floor, so the row grows to it.
-                    <td key={c} className={cn('px-2 py-1 whitespace-nowrap tabular-nums', numericColumns.has(c) && 'text-right', canDrill && 'max-sm:h-11')}>
+                    <td
+                      key={c}
+                      className={cn(
+                        'px-2 py-1 whitespace-nowrap tabular-nums',
+                        numericColumns.has(c) && 'text-right',
+                        (lineDrills || cellDrills(undefined)) && 'max-sm:h-11',
+                        cellDrill && 'cursor-pointer hover:bg-accent/40 max-sm:min-w-11',
+                      )}
+                      data-testid={cellDrill ? 'dataset-drill-cell' : undefined}
+                      onClick={cellDrill ? () => openDrill(index, rowTitle, [c]) : undefined}
+                    >
                       {measure
                         ? formatMeasure(row[c], measureField(measure)?.format, measureCellCurrency(measureField(measure), state.rows[index]), measureField(measure)?.percentScale, displayLocale)
                         : formatDimensionValue(row[c], displayLocale)}
@@ -1914,7 +1982,8 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
                   );
                 })}
               </tr>
-            ))}
+              );
+            })}
           </tbody>
           {/* The totals row lives in `tfoot`, OUTSIDE `orderedEntries`
               entirely — not as a special case inside the sort. Three
@@ -2156,6 +2225,19 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
   // underneath any explicit author map.
   const chartPresentation = chartConfigPresentation(widget?.chartConfig, categoryColors);
 
+  // objectstack-ai/objectstack#30615 — the measure a clicked mark stands for.
+  // A pivoted chart carries one measure, its series being the second
+  // dimension's groups. Otherwise the series key IS the measure: a key that
+  // names no declared measure (a `<measure>__compare` series, the earlier
+  // window, which `drillScopes` gives no entry) stands for no record list. A
+  // mark with no series key belongs to the one measure a single-series chart
+  // draws.
+  const chartDrillMeasure = (seriesKey: unknown): string | undefined => {
+    if (pivotedSeries) return values[0];
+    if (typeof seriesKey === 'string' && seriesKey !== '') return values.includes(seriesKey) ? seriesKey : undefined;
+    return renderedMeasures.length === 1 ? renderedMeasures[0] : undefined;
+  };
+
   // Map a clicked chart segment back to its dataset row, then drill through to
   // the underlying records — same governed path the table/pivot rows use.
   const handleChartDrill = (ev: ChartSegmentClickEvent) => {
@@ -2184,13 +2266,19 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
     const pivoted = dimensions.length >= 2 && values.length === 1;
     const seriesTitle = ev?.seriesLabel ?? ev?.series;
     const title = [ev?.category, pivoted ? seriesTitle : undefined].filter(Boolean).map(String).join(' / ');
-    openDrill(idx, title);
+    const measure = chartDrillMeasure(ev?.series);
+    if (measure === undefined) return;
+    openDrill(idx, title, [measure]);
   };
 
   // The `chart` schema renders through either ChartRenderer (reads `onChartClick`)
   // or ObjectChart (reads `onSegmentClick` and suppresses its own object-drill) —
   // pass both so the segment click drills regardless of which is registered.
-  const chartDrill = canDrill ? handleChartDrill : undefined;
+  // …and offered only when at least one drawn measure has a record list.
+  const chartDrillable = canDrill && (pivotedSeries ? values.slice(0, 1) : renderedMeasures).some(
+    (m) => readMeasureDrillScope(state, m) !== undefined,
+  );
+  const chartDrill = chartDrillable ? handleChartDrill : undefined;
   return (
     <div className={cn('relative h-full w-full min-h-[220px]')}>
       {refreshBar}

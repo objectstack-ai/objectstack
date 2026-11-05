@@ -4163,7 +4163,8 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
   bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
   operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, and `list_toolbar` is not a location'),
   patch: rowPatchRetired("An `action:icon`'s"),
-  confirmText: actionRowCopy('confirmText').optional().describe(ACTION_ROW_COPY_DESCRIBE.confirmText),
+  confirmText: actionRowCopy('confirmText').optional()
+    .describe(`${ACTION_ROW_COPY_DESCRIBE.confirmText} Beside a non-empty array \`params\` it is refused — the runner would show the confirm and then the param dialog, two dialogs for one decision; put the question on \`description\` instead. Correct with no \`params\`, beside \`params: []\`, and beside an object \`params\` (static values, no param dialog)`),
   successMessage: actionRowCopy('successMessage').optional().describe(ACTION_ROW_COPY_DESCRIBE.successMessage),
   errorMessage: actionRowCopy('errorMessage').optional().describe(ACTION_ROW_COPY_DESCRIBE.errorMessage),
   refreshAfter: z.boolean().optional().describe('Refresh the surrounding data after the action runs'),
@@ -4178,7 +4179,14 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
 }).superRefine(rowDeclarativeUpdate('actionType', "An `action:icon`'s"))
   .superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:icon`'s"))
   .superRefine(refuseRowUrlExecutorAlias('actionType', "An `action:icon`'s `actionType: 'navigation'`"))
-  .superRefine(refuseRowOnSuccessBesideExecutor('actionType', "An `action:icon`'s")));
+  .superRefine(refuseRowOnSuccessBesideExecutor('actionType', "An `action:icon`'s"))
+  // #30017 (ruling record 6624208841, letter A): the fourth door of the
+  // `confirmText` + non-empty `params` refusal, `action:button`'s predicate and
+  // message. This block forwards `confirmText` and an ARRAY `params` (as
+  // `actionParams`) to the same runner, which awaits the confirm and then opens
+  // the param dialog. An object `params` is the static values, which open no
+  // dialog, and the predicate's `Array.isArray` read leaves it alone.
+  .refine((data) => !declaresConfirmBesideParams(data), CONFIRM_BESIDE_PARAMS_REFUSAL));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ActionIconProps = z.input<typeof ActionIconPropsSchema>;
 /**
@@ -4313,7 +4321,8 @@ function actionContainerMemberShape() {
     bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
     operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, and `list_toolbar` is not a location'),
     patch: rowPatchRetired('An `action:group` or `action:menu` member\'s'),
-    confirmText: actionRowCopy('confirmText').optional().describe(ACTION_ROW_COPY_DESCRIBE.confirmText),
+    confirmText: actionRowCopy('confirmText').optional()
+      .describe(`${ACTION_ROW_COPY_DESCRIBE.confirmText} Beside a non-empty array \`params\` it is refused — the runner would show the confirm and then the param dialog, two dialogs for one decision; put the question on \`description\` instead. Correct with no \`params\`, beside \`params: []\`, and beside a \`type: 'api'\` member's object \`params\` (its request payload, no param dialog)`),
     successMessage: actionRowCopy('successMessage').optional().describe(ACTION_ROW_COPY_DESCRIBE.successMessage),
     errorMessage: actionRowCopy('errorMessage').optional().describe(ACTION_ROW_COPY_DESCRIBE.errorMessage),
     refreshAfter: z.boolean().optional().describe('Refresh the surrounding data after the action runs'),
@@ -4413,7 +4422,15 @@ function buildActionGroupMember() {
     .superRefine(actionContainerMemberParamsFitType('action:group'))
     .superRefine(refuseUnopenableRowUrlTarget('type', "An `action:group` member's"))
     .superRefine(refuseRowUrlExecutorAlias('type', "An `action:group` member's `type: 'navigation'`"))
-    .superRefine(refuseRowOnSuccessBesideExecutor('type', "An `action:group` member's"));
+    .superRefine(refuseRowOnSuccessBesideExecutor('type', "An `action:group` member's"))
+    // #30017 (ruling record 6624208841, letter A): `action:button`'s
+    // `confirmText` + non-empty ARRAY `params` refusal, its predicate and its
+    // message. The container forwards a member's `confirmText` and an array
+    // `params` (as `actionParams`) to the same runner, which awaits the confirm
+    // and then opens the param dialog. A `type: 'api'` member's object `params`
+    // is its request payload, which opens no dialog. On the member, so the
+    // issue lands at `actions.N.confirmText`.
+    .refine((member) => !declaresConfirmBesideParams(member), CONFIRM_BESIDE_PARAMS_REFUSAL);
 }
 let actionGroupMemberOnce: ReturnType<typeof buildActionGroupMember> | undefined;
 /** The one {@link buildActionGroupMember} instance. */
@@ -4436,7 +4453,15 @@ function buildActionMenuMember() {
     .superRefine(actionContainerMemberParamsFitType('action:menu'))
     .superRefine(refuseUnopenableRowUrlTarget('type', "An `action:menu` member's"))
     .superRefine(refuseRowUrlExecutorAlias('type', "An `action:menu` member's `type: 'navigation'`"))
-    .superRefine(refuseRowOnSuccessBesideExecutor('type', "An `action:menu` member's"));
+    .superRefine(refuseRowOnSuccessBesideExecutor('type', "An `action:menu` member's"))
+    // #30017 (ruling record 6624208841, letter A): `action:button`'s
+    // `confirmText` + non-empty ARRAY `params` refusal, its predicate and its
+    // message. The container forwards a member's `confirmText` and an array
+    // `params` (as `actionParams`) to the same runner, which awaits the confirm
+    // and then opens the param dialog. A `type: 'api'` member's object `params`
+    // is its request payload, which opens no dialog. On the member, so the
+    // issue lands at `actions.N.confirmText`.
+    .refine((member) => !declaresConfirmBesideParams(member), CONFIRM_BESIDE_PARAMS_REFUSAL);
 }
 let actionMenuMemberOnce: ReturnType<typeof buildActionMenuMember> | undefined;
 /** The one {@link buildActionMenuMember} instance. */

@@ -32,6 +32,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/core/src/security/user-assigned-work.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/core/src/utils/metadata-activation-store.test.ts",
       "verb": "update",
       "pinned": 1
@@ -4582,6 +4587,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/meta-object-extension-plural-label.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/meta-object-extension-property-classes.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -4719,6 +4729,11 @@
     {
       "file": "packages/rest/src/rest-server-meta-references-refusal-envelope.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/user-work-routes.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

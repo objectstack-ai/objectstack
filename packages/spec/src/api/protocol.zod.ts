@@ -3713,7 +3713,10 @@ export const RegisterDeviceRequestSchema = lazySchema(() => z.object({
     + 'android means fcm. web has no default vendor: a web registration names apns or fcm, and one without vendor is refused',
   ),
   appId: z.string().optional().describe('App the token was issued to: the iOS bundle ID or the Android application ID'),
-  locale: LocaleSchema.optional().describe('Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in'),
+  locale: LocaleSchema.optional().describe(
+    'Device locale (BCP 47, for example zh-CN). Stored on the device row; no push renders by it: a push arrives in the '
+    + 'recipient\'s language (sys_user.locale, then the deployment default)',
+  ),
   origin: z.string().regex(PUSH_SERVER_ORIGIN_PATTERN, { message: PUSH_SERVER_ORIGIN_MESSAGE }).optional().describe(
     '[PLANNED — not yet stored] The origin the Console was loaded from (window.location.origin, for example '
     + 'https://crm.example.com): the address the mobile shell saved for this server. The Console writes it; the server '

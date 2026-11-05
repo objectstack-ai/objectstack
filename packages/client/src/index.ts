@@ -220,6 +220,34 @@ import { RealtimeAPI } from './realtime-api';
  */
 export type ApiRouteType = keyof ApiRoutes;
 
+/**
+ * [#30205] `security.assignedWork.count`'s answer: per object and user field,
+ * how many records hold the user, as the caller can read them.
+ */
+export interface UserAssignedWorkSummary {
+  userId: string;
+  objects: Array<{ object: string; field: string; count: number; transferable: boolean }>;
+  total: number;
+  truncated: boolean;
+  unreadable: string[];
+}
+
+/** [#30205] `security.assignedWork.transfer`'s answer: what moved, what failed, what remains. */
+export interface UserWorkTransferReport {
+  fromUserId: string;
+  toUserId: string;
+  objects: Array<{
+    object: string;
+    field: string;
+    updated: number;
+    failed: number;
+    failures: Array<{ id: string; code: string; message: string }>;
+  }>;
+  updated: number;
+  failed: number;
+  remaining: number;
+}
+
 export interface ClientConfig {
   baseUrl: string;
   token?: string;
@@ -6463,6 +6491,45 @@ export class ObjectStackClient {
                   { method: 'POST' },
               );
               return this.unwrapResponse(res);
+          },
+      },
+
+      /**
+       * [#30205] A user's open work — what an administrator needs when they ban
+       * someone. Both calls run as the CALLER: the counts are what the caller
+       * can read, and each moved record is an ordinary update under the
+       * caller's permissions (sharing, validation and hooks apply). Neither
+       * touches the ban, which stays `POST /api/v1/auth/admin/ban-user`.
+       */
+      assignedWork: {
+          /**
+           * Per object and user field (the owner field and every app user
+           * field), how many records hold `userId`. Objects the caller cannot
+           * read are named in `unreadable`; `truncated` says more fields exist
+           * than were counted.
+           */
+          count: async (userId: string): Promise<UserAssignedWorkSummary> => {
+              const res = await this.fetch(
+                  `${this.baseUrl}/api/v1/security/users/${encodeURIComponent(userId)}/assigned-work`,
+              );
+              return this.unwrapResponse<UserAssignedWorkSummary>(res);
+          },
+
+          /**
+           * Hand up to 500 of `userId`'s records to the active user `toUserId`
+           * (optionally only on `objects`), and answer what moved, what failed
+           * and how many remain; call again until `remaining` is 0. A banned or
+           * unknown `toUserId` is refused before anything moves.
+           */
+          transfer: async (
+              userId: string,
+              request: { toUserId: string; objects?: string[] },
+          ): Promise<UserWorkTransferReport> => {
+              const res = await this.fetch(
+                  `${this.baseUrl}/api/v1/security/users/${encodeURIComponent(userId)}/assigned-work/transfer`,
+                  { method: 'POST', body: JSON.stringify(request) },
+              );
+              return this.unwrapResponse<UserWorkTransferReport>(res);
           },
       },
   };

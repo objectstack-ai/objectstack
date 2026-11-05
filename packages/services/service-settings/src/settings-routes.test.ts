@@ -151,6 +151,36 @@ describe('settings-routes', () => {
     expect(state.body.data.ok).toBe(true);
   });
 
+  // The answer an action composes (the "Send test email" toast) is shown to
+  // the caller, so the handler is told the caller's display language: the top
+  // Accept-Language tag, else `?locale`, the same reading the page's
+  // live-status statement gets. It authorizes nothing and stays out of `ctx`.
+  it('POST action hands the handler the caller\'s display locale, outside ctx', async () => {
+    const http = new MockHttp();
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(brandingSettingsManifest);
+    const seen: Array<{ locale?: string; ctxKeys: string[] }> = [];
+    svc.registerAction('branding', 'ping', ({ locale, ctx }) => {
+      seen.push({ locale, ctxKeys: Object.keys(ctx) });
+      return { ok: true, message: 'pong' };
+    });
+    registerSettingsRoutes(http, svc, { contextFromRequest: adminProvider });
+
+    const h = http.routes.get('POST /api/settings/:namespace/:actionId')!;
+    const zh = makeReqRes({
+      params: { namespace: 'branding', actionId: 'ping' },
+      body: null,
+      headers: { 'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8' },
+    });
+    await h(zh.req, zh.res);
+    const none = makeReqRes({ params: { namespace: 'branding', actionId: 'ping' }, body: null });
+    await h(none.req, none.res);
+
+    expect(zh.state.status).toBe(200);
+    expect(seen.map((s) => s.locale)).toEqual(['zh-CN', undefined]);
+    expect(seen[0].ctxKeys).not.toContain('locale');
+  });
+
   // ── [Finding-1] the DEFAULT (no verified provider) is SECURE ──────────────
   // Header-trusted identity is gone; an unauthenticated request can neither
   // enumerate protected namespaces nor write them. Since the family took the

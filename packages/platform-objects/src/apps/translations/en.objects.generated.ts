@@ -39,7 +39,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       banned: {
         label: "Banned",
-        help: "When true, the user cannot sign in. Toggle via Ban User / Unban User actions."
+        help: "When on, the user cannot sign in. Use the Ban User / Unban User actions to change it."
       },
       ban_reason: {
         label: "Ban Reason"
@@ -70,7 +70,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       must_change_password: {
         label: "Must Change Password",
-        help: "When true, the user is blocked (403 PASSWORD_RESET_REQUIRED) until they change their password. Stamped by the admin user-management routes; system-managed."
+        help: "When on, the user must change their password before they can continue. Turned on when an administrator creates or imports the account, or resets its password; system-managed."
       },
       mfa_required_at: {
         label: "MFA Required At",
@@ -159,7 +159,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Ban User",
-        description: "Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned. The keys work again after the unban.",
+        description: "Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned, as are their OAuth access tokens and token refreshes. The keys work again after the unban.",
         successMessage: "User banned",
         params: {
           banReason: {
@@ -557,7 +557,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       require_mfa: {
         label: "Require Multi-Factor Auth",
-        help: "When true, every member of this organization must enroll an authenticator app to access data. Needs two-factor authentication on for this deployment (OS_AUTH_TWO_FACTOR=true); while it is off, saving this as true is refused."
+        help: "Turn on to require every member of this organization to set up an authenticator app before they can access data. Needs two-factor authentication on for this deployment (OS_AUTH_TWO_FACTOR=true); while it is off, saving this as on is refused."
       },
       timezone: {
         label: "Timezone",
@@ -984,7 +984,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_business_unit: {
     label: "Business Unit",
     pluralLabel: "Business Units",
-    description: "Your company structure — divisions, departments, regions and offices — used to scope data and reports.",
+    description: "Your company structure — divisions, departments, regions and offices. Sharing rules can share records with a unit, or a unit and the units under it: members get that access, and lose it when they leave. Letting a permission set read every record of a unit (read scope 'unit') needs the enterprise edition.",
     fields: {
       name: {
         label: "Name"
@@ -995,7 +995,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       kind: {
         label: "Kind",
-        help: "Categorisation hint — does not change graph semantics.",
+        help: "For grouping and reporting only; it does not change where the unit sits in the organization or who it covers.",
         options: {
           company: "Company",
           division: "Division",
@@ -1006,11 +1006,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_business_unit_id: {
         label: "Parent Business Unit",
-        help: "Self-reference for the org tree. Null = root of tenant. A unit that still has child units cannot be deleted until they are re-parented or deleted."
+        help: "The unit this one sits under. Leave empty for a top-level unit. A unit that still has units under it cannot be deleted until they are moved under another unit or deleted."
       },
       timezone: {
         label: "Timezone",
-        help: "IANA time zone (e.g. Asia/Shanghai) date boundaries are computed in for this unit. Leave unset to inherit the parent unit's zone, then the organization's, then UTC."
+        help: "IANA time zone (e.g. Asia/Shanghai) kept for this unit; leave it empty to take the parent unit's, then the organization's. It does not change any date calculation today: formulas, reports and displayed dates use Settings → Localization → Default timezone."
       },
       organization_id: {
         label: "Organization",
@@ -1022,19 +1022,19 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       active: {
         label: "Active",
-        help: "When false, members are not expanded by graph queries."
+        help: "Turn off to retire the unit: sharing and other access given to this unit, or to a unit above it, no longer reaches its members or the units under it."
       },
       effective_from: {
         label: "Effective From",
-        help: "When this business unit came into existence (HRIS sync)."
+        help: "When this business unit came into existence. Usually filled in by a sync from your HR system."
       },
       effective_to: {
         label: "Effective To",
-        help: "When this business unit was retired (HRIS sync)."
+        help: "When this business unit was retired. Usually filled in by a sync from your HR system."
       },
       external_ref: {
         label: "External Reference",
-        help: "ID in upstream HRIS (Workday / SAP HR / 北森)."
+        help: "The unit's ID in your HR system (such as Workday, SAP HR or 北森), used to match it on each sync."
       },
       id: {
         label: "Business Unit ID"
@@ -3446,6 +3446,54 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_platform_setting: {
+    label: "Platform Setting",
+    pluralLabel: "Platform Settings",
+    description: "Deployment-wide settings values: the global rung of the settings cascade.",
+    fields: {
+      id: {
+        label: "Setting ID"
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      },
+      namespace: {
+        label: "Namespace",
+        help: "Manifest namespace (e.g. mail, storage, ai)."
+      },
+      key: {
+        label: "Key",
+        help: "Specifier key inside the namespace (snake_case)."
+      },
+      value: {
+        label: "Value",
+        help: "JSON-encoded value. Null when encrypted=true (see value_enc)."
+      },
+      encrypted: {
+        label: "Encrypted",
+        help: "When true, the value is stored encrypted-at-rest in value_enc; value column is null."
+      },
+      locked: {
+        label: "Locked",
+        help: "When true, tenant and user rows cannot override this value; writes against those scopes return 409."
+      },
+      locked_reason: {
+        label: "Lock Reason",
+        help: "Human-readable explanation surfaced in the UI tooltip when locked=true."
+      },
+      value_enc: {
+        label: "Encrypted Value",
+        help: "Handle of the sys_secret row holding the ciphertext. Set only when encrypted=true."
+      },
+      updated_by: {
+        label: "Updated By",
+        help: "Last actor who wrote this row through the settings service."
+      }
+    }
+  },
   sys_secret: {
     label: "Secret",
     pluralLabel: "Secrets",
@@ -3518,6 +3566,84 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         options: {
           tenant: "Tenant",
           user: "User"
+        }
+      },
+      action: {
+        label: "Action",
+        help: "Mutation kind.",
+        options: {
+          set: "Set",
+          reset: "Reset",
+          lock: "Lock",
+          unlock: "Unlock",
+          rotate: "Rotate"
+        }
+      },
+      actor_id: {
+        label: "Actor",
+        help: "User who performed the mutation; null for system jobs."
+      },
+      source: {
+        label: "Source",
+        help: "Mutation entry-point.",
+        options: {
+          ui: "UI",
+          api: "API",
+          migration: "Migration",
+          import: "Import",
+          system: "System"
+        }
+      },
+      reason: {
+        label: "Reason",
+        help: "Free-text justification provided by the actor (optional)."
+      },
+      old_hash: {
+        label: "Old Hash",
+        help: "Digest of the previous value, never the plaintext: sha256: hex for a plain value, the keyed hmac-sha256: digest for a secret. Null when previously unset, or for a secret with no keyed digest."
+      },
+      new_hash: {
+        label: "New Hash",
+        help: "Digest of the new value, never the plaintext: sha256: hex for a plain value, the keyed hmac-sha256: digest for a secret. Null on reset, or for a secret with no keyed digest."
+      },
+      encrypted: {
+        label: "Encrypted",
+        help: "True when the field carries secret material (rotation is interesting)."
+      },
+      request_id: {
+        label: "Request ID",
+        help: "Correlates with sys_audit_log / tracing."
+      }
+    },
+    _views: {
+      recent: {
+        label: "Recent"
+      }
+    }
+  },
+  sys_platform_setting_audit: {
+    label: "Platform Setting Audit Entry",
+    pluralLabel: "Platform Setting Audit",
+    description: "Append-only audit trail for SettingsService mutations of global-scope keys.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      created_at: {
+        label: "Created At",
+        help: "When the mutation was recorded."
+      },
+      namespace: {
+        label: "Namespace"
+      },
+      key: {
+        label: "Key"
+      },
+      scope: {
+        label: "Scope",
+        help: "Cascade layer the row was written to — always the global rung here.",
+        options: {
+          global: "Global"
         }
       },
       action: {

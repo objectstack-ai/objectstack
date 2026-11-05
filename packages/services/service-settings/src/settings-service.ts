@@ -901,6 +901,13 @@ export class SettingsService {
   private readonly optionSources = new Map<string, Map<string, SettingsOptionSource>>();
   /** Option-source failures already said, `namespace.key:cause` — see {@link optionSourceAnswer}. */
   private readonly reportedOptionSourceFaults = new Set<string>();
+  /**
+   * Whether a sourced key's `OS_*` verdict is held until the boot seals the
+   * sources — see {@link holdOptionSourceVerdicts}.
+   */
+  private optionSourceVerdictsHeld = false;
+  /** Sourced keys whose `OS_*` override was taken in force while held, `[namespace, key]`. */
+  private readonly heldOptionSourceVerdicts = new Map<string, [string, string]>();
   /** Write predicates by namespace, then key — see {@link registerWritePredicate}. */
   private readonly writePredicates = new Map<
     string,
@@ -1408,7 +1415,7 @@ export class SettingsService {
       const { allowed, judge } = this.optionTableOf(namespace, key, reg.optionTables.get(key) ?? []);
       if (allowed.length > 0) {
         const rejected = judge(value);
-        if (rejected) {
+        if (rejected && !this.holdsOptionSourceVerdict(namespace, key)) {
           this.reportRejectedEnvOverride(reg, namespace, key, envName, rejected.value, {
             what: 'is not a declared option for',
             detail: `Allowed values: ${allowed.join(', ')}.`,
@@ -1572,11 +1579,16 @@ export class SettingsService {
     else console.error(message);
   }
 
-  /** Look up a manifest, or throw `UnknownNamespaceError`. */
-  getManifest(namespace: string): SettingsManifest {
+  /**
+   * Look up a manifest, or throw `UnknownNamespaceError`. A key with a
+   * registered option source carries the source's options, as the namespace
+   * read serves them ({@link servedManifest}); every other key carries its
+   * declared table. `display.locale` is the language the options are named in.
+   */
+  getManifest(namespace: string, display: SettingsDisplayOptions = {}): SettingsManifest {
     const reg = this.registry.get(namespace);
     if (!reg) throw new UnknownNamespaceError(namespace);
-    return reg.manifest;
+    return this.servedManifest(reg, namespace, {}, display);
   }
 
   /**
@@ -1605,10 +1617,16 @@ export class SettingsService {
     }
   }
 
-  /** List all registered manifests, optionally filtered by permission. */
-  listManifests(ctx: SettingsContext = {}): SettingsManifest[] {
+  /**
+   * List all registered manifests, optionally filtered by permission. Each is
+   * served as {@link getManifest} serves it: a sourced key carries the options
+   * the save judges against, not the declared table the source replaces.
+   */
+  listManifests(ctx: SettingsContext = {}, display: SettingsDisplayOptions = {}): SettingsManifest[] {
     const perms = new Set(ctx.permissions ?? []);
-    const all = Array.from(this.registry.values()).map((r) => r.manifest);
+    const all = Array.from(this.registry.entries()).map(([namespace, reg]) =>
+      this.servedManifest(reg, namespace, {}, display),
+    );
     // Empty permissions ⇒ pass-through ONLY for a trusted (non-enforced)
     // in-process caller. An ENFORCED HTTP caller with no capabilities sees only
     // the manifests it may read — never the whole set (Finding-1: an
@@ -1688,6 +1706,59 @@ export class SettingsService {
   }
 
   /**
+   * Hold the `OS_*` verdict on every sourced key until {@link sealOptionSources}.
+   *
+   * A source answers from a list the boot is still filling: the i18n service
+   * reports the locales its plugins and the app's authored translations load,
+   * and the authored ones arrive at `kernel:ready`, so a `kernel:ready` reader
+   * of `localization.locale` can ask before the language its override names
+   * is in the list. Judged then, the override would be reported IGNORED and
+   * the reader would keep the next layer's value, though the boot goes on to
+   * offer that language (AGENTS.md, "Startup registry reads").
+   *
+   * So while held, an override the source (or the declared table it stands
+   * in for) does not admit is taken in force, unreported, and remembered.
+   * The other families (pattern, domain, bounds, format) are judged as ever:
+   * they do not depend on the list. A service nobody holds judges at once,
+   * as it always has.
+   */
+  holdOptionSourceVerdicts(): void {
+    this.optionSourceVerdictsHeld = true;
+  }
+
+  /**
+   * End the hold: the lists the sources read are whole (the plugin calls this
+   * at `kernel:bootstrapped`, after every `kernel:ready` handler). Each key
+   * whose override was taken in force while held is judged again, now for
+   * real: one its source still does not admit is reported IGNORED once, as at
+   * any read, and a change is emitted for its namespace and key so a reader
+   * that applied the held value reads the key again and drops it. One the
+   * source now admits stays in force, and nothing is said. Idempotent.
+   */
+  sealOptionSources(): void {
+    if (!this.optionSourceVerdictsHeld) return;
+    this.optionSourceVerdictsHeld = false;
+    const held = [...this.heldOptionSourceVerdicts.values()];
+    this.heldOptionSourceVerdicts.clear();
+    for (const [namespace, key] of held) {
+      const reg = this.registry.get(namespace);
+      if (!reg) continue;
+      if (this.effectiveEnvOverride(reg, namespace, key) !== null) continue;
+      this.emitChange({ namespace, key, scope: 'global', action: 'set', at: new Date().toISOString() });
+    }
+  }
+
+  /**
+   * Whether this key's option verdict is held (see {@link holdOptionSourceVerdicts}),
+   * remembering the key for {@link sealOptionSources} when it is.
+   */
+  private holdsOptionSourceVerdict(namespace: string, key: string): boolean {
+    if (!this.optionSourceVerdictsHeld || !this.optionSources.get(namespace)?.has(key)) return false;
+    this.heldOptionSourceVerdicts.set(`${namespace}.${key}`, [namespace, key]);
+    return true;
+  }
+
+  /**
    * The source's answer for one key, or `undefined` when no source is
    * registered or it has none. A source that throws is answered `undefined`
    * and said once per cause: the declared table then stands, the same answer a
@@ -1742,9 +1813,13 @@ export class SettingsService {
   }
 
   /**
-   * The manifest a page is served: the registered one, with each sourced
-   * key's `options` replaced by its source's answer for the value in effect.
-   * The registered manifest itself is never changed.
+   * The manifest a reader is served: the registered one, with each sourced
+   * key's `options` replaced by its source's answer. The one resolution every
+   * manifest read goes through: the namespace read passes the values in
+   * effect, so the answer can offer the stored value as stored;
+   * {@link getManifest} and {@link listManifests} pass none, and are served
+   * the options a write is judged against. The registered manifest itself is
+   * never changed.
    */
   private servedManifest(
     reg: RegisteredManifest,
@@ -3295,12 +3370,17 @@ export class SettingsService {
     return keys.length;
   }
 
-  /** Invoke a declared action (test connection, rotate, …). */
+  /**
+   * Invoke a declared action (test connection, rotate, …). `display.locale` is
+   * handed to the handler so the answer it composes is written in the caller's
+   * language; it authorizes nothing.
+   */
   async runAction(
     namespace: string,
     actionId: string,
     payload: unknown,
     ctx: SettingsContext = {},
+    display: SettingsDisplayOptions = {},
   ): Promise<SettingsActionResult> {
     const reg = this.registry.get(namespace);
     if (!reg) throw new UnknownNamespaceError(namespace);
@@ -3335,7 +3415,10 @@ export class SettingsService {
       values[key] = (await this.get(namespace, key, ctx)).value;
     }
     try {
-      return await handler({ namespace, actionId, values, payload, ctx });
+      return await handler({
+        namespace, actionId, values, payload, ctx,
+        ...(display.locale !== undefined ? { locale: display.locale } : {}),
+      });
     } catch (err: any) {
       return {
         ok: false,

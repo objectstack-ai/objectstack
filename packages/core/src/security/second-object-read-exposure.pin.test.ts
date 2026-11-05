@@ -264,6 +264,14 @@ const CALLERS: Record<string, Classification> = {
       'the validation-predicate reads (`resolvePredicateRelated`: a pass/fail verdict, the value never served), and ' +
       "`resolveOneHopRelated`, the one-hop loader they and the formula fields read through, as the caller's own `find`",
   },
+  // [#30205] A user's assigned work: which fields hold work for a user.
+  'packages/core/src/security/user-assigned-work.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      'picks the fields whose target is the user object, then counts and updates rows of the object that DECLARES ' +
+      'them, under the caller\'s own context; the only read of the target is the hand-over recipient\'s ban state ' +
+      '(a fixed platform object), and no field of it is served',
+  },
   'packages/objectql/src/integrity/dangling-reference-audit.ts': {
     kind: 'not-a-served-read',
     reason: 'an integrity audit: it probes whether a stored id resolves and reports ids, never a field of the target',

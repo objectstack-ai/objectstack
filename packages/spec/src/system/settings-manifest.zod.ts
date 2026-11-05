@@ -11,7 +11,7 @@ import { ValueDomainSchema } from '../shared/value-domain.zod';
  * Settings Manifest Protocol
  *
  * Declarative description of a single namespace of platform settings
- * (e.g. `mail`, `branding`, `feature_flags`). Modelled on Apple's
+ * (e.g. `mail`, `branding`, `localization`). Modelled on Apple's
  * `Settings.bundle/Root.plist` PreferenceSpecifiers — a small, closed
  * set of specifier types that the system-owned renderer turns into a
  * uniform Settings page.
@@ -498,6 +498,17 @@ export const SpecifierSchema = lazySchema(() => z.object({
    * the right shape for tables the platform itself backs — `mail.provider`,
    * `sms.provider` — where "legal" means "this deployment ships an adapter for
    * it", not "some registrar published it". Do not add `valueDomain` to those.
+   *
+   * **The one other boundary mover is a runtime option source.** A select whose
+   * legal values are what the running deployment supports (`localization.locale`:
+   * the languages its i18n service reports) has its table served by the
+   * settings service from that system, not from this declaration. Where a
+   * source answers, its options are what a write is judged against and what
+   * every manifest read serves (the namespace read and the manifest list
+   * alike); the declared `options` are the fallback, standing only while the
+   * source has no answer (the system it reads is absent from the composition).
+   * That is a runtime registration, not an authorable key: a manifest cannot
+   * declare one.
    *
    * `pattern` / `minLength` / `maxLength` still apply and still narrow: they
    * constrain the *shape* of the string, the domain constrains its

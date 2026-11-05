@@ -17,6 +17,8 @@ import {
   normalizeSupportedLocales,
   objectValidationMessageKey,
   TRANSLATABLE_METADATA_TYPES,
+  resolveBundleLocale,
+  resolveLocaleAmong,
 } from './i18n-resolver';
 // #14253 — the dataset fixture is PARSED by the authoring schema rather than
 // hand-shaped, so a translator addressing a member name the schema does not
@@ -1041,6 +1043,64 @@ describe('locale fallback resolution (BCP-47)', () => {
       { locale: 'fr', fallbackChain: [] },
     );
     expect(out.label).toBe('Account');
+  });
+});
+
+// The platform locale table's read aliases decide which key serves a request
+// before any base-language or first-variant guess, so a Traditional reader
+// (`zh-TW`, `zh-HK`, `zh-MO`) reaches a `zh-Hant` key and a Simplified one
+// reaches `zh-CN` whatever order the bundle registered them in. Core's
+// `resolveLocale` is `resolveLocaleAmong`; its own suite runs one case list
+// against both resolvers.
+describe('resolveBundleLocale — the platform table language step', () => {
+  const orders: Array<[string, Record<string, unknown>]> = [
+    ['Simplified first', { en: {}, 'zh-CN': {}, 'zh-Hant': {} }],
+    ['Traditional first', { en: {}, 'zh-Hant': {}, 'zh-CN': {} }],
+  ];
+
+  for (const [name, bundle] of orders) {
+    describe(name, () => {
+      it.each(['zh-TW', 'zh-HK', 'zh-MO', 'zh-tw', 'zh-Hant'])('%s reaches zh-Hant', (requested) => {
+        expect(resolveBundleLocale(bundle, requested)).toBe('zh-Hant');
+      });
+
+      it.each(['zh-CN', 'zh', 'zh-SG', 'zh-Hans', 'zh-cn'])('%s reaches zh-CN', (requested) => {
+        expect(resolveBundleLocale(bundle, requested)).toBe('zh-CN');
+      });
+    });
+  }
+
+  it('prefers the table tag spelling, then the first key the table maps to it', () => {
+    expect(resolveBundleLocale({ 'zh-TW': {}, 'zh-Hant': {} }, 'zh-HK')).toBe('zh-Hant');
+    expect(resolveBundleLocale({ 'zh-HK': {}, 'zh-TW': {} }, 'zh-MO')).toBe('zh-HK');
+    expect(resolveBundleLocale({ 'zh-CN': {}, 'zh-TW': {} }, 'zh-Hant')).toBe('zh-TW');
+  });
+
+  it('runs before the base-language step: a bare `zh` key is Simplified', () => {
+    expect(resolveBundleLocale({ zh: {}, 'zh-Hant': {} }, 'zh-TW')).toBe('zh-Hant');
+    expect(resolveBundleLocale({ 'zh-Hant': {}, zh: {} }, 'zh-CN')).toBe('zh');
+  });
+
+  it('keeps the alias-spelled bundles of today: ja → ja-JP, es → es-ES, en → en-US', () => {
+    const bundle = { 'en-US': {}, 'zh-CN': {}, 'ja-JP': {}, 'es-ES': {} };
+    expect(resolveBundleLocale(bundle, 'ja')).toBe('ja-JP');
+    expect(resolveBundleLocale(bundle, 'es')).toBe('es-ES');
+    expect(resolveBundleLocale(bundle, 'en')).toBe('en-US');
+    expect(resolveBundleLocale(bundle, 'zh-TW')).toBe('zh-CN');
+  });
+
+  it('a code the table does not know falls back as before', () => {
+    expect(resolveBundleLocale({ en: {}, 'es-ES': {} }, 'es-MX')).toBe('es-ES');
+    expect(resolveBundleLocale({ en: {}, 'en-US': {} }, 'en-GB')).toBe('en');
+    expect(resolveBundleLocale({ 'pt-PT': {} }, 'pt-BR')).toBe('pt-PT');
+    expect(resolveBundleLocale({ en: {}, 'zh-CN': {} }, 'fr')).toBeUndefined();
+    expect(resolveBundleLocale({}, 'zh-TW')).toBeUndefined();
+  });
+
+  it('resolveLocaleAmong answers the same over a list', () => {
+    expect(resolveLocaleAmong('zh-TW', ['en', 'zh-CN', 'zh-Hant'])).toBe('zh-Hant');
+    expect(resolveLocaleAmong('zh', ['zh-Hant', 'zh-CN'])).toBe('zh-CN');
+    expect(resolveLocaleAmong('zh-TW', [])).toBeUndefined();
   });
 });
 

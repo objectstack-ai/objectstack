@@ -62,8 +62,10 @@ export type QueueExpansionPurpose = 'access' | 'addressing';
  * does not carry is absence, not failure. The activation-ledger read
  * (`sys_metadata_activation`, which says whether a declared queue or a position
  * is switched off) is NOT a failed read in this sense: under either answer its
- * failure reads "switched on", as it did before the key existed; whether that
- * posture moves is #29604's code half to decide.
+ * failure reads "switched on", as it did before the key existed. That posture
+ * stays by decision: it is the one the sharing-rule service takes for the same
+ * ledger on its own `position` recipients, so a queue's position and a rule's
+ * position cannot disagree during an outage.
  *
  * - `'nobody'` — the default and the answer every caller had before the key
  *   existed. A failed read is logged at `warn`, and what sat behind it
@@ -76,8 +78,7 @@ export type QueueExpansionPurpose = 'access' | 'addressing';
  *   grants and "nobody" there revokes: the approver slate (D6) and the
  *   sharing-recipient grant recompute (D7). An implementation written before
  *   this key existed ignores it and answers `'nobody'`; the registered one,
- *   `@objectstack/plugin-sharing`'s, honours `'refuse'` from #29604's code half
- *   on, so until then a caller passing `'refuse'` still gets `'nobody'`.
+ *   `@objectstack/plugin-sharing`'s, honours `'refuse'`.
  *
  * Under either answer an EMPTY queue — every read succeeded and reached
  * nobody — is still `[]`, and a name that resolves nowhere is still `[]` /
@@ -157,6 +158,14 @@ export interface IOwnershipQueueService {
    * under `'nobody'`, the default, a failed read counts as not reaching
    * `userId`; under `'refuse'`, `false` is answered only when every read
    * behind it succeeded, and a failed read rejects with a failure naming it.
+   * Under `'refuse'` the registered service reads the queue's own rows
+   * (`sys_queue`, `sys_queue_member`) first, and a failure there rejects at
+   * once, since without them the queue's member set would be incomplete (a
+   * declared queue's own specifications come from the registry, but its
+   * authored additions come from `sys_queue_member`). Past them it
+   * answers `true` as soon as a read that succeeded reaches `userId`, even
+   * beside a failed read, and rejects only when no successful read reaches
+   * `userId` and one failed.
    * The options argument is optional, so a three-argument call is today's.
    */
   isMember(

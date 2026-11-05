@@ -91,10 +91,10 @@ export interface SettingsContext {
 export interface SettingsDisplayOptions {
   /**
    * The caller's display language (BCP-47), for prose a
-   * {@link SettingsWritePredicate} refusal or a {@link SettingsLiveStatusProvider}
-   * statement composes. The settings routes pass it from the request
-   * (`Accept-Language`, else `?locale`). Absent, such prose is written in
-   * English.
+   * {@link SettingsWritePredicate} refusal, a {@link SettingsLiveStatusProvider}
+   * statement or a {@link SettingsActionHandler} answer composes. The settings
+   * routes pass it from the request (`Accept-Language`, else `?locale`).
+   * Absent, such prose is written in English.
    */
   locale?: string;
 }
@@ -356,6 +356,11 @@ export type SettingsActionHandler = (input: {
   values: Record<string, unknown>;
   payload?: unknown;
   ctx: SettingsContext;
+  /**
+   * The language the answer's `message` is written in — the caller sees it as
+   * the action's toast. {@link SettingsDisplayOptions.locale}.
+   */
+  locale?: string;
 }) => Promise<SettingsActionResult> | SettingsActionResult;
 
 /**
@@ -500,7 +505,9 @@ export interface SettingsOptionSourceAnswer {
  * absent from the composition).
  *
  * Asked at the moment it is used, never recorded: on each save (the write's
- * acceptance), on each read of an `OS_*` override, and on each page read. It
+ * acceptance), on each read of an `OS_*` override, on each page read, and on
+ * each manifest read (`getManifest`, `listManifests`, `GET /api/settings`),
+ * so every reader of the key's options is told the table a save judges. It
  * is not asked when the manifest registers, because what it reads registers
  * later in the boot, so an `OS_*` override of such a key is judged when it is
  * read.
@@ -510,7 +517,8 @@ export type SettingsOptionSource = (input: {
    * The key's value in effect on the page being served, so the answer can
    * offer it as stored: under its own spelling when it is a second spelling
    * of an offered value, and named as no longer offered when it is not
-   * admitted. Absent when a write or an override is judged.
+   * admitted. Absent when a write or an override is judged, and when a
+   * manifest is read outside a page (`getManifest`, `listManifests`).
    */
   current?: unknown;
   /** The language the page is read in, {@link SettingsDisplayOptions.locale}. */

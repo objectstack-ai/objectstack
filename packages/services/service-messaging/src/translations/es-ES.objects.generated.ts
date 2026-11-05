@@ -460,7 +460,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       locale: {
         label: "Configuración regional",
-        help: "Configuración regional del dispositivo en la que se muestran las notificaciones push enviadas a él."
+        help: "Configuración regional del dispositivo, tal como la indicó el registro. Se guarda para el dispositivo; ninguna notificación push se muestra según ella: llega en el idioma del destinatario (su configuración regional de usuario y, si no, la predeterminada de la implantación)."
       },
       name: {
         label: "Nombre del dispositivo"

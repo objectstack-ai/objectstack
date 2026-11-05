@@ -33,17 +33,21 @@
 
 import type { ActionActivationRow, ActionActivationStore, ActionActivationWriteOptions } from './action-activation.js';
 import type { ObjectQL } from './engine.js';
+import { standaloneActionOwnerKey } from './action-governance.js';
 
 /**
  * One registered action handler. [#30065] `override` marks a declared action
  * override's handler ({@link ActionsFacet.registerActionOverride}); `beneath`
- * is the handler it was bound over, or one registered for the key after it,
- * kept so removing the override restores it.
+ * is the handler it was bound over, or the declared base's registered for the
+ * key after it, kept so removing the override restores it. [#30542] `base` is
+ * the package the override declares (`overrides.package`): only a handler of
+ * the action that package ships slots beneath it.
  */
 export interface ActionHandlerEntry {
   handler: (ctx: any) => Promise<any> | any;
   package?: string;
   override?: true;
+  base?: string;
   beneath?: ActionHandlerEntry;
 }
 
@@ -58,21 +62,24 @@ export interface ActionsHost {
   readonly actionActivation: ObjectQL['actionActivation'];
   readonly actions: ObjectQL['actions'];
   readonly logger: ObjectQL['logger'];
+  readonly registry: ObjectQL['registry'];
 }
 
 /** The bodies of the "Action system and packaged-action activation" section of `ObjectQL`: a stateless facet, called by the class's stubs. */
 export class ActionsFacet {
   /** The body of `ObjectQL#registerAction`; the method's docblock there is its contract. */
-  static registerAction(this: Pick<ActionsHost, 'actions' | 'logger'>, objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName?: string): void {
+  static registerAction(this: Pick<ActionsHost, 'actions' | 'logger' | 'registry'>, objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName?: string): void {
     const key = `${objectName}:${actionName}`;
     const replaced = this.actions.get(key);
-    // [#30065, ADR-0146 D9 `action`] Another package's handler arriving under
-    // a key a declared override holds — a marketplace base's, bound by its
+    // [#30065, ADR-0146 D9 `action`] The declared base's handler arriving
+    // under a key the override holds — a marketplace base's, bound by its
     // `kernel:ready` rehydrate after the authored-action resync bound the
-    // override, or a bundle's handlers re-bound — is the base's: it slots
-    // beneath the override, which stays the one that runs, and is the one a
-    // removal of the override binds again.
-    if (replaced?.override === true && replaced.package !== packageName) {
+    // override, or a bundle's handlers re-bound — slots beneath the override,
+    // which stays the one that runs, and is the one a removal of the override
+    // binds again. [#30542] Only the declared base's: any other registration
+    // replaces it and is warned below, like every other collision.
+    if (replaced?.override === true && replaced.package !== packageName
+        && ActionsFacet.arrivesAsDeclaredBase.call(this, replaced, objectName, actionName, packageName)) {
       this.actions.set(key, { ...replaced, beneath: { handler, package: packageName } });
       this.logger.debug('Registered action beneath an override', { objectName, actionName, package: packageName, override: replaced.package });
       return;
@@ -92,14 +99,35 @@ export class ActionsFacet {
     this.logger.debug('Registered action', { objectName, actionName, package: packageName });
   }
 
+  /**
+   * [#30542] Whether a registration under a key a declared override holds is
+   * the declared base's own handler: the registry's code artifact of the
+   * action (`getArtifactItem`, which a package's items are registered in
+   * before its handlers are bound) belongs to the package the override
+   * declares, on this object — the judgement the authored-action resync
+   * binds the override by once that artifact is registered. A registration
+   * with no package is no package's. An override bound with no declared base
+   * keeps taking any package's handler beneath it.
+   */
+  static arrivesAsDeclaredBase(this: Pick<ActionsHost, 'registry'>, override: ActionHandlerEntry, objectName: string, actionName: string, packageName: string | undefined): boolean {
+    if (packageName === undefined) return false;
+    if (override.base === undefined) return true;
+    const artifact: any = this.registry?.getArtifactItem?.('action', actionName);
+    return artifact?._packageId === override.base && standaloneActionOwnerKey(artifact) === objectName;
+  }
+
   /** The body of `ObjectQL#registerActionOverride`; the method's docblock there is its contract. */
-  static registerActionOverride(this: Pick<ActionsHost, 'actions' | 'logger'>, objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName: string): void {
+  static registerActionOverride(this: Pick<ActionsHost, 'actions' | 'logger'>, objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName: string, base?: string): void {
     const key = `${objectName}:${actionName}`;
     const current = this.actions.get(key);
     // Re-binding the same package's override replaces it in place, over the
     // same handler beneath.
     const beneath = current?.package === packageName ? current.beneath : current;
-    this.actions.set(key, { handler, package: packageName, override: true, ...(beneath !== undefined ? { beneath } : {}) });
+    this.actions.set(key, {
+      handler, package: packageName, override: true,
+      ...(base !== undefined ? { base } : {}),
+      ...(beneath !== undefined ? { beneath } : {}),
+    });
     this.logger.debug('Registered action override', { objectName, actionName, package: packageName, beneath: beneath?.package });
   }
 

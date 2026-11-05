@@ -766,6 +766,17 @@ export function overrideWriteIdentityOf(type: string, identity: string, item: un
     return member === undefined ? identity : `${identity}\u0000${member}`;
 }
 
+/**
+ * [#30542] The object an `action` item is keyed on under the override write
+ * gate — its `objectName`, `''` when it names none: the first half of the
+ * `<objectName>:<name>` identity {@link overrideWriteItemsOf} gives it, and
+ * what {@link overrideWriteVerdict} matches a declared override's base on.
+ */
+function overrideWriteActionObjectOf(item: unknown): string {
+    const objectName = isPlainRecord(item) ? item.objectName : undefined;
+    return typeof objectName === 'string' ? objectName : '';
+}
+
 /** One item written into one package — what the override write gate judges. */
 export interface OverrideWriteSubject {
     /** The metadata type, either spelling (folded here). */
@@ -1112,9 +1123,8 @@ export function overrideWriteItemsOf(body: Record<string, unknown>, at = ''): Ov
                 }
                 continue;
             }
-            const identity = type === 'action' && typeof item.objectName === 'string' && item.objectName !== ''
-                ? `${item.objectName}:${declaredName}`
-                : declaredName;
+            const object = type === 'action' ? overrideWriteActionObjectOf(item) : '';
+            const identity = object !== '' ? `${object}:${declaredName}` : declaredName;
             out.push({ type, name: declaredName, identity: overrideWriteIdentityOf(type, identity, item), item, path });
         }
     }
@@ -1171,11 +1181,19 @@ export function overrideWriteVerdict(
     if (packageId !== undefined && scope === undefined) return NOT_CONCERNED;
     const dependencies = scope?.dependencies.filter((id) => id !== packageId);
     const member = overrideWriteMemberOf(request.type, request.item);
+    // [#30542] A declared action override names its base's action by the
+    // identity `os validate` and the install door key it on,
+    // `<objectName>:<name>` ({@link overrideWriteItemsOf}): the base's action
+    // of that name on another object is no shipper of it, so an override that
+    // moves the action to another object is refused here as it is there.
+    const onItsObject = (a: unknown): boolean => !declaration.present
+        || (PLURAL_TO_SINGULAR[request.type] ?? request.type) !== 'action'
+        || overrideWriteActionObjectOf(a) === overrideWriteActionObjectOf(request.item);
     const shippers = dependencies === undefined || dependencies.length === 0
         ? []
         : Array.from(new Set(
             this.shippedArtifactsOf(request.type, request.name, undefined, member)
-                .filter((a) => overrideWriteMemberOf(request.type, a) === member)
+                .filter((a) => overrideWriteMemberOf(request.type, a) === member && onItsObject(a))
                 .map((a) => (a as { _packageId?: unknown } | null | undefined)?._packageId)
                 // An override replaces an item of an INSTALLED, read-only base
                 // (ADR-0146 D1): a writable package's item is edited in place
@@ -1188,7 +1206,7 @@ export function overrideWriteVerdict(
     // [#30065] The base's own item, the one a declared action override is
     // judged against: the shipping artifact under that base's envelope.
     const baseItemOf = (basePackageId: string): unknown => this.shippedArtifactsOf(request.type, request.name, undefined, member)
-        .find((a) => overrideWriteMemberOf(request.type, a) === member
+        .find((a) => overrideWriteMemberOf(request.type, a) === member && onItsObject(a)
             && (a as { _packageId?: unknown } | null | undefined)?._packageId === basePackageId);
     return judgeOverrideWrite(request, { dependencies, shippers, baseItemOf });
 }
