@@ -897,7 +897,7 @@
       "title": "Email templates resolve from the registry (no sys_email_template row since ADR-0131 D6/D10), resolve (name, locale) with en-US fallback, render {{path}} holes, gate on required variables and active:false, survive admin edits across redeploys — and the raw POST /api/v1/email/send door authenticates, requires manage_platform_settings, bounds sentBy, from, headers, organizationId and identityMail, refuses anonymous, and 400s malformed input",
       "since": "v15",
       "status": "active",
-      "revision": 15,
+      "revision": 16,
       "priority": "P2",
       "surface": "mixed",
       "fixtures": {
@@ -954,9 +954,9 @@
           "evidence": "the error"
         },
         {
-          "clause": "(name, locale) resolution walks the ladder of record, SendTemplateInput.locale in packages/spec/src/contracts/email-service.ts: two rows with one name are an i18n bundle, the name is matched exactly and only the locale member is resolved, and every rung loads one row at one tag exactly, so en and en-US stay two distinct rows (folding chooses which row is read, it never merges two). A call that NAMES a locale, over the built-in registry template loader, walks: (1) this locale, folded against the bundle's locale tags by resolveBundleLocale — exact, then case-insensitive (zh-cn → zh-CN), then base language (en-GB → en), then variant expansion (zh and zh-TW → zh-CN), the first match in ascending tag order; (2) the stack's declared fallback locale (II18nService.getFallbackLocale(): i18n.fallbackLocale, else defaultLocale), folded the same way, skipped when none is declared; (3) en-US, exactly; (4) TEMPLATE_NOT_FOUND, which is permanent. A rung that resolves to a tag already tried is skipped; a replacement TemplateLoader keeps the exact ladder. A call that names no locale starts at en-US exactly, with no fold and no declared fallback, then takes the loader's own no-locale answer (the built-in loader: the bundle's lowest locale tag)",
+          "clause": "(name, locale) resolution walks the ladder of record, SendTemplateInput.locale in packages/spec/src/contracts/email-service.ts: two rows with one name are an i18n bundle, the name is matched exactly and only the locale member is resolved, and every rung loads one row at one tag exactly, so en and en-US stay two distinct rows (folding chooses which row is read, it never merges two). A call that NAMES a locale, over the built-in registry template loader, walks: (1) this locale, folded against the bundle's locale tags by resolveBundleLocale, which runs resolveLocaleAmong's five steps — exact, then case-insensitive (zh-cn → zh-CN), then the platform locale table language (platformLocaleTagOf: zh → zh-CN, zh-TW / zh-HK / zh-MO → a zh-Hant tag), then base language (en-GB → en), then variant expansion (zh-TW → zh-CN when the bundle holds no zh-Hant tag), the first match in ascending tag order; (2) the stack's declared fallback locale (II18nService.getFallbackLocale(): i18n.fallbackLocale, else defaultLocale), folded the same way, skipped when none is declared; (3) en-US, exactly; (4) TEMPLATE_NOT_FOUND, which is permanent. A rung that resolves to a tag already tried is skipped; a replacement TemplateLoader keeps the exact ladder. A call that names no locale starts at en-US exactly, with no fold and no declared fallback, then takes the loader's own no-locale answer (the built-in loader: the bundle's lowest locale tag)",
           "oracle": "log",
-          "verify": "the zh-CN recipient gets the zh-CN render; the zh recipient gets the zh-CN render too (variant expansion); a recipient whose language the bundle lacks (e.g. ja-JP) gets the en-US row, through the showcase's declared fallback en folding to en-US. A zh recipient getting the en-US row is the FAIL. The clause's no-locale branch cannot be driven from the HTTP door: the email channel always names a locale, the recipient's sys_user.locale or else the deployment default (resolveRecipientLocale, packages/services/service-messaging/src/recipient-locale.ts), so score that branch from source, never as a live FAIL",
+          "verify": "the zh-CN recipient gets the zh-CN render; the zh recipient gets the zh-CN render too (the platform locale table step); a recipient whose language the bundle lacks (e.g. ja-JP) gets the en-US row, through the showcase's declared fallback en folding to en-US. A zh recipient getting the en-US row is the FAIL. The clause's no-locale branch cannot be driven from the HTTP door: the email channel always names a locale, the recipient's sys_user.locale or else the deployment default (resolveRecipientLocale, packages/services/service-messaging/src/recipient-locale.ts), so score that branch from source, never as a live FAIL",
           "evidence": "the two renders"
         },
         {
@@ -1096,6 +1096,12 @@
           "date": "2026-11-04",
           "change": "fixtures.requires[2] corrected: the 'same name, locale zh-CN' scratch copy was written package-less onto the shipped name, which ADR-0146 D11 refuses 403 NOT_OVERRIDABLE. The zh-CN member is now authored into com.example.showcase.custom with no `overrides`, since the base ships no zh-CN member and a declared override of one is refused 403 NOT_OVERRIDABLE (declared_package_ships_no_such_item). Measured on a fresh showcase boot at base 232d3bb5ef: package-less zh-CN PUT 403; ensure-customization 201; pair PUT with overrides 403; pair PUT without overrides 200, served by ?member=zh-CN; a scratch api notify flow then sent the zh-CN wording to a zh-CN-locale recipient and the en-US wording to an en-US one (sys_email 'sent'); DELETE ?package=…custom&member=zh-CN 200, then ?member=zh-CN 404. No clause changed",
           "ref": "#30129"
+        },
+        {
+          "revision": 16,
+          "date": "2026-11-05",
+          "change": "acceptance[3].clause and .verify name the fold ladder as resolveLocaleAmong's five steps: PR #30601 put a platform locale table step (platformLocaleTagOf) between case-insensitive and base language, so zh reaches zh-CN at that step and zh-TW / zh-HK / zh-MO reach a zh-Hant tag when the bundle holds one, else zh-CN by variant expansion. The showcase bundle holds no zh-Hant tag, so no verdict this item scores changes. Read on main b77c160a",
+          "ref": "#30617"
         }
       ]
     },

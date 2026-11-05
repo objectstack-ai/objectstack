@@ -22,6 +22,7 @@ import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-
 import { describeDriverSqliteFile } from '../../utils/connection-display.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
 import { refuseUndeclaredObjects } from '../../utils/migrate-object-scope.js';
+import { formatWithheldColumns } from '../../utils/migrate-withheld-columns.js';
 import {
   walkBlankColumns,
   type BlankSingleValuesEngine,
@@ -117,6 +118,7 @@ export function formatBlankMultiValuesReport(report: BlankSingleValuesReport): s
   if (report.truncated) {
     lines.push('⚠ Walk incomplete — rows past the cap or in an unreadable object were not read.');
   }
+  lines.push(...formatWithheldColumns(report.withheldColumns));
   return lines;
 }
 
@@ -295,6 +297,7 @@ export default class MigrateBlankMultiValues extends Command {
         find: (object, options) =>
           !apply && stack.tableAbsent?.(object) ? Promise.resolve([]) : engine.find(object, options),
         update: (object, data, options) => engine.update(object, data, options),
+        registry: engine.registry,
       };
 
       const report = await cleanBlankMultiValues(view, logger, {
