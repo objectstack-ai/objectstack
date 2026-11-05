@@ -12,10 +12,6 @@ describe('metricDrillFilter — the list a KPI tile opens (ADR-0021 D2)', () => 
     expect(metricDrillFilter({ object: 'crm_opportunity', measureScope: undefined, runtimeFilter: { stage: 'closed_won' } })).toBeNull();
   });
 
-  it('offers no click when the server says the scope is not a list filter', () => {
-    expect(metricDrillFilter({ object: 'crm_opportunity', measureScope: null, runtimeFilter: undefined })).toBeNull();
-  });
-
   it('opens the widget filter alone when the measure has no scope of its own', () => {
     expect(
       metricDrillFilter({ object: 'crm_opportunity', measureScope: {}, runtimeFilter: { stage: { $nin: ['closed_won', 'closed_lost'] } } }),
@@ -52,8 +48,19 @@ describe('metricDrillFilter — the list a KPI tile opens (ADR-0021 D2)', () => 
   });
 });
 
-describe('readMeasureDrillScope — before the server sidecar exists', () => {
-  it('reads every answer as "did not say"', () => {
-    expect(readMeasureDrillScope({ rows: [{ total_amount: 1 }], object: 'crm_opportunity' }, 'total_amount')).toBeUndefined();
+describe('readMeasureDrillScope — the answer drillScopes entry', () => {
+  it('reads the tile measure entry', () => {
+    expect(readMeasureDrillScope({ drillScopes: { paid_count: { status: 'paid' } } }, 'paid_count')).toEqual({ status: 'paid' });
+  });
+
+  it('reads an empty entry as a scope with no extra condition', () => {
+    expect(readMeasureDrillScope({ drillScopes: { total_amount: {} } }, 'total_amount')).toEqual({});
+  });
+
+  it('reads a missing entry, a missing map or no measure as "no scope"', () => {
+    expect(readMeasureDrillScope({ drillScopes: { opp_count: {} } }, 'paid_rate')).toBeUndefined();
+    expect(readMeasureDrillScope({}, 'total_amount')).toBeUndefined();
+    expect(readMeasureDrillScope(undefined, 'total_amount')).toBeUndefined();
+    expect(readMeasureDrillScope({ drillScopes: { total_amount: {} } }, undefined)).toBeUndefined();
   });
 });

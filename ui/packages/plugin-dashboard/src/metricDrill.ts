@@ -12,9 +12,10 @@
  * A tile's number is the dataset's own scope AND the measure's own filter AND
  * the widget's filter (the dashboard's filters are already merged into it).
  * The first two live in the dataset definition, which this package never
- * reads: only the server knows them, so the tile drills only when the answer
- * hands over that measure's scope as a list filter. Without it, a tile whose
- * measure carries a filter would open more records than its number counts.
+ * reads: the server hands them over per measure as the answer's `drillScopes`
+ * entry, already lowered to a list filter on the answer's `object`. A measure
+ * with no entry (a derived measure, or a scope naming a relationship path) has
+ * no list that selects its records.
  *
  * Invariant: a tile offers a click only when its list provably matches its
  * number. Every "cannot tell" answer below is `null`, never a looser filter.
@@ -27,13 +28,10 @@ export interface MetricDrillInput {
   /** The dataset's base object, from the answer (`object`). */
   object: string | undefined;
   /**
-   * The tile measure's own scope as a list filter: the dataset's filter AND
-   * the measure's filter, already lowered by the server.
-   * - `undefined`: the answer did not say (no click).
-   * - `null`: the server says the scope is not a list filter (no click).
-   * - an object (possibly empty): that scope.
+   * The tile measure's `drillScopes` entry: `undefined` when the answer has
+   * none (no click), else the list filter its records need (`{}` = none).
    */
-  measureScope: Record<string, unknown> | null | undefined;
+  measureScope: Record<string, unknown> | undefined;
   /** The widget's resolved filter (placeholders already resolved). */
   runtimeFilter: unknown;
   /** The answer's date windows for the tile's single row (`drillRanges[0]`). */
@@ -47,7 +45,7 @@ export interface MetricDrillInput {
  */
 export function metricDrillFilter(input: MetricDrillInput): Record<string, unknown> | null {
   const { object, measureScope, runtimeFilter, ranges } = input;
-  if (!object || measureScope == null) return null;
+  if (!object || measureScope === undefined) return null;
   try {
     const hasScope = Object.keys(measureScope).length > 0;
     const scoped = hasScope ? composeDrillFilter(runtimeFilter, measureScope) : runtimeFilter;
@@ -58,15 +56,15 @@ export function metricDrillFilter(input: MetricDrillInput): Record<string, unkno
   }
 }
 
-/**
- * Read the tile measure's scope off a dataset answer.
- *
- * The server sidecar this reads is not on the wire yet; until it is, every
- * answer reads as "did not say" and no tile offers a click.
- */
+/** Read one measure's `drillScopes` entry off a dataset answer. */
 export function readMeasureDrillScope(
-  _answer: unknown,
-  _measure: string,
-): Record<string, unknown> | null | undefined {
-  return undefined;
+  answer: { drillScopes?: unknown } | null | undefined,
+  measure: string | undefined,
+): Record<string, unknown> | undefined {
+  const scopes = answer?.drillScopes;
+  if (!measure || !scopes || typeof scopes !== 'object' || Array.isArray(scopes)) return undefined;
+  const entry = (scopes as Record<string, unknown>)[measure];
+  return entry && typeof entry === 'object' && !Array.isArray(entry)
+    ? (entry as Record<string, unknown>)
+    : undefined;
 }

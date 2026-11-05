@@ -1063,23 +1063,72 @@ describe('DatasetWidget — dimension metadata probe (objectui#5280)', () => {
 });
 
 // ── The KPI tile's click (ADR-0021 D2) ───────────────────────────────────────
-// A tile drills only when the answer states its measure's own scope; an answer
-// that names the object and nothing more leaves the tile with no click.
+// A tile drills only when the answer carries a `drillScopes` entry for its
+// measure, and the list it opens is the widget filter AND that entry.
 describe('DatasetWidget metric tile drill', () => {
-  it('offers no click when the answer does not state the measure scope', async () => {
-    const src = makeSource(async () => ({
+  const OPEN = { stage: { $nin: ['closed_won', 'closed_lost'] } };
+  const tileSource = (answer: Record<string, unknown>) => ({
+    queryDataset: vi.fn(async () => ({
       rows: [{ total_amount: 814400 }],
       fields: [{ name: 'total_amount', type: 'number', label: 'Total Amount', aggregate: 'sum' }],
       object: 'crm_opportunity',
-    }));
+      ...answer,
+    })),
+    // Parameters declared: the assertions read `find.mock.calls[0][1]`.
+    find: vi.fn(async (_object: string, _params: unknown) => ({ data: [] })),
+    getObjectSchema: vi.fn(async () => ({ fields: {} })),
+  });
+  const renderTile = (src: ReturnType<typeof tileSource>, filter: Record<string, unknown> | undefined = OPEN) =>
     render(
       <DatasetWidget
-        widget={{ type: 'metric', dataset: 'opportunity_metrics', values: ['total_amount'], filter: { stage: { $nin: ['closed_won', 'closed_lost'] } } }}
+        widget={{ type: 'metric', dataset: 'opportunity_metrics', values: ['total_amount'], ...(filter ? { filter } : {}) }}
         dataSource={src}
       />,
     );
+
+  it('offers no click when the answer carries no drillScopes', async () => {
+    renderTile(tileSource({}));
     await screen.findByText('814400');
     expect(screen.queryByTestId('dataset-metric-drill')).not.toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('offers no click when the tile measure has no entry (a derived measure)', async () => {
+    renderTile(tileSource({ drillScopes: { opp_count: {} } }));
+    await screen.findByText('814400');
+    expect(screen.queryByTestId('dataset-metric-drill')).not.toBeInTheDocument();
+  });
+
+  it('opens the widget filter AND the measure scope on click', async () => {
+    const src = tileSource({ drillScopes: { total_amount: { amount: { $null: false } } } });
+    renderTile(src);
+    fireEvent.click(await screen.findByTestId('dataset-metric-drill'));
+    await waitFor(() => expect(src.find).toHaveBeenCalled());
+    expect(src.find.mock.calls[0][0]).toBe('crm_opportunity');
+    expect((src.find.mock.calls[0][1] as any).$filter).toEqual({
+      $and: [{ stage: { $nin: ['closed_won', 'closed_lost'] } }, { amount: { $null: false } }],
+    });
+  });
+
+  it('opens the widget filter alone when the entry is empty', async () => {
+    const src = tileSource({ drillScopes: { total_amount: {} } });
+    renderTile(src);
+    fireEvent.keyDown(await screen.findByTestId('dataset-metric-drill'), { key: 'Enter' });
+    await waitFor(() => expect(src.find).toHaveBeenCalled());
+    expect((src.find.mock.calls[0][1] as any).$filter).toEqual(OPEN);
+  });
+
+  it('bounds the list by the answer date window', async () => {
+    const src = tileSource({
+      drillScopes: { total_amount: {} },
+      drillRanges: [{ close_date: { field: 'close_date', gte: '2026-10-01', lt: '2027-01-01' } }],
+    });
+    renderTile(src, { stage: 'closed_won' });
+    fireEvent.click(await screen.findByTestId('dataset-metric-drill'));
+    await waitFor(() => expect(src.find).toHaveBeenCalled());
+    const sent = JSON.stringify((src.find.mock.calls[0][1] as any).$filter);
+    expect(sent).toContain('closed_won');
+    expect(sent).toContain('2026-10-01');
+    expect(sent).toContain('2027-01-01');
   });
 });
