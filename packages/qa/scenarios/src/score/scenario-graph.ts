@@ -9,8 +9,8 @@
  *
  * A multi-package artifact may carry its collections only inside
  * `packages[i].manifest` (ADR-0130 D4, option B). Every collection here is read
- * through `resolveStackCollection` — the rule `@objectstack/cli` and
- * `@objectstack/verify` already share (`utils/stack-collections.ts`): the
+ * through `resolveStackCollection`, imported from its owner `@objectstack/core`
+ * — the rule `@objectstack/cli` and `@objectstack/verify` share too: the
  * top-level array when present, otherwise every package body's, in the
  * dependency order `resolveArtifactPackageOrder` decides. ⛔ No local walk of
  * `packages[]`.
