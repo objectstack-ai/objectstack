@@ -14,9 +14,9 @@ import { ConsolePageHeader } from '@object-ui/app-shell';
 import { Loader2, ArrowLeft, ChevronRight, RotateCcw, ShieldAlert } from 'lucide-react';
 import { Button, Card, CardContent, Skeleton, Badge, getLazyIcon } from '@object-ui/components';
 import { ExpressionEvaluator } from '@object-ui/core';
-import { extractFieldErrors } from '@object-ui/react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { SettingsField } from './SettingsField';
+import { fieldWording, settingsFieldRefusals } from './settingsFieldRefusals';
 import {
   getSettingsNamespace,
   lockedKeyOf,
@@ -510,7 +510,11 @@ export function SettingsView() {
         // repeats each row's whole message, help text included.
         // `{{settings}}` is the labels joined with the pack's own list
         // separator, the one the record form's field lists use.
-        const perField = extractFieldErrors(apiError);
+        //
+        // objectstack#30206 — a format miss (`invalid_format`) reads in the
+        // console's words and the reader's language; every other refusal
+        // keeps the server's sentence (`settingsFieldRefusals`).
+        const perField = settingsFieldRefusals(apiError, manifest.specifiers, fieldWording(labels), t);
         if (perField?.length) {
           setFieldErrors(Object.fromEntries(perField.map((f) => [f.field, f.message])));
           const named = refusedSettingLabels(perField, manifest.specifiers, labels);

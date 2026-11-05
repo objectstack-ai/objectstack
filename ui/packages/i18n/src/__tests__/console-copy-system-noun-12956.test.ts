@@ -23,7 +23,7 @@ import { builtInLocales } from '../locales';
 
 const FAMILIES = [
   'console.settingsHub',
-  'console.workspaceTimezonePrompt',
+  'console.firstRunChecklist',
   'console.readRate',
   'auth',
   'profile.password',

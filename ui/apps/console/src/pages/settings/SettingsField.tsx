@@ -58,8 +58,8 @@ import type { SettingsLabelHelpers } from './useSettingsLabel';
  * of text (an installed package's own words) through the same unconditional
  * `rehype-sanitize` pass, used as it is.
  *
- * Lazy on purpose. This module is in the EAGER closure (`AppContent` imports
- * `WorkspaceTimezonePrompt`, which imports it), and a static import would put
+ * Lazy on purpose. This module is in the EAGER closure (`App` imports
+ * `FirstRunChecklist`, which imports it), and a static import would put
  * `plugin-markdown`'s whole chunk, its syntax highlighter included, on every
  * console page load. Until the chunk arrives the body shows as its own plain
  * text.
@@ -106,8 +106,9 @@ export interface SettingsFieldProps {
   labels?: SettingsLabelHelpers;
   /**
    * Server-side rejection for THIS field, from the last failed save
-   * (objectstack#4224). Already localized by the server — rendered verbatim,
-   * not re-worded here.
+   * (objectstack#4224). Rendered verbatim, not re-worded here: the host passes
+   * the server's sentence, or the console's own for a format miss
+   * (`settingsFieldRefusals`, objectstack#30206).
    *
    * Replaces the help text while present, rather than stacking below it: the
    * two occupy the same slot and say the same kind of thing, and a description
@@ -116,7 +117,7 @@ export interface SettingsFieldProps {
   error?: string;
   /**
    * The scope this row's Save writes. The page passes it; a host that does
-   * not (the timezone prompt) keeps the badges a lower scope would see.
+   * not (the first-run checklist) keeps the badges a lower scope would see.
    */
   writeScope?: SpecifierScope;
 }
@@ -305,6 +306,35 @@ function FieldError({ id, message }: { id: string; message: string }) {
 }
 
 /**
+ * An option's name: its label without the option's own code beside it.
+ * The country picker labels read `Name (CODE)` (`中国 (CN)`, `Germany (DE)`),
+ * the currency suggestions `CODE — Name` (`CNY — Chinese Yuan`); either way the
+ * code is the option's `value`, so only that code is taken off, with the
+ * brackets or the dash that join it. A label that carries no such code is its
+ * own name.
+ */
+function optionName(option: { value: string; label: string }): string {
+  const label = option.label.trim();
+  const code = option.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const suffixed = new RegExp(`^(.*?)\\s*[(（]\\s*${code}\\s*[)）]$`, 'i').exec(label);
+  if (suffixed && suffixed[1].trim() !== '') return suffixed[1].trim();
+  const prefixed = new RegExp(`^${code}\\s*[—–-]\\s*(.+)$`, 'i').exec(label);
+  if (prefixed && prefixed[1].trim() !== '') return prefixed[1].trim();
+  return label;
+}
+
+/**
+ * The one option whose name is `text`, compared trimmed and case-insensitively,
+ * or `undefined` when no option, or more than one, carries that name.
+ */
+function optionByName<T extends { value: string; label: string }>(options: readonly T[], text: string): T | undefined {
+  const wanted = text.trim().toLocaleLowerCase();
+  if (wanted === '') return undefined;
+  const matches = options.filter((option) => optionName(option).toLocaleLowerCase() === wanted);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+/**
  * <DomainCombobox> — the control a `select` gets when its specifier declares a
  * `valueDomain` (objectstack#5712 / PR objectstack#6581).
  *
@@ -328,8 +358,14 @@ function FieldError({ id, message }: { id: string; message: string }) {
  * the box while `DE` is what is committed. A datalist commits its option's
  * `value` attribute into the box verbatim, which is why the suggestions carry
  * the label there and `committedValue` maps it back. Typed text that equals an
- * option's `value` is a code and is committed as typed; any other text is
- * committed verbatim, as before.
+ * option's `value` is a code and is committed as typed.
+ *
+ * Typed text that is an option's NAME is committed as that option's code
+ * (objectstack#30206): 「中国」 typed into 默认国家, whose option reads
+ * 「中国 (CN)」, commits `CN`. The name is the label without the option's own
+ * code beside it (`optionByName`), compared trimmed and case-insensitively, and
+ * only a name exactly one option carries counts. Any other text is committed
+ * verbatim, as before, and the server judges it.
  *
  * Props beyond its own are forwarded to the `<input>` so `wrapper`'s
  * `aria-invalid` / `aria-describedby` reach the focusable control rather than a
@@ -356,7 +392,7 @@ function DomainCombobox({
     code === null ? '' : options.find((opt) => opt.value === code)?.label ?? code;
   const committedValue = (text: string): string | null => {
     if (text === '' || options.some((opt) => opt.value === text)) return textOrUnset(text);
-    return options.find((opt) => opt.label === text)?.value ?? text;
+    return options.find((opt) => opt.label === text)?.value ?? optionByName(options, text)?.value ?? text;
   };
   // What the admin typed, kept while it still stands for the stored value; a
   // value changed from outside (a reset, a re-read after save) shows as its name.

@@ -389,7 +389,12 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // `console.organizationMfa.needsTwoFactor`, the organization form's notice
     // that names the Setup switch to turn on („Mehrstufige Authentifizierung
     // verlangen“) — one literal span, a UI label.
-    expect(okSpans, 'correctly paired spans').toBe(104);
+    // 106 once objectstack-ai/objectstack#30206 added the first-run checklist:
+    // `console.firstRunChecklist.organizationName.todo` quotes the name the
+    // organization still carries („{{name}}“) — one interpolated span, runtime
+    // data — and `.timezone.todo` quotes the word formulas read („heute“) —
+    // one literal span.
+    expect(okSpans, 'correctly paired spans').toBe(106);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -473,7 +478,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // `marketplace.suggestedBindings.reopenedToast`, one more matched pair.
     // 104 / 104 / 0 after objectstack-ai/objectstack#30295 added
     // `console.organizationMfa.needsTwoFactor`, one more matched pair.
-    expect({ open, close, rdq }).toEqual({ open: 104, close: 104, rdq: 0 });
+    // 106 / 106 / 0 after objectstack-ai/objectstack#30206 added
+    // `console.firstRunChecklist.organizationName.todo` and `.timezone.todo`,
+    // one matched pair each.
+    expect({ open, close, rdq }).toEqual({ open: 106, close: 106, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);
