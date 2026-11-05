@@ -68,7 +68,8 @@ export function describeUndeclaredActionNames(
 }
 
 function isDevelopment(): boolean {
-  return (globalThis as any).process?.env?.NODE_ENV !== 'production';
+  const env = (globalThis as { process?: { env?: { NODE_ENV?: string } } }).process?.env;
+  return env?.NODE_ENV !== 'production';
 }
 
 /**
