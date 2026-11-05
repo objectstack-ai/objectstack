@@ -306,7 +306,7 @@ const README_INLINE = {
 // ── Images ──────────────────────────────────────────────────────────────────
 // Matched here, before the shared inline pass, which has no image rule: an
 // image is a request the viewer's browser makes to a third party, so the rule
-// stays this card's. A destination may hold one level of balanced parentheses.
+// stays this renderer's. A destination may hold one level of balanced parentheses.
 
 const DESTINATION = '((?:[^()\\s]|\\([^()\\s]*\\))+)';
 const IMAGE = `!\\[([^\\]]*)\\]\\(${DESTINATION}(?:\\s+"[^"]*")?\\)`;
@@ -315,7 +315,8 @@ const IMAGE_OR_CODE = new RegExp(`(?<!\`)\`[^\`]+\`(?!\`)|\\[${IMAGE}\\]\\(${DES
 
 /** An absolute URL with the given schemes, or `null`: a relative path resolves against the console, not the repository. */
 function absoluteUrl(raw: string, schemes: readonly string[]): string | null {
-  if (/[\s\u0000-\u001f\u007f]/.test(raw)) return null;
+  // Browsers strip whitespace and control characters before reading a scheme, so either refuses the URL.
+  if (/\s/.test(raw) || [...raw].some((ch) => ch.charCodeAt(0) <= 0x1f || ch.charCodeAt(0) === 0x7f)) return null;
   try {
     return schemes.includes(new URL(raw).protocol) ? raw : null;
   } catch {

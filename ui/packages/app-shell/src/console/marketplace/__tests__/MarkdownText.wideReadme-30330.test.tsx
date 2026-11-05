@@ -71,6 +71,7 @@ describe('README images', () => {
     'data:image/svg+xml;base64,PHN2Zz4=',
     'javascript:alert(1)',
     'JAVASCRIPT:alert(1)',
+    'https://img.example/a\u0007.png',
   ])('leaves out an image whose source is %j, alt text included', (src) => {
     const root = renderMd(`Before ![Shot](${src}) after.\n\n- [![Badge](${src})](https://acme.example)`);
     expect(root.querySelector('img')).toBeNull();
