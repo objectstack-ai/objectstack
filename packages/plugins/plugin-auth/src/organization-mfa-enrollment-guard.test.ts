@@ -26,8 +26,10 @@
 import { describe, it, expect, afterAll, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import type { PluginContext } from '@objectstack/core';
 import { SysOrganization } from '@objectstack/platform-objects/identity';
 import { AuthManager } from './auth-manager';
+import { AuthPlugin } from './auth-plugin.js';
 import {
   ORGANIZATION_MFA_ENROLLMENT_GUARD_PRIORITY,
   organizationMfaWithoutEnrollmentRefusal,
@@ -138,6 +140,58 @@ describe('organization MFA enrollment guard — the rule', () => {
     expect(err.message).toMatch(/auth\.mfa_required/);
     expect(err.message).not.toMatch(/#\d/);
     expect(err.fields[0].message).toBe(err.message);
+  });
+});
+
+describe('auth-plugin registers the guard on `kernel:ready` and asks the live manager', () => {
+  it('both hooks on sys_organization, after the D2 guard, judging the manager\'s two-factor state per write', async () => {
+    const registered: Array<{ event: string; handler: (ctx: any) => Promise<void>; options: any }> = [];
+    const engine = {
+      registerHook: (event: string, handler: (ctx: any) => Promise<void>, options: any) => {
+        registered.push({ event, handler, options });
+      },
+      getSchema: () => undefined,
+    };
+    const ready: Array<() => Promise<void>> = [];
+    const ctx = {
+      registerService: vi.fn(),
+      getService: vi.fn((name: string): any => {
+        if (name === 'manifest') return { register: vi.fn() };
+        if (name === 'objectql') return engine;
+        return undefined;
+      }),
+      getServices: vi.fn(() => new Map()),
+      hook: vi.fn((name: string, handler: () => Promise<void>) => { if (name === 'kernel:ready') ready.push(handler); }),
+      trigger: vi.fn(),
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+      getKernel: vi.fn(),
+    } as unknown as PluginContext;
+    const plugin = new AuthPlugin({ secret: 'test-secret-at-least-32-chars-long', baseUrl: 'http://localhost:3000' });
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    for (const handler of ready) {
+      try { await handler(); } catch { /* other kernel:ready work needs services this double does not offer */ }
+    }
+
+    const ours = registered.filter(
+      (r) => r.options?.packageId === 'com.objectstack.plugin-auth.organization-mfa-enrollment-guard',
+    );
+    expect(ours.map((r) => [r.event, r.options.object, r.options.priority]).sort()).toEqual([
+      ['beforeInsert', 'sys_organization', ORGANIZATION_MFA_ENROLLMENT_GUARD_PRIORITY],
+      ['beforeUpdate', 'sys_organization', ORGANIZATION_MFA_ENROLLMENT_GUARD_PRIORITY],
+    ]);
+    const d2 = registered.find(
+      (r) => r.event === 'beforeUpdate' && r.options?.packageId === 'com.objectstack.plugin-auth.identity-write-guard',
+    );
+    expect(ORGANIZATION_MFA_ENROLLMENT_GUARD_PRIORITY).toBeGreaterThan(d2!.options.priority);
+
+    const update = ours.find((r) => r.event === 'beforeUpdate')!;
+    const turnOn = () => update.handler({ object: 'sys_organization', input: { id: 'org_1', data: { require_mfa: true } } });
+    // The default deployment: two-factor off.
+    expectRequireMfaRefusal(await turnOn().then(() => null, (e) => e));
+    // The settings pass turns the plugin on (as `auth.mfa_required` does): the next write is admitted.
+    (plugin as any).authManager.applyConfigPatch({ plugins: { twoFactor: true } });
+    await expect(turnOn()).resolves.toBeUndefined();
   });
 });
 
