@@ -41,9 +41,8 @@ export const SysMember = ObjectSchema.create({
   // wins over `titleFormat`) drew the raw id as the record page's H1. The
   // retired `titleFormat` template beside it is gone (refused at save and by
   // `os validate`); `identity-display-title.test.ts` holds the formula to the
-  // text that template drew. `user_id` is a lookup, so the formula reads its
-  // stored id: a formula is evaluated on the stored row, before `$expand`, and
-  // cannot reach the related record's own title.
+  // text that template drew. The formula names the PERSON, read one hop
+  // through `user_id` (ADR-0079 addendum 2026-10-18), never the stored id.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   // Org-independent title: organization_id is null in single-org mode, so a
@@ -338,12 +337,20 @@ export const SysMember = ObjectSchema.create({
     }),
 
     // [ADR-0079] The record title (`nameField` above). A formula is computed on
-    // read and has no stored column. `role` is nullable, so a row without one
-    // is titled by its user alone rather than failing to evaluate.
+    // read and has no stored column, so a renamed user is named anew on the
+    // next read. It names the PERSON, not the stored id: the user's `name`, or
+    // their `email` where the name is blank (the platform's `name || email`
+    // rule for a person's handle), read ONE hop through `user_id` (ADR-0079
+    // addendum, 2026-10-18), as `sys_business_unit_member`'s title does. The
+    // hop is read under the READER's own authority: a user the reader may not
+    // read, or one that no longer exists, leaves the title null, never the id.
+    // `user_id` is not read bare beside its hop (refused,
+    // `traversal-bare-and-traversed`). `role` is nullable, so a row without
+    // one is titled by its user alone rather than failing to evaluate.
     display_title: Field.formula({
       label: 'Title',
       returnType: 'text',
-      expression: F`record.role != null ? record.user_id + ' (' + record.role + ')' : record.user_id`,
+      expression: F`(isBlank(trim(record.user_id.name)) ? record.user_id.email : record.user_id.name) + (record.role != null ? ' (' + record.role + ')' : '')`,
       description: 'Record title: the member and, when recorded, their role (computed on read)',
     }),
     

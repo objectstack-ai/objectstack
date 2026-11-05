@@ -34,9 +34,8 @@ export const SysTwoFactor = ObjectSchema.create({
   // wins over `titleFormat`) drew the raw id as the record page's H1. The
   // retired `titleFormat` template beside it is gone (refused at save and by
   // `os validate`); `identity-display-title.test.ts` holds the formula to the
-  // text that template drew. `user_id` is a lookup, so the formula reads its
-  // stored id: a formula is evaluated on the stored row, before `$expand`, and
-  // cannot reach the related record's own title.
+  // text that template drew. The formula names the PERSON, read one hop
+  // through `user_id` (ADR-0079 addendum 2026-10-18), never the stored id.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   highlightFields: ['user_id', 'created_at'],
@@ -163,12 +162,17 @@ export const SysTwoFactor = ObjectSchema.create({
     }),
 
     // [ADR-0079] The record title (`nameField` above). A formula is computed on
-    // read and has no stored column. `user_id` is required, so the expression
-    // needs no null guard.
+    // read and has no stored column. It names the PERSON, not the stored id:
+    // the user's `name`, or their `email` where the name is blank, read ONE hop
+    // through `user_id` (ADR-0079 addendum, 2026-10-18), as
+    // `sys_business_unit_member`'s title does. The hop is read under the
+    // READER's own authority: a user the reader may not read, or one that no
+    // longer exists, leaves the title null, never the id. `user_id` is
+    // required, and `sys_user.email` is required stored text (no second hop).
     display_title: Field.formula({
       label: 'Title',
       returnType: 'text',
-      expression: F`'Two-factor for ' + record.user_id`,
+      expression: F`'Two-factor for ' + (isBlank(trim(record.user_id.name)) ? record.user_id.email : record.user_id.name)`,
       description: 'Record title: the user the credential belongs to (computed on read)',
     }),
     
