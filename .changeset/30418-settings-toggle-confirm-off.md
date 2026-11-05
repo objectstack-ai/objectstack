@@ -1,6 +1,6 @@
 ---
 '@objectstack/spec': minor
-'@objectstack/service-settings': minor
+'@objectstack/service-settings': patch
 ---
 
 feat: a settings toggle can declare the question asked before it is turned off (`confirmOffText`), and Setup's email and password sign-in toggle declares one
