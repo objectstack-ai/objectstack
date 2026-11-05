@@ -557,7 +557,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       require_mfa: {
         label: "强制多因素认证",
-        help: "开启后，该组织的每位成员都必须先绑定身份验证器 App，才能访问数据。"
+        help: "开启后，该组织的每位成员都必须先绑定身份验证器 App，才能访问数据。需要本部署开启双重验证（OS_AUTH_TWO_FACTOR=true）；双重验证关闭时，保存为开启会被拒绝。"
       },
       timezone: {
         label: "时区",
