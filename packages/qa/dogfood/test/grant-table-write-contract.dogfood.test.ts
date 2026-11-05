@@ -37,19 +37,29 @@ const SET = 'showcase_auditor';
 const codeOf = (body: any) => body?.code ?? body?.error?.code;
 const idOf = (b: any) => b?.id ?? b?.record?.id ?? b?.data?.id;
 
+// One showcase boot for the file: each block below signs up its own users and
+// judges only the grants it wrote for them.
+let stack: VerifyStack;
+let ql: any;
+let admin: string;
+
+beforeAll(async () => {
+  stack = await bootShowcase();
+  admin = await stack.signIn();
+  ql = await stack.kernel.getServiceAsync('objectql');
+}, 120_000);
+
+afterAll(async () => {
+  await stack?.stop();
+});
+
 describe('the grant table\'s write contract over the REST data door', () => {
-  let stack: VerifyStack;
-  let ql: any;
-  let admin: string;
   let adminId: string;
   const uid: Record<string, string> = {};
 
   const userIdOf = async (email: string) => String((await ql.findOne('sys_user', { where: { email }, context: SYS }))?.id ?? '');
 
   beforeAll(async () => {
-    stack = await bootShowcase();
-    admin = await stack.signIn();
-    ql = await stack.kernel.getServiceAsync('objectql');
     const session = (await (await stack.apiAs(admin, 'GET', '/auth/get-session')).json()) as any;
     adminId = String(session?.user?.id ?? '');
     expect(adminId, 'the admin has an id').toBeTruthy();
@@ -61,10 +71,6 @@ describe('the grant table\'s write contract over the REST data door', () => {
       expect(uid[who], `${who} signed up`).toBeTruthy();
     }
   }, 120_000);
-
-  afterAll(async () => {
-    await stack?.stop();
-  });
 
   it('acceptance[1]: a grant naming the retired permission_set_id column is 400 INVALID_FIELD, and nothing is stored', async () => {
     const res = await stack.apiAs(admin, 'POST', GRANTS, { user_id: uid.retired, permission_set_id: SET });
@@ -101,9 +107,6 @@ describe('the grant table\'s write contract over the REST data door', () => {
 });
 
 describe('a grant naming an agent ceiling set is refused at every write door of the grant table', () => {
-  let stack: VerifyStack;
-  let ql: any;
-  let admin: string;
   let personId: string;
   let grantId: string;
 
@@ -123,9 +126,6 @@ describe('a grant naming an agent ceiling set is refused at every write door of 
       .filter((g) => (MCP_AGENT_PERMISSION_SETS as readonly string[]).includes(String(g?.permission_set)));
 
   beforeAll(async () => {
-    stack = await bootShowcase();
-    admin = await stack.signIn();
-    ql = await stack.kernel.getServiceAsync('objectql');
     // The stock catalog serves every agent ceiling set, so the refusal below is
     // this rule's and never the catalog's `reference_not_found`.
     for (const name of MCP_AGENT_PERMISSION_SETS) {
@@ -141,10 +141,6 @@ describe('a grant naming an agent ceiling set is refused at every write door of 
     grantId = String(idOf(await res.json()) ?? '');
     expect(grantId, 'the person grant id').toBeTruthy();
   }, 120_000);
-
-  afterAll(async () => {
-    await stack?.stop();
-  });
 
   it('POST /data/sys_user_permission_set refuses each agent ceiling set from an administrator, and stores none', async () => {
     for (const name of MCP_AGENT_PERMISSION_SETS) {
