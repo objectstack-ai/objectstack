@@ -2365,9 +2365,12 @@ export function registerAuthzMiddleware(
       // writable. Composed here, before `next()`, so it binds the engine's
       // matched-row read, its per-row hook dispatch and the driver write
       // alike — a hidden row is not written, not counted and not refused.
+      // [#21829, ruling B] A caller the read door REFUSES is answered that
+      // refusal here, thrown by the read question itself before `next()`: it
+      // writes none of the object's records, whatever its predicate addresses,
+      // as on the by-id leg (step 2.7).
       if (this.addressedPredicateWrite(opCtx, nestedInOperation, referentialFieldClearWrite)) {
-        const readable = await this.readableRowsScopeForPredicateWrite(opCtx);
-        if (readable) extra.push(readable);
+        extra.push(await this.readableRowsScopeForPredicateWrite(opCtx));
       }
       // [#15813 / ADR-0131 D8] RECORD the Layer 0 verdict on the operation —
       // the seam ruled on #15706 (option (i)): the wall states what it

@@ -136,7 +136,7 @@ export function addressedPredicateWrite(
 export async function readableRowsScopeForPredicateWrite(
   this: Pick<AddressedWritesHost, 'ql'>,
   opCtx: any,
-): Promise<Record<string, unknown> | null> {
+): Promise<Record<string, unknown>> {
   if (typeof this.ql?.find !== 'function') {
     // The read question cannot be asked, and a write that cannot be narrowed
     // must not run un-narrowed. Unreachable in a real deployment — `start()`
@@ -159,7 +159,11 @@ export async function readableRowsScopeForPredicateWrite(
       context: withoutOperationPrivateKeys((opCtx.context ?? {}) as Record<string, unknown>),
     }),
   );
-  if (answer.refused) return null;
+  // [#21829, ruling B] A caller the read door refuses writes none of the
+  // object's records: the read door's refusal is the predicate write's answer,
+  // before the write runs — the answer the by-id leg gives the same caller
+  // (`callerCannotReadAddressedRow`).
+  if (answer.refused) throw answer.error;
   const rows: unknown[] = Array.isArray(answer.value) ? answer.value : [];
   if (rows.length > PREDICATE_WRITE_READABLE_ID_CAP) {
     throw predicateWriteReadableCapError(opCtx.object, opCtx.operation);
