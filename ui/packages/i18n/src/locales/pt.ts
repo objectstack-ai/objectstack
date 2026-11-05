@@ -4633,6 +4633,7 @@ const pt = {
       title: 'Alterações pendentes',
       description: 'O que a publicação vai mudar. Itens novos são adicionados; atualizações sobrescrevem a versão publicada.',
       savedToCustomization: 'Salvo nas personalizações de {{package}}',
+      customizationEnvironment: 'Estas alterações ficam no banco de dados deste ambiente, como itens de {{pair}}, e não no código-fonte do seu projeto. Só chegam a outro ambiente por meio de {{command}}.',
       loading: 'Carregando alterações pendentes…',
       loadFailed: 'Não foi possível carregar as alterações pendentes:',
       empty: 'Nada pendente — todos os rascunhos foram publicados.',

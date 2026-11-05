@@ -4638,6 +4638,7 @@ const es = {
       title: 'Cambios pendientes',
       description: 'Lo que cambiará al publicar. Los elementos nuevos se añaden; las actualizaciones sobrescriben la versión publicada.',
       savedToCustomization: 'Guardado en las personalizaciones de {{package}}',
+      customizationEnvironment: 'Estos cambios se guardan en la base de datos de este entorno, como elementos de {{pair}}, no en el código fuente de su proyecto. Solo llegan a otro entorno mediante {{command}}.',
       loading: 'Cargando cambios pendientes…',
       loadFailed: 'No se pudieron cargar los cambios pendientes:',
       empty: 'Nada pendiente — todos los borradores se han publicado.',
