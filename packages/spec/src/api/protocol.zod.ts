@@ -3689,7 +3689,7 @@ export const GetPresenceResponseSchema = lazySchema(() => z.object({
  * `DELETE /api/v1/notifications/devices/:deviceId`.
  *
  * One request does both: registering a `deviceId` the user already has
- * refreshes that device (its token, vendor, app and locale) instead of adding
+ * refreshes that device (its token, vendor, app, locale and origin) instead of adding
  * a second one. A request without `deviceId` gets one minted by the server
  * and answered in {@link RegisterDeviceResponseSchema}; the client keeps it
  * and sends it on every later registration and on unregister.
@@ -3718,7 +3718,7 @@ export const RegisterDeviceRequestSchema = lazySchema(() => z.object({
     + 'recipient\'s language (sys_user.locale, then the deployment default)',
   ),
   origin: z.string().regex(PUSH_SERVER_ORIGIN_PATTERN, { message: PUSH_SERVER_ORIGIN_MESSAGE }).optional().describe(
-    '[PLANNED — not yet stored] The origin the Console was loaded from (window.location.origin, for example '
+    'The origin the Console was loaded from (window.location.origin, for example '
     + 'https://crm.example.com): the address the mobile shell saved for this server. The Console writes it; the server '
     + 'stores it on the device row and every push to the device carries it back, so a shell with several saved servers '
     + 'opens the push on the one that sent it. http or https, a lowercase host and an optional port; a path, another '

@@ -68,7 +68,7 @@ export const UserDeviceSchema = lazySchema(() => z.object({
   ),
   name: z.string().optional().describe('Device friendly name, as the registration named it'),
   origin: z.string().regex(PUSH_SERVER_ORIGIN_PATTERN, { message: PUSH_SERVER_ORIGIN_MESSAGE }).optional().describe(
-    '[PLANNED — not yet stored] The origin the Console was loaded from, as the registration named it (for example '
+    'The origin the Console was loaded from, as the registration named it (for example '
     + 'https://crm.example.com). The device registry keeps it on the row and the push channel copies it into every push '
     + 'to this device, where the mobile shell picks the saved server by it. Absent on a device registered without one',
   ),

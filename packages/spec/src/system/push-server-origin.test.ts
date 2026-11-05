@@ -103,10 +103,12 @@ describe('the three origin members are one contract', () => {
     expect(new Set(patterns).size).toBe(1);
   });
 
-  it('marks the device-side members PLANNED until the server stores the origin', () => {
-    expect(RegisterDeviceRequestSchema.shape.origin.description).toMatch(/^\[PLANNED — not yet stored\] /);
-    expect(UserDeviceSchema.shape.origin.description).toMatch(/^\[PLANNED — not yet stored\] /);
-    // The push data is served: the push channel produces it and copies a stored origin (#29041).
+  it('marks no member PLANNED: the server stores the origin and every push carries it back', () => {
+    // The device registry stores the registration's origin on sys_user_device and the push
+    // channel copies it into the push data (service-messaging), so all three members are served.
+    expect(RegisterDeviceRequestSchema.shape.origin.description).not.toMatch(/PLANNED/);
+    expect(UserDeviceSchema.shape.origin.description).not.toMatch(/PLANNED/);
+    expect(PushDeliveryDataSchema.shape.origin.description).not.toMatch(/PLANNED/);
     expect(PushDeliveryDataSchema.description).not.toMatch(/PLANNED/);
   });
 });
