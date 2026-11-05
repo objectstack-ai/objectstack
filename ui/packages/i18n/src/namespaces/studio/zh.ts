@@ -3254,6 +3254,7 @@ const STUDIO_ZH: Record<string, string> = {
   // objectstack ADR-0146 D3 (#28568) — the customization marks, counts and
   // filter of the All metadata area, from a base's customization read.
   'engine.customizationMark.customized': '已定制（{baseName}）',
+  'engine.customizationMark.customizedShort': '定制',
   'engine.customizationMark.customizedTitle': '定制包 {pair} 覆盖了 {baseName} 的此项',
   'engine.customizationMark.added': '新增',
   'engine.customizationMark.addedTitle': '由 {baseName} 的定制包 {pair} 新增',
