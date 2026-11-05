@@ -663,15 +663,17 @@ describe('[#30062] a declared override\'s label order: the packaged base and the
                 expect(await protocol.getPairTranslationBundle(BASE), `${type}, a pair with no translation`).toBeUndefined();
 
                 // The pair's own translation, through the same doors; and a package-less one of the
-                // same key, which is in the deployment catalog but is not the pair's.
+                // same key, which is in the deployment catalog but is not the pair's. The layer
+                // merges rows in name order, so the package-less row is named to sort AFTER the
+                // pair's: were it read, its text would overwrite the pair's and this pin would see it.
                 const saved = await protocol.saveMetaItem({
                     type: 'translation', name: PAIR_TRANSLATION, packageId: PAIR,
                     item: { name: PAIR_TRANSLATION, locale: 'zh-CN', ...zhGroup(type, name, `${EDITED} (zh)`) },
                 });
                 expect(saved?.success, 'the pair translation save').toBe(true);
-                stores.get('sys_metadata')!.set('legacy_zh', {
-                    id: 'legacy_zh', type: 'translation', name: 'legacy_zh_cn', organization_id: null, package_id: null,
-                    state: 'active', version: 1, metadata: JSON.stringify({ name: 'legacy_zh_cn', locale: 'zh-CN', ...zhGroup(type, name, 'not the pair') }),
+                stores.get('sys_metadata')!.set('zz_legacy_zh', {
+                    id: 'zz_legacy_zh', type: 'translation', name: 'zz_legacy_zh_cn', organization_id: null, package_id: null,
+                    state: 'active', version: 1, metadata: JSON.stringify({ name: 'zz_legacy_zh_cn', locale: 'zh-CN', ...zhGroup(type, name, 'not the pair') }),
                 });
                 const pairBundle = await protocol.getPairTranslationBundle(BASE);
                 expect(pairBundle, `${type}, the pair's bundle`).toEqual({ 'zh-CN': zhGroup(type, name, `${EDITED} (zh)`) });
