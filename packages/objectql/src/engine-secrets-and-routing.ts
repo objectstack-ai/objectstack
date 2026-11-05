@@ -7,8 +7,8 @@
  * `onCryptoProviderChange`, `setTenancyPostureProvider`, `getSchema`,
  * `resolveObjectName`, `judgeFilter`, `isSystemLedgerObject`,
  * `resolveDatasourceBinding`, `resolveEffectiveDatasource`,
- * `resolveMappedDatasource` moved out of `engine.ts` whole by
- * `scripts/codemod-split-engine.mjs`.
+ * `resolveMappedDatasource`, `setDatasourceMapping`, `init` moved out of
+ * `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
  *
  * A MOVE, not a redesign. {@link SecretsAndRoutingFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -37,6 +37,9 @@
 
 import type { EngineQueryOptions, ServiceObject } from '@objectstack/spec/data';
 import type { EngineFilterJudgement, EngineFilterJudgementOptions, ICryptoProvider } from '@objectstack/spec/contracts';
+import { DriverConnectError, emitDegradedBootBanner } from './driver-connect-errors.js';
+import type { DriverConnectFailure } from './driver-connect-errors.js';
+import { resolveAllowDriverConnectFailure } from '@objectstack/types';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { objectNotFoundError } from '@objectstack/core';
 import { judgeWhereAdmission } from './engine-top-level.js';
@@ -53,6 +56,7 @@ export interface SecretsAndRoutingHost {
   readonly _registry: ObjectQL['_registry'];
   cryptoProvider: ObjectQL['cryptoProvider'];
   readonly cryptoProviderListeners: ObjectQL['cryptoProviderListeners'];
+  datasourceMapping: ObjectQL['datasourceMapping'];
   readonly defaultDriver: ObjectQL['defaultDriver'];
   readonly drivers: ObjectQL['drivers'];
   readonly logger: ObjectQL['logger'];
@@ -263,5 +267,62 @@ export class SecretsAndRoutingFacet {
   /** The body of `ObjectQL#resolveMappedDatasource`; the method's docblock there is its contract. */
   static resolveMappedDatasource(this: Pick<SecretsAndRoutingHost, '_registry' | 'resolveDatasourceFromMapping'>, objectName: string): string | null {
     return this.resolveDatasourceFromMapping(objectName, this._registry.getObject(objectName));
+  }
+
+  /** The body of `ObjectQL#setDatasourceMapping`; the method's docblock there is its contract. */
+  static setDatasourceMapping(this: Pick<SecretsAndRoutingHost, 'datasourceMapping' | 'logger'>, rules: Array<{
+    namespace?: string;
+    package?: string;
+    objectPattern?: string;
+    default?: boolean;
+    datasource: string;
+    priority?: number;
+  }>): void {
+    this.datasourceMapping = rules;
+    this.logger.info('Datasource mapping rules configured', {
+      ruleCount: rules.length
+    });
+  }
+
+  /** The body of `ObjectQL#init`; the method's docblock there is its contract. */
+  static async init(this: Pick<SecretsAndRoutingHost, 'drivers' | 'logger'>): Promise<void> {
+    this.logger.info('Initializing ObjectQL engine', {
+      driverCount: this.drivers.size,
+      drivers: Array.from(this.drivers.keys())
+    });
+
+    const failures: DriverConnectFailure[] = [];
+    for (const [name, driver] of this.drivers) {
+      try {
+        await driver.connect();
+        this.logger.info('Driver connected successfully', { driverName: name });
+      } catch (e) {
+        failures.push({ driverName: name, error: e });
+        this.logger.error('Failed to connect driver', e as Error, { driverName: name });
+      }
+    }
+
+    if (failures.length > 0) {
+      if (!resolveAllowDriverConnectFailure()) {
+        throw new DriverConnectError(failures, this.drivers.size);
+      }
+      const failedDrivers = failures.map(f => f.driverName);
+      const banner =
+        `⚠️ DEGRADED BOOT: ${failures.length} of ${this.drivers.size} driver(s) failed to connect ` +
+        `(${failedDrivers.join(', ')}), but OS_ALLOW_DRIVER_CONNECT_FAILURE is set — starting anyway. ` +
+        `Every query routed to them fails until the datasource becomes reachable, and the boot-time ` +
+        `schema sync is SKIPPED FOR GOOD — the client will reconnect on its own, but nothing re-runs ` +
+        `the DDL, so those objects may have no tables even after the database comes back. Unset ` +
+        `OS_ALLOW_DRIVER_CONNECT_FAILURE to restore fail-fast boot.`;
+      this.logger.warn(banner, { failedDrivers });
+      // …and again on a channel the operator's log level cannot filter away: the
+      // line above is dropped outright at `error`/`fatal`/`silent`, which is a
+      // normal production setting and precisely where this flag gets used. See
+      // the helper's note — the duplication is deliberate, and it is NOT about
+      // `os serve`'s boot-quiet window (that swallowed it too until #4012).
+      emitDegradedBootBanner(banner);
+    }
+
+    this.logger.info('ObjectQL engine initialization complete');
   }
 }

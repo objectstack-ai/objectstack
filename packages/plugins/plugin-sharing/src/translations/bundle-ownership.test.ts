@@ -20,6 +20,8 @@ const OWNED_OBJECTS = new Set([
   'sys_record_share',
   'sys_sharing_rule',
   'sys_share_link',
+  'sys_queue',
+  'sys_queue_member',
 ]);
 
 describe('objects translation bundle ownership (ADR-0029 D8)', () => {

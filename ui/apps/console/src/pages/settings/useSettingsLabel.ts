@@ -9,7 +9,7 @@
  *   settings.<namespace>.title
  *   settings.<namespace>.description
  *   settings.<namespace>.groups.<groupKey>.title / .description
- *   settings.<namespace>.keys.<key>.label / .help / .placeholder
+ *   settings.<namespace>.keys.<key>.label / .help / .placeholder / .confirmOffText
  *   settings.<namespace>.keys.<key>.options.<value>
  *   settings.<namespace>.actions.<actionId>.label / .confirmText / .successMessage
  *   settings.<namespace>.banners.<bannerId>.title / .text
@@ -45,6 +45,8 @@ export interface SettingsLabelHelpers {
   fieldLabel: (key: string, fallback: string) => string;
   fieldHelp: (key: string, fallback: string | undefined) => string | undefined;
   fieldPlaceholder: (key: string, fallback: string | undefined) => string | undefined;
+  /** A `toggle`'s question before it goes off, keyed by the setting key; falls back to its `confirmOffText`. */
+  fieldConfirmOff: (key: string, fallback: string) => string;
   optionLabel: (key: string, optionValue: string, fallback: string) => string;
   actionLabel: (actionId: string, fallback: string) => string;
   actionConfirm: (actionId: string, fallback: string | undefined) => string | undefined;
@@ -151,6 +153,8 @@ export function useSettingsLabel(namespace: string): SettingsLabelHelpers {
       fieldLabel: (key, fallback) => resolve(`keys.${key}.label`, fallback) ?? fallback,
       fieldHelp: (key, fallback) => resolve(`keys.${key}.help`, fallback),
       fieldPlaceholder: (key, fallback) => resolve(`keys.${key}.placeholder`, fallback),
+      fieldConfirmOff: (key, fallback) =>
+        resolve(`keys.${key}.confirmOffText`, fallback) ?? fallback,
       optionLabel: (key, optionValue, fallback) =>
         resolve(`keys.${key}.options.${optionValue}`, fallback) ?? fallback,
       actionLabel: (actionId, fallback) =>

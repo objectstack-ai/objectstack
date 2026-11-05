@@ -313,6 +313,26 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
     },
   ],
+  // [#30494] An advisory (fail-open) rule: the fault skips the rule and the
+  // write proceeds, nothing reads null.
+  'date-arithmetic-fail-open': [
+    {
+      produce: () =>
+        onlyError('predicate', 'record.close_date + 1 > 3', {
+          scope: 'record',
+          fieldTypes: { close_date: 'date' },
+          faultOutcome: 'fail-open',
+        }),
+      params: { operands: 'google.protobuf.Timestamp + int', reference: 'record.close_date' },
+      message:
+        'date arithmetic `google.protobuf.Timestamp + int` — `record.close_date` is a date, and CEL can\'t do arithmetic ' +
+        'on dates: ' +
+        'this faults at runtime, and here the rule is advisory, so a rule that cannot be evaluated is skipped, not refused: ' +
+        'the write proceeds, the rule is never applied (its advisory never fires), and the only trace is a log line saying ' +
+        'it could not be evaluated. ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+  ],
   // [#30016] A flattened (flow) condition: the fault fails the run, it never
   // reads null — `run-fails` where the run is proven to hold the field.
   'date-arithmetic-run-fails': [
@@ -374,6 +394,24 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: ' +
         'this faults at runtime, and here an expression that cannot be evaluated fails closed: the write (or the operation ' +
         'a hook guards) is refused, not skipped (it does not read null). ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+  ],
+  'date-text-arithmetic-fail-open': [
+    {
+      produce: () =>
+        onlyError('predicate', 'record.end_date - record.start_date > duration("24h")', {
+          scope: 'record',
+          fieldTypes: { start_date: 'date', end_date: 'date' },
+          faultOutcome: 'fail-open',
+        }),
+      params: { operands: 'DateText - DateText', reference: 'record.start_date' },
+      message:
+        'date arithmetic `DateText - DateText` — `record.start_date` is a date field, and the runtime holds a date field ' +
+        'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: ' +
+        'this faults at runtime, and here the rule is advisory, so a rule that cannot be evaluated is skipped, not refused: ' +
+        'the write proceeds, the rule is never applied (its advisory never fires), and the only trace is a log line saying ' +
+        'it could not be evaluated. ' +
         'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
     },
   ],
@@ -751,6 +789,15 @@ const SWEEP_SCHEMAS: readonly (ExprSchemaHint | undefined)[] = [
     fields: ['close_date'],
     fieldTypes: { close_date: 'date' },
     faultOutcome: 'fail-closed',
+  },
+  // [#30494] The same date schema on an advisory rule reaches the date
+  // verdicts' `-fail-open` codes.
+  {
+    scope: 'record',
+    objectName: 'deal',
+    fields: ['close_date'],
+    fieldTypes: { close_date: 'date' },
+    faultOutcome: 'fail-open',
   },
   {
     scope: 'flattened',

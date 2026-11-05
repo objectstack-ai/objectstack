@@ -1049,6 +1049,21 @@ export const ERROR_CODE_LEDGER = {
     // synonym of any standard member: the manifest is well-formed, and the
     // refusal comes from what the deployment already holds.
     'DEFAULT_RECORD_PAGE_CONFLICT',
+    // [ADR-0148 D2, card #30235] The recycle bin's three restore refusals,
+    // REGISTERED AHEAD OF THEIR PRODUCER: the engine's restore (#30237) stamps
+    // them and asserts these strings by value; the Console (#30239) reads them
+    // in its own language. `status: 409` for all three — the entry is intact
+    // and the live state conflicts with writing it back; a restore refuses
+    // with the reason and never forces a write. The spec spells them once, in
+    // `RECYCLE_BIN_RESTORE_REFUSAL_CODES` (`data/recycle-bin.zod.ts`). RESTORE is
+    // a token no standard member carries, so none needs a waiver.
+    // A unique value of a snapshotted row is held by a live row now.
+    'RESTORE_UNIQUE_VALUE_TAKEN',
+    // A row's master-detail parent is neither live nor in the bin.
+    'RESTORE_PARENT_PURGED',
+    // An object of the entry no longer exists in the registry: its package
+    // was uninstalled.
+    'RESTORE_PACKAGE_UNINSTALLED',
   ],
   '@objectstack/core': [
     // [#23367, ruling A] The API-key lifecycle refusals: three distinct key

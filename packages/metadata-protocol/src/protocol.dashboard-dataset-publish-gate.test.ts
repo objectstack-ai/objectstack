@@ -583,6 +583,73 @@ describe('#30005 — a filter key on another package\'s dataset, under the writt
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// #30006 — a bare filter key naming a dataset dimension or measure, same door
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The dataset door binds a bare key naming a DIMENSION through that
+// dimension's field (`state` → `status = ?`), so a widget filter keyed on it
+// now publishes, as the report twin's already did. A key naming a MEASURE is
+// refused by both rules with its own message: the door would compile
+// `amount_sum > 100` to the row-level `amount > 100`, never a filter on the
+// total. Same harness and `orders_states` dataset as the #29900 block.
+
+const stateBoard = (filter: Record<string, unknown>) => ({
+    name: 'orders_board',
+    label: 'Orders',
+    widgets: [{ id: 'w1', type: 'metric', title: 'T', dataset: 'orders_states', values: ['amount_sum'], filter }],
+});
+
+describe('#30006 — dataset dimension and measure filter keys at the publish door', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    it('a widget filter keyed on a dimension name publishes', async () => {
+        const { draft, published } = await draftThenPublish('dashboard', 'orders_board', stateBoard({ state: 'open' }));
+        expect(draft.success).toBe(true);
+        expect(published.success, JSON.stringify(published?.issues ?? published)).toBe(true);
+    });
+
+    it('a report runtimeFilter keyed on a measure name is REFUSED 422 with the measure message', async () => {
+        const { published, rows } = await draftThenPublish(
+            'report', 'orders_report', filteredReport({ amount_sum: { $gt: 100 } }),
+        );
+        expect(published).toBeInstanceOf(Error);
+        expect(published.status).toBe(422);
+        expect(published.code).toBe('INVALID_METADATA');
+        const issue = published.issues.find((i: any) => i.rule === 'report-filter-field-unknown');
+        expect(issue, `issues: ${JSON.stringify(published.issues)}`).toBeDefined();
+        expect(issue.path).toBe('reports[0].runtimeFilter.amount_sum');
+        expect(issue.message).toContain('names a measure of dataset "orders_states"');
+        expect(Array.from(rows.values()).filter((r) => r.type === 'report').map((r) => r.state)).not.toContain('active');
+    });
+
+    it('the widget twin refuses the same measure key the same way', async () => {
+        const { published } = await draftThenPublish('dashboard', 'orders_board', stateBoard({ amount_sum: { $gt: 100 } }));
+        expect(published.status).toBe(422);
+        expect(published.code).toBe('INVALID_METADATA');
+        const issue = published.issues.find((i: any) => i.rule === 'widget-filter-field-unknown');
+        expect(issue?.path).toBe('dashboards[0].widgets[0].filter.amount_sum');
+        expect(issue.message).toContain('names a measure of dataset "orders_states"');
+    });
+
+    it('CONTROL — an unknown key on the dimension board is still refused as unknown', async () => {
+        const { published } = await draftThenPublish('dashboard', 'orders_board', stateBoard({ state: 'open', no_such_field: 'x' }));
+        expect(published.status).toBe(422);
+        expect(published.code).toBe('INVALID_METADATA');
+        expect(published.issues.map((i: any) => [i.rule, i.path])).toEqual([
+            ['widget-filter-field-unknown', 'dashboards[0].widgets[0].filter.no_such_field'],
+        ]);
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // #16225 — the stub answers the table it was asked about, and only that one
 // ─────────────────────────────────────────────────────────────────────────────
 //

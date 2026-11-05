@@ -201,3 +201,74 @@ describe('MessagingServicePlugin — the email channel reads the declared fallba
         expect(data.locales).toEqual(['fr-FR', 'fr', 'en']);
     });
 });
+
+/**
+ * [#30509] The composition: the email channel's store reads the templates a
+ * producer registered with `messaging.registerBuiltinTemplates`, beneath the
+ * organization's rows, rendering the recipient's title and body into them.
+ */
+describe('MessagingServicePlugin — the email channel renders the code-declared tier (#30509)', () => {
+    function composed(rows: any[]) {
+        const data = fakeData(rows);
+        const engine = {
+            ...data.engine,
+            async syncObjectSchema() {},
+            async findOne(object: string, query: any) {
+                if (object === 'sys_user') return { email: 'ada@example.com', locale: 'en-US' };
+                if (object === 'sys_notification_template') return data.engine.findOne(object, query);
+                assertEngineFindOnePredicate(object, query);
+                return null;
+            },
+        };
+        const services = new Map<string, unknown>([['data', engine], ['manifest', { register() {} }]]);
+        const readyHooks: Array<() => Promise<void> | void> = [];
+        const logger = { info() {}, warn() {}, error() {}, debug() {}, child() { return logger; } };
+        const ctx = {
+            logger,
+            getService(name: string) {
+                if (!services.has(name)) throw new Error(`service '${name}' not found`);
+                return services.get(name);
+            },
+            registerService(name: string, svc: unknown) { services.set(name, svc); },
+            hook(event: string, fn: () => Promise<void> | void) { if (event === 'kernel:ready') readyHooks.push(fn); },
+        } as any;
+        const sent: any[] = [];
+        services.set('email', { async send(input: any) { sent.push(input); return { id: 'mail_1' }; } });
+        return { ctx, sent, fireReady: async () => { for (const fn of readyHooks) await fn(); } };
+    }
+    const delivery: Delivery = {
+        channel: 'email',
+        recipient: 'user_1',
+        notification: {
+            notificationId: 'evt_1', topic: 't', title: 'Title as read', body: 'Body as read', severity: 'info',
+            recipients: ['user_1'], organizationId: 'org_1', payload: { link: 'https://app.example.test/x?y=1' },
+        } as any,
+    };
+    const sendCtx = { logger: { info() {}, warn() {}, error() {} } } as any;
+    const builtin = { topic: 't', channel: 'email', locale: 'en', subject: '{{ title }}', body: '{{ body }}\n\nOpen: {{ link }}', format: 'text' as const };
+
+    it('a template registered after kernel:ready renders, with no row in the organization', async () => {
+        const { ctx, sent, fireReady } = composed([]);
+        await new MessagingServicePlugin({ reliableDelivery: false }).init(ctx);
+        await fireReady();
+        const messaging = ctx.getService('messaging') as MessagingService;
+        messaging.registerBuiltinTemplates([builtin]);
+
+        expect((await messaging.getChannel('email')!.send(sendCtx, delivery)).ok).toBe(true);
+        expect(sent[0]).toMatchObject({
+            subject: 'Title as read',
+            text: 'Body as read\n\nOpen: https://app.example.test/x?y=1',
+        });
+    });
+
+    it("the organization's row overrides it", async () => {
+        const { ctx, sent, fireReady } = composed([row('en', 'org subject')]);
+        await new MessagingServicePlugin({ reliableDelivery: false }).init(ctx);
+        await fireReady();
+        const messaging = ctx.getService('messaging') as MessagingService;
+        messaging.registerBuiltinTemplates([builtin]);
+
+        expect((await messaging.getChannel('email')!.send(sendCtx, delivery)).ok).toBe(true);
+        expect(sent[0]).toMatchObject({ subject: 'org subject', text: 'B' });
+    });
+});

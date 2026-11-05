@@ -84,6 +84,14 @@ describe('closing the claim against the supported locales', () => {
     expect(resolveIdpLocale('ja', SUPPORTED)).toBe('ja-JP');
   });
 
+  // #30456: the one offered-locale matcher Setup's default language accepts by.
+  it('lands a script or region spelling on the offered code the platform table says it means', () => {
+    expect(resolveIdpLocale('zh-TW', ['en', 'zh-Hans', 'zh-Hant'])).toBe('zh-Hant');
+    expect(resolveIdpLocale('zh-CN', ['en', 'zh-Hant', 'zh-Hans'])).toBe('zh-Hans');
+    expect(resolveIdpLocale('fr-FR', ['en', 'fr'])).toBe('fr');
+    expect(resolveIdpLocale('de-DE', ['en', 'fr'])).toBeUndefined();
+  });
+
   it('reads the underscore spelling OIDC Core §5.1 notes as the tag it stands for', () => {
     expect(resolveIdpLocale('zh_CN', SUPPORTED)).toBe('zh-CN');
   });

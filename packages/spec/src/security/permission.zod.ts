@@ -654,6 +654,26 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
     'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 
+  // [#30235] declared; [#30237] the evaluator mapping and the engine's
+  // restore, purge and empty read them; [#30239] the Console shows them.
+  /**
+   * [ADR-0148 D2/D5] The recycle bin's two grants. NEW spellings, on purpose:
+   * the retired `allowRestore` / `allowPurge` above stay tombstoned, so a key
+   * that once meant "nothing happens" never comes to mean "a snapshot is kept".
+   *
+   * Deliberately OPTIONAL (no Zod default), like `allowExport`: a default would
+   * materialize the key into every parsed entry, and a runtime built before
+   * these keys existed refuses a key it does not know.
+   *
+   * PLANNED: declared ahead of the reader by the ADR's rollout. The permission
+   * evaluator maps the engine's `restore` / `purge` operations onto them when
+   * the engine slice lands; until then a dispatched `restore` / `purge` stays
+   * denied fail-closed by the destructive-operation backstop, whatever these
+   * say.
+   */
+  allowRestoreOwnDeleted: z.boolean().optional().describe('[PLANNED] Recycle bin: restore the entries of this object the caller deleted. Not read yet: until the engine\'s restore ships, a dispatched restore stays denied.'),
+  manageRecycleBin: z.boolean().optional().describe('[PLANNED] Recycle bin administration on this object: list every entry, restore any, and purge (emptying the bin purges every entry the caller manages). Not read yet: until the engine\'s restore ships, a dispatched restore or purge stays denied.'),
+
   /** 
    * View All Records: Super-user read access. 
    * Bypasses Sharing Rules and Ownership checks.

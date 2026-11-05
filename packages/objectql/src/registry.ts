@@ -3684,6 +3684,41 @@ export class SchemaRegistry {
   /** See {@link onPackageUninstalled}. */
   private packageUninstalledListeners = new Set<(packageId: string) => void>();
 
+  /** See {@link onPackageEnabled}. */
+  private packageEnabledListeners = new Set<(packageId: string) => void>();
+
+  /**
+   * [#30377] Be told that {@link enablePackage} has switched a DISABLED package
+   * back on, after its served folds are dropped: never for an enable of a
+   * package that was already enabled (`enableOnInstall: true` on a fresh
+   * install). Returns the unsubscribe.
+   *
+   * For state derived from what a disable withholds, so it is brought current
+   * on every enable door at once (`PATCH /packages/:id/enable`, an install's
+   * `enableOnInstall`, the protocol's install), never per door. The engine is
+   * the one today: a roll-up `summary` a package contributes by extension is
+   * withheld with its package, so the child writes made during the disable
+   * recompute nothing, and the engine recomputes it on enable.
+   */
+  onPackageEnabled(listener: (packageId: string) => void): () => void {
+    this.packageEnabledListeners.add(listener);
+    return () => { this.packageEnabledListeners.delete(listener); };
+  }
+
+  /** Tell every {@link onPackageEnabled} listener. Never throws: the enable has happened, and a failing listener is logged at `error`. */
+  private announcePackageEnabled(id: string): void {
+    for (const listener of this.packageEnabledListeners) {
+      try {
+        listener(id);
+      } catch (err) {
+        console.error(
+          `[Registry] package "${id}" was enabled, but a listener bringing state derived from it current failed `
+            + `(${(err as Error)?.message ?? err}) — that state may still read as it did while the package was disabled.`,
+        );
+      }
+    }
+  }
+
   /**
    * [#30215] Be told, once per package, that {@link uninstallPackage} has
    * withdrawn it — after its record is gone, never for a refused uninstall
@@ -8449,6 +8484,7 @@ export class SchemaRegistry {
   enablePackage(id: string): InstalledPackage | undefined {
     const pkg = this.getPackage(id);
     if (pkg) {
+      const wasDisabled = this.isPackageDisabled(id);
       pkg.enabled = true;
       pkg.status = 'installed';
       pkg.statusChangedAt = new Date().toISOString();
@@ -8457,6 +8493,7 @@ export class SchemaRegistry {
       // [#24400] A disabled package's bound actions are not attached
       // ({@link boundCodeActions}), so every object's fold is re-derived.
       this.invalidateAll();
+      if (wasDisabled) this.announcePackageEnabled(id);
     }
     return pkg;
   }
