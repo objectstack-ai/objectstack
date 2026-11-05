@@ -2310,7 +2310,9 @@ export class ObjectQL implements IObjectQLEngine {
       // from 0", i.e. duplicate autonumbers.
       const walk = keysetWalk<Record<string, unknown>>(
         (q: KeysetPageQuery) => this.find(object, {
-          ...q,
+          // The walk spells its `where` `unknown` (this scan's filter AND-ed
+          // with the seek predicate); it is read as the engine's `where` slot.
+          ...(q as Omit<KeysetPageQuery, 'where'> & { where?: EngineQueryOptions['where'] }),
           fields: ['id', field],
           context: execCtx,
         }),
