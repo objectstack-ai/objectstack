@@ -156,7 +156,7 @@ const SURFACE_MODULE = 'scripts/i18n-bundle-surface.mjs';
 /**
  * The two producers of the `metadataForms` TYPE-LEVEL surface, declared as
  * bare module-body path literals for the same reason as SURFACE_MODULE above
- * (#9144). `walkMetadataForms` (packages/cli/src/utils/i18n-extract.ts) emits
+ * (#9144). `walkMetadataForms` (packages/lint/src/i18n-walk.ts) emits
  * `metadataForms.<type>.label` / `.description` for every entry of
  * `DEFAULT_METADATA_TYPE_REGISTRY` — including form-less types like
  * `datasource`/`job`/`translation` — and separately reads
