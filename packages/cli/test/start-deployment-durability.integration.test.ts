@@ -409,10 +409,15 @@ describe('#30120 — without the switch, a production start on its defaults boot
   });
 
   it('neither the public auth config nor the runtime config carries the notice', () => {
-    const { authConfig, runtimeConfig, home } = recorded();
+    const { authConfig, runtimeConfig, adminNotice, home } = recorded();
+    // Non-vacuity: the administrator's own read carries every string the
+    // check below looks for, so a leak of it could not pass unseen.
+    for (const leak of ['database_local_file', 'auth_secret_generated', 'data_key_file', home]) {
+      expect(adminNotice.text).toContain(leak);
+    }
     for (const served of [authConfig, runtimeConfig]) {
       expect(served.status, served.text.slice(0, 500)).toBe(200);
-      for (const leak of ['database_local_file', 'auth_secret_generated', 'data_key_file', 'deploymentNotice', home]) {
+      for (const leak of ['database_local_file', 'auth_secret_generated', 'data_key_file', 'deployment_notice', home]) {
         expect(served.text).not.toContain(leak);
       }
     }
