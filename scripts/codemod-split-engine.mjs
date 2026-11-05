@@ -2719,10 +2719,11 @@ async function mainScoped(tm, argv) {
  * The proof is the undo: putting every moved docblock back on its stub
  * (re-indented), the placeholder back on its function, and taking the marker
  * phrase and the header note out rebuilds the base `engine.ts` and every base
- * hand module byte-for-byte. A one-character edit in a moved docblock, a block
- * dropped on either side, a public docblock moved, or any other byte changed
- * in those files fails it. The public `.d.ts` bar is a report reading on two
- * built dists, as for the first two passes.
+ * hand module byte-for-byte (a base an earlier slice landed in is undone the
+ * same way first, so a slice is proved on its own). A one-character edit in a
+ * moved docblock, a block dropped on either side, a public docblock moved, or
+ * any other byte changed in those files fails it. The public `.d.ts` bar is a
+ * report reading on two built dists, as for the first two passes.
  */
 const HAND_DOCS_CARD = '#30053';
 
@@ -2871,21 +2872,23 @@ function generateHandDocs(tm, engineText, moduleTexts, planned) {
 }
 
 /**
- * The proof. Undo every move the head's markers record and require the base
- * `engine.ts` and the base hand modules back, byte-for-byte. `baseModules` and
- * `headModules` map a hand module file to its text (a file absent from one
- * side fails).
+ * Undo every move a tree's markers record: each moved docblock back on its
+ * stub (re-indented), the placeholder back on its function, the marker phrase
+ * and the header note out. `moduleTexts` maps a hand module file to its text.
+ * Returns the undone texts, the moves it undid, and every way the tree breaks
+ * the rule (a public docblock moved, a marker over a docblock still on the
+ * class, a function with no moved docblock, a header with no note).
  */
-function verifyHandDocs(tm, baseText, headText, baseModules, headModules, { className = CLASS_NAME } = {}) {
+function undoHandDocs(tm, engineText, moduleTexts, className = CLASS_NAME) {
   const failures = [];
   const moved = [];
   const hostEdits = [];
   const perModule = new Map();
-  for (const s of handStubs(tm, headText, className)) {
+  for (const s of handStubs(tm, engineText, className)) {
     if (!s.moved) continue;
     if (s.scope !== 'private') failures.push(`${s.name}: a ${s.scope} method's docblock moved off the class (only a private one may)`);
     if (s.lead !== '') failures.push(`${s.name}: its stub says the docblock moved, but the class still carries leading text`);
-    const text = headModules.get(s.module);
+    const text = moduleTexts.get(s.module);
     const fn = text == null ? null : handFunction(tm, s.module, text, s.name);
     if (!fn) { failures.push(`${s.name}: ${s.module} exports no function of that name`); continue; }
     const sole = soleDocblock(fn.lead);
@@ -2893,7 +2896,7 @@ function verifyHandDocs(tm, baseText, headText, baseModules, headModules, { clas
       failures.push(`${s.name}: its stub says the docblock moved, but its function in ${s.module} carries no moved docblock`);
       continue;
     }
-    const indent = /^ */.exec(headText.slice(headText.lastIndexOf('\n', s.memberStart) + 1, s.memberStart))[0];
+    const indent = /^ */.exec(engineText.slice(engineText.lastIndexOf('\n', s.memberStart) + 1, s.memberStart))[0];
     hostEdits.push({ start: s.memberStart, end: s.memberStart, text: `${reindentDoc(sole.doc)}\n${indent}` });
     hostEdits.push({ start: s.phraseAt, end: s.phraseAt + HAND_DOC_MOVED.length, text: '' });
     const edits = perModule.get(s.module) ?? [];
@@ -2901,27 +2904,49 @@ function verifyHandDocs(tm, baseText, headText, baseModules, headModules, { clas
     perModule.set(s.module, edits);
     moved.push({ name: s.name, module: s.module, lines: sole.doc.split('\n').length });
   }
+  const modules = new Map();
+  for (const [file, text] of moduleTexts) {
+    const edits = perModule.get(file) ?? [];
+    if (edits.length > 0 || text.includes(HAND_DOCS_NOTE)) {
+      const at = text.indexOf(`\n${HAND_DOCS_NOTE}\n */\n`);
+      if (at < 0) failures.push(`${file}: a docblock moved into it, but its header carries no note saying so above its closing line`);
+      else edits.push({ start: at, end: at + HAND_DOCS_NOTE.length + 1, text: '' });
+    }
+    modules.set(file, applyEdits(text, edits));
+  }
+  return { host: applyEdits(engineText, hostEdits), modules, moved, failures };
+}
+
+/**
+ * The proof: undoing every move in the head lands on exactly what undoing
+ * every move in the base lands on, `engine.ts` and each hand module byte for
+ * byte. A base no slice has touched undoes to itself, so against it this is
+ * "the undo rebuilds the base"; against a base an earlier slice landed in, it
+ * proves this slice without re-proving that one's text. `baseModules` and
+ * `headModules` map a hand module file to its text (a file absent from one
+ * side fails).
+ */
+function verifyHandDocs(tm, baseText, headText, baseModules, headModules, { className = CLASS_NAME } = {}) {
+  const head = undoHandDocs(tm, headText, headModules, className);
+  const base = undoHandDocs(tm, baseText, baseModules, className);
+  const failures = [...head.failures, ...base.failures.map((f) => `base: ${f}`)];
   const firstDiff = (a, b) => {
     const x = a.split('\n'); const y = b.split('\n');
     let i = 0; while (i < Math.max(x.length, y.length) && x[i] === y[i]) i += 1;
-    return `line ${i + 1}: base ${JSON.stringify(x[i] ?? null)} | undone head ${JSON.stringify(y[i] ?? null)}`;
+    return `line ${i + 1}: undone base ${JSON.stringify(x[i] ?? null)} | undone head ${JSON.stringify(y[i] ?? null)}`;
   };
-  const rebuilt = applyEdits(headText, hostEdits);
-  if (rebuilt !== baseText) failures.push(`undoing the moves does NOT rebuild the base ${HOST_BASENAME} (${firstDiff(baseText, rebuilt)})`);
+  if (head.host !== base.host) failures.push(`undoing the moves does NOT rebuild the base ${HOST_BASENAME} (${firstDiff(base.host, head.host)})`);
   const files = [...new Set([...baseModules.keys(), ...headModules.keys()])].sort();
   for (const file of files) {
-    const base = baseModules.get(file); const head = headModules.get(file);
-    if (base == null || head == null) { failures.push(`${file}: only in the ${base == null ? 'head' : 'base'}`); continue; }
-    const edits = perModule.get(file) ?? [];
-    if (edits.length > 0 || head.includes(HAND_DOCS_NOTE)) {
-      const at = head.indexOf(`\n${HAND_DOCS_NOTE}\n */\n`);
-      if (at < 0) failures.push(`${file}: a docblock moved into it, but its header carries no note saying so before its closing line`);
-      else edits.push({ start: at, end: at + HAND_DOCS_NOTE.length + 1, text: '' });
-    }
-    const undone = applyEdits(head, edits);
-    if (undone !== base) failures.push(`undoing the moves does NOT rebuild the base ${file} (${firstDiff(base, undone)})`);
+    const b = base.modules.get(file); const h = head.modules.get(file);
+    if (b == null || h == null) { failures.push(`${file}: only in the ${b == null ? 'head' : 'base'}`); continue; }
+    if (h !== b) failures.push(`undoing the moves does NOT rebuild the base ${file} (${firstDiff(b, h)})`);
   }
-  return { failures, moved, modules: files.length, linesBefore: lineCount(baseText), linesAfter: lineCount(headText) };
+  const baseMoved = new Set(base.moved.map((m) => m.name));
+  return {
+    failures, moved: head.moved.filter((m) => !baseMoved.has(m.name)), baseMoved: base.moved.length,
+    modules: files.length, linesBefore: lineCount(baseText), linesAfter: lineCount(headText),
+  };
 }
 
 function planReportHandDocs(planned) {
@@ -2943,9 +2968,9 @@ function planReportHandDocs(planned) {
 
 function printVerifyHandDocs(v) {
   for (const f of v.failures) console.error(`  ✗ ${f}`);
-  console.log(`hand docblocks: ${v.moved.length} moved (${v.moved.reduce((n, m) => n + m.lines, 0)} lines) across ${new Set(v.moved.map((m) => m.module)).size} module(s); ` +
-    `${HOST_BASENAME} ${v.linesBefore} -> ${v.linesAfter} lines; undoing the moves ${v.failures.some((f) => f.startsWith('undoing')) ? 'does NOT' : 'does'} rebuild the base ` +
-    `${HOST_BASENAME} and its ${v.modules} hand module(s) byte-for-byte`);
+  console.log(`hand docblocks: ${v.moved.length} moved (${v.moved.reduce((n, m) => n + m.lines, 0)} lines) across ${new Set(v.moved.map((m) => m.module)).size} module(s), ${v.baseMoved} already moved at base; ` +
+    `${HOST_BASENAME} ${v.linesBefore} -> ${v.linesAfter} lines; undoing every move ${v.failures.some((f) => f.startsWith('undoing')) ? 'does NOT rebuild' : 'rebuilds'} the base, ` +
+    `undone the same way, for ${HOST_BASENAME} and its ${v.modules} hand module(s) byte-for-byte`);
 }
 
 /** The hand modules `engine.ts`'s hand stubs name, read through `read(file)` (null: absent). */
@@ -3104,7 +3129,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'import prune': 4,
   'refusals': 6,
   'scoped classes (second pass)': 16,
-  'hand-series docblocks (third pass)': 15,
+  'hand-series docblocks (third pass)': 16,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
 
@@ -3710,6 +3735,14 @@ async function selfTest() {
       !slice.modules.has('engine-beta.ts') && slice.host.includes('A beta docblock') &&
       rest.host === out.host && (rest.modules.get('engine-beta.ts') ?? '') === out.modules.get('engine-beta.ts') &&
       planHandDocs(tm, slice.host, sliceMods).records.find((r) => r.name === 'privateDoc')?.reason === 'already-moved');
+    {
+      const restMods = new Map([...sliceMods, ...rest.modules]);
+      const onSlice = verifyHandDocs(tm, slice.host, rest.host, sliceMods, restMods);
+      const onBase = verifyHandDocs(tm, input, rest.host, mods, restMods);
+      check('the next slice proves against the earlier slice\'s output, counting only its own moves, and against the unsliced base',
+        onSlice.failures.length === 0 && onSlice.moved.length === 1 && onSlice.baseMoved === 1 && onBase.failures.length === 0 && onBase.moved.length === 2,
+        [...onSlice.failures, ...onBase.failures].join(' | '));
+    }
     const fails = (host, edited) => verifyHandDocs(tm, input, host, mods, new Map([...mods, ...out.modules, ...edited])).failures.length > 0;
     check('one edited character in a moved docblock fails', fails(out.host, [['engine-alpha.ts', alpha.replace('Second paragraph.', 'Second paragraph!')]]));
     check('a moved docblock dropped from its function fails', fails(out.host, [['engine-alpha.ts', alpha.replace(/\/\*\*\n \* A private docblock[\s\S]*?\*\/\n/, '')]]));
