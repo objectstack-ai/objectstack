@@ -28,6 +28,10 @@
 //   4. the by-id doors keep their answers: the hidden row's by-id write still
 //      answers the read door's not-found.
 //
+// A second top-level describe, at the foot of the file, pins the rule for a
+// caller the read door REFUSES, at an HTTP door: a write from that caller is
+// refused, whatever rows it addresses (its own header).
+//
 // ── the arming is the pin ─────────────────────────────────────────────────
 //
 // Each boot proves its principal's domain before anything is measured: outside
@@ -43,6 +47,7 @@ import { tmpdir } from 'node:os';
 import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { PermissionSetSchema, type PermissionSet } from '@objectstack/spec/security';
+import type { Flow } from '@objectstack/spec/automation';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { resolveAuthzContext } from '@objectstack/core';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
@@ -452,4 +457,246 @@ describe('predicate write door: a row the caller cannot read is not matched', ()
       }
     }
   }
+});
+
+// ── A write from a caller the read door refuses is refused ─────────────────
+//
+// [#21829, ruling B] A caller the read door REFUSES writes none of the
+// object's records, whatever its write addresses: the predicate update and
+// delete it addresses are answered the read door's own refusal before the
+// write runs, as its by-id update and delete are.
+//
+// The HTTP door: a `runAs: 'user'` flow started at
+// `POST /automation/:name/trigger`, whose `update_record` / `delete_record`
+// node declares bulk intent (`multi: true`) over a filter the start input
+// supplies — a predicate write under the caller's own identity, addressed by
+// that caller. The object's read is gated on a capability the writer lacks and
+// its writes are not (ADR-0066 ⑤): since an object permission that edits or
+// deletes a record also reads it, the one shape in which the write door admits
+// a caller the read door refuses. The boot is the production `single` shape.
+//
+//   1. ⭐ the writer's predicate update and delete answer the read door's
+//      refusal (the run fails with the node's inner refusal), for a filter
+//      naming rows and a filter naming none alike, and no row changes;
+//   2. control: a principal holding the capability keeps its predicate write;
+//   3. control: the by-id doors give the writer the same refusal (unchanged).
+
+const GATED_READ_CAP = 'pw_gated_read';
+
+/** Read-gated on a capability; writes are not gated. No row-level policy binds it. */
+const buildPwGated = () => ObjectSchema.create({
+  name: 'pw_gated',
+  label: 'Predicate Write Gated',
+  pluralLabel: 'Predicate Write Gated',
+  sharingModel: 'public_read_write',
+  requiredPermissions: { read: [GATED_READ_CAP] },
+  fields: {
+    name: Field.text({ label: 'Name', required: true }),
+    tag: Field.text({ label: 'Tag' }),
+  },
+});
+
+/** `start → <verb>_record (multi, filtered by the `tag` input) → end`, as the triggering user. */
+const sweepFlow = (verb: 'update' | 'delete'): Flow => ({
+  name: `pw_gated_sweep_${verb}`,
+  label: `Sweep gated rows by tag (${verb})`,
+  type: 'autolaunched',
+  runAs: 'user',
+  variables: [{ name: 'tag', type: 'text', isInput: true }],
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    verb === 'update'
+      ? {
+          id: 'sweep',
+          type: 'update_record',
+          label: 'Sweep',
+          config: { objectName: 'pw_gated', filter: { tag: { dialect: 'cel', source: 'tag' } }, fields: { name: 'swept' }, multi: true },
+        }
+      : {
+          id: 'sweep',
+          type: 'delete_record',
+          label: 'Sweep',
+          config: { objectName: 'pw_gated', filter: { tag: { dialect: 'cel', source: 'tag' } }, multi: true },
+        },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'sweep' },
+    { id: 'e2', source: 'sweep', target: 'end' },
+  ],
+} as Flow);
+
+const buildGatedStackDefinition = () =>
+  defineStack({
+    manifest: {
+      id: 'com.dogfood.predicate-write-read-door-refusal',
+      version: '0.0.0',
+      type: 'app',
+      name: 'Predicate write: a caller the read door refuses',
+      description:
+        'A read-gated object and two user-mode flows that update or delete its rows by a filter: the answer a caller the read door refuses gets from a predicate write.',
+    },
+    objects: [buildPwGated()],
+    flows: [sweepFlow('update'), sweepFlow('delete')],
+  });
+
+/** Every bit on the object, and not the capability its read requires. */
+const gatedWriterSet: PermissionSet = PermissionSetSchema.parse({
+  name: 'pw_gated_writer',
+  label: 'Predicate write fixture — gated writer',
+  objects: { pw_gated: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+});
+
+/** The capability the object's read requires, and nothing else. */
+const gatedReaderSet: PermissionSet = PermissionSetSchema.parse({
+  name: 'pw_gated_reader',
+  label: 'Predicate write fixture — gated reader',
+  systemPermissions: [GATED_READ_CAP],
+  objects: {},
+});
+
+describe('a write from a caller the read door refuses is refused, whatever rows it addresses (HTTP door)', () => {
+  let stack: VerifyStack;
+  let ql: any;
+  let writerTok: string;
+  let readerTok: string;
+  const ids: Record<string, string[]> = {};
+
+  interface Answer { status: number; body: any }
+  const call = async (token: string, method: string, path: string, body?: unknown): Promise<Answer> => {
+    const res = await stack.apiAs(token, method, path, body);
+    let parsed: unknown;
+    try { parsed = await res.json(); } catch { parsed = undefined; }
+    return { status: res.status, body: parsed };
+  };
+  const trigger = (token: string, verb: 'update' | 'delete', tag: string) =>
+    call(token, 'POST', `/automation/pw_gated_sweep_${verb}/trigger`, { params: { tag } });
+  /** The refusal an HTTP answer carries: code and message, whichever envelope spells them. */
+  const refusalOf = (a: Answer) => ({
+    code: a.body?.error?.code ?? a.body?.code,
+    message: typeof a.body?.error === 'string' ? a.body.error : a.body?.error?.message ?? a.body?.message,
+  });
+  /** Every row, as the system reads it. */
+  const snapshot = async () =>
+    JSON.stringify(
+      ((await ql.find('pw_gated', { limit: 100, context: SYS })) as any[])
+        .map((r) => [r.id, r.name, r.tag])
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    );
+
+  beforeAll(async () => {
+    stack = await bootStack(buildGatedStackDefinition() as never, {
+      orgContext: true,
+      automation: true,
+      security: new SecurityPlugin({
+        defaultPermissionSets: [...securityDefaultPermissionSets, gatedWriterSet, gatedReaderSet],
+        fallbackPermissionSet: gatedWriterSet.name,
+      }),
+    });
+    await stack.signIn();
+    ql = await stack.kernel.getServiceAsync<any>('objectql');
+    const defaultOrg = await ql.findOne('sys_organization', { where: { slug: 'default' }, context: SYS });
+    expect(defaultOrg?.id, 'the `single` boot names a Default Organization').toBeTruthy();
+    const grant = async (email: string, sets: string[]): Promise<string> => {
+      const token = await stack.signUp(email);
+      const userId = (await ql.findOne('sys_user', { where: { email }, context: SYS }))?.id;
+      expect(userId, `${email} provisioned`).toBeTruthy();
+      for (const name of sets) {
+        expect(await catalogPermissionSet(ql, name), `fixture permission set ${name} served by the security catalog`).toBeTruthy();
+        await ql.insert('sys_user_permission_set', {
+          id: `ups_${userId}_${name}`, user_id: userId, permission_set: name, organization_id: String(defaultOrg.id),
+        }, { context: SYS });
+      }
+      return token;
+    };
+    writerTok = await grant('pw-gated-writer@verify.test', [gatedWriterSet.name]);
+    readerTok = await grant('pw-gated-reader@verify.test', [gatedWriterSet.name, gatedReaderSet.name]);
+
+    for (const [tag, n] of [['alpha', 2], ['beta', 1], ['gamma', 2], ['delta', 1], ['kappa', 1]] as const) {
+      ids[tag] = [];
+      for (let i = 0; i < n; i++) {
+        ids[tag].push(String((await ql.insert('pw_gated', { name: `${tag} ${i}`, tag }, { context: { ...SYS } })).id));
+      }
+    }
+
+    await assertArmed([
+      armedWhen({
+        control: 'the writer holds the write grant and not the capability the read requires — the read door refuses it',
+        disarmedBy: 'a writer holding the capability (it reads, and measures the control) or missing the grant (an object refusal)',
+        observe: async () => ({
+          ctx: await resolveAuthzFor(stack, writerTok),
+          read: (await call(writerTok, 'GET', '/data/pw_gated')).status,
+        }),
+        armed: ({ ctx, read }) =>
+          ctx.permissions.includes(gatedWriterSet.name) && !ctx.permissions.includes(gatedReaderSet.name) && read === 403,
+        describe: ({ ctx, read }) => `permissions=${JSON.stringify(ctx.permissions)} GET=${read}`,
+      }),
+      armedWhen({
+        control: 'the reader holds the write grant and the capability — the read door answers it',
+        disarmedBy: 'a reader missing the capability: the control then measures the refused caller twice',
+        observe: async () => ({
+          ctx: await resolveAuthzFor(stack, readerTok),
+          read: (await call(readerTok, 'GET', '/data/pw_gated')).status,
+        }),
+        armed: ({ ctx, read }) =>
+          ctx.permissions.includes(gatedWriterSet.name) && ctx.permissions.includes(gatedReaderSet.name) && read === 200,
+        describe: ({ ctx, read }) => `permissions=${JSON.stringify(ctx.permissions)} GET=${read}`,
+      }),
+    ]);
+  }, 240_000);
+
+  afterAll(async () => {
+    await stack?.stop();
+  });
+
+  for (const [verb, tag] of [['update', 'alpha'], ['delete', 'beta']] as const) {
+    it(`${verb}: the writer's predicate ${verb} answers the read door's refusal, for rows and for none, and no row changes`, async () => {
+      const read = await call(writerTok, 'GET', '/data/pw_gated');
+      expect(read.status, JSON.stringify(read.body)).toBe(403);
+      const readRefusal = refusalOf(read);
+      expect(readRefusal.code).toBe('PERMISSION_DENIED');
+      const before = await snapshot();
+
+      const rows = await trigger(writerTok, verb, tag);
+      const none = await trigger(writerTok, verb, 'nowhere');
+
+      for (const got of [rows, none]) {
+        expect(got.status, JSON.stringify(got.body)).toBe(400);
+        expect(got.body?.error?.code, JSON.stringify(got.body)).toBe('FLOW_FAILED');
+        expect(got.body?.data, JSON.stringify(got.body)).toBeUndefined();
+        expect(got.body?.error?.details?.innerRefusal, JSON.stringify(got.body)).toEqual(readRefusal);
+      }
+      expect(none.body?.error?.message).toBe(rows.body?.error?.message);
+      // Refused means untouched — every row of the object.
+      expect(await snapshot()).toBe(before);
+    });
+  }
+
+  it('control: a principal holding the capability keeps its predicate update and delete', async () => {
+    const updated = await trigger(readerTok, 'update', 'gamma');
+    expect(updated.status, JSON.stringify(updated.body)).toBe(200);
+    expect(updated.body?.data?.success, JSON.stringify(updated.body)).toBe(true);
+    for (const id of ids.gamma) {
+      expect((await ql.findOne('pw_gated', { where: { id }, context: SYS }))?.name).toBe('swept');
+    }
+
+    const deleted = await trigger(readerTok, 'delete', 'delta');
+    expect(deleted.status, JSON.stringify(deleted.body)).toBe(200);
+    expect(deleted.body?.data?.success, JSON.stringify(deleted.body)).toBe(true);
+    for (const id of ids.delta) expect(await ql.findOne('pw_gated', { where: { id }, context: SYS })).toBeFalsy();
+    // Its filter wrote nothing else.
+    expect((await ql.findOne('pw_gated', { where: { id: ids.kappa[0] }, context: SYS }))?.name).toBe('kappa 0');
+  });
+
+  it('control: the by-id doors give the writer the same refusal, and the row is untouched', async () => {
+    const readRefusal = refusalOf(await call(writerTok, 'GET', '/data/pw_gated'));
+    const id = ids.kappa[0];
+    const patched = await call(writerTok, 'PATCH', `/data/pw_gated/${id}`, { name: 'should not land' });
+    const removed = await call(writerTok, 'DELETE', `/data/pw_gated/${id}`);
+    for (const got of [patched, removed]) {
+      expect(got.status, JSON.stringify(got.body)).toBe(403);
+      expect(refusalOf(got)).toEqual(readRefusal);
+    }
+    expect((await ql.findOne('pw_gated', { where: { id }, context: SYS }))?.name).toBe('kappa 0');
+  });
 });
