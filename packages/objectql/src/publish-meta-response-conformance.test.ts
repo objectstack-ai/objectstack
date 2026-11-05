@@ -316,7 +316,19 @@ describe('publishMetaItem response conforms to PublishMetaItemResponseSchema (#7
         // rather than their types is what makes the case a measurement: a
         // receipt whose numbers stopped arriving would still be "a number" if
         // the schema ever loosened them.
-        expect(parsed.seedApplied).toEqual({ success: true, inserted: 1, updated: 0 });
+        // [#30348] `landed` rides through the parse too: one entry for the
+        // seeded object, the one created row under `inserted`. The ids are
+        // checked against the engine in `publish-seed-receipt-landed-ids.test.ts`.
+        const landedId = parsed.seedApplied?.landed?.[0]?.inserted.ids[0];
+        expect(typeof landedId).toBe('string');
+        expect(parsed.seedApplied).toEqual({
+            success: true, inserted: 1, updated: 0,
+            landed: [{
+                object: 'sys_metadata',
+                inserted: { ids: [landedId], total: 1, truncated: false },
+                matched: { ids: [], total: 0, truncated: false },
+            }],
+        });
     });
 
     it('all three receipts at once: the fully-loaded body still strips nothing', async () => {

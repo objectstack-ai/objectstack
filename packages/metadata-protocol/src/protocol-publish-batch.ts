@@ -49,6 +49,8 @@ import {
 } from './protocol.js';
 import { CLOSURE_CONTEXT_KEY_BY_TYPE, type RuntimePendingDeclarations } from './runtime-authoring-gate.js';
 import type { SeedLoadPartialWrites } from './seed-loader.js';
+import type { SeedAppliedLandedParsed } from '@objectstack/spec/api';
+import { seedAppliedLanded } from './seed-applied-landed.js';
 
 /**
  * The `ObjectStackProtocolImplementation` members the functions below read —
@@ -74,6 +76,7 @@ export async function applySeedBodies(
 ): Promise<{
     success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[];
     issues?: Array<{ path: string; message: string; code?: string | undefined }>;
+    landed?: SeedAppliedLandedParsed[];
 }> {
     // The loader's reader of what a THROWN load had written. Unset until the
     // loader module is imported, which no write precedes.
@@ -128,6 +131,13 @@ export async function applySeedBodies(
             inserted: r.summary.totalInserted,
             updated: r.summary.totalUpdated,
             ...(r.errors?.length ? { errors: r.errors } : {}),
+            // [#30348] Which rows landed, per object: created by this publish
+            // vs pre-existing rows a seed key matched — the loader's own ids,
+            // capped and folded by the one projection both receipt producers
+            // share. Only on this path: a load that THREW (the catch below)
+            // reports counts but no ids, so `landed` stays absent there —
+            // "not reported", never "nothing landed".
+            landed: seedAppliedLanded(r.results),
         };
     } catch (e: any) {
         // [#8333 · P9] `seedApplied.error` rides on a **200** publish
