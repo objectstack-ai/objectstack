@@ -24,6 +24,7 @@ import {
   type SettingsLiveStatusProvider,
   type SettingsWritePredicate,
   type SettingsDisplayOptions,
+  type SettingsWriteOptions,
   SETTINGS_LIVE_STATUS_BANNER_ID,
   type SettingsAuditSink,
   type SettingsContext,
@@ -2345,14 +2346,15 @@ export class SettingsService {
    * the row it would store names no owner, and the user rung answers only its
    * owner, so no reader would ever see it while the write reported success.
    *
-   * `display` picks the language of a write predicate's refusal, and nothing
-   * else (see {@link refuseByWritePredicates}).
+   * `display` picks the language of a write predicate's refusal and hands it
+   * the request the write arrived on, and nothing else (see
+   * {@link refuseByWritePredicates}).
    */
   async setMany(
     namespace: string,
     patch: Record<string, unknown>,
     ctx: SettingsContext = {},
-    display: SettingsDisplayOptions = {},
+    display: SettingsWriteOptions = {},
   ): Promise<Record<string, ResolvedSettingValue>> {
     // The pre-bind window: refuse rather than resolve against a store nothing
     // will ever read. See `assertEngineBound`.
@@ -2665,7 +2667,7 @@ export class SettingsService {
     patch: Record<string, unknown>,
     ctx: SettingsContext,
     reach: OrganizationReach | undefined,
-    display: SettingsDisplayOptions,
+    display: SettingsWriteOptions,
   ): Promise<void> {
     const byKey = this.writePredicates.get(namespace);
     if (!byKey) return;
@@ -2678,7 +2680,16 @@ export class SettingsService {
       if (stableStringify(next) === stableStringify(current)) continue;
       const scope = reg.scopes.get(key)!;
       const organizationId = scope === 'global' || !reach ? undefined : organizationReachRowOwner(reach) ?? null;
-      const refusal = await predicate({ namespace, key, next, current, organizationId, ctx, locale: display.locale });
+      const refusal = await predicate({
+        namespace,
+        key,
+        next,
+        current,
+        organizationId,
+        ctx,
+        locale: display.locale,
+        ...(display.transport ? { transport: display.transport } : {}),
+      });
       if (!refusal) continue;
       const spec = ((reg.manifest.specifiers ?? []) as Array<Record<string, unknown>>)
         .find((s) => s.key === key);

@@ -50,7 +50,7 @@ export function parseAllowedIpRanges(raw: unknown): string[] {
 
 /**
  * The HTTP request a settings write arrived on, as the settings routes hand it
- * to a write predicate (`SettingsContext.transport` in `service-settings`).
+ * to a write predicate (`SettingsWriteOptions.transport` in `service-settings`).
  */
 interface WriteTransport {
   headers?: Record<string, string | string[] | undefined>;
@@ -64,7 +64,7 @@ interface WriteTransport {
  */
 export interface AllowedIpRangesWriteInput {
   next: unknown;
-  ctx?: { transport?: WriteTransport };
+  transport?: WriteTransport;
   locale?: string;
 }
 
@@ -137,8 +137,7 @@ function copyFor(locale: string | undefined): RefusalCopy {
 export function allowedIpRangesWritePredicate(
   manager: () => Pick<AuthManager, 'resolveClientAddress'> | null | undefined,
 ): (input: AllowedIpRangesWriteInput) => AllowedIpRangesWriteRefusal | undefined {
-  return ({ next, ctx, locale }) => {
-    const transport = ctx?.transport;
+  return ({ next, transport, locale }) => {
     if (!transport) return undefined;
     const ranges = parseAllowedIpRanges(next);
     if (ranges.length === 0) return undefined;
