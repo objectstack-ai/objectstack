@@ -69,6 +69,18 @@ import { isNonCanonicalStoredType } from './protocol-stored-overlay-types.js';
 import type { RollbackMetaItemRequest } from './protocol-door-requests.js';
 import type { ProtocolHost } from './protocol-host.js';
 
+/**
+ * [#30319] The grant keys of a stored permission set's `objects` map: what a
+ * copy of that row holds because the source does (the save request's
+ * `inheritedGrantObjects`). The same derivation as the permission-set clone
+ * door's `inheritedGrantObjectsOf` (`@objectstack/runtime`, which depends on
+ * this package, so it is restated, not imported).
+ */
+function storedGrantObjectKeys(stored: unknown): string[] {
+    const objects = stored && typeof stored === 'object' ? (stored as { objects?: unknown }).objects : undefined;
+    return objects && typeof objects === 'object' && !Array.isArray(objects) ? Object.keys(objects) : [];
+}
+
 export class ProtocolPackageCommitsFacet {
     /** The body of `ObjectStackProtocolImplementation#revertStoredPackage`; the method's docblock there is its contract. */
     static async revertStoredPackage(host: Pick<ProtocolHost, 'discardDraftInItsScope' | 'ensureOverlayIndex' | 'findEnvironmentRows' | 'getOverlayRepo' | 'refuseOrganizationScopedWrite' | 'rethrowUnlessMetadataStoreUnprovisioned'>, request: {
@@ -779,6 +791,15 @@ export class ProtocolPackageCommitsFacet {
                     // duplicate-AGAIN workflow, and its `?force=true` default
                     // would name a parameter this door does not accept.
                     writeFace: 'package-duplicate',
+                    // [#30319] A copied permission set's grants are the SOURCE
+                    // row's, so the unknown-object refusal does not judge the
+                    // keys that row holds as stored — the clone door's rule
+                    // (#30255) for this door's copy. A platform set may grant on
+                    // an optional plugin's object this deployment does not
+                    // install (`sys_comment`, `@objectstack/plugin-audit`).
+                    // Derived from the stored row, never from the request; a key
+                    // the rewrite above renamed is not the source's, and is judged.
+                    ...(singular === 'permission' ? { inheritedGrantObjects: storedGrantObjectKeys(body) } : {}),
                     ...(request.actor ? { actor: request.actor } : {}),
                 });
                 copied.push({ type: row.type, name: newName });
@@ -939,6 +960,9 @@ export class ProtocolPackageCommitsFacet {
                     packageId: targetPackageId,
                     // Server-stated, as on every face: no body reaches this field.
                     writeFace: 'package-unmanaged-import',
+                    // [#30319] No `inheritedGrantObjects`, deliberately: the
+                    // package is the request's body, not a stored row, so its
+                    // permission sets are new writes and every grant is judged.
                     ...(actor ? { actor } : {}),
                 });
                 copied.push({ type: item.type, name: item.name });
