@@ -189,7 +189,7 @@ function isEmptyReferenceValue(v: unknown): boolean {
  * (see {@link masterDetailHeadersCallerReads}).
  */
 export async function assertReferencesResolve(
-  this: Pick<ReferentialIntegrityHost, 'masterDetailHeaderExists' | 'referenceExists' | 'referenceRow'>,
+  this: Pick<ReferentialIntegrityHost, 'logger' | 'masterDetailHeaderExists' | 'referenceExists' | 'referenceRow'>,
   schema: any,
   data: Record<string, unknown> | null | undefined,
   supplied: Record<string, unknown> | null | undefined,
@@ -263,7 +263,16 @@ export async function assertReferencesResolve(
       // [#22519] A master-detail header must also be one the caller can read.
       if (def?.type !== 'master_detail' && target === BAN_CHECKED_USER_OBJECT) {
         // [#30205] One probe answers both: the row's existence and its ban.
-        const row = await this.referenceRow(target, v, context, USER_BAN_FIELDS);
+        let row: Awaited<ReturnType<typeof this.referenceRow>>;
+        try {
+          row = await this.referenceRow(target, v, context, USER_BAN_FIELDS);
+        } catch (err) {
+          // Fails open like the existence probe: a check that cannot run refuses nothing.
+          this.logger?.warn?.('the reference check could not read the referenced user — neither its existence nor its ban was checked', {
+            object: target, field: name, error: err instanceof Error ? err.message : String(err),
+          });
+          row = null;
+        }
         if (row === false) refused.push({ name, def, value: v, target });
         // adr0112-ok: D6 — a field-addressed FieldErrorCode; this entry becomes `{ field, code }` below
         else if (row !== null && isUserBanInForce(row)) refused.push({ name, def, value: v, target, code: 'reference_user_banned' });
@@ -311,7 +320,7 @@ export async function assertReferencesResolve(
  * check costs no read of its own and is read the way the probe reads:
  * elevated inside the caller's tenant, because a ban is a fact about the
  * user, not about what the caller may read. A probe that cannot run refuses
- * nothing, as before.
+ * nothing, as before, and logs a warning.
  */
 const BAN_CHECKED_USER_OBJECT = 'sys_user';
 

@@ -190,32 +190,33 @@ export class ReferencesAndMasterDetailFacet {
    * now refuses.
    */
   static async referenceExists(this: Pick<ReferencesAndMasterDetailHost, 'referenceRow'>, target: string, id: unknown, context?: ExecutionContext): Promise<boolean | null> {
-    const row = await this.referenceRow(target, id, context, []);
-    return row === null ? null : row !== false;
+    try {
+      const row = await this.referenceRow(target, id, context, []);
+      return row === null ? null : row !== false;
+    } catch {
+      return null;
+    }
   }
 
   /**
    * [#30205] {@link referenceExists}'s probe, answering the row it found:
    * `id` plus whichever of `extraFields` the target declares, `false` when the
-   * probe ran and found nothing, `null` when it could not run. Same read, same
-   * elevation, so a check that needs a column of the target (a user's ban
-   * state) costs no read of its own.
+   * probe ran and found nothing, `null` when the target is not registered.
+   * Same read, same elevation, so a check that needs a column of the target
+   * (a user's ban state) costs no read of its own. A read that throws is the
+   * caller's to answer: {@link referenceExists} answers it `null`.
    */
   static async referenceRow(this: Pick<ReferencesAndMasterDetailHost, '_registry' | 'findOne' | 'resolveObjectName'>, target: string, id: unknown, context: ExecutionContext | undefined, extraFields: readonly string[]): Promise<Record<string, unknown> | false | null> {
-    try {
-      const resolved = this.resolveObjectName(target);
-      const schema = this._registry.getObject(resolved) as { fields?: Record<string, unknown> } | undefined;
-      if (!schema) return null;
-      const declared = schema.fields ?? {};
-      const row = await this.findOne(resolved, {
-        where: { id },
-        fields: ['id', ...extraFields.filter((f) => f !== 'id' && f in declared)],
-        context: ObjectQL.referenceCheckContext(context),
-      });
-      return row ? row as Record<string, unknown> : false;
-    } catch {
-      return null;
-    }
+    const resolved = this.resolveObjectName(target);
+    const schema = this._registry.getObject(resolved) as { fields?: Record<string, unknown> } | undefined;
+    if (!schema) return null;
+    const declared = schema.fields ?? {};
+    const row = await this.findOne(resolved, {
+      where: { id },
+      fields: ['id', ...extraFields.filter((f) => f !== 'id' && f in declared)],
+      context: ObjectQL.referenceCheckContext(context),
+    });
+    return row ? row as Record<string, unknown> : false;
   }
 
   /**

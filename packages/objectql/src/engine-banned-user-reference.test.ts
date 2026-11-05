@@ -215,4 +215,22 @@ describe('[#30205] a new assignment to a banned user is refused', () => {
     const err = await refusalOf(() => engine.insert('ban_ticket', { title: 'T', assignee: 'u_nobody' }, { context: ALICE } as any));
     expect(err.fields[0]).toMatchObject({ field: 'assignee', code: 'reference_not_found' });
   });
+
+  it('a user read that throws refuses nothing and logs a warning, as the existence probe fails open', async () => {
+    const warnings: unknown[][] = [];
+    const logger = (engine as any).logger;
+    const warn = logger.warn;
+    logger.warn = (...a: unknown[]) => { warnings.push(a); };
+    engine.registerMiddleware(async (ctx: any, next: () => Promise<void>) => {
+      if (ctx.object === 'sys_user' && ctx.operation === 'findOne') throw new Error('user store unreachable');
+      await next();
+    });
+    try {
+      const row: any = await engine.insert('ban_ticket', { title: 'T', assignee: 'u_bob' }, { context: ALICE } as any);
+      expect(row.assignee).toBe('u_bob');
+      expect(warnings.some(([m]) => String(m).includes('could not read the referenced user'))).toBe(true);
+    } finally {
+      logger.warn = warn;
+    }
+  });
 });
