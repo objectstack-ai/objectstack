@@ -30,7 +30,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import {
   SysBusinessUnit, SysBusinessUnitMember, SysMember, SysOrganization, SysTeamMember,
 } from '@objectstack/platform-objects/identity';
-import { ApprovalService } from './approval-service.js';
+import { ApprovalService, ApproverDirectoryUnreadableError } from './approval-service.js';
 
 const ORG = 'org_large';
 const ELSEWHERE = 'org_elsewhere';
@@ -129,8 +129,8 @@ const department = (rig: Rig, value = ROOT) =>
   (rig.svc as any).expandBusinessUnitUsers(value, ORG) as Promise<string[]>;
 const resolveSpec = (rig: Rig, a: { type: string; value: string }) =>
   (rig.svc as any).resolveApproverSpec(a, undefined, ORG, Date.now()) as Promise<string[]>;
-const resolveExpression = (rig: Rig, a: { type: string; value: string; resolveAs: string }) =>
-  (rig.svc as any).resolveExpressionApprovers(a, {}, ORG, Date.now()) as Promise<{
+const resolveExpression = (rig: Rig, a: { type: string; value: string; resolveAs: string }, onDirectoryFailure?: 'refuse' | 'literal') =>
+  (rig.svc as any).resolveExpressionApprovers(a, {}, ORG, Date.now(), undefined, undefined, onDirectoryFailure) as Promise<{
     slots: Array<{ id: string; subGroup?: string }>;
     raw: string[];
   }>;
@@ -220,10 +220,18 @@ describe('[#29606] item 3 — an expression approver whose resolveAs expansion f
     expect(failed[0][1].error).toMatch(/SQLITE_IOERR/);
   });
 
-  it('⛔ a failed team read through resolveAs warns the same way', async () => {
+  it('⛔ a failed team read through resolveAs refuses the node as a team approver does; the literal reader warns the same way', async () => {
     const rig = await boot(0);
     rig.failReadsOf('sys_team_member');
-    const { slots } = await resolveExpression(rig, { type: 'expression', value: `'team_x'`, resolveAs: 'team' });
+    // [ADR-0142 D6 as amended, #29604] The value is read through the team
+    // expander, so its failure refuses the node like a static `team` approver's.
+    const refusal = await resolveExpression(rig, { type: 'expression', value: `'team_x'`, resolveAs: 'team' })
+      .then(() => null, (e: unknown) => e);
+    expect(refusal).toBeInstanceOf(ApproverDirectoryUnreadableError);
+    expect(refusal).toMatchObject({ approverType: 'team', approverValue: 'team_x', retryable: true });
+    expect((refusal as Error).message).toMatch(/^APPROVER_DIRECTORY_UNREADABLE: approver 'expression' \(resolveAs 'team', value 'team_x'\)/);
+
+    const { slots } = await resolveExpression(rig, { type: 'expression', value: `'team_x'`, resolveAs: 'team' }, 'literal');
 
     expect(slots).toEqual([{ id: 'team:team_x', subGroup: 'team_x' }]);
     const failed = failureWarnings(rig);

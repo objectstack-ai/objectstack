@@ -1388,7 +1388,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         }
 
         try {
-            const summary = await this.runInlineSeed(ctx, datasets);
+            // [#30281] No user starts a boot heal: the setting, then this
+            // package's declared default locale.
+            const summary = await this.runInlineSeed(ctx, datasets, undefined, { app: converted });
             const landed = (summary.inserted ?? 0) + (summary.updated ?? 0);
             if (landed > 0) {
                 entry.withSampleData = true;
@@ -1626,7 +1628,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      */
     private buildSeedReplayer = (ctx: PluginContext) => {
         const empty = () => ({ inserted: 0, updated: 0, skipped: 0, errors: [] as any[] });
-        return async (organizationId: string) => {
+        // [#30281] `options.userId` is the organization's founder when the
+        // org-scoping middleware knows one — the AppPlugin replayer's shape.
+        return async (organizationId: string, options?: { userId?: string }) => {
             if (!organizationId) return empty();
             const datasetsNow = this.readSharedSeedDatasets(ctx);
             if (!Array.isArray(datasetsNow) || datasetsNow.length === 0) return empty();
@@ -1645,7 +1649,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 ctx.logger?.warn?.(`[MarketplaceInstallLocal] seed-replayer: objectql/metadata unavailable — org ${organizationId} not seeded`);
                 return empty();
             }
-            const s = await this.runInlineSeed(ctx, datasetsNow, organizationId);
+            // [#30281] The locale is resolved per organization: its setting,
+            // then the founder's language. No app default rung — the shared
+            // list is every installed package's datasets, and no one package's
+            // declared default speaks for the union.
+            const s = await this.runInlineSeed(ctx, datasetsNow, organizationId, { userId: options?.userId });
             return { inserted: s.inserted, updated: s.updated, skipped: s.skipped, errors: s.errorList };
         };
     };
@@ -2446,7 +2454,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //      • load translation bundles into the i18n service
         //      • stash seed datasets on the kernel + run them now so the
         //        installed app has demo data on first paint.
-        const seededSummary = await this.applySideEffects(ctx, converted, { seedNow: true, c });
+        const seededSummary = await this.applySideEffects(ctx, converted, { seedNow: true, c, userId });
         // `skipped` counts too: an all-skip run means the rows are ALREADY in
         // the database (e.g. a reinstall/upgrade over live sample data) — the
         // install carries sample data either way. Leaving the flag false here
@@ -4249,7 +4257,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // The ledger keeps the body as installed: `entry` is written back below
         // with its `manifest` untouched.
         const converted = this.convertPackageBodyForward(ctx, entry.manifest);
-        const summary = await this.applySideEffects(ctx, converted, { seedNow: true, c, door: 'reseed' });
+        const summary = await this.applySideEffects(ctx, converted, { seedNow: true, c, door: 'reseed', userId: admission.userId });
         // [ADR-0123 D2 / D4] A walled session with no active organization: the
         // reseed is a tenant-scoped write with no organization to write under.
         if (summary.seeded.mode === 'refused') {
@@ -4890,7 +4898,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     private applySideEffects = async (
         ctx: PluginContext,
         manifest: any,
-        opts: { seedNow: boolean; c?: any; door?: Exclude<SampleDataDoor, 'purge'> },
+        opts: { seedNow: boolean; c?: any; door?: Exclude<SampleDataDoor, 'purge'>; userId?: string },
     ): Promise<{ translationsLoaded: number; seeded: { mode: 'inline' | 'replayer' | 'skipped' | 'refused'; inserted?: number; updated?: number; skipped?: number; errors?: number; reason?: string; errorSample?: string } }> => {
         const appId = String(manifest?.id ?? 'unknown');
         let translationsLoaded = 0;
@@ -5008,7 +5016,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                         }
                     }
                     if (!multiTenant || organizationId) {
-                        const s = await this.runInlineSeed(ctx, datasets, organizationId);
+                        // [#30281] The installing (or reseeding) user and this
+                        // package's own declared default locale.
+                        const s = await this.runInlineSeed(ctx, datasets, organizationId, {
+                            userId: opts.userId,
+                            app: manifest,
+                        });
                         seedSummary = { mode: 'inline', ...s };
                         ctx.logger?.info?.(`[MarketplaceInstallLocal] inline seed for ${appId}${organizationId ? ` (org=${organizationId})` : ''}: inserted=${s.inserted} updated=${s.updated} skipped=${s.skipped} errors=${s.errors}`);
                     }
@@ -5025,24 +5038,41 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     /**
      * One SeedLoaderService run over `datasets` (multi-pass, each dataset in
      * its own `mode`, the spec default `ignore` when it declares none) — the
-     * shared engine behind install-time seeding, the reseed endpoint and the
-     * rehydrate-time healer. Throws when objectql/metadata are unavailable;
-     * per-row write failures are counted into `errors`, not thrown.
+     * shared engine behind install-time seeding, the reseed endpoint, the
+     * rehydrate-time healer and this file's per-org replayer. Throws when
+     * objectql/metadata are unavailable, or when the seed locale cannot be
+     * read; per-row write failures are counted into `errors`, not thrown.
+     *
+     * [#30281] `localeFrom` names who the load is for, and the runtime's
+     * `resolveSeedLocaleForLoad` turns it into the `Seed.locale` filter: the
+     * organization's Localization setting, then `userId`'s language, then
+     * `app`'s declared `i18n.defaultLocale` (`app` is the package body; ruling
+     * A, maintainer, 2026-11-05: the install paths
+     * pick datasets by locale). Nothing answers ⇒ no locale, and every dataset
+     * loads as before. A dataset without `locale` loads whatever it answers.
      */
     private runInlineSeed = async (
         ctx: PluginContext,
         datasets: any[],
         organizationId?: string,
+        localeFrom: { userId?: string; app?: unknown } = {},
     ): Promise<{ inserted: number; updated: number; skipped: number; errors: number; errorList: any[]; droppedRefs: number; errorSample?: string }> => {
         const ql: any = ctx.getService('objectql');
         let metadata: any;
         try { metadata = ctx.getService('metadata'); } catch { /* none */ }
         if (!ql || !metadata) throw new Error('objectql-or-metadata-missing');
 
-        const [{ SeedLoaderService }, { SeedLoaderRequestSchema }] = await Promise.all([
+        const [{ SeedLoaderService, appDefaultSeedLocale, describeSeedLocale, resolveSeedLocaleForLoad }, { SeedLoaderRequestSchema }] = await Promise.all([
             import('@objectstack/runtime'),
             import('@objectstack/spec/data'),
         ]);
+        const seedLocale = await resolveSeedLocaleForLoad(ctx, {
+            seeds: datasets,
+            organizationId,
+            userId: localeFrom.userId,
+            appDefaultLocale: appDefaultSeedLocale(localeFrom.app),
+        });
+        ctx.logger?.info?.(`[MarketplaceInstallLocal] seed locale${organizationId ? ` for org ${organizationId}` : ''}: ${describeSeedLocale(seedLocale)}`);
         const seedLoader = new (SeedLoaderService as any)(ql, metadata, ctx.logger);
         const request = (SeedLoaderRequestSchema as any).parse({
             // ADR-0036 / seed rename: the field is `seeds` (was `datasets`).
@@ -5054,6 +5084,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // `mode: 'upsert'` (the spec default, ruling 6631016988).
                 multiPass: true,
                 ...(organizationId ? { organizationId } : {}),
+                // Spread, never `locale: undefined`: absence is what the
+                // loader's unresolved-scope warning is keyed on.
+                ...(seedLocale ? { locale: seedLocale.locale } : {}),
             },
         });
         const result = await seedLoader.load(request);
