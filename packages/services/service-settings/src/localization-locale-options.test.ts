@@ -160,9 +160,31 @@ describe('localization.locale serves the deployment\'s locale list', () => {
     booted.i18n.locales = ['en', 'zh-Hans'];
     expect((await save(booted.http, { locale: 'zh-CN' })).status).toBe(200);
     expect((await save(booted.http, { locale: 'en-US' })).status).toBe(200);
-    // A code the platform locale table does not alias is accepted only as spelled.
+  });
+
+  // #30456: Setup accepts by the matcher the IdP locale claim resolves by
+  // (`resolveOfferedLocale`), so a language one door takes the other takes too.
+  it('accepts a region or base of an offered language, and another case, as the IdP claim does (#30456)', async () => {
     booted.i18n.locales = ['en', 'fr'];
-    expect((await save(booted.http, { locale: 'fr-FR' })).status).toBe(400);
+    expect((await save(booted.http, { locale: 'fr-FR' })).status).toBe(200);
+    // Served under the stored spelling, in the offered code's place, so it shows chosen.
+    expect(servedLocaleOptions((await getPage(booted.http)).body).map((o) => o.value)).toEqual(['en', 'fr-FR']);
+
+    booted.i18n.locales = ['en', 'fr-FR'];
+    expect((await save(booted.http, { locale: 'fr' })).status).toBe(200);
+
+    booted.i18n.locales = ['en', 'zh-CN'];
+    expect((await save(booted.http, { locale: 'zh-cn' })).status).toBe(200);
+    expect(servedLocaleOptions((await getPage(booted.http)).body).map((o) => o.value)).toEqual(['en', 'zh-cn']);
+
+    // Both Chinese scripts offered: each spelling lands on its own script.
+    booted.i18n.locales = ['en', 'zh-Hans', 'zh-Hant'];
+    expect((await save(booted.http, { locale: 'zh-TW' })).status).toBe(200);
+    expect(servedLocaleOptions((await getPage(booted.http)).body).map((o) => o.value)).toEqual(['en', 'zh-Hans', 'zh-TW']);
+
+    // A language not offered in any spelling is still refused.
+    booted.i18n.locales = ['en', 'fr'];
+    expect((await save(booted.http, { locale: 'de-DE' })).status).toBe(400);
   });
 
   it('keeps a stored value the deployment no longer offers readable, and serves it named as such', async () => {
@@ -280,5 +302,110 @@ describe('localeSelfName: a locale named in its own language, else its code', ()
       // keep the code
     }
     expect(localeSelfName('vi-VN')).toBe(expected);
+  });
+});
+
+/**
+ * #30456: the locale list fills during the boot (the app's authored
+ * translations arrive at `kernel:ready`), and `localization.locale` has
+ * `kernel:ready` readers (auth's mail/SMS default language). An
+ * `OS_LOCALIZATION_LOCALE` naming a language the list gains later in that
+ * same step must not be reported IGNORED and dropped: its verdict is held
+ * until `kernel:bootstrapped`.
+ */
+describe('an OS_LOCALIZATION_LOCALE override read while the boot is still filling the locale list (#30456)', () => {
+  /** An i18n stand-in that gains `atReady` in its own `kernel:ready` step, as authored translations arrive. */
+  class GrowingI18nPlugin extends LocaleListI18nPlugin {
+    override name = 'test.growing-i18n';
+    atReady: string[] = [];
+    async start(ctx: PluginContext): Promise<void> {
+      ctx.hook('kernel:ready', async () => {
+        this.locales = [...this.locales, ...this.atReady];
+      });
+    }
+  }
+
+  /** A `kernel:ready` reader of `localization.locale` that re-reads on a change, as auth's is. */
+  class LocaleReaderPlugin implements Plugin {
+    name = 'test.locale-reader';
+    version = '0.0.0';
+    reads: Array<{ value: unknown; source: string }> = [];
+    async init(): Promise<void> {}
+    async start(ctx: PluginContext): Promise<void> {
+      ctx.hook('kernel:ready', async () => {
+        const settings = ctx.getService<SettingsService>('settings');
+        const read = async () => {
+          const resolved = await settings.get('localization', 'locale', {});
+          this.reads.push({ value: resolved.value, source: resolved.source });
+        };
+        await read();
+        settings.subscribe('localization', () => {
+          void read();
+        });
+      });
+    }
+  }
+
+  async function bootFilling(envValue: string, atReady: string[]) {
+    const i18n = new GrowingI18nPlugin();
+    i18n.locales = ['en'];
+    i18n.atReady = atReady;
+    const reader = new LocaleReaderPlugin();
+    const kernel = new LiteKernel({ logger: { level: 'error' } as never });
+    const error = vi.spyOn((kernel as unknown as { logger: { error: (...a: unknown[]) => void } }).logger, 'error');
+    // The reader's `kernel:ready` step runs before the list grows.
+    kernel.use(reader);
+    kernel.use(i18n);
+    kernel.use(new SettingsServicePlugin({ registerRoutes: false, env: { OS_LOCALIZATION_LOCALE: envValue } }));
+    await kernel.bootstrap();
+    const reports = () =>
+      error.mock.calls.map((args) => String(args[0])).filter((m) => m.includes('OS_LOCALIZATION_LOCALE'));
+    return { kernel, service: kernel.getService<SettingsService>('settings'), reader, reports };
+  }
+
+  it('holds a language the list gains during kernel:ready in force, and never reports it', async () => {
+    const booted = await bootFilling('vi-VN', ['vi-VN']);
+    try {
+      // The reader asked before `vi-VN` was in the list, and got the override.
+      expect(booted.reader.reads[0]).toEqual({ value: 'vi-VN', source: 'env' });
+      expect(booted.reader.reads.every((r) => r.value === 'vi-VN')).toBe(true);
+      const resolved = await booted.service.get('localization', 'locale');
+      expect(resolved).toMatchObject({ value: 'vi-VN', source: 'env' });
+      expect(booted.reports()).toEqual([]);
+    } finally {
+      await booted.kernel.shutdown();
+    }
+  });
+
+  it('reports a language the boot never offers once the list is whole, and tells the readers to read again', async () => {
+    const booted = await bootFilling('xx-XX', ['vi-VN']);
+    try {
+      // Held while the list was filling ...
+      expect(booted.reader.reads[0]).toEqual({ value: 'xx-XX', source: 'env' });
+      // ... then judged at `kernel:bootstrapped`: reported once, and the reader re-read.
+      await vi.waitFor(() => expect(booted.reader.reads.length).toBeGreaterThan(1));
+      expect(booted.reader.reads.at(-1)).toEqual({ value: 'en-US', source: 'default' });
+      expect(booted.reports()).toHaveLength(1);
+      expect(booted.reports()[0]).toContain('IGNORED');
+      expect((await booted.service.get('localization', 'locale')).source).toBe('default');
+      expect(booted.reports()).toHaveLength(1);
+    } finally {
+      await booted.kernel.shutdown();
+    }
+  });
+
+  it('judges at once on a service no boot holds', async () => {
+    const error = vi.fn();
+    const svc = new SettingsService({
+      env: { OS_LOCALIZATION_LOCALE: 'xx-XX' },
+      logger: { warn: vi.fn(), error } as never,
+    });
+    svc.registerOptionSource('localization', 'locale', localizationLocaleOptionSource(() => ({ getLocales: () => ['en'] })));
+    svc.registerManifest(localizationSettingsManifest);
+    expect((await svc.get('localization', 'locale')).source).toBe('default');
+    expect(error).toHaveBeenCalledTimes(1);
+    // Sealing a service that never held anything is a no-op.
+    svc.sealOptionSources();
+    expect(error).toHaveBeenCalledTimes(1);
   });
 });
