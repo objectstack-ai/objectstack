@@ -676,6 +676,15 @@ describe('a start input declared a record id is loaded from the declared object 
             }
         },
     };
+    /**
+     * The code a value that is not an id is refused with, per door. The trigger
+     * routes and the endpoint hand every param to the start check, which answers
+     * `VALIDATION_FAILED`. The action doors type each declared param first
+     * (ADR-0104 D2), so a `text` param holding an object, a list or a boolean
+     * is refused there, `400 VALIDATION_ERROR` naming the same param, before
+     * the start check is reached: one more gate in front, never a gap.
+     */
+    const NOT_AN_ID_CODE = (door: string): string => (door.includes('action') ? 'VALIDATION_ERROR' : 'VALIDATION_FAILED');
     /** Every `crm_contract` row the start loaded. */
     const contractReads = (ql: any) => ql.find.mock.calls.filter((c: any[]) => c[0] === CONTRACT).map((c: any[]) => c[1]?.where?.id);
 
@@ -728,12 +737,12 @@ describe('a start input declared a record id is loaded from the declared object 
                 ['an object', { id: BOTH }],
                 ['a list', [BOTH]],
                 ['a boolean', true],
-            ])('a declared input given %s: 400 VALIDATION_FAILED naming the input, nothing loaded from the declared object, no run', async (_label, value) => {
+            ])('a declared input given %s: 400 naming the input, nothing loaded from the declared object, no run', async (_label, value) => {
                 const got = await start(DECLARED, value);
 
                 expect(got.status).toBe(400);
-                expect(got.error.code).toBe('VALIDATION_FAILED');
-                expect(String(got.error.message)).toContain('`contractId`');
+                expect(got.error.code).toBe(NOT_AN_ID_CODE(door));
+                expect(String(got.error.message)).toContain('contractId');
                 expect(contractReads(got.ql)).toHaveLength(0);
                 expect(got.automation.execute).not.toHaveBeenCalled();
             });
