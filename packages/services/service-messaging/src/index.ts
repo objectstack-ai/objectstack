@@ -104,6 +104,7 @@ export {
     DEFAULT_LOCALE,
 } from './template-renderer.js';
 export type {
+    BuiltinNotificationTemplate,
     NotificationTemplateRow,
     RenderedNotification,
     RenderInput,

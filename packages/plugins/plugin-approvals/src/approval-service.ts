@@ -129,6 +129,7 @@ import { PendingApproverReadGrantSource, type PendingApproverReadGrants } from '
 // The ADR-0043 pages — the ONE copy of their text, rendered by the plugin's
 // self-hosted mount and by `handleActionPage` alike.
 import { renderConfirmPage, renderResultPage } from './action-link-pages.js';
+import { APPROVAL_EMAIL_CHANNELS, EMAILED_APPROVAL_TOPICS } from './approval-email-templates.js';
 import {
   approvalNotificationText,
   subjectParams,
@@ -416,7 +417,30 @@ export interface ApprovalMessagingSurface {
      * fallback beside it.
      */
     keyedText?: ApprovalKeyedText;
+    /**
+     * [#30509] The channels to fan out to (`EmitInput.channels` of the
+     * messaging service). Absent, messaging delivers to the in-app inbox only.
+     */
+    channels?: string[];
   }): Promise<unknown>;
+  /**
+   * [#30509] Declare code-level notification templates
+   * (`MessagingService.registerBuiltinTemplates`): rendered beneath an
+   * organization's own `sys_notification_template` row, never stored.
+   * Optional — a messaging service without it renders the e-mail from the
+   * notification's title and body alone.
+   */
+  registerBuiltinTemplates?(templates: readonly ApprovalBuiltinTemplate[]): void;
+}
+
+/** [#30509] One code-declared notification template, as the messaging service takes it. */
+export interface ApprovalBuiltinTemplate {
+  readonly topic: string;
+  readonly channel: string;
+  readonly locale: string;
+  readonly subject?: string;
+  readonly body?: string;
+  readonly format?: 'markdown' | 'html' | 'text' | 'mjml';
 }
 
 /**
@@ -446,6 +470,16 @@ type ApprovalNotificationPayload = {
   readonly body: string;
   /** Where opening it lands; `notify()` narrows the approvals inbox to the request. */
   readonly actionUrl: string;
+  /**
+   * [#30509] The same request page as `actionUrl`, prefixed with the
+   * deployment's public origin when one resolves (`publicBaseUrl`), for a
+   * channel read outside the Console: the approval e-mail's link
+   * (`approval-email-templates.ts`). Set by `notify()` beside the
+   * deep-linked `actionUrl`, which stays relative because the Console routes
+   * on it. It opens the request page for a signed-in reader and decides
+   * nothing: not an ADR-0043 action link.
+   */
+  readonly approvalUrl?: string;
 };
 
 /**
@@ -2127,7 +2161,8 @@ export class ApprovalService implements IApprovalService {
         && event.source?.object === 'sys_approval_request'
         && event.source.id
       ) {
-        payload = { ...payload, actionUrl: `/system/approvals?request=${encodeURIComponent(event.source.id)}` };
+        const actionUrl = `/system/approvals?request=${encodeURIComponent(event.source.id)}`;
+        payload = { ...payload, actionUrl, approvalUrl: `${this.publicBaseUrl}${actionUrl}` };
       }
       // A dedup key names ONE event: a notice split per name keys each part by
       // its first recipient, so messaging never folds one part into another.
@@ -2135,6 +2170,10 @@ export class ApprovalService implements IApprovalService {
       try {
         await this.messaging.emit({
           severity: 'info', ...event, payload, keyedText: part.keyedText, audience: part.audience,
+          // [#30509] The approval lifecycle's own notices also go by e-mail;
+          // every other approval topic stays inbox-only. Preferences filter as
+          // for any channel.
+          ...(EMAILED_APPROVAL_TOPICS.has(event.topic) ? { channels: [...APPROVAL_EMAIL_CHANNELS] } : {}),
           ...(dedupKey ? { dedupKey } : {}),
           ...(person ? { actorId: person } : {}),
           ...(organization ? { organizationId: organization } : {}),

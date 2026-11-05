@@ -27,6 +27,7 @@ import { INBOX_SYSTEM_CONTEXT } from './inbox-system-context.js';
 import { assertActorReferenceResolves } from './actor-reference.js';
 import { USER_OBJECT } from './recipient-locale.js';
 import { DeviceRegistry } from './device-registry.js';
+import { BuiltinNotificationTemplates, type BuiltinNotificationTemplate } from './template-renderer.js';
 import type {
     RegisterDeviceRequest,
     RegisterDeviceResponse,
@@ -273,6 +274,13 @@ export class MessagingService {
     private keyedTextWithoutRendererAnnounced = false;
     /** The push device registry behind the four device members. */
     private readonly devices: DeviceRegistry;
+    /**
+     * [#30509] The code-declared template tier — see
+     * {@link MessagingService.registerBuiltinTemplates}. The composition hands
+     * it to the channels' template store, which reads it beneath the
+     * organization's own `sys_notification_template` rows.
+     */
+    readonly builtinTemplates = new BuiltinNotificationTemplates();
 
     constructor(private readonly ctx: MessagingServiceContext) {
         this.now = ctx.now ?? (() => new Date().toISOString());
@@ -288,6 +296,27 @@ export class MessagingService {
             });
         this.outbox = ctx.outbox;
         this.devices = new DeviceRegistry({ getData: () => ctx.getData?.(), now: this.now });
+    }
+
+    /**
+     * [#30509] Declare notification templates in code: `(topic, channel,
+     * locale)` templates the channels render beneath the recipient
+     * organization's own `sys_notification_template` row at each locale rung,
+     * and above the generic title/body fallback. Nothing is written to the
+     * database (ADR-0131 §1.4: a row exists only when an organization authored
+     * it), so an organization that authors a row overrides the declaration
+     * without anything to migrate.
+     *
+     * A malformed template, or a `(topic, channel, locale)` already declared,
+     * is refused with a `TypeError` and nothing from the call is kept.
+     *
+     * Holes are the renderer's (`renderNotification`): `{{ title }}` and
+     * `{{ body }}` are the notification's text as the recipient reads it
+     * (keyed text rendered in their language, #24978), and a payload member is
+     * `{{ name }}` or `{{ payload.name }}`.
+     */
+    registerBuiltinTemplates(templates: readonly BuiltinNotificationTemplate[]): void {
+        this.builtinTemplates.register(templates);
     }
 
     /* ------------------------------------------------------------------ */
