@@ -844,17 +844,21 @@ export const PageComponentSchema = lazySchema(() => strictObject({
  *
  * Semantics are the one-record binding the record blocks take from an element
  * `dataSource`: read the bound set under the caller's identity, take its FIRST
- * row by `sort`, re-read when the bound object is written. Zero rows, or a row
- * the caller may not read, leaves `record` unbound: a predicate reading it
- * faults, and a faulting `visibleWhen` renders the component. There is no
+ * row by `sort`, re-read when the bound object is written. There is no
  * `limit` — the page binds one row by definition.
  *
  * What a predicate wants from the row is a FIELD on it: a count is a
  * `summary` (roll-up) field, a plan or tier is the field the object carries —
  * `record.environment_count > 1`, `record.plan != 'free'`.
  *
- * Planned in the renderer: until the console mounts this binding, `record`
- * stays unbound on an app page, as it was before the key existed.
+ * The console reads the binding once per page open: the first row under
+ * `sort`, under the caller's identity. Every component's `visibleWhen` on the
+ * page sees that row as `record`, and a record block that binds its own row
+ * still provides that row to its own subtree. A predicate sees three states:
+ * pending, where the page body is not drawn until the read settles; no row or
+ * a refused read, where `record` is null, so absent and not-yours read the
+ * same; and any other failure, where the page body is not drawn and the
+ * failed-read state stands in its place.
  */
 export const PageRecordBindingSchema = lazySchema(() => strictObject({
   surface: 'this page record binding',
@@ -2000,7 +2004,7 @@ export const PageSchema = lazySchema(() => strictObject({
    * every other page type ({@link checkPageRecordBindingPlacement}).
    */
   record: PageRecordBindingSchema.optional()
-    .describe("The row an app page is about — a one-row query `{ object, view?, filter?, sort? }` whose FIRST row (by `sort`, read under the caller's identity) the page's components read as `record` in `visibleWhen`. A count or a plan is a field on that row: a `summary` roll-up (`record.environment_count > 1`) or the object's own field (`record.plan != 'free'`). No row, no `record`: the predicate faults and the component renders. Only on `type: 'app'` — refused on every other page type (a record page's row is the record it opens). Planned in the renderer: until the console mounts it, `record` stays unbound on an app page."),
+    .describe("The row an app page is about — a one-row query `{ object, view?, filter?, sort? }`. The console reads it once per page open: the FIRST row under `sort`, under the caller's identity. Every component's `visibleWhen` sees that row as `record`; a record block that binds its own row still provides that row to its own subtree. A count or a plan is a field on that row: a `summary` roll-up (`record.environment_count > 1`) or the object's own field (`record.plan != 'free'`). Three states: while the read is pending, the page body is not drawn; no row or a refused read binds `record` as null; any other failure draws no page body. Only on `type: 'app'` — refused on every other page type (a record page's row is the record it opens)."),
 
   // recordReview / blankLayout fields removed — the record_review/blank page
   // types have no renderer and were dropped from PageTypeSchema (framework#2265);
