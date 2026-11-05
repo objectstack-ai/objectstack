@@ -71,7 +71,9 @@ import { readFields, writeFields, type FieldEntry } from '../metadata-admin/prev
  * app is copied into the pair on the first saved navigation edit). Each is an
  * `overridable` type of the spec's classification. Translations and email
  * templates are too: no pillar designs them, and the All metadata area's form
- * editor customizes them (`StudioBundleItemEditor`, objectstack#28569).
+ * editor customizes them (`StudioBundleItemEditor`, objectstack#28569). So is
+ * a read-only package's dataset, in that editor with its own designer
+ * (objectstack#30064, `metadataArea.ts#AREA_CUSTOMIZE_EDITOR_TYPES`).
  */
 export const STUDIO_CUSTOMIZE_TYPES: readonly string[] = ['view', 'dashboard', 'report', 'app'];
 
