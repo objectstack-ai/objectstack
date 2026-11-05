@@ -108,8 +108,7 @@ import {
   extractHookBodyWriteSet,
   type BodyWritePatternExclusion,
 } from './validate-hook-body-writes.js';
-import { buildReadonlyIndex, READONLY_WHEN_STRIP_SCOPE } from './validate-readonly-flow-writes.js';
-import { objectsAsServed, objectsWithoutTiedFields } from './object-graph.js';
+import { buildReadonlyIndex, buildServedReadonlyIndex, READONLY_WHEN_STRIP_SCOPE } from './validate-readonly-flow-writes.js';
 
 export type ReadonlyActionWriteSeverity = 'warning';
 
@@ -264,12 +263,9 @@ export function validateReadonlyActionWrites(stack: AnyRec): ReadonlyActionWrite
     );
     if (writes.length === 0) continue;
 
-    // [#30471] The readonly index reads the objects as SERVED (`objectsAsServed`,
-    // the package's one fold): a write to a field a sibling package adds
-    // through `objectExtensions` and declares `readonly` is judged as a declared
-    // one is. Readonly is a question about the field's definition, so a field two
-    // packages tie on is left out (`objectsWithoutTiedFields`) and goes unjudged.
-    roIndex ??= buildReadonlyIndex(objectsWithoutTiedFields(objectsAsServed(stack)));
+    // [#30471] The readonly index reads the objects as served
+    // (`buildServedReadonlyIndex`).
+    roIndex ??= buildServedReadonlyIndex(stack);
 
     const where = `action "${site.name}" > body`;
     const reported = new Set<string>();

@@ -40,8 +40,9 @@ import { ACTION_BODY_WRITE_UNKNOWN_FIELD, validateActionBodyWrites } from './val
 import { HOOK_BODY_WRITE_UNKNOWN_FIELD, validateHookBodyWrites } from './validate-hook-body-writes.js';
 import { validateReactPageProps } from './validate-react-page-props.js';
 import { TRANSLATION_TARGET_UNKNOWN, validateTranslationReferences } from './validate-translation-references.js';
-import { FLOW_UPDATE_READONLY_FIELD, validateReadonlyFlowWrites } from './validate-readonly-flow-writes.js';
-import { HOOK_API_UPDATE_READONLY_FIELD, validateReadonlyHookWrites } from './validate-readonly-hook-writes.js';
+import { FLOW_UPDATE_READONLY_FIELD, FLOW_UPDATE_READONLY_WHEN_FIELD, validateReadonlyFlowWrites } from './validate-readonly-flow-writes.js';
+import { HOOK_API_UPDATE_READONLY_FIELD, HOOK_API_UPDATE_READONLY_WHEN_FIELD, validateReadonlyHookWrites } from './validate-readonly-hook-writes.js';
+import { SORT_FIELD_UNKNOWN, SORT_FIELD_UNSORTABLE, validateSortableFields } from './validate-sortable-fields.js';
 import { ACTION_API_UPDATE_READONLY_WHEN_FIELD, validateReadonlyActionWrites } from './validate-readonly-action-writes.js';
 import { SEARCHABLE_FIELD_UNKNOWN } from './validate-searchable-fields.js';
 // [#16340] Read back the registry's OWN definition table to assert the graph
@@ -853,6 +854,12 @@ describe('[#30471] the field-name indexes read the objects as served', () => {
   const validationOn = (condition: string): Rec => ({
     objects: [{ ...deal, validations: [{ name: 'v', type: 'script', condition, message: 'M' }] }, account],
   });
+  const pageSort = (field: string): Rec => ({
+    pages: [{ name: 'p', type: 'list', object: 'xs_deal', interfaceConfig: { source: 'xs_deal', sort: [{ field, order: 'asc' }] } }],
+  });
+  const viewSort = (field: string): Rec => ({
+    views: [{ name: 'v', objectName: 'xs_deal', list: { type: 'grid', columns: ['name'], sort: [{ field, order: 'asc' }] } }],
+  });
 
   // rule · its unknown-field id · the stack naming FIELD
   const existence: Array<[string, string, Run, (field: string) => Rec]> = [
@@ -878,6 +885,8 @@ describe('[#30471] the field-name indexes read the objects as served', () => {
     ['validate-translation-references', TRANSLATION_TARGET_UNKNOWN, validateTranslationReferences, (f) => ({
       translations: [{ 'zh-CN': { objects: { xs_deal: { fields: { [f]: { label: 'L' } } } } } }],
     })],
+    ['validate-sortable-fields (a page sort)', PAGE_FIELD_UNKNOWN, validateSortableFields, (f) => pageSort(f)],
+    ['validate-sortable-fields (a list-view sort)', SORT_FIELD_UNKNOWN, validateSortableFields, (f) => viewSort(f)],
   ];
 
   it.each(existence)('%s: an extension-added field passes; a field nothing adds is still refused', (_rule, id, run, naming) => {
@@ -1030,5 +1039,90 @@ describe('[#30471] the field-name indexes read the objects as served', () => {
     });
     expect(ids(validateReactPageProps, artifact(search('region')))).toEqual([SEARCHABLE_FIELD_UNKNOWN]);
     expect(ids(validateReactPageProps, artifact(search('name')))).toEqual([]);
+  });
+
+  // Every refusal this change adds, one row each: a write or a sort naming an
+  // extension field whose served definition the runtime refuses or drops. On
+  // the declared objects alone (what `main` read) the same stack was the
+  // existence rule's unknown name; now the existence rule passes it and the
+  // definition rule owns it, at that rule's own severity. The hook rows are
+  // the one severity move: `hook-body-write-unknown-field` was a warning.
+  describe('each refusal this change adds is the definition rule\'s, at its own severity', () => {
+    const lock = { locked: { type: 'text', readonly: true } };
+    const gate = { gated: { type: 'number', readonlyWhen: "record.name == 'x'" } };
+    const calc = { calc: { type: 'formula', expression: 'record.amount * 2' } };
+    const flowNode = (type: string, field: string): Rec => ({
+      flows: [{ name: 'fl', nodes: [{ id: 'n', type, config: { objectName: 'xs_deal', fields: { [field]: 'x' } } }] }],
+    });
+    const hookApi = (call: string): Rec => ({
+      hooks: [{ name: 'h', object: 'xs_account', events: ['afterInsert'], body: { language: 'js', source: `await ctx.api.object('xs_deal').${call};` } }],
+    });
+    const actionApi = (field: string): Rec => ({
+      actions: [{ name: 'act', label: 'Act', objectName: 'xs_deal', body: { language: 'js', source: `await ctx.api.object('xs_deal').update({ id: ctx.recordId, ${field}: 1 });` } }],
+    });
+    const hooks: Run = (stack) => validateReadonlyHookWrites(stack);
+    const hookExistence: Run = (stack) => validateHookBodyWrites(stack);
+    // the write · the rule judging it now · the extension fields · the stack ·
+    // its id and severity now · the existence rule and the id it raised before
+    const refusals: Array<[string, Run, Rec, Rec, string, string, Run, string]> = [
+      ['a flow update_record of a readonly field', validateReadonlyFlowWrites, lock, flowNode('update_record', 'locked'),
+        FLOW_UPDATE_READONLY_FIELD, 'error', validateFlowNodeWrites, FLOW_NODE_WRITE_UNKNOWN_FIELD],
+      ['a flow create_record of a readonly field', validateReadonlyFlowWrites, lock, flowNode('create_record', 'locked'),
+        FLOW_UPDATE_READONLY_FIELD, 'error', validateFlowNodeWrites, FLOW_NODE_WRITE_UNKNOWN_FIELD],
+      ['a flow update_record of a readonlyWhen field', validateReadonlyFlowWrites, gate, flowNode('update_record', 'gated'),
+        FLOW_UPDATE_READONLY_WHEN_FIELD, 'warning', validateFlowNodeWrites, FLOW_NODE_WRITE_UNKNOWN_FIELD],
+      ['a hook ctx.api update of a readonly field', hooks, lock, hookApi("update({ id: dealId, locked: 'x' })"),
+        HOOK_API_UPDATE_READONLY_FIELD, 'error', hookExistence, HOOK_BODY_WRITE_UNKNOWN_FIELD],
+      ['a hook ctx.api insert of a readonly field', hooks, lock, hookApi("insert({ locked: 'x' })"),
+        HOOK_API_UPDATE_READONLY_FIELD, 'error', hookExistence, HOOK_BODY_WRITE_UNKNOWN_FIELD],
+      ['a hook ctx.api update of a readonlyWhen field', hooks, gate, hookApi('update({ id: dealId, gated: 1 })'),
+        HOOK_API_UPDATE_READONLY_WHEN_FIELD, 'warning', hookExistence, HOOK_BODY_WRITE_UNKNOWN_FIELD],
+      ['an action ctx.api update of a readonlyWhen field', validateReadonlyActionWrites, gate, actionApi('gated'),
+        ACTION_API_UPDATE_READONLY_WHEN_FIELD, 'warning', validateActionBodyWrites, ACTION_BODY_WRITE_UNKNOWN_FIELD],
+      ['a page sort by a formula field', validateSortableFields, calc, pageSort('calc'),
+        SORT_FIELD_UNSORTABLE, 'error', validateSortableFields, PAGE_FIELD_UNKNOWN],
+      ['a list-view sort by a formula field', validateSortableFields, calc, viewSort('calc'),
+        SORT_FIELD_UNSORTABLE, 'error', validateSortableFields, SORT_FIELD_UNKNOWN],
+    ];
+    // The stack on both CLI legs (the union artifact, then the per-package
+    // body), each extension list its own package.
+    const onLegs = (extra: Rec, packages: unknown[][], objects: unknown[] = [deal, account]): Rec[] => {
+      const mods = packages.map((objectExtensions, i) => ({ manifest: { id: `mod${i}`, objectExtensions } }));
+      const body = { id: 'app', objects, ...extra };
+      return [
+        { objects, packages: [{ manifest: { id: 'app', objects } }, ...mods], ...extra },
+        { ...body, manifest: body, packages: [{ manifest: body }, ...mods] },
+      ];
+    };
+    const ext = (fields: Rec) => [{ extend: 'xs_deal', fields }];
+
+    it.each(refusals)('%s', (_write, run, fields, stack, id, severity, existence, unknownId) => {
+      for (const served of onLegs(stack, [ext(fields)])) {
+        expect(run(served).map((f) => [f.rule, f.severity])).toEqual([[id, severity]]);
+        expect(ids(existence, served)).not.toContain(unknownId);
+      }
+      for (const declared of onLegs(stack, [[]])) {
+        expect(ids(existence, declared)).toContain(unknownId);
+        expect(ids(run, declared)).not.toContain(id);
+      }
+    });
+
+    it.each(refusals)('%s, on a field two packages tie on: unjudged', (_write, run, fields, stack, id) => {
+      const plain = Object.fromEntries(Object.keys(fields).map((name) => [name, { type: 'text' }]));
+      for (const [a, b] of [[plain, fields], [fields, plain]]) {
+        for (const tied of onLegs(stack, [ext(a), ext(b)])) expect(ids(run, tied)).not.toContain(id);
+      }
+      for (const single of onLegs(stack, [ext(fields), ext({})])) expect(ids(run, single)).toContain(id);
+    });
+
+    // An object that declares no field (an introspected schema) is left
+    // unjudged by the write rules and skip 2 of the sort rule; an extension
+    // adding to it does not make it judgeable by the definition rules either.
+    it.each(refusals)('%s, on an object that declares no field: unjudged, extended or not', (_write, run, fields, stack) => {
+      const bare = { name: 'xs_deal', label: 'Deal', fields: {} };
+      for (const packages of [[ext(fields)], [[]]]) {
+        for (const s of onLegs(stack, packages, [bare, account])) expect(ids(run, s)).toEqual([]);
+      }
+    });
   });
 });
