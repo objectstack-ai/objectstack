@@ -228,13 +228,11 @@ import { findMisplacedReadableIds, refuseReadableIdsOnce } from '@objectstack/co
 import { isComposedReadableIds, type ComposedReadableIds } from '@objectstack/spec/data';
 // [#29520 codemod] The top-level declarations that moved whole to `sql-driver-top-level.ts`, as this file still reads them.
 import {
-  AUDIT_TIMESTAMP_COLUMNS, AUTONUMBER_COLLISION_RETRIES, CROSS_FIELD_COMPARISON_OPERATORS, MYSQL_DATETIME_PRECISION,
-  SEQUENCES_TABLE, TEXT_OPERATORS, WITHHELD_FILTER_AUTHOR_TEXT, WITHHELD_FILTER_SUBTREE, assertCompilableComparand,
-  bareFieldReferenceError, betweenArityError, declaresColumnNotNull, fieldReferenceOf, isDeclaredFieldType,
-  isDeferredDdlLockWaitRefusal, isFilterNode, isMultiValuedColumn, isNowDefaultValue, nowAnchorOf,
-  nowAnchorPositionError, reduceFilterKey, reduceFilterNode, refusalSubtree, refuseRejectedReferenceAlias,
-  refuseUndeclaredFieldType, retiredFilterOperatorError, unsupportedFilterError, unsupportedFilterOperatorError,
-  withheldFilterDiagnosticOf,
+  AUTONUMBER_COLLISION_RETRIES, CROSS_FIELD_COMPARISON_OPERATORS, MYSQL_DATETIME_PRECISION, SEQUENCES_TABLE,
+  TEXT_OPERATORS, assertCompilableComparand, bareFieldReferenceError, betweenArityError, declaresColumnNotNull,
+  fieldReferenceOf, isDeclaredFieldType, isFilterNode, isMultiValuedColumn, nowAnchorOf, nowAnchorPositionError,
+  reduceFilterKey, reduceFilterNode, refusalSubtree, refuseRejectedReferenceAlias, refuseUndeclaredFieldType,
+  retiredFilterOperatorError, unsupportedFilterOperatorError,
 } from './sql-driver-top-level.js';
 import type {
   AutoNumberReservation, ConflictTargetVerdict, IntrospectedColumn, IntrospectedForeignKey, IntrospectedSchema,
@@ -878,8 +876,8 @@ export class SqlDriver implements IDataDriver {
    * Reason ② is why this method exists; it is not what this conversion bought.
    */
   protected logDurabilityFailure(msg: string, meta?: any): void {
-    if (this.logger.error) this.logger.error(msg, meta);
-    else this.logger.warn(msg, meta);
+    // [#29520 codemod] The body moved to `sql-driver-class-head.ts` (see `ClassHeadHost`).
+    return ClassHeadFacet.logDurabilityFailure.call(classHeadHost.of(this), msg, meta);
   }
 
   /**
@@ -5146,61 +5144,12 @@ export class SqlDriver implements IDataDriver {
     return (RotationFacet.withPinnedSession<T>).call(rotationHost.of(this), fn);
   }
 
-  protected async migrateMysqlDatetimeColumns(
+  protected migrateMysqlDatetimeColumns(
     table: string,
     fields: Record<string, any>,
   ): Promise<void> {
-    if (!this.isMysql) return;
-    try {
-      const legacy = await this.legacyMysqlTimestampColumns(table, fields);
-      if (legacy.length === 0) return;
-
-      // #9354: built as a list, then run as one unit, so the whole widening of a
-      // table shares the ONE pinned session the bounded lock wait needs.
-      const statements = legacy.map((col) => {
-        // The default is re-stated because MySQL drops a column's DEFAULT when
-        // MODIFY does not repeat it, and an audit column without
-        // `CURRENT_TIMESTAMP(3)` would start inserting NULL.
-        //
-        // A declared `defaultValue: 'NOW()'` column is the same case (#21241),
-        // and the TIME twin ({@link migrateMysqlTimeColumns}) already restates
-        // it. Measured on MySQL 8.0.46 before this line: a legacy
-        // `timestamp null default current_timestamp` NOW() column came out of
-        // the widening as `datetime(3)` with NO default, and an insert omitting
-        // it answered `null`. Both take the expression a fresh column gets,
-        // from {@link nowColumnDefault}, so the widening cannot spell a third.
-        const isAudit = (AUDIT_TIMESTAMP_COLUMNS as readonly string[]).includes(col.name);
-        const isNowDefault = isNowDefaultValue(fields[col.name]?.defaultValue);
-        const nullClause = col.nullable ? 'null' : 'not null';
-        const defaultClause = isAudit || isNowDefault ? ` default ${this.nowColumnDefault('datetime').toString()}` : '';
-        return {
-          sql: `alter table ?? modify column ?? datetime(${MYSQL_DATETIME_PRECISION}) ${nullClause}${defaultClause}`,
-          bindings: [table, col.name] as unknown[],
-        };
-      });
-      await this.runWideningAlters(table, statements);
-      this.logger.info?.(
-        `[sql-driver] widened MySQL TIMESTAMP → DATETIME(3) on ${table}: TIMESTAMP ends at 2038-01-19, ` +
-          `keeps no milliseconds and converts through the session timezone`,
-        { columns: legacy.map((c) => c.name) },
-      );
-    } catch (err) {
-      // #9354: the ONE failure that must not be swallowed. Everything else on
-      // this path keeps the policy the doc comment above describes; a metadata
-      // lock wait that the flush bounded is the operator's answer to a command
-      // they ran, and dropping it would report success for work not done.
-      if (isDeferredDdlLockWaitRefusal(err)) throw err;
-      this.logDurabilityFailure(
-        `[sql-driver] FAILED to widen MySQL datetime columns on ${table} — the DDL did not run and boot ` +
-        `continued: the columns are still legacy TIMESTAMP, so every write to them keeps truncating ` +
-        `milliseconds and keeps the 2038 ceiling, while reads return exactly what was stored and nothing ` +
-        `else reports the table as un-widened. Fix: identify the metadata-lock holder with ` +
-        '`SHOW PROCESSLIST` or `performance_schema.metadata_locks` (or resolve the error in this ' +
-        'record\'s meta), end it, then re-run `os migrate apply` or restart — the widening is ' +
-        're-detected from `information_schema` and is idempotent, so re-running is safe.',
-        { error: err instanceof Error ? err.message : String(err) },
-      );
-    }
+    // [#29520 codemod] The body moved to `sql-driver-rotation.ts` (see `RotationHost`).
+    return RotationFacet.migrateMysqlDatetimeColumns.call(rotationHost.of(this), table, fields);
   }
 
   /**
@@ -5249,53 +5198,12 @@ export class SqlDriver implements IDataDriver {
    * as un-widened, so the level IS the signal. Same reasoning, same level, on
    * {@link migrateMysqlDatetimeColumns}.
    */
-  protected async migrateMysqlTimeColumns(
+  protected migrateMysqlTimeColumns(
     table: string,
     fields: Record<string, any>,
   ): Promise<void> {
-    if (!this.isMysql) return;
-    try {
-      const legacy = await this.legacyMysqlTimeColumns(table, fields);
-      if (legacy.length === 0) return;
-
-      // #9354: the datetime twin's seam, for the same reason — this ALTER takes
-      // the same exclusive metadata lock and blocks on the same holder.
-      const statements = legacy.map((col) => {
-        // MODIFY drops a default it does not restate. A `defaultValue: 'NOW()'`
-        // column gets the canonical UTC expression default (`nowColumnDefault`);
-        // its legacy `current_timestamp()` default read the SESSION's zone, so
-        // dropping-and-replacing it is a fix, not collateral.
-        const isNowDefault = isNowDefaultValue(fields[col.name]?.defaultValue);
-        const defaultClause = isNowDefault ? ' default (cast(utc_timestamp(3) as time(3)))' : '';
-        return {
-          sql: `alter table ?? modify column ?? time(3) ${col.nullable ? 'null' : 'not null'}${defaultClause}`,
-          bindings: [table, col.name] as unknown[],
-        };
-      });
-      await this.runWideningAlters(table, statements);
-      this.logger.info?.(
-        `[sql-driver] widened MySQL TIME → TIME(3) on ${table}: a zero-precision TIME rounds the ` +
-          `canonical milliseconds to the nearest second, changing the stored wall clock`,
-        { columns: legacy.map((c) => c.name) },
-      );
-    } catch (err) {
-      // #9354: the ONE failure that must not be swallowed. Everything else on
-      // this path keeps the policy the doc comment above describes; a metadata
-      // lock wait that the flush bounded is the operator's answer to a command
-      // they ran, and dropping it would report success for work not done.
-      if (isDeferredDdlLockWaitRefusal(err)) throw err;
-      this.logDurabilityFailure(
-        `[sql-driver] FAILED to widen MySQL time columns on ${table} — the DDL did not run and boot ` +
-        `continued: the columns are still zero-precision TIME, so every fractional-second write to them ` +
-        `keeps being ROUNDED to whole seconds — the stored wall clock is not the one that was asked for — ` +
-        `while reads return exactly what was stored and nothing else reports the table as un-widened. ` +
-        'Fix: identify the metadata-lock holder with `SHOW PROCESSLIST` or ' +
-        '`performance_schema.metadata_locks` (or resolve the error in this record\'s meta), end it, then ' +
-        're-run `os migrate apply` or restart — the widening is re-detected from `information_schema` ' +
-        'and is idempotent, so re-running is safe.',
-        { error: err instanceof Error ? err.message : String(err) },
-      );
-    }
+    // [#29520 codemod] The body moved to `sql-driver-rotation.ts` (see `RotationHost`).
+    return RotationFacet.migrateMysqlTimeColumns.call(rotationHost.of(this), table, fields);
   }
 
   // ── Deferred schema DDL (#3917) ────────────────────────────────────────────
@@ -7285,18 +7193,8 @@ export class SqlDriver implements IDataDriver {
    * shape {@link SqlDriver.withWithheldFilterLog} exists for).
    */
   protected resolveWithheldFilterRefusal(err: unknown, rootFilter: unknown): unknown {
-    const diagnostic = withheldFilterDiagnosticOf(err);
-    if (diagnostic === null) return err;
-    const carrier = err as Record<symbol, unknown>;
-    const subtree = carrier[WITHHELD_FILTER_SUBTREE];
-    const provenance =
-      subtree === undefined ? null : resolveFilterSubtreeProvenance(rootFilter, subtree);
-    if (provenance === 'author') {
-      const authorText = carrier[WITHHELD_FILTER_AUTHOR_TEXT];
-      return unsupportedFilterError(typeof authorText === 'string' ? authorText : diagnostic);
-    }
-    this.logWithheldFilterDiagnostic(err);
-    return err;
+    // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
+    return FilterHelpersFacet.resolveWithheldFilterRefusal.call(filterHelpersHost.of(this), err, rootFilter);
   }
 
   /**
@@ -10307,6 +10205,7 @@ export class SqlDriver implements IDataDriver {
       get isPostgres() { return driver.isPostgres; },
       get isSqlite() { return driver.isSqlite; },
       get knex() { return driver.knex; },
+      get logger() { return driver.logger; },
       get openedEmptyInMemory() { return driver.openedEmptyInMemory; },
       set openedEmptyInMemory(v) { driver.openedEmptyInMemory = v; },
       get schemaMode() { return driver.schemaMode; },
@@ -10435,6 +10334,7 @@ export class SqlDriver implements IDataDriver {
       get isSqlite() { return driver.isSqlite; },
       jsonColumnFieldClass: (...a) => driver.jsonColumnFieldClass(...a),
       get jsonFields() { return driver.jsonFields; },
+      logWithheldFilterDiagnostic: (...a) => driver.logWithheldFilterDiagnostic(...a),
       get logger() { return driver.logger; },
       get managedObjectFields() { return driver.managedObjectFields; },
       get mediaFields() { return driver.mediaFields; },
@@ -10519,11 +10419,17 @@ export class SqlDriver implements IDataDriver {
       ensureRotation: (...a) => driver.ensureRotation(...a),
       get fractionalNumericFields() { return driver.fractionalNumericFields; },
       isJsonField: (...a) => driver.isJsonField(...a),
+      get isMysql() { return driver.isMysql; },
       get jsonFields() { return driver.jsonFields; },
       get knex() { return driver.knex; },
+      legacyMysqlTimeColumns: (...a) => driver.legacyMysqlTimeColumns(...a),
+      legacyMysqlTimestampColumns: (...a) => driver.legacyMysqlTimestampColumns(...a),
+      logDurabilityFailure: (...a) => driver.logDurabilityFailure(...a),
+      get logger() { return driver.logger; },
       get managedObjectFields() { return driver.managedObjectFields; },
       get managedObjectIndexes() { return driver.managedObjectIndexes; },
       get mediaFields() { return driver.mediaFields; },
+      nowColumnDefault: (...a) => driver.nowColumnDefault(...a),
       get numericFields() { return driver.numericFields; },
       get numericValueFields() { return driver.numericValueFields; },
       get organizationObjectRegistered() { return driver.organizationObjectRegistered; },
@@ -10531,6 +10437,7 @@ export class SqlDriver implements IDataDriver {
       get physicalKeyIndexes() { return driver.physicalKeyIndexes; },
       registerManagedObjectMetadata: (...a) => driver.registerManagedObjectMetadata(...a),
       get rotationStateByTable() { return driver.rotationStateByTable; },
+      runWideningAlters: (...a) => driver.runWideningAlters(...a),
       get supportsRotation() { return driver.supportsRotation; },
       get tablesWithTimestamps() { return driver.tablesWithTimestamps; },
       get tenantFieldByTable() { return driver.tenantFieldByTable; },

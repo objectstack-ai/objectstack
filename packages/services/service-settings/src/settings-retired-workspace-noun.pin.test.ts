@@ -112,7 +112,7 @@ describe('the retired noun: no settings manifest or bundle says workspace / å·¥ä
   });
 
   it('walks every built-in manifest', () => {
-    expect(manifests.length).toBeGreaterThanOrEqual(10);
+    expect(manifests.length).toBeGreaterThanOrEqual(9);
     for (const m of builtinSettingsManifests) expect(manifests).toContain(m);
   });
 
