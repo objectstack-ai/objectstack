@@ -145,14 +145,26 @@ export const SysTeamMember = ObjectSchema.create({
       readonly: true,
     }),
     
+    // The related lists these two lookups derive name their columns. With none
+    // authored, a related list leads with the record title (ADR-0079), and
+    // `display_title` reads the two stored ids, so a team's Members list opened
+    // on a column of `USER_ID in TEAM_ID` beside the User column. Authored
+    // columns are drawn as written, with no title lead; the list drops the key
+    // back to its parent, so each list names the OTHER lookup and when the
+    // membership began.
     team_id: Field.lookup('sys_team', {
       label: 'Team',
       required: true,
+      // The team page's Members list.
+      relatedListColumns: ['user_id', 'created_at'],
     }),
-    
+
     user_id: Field.lookup('sys_user', {
       label: 'User',
       required: true,
+      // A user page's Teams list, on a user page that derives its lists
+      // (Setup's own `sys_user_detail` page is authored and lists no teams).
+      relatedListColumns: ['team_id', 'created_at'],
     }),
 
     // better-auth's own single-column uniqueness boundary for a membership
