@@ -1746,6 +1746,8 @@ const ru = {
       vsLastYear: "пред. год",
       vsYesterday: "вчера",
       vsPreviousPeriod: "пред. период",
+      vsThisMonth: "тек. месяц",
+      vsThisQuarter: "тек. квартал",
     },
   },
   appDesigner: {

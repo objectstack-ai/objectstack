@@ -101,17 +101,17 @@ const { createRestApiPlugin } = await import('./rest-api-plugin.js');
  * annotation makes, restated in a form the runtime can check.
  */
 const PROVIDERS = [
-  { index: 6, label: 'authServiceProvider', slot: 'auth', scope: 'host' },
+  { index: 6, label: 'authServiceProvider', slot: 'auth', scope: 'environment' },
   { index: 7, label: 'objectQLProvider', slot: 'objectql', scope: 'host' },
   { index: 8, label: 'emailServiceProvider', slot: 'email', scope: 'environment' },
   { index: 9, label: 'sharingServiceProvider', slot: 'sharing', scope: 'environment' },
   { index: 11, label: 'approvalsServiceProvider', slot: 'approvals', scope: 'environment' },
   { index: 12, label: 'sharingRulesServiceProvider', slot: 'sharingRules', scope: 'environment' },
-  { index: 13, label: 'i18nServiceProvider', slot: 'i18n', scope: 'host' },
+  { index: 13, label: 'i18nServiceProvider', slot: 'i18n', scope: 'environment' },
   { index: 14, label: 'analyticsServiceProvider', slot: 'analytics', scope: 'environment' },
-  { index: 15, label: 'settingsServiceProvider', slot: 'settings', scope: 'host' },
-  { index: 17, label: 'securityServiceProvider', slot: 'security', scope: 'host' },
-  { index: 19, label: 'metadataServiceProvider', slot: 'metadata', scope: 'host' },
+  { index: 15, label: 'settingsServiceProvider', slot: 'settings', scope: 'environment' },
+  { index: 17, label: 'securityServiceProvider', slot: 'security', scope: 'environment' },
+  { index: 19, label: 'metadataServiceProvider', slot: 'metadata', scope: 'environment' },
   // [#17716] The appended parameter #15256's own docblock warns about. Its
   // provider is kernel-first (`ctx.getKernel()?.getServiceAsync('tenancy')`)
   // and falls back to `ctx.getService('tenancy')` for a host with no async
@@ -128,9 +128,10 @@ const PROVIDERS = [
 /**
  * [#30011] `scope: 'environment'` marks the providers that, given an
  * environment id AND a `kernel-manager`, read the slot on THAT environment's
- * kernel instead of this plugin's own — the five whose occupants a hosted
- * environment's kernel mounts. `host` rows read this plugin's kernel whatever
- * id they are handed. The hosted behaviour itself is pinned end to end in
+ * kernel instead of this plugin's own — the slots whose occupants a hosted
+ * environment's kernel mounts ([#30192] added `auth`, `i18n`, `settings`,
+ * `security` and `metadata` to #30011's five). `host` rows read this plugin's
+ * kernel whatever id they are handed. The hosted behaviour itself is pinned end to end in
  * `rest-environment-scoped-providers.test.ts`; this table only says which
  * kernel each provider asks, so the slot-identity cases below can ask the
  * right one.
@@ -407,7 +408,7 @@ describe('[#4251 B4] rest-api-plugin slot lookups', () => {
 });
 
 describe('[#30011] a single-kernel deployment reads the environment-scoped slots exactly as before', () => {
-  it('with no kernel-manager, each of the five reads its slot on the plugin\'s own kernel, whatever environment it is asked for', async () => {
+  it('with no kernel-manager, each environment-scoped provider reads its slot on the plugin\'s own kernel, whatever environment it is asked for', async () => {
     // Today's single-kernel composition: no `kernel-manager`, no resolver.
     // Before the fix every one of the five read `ctx.getService(slot)`
     // unconditionally; with no manager to hand out an environment's kernel
@@ -418,7 +419,11 @@ describe('[#30011] a single-kernel deployment reads the environment-scoped slots
     delete services['env-registry'];
     const { args, ctx } = await boot(services);
 
-    expect(ENVIRONMENT_SCOPED.map((p) => p.slot)).toEqual(['email', 'sharing', 'approvals', 'sharingRules', 'analytics']);
+    // [#30192] `auth`, `i18n`, `settings`, `security` and `metadata` joined
+    // the five #30011 scoped; `objectql` and `tenancy` stay on the host.
+    expect(ENVIRONMENT_SCOPED.map((p) => p.slot)).toEqual([
+      'auth', 'email', 'sharing', 'approvals', 'sharingRules', 'i18n', 'analytics', 'settings', 'security', 'metadata',
+    ]);
     for (const { index, label, slot } of ENVIRONMENT_SCOPED) {
       const provider = args[index] as (environmentId?: string) => Promise<unknown>;
       for (const environmentId of ['env_1', undefined, 'platform']) {
