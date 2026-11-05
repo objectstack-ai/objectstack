@@ -82,7 +82,7 @@ only on reorgs. Why the tree matters:
 
 Day-to-day lifecycle actions live on each user's row menu and record header:
 **Ban / Unban** (blocks sign-in, ends the user's sessions, and refuses their API keys
-while the ban holds), **Unlock Account** (clears a brute-force
+and OAuth access tokens while the ban holds, with no new OAuth token issued to them), **Unlock Account** (clears a brute-force
 lockout early, at both the password and two-factor stages), **Set Password**
 (also mints one-time temporary passwords),
 and **Impersonate User** (see [Step 4](#step-4--verify)). *(Rough edge today:
@@ -181,7 +181,7 @@ Full model: [Permission Sets](/docs/permissions/permission-sets).
 | I need to… | Do this |
 |:--|:--|
 | Onboard a new employee | Invite/Create the user → Business Unit Member row → assign their position ([2](#step-2--add-people-users)→[3](#step-3--assign-positions)) |
-| Offboard someone | **Ban User** (blocks sign-in and the user's API keys immediately) — then remove assignments at leisure |
+| Offboard someone | **Ban User** (blocks sign-in, the user's API keys and their OAuth access tokens and token refreshes immediately) — then remove assignments at leisure |
 | "I can't sign in" | User record → is it banned? locked? **Unlock Account** or **Set Password** (temporary, must-change) |
 | "Why can't I see X?" | Studio → Access → **Explain access** for that user + object |
 | Someone changed departments | Update their Business Unit Member row; re-anchor their User Position rows |

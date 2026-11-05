@@ -44,6 +44,7 @@ import { codeSelfServiceRefusal } from './account-self-service-refusal-code.js';
 import type { AuthManager } from './auth-manager.js';
 import { SIGN_IN_EMAIL_PATH } from './auth-session-audit.js';
 import { narrowDirectoryForExternalCaller } from './external-directory-door.js';
+import { refuseIntrospectionForBannedSubject } from './oauth-token-read-ban-refusal.js';
 import { rotateCallerBearerOnImpersonation } from './impersonation-bearer-rotation.js';
 import { stampInvitationDeliveryOutcome } from './invitation-delivery-outcome.js';
 import { retireExpiredInvitationsOnReissue } from './invitation-expired-supersede.js';
@@ -137,6 +138,12 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // one. See `two-factor-reenrollment-verified-reset.ts`, whose header
   // also states what this deliberately does NOT do.
   await resetVerifiedOnTwoFactorReenrollment(ctx);
+
+  // ── A banned user's token introspects as inactive while the ban holds ──
+  // `/oauth2/introspect` only: an active answer whose subject is a user
+  // whose ban holds becomes `{ active: false }`, the answer a token that is
+  // not valid gets. See `oauth-token-read-ban-refusal.ts`.
+  await refuseIntrospectionForBannedSubject(ctx);
 
   // ── ADR-0069 D2: account lockout (counter) ──────────────────
   // better-auth catches an INVALID_EMAIL_OR_PASSWORD APIError and runs

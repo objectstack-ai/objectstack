@@ -147,11 +147,12 @@ describe('#7309 — the destructive warnings survived the move, word for word', 
   it('sys_user.ban_user still says the user is signed out and locked out', () => {
     const a = byName(SysUser, 'ban_user');
     expect(a.description).toBe(
-      'Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned. The keys work again after the unban.',
+      'Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned, as are their OAuth access tokens and token refreshes. The keys work again after the unban.',
     );
     expect(a.description).toContain('signed out');
     expect(a.description).toContain('unable to sign in');
     expect(a.description).toContain('API keys refused');
+    expect(a.description).toContain('OAuth access tokens and token refreshes');
   });
 
   it('sys_user.delete_my_account still says it cannot be undone', () => {

@@ -90,6 +90,7 @@ import {
 } from './one-time-token-handoff.js';
 import { userInfoLocaleClaim } from './oidc-userinfo-locale-claim.js';
 import { refuseGrantForBannedUser } from './oauth-grant-ban-refusal.js';
+import { refuseUserInfoForBannedUser } from './oauth-token-read-ban-refusal.js';
 import { buildTurnstileSignUpPlugin, reportHalfConfiguredTurnstile, resolveTurnstileKeys } from './turnstile-sign-up.js';
 
 /**
@@ -703,14 +704,21 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
       // its failure posture live in `oidc-userinfo-locale-claim.ts`. Userinfo
       // only: the provider keeps profile claims out of the ID token, and the
       // platform RP reads userinfo.
-      customUserInfoClaims: ({ user, scopes }) =>
-        userInfoLocaleClaim(
+      //
+      // A banned user's token reads no claims while the ban holds
+      // (`oauth-token-read-ban-refusal.ts`): userinfo answers it as an access
+      // token that does not verify, from the user row the provider hands this
+      // callback. Judged first, so a refused request reads no locale either.
+      customUserInfoClaims: async ({ user, scopes }) => {
+        await refuseUserInfoForBannedUser({ user });
+        return userInfoLocaleClaim(
           {
             getEngine: () => this.getDataEngine(),
             warn: (message, meta) => this.config.logger?.warn?.(message, meta),
           },
           { user, scopes },
-        ),
+        );
+      },
     })];
     });
   }
