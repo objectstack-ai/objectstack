@@ -4216,6 +4216,10 @@ const de = {
         unreadableVersion: "Installieren Sie eine Release-Version von {{dependency}} innerhalb von {{range}}. Die installierte Version {{installedVersion}} hat nicht das Format MAJOR.MINOR.PATCH.",
         unreadableDeclaration: "{{packageId}} deklariert seine Abhängigkeiten in einer Form, die die Installation nicht lesen kann. Schreiben Sie sie als Zuordnung von Paket-ID zu Versionsbereich und veröffentlichen Sie das Paket erneut.",
       },
+      protocolCheckSkipped: {
+        noRange: "{{packageId}} gibt nicht an, welches Plattformprotokoll es unterstützt. Es wurde daher ohne Kompatibilitätsprüfung unter Protokoll {{protocolVersion}} installiert und funktioniert auf dieser Plattformversion möglicherweise nicht. Ein Build des Pakets, der sein unterstütztes Protokoll (engines.protocol) angibt, wird bei der Installation geprüft.",
+        unparsedRange: "{{packageId}} gibt sein Plattformprotokoll als {{requiredRange}} an, was diese Laufzeitumgebung nicht lesen kann. Es wurde daher ohne Kompatibilitätsprüfung unter Protokoll {{protocolVersion}} installiert und funktioniert auf dieser Plattformversion möglicherweise nicht. Ein Build des Pakets mit lesbarem Bereich (engines.protocol) wird bei der Installation geprüft.",
+      },
       localUnauthorized: "Melden Sie sich zuerst in diesem Laufzeitsystem an.",
       localMarketplaceUnavailable: "Dieses Laufzeitsystem hat keine OS_CLOUD_URL konfiguriert.",
       updateTo: "Aktualisieren → v{{version}}",

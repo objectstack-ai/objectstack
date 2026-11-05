@@ -4561,6 +4561,10 @@ const ar = {
         unreadableVersion: "ثبّت إصدارًا نهائيًا من {{dependency}} ضمن {{range}}. الإصدار المثبّت {{installedVersion}} ليس بصيغة MAJOR.MINOR.PATCH.",
         unreadableDeclaration: "تعلن {{packageId}} عن تبعياتها بصيغة لا يستطيع التثبيت قراءتها. اكتبها كخريطة من معرّف الحزمة إلى نطاق الإصدارات ثم أعد نشر الحزمة.",
       },
+      protocolCheckSkipped: {
+        noRange: "لا تحدد الحزمة {{packageId}} بروتوكول المنصة الذي تدعمه، لذلك ثُبّتت تحت البروتوكول {{protocolVersion}} دون فحص التوافق وقد لا تعمل على إصدار المنصة هذا. يُفحص عند التثبيت أي إصدار من الحزمة يصرّح بالبروتوكول الذي يدعمه (engines.protocol).",
+        unparsedRange: "تصرّح الحزمة {{packageId}} ببروتوكول المنصة على أنه {{requiredRange}}، وهو ما لا تستطيع بيئة التشغيل هذه قراءته، لذلك ثُبّتت تحت البروتوكول {{protocolVersion}} دون فحص التوافق وقد لا تعمل على إصدار المنصة هذا. يُفحص عند التثبيت أي إصدار من الحزمة يصرّح بنطاق مقروء (engines.protocol).",
+      },
       localUnauthorized: "سجل الدخول إلى هذا الوقت التشغيل أولاً.",
       localMarketplaceUnavailable: "هذا الوقت التشغيل لا يحتوي على OS_CLOUD_URL مُهيأ.",
       updateTo: "تحديث → v{{version}}",

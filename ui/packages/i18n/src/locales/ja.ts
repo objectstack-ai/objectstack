@@ -4218,6 +4218,10 @@ const ja = {
         unreadableVersion: "{{range}} の範囲内にある {{dependency}} のリリース版をインストールしてください（インストール済みの {{installedVersion}} は MAJOR.MINOR.PATCH 形式ではありません）。",
         unreadableDeclaration: "{{packageId}} の依存関係の宣言を読み取れません。パッケージ ID からバージョン範囲へのマップとして記述し、パッケージを再公開してください。",
       },
+      protocolCheckSkipped: {
+        noRange: "{{packageId}} は対応するプラットフォームプロトコルを宣言していないため、互換性チェックなしでプロトコル {{protocolVersion}} の下にインストールされました。このプラットフォームバージョンでは正しく動作しない可能性があります。対応プロトコル（engines.protocol）を宣言したパッケージのビルドはインストール時にチェックされます。",
+        unparsedRange: "{{packageId}} はプラットフォームプロトコルを {{requiredRange}} と宣言していますが、このランタイムでは解釈できないため、互換性チェックなしでプロトコル {{protocolVersion}} の下にインストールされました。このプラットフォームバージョンでは正しく動作しない可能性があります。解釈可能な範囲（engines.protocol）を宣言したパッケージのビルドはインストール時にチェックされます。",
+      },
       localUnauthorized: "最初にこのランタイムにサインインしてから再試行してください。",
       localMarketplaceUnavailable: "このランタイムにはOS_CLOUD_URLが設定されていないため、マーケットプレイスカタログにアクセスできません。",
       updateTo: "更新 → v{{version}}",
