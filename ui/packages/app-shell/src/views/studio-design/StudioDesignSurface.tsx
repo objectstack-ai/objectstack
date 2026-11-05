@@ -6962,6 +6962,19 @@ export function DataPillar({
                     focus={actionFocus}
                     actionSchema={typeSchemas.action}
                     onCelVerdictsChange={reportPanelVerdicts}
+                    // objectstack#30088 — a base object's new actions are items of the pair.
+                    pair={
+                      extendsBase && customization
+                        ? {
+                            pairId: railPairId,
+                            ensure: customization.ensure,
+                            walled: customization.walled,
+                            marks: railMarks,
+                            publishNonce,
+                            onDraftSaved,
+                          }
+                        : null
+                    }
                   />
                 </div>
               ) : viewMode === 'api' ? (

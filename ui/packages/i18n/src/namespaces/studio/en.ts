@@ -3551,6 +3551,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.actions.presets': 'Common actions',
   'engine.studio.actions.notSaved': 'Not saved — needs “{input}”',
   'engine.studio.actions.heldNeeds': 'the action “{action}” needs “{input}”',
+  'engine.studio.actions.renameHeld': 'Not saved yet: an action added to an installed app keeps the name it was created with. Change the name back to {name} to save your changes.',
   'engine.studio.actions.preset.change': 'Change a picklist field',
   'engine.studio.actions.preset.changeHint': 'Asks for a new “{field}”, then saves it.',
   'engine.studio.actions.preset.changeNeeds': 'Needs a picklist field on this object.',

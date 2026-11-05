@@ -47,10 +47,22 @@
  * name no listed action holds; a rename in the editor's Name field to a name
  * another listed action holds is written as the first free `<name>_N` instead,
  * so the draft never carries the pair and its save is never refused for it.
+ *
+ * ## On a read-only base, an action added in its pair (objectstack#30088)
+ *
+ * A read-only base's object is never written, so its actions (the vendor's)
+ * are listed read-only. With `pair` (ADR-0146 D3: the base has, or can get,
+ * its customization package, and the ensure door admits this caller) New
+ * offers the same presets and editor, and the action is saved as its own
+ * `action` item in the pair, bound to this object by `objectName`
+ * (`pairObjectActions.ts`). Each such action is listed after the vendor's
+ * with the customization mark, opens editable and has Delete; "only
+ * customizations" narrows the list to them. The object draft is not touched.
  */
 
 import React from 'react';
-import { Ban, Zap, Plus, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
+import { Ban, Zap, Plus, Trash2, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
+import { useDisplayLocale } from '@object-ui/i18n';
 import { Popover, PopoverTrigger, PopoverContent } from '@object-ui/components';
 import { getIcon } from '../../utils/getIcon.js';
 import { useRegisteredMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry.js';
@@ -66,6 +78,8 @@ import {
   type ActionPresetFieldOpt,
 } from './actionPresets.js';
 import { StudioEmptyState, StudioEmptyStateAction } from './StudioEmptyState.js';
+import { usePairObjectActions, type PairActionsDoor } from './pairObjectActions.js';
+import { RailCustomizationFilter, RailCustomizationMark, useRailCustomizationsOnly } from './StudioRailCustomizations.js';
 
 interface ActionItem {
   name?: string;
@@ -124,6 +138,7 @@ export function ObjectActionsPanel({
   onBlockingIssuesChange,
   onCelVerdictsChange,
   focus,
+  pair = null,
 }: {
   draft: Record<string, unknown>;
   onPatch: (patch: Record<string, unknown>) => void;
@@ -154,10 +169,35 @@ export function ObjectActionsPanel({
    * forward-compatible config panel for the action metadata.
    */
   actionSchema?: Record<string, unknown>;
+  /**
+   * objectstack#30088 — on a read-only base's object, its pair: New saves the
+   * action as an `action` item there (see the header). Absent, every action is
+   * the object draft's.
+   */
+  pair?: PairActionsDoor | null;
 }) {
   const locale = useMetadataLocale();
-  const actions = React.useMemo(() => readActions(draft.actions), [draft.actions]);
+  // The last-saved time reads the DISPLAY locale (objectui#10232).
+  const displayLocale = useDisplayLocale();
   const objectName = typeof draft.name === 'string' ? draft.name : '';
+  // objectui#4527 — each action's blocking CEL verdict, by name (see below).
+  const [celErrors, setCelErrors] = React.useState<Record<string, number>>({});
+  const blockingOf = React.useCallback((name: string) => celErrors[name] ?? 0, [celErrors]);
+  // objectstack#30088 — the pair's actions on this object, and the vendor's:
+  // the object's served actions less any the pair holds (a published one is
+  // served folded into the object too).
+  const added = usePairObjectActions(pair, objectName, blockingOf);
+  const addedNames = React.useMemo(() => new Set(added.rows.map((r) => r.name)), [added.rows]);
+  const actions = React.useMemo(
+    () =>
+      readActions(draft.actions).filter(
+        (a) => !addedNames.has(String(a.name ?? '')) && (added.pairId === null || a._packageId !== added.pairId),
+      ),
+    [draft.actions, addedNames, added.pairId],
+  );
+  // New is offered where an action can be saved: the object draft, or the pair.
+  const canAdd = pair ? !pair.walled : !disabled;
+  const [onlyAdded, toggleOnlyAdded] = useRailCustomizationsOnly();
   // objectui#11861 — new actions still waiting for their target: listed and
   // edited here, and NOT in the draft (see "A new action waits for its target"
   // above). Each is kept with the object it was started on (`on`, not the
@@ -168,12 +208,33 @@ export function ObjectActionsPanel({
     () => held.filter((h) => h.on === objectName).map((h) => h.action),
     [held, objectName],
   );
-  const listed = React.useMemo(() => [...actions, ...heldHere], [actions, heldHere]);
+  const addedListed = React.useMemo(() => added.rows.map((r) => ({ ...r.body, name: r.name }) as ActionItem), [added.rows]);
+  const allListed = React.useMemo(
+    // A held action is listed once: from the moment its write lands, as the pair's.
+    () => [...actions, ...addedListed, ...heldHere.filter((h) => !addedNames.has(String(h.name ?? '')))],
+    [actions, addedListed, heldHere, addedNames],
+  );
+  // The pair's actions that carry the mark: what "only customizations" counts and keeps.
+  const markOf = (name: string) =>
+    pair?.marks && added.pairId ? pair.marks.markOf({ type: 'action', name, addedIn: added.pairId }) : null;
+  const markedNames = new Set(added.rows.map((r) => r.name).filter((n) => markOf(n) !== null));
+  const listed = onlyAdded && pair ? allListed.filter((a) => markedNames.has(String(a.name ?? ''))) : allListed;
   // What each held action still needs, by name: the catalogue key of the input.
   const heldNeeds = React.useMemo(
     () => new Map(heldHere.map((a) => [String(a.name ?? ''), heldInputKey(a)])),
     [heldHere],
   );
+  // A row this panel may edit: the object draft's on a writable package; on a
+  // read-only base, the pair's own and a held new one.
+  const editable = (name: string | null | undefined): boolean => {
+    if (pair) return !pair.walled && (addedNames.has(String(name ?? '')) || heldNeeds.has(String(name ?? '')));
+    return !disabled;
+  };
+  // Every name the object's list holds, whatever the filter shows: a new or
+  // renamed action takes none of them.
+  const takenNames = React.useMemo(() => allListed.map((a) => String(a.name ?? '')), [allListed]);
+  // objectstack#30088 — held actions whose write into the pair is in flight.
+  const creatingRef = React.useRef(new Set<string>());
   // A "Show me" from another view mounts this panel already focused.
   const [selected, setSelected] = React.useState<string | null>(() => focus?.name ?? null);
   // Adjusted while rendering, React's own pattern for state that follows a prop.
@@ -200,6 +261,12 @@ export function ObjectActionsPanel({
   const patchSelected = React.useCallback(
     (requested: Record<string, unknown>) => {
       if (!sel) return;
+      // objectstack#30088 — a pair action's buffer; a rename is held there
+      // (an item keeps the name it is stored under), not rewritten.
+      if (pair && addedNames.has(String(sel.name ?? ''))) {
+        added.patch(String(sel.name), requested);
+        return;
+      }
       // A rename to a name another listed action holds takes the first free
       // `<name>_N` instead (see "An action name is taken once" above).
       const patch =
@@ -208,7 +275,7 @@ export function ObjectActionsPanel({
               ...requested,
               name: freeActionName(
                 requested.name,
-                listed.filter((a) => a !== sel).map((a) => String(a.name ?? '')),
+                allListed.filter((a) => a !== sel).map((a) => String(a.name ?? '')),
               ),
             }
           : requested;
@@ -216,17 +283,31 @@ export function ObjectActionsPanel({
         const next = { ...sel, ...patch };
         const mine = (h: { on: string; action: ActionItem }) => h.on === objectName && h.action.name === sel.name;
         if (heldInputKey(next) === null) {
-          onPatch({ actions: [...actions, next] });
-          setHeld((prev) => prev.filter((h) => !mine(h)));
+          if (pair) {
+            // Written into the pair once it needs no input; held until it
+            // lands, and written once while its write is in flight.
+            const key = String(sel.name ?? '');
+            if (!creatingRef.current.has(key)) {
+              creatingRef.current.add(key);
+              void added.create(next).then((ok) => {
+                creatingRef.current.delete(key);
+                if (ok) setHeld((prev) => prev.filter((h) => !mine(h)));
+              });
+            }
+            setHeld((prev) => prev.map((h) => (mine(h) ? { on: h.on, action: next } : h)));
+          } else {
+            onPatch({ actions: [...actions, next] });
+            setHeld((prev) => prev.filter((h) => !mine(h)));
+          }
         } else {
           setHeld((prev) => prev.map((h) => (mine(h) ? { on: h.on, action: next } : h)));
         }
-      } else {
+      } else if (!pair) {
         onPatch({ actions: actions.map((a) => (a.name === sel.name ? { ...a, ...patch } : a)) });
       }
       if (typeof patch.name === 'string' && patch.name !== sel.name) setSelected(patch.name);
     },
-    [actions, heldNeeds, listed, objectName, sel, onPatch],
+    [actions, added, addedNames, allListed, heldNeeds, objectName, pair, sel, onPatch],
   );
 
   /* ─── Blocking CEL verdicts → the Data pillar's Save gate (objectui#4527) ──
@@ -238,7 +319,6 @@ export function ObjectActionsPanel({
    * again. A DELETED action's inspector can never report `0`, so the total is
    * DERIVED against the live action-name set rather than repaired by an effect.
    */
-  const [celErrors, setCelErrors] = React.useState<Record<string, number>>({});
   const reportCel = React.useCallback((actionName: string, count: number) => {
     setCelErrors((prev) => (prev[actionName] === count ? prev : { ...prev, [actionName]: count }));
   }, []);
@@ -273,7 +353,7 @@ export function ObjectActionsPanel({
   // before the presets, unchanged. Its name is unique among the held actions
   // too.
   const addAction = React.useCallback(() => {
-    const name = nextActionName(objectName, listed.map((a) => String(a.name ?? '')));
+    const name = nextActionName(objectName, takenNames);
     // Minimal *valid* skeleton, and a DECLARATIVE one (objectui#11820): an
     // "Update fields on this record" action — `operation: 'update'` with an
     // empty `patch` — bound to this object. It used to start as a script with a
@@ -308,9 +388,10 @@ export function ObjectActionsPanel({
       operation: 'update',
       patch: {},
     };
-    onPatch({ actions: [...actions, fresh] });
+    if (pair) void added.create(fresh);
+    else onPatch({ actions: [...actions, fresh] });
     setSelected(name);
-  }, [actions, listed, objectName, onPatch, locale]);
+  }, [actions, added, takenNames, objectName, onPatch, locale, pair]);
 
   // objectui#11861 — what each preset would do on THIS object, read before the
   // author picks one so its menu row can say which field it asks about, or
@@ -344,7 +425,7 @@ export function ObjectActionsPanel({
    * rest: none needed ⇒ written now; one the spec needs ⇒ held until given.
    */
   const addPreset = (plan: Extract<ActionPresetPlan, { ready: true }>) => {
-    const name = nextActionName(objectName, listed.map((a) => String(a.name ?? '')));
+    const name = nextActionName(objectName, takenNames);
     const fresh: ActionItem = {
       name,
       label: t('engine.studio.actions.newLabel', locale),
@@ -352,8 +433,10 @@ export function ObjectActionsPanel({
       locations: ['record_header'],
       ...plan.keys,
     };
-    if (heldInputKey(fresh) === null) onPatch({ actions: [...actions, fresh] });
-    else setHeld((prev) => [...prev, { on: objectName, action: fresh }]);
+    if (heldInputKey(fresh) === null) {
+      if (pair) void added.create(fresh);
+      else onPatch({ actions: [...actions, fresh] });
+    } else setHeld((prev) => [...prev, { on: objectName, action: fresh }]);
     setSelected(name);
   };
 
@@ -361,12 +444,14 @@ export function ObjectActionsPanel({
     (name: string) => {
       if (heldNeeds.has(name)) {
         setHeld((prev) => prev.filter((h) => !(h.on === objectName && h.action.name === name)));
+      } else if (pair) {
+        if (addedNames.has(name)) void added.remove(name);
       } else {
         onPatch({ actions: actions.filter((a) => a.name !== name) });
       }
       setSelected(null);
     },
-    [actions, heldNeeds, objectName, onPatch],
+    [actions, added, addedNames, heldNeeds, objectName, onPatch, pair],
   );
 
   const headerTrigger = (
@@ -382,7 +467,7 @@ export function ObjectActionsPanel({
   // objectui#12514 — the one "New" menu. While the object holds no action it
   // opens from the empty block's button, and once the first one lists it hands
   // focus to the header's "New", the trigger that is then on the page.
-  const menuFromEmpty = listed.length === 0;
+  const menuFromEmpty = allListed.length === 0;
   const addMenu = (
     <Popover
       open={addOpen}
@@ -470,27 +555,59 @@ export function ObjectActionsPanel({
     </Popover>
   );
 
-  if (listed.length === 0) {
+  // objectstack#30088 — what a read or write of the pair answered, as sent.
+  const pairError = added.error ? (
+    <div
+      data-testid="actions-pair-error"
+      role="alert"
+      className="m-2 shrink-0 whitespace-pre-line rounded-md border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-[11px] text-destructive"
+    >
+      {added.error}
+    </div>
+  ) : null;
+
+  if (allListed.length === 0) {
     return (
-      <StudioEmptyState
-        testId="actions-empty"
-        icon={Zap}
-        sentence={t('engine.studio.actions.none', locale)}
-        action={disabled ? undefined : addMenu}
-      />
+      <div className="flex min-h-0 flex-1 flex-col">
+        {added.dialog}
+        {pairError}
+        <StudioEmptyState
+          testId="actions-empty"
+          icon={Zap}
+          sentence={t('engine.studio.actions.none', locale)}
+          action={canAdd ? addMenu : undefined}
+        />
+      </div>
     );
   }
 
+  const selAdded = sel !== null && pair !== null && addedNames.has(String(sel.name ?? ''));
+  const selRow = selAdded ? added.rows.find((r) => r.name === sel.name) : undefined;
+  const selRenamedFrom = selAdded ? added.renamedFrom(String(sel.name)) : null;
+
   return (
     <div className="flex min-h-0 flex-1 gap-4">
+      {added.dialog}
       {/* action list */}
       <div className="flex w-72 shrink-0 flex-col rounded-lg border">
         <header className="flex items-center gap-2 border-b px-3 py-2">
           <Zap className="h-3.5 w-3.5" />
           <span className="text-[13px] font-medium">{t('engine.studio.data.tab.actions', locale)}</span>
           <span className="text-[11px] text-muted-foreground">({listed.length})</span>
-          {!disabled && addMenu}
+          {canAdd && addMenu}
         </header>
+        {pair && (
+          <div className="pt-2">
+            <RailCustomizationFilter
+              marks={pair.marks}
+              marked={markedNames.size}
+              on={onlyAdded}
+              onToggle={toggleOnlyAdded}
+              locale={locale}
+              testId="actions-customizations-only"
+            />
+          </div>
+        )}
         <div className="min-h-0 flex-1 overflow-auto">
           {listed.map((a) => {
             const Icon = getIcon(typeof a.icon === 'string' ? a.icon : undefined);
@@ -520,6 +637,13 @@ export function ObjectActionsPanel({
                     {type}
                   </span>
                 )}
+                {pair && added.pairId && addedNames.has(String(a.name ?? '')) && (
+                  <RailCustomizationMark
+                    row={{ type: 'action', name: String(a.name), addedIn: added.pairId }}
+                    marks={pair.marks}
+                    locale={locale}
+                  />
+                )}
               </button>
             );
           })}
@@ -546,10 +670,24 @@ export function ObjectActionsPanel({
         )}
         {/* The list always selects an action, so this pane is never blank for
             want of a pick (objectui#12514 retired that sentence). */}
+        {pairError}
         {!sel ? null : Inspector ? (
           <>
-            {!disabled && (
-              <div className="flex shrink-0 items-center justify-end border-b px-2 py-1">
+            {editable(sel.name) && (
+              <div className="flex shrink-0 items-center justify-end gap-2 border-b px-2 py-1">
+                {/* objectstack#30088 — a pair action autosaves on its own: its status line. */}
+                {selAdded && added.saving ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground" data-testid="actions-pair-saving">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    {t('engine.studio.autoSaving', locale)}
+                  </span>
+                ) : selAdded && added.savedAt?.name === sel.name && added.dirty !== sel.name ? (
+                  <span className="text-[11px] text-muted-foreground" data-testid="actions-pair-saved-at">
+                    {tFormat('engine.studio.data.lastSaved', locale, {
+                      time: added.savedAt.at.toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' }),
+                    })}
+                  </span>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => removeAction(sel.name!)}
@@ -559,13 +697,22 @@ export function ObjectActionsPanel({
                 </button>
               </div>
             )}
+            {selRenamedFrom !== null && (
+              <p
+                role="status"
+                data-testid="actions-rename-held"
+                className="border-b bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground"
+              >
+                {tFormat('engine.studio.actions.renameHeld', locale, { name: selRenamedFrom })}
+              </p>
+            )}
             {/* eslint-disable-next-line react-hooks/static-components -- useRegisteredMetadataDefaultInspector returns a registered component (stable), not one created during render */}
             <Inspector
               type="action"
               name={String(sel.name ?? '')}
-              draft={sel as Record<string, unknown>}
+              draft={(selRow ? selRow.body : sel) as Record<string, unknown>}
               onPatch={patchSelected}
-              readOnly={!!disabled}
+              readOnly={!editable(sel.name)}
               locale={locale}
               serverSchema={actionSchema}
               onBlockingIssuesChange={(count) => reportCel(String(sel.name ?? ''), count)}
