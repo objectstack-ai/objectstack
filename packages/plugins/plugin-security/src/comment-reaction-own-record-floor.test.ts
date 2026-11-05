@@ -33,8 +33,9 @@
  * ## Who grants the bits
  *
  * The object-level create / read / delete bits come from an ordinary
- * position-distributed set an application ships (as an app grants
- * `sys_comment` today), never from the `everyone`-bound baseline, which
+ * position-distributed set an application ships (as an app grants the
+ * `sys_comment` delete bit; the baseline grants comments' read, create and
+ * edit, never delete), never from the `everyone`-bound baseline, which
  * ADR-0090 D5 keeps free of delete bits. Which shipped set — if any — carries
  * them is an open decision on #22566; the floor pinned here holds whatever set
  * hands the delete bit out.

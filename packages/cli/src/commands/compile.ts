@@ -87,6 +87,7 @@ import { findExtensionFieldSuffixRefusals } from '../utils/extension-field-suffi
 // [#29051] An undeclared top-level flow cycle — the walk `os validate` step
 // 3a-vii runs, over the automation engine's own judge.
 import { findFlowCycleRefusals } from '../utils/flow-undeclared-cycle.js';
+import { localCustomizationNotice, readLocalCustomizations } from '../utils/local-customizations.js';
 
 export default class Compile extends Command {
   static override description = 'Compile ObjectStack configuration to JSON artifact';
@@ -120,6 +121,13 @@ export default class Compile extends Command {
       default: false,
     }),
   };
+
+  /**
+   * Whether the text face ends with the local-customization notice
+   * (`utils/local-customizations.ts`). `os build` turns it on; `os compile`,
+   * which `os dev` runs on every boot and rebuild, keeps it off.
+   */
+  protected reportsLocalCustomizations = false;
 
   async run(): Promise<void> {
     const { args, flags } = await this.parse(Compile);
@@ -1446,6 +1454,22 @@ export default class Compile extends Command {
         console.log(chalk.dim(`      → ${protocolGap.hint}`));
       }
       console.log('');
+
+      // A Studio customization in the local dev database is left behind by
+      // this artifact (ADR-0146 D2: it lives in `<base>.custom`, in the
+      // database). Said once, on `os build` only — the command a deployment
+      // runs; `os dev` compiles through `os compile` on every boot and rebuild,
+      // where it would be noise.
+      if (this.reportsLocalCustomizations) {
+        const notice = localCustomizationNotice(
+          await readLocalCustomizations({ projectRoot: process.cwd(), artifactPath }),
+        );
+        if (notice.length > 0) {
+          printWarning(notice[0]);
+          for (const line of notice.slice(1)) console.log(chalk.dim(`      ${line}`));
+          console.log('');
+        }
+      }
 
     } catch (error: any) {
       if (isExitSignal(error)) throw error;

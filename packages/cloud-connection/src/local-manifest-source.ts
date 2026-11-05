@@ -7,8 +7,10 @@
  * A self-hosted / single-environment runtime OWNS its desired state: the
  * answer to "which packages should this runtime load" lives on the runtime's
  * own disk, one JSON file per installed manifest under
- * `<cwd>/.objectstack/installed-packages/`. This class is that ledger,
- * promoted to a first-class named seam.
+ * `<OS_HOME>/installed-packages/` when `OS_HOME` is set, and under
+ * `<cwd>/.objectstack/installed-packages/` when it is not
+ * ({@link resolveInstalledPackagesDir}). This class is that ledger, promoted
+ * to a first-class named seam.
  *
  * It is the LOCAL isomorph of what a cloud control plane does for managed
  * environments (`sys_package_installation` desired rows → compiled
@@ -28,8 +30,12 @@
  * the same ledger without going through HTTP.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import {
+    copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync,
+    writeFileSync,
+} from 'node:fs';
+import { homedir } from 'node:os';
+import { basename, dirname, join, resolve } from 'node:path';
 
 import type { GlobalUniqueAttestation } from '@objectstack/types';
 
@@ -179,8 +185,97 @@ export interface InstalledManifestListing {
     skipped: SkippedManifestEntry[];
 }
 
-/** Default ledger location, relative to the runtime's working directory. */
+/**
+ * The ledger location relative to the runtime's working directory — where the
+ * ledger lives when `OS_HOME` is unset, and where every release before the
+ * ledger followed `OS_HOME` wrote it ({@link resolveInstalledPackagesDir}).
+ */
 export const DEFAULT_INSTALLED_PACKAGES_DIR = '.objectstack/installed-packages';
+
+/** The ledger's directory name under `OS_HOME`. */
+export const INSTALLED_PACKAGES_HOME_SUBDIR = 'installed-packages';
+
+/**
+ * The internal channel `os dev --fresh` sets on its `serve` child: the
+ * ephemeral `OS_HOME` that run created. A ledger under a home this channel
+ * names adopts nothing from the working directory — see
+ * {@link resolveInstalledPackagesDir}. The parent owns the variable, like the
+ * CLI's other `OS_INTERNAL_*` channels; it is not an operator setting.
+ */
+export const FRESH_HOME_CHANNEL_ENV = 'OS_INTERNAL_FRESH_HOME';
+
+/** Where the ledger lives, and the earlier location it adopts from once. */
+export interface InstalledPackagesLocation {
+    /** The directory the ledger reads and writes. */
+    dir: string;
+    /**
+     * The working-directory ledger a release before this one wrote, which
+     * {@link LocalManifestSource.adoptLegacyEntries} copies into {@link dir}
+     * once. `null` when it is {@link dir} itself, or when `dir` is under the
+     * ephemeral home of an `os dev --fresh` run.
+     */
+    legacyDir: string | null;
+}
+
+function expandHome(raw: string): string {
+    return raw.startsWith('~') ? resolve(homedir(), raw.slice(1).replace(/^[/\\]/, '')) : resolve(raw);
+}
+
+/**
+ * The ONE answer to "where is this runtime's install ledger" — the runtime's
+ * own default and `os doctor` both read it, so the two never look at two
+ * directories.
+ *
+ *   | `OS_HOME`  | ledger                                    |
+ *   |------------|-------------------------------------------|
+ *   | set        | `<OS_HOME>/installed-packages`            |
+ *   | unset      | `<cwd>/.objectstack/installed-packages`   |
+ *
+ * Set, the ledger follows the home the rest of the instance's state follows
+ * (the default database, the uploads root), so `os dev --fresh` — a fresh
+ * `OS_HOME` — and a second instance under another `OS_HOME` start without the
+ * packages an earlier run installed. The ledger used to resolve from the
+ * working directory alone, so both of those rehydrated a previous install.
+ *
+ * Unset, it stays in the project: an `os dev` that sets no `OS_HOME` keeps its
+ * database in the project too, and the ledger must sit beside the database
+ * whose sample-data rows its entries describe. `~/.objectstack` (the home's
+ * own default) would make one ledger serve every project on the machine. An
+ * `os start` in project mode sets `OS_HOME` to `<cwd>/.objectstack`, so its
+ * ledger is the same directory it always was.
+ *
+ * `legacyDir` names the working-directory ledger whenever the answer moved
+ * away from it, so the installs an earlier release recorded there are adopted
+ * once instead of silently disappearing — except under the ephemeral home an
+ * `os dev --fresh` run announces on {@link FRESH_HOME_CHANNEL_ENV}, whose
+ * whole point is to start without them.
+ */
+export function resolveInstalledPackagesDir(
+    opts: { env?: NodeJS.ProcessEnv; cwd?: string } = {},
+): InstalledPackagesLocation {
+    const env = opts.env ?? process.env;
+    const legacy = resolve(opts.cwd ?? process.cwd(), DEFAULT_INSTALLED_PACKAGES_DIR);
+    const home = env.OS_HOME?.trim();
+    if (!home) return { dir: legacy, legacyDir: null };
+    const homeDir = expandHome(home);
+    const dir = join(homeDir, INSTALLED_PACKAGES_HOME_SUBDIR);
+    if (dir === legacy) return { dir, legacyDir: null };
+    const fresh = env[FRESH_HOME_CHANNEL_ENV]?.trim();
+    // The channel counts only for the home it names: an inherited copy never
+    // speaks for another run's home.
+    if (fresh && expandHome(fresh) === homeDir) return { dir, legacyDir: null };
+    return { dir, legacyDir: legacy };
+}
+
+/** What {@link LocalManifestSource.adoptLegacyEntries} copied, and from where. */
+export interface LegacyLedgerAdoption {
+    /** The working-directory ledger the files were copied from (left in place). */
+    from: string;
+    /** The ledger directory they were copied into. */
+    to: string;
+    /** The basenames copied, byte for byte — unreadable ones included. */
+    files: string[];
+}
 
 function safeFilename(manifestId: string): string {
     return manifestId.replace(/[^a-zA-Z0-9._-]/g, '_') + '.json';
@@ -189,11 +284,61 @@ function safeFilename(manifestId: string): string {
 export class LocalManifestSource {
     /** Resolved ledger directory. */
     readonly dir: string;
+    /**
+     * The earlier ledger location {@link adoptLegacyEntries} copies from —
+     * set only on a default construction whose {@link resolveInstalledPackagesDir}
+     * answer moved away from the working directory. An explicit `storageDir`
+     * is the host's own choice and adopts nothing.
+     */
+    readonly legacyDir: string | null;
 
     constructor(storageDir?: string) {
-        this.dir = storageDir
-            ? resolve(storageDir)
-            : resolve(process.cwd(), DEFAULT_INSTALLED_PACKAGES_DIR);
+        if (storageDir) {
+            this.dir = resolve(storageDir);
+            this.legacyDir = null;
+        } else {
+            const location = resolveInstalledPackagesDir();
+            this.dir = location.dir;
+            this.legacyDir = location.legacyDir;
+        }
+    }
+
+    /**
+     * Copy the working-directory ledger an earlier release wrote into this
+     * ledger, ONCE: only while this ledger's directory does not exist yet.
+     *
+     * Answers `null` when there is nothing to adopt — no {@link legacyDir}, the
+     * ledger directory already exists, or the legacy directory holds no
+     * `.json` file. The files are copied byte for byte, unreadable ones too, so
+     * `list()` reports those from their new place exactly as it would have
+     * from the old one. The legacy files are LEFT IN PLACE: an `OS_HOME`
+     * pointed at a throwaway directory must never take a project's installs
+     * away with it. They are not read again: from then on the ledger directory
+     * exists, so a package uninstalled here stays uninstalled.
+     *
+     * The copy lands in a sibling directory that is renamed into place, so a
+     * failure part-way leaves no ledger directory behind and the next boot
+     * adopts again. A failure throws — the caller reports it; nothing here
+     * decides how loud a boot should be (the same split as {@link list}).
+     *
+     * Not called by `list()` or `read()`: a reader such as `os doctor` must not
+     * write. The runtime calls it once, before it rehydrates.
+     */
+    adoptLegacyEntries(): LegacyLedgerAdoption | null {
+        const from = this.legacyDir;
+        if (!from || existsSync(this.dir) || !existsSync(from)) return null;
+        const files = readdirSync(from).filter((name) => name.endsWith('.json'));
+        if (files.length === 0) return null;
+        mkdirSync(dirname(this.dir), { recursive: true });
+        const staging = mkdtempSync(join(dirname(this.dir), `.${basename(this.dir)}.adopting-`));
+        try {
+            for (const name of files) copyFileSync(join(from, name), join(staging, name));
+            renameSync(staging, this.dir);
+        } catch (cause) {
+            rmSync(staging, { recursive: true, force: true });
+            throw cause;
+        }
+        return { from, to: this.dir, files };
     }
 
     /**

@@ -56,6 +56,11 @@ vi.mock('@objectstack/runtime', () => ({
         async load(request: any) { loadCalls.push(request); return seedResult; }
     },
     recordSeedOutcome: vi.fn(),
+    // [#30281] The seed-locale producer, answering "no locale": this suite's
+    // subject is not the locale (pinned in marketplace-install-local-seed-replayer.test.ts).
+    resolveSeedLocaleForLoad: async () => undefined,
+    appDefaultSeedLocale: () => undefined,
+    describeSeedLocale: () => 'none',
 }));
 // Only the seed-request parse is stubbed; every other export stays the real one,
 // because `@objectstack/core` reads `@objectstack/spec/data` values at module load
