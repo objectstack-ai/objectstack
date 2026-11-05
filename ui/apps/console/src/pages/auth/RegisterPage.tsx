@@ -33,6 +33,11 @@
  *    `SELF_REGISTRATION_CLOSED` re-reads the preview, so an invitation that
  *    went away meanwhile ends the same way and a live one names the address
  *    it was sent to (#27509).
+ *  - Registered from an invitation link, accepts THAT invitation as the new
+ *    account and enters its organization, instead of stopping on the accept
+ *    page and then on "Invitation accepted" (#30125, app-shell's
+ *    `useInvitationSignUpJoin`). An address the server refuses goes on to the
+ *    accept page as before, which shows the refusal.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -51,6 +56,7 @@ import {
   InvitationGoneNotice,
   invitationArrivalCopy,
   useInvitationArrival,
+  useInvitationSignUpJoin,
 } from '@object-ui/app-shell';
 import { AuthLayout } from './AuthLayout';
 import { followOauthAuthorize } from './followAuthorize';
@@ -116,6 +122,8 @@ export function RegisterPage() {
   const ssoHandoffStartedRef = useRef(false);
   // And the mobile sign-in hand-off navigation.
   const mobileHandoffStartedRef = useRef(false);
+  // And the entry into the organization an invitation sign-up joined (#30125).
+  const invitationEntryStartedRef = useRef(false);
 
   // See LoginPage: `isLoading` is overloaded (initial session check + every
   // in-flight signUp). Latch once the first check resolves so a failed
@@ -164,6 +172,8 @@ export function RegisterPage() {
   const invitationCopy = invitationRedirect
     ? invitationArrivalCopy('register', invitationArrival.preview, t)
     : null;
+  // #30125 — the sign-up made on this page from an invitation link accepts it.
+  const invitationJoin = useInvitationSignUpJoin(redirect);
 
   // Sign-up switched off — bounce to /login.
   useEffect(() => {
@@ -198,6 +208,18 @@ export function RegisterPage() {
       return;
     }
 
+    // #30125 — registered from an invitation link: hold while the acceptance
+    // is in flight, then enter the organization it joined. A refusal falls
+    // through to the steps below, which open the accept page as before.
+    if (invitationJoin === 'joining') return;
+    if (invitationJoin === 'joined') {
+      if (!invitationEntryStartedRef.current) {
+        invitationEntryStartedRef.current = true;
+        window.location.assign(withConsoleBase('/'));
+      }
+      return;
+    }
+
     if (!activeOrganization) {
       if (isOrganizationsLoading || autoSelectingOrg) return;
       if (organizations.length === 1) {
@@ -227,6 +249,7 @@ export function RegisterPage() {
     switchOrganization,
     handoff.target,
     handoff.holdForSignIn,
+    invitationJoin,
   ]);
 
   // The first session check has answered and nobody is signed in: the page is
