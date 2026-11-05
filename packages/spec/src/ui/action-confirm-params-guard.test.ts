@@ -455,14 +455,18 @@ describe('`confirmText` + non-empty ARRAY `params` is refused on `action:icon` a
       expect(issues[0]?.message).toContain('`description`');
     });
 
-    it(`an \`${row}\` member refuses the localized-map form of \`confirmText\` too`, () => {
+    it(`an \`${row}\` member refuses the template-envelope form of \`confirmText\` too`, () => {
+      // A row's `confirmText` is a template slot: the bare string and the
+      // `{ dialect: 'template', source }` envelope are its two spellings (a
+      // localized map is refused by the slot itself, for its own reason).
       const result = schema.safeParse(asContainer({
         ...memberReject,
-        confirmText: { en: 'Reject this request?', 'zh-CN': '拒绝该请求？' },
+        confirmText: { dialect: 'template', source: 'Reject this request?' },
       }));
 
       expect(result.success).toBe(false);
-      expect(result.success ? [] : result.error.issues.map((i) => i.path.join('.'))).toEqual(['actions.1.confirmText']);
+      expect(result.success ? [] : result.error.issues.map((i) => [i.code, i.path.join('.')]))
+        .toEqual([['custom', 'actions.1.confirmText']]);
     });
   }
 
