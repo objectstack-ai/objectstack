@@ -377,6 +377,14 @@ const READERS: Record<string, Row> = {
     disposition: 'skips',
     why: 'the recompute reads the stamp its apply keeps, and leaves the column out of its read (and its write) on a federated object',
   },
+  'stored-expression-backfill.ts#backfillStoredExpressions :: isFederatedUnprovisionedInjectedColumn()': {
+    disposition: 'skips',
+    why: 'the backfill never sends an injected column a federated object does not provision',
+  },
+  'stored-expression-backfill.ts#backfillStoredExpressions :: updated_at': {
+    disposition: 'skips',
+    why: 'the backfill keeps the stamp of the row it writes, and sends none on a federated object',
+  },
   'engine-migration-state.ts#recordObservedDeviation :: updated_at': { disposition: 'not-a-read', why: PLATFORM_ROW },
   'engine-migration-state.ts#retractCreationAttestation :: updated_at': { disposition: 'not-a-read', why: PLATFORM_ROW },
   'plugin.ts#reconcileFederatedBindings :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
@@ -703,7 +711,7 @@ describe('[#21918] every engine reader of an injected column has a disposition t
     }
   }, SCAN_BUDGET_MS);
 
-  it('the sites that skip are exactly the cascade scan, its plan, the organization-delete count, the lifecycle tenant partition, and the home-amount recompute', () => {
+  it('the sites that skip are exactly the cascade scan, its plan, the organization-delete count, the lifecycle tenant partition, the home-amount recompute and the stored-expression backfill', () => {
     const skipping = new Set(
       Object.entries(READERS)
         .filter(([, row]) => row.disposition === 'skips')
@@ -715,6 +723,7 @@ describe('[#21918] every engine reader of an injected column has a disposition t
       'engine-cascade-planning.ts#planCascadeAtomicity',
       'home-amount-recompute.ts#recomputeHomeAmounts',
       'lifecycle/lifecycle-service.ts#tenantWindowsFor',
+      'stored-expression-backfill.ts#backfillStoredExpressions',
     ]);
   });
 
