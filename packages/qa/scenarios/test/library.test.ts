@@ -10,7 +10,8 @@
  * held to, not a snapshot of what it printed.
  */
 
-import { dirname, resolve } from 'node:path';
+import { readdirSync } from 'node:fs';
+import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
@@ -98,8 +99,16 @@ describe('the open scenario library (docs/qa/scenarios)', () => {
     expect(result.refusals.map(formatRefusal)).toEqual([]);
   });
 
-  it('holds exactly the three control cards (the mid-tier cards land on their own)', () => {
-    expect(result.cards.map((c) => c.card.id).sort()).toEqual([...Object.keys(EXPECTED_TRUTHS), 'travel_expense'].sort());
+  it('loads one card per .json file, and the three control cards are among them', () => {
+    // Every card file in the directory loads as a card; none is silently skipped. A mid-tier card
+    // pins its own truths in `test/<id>.test.ts`, so adding one never edits this file.
+    const files = readdirSync(SCENARIOS_DIR)
+      .filter((f) => f.endsWith('.json'))
+      .map((f) => basename(f, '.json'))
+      .sort();
+    const ids = result.cards.map((c) => c.card.id).sort();
+    expect(ids).toEqual(files);
+    expect(ids).toEqual(expect.arrayContaining(Object.keys(EXPECTED_TRUTHS)));
   });
 
   for (const [id, expected] of Object.entries(EXPECTED_TRUTHS)) {
