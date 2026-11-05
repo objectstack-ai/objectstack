@@ -104,7 +104,7 @@ import { declaredHttpStatus } from '@objectstack/types';
 import type { SecurityPlugin } from './security-plugin.js';
 import { isGuestEnvelope, readUnlessRefused, requiredCapsForOperation } from './security-plugin.js';
 import { assertFlowSystemIdentityWriteAllowed } from './flow-system-identity-write-refusal.js';
-import { isUnreadableAddressedRowRefusal } from './delegated-admin-gate.js';
+import { delegatedUnitReadScope, isUnreadableAddressedRowRefusal } from './delegated-admin-gate.js';
 import { isRowWriteProbe, logGateRefusal, type AuthzMiddlewareFn } from './record-row-write-probe.js';
 import {
   intersectDelegatedScope,
@@ -840,6 +840,14 @@ export function registerAuthzMiddleware(
     // guard this replaced admitted that caller to every object no set
     // grants. A principal-less context never reaches this line — it was
     // refused above ({@link isPrincipalLessContext}, [#21908] ADR-0096 D5).
+    //
+    // [ADR-0090 D12, ruling of record 6663849489] One admission beside the
+    // grant: a delegate reads the business units its admin scopes cover. For
+    // a read of `sys_business_unit` no set grants, `delegatedUnitReadScope`
+    // answers the `id IN <covered units>` scope step 3 ANDs into the read, or
+    // null — and null keeps the refusal below. Every condition and why it is
+    // no wider is on that function.
+    let delegatedUnitScope: Record<string, unknown> | null = null;
     if (!referentialFieldClearWrite) {
       const allowed = this.permissionEvaluator.checkObjectPermission(
         opCtx.operation,
@@ -847,8 +855,11 @@ export function registerAuthzMiddleware(
         permissionSets,
         { isPrivate: secMeta.isPrivate },
       );
-
       if (!allowed) {
+        delegatedUnitScope = await delegatedUnitReadScope(this.delegatedAdminGate, opCtx, permissionSets, delegatorSets);
+      }
+
+      if (!allowed && !delegatedUnitScope) {
         // [#7414] TWO messages, two audiences — the split #7307 made for
         // `DELETE_RESTRICTED`, reached from the authorization side and through
         // the SAME catalog.
@@ -2351,6 +2362,9 @@ export function registerAuthzMiddleware(
       );
       const rlsFilter = andComposeLayers(layered.layer0, layered.layer1);
       if (rlsFilter) extra.push(rlsFilter);
+      // [ADR-0090 D12] The delegated unit read admitted at step 2 sees the
+      // units its scopes cover, and only those.
+      if (delegatedUnitScope) extra.push(delegatedUnitScope);
       let tenantLayer0Verdict = layered.tenantLayer0Verdict;
       // ADR-0055: a controlled_by_parent object derives its read scope from the
       // master record — `masterFK IN (<the master ids this caller may read>)`,
