@@ -110,7 +110,7 @@ describe('generateObjectDraft', () => {
      * Where the key went instead is pinned in
      * `external-object-draft-primary-key.test.ts`.
      */
-    expect(fields.order_id).toEqual({ type: 'text' });
+    expect(fields.order_id).toEqual({ type: 'text', label: 'Order Id' });
     expect(fields.amount.type).toBe('number');
     expect(fields.ordered_at.type).toBe('datetime');
     expect(fields.metadata.type).toBe('json');
@@ -124,7 +124,7 @@ describe('generateObjectDraft', () => {
     expect(draft.source).toContain('REVIEW:');
     // Same flip, source side: the rendered field line no longer carries the
     // key, and the introspected key survives as the comment ruling D requires.
-    expect(draft.source).toContain("order_id: { type: 'text' },");
+    expect(draft.source).toContain("order_id: { type: 'text', label: 'Order Id' },");
     expect(draft.source).not.toContain('primaryKey: true');
     expect(draft.source).toContain('// Remote primary key: order_id');
   });
