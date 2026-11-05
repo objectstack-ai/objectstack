@@ -129,9 +129,9 @@
  *   from it. The getter reads the field the handler read, when it read it:
  *   slice 2's batch shape, unbound, per the seat's provider ruling (no shipped
  *   provider reads `this`).
- * - The masker, the protocol, the read gate, the schema mask and the metadata
- *   service are each resolved per request by a METHOD of the class, and every
- *   method goes as a closure.
+ * - The masker, the protocol, the read gate, the schema mask, the metadata
+ *   service and [#30218] the request's environment are each resolved per
+ *   request by a METHOD of the class, and every method goes as a closure.
  * - The door names the requested type through the private static
  *   `metaTypeSingular`, which it used to call as
  *   `RestServer.metaTypeSingular(…)`; for the reason the section above gives,
@@ -1092,6 +1092,7 @@ export interface MetaItemPublishedRouteHost {
     metaItemReadGate: RestServer['metaItemReadGate'];
     maskObjectDocument: RestServer['maskObjectDocument'];
     readonly objectQLProvider: RestServer['objectQLProvider'];
+    resolveRequestEnvironmentId: RestServer['resolveRequestEnvironmentId'];
     resolveMetadataService: RestServer['resolveMetadataService'];
 }
 
@@ -1265,9 +1266,11 @@ export function registerMetaItemPublishedRoute(this: MetaItemPublishedRouteHost,
                     let withheld = false;
                     if (publishedMetaType !== 'object' && publishedMetaType !== 'package'
                         && typeof publishedProtocol?.getMetaItem === 'function') {
+                        // [#30218] The REQUEST's environment's engine,
+                        // through the shared resolver, never the host's.
                         const ql = await wiredEngineOrLoud(
                             Boolean(this.objectQLProvider),
-                            () => this.objectQLProvider!(environmentId),
+                            async () => this.objectQLProvider!(await this.resolveRequestEnvironmentId(environmentId, req)),
                         );
                         const registry = (ql as any)?.registry;
                         if (typeof registry?.isPackageDisabled === 'function') {

@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { ListViewSchema } from '@objectstack/spec/ui';
-import { buildPersonalViewConfig, personalViewEntry, readPersonalViewRows } from './personalViews';
+import { buildPersonalViewConfig, personalViewEntry, personalViewPanelFilters, readPersonalViewRows } from './personalViews';
 
 const row = (extra: Record<string, unknown> = {}) => ({
   id: 'pv_1',
@@ -104,5 +104,77 @@ describe('buildPersonalViewConfig', () => {
   it('refuses a Filter panel group it cannot fold losslessly, instead of storing another record set', () => {
     const nested = { logic: 'and', conditions: [{ logic: 'or', conditions: [{ field: 'city', operator: 'equals', value: 'Paris' }] }] };
     expect(buildPersonalViewConfig('crm_lead', VIEW, { url: { filters: nested as never } })).toEqual({ ok: false, reason: 'nested_group' });
+  });
+});
+
+/**
+ * objectstack#30073 — a personal view's own conditions are Filter panel rows,
+ * and 保存 writes the panel back as the view's filter in the stored shape.
+ */
+describe('personalViewPanelFilters', () => {
+  const every = () => true;
+
+  it('reads a stored AND list as one panel row per condition, operator and value as stored', () => {
+    const group = personalViewPanelFilters({
+      filter: [
+        { field: 'stage', operator: 'not_in', value: ['closed_won', 'closed_lost'] },
+        { field: 'close_date', operator: 'between', value: ['{quarter_start}', '{quarter_end}'] },
+      ],
+    }, every);
+    expect(group?.logic).toBe('and');
+    expect(group?.conditions.map(({ field, operator, value }) => ({ field, operator, value }))).toEqual([
+      { field: 'stage', operator: 'not_in', value: ['closed_won', 'closed_lost'] },
+      { field: 'close_date', operator: 'between', value: ['{quarter_start}', '{quarter_end}'] },
+    ]);
+  });
+
+  it('reads the one any-of group the fold writes for an OR panel as an OR group of rows', () => {
+    const group = personalViewPanelFilters({
+      filter: [{ or: [{ field: 'city', operator: 'equals', value: 'Paris' }, { field: 'city', operator: 'equals', value: 'Rome' }] }],
+    }, every);
+    expect(group?.logic).toBe('or');
+    expect(group?.conditions.map((c) => c.value)).toEqual(['Paris', 'Rome']);
+  });
+
+  it('leaves a list the panel cannot hold, a refused field, or no condition where every view keeps its conditions', () => {
+    const orBeside = [{ field: 'status', operator: 'equals', value: 'open' }, { or: [{ field: 'city', operator: 'equals', value: 'Paris' }] }];
+    expect(personalViewPanelFilters({ filter: orBeside }, every)).toBeUndefined();
+    expect(personalViewPanelFilters({ filter: [{ field: 'secret', operator: 'equals', value: 1 }] }, (f) => f !== 'secret')).toBeUndefined();
+    expect(personalViewPanelFilters({ filter: [] }, every)).toBeUndefined();
+    expect(personalViewPanelFilters({}, every)).toBeUndefined();
+  });
+});
+
+describe('buildPersonalViewConfig — a view whose conditions the panel holds', () => {
+  const OWN_FILTER = [{ field: 'city', operator: 'equals', value: 'Paris' }];
+  const VIEW = { id: 'pv_1', label: 'Paris leads', type: 'grid', columns: ['name', 'city'], filter: OWN_FILTER };
+  const panelFilters = personalViewPanelFilters(VIEW, () => true);
+
+  it('an untouched panel keeps the stored filter as it is', () => {
+    const built = buildPersonalViewConfig('crm_lead', VIEW, { url: { filters: undefined }, panelFilters });
+    expect(built.ok && built.config.filter).toEqual(OWN_FILTER);
+  });
+
+  it('an edited panel is the whole filter, in the stored shape, never laid over the view\'s own', () => {
+    const edited = { id: 'root', logic: 'and', conditions: [{ id: 'view-0', field: 'city', operator: 'equals', value: 'Rome' }] };
+    const built = buildPersonalViewConfig('crm_lead', VIEW, { url: { filters: edited as never }, panelFilters });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.config.filter).toEqual([{ field: 'city', operator: 'equals', value: 'Rome' }]);
+    expect(ListViewSchema.safeParse(built.config).success).toBe(true);
+  });
+
+  it('an emptied panel stores no filter', () => {
+    const built = buildPersonalViewConfig('crm_lead', VIEW, {
+      url: { filters: { id: 'root', logic: 'and', conditions: [] } as never },
+      panelFilters,
+    });
+    expect(built.ok && built.config.filter).toBeUndefined();
+  });
+
+  it('a group the fold cannot write losslessly keeps the refusal', () => {
+    const nested = { logic: 'and', conditions: [{ logic: 'or', conditions: [{ field: 'city', operator: 'equals', value: 'Paris' }] }] };
+    expect(buildPersonalViewConfig('crm_lead', VIEW, { url: { filters: nested as never }, panelFilters }))
+      .toEqual({ ok: false, reason: 'nested_group' });
   });
 });
