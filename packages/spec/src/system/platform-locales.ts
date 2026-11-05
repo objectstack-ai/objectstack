@@ -59,11 +59,18 @@ export const PLATFORM_LOCALE_TAGS: readonly PlatformLocaleTag[] = Object.freeze(
 );
 
 /**
- * Read aliases: a code that stored values already carry, mapped to the table
- * tag it means. Reads only: a new write uses the table tag itself.
+ * Read aliases: a code that stored values already carry, or that a browser or
+ * operating system sends, mapped to the table tag it means. Reads only: a new
+ * write uses the table tag itself.
+ *
+ * Each regional Chinese alias also has a row for its script-subtag spelling,
+ * which names the table tag outright: `zh-Hans-CN` and `zh-Hans-SG` read as
+ * `zh-Hans`, `zh-Hant-TW`, `zh-Hant-HK` and `zh-Hant-MO` as `zh-Hant`.
  *
  * The list is closed. A code it does not name is not guessed at, so there is
- * no region fallback here (`pt-PT` is not `pt-BR`, `zh-Hans-CN` is not listed).
+ * no region or script fallback here: `pt-PT` is not `pt-BR`, and a
+ * script-subtag spelling without a row (`zh-Hant-US`) answers nothing, because
+ * the rows are read one by one, never as a pattern.
  * Frozen.
  */
 export const PLATFORM_LOCALE_READ_ALIASES = Object.freeze({
@@ -73,6 +80,12 @@ export const PLATFORM_LOCALE_READ_ALIASES = Object.freeze({
   'zh-TW': 'zh-Hant',
   'zh-HK': 'zh-Hant',
   'zh-MO': 'zh-Hant',
+  // The script-subtag spellings of the five regional aliases above (#30618).
+  'zh-Hans-CN': 'zh-Hans',
+  'zh-Hans-SG': 'zh-Hans',
+  'zh-Hant-TW': 'zh-Hant',
+  'zh-Hant-HK': 'zh-Hant',
+  'zh-Hant-MO': 'zh-Hant',
   'ja-JP': 'ja',
   'es-ES': 'es',
   pt: 'pt-BR',
@@ -109,8 +122,9 @@ const TAG_BY_FOLDED_CODE: ReadonlyMap<string, PlatformLocaleTag> = new Map<strin
  * language, first variant). Its table-language step asks this function of
  * both the requested code and each key, so the two never contradict: `pt`
  * means `pt-BR`, and a request for `pt-BR` may still be served by a bundle's
- * `pt` key; a bundle holding both scripts answers `zh` and `zh-CN` with its
- * Simplified key and `zh-TW` with its Traditional one, in any key order.
+ * `pt` key; a bundle holding both scripts answers `zh`, `zh-CN` and
+ * `zh-Hans-CN` with its Simplified key and `zh-TW` and `zh-Hant-TW` with its
+ * Traditional one, in any key order.
  */
 export function platformLocaleTagOf(code: unknown): PlatformLocaleTag | undefined {
   if (typeof code !== 'string') return undefined;

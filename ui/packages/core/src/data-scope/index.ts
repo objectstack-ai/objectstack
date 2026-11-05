@@ -29,7 +29,8 @@ export {
   elementDataSourceBlock,
   elementDataSourceRefusedLimitMessage,
   elementDataSourceViewNotFoundMessage,
-  isElementDataSourceBlock,
+  // `isElementDataSourceBlock` stays in the module for the registry and off
+  // the public entry (objectstack#25921: zero consumers).
   isElementDataSourceConfig,
   resolveSavedView,
   type ComposedElementDataSource,
