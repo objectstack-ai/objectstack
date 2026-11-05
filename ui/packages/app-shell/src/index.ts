@@ -304,6 +304,9 @@ export {
   useInvitationPreview,
   type InvitationArrival,
 } from './console/auth/invitationArrival.js';
+// Registering from an invitation link accepts that invitation and enters its
+// organization, on both register pages (#30125).
+export { useInvitationSignUpJoin, type InvitationSignUpJoin } from './console/auth/invitationSignUpJoin.js';
 export { ForgotPasswordPage as DefaultForgotPasswordPage } from './console/auth/ForgotPasswordPage.js';
 export { HomeLayout as DefaultHomeLayout, HomeLayout } from './console/home/HomeLayout.js';
 export { HomePage as DefaultHomePage, HomePage } from './console/home/HomePage.js';
