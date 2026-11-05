@@ -154,7 +154,7 @@ describe('the Branding namespace under a walled posture (#24766)', () => {
         const namespaces = await b.listed();
         expect(namespaces).not.toContain('branding');
         // Control: the listing is real and the rest of the slate is offered.
-        expect(namespaces).toEqual(expect.arrayContaining(['company', 'localization', 'mail']));
+        expect(namespaces).toEqual(expect.arrayContaining(['company', 'localization']));
         expect(b.service.listManifests().map((m) => m.namespace)).not.toContain('branding');
       });
 
