@@ -74,9 +74,14 @@ function tmp(prefix: string): string {
   return d;
 }
 
-/** The env every run starts from: no variable of any spelling the subject reads. */
-function baseEnv(home: string, over: Record<string, string | undefined> = {}) {
-  return childEnv({
+/**
+ * The overrides every run starts from: no variable of any spelling the subject
+ * reads. Each spawn hands them to `childEnv` itself, with `NODE_ENV` unset as
+ * the last word, so the child's posture is readable at the call
+ * (`check:cli-test-child-env`).
+ */
+function baseEnv(home: string, over: Record<string, string | undefined> = {}): Record<string, string | undefined> {
+  return {
     NO_COLOR: '1',
     HOME: home,
     OS_CLOUD_URL: 'off',
@@ -102,11 +107,10 @@ function baseEnv(home: string, over: Record<string, string | undefined> = {}) {
     BETTER_AUTH_SECRET: undefined,
     OS_CLUSTER_DRIVER: undefined,
     OS_MODE: undefined,
-    NODE_ENV: undefined,
     OS_PORT: undefined,
     PORT: undefined,
     ...over,
-  });
+  };
 }
 
 /** Everything under `dir`, recursively, as relative paths. */
@@ -123,11 +127,11 @@ interface Live {
   output: () => string;
 }
 
-function boot(what: string, cwd: string, env: Record<string, string | undefined>): Promise<Live> {
+function boot(what: string, cwd: string, over: Record<string, string | undefined>): Promise<Live> {
   return new Promise((resolveBoot, rejectBoot) => {
     const child = spawn(process.execPath, [CLI, 'start', '--port', KERNEL_ASSIGNED_PORT], {
       cwd,
-      env,
+      env: childEnv({ ...over, NODE_ENV: undefined }),
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
     });
@@ -257,7 +261,7 @@ describe('#30120 — with the image switch on, a start missing its settings refu
     const cwd = tmp('os-30120-cwd-');
     const run = spawnSync(process.execPath, [CLI, 'start', '--port', KERNEL_ASSIGNED_PORT], {
       cwd,
-      env: baseEnv(home, { [SWITCH]: 'true', ...over }),
+      env: childEnv({ ...baseEnv(home, { [SWITCH]: 'true', ...over }), NODE_ENV: undefined }),
       encoding: 'utf8',
       timeout: 120_000,
     });
