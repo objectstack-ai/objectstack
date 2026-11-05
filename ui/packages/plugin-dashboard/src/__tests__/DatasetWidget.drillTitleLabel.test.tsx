@@ -102,6 +102,7 @@ const datasetOf = (
     // Both dimensions drill, so the filter names the clicked GROUP as well as
     // the clicked bucket — which is what makes a wrong series visible.
     dimensionFields: { status: 'status_id', priority: 'priority_id' },
+    drillScopes: { est_hours: {} },
     drillRawRows: rawRows,
   })),
 });
@@ -307,6 +308,7 @@ describe('DatasetWidget — the drill title reads the series LABEL (objectui#468
               ],
               object: 'proj_task',
               dimensionFields: { status: 'status_id' },
+              drillScopes: { est_hours: {} },
               drillRawRows: [{ status: 'st-backlog' }],
             })),
           } as any}

@@ -186,6 +186,7 @@ const STAGE_RESULT = {
   ],
   object: 'crm_opportunity',
   dimensionFields: { stage: 'stage' },
+  drillScopes: { total_amount: {}, avg_probability: {} },
   drillRawRows: [
     { stage: null },
     { stage: 'closed_won' },

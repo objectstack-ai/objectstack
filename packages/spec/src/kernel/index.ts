@@ -17,9 +17,11 @@ export * from './events.zod';
 // feature.zod (FeatureFlagSchema / FeatureStrategy / FeatureFlag factory) was
 // REMOVED per ADR-0056 D8: zero runtime consumers, and its only protocol home —
 // the static ObjectStackCapabilities.system.features descriptor — was itself
-// removed as dead (#3605). Live toggles are the `feature_flags` settings
-// manifest (ADR-0007, env-overridable via OS_FEATURE_FLAGS_*) and the
-// PUBLIC_AUTH_FEATURES registry (public-auth-features.ts) for auth gates.
+// removed as dead (#3605). There is no central feature-flag namespace: a
+// setting a plugin reads is declared on that plugin's own settings manifest
+// (SettingsManifestSchema, ADR-0007, env-overridable via OS_{NAMESPACE}_{KEY}),
+// and the capabilities a deployment advertises to clients are the
+// PUBLIC_AUTH_FEATURES registry (public-auth-features.ts).
 export * from './manifest.zod';
 // metadata-customization.zod (MetadataOverlaySchema, FieldChangeSchema, the
 // three-layer overlay / 3-way-merge protocol) was REMOVED per ADR-0049
