@@ -8,6 +8,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { authGateEvents } from './auth-gate-events.js';
+import { runBeforeSignOut } from './beforeSignOut.js';
 import type { AuthUser, AuthClient, AuthProviderOptions, PreviewModeOptions, AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthPublicConfig, SignInWithProviderOptions, SignInTwoFactorCodeKind, TwoFactorChallenge } from './types.js';
 import { TWO_FACTOR_CHALLENGE_ENDED_CODES } from './two-factor-codes.js';
 import { AuthCtx, type AuthContextValue } from './AuthContext.js';
@@ -491,6 +492,9 @@ export function AuthProvider({
   const signOut = useCallback(async () => {
     setIsLoading(true);
     try {
+      // Steps that need the session (a push device's unregister) run while it
+      // still exists. Bounded, and never rejects: it cannot hold sign-out back.
+      await runBeforeSignOut();
       await client.signOut();
       setUser(null);
       setSession(null);
