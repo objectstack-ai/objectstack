@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: one showcase boot for the whole file, its REST and MCP doors driven in process, and one timed ban waited out to its expiry; 12.25 s of tests, the slower of two local runs on a shared agent box, x 1.25, rounded up, no CI reading yet (the dogfood lane did not run on this PR), re-measure on CI
 
 /**
  * A banned user's credentials are refused while the ban holds, at every door
