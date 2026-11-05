@@ -1091,7 +1091,8 @@ const DECLARED_FIELD_DOOR =
   'every driver, before any statement is built. The whole payload is refused, so the correctly named ' +
   'fields beside the bad key never land either. The refusal arrives at run time, on whichever record ' +
   'first exercises the write and far from the line that made the mistake, which is why the rule ' +
-  'reports it at author time, naming the field, the object and the write.';
+  'reports it at author time, naming the field, the object and the write. Declared includes every field ' +
+  'an `objectExtensions` entry of the same artifact adds to the object, which the registry serves.';
 
 /** The cause and the consequence of writing an unprovisioned anchor — the three anchor ids. */
 const UNPROVISIONED_ANCHOR_WRITE: readonly string[] = [
@@ -3898,8 +3899,8 @@ const TRANSLATION_TARGET_UNKNOWN_EXPLANATION: RuleExplanation = {
     'The verdict names the nearest declared name when one is close ("Did you mean"), and the fix ' +
       'line names the remedy only, without listing what is declared; what each key may name follows.',
     'Under `objects.OBJECT` (an object this stack, or a sibling package of the same artifact, ' +
-      'defines): `fields.FIELD` a declared field (a system column, `_id`, `name` and `space` are ' +
-      'never reported); `_views.VIEW` a view\'s `name`, not its label — the runtime keys a nameless ' +
+      'defines): `fields.FIELD` a declared field, fields an `objectExtensions` entry of the same ' +
+      'artifact adds included (a system column, `_id`, `name` and `space` are never reported); `_views.VIEW` a view\'s `name`, not its label — the runtime keys a nameless ' +
       'default `list` `default`, never `list`; `_sections.KEY` a ' +
       '`fieldGroups[].key`, a named form-view section or a named `record:details` section — a ' +
       'section is translatable only through a stable name; `_tabs.TAB` a filter-preset tab that a ' +
@@ -4327,7 +4328,8 @@ const PAGE_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
   covers: 'how a page binding names a field',
   paragraphs: [
     'A page component binds fields by name, and each name must match one of the bound object\'s ' +
-      'declared fields, or a system field, exactly: a misspelt or renamed field resolves to nothing, ' +
+      'declared fields (declared includes fields an `objectExtensions` entry of the same artifact ' +
+      'adds), or a system field, exactly: a misspelt or renamed field resolves to nothing, ' +
       'at the cost the message names.',
     'To fix it, correct the name (the `fix:` line names the nearest declared field when one is ' +
       'close) or add the field to the object. Not judged here: a dotted relationship path ' +

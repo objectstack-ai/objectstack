@@ -178,7 +178,7 @@ import {
   READONLY_INSERT_STRIP_OUTCOME,
   READONLY_WHEN_STRIP_SCOPE,
 } from './validate-readonly-flow-writes.js';
-import { recordsOf } from './object-graph.js';
+import { objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
 
 export type ReadonlyHookWriteSeverity = 'error' | 'warning';
 
@@ -404,7 +404,13 @@ export function validateReadonlyHookWrites(
     );
     if (writes.length === 0) return;
 
-    roIndex ??= buildReadonlyIndex(recordsOf(stack.objects));
+    // [#30471] The readonly index reads the objects as SERVED (`objectsAsServed`,
+    // the package's one fold): a write to a field a sibling package adds
+    // through `objectExtensions` and declares `readonly` is judged as a declared
+    // one is. Readonly is a question about the field's definition, so a field two
+    // packages tie on is left out (`objectsWithoutTiedFields`) and goes unjudged.
+    // The insert-strip exemption is object-level and stays on the declared objects.
+    roIndex ??= buildReadonlyIndex(objectsWithoutTiedFields(objectsAsServed(stack)));
     insertStripExempt ??= buildInsertStripExemptObjects(recordsOf(stack.objects));
 
     const hookName = typeof hook.name === 'string' && hook.name ? hook.name : `#${hookIndex}`;

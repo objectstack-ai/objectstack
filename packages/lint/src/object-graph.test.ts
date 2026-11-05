@@ -40,6 +40,10 @@ import { ACTION_BODY_WRITE_UNKNOWN_FIELD, validateActionBodyWrites } from './val
 import { HOOK_BODY_WRITE_UNKNOWN_FIELD, validateHookBodyWrites } from './validate-hook-body-writes.js';
 import { validateReactPageProps } from './validate-react-page-props.js';
 import { TRANSLATION_TARGET_UNKNOWN, validateTranslationReferences } from './validate-translation-references.js';
+import { FLOW_UPDATE_READONLY_FIELD, validateReadonlyFlowWrites } from './validate-readonly-flow-writes.js';
+import { HOOK_API_UPDATE_READONLY_FIELD, validateReadonlyHookWrites } from './validate-readonly-hook-writes.js';
+import { ACTION_API_UPDATE_READONLY_WHEN_FIELD, validateReadonlyActionWrites } from './validate-readonly-action-writes.js';
+import { SEARCHABLE_FIELD_UNKNOWN } from './validate-searchable-fields.js';
 // [#16340] Read back the registry's OWN definition table to assert the graph
 // derives its injected types rather than carrying a second copy of them.
 import { injectedSystemColumnDefs } from '@objectstack/spec/data';
@@ -945,5 +949,86 @@ describe('[#30471] the field-name indexes read the objects as served', () => {
     expect(messages(text, num)).toEqual([]);
     expect(messages(text, {})).toEqual([expect.stringContaining('type mismatch'), expect.stringContaining('nullable')]);
     expect(messages(num, {})).toEqual([expect.stringContaining('nullable')]);
+  });
+
+  it('validate-expressions, on the per-package leg: a tied field is judged on no definition either', () => {
+    const body = { id: 'app', objects: [{ ...deal, validations: [{ name: 'v', type: 'script', condition: 'record.score + 1 > 2', message: 'M' }] }, account] };
+    const tie = (a: Rec, b: Rec): Rec => ({
+      ...body,
+      manifest: body,
+      packages: [
+        { manifest: body },
+        { manifest: { id: 'mod', objectExtensions: [{ extend: 'xs_deal', fields: a }] } },
+        { manifest: { id: 'mod2', objectExtensions: [{ extend: 'xs_deal', fields: b }] } },
+      ],
+    });
+    const messages = (a: Rec, b: Rec) => validateStackExpressions(tie(a, b)).map((issue) => issue.message);
+    const num = { score: { type: 'number' } };
+    const text = { score: { type: 'text' } };
+    expect(messages(num, text)).toEqual([]);
+    expect(messages(text, num)).toEqual([]);
+    expect(messages(text, {})).toEqual([expect.stringContaining('type mismatch'), expect.stringContaining('nullable')]);
+  });
+
+  // The readonly write rules judge an extension field's `readonly` /
+  // `readonlyWhen` as a declared field's: without that, moving the existence
+  // index above would have left such a write silent where `main` at least
+  // refused the name. Readonly is the field's definition, so a tie is unjudged.
+  describe('the readonly write rules read the served definition', () => {
+    const lock = { locked: { type: 'text', readonly: true } };
+    const gate = { gated: { type: 'number', readonlyWhen: "record.name == 'x'" } };
+    // rule · its readonly id · the extension fields it needs · the stack writing them
+    const readonly: Array<[string, string, Run, Rec, Rec]> = [
+      ['validate-readonly-flow-writes', FLOW_UPDATE_READONLY_FIELD, validateReadonlyFlowWrites, lock, {
+        flows: [{ name: 'fl', nodes: [{ id: 'n', type: 'update_record', config: { objectName: 'xs_deal', fields: { locked: 'x' } } }] }],
+      }],
+      ['validate-readonly-hook-writes', HOOK_API_UPDATE_READONLY_FIELD, (stack) => validateReadonlyHookWrites(stack), lock, {
+        hooks: [{ name: 'h', object: 'xs_account', events: ['afterInsert'], body: { language: 'js', source: "await ctx.api.object('xs_deal').update({ id: dealId, locked: 'x' });" } }],
+      }],
+      ['validate-readonly-action-writes', ACTION_API_UPDATE_READONLY_WHEN_FIELD, validateReadonlyActionWrites, gate, {
+        actions: [{ name: 'act', label: 'Act', objectName: 'xs_deal', body: { language: 'js', source: "await ctx.api.object('xs_deal').update({ id: ctx.recordId, gated: 1 });" } }],
+      }],
+    ];
+    const plain = { locked: { type: 'text' }, gated: { type: 'number' } };
+    const ext = (fields: Rec) => [{ extend: 'xs_deal', fields }];
+    const tie = (a: Rec, b: Rec, extra: Rec, perPackageLeg = false): Rec => {
+      const mods = [
+        { manifest: { id: 'mod', objectExtensions: ext(a) } },
+        { manifest: { id: 'mod2', objectExtensions: ext(b) } },
+      ];
+      if (!perPackageLeg) return { objects: [deal, account], packages: [{ manifest: { id: 'app', objects: [deal, account] } }, ...mods], ...extra };
+      const body = { id: 'app', objects: [deal, account], ...extra };
+      return { ...body, manifest: body, packages: [{ manifest: body }, ...mods] };
+    };
+
+    it.each(readonly)('%s: an extension field declared readonly is refused with the readonly id', (_rule, id, run, fields, writing) => {
+      expect(ids(run, artifact(writing, ext(fields)))).toEqual([id]);
+      expect(ids(run, perPackage(writing, ext(fields)))).toEqual([id]);
+      // The same name added writable, or not added at all, is not this rule's.
+      expect(ids(run, artifact(writing, ext(plain)))).toEqual([]);
+      expect(ids(run, artifact(writing, []))).toEqual([]);
+    });
+
+    it.each(readonly)('%s: a field two packages tie on, one of them readonly, is unjudged', (_rule, id, run, fields, writing) => {
+      for (const perPackageLeg of [false, true]) {
+        expect(ids(run, tie(plain, fields, writing, perPackageLeg))).toEqual([]);
+        expect(ids(run, tie(fields, plain, writing, perPackageLeg))).toEqual([]);
+        expect(ids(run, tie(fields, {}, writing, perPackageLeg))).toEqual([id]);
+      }
+    });
+  });
+
+  // `indexObjectSearchTargets` stays on the declared objects (its type
+  // question is the searchable-fields rule's, not moved here), so a react
+  // page's `searchableFields` naming an extension field is still refused.
+  it('validate-react-page-props: searchableFields still reads the declared objects', () => {
+    const search = (field: string) => ({
+      pages: [{
+        name: 'p', kind: 'react',
+        source: `function Page(){ return <ListView data={{ provider: 'object', object: 'xs_deal' }} columns={['name']} searchableFields={['name', '${field}']} />; }`,
+      }],
+    });
+    expect(ids(validateReactPageProps, artifact(search('region')))).toEqual([SEARCHABLE_FIELD_UNKNOWN]);
+    expect(ids(validateReactPageProps, artifact(search('name')))).toEqual([]);
   });
 });
