@@ -100,6 +100,14 @@ export default defineConfig({
         find: /^@objectstack\/observability$/,
         replacement: path.resolve(__dirname, '../observability/src/index.ts'),
       },
+      // [#30323] The sample-data count door refuses an unknown query parameter
+      // with REST's shared sentence (`unknownQueryParamRefusalMessage`), so the
+      // suites that drive it judge THIS checkout's sentence, not a
+      // `rest/dist` that may be behind it. Anchored like the entries above.
+      {
+        find: /^@objectstack\/rest$/,
+        replacement: path.resolve(__dirname, '../rest/src/index.ts'),
+      },
     ],
   },
   // Discovery is untouched — but this file is NOT "the alias and nothing else".
