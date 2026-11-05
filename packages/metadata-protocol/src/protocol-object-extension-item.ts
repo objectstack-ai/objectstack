@@ -40,6 +40,7 @@ import { MetadataProtectionFields } from '@objectstack/spec/kernel';
 import { closureDependencyRemedy, narrowObjectsToPackageClosure } from '@objectstack/lint/runtime';
 import type { RuntimePackageScope } from '@objectstack/lint/runtime';
 import { judgeExtensionFieldSuffix, extensionFieldSuffixRefusalError } from './protocol-extension-field-suffix.js';
+import { judgeRedeclaredOwnerFields, redeclaredOwnerFieldRefusalError } from './protocol-extension-redeclared-owner-field.js';
 import type { MetadataIssueEntry } from './protocol.js';
 
 /** The metadata type of an object extension item. */
@@ -99,6 +100,7 @@ export interface ObjectExtensionRegistry {
     registerObjectExtension?(extension: { extend: string; priority?: number } & Record<string, unknown>, packageId: string): string;
     withdrawObjectExtension?(name: string, packageId: string): boolean;
     getObjectContributors?(name: string): Array<{ packageId: string; ownership: string; definition?: unknown }>;
+    getObjectOwner?(name: string): { packageId: string | undefined; definition?: unknown } | undefined;
 }
 
 type GateRefusal = Error & { code: 'VALIDATION_ERROR'; status: 400; issues?: MetadataIssueEntry[] };
@@ -153,6 +155,12 @@ export interface ObjectExtensionItemSubject {
  *  6. The `__c` reservation (`judgeExtensionFieldSuffix`, #28564), judged as
  *     the package's `objectExtensions` entry; an extension of the package's
  *     own object adds to its own fields, as the judge reads it.
+ *  7. ADR-0146 D10's whitelist (`judgeRedeclaredOwnerFields`): a `fields` key
+ *     naming a field the target's owner declares (`getObjectOwner`, the
+ *     owner's own declaration, never the resolved object) is refused when it
+ *     changes anything outside the display-property whitelist, with the
+ *     prescription naming `fieldPatches`. A registry without `getObjectOwner`
+ *     leaves it unasked, as the target checks above are.
  *
  * Whether the package is writable is the door's own refusal
  * (`WRITABLE_PACKAGE_REQUIRED`), asked before any of this.
@@ -227,6 +235,17 @@ export function objectExtensionItemRefusal(
         objectExtensions: [item],
     }).map((r) => ({ ...r, path: r.path.slice('objectExtensions[0].'.length) }));
     if (suffix.length > 0) return extensionFieldSuffixRefusalError(suffix);
+
+    // 7.
+    const ownerContributor = registry?.getObjectOwner?.(target);
+    const redeclared = judgeRedeclaredOwnerFields({
+        packageId: binding,
+        objectExtensions: [item],
+        ownerOf: () => (ownerContributor
+            ? { packageId: ownerContributor.packageId, definition: ownerContributor.definition }
+            : undefined),
+    }).map((r) => ({ ...r, path: r.path.slice('objectExtensions[0].'.length) }));
+    if (redeclared.length > 0) return redeclaredOwnerFieldRefusalError(redeclared);
     return undefined;
 }
 
