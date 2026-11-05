@@ -42,6 +42,7 @@ import {
   readMcpServerEnabledEnv,
   isOAuthEligibleBaseUrl,
   ipMatchesRange,
+  unreadableIpRangeEntries,
   // [#16384] The one place `'/api/v1/auth'` is written — see its docblock in
   // auth-manager.ts. This file no longer carries an independent copy.
   DEFAULT_AUTH_BASE_PATH,
@@ -130,7 +131,7 @@ import {
 } from './demo-staff.js';
 import { cloudManagedRefusal } from './cloud-managed.js';
 import { registerCopyInvitationLinkAction } from './invitation-link-action.js';
-import { allowedIpRangesWritePredicate, parseAllowedIpRanges } from './allowed-ip-ranges.js';
+import { ALLOWED_IP_RANGES_ENV, allowedIpRangesWritePredicate, parseAllowedIpRanges } from './allowed-ip-ranges.js';
 import { FORWARDED_CLIENT_ADDRESS_HEADERS } from './client-address-forwarding.js';
 import {
   runAdminBanUser,
@@ -553,6 +554,8 @@ export class AuthPlugin implements Plugin {
    */
   private allowListUndeterminedWarned = false;
   private allowListUntrustedHeaderWarned = false;
+  /** The applied allow-list whose unreadable entries were last reported, so one list is reported once. */
+  private allowListUnreadableReportedFor: string | undefined;
   /**
    * [#30203] The allow-list the deployment itself declared (plugin options or
    * an `auth:configure` handler), taken before any setting is applied: what
@@ -2398,8 +2401,10 @@ export class AuthPlugin implements Plugin {
         // at once, rather than leaving the last stored list in force until a
         // restart while the console shows the field empty.
         if (isExplicit('allowed_ip_ranges')) {
-          patch.allowedIpRanges = parseAllowedIpRanges(values.allowed_ip_ranges);
+          const ranges = parseAllowedIpRanges(values.allowed_ip_ranges);
+          patch.allowedIpRanges = ranges;
           this.allowedIpRangesFromSettings = true;
+          this.reportUnreadableAllowListEntries(ctx, ranges, sources.allowed_ip_ranges === 'env');
         } else if (this.allowedIpRangesFromSettings) {
           patch.allowedIpRanges = this.declaredAllowedIpRanges ? [...this.declaredAllowedIpRanges] : [];
           this.allowedIpRangesFromSettings = false;
@@ -3121,6 +3126,36 @@ export class AuthPlugin implements Plugin {
     } catch (err: any) {
       ctx.logger.debug(`[auth] dev seed-admin probe skipped: ${err?.message ?? err}`);
     }
+  }
+
+  /**
+   * ADR-0069 D5 — name the entries of an applied `allowed_ip_ranges` list that
+   * name no range (`unreadableIpRangeEntries`, the gate's own reading). The
+   * save check refuses such a list, so this is a list it never judged: one
+   * stored by an earlier release, or pinned by `OS_AUTH_ALLOWED_IP_RANGES`.
+   * Each such entry matches no address at the gate, while the settings console
+   * shows the list as in force, so `error` (AGENTS.md, degradation log levels),
+   * once per distinct list, with the fix in the same line.
+   */
+  private reportUnreadableAllowListEntries(ctx: PluginContext, ranges: readonly string[], fromEnv: boolean): void {
+    const unreadable = unreadableIpRangeEntries(ranges);
+    const key = unreadable.length > 0 ? JSON.stringify(ranges) : undefined;
+    if (key === this.allowListUnreadableReportedFor) return;
+    this.allowListUnreadableReportedFor = key;
+    if (!key) return;
+    const named = unreadable.map((entry) => JSON.stringify(entry)).join(', ');
+    ctx.logger.error(
+      `[auth] allowed_ip_ranges (ADR-0069 D5) holds ${unreadable.length === 1 ? 'an entry' : 'entries'} that ` +
+        `${unreadable.length === 1 ? 'is' : 'are'} not an IP address or a CIDR range: ${named}. ` +
+        `${unreadable.length === 1 ? 'It matches' : 'Each matches'} no address, so sign-in is admitted only from ` +
+        "the list's other entries, if any, while the settings console shows the list as in force. Fix: " +
+        (fromEnv
+          ? `correct ${ALLOWED_IP_RANGES_ENV} (read at startup) `
+          : 'correct the stored list in the settings console ') +
+        'so each entry is an address, or an address, "/" and a prefix length in decimal digits (0 to 32 for IPv4, ' +
+        '0 to 128 for IPv6), or clear it' +
+        (fromEnv ? '.' : `; locked out, start the server with ${ALLOWED_IP_RANGES_ENV} set to an empty value.`),
+    );
   }
 
   /**
