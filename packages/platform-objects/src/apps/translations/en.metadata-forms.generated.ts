@@ -1756,6 +1756,9 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "params.type": {
         label: "Type"
       },
+      "params.widget": {
+        label: "Widget"
+      },
       "params.required": {
         label: "Required"
       },

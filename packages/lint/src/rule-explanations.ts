@@ -819,7 +819,8 @@ const SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION: RuleExplanation = {
     'Unlike an unqualified key (`security-fls-unqualified-key`) this one looks correct in review, and ' +
       'it is exactly what a field rename leaves behind; an empty remainder is what a half-finished edit ' +
       'leaves. A key with more dots is judged on its whole remainder, because FLS keys address columns, ' +
-      'never joins.',
+      'never joins. The columns are the object\'s as the registry serves it: the fields it declares and ' +
+      'every field an `objectExtensions` entry adds to it, from any package of the same artifact.',
     'Not judged: an object this stack does not define, an object with no readable field map, and a ' +
       'registry-injected system column, which is real and addressable. To fix it, point the key at a ' +
       'field the object declares, or delete the entry: an entry that cannot match is not protection, ' +
