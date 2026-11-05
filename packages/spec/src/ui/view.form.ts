@@ -11,6 +11,15 @@
  *
  * Visibility predicates use the `type` discriminator to reveal only
  * the surface-specific block.
+ *
+ * Composite children are spelled out, each with the hint the panel shows
+ * (#30267). `os i18n extract` walks only DECLARED children, so a composite
+ * left to the schema-derived list had no catalog key for any of its rows and
+ * read English in every locale. A declared child's `helpText` is its schema
+ * `.describe()` text, the hint the panel showed before it was declared;
+ * `view-form-composite-children.test.ts` holds the two equal and holds each
+ * child list equal to the schema's live keys, so a key added to a block
+ * cannot go missing from the panel.
  */
 
 import { defineForm } from './view.zod';
@@ -95,11 +104,17 @@ export const viewForm = defineForm({
       collapsed: true,
       columns: 2,
       fields: [
-        { field: 'resizable', colSpan: 1 },
+        { field: 'resizable', colSpan: 1, helpText: 'Enable column resizing' },
         // `striped` / `bordered` inputs removed with the keys (#7176 — pass-through-only, retired).
-        { field: 'compactToolbar', colSpan: 1 },
-        { field: 'rowHeight', colSpan: 1 },
-        { field: 'selection', type: 'composite', colSpan: 2 },
+        { field: 'compactToolbar', colSpan: 1, helpText: 'Collapse Group/Color/Density/Hide-fields into a single View settings popover' },
+        { field: 'rowHeight', colSpan: 1, helpText: 'Row height / density setting' },
+        {
+          field: 'selection',
+          type: 'composite',
+          colSpan: 2,
+          helpText: 'Row selection configuration',
+          fields: [{ field: 'type', helpText: 'Selection mode' }],
+        },
       ],
     },
     // `pagination` is NOT grid-only: every view type accepts it, and
@@ -113,7 +128,17 @@ export const viewForm = defineForm({
       description: 'Page size and page-size options — every view type accepts them, not only grids.',
       collapsible: true,
       collapsed: true,
-      fields: [{ field: 'pagination', type: 'composite' }],
+      fields: [
+        {
+          field: 'pagination',
+          type: 'composite',
+          helpText: 'Pagination configuration',
+          fields: [
+            { field: 'pageSize', helpText: 'Number of records per page. On a view with no pager (kanban, gallery, timeline) it is the fetch ceiling, and the renderer owes two things: bound its fetch at this number, and, when the filtered set is larger than it, show a visible truncation signal saying what is on screen is not the whole set' },
+            { field: 'pageSizeOptions', helpText: 'Available page size options' },
+          ],
+        },
+      ],
     },
     {
       name: 'kanban',
@@ -172,14 +197,62 @@ export const viewForm = defineForm({
       collapsible: true,
       collapsed: true,
       fields: [
-        { field: 'userFilters', type: 'composite', helpText: 'Quick-filter bar: element style (dropdown / tabs / toggle) + exposed fields or tab presets' },
+        {
+          field: 'userFilters',
+          type: 'composite',
+          helpText: 'Quick-filter bar: element style (dropdown / tabs / toggle) + exposed fields or tab presets',
+          fields: [
+            { field: 'element', helpText: 'Filter control style on object views: "dropdown" (per-field value chips). "toggle" is deprecated. "tabs" is page-only — use `listViews` for named presets.' },
+            {
+              field: 'fields',
+              type: 'repeater',
+              helpText: 'Fields exposed as quick filters (dropdown/toggle elements)',
+              // Row-property names: every authorable row property, `label`
+              // equal to the item schema's `.meta({ title })`, as `columns`
+              // above does.
+              fields: [
+                { field: 'field', label: 'Field' },
+                { field: 'label', label: 'Label' },
+                { field: 'type', label: 'Type' },
+                { field: 'options', label: 'Options' },
+                { field: 'showCount', label: 'Show Count' },
+                { field: 'defaultValues', label: 'Default Values' },
+              ],
+            },
+          ],
+        },
         // [#20301] The `tabs` repeater was REMOVED with the key it wrote — now a
         // `retiredKey()` tombstone on `ListViewSchema` (no renderer ever mounted a
         // tab bar for it). A form input for an unwritable key is the
         // false-compliant UI half of a retirement; named presets are `listViews`
         // entries, each a tab in the saved-view switcher.
-        { field: 'appearance', type: 'composite', helpText: 'allowedVisualizations: which renderers users may switch between' },
-        { field: 'userActions', type: 'composite', helpText: 'Toolbar toggles: sort / search / filter / row height' },
+        {
+          field: 'appearance',
+          type: 'composite',
+          helpText: 'allowedVisualizations: which renderers users may switch between',
+          fields: [
+            { field: 'showDescription', helpText: 'Show the view description text' },
+            { field: 'allowedVisualizations', helpText: 'Whitelist of visualization types users can switch between (e.g. ["grid", "gallery", "kanban"])' },
+          ],
+        },
+        {
+          field: 'userActions',
+          type: 'composite',
+          helpText: 'Toolbar toggles: sort / search / filter / row height',
+          fields: [
+            { field: 'sort', helpText: 'Allow users to sort records' },
+            { field: 'search', helpText: 'Allow users to search records' },
+            { field: 'filter', helpText: 'Allow users to filter records' },
+            { field: 'refresh', helpText: 'Allow users to reload the view data from the backend without a full page reload' },
+            { field: 'rowHeight', helpText: 'Allow users to toggle row height/density' },
+            { field: 'group', helpText: 'Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block.' },
+            { field: 'addRecordForm', helpText: 'Add records through a form instead of inline' },
+            { field: 'editInline', helpText: 'Allow users to edit records inline. On by default: a user who may update the object edits a cell in place with the field\'s type-aware widget (the same control the form uses), under the permission gate that already decides whether the object is editable at all. Declare `editInline: false` to make the list read-only in place.' },
+            { field: 'hideFields', helpText: 'Allow users to hide/show fields from the toolbar (the affordance behind the view-level `hiddenFields` list). Boolean toggle — distinct from the record-details component\'s `hideFields`, which is an array of field names to omit. On by default: a reader hides and shows columns for themselves; declare `hideFields: false` to withhold the control.' },
+            { field: 'rowColor', helpText: 'Allow users to configure row colouring from the toolbar. Boolean toggle — the colour rules themselves live in the view-level `rowColor` block. Off by default: row colouring is opt-in.' },
+            { field: 'buttons', helpText: 'Custom action button IDs to show in the toolbar' },
+          ],
+        },
         // [#24692] Spelled out so the form offers exactly the two live keys:
         // `mode` and `formView` are `retiredKey()` tombstones on
         // `AddRecordConfigSchema` (no renderer ever read them — the Add button
@@ -189,9 +262,13 @@ export const viewForm = defineForm({
         {
           field: 'addRecord',
           type: 'composite',
-          fields: [{ field: 'enabled' }, { field: 'position' }],
+          helpText: 'Add record entry point configuration',
+          fields: [
+            { field: 'enabled', helpText: 'Show the add record entry point — REQUIRED: `true` draws the Add button, `false` declares it off' },
+            { field: 'position', helpText: 'Position of the add record button: `top` (the toolbar, the default), `bottom` (under the list) or `both`' },
+          ],
         },
-        { field: 'showRecordCount' },
+        { field: 'showRecordCount', helpText: 'Show record count at the bottom of the list' },
       ],
     },
     {
@@ -201,8 +278,30 @@ export const viewForm = defineForm({
       collapsible: true,
       collapsed: true,
       fields: [
-        { field: 'navigation', type: 'composite' },
-        { field: 'sharing', type: 'composite' },
+        // Children spelled out (#30267) so the i18n extractor emits a catalog
+        // key per row, and so the form offers only the live keys:
+        // `navigation.view` and `sharing.type` are `retiredKey()` tombstones
+        // the schema-derived list used to render as editable rows.
+        {
+          field: 'navigation',
+          type: 'composite',
+          helpText: 'Configuration for item click navigation (drawer by default, page, new_window or none)',
+          fields: [
+            { field: 'mode' },
+            { field: 'preventNavigation', helpText: 'Disable standard navigation entirely' },
+            { field: 'openNewTab', helpText: 'Force open in new tab (applies to page mode)' },
+            { field: 'size', helpText: 'Overlay size bucket for the drawer detail: \'auto\' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it.' },
+            { field: 'width', helpText: '[DEPRECATED → size] Pixel/percent width of the drawer (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket.' },
+          ],
+        },
+        {
+          field: 'sharing',
+          type: 'composite',
+          helpText: 'View sharing configuration: who locked the view configuration',
+          fields: [
+            { field: 'lockedBy', helpText: 'User who locked the view configuration' },
+          ],
+        },
       ],
     },
   ],
