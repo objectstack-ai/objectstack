@@ -58,7 +58,9 @@ function makeDriver() {
     name: 'memory', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async find(object: string, ast: any) {
-      return Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where)).map((r) => ({ ...r }));
+      const rows = Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
+      const page = typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
+      return page.map((r) => ({ ...r }));
     },
     async findOne(object: string, ast: any) {
       for (const r of storeFor(object).values()) if (matches(r, ast?.where)) return { ...r };
@@ -166,7 +168,7 @@ describe('a roll-up a disabled package contributes by extension, over an enabled
     engine.registry.enablePackage(MODULE);
     await engine.summaryRefreshSettled();
 
-    const served = await engine.findOne(ACCOUNT, { where: { id: acme.id }, context: { isSystem: true } } as any);
+    const served = await engine.findOne(ACCOUNT, { where: { id: acme.id }, context: { isSystem: true } });
     expect(served?.[TOTAL]).toBe(25);
     expect(stored(beta.id)).toBe(7);
   });
