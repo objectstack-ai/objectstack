@@ -108,7 +108,7 @@ import {
   reportIfNoSignInAccountExists,
   type SignInPathConfigView,
 } from './boot-sign-in-reachability.js';
-import { providerCredentialIndex, registerSignInMethodFloor } from './sign-in-method-floor.js';
+import { providerCredentialIndex, providerCredentialsFrom, registerSignInMethodFloor } from './sign-in-method-floor.js';
 import { judgePlatformAdmin, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
   decideDemoStaffEnvironmentGate,
@@ -2067,9 +2067,8 @@ export class AuthPlugin implements Plugin {
         },
         hostSignInHandoff: this.options.hostSignInHandoff === true,
         stackConfiguredGoogle: () => !!this.configuredSocialProviders?.google,
-        // Not declared at boot = the Google the settings added, which the apply
-        // adds only with a client ID and secret.
-        providerHasCredentials: ({ id, type }) => this.bootProviderCredentials.get(`${type}:${id}`) ?? true,
+        // Read at save time: the index is set in init, after `auth:configure`.
+        providerHasCredentials: (provider) => providerCredentialsFrom(this.bootProviderCredentials)(provider),
         env: () => ((globalThis as any)?.process?.env ?? {}) as Record<string, string | undefined>,
       },
       ctx.logger,

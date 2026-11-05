@@ -92,7 +92,8 @@ export interface SignInMethodFloorDeps {
   /**
    * Whether a provider in force holds a credential pair: a non-blank `clientId`
    * AND `clientSecret` in the configuration it came from. Google added from the
-   * settings has one by construction (the apply adds it only with both).
+   * settings has one by construction (the apply adds it only with both); a
+   * provider of unknown origin does not count ({@link providerCredentialsFrom}).
    */
   providerHasCredentials(provider: { id: string; type: 'social' | 'oidc' }): boolean;
   env(): Record<string, string | undefined>;
@@ -124,6 +125,19 @@ export function providerCredentialIndex(socialProviders: unknown, oidcProviders:
     }
   }
   return index;
+}
+
+/**
+ * {@link SignInMethodFloorDeps.providerHasCredentials} over a boot index. A
+ * provider the index holds answers for itself. Of the providers it does not
+ * hold, only the social Google counts: the settings add it at runtime, and
+ * only with a client ID and secret. Any other provider the boot did not declare
+ * is unaccounted for, so it is not counted as a way in.
+ */
+export function providerCredentialsFrom(
+  index: ReadonlyMap<string, boolean>,
+): SignInMethodFloorDeps['providerHasCredentials'] {
+  return ({ id, type }) => index.get(`${type}:${id}`) ?? (type === 'social' && id === 'google');
 }
 
 const isSettingsGoogle = (p: { id?: string; type?: string } | undefined): boolean =>

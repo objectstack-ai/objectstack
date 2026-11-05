@@ -28,7 +28,8 @@
  *      is refused at both keys, and Google filled in, or switched on over a
  *      stored credential pair, in the same save as email and password off is
  *      accepted;
- *   7. a provider listed without a credential pair is no way in.
+ *   7. a provider listed without a credential pair is no way in, and one the
+ *      boot did not declare counts only as the settings-added Google.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -45,7 +46,7 @@ import {
 import { AuthPlugin } from './auth-plugin.js';
 import type { AuthManager } from './auth-manager.js';
 import { SSO_PROVIDER_OBJECT } from './sso-client-secret.js';
-import { SIGN_IN_FLOOR_COPY, providerCredentialIndex } from './sign-in-method-floor.js';
+import { SIGN_IN_FLOOR_COPY, providerCredentialIndex, providerCredentialsFrom } from './sign-in-method-floor.js';
 
 const SECRET = 'test-secret-at-least-32-chars-long';
 
@@ -387,7 +388,7 @@ describe('the auth settings save keeps a way to sign in', () => {
     expect(passwordOn(manager)).toBe(true);
   });
 
-  it('indexes each boot provider, social and OIDC, by whether it holds both credentials', () => {
+  it('indexes each boot provider, social and OIDC, by whether it holds both credentials; an unindexed one other than Google does not count', () => {
     const index = providerCredentialIndex(
       { github: { clientId: 'id', clientSecret: 'secret' }, gitlab: { clientId: 'id', clientSecret: '' } },
       [{ providerId: 'okta', clientId: 'id', clientSecret: 'secret' }, { providerId: 'azure', clientId: '', clientSecret: 's' }],
@@ -399,6 +400,14 @@ describe('the auth settings save keeps a way to sign in', () => {
       'oidc:azure': false,
     });
     expect(providerCredentialIndex(undefined, undefined).size).toBe(0);
+
+    // Outside the index only the settings-added social Google counts.
+    const has = providerCredentialsFrom(index);
+    expect(has({ id: 'gitlab', type: 'social' })).toBe(false);
+    expect(has({ id: 'google', type: 'social' })).toBe(true);
+    expect(has({ id: 'google', type: 'oidc' })).toBe(false);
+    expect(has({ id: 'bitbucket', type: 'social' })).toBe(false);
+    expect(has({ id: 'keycloak', type: 'oidc' })).toBe(false);
   });
 
   // ── 5. Recovery for a deployment that already stored the dead end ─────────
