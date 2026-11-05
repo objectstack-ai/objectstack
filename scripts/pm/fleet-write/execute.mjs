@@ -1593,11 +1593,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the run_rerun_failed: the five fences judged HERE on the run and its pull, read immediately before ONE bodiless POST — the pull's current head by its own GET, never the run's embedded copy, and a run naming no pull refused by name; each refused with the POST not sent and accepted on the measured run; a run, pull, baseline or fence that fails is zero writes; the 201 confirmed only by reading attempt 2 back with its failed jobs queued or in progress, naming their job ids; attempt 2 never seen, a failed job completed, or a job list unread is FAILED; no annotation": 21,
   "the hierarchy link: sub_issue_add and sub_issue_remove read the parent's and the child's own answers, then the child's parent (add) or the parent's whole list (remove), immediately before ONE write whose body is the child's REST id from its own answer — never its number, never replace_parent; a pull, a transferred or unread card, a child under another parent, one the parent does not list, or a read that is neither answer is zero writes; a child already under this parent is a no-op landed on the list; the answer confirmed only when the parent's list reads the child back (or no longer does) inside the window; a refused write, a list that never settles or never reads whole is FAILED; no annotation, and the rows ride a stroke beside other ops": 20,
   "the advisory rows: advisory_report and advisory_create are ONE POST of their body each, landed on a 2xx carrying an id — a draft's reading state draft — that the row and a notice annotation name; advisory_collaborators_add, advisory_versions and advisory_state read the advisory first and send ONE PATCH — every existing login kept with the missing ones added, an all-present list a no-op, the versions entries alone, or the one state a legal transition reaches, the reopen and the publish among them — or nothing at all on a fence: an unread, other or wrong-state advisory, an illegal move, a list the versions may not replace or a publish whose versions are not set; each lands only when its answer shows the result, a publish only read back as published with the versions it was sent, and a landed publish alone is annotated with its id; ⛔ the marker in a report's or a draft's summary, description and packages and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation": 41,
+  "an issue_create's title and body on a private repository: they reach no log line, row, step summary or annotation when the stroke lands, when the transport fails, or when the payload is refused for an over-cap or ill-typed body — the refusal names the key and the byte count alone": 5,
   "advisory_read: ONE GET after the sender gate and nothing written; the read, advisory and sender fences judged on that answer — target-write by the maintainer's ruling, a sender off the advisory's collaborators sealed for, one without write refused before the GET, any other gate closed — then the answer sealed to the seat's key and emitted as notice parts the reader parses back, opening byte for byte for that key and read alone; a failed or unsealed seal and an over-cap answer FAILED with nothing emitted; ⛔ the marker in the summary, description and vulnerabilities, and the advisory's id, reach no log line, row, step summary or annotation, and the sealed answer alone carries no marker": 18,
 });
 // Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
-// hierarchy link battery, 20 → 21 with the advisory rows' battery, 21 → 22 with advisory_read's: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 22;
+// hierarchy link battery, 20 → 21 with the advisory rows' battery, 21 → 22 with advisory_read's, 22 → 23 with the
+// private-repository issue body's: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 23;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -2264,6 +2266,35 @@ export async function selfTest() {
       t('…and the scrubbed spelling is what appears instead', everything.includes('<redacted>'));
       const thrown = await run(base([{ op: 'comment', issue: 1, body: 'a' }]), { ...allowed, [`POST /repos/${REPO}/issues/1/comments`]: { throws: `socket hung up sending ${TOKEN}` } });
       t('a transport error that echoed the token is scrubbed too', [thrown.summary, ...thrown.logs].join('\n').includes(TOKEN), false);
+    }
+
+    // ── an issue body on a private repository ───────────────────────────────
+    // This run's log is public while the issue it files may sit on a private repository and hold a security
+    // mechanism (pm-dispatch `references/security-findings.md`). The battery pins the three channels where the
+    // title and body never surface. It deliberately claims nothing about a FAILED request: `requestLanded` prints
+    // the platform's message as given, so a message that quoted the body would surface in the row, the log line
+    // and the summary — the advisory rows withhold such a message (`advisoryRefusalCause`), this path does not.
+    battery("an issue_create's title and body on a private repository: they reach no log line, row, step summary or annotation when the stroke lands, when the transport fails, or when the payload is refused for an over-cap or ill-typed body — the refusal names the key and the byte count alone");
+    {
+      // Spaces and punctuation: prose, never an id's, a label's or a login's shape.
+      const MARKER = 'ISSUE MARKER: how the flaw is reached, never to be logged';
+      const PRIVATE = 'objectstack-ai/cloud';
+      const privatePerm = `GET /repos/${PRIVATE}/collaborators/os-support-ai/permission`;
+      const privateAllowed = { [privatePerm]: allowed[PERM] };
+      const filed = (extra = {}) => ({ request_id: 'fw-test-1', repo: PRIVATE, session: 'session_01ABCDEFGHJKMNPQRSTVWXYZ', actions: [{ op: 'issue_create', title: `${MARKER} — the title`, body: `${MARKER} — the body`, labels: ['security'], ...extra }] });
+      const CREATE = `POST /repos/${PRIVATE}/issues`;
+      const issueUrl = (repo, n) => `https://github.test/${repo}/issues/${n}`;
+      const surfaced = (r) => [r.summary ?? '', ...(r.logs ?? []), ...(r.rows ?? []).map((row) => JSON.stringify(row)), ...(r.annotations ?? []).map((a) => JSON.stringify(a))].join('\n');
+      // The platform's answer echoes the title and body back, as GitHub's does.
+      const landed = await run(filed(), { ...privateAllowed, [CREATE]: { status: 201, json: { number: 41, html_url: issueUrl(PRIVATE, 41), title: MARKER, body: MARKER } } });
+      t('positive control: the marker rides the request the platform receives, so the sweep below looks for text that is there', [landed.exit, writes(landed.seen)[0]?.body?.body?.includes(MARKER), writes(landed.seen)[0]?.body?.title?.includes(MARKER)], [EXIT_OK, true, true]);
+      t('⛔ a landed issue_create — its answer echoing the title and body — prints neither in any log line, row, step summary or annotation: the row and the notice carry the number and the url alone', [surfaced(landed).includes('ISSUE MARKER'), landed.rows.map((r) => r.result), landed.annotations], [false, [`#41 ${issueUrl(PRIVATE, 41)}`], [{ action: 1, op: 'issue_create', number: 41, url: issueUrl(PRIVATE, 41), repo: PRIVATE }]], surfaced(landed).slice(0, 300));
+      const severed = await run(filed(), { ...privateAllowed, [CREATE]: { throws: `socket hung up sending ${MARKER}` } });
+      t('⛔ a transport failure whose text quotes the body is a FAILED action that prints neither the title nor the body', [severed.exit, surfaced(severed).includes('ISSUE MARKER')], [EXIT_ACTION_FAILED, false], surfaced(severed).slice(0, 300));
+      const overCap = await run(filed({ body: `${MARKER} ${'x'.repeat(60_000)}` }), privateAllowed);
+      t('⛔ an over-cap body is refused before any write, naming the key and the byte count — never the text', [overCap.exit, writes(overCap.seen).length, surfaced(overCap).includes('ISSUE MARKER'), surfaced(overCap).includes('actions[0].body is 60058 bytes, over its cap of 60000')], [EXIT_REFUSED, 0, false, true], surfaced(overCap).slice(0, 300));
+      const illTyped = await run(filed({ body: [MARKER] }), privateAllowed);
+      t('⛔ an ill-typed body is refused before any write, naming the key and the shape — never the text', [illTyped.exit, writes(illTyped.seen).length, surfaced(illTyped).includes('ISSUE MARKER'), surfaced(illTyped).includes('actions[0].body')], [EXIT_REFUSED, 0, false, true], surfaced(illTyped).slice(0, 300));
     }
 
     // ── the batch gap on the runner ─────────────────────────────────────────

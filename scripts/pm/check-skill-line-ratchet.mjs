@@ -1348,7 +1348,13 @@ export const CEILINGS = new Map([
   // body, filed under the maintainer's verbatim 「开发中遇到的问题应该通过安全通道上报而不是直接处理」. The
   // dev's route and the fix-only-by-order sentence folded into existing lines (§9 L60, §3 L28). Measured
   // delta +2 (62 → 64 lines); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/security-findings.md', 64],
+  // 64 → 67 (#30114): the private-repository branch — a seat tells the two cases apart by the affected repository's
+  // `private` flag read from the API, the private card is an ordinary `security`-labelled issue that holds the
+  // mechanism, its fix is dispatched from that issue, and on a private repository too a fix PR's commits stay at the
+  // rule and link the issue. §2, §3, §4, §5 and §9 scoped in place. Ruling of record: that card's body, filed under
+  // the maintainer's verbatim 「cloud 私有仓库可以直接用带 security 标签的普通 issue，立卡修改 skills」, which names
+  // this file. Measured delta +3 (64 → 67 lines); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/security-findings.md', 67],
   ['.claude/skills/pm-dispatch/references/external-contributions.md', 22],
   ['.claude/skills/pm-dispatch/references/reading-discipline.md', 37],
   // Lowered 51 → 47 by #25712 item 4: objectui stopped being a sister repo, so
