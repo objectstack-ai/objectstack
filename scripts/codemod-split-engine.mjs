@@ -19,6 +19,10 @@
  *                                                         # the third pass (#30053): plan (or apply) the hand series' private docblocks
  *   node scripts/codemod-split-engine.mjs --hand-docs --verify --base <ref>
  *                                                         # re-prove the third pass on disk against engine.ts and its hand modules at <ref>
+ *   node scripts/codemod-split-engine.mjs --members <a,b> [--write]
+ *                                                         # the fourth pass (#30055): plan (or apply) moving the named methods onto the split class
+ *   node scripts/codemod-split-engine.mjs --members --verify --base <ref>
+ *                                                         # re-prove the fourth pass on disk against engine.ts and its modules at <ref>
  *   node scripts/codemod-split-engine.mjs --self-test
  *   node scripts/codemod-split-engine.mjs --help          # this usage, on any tree (split or not)
  *
@@ -147,6 +151,14 @@
  * private method's docblock with its body; a public or protected one stays on
  * the class. Its section below (`HAND_STUB_MARK`) states the rule, the slices
  * (`--modules`) and the proof, the undo of every move.
+ *
+ * ## The fourth pass: named methods onto the split class (#30055)
+ *
+ * The first pass runs on an unsplit file only, so a method a stay rule held
+ * when `main` was split (a path pin since retired, a return type since
+ * spelled) moves by `--members`: on the split file, as the first pass would
+ * have moved it, into the facet module it wrote. Its section below
+ * (`MEMBERS_CARD`) states what it grows, what it refuses and the undo proof.
  *
  * ts-morph is a root devDependency, resolved from the root manifest, as the
  * pilot takes it.
@@ -3917,6 +3929,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'refusals': 6,
   'scoped classes (second pass)': 16,
   'hand-series docblocks (third pass)': 19,
+  'named methods onto the split class (fourth pass)': 18,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
 
@@ -4092,6 +4105,32 @@ function needleInMethod(n: number): number {
   return n;
 }
 `;
+}
+
+/**
+ * The fourth pass's fixture: the first pass's, with two methods a pin held
+ * when it split the file (`FOURTH_FIXTURE_PINS`), one private that reads a
+ * new host member, a new private static and an import only it reads, one
+ * protected that names a type only it imports.
+ */
+const FOURTH_FIXTURE_PINS = Object.freeze({ ...FIXTURE_PINS, pinnedHost: 'a fixture reader', pinnedTyped: 'a fixture reader' });
+function fourthFixtureSource() {
+  const pad = Array.from({ length: 12 }, (_, i) => `    const p${i} = ${i};`).join('\n');
+  const extra = `
+  /** A pinned private docblock: the fourth pass moves it with the body. */
+  private async pinnedHost(object: string): Promise<string> {
+${pad}
+    return this.other(object) + String(this.count) + String(this.knex) + helperImported(object) + String(ObjectQL.SECRET) + String(ObjectQL.bump) + fourthOnly();
+  }
+
+  /** A pinned protected docblock: it stays on the class. */
+  protected pinnedTyped(x: FourthShape): number {
+${pad}
+    return x.n;
+  }
+`;
+  return fixtureSource(extra).replace("import { seamHelper } from './engine-seam.js';\n",
+    "import { seamHelper } from './engine-seam.js';\nimport { fourthOnly } from './fourth-only.js';\nimport type { FourthShape } from './fourth-shape.js';\n");
 }
 
 const FIXTURE_SCOPED_CLASSES = Object.freeze([
@@ -4550,6 +4589,63 @@ async function selfTest() {
       fails(out.host.replace("import { betaPrivate } from './engine-beta.js';\n", ''), []));
     check('--modules naming a module no stub delegates to refuses',
       refused(() => planHandDocs(tm, input, mods, { modules: ['engine-gone.ts'] })));
+  }
+
+  open('named methods onto the split class (fourth pass)');
+  {
+    const opts = { anchors: FIXTURE_ANCHORS, pins: FIXTURE_PINS, needles: FIXTURE_NEEDLES, classNeedles: FIXTURE_CLASS_NEEDLES };
+    const source = fourthFixtureSource();
+    const split = generate(tm, source, plan(tm, source, { ...opts, pins: FOURTH_FIXTURE_PINS }));
+    const input = split.host;
+    const mods = split.modules;
+    const names = ['pinnedTyped', 'pinnedHost'];
+    check('the first pass keeps the pinned methods on the class (path-reader)',
+      input.includes('  private async pinnedHost(object: string): Promise<string> {\n    const p0') && input.includes('  protected pinnedTyped(x: FourthShape): number {\n    const p0'));
+    const planned = planMembers(tm, input, mods, names, opts);
+    check('the plan takes both into their section\'s written module, in class order',
+      [...planned.modules.keys()].join() === 'engine-lifecycle.ts' && planned.records.map((r) => r.name).join() === 'pinnedHost,pinnedTyped',
+      planned.records.map((r) => `${r.name}->${r.module}`).join());
+    const out = generateMembers(tm, input, mods, planned);
+    const again = generateMembers(tm, input, mods, planMembers(tm, input, mods, names, opts));
+    const head = new Map([...mods, ...out.modules]);
+    const v = verifyMembers(tm, input, out.host, mods, head, opts);
+    check('the generated moves prove against their base', v.failures.length === 0 && v.moved.length === 2, v.failures.join(' | '));
+    check('two runs on one input write byte-identical trees',
+      treeHash(new Map([['h', out.host], ...out.modules])) === treeHash(new Map([['h', again.host], ...again.modules])));
+    const lifecycle = out.modules.get('engine-lifecycle.ts') ?? '';
+    check('each stub is the first pass\'s stub, `async` dropped',
+      out.host.includes(`  private pinnedHost(object: string): Promise<string> {\n    // ${MARK} The body moved to \`engine-lifecycle.ts\`, ${DOC_MOVED} (see \`LifecycleHost\`).\n    return LifecycleFacet.pinnedHost.call(lifecycleHost.of(this), object);\n  }`) &&
+      out.host.includes(`  protected pinnedTyped(x: FourthShape): number {\n    // ${MARK} The body moved to \`engine-lifecycle.ts\`.\n    return LifecycleFacet.pinnedTyped(x);\n  }`),
+      out.host.slice(out.host.indexOf('pinnedHost(') - 80, out.host.indexOf('pinnedHost(') + 300));
+    check('a private docblock moves with its body; a protected one stays on the class',
+      lifecycle.includes('  /** A pinned private docblock: the fourth pass moves it with the body. */\n  static async pinnedHost(') && !out.host.includes('A pinned private docblock') &&
+      out.host.includes('  /** A pinned protected docblock: it stays on the class. */\n  protected pinnedTyped(') && lifecycle.includes(`  ${placeholderDoc('pinnedTyped')}\n  static pinnedTyped(`));
+    const listed = headerNamesOf(lifecycle, 'Lifecycle')?.names ?? [];
+    check('the header lists both, in class order after the members declared above them',
+      listed.indexOf('pinnedHost') > listed.indexOf('generic') && listed.indexOf('pinnedTyped') === listed.indexOf('pinnedHost') + 1, listed.join());
+    check('a host member only a moved body reads joins the interface and the factory',
+      lifecycle.includes("  readonly knex: ObjectQLClass['knex'];") && out.host.includes('      get knex() { return engine.knex; },') && !input.includes('get knex()'));
+    check('a private static only a moved body reads joins the statics route',
+      out.host.includes("  readonly bump: (typeof ObjectQL)['bump'];") && out.host.includes('      bump: { get: () => ObjectQL.bump },') && !input.includes("['bump']"));
+    check('the module imports what the moved members read, ahead of the leaf; engine.ts drops what only the bodies read and keeps the type a stub still names, and the proof names the drops',
+      /import \{ fourthOnly \} from '\.\/fourth-only\.js';\nimport type \{ FourthShape \} from '\.\/fourth-shape\.js';\n(import[^\n]*\n)*import[^\n]*'\.\/engine-top-level\.js'/.test(lifecycle) &&
+      out.pruned.join() === 'fourthOnly,helperImported' && v.pruned.join() === 'fourthOnly,helperImported' &&
+      out.host.includes("import type { FourthShape } from './fourth-shape.js';"), `${out.pruned} | ${v.pruned}`);
+    check('a name the class does not declare refuses', refused(() => planMembers(tm, input, mods, ['gone'], opts)));
+    check('a method already moved refuses', refused(() => planMembers(tm, input, mods, ['movable'], opts)));
+    check('a method a stay rule holds refuses (inferred-return-type, and a pin that still stands)',
+      refused(() => planMembers(tm, input, mods, ['inferred'], opts)) && refused(() => planMembers(tm, input, mods, ['pinnedMethod'], opts)));
+    const fails = (host, edited) => verifyMembers(tm, input, host, mods, new Map([...head, ...edited]), opts).failures.length > 0;
+    check('one edited character in a moved body fails', fails(out.host, [['engine-lifecycle.ts', lifecycle.replace('return x.n;', 'return x.n + 1;')]]));
+    check('a host member no body reads, in the interface and the factory, fails', fails(
+      out.host.replace('      get knex() { return engine.knex; },', '      get knex() { return engine.knex; },\n      get zed() { return engine.zed; },'),
+      [['engine-lifecycle.ts', lifecycle.replace("  readonly knex: ObjectQLClass['knex'];", "  readonly knex: ObjectQLClass['knex'];\n  readonly zed: ObjectQLClass['zed'];")]]));
+    check('an import nothing in the module reads fails', fails(out.host, [['engine-lifecycle.ts', lifecycle.replace("import { fourthOnly } from './fourth-only.js';", "import { fourthOnly, unread } from './fourth-only.js';")]]));
+    check('a stub that kept `async` fails', fails(out.host.replace('  private pinnedHost(object: string)', '  private async pinnedHost(object: string)'), []));
+    check('an edit elsewhere in engine.ts, or in a module no moved member is in, fails',
+      fails(out.host.replace('    return 2 + VIA_SEAM', '    return 3 + VIA_SEAM'), []) &&
+      fails(out.host, [[LEAF_MODULE, (mods.get(LEAF_MODULE) ?? '').replace('const LOCAL_VALUE = 1;', 'const LOCAL_VALUE = 2;')]]));
+    check('a head that moved nothing fails', verifyMembers(tm, input, input, mods, mods, opts).failures.some((f) => f.startsWith('nothing moved')));
   }
 
   const declared = Object.keys(SELF_TEST_BATTERIES);
