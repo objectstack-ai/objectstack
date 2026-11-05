@@ -486,14 +486,15 @@ export const SysOrganization = ObjectSchema.create({
       required: false,
       group: 'Group Structure',
       description:
-        'Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference.',
+        'Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference. Meaningful only where the deployment runs several organizations.',
     }),
 
     sort_order: Field.number({
       label: 'Sort Order',
       required: false,
       group: 'Group Structure',
-      description: 'Display order among sibling organizations. Presentation only.',
+      description:
+        'Display order among sibling organizations. Presentation only. Meaningful only where the deployment runs several organizations.',
     }),
 
     // ── System ───────────────────────────────────────────────────
