@@ -138,8 +138,10 @@ function navEntryResolves(entry: EvalGraphNavEntry, targets: Set<string>): boole
 /**
  * One check per widget measure: the measure must exist on the dataset the
  * widget binds, and the dataset must exist in the graph (deviation 2 above).
+ * Exported for the capability-tag checks (`scenario-tags.ts`), so a dashboard
+ * tag and these scorers judge a measure by one rule.
  */
-function measureChecks(graph: EvalGraph, label: (dashboard: string, measure: string, dataset: string) => string): CheckResult[] {
+export function measureChecks(graph: EvalGraph, label: (dashboard: string, measure: string, dataset: string) => string): CheckResult[] {
   const out: CheckResult[] = [];
   for (const d of graph.dashboards ?? []) {
     for (const w of d.widgets ?? []) {
