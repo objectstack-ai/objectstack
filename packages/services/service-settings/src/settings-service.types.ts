@@ -91,10 +91,10 @@ export interface SettingsContext {
 export interface SettingsDisplayOptions {
   /**
    * The caller's display language (BCP-47), for prose a
-   * {@link SettingsWritePredicate} refusal or a {@link SettingsLiveStatusProvider}
-   * statement composes. The settings routes pass it from the request
-   * (`Accept-Language`, else `?locale`). Absent, such prose is written in
-   * English.
+   * {@link SettingsWritePredicate} refusal, a {@link SettingsLiveStatusProvider}
+   * statement or a {@link SettingsActionHandler} answer composes. The settings
+   * routes pass it from the request (`Accept-Language`, else `?locale`).
+   * Absent, such prose is written in English.
    */
   locale?: string;
 }
@@ -356,6 +356,11 @@ export type SettingsActionHandler = (input: {
   values: Record<string, unknown>;
   payload?: unknown;
   ctx: SettingsContext;
+  /**
+   * The language the answer's `message` is written in — the caller sees it as
+   * the action's toast. {@link SettingsDisplayOptions.locale}.
+   */
+  locale?: string;
 }) => Promise<SettingsActionResult> | SettingsActionResult;
 
 /**

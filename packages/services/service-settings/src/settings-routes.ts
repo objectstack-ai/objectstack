@@ -204,7 +204,7 @@ function refuseHeldSession(res: IHttpResponse, ctx: SettingsContext | undefined)
 /**
  * The caller's display language, read the way REST's metadata door reads it:
  * the top `Accept-Language` tag, else `?locale`. It only picks the language of
- * prose a write predicate or a live-status provider composes
+ * prose a write predicate, a live-status provider or an action handler composes
  * (`SettingsDisplayOptions`); it authorizes nothing, and it never enters the
  * caller's context.
  */
@@ -419,7 +419,7 @@ export function registerSettingsRoutes(
   mountFamilyRoute('post', `${base}/:namespace/:actionId`, {
     async serve(req, res, ctx) {
       const { namespace, actionId } = req.params;
-      const result = await service.runAction(namespace, actionId, req.body, ctx);
+      const result = await service.runAction(namespace, actionId, req.body, ctx, { locale: requestLocaleOf(req) });
       // The 200/400 split is PRE-EXISTING and preserved verbatim: an action
       // that ran and reported `ok: false` is still answered 400. Whether a
       // reported (as opposed to crashed) failure ought to be a 200 carrying the

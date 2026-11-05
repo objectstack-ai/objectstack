@@ -3281,12 +3281,17 @@ export class SettingsService {
     return keys.length;
   }
 
-  /** Invoke a declared action (test connection, rotate, …). */
+  /**
+   * Invoke a declared action (test connection, rotate, …). `display.locale` is
+   * handed to the handler so the answer it composes is written in the caller's
+   * language; it authorizes nothing.
+   */
   async runAction(
     namespace: string,
     actionId: string,
     payload: unknown,
     ctx: SettingsContext = {},
+    display: SettingsDisplayOptions = {},
   ): Promise<SettingsActionResult> {
     const reg = this.registry.get(namespace);
     if (!reg) throw new UnknownNamespaceError(namespace);
@@ -3321,7 +3326,10 @@ export class SettingsService {
       values[key] = (await this.get(namespace, key, ctx)).value;
     }
     try {
-      return await handler({ namespace, actionId, values, payload, ctx });
+      return await handler({
+        namespace, actionId, values, payload, ctx,
+        ...(display.locale !== undefined ? { locale: display.locale } : {}),
+      });
     } catch (err: any) {
       return {
         ok: false,
