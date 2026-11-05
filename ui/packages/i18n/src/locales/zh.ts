@@ -2949,6 +2949,7 @@ const zh = {
       verifyingDescription: '正在确认您的邮箱，请稍候。',
       successTitle: '邮箱已验证',
       successDescription: '您的邮箱已确认，现在可以登录了。',
+      handoffSuccessDescription: '您的邮箱已确认。请回到您正在登录的应用，在那里登录。',
       errorTitle: '验证失败',
       errorDescription: '验证失败，请重新获取验证链接。',
       missingToken: '验证链接缺少令牌。',

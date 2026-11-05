@@ -3006,6 +3006,7 @@ const ru = {
       verifyingDescription: "Подтверждаем ваш email. Пожалуйста, подождите.",
       successTitle: "Email подтверждён",
       successDescription: "Ваш email подтверждён. Теперь вы можете войти.",
+      handoffSuccessDescription: "Ваш email подтверждён. Вернитесь в приложение, в которое вы входили, и войдите там.",
       errorTitle: "Подтверждение не удалось",
       errorDescription: "Подтверждение не удалось. Запросите новую ссылку.",
       missingToken: "В ссылке подтверждения отсутствует токен.",

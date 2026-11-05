@@ -34,9 +34,11 @@ export const SysTeamMember = ObjectSchema.create({
   // wins over `titleFormat`) drew the raw id as the record page's H1. The
   // retired `titleFormat` template beside it is gone (refused at save and by
   // `os validate`); `identity-display-title.test.ts` holds the formula to the
-  // text that template drew. `user_id` and `team_id` are lookups, so the
-  // formula reads their stored ids: a formula is evaluated on the stored row,
-  // before `$expand`, and cannot reach a related record's own title.
+  // text that template drew. The formula reads the user's and the team's names
+  // one hop through the two lookups (ADR-0079 addendum, 2026-10-18), as
+  // `sys_business_unit_member` does; it read the two stored ids before, so a
+  // team's Members panel, a membership's H1 and every reference to the row
+  // named it `USER_ID in TEAM_ID`.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   highlightFields: ['user_id', 'team_id', 'created_at'],
@@ -130,12 +132,20 @@ export const SysTeamMember = ObjectSchema.create({
     }),
 
     // [ADR-0079] The record title (`nameField` above). A formula is computed on
-    // read and has no stored column. Every source column is required, so the
-    // expression needs no null guard.
+    // read and has no stored column, so a renamed user or team is named anew on
+    // the next read. It names the PERSON and the TEAM, the way
+    // `sys_business_unit_member`'s title does: the user's `name`, or their
+    // `email` where the name is blank (the platform's `name || email` rule for a
+    // person's handle), and the team's `name`, each read ONE hop through its
+    // lookup (ADR-0079 addendum, 2026-10-18). Both hops are read under the
+    // READER's own authority: a user or team the reader may not read, or one
+    // that no longer exists, leaves the title null, never a value computed in
+    // its place. Neither lookup is read bare beside its hop. Both lookups are
+    // required, and `sys_team.name` is required stored text (no second hop).
     display_title: Field.formula({
       label: 'Title',
       returnType: 'text',
-      expression: F`record.user_id + ' in ' + record.team_id`,
+      expression: F`(isBlank(trim(record.user_id.name)) ? record.user_id.email : record.user_id.name) + ' in ' + record.team_id.name`,
       description: 'Record title: the user and the team (computed on read)',
     }),
     
@@ -145,14 +155,26 @@ export const SysTeamMember = ObjectSchema.create({
       readonly: true,
     }),
     
+    // The related lists these two lookups derive name their columns. With none
+    // authored, a related list leads with the record title (ADR-0079), so a
+    // team's Members list opened on a Title column beside the User column: two
+    // raw ids before the title read names, and the user again plus the team the
+    // page is about after. Authored columns are drawn as written, with no title
+    // lead; the list drops the key back to its parent, so each list names the
+    // OTHER lookup and when the membership began.
     team_id: Field.lookup('sys_team', {
       label: 'Team',
       required: true,
+      // The team page's Members list.
+      relatedListColumns: ['user_id', 'created_at'],
     }),
-    
+
     user_id: Field.lookup('sys_user', {
       label: 'User',
       required: true,
+      // A user page's Teams list, on a user page that derives its lists
+      // (Setup's own `sys_user_detail` page is authored and lists no teams).
+      relatedListColumns: ['team_id', 'created_at'],
     }),
 
     // better-auth's own single-column uniqueness boundary for a membership

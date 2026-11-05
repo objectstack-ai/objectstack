@@ -286,4 +286,40 @@ describe('Register SAML Provider through the REAL route — the INSTALLED @bette
     expect(body.error?.message).toContain('issuer');
     expect(db.ssoProvider).toHaveLength(storedBefore);
   });
+
+  // A SAML EntityID is a URI, and many IdPs publish a URN. The bridge sends the
+  // form's Entity ID both as the top-level `issuer` and as
+  // `idpMetadata.entityID`, and the vendor's register body types `issuer` as
+  // `z.string().url()`. In the installed zod (4.6.7) that check is the WHATWG
+  // URL parser, which accepts `urn:` values, so a URN form registers. A vendor
+  // or zod release that narrows the check to http(s) would refuse every URN
+  // IdP at the vendor's parse step; these cases turn red when that happens.
+  //
+  // Usable, not only stored: sign-in finds the provider by `providerId`
+  // (or organization / domain), never by `issuer`, and the ACS reads the IdP
+  // identity from `idpMetadata.entityID`.
+  it.each([
+    ['urn-oasis', 'urn:oasis:names:tc:SAML:2.0:idp:acme'],
+    ['urn-short', 'urn:example:idp'],
+  ])('a URN IdP Entity ID registers and starts a sign-in (%s)', async (providerId, entityId) => {
+    const res = await post({ ...COMPLETE_FORM, providerId, issuer: entityId });
+    const body: any = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.providerId).toBe(providerId);
+
+    const row = db.ssoProvider.find((p) => p.providerId === providerId);
+    expect(row?.issuer).toBe(entityId);
+    expect(JSON.parse(row.samlConfig).idpMetadata).toEqual({ entityID: entityId });
+
+    const signIn = await app.request(`${ORIGIN}${BASE}/sign-in/sso`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: ORIGIN },
+      body: JSON.stringify({ providerId, callbackURL: '/' }),
+    });
+    const started: any = await signIn.json();
+    expect(signIn.status, JSON.stringify(started)).toBe(200);
+    expect(started.redirect).toBe(true);
+    expect(started.url.startsWith(`${COMPLETE_FORM.entryPoint}?SAMLRequest=`)).toBe(true);
+  });
 });

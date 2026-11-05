@@ -125,7 +125,7 @@ import {
   sectionGroupRefs,
   type SectionGroupRef,
 } from './object-field-groups.js';
-import { indexObjectGraph, recordsOf, resolveFieldPath, suggestName, type ObjectGraph } from './object-graph.js';
+import { indexObjectGraph, objectsAsServed, recordsOf, resolveFieldPath, suggestName, type ObjectGraph } from './object-graph.js';
 // [#23013] The one answer to "does this field hold several values?" — the
 // predicate storage, the aggregate answer and the generator already ask.
 import { isMultiValueField } from '@objectstack/spec/data';
@@ -604,9 +604,12 @@ export function validatePageFieldBindings(stack: AnyRec): PageFieldFinding[] {
   const findings: PageFieldFinding[] = [];
   if (!stack || typeof stack !== 'object') return findings;
 
-  // object name → its declared field names. Built with `recordsOf` so BOTH
-  // `fields` shapes (array of `{name}` and name-keyed map) resolve.
-  const objectFields = indexObjectFields(stack);
+  // object name → its field names. Built with `recordsOf` so BOTH `fields`
+  // shapes (array of `{name}` and name-keyed map) resolve. [#30383] Over the
+  // objects as served, every `objectExtensions` field folded in, as the graph
+  // below: a binding naming a field a sibling package adds is served.
+  const served = { objects: objectsAsServed(stack).objects };
+  const objectFields = indexObjectFields(served);
   // [#8340] The provenance index alongside the existence one — same keying,
   // asked on the path where the existence check stays silent.
   const unprovisionedAnchors = indexUnprovisionedAnchors(stack);
@@ -614,7 +617,7 @@ export function validatePageFieldBindings(stack: AnyRec): PageFieldFinding[] {
   const objectFieldGroups = indexObjectFieldGroups(stack);
   // [#23013] Field DEFINITIONS (type, `multiple`), for the one question a
   // name index cannot answer: is a counted field multi-valued?
-  const objectGraph = indexObjectGraph(stack);
+  const objectGraph = indexObjectGraph(served);
 
   const pages = recordsOf(stack.pages);
   for (let pi = 0; pi < pages.length; pi++) {

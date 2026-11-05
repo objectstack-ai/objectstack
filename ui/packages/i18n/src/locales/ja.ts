@@ -2873,6 +2873,7 @@ const ja = {
       verifyingDescription: "メールを確認中です。少々お待ちください。",
       successTitle: "メールが確認されました",
       successDescription: "メールが確認されました。サインインできます。",
+      handoffSuccessDescription: "メールが確認されました。サインインしようとしていたアプリに戻り、そこでサインインしてください。",
       errorTitle: "確認に失敗しました",
       errorDescription: "確認に失敗しました。新しいリンクをリクエストしてください。",
       missingToken: "確認リンクにトークンがありません。",
