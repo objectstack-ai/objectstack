@@ -188,12 +188,8 @@ export const zhCN: PlatformTranslationData = {
         locale: {
           label: '默认语言',
           help: '用于消息文案和数字/日期格式的 BCP-47 语言。',
-          options: {
-            'en-US': '英语(美国)',
-            'zh-CN': '简体中文',
-            'ja-JP': '日语',
-            'es-ES': '西班牙语(西班牙)',
-          },
+          // No `options`: each language is named in its own language, as the
+          // server serves it (`localization-locale-options.ts`).
         },
         default_country: {
           label: '默认国家/地区',
