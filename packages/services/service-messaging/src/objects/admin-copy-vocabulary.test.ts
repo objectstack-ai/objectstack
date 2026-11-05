@@ -26,6 +26,10 @@ import { enObjects } from '../translations/en.objects.generated.js';
 import { zhCNObjects } from '../translations/zh-CN.objects.generated.js';
 import { jaJPObjects } from '../translations/ja-JP.objects.generated.js';
 import { esESObjects } from '../translations/es-ES.objects.generated.js';
+import { zhHantObjects } from '../translations/zh-Hant.objects.generated.js';
+import { arObjects } from '../translations/ar.objects.generated.js';
+import { frObjects } from '../translations/fr.objects.generated.js';
+import { ptBRObjects } from '../translations/pt-BR.objects.generated.js';
 
 /** The design-record vocabulary an admin-facing string must not carry. */
 const DESIGN_RECORD_VOCABULARY: ReadonlyArray<readonly [string, RegExp]> = [
@@ -90,7 +94,16 @@ function isObjectSchema(v: unknown): v is ObjectLike {
     && !!(v as ObjectLike).fields && typeof (v as ObjectLike).fields === 'object';
 }
 
-const OBJECT_BUNDLES = { en: enObjects, 'zh-CN': zhCNObjects, 'ja-JP': jaJPObjects, 'es-ES': esESObjects } as const;
+const OBJECT_BUNDLES = {
+  en: enObjects,
+  'zh-CN': zhCNObjects,
+  'ja-JP': jaJPObjects,
+  'es-ES': esESObjects,
+  'zh-Hant': zhHantObjects,
+  'ar': arObjects,
+  'fr': frObjects,
+  'pt-BR': ptBRObjects,
+} as const;
 
 describe('messaging objects: admin-facing copy carries no design-record vocabulary', () => {
   it('the matcher recognises each kind of vocabulary it exists to keep out', () => {
