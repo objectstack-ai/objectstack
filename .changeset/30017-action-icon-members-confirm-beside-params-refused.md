@@ -10,7 +10,7 @@ Clause-②: no (narrowing) — `ActionIconPropsSchema` and the `action:group` / 
 
 Metadata-protocol: narrowed (a page `action:icon`, and an `action:group` or `action:menu` member, may no longer declare `confirmText` beside a non-empty array `params`)
 
-<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed or renamed: the icon row and the container member already declared both keys and keep them, and this adds the pair refusal the other three action doors carry. There is no rewrite that keeps what the author meant without reading it (the confirm sentence may or may not suit the param dialog's description line), so the author decides, and the refusal names the remedy. The in-repo census at the base found no shipped action:icon or container member carrying the pair; the one carrier was this package's own test fixture, repaired here. -->
+<!-- adr-0087: registered ui-page-action-row-confirm-text-beside-params-refused -->
 
 **BREAKING** accept-set narrowing at `ActionIconPropsSchema` and the `action:group` / `action:menu` member rows (`@objectstack/spec`), served where a page's component `properties` are judged: the component-props gate (`component-props-invalid`, `@objectstack/lint`) at every CLI command (`os validate`, `os compile`, the publish gate) and at the runtime `page` save door. `defineStack` does not parse a component's `properties` bag, so it does not refuse the pair.
 
@@ -19,4 +19,4 @@ Metadata-protocol: narrowed (a page `action:icon`, and an `action:group` or `act
 - **Unchanged.** `confirmText` with no `params`, beside `params: []`, or beside an object `params` (an icon's static parameter values; a `type: 'api'` member's request payload — neither opens a dialog) parses as before; so does an array `params` with `description`.
 - **Who sees it.** An author whose page declares an `action:icon`, or an `action:group` / `action:menu` member, with both keys. A stored page keeps loading and serving; its next save is refused, with the remedy in the finding.
 
-**The remedy.** Move the confirm sentence to the action's `description`, which the param dialog draws under its title, and drop `confirmText`. On an `action:icon` with no `label`, `description` is also the tooltip text.
+**The one-line fix: move the confirm sentence to the action's `description`, which the param dialog draws under its title, and drop `confirmText`.** `os migrate meta --from 17` lists the D3 entry `ui-page-action-row-confirm-text-beside-params-refused`, which names all four page action rows (`action:button`, `action:icon`, and each `action:group` / `action:menu` member) — the `action:button` refusal shipped earlier in 18.x is covered by the same entry. The rewrite is by hand, because whether the sentence reads as the dialog's description line is the author's call. On an `action:icon` with no `label`, `description` is also the tooltip text; give the icon a `label` to keep them apart.
