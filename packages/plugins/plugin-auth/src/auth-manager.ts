@@ -124,6 +124,7 @@ import {
   recordPasswordHistory,
   refreshMustChangeCacheIfStale,
   refreshOrgMfaCacheIfStale,
+  resolveMfaGracePeriodDays,
   resolvePasswordChangeUserId,
   resolveUserAuthGates,
   stampPasswordChangedAt,
@@ -5311,6 +5312,20 @@ export class AuthManager {
    */
   public isTwoFactorEnabled(): boolean {
     return resolveTwoFactorEnabled(this.config.plugins);
+  }
+
+  /**
+   * @internal Package-internal: read by the organization MFA enrollment guard
+   * `AuthPlugin` registers; not a supported entry point.
+   *
+   * [#30411] The MFA grace period in force, in whole days — the
+   * `auth.mfa_grace_period_days` setting as the settings pass applied it,
+   * {@link resolveMfaGracePeriodDays} over the live config, the same answer
+   * the MFA gate's clock reads. Read per call, so a settings change is seen at
+   * once.
+   */
+  public getMfaGracePeriodDays(): number {
+    return resolveMfaGracePeriodDays(this.config);
   }
 
   /**
