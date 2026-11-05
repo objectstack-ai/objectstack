@@ -643,6 +643,16 @@ function notifyLiteralRefusals(cfg: {
  *    click-through target is dropped so the inbox never renders a dead link.
  *    The schema keeps both optional rather than refining, because the executor
  *    tolerates (drops) the half-specified shape rather than rejecting it.
+ *  - Click-through default: a node that writes none of `sourceObject`,
+ *    `sourceId` and `actionUrl` links to the run's trigger record, when the
+ *    run has one — a record change other than a delete, a time-relative
+ *    sweep's row, an action started on a record. A schedule tick, an inbound
+ *    API post and a manual start with no record have none and link nowhere;
+ *    a delete's record is gone once the write lands, so it is not linked. An
+ *    explicit pair or an explicit `actionUrl` is the author's word and wins,
+ *    and a half-written pair is still dropped, never defaulted. The executor
+ *    owns the default (`defaultClickThroughOf` in service-automation's
+ *    `notify-node.ts`); the schema shape is unchanged by it.
  *  - The historical aliases (`to`/`subject`/`body`/`url`, nested
  *    `source: { object, id }`) are NOT part of this contract: the ADR-0087 D2
  *    conversion `flow-node-notify-config-aliases` rewrote them at load for
@@ -744,26 +754,34 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
     .describe('Severity forwarded to the messaging service'),
   /**
    * Click-through target object — only effective together with `sourceId`
-   * (#2675). A literal, read as written (#19939, "notify literals" above).
+   * (#2675); a half-written pair is dropped, never defaulted. A literal, read
+   * as written (#19939, "notify literals" above). Left out together with
+   * `sourceId` and `actionUrl`, the link defaults to the run's trigger record
+   * (see "click-through default" above).
    */
   sourceObject: notifyLiteralStringSchema('sourceObject').optional()
-    .describe('Object name of the record the notification links to (writes sys_notification.source_object) — a literal, read as written: a single-brace `{token}` is not resolved here and is refused, as is a CEL value envelope; write the value. Only takes effect together with sourceId — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link.'),
+    .describe('Object name of the record the notification links to (writes sys_notification.source_object) — a literal, read as written: a single-brace `{token}` is not resolved here and is refused, as is a CEL value envelope; write the value. Only takes effect together with sourceId — a half-specified click-through target is dropped at execute time, not defaulted, so the inbox never renders a dead link. When sourceObject, sourceId and actionUrl are all left out, a run started by a record (a record change other than a delete, a time-relative sweep, an action on a record) links to that record, and a run with no trigger record links nowhere; an explicit pair or an actionUrl is kept as written.'),
   /**
    * Click-through target record id — only effective together with
-   * `sourceObject`. A `value` slot (#19939, {@link NotifySourceIdSlotSchema}).
+   * `sourceObject`; a half-written pair is dropped, never defaulted. A `value`
+   * slot (#19939, {@link NotifySourceIdSlotSchema}). Left out together with
+   * `sourceObject` and `actionUrl`, the link defaults to the run's trigger
+   * record (see "click-through default" above).
    */
   sourceId: NotifySourceIdSlotSchema.optional()
-    .describe('Record id the notification links to (writes sys_notification.source_id) — a string, or a CEL value envelope `{ dialect: \'cel\', source }` evaluated per run to one (`record.id`); a `{…}` template token is refused. Only takes effect together with sourceObject — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link.'),
+    .describe('Record id the notification links to (writes sys_notification.source_id) — a string, or a CEL value envelope `{ dialect: \'cel\', source }` evaluated per run to one (`record.id`); a `{…}` template token is refused. Only takes effect together with sourceObject — a half-specified click-through target is dropped at execute time, not defaulted, so the inbox never renders a dead link. When sourceObject, sourceId and actionUrl are all left out, a run started by a record (a record change other than a delete, a time-relative sweep, an action on a record) links to that record, and a run with no trigger record links nowhere; an explicit pair or an actionUrl is kept as written.'),
   /** User id that caused the event. A literal, read as written (#19939, "notify literals" above). */
   actorId: notifyLiteralStringSchema('actorId').optional()
     .describe('User id that caused the event (writes sys_notification.actor_id) — a literal, read as written: a single-brace `{token}` is not resolved here and is refused, as is a CEL value envelope; write the value'),
   /**
-   * Explicit click-through URL; overrides the sourceObject/sourceId link. A
-   * TEXT slot (#19939): rendered per run with `{{ }}` holes, like `title`; a
-   * single-brace `{token}` is refused by the `superRefine` below.
+   * Explicit click-through URL; overrides the sourceObject/sourceId link, and
+   * written alone keeps the trigger-record default from applying (see
+   * "click-through default" above). A TEXT slot (#19939): rendered per run with
+   * `{{ }}` holes, like `title`; a single-brace `{token}` is refused by the
+   * `superRefine` below.
    */
   actionUrl: z.string().optional()
-    .describe('Explicit click-through URL, rendered per run with `{{ }}` holes like `title` (`/crm_case/{{ record.id }}`); a single-brace `{token}` is refused. Overrides the link synthesized from sourceObject/sourceId.'),
+    .describe('Explicit click-through URL, rendered per run with `{{ }}` holes like `title` (`/crm_case/{{ record.id }}`); a single-brace `{token}` is refused. Overrides the link synthesized from sourceObject/sourceId, and written alone keeps the notification from linking to the record that started the run.'),
   /**
    * Extra values merged into the notification payload — literals, read as
    * written (#19939, "notify literals" above).
