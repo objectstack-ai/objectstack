@@ -30,11 +30,11 @@ import type { PluginContext } from '@objectstack/core';
 import type { IHttpRequest, IHttpResponse, IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/objectql';
 import {
-  InMemoryCryptoProvider,
   SettingsService,
   SettingsValidationError,
   builtinSettingsManifests,
   registerSettingsRoutes,
+  type CryptoAdapter,
 } from '@objectstack/service-settings';
 import { AuthPlugin } from './auth-plugin.js';
 import type { AuthManager } from './auth-manager.js';
@@ -42,6 +42,20 @@ import { SSO_PROVIDER_OBJECT } from './sso-client-secret.js';
 import { SIGN_IN_FLOOR_COPY } from './sign-in-method-floor.js';
 
 const SECRET = 'test-secret-at-least-32-chars-long';
+
+/** Declares confidentiality, so the settings service stores the Google client secret. */
+class ConfidentialTestAdapter implements CryptoAdapter {
+  readonly confidential = true;
+  async encrypt(plaintext: string): Promise<string> {
+    return 'kms:' + Buffer.from(plaintext, 'utf8').toString('base64');
+  }
+  async decrypt(ciphertext: string): Promise<string> {
+    return Buffer.from(ciphertext.replace(/^kms:/, ''), 'base64').toString('utf8');
+  }
+  digest(): string {
+    return 'fnv32:deadbeef';
+  }
+}
 
 const ENV_KEYS = [
   'OS_AUTH_EMAIL_PASSWORD_ENABLED',
@@ -98,8 +112,7 @@ describe('the auth settings save keeps a way to sign in', () => {
   });
 
   const makeSettings = (env: Record<string, string | undefined> = {}) => {
-    // A crypto provider, so the Google client secret can be stored.
-    const settings = new SettingsService({ env, cryptoProvider: new InMemoryCryptoProvider() });
+    const settings = new SettingsService({ env, crypto: new ConfidentialTestAdapter() });
     for (const manifest of builtinSettingsManifests) {
       if (manifest.namespace === 'auth') settings.registerManifest(manifest);
     }
@@ -298,6 +311,8 @@ describe('the auth settings save keeps a way to sign in', () => {
     await vi.waitFor(() => expect(passwordOn(alone.manager)).toBe(false));
     process.env.GOOGLE_CLIENT_SECRET = 'google-env-client-secret';
     await alone.settings.setMany('auth', { google_client_secret: null });
+    expect(await alone.settings.get('auth', 'google_client_secret')).toMatchObject({ source: 'default' });
+    await new Promise((resolve) => setTimeout(resolve, 10)); // the pass re-runs on the change
     expect(googleOn(alone.manager)).toBe(true);
   });
 
