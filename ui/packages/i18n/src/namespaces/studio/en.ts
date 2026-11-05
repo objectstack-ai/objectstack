@@ -1582,6 +1582,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.objectPicker.showSystem': 'Show system objects ({count})',
   'engine.inspector.objectPicker.hideSystem': 'Hide system objects',
   'engine.inspector.objectPicker.noMatch': 'No object matches. Press Enter to keep what you typed.',
+  // A picker that takes objects only (the new-automation trigger object).
+  'engine.inspector.objectPicker.noMatchObjectsOnly': 'No object matches. Choose one from the list.',
+  'engine.inspector.objectPicker.notChosen': 'No object chosen: \u201c{text}\u201d is not an object. Choose one from the list.',
   // objectstack#28240 — objects outside the edited package's closure.
   'engine.inspector.objectPicker.groupOutside': 'Outside this package\u2019s dependencies',
   'engine.inspector.objectPicker.showOutside': 'Show objects outside this package\u2019s dependencies ({count})',

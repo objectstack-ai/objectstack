@@ -1419,6 +1419,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.objectPicker.showSystem': '显示系统对象（{count}）',
   'engine.inspector.objectPicker.hideSystem': '隐藏系统对象',
   'engine.inspector.objectPicker.noMatch': '没有匹配的对象。按 Enter 保留输入的内容。',
+  // 只接受对象的选择器(新建自动化的触发对象)。
+  'engine.inspector.objectPicker.noMatchObjectsOnly': '没有匹配的对象。请从列表中选择一个。',
+  'engine.inspector.objectPicker.notChosen': '未选择对象：\u201c{text}\u201d不是对象。请从列表中选择一个。',
   // objectstack#28240 — objects outside the edited package's closure.
   'engine.inspector.objectPicker.groupOutside': '不在本软件包的依赖范围内',
   'engine.inspector.objectPicker.showOutside': '显示不在本软件包依赖范围内的对象（{count}）',
