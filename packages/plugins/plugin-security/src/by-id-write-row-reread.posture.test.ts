@@ -25,7 +25,12 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveThrownHttpError } from '@objectstack/types';
 
+import { SysUser, SysMember, SysBusinessUnit, SysBusinessUnitMember } from '@objectstack/platform-objects/identity';
+
 import { SecurityPlugin } from './security-plugin.js';
+import { SysUserPosition } from './objects/sys-user-position.object.js';
+import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
+import { defaultPermissionSets } from './objects/index.js';
 
 const ORG_A = 'org_a';
 const ORG_B = 'org_b';
@@ -338,6 +343,99 @@ describe("the controlled-by-parent master read judges the platform's own predica
         { context: structuredClone(MASTER_ORG_HIDDEN) }));
       expect([hidden.status, hidden.code, hidden.name], `column hidden: ${hidden.message}`).toEqual([reads.status, reads.code, reads.name]);
       expect(await engine.find(DETAIL, { where: { master: 'master_b' }, context: { isSystem: true } }), 'nothing stored').toHaveLength(0);
+    });
+  }
+});
+
+// ── The organization administrator's assignment removal ─────────────────────
+
+/** An in-boundary set and position: no superuser bit, no `adminScope`, an organization capability only. */
+const IN_BOUNDARY_SET = { name: 'qa_reread_in_set', label: 'In boundary', objects: { sys_user: { allowRead: true } }, systemPermissions: ['manage_org_users'] };
+const IN_BOUNDARY_POSITION = { name: 'qa_reread_in_pos', label: 'In boundary', permissionSets: [IN_BOUNDARY_SET.name] };
+/** Field rules alone, held beside `organization_admin`: both assignment tables' organization column hidden from its reads. */
+const ASSIGNMENT_ORG_HIDDEN = {
+  name: 'qa_reread_assignment_org_hidden',
+  label: 'Assignment organization hidden',
+  objects: {},
+  fields: { 'sys_user_position.organization_id': HIDDEN, 'sys_user_permission_set.organization_id': HIDDEN },
+};
+const ASSIGNMENT_SETS = [...defaultPermissionSets, IN_BOUNDARY_SET, ASSIGNMENT_ORG_HIDDEN];
+const ASSIGNMENT_ROWS = {
+  sys_user_position: { position: IN_BOUNDARY_POSITION.name },
+  sys_user_permission_set: { permission_set: IN_BOUNDARY_SET.name },
+} as const;
+type AssignmentTable = keyof typeof ASSIGNMENT_ROWS;
+const orgAdmin = (...extra: string[]) => ({
+  userId: 'u_org_admin', positions: [] as string[], permissions: ['organization_admin', ...extra], tenantId: ORG_A, accessible_org_ids: [ORG_A],
+});
+
+async function bootAssignments(posture: Posture): Promise<ObjectQL> {
+  const engine = new ObjectQL();
+  engine.registerDriver(
+    new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }),
+    true,
+  );
+  await engine.init();
+  engine.registerApp({
+    id: 'com.objectstack.qa.by-id-write-row-reread.assignments',
+    name: 'By-id write row re-read, assignments',
+    version: '1.0.0',
+    type: 'plugin',
+    scope: 'system',
+    objects: [SysUserPosition, SysUserPermissionSet, SysMember, SysBusinessUnit, SysBusinessUnitMember],
+  } as any);
+  await engine.syncSchemas();
+  if (!engine.registry.getObject(SysUser.name)) engine.registry.registerObject(SysUser as never, 'qa.by-id-write-row-reread');
+  engines.push(engine);
+  const services: Record<string, unknown> = {
+    manifest: { register: vi.fn() },
+    objectql: engine,
+    metadata: {
+      get: async (type: string, name: string) =>
+        (type === 'position' ? (name === IN_BOUNDARY_POSITION.name ? IN_BOUNDARY_POSITION : undefined)
+          : type === 'permission' ? ASSIGNMENT_SETS.find((p) => p.name === name)
+          : type === 'capability' ? undefined
+          : engine.getSchema(name)) ?? null,
+      list: async (type: string) => (type === 'position' ? [IN_BOUNDARY_POSITION] : type === 'permission' ? ASSIGNMENT_SETS : []),
+    },
+    'org-scoping': { name: 'com.objectstack.org-scoping' },
+    tenancy: { posture },
+  };
+  const ctx: any = {
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    hook: vi.fn(),
+    registerService: vi.fn(),
+    getService: (name: string) => {
+      if (!(name in services)) throw new Error(`service not registered: ${name}`);
+      return services[name];
+    },
+  };
+  const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+  await plugin.init(ctx);
+  await plugin.start(ctx);
+  vi.spyOn((engine as any).logger, 'warn').mockImplementation(() => undefined);
+  for (const m of [
+    { id: 'm_admin', user_id: 'u_org_admin', organization_id: ORG_A, role: 'admin' },
+    { id: 'm_holder', user_id: 'u_holder', organization_id: ORG_A, role: 'member' },
+  ]) {
+    await engine.insert('sys_member', m, inOrg(ORG_A));
+  }
+  return engine;
+}
+
+describe("an organization administrator whose field rules hide the organization column removes an in-boundary assignment by id", () => {
+  for (const posture of WALLED) {
+    it(`posture '${posture}': the removal is admitted, as for an administrator who reads the column`, async () => {
+      const engine = await bootAssignments(posture);
+      for (const table of Object.keys(ASSIGNMENT_ROWS) as AssignmentTable[]) {
+        for (const [label, context] of [['column read', orgAdmin()], ['column hidden', orgAdmin(ASSIGNMENT_ORG_HIDDEN.name)]] as const) {
+          const id = `${table}_${label.replace(' ', '_')}`;
+          await engine.insert(table, { id, user_id: 'u_holder', ...ASSIGNMENT_ROWS[table], organization_id: ORG_A }, inOrg(ORG_A));
+          const answer = await answerOf(() => engine.delete(table, { where: { id }, context: structuredClone(context) }));
+          expect(answer, `${table}, ${label}: ${String(answer.message)}`).toEqual({ status: 200 });
+          expect(await engine.find(table, { where: { id }, context: { isSystem: true } }), `${table}, ${label}: removed`).toHaveLength(0);
+        }
+      }
     });
   }
 });
