@@ -36,11 +36,12 @@
  *   `register` calls, all of which run while registration runs, and the
  *   class's one `routeManager` reassignment wraps
  *   `registerMetadataEndpointsInner`, never these registrars.
- * - `kernelManager` (read by the explain body) and `securityServiceProvider`
- *   (read by both) go as GETTERS. Each body's `resolveService` reads them at
- *   REQUEST time, and neither field is `readonly`, so a value copied at
- *   registration could part from it. The getter reads the field the handler
- *   read, when it read it.
+ * - `securityServiceProvider` (read by both) goes as a GETTER. Each body's
+ *   `resolveService` reads it at REQUEST time, and the field is not
+ *   `readonly`, so a value copied at registration could part from it. The
+ *   getter reads the field the handler read, when it read it. (`kernelManager`
+ *   went the same way, for the explain body, until #30192 moved the
+ *   environment-kernel lookup into the provider itself.)
  *
  * Module-level helpers stay where they were and are imported from the modules
  * `rest-server.ts` imports them from; the bodies read nothing declared in
@@ -76,12 +77,11 @@ import type { RestServer } from './rest-server.js';
  * every one of them, and no other. Each is typed AS the class member (an
  * indexed access on the class), so a change to a member's signature on the
  * class is a change here too, and naming a member the class does not have is a
- * compile error. See the module header for why `kernelManager` and
- * `securityServiceProvider` are getters.
+ * compile error. See the module header for why `securityServiceProvider` is
+ * a getter.
  */
 export interface SecurityExplainRouteHost {
     readonly routeManager: RestServer['routeManager'];
-    readonly kernelManager: RestServer['kernelManager'];
     readonly securityServiceProvider: RestServer['securityServiceProvider'];
     resolveRequestEnvironmentId: RestServer['resolveRequestEnvironmentId'];
     resolveExecCtx: RestServer['resolveExecCtx'];
@@ -96,6 +96,7 @@ export interface SecurityExplainRouteHost {
 export interface SecurityRouteHost {
     readonly routeManager: RestServer['routeManager'];
     readonly securityServiceProvider: RestServer['securityServiceProvider'];
+    resolveRequestEnvironmentId: RestServer['resolveRequestEnvironmentId'];
     resolveExecCtx: RestServer['resolveExecCtx'];
     enforceAuth: RestServer['enforceAuth'];
 }
@@ -119,20 +120,20 @@ const EMPTY_KEY_REMEDIES: ReadonlyArray<readonly ['object' | 'userId', string]> 
  */
 export function registerSecurityExplainEndpoints(this: SecurityExplainRouteHost, basePath: string): void {
     const isScoped = basePath.includes('/environments/:environmentId');
-    // Resolve the ENVIRONMENT's security service first (its resolver /
-    // evaluator / RLS compiler are bound to the env kernel's own data
-    // engine); the host provider is the single-kernel fallback.
-    const resolveService = async (environmentId?: string, req?: any) => {
+    // The ENVIRONMENT's security service — its resolver / evaluator / RLS
+    // compiler are bound to the env kernel's own data engine.
+    //
+    // [#30192] The provider resolves the environment's kernel itself now, as
+    // the analytics door's does, so this asks it for the REQUEST's environment
+    // (the shared resolver's answer) and nothing else. The host provider is no
+    // longer a fallback: when the environment's kernel carries no security
+    // service, or could not be acquired, the answer is the 501 below.
+    const resolveService = async (environmentId: string | undefined, req: any) => {
+        if (!this.securityServiceProvider) return undefined;
         try {
             const envId = await this.resolveRequestEnvironmentId(environmentId, req);
-            if (envId && envId !== 'platform' && this.kernelManager) {
-                const kernel = await this.kernelManager.getOrCreate(envId);
-                const svc = await kernel.getServiceAsync<any>('security').catch(() => undefined);
-                if (svc) return svc;
-            }
-        } catch { /* fall back to the host service */ }
-        if (!this.securityServiceProvider) return undefined;
-        try { return await this.securityServiceProvider(environmentId); }
+            return await this.securityServiceProvider(envId);
+        }
         catch { return undefined; }
     };
 
@@ -458,10 +459,17 @@ export function registerSecurityEndpoints(this: SecurityRouteHost, basePath: str
     const dataPath = basePath;
     const isScoped = basePath.includes('/environments/:environmentId');
 
-    const resolveService = async (environmentId?: string) => {
+    // [#30192] The provider is asked for the environment the REQUEST is in,
+    // through the one resolver every REST-owned route shares: the scoped param
+    // when the mount carries one, else the host's request→environment answer
+    // (a hostname-routed request arrives here with no id at all). Passing the
+    // raw `undefined` on the unscoped mount is how a hosted environment's
+    // suggestions were asked of the host kernel, which answered 501.
+    const resolveService = async (environmentId: string | undefined, req: any) => {
         if (!this.securityServiceProvider) return undefined;
         try {
-            const svc = await this.securityServiceProvider(environmentId);
+            const envId = await this.resolveRequestEnvironmentId(environmentId, req);
+            const svc = await this.securityServiceProvider(envId);
             return svc && typeof svc.listAudienceBindingSuggestions === 'function' ? svc : undefined;
         } catch { return undefined; }
     };
@@ -529,7 +537,7 @@ export function registerSecurityEndpoints(this: SecurityRouteHost, basePath: str
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
-                const svc = await resolveService(environmentId);
+                const svc = await resolveService(environmentId, req);
                 if (!svc) return respond501(res);
                 // [#6877] Both are `String(array)` joins — `?status=a&status=b`
                 // filtered on the single status `'a,b'` and returned nothing.
@@ -572,7 +580,7 @@ export function registerSecurityEndpoints(this: SecurityRouteHost, basePath: str
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
-                const svc = await resolveService(environmentId);
+                const svc = await resolveService(environmentId, req);
                 if (!svc) return respond501(res);
                 const result = await svc.confirmAudienceBindingSuggestion(context ?? {}, String(req.params.id));
                 res.json({ data: result });
@@ -590,7 +598,7 @@ export function registerSecurityEndpoints(this: SecurityRouteHost, basePath: str
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
-                const svc = await resolveService(environmentId);
+                const svc = await resolveService(environmentId, req);
                 if (!svc) return respond501(res);
                 const result = await svc.dismissAudienceBindingSuggestion(context ?? {}, String(req.params.id));
                 res.json({ data: result });
@@ -612,7 +620,7 @@ export function registerSecurityEndpoints(this: SecurityRouteHost, basePath: str
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
-                const svc = await resolveService(environmentId);
+                const svc = await resolveService(environmentId, req);
                 if (!svc) return respond501(res);
                 if (typeof svc.reopenAudienceBindingSuggestion !== 'function') {
                     return respondError(
