@@ -12792,7 +12792,7 @@ export function contractReviewVerdictOf(body) {
 // remedy sentence says so rather than prescribing a relabel.
 //
 // ⛔ And no new label, by the same ruling: 「不要新增标签。你已经证明词汇表够用」.
-// `needs-user-decision` is live on cards and PRs and `pm:awaiting-maintainer`
+// `needs-user-decision` is live on cards and `pm:awaiting-maintainer`
 // is live on cards, so the state the remedy points at already exists and the
 // deliverable triage ruled for is 逐卡改判, not a new state.
 //
@@ -12893,7 +12893,7 @@ export function h54DecisionTitledQueueCard(issue) {
     'must stop saying otherwise); if it is genuinely UNRULED it belongs in the decision inbox — ' +
     '`needs-user-decision`, carrying its four-facet analysis at the moment the label lands, ⛔ not ' +
     'left for the maintainer to fill in on arrival. ⛔ No new label is needed or wanted: the ' +
-    'vocabulary already carries the state (`needs-user-decision` on cards and PRs, ' +
+    'vocabulary already carries the state (`needs-user-decision` on cards, ' +
     '`pm:awaiting-maintainer` on cards), and the ruled deliverable is 逐卡改判 rather than a new ' +
     'state. Report-only: this row writes no label, relabels nothing, and its verdict is a ' +
     'disagreement between two carriers — ⛔ never a finding that the card is mislabelled. ' +

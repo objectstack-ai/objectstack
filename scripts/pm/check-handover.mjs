@@ -132,6 +132,7 @@ import { isEntrypoint } from '../invoked-as.mjs';
 import {
   CLAIM_COMMENT_MARKER,
   DECISION_FACET_MARKER,
+  DECISION_INBOX_LABEL,
   GOVERNED_PR_AWAITING_MERGE_LABEL,
   OPEN_LISTING_PAGE_CEILING,
   OS_DEV_REPORT_MARKER,
@@ -173,9 +174,6 @@ export const PROXY_REARM_GUARD = 'OS_CHECK_HANDOVER_PROXY_REARMED';
 
 /** The identity every relay write carries; (b) reads the departing session's comments by this author only. */
 export const FLEET_BOT_LOGIN = 'objectstack-fleet[bot]';
-
-/** The decision inbox label, and the one state a card awaiting the maintainer may carry. */
-export const DECISION_INBOX_LABEL = 'needs-user-decision';
 
 /** (b)'s default window: a seat shift measured 41 h and 49 h in the two vacant bodies the card read; ×3 headroom. */
 export const DEFAULT_WINDOW_HOURS = 168;
