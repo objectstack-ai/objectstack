@@ -82,7 +82,7 @@ const node = (approver: Record<string, unknown>) => ({
   runId: 'run_1',
   nodeId: 'group_signoff',
   flowName: 'po_approval',
-  config: { approvers: [approver], behavior: 'unanimous' as const, lockRecord: false, onEmptyApprovers: 'admin_rescue' as const },
+  config: { approvers: [approver as any], behavior: 'unanimous' as const, lockRecord: false, onEmptyApprovers: 'admin_rescue' as const },
   record: { id: 'po1', signoff_position: 'cfo' },
 });
 
