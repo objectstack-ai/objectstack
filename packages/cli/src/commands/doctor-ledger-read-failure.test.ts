@@ -479,10 +479,10 @@ describe('os doctor, end to end, against an unreadable installed-package ledger'
     // installed-packages` here would move the literal into the test and pin
     // the row against the guess a second time — the defect, relocated.
     // Re-imported rather than read off `LEDGER_REL` for the same reason.
-    const { DEFAULT_INSTALLED_PACKAGES_DIR } = await import('@objectstack/cloud-connection');
+    const { resolveInstalledPackagesDir } = await import('@objectstack/cloud-connection');
     // `mkdtemp` makes this unique per run, which is what makes "the resolved
     // dir, not the literal" assertable at all: no literal can contain it.
-    const resolved = path.join(tmp, DEFAULT_INSTALLED_PACKAGES_DIR);
+    const resolved = resolveInstalledPackagesDir({ cwd: tmp }).dir;
 
     const run = await runDoctor(['--verbose']);
 
@@ -672,6 +672,34 @@ describe('os doctor, end to end, against an unreadable installed-package ledger'
     // The fix is per-file, so it has to say what to do with each one.
     expect(verboseRun.out).toContain('Repair the JSON, or delete the file');
     expect(verboseRun.exitCode).toBeUndefined();
+  }, 60_000);
+
+  it('reads the ledger under OS_HOME when OS_HOME is set — the directory the runtime reads (#30217)', async () => {
+    // The runtime's ledger follows OS_HOME. Doctor reading `<cwd>/.objectstack/
+    // installed-packages` here would report on a directory the runtime no
+    // longer reads, and stay silent about the one it does.
+    writeConfig();
+    const home = path.join(tmp, 'home');
+    const homeLedger = path.join(home, 'installed-packages');
+    fs.mkdirSync(homeLedger, { recursive: true });
+    fs.writeFileSync(path.join(homeLedger, 'billing.json'), JSON.stringify(globalUniqueEntry('billing')));
+    // A stale working-directory ledger beside it: not what the runtime reads.
+    fs.mkdirSync(ledgerPath(), { recursive: true });
+    fs.writeFileSync(path.join(ledgerPath(), 'stale.json'), '{"manifestId":"stale"');
+
+    const savedHome = process.env.OS_HOME;
+    process.env.OS_HOME = home;
+    let run: { out: string; exitCode: number | undefined };
+    try {
+      run = await runDoctor(['--verbose']);
+    } finally {
+      if (savedHome === undefined) delete process.env.OS_HOME;
+      else process.env.OS_HOME = savedHome;
+    }
+
+    expect(run.out).toContain("installed package 'billing'");
+    expect(run.out).not.toContain('stale.json');
+    expect(run.out).not.toContain(SKIPPED_HEADLINE);
   }, 60_000);
 });
 

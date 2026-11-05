@@ -233,6 +233,7 @@ import {
     LocalManifestSource,
     type InstalledManifestEntry,
     type InstalledManifestListing,
+    type LegacyLedgerAdoption,
     type SkippedManifestEntry,
 } from './local-manifest-source.js';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
@@ -1086,7 +1087,9 @@ export interface MarketplaceInstallLocalPluginConfig {
      *  OS_CLOUD_URL=off to disable (the install endpoint then returns 503). */
     controlPlaneUrl?: string;
     /** Override the on-disk cache directory. Defaults to
-     *  `<cwd>/.objectstack/installed-packages`. */
+     *  `<OS_HOME>/installed-packages` when `OS_HOME` is set, else
+     *  `<cwd>/.objectstack/installed-packages` (`resolveInstalledPackagesDir`).
+     *  An explicit directory adopts nothing from the working directory. */
     storageDir?: string;
 }
 
@@ -1207,6 +1210,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     private rehydrate = async (ctx: PluginContext): Promise<void> => {
         // [#21822] The record describes THIS rehydrate, and nothing older.
         this.refusedAtRehydrate.clear();
+        // [#30217] Before the read: the installs an earlier release ledgered in
+        // the working directory are copied into the ledger that now follows
+        // OS_HOME, once, so they rehydrate here instead of silently vanishing.
+        this.adoptLegacyLedger(ctx);
         const { entries, skipped } = this.readAll();
 
         // #5413 — BEFORE the early return, not after. A ledger whose entries
@@ -5512,6 +5519,37 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             + `this runtime, though its ledger entry lists it as installed — none of its objects, data or handlers `
             + `are available: ${diagnostic.message}. Install a version of the package built for protocol `
             + `${diagnostic.protocolVersion} (POST ${ROUTE_BASE}), or remove it (DELETE ${ROUTE_BASE}/${entry.manifestId}).`,
+        );
+    };
+
+    /**
+     * [#30217] Copy the working-directory ledger into this one, once
+     * ({@link LocalManifestSource.adoptLegacyEntries}), and say so.
+     *
+     * A copy that happened is a `warn`: the runtime now reads the new place,
+     * and the old directory, left in place, is stale state the operator should
+     * remove. A copy that failed is an `error` (AGENTS.md, "Degradation log
+     * levels"): the old ledger lists packages as installed, this runtime loads
+     * none of them, and the boot otherwise looks normal. Nothing was lost — the
+     * old files are untouched and the next boot copies again.
+     */
+    private adoptLegacyLedger = (ctx: PluginContext): void => {
+        let adoption: LegacyLedgerAdoption | null;
+        try {
+            adoption = this.ledger.adoptLegacyEntries();
+        } catch (cause) {
+            ctx.logger?.error?.(
+                `[MarketplaceInstallLocal] the packages ledgered in ${this.ledger.legacyDir} are NOT loaded into this `
+                + `runtime: copying them into ${this.storageDir}, where the ledger now lives (it follows OS_HOME), `
+                + `failed: ${describeLedgerCause(cause)}. Make ${this.storageDir} writable and restart, or copy the `
+                + `files there yourself; the old files are untouched.`,
+            );
+            return;
+        }
+        if (!adoption) return;
+        ctx.logger?.warn?.(
+            `[MarketplaceInstallLocal] copied ${adoption.files.length} installed package(s) from ${adoption.from} `
+            + `into ${adoption.to}: the ledger now follows OS_HOME. ${adoption.from} is no longer read; remove it.`,
         );
     };
 

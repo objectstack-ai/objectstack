@@ -1140,7 +1140,9 @@ export interface InstalledPackageLedgerReading {
   readerFailure?: { cause: unknown };
   /**
    * Present ONLY when the reader package LOADED and its
-   * `DEFAULT_INSTALLED_PACKAGES_DIR` export is not a string (#5996).
+   * `resolveInstalledPackagesDir` export is not a function (#5996; the
+   * authority was the `DEFAULT_INSTALLED_PACKAGES_DIR` string until the ledger
+   * followed `OS_HOME`, #30217).
    *
    * A FOURTH fact — the last cell of the edge #5644 carved. `readerFailure` is
    * "present but unloadable"; this is "loaded but unrecognizable". That export
@@ -1152,9 +1154,10 @@ export interface InstalledPackageLedgerReading {
    */
   dirAuthorityMissing?: { received: unknown };
   /**
-   * The resolved ledger directory — `cwd` joined with the producer's
-   * `DEFAULT_INSTALLED_PACKAGES_DIR` export (#5996). Present exactly when that
-   * export was read successfully, whatever happened afterwards (a `failure`
+   * The resolved ledger directory — the producer's
+   * `resolveInstalledPackagesDir` answer for `cwd` (#5996, #30217): the same
+   * directory the runtime's default reads, `OS_HOME` included. Present exactly
+   * when that export was read successfully, whatever happened afterwards (a `failure`
    * reading still carries it); absent when the reader never loaded
    * (`readerFailure`) or loaded without declaring it (`dirAuthorityMissing`).
    * Rows that name the directory take it from HERE, never from a re-hardcoded
@@ -1221,9 +1224,10 @@ interface SkippedLedgerEntry {
  * and the measurements behind it); only the genuinely-absent half stays silent.
  *
  * And a FIFTH — the cell the fourth's edge left uncovered (#5996). `loaded` is
- * still not RECOGNIZED: the ledger directory's name is the module's own
- * `DEFAULT_INSTALLED_PACKAGES_DIR` export — the single authority on that name —
- * and a module that evaluates fine while declaring no such string is a reader
+ * still not RECOGNIZED: the ledger directory is the module's own
+ * `resolveInstalledPackagesDir` answer (the `DEFAULT_INSTALLED_PACKAGES_DIR`
+ * string until #30217) — the single authority on where it is — and a module
+ * that evaluates fine while declaring no such function is a reader
  * this doctor does not know how to follow. The consumer-side `??` that used to
  * sit on that export answered the state with a hard-coded guess, two lines
  * above the #5413 comment that forbids exactly that accommodation (Prime
@@ -1237,8 +1241,8 @@ interface SkippedLedgerEntry {
  * every finding above is now reachable under every posture (which is the whole
  * point), and this function no longer sits inside a `try` belonging to somebody
  * else. It must therefore report rather than throw for anything it can hit,
- * which is why the export is TYPE-CHECKED before `path.join()` ever sees it
- * (#5996): the join over two known strings cannot throw. Before the check
+ * which is why the export is TYPE-CHECKED before it is called (#5996), and a
+ * resolver that throws anyway comes back as `readerFailure`. Before the check
  * existed, the same hazard was handled positionally — the join lived INSIDE the
  * guarded block, because a `path.join()` over a non-string export used to be
  * absorbed by the config `catch` and misreported as "Could not load config for
@@ -1262,22 +1266,29 @@ async function readInstalledPackageEntries(cwd: string): Promise<InstalledPackag
   const mod: any = load.module;
 
   // Case 5 (#5996) — LOADED is not RECOGNIZED. This export is the single
-  // authority on what the ledger directory is called, and a module that
-  // evaluates fine without declaring it (as a string) is not a reader this
-  // doctor knows how to follow. Read with no `??` fallback for the same reason
+  // authority on where the ledger directory is, and a module that evaluates
+  // fine without declaring it (as a function) is not a reader this doctor
+  // knows how to follow. [#30217] It is the resolver the runtime's own default
+  // calls, not the cwd-relative name: with `OS_HOME` set the ledger lives under
+  // it, and a `cwd` join here would read a directory the runtime does not. Read with no `??` fallback for the same reason
   // the destructuring below has none (Prime Directive #12): the guess the
   // fallback used to make is the consumer restating what only the producer
   // decides, and the runtime keeps reading wherever the package says — so the
   // guess could put doctor and the runtime on two different directories, both
   // silent. No guessed directory is read; the state is its own named row.
-  const declaredDir: unknown = mod.DEFAULT_INSTALLED_PACKAGES_DIR;
-  if (typeof declaredDir !== 'string') {
-    return { entries: [], skipped: [], dirAuthorityMissing: { received: declaredDir } };
+  const resolveDir: unknown = mod.resolveInstalledPackagesDir;
+  if (typeof resolveDir !== 'function') {
+    return { entries: [], skipped: [], dirAuthorityMissing: { received: resolveDir } };
   }
-  // Outside the `try` on purpose: both operands are known strings, so this
-  // join cannot throw, and resolving it here keeps `dir` in scope for every
-  // return below — including the `failure` one.
-  const dir = path.join(cwd, declaredDir);
+  // Outside the `try` below on purpose, so `dir` is in scope for every return
+  // after it — including the `failure` one. A resolver that throws is a reader
+  // that failed, reported as such rather than thrown out of doctor.
+  let dir: string;
+  try {
+    dir = (resolveDir as (opts: { cwd: string }) => { dir: string })({ cwd }).dir;
+  } catch (cause) {
+    return { entries: [], skipped: [], readerFailure: { cause } };
+  }
 
   try {
     // No directory = nothing was ever installed. Genuinely not a finding.
@@ -1723,8 +1734,8 @@ const LEDGER_ROW_NAME = 'Installed packages';
  *   • **The cause is quoted, not paraphrased** (#5390 / #5403). `ENOTDIR: not
  *     a directory, scandir '…'` names the file that is in the way; no sentence
  *     doctor could invent would beat it.
- *   • **`dir` is the directory doctor actually read** (#6643) — resolved from
- *     `DEFAULT_INSTALLED_PACKAGES_DIR` and carried on the reading, exactly as
+ *   • **`dir` is the directory doctor actually read** (#6643) — resolved by
+ *     `resolveInstalledPackagesDir` and carried on the reading, exactly as
  *     its `skipped` sibling takes it since #5996. It used to open with a
  *     re-hardcoded ``.objectstack/installed-packages/`` literal "under the
  *     project root": the consumer restating a value only the producer decides,
@@ -1781,8 +1792,8 @@ export function installedPackageLedgerFailureCheck(err: unknown, dir: string): H
  *     are different repairs.
  *   • **The row quotes the FIRST cause; `fix` carries them all** (#5390 body).
  *     One row is one line, the same bound every other finding here respects.
- *   • **`dir` is the directory doctor actually read** — the one resolved from
- *     `DEFAULT_INSTALLED_PACKAGES_DIR`, handed down through the reading
+ *   • **`dir` is the directory doctor actually read** — the one resolved by
+ *     `resolveInstalledPackagesDir`, handed down through the reading
  *     (#5996). It used to be a re-hardcoded `.objectstack/installed-packages/`
  *     literal: the same guess the deleted `??` fallback made, i.e. the
  *     consumer restating what only the producer decides. A row that names
@@ -1831,7 +1842,7 @@ export function installedPackageLedgerSkippedEntriesCheck(
  *
  * What is deliberately NOT a condition here: whether
  * `.objectstack/installed-packages/` exists. Doctor does not know that it does
- * not — the directory's name is `DEFAULT_INSTALLED_PACKAGES_DIR`, an export of
+ * not — the directory is `resolveInstalledPackagesDir`'s answer, an export of
  * the very package that would not load, and answering from the hard-coded
  * fallback would be doctor claiming knowledge it just lost. Making the row
  * conditional on the directory was option B of #5644 and was rejected on
@@ -1855,7 +1866,7 @@ export function installedPackageLedgerReaderFailureCheck(err: unknown): HealthCh
       + `${reportRowHeadline(cause)}`,
     fix:
       '`@objectstack/cloud-connection` IS installed here — its specifier resolves — and loading\n'
-      + '      it threw. That package is how `os doctor` reads `.objectstack/installed-packages/`,\n'
+      + '      it threw. That package is how `os doctor` reads the installed-package ledger,\n'
       + '      so nothing about the installed packages was read: whether any of them is\n'
       + '      unreadable — and, under the `isolated` posture, whether any declares an\n'
       + '      installation-wide `unique` — went unasked. Doctor cannot even tell you\n'
@@ -1876,9 +1887,9 @@ export function installedPackageLedgerReaderFailureCheck(err: unknown): HealthCh
  */
 function describeMissingDirAuthority(received: unknown): string {
   if (received === undefined) {
-    return 'DEFAULT_INSTALLED_PACKAGES_DIR is not among its exports';
+    return 'resolveInstalledPackagesDir is not among its exports';
   }
-  return `DEFAULT_INSTALLED_PACKAGES_DIR is not a string (got ${typeof received}: ${String(received)})`;
+  return `resolveInstalledPackagesDir is not a function (got ${typeof received}: ${String(received)})`;
 }
 
 /**
@@ -1888,8 +1899,8 @@ function describeMissingDirAuthority(received: unknown): string {
  * The fourth sibling of `installedPackageLedgerFailureCheck`, and the last
  * cell of the edge #5644 carved. That issue split "present but unloadable" out
  * of absence's silence; this row is "loaded but unrecognizable": the module
- * evaluated fine and its `DEFAULT_INSTALLED_PACKAGES_DIR` export — the single
- * authority on what the ledger directory is called — is not a string. Like its
+ * evaluated fine and its `resolveInstalledPackagesDir` export — the single
+ * authority on where the ledger directory is — is not a function. Like its
  * three siblings the row takes the {@link LEDGER_ROW_NAME} name column, makes
  * the D5e advisory withhold its `✓ Unique scope` line, and stays a warning.
  *
@@ -1903,8 +1914,8 @@ function describeMissingDirAuthority(received: unknown): string {
  * plausible path.
  *
  * What is deliberately NOT here, in the row or behind it: any directory path.
- * The one name doctor had for the ledger is the export that just came back
- * non-string, so naming a path — any path — would be doctor claiming the
+ * The one answer doctor had for the ledger is the export that just came back
+ * as no function, so naming a path — any path — would be doctor claiming the
  * knowledge whose loss this row reports. Same ground as #5644's option-B
  * rejection, one cell over: while this row shows, no directory is read at all.
  */
@@ -1918,8 +1929,8 @@ export function installedPackageLedgerDirAuthorityMissingCheck(received: unknown
       + reportRowHeadline(saw),
     fix:
       '`@objectstack/cloud-connection` IS installed here and it DID load — but it does not\n'
-      + '      export `DEFAULT_INSTALLED_PACKAGES_DIR` as a string, and that export is the single\n'
-      + '      authority on what the ledger directory is called. Doctor will not read a guessed\n'
+      + '      export `resolveInstalledPackagesDir` as a function, and that export is the single\n'
+      + '      authority on where the ledger directory is. Doctor will not read a guessed\n'
       + '      path in its place: the ledger’s location belongs to that package — the runtime\n'
       + '      reads wherever it decides — so a guess here could have doctor and the runtime\n'
       + '      reporting on two different directories with neither saying so. Nothing about the\n'
