@@ -5691,7 +5691,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   if (onAddedFieldsChange && objectDef?.fields) {
     const defs = objectDef.fields as Record<string, { label?: string; hidden?: unknown; system?: boolean } | undefined>;
     const listed = new Set(allFields.map((f) => f.name));
-    const candidates = Object.entries(defs).filter(([name, def]) =>
+    const candidates = Object.entries(defs).filter(([name]) =>
       !listed.has(name) && !isDeclaredHidden(defs, name) && canReadField(perms, schema.objectName, name));
     for (const tier of [false, true]) {
       for (const [name, def] of candidates) {
