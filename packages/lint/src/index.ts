@@ -145,6 +145,7 @@ export {
   FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
   FLOW_TRIGGER_UNROUTABLE,
   FLOW_API_TRIGGER_SECRET_MISSING,
+  FLOW_API_TRIGGER_SIGNATURE_UNUSABLE,
 } from './validate-flow-trigger-readiness.js';
 export type {
   FlowTriggerReadinessFinding,

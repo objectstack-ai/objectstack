@@ -30,6 +30,9 @@
  *    close): listed and moved the same way, never merged over another row of
  *    its item; rows bound to a writable package or to a package that does not
  *    ship the name are not listed.
+ *  - [#30000] THE REGISTRY FOLLOWS THE MOVE: the unbound row's registration
+ *    leaves with the row, so the process holds what a restart holds, with no
+ *    restart (the delete door's heal, run after step 4).
  *
  * Test-path resolution: the protocol is `@objectstack/metadata-protocol`'s
  * `dist/`, so a change there is read here after that package is rebuilt.
@@ -609,11 +612,17 @@ describe('[#28576] the close reaches only what the ceremony moves: every row it 
         const pairRow = rowOf(VIEW, PAIR);
         expect(columnsOf(await read(protocol))).toEqual(['title']);
 
-        // The rollback's row is the first active row of the name in store
-        // order (`resolveOverlayPackageBinding`): here the package-less one,
-        // which is rolled back to its version 1.
-        expect(await refusalOf((protocol as any).rollbackMetaItem({ type: 'view', name: VIEW, toVersion: 1 }))).toBeUndefined();
-        expect(columnsOf(JSON.parse(String(rowOf(VIEW, null)!.metadata)))).toEqual(UNBOUND_COLUMNS);
+        // [#29848] The rollback's row is the one the read serves, the pair's
+        // declared row, never the first active row of the name in store order:
+        // version 1 is the package-less row's undeclared body, so the override
+        // write gate answers it there (D2), not the close, and nothing is written.
+        const packagelessRow = rowOf(VIEW, null);
+        const rolledBack = await refusalOf((protocol as any).rollbackMetaItem({ type: 'view', name: VIEW, toVersion: 1 }));
+        expect(rolledBack).toMatchObject({ status: 403, code: 'NOT_OVERRIDABLE' });
+        expect(rolledBack?.message).toContain('declares no override');
+        expect(rolledBack?.message).not.toContain('os migrate packageless-overlays');
+        expect(rowOf(VIEW, PAIR)).toEqual(pairRow);
+        expect(rowOf(VIEW, null)).toEqual(packagelessRow);
         // The package-less save and DELETE are not the close's to refuse:
         // they are addressed as before the close (`packagelessAddress`: the
         // one bound row of the name, the pair's), so the override write gate
@@ -627,7 +636,7 @@ describe('[#28576] the close reaches only what the ceremony moves: every row it 
         expect(rows(VIEW)).toEqual([[null, 'active']]);
         // …which leaves the package-less row movable: the ceremony's remedy.
         expect(dispositions(await census(protocol))).toEqual([`${VIEW}@active movable`]);
-        expect(columnsOf(await read(protocol))).toEqual(UNBOUND_COLUMNS);
+        expect(columnsOf(await read(protocol))).toEqual(EDITED_COLUMNS);
     });
 
     it('CONTROL movable: the same stored row with no pair row beside it — its package-less rollback, save and DELETE are refused', async () => {
@@ -784,5 +793,36 @@ describe('[#28413] adopt-orphans leaves a shipped name to the ceremony', () => {
         expect(result.reassigned).toEqual([{ type: 'view', name: ENV_VIEW }]);
         expect(rows(VIEW)).toEqual([[null, 'active']]);
         expect(rows(ENV_VIEW)).toEqual([[WORKSPACE, 'active']]);
+    });
+});
+
+describe('[#30000] the registry follows the move at once: it holds what a restart holds', () => {
+    /** Every registry entry named `VIEW`, by the columns it serves. */
+    const registered = (engine: ObjectQL) => ((engine.registry as any).listItems('view') as any[])
+        .filter((item) => item?.name === VIEW)
+        .map((item) => columnsOf(item).join(','))
+        .sort();
+
+    it('the moved unbound row leaves no registration behind, and every read serves the same with no restart', async () => {
+        const { engine, protocol, stores } = await boot();
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS);
+        expect(await (protocol as any).loadMetaFromDb()).toMatchObject({ errors: 0 });
+        expect(registered(engine)).toEqual([BASE_COLUMNS.join(','), UNBOUND_COLUMNS.join(',')].sort());
+
+        const result = await migrate(protocol);
+        expect(result.outcomes.map((o: any) => o.outcome)).toEqual(['moved']);
+
+        // A restart: a new engine and protocol over the same rows, the pair
+        // ensured, then the boot's hydration.
+        const next = await boot();
+        next.stores.set('sys_metadata', stores.get('sys_metadata')!);
+        await (next.protocol as any).ensureCustomizationPackage({ basePackageId: BASE });
+        expect(await (next.protocol as any).loadMetaFromDb()).toMatchObject({ errors: 0 });
+
+        // The unbound row's registration left with the row, in the same process.
+        expect(registered(engine)).toEqual(registered(next.engine));
+        expect(registered(engine)).not.toContain(UNBOUND_COLUMNS.join(','));
+        expect(await fiveReads(protocol)).toEqual(await fiveReads(next.protocol));
+        expect(await fiveReads(protocol)).toEqual([UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS]);
     });
 });

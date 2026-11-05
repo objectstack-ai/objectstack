@@ -36,7 +36,13 @@
  */
 
 import type { ObjectStackProtocolImplementation } from './protocol.js';
-import { isOriginGatedType, managedItemSealedSentence, regimeCDeclaredSaveSentence } from './packaged-base-regime.js';
+import {
+    isOriginGatedType,
+    managedItemSealedSentence,
+    packagedBaseRegimePrescription,
+    packagedBaseRegimeRow,
+    regimeCDeclaredSaveSentence,
+} from './packaged-base-regime.js';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
 import { OBJECT_EXTENSION_TYPE } from './protocol-object-extension-item.js';
 import { customizationPairEnsureRefusal, type PairRegistry } from './protocol-customization-package.js';
@@ -44,9 +50,11 @@ import { overlayMemberField, overlayMemberOfBody, overlayMemberValue } from './m
 import {
     customizationBasePackageId,
     customizationPackageId,
+    DEFAULT_METADATA_TYPE_REGISTRY,
     getOverrideTypeClassification,
     isCustomizationPairOf,
     OverrideDeclarationSchema,
+    type OverrideClassificationBasis,
 } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec';
@@ -526,20 +534,32 @@ function isOpenOverrideType(singular: string): boolean {
 
 /**
  * [#28412, ADR-0146 D9 item 1] Whether a removal addressed to `packageId`
- * removes the shipping package's PAIR row of a type whose D9 conditions are
- * delivered ({@link CONDITIONS_DELIVERED}: `flow` today) — the row the pair's
+ * removes the shipping package's PAIR row of a type whose declared override
+ * the gate admits today ({@link isOpenOverrideType}) — the row the pair's
  * declared override is stored in. Such a removal is admitted past the
  * sealed-removal refusal: it removes no managed definition, and the code
- * package's flow is what every read serves and what the automation engine
- * arms once the row is gone — the narrowing direction the #6960 ruling names.
- * ⛔ Only the pair, named: a removal naming no package, or any other package,
- * keeps the sealed refusal it had. ⛔ Only a delivered type: every other open
- * type (`view`, `mapping`, …) keeps main's delete verdict — its own removal
- * carve-out or its sealed refusal — untouched by this card.
+ * package's item is what every read serves (for a flow, what the automation
+ * engine arms) once the row is gone — the narrowing direction the #6960
+ * ruling names, and ADR-0146's revert ("Restore package original" deletes the
+ * overriding item from `.custom`, so the base's document is served again).
+ *
+ * [#30062] Every open type, no longer `flow` alone. A `doc` or `mapping`
+ * opens no overlay channel and is no `supportsOverlay` type either, so the
+ * sealed-removal refusal answered a pair's own removal of its declared
+ * override with 403 and the override stayed served: a customization the
+ * customer could not undo. The other open types already passed (their own
+ * overlay channel or the #6960 carve-out); the removal is now told to the
+ * store as runtime-only for all of them, as the declared save wrote the row.
+ *
+ * ⛔ Only the pair, named: a removal naming no package, the base, or any
+ * other package, keeps the refusal it had — a base's own item is never
+ * removed. ⛔ Only an open type: `action` (its D9 conditions are not
+ * delivered, so no pair holds a declared action override) and every excluded
+ * type keep main's delete verdict.
  */
 export function isPairRowRemoval(type: string, basePackageId: unknown, packageId: unknown): boolean {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
-    if (!CONDITIONS_DELIVERED.has(singular) || !isOpenOverrideType(singular)) return false;
+    if (!isOpenOverrideType(singular)) return false;
     if (typeof basePackageId !== 'string') return false;
     if (typeof packageId !== 'string' || packageId.length === 0) return false;
     const pair = customizationPackageId(basePackageId);
@@ -657,6 +677,89 @@ function declarationOf(item: unknown): { present: boolean; base: string | undefi
 }
 
 /**
+ * [#30062] The decision record each excluded type's basis rests on: the one
+ * the refusal of a declared override of that type cites. Before, every
+ * excluded type cited ADR-0146 D6, the security catalog's paragraph, whatever
+ * excluded it.
+ */
+const EXCLUSION_BASIS_CITATION: Readonly<Record<OverrideClassificationBasis, string>> = {
+    adr_0146_d2_listed: 'ADR-0146 D2',
+    adr_0146_d6_security_catalog: 'ADR-0146 D6',
+    adr_0146_d10_extended: 'ADR-0146 D10',
+    adr_0126_code_only: 'ADR-0146 D6',
+    not_package_shipped: 'ADR-0146 D2',
+    not_runtime_creatable: 'ADR-0146 D2',
+    adr_0126_one_shot: 'ADR-0126 §3',
+    setup_owned_connection: 'ADR-0146 D1',
+    behavioural_switch_first: 'ADR-0146 D9',
+};
+
+/**
+ * [#30062] The Setup page an organization authors its OWN item of an
+ * excluded type on, for a type no metadata door creates and no ADR-0126
+ * regime row routes: a queue is a `sys_queue` record (ADR-0142 D1), listed at
+ * Setup › Queues (`@objectstack/plugin-sharing`'s navigation contribution).
+ */
+const SETUP_AUTHORED_DOORS: Readonly<Record<string, string>> = {
+    queue: 'Setup › Queues',
+};
+
+/** `type`'s registry entry admits a runtime create (`allowRuntimeCreate`), read on the canonical type. */
+function admitsRuntimeCreate(type: string): boolean {
+    return DEFAULT_METADATA_TYPE_REGISTRY.some((e) => e.type === type && e.allowRuntimeCreate === true);
+}
+
+/**
+ * [#30062] The remedy a declared override of an excluded `type` is told: one
+ * that works for that type, read from the facts that decide whether it does,
+ * in this order, never from a sentence shared by every excluded type:
+ *
+ *  1. a Setup-owned connection (`datasource`, ADR-0146 D1): Setup › Datasources;
+ *     a `field`: its object's extension in the pair (ADR-0146 D10);
+ *  2. a type the metadata door creates (`allowRuntimeCreate`): the customer's
+ *     own item under a new name, "new similar" (D6's remedy for its catalog);
+ *  3. a type with an ADR-0126 Regime C row: that row's sanctioned path, the
+ *     sentence every other door of the type names (`sharing_rule`: an
+ *     organization rule, `POST /sharing/rules`, which Setup › Sharing Rules
+ *     lists, or the switch);
+ *  4. a type an organization authors as a Setup record ({@link SETUP_AUTHORED_DOORS});
+ *  5. else the type is defined only in package source: it changes with a new
+ *     version of the package that ships it.
+ *
+ * Before, every excluded type was told to "create your own TYPE under a new
+ * name", and for a type with no runtime create (a sharing rule, a queue, a
+ * code-only type) that create answered 403 `NOT_CREATABLE`.
+ */
+function excludedTypeRemedy(type: string, base: string | undefined): string {
+    if (getOverrideTypeClassification(type)?.basis === 'setup_owned_connection') {
+        return `Remove \`overrides\`: ${articleFor(type)} ${type} is the environment's own connection and does not travel in a package. `
+            + 'Add your own under a new name in Setup › Datasources.';
+    }
+    if (type === 'field') {
+        // ADR-0146 D10: a base field changes through its object's extension, never on its own.
+        return 'Remove `overrides` and change the field through an object extension in the base\'s paired .custom package '
+            + `(ADR-0146 D10): an \`object_extension\` item saved through ${OBJECT_EXTENSION_ITEM_DOOR} adds a field, or changes a base field within the display-property whitelist.`;
+    }
+    if (admitsRuntimeCreate(type)) {
+        return `Remove \`overrides\` and create your own ${type} under a new name ("new similar").`;
+    }
+    if (packagedBaseRegimeRow(type)?.regime === 'C') {
+        return `Remove \`overrides\`. ${packagedBaseRegimePrescription(type)}`;
+    }
+    const setup = Object.prototype.hasOwnProperty.call(SETUP_AUTHORED_DOORS, type) ? SETUP_AUTHORED_DOORS[type] : undefined;
+    if (setup !== undefined) {
+        return `Remove \`overrides\` and add your organization's own ${type} under a new name in ${setup}.`;
+    }
+    const shipper = base === undefined ? 'the package that ships it' : `'${base}'`;
+    return `Remove \`overrides\`: ${articleFor(type)} ${type} is defined only in package source, so it changes only with a new version of ${shipper}.`;
+}
+
+/** The indefinite article for a type name, by its first letter: "an api", "a permission". */
+function articleFor(type: string): 'a' | 'an' {
+    return /^[aeiou]/.test(type) ? 'an' : 'a';
+}
+
+/**
  * THE override write gate's rule, as a pure verdict — the one judgement the
  * publish doors (`saveMetaItem`, `publishMetaItem`, `publishPackageDrafts`),
  * `os validate` and the marketplace install door all ask, so the three gate
@@ -709,9 +812,11 @@ export function judgeOverrideWrite(
                 + `object it extends and is stored under that object's name. Remove \`overrides\` and edit the object_extension '${name}' itself.`);
         }
         if (row?.disposition !== 'overridable') {
+            // [#30062] The citation is the type's own basis, and the remedy one that works for the type.
+            const cite = row === undefined ? 'ADR-0146 D2' : EXCLUSION_BASIS_CITATION[row.basis];
             return refuse('declared_type_not_overridable',
-                `${item} carries \`overrides\`, but a ${type} takes no override (ADR-0146 D6). `
-                + `Remove \`overrides\` and create your own ${type} under a new name ("new similar").`);
+                `${item} carries \`overrides\`, but ${articleFor(type)} ${type} takes no override (${cite}). `
+                + excludedTypeRemedy(type, declaration.base));
         }
         // `action` is classified overridable and waits for D9's conditions
         // (`isOpenOverrideType`): "action customization is not yet available".

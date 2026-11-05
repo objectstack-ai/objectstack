@@ -155,6 +155,7 @@ function rewriteProjectIdentity(
   targetDir: string,
   projectName: string,
   namespace: string,
+  pm: string,
 ) {
   const title = toTitleCase(projectName);
 
@@ -268,16 +269,20 @@ function rewriteProjectIdentity(
     fs.writeFileSync(readmePath, md);
   }
 
-  writeAgentGuides(targetDir, title, projectName);
+  writeAgentGuides(targetDir, title, projectName, pm);
 }
 
 // Emit the cross-agent guidance file (AGENTS.md) and the GitHub Copilot variant
 // (.github/copilot-instructions.md) from the shared template. This is what tells
-// the coding agent to run `npm run validate` after editing metadata — the gate
+// the coding agent to run `<pm> run validate` after editing metadata — the gate
 // that catches bare-field predicates and dangling bindings that otherwise fail
 // silently at runtime. Skip either file if the template already shipped its own,
 // so a curated template can override the default.
-function writeAgentGuides(targetDir: string, title: string, projectName: string) {
+//
+// `{{PM}}` is the package manager this run detected — the same one the install
+// line and "Next steps" name — so a project created with pnpm is not told to
+// type `npm run` in the file its coding agent reads first.
+function writeAgentGuides(targetDir: string, title: string, projectName: string, pm: string) {
   const templatePath = path.join(BUNDLED_TEMPLATES_DIR, 'AGENTS.md');
   let template: string;
   try {
@@ -289,7 +294,8 @@ function writeAgentGuides(targetDir: string, title: string, projectName: string)
 
   const rendered = template
     .replace(/\{\{PROJECT_TITLE\}\}/g, title)
-    .replace(/\{\{PROJECT_NAME\}\}/g, projectName);
+    .replace(/\{\{PROJECT_NAME\}\}/g, projectName)
+    .replace(/\{\{PM\}\}/g, pm);
 
   // Atomic exclusive-create (the `wx` flag) instead of existsSync()+writeFileSync():
   // it fails with EEXIST if the file already exists, so a curated template that
@@ -593,7 +599,7 @@ const program = new Command()
 
       const createdFiles = loadBundled(template.source.dir, targetDir);
 
-      rewriteProjectIdentity(targetDir, projectName, namespace);
+      rewriteProjectIdentity(targetDir, projectName, namespace, pm);
 
       // Progress, not an inventory. The authoritative list is printed at the
       // end, once `<pm> install` and the skills installer have also written —

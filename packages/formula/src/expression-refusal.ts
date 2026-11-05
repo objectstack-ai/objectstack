@@ -164,16 +164,35 @@ export interface ExpressionRefusalParams {
   'bare-reference': { readonly name: string };
   /**
    * Arithmetic on a date field against a number. `operands` are the CEL
-   * operand types; `reference` is the field as written, when it is known.
+   * operand types; `reference` is the field as written, when it is known. A
+   * flattened (flow) condition is `date-arithmetic-run-fails` /
+   * `date-arithmetic-run-may-fail`.
    */
   'date-arithmetic': { readonly operands: string; readonly reference?: string };
   /**
    * Arithmetic on a date field's runtime TEXT that the evaluator cannot answer
    * (`record.end_date - record.start_date`), judged with the field declared as
    * that text. `operands` are the CEL operand types (the text is `DateText`);
-   * `reference` is the field as written, when it is known.
+   * `reference` is the field as written, when it is known. A flattened (flow)
+   * condition is `date-text-arithmetic-run-fails` / `-run-may-fail`.
    */
   'date-text-arithmetic': { readonly operands: string; readonly reference?: string };
+  /**
+   * [#30016] ERROR: `date-arithmetic` in a flow condition whose run is proven
+   * to hold the field there (`faultOutcome: 'run-fails'`) — the condition
+   * faults, so the run fails at it. It never reads null.
+   */
+  'date-arithmetic-run-fails': { readonly operands: string; readonly reference?: string };
+  /**
+   * [#30016] ERROR: `date-arithmetic` in any other flow condition — it faults,
+   * and so fails the run, wherever the name holds the field's date when the
+   * condition runs; what the run binds under the name is not proven there.
+   */
+  'date-arithmetic-run-may-fail': { readonly operands: string; readonly reference?: string };
+  /** [#30016] ERROR: `date-text-arithmetic`, at a `date-arithmetic-run-fails` site. */
+  'date-text-arithmetic-run-fails': { readonly operands: string; readonly reference?: string };
+  /** [#30016] ERROR: `date-text-arithmetic`, at a `date-arithmetic-run-may-fail` site. */
+  'date-text-arithmetic-run-may-fail': { readonly operands: string; readonly reference?: string };
   /**
    * A formula that computes a `google.protobuf.Duration`
    * (`today() - record.start_date`), which a field reads as `{}`. `reference`
@@ -274,6 +293,10 @@ const CODE_TABLE = {
   'bare-reference': true,
   'date-arithmetic': true,
   'date-text-arithmetic': true,
+  'date-arithmetic-run-fails': true,
+  'date-arithmetic-run-may-fail': true,
+  'date-text-arithmetic-run-fails': true,
+  'date-text-arithmetic-run-may-fail': true,
   'date-duration-value': true,
   'type-mismatch': true,
   'type-mismatch-fail-closed': true,

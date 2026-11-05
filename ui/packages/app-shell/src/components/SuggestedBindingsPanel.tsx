@@ -8,6 +8,7 @@ import {
   listSuggestedBindings,
   confirmSuggestedBinding,
   dismissSuggestedBinding,
+  reopenSuggestedBinding,
   type SuggestedBinding,
 } from '../services/suggestedBindingsApi.js';
 
@@ -33,14 +34,17 @@ import {
  *    change. The list does not carry this, so it lasts until the panel
  *    re-reads; after that the row reads as accepted, which claims the
  *    decision only, never that the set is in force;
- *  - dismissed or revoked — the server records both as `dismissed`.
+ *  - dismissed or revoked — the server records both as `dismissed` — offers
+ *    Reconsider, which re-opens the row: it is `pending` again, with Accept
+ *    and Dismiss, and grants nothing until it is accepted.
  *
  * A `confirmed` row WITHOUT a deployment decision is one the baseline already
  * names; this surface does not decide the baseline (the server refuses its
  * dismiss `409`), so it is not drawn.
  *
- * Every refusal (403 / 409) is surfaced with the server's own message, and
- * the panel then re-reads the list so it shows what the server holds.
+ * Every refusal (403 / 404 / 409, and a 501 from a service without the
+ * re-open door) is surfaced with the server's own message, and the panel
+ * then re-reads the list so it shows what the server holds.
  *
  * Renders nothing while loading, when the package has no suggestion, or when
  * the list is refused — a caller without `manage_metadata` gets 403 — so it
@@ -66,6 +70,11 @@ export interface SuggestedBindingsStrings {
   revoke: string;
   revoking: string;
   revokedToast: (s: SuggestedBinding) => string;
+  /** Action on a dismissed or revoked row: re-open it for a decision. */
+  reopen: string;
+  reopening: string;
+  /** Toast after a re-open. Says the row is pending again, never that the set is granted. */
+  reopenedToast: (s: SuggestedBinding) => string;
 }
 
 type RowState = 'pending' | 'guest' | 'accepted' | 'notInForce' | 'dismissed';
@@ -90,7 +99,7 @@ export function SuggestedBindingsPanel({
   packageId?: string;
   strings: SuggestedBindingsStrings;
   className?: string;
-  /** Called after any suggestion is accepted, dismissed or revoked. */
+  /** Called after any suggestion is accepted, dismissed, revoked or re-opened. */
   onResolved?: (s: SuggestedBinding) => void;
 }) {
   const [rows, setRows] = useState<SuggestedBinding[]>([]);
@@ -117,7 +126,7 @@ export function SuggestedBindingsPanel({
   const put = (next: SuggestedBinding) =>
     setRows((current) => current.map((r) => (r.id === next.id ? next : r)));
 
-  const act = async (s: SuggestedBinding, action: 'confirm' | 'dismiss' | 'revoke') => {
+  const act = async (s: SuggestedBinding, action: 'confirm' | 'dismiss' | 'revoke' | 'reopen') => {
     setBusyId(s.id);
     try {
       let resolved: SuggestedBinding;
@@ -132,6 +141,9 @@ export function SuggestedBindingsPanel({
         });
         if (bindingCreated) toast.success(strings.confirmedToast(s));
         else toast.warning(strings.notInForceState(s));
+      } else if (action === 'reopen') {
+        resolved = await reopenSuggestedBinding(s.id);
+        toast.success(strings.reopenedToast(s));
       } else {
         resolved = await dismissSuggestedBinding(s.id);
         toast.success(action === 'revoke' ? strings.revokedToast(s) : strings.dismissedToast(s));
@@ -221,6 +233,17 @@ export function SuggestedBindingsPanel({
                 data-testid={`suggested-binding-revoke-${s.permission_set_name}`}
               >
                 {busy ? strings.revoking : strings.revoke}
+              </Button>
+            )}
+            {state === 'dismissed' && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => act(s, 'reopen')}
+                data-testid={`suggested-binding-reopen-${s.permission_set_name}`}
+              >
+                {busy ? strings.reopening : strings.reopen}
               </Button>
             )}
           </div>

@@ -113,9 +113,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_activity: {
-    label: "アクティビティ",
-    pluralLabel: "アクティビティ",
-    description: "最近のアクティビティストリームエントリ（軽量、非正規化）",
+    label: "アクティビティフィード",
+    pluralLabel: "アクティビティフィード",
+    description: "最近レコードに対して行われた操作を新しい順に表示します：誰が何を作成、変更、削除したか。エントリは 14 日間保持されます。",
     fields: {
       id: {
         label: "アクティビティ ID"
@@ -192,6 +192,18 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       milestone_key: {
         label: "マイルストーンキー",
         help: "発火したアクティビティマイルストーンについて、発火時にオブジェクトの activityMilestones 宣言が監視していた全フィールドをソートしてカンマで連結したキー。その他の行では NULL。書き込み時にプラットフォームが付与し、決して返されません。読み取りルールが現在の宣言と比較します。"
+      }
+    },
+    _views: {
+      recent: {
+        label: "最近のアクティビティ",
+        emptyState: {
+          title: "最近のアクティビティはありません",
+          message: "レコードへの変更がここに新しい順で表示されます。"
+        }
+      },
+      all: {
+        label: "すべてのエントリ"
       }
     }
   },

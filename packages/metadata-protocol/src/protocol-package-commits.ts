@@ -1906,7 +1906,7 @@ export class ProtocolPackageCommitsFacet {
     }
 
     /** [#28355] The body of {@link rollbackMetaItem} before its refusal audit; that method's docblock is the contract. */
-    static async rollbackMetaItemUnaudited(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'emitMetadataMutation' | 'ensureOverlayIndex' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'packagelessOverlayWriteRefusal' | 'receiptVersion' | 'recordMetadataAudit' | 'recordOptimisticConflictAudit' | 'refuseOrganizationScopedWrite' | 'resolveOverlayPackageBinding' | 'restoreWriteFor' | 'runMutationProjector'>, request: RollbackMetaItemRequest): Promise<{
+    static async rollbackMetaItemUnaudited(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'emitMetadataMutation' | 'ensureOverlayIndex' | 'findServedOverlayRow' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'packagelessOverlayWriteRefusal' | 'packagelessReadAddress' | 'receiptVersion' | 'recordMetadataAudit' | 'recordOptimisticConflictAudit' | 'refuseOrganizationScopedWrite' | 'resolveOverlayPackageBinding' | 'restoreWriteFor' | 'runMutationProjector'>, request: RollbackMetaItemRequest): Promise<{
             success: boolean;
             version: string;
             seq: number;
@@ -2025,7 +2025,31 @@ export class ProtocolPackageCommitsFacet {
         // it afterwards would put a fallible query downstream of a write that
         // already succeeded — the shape that ends in a `catch {}` swallowing a
         // real outage (#4867).
-        const rollbackPackageId = await host.resolveOverlayPackageBinding(singularType, request.name, member);
+        //
+        // [#29848, ADR-0146 D8 item 2] The row is the one the by-name read
+        // naming no package SERVES ({@link findServedOverlayRow} at
+        // {@link packagelessReadAddress}, its declared override first), so a
+        // rollback restores the item the caller sees. Beside a row bound to the
+        // read-only base (stored before #28905's close), the base's paired
+        // `.custom` row that declares the override is served, and its rollback
+        // restores it; the package-agnostic binding read answered whichever
+        // active row of the name the store returned first, so the pair's
+        // rollback addressed the base row and the named-base close below
+        // refused it, naming a row the caller never meant. No row served (a
+        // row only another package binds under the name): that row's binding,
+        // as before.
+        const servedPackage = await host.packagelessReadAddress(singularType, request.name, member);
+        const served = await host.findServedOverlayRow({
+            type: singularType,
+            name: request.name,
+            state: 'active',
+            ...(servedPackage !== undefined ? { packageId: servedPackage } : {}),
+            ...memberOption(member),
+            servedOverride: true,
+        });
+        const rollbackPackageId = served !== undefined
+            ? ((served.row as { package_id?: string | null } | null)?.package_id ?? null)
+            : await host.resolveOverlayPackageBinding(singularType, request.name, member);
         // [ADR-0146 D11, D1] A rollback writes the row its binding names, so
         // a rollback of a packaged item's package-less row (an overlay type's
         // row the ceremony has not moved, or none stored, whose restore writes
@@ -2081,6 +2105,9 @@ export class ProtocolPackageCommitsFacet {
                 deriveRestoredBody,
                 // [#22877] The member whose lineage `toVersion` is taken from.
                 ...memberOption(member),
+                // [#29848, #29414] The row the binding above names, and no other
+                // package's row of the name: its parent hash, and the write.
+                packageId: rollbackPackageId,
             });
             // #4521 — a rollback is a live write like any other: the restored
             // body must be the one the runtime dispatches on immediately, not

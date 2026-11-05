@@ -1329,6 +1329,9 @@ function isFlattenedNearMissFor(diagnostic: string, roots: readonly string[]): b
  * declares none, it stays the advisory warning. An advisory rule is graded
  * `error` too: the twin refuses it, and a rule that can never be evaluated
  * never gives its advisory — the message says so instead of a refused write.
+ * The date verdicts (`date-arithmetic`, `date-text-arithmetic`) are an error
+ * at every site; in a flow condition the same outcome picks their sentence:
+ * `-run-fails` under `run-fails`, `-run-may-fail` anywhere else (#30016).
  */
 type FaultSite =
   | { readonly kind: 'validation rule'; readonly severity: unknown }
