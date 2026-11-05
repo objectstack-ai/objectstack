@@ -194,6 +194,10 @@ describe('[#30581] a package body re-registered folds its contributions once', (
   });
 
   it('two disable/enable cycles of a module, each followed by a reload, serve the fresh registration', () => {
+    // The enable announcement the roll-up recompute rides on (#30377) still
+    // fires once per enable of a disabled package: a reload is no enable.
+    const heard: string[] = [];
+    const stop = engine.registry.onPackageEnabled((id) => { heard.push(id); });
     for (let cycle = 0; cycle < 2; cycle++) {
       engine.registry.disablePackage(ORDERS);
       expect(served(engine)).toEqual(['g_sales/nav_accounts', 'g_sales/nav_quotes', 'g_service/nav_cases']);
@@ -201,6 +205,8 @@ describe('[#30581] a package body re-registered folds its contributions once', (
       engine.registry.enablePackage(ORDERS);
       expect(served(engine)).toEqual(fresh);
     }
+    stop();
+    expect(heard).toEqual([ORDERS, ORDERS]);
   });
 
   it('toggling and re-registering a module with no contributions leaves the navigation unchanged', () => {
