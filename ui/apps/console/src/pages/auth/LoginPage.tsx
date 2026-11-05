@@ -74,7 +74,7 @@ import {
 import { AuthLayout } from './AuthLayout';
 import { AuthFooter, readLegalLinks } from './AuthFooter';
 import { followOauthAuthorize } from './followAuthorize';
-import { useHandoffRedirect } from './handoffRedirect';
+import { handoffMarkQuery, useHandoffRedirect } from './handoffRedirect';
 // Was module-private here; lifted to a shared module so `SetupPage` (whose
 // first-run exits went without it) and `RegisterPage` (which had copied it)
 // share ONE implementation — objectui#4181. Behaviour here is unchanged.
@@ -324,9 +324,9 @@ export function LoginPage() {
   }
 
   // Build search-aware sign-up URL so the redirect param survives the
-  // bounce from /login → /register → /login.
+  // bounce from /login → /register → /login, and the hand-off route's mark with it.
   const registerUrl = redirect
-    ? `/register?redirect=${encodeURIComponent(redirect)}`
+    ? `/register?redirect=${encodeURIComponent(redirect)}${handoffMarkQuery(redirect)}`
     : '/register';
   const legalLinks = readLegalLinks(authConfig);
   const offerSignUp = configRead === 'known' && signUpOffer === 'form';
