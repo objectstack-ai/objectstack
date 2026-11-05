@@ -82,7 +82,7 @@ only on reorgs. Why the tree matters:
 
 Day-to-day lifecycle actions live on each user's row menu and record header:
 **Ban / Unban** (blocks sign-in, ends the user's sessions, and refuses their API keys
-while the ban holds), **Unlock Account** (clears a brute-force
+and OAuth access tokens while the ban holds, with no new OAuth token issued to them), **Unlock Account** (clears a brute-force
 lockout early, at both the password and two-factor stages), **Set Password**
 (also mints one-time temporary passwords),
 and **Impersonate User** (see [Step 4](#step-4--verify)). *(Rough edge today:
@@ -97,6 +97,26 @@ through this membership, so don't skip it.
 
 Endpoint-level detail (payloads, password policies, phone-only accounts):
 [Authentication → Admin User Management](/docs/permissions/authentication#admin-user-management).
+
+### Handing over a banned user's work
+
+A ban does not move the records the person owns or is assigned. Two calls do,
+both run as you, so they count and change only what you could read and edit by
+hand:
+
+- `GET /api/v1/security/users/USER_ID/assigned-work` answers, per object and
+  user field (the owner field and every app user field such as an assignee),
+  how many records hold the user. Objects you cannot read are listed in
+  `unreadable`.
+- `POST /api/v1/security/users/USER_ID/assigned-work/transfer` with
+  `{ "toUserId": "...", "objects": ["..."] }` (`objects` optional) moves up to
+  500 records per call to an active user, each as an ordinary edit, so sharing,
+  validation rules and hooks apply. It answers what moved, what failed and how
+  many remain; call it again until `remaining` is 0.
+
+The hand-over is optional and never delays the ban. Once a user is banned, a
+new record or edit that sets a user field to them is refused with the field
+code `reference_user_banned`; a record that already holds them stays editable.
 
 ## Step 3 — Assign positions
 
@@ -181,7 +201,7 @@ Full model: [Permission Sets](/docs/permissions/permission-sets).
 | I need to… | Do this |
 |:--|:--|
 | Onboard a new employee | Invite/Create the user → Business Unit Member row → assign their position ([2](#step-2--add-people-users)→[3](#step-3--assign-positions)) |
-| Offboard someone | **Ban User** (blocks sign-in and the user's API keys immediately) — then remove assignments at leisure |
+| Offboard someone | **Ban User** (blocks sign-in, the user's API keys and their OAuth access tokens and token refreshes immediately) — then hand over their records ([below](#handing-over-a-banned-users-work)) and remove assignments at leisure |
 | "I can't sign in" | User record → is it banned? locked? **Unlock Account** or **Set Password** (temporary, must-change) |
 | "Why can't I see X?" | Studio → Access → **Explain access** for that user + object |
 | Someone changed departments | Update their Business Unit Member row; re-anchor their User Position rows |

@@ -34,6 +34,17 @@ import { RLS_PREDICATE_UNKNOWN_FIELD, validateRlsPredicateEnforceability } from 
 import { SHARING_RULE_UNLOWERABLE_CONDITION, validateSharingRuleEnforceability } from './validate-sharing-rule-enforceability.js';
 import { THANK_YOU_RECORD_FIELD, validateThankYouRecordFields } from './validate-thank-you-record-fields.js';
 import { MEASURE_AGGREGATE_INCOHERENT, WIDGET_FILTER_FIELD_UNKNOWN, validateWidgetBindings } from './validate-widget-bindings.js';
+import { validateStackExpressions } from './validate-expressions.js';
+import { FLOW_NODE_WRITE_UNKNOWN_FIELD, validateFlowNodeWrites } from './validate-flow-node-writes.js';
+import { ACTION_BODY_WRITE_UNKNOWN_FIELD, validateActionBodyWrites } from './validate-action-body-writes.js';
+import { HOOK_BODY_WRITE_UNKNOWN_FIELD, validateHookBodyWrites } from './validate-hook-body-writes.js';
+import { validateReactPageProps } from './validate-react-page-props.js';
+import { TRANSLATION_TARGET_UNKNOWN, validateTranslationReferences } from './validate-translation-references.js';
+import { FLOW_UPDATE_READONLY_FIELD, FLOW_UPDATE_READONLY_WHEN_FIELD, validateReadonlyFlowWrites } from './validate-readonly-flow-writes.js';
+import { HOOK_API_UPDATE_READONLY_FIELD, HOOK_API_UPDATE_READONLY_WHEN_FIELD, validateReadonlyHookWrites } from './validate-readonly-hook-writes.js';
+import { SORT_FIELD_UNKNOWN, SORT_FIELD_UNSORTABLE, validateSortableFields } from './validate-sortable-fields.js';
+import { ACTION_API_UPDATE_READONLY_WHEN_FIELD, validateReadonlyActionWrites } from './validate-readonly-action-writes.js';
+import { SEARCHABLE_FIELD_UNKNOWN } from './validate-searchable-fields.js';
 // [#16340] Read back the registry's OWN definition table to assert the graph
 // derives its injected types rather than carrying a second copy of them.
 import { injectedSystemColumnDefs } from '@objectstack/spec/data';
@@ -802,6 +813,353 @@ describe('[#30383] the field-path rules read the objects as served', () => {
         expect(findings.map((f) => f.rule)).toEqual([THANK_YOU_RECORD_FIELD]);
         expect(findings[0].message).toContain('is a text field');
       }
+    });
+  });
+});
+
+// [#30471] The field-NAME indexes outside the graph read the same fold: the
+// `record.FIELD` index of the expression passes (validations, formulas, flows,
+// hooks, sharing-rule conditions), the write rules' index (flow nodes, action
+// and hook bodies), a react page's field props and the translation universe.
+// The #30383 artifact, plus one extension rule for the translation rung.
+describe('[#30471] the field-name indexes read the objects as served', () => {
+  type Rec = Record<string, unknown>;
+  type Finding = { rule: string; severity?: unknown; where?: unknown; path?: unknown; message?: unknown };
+  type Run = (stack: Rec) => ReadonlyArray<Finding>;
+  const deal = { name: 'xs_deal', label: 'Deal', fields: { name: { type: 'text' }, amount: { type: 'number' } } };
+  const account = { name: 'xs_account', label: 'Account', fields: { name: { type: 'text' } } };
+  const added = { region: { type: 'text' }, score: { type: 'number' } };
+  const extensions = [{
+    extend: 'xs_deal',
+    fields: added,
+    validations: [{ name: 'region_set', type: 'script', condition: 'record.region == null', message: 'Set a region' }],
+  }];
+  const artifact = (extra: Rec, objectExtensions: unknown[] = extensions, objects: unknown[] = [deal, account]): Rec => ({
+    objects,
+    packages: [
+      { manifest: { id: 'app', objects } },
+      { manifest: { id: 'mod', objectExtensions } },
+    ],
+    ...extra,
+  });
+  // The per-package leg of `os build` (`packageBodyAsStack` in the cli).
+  const perPackage = (extra: Rec, objectExtensions: unknown[] = extensions): Rec => {
+    const body = { id: 'app', objects: [deal, account], ...extra };
+    return { ...body, manifest: body, packages: [{ manifest: body }, { manifest: { id: 'mod', objectExtensions } }] };
+  };
+  const ids = (run: Run, stack: Rec) => run(stack).map((f) => f.rule);
+  // The expression passes carry no rule id: every issue they raise on these
+  // stacks is about the one expression each names, read as `expression`.
+  const expressions: Run = (stack) => validateStackExpressions(stack).map((issue) => ({ ...issue, rule: 'expression' }));
+  const validationOn = (condition: string): Rec => ({
+    objects: [{ ...deal, validations: [{ name: 'v', type: 'script', condition, message: 'M' }] }, account],
+  });
+  const pageSort = (field: string): Rec => ({
+    pages: [{ name: 'p', type: 'list', object: 'xs_deal', interfaceConfig: { source: 'xs_deal', sort: [{ field, order: 'asc' }] } }],
+  });
+  const viewSort = (field: string): Rec => ({
+    views: [{ name: 'v', objectName: 'xs_deal', list: { type: 'grid', columns: ['name'], sort: [{ field, order: 'asc' }] } }],
+  });
+
+  // rule · its unknown-field id · the stack naming FIELD
+  const existence: Array<[string, string, Run, (field: string) => Rec]> = [
+    ['validate-expressions (a validation condition)', 'expression', expressions, (f) => validationOn(`record.${f} == 'x'`)],
+    ['validate-expressions (a sharing-rule condition)', 'expression', expressions, (f) => ({
+      sharingRules: [{ name: 'sr', object: 'xs_deal', condition: `record.${f} == 'x'`, sharedWith: { type: 'role', value: 'r' }, accessLevel: 'read' }],
+    })],
+    ['validate-flow-node-writes', FLOW_NODE_WRITE_UNKNOWN_FIELD, validateFlowNodeWrites, (f) => ({
+      flows: [{ name: 'fl', nodes: [{ id: 'n', type: 'update_record', config: { objectName: 'xs_deal', fields: { [f]: 'x' } } }] }],
+    })],
+    ['validate-action-body-writes', ACTION_BODY_WRITE_UNKNOWN_FIELD, validateActionBodyWrites, (f) => ({
+      actions: [{ name: 'act', label: 'Act', body: { language: 'js', source: `await ctx.api.object('xs_deal').updateById(id, { ${f}: 'x' });` } }],
+    })],
+    ['validate-hook-body-writes', HOOK_BODY_WRITE_UNKNOWN_FIELD, (stack) => validateHookBodyWrites(stack), (f) => ({
+      hooks: [{ name: 'h', object: 'xs_deal', events: ['beforeInsert'], body: { language: 'js', source: `ctx.input.${f} = 'x';` } }],
+    })],
+    ['validate-react-page-props', PAGE_FIELD_UNKNOWN, validateReactPageProps, (f) => ({
+      pages: [{
+        name: 'p', kind: 'react',
+        source: `function Page(){ return <ListView data={{ provider: 'object', object: 'xs_deal' }} columns={['name', '${f}']} />; }`,
+      }],
+    })],
+    ['validate-translation-references', TRANSLATION_TARGET_UNKNOWN, validateTranslationReferences, (f) => ({
+      translations: [{ 'zh-CN': { objects: { xs_deal: { fields: { [f]: { label: 'L' } } } } } }],
+    })],
+    ['validate-sortable-fields (a page sort)', PAGE_FIELD_UNKNOWN, validateSortableFields, (f) => pageSort(f)],
+    ['validate-sortable-fields (a list-view sort)', SORT_FIELD_UNKNOWN, validateSortableFields, (f) => viewSort(f)],
+  ];
+
+  it.each(existence)('%s: an extension-added field passes; a field nothing adds is still refused', (_rule, id, run, naming) => {
+    expect(ids(run, artifact(naming('region')))).not.toContain(id);
+    expect(ids(run, artifact(naming('region'), []))).toContain(id);
+    expect(ids(run, artifact(naming('nowhere')))).toContain(id);
+  });
+
+  it.each(existence)('%s, on the per-package leg: the same verdicts', (_rule, id, run, naming) => {
+    expect(ids(run, perPackage(naming('region')))).not.toContain(id);
+    expect(ids(run, perPackage(naming('region'), []))).toContain(id);
+    expect(ids(run, perPackage(naming('nowhere')))).toContain(id);
+  });
+
+  it.each(existence)('%s: a field nothing adds is refused byte-for-byte as on the declared objects alone', (_rule, id, run, naming) => {
+    const refusal = (stack: Rec) => run(stack)
+      .filter((f) => f.rule === id)
+      .map(({ severity, where, path, message }) => ({ severity, where, path, message }));
+    const served = refusal(artifact(naming('zq_absent')));
+    expect(served).toHaveLength(1);
+    expect(served).toEqual(refusal(artifact(naming('zq_absent'), [])));
+  });
+
+  it('validate-translation-references: a `_validations` key for a rule an extension adds resolves', () => {
+    const bundle = (rule: string) => ({ translations: [{ 'zh-CN': { objects: { xs_deal: { _validations: { [rule]: { message: 'M' } } } } } }] });
+    expect(ids(validateTranslationReferences, artifact(bundle('region_set')))).toEqual([]);
+    expect(ids(validateTranslationReferences, artifact(bundle('region_set'), []))).toEqual([TRANSLATION_TARGET_UNKNOWN]);
+    expect(ids(validateTranslationReferences, artifact(bundle('nowhere')))).toEqual([TRANSLATION_TARGET_UNKNOWN]);
+  });
+
+  // The retired private reader kept every entry; the fold keeps one per
+  // package per target, so a later entry of the same package replaces an
+  // earlier one whole, its rules with its fields.
+  it('validate-translation-references: a key only a replaced entry adds is an orphan, as the registry serves it', () => {
+    const replaced = [...extensions, { extend: 'xs_deal', fields: { mood: { type: 'text' } } }];
+    const keys = (fields: Rec, rules: Rec = {}) => ({ translations: [{ 'zh-CN': { objects: { xs_deal: { fields, _validations: rules } } } }] });
+    expect(ids(validateTranslationReferences, artifact(keys({ mood: { label: 'M' } }), replaced))).toEqual([]);
+    expect(ids(validateTranslationReferences, artifact(keys({ region: { label: 'R' } }), replaced))).toEqual([TRANSLATION_TARGET_UNKNOWN]);
+    expect(ids(validateTranslationReferences, artifact(keys({}, { region_set: { message: 'M' } }), replaced))).toEqual([TRANSLATION_TARGET_UNKNOWN]);
+  });
+
+  // The two refusals the retired private reader did not raise, both at
+  // `error`: it kept every entry, and read a top-level `objectExtensions`
+  // beside `packages[]` too. The fold keeps one entry per package per target
+  // and reads `packages[]` alone when there is one, as the registry does.
+  it('validate-translation-references: the keys only the fold drops are refused at error', () => {
+    const bundle = { translations: [{ 'zh-CN': { objects: { xs_deal: { fields: { region: { label: 'R' } }, _validations: { region_set: { message: 'M' } } } } } }] };
+    const refused = [[TRANSLATION_TARGET_UNKNOWN, 'error'], [TRANSLATION_TARGET_UNKNOWN, 'error']];
+    const verdicts = (stack: Rec) => validateTranslationReferences(stack).map((f) => [f.rule, f.severity]);
+    const replaced = [...extensions, { extend: 'xs_deal', fields: { mood: { type: 'text' } } }];
+    expect(verdicts(artifact(bundle, replaced))).toEqual(refused);
+    expect(verdicts(perPackage(bundle, replaced))).toEqual(refused);
+    const beside = { objects: [deal, account], objectExtensions: extensions, packages: [{ manifest: { id: 'app', objects: [deal, account] } }], ...bundle };
+    expect(verdicts(beside)).toEqual(refused);
+    // With no `packages[]`, the top level is the artifact's own and is read.
+    const { packages: _packages, ...alone } = beside;
+    expect(verdicts(alone)).toEqual([]);
+  });
+
+  // The write rules leave an object that declares no field unjudged (an
+  // external, introspected schema): an extension adding to it does not make
+  // its other fields knowable.
+  it('the write rules keep an object that declares no field unjudged, extended or not', () => {
+    const bare = { name: 'xs_deal', label: 'Deal', fields: {} };
+    const write = { flows: [{ name: 'fl', nodes: [{ id: 'n', type: 'update_record', config: { objectName: 'xs_deal', fields: { remote_col: 'x' } } }] }] };
+    expect(ids(validateFlowNodeWrites, artifact(write, extensions, [bare, account]))).toEqual([]);
+    expect(ids(validateFlowNodeWrites, artifact(write, [], [bare, account]))).toEqual([]);
+  });
+
+  // A field two packages write at the deciding priority: its name is served,
+  // its definition is registration order. The two definition questions of the
+  // expression passes (its type, whether it is nullable) leave it unjudged;
+  // the single-writer controls show both verdicts the tie would otherwise get.
+  it('validate-expressions: a field two packages tie on is a served name, judged on no definition', () => {
+    const tie = (a: Rec, b: Rec): Rec => ({
+      ...validationOn('record.score + 1 > 2'),
+      packages: [
+        { manifest: { id: 'app', objects: [deal, account] } },
+        { manifest: { id: 'mod', objectExtensions: [{ extend: 'xs_deal', fields: a }] } },
+        { manifest: { id: 'mod2', objectExtensions: [{ extend: 'xs_deal', fields: b }] } },
+      ],
+    });
+    const messages = (a: Rec, b: Rec) => validateStackExpressions(tie(a, b)).map((issue) => issue.message);
+    const num = { score: { type: 'number' } };
+    const text = { score: { type: 'text' } };
+    expect(messages(num, text)).toEqual([]);
+    expect(messages(text, num)).toEqual([]);
+    expect(messages(text, {})).toEqual([expect.stringContaining('type mismatch'), expect.stringContaining('nullable')]);
+    expect(messages(num, {})).toEqual([expect.stringContaining('nullable')]);
+  });
+
+  it('validate-expressions, on the per-package leg: a tied field is judged on no definition either', () => {
+    const body = { id: 'app', objects: [{ ...deal, validations: [{ name: 'v', type: 'script', condition: 'record.score + 1 > 2', message: 'M' }] }, account] };
+    const tie = (a: Rec, b: Rec): Rec => ({
+      ...body,
+      manifest: body,
+      packages: [
+        { manifest: body },
+        { manifest: { id: 'mod', objectExtensions: [{ extend: 'xs_deal', fields: a }] } },
+        { manifest: { id: 'mod2', objectExtensions: [{ extend: 'xs_deal', fields: b }] } },
+      ],
+    });
+    const messages = (a: Rec, b: Rec) => validateStackExpressions(tie(a, b)).map((issue) => issue.message);
+    const num = { score: { type: 'number' } };
+    const text = { score: { type: 'text' } };
+    expect(messages(num, text)).toEqual([]);
+    expect(messages(text, num)).toEqual([]);
+    expect(messages(text, {})).toEqual([expect.stringContaining('type mismatch'), expect.stringContaining('nullable')]);
+  });
+
+  // The readonly write rules judge an extension field's `readonly` /
+  // `readonlyWhen` as a declared field's: without that, moving the existence
+  // index above would have left such a write silent where `main` at least
+  // refused the name. Readonly is the field's definition, so a tie is unjudged.
+  describe('the readonly write rules read the served definition', () => {
+    const lock = { locked: { type: 'text', readonly: true } };
+    const gate = { gated: { type: 'number', readonlyWhen: "record.name == 'x'" } };
+    // rule · its readonly id · the extension fields it needs · the stack writing them
+    const readonly: Array<[string, string, Run, Rec, Rec]> = [
+      ['validate-readonly-flow-writes', FLOW_UPDATE_READONLY_FIELD, validateReadonlyFlowWrites, lock, {
+        flows: [{ name: 'fl', nodes: [{ id: 'n', type: 'update_record', config: { objectName: 'xs_deal', fields: { locked: 'x' } } }] }],
+      }],
+      ['validate-readonly-hook-writes', HOOK_API_UPDATE_READONLY_FIELD, (stack) => validateReadonlyHookWrites(stack), lock, {
+        hooks: [{ name: 'h', object: 'xs_account', events: ['afterInsert'], body: { language: 'js', source: "await ctx.api.object('xs_deal').update({ id: dealId, locked: 'x' });" } }],
+      }],
+      ['validate-readonly-action-writes', ACTION_API_UPDATE_READONLY_WHEN_FIELD, validateReadonlyActionWrites, gate, {
+        actions: [{ name: 'act', label: 'Act', objectName: 'xs_deal', body: { language: 'js', source: "await ctx.api.object('xs_deal').update({ id: ctx.recordId, gated: 1 });" } }],
+      }],
+    ];
+    const plain = { locked: { type: 'text' }, gated: { type: 'number' } };
+    const ext = (fields: Rec) => [{ extend: 'xs_deal', fields }];
+    const tie = (a: Rec, b: Rec, extra: Rec, perPackageLeg = false): Rec => {
+      const mods = [
+        { manifest: { id: 'mod', objectExtensions: ext(a) } },
+        { manifest: { id: 'mod2', objectExtensions: ext(b) } },
+      ];
+      if (!perPackageLeg) return { objects: [deal, account], packages: [{ manifest: { id: 'app', objects: [deal, account] } }, ...mods], ...extra };
+      const body = { id: 'app', objects: [deal, account], ...extra };
+      return { ...body, manifest: body, packages: [{ manifest: body }, ...mods] };
+    };
+
+    it.each(readonly)('%s: an extension field declared readonly is refused with the readonly id', (_rule, id, run, fields, writing) => {
+      expect(ids(run, artifact(writing, ext(fields)))).toEqual([id]);
+      expect(ids(run, perPackage(writing, ext(fields)))).toEqual([id]);
+      // The same name added writable, or not added at all, is not this rule's.
+      expect(ids(run, artifact(writing, ext(plain)))).toEqual([]);
+      expect(ids(run, artifact(writing, []))).toEqual([]);
+    });
+
+    it.each(readonly)('%s: a field two packages tie on, one of them readonly, is unjudged', (_rule, id, run, fields, writing) => {
+      for (const perPackageLeg of [false, true]) {
+        expect(ids(run, tie(plain, fields, writing, perPackageLeg))).toEqual([]);
+        expect(ids(run, tie(fields, plain, writing, perPackageLeg))).toEqual([]);
+        expect(ids(run, tie(fields, {}, writing, perPackageLeg))).toEqual([id]);
+      }
+    });
+  });
+
+  // `indexObjectSearchTargets` stays on the declared objects (its type
+  // question is the searchable-fields rule's, not moved here), so a react
+  // page's `searchableFields` naming an extension field is still refused.
+  it('validate-react-page-props: searchableFields still reads the declared objects', () => {
+    const search = (field: string) => ({
+      pages: [{
+        name: 'p', kind: 'react',
+        source: `function Page(){ return <ListView data={{ provider: 'object', object: 'xs_deal' }} columns={['name']} searchableFields={['name', '${field}']} />; }`,
+      }],
+    });
+    expect(ids(validateReactPageProps, artifact(search('region')))).toEqual([SEARCHABLE_FIELD_UNKNOWN]);
+    expect(ids(validateReactPageProps, artifact(search('name')))).toEqual([]);
+  });
+
+  // Every refusal this change adds, one row each: a write or a sort naming an
+  // extension field whose served definition the runtime refuses or drops. On
+  // the declared objects alone (what `main` read) the same stack was the
+  // existence rule's unknown name; now the existence rule passes it and the
+  // definition rule owns it, at that rule's own severity. The hook rows are
+  // the one severity move: `hook-body-write-unknown-field` was a warning.
+  describe('each refusal this change adds is the definition rule\'s, at its own severity', () => {
+    const lock = { locked: { type: 'text', readonly: true } };
+    const gate = { gated: { type: 'number', readonlyWhen: "record.name == 'x'" } };
+    const calc = { calc: { type: 'formula', expression: 'record.amount * 2' } };
+    const flowNode = (type: string, field: string): Rec => ({
+      flows: [{ name: 'fl', nodes: [{ id: 'n', type, config: { objectName: 'xs_deal', fields: { [field]: 'x' } } }] }],
+    });
+    const hookApi = (call: string): Rec => ({
+      hooks: [{ name: 'h', object: 'xs_account', events: ['afterInsert'], body: { language: 'js', source: `await ctx.api.object('xs_deal').${call};` } }],
+    });
+    const actionApi = (field: string): Rec => ({
+      actions: [{ name: 'act', label: 'Act', objectName: 'xs_deal', body: { language: 'js', source: `await ctx.api.object('xs_deal').update({ id: ctx.recordId, ${field}: 1 });` } }],
+    });
+    const hooks: Run = (stack) => validateReadonlyHookWrites(stack);
+    const hookExistence: Run = (stack) => validateHookBodyWrites(stack);
+    // the write · the rule judging it now · the extension fields · the stack ·
+    // its id and severity now · the existence rule and the id it raised before
+    const refusals: Array<[string, Run, Rec, Rec, string, string, Run, string]> = [
+      ['a flow update_record of a readonly field', validateReadonlyFlowWrites, lock, flowNode('update_record', 'locked'),
+        FLOW_UPDATE_READONLY_FIELD, 'error', validateFlowNodeWrites, FLOW_NODE_WRITE_UNKNOWN_FIELD],
+      ['a flow create_record of a readonly field', validateReadonlyFlowWrites, lock, flowNode('create_record', 'locked'),
+        FLOW_UPDATE_READONLY_FIELD, 'error', validateFlowNodeWrites, FLOW_NODE_WRITE_UNKNOWN_FIELD],
+      ['a flow update_record of a readonlyWhen field', validateReadonlyFlowWrites, gate, flowNode('update_record', 'gated'),
+        FLOW_UPDATE_READONLY_WHEN_FIELD, 'warning', validateFlowNodeWrites, FLOW_NODE_WRITE_UNKNOWN_FIELD],
+      ['a hook ctx.api update of a readonly field', hooks, lock, hookApi("update({ id: dealId, locked: 'x' })"),
+        HOOK_API_UPDATE_READONLY_FIELD, 'error', hookExistence, HOOK_BODY_WRITE_UNKNOWN_FIELD],
+      ['a hook ctx.api insert of a readonly field', hooks, lock, hookApi("insert({ locked: 'x' })"),
+        HOOK_API_UPDATE_READONLY_FIELD, 'error', hookExistence, HOOK_BODY_WRITE_UNKNOWN_FIELD],
+      ['a hook ctx.api update of a readonlyWhen field', hooks, gate, hookApi('update({ id: dealId, gated: 1 })'),
+        HOOK_API_UPDATE_READONLY_WHEN_FIELD, 'warning', hookExistence, HOOK_BODY_WRITE_UNKNOWN_FIELD],
+      ['an action ctx.api update of a readonlyWhen field', validateReadonlyActionWrites, gate, actionApi('gated'),
+        ACTION_API_UPDATE_READONLY_WHEN_FIELD, 'warning', validateActionBodyWrites, ACTION_BODY_WRITE_UNKNOWN_FIELD],
+      ['a page sort by a formula field', validateSortableFields, calc, pageSort('calc'),
+        SORT_FIELD_UNSORTABLE, 'error', validateSortableFields, PAGE_FIELD_UNKNOWN],
+      ['a list-view sort by a formula field', validateSortableFields, calc, viewSort('calc'),
+        SORT_FIELD_UNSORTABLE, 'error', validateSortableFields, SORT_FIELD_UNKNOWN],
+    ];
+    // The stack on both CLI legs (the union artifact, then the per-package
+    // body), each extension list its own package.
+    const onLegs = (extra: Rec, packages: unknown[][], objects: unknown[] = [deal, account]): Rec[] => {
+      const mods = packages.map((objectExtensions, i) => ({ manifest: { id: `mod${i}`, objectExtensions } }));
+      const body = { id: 'app', objects, ...extra };
+      return [
+        { objects, packages: [{ manifest: { id: 'app', objects } }, ...mods], ...extra },
+        { ...body, manifest: body, packages: [{ manifest: body }, ...mods] },
+      ];
+    };
+    const ext = (fields: Rec) => [{ extend: 'xs_deal', fields }];
+
+    it.each(refusals)('%s', (_write, run, fields, stack, id, severity, existence, unknownId) => {
+      for (const served of onLegs(stack, [ext(fields)])) {
+        expect(run(served).map((f) => [f.rule, f.severity])).toEqual([[id, severity]]);
+        expect(ids(existence, served)).not.toContain(unknownId);
+      }
+      for (const declared of onLegs(stack, [[]])) {
+        expect(ids(existence, declared)).toContain(unknownId);
+        expect(ids(run, declared)).not.toContain(id);
+      }
+    });
+
+    it.each(refusals)('%s, on a field two packages tie on: unjudged', (_write, run, fields, stack, id) => {
+      const plain = Object.fromEntries(Object.keys(fields).map((name) => [name, { type: 'text' }]));
+      for (const [a, b] of [[plain, fields], [fields, plain]]) {
+        for (const tied of onLegs(stack, [ext(a), ext(b)])) expect(ids(run, tied)).not.toContain(id);
+      }
+      for (const single of onLegs(stack, [ext(fields), ext({})])) expect(ids(run, single)).toContain(id);
+    });
+
+    // An object that declares no field (an introspected schema) is left
+    // unjudged by the write rules and skip 2 of the sort rule; an extension
+    // adding to it does not make it judgeable by the definition rules either.
+    it.each(refusals)('%s, on an object that declares no field: unjudged, extended or not', (_write, run, fields, stack) => {
+      const bare = { name: 'xs_deal', label: 'Deal', fields: {} };
+      for (const packages of [[ext(fields)], [[]]]) {
+        for (const s of onLegs(stack, packages, [bare, account])) expect(ids(run, s)).toEqual([]);
+      }
+    });
+
+    // An extension that RE-DECLARES an owner's field replaces it whole, in the
+    // fold as in the registry's `mergeObjectDefinitions`
+    // (`{ ...base.fields, ...extension.fields }`), so the owner's field is
+    // judged on the extension's definition. On the declared objects alone (what
+    // `main` read) the owner's `amount: number` is known, sortable and writable,
+    // and nothing is raised. ADR-0146 D10 refuses this shape on the extension;
+    // no CLI door does.
+    it.each<[string, Run, Rec, Rec, string]>([
+      ['a list-view sort by an owner field re-declared as formula', validateSortableFields,
+        { amount: { type: 'formula', expression: 'record.name' } }, viewSort('amount'), SORT_FIELD_UNSORTABLE],
+      ['a flow update_record of an owner field re-declared readonly', validateReadonlyFlowWrites,
+        { amount: { type: 'number', readonly: true } }, flowNode('update_record', 'amount'), FLOW_UPDATE_READONLY_FIELD],
+    ])('%s: judged on the extension\'s definition', (_write, run, fields, stack, id) => {
+      for (const served of onLegs(stack, [ext(fields)])) {
+        expect(run(served).map((f) => [f.rule, f.severity])).toEqual([[id, 'error']]);
+      }
+      for (const declared of onLegs(stack, [[]])) expect(run(declared)).toEqual([]);
     });
   });
 });

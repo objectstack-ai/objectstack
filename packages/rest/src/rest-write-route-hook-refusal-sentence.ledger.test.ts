@@ -154,13 +154,22 @@ function boot(error: () => Error, protocol: Record<string, Fn> = {}): Booted {
     }
     const service = (label: string) => async () => rejecting(label, calls, error);
     const caller = { userId: 'u1', systemPermissions: ['manage_metadata', 'manage_platform_settings'] };
-    const engine = { transaction: async (fn: Fn) => fn({}) };
+    // [#30205] The assigned-work hand-over reads and writes through the data
+    // engine itself: one user field to move, an active target, and a row whose
+    // `update` the refusal reaches.
+    const engine = {
+        transaction: async (fn: Fn) => fn({}),
+        getConfigs: () => ({ [OBJECT]: { name: OBJECT, fields: { owner_id: { type: 'lookup', reference: 'sys_user' } } } }),
+        find: async (object: string) => (object === 'sys_user' ? [{ id: 'u2', banned: false }] : [{ id: 'r1' }]),
+        count: async () => 0,
+        update: async () => { calls.push('engine.update'); throw error(); },
+    };
     const rest = new RestServer(
         server,
         rejecting('protocol', calls, error, recorded),
         { api: { requireAuth: false } } as any,
         undefined, undefined, undefined, undefined,
-        async () => engine,                 // objectQLProvider (`POST /batch`)
+        async () => engine,                 // objectQLProvider (`POST /batch`, the assigned-work hand-over)
         service('email'),
         service('sharing'),
         undefined,                          // retired slot
@@ -348,6 +357,12 @@ const ANSWERS_THE_SENTENCE: Record<string, Driver> = {
         },
     },
     'POST /api/v1/security/explain': { called: 'security.explain', body: { object: OBJECT, operation: 'read' } },
+    // [#30205] The hand-over answers per row, inside its `200`: a refused row's
+    // entry in `failures` carries the `/data` door's sentence for that throw.
+    'POST /api/v1/security/users/:id/assigned-work/transfer': {
+        called: 'engine.update', body: { toUserId: 'u2' },
+        answer: (res) => res.body?.data?.objects?.[0]?.failures?.[0]?.message,
+    },
     'POST /api/v1/data/:object/:id/shares': { called: 'sharing.grant', body: {} },
     'DELETE /api/v1/data/:object/:id/shares/:shareId': { called: 'sharing.revoke' },
     'POST /api/v1/batch': {

@@ -90,6 +90,7 @@
  */
 
 import { isCloudManaged } from '@objectstack/core';
+import { MCP_AGENT_PERMISSION_SETS } from '@objectstack/spec/ai';
 import {
   AUDIENCE_POSTURES,
   SystemUserId,
@@ -217,8 +218,11 @@ export const OPEN_POSTURE_VERIFICATION_OFF_WARNING =
  * Entry validation — REFUSES an unusable audience declaration at the point it
  * enters the manager (constructor and `applyConfigPatch`), loudly, with the
  * remedy in the message. Mirrors `AudienceConfigSchema`'s predicates (the
- * schema guards the authoring surface; the runtime receives plain objects) and
- * adds the one cross-field invariant the schema cannot see, on
+ * schema guards the authoring surface; the runtime receives plain objects),
+ * refuses one value the schema does not — an MCP agent ceiling set as the
+ * self-registration set ([ADR-0090 D10]: a self-registrant is a person, and an
+ * agent ceiling is not a person's set) — and adds the one cross-field invariant
+ * the schema cannot see, on
  * `emailAndPassword.requireEmailVerification` (verification is FORCED on by
  * the wiring under both self-registration postures unless noted):
  *
@@ -306,6 +310,15 @@ export function assertAudienceConfig(
       fail(
         "selfRegistrationPermissionSet must not be 'admin_full_access' — a platform-admin grant to every " +
         'self-registrant is never a declarable audience.',
+      );
+    }
+    // [ADR-0090 D10] A self-registrant is a person, and an agent ceiling is not
+    // a person's set: the declaration that names the set refuses one.
+    if (typeof set === 'string' && (MCP_AGENT_PERMISSION_SETS as readonly string[]).includes(set)) {
+      fail(
+        `selfRegistrationPermissionSet must not be '${set}' — it is the permission ceiling of an AI assistant ` +
+        'connected over MCP, which the assistant receives from the access its user consented to, never from an ' +
+        'assignment, and a self-registrant is a person. Declare a permission set meant for people.',
       );
     }
     if (emailAndPassword?.requireEmailVerification === false) {

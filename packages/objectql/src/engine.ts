@@ -2407,13 +2407,24 @@ export class ObjectQL implements IObjectQLEngine {
       // plugin adding its menu into the `setup` app). Merged into the target
       // app's navigation on read by group id + priority, so registration order
       // does not matter.
-      if (Array.isArray((manifest as any).navigationContributions) && (manifest as any).navigationContributions.length > 0) {
-          for (const contribution of (manifest as any).navigationContributions) {
+      // [#30581] A body with an id REPLACES its package's contributions, so a
+      // re-registration of the same body (an artifact reload re-registers every
+      // package of the artifact) folds each entry once, not once more per
+      // registration; a body that now declares none clears an earlier one's.
+      const navigationContributions: any[] = Array.isArray((manifest as any).navigationContributions)
+          ? (manifest as any).navigationContributions
+          : [];
+      if (id) {
+          this._registry.setPackageNavContributions(id, navigationContributions);
+      } else {
+          for (const contribution of navigationContributions) {
               this._registry.registerAppNavContribution(contribution, id);
           }
+      }
+      if (navigationContributions.length > 0) {
           this.logger.debug('Registered navigation contributions', {
               from: id,
-              count: (manifest as any).navigationContributions.length,
+              count: navigationContributions.length,
           });
       }
 
@@ -2994,11 +3005,20 @@ export class ObjectQL implements IObjectQLEngine {
     storedRows?: StoredReferenceRows,
   ): Promise<void> {
     // [#25522 cut 10] The body moved to `engine-referential-integrity.ts`, its docblock with it (see `ReferentialIntegrityHost`).
+    // [#30205] `referenceRow` answers a referenced user's ban state from the existence probe's own read.
+    const readLogger = () => this.logger;
     const host: ThisParameterType<typeof assertReferencesResolve> = {
+      get logger() { return readLogger(); },
       masterDetailHeaderExists: (...a) => this.masterDetailHeaderExists(...a),
       referenceExists: (...a) => this.referenceExists(...a),
+      referenceRow: (...a) => this.referenceRow(...a),
     };
     return assertReferencesResolve.call(host, schema, data, supplied, context, msgCtx, storedRows);
+  }
+
+  private referenceRow(target: string, id: unknown, context: ExecutionContext | undefined, extraFields: readonly string[]): Promise<Record<string, unknown> | false | null> {
+    // [#30205] The body lives in `engine-references-and-master-detail.ts`, its docblock with it (see `ReferencesAndMasterDetailHost`).
+    return ReferencesAndMasterDetailFacet.referenceRow.call(referencesAndMasterDetailHost.of(this), target, id, context, extraFields);
   }
 
   private referenceExists(target: string, id: unknown, context?: ExecutionContext): Promise<boolean | null> {
@@ -10544,6 +10564,7 @@ export class ObjectQL implements IObjectQLEngine {
       get realtimeService() { return engine.realtimeService; },
       set realtimeService(v) { engine.realtimeService = v; },
       referenceExists: (...a) => engine.referenceExists(...a),
+      referenceRow: (...a) => engine.referenceRow(...a),
       resolveEnginePosture: (...a) => engine.resolveEnginePosture(...a),
       resolveObjectName: (...a) => engine.resolveObjectName(...a),
     }));

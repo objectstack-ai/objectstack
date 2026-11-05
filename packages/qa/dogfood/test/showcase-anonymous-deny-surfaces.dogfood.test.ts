@@ -51,6 +51,7 @@
 // authz-row: anonymous-deny-packages
 // authz-row: anonymous-deny-analytics
 // authz-row: anonymous-deny-api-description
+// authz-row: anonymous-deny-user-work
 // authz-row: anonymous-deny-i18n
 //
 // ── Why the translation faces are here (#22432) ────────────────────────────
@@ -179,6 +180,26 @@ const API_DESCRIPTION_ENDPOINTS: readonly ApiDescriptionEndpoint[] = [
 /** [#25104] The retired viewer page's path, and a path nothing ever served, for the not-found control. */
 const RETIRED_VIEWER_PATH = '/docs';
 const NEVER_SERVED_PATH = '/this-route-does-not-exist';
+
+// ── #30205 — a user's assigned work, counted and handed over (@objectstack/rest)
+//
+// Both handlers open with the floor, ahead of the query-parameter check and
+// any engine read. The ids are ones no user holds, so the member controls
+// read nothing and write nothing: the count answers an empty summary, and the
+// hand-over refuses the unknown target before any write.
+interface UserWorkFace {
+  readonly face: string;
+  readonly method: 'GET' | 'POST';
+  readonly path: string;
+  readonly body?: unknown;
+}
+const USER_WORK_FACES: readonly UserWorkFace[] = [
+  { face: 'the assigned-work count', method: 'GET', path: '/security/users/usr_nobody_30205/assigned-work' },
+  {
+    face: 'the assigned-work hand-over', method: 'POST', path: '/security/users/usr_nobody_30205/assigned-work/transfer',
+    body: { toUserId: 'usr_nobody_either_30205' },
+  },
+];
 
 // ── #22432 — the translation faces (dispatcher-mounted; runtime domains/i18n.ts)
 //
@@ -807,6 +828,40 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     expect(adminRes.status, 'the admin is answered the same not-found').toBe(404);
     expect(adminRes.headers.get('content-type') ?? '', 'no page is served to the admin').not.toContain('text/html');
     expect(await adminRes.text(), 'the retired path answers the admin the ordinary not-found body').toBe(controlBody);
+  });
+
+  // ── a user's assigned work (@objectstack/rest) — #30205 ─────────────────
+  //
+  // The refusal is each handler's first act, so the anonymous body is the REST
+  // seam's shared one, whole, and nothing is counted or moved. The member
+  // controls are the teeth: with a session the count is served 200 and the
+  // hand-over reaches its own target check (404), so both doors are mounted
+  // on this boot and the 401 is the floor's answer.
+  it.each(USER_WORK_FACES)('an anonymous caller on $face is denied (401) and served nothing', async (face) => {
+    const r = await anon(face.method, face.path, face.body);
+    expect(r.status, `${face.face}: an anonymous caller must be refused by the floor`).toBe(ANONYMOUS_DENY_STATUS);
+    const body = await r.json();
+    expect(body, `${face.face}: the refusal is the REST seam's shared body, whole`).toEqual(ANONYMOUS_DENY_BODY);
+    expect(body, `${face.face}: nothing of the work rides on the refusal`).not.toHaveProperty('data');
+  });
+
+  it('a signed-in member is served the assigned-work count (200) — the control', async () => {
+    const r = await stack.apiAs(memberToken, 'GET', USER_WORK_FACES[0].path);
+    expect(r.status, 'an authenticated member must clear the floor and be served the count').toBe(200);
+    const body = await r.json();
+    expect(body.data, 'the served body is the count of a user who holds nothing').toMatchObject({
+      userId: 'usr_nobody_30205', total: 0, objects: [],
+    });
+  });
+
+  it('a signed-in member reaches the hand-over\'s own target check (404), and nothing moves — the control', async () => {
+    const face = USER_WORK_FACES[1];
+    const r = await stack.apiAs(memberToken, face.method, face.path, face.body);
+    expect(r.status, 'an authenticated member must clear the floor and meet the target check').toBe(404);
+    const body = await r.json();
+    expect(body.error?.details?.fields?.[0], 'the refusal names the unknown target').toMatchObject({
+      field: 'toUserId', code: 'reference_not_found',
+    });
   });
 
   // ── the translation faces (dispatcher-mounted; runtime domains/i18n.ts) — #22432
