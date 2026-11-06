@@ -21,6 +21,12 @@ import {
   QUEUE_GUARD_PACKAGE,
 } from './queue-hooks.js';
 import { ruleRegrantQueue } from './rule-hooks.js';
+import {
+  bindAssignmentRuleGuards,
+  reportShadowedAuthoredAssignmentRules,
+  AssignmentRuleValidationError,
+  ASSIGNMENT_RULE_GUARD_PACKAGE,
+} from './assignment-rule-hooks.js';
 
 type Row = Record<string, any>;
 
@@ -757,5 +763,139 @@ describe('[ADR-0142 D7] queue-recipient rules recompute on a queue-membership wr
     });
     expect(svc.revokeRuleGrantsForRetiredRecipients).toHaveBeenCalledTimes(1);
     await ruleRegrantQueue.whenIdle();
+  });
+});
+
+// ─── ADR-0142 D5: an organization's own assignment rules, judged on save ─────
+
+describe('[ADR-0142 D5] the sys_assignment_rule save guard', () => {
+  const DECLARED_RULES = [{ name: 'ticket_intake', object: 'ticket', entries: [] }];
+  const SCHEMAS: Record<string, any> = {
+    ticket: { name: 'ticket', fields: {} }, // an owned object: the platform injects the queue column
+    catalog: { name: 'catalog', ownership: 'org', fields: {} }, // no owner, so no queue column
+    sys_member: { name: 'sys_member', fields: {} },
+    sys_user: { name: 'sys_user', fields: {} },
+  };
+  let engine: ReturnType<typeof makeEngine>;
+
+  beforeEach(() => {
+    engine = makeEngine({
+      schemas: SCHEMAS,
+      tables: {
+        sys_member: [
+          { id: 'm1', user_id: 'u_lead', organization_id: 'org_a' },
+          { id: 'm2', user_id: 'u_banned', organization_id: 'org_a' },
+          { id: 'm3', user_id: 'u_elsewhere', organization_id: 'org_b' },
+        ],
+        sys_user: [{ id: 'u_lead' }, { id: 'u_banned', banned: true }, { id: 'u_elsewhere' }],
+      },
+    });
+    const listItems = engine.registry.listItems;
+    engine.registry.listItems = (type: string) => (type === 'assignment_rule' ? DECLARED_RULES : listItems(type));
+    bindAssignmentRuleGuards(engine as any);
+  });
+
+  const valid = (extra: Row = {}): Row => ({
+    name: 'vip_tickets', label: 'VIP tickets', object_name: 'ticket', criteria: 'record.priority == "high"',
+    recipient_type: 'queue', recipient_id: 'vip', ...extra,
+  });
+  const save = (data: Row, session: Row | null = { organizationId: 'org_a' }) =>
+    engine.fire('beforeInsert', 'sys_assignment_rule', { input: { data }, ...(session ? { session } : {}) });
+  const refusal = async (p: Promise<unknown>) => {
+    try {
+      await p;
+    } catch (err) {
+      return err as AssignmentRuleValidationError;
+    }
+    throw new Error('expected the save to be refused');
+  };
+
+  it('a well-formed rule saves, queue or member target, with or without a strategy', async () => {
+    await expect(save(valid())).resolves.toBeUndefined();
+    await expect(save(valid({ recipient_type: 'user', recipient_id: 'u_lead' }))).resolves.toBeUndefined();
+    await expect(save(valid({ strategy: 'least_loaded', load: 'record.status != "closed"' }))).resolves.toBeUndefined();
+    await expect(save(valid({ criteria: null, strategy: 'round_robin' }))).resolves.toBeUndefined();
+  });
+
+  it('refuses a declared rule\'s name — one name, one rule — and a name that is not a machine name', async () => {
+    const taken = await refusal(save(valid({ name: 'ticket_intake' })));
+    expect(taken).toBeInstanceOf(AssignmentRuleValidationError);
+    expect(taken).toMatchObject({ code: 'VALIDATION_FAILED', name: 'ValidationError', fields: [{ field: 'name', code: 'invalid_value' }] });
+    expect((await refusal(save(valid({ name: 'VIP Tickets' })))).fields).toEqual([expect.objectContaining({ field: 'name', code: 'invalid_format' })]);
+  });
+
+  it('refuses an object that does not exist, and one whose records have no owner to set', async () => {
+    expect((await refusal(save(valid({ object_name: 'tickets' })))).fields).toEqual([expect.objectContaining({ field: 'object_name', code: 'reference_not_found' })]);
+    expect((await refusal(save(valid({ object_name: 'catalog' })))).fields).toEqual([expect.objectContaining({ field: 'object_name', code: 'invalid_value' })]);
+  });
+
+  it('refuses the entry shapes the stack schema refuses for a declared entry', async () => {
+    expect((await refusal(save(valid({ recipient_type: 'user', recipient_id: 'u_lead', strategy: 'round_robin' })))).fields)
+      .toEqual([expect.objectContaining({ field: 'strategy' })]);
+    expect((await refusal(save(valid({ strategy: 'least_loaded' })))).fields).toEqual([expect.objectContaining({ field: 'load' })]);
+    expect((await refusal(save(valid({ load: 'record.status != "closed"' })))).fields).toEqual([expect.objectContaining({ field: 'load' })]);
+    expect((await refusal(save(valid({ recipient_id: 'VIP Queue' })))).fields).toEqual([expect.objectContaining({ field: 'recipient_id' })]);
+    expect((await refusal(save(valid({ recipient_type: 'team' })))).fields).toEqual([expect.objectContaining({ field: 'recipient_type' })]);
+  });
+
+  it('refuses a condition or an open-work expression the engine\'s CEL paths cannot compile', async () => {
+    expect((await refusal(save(valid({ criteria: 'record.priority == (' })))).fields).toEqual([expect.objectContaining({ field: 'criteria', code: 'invalid_value' })]);
+    expect((await refusal(save(valid({ strategy: 'least_loaded', load: 'size(record.subject) > 3' })))).fields)
+      .toEqual([expect.objectContaining({ field: 'load', code: 'invalid_value' })]);
+  });
+
+  it('refuses a user target who is not an active member of the rule\'s organization', async () => {
+    expect((await refusal(save(valid({ recipient_type: 'user', recipient_id: 'u_elsewhere' })))).fields)
+      .toEqual([expect.objectContaining({ field: 'recipient_id', code: 'reference_not_found' })]);
+    expect((await refusal(save(valid({ recipient_type: 'user', recipient_id: 'u_banned' })))).fields)
+      .toEqual([expect.objectContaining({ field: 'recipient_id', code: 'reference_user_banned' })]);
+    // The same user saves in the organization they are a member of.
+    await expect(save(valid({ recipient_type: 'user', recipient_id: 'u_elsewhere' }), { organizationId: 'org_b' })).resolves.toBeUndefined();
+  });
+
+  it('refuses a rule that would land in no organization', async () => {
+    expect((await refusal(save(valid(), null))).fields).toEqual([expect.objectContaining({ field: 'organization_id', code: 'required' })]);
+    await expect(save(valid({ organization_id: 'org_a' }), null)).resolves.toBeUndefined();
+  });
+
+  it('names every field at fault in one refusal', async () => {
+    const err = await refusal(save(valid({ name: 'ticket_intake', object_name: 'catalog', criteria: 'record.x == (' })));
+    expect(err.fields.map((f) => f.field).sort()).toEqual(['criteria', 'name', 'object_name']);
+  });
+
+  it('an update is judged on the merged row when it touches a judged column, and not re-judged otherwise', async () => {
+    const previous = { id: 'r1', organization_id: 'org_a', ...valid({ recipient_type: 'user', recipient_id: 'u_lead' }) };
+    const update = (data: Row) => engine.fire('beforeUpdate', 'sys_assignment_rule', { input: { data }, previous, session: { organizationId: 'org_a' } });
+    await expect(update({ label: 'Renamed', active: false, sort_order: 3 })).resolves.toBeUndefined();
+    expect((await refusal(update({ recipient_id: 'u_elsewhere' }))).fields).toEqual([expect.objectContaining({ field: 'recipient_id' })]);
+    // The merged row carries the pre-image's user target, so a strategy alone is refused.
+    expect((await refusal(update({ strategy: 'round_robin' }))).fields).toEqual([expect.objectContaining({ field: 'strategy' })]);
+  });
+
+  it('a membership read that fails refuses the save, saying it could not judge — never a pass', async () => {
+    const failing = makeEngine({ schemas: SCHEMAS, failOn: ['sys_member'] });
+    bindAssignmentRuleGuards(failing as any);
+    await expect(failing.fire('beforeInsert', 'sys_assignment_rule', {
+      input: { data: valid({ recipient_type: 'user', recipient_id: 'u_lead' }) }, session: { organizationId: 'org_a' },
+    })).rejects.toThrow(/could not be read, so the assignment rule cannot be judged and is not saved/);
+  });
+
+  it('re-binding replaces, never stacks', () => {
+    const before = engine.hooks.filter((h) => h.packageId === ASSIGNMENT_RULE_GUARD_PACKAGE).length;
+    expect(before).toBe(2);
+    bindAssignmentRuleGuards(engine as any);
+    expect(engine.hooks.filter((h) => h.packageId === ASSIGNMENT_RULE_GUARD_PACKAGE).length).toBe(before);
+  });
+
+  it('a boot report names every authored rule a declaration now shadows, at error', async () => {
+    engine._tables.sys_assignment_rule = [
+      { id: 'r1', name: 'ticket_intake', organization_id: 'org_a' },
+      { id: 'r2', name: 'vip_tickets', organization_id: 'org_a' },
+    ];
+    const logger = { warn: vi.fn(), error: vi.fn() };
+    await reportShadowedAuthoredAssignmentRules(engine as any, logger);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error.mock.calls[0][0]).toMatch(/assignment rule 'ticket_intake' is shadowed/);
+    expect(logger.error.mock.calls[0][1]).toEqual({ rule: 'ticket_intake', organization: 'org_a' });
   });
 });
