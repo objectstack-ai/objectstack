@@ -343,5 +343,71 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "By Queue"
       }
     }
+  },
+  sys_assignment_rule: {
+    label: "Assignment Rule",
+    pluralLabel: "Assignment Rules",
+    description: "Sends each new record that matches a condition to a queue or a person.",
+    fields: {
+      organization_id: {
+        label: "Organization",
+        help: "The organization this rule belongs to."
+      },
+      name: {
+        label: "Name",
+        help: "Identifies the rule. Lowercase letters, digits and underscores only, and not the name of a rule an installed app provides."
+      },
+      label: {
+        label: "Display Label"
+      },
+      description: {
+        label: "Description"
+      },
+      object_name: {
+        label: "Object",
+        help: "The object whose new records this rule sends somewhere. Only objects whose records have an owner can be assigned."
+      },
+      criteria: {
+        label: "Condition",
+        help: "Which new records this rule takes; leave it empty to take every new record that no earlier rule took. Written as an expression over the record — for example record.priority == \"high\"."
+      },
+      sort_order: {
+        label: "Order",
+        help: "When several of your rules could take the same record, the one with the lowest order is tried first. Your rules are always tried before the rules installed apps provide."
+      },
+      recipient_type: {
+        label: "Assign To",
+        help: "Send the record to a queue, where its members can take it, or straight to one person.",
+        options: {
+          queue: "Queue",
+          user: "User"
+        }
+      },
+      recipient_id: {
+        label: "Queue or User",
+        help: "The queue, or the person, the record goes to. A person must be an active member of this organization."
+      },
+      strategy: {
+        label: "Pick a Member",
+        help: "For a queue: give the record straight to one member, taking turns or choosing whoever has the least open work. Leave it empty to leave the record in the queue until a member takes it.",
+        options: {
+          round_robin: "Round robin",
+          least_loaded: "Least loaded"
+        }
+      },
+      load: {
+        label: "Open Work",
+        help: "Required for \"Least loaded\": which records count as a member's open work, written as an expression over the record — for example record.status != \"closed\"."
+      },
+      active: {
+        label: "Active",
+        help: "Turn off to stop this rule from assigning new records, without deleting it."
+      }
+    },
+    _views: {
+      by_object: {
+        label: "By Object"
+      }
+    }
   }
 };
