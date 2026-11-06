@@ -2653,7 +2653,7 @@
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
           "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
-          "scratch flows: a record-triggered flow writing current_user.id, on an object the MEMBER may update — the stock member's own set (showcase_member_default) grants showcase_task read + create, NOT edit, so a member's PATCH of showcase_task answers 403 PERMISSION_DENIED: either bind the member to the contributor position (showcase_contributor edits the tasks assigned to them; the search:qa-contributor-bound-member recipe), or trigger the flow on the member's own showcase_private_note (QA run #24558); an autolaunched runAs:\"system\" flow; a decision node whose two edges are both true"
+          "scratch flows: a record-triggered flow writing current_user.id, on an object the MEMBER may update — the stock member's own set (showcase_member_default) grants showcase_task read + create, NOT edit, so a member's PATCH of showcase_task answers 403 PERMISSION_DENIED: either bind the member to the showcase_contributor position (showcase_contributor edits the tasks assigned to them; the search:qa-contributor-bound-member recipe), or trigger the flow on the member's own showcase_private_note (QA run #24558); an autolaunched runAs:\"system\" flow; a decision node whose two edges are both true"
         ]
       },
       "steps": [
@@ -2875,7 +2875,7 @@
       "surface": "mixed",
       "personas": [
         "admin (holds manage_metadata; single posture)",
-        "dev admin as the approver (holds the manager position, so showcase_budget_approval's manager_review routes to them)"
+        "dev admin as the approver (holds the showcase_manager position, so showcase_budget_approval's manager_review routes to them)"
       ],
       "fixtures": {
         "app": "showcase",

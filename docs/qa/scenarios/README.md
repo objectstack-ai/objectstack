@@ -165,6 +165,6 @@ meet this floor:
 ## Running the cards
 
 `pnpm --filter @objectstack/scenarios run-scenarios` builds, runs and iterates every card here with a local
-Claude Code session, and writes one run record per card. Grading uses `@objectstack/scenarios/score`; no
+Claude Code session, and writes one run record per card. Grading uses `@objectstack/scenarios/score/full`; no
 API-billed model is used. The runner reads a card's names relative to the card's namespace
 (`account` → `democrm_account`), and a build that names any item without the prefix fails its Build half. Flags and modes: [the package README](../../../packages/qa/scenarios/README.md#running-the-cards--objectstackscenariosrunner).

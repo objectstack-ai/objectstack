@@ -199,7 +199,14 @@ function boot(error: () => Error, protocol: Record<string, Fn> = {}): Booted {
         server,
         recorder: rest,
         ctx: {
-            getService: (name: string) => rejecting(`service:${name}`, calls, error),
+            // No `tenancy` service is registered, as on a deployment that is not
+            // walled: the import door's walled-catalog verdict is then inert,
+            // and the import reaches the federation service whose refusal this
+            // ledger reads. A rejecting stand-in would read as a walled posture.
+            getService: (name: string) => {
+                if (name === 'tenancy') throw new Error(`service '${name}' is not registered`);
+                return rejecting(`service:${name}`, calls, error);
+            },
             logger: { debug() {}, info() {}, warn() {}, error() {} },
         } as any,
         versionedBase: '/api/v1',

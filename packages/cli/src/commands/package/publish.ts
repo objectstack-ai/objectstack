@@ -10,9 +10,10 @@
  *      active organization (user mode) or supplied via --org (service mode).
  *   2. POST /cloud/packages/:id/versions     — snapshot dist/objectstack.json
  *      into sys_package_version.manifest_json (status=published).
- *   3. (optional) auto-install into a target environment via --env, or the
+ *   3. (optional) auto-install into a target environment via --env, the
  *      environment `os environments switch` recorded in cloud.json for the
- *      control plane being published to.
+ *      control plane being published to, or the organization's only
+ *      environment (`utils/install-target.ts`, resolved before step 1).
  *
  * This is the "upload my local code to my org" path — the single supported
  * way to publish. (The legacy direct-to-environment `os publish` / `os
@@ -41,8 +42,8 @@ import {
 } from '@objectstack/spec/marketplace';
 import { ManifestSchema, resolveInstallModes } from '@objectstack/spec/kernel';
 import { printHeader, printKV, printSuccess, printError, printStep, printWarning, isExitSignal } from '../../utils/format.js';
-import { DEFAULT_CLOUD_URL, tryReadCloudConfig } from '../../utils/cloud-config.js';
-import { resolveCloudActiveEnvironmentId } from '../../utils/active-environment.js';
+import { DEFAULT_CLOUD_URL, resolveCloudCredential } from '../../utils/cloud-config.js';
+import { installTargetLine, resolveInstallTarget, type InstallTargetResolution } from '../../utils/install-target.js';
 import { readErrorMessage } from '../../utils/response-envelope.js';
 
 /**
@@ -447,7 +448,28 @@ async function resolveLocalizedMarkdown(
   return await readFile(path, 'utf-8');
 }
 
+/**
+ * What one successful publish produced — read by `os deploy`, which runs this
+ * command for its publish step and then waits on the result. Set only after
+ * the version POST succeeded; every refusal leaves it undefined.
+ */
+export interface PublishOutcome {
+  manifestId: string;
+  /** `sys_package.id` — the internal id the installation read is keyed by. */
+  packageId: string;
+  version: string;
+  versionId: string | undefined;
+  /** The control plane the publish went to, and the credential it used. */
+  baseUrl: string;
+  token: string;
+  /** The environment the control plane reports installing into, when it installed. */
+  installedInto: string | undefined;
+}
+
 export default class PackagePublish extends Command {
+  /** See {@link PublishOutcome}. */
+  outcome: PublishOutcome | undefined;
+
   static override description =
     'Publish a compiled artifact as a versioned package in your organization (ADR-0006 v4 Phase B)';
 
@@ -523,11 +545,14 @@ export default class PackagePublish extends Command {
     env: Flags.string({
       description:
         'Environment id to install the new version into after publish. Defaults to the '
-        + 'environment `os environments switch` recorded for this control plane in cloud.json',
+        + 'environment `os environments switch` recorded for this control plane in cloud.json, '
+        + "then to your organization's only environment",
       env: 'OS_ENVIRONMENT_ID',
     }),
     install: Flags.boolean({
-      description: 'Auto-install the new version into --env after publishing',
+      description:
+        'Install the new version after publishing, into --env or the environment it defaults to. '
+        + 'With no environment to name, the command exits non-zero before publishing anything.',
       default: false,
     }),
     'seed-sample-data': Flags.boolean({
@@ -702,20 +727,41 @@ export default class PackagePublish extends Command {
       // (the *runtime* identity, written by `os login`). Publishing a package
       // and managing a local ObjectOS instance are two distinct identities —
       // see `os cloud login` for the cloud identity.
-      let token = flags.token ?? process.env.OS_TOKEN ?? undefined;
-      let baseUrl = flags.server.replace(/\/+$/, '');
-      const serverFlagWasDefault = !process.env.OS_CLOUD_URL && baseUrl === DEFAULT_CLOUD_URL;
-      if (!token || serverFlagWasDefault) {
-        const stored = await tryReadCloudConfig();
-        if (!token && stored?.token) token = stored.token;
-        if (serverFlagWasDefault && stored?.url) baseUrl = stored.url.replace(/\/+$/, '');
-      }
+      // One resolution, shared with `os deploy` (`resolveCloudCredential`).
+      const { token, baseUrl } = await resolveCloudCredential({ token: flags.token, server: flags.server });
       if (!token) {
         printError(
           'Not logged in to ObjectOS Cloud. Run `os cloud login` first, or pass --token / set $OS_TOKEN.',
         );
         this.exit(1);
         return;
+      }
+
+      // ---- Step 0: where an install goes, decided BEFORE any write ---------
+      // `utils/install-target.ts` owns the order (`--env` / $OS_ENVIRONMENT_ID,
+      // then the active environment recorded in `cloud.json` FOR THIS CONTROL
+      // PLANE, then the organization's only environment) and every refusal.
+      // ⛔ It runs ahead of step 1 on purpose: an `--install` that cannot name
+      // an environment exits non-zero here, before the package row is touched —
+      // a publish that was asked to install and did not must not read as
+      // success. `credentials.json` is never read for this value (the url gate
+      // lives in `utils/active-environment.ts`; this line must not grow a
+      // second one).
+      let installTarget: Extract<InstallTargetResolution, { kind: 'resolved' }> | undefined;
+      if (flags.install) {
+        const resolution = await resolveInstallTarget({
+          subject: '`--install`',
+          explicit: flags.env,
+          baseUrl,
+          token,
+          timeoutMs: flags.timeout,
+        });
+        if (resolution.kind === 'refused') {
+          printError(resolution.message);
+          this.exit(1);
+          return;
+        }
+        installTarget = resolution;
       }
 
       // ---- Step 1: ensure sys_package row ---------------------------------
@@ -902,38 +948,10 @@ export default class PackagePublish extends Command {
       if (flags.submit) verBody.submit_for_review = true;
       if (flags['auto-approve']) verBody.auto_approve = true;
 
-      // Install target precedence: `--env` (which oclif also fills from
-      // $OS_ENVIRONMENT_ID), then the environment `os environments switch`
-      // recorded in `cloud.json` FOR THIS CONTROL PLANE.
-      //
-      // ⛔ Never `credentials.json`. That file's `activeEnvironmentId` belongs
-      // to whatever server the runtime identity points at — `localhost:3000`
-      // by default — so it can name an environment on a different control
-      // plane than the one this publish is POSTing to. The url gate lives in
-      // `utils/active-environment.ts`; this line must not grow a second one.
-      let installEnvId = flags.env;
-      let installEnvFromActive = false;
-      if (flags.install && !installEnvId) {
-        installEnvId = await resolveCloudActiveEnvironmentId(baseUrl);
-        installEnvFromActive = Boolean(installEnvId);
-      }
-
-      const shouldInstall = flags.install && installEnvId;
-      if (shouldInstall) {
-        verBody.install_env_id = installEnvId;
+      if (installTarget) {
+        verBody.install_env_id = installTarget.environmentId;
         verBody.seed_sample_data = flags['seed-sample-data'];
-        if (installEnvFromActive) {
-          printStep(
-            `Installing into the active environment ${installEnvId} `
-            + '(os environments switch / os environments create --activate)',
-          );
-        }
-      } else if (flags.install && !installEnvId) {
-        printError(
-          '`--install` requires `--env <id>`, $OS_ENVIRONMENT_ID, or an active environment '
-          + '(`os environments switch <id>` or `os environments create --activate` against this '
-          + 'control plane). Skipping auto-install.',
-        );
+        if (installTarget.source !== 'flag') printStep(installTargetLine(installTarget));
       }
 
       const verRes = await this.postJson(
@@ -962,6 +980,17 @@ export default class PackagePublish extends Command {
         return;
       }
       const ver = verRes.body?.data ?? verRes.body;
+      this.outcome = {
+        manifestId,
+        packageId: String(pkg?.id ?? ''),
+        version: String(ver?.version ?? version),
+        versionId: typeof ver?.id === 'string' ? ver.id : undefined,
+        baseUrl,
+        token,
+        installedInto: ver?.installation
+          ? String(ver.installation.environment_id ?? installTarget?.environmentId ?? '')
+          : undefined,
+      };
       const violations = Array.isArray(verRes.body?.violations) ? verRes.body.violations : [];
       const warnings = Array.isArray(ver?.warnings) ? ver.warnings : [];
 
@@ -978,7 +1007,7 @@ export default class PackagePublish extends Command {
       if (ver?.installation) {
         console.log('');
         printSuccess('Installed into environment');
-        printKV('  Environment', String(ver.installation.environment_id ?? flags.env ?? '—'));
+        printKV('  Environment', String(ver.installation.environment_id ?? installTarget?.environmentId ?? '—'));
         printKV('  Installation', String(ver.installation.installation_id ?? '—'));
       }
       printKV('  Server',         baseUrl);

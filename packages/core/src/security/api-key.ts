@@ -18,7 +18,8 @@
  *  - The raw key and its hash must never enter logs, HTTP responses, error
  *    messages, commit messages or comments.
  *  - Validation is fail-closed: anything ambiguous (missing, revoked, expired,
- *    malformed) resolves to "no principal", never to an elevated one.
+ *    malformed) resolves to "no principal", never to an elevated one, and a
+ *    key authenticates only as an owner who exists.
  */
 
 import { createHash, randomBytes } from 'node:crypto';
@@ -493,13 +494,18 @@ export interface ApiKeyPrincipal {
  * key is unknown/revoked/expired": a refusal means the credential is real and
  * intact but cannot be admitted under this deployment's tenancy posture.
  */
-export type ApiKeyRefusalReason = 'organization_required' | 'organization_membership_ended' | 'owner_banned';
+export type ApiKeyRefusalReason =
+  | 'organization_required'
+  | 'organization_membership_ended'
+  | 'owner_banned'
+  | 'owner_absent';
 
 /**
  * The verdict on an inbound API key. Five outcomes, deliberately distinct:
  *
- *  - `none` — no key header, or a key that is unknown / owner-less.
- *    Indistinguishable by design (never tell a prober which), and the caller
+ *  - `none` — no key header, or a key that is unknown / owner-less (a row
+ *    that names no owner at all; a row naming an owner who does not exist is
+ *    `refused`, below). Indistinguishable by design (never tell a prober which), and the caller
  *    MAY fall through to the session path exactly as before.
  *  - `lifecycle` — [#23367, ruling A] a REAL key whose own state refuses it:
  *    revoked, expired (its `expires_at`, or the grace of a key signed with
@@ -519,8 +525,10 @@ export type ApiKeyRefusalReason = 'organization_required' | 'organization_member
  *    caller must NOT fall through to the session path, for the reason the
  *    `refused` arm gives. ⛔ Not a revocation: nothing is written, and the same
  *    key is admitted again the moment the owner remediates.
- *  - `refused` — a real, intact key the posture cannot admit, or whose owner's
- *    ban holds (`owner_banned`, {@link isUserBanInForce}). The caller must
+ *  - `refused` — a real, intact key the posture cannot admit, whose owner does
+ *    not exist (`owner_absent`: a key authenticates only as an owner who
+ *    exists), or whose owner's ban holds (`owner_banned`,
+ *    {@link isUserBanInForce}). The caller must
  *    NOT fall through to the session path: falling through would be more
  *    permissive than today's behaviour (an API key already outranks a session),
  *    and the whole point of the refusal is that it is LOUD at call time.
@@ -590,7 +598,7 @@ export function effectiveTenancyPosture(
  * the verdict of {@link resolveApiKeyAdmission}, collapsed to a principal.
  *
  * Fail-closed: returns `undefined` for a missing key, an unusable data engine,
- * a key that is unknown / owner-less, a key its own lifecycle
+ * a key that is unknown / owner-less, a key whose owner does not exist, a key its own lifecycle
  * refuses (revoked / expired / inactive — `lifecycle`), a key the tenancy
  * posture refuses, and a key whose OWNER holds an `account`-scope ADR-0069
  * posture (`held`). A `sys_api_key` read that THROWS is no answer at all: it
@@ -641,10 +649,11 @@ export async function resolveApiKeyPrincipal(
  * a caller of it fails closed; a caller that can report WHY (the shared
  * `resolveAuthzContext`) uses this instead.
  *
- * The only refusal decided here is the org-less one, because it needs nothing
- * but the row and the posture. The ex-member refusal needs the caller's
- * membership set and is decided in `resolveAuthzContext`, where that set is
- * already resolved.
+ * The refusals decided here need nothing but the key row, its owner's row and
+ * the posture: an owner who does not exist (`owner_absent`), a banned owner
+ * (`owner_banned`) and the org-less key (`organization_required`). The
+ * ex-member refusal needs the caller's membership set and is decided in
+ * `resolveAuthzContext`, where that set is already resolved.
  *
  * [#23455] Every parameter after `nowMs` is REQUIRED, and `undefined` is a
  * value passed on purpose — see `userAuthGates` below.
@@ -766,8 +775,17 @@ export async function resolveApiKeyAdmission(
   // One read of the owner's row per key resolution: nothing earlier on this
   // path has the row (the grants read comes after admission and may be served
   // from a cache that would not see a fresh ban). A read that THROWS is the
-  // branded store outage, as for `sys_api_key`; a `sys_user` table that was
-  // never provisioned holds no ban.
+  // branded store outage, as for `sys_api_key`.
+  //
+  // [maintainer ruling 2026-11-05, option B] An API key authenticates only as
+  // an owner who exists. The key is a credential of its owner (ADR-0090), so a
+  // key whose owner the read does not find is no credential of anyone: it is
+  // `refused` (`owner_absent`), answered on the wire exactly as a key that
+  // does not exist, never falling through to the session path, and named in
+  // the operator's refusal line by its row id and owner id. A store with no
+  // `sys_user` table answers as a store with no row: no owner exists there,
+  // so it refuses every key. Asked here, after the key's own lifecycle and
+  // before the ban, on the same read the ban takes — no read is added.
   let owner: Record<string, unknown> | undefined;
   try {
     let users: any = await ql.find('sys_user', {
@@ -780,6 +798,15 @@ export async function resolveApiKeyAdmission(
     owner = Array.isArray(users) ? users[0] : undefined;
   } catch (err) {
     if (!isMissingTableError(err, 'sys_user')) throw new AuthzStoreUnavailableError('sys_user', err);
+  }
+  if (!owner || typeof owner !== 'object') {
+    return {
+      outcome: 'refused',
+      reason: 'owner_absent',
+      keyId,
+      userId,
+      message: 'The owner of this API key does not exist; a key authenticates only as an owner who exists.',
+    };
   }
   if (isUserBanInForce(owner, nowMs)) {
     return {

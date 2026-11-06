@@ -46,6 +46,7 @@
   "oclif": {
     "bin": "os",
     "dirname": "objectstack",
+    "helpClass": "./dist/help.js",
     "commands": {
       "strategy": "pattern",
       "target": "./dist/commands",

@@ -24,6 +24,10 @@ export default defineConfig({
       // from `@objectstack/core`: both from source, for the same reason.
       { find: /^@objectstack\/spec\/api$/, replacement: path.resolve(__dirname, '../../spec/src/api/index.ts') },
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
+      // The relay sender reads the `cloud-binding` service name from the
+      // contract (`CLOUD_BINDING_SERVICE`, `@objectstack/spec/contracts`): from
+      // source, for the same reason.
+      { find: /^@objectstack\/spec\/contracts$/, replacement: path.resolve(__dirname, '../../spec/src/contracts/index.ts') },
     ],
   },
 });

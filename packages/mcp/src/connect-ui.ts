@@ -1,8 +1,10 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * "Connect an agent" page — plugin-carried UI metadata (#2714 Phase 1,
- * objectui#2363).
+ * "Connect an AI Assistant" page — plugin-carried UI metadata (#2714 Phase 1,
+ * objectui#2363). Named for what a person connects (Claude, Doubao, Cursor and
+ * the rest) rather than "agent", which Studio and Setup already use for the
+ * agents an author builds (#30895).
  *
  * The page ships WITH the MCP capability (same principle as the marketplace
  * pages in `@objectstack/cloud-connection`, cloud ADR-0009: the nav lives and
@@ -26,9 +28,8 @@
  * ['setup.access']`, so every non-admin following the two-step guide stopped at
  * step 1 while the endpoint behind the button accepted them all along.
  *
- * The fix is a SECOND contribution, into the `account` app's Developer group
- * beside the `nav_account_api_keys` entry already shipping there. The Setup
- * entry stays for admins. ⛔ Ungating Setup is NOT the fix and was measured:
+ * The fix is a SECOND contribution, into the `account` app. The Setup entry
+ * stays for admins. ⛔ Ungating Setup is NOT the fix and was measured:
  * the app-level `setup.access` gate fires BEFORE the group gate, so dropping
  * the group gate alone changes nothing, and dropping both serves 14+ unrelated
  * Setup surfaces (Users, Organization, Branding, Company, …) to every
@@ -39,13 +40,26 @@
  * opted-out deployment. A contribution registers exactly when the page
  * registers, which is why both entries live in THIS bundle and neither carries
  * a gate of its own.
+ *
+ * ## Where each entry sits (#30895)
+ *
+ * Connecting an AI client is something every person does for themselves, so
+ * neither entry may sit where nobody passes. In Account it fills
+ * `grp_account_ai_assistant`, a group of its own that `ACCOUNT_APP` declares
+ * expanded right after Inbox, never inside the collapsed Developer group. In
+ * Setup it joins `group_overview`, the top group, behind System Overview,
+ * never near the bottom among the datasource and connector screens. Both
+ * anchors are empty slots in their app definitions, and the nav filter drops an
+ * empty group, so an opted-out deployment still shows neither. The Console's
+ * avatar menu adds a third door, drawn only while the served Account app
+ * carries this page.
  */
 
 import type { Page } from '@objectstack/spec/ui';
 
 export const CONNECT_AGENT_PAGE: Page = {
   name: 'connect_agent',
-  label: 'Connect an Agent',
+  label: 'Connect an AI Assistant',
   type: 'app' as const,
   template: 'default',
   kind: 'full' as const,
@@ -58,7 +72,7 @@ export const CONNECT_AGENT_PAGE: Page = {
         {
           type: 'page:header',
           properties: {
-            title: 'Connect an Agent',
+            title: 'Connect an AI Assistant',
             subtitle:
               'Give any MCP-capable AI client governed access to this system — ' +
               'every call runs under the caller\'s own permissions and row-level security.',
@@ -80,8 +94,8 @@ export const CONNECT_AGENT_UI_BUNDLE = {
   version: '0.1.0',
   type: 'plugin',
   scope: 'system',
-  name: 'Connect an Agent UI',
-  description: 'Connect-an-Agent page + Setup and Account navigation for connecting MCP clients to this system.',
+  name: 'Connect an AI Assistant UI',
+  description: 'Connect an AI Assistant page + Setup and Account navigation for connecting MCP clients to this system.',
   pages: [CONNECT_AGENT_PAGE],
   // Both entries point at the one `connect_agent` page and share the item id.
   // That is legal and deliberate, read off the fold rather than assumed: the
@@ -99,15 +113,19 @@ export const CONNECT_AGENT_UI_BUNDLE = {
   // any in-place consumer edit would leak across them.
   navigationContributions: [
     {
+      // The top group. `group_overview` carries the same
+      // `manage_platform_settings` gate `group_integrations` did, so who sees
+      // the entry does not move; only where it sits. Priority 110 orders it
+      // behind System Overview (`SETUP_NAV_CONTRIBUTIONS`, 100).
       app: 'setup',
-      group: 'group_integrations',
+      group: 'group_overview',
       priority: 110,
       items: [
         {
           id: 'nav_connect_agent',
           type: 'page',
           pageName: 'connect_agent',
-          label: 'Connect an Agent',
+          label: 'Connect an AI Assistant',
           icon: 'bot',
         },
       ],
@@ -115,23 +133,21 @@ export const CONNECT_AGENT_UI_BUNDLE = {
     {
       // The per-user half. `ACCOUNT_APP` declares no `requiredPermissions` —
       // deliberately, so every authenticated user reaches their own security
-      // surface — and `grp_account_developer` already carries
-      // `nav_account_api_keys`. Targeted by NAME; `packages/platform-objects`
-      // is not edited.
+      // surface — and declares `grp_account_ai_assistant` as an empty,
+      // expanded slot for this entry. Targeted by NAME.
       app: 'account',
-      group: 'grp_account_developer',
-      // `priority` orders contributions among THEMSELVES within the group, and
-      // the group's own static children always precede them. Stated rather
-      // than defaulted, at the schema's declared default: no other package
-      // contributes into this group today, so there is nothing to interleave
-      // with and no reason to claim a position.
+      group: 'grp_account_ai_assistant',
+      // `priority` orders contributions among THEMSELVES within the group.
+      // Stated rather than defaulted, at the schema's declared default: no
+      // other package contributes into this group today, so there is nothing
+      // to interleave with and no reason to claim a position.
       priority: 200,
       items: [
         {
           id: 'nav_connect_agent',
           type: 'page',
           pageName: 'connect_agent',
-          label: 'Connect an Agent',
+          label: 'Connect an AI Assistant',
           icon: 'bot',
         },
       ],

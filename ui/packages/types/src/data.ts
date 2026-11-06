@@ -227,9 +227,8 @@ export interface BatchRef {
  * server contract of `POST /api/v1/batch` (objectstack-ai/objectstack#1604 /
  * ADR-0034 item 4).
  *
- * Distinct from the driver-level `BatchOperation` in `data-protocol.ts`
- * (which speaks `type`/`table`) — this is the DataSource-level, object-aware
- * shape consumed by {@link DataSource.batchTransaction}.
+ * This is the DataSource-level, object-aware shape consumed by
+ * {@link DataSource.batchTransaction}.
  */
 export interface BatchTransactionOperation {
   /** Target object/table name. */
