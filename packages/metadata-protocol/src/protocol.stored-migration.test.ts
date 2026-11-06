@@ -18,6 +18,11 @@
  * it declines to touch says so instead of being silently counted clean.
  */
 import { describe, expect, it } from 'vitest';
+// The protocol's diagnostics load `@objectstack/lint` with a dynamic
+// `import()` (`metadata-diagnostics.ts`). Paid here, at collection, so no
+// case's `testTimeout` window pays that first load
+// (`scripts/check-test-source-alias.mjs`, "The source reach").
+import '@objectstack/lint';
 // [#5619] The producer's OWN write-verb dispatch decisions (#4550 delete /
 // #5480 update), so the fake engine below cannot accept a call ObjectQL
 // refuses. Imported from `@objectstack/metadata-core` and not from

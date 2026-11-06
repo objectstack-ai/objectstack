@@ -22,6 +22,12 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { ObjectSchema } from '@objectstack/spec/data';
 import { t } from '../i18n';
+// The inspector's object picker and CEL authoring load `@objectstack/lint` and
+// `@objectstack/formula` with function-body `import()`s. Warmed here so their
+// first load is paid at collection, not inside a case's bounded wait. Same
+// specifiers, so the source's own dynamic imports resolve from the cache.
+import '@objectstack/lint';
+import '@objectstack/formula';
 
 type Row = Record<string, unknown>;
 
