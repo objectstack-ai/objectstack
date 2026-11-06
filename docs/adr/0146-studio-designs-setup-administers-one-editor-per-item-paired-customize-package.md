@@ -211,14 +211,15 @@ item document — not in a manifest list, not in a side table — so it travels 
 the `.custom` manifest needs no index of what it overrides (Q2, 「全部同意」: declaration in the item body). `package`
 names the base; `basedOn` records which version of the base **package** — its `manifest.version`, not a history version
 of the item — the author started from (ruling record 6549129352 on #28404, aligned here). **`basedOn` is recorded and
-never gates**: no door refuses on it, no token is asked for it, and nothing is merged, rebased or rewritten
-automatically because of it (epic #28236, *Not in this epic*: upgrade diff / `basedOn` checking, recorded only). **One
-reader is admitted, as advice** (amended 2026-11-06, decision D2 on objectstack-ai/cloud#3652): a base's **upgrade
-plan** — the preview of a base upgrade before it runs — may list as advisory findings (a) a `.custom` item whose
-declared override names a base item the upgrade changes between the installed and the new version ("this override
-hides a vendor change"), and (b) an override whose `basedOn` is not the installed base's `manifest.version`. No door
-refuses on either finding and the upgrade proceeds as it would without it; re-basing stays the customer's act. The
-finding is not the base-upgrade interception ADR-0141 D3 defers, because it refuses nothing, and [D3](#d3)'s `^<major>`
+never gates** (epic #28236, *Not in this epic*: upgrade diff / `basedOn` checking, recorded only). **One reader is
+admitted, as advice** (amended 2026-11-06, decision D2 on objectstack-ai/cloud#3652): a base's **upgrade plan** — the
+preview of a base upgrade before it runs — may list as advisory findings (a) a `.custom` item whose declared override
+names a base item the upgrade changes between the installed and the new version ("this override hides a vendor
+change"), and (b) an override whose `basedOn` is not the installed base's `manifest.version`. On either finding no door
+refuses, no token is asked, and nothing is merged, rebased or rewritten automatically; the upgrade proceeds as it would
+without it, and re-basing stays the customer's act. The plan carries both findings in an **advisory class** that its
+refusal never reads and that no finding-set token covers, so neither becomes a gate by sharing a response with a
+refusing finding. The finding is not the base-upgrade interception ADR-0141 D3 defers, because it refuses nothing, and [D3](#d3)'s `^<major>`
 reasoning (merge question 1) is unchanged. Whole-document
 replace is ADR-0005's binding principle 3 and ADR-0131 D6's O rule carried over unchanged: no field-level patch, no
 three-way merge — the author who changes one column ships the whole view.
