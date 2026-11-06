@@ -326,7 +326,7 @@ describe('runCard — the seed against a build whose owner field is a user looku
     expect(seed).toEqual({ inserted: 8, refused: [], handlesAsAdmin: ['u_tia'] });
     const owners = Object.fromEntries(apps[0]!.rows.democrm_account!.map((r) => [r.id, [r.owner, r.owner_id]]));
     expect(owners).toEqual({ ac1: ['u-sdr', 'u-sdr'], ac2: ['u-admin', 'u-admin'], ac3: ['u-sdr', 'u-sdr'] });
-    expect(apps[0]!.rows.democrm_contact!.map((r) => r.id)).toEqual(['ct1', 'ct2', 'ct3', 'ct4', 'ct5']);
+    expect(apps[0]!.rows.democrm_contact!.map((r) => r.id)).toEqual(['ct1', 'ct2', 'ct3', 'ct4', 'ct5', 'new-add_contact']); // the five seeded, then the sdr's add
     expect(apps[0]!.rows.democrm_contact!.find((r) => r.id === 'ct1')!.owner_id).toBeUndefined(); // a path scope (`account.owner`) owns nothing
     expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 5, total: 5 }); // every write found its seeded target
   });
