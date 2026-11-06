@@ -31,7 +31,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resolveThrownHttpError } from '@objectstack/types';
-import { markFlowWriteReferenceCheck } from '@objectstack/core';
+import { markFlowWriteReferenceCheck, vouchForReference, VOUCHED_REFERENCES } from '@objectstack/core';
 import { ObjectQL } from './engine.js';
 import { ValidationError } from './validation/record-validator.js';
 
@@ -496,5 +496,76 @@ describe('[#29029] the update\'s reference forgiveness compares only stored valu
       await write(door, { title: 'renamed', [field]: UNREADABLE }, flowRun);
       expect(storeFor(ITEM).get('k1')?.title).toBe('renamed');
     });
+  });
+});
+
+describe('a reference a service verb vouches for on its own write: that one value skips the caller\'s read door, nothing else does', () => {
+  let engine: ObjectQL;
+  let targetReads: TargetRead[];
+  let storeFor: (o: string) => Map<string, Record<string, any>>;
+
+  beforeEach(() => {
+    ({ engine, targetReads, storeFor } = makeEngine());
+  });
+
+  /** Alice's context, vouching for `id` in `field` of a write to `object`. */
+  const vouched = (id: string, field = 'duty', object = ITEM, base: Record<string, unknown> = ALICE) =>
+    vouchForReference({ ...base }, { object, field, id });
+  const insert = (object: string, payload: Record<string, unknown>, context: Record<string, unknown>) =>
+    engine.insert(object, { title: 'new', ...payload }, { context } as any);
+  const items = (object = ITEM) => [...storeFor(object).values()];
+
+  it('the vouched value lands although the caller cannot read it; its existence is still probed, elevated', async () => {
+    await insert(ITEM, { duty: UNREADABLE }, vouched(UNREADABLE));
+    expect(items().some((r) => r.duty === UNREADABLE)).toBe(true);
+    // No read door asked for it; the existence probe ran.
+    expect(targetReads.map(({ operation, elevated }) => ({ operation, elevated }))).toEqual([
+      { operation: 'findOne', elevated: true },
+    ]);
+  });
+
+  it('a vouched id that names no row is still refused reference_not_found', async () => {
+    expect(envelopeOf(await refusalOf(() => insert(ITEM, { duty: NOWHERE }, vouched(NOWHERE))))).toEqual(notFound('duty'));
+    expect(items()).toEqual([]);
+  });
+
+  it('control: another unreadable id in the vouched field is refused as before', async () => {
+    const err = await refusalOf(() => insert(ITEM, { duty: 't_flagged_other' }, vouched(UNREADABLE)));
+    expect(envelopeOf(err)).toEqual(notFound('duty'));
+    expect(items()).toEqual([]);
+  });
+
+  it('control: the vouched id in another field of the same write is refused as before', async () => {
+    const err = await refusalOf(() => insert(ITEM, { duty: UNREADABLE, assignee: UNREADABLE }, vouched(UNREADABLE)));
+    expect(envelopeOf(err)).toEqual(notFound('assignee'));
+    expect(items()).toEqual([]);
+  });
+
+  it('control: the vouched id on a write to another object is refused as before', async () => {
+    const err = await refusalOf(() => insert(RULED, { duty: UNREADABLE }, vouched(UNREADABLE)));
+    expect(envelopeOf(err)).toEqual(notFound('duty'));
+    expect(items(RULED)).toEqual([]);
+  });
+
+  it('control: a multi-valued field admits the vouched member only, and refuses another unreadable one beside it', async () => {
+    const err = await refusalOf(() => insert(ITEM, { duties: [UNREADABLE, 't_flagged_other'] }, vouched(UNREADABLE, 'duties')));
+    expect(envelopeOf(err)).toEqual(notFound('duties'));
+    await insert(ITEM, { duties: [UNREADABLE, 't_mine'] }, vouched(UNREADABLE, 'duties'));
+    expect(items().some((r) => Array.isArray(r.duties) && r.duties.includes(UNREADABLE))).toBe(true);
+  });
+
+  it('control: the same value without the mark is refused, and a string key of the same name is no mark', async () => {
+    expect(envelopeOf(await refusalOf(() => insert(ITEM, { duty: UNREADABLE }, { ...ALICE })))).toEqual(notFound('duty'));
+    // What a JSON body or a stored row could spell: the symbol's description as a plain key.
+    const spelled = { ...ALICE, [String(VOUCHED_REFERENCES.description)]: [{ object: ITEM, field: 'duty', id: UNREADABLE }] };
+    expect(envelopeOf(await refusalOf(() => insert(ITEM, { duty: UNREADABLE }, spelled)))).toEqual(notFound('duty'));
+    expect(items()).toEqual([]);
+  });
+
+  it('control: a caller whose read of the target object is refused outright is admitted for the vouched value only', async () => {
+    await insert(ITEM, { duty: 't_mine' }, vouched('t_mine', 'duty', ITEM, CAROL));
+    expect(items().some((r) => r.duty === 't_mine')).toBe(true);
+    const err = await refusalOf(() => insert(ITEM, { duty: 't_mine_2' }, vouched('t_mine', 'duty', ITEM, CAROL)));
+    expect(envelopeOf(err)).toEqual(notFound('duty'));
   });
 });
