@@ -264,7 +264,7 @@ describe('[#30958] mint: the platform admin gets a bearer the SCIM plugin accept
       { connectionId: '' },
       { connectionId: ' padded ' },
       { connectionId: 42 },
-      { connectionId: 'x'.repeat(256) },
+      { connectionId: 'x'.repeat(247) },
       { connectionId: 'okta-bad-expiry', expiresAt: 'not-a-date' },
       { connectionId: 'okta-bad-expiry', expiresAt: new Date(Date.now() - 60_000).toISOString() },
       { connectionId: 'okta-bad-label', label: 7 },
@@ -275,6 +275,24 @@ describe('[#30958] mint: the platform admin gets a bearer the SCIM plugin accept
     }
     expect(await credentialRows('okta-bad-expiry')).toEqual([]);
     expect(await credentialRows('okta-bad-label')).toEqual([]);
+  });
+
+  it('a connection id leaves room for the svc:scim: audit actor: 246 characters mint, 247 are refused', async () => {
+    // A SCIM connection's own writes are audited as `svc:scim:<connectionId>`
+    // (#30960) in `sys_audit_log.actor`, which holds 255 characters.
+    expect('svc:scim:'.length + 246).toBe(255);
+    const longest = 'c'.repeat(246);
+    const minted = await door('mint-credential', { connectionId: longest });
+    expect(minted.status, JSON.stringify(minted.body)).toBe(200);
+    expect(minted.body.data.connectionId).toBe(longest);
+    expect(await credentialRows(longest)).toHaveLength(1);
+
+    const tooLong = 'c'.repeat(247);
+    const refused = await door('mint-credential', { connectionId: tooLong });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error.code).toBe('INVALID_REQUEST');
+    expect(refused.body.error.message).toContain('at most 246 characters');
+    expect(await credentialRows(tooLong)).toEqual([]);
   });
 
   it('a future expiry is stored and answered', async () => {

@@ -78,6 +78,15 @@ export const SCIM_REVOKE_CREDENTIAL_PATH = '/admin/scim/revoke-credential';
 /** The longest value the credential row's text columns store. */
 const MAX_TEXT = 255;
 
+/**
+ * The longest connection id the door accepts: 246, not {@link MAX_TEXT}.
+ * A write made by a SCIM connection is audited with the service actor
+ * `svc:scim:<connectionId>` (#30960), and `sys_audit_log.actor` holds 255
+ * characters, so a longer id would make that audit insert fail for every
+ * request the connection makes. 255 minus the 9-character prefix.
+ */
+const MAX_SCIM_CONNECTION_ID = MAX_TEXT - 'svc:scim:'.length;
+
 /** Execution context for the store reads and the audit write. */
 const SYSTEM_CTX = { isSystem: true } as const;
 
@@ -248,11 +257,11 @@ export async function runMintScimCredential(
   const body = reading.body;
 
   const connectionId = body.connectionId;
-  if (typeof connectionId !== 'string' || connectionId.length === 0 || connectionId.trim() !== connectionId || connectionId.length > MAX_TEXT) {
+  if (typeof connectionId !== 'string' || connectionId.length === 0 || connectionId.trim() !== connectionId || connectionId.length > MAX_SCIM_CONNECTION_ID) {
     return fail(
       400,
       'INVALID_REQUEST',
-      `connectionId is required: the connection's identifier (e.g. "okta-prod"), a non-empty string of at most ${MAX_TEXT} characters with no surrounding whitespace`,
+      `connectionId is required: the connection's identifier (e.g. "okta-prod"), a non-empty string of at most ${MAX_SCIM_CONNECTION_ID} characters with no surrounding whitespace`,
     );
   }
   const optional: Record<'label' | 'provisioningDomainId' | 'organizationId', string | undefined> = {

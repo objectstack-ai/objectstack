@@ -1183,7 +1183,8 @@ curl -X POST http://localhost:3000/api/v1/auth/admin/scim/mint-credential \
 ```
 
 - `connectionId` (required) names the connection every provisioned resource
-  is scoped to. Optional: `label`, `expiresAt` (a future ISO date-time),
+  is scoped to: at most 246 characters, so the connection's audit actor
+  `svc:scim:<connectionId>` fits the audit log's 255. Optional: `label`, `expiresAt` (a future ISO date-time),
   `provisioningDomainId`, and `organizationId` (the organization that owns the
   credential row; the Default Organization when omitted).
 - The `token` is shown **once**, in this response only (`Cache-Control:
