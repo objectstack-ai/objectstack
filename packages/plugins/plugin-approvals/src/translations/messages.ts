@@ -401,7 +401,7 @@ export const ptBRMessages: ApprovalMessages = {
   approvalAdminRescuePositionUnheld: 'o cargo "{{value}}" não tem ocupante',
   approvalAdminRescueSlotUnresolved: '{{type}} "{{value}}" não correspondeu a ninguém',
   approvalAdminRescueNoApprover: 'nenhum aprovador do nó correspondeu a uma pessoa',
-  approvalAdminRescueFallbackUnresolved: 'os fallbackApprovers declarados também não corresponderam a ninguém',
+  approvalAdminRescueFallbackUnresolved: 'tampouco os fallbackApprovers declarados corresponderam a ninguém',
   approvalAdminRescueFallbackUndeclared: "onEmptyApprovers é 'fallback', mas nenhum fallbackApprovers foi declarado",
   approvalAdminRescueReasonSeparator: '; ',
   approvalAdminRescueSubmitterExcluded: 'o único aprovador encontrado foi o solicitante, que excludeSubmitter remove',
