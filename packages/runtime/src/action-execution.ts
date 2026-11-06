@@ -4963,17 +4963,28 @@ export interface ActionHandlerOwnerRefusal {
  *    metadata service's `loadMany`), and the engine registry's, a disabled
  *    package's items included.
  *
- * A read that throws travels to the caller, which refuses: an unread source
- * is a gate that cannot be verified, never a gate that is absent.
+ * The engine's own copies are in memory and always read. The metadata plane's
+ * listings are read beside them, and a plane listing that throws is REPORTED
+ * (`planeError`), never read as "no rows": the caller decides whether the
+ * entry it judges can have an owner the engine's copies do not hold.
  */
 async function collectHandlerOwnerCandidates(
     deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
     args: { ql: any; entryObjectKey: string; routedObjectName: string; routedObject?: any; envId?: string },
-): Promise<Array<{ action: any; objectName: string }>> {
+): Promise<{ rows: Array<{ action: any; objectName: string }>; planeError?: unknown }> {
     const { ql, entryObjectKey, routedObjectName, routedObject, envId } = args;
     const protocol: any = await deps.resolveService(requestContext, 'protocol', envId);
     const meta: any = await deps.resolveService(requestContext, 'metadata', envId);
+    let planeError: unknown;
+    const fromPlane = async (read: () => Promise<any[] | undefined>): Promise<any[]> => {
+        try {
+            return (await read()) ?? [];
+        } catch (err) {
+            planeError ??= err;
+            return [];
+        }
+    };
     const mergedListing = async (type: 'object' | 'action'): Promise<any[] | undefined> => {
         if (!protocol || typeof protocol.getMetaItems !== 'function') return undefined;
         const answer: any = await protocol.getMetaItems({ type });
@@ -4994,13 +5005,13 @@ async function collectHandlerOwnerCandidates(
         if (schema) objects.push(schema);
     }
     if (isObjectLessActionKey(entryObjectKey)) {
-        objects.push(...((await mergedListing('object')) ?? (await meta?.listObjects?.()) ?? []));
         objects.push(...registryListing('object'));
+        objects.push(...await fromPlane(async () => (await mergedListing('object')) ?? (await meta?.listObjects?.())));
     }
 
     const standalone: any[] = [
-        ...((await mergedListing('action')) ?? (await meta?.loadMany?.('action')) ?? []),
         ...registryListing('action'),
+        ...await fromPlane(async () => (await mergedListing('action')) ?? (await meta?.loadMany?.('action'))),
     ];
 
     const rows: Array<{ action: any; objectName: string }> = [];
@@ -5014,8 +5025,17 @@ async function collectHandlerOwnerCandidates(
     for (const action of standalone) {
         if (action && typeof action.name === 'string') rows.push({ action, objectName: standaloneActionOwnerKey(action) });
     }
-    return rows;
+    return planeError === undefined ? { rows } : { rows, planeError };
 }
+
+/**
+ * The package label the engine plugin's authored-action resync registers a
+ * metadata-plane action's handler under (`ObjectQLPlugin`'s
+ * `resyncAuthoredActionsNow`, `registerAction(…, 'metadata-service')`). An
+ * entry carrying it was built from a plane row, so the declarations that own
+ * it are plane rows, which the engine's in-memory copies need not hold.
+ */
+const PLANE_AUTHORED_HANDLER_PACKAGE = 'metadata-service';
 
 /**
  * [ADR-0066 D4 · ADR-0126 §8 item 2 · ADR-0110 D2] An action whose dispatch
@@ -5057,6 +5077,16 @@ async function collectHandlerOwnerCandidates(
  * onto its envelope; the MCP `run_action` bridge throws it with `code` and
  * `status`.
  *
+ * ## An unreadable metadata plane
+ *
+ * The owners are read from the engine's in-memory copies and from the plane's
+ * listings ({@link collectHandlerOwnerCandidates}). The plane being down
+ * adds no dependency to a call whose handler a package or code registered:
+ * its owners are declarations the engine holds. Only an entry the
+ * authored-action resync built for ANOTHER plane declaration is refused
+ * 503 while the plane cannot be read — the one case where the owner's gates
+ * live nowhere else.
+ *
  * `candidates` are the handler keys the door hands {@link executeRegisteredAction},
  * so the entry judged here is the one the dispatch reaches. An engine that
  * cannot enumerate its handlers (no `listRegisteredActions`) names no entry,
@@ -5080,27 +5110,13 @@ export async function actionHandlerOwnerRefusal(deps: ActionExecutionDeps,
     if (!ql || typeof ql.listRegisteredActions !== 'function') return undefined;
 
     const registered = new Set<string>();
-    for (const row of ql.listRegisteredActions() as Array<{ objectName: string; actionName: string }>) {
+    const packageOf = new Map<string, string | undefined>();
+    for (const row of ql.listRegisteredActions() as Array<{ objectName: string; actionName: string; package?: string }>) {
         registered.add(`${row.objectName}:${row.actionName}`);
+        packageOf.set(`${row.objectName}:${row.actionName}`, row.package);
     }
     const entry = reachedHandlerEntry(registered, objectName, candidates);
     if (!entry) return undefined;
-
-    let population: Array<{ action: any; objectName: string }>;
-    try {
-        population = await collectHandlerOwnerCandidates(deps, requestContext, {
-            ql, entryObjectKey: entry.slice(0, entry.indexOf(':')), routedObjectName: objectName, routedObject: obj, envId,
-        });
-    } catch (err: any) {
-        return {
-            code: standardErrorCodeForHttpStatus(503),
-            status: 503,
-            message:
-                `Cannot verify which declared action owns the handler that action '${action?.name ?? 'unknown'}' ` +
-                `dispatches to — the metadata plane is unavailable (${err?.message ?? String(err)}). ` +
-                'Refusing rather than running it ungated.',
-        };
-    }
 
     // The invoked declaration's identity: the routed object key when the routed
     // object embeds that name (both doors resolve object-embedded first, so
@@ -5109,6 +5125,30 @@ export async function actionHandlerOwnerRefusal(deps: ActionExecutionDeps,
     const embeddedInRouted = Array.isArray(obj?.actions)
         && obj.actions.some((a: any) => a === action || (a && a.name === action?.name));
     const invokedIdentity = `${embeddedInRouted ? objectName : standaloneActionOwnerKey(action)}:${action?.name}`;
+
+    const { rows: population, planeError } = await collectHandlerOwnerCandidates(deps, requestContext, {
+        ql, entryObjectKey: entry.slice(0, entry.indexOf(':')), routedObjectName: objectName, routedObject: obj, envId,
+    });
+    // A plane listing that could not be read leaves the engine's own copies,
+    // which hold every declaration a package or code registered a handler for.
+    // An entry built from a plane row is owned by the plane row it was built
+    // for (registered under that row's owner key and name): when that row is
+    // not the invoked declaration, its gates cannot be verified with the plane
+    // unread, and the call is refused rather than run ungated — ADR-0110 D3's
+    // posture for an unreadable plane.
+    if (planeError !== undefined && entry !== invokedIdentity
+        && packageOf.get(entry) === PLANE_AUTHORED_HANDLER_PACKAGE) {
+        const reason = planeError instanceof Error ? planeError.message : String(planeError);
+        return {
+            code: standardErrorCodeForHttpStatus(503),
+            status: 503,
+            message:
+                `Cannot verify which declared action owns the handler that action '${action?.name ?? 'unknown'}' ` +
+                `dispatches to — the metadata plane is unavailable (${reason}). ` +
+                'Refusing rather than running it ungated.',
+        };
+    }
+
     const owners = new Map<string, { action: any; objectName: string }[]>();
     for (const row of population) {
         const identity = `${row.objectName}:${row.action.name}`;

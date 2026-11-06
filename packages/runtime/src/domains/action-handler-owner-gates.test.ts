@@ -78,6 +78,24 @@ const SAME_NAME_THERE = {
     name: 'log_touch', label: 'Log Touch', objectName: OTHER_OBJECT, type: 'script',
     body: { language: 'js', source: 'return 1;' }, requiredPermissions: ['manage_accounts'],
 };
+/**
+ * A gated body action declared ONLY on the metadata plane; its handler is the
+ * one the engine plugin's authored-action resync registers for it (under its
+ * owner key and name, package `metadata-service`).
+ */
+const PLANE_OWNER = {
+    name: 'stamp_lead', label: 'Stamp Lead', objectName: OBJECT, type: 'script',
+    body: { language: 'js', source: 'return 1;' }, requiredPermissions: ['manage_data'],
+};
+/** An embedded action whose `target` names the plane owner's handler key. */
+const VIA_PLANE = {
+    name: 'quick_stamp', label: 'Quick Stamp', objectName: OBJECT, type: 'script', target: 'stamp_lead',
+};
+/** An authored body action carried on the object, whose resync-registered handler is its own. */
+const PLANE_SELF = {
+    name: 'note_lead', label: 'Note Lead', objectName: OBJECT, type: 'script',
+    body: { language: 'js', source: 'return 1;' },
+};
 
 /**
  * The engine's handler registry, as `engine-actions.ts` keeps it: one Map
@@ -85,12 +103,14 @@ const SAME_NAME_THERE = {
  * and `listRegisteredActions` enumerating that same Map. Each handler is its
  * own spy so a test can say WHICH handler ran.
  */
-function boot(opts: { disabled?: string[] } = {}) {
+function boot(opts: { disabled?: string[]; planeDown?: boolean } = {}) {
     const disabled = new Set(opts.disabled ?? []);
-    const handlers = new Map<string, ReturnType<typeof vi.fn>>();
-    const register = (obj: string, key: string) => {
-        const fn = vi.fn(async () => ({ ran: `${obj}:${key}` }));
+    const handlers = new Map<string, (ctx: unknown) => Promise<unknown>>();
+    const packages = new Map<string, string>();
+    const register = (obj: string, key: string, pkg?: string) => {
+        const fn = vi.fn(async (_ctx: unknown) => ({ ran: `${obj}:${key}` }));
         handlers.set(`${obj}:${key}`, fn);
+        if (pkg) packages.set(`${obj}:${key}`, pkg);
         return fn;
     };
     const ownerTargetHandler = register(OBJECT, 'purge_lead_impl');
@@ -100,6 +120,8 @@ function boot(opts: { disabled?: string[] } = {}) {
     const carriedHandler = register(OBJECT, 'touch_lead_impl');
     const sameNameHereHandler = register(OBJECT, 'log_touch');
     const sameNameThereHandler = register(OTHER_OBJECT, 'log_touch');
+    const planeOwnerHandler = register(OBJECT, 'stamp_lead', 'metadata-service');
+    const planeSelfHandler = register(OBJECT, 'note_lead', 'metadata-service');
 
     const executeAction = vi.fn(async (obj: string, key: string, ctx: any) => {
         const fn = handlers.get(`${obj}:${key}`);
@@ -108,18 +130,26 @@ function boot(opts: { disabled?: string[] } = {}) {
     });
     const listRegisteredActions = () => [...handlers.keys()].map((k) => {
         const at = k.indexOf(':');
-        return { objectName: k.slice(0, at), actionName: k.slice(at + 1) };
+        const pkg = packages.get(k);
+        return { objectName: k.slice(0, at), actionName: k.slice(at + 1), ...(pkg ? { package: pkg } : {}) };
     });
 
     const objectDef = {
         name: OBJECT,
-        actions: [TARGET_OWNER, NAME_OWNER, VIA_TARGET, VIA_NAME, PLAIN, VIA_GLOBAL, CARRIED_TWICE, SAME_NAME_HERE],
+        actions: [
+            TARGET_OWNER, NAME_OWNER, VIA_TARGET, VIA_NAME, PLAIN, VIA_GLOBAL, CARRIED_TWICE, SAME_NAME_HERE,
+            VIA_PLANE, PLANE_SELF,
+        ],
     };
     const otherDef = { name: OTHER_OBJECT, actions: [SAME_NAME_THERE] };
     const objects = [objectDef, otherDef];
-    // The standalone population: the object-less owner, and a separate copy of
-    // a declaration the object already embeds.
-    const standalone = [GLOBAL_OWNER, { ...CARRIED_TWICE }];
+    // The standalone population: the object-less owner, a separate copy of a
+    // declaration the object already embeds, and the plane-only owner.
+    const standalone = [GLOBAL_OWNER, { ...CARRIED_TWICE }, PLANE_OWNER];
+    const planeRead = <T>(value: T) => async (): Promise<T> => {
+        if (opts.planeDown) throw new Error('The metadata store could not be read.');
+        return value;
+    };
     const byName = (name: string) => standalone.find((a) => a.name === name) ?? null;
 
     const ql: any = {
@@ -138,8 +168,8 @@ function boot(opts: { disabled?: string[] } = {}) {
     const metadata: any = {
         load: vi.fn(async (_t: string, name: string) => byName(name)),
         loadDiagnosed: vi.fn(async (_t: string, name: string) => ({ data: byName(name), degraded: false, errors: [] })),
-        loadMany: vi.fn(async () => standalone),
-        listObjects: vi.fn(async () => objects),
+        loadMany: vi.fn(planeRead(standalone)),
+        listObjects: vi.fn(planeRead(objects)),
         getObject: vi.fn(async (name: string) => objects.find((o) => o.name === name)),
     };
     const resolve = (n: string) =>
@@ -154,7 +184,7 @@ function boot(opts: { disabled?: string[] } = {}) {
     return {
         dispatcher: new HttpDispatcher(kernel), ql, metadata, executeAction,
         ownerTargetHandler, ownerNameHandler, plainHandler, globalHandler, carriedHandler,
-        sameNameHereHandler, sameNameThereHandler,
+        sameNameHereHandler, sameNameThereHandler, planeOwnerHandler, planeSelfHandler,
     };
 }
 
@@ -264,6 +294,50 @@ describe('REST `POST /actions/:object/:action` — a handler another declared ac
         expect(statusOf(res)).toBe(200);
         expect(h.sameNameHereHandler).toHaveBeenCalledTimes(1);
         expect(h.sameNameThereHandler).not.toHaveBeenCalled();
+    });
+
+    it('a metadata-plane owner\'s requiredPermissions gate an action reaching the handler built for it', async () => {
+        const h = boot();
+
+        const res = await h.dispatcher.handleActions(`/${OBJECT}/${VIA_PLANE.name}`, 'POST', {}, CTX());
+
+        expect(statusOf(res)).toBe(403);
+        expect(codeOf(res)).toBe('PERMISSION_DENIED');
+        expect(h.planeOwnerHandler).not.toHaveBeenCalled();
+    });
+
+    it('with the metadata plane unreadable, refuses 503 SERVICE_UNAVAILABLE a call reaching a handler built for another plane declaration, even for a caller holding its permissions', async () => {
+        const h = boot({ planeDown: true });
+
+        const res = await h.dispatcher.handleActions(
+            `/${OBJECT}/${VIA_PLANE.name}`, 'POST', {}, CTX(['manage_data']),
+        );
+
+        expect(statusOf(res)).toBe(503);
+        expect(codeOf(res)).toBe('SERVICE_UNAVAILABLE');
+        expect(h.planeOwnerHandler).not.toHaveBeenCalled();
+    });
+
+    it('with the metadata plane unreadable, an action reaching its own plane-built handler still runs', async () => {
+        const h = boot({ planeDown: true });
+
+        const res = await h.dispatcher.handleActions(`/${OBJECT}/${PLANE_SELF.name}`, 'POST', {}, CTX());
+
+        expect(statusOf(res)).toBe(200);
+        expect(h.planeSelfHandler).toHaveBeenCalledTimes(1);
+    });
+
+    it('with the metadata plane unreadable, a handler a package registered is still judged by the engine\'s own declarations', async () => {
+        const h = boot({ planeDown: true });
+
+        const plain = await h.dispatcher.handleActions(`/${OBJECT}/${PLAIN.name}`, 'POST', {}, CTX());
+        expect(statusOf(plain)).toBe(200);
+        expect(h.plainHandler).toHaveBeenCalledTimes(1);
+
+        const borrowed = await h.dispatcher.handleActions(`/${OBJECT}/${VIA_TARGET.name}`, 'POST', {}, CTX());
+        expect(statusOf(borrowed)).toBe(403);
+        expect(codeOf(borrowed)).toBe('PERMISSION_DENIED');
+        expect(h.ownerTargetHandler).not.toHaveBeenCalled();
     });
 });
 
