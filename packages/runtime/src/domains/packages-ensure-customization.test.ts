@@ -248,7 +248,7 @@ describe(`${ENSURE_PATH}: each refusal is worded and leaves nothing`, () => {
     });
 
     // [ruling record 6691217245] The kernel — the packages of scope `system`
-    // and `cloud` — ships with the runtime and is installed whole: no kernel
+    // and `cloud` — ships with the runtime, at its version: no kernel
     // object is customizable in this version, so the door ensures no pair for
     // one. A narrowing: before it, this call created `<kernel id>.custom`.
     for (const scope of ['system', 'cloud'] as const) {

@@ -154,7 +154,8 @@ interface PairPackageRow {
  * package — `system` or `cloud`, the scopes the platform delivers
  * ({@link READ_ONLY_PACKAGE_SCOPES}) — or `undefined` for any other package.
  * The kernel is one suite that ships with the runtime at the runtime's version
- * and is always installed whole, so it is no customer's unit to customize: in
+ * (installing it whole is the goal ruling 6691022506 records), so it is no
+ * customer's unit to customize: in
  * this version every kernel object is served as not customizable, and the
  * ensure door creates no pair for a kernel package. Which kernel objects a
  * later version opens to customization (a whitelist) is that version's
