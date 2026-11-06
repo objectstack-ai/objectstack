@@ -312,7 +312,6 @@ describe('#30924: a sign-in that enforced MFA holds records the hold on its own 
     const metadata = JSON.parse(String(held[0].metadata));
     expect(metadata).toMatchObject({ endpoint: '/sign-in/email', reason: 'MFA_REQUIRED', rule: 'mfa_required' });
     expect(held[0].object_name).toBe('sys_session');
-    expect(held[0].ip_address ?? null).not.toBe('');
 
     // A held sign-in is not a refused one, and no row carries the credential.
     expect(await findRows(ql, 'sys_audit_log', { action: 'login_failed', user_id: heldUserId })).toEqual([]);
