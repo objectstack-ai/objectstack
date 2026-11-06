@@ -115,7 +115,11 @@ export async function main(argv: readonly string[]): Promise<number> {
   console.log(`driver: ${info.driver} ${info.version ?? ''} · login: ${info.authMethod ?? 'n/a'} · API-billed: no`);
 
   const ops: ProjectOps = {
-    scaffold: (name) => scaffold(work, name, args.createVersion ? { version: args.createVersion } : {}),
+    scaffold: (name, under) => {
+      const parent = join(work, under);
+      mkdirSync(parent, { recursive: true });
+      return scaffold(parent, name, args.createVersion ? { version: args.createVersion } : {});
+    },
     os: (dir, a) => os(dir, a),
     readArtifact,
     namespace: readNamespace,

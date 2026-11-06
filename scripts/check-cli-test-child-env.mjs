@@ -2635,7 +2635,7 @@ export function selfTest() {
       .filter((abs) => builtEntrypointSpawns(abs, readFileSync(abs, 'utf8')).spawns > 0)
       .map((abs) => relative(REPO_ROOT, abs).split(sep).join('/'))
       .sort();
-    t('the built-entrypoint population is exactly the nineteen files that spawn bin/run.js',
+    t('the built-entrypoint population is exactly the twenty files that spawn bin/run.js',
       JSON.stringify(builtFiles) === JSON.stringify([
         // [#26130] Joined the population deliberately: its subject is a plain
         // `os dev` boot that compiles before it serves, measured on the BUILT
@@ -2714,6 +2714,13 @@ export function selfTest() {
         // so the tsx shim every `runServe()` caller uses cannot reach it at all.
         'packages/cli/test/serve-ready-degraded-boot.e2e.test.ts',
         'packages/cli/test/serve-stdio-stdout-purity.e2e.test.ts',
+        // [#30120] Joined the population deliberately: its subject is the
+        // official image's refusal and the production boot block of a plain
+        // `os start` (start forces a production `serve` child unless `NODE_ENV`
+        // is set), measured on the BUILT packages, and `bin/run-dev.js` sets
+        // `NODE_ENV=development` before argv is parsed, where neither exists.
+        // Every spawn hands its child `NODE_ENV: undefined`.
+        'packages/cli/test/start-deployment-durability.integration.test.ts',
         // [#24002] Joined the population deliberately: its subject is the
         // documented stdio invocation, `os start` in PRODUCTION posture (start
         // forces a production `serve` child unless `NODE_ENV` is set), and

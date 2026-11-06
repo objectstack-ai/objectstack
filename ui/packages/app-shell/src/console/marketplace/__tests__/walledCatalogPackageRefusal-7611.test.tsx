@@ -237,6 +237,8 @@ describe.each<Posture>(['group', 'isolated'])(
       await boot({ installed: [], refusal: () => refused('Installing', posture) });
       render(<MarketplacePackagePage />);
       fireEvent.click(await screen.findByRole('button', { name: '«marketplace.action.install»' }));
+      // objectstack#30325 — Install opens the confirm; its Install installs.
+      fireEvent.click(await screen.findByTestId('install-preview-confirm'));
 
       await expectReasonShown('Installing', posture);
       expect(writes).toEqual([{ method: 'POST', path: INSTALL_PATH, body: { packageId: PKG } }]);
@@ -250,6 +252,7 @@ describe.each<Posture>(['group', 'isolated'])(
       // The local install is listed (3.2.0) and the catalog's latest is 4.0.1: the
       // page's one install control now installs `latest` over it.
       fireEvent.click(await screen.findByRole('button', { name: '«marketplace.action.reinstall»' }));
+      fireEvent.click(await screen.findByTestId('install-preview-confirm'));
 
       await expectReasonShown('Installing', posture);
       expect(writes).toEqual([{ method: 'POST', path: INSTALL_PATH, body: { packageId: PKG } }]);
@@ -294,6 +297,7 @@ describe('CONTROL: the bare forms are detectable on this harness (objectui#7611)
     });
     render(<MarketplacePackagePage />);
     fireEvent.click(await screen.findByRole('button', { name: '«marketplace.action.install»' }));
+    fireEvent.click(await screen.findByTestId('install-preview-confirm'));
 
     await waitFor(() => expect(writes).toHaveLength(1));
     await waitFor(() => {

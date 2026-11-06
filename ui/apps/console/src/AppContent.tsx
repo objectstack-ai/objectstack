@@ -18,7 +18,6 @@ import { createAuthenticatedFetch, useAuth } from '@object-ui/auth';
 import type { DataSource } from '@object-ui/types';
 import { LocalizationFetchProvider } from './LocalizationFetchProvider';
 import { InAppFormRoute } from './components/InternalFormRoute';
-import { WorkspaceTimezonePrompt } from './pages/settings/WorkspaceTimezonePrompt';
 import { APPROVAL_ACTION_OBJECT, APPROVAL_REQUEST_OBJECT, routeApprovalRecordReads } from './services/approvalRequestsDataSource';
 
 const AppManagementPage = lazy(() => import('./pages/system/AppManagementPage').then(m => ({ default: m.AppManagementPage })));
@@ -528,11 +527,6 @@ export function AppContent() {
           />
         </ApprovalRecordReads>
       </LocalizationFetchProvider>
-      {/* objectui#11758 — asks an administrator once to set a still-default
-          workspace timezone. Under `ConsolePermissionsScope`, because that
-          provider is what answers whether this session may write the
-          setting; mounted once for the whole app shell, beside the routes. */}
-      <WorkspaceTimezonePrompt />
     </>
   );
 }

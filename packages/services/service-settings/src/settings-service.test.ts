@@ -18,6 +18,7 @@ import { companySettingsManifest } from './manifests/company.manifest.js';
 import { brandingSettingsManifest } from './manifests/branding.manifest.js';
 import { builtinSettingsManifests } from './manifests/index.js';
 import { evaluateVisibility, visibilitySource } from './visibility-eval.js';
+import { SETTINGS_SECRET_MASK } from './settings-secret-redaction.js';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
 
 describe('reference manifests are spec-valid', () => {
@@ -2967,5 +2968,163 @@ describe('SettingsService — a reset clears the value stored beneath an env pin
     await svc.set('resettable', 'motto', 'Stored motto');
     const r = await svc.runAction('resettable', 'reset', null);
     expect(r.message).toBe('Cleared 1 saved value(s); environment/default configuration is back in effect.');
+  });
+});
+
+describe('SettingsService — the namespace read lists what is stored beneath an env pin', () => {
+  // A pin on each rung a clear can land at, a secret, and a JSON key whose env
+  // value can coerce to null.
+  const BENEATH = {
+    namespace: 'beneath',
+    version: 1,
+    label: 'Beneath',
+    scope: 'tenant',
+    specifiers: [
+      { type: 'text', key: 'motto', label: 'Motto', scope: 'tenant', default: 'none' },
+      { type: 'text', key: 'banner', label: 'Banner', scope: 'global', default: 'none' },
+      { type: 'text', key: 'nickname', label: 'Nickname', scope: 'user', default: 'none' },
+      { type: 'password', key: 'api_secret', label: 'API secret', scope: 'tenant' },
+      { type: 'password', key: 'spare_secret', label: 'Spare secret', scope: 'tenant' },
+      { type: 'json', key: 'rules', label: 'Rules', scope: 'tenant', default: [] },
+    ],
+  } as any;
+  const envEntry = (value: unknown, envName: string) => ({
+    scope: 'env', value, locked: true, lockedReason: `Set via env: ${envName}`, effective: true,
+  });
+
+  /** A crypto adapter whose decrypt is watched, so a read can prove it never opened a secret. */
+  function watchedCrypto(): CryptoAdapter & { decrypt: ReturnType<typeof vi.fn> } {
+    return {
+      confidential: true,
+      encrypt: async (plain: string) => 'kms:' + Buffer.from(plain, 'utf8').toString('base64'),
+      decrypt: vi.fn(async (cipher: string) => Buffer.from(cipher.replace(/^kms:/, ''), 'base64').toString('utf8')),
+      digest: () => 'fnv32:deadbeef',
+    };
+  }
+
+  /** `motto` stored then pinned: the operator's recovery, before the clear. */
+  async function pinnedOverStored() {
+    const env: Record<string, string | undefined> = {};
+    const crypto = watchedCrypto();
+    const svc = new SettingsService({ env, crypto });
+    svc.registerManifest(BENEATH);
+    await svc.set('beneath', 'motto', 'Stored motto');
+    env.OS_BENEATH_MOTTO = 'Pinned motto';
+    return { env, svc, crypto };
+  }
+
+  it('a pinned key over a stored row lists that row beneath its env entry; the answer is otherwise the pin\'s', async () => {
+    const { svc } = await pinnedOverStored();
+    const { values } = await svc.getNamespace('beneath');
+
+    expect(values.motto).toEqual({
+      value: 'Pinned motto',
+      source: 'env',
+      locked: true,
+      lockedReason: 'Set via env: OS_BENEATH_MOTTO',
+      cascadeChain: [
+        envEntry('Pinned motto', 'OS_BENEATH_MOTTO'),
+        { scope: 'tenant', value: 'Stored motto', locked: false, lockedReason: undefined },
+        { scope: 'default', value: 'none' },
+      ],
+    });
+    // The env entry is the only effective one, and the first non-null one.
+    expect(values.motto.cascadeChain!.filter((e) => e.effective)).toHaveLength(1);
+  });
+
+  it('after the clear through the pin the stored entry reads null; a pin with no row lists none', async () => {
+    const { env, svc } = await pinnedOverStored();
+    await svc.set('beneath', 'motto', null);
+    env.OS_BENEATH_BANNER = 'Pinned banner';
+
+    const { values } = await svc.getNamespace('beneath');
+    expect(values.motto.cascadeChain).toEqual([
+      envEntry('Pinned motto', 'OS_BENEATH_MOTTO'),
+      { scope: 'tenant', value: null, locked: false, lockedReason: undefined },
+      { scope: 'default', value: 'none' },
+    ]);
+    expect(values.banner.cascadeChain).toEqual([
+      envEntry('Pinned banner', 'OS_BENEATH_BANNER'),
+      { scope: 'default', value: 'none' },
+    ]);
+  });
+
+  it('a global key lists its global row, and an upper row\'s lock rides along, so a refused clear is visible', async () => {
+    const { env, svc } = await pinnedOverStored();
+    await svc.set('beneath', 'banner', 'Stored banner');
+    env.OS_BENEATH_BANNER = 'Pinned banner';
+    await (svc as any).upsertRow({
+      namespace: 'beneath', key: 'motto', scope: 'global', user_id: null, value: 'Platform motto',
+      value_enc: null, encrypted: false, locked: true, locked_reason: 'Set by the platform.',
+    });
+
+    const { values } = await svc.getNamespace('beneath');
+    expect(values.banner.cascadeChain).toEqual([
+      envEntry('Pinned banner', 'OS_BENEATH_BANNER'),
+      { scope: 'global', value: 'Stored banner', locked: false, lockedReason: undefined },
+      { scope: 'default', value: 'none' },
+    ]);
+    expect(values.motto.cascadeChain!.slice(1, 3)).toEqual([
+      { scope: 'global', value: 'Platform motto', locked: true, lockedReason: 'Set by the platform.' },
+      { scope: 'tenant', value: 'Stored motto', locked: false, lockedReason: undefined },
+    ]);
+    // The pin still answers: an upper row's lock does not take the lock over.
+    expect(values.motto).toMatchObject({ source: 'env', lockedReason: 'Set via env: OS_BENEATH_MOTTO' });
+  });
+
+  it('a user key lists the caller\'s own row only', async () => {
+    const env: Record<string, string | undefined> = {};
+    const svc = new SettingsService({ env });
+    svc.registerManifest(BENEATH);
+    await svc.set('beneath', 'nickname', 'Ada', { userId: 'usr_a' });
+    await svc.set('beneath', 'nickname', 'Bob', { userId: 'usr_b' });
+    env.OS_BENEATH_NICKNAME = 'Pinned';
+
+    const forA = (await svc.getNamespace('beneath', { userId: 'usr_a' })).values.nickname.cascadeChain!;
+    expect(forA.slice(1)).toEqual([{ scope: 'user', value: 'Ada' }, { scope: 'default', value: 'none' }]);
+    const forNobody = (await svc.getNamespace('beneath')).values.nickname.cascadeChain!;
+    expect(forNobody.slice(1)).toEqual([{ scope: 'default', value: 'none' }]);
+  });
+
+  it('a secret beneath a pin shows that a value is stored, never the value, and is never decrypted', async () => {
+    const { env, svc, crypto } = await pinnedOverStored();
+    await svc.set('beneath', 'api_secret', 'stored-secret-plaintext');
+    env.OS_BENEATH_API_SECRET = 'env-secret';
+    env.OS_BENEATH_SPARE_SECRET = 'env-spare';
+    crypto.decrypt.mockClear();
+
+    const { values } = await svc.getNamespace('beneath');
+    expect(values.api_secret.cascadeChain).toEqual([
+      envEntry('env-secret', 'OS_BENEATH_API_SECRET'),
+      { scope: 'tenant', value: SETTINGS_SECRET_MASK, locked: false, lockedReason: undefined },
+      { scope: 'default', value: null },
+    ]);
+    expect(values.spare_secret.cascadeChain!.slice(1)).toEqual([{ scope: 'default', value: null }]);
+    expect(JSON.stringify(values)).not.toContain('stored-secret-plaintext');
+    expect(crypto.decrypt).not.toHaveBeenCalled();
+
+    // Cleared through the pin, the secret's stored entry reads null.
+    await svc.set('beneath', 'api_secret', null);
+    const after = (await svc.getNamespace('beneath')).values.api_secret.cascadeChain!;
+    expect(after[1]).toEqual({ scope: 'tenant', value: null, locked: false, lockedReason: undefined });
+  });
+
+  it('an override whose value coerces to null keeps its single env entry', async () => {
+    const env: Record<string, string | undefined> = {};
+    const svc = new SettingsService({ env });
+    svc.registerManifest(BENEATH);
+    await svc.set('beneath', 'rules', ['stored']);
+    env.OS_BENEATH_RULES = 'null';
+
+    const { values } = await svc.getNamespace('beneath');
+    expect(values.rules).toMatchObject({ value: null, source: 'env', locked: true });
+    expect(values.rules.cascadeChain).toEqual([envEntry(null, 'OS_BENEATH_RULES')]);
+  });
+
+  it('get() and getMany() still answer a pin from the env alone', async () => {
+    const { svc } = await pinnedOverStored();
+    const pinOnly = [envEntry('Pinned motto', 'OS_BENEATH_MOTTO')];
+    expect((await svc.get('beneath', 'motto')).cascadeChain).toEqual(pinOnly);
+    expect((await svc.getMany('beneath', ['motto'])).motto.cascadeChain).toEqual(pinOnly);
   });
 });

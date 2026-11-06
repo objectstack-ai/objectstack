@@ -24,6 +24,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { IHttpServer, IObjectQLEngine, InternalFieldEvaluationQuery, QueryEvaluationGate, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import { standardErrorCodeForHttpStatus, type MetadataProtocol } from '@objectstack/spec/api';
+import { renderOperationMessage } from '@objectstack/spec/system';
 // [#15942 / #16293] The confirmation member's SPELLING is the contract, so it
 // is imported, never hand-spelled: the door that refuses and the client that
 // retries have to agree on it, and two doors each writing their own 'confirm'
@@ -2719,6 +2720,11 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         // twin (`buildAutomationContext`): a refused run's message renders in
         // it. See `AutomationContext.locale`.
         ...(typeof ec?.locale === 'string' && ec.locale.length > 0 ? { locale: ec.locale } : {}),
+        // [#30213] The administrator an impersonation session names, the
+        // trigger door's twin (`buildAutomationContext`): attribution only, so
+        // the flow's own writes record who was at the keyboard. Absent on the
+        // user's own click. See `AutomationContext.impersonatedBy`.
+        ...(typeof ec?.impersonatedBy === 'string' && ec.impersonatedBy.trim() ? { impersonatedBy: ec.impersonatedBy.trim() } : {}),
         params: runParams,
         // [#19846] Which of those keys the CALLER supplied, stated here where it
         // is known rather than inferred downstream from the merged bag.
@@ -3705,6 +3711,88 @@ export function refuseDeniedSubjectLoad(
 }
 
 /**
+ * [#30848] The declarative update's object-level update refusal, judged before
+ * its subject-load verdict is: the data door's order, "the update is judged
+ * before the record is looked up" (`http-protocol.mdx`).
+ *
+ * ## What was wrong
+ *
+ * A caller who may read an object but holds no edit grant on it, writing a
+ * row their scope hides (or an id that names nothing), was answered
+ * `404 RECORD_NOT_FOUND` by a declarative `operation: 'update'` action,
+ * through REST `/actions` and MCP `run_action` both, while the data door
+ * answered the same write `403 PERMISSION_DENIED` (`PATCH /data`, MCP
+ * `update_record`). The action door consumed {@link refuseDeniedSubjectLoad}'s
+ * 404 first, so the write, which would have been refused for the object
+ * before any row was read, was never asked. On a row the caller can see, the
+ * write is asked and both doors already answered 403.
+ *
+ * ## The ask, and why it is not a second decision
+ *
+ * Asked only when the subject load was denied: on a delivered row the write
+ * below carries the caller's identity and the data plane answers its own
+ * refusal, the same one this ask stands in for. The question is the security
+ * service's `explain` for `update` on the object, the contract's "would the
+ * middleware allow this operation?" bottom line, computed by the enforcement
+ * walk and not re-derived here from permission sets (the REST import-template
+ * gate asks `create` the same way). ⛔ No row is named: the answer must not
+ * depend on whether the id names a row, or the door becomes an existence
+ * oracle.
+ *
+ * - `allowed` ⇒ no refusal here; the caller who may update the object keeps
+ *   the not-found answer, one answer for a hidden row and a missing id.
+ * - a denial, or an `explain` that throws ⇒ the data door's own refusal:
+ *   `403 PERMISSION_DENIED` with the middleware's user-facing sentence
+ *   (`permission_denied`, the caller's locale, the deployment's override).
+ *   A throw is a denial, never read as a grant.
+ * - no security service, or one without `explain` ⇒ no refusal here: no
+ *   permission set exists to deny with, as the data door. (A system context
+ *   is `explain`'s own bypass, as it is the middleware's: asked, not skipped.)
+ */
+export async function refuseUngrantedDeclarativeUpdate(
+    deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext | undefined,
+    objectName: string,
+    ec: any,
+    envId?: string,
+): Promise<void> {
+    let security: { explain?: (request: { object: string; operation: string }, context?: any) => Promise<{ allowed?: boolean } | undefined> } | undefined;
+    try {
+        security = await deps.resolveService(requestContext as HttpProtocolContext, 'security', envId);
+    } catch {
+        security = undefined;
+    }
+    if (!security || typeof security.explain !== 'function') return;
+    let allowed: boolean;
+    try {
+        allowed = (await security.explain({ object: objectName, operation: DECLARATIVE_UPDATE_OPERATION }, ec))?.allowed === true;
+    } catch {
+        allowed = false;
+    }
+    if (allowed) return;
+    let translate: ((key: string, locale: string, params?: Record<string, unknown>) => string) | undefined;
+    try {
+        const i18n: { t?: unknown } | null | undefined = await deps.resolveService(requestContext as HttpProtocolContext, 'i18n', envId);
+        if (i18n && typeof i18n.t === 'function') {
+            const t = i18n.t as (key: string, locale: string, params?: Record<string, unknown>) => string;
+            translate = (key, locale, params) => t.call(i18n, key, locale, params);
+        }
+    } catch {
+        translate = undefined;
+    }
+    const message = renderOperationMessage(
+        { messageKey: 'permission_denied' },
+        { locale: typeof ec?.locale === 'string' ? ec.locale : undefined, translate },
+    );
+    throw Object.assign(new Error(message), {
+        name: 'PermissionDeniedError',
+        code: 'PERMISSION_DENIED',
+        status: 403,
+        statusCode: 403,
+    });
+}
+
+/**
  * Contract point 3 as the two action doors' dispatch reads it, for every
  * branch: {@link refuseDeniedSubjectLoad}, except for a same-origin
  * `type: 'api'` forward that needs nothing from the row.
@@ -4083,6 +4171,11 @@ function declarativeUpdateRefusal(message: string, status: number): Error {
  * inventing a 403 for the pair would answer a question the platform declines to
  * answer everywhere else. See the note on `loadActionSubjectRecord`.
  *
+ * [#30848] Except for a caller who may not update the OBJECT at all: the data
+ * door refuses that write `403` before it looks the record up, so the pair
+ * gets that 403 here too ({@link refuseUngrantedDeclarativeUpdate}), one
+ * answer for both members of the pair, and the pair stays undistinguished.
+ *
  * ## What is NOT checked here
  *
  * `visible` — contract point 6. It is a per-record UI predicate the client
@@ -4161,6 +4254,14 @@ export async function executeDeclarativeUpdateAction(
     // the flow door and the script/body door now call too. Behaviour here is
     // unchanged to the byte — what changed is that this is no longer the only
     // door that reads the verdict, so the rule cannot be inert two doors over.
+    //
+    // [#30848] …but the object-level update refusal comes first, as at the
+    // data door: a caller with no edit grant gets the write's 403 whether or
+    // not the id names a row it can read. Asked only on a denied load: a
+    // delivered row reaches the write below, which answers that 403 itself.
+    if (subject.recordLoadDenied) {
+        await refuseUngrantedDeclarativeUpdate(_deps, wiring.requestContext, objectName, ec, envId);
+    }
     refuseDeniedSubjectLoad(objectName, recordId, subject);
 
     // ── contract point 2: ONE data-plane update, AS THE CALLER ───────────────

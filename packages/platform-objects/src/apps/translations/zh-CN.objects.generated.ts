@@ -634,6 +634,20 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         confirmText: "要退出该组织吗？退出后你将失去对其环境和成员的访问权限。",
         successMessage: "你已退出该组织"
       }
+    },
+    _sections: {
+      identity: {
+        label: "基本信息"
+      },
+      branding: {
+        label: "品牌"
+      },
+      configuration: {
+        label: "配置"
+      },
+      group_structure: {
+        label: "集团结构"
+      }
     }
   },
   sys_member: {

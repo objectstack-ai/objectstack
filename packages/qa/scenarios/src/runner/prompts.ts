@@ -11,14 +11,18 @@
  *
  *   - the data the app is loaded with (the card's seed rows, verbatim): object
  *     and field machine names, and the values each field must accept;
- *   - the people who use it: one permission set per persona, named by the
- *     persona's id, with what that persona must not see and which rows it
- *     sees (the card states these as requirements of the app);
- *   - the business actions an agent may call, when the card declares them.
+ *   - the people who use it: one permission set per persona, named
+ *     `<namespace>_<persona id>`, with what that persona must not see and
+ *     which rows it sees (the card states these as requirements of the app);
+ *   - the business actions an agent may call, when the card declares them;
+ *   - the naming rule: EVERY item the app declares is named
+ *     `<namespace>_<short>`, not only its objects ({@link namingRule}). The
+ *     scorer reports a bare one as a Build finding, so every authoring prompt
+ *     (build, iterate, template iterate) states it.
  *
  * The card handed in here is already namespace-relative (`namespace.ts`): its
- * object names carry the project's prefix, so the contract states them as the
- * build must write them.
+ * item names carry the card's prefix (`democrm_`), so the contract states them
+ * as the build must write them.
  *
  * The questions, their truths, the operations and their outcomes are never in
  * a build prompt. A question turn carries the question, the card's fixed
@@ -27,7 +31,8 @@
  */
 
 import type { LoadedScenario } from '../loader.js';
-import type { ScenarioCard } from '../schema.js';
+import { scenarioNamespace, type ScenarioCard } from '../schema.js';
+import { permissionSetName } from './namespace.js';
 
 type Card = ScenarioCard;
 type Persona = Card['run']['personas'][number];
@@ -45,14 +50,24 @@ export function personaHandles(card: Card): Map<string, string> {
   return out;
 }
 
-function personaLine(p: Persona): string {
+/** The every-item-prefixed rule, in every authoring prompt. */
+export function namingRule(card: Card): string {
+  const ns = scenarioNamespace(card);
+  return (
+    `Naming: this app's namespace is \`${ns}\`. Name EVERY metadata item you declare \`${ns}_<name>\` — not only objects, ` +
+    'but also views, apps, pages, dashboards, reports, datasets, actions, flows, permission sets, picklists, skills, agents ' +
+    'and every other item. Fields are not items and keep their plain names. A bare item name fails the build.'
+  );
+}
+
+function personaLine(card: Card, p: Persona): string {
   const hides = [
     ...(p.hidden.objects ?? []).map((o) => `the object \`${o}\``),
     ...(p.hidden.fields ?? []).map((f) => `the field \`${f.object}.${f.field}\``),
   ];
   const scope = (p.scope ?? []).map((s) => `\`${s.object}\` rows whose \`${s.field}\` is ${JSON.stringify(s.value)}`);
   return (
-    `- \`${p.id}\` (${p.role}): must not read ${hides.join(' or ')}` +
+    `- \`${permissionSetName(card, p.id)}\` for \`${p.id}\` (${p.role}): must not read ${hides.join(' or ')}` +
     (scope.length ? `; sees only ${scope.join(' and ')}` : '') +
     '.'
   );
@@ -66,18 +81,20 @@ export function dataContract(card: Card): string {
   lines.push(
     'After you finish, a test runner loads the rows below through the data API and signs each person in. ' +
       'Use these object and field machine names exactly (lookup values are the `id` of the referenced row), ' +
-      'and make every value shown valid for its field. The object names already carry this project’s namespace prefix.',
+      'and make every value shown valid for its field. The object names already carry this app’s namespace prefix.',
   );
+  lines.push('');
+  lines.push(namingRule(card));
   lines.push('');
   lines.push('```json');
   lines.push(JSON.stringify(card.run.seed, null, 1));
   lines.push('```');
   lines.push('');
   lines.push(
-    'People: declare one permission set per person below, named exactly by the id, granting what that role needs ' +
-      'on the app’s objects and nothing it must not see. The runner signs each in as a user holding only that set.',
+    'People: declare one permission set per person below, named exactly as shown, granting what that role needs ' +
+      'on the app’s objects and nothing it must not see. The runner signs each person in as a user holding only that set.',
   );
-  for (const p of card.run.personas) lines.push(personaLine(p));
+  for (const p of card.run.personas) lines.push(personaLine(card, p));
   const handles = personaHandles(card);
   if (handles.size) {
     lines.push('');
@@ -108,6 +125,8 @@ export function iteratePrompt(card: Card): string {
     'This project holds a working ObjectStack app. Apply the change below, then run `npx objectstack validate` and ' +
       '`npx objectstack build` and fix what they report until both pass. Keep everything else working. Work without asking questions.',
     '',
+    namingRule(card),
+    '',
     `Change: ${text(card.iterate.change)}`,
   ].join('\n');
 }
@@ -130,6 +149,8 @@ export function templateIteratePrompt(card: Card, server: TemplateServer): strin
       `through the server’s metadata API (\`GET/PUT ${server.baseUrl}/api/v1/meta/<type>/<name>\`, signed in at ` +
       `\`POST ${server.baseUrl}/api/v1/auth/sign-in/email\` as ${server.adminEmail} / ${server.adminPassword}). ` +
       'Check each item you save reads back. Work without asking questions.',
+    '',
+    namingRule(card),
     '',
     `Change: ${text(card.iterate.change)}`,
   ].join('\n');

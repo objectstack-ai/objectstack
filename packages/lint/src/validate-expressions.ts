@@ -135,7 +135,12 @@ import type { FlowNodeParsed, FlowEdgeParsed, FlowTriggerKind } from '@objectsta
 // shared refusal to prevent.
 import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec/shared';
 import { referenceCarrierOf, referenceTargetOf, REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
-import { isStoredMetadataBodyObject, STORED_METADATA_BODY_PRESCRIPTION } from '@objectstack/spec/kernel';
+import {
+  isStoredMetadataBodyObject,
+  STORED_METADATA_BODY_PRESCRIPTION,
+  PUBLIC_AUTH_FEATURE_NAMES,
+  featureGatePredicate,
+} from '@objectstack/spec/kernel';
 // [#22394] The acting user's declared members — the contract half of the option
 // verdict's member allowlist for `current_user` and its ADR-0068 aliases. Read
 // off the schema at first use, never restated here.
@@ -1023,6 +1028,43 @@ const FIELD_RULE_USER_ROOTS = ['current_user', 'user', 'ctx', 'os'] as const;
  * and worded for it ({@link FIELD_RULE_SLOT_CONSEQUENCE}, {@link fieldRuleRootIssue}).
  */
 const FIELD_GROUP_VISIBLE_WHEN_SLOT = 'field group visibleWhen';
+
+/**
+ * [#30692] A field group's `visibleWhen` with the gate its `requiresFeature`
+ * lowered into it taken off, so the root verdict judges what the AUTHOR wrote.
+ *
+ * `fieldGroups[].requiresFeature` (`ObjectFieldGroupSchema`) is lowered at
+ * parse by the spec's `lowerRequiresFeature` into one of exactly two shapes —
+ * the gate alone, or `(<authored>) && <gate>` — where the gate is
+ * `featureGatePredicate(flag)` for a flag of `PUBLIC_AUTH_FEATURES`. Both
+ * renderers evaluate a group's predicate with the host's `features` root in
+ * scope (the form's section gate and the record page's `record:details`), so
+ * that gate is enforced where it is read; it is the ruled shape (#30210 row 4
+ * A, ruling 6670372892), and only it is accepted. A `features.*` read anywhere
+ * else in the predicate keeps its root verdict: this takes off the trailing
+ * gate the lowering appends, and nothing more.
+ *
+ * Returns `undefined` when the whole predicate is the gate (nothing authored
+ * left to judge), the authored part in the input's own spelling when the gate
+ * was composed onto one, and the input untouched otherwise — including when
+ * the part before the gate does not parse on its own, which is how a
+ * hand-written `(a) && (b) && <gate>` (whose "authored part" would be
+ * `a) && (b`) is told apart from the lowering's single parenthesised group.
+ */
+export function withoutLoweredFeatureGate(raw: unknown): unknown {
+  const loweredSource = celSourceOf(raw);
+  if (loweredSource === undefined) return raw;
+  for (const flag of PUBLIC_AUTH_FEATURE_NAMES) {
+    const gate = featureGatePredicate(flag);
+    if (loweredSource === gate) return undefined;
+    const loweredTail = `) && ${gate}`;
+    if (!loweredSource.startsWith('(') || !loweredSource.endsWith(loweredTail)) continue;
+    const authored = loweredSource.slice(1, loweredSource.length - loweredTail.length);
+    if (!collectCelRootIdentifiers(authored).ok) return raw;
+    return typeof raw === 'string' ? authored : { ...(raw as AnyRec), source: authored };
+  }
+  return raw;
+}
 /**
  * The slot-agnostic clause — provably true for any slot, specific to none.
  * Used where the honest answer is "not measured for this slot", never as a
@@ -1120,7 +1162,15 @@ export function fieldRuleRootIssue(
   // [#26646] A field group has no options and is not a field: its user-root
   // prescription keeps only the two answers that apply to it.
   const userRoot = (FIELD_RULE_USER_ROOTS as readonly string[]).includes(root);
-  const prescription = userRoot && slot === FIELD_GROUP_VISIBLE_WHEN_SLOT
+  const prescription = root === 'features' && slot === FIELD_GROUP_VISIBLE_WHEN_SLOT
+    // [#30692] A field group has its own door for a deployment feature: the
+    // `requiresFeature` key, whose lowered gate this rule accepts.
+    ? `To show the group only where a deployment feature is on, declare it on the group ` +
+      `instead — \`requiresFeature: 'FLAG'\`, the same flag names an action's \`requiresFeature\` ` +
+      `takes — and keep \`visibleWhen\` for record state; the gate it lowers to is the one ` +
+      `\`features\` read this predicate accepts. To gate the group on record state, rewrite the ` +
+      `predicate against \`record\`.`
+    : userRoot && slot === FIELD_GROUP_VISIBLE_WHEN_SLOT
     ? `To hide the group's fields by role, declare field-level security on a permission set ` +
       `for each field in the group (\`fields: { 'OBJECT.FIELD': { readable: false } }\`), which ` +
       `the server enforces. To gate the group on record state, rewrite the predicate against ` +
@@ -3830,10 +3880,13 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       const groupKey = typeof fieldGroup.key === 'string' ? fieldGroup.key : '?';
       const where = `object '${objectName}' · field group '${groupKey}' visibleWhen`;
       const raw: unknown = fieldGroup.visibleWhen;
-      const verdict = fieldRuleRootVerdict(FIELD_GROUP_VISIBLE_WHEN_SLOT, raw);
+      // [#30692] The root verdict judges the predicate without the gate a
+      // `requiresFeature` lowered into it ({@link withoutLoweredFeatureGate});
+      // every other check still reads the whole predicate.
+      const verdict = fieldRuleRootVerdict(FIELD_GROUP_VISIBLE_WHEN_SLOT, withoutLoweredFeatureGate(raw));
       check(where, raw, objectName, 'record', verdict !== null);
       if (verdict) {
-        issues.push({ where, message: verdict.message, source: verdict.source, severity: 'error' });
+        issues.push({ where, message: verdict.message, source: celSourceOf(raw) ?? verdict.source, severity: 'error' });
       }
     }
   }

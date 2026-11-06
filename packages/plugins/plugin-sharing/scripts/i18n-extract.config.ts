@@ -43,7 +43,7 @@
  */
 
 import { defineStack, type ObjectStackDefinition } from '@objectstack/spec';
-import { SysRecordShare, SysSharingRule, SysShareLink, SysQueue, SysQueueMember } from '../src/objects/index.js';
+import { SysRecordShare, SysSharingRule, SysShareLink, SysQueue, SysQueueMember, SysAssignmentRule } from '../src/objects/index.js';
 import { enObjects } from '../src/translations/en.objects.generated.js';
 import { zhCNObjects } from '../src/translations/zh-CN.objects.generated.js';
 import { jaJPObjects } from '../src/translations/ja-JP.objects.generated.js';
@@ -73,7 +73,7 @@ import { sharingPageTranslations } from '../src/translations/pages.js';
  * precision: the annotated type is the function's own return type.
  */
 const config: ObjectStackDefinition = defineStack({
-  objects: [SysRecordShare, SysSharingRule, SysShareLink, SysQueue, SysQueueMember] as any,
+  objects: [SysRecordShare, SysSharingRule, SysShareLink, SysQueue, SysQueueMember, SysAssignmentRule] as any,
   pages: [SysQueueDetailPage],
   translations: [
     { en: { objects: enObjects, pages: sharingPageTranslations.en } },

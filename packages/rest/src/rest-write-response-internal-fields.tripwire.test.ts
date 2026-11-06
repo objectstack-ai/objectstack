@@ -361,6 +361,12 @@ const DISPOSITIONS: Record<string, Disposition> = {
   // Metadata plane: bodies carry metadata ITEMS. `internal: true` is a field
   // flag on a data object's field, and a metadata item is not a data record.
   'POST /api/v1/meta/_migrate-stored': { kind: 'no-record-echo', why: 'Metadata plane: migration receipt.' },
+  // [#30675] Writes a data object's rows, but answers only the run's report:
+  // counts, a few record ids, and per-row failure sentences — no stored value.
+  'POST /api/v1/meta/_migrate-record-currency-codes': {
+    kind: 'no-record-echo',
+    why: 'Backfill report: counts, sample record ids and failure sentences, never a stored field value.',
+  },
   'PUT /api/v1/meta/:type/:name': { kind: 'no-record-echo', why: 'Metadata plane: metadata item, not a data record.' },
   'DELETE /api/v1/meta/:type/:name': { kind: 'no-record-echo', why: 'Metadata plane: delete receipt.' },
   'POST /api/v1/meta/:type/:name/publish': { kind: 'no-record-echo', why: 'Metadata plane: publish receipt.' },

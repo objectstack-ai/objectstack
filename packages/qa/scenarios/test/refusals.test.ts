@@ -52,6 +52,10 @@ const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   ['an unknown key, locating the key itself', (c) => (c.run.questions[0].truth.limit = 5), 'run.questions[0].truth.limit', /unknown key `limit`/],
   ['a prompt with no language', (c) => (c.prompt.short = {}), 'prompt.short', /at least one language/],
   ['fewer than five questions', (c) => (c.run.questions = c.run.questions.slice(0, 4)), 'run.questions', /5/],
+  // ── the app code (its namespace is `demo` + code) ──
+  ['a card with no app code', (c) => delete c.code, 'code', /names its app `code`/],
+  ['an app code with an underscore', (c) => (c.code = 'crm_app'), 'code', /2–8 lowercase letters/],
+  ['an app code longer than eight letters', (c) => (c.code = 'customers'), 'code', /2–8 lowercase letters/],
   // ── expect consistency ──
   ['a lookup to an object the card does not expect', (c) => c.expect.lookups.push({ object: 'contact', field: 'email', to: 'customer' }), 'expect.lookups[1].to', /lookup target `customer` is not in expect.objects/],
   ['a dangling app nav target', (c) => (c.expect.appNavTargets = ['account', 'overview']), 'expect.appNavTargets[1]', /dangling nav/],
@@ -124,6 +128,44 @@ describe('scenario card refusals', () => {
   it('refuses a card whose id is not its basename', () => {
     const r = load(() => {}, 'crm.json');
     expect(r.refusals).toEqual([{ file: r.file, path: 'id', message: expect.stringMatching(/basename `crm`/) }]);
+  });
+
+  it('refuses every card sharing an app code, each naming the other (control: distinct codes load)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scenario-refusal-'));
+    dirs.push(dir);
+    const first = join(dir, `${base.id}.json`);
+    const second = join(dir, 'crm_twin.json');
+    writeFileSync(first, JSON.stringify(base));
+    writeFileSync(second, JSON.stringify({ ...base, id: 'crm_twin' }));
+    const r = loadScenarios(dir, { areas });
+    expect(r.cards).toEqual([]);
+    expect(r.refusals).toEqual([
+      { file: first, path: 'code', message: expect.stringMatching(/^duplicate app code `crm`, also the code of crm_twin\.json/) },
+      { file: second, path: 'code', message: expect.stringMatching(/^duplicate app code `crm`, also the code of crm_account_with_contacts\.json/) },
+    ]);
+
+    const twin = { ...base, id: 'crm_twin' };
+    twin.code = 'crmtwin';
+    writeFileSync(second, JSON.stringify(twin));
+    const ok = loadScenarios(dir, { areas });
+    expect(ok.refusals).toEqual([]);
+    expect(ok.cards.map((c) => c.card.code)).toEqual(['crm', 'crmtwin']);
+  });
+
+  it('names a shared app code even on a card refused for another fault', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scenario-refusal-'));
+    dirs.push(dir);
+    const first = join(dir, `${base.id}.json`);
+    const second = join(dir, 'crm_twin.json');
+    writeFileSync(first, JSON.stringify(base));
+    writeFileSync(second, JSON.stringify({ ...base, id: 'crm_twin', category: 'retail' }));
+    const r = loadScenarios(dir, { areas });
+    expect(r.cards).toEqual([]);
+    expect(r.refusals.map((x) => [x.file, x.path])).toEqual([
+      [first, 'code'],
+      [second, 'category'],
+      [second, 'code'],
+    ]);
   });
 
   it('refuses a file that is not JSON', () => {

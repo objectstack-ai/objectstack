@@ -129,6 +129,21 @@ const zh = {
         unmanagedSuccess: '已将 "{{name}}" 的 v{{version}} 复制到本运行时，成为它自己的元数据，位于基础包 {{base}} 中。副本可编辑，且不再接收升级。',
         unmanagedStrippedLocks: '软件包锁定了以下条目。副本可编辑，因此这些锁未被复制：',
         unmanagedIgnored: '本运行时不支持非托管安装，因此 "{{name}}" 以托管方式安装（以代码形式注册），而不是被复制。请先升级运行时，然后卸载该软件包，再以非托管副本重新安装。',
+        // objectstack#30325 — the confirm in front of a local Install: what the
+        // install adds, read from the manifest it installs (MarketplacePackagePage).
+        preview: {
+          title: "安装 {{name}}？",
+          reinstallTitle: "重新安装 {{name}}？",
+          intro: "安装会向此运行时加入以下内容：",
+          reading: "正在读取此软件包将加入的内容…",
+          unreadable: "安装前无法读取此软件包将加入的内容。安装结果会说明加载了什么。",
+          objects: "对象",
+          permissionSets: "权限集",
+          sampleRecords: "示例记录",
+          atMost: "最多 {{count}}",
+          sampleNote: "示例记录随应用一起加载，安装后可在本页清除。",
+          suggestsEveryone: "安装后会建议将「{{set}}」授予所有已登录用户（Everyone 岗位）。在你接受之前不会授予任何权限。",
+        },
       },
       // objectui#12146 — the install dialog opened as an UPDATE of the copy
       // this environment holds (MarketplacePackagePage).
