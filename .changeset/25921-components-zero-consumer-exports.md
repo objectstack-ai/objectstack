@@ -33,6 +33,17 @@ Every other name the entry exported stays exported unchanged, among them `AlertD
 
 What leaves, and what to write instead:
 
-- FROM `TypographyH1` … `TypographyMuted` TO the plain element with the Tailwind classes you want (`h1`, `p`, `blockquote`, `code` and so on), or an `element:text` node with a heading `variant` such as `h2`.
-- FROM any of the fifty-one shadcn sub-parts TO the same primitive in the host's own tree (`npx shadcn@latest add menubar`, `navigation-menu`, `pagination`, `carousel`, …), or the Radix / Embla / input-otp / vaul primitive it wraps; or, to draw one of these from metadata, the matching schema node type, which this package still registers.
+- FROM `TypographyH1`, `TypographyH2`, `TypographyH3`, `TypographyH4`, `TypographyP`, `TypographyBlockquote`, `TypographyList`, `TypographyInlineCode`, `TypographyLead`, `TypographyLarge`, `TypographySmall`, `TypographyMuted` TO the plain element with the Tailwind classes you want (`h1`, `p`, `blockquote`, `code` and so on), or an `element:text` node with a heading `variant` such as `h2`.
+- FROM `AlertDialogOverlay`, `AlertDialogPortal` TO `AlertDialogContent`, which already mounts the portal and the overlay.
+- FROM `BreadcrumbEllipsis`, `BreadcrumbSeparator` TO the same parts in the host's own tree (`npx shadcn@latest add breadcrumb`), or a `breadcrumb` schema node, which draws the separators and the collapsed-crumb ellipsis itself.
+- FROM `CarouselContent`, `CarouselNext`, `CarouselPrevious` TO the same parts in the host's own tree (`npx shadcn@latest add carousel`), or a `carousel` schema node.
+- FROM `CommandShortcut` TO a `kbd` element (or `Kbd`) inside `CommandItem`.
+- FROM `ContextMenuCheckboxItem`, `ContextMenuGroup`, `ContextMenuLabel`, `ContextMenuPortal`, `ContextMenuRadioGroup`, `ContextMenuRadioItem`, `ContextMenuShortcut` TO the same parts in the host's own tree (`npx shadcn@latest add context-menu`), or the `@radix-ui/react-context-menu` primitive they wrap.
+- FROM `DrawerOverlay`, `DrawerPortal` TO `DrawerContent`, which already mounts the portal and the overlay.
 - FROM `useFormField` TO `FormLabel`, `FormControl`, `FormDescription` and `FormMessage`, which read the same field state.
+- FROM `InputOTP`, `InputOTPSlot` TO the same parts in the host's own tree (`npx shadcn@latest add input-otp`), or an `input-otp` schema node.
+- FROM `MenubarCheckboxItem`, `MenubarContent`, `MenubarGroup`, `MenubarLabel`, `MenubarPortal`, `MenubarRadioGroup`, `MenubarRadioItem`, `MenubarSeparator`, `MenubarShortcut`, `MenubarSub`, `MenubarSubContent`, `MenubarSubTrigger`, `MenubarTrigger` TO the same parts in the host's own tree (`npx shadcn@latest add menubar`), or a `menubar` schema node.
+- FROM `NavigationMenu`, `NavigationMenuContent`, `NavigationMenuIndicator`, `NavigationMenuLink`, `NavigationMenuList`, `NavigationMenuTrigger`, `NavigationMenuViewport`, `navigationMenuTriggerStyle` TO the same parts in the host's own tree (`npx shadcn@latest add navigation-menu`), or a `navigation-menu` schema node.
+- FROM `PaginationContent`, `PaginationEllipsis`, `PaginationItem`, `PaginationLink`, `PaginationNext`, `PaginationPrevious` TO the same parts in the host's own tree (`npx shadcn@latest add pagination`), or a `pagination` schema node.
+- FROM `SelectScrollDownButton`, `SelectScrollUpButton`, `SelectSeparator` TO `SelectContent`, which already draws the scroll buttons, and `Separator` between groups.
+- FROM `TableCaption` TO a `caption` element inside `Table`.
