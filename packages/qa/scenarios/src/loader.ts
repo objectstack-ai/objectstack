@@ -148,9 +148,10 @@ type Persona = ScenarioCard['run']['personas'][number];
  * The two codes a faithful build answers an operation its acting persona
  * cannot reach with. Spelled as literals, because `check:dispatcher-error-vocabulary`
  * judges the `code` these feed into `want` below and reads a constant only when
- * it resolves to a literal; parsed through the spec's catalogue (`ErrorCode`,
- * ADR-0112) once at load, so a code the platform stops answering refuses here
- * instead of drifting (the `ErrorCode` type alone admits any string).
+ * it resolves to a literal. Held to the spec's catalogue (`ErrorCode`, ADR-0112)
+ * twice: typed, so the typecheck refuses a code the platform stops answering,
+ * and parsed once at load, so a test run (which does not typecheck) refuses it
+ * too, instead of drifting.
  *
  *   NOT_REACHABLE_ROW_CODE  a by-id write on a row the caller cannot READ is
  *                           answered not-found, indistinguishable from a
