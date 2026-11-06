@@ -118,6 +118,7 @@ apply):
 'create_record'        // Create
 'update_record'        // Update by id
 'delete_record'        // Delete by id (destructive; refused without confirm: true)
+'delete_records'       // Delete many by filter or id list, ≤200 per call (refused with a preview without confirm: true)
 
 // Business actions — operate the app, not just its rows
 'list_actions'         // Invokable business actions the caller may run
@@ -130,7 +131,7 @@ and `resume_run` only when it implements `resumeRun`; a bridge without those
 seams serves the rest and advertises nothing it cannot do.
 
 OAuth scopes narrow the families at consent time: `data:read` covers
-list/describe/query/aggregate/get, `data:write` covers create/update/delete, and
+list/describe/query/aggregate/get, `data:write` covers create/update/delete (both delete tools), and
 `actions:execute` covers `list_actions` / `run_action` / `resume_run`. A tool outside the grant
 is **not registered at all**, so the SDK rejects it as an unknown tool — the
 grant doubles as dispatch-time enforcement.

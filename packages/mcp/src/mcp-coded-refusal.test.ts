@@ -102,6 +102,9 @@ const SITES: readonly Site[] = [
   { tool: 'update_record', args: { objectName: 'task', recordId: 't9', data: { title: 'x' } }, member: 'update' },
   // `confirm: true` passes the confirmation gate, so the call reaches `remove`.
   { tool: 'delete_record', args: { objectName: 'task', recordId: 't9', confirm: true }, member: 'remove' },
+  // [#30891] The selection read is the member a bulk delete calls first; a
+  // refusal there refuses the whole call, rendered as the data tools render it.
+  { tool: 'delete_records', args: { objectName: 'task', where: {}, confirm: true }, member: 'query' },
   { tool: 'list_actions', args: {}, member: 'listActions' },
   { tool: 'run_action', args: { actionName: 'complete' }, member: 'runAction', actionDoor: true },
   { tool: 'resume_run', args: { runId: 'r1' }, member: 'resumeRun', actionDoor: true },

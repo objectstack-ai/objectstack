@@ -23,7 +23,7 @@ import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpActionBridge, McpDataBridge } from './mcp-http-tools.js';
 
 const READ_TOOLS = ['list_objects', 'describe_object', 'validate_expression', 'query_records', 'get_record', 'aggregate_records'];
-const WRITE_TOOLS = ['create_record', 'update_record', 'delete_record'];
+const WRITE_TOOLS = ['create_record', 'update_record', 'delete_record', 'delete_records'];
 const ACTION_TOOLS = ['list_actions', 'run_action'];
 
 function makeBridge(): McpDataBridge & McpActionBridge & { calls: any[] } {

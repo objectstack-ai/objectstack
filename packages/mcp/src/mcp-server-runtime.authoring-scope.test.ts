@@ -53,7 +53,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 const READ_TOOLS = ['list_objects', 'describe_object', 'validate_expression', 'query_records', 'get_record', 'aggregate_records'];
-const WRITE_TOOLS = ['create_record', 'update_record', 'delete_record'];
+const WRITE_TOOLS = ['create_record', 'update_record', 'delete_record', 'delete_records'];
 const ACTION_TOOLS = ['list_actions', 'run_action'];
 const NATIVE_TOOLS = [...READ_TOOLS, ...WRITE_TOOLS, ...ACTION_TOOLS].sort();
 

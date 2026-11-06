@@ -32,7 +32,7 @@
 
 import type { AIToolDefinition } from '@objectstack/spec/contracts';
 import { MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
-import { grantsAuthoringTools } from './mcp-http-tools.js';
+import { DELETE_RECORDS_MAX_PER_CALL, grantsAuthoringTools } from './mcp-http-tools.js';
 
 /** Skill identity (mirrors the `SKILL.md` YAML frontmatter). */
 export const OBJECTSTACK_SKILL_NAME = 'objectstack';
@@ -289,6 +289,15 @@ create/update payload.
   permanently. The server REFUSES a call without \`confirm: true\`
   (\`ACTION_CONFIRMATION_REQUIRED\`) and nothing is deleted. Ask your human
   first; the flag asserts an approval, it does not obtain one.
+- **delete_records({ objectName, where | recordIds, confirm })** — delete many
+  records of one object in one call, instead of one \`delete_record\` per row.
+  Without \`confirm: true\` it deletes nothing and is REFUSED
+  (\`ACTION_CONFIRMATION_REQUIRED\`) with a \`preview\`: how many records match
+  and sample ids. Show that to your human, then retry with \`confirm: true\`.
+  A confirmed call deletes up to ${DELETE_RECORDS_MAX_PER_CALL} records, each under your permissions and the
+  object's delete rules (no one bypasses them); refused records stay and come
+  back grouped by reason with their ids, and \`remaining\` says how many still
+  match. Call again to continue.
 - **list_actions()** — list the business actions available to you (only those
   the app author exposed to AI and you are permitted to run), with each
   action's declared parameters, whether it operates on a record, and whether
