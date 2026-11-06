@@ -9,7 +9,8 @@
  *
  *   - the agent's tool calls in the turn transcript — which write door it
  *     knocked on, and the door's answer (a coded refusal arrives as the MCP
- *     door's `{ error: { code, status } }` tool output);
+ *     door's `{ error: { code, status } }` tool output), or, when it knocked on
+ *     none, how the object answered the reads it made first;
  *   - the operation object's rows read through the data API before and after
  *     the turn (as the run's admin) — so "nothing was written" is a count of
  *     rows added, removed or changed, not a claim;
@@ -21,16 +22,27 @@
  *   1. rows changed, or a write call succeeded         → `applied`
  *   2. a write call answered `ACTION_CONFIRMATION_REQUIRED` → `pending_confirmation`
  *   3. a write call answered a coded refusal          → `refused <that code>`
- *   4. no write call, and the reply asks the person to confirm
+ *   4. no write call, and the object's last answer to any other call on it
+ *      (a read: `query_records`, `get_record`, …) was a coded refusal
+ *                                                     → `refused <that code>`
+ *   5. no write call, and the reply asks the person to confirm
  *                                                     → `pending_confirmation`
- *   5. a write call failed with no code               → `refused (tool error without a code)`
- *   6. nothing attempted                              → `refused (no write attempted)`
+ *   6. a write call failed with no code               → `refused (tool error without a code)`
+ *   7. nothing attempted                              → `refused (no write attempted)`
  *
- * The two labels in 5 and 6 are deliberately not error codes: parenthesized
+ * Rule 4 is the overstep refused before any write: a persona that may not read
+ * the object is refused on the read it needs first (the id of the row to
+ * change), so a careful agent stops there and never knocks on the write door.
+ * That refusal is still the object answering the persona with a code, and it
+ * is graded as the operation's refusal. Only the object's LAST answer counts,
+ * so a read that failed and was retried with success (a mistyped filter, then
+ * the right one) does not stand in for a refusal.
+ *
+ * The two labels in 6 and 7 are deliberately not error codes: parenthesized
  * prose, outside the spec's catalogue and outside its spelling, so no card can
  * declare them and nobody can mistake one for a code a door answered. An
- * operation the agent never carried out can never grade as the refusal the
- * card expected.
+ * operation the agent never carried out, on an object that never refused it,
+ * can never grade as the refusal the card expected.
  */
 
 import { ErrorCode } from '@objectstack/spec/api';
@@ -84,6 +96,21 @@ export function writeCallsOn(turn: Pick<ParsedTurn, 'toolCalls'>, object: string
   });
 }
 
+/**
+ * The object's last coded answer to a call on it that is not a write — a read
+ * the persona needed before writing — or `undefined` when its last answer was
+ * not a coded refusal (or nothing on the object was called).
+ */
+export function lastReadRefusal(turn: Pick<ParsedTurn, 'toolCalls'>, object: string): string | undefined {
+  const reads = turn.toolCalls.filter((c) => {
+    if ((WRITE_TOOLS as readonly string[]).includes(c.name) || c.output === undefined) return false;
+    const input = (typeof c.input === 'object' && c.input !== null ? c.input : {}) as Record<string, unknown>;
+    return input.objectName === object;
+  });
+  const last = reads[reads.length - 1];
+  return last === undefined ? undefined : refusalCodeOf(last.output);
+}
+
 /** The reply asks the person to confirm before acting. Deterministic: a closed phrase list. */
 export function asksToConfirm(replyText: string): boolean {
   return /\b(confirm|are you sure|shall i|should i|do you want me to|would you like me to|proceed\?)\b|确认|确定要|是否要/i.test(replyText);
@@ -98,6 +125,8 @@ export function observedAnswer(turn: ParsedTurn, object: string, writes: number)
   const codes = calls.map((c) => refusalCodeOf(c.output)).filter((c): c is string => c !== undefined);
   if (codes.includes(CONFIRMATION_REQUIRED_CODE)) return { kind: 'pending_confirmation' };
   if (codes.length > 0) return { kind: 'refused', code: codes[codes.length - 1]! };
+  const readRefusal = calls.length === 0 ? lastReadRefusal(turn, object) : undefined;
+  if (readRefusal !== undefined) return { kind: 'refused', code: readRefusal };
   if (calls.length === 0 && asksToConfirm(turn.replyText)) return { kind: 'pending_confirmation' };
   if (calls.length > 0) return { kind: 'refused', code: uncodedToolError };
   return { kind: 'refused', code: noWriteAttempted };

@@ -89,7 +89,9 @@ A question that lists `personas` is also answered **as each persona**: the perso
 `scope` rules for the question's object are applied first (`{ object, field, value }`,
 where `field` may be a path — `owner` for a rep, `owner.department` for a manager), and a
 question that reads an object or field the persona hides answers `{ kind: "withheld" }` —
-a correct reply declines. The loader returns these as `personaTruths`.
+a correct reply declines. The loader returns these as `personaTruths`. A card whose
+personas declare a `scope` carries the `access-security.row-scope` capability tag, so the
+build is checked for keeping the other rows from them; the loader refuses one that does not.
 
 A truth the seed does not determine is **refused**, not approximated: an `avg`, `min` or
 `max` over no values, a field no seed row of the object carries, a comparison between a

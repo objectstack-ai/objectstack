@@ -85,6 +85,13 @@ export const CapabilityTagSchema = z
     'must be `<area>.<name>`, e.g. `records-forms.master-detail`',
   );
 
+/**
+ * The tag whose check judges a persona's row `scope` in the build. The loader
+ * requires it on every card with a scoped persona, and the scorer keys its
+ * check by it, so the two can never spell it apart.
+ */
+export const ROW_SCOPE_TAG = 'access-security.row-scope';
+
 /** The cloud marketplace taxonomy — a closed enum. */
 export const SCENARIO_CATEGORIES = [
   'app',
@@ -425,6 +432,16 @@ export const SCENARIO_NAMESPACE_PREFIX = 'demo';
  */
 export function scenarioNamespace(card: { code: string }): string {
   return `${SCENARIO_NAMESPACE_PREFIX}${card.code}`;
+}
+
+/**
+ * The permission set a persona signs in with, in an app of `namespace`:
+ * `<namespace>_<persona id>` (`democrm_sdr`). The runner grants it to the
+ * persona's user, the build prompt asks for it by this name, and the scorer
+ * reads its row-level security from it.
+ */
+export function personaPermissionSetName(namespace: string, persona: string): string {
+  return `${namespace}_${persona}`;
 }
 
 // ── The card ────────────────────────────────────────────────────────────────

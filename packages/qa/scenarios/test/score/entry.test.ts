@@ -86,6 +86,7 @@ describe('scoreCardArtifact', () => {
       'records-forms.select-options': 'pass',
       'ai.ask-data': 'unscored',
       'access-security.field-permissions': 'fail',
+      'access-security.row-scope': 'pass',
     });
   });
 });

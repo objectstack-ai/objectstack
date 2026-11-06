@@ -61,7 +61,7 @@ discrimination test; ⛔ never match by area prefix.
 | `records-forms.roll-up-summary` | carries a roll-up summary, each reading a child object that relates back and, unless it counts, a child field that exists |
 | `records-forms.select-options` | carries a single-choice option field (`select`, `radio`), each offering at least two options |
 | `access-security.field-permissions` | denies (`readable: false`, in a permission set) every field a card persona hides, and has that field |
-| `access-security.row-scope` | keeps every object a persona's `scope` names private (owner-scoped), or derived from its master |
+| `access-security.row-scope` | keeps every object a persona's `scope` names private (owner-scoped) or derived from its master, or narrows it for each such persona by a read policy (`rowLevelSecurity`, `select` or `all`, no `positions`, a `using` that is not `true`) on that persona's permission set |
 | `approvals.approval-flow` | carries an approval (a flow with an Approval node), each bound to an object it serves, one bound to an object the card names |
 | `automation.record-triggered-flow` | carries a record-triggered flow, each bound to an object it serves, one bound to an object the card names |
 | `dashboards.widget-measures` | carries a dashboard widget with a measure, and every widget measure resolves on the dataset it binds |
@@ -87,7 +87,9 @@ Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scen
   refuses to start when `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` is set or the CLI is logged in with an API key
   (the cost ruling on cloud#3600), and the record states the driver and login. `RecordedDriver` replays a recording.
 - **Observation** (`observe.ts`): the write grader is fed what the runner reads itself: the agent's write calls and
-  the door's answer (a coded refusal), the object's rows before and after the turn, and the audit trail's actor.
+  the door's answer (a coded refusal), the object's rows before and after the turn, and the audit trail's actor. A turn
+  that wrote nothing because the object refused the read it needed first (a persona that may not read it) grades as
+  that refusal's code; `(no write attempted)` is left for a turn whose object never refused it.
 - **Namespaces** (`namespace.ts`): every card's app is in the namespace `demo` + the card's `code` (`democrm`): scratch
   mode scaffolds the project under that name, and template mode installs a template declaring it into a host named
   `host<code>` (the unmanaged copy keeps its namespace, and the install refuses one the host owns). The card's names are

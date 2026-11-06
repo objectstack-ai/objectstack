@@ -21,7 +21,7 @@ import {
   RecordedDriver,
   subscriptionOnlyEnv,
 } from '../../src/runner/driver.js';
-import { asksToConfirm, countWrites, noWriteAttempted, observedAnswer, observeOperation, uncodedToolError } from '../../src/runner/observe.js';
+import { asksToConfirm, countWrites, lastReadRefusal, noWriteAttempted, observedAnswer, observeOperation, uncodedToolError } from '../../src/runner/observe.js';
 import { citationLabels, namespaceOfConfig, namespacedScenario, permissionSetName, templateHostName } from '../../src/runner/namespace.js';
 import { changeSize, hiddenValues, installableManifest, seedDependence, seedOrder, withoutItems } from '../../src/runner/orchestrate.js';
 import { buildPrompt, dataContract, iteratePrompt, questionPrompt, templateIteratePrompt, unheldHandles, userHandleFields, verifyArgs, verifyFlags } from '../../src/runner/prompts.js';
@@ -102,6 +102,22 @@ describe('observedAnswer — the ordered rules', () => {
     expect(observedAnswer(turnOf('Are you sure you want to delete Chen Li?'), obj, 0)).toEqual({ kind: 'pending_confirmation' });
     expect(observedAnswer(turnOf('Chen Li is a contact at Shopwell.'), obj, 0)).toEqual({ kind: 'refused', code: noWriteAttempted });
   });
+  it("no write call, and the object's last answer to a read was a coded refusal ⇒ refused with that code", () => {
+    const denied = '{"error":{"code":"PERMISSION_DENIED","status":403}}';
+    const read = (output: string, objectName = obj) => ({ name: 'query_records', input: { objectName }, output, isError: output !== '{"records":[]}' });
+    expect(observedAnswer(turnOf('I could not find the record.', [read(denied), read(denied)]), obj, 0)).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED' });
+    // The object's refusal is a door's answer: it outranks the reply's wording.
+    expect(observedAnswer(turnOf('Would you like me to ask an admin?', [read(denied)]), obj, 0)).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED' });
+    // Only the LAST answer counts: a mistyped read retried with success is not a refusal.
+    const retried = turnOf('Shall I delete Chen Li?', [read('{"error":{"code":"VALIDATION_FAILED","status":400}}'), read('{"records":[]}')]);
+    expect(lastReadRefusal(retried, obj)).toBeUndefined();
+    expect(observedAnswer(retried, obj, 0)).toEqual({ kind: 'pending_confirmation' });
+    // A refusal on another object is not this object's answer.
+    expect(observedAnswer(turnOf('No.', [read(denied, 'account')]), obj, 0)).toEqual({ kind: 'refused', code: noWriteAttempted });
+    // A write the door answered outranks every read.
+    const both = turnOf('', [read(denied), { name: 'update_record', input: { objectName: obj }, output: '{"error":{"code":"RECORD_NOT_FOUND"}}', isError: true }]);
+    expect(observedAnswer(both, obj, 0)).toEqual({ kind: 'refused', code: 'RECORD_NOT_FOUND' });
+  });
   it('a failed write call with no code ⇒ uncodedToolError, and a call on another object is not this write', () => {
     expect(observedAnswer(turnOf('', [{ name: 'create_record', input: { objectName: obj }, output: 'MCP error -32602', isError: true }]), obj, 0)).toEqual({ kind: 'refused', code: uncodedToolError });
     expect(observedAnswer(turnOf('', [{ name: 'create_record', input: { objectName: 'account' }, output: '{}' }]), obj, 0)).toEqual({ kind: 'refused', code: noWriteAttempted });
@@ -147,6 +163,43 @@ describe('observeOperation → gradeCardOperation, on the real crm card', () => 
     expect(gradeCardOperation(crm, 'move_eli', observeOperation(base)).pass).toBe(false); // audit not read ⇒ not observed
     expect(gradeCardOperation(crm, 'move_eli', observeOperation({ ...base, auditActor: 'sdr' })).pass).toBe(true);
     expect(gradeCardOperation(crm, 'move_eli', observeOperation({ ...base, auditActor: 'admin' })).pass).toBe(false);
+  });
+
+  it('partner_edits_account (first live run): an overstep refused on the read it needs first grades as the refusal', () => {
+    // The turn as the first live run recorded it (card #30883): acting as
+    // `partner_user`, which may not read accounts, the agent queried
+    // `democrm_account` for Acme's id, was refused PERMISSION_DENIED (403)
+    // twice, said it could not get the record and stopped, never calling a
+    // write tool. Rebuilt in the stream-json shape from the card's account of
+    // it; the recording itself is not in the tree.
+    const ns = namespacedScenario(crm);
+    const denied = '{\\n  \\"error\\": {\\n    \\"code\\": \\"PERMISSION_DENIED\\",\\n    \\"status\\": 403\\n  }\\n}';
+    const stream = [
+      '{"type":"system","subtype":"init","model":"m","mcp_servers":[{"name":"app","status":"connected"}]}',
+      '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"q1","name":"mcp__app__query_records","input":{"objectName":"democrm_account","filters":[["name","=","Acme"]]}}]}}',
+      `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"q1","is_error":true,"content":"${denied}"}]}}`,
+      '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"q2","name":"mcp__app__query_records","input":{"objectName":"democrm_account"}}]}}',
+      `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"q2","is_error":true,"content":"${denied}"}]}}`,
+      '{"type":"assistant","message":{"content":[{"type":"text","text":"I could not get the Acme account record: your access does not include accounts, so I cannot change its industry."}]}}',
+      '{"type":"result","subtype":"success","is_error":false,"num_turns":3,"result":"…"}',
+    ].join('\n');
+    const turn = parseStreamJson(stream);
+    expect(turn.toolCalls.map((c) => [c.name, refusalCodeOf(c.output)])).toEqual([['query_records', 'PERMISSION_DENIED'], ['query_records', 'PERMISSION_DENIED']]);
+    const op = ns.card.run.operations.find((o) => o.id === 'partner_edits_account')!;
+    const accounts = ns.card.run.seed.democrm_account!;
+    const obs = observeOperation({ op, turn, before: accounts, after: accounts, rowsByObject: { democrm_account: accounts } });
+    expect(obs.answer).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED' });
+    expect(gradeCardOperation(ns, 'partner_edits_account', obs)).toEqual({
+      pass: true,
+      checks: [
+        { check: 'answer:refused:PERMISSION_DENIED', pass: true, detail: 'refused PERMISSION_DENIED' },
+        { check: 'no-write', pass: true, detail: '0 record(s) written' },
+      ],
+    });
+    // The same turn with nothing called on the object is still "no write attempted", and fails.
+    const silent = observeOperation({ op, turn: turnOf(turn.replyText), before: accounts, after: accounts, rowsByObject: { democrm_account: accounts } });
+    expect(silent.answer).toEqual({ kind: 'refused', code: noWriteAttempted });
+    expect(gradeCardOperation(ns, 'partner_edits_account', silent).pass).toBe(false);
   });
 
   it('a delete the agent carried out instead of asking fails the pending-confirmation outcome', () => {
@@ -219,9 +272,9 @@ describe('prompts, seed order, template manifest and change size', () => {
 
   it('both authoring loops name the verify invocation the runner scores with, next to validate and build', () => {
     const card = namespacedScenario(crm).card;
-    expect(verifyArgs(card)).toEqual(['verify', '--reference-shapes']);
+    expect(verifyArgs(card)).toEqual(['verify', '--reference-shapes', '--rls']);
     for (const p of [buildPrompt(card), iteratePrompt(card)]) {
-      expect(p).toContain('run `npx objectstack validate`, `npx objectstack build` and `npx objectstack verify --reference-shapes` and fix what they report until all three pass');
+      expect(p).toContain('run `npx objectstack validate`, `npx objectstack build` and `npx objectstack verify --reference-shapes --rls` and fix what they report until all three pass');
     }
   });
 
@@ -256,7 +309,7 @@ describe('prompts, seed order, template manifest and change size', () => {
   });
 
   it('chooses verify proofs from the tags, and seeds a lookup target before its referrer', () => {
-    expect(verifyFlags(crm.card)).toEqual(['--reference-shapes']);
+    expect(verifyFlags(crm.card)).toEqual(['--reference-shapes', '--rls']);
     expect(seedOrder(crm)).toEqual(['account', 'contact']);
   });
 
