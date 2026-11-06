@@ -188,6 +188,14 @@ type UncheckedPackageRow = Omit<InstalledPackageRow, 'source' | 'writable'> & {
 
 const API = '/api/v1/packages';
 
+/**
+ * The code `PATCH /packages/:id/disable` answers, with `409`, while a
+ * validation rule of an enabled package reads a field the package adds through
+ * `objectExtensions` (registered in the spec's error-code ledger). Its message
+ * names every such rule and the remedy; the refusal carries no `details`.
+ */
+const DISABLE_RESTRICTED_BY_VALIDATION_RULE = 'PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE';
+
 async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   // objectstack#29119 — every write this page sends (publish, revert, discard,
   // delete, adopt, enable/disable, import) may change the package list, so the
@@ -518,11 +526,14 @@ export function PackageDetailSheet({
   const client = useMetadataClient();
   const [busy, setBusy] = React.useState<string | null>(null);
   // `details`: the lines a refusal carries under its sentence, in the server's
-  // own words (objectui#13160).
+  // own words (objectui#13160). `heading`: a console sentence, in the reader's
+  // language, drawn above a refusal that is then shown whole rather than cut
+  // to its first sentence (objectstack#31003).
   const [msg, setMsg] = React.useState<{
     kind: 'ok' | 'err';
     text: string;
     details?: readonly string[];
+    heading?: string;
   } | null>(null);
   // ADR-0033 — pending DRAFT items bound to this package. AI-authored metadata
   // lands as drafts that the active-only browsers hide, so without this the
@@ -629,6 +640,14 @@ export function PackageDetailSheet({
         kind: 'err',
         text: e?.message ?? t('engine.packages.detail.actionFailed', locale),
         ...(e instanceof PackagePublishRefusal ? { details: e.reasons } : {}),
+        // objectstack#31003 — the disable door refuses while an enabled
+        // validation rule reads a field the package adds. The server's sentence
+        // names every such rule (package · object · rule) and then the remedy,
+        // so it is drawn whole under a heading in the reader's language: cut to
+        // its first sentence, the remedy sat behind "More".
+        ...(errorCodeIs(e, DISABLE_RESTRICTED_BY_VALIDATION_RULE)
+          ? { heading: t('engine.packages.detail.disableRestricted', locale) }
+          : {}),
       });
     } finally {
       setBusy(null);
@@ -1174,8 +1193,22 @@ export function PackageDetailSheet({
             }`}
           >
             {/* A refusal leads with its first sentence; the rest of the
-                server's text is behind "More" (objectui#13332). */}
-            {msg.kind === 'err' ? <RefusalMessage text={msg.text} /> : msg.text}
+                server's text is behind "More" (objectui#13332). One with a
+                heading is drawn whole under it (objectstack#31003). */}
+            {msg.kind === 'err' && msg.heading ? (
+              <>
+                <p className="font-medium" data-testid="pkg-detail-refusal-heading">
+                  {msg.heading}
+                </p>
+                <p className="mt-1 whitespace-pre-wrap break-words select-text" data-testid="pkg-detail-refusal-text">
+                  {msg.text}
+                </p>
+              </>
+            ) : msg.kind === 'err' ? (
+              <RefusalMessage text={msg.text} />
+            ) : (
+              msg.text
+            )}
             {msg.details && msg.details.length > 0 && (
               // Not capped: the sheet scrolls (`overflow-y-auto`), as it does
               // for the pending-drafts list above. `break-words` keeps a long
@@ -1301,6 +1334,13 @@ export function PackageDetailSheet({
               <AlertDialogDescription>
                 {t('engine.packages.detail.disableDescription', locale)}
               </AlertDialogDescription>
+              {/* objectstack#31003 — the served `disableable` says what the
+                  package allows, not whether a rule elsewhere still reads its
+                  fields; the door answers that only when asked, so the dialog
+                  says the disable can still be refused. */}
+              <p className="text-sm text-muted-foreground" data-testid="pkg-detail-disable-may-refuse">
+                {t('engine.packages.detail.disableMayBeRefused', locale)}
+              </p>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel data-testid="pkg-detail-disable-cancel">
