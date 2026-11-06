@@ -649,6 +649,13 @@ often before the account-level lock engages.
 > administrator's included. This is why a non-compliant user can sign in but
 > can't read or change data, or administer the platform, until they fix the
 > issue.
+>
+> **An API key authenticates only as an owner who exists.** A key whose owner
+> has no user record is answered on every face that admits keys exactly as a
+> key that does not exist (the generic `401 UNAUTHENTICATED`), a session sent
+> beside it never answers for it, and the server logs the refused key's row id
+> and owner id. The remedy is a new key minted by an existing user; revoke the
+> old key in **Setup → API Keys**.
 
 #### Saving, clearing and lockout recovery
 

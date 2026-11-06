@@ -256,6 +256,8 @@ async function bootFederation(
           ? [{ id: 'key_1', key: hashApiKey(API_KEY), user_id: 'u_federation', revoked: false, active_organization_id: 'o1' }]
           : [];
       }
+      // The key's owner exists: an API key authenticates only as an owner who exists.
+      if (object === 'sys_user') return query?.where?.id === 'u_federation' ? [{ id: 'u_federation' }] : [];
       if (object === 'sys_user_permission_set') {
         return query?.where?.user_id === 'u_federation' && grants.length > 0
           ? [{ id: 'ups_1', user_id: 'u_federation', permission_set_id: GRANT_SET_ID, permission_set: 'federation_caller', organization_id: 'o1' }]
