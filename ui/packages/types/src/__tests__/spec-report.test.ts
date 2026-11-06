@@ -4,7 +4,6 @@
  *
  * Tests for the Spec Report bridge (spec 9.0, dataset-bound — ADR-0021):
  * - Re-exports compile and match the spec shape.
- * - Aggregate mapping handles the `unique → count_distinct` translation.
  * - The presentation adapter maps the dataset `rows` / `values` names through.
  */
 
@@ -12,27 +11,12 @@ import { describe, it, expect } from 'vitest';
 import {
   SpecReport,
   SpecReportSchema,
-  mapAggregateToQL,
   specReportToPresentation,
   isSpecReport,
 } from '../spec-report';
 import type { SpecReportInput } from '../spec-report';
 
 describe('SpecReport bridge', () => {
-  describe('mapAggregateToQL', () => {
-    it('translates unique to count_distinct', () => {
-      expect(mapAggregateToQL('unique')).toBe('count_distinct');
-    });
-
-    it('passes through standard aggregates', () => {
-      expect(mapAggregateToQL('sum')).toBe('sum');
-      expect(mapAggregateToQL('avg')).toBe('avg');
-      expect(mapAggregateToQL('min')).toBe('min');
-      expect(mapAggregateToQL('max')).toBe('max');
-      expect(mapAggregateToQL('count')).toBe('count');
-    });
-  });
-
   describe('SpecReportSchema parsing', () => {
     it('accepts a minimal tabular report (dataset + values)', () => {
       const input: SpecReportInput = {
