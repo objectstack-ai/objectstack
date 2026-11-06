@@ -361,6 +361,7 @@ import {
 } from './workspace-enumerator.mjs';
 import { tsconfigExcludedDirs } from './check-undeclared-dep-imports.mjs';
 import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import process from 'node:process';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -1378,7 +1379,7 @@ function reachEdgesOf(file, packageDir) {
     for (const spec of moduleScope) {
       if (!spec.startsWith('.')) continue;
       const target = resolveRelative(file, spec);
-      if (target && isInsidePackage(packageDir, target)) children.push(target);
+      if (target && isInsidePackage(packageDir, target)) children.push({ target, spec });
     }
     edges = { children, warm: moduleScope, clocked };
   } catch {
@@ -1395,9 +1396,10 @@ function reachEdgesOf(file, packageDir) {
  * time imports, with no collection-time load of that specifier anywhere in the
  * same reach and no mock of it in the test file.
  *
- * A finding names the test file (where the remedy goes), the source site, and
- * the chain of files that carried the test to it. One finding per specifier,
- * the first site found breadth-first, so the chain printed is a shortest one.
+ * A finding names the test file and the line of its import that starts the
+ * chain (where the remedy goes), the first source site reached breadth-first
+ * (so the chain printed is a shortest one), and how many sites of the same
+ * specifier the reach holds. One finding per specifier.
  */
 function sourceReachFindings(file, offendingSpecs, packageDir, alreadyReported) {
   let source;
@@ -1416,27 +1418,34 @@ function sourceReachFindings(file, offendingSpecs, packageDir, alreadyReported) 
 
   const root = reachEdgesOf(file, packageDir);
   const warm = new Set(root.warm);
+  /** reached file -> the file whose collection-time import reached it first */
   const parent = new Map([[file, null]]);
+  /** reached file -> the specifier the TEST wrote to start its chain */
+  const entry = new Map();
   const queue = [];
-  for (const child of root.children) {
-    if (parent.has(child)) continue;
-    parent.set(child, file);
-    queue.push(child);
+  for (const { target, spec } of root.children) {
+    if (parent.has(target)) continue;
+    parent.set(target, file);
+    entry.set(target, spec);
+    queue.push(target);
   }
-  /** spec -> the first site reached, breadth-first */
+  /** spec -> { first site reached, breadth-first; how many sites in the reach } */
   const sites = new Map();
   for (let i = 0; i < queue.length; i++) {
     const at = queue[i];
     const edges = reachEdgesOf(at, packageDir);
     for (const spec of edges.warm) warm.add(spec);
     for (const site of edges.clocked) {
-      if (!offendingSpecs.has(site.spec) || sites.has(site.spec)) continue;
-      sites.set(site.spec, { ...site, at });
+      if (!offendingSpecs.has(site.spec)) continue;
+      const known = sites.get(site.spec);
+      if (known) known.all.push({ file: at, line: site.line });
+      else sites.set(site.spec, { ...site, at, all: [{ file: at, line: site.line }] });
     }
-    for (const child of edges.children) {
-      if (parent.has(child)) continue;
-      parent.set(child, at);
-      queue.push(child);
+    for (const { target } of edges.children) {
+      if (parent.has(target)) continue;
+      parent.set(target, at);
+      entry.set(target, entry.get(at));
+      queue.push(target);
     }
   }
 
@@ -1445,9 +1454,23 @@ function sourceReachFindings(file, offendingSpecs, packageDir, alreadyReported) 
     if (warm.has(spec) || mocked.has(spec) || alreadyReported.has(spec)) continue;
     const chain = [];
     for (let at = site.at; at != null; at = parent.get(at)) chain.unshift(at);
-    findings.push({ spec, form: site.form, line: 1, source: { file: site.at, line: site.line }, chain });
+    findings.push({
+      spec,
+      form: site.form,
+      line: importLineOf(source, entry.get(site.at)),
+      source: { file: site.at, line: site.line },
+      sites: site.all,
+      chain,
+    });
   }
   return findings;
+}
+
+/** The line of the first quoted occurrence of `spec` in `source`; 1 if none. */
+function importLineOf(source, spec) {
+  if (!spec) return 1;
+  const at = source.search(new RegExp(`['"]${escapeForRegexLiteral(spec)}['"]`));
+  return at < 0 ? 1 : lineOf(source, at);
 }
 
 /**
@@ -2034,7 +2057,7 @@ function sourceTargetFor(spec, packageDirs, consumerDir) {
  * @returns {{ packages: Array, artifactPackages: Set<string>, totalPackages: number,
  *            configTraps: Array, publishedCount: number }}
  */
-function scan(root) {
+function scan(root, reachScope = null) {
   // Per-scan, not per-process: `--self-test` rewrites fixture files BETWEEN
   // `check()` calls to exercise registry drift, and a cache that outlived a
   // scan would answer those later passes from the pre-rewrite content.
@@ -2050,6 +2073,8 @@ function scan(root) {
   const published = workspace.flatMap((p) => publishedSubpaths(p.json, p.name));
 
   const packages = [];
+  /** Test files the source-reach rule judged (its census: see `check`). */
+  let reachJudged = 0;
   /** Per-config latent traps: a published subpath this table would mangle. */
   const configTraps = [];
   for (const pkg of workspace) {
@@ -2143,12 +2168,20 @@ function scan(root) {
         for (const finding of direct) {
           clockedLoads.push({ ...finding, file: relative(root, file) });
         }
+        // The source reach is judged only on the test files in scope: every
+        // one under `--reach-all`, otherwise the ones the change adds or edits
+        // (the header's "The source reach" says why the reach cannot be judged
+        // on every file at once).
+        const relTest = relative(root, file).split('\\').join('/');
+        if (reachScope && !reachScope.has(relTest)) continue;
+        reachJudged++;
         const reported = new Set(direct.map((f) => f.spec));
         for (const finding of sourceReachFindings(file, offendingSpecs, pkg.dir, reported)) {
           clockedLoads.push({
             ...finding,
             file: relative(root, file),
             source: { file: relative(root, finding.source.file), line: finding.source.line },
+            sites: finding.sites.map((site) => ({ file: relative(root, site.file), line: site.line })),
             chain: finding.chain.map((f) => relative(root, f)),
           });
         }
@@ -2168,7 +2201,14 @@ function scan(root) {
     });
   }
 
-  return { packages, artifactPackages, totalPackages: workspace.length, configTraps, publishedCount: published.length };
+  return {
+    packages,
+    artifactPackages,
+    totalPackages: workspace.length,
+    configTraps,
+    publishedCount: published.length,
+    reachJudged,
+  };
 }
 
 // ── the gate ────────────────────────────────────────────────────────────────
@@ -2262,9 +2302,39 @@ function remediationHint(pkg, deps) {
   return lines.join('\n');
 }
 
-function check(root, registry) {
+/**
+ * The failure text for a load reached in the SOURCE under test. The convention
+ * sentence and the remedy are the direct rule's own words, so one rule speaks
+ * with one voice; what differs is where the load sits and how the test got there.
+ */
+function sourceReachFailure(load) {
+  const shown = load.sites.slice(0, 4).map((site) => `${site.file}:${site.line}`);
+  if (load.sites.length > shown.length) shown.push(`${load.sites.length - shown.length} more`);
+  return (
+    `${load.file}:${load.line}: reaches \`${load.form}('${load.spec}')\` in the source under test, at ${shown.join(', ')} —\n` +
+    '    inside a function body, a CLOCKED window for whichever case first calls it.\n' +
+    `    Reached during collection through (the first site): ${load.chain.join(' → ')}\n` +
+    `    Nothing in that reach loads \`${load.spec}\` at module scope, this file does not \`vi.mock\` it, and this\n` +
+    "    package resolves it through `dist/`, so the case that first gets past the source's own gates transforms\n" +
+    "    that dependency's whole module graph while a `testTimeout` is running. Measured on the incident this half\n" +
+    '    comes from: 3.2s for that one load, against a 5000ms window that timed out on a loaded shard.\n' +
+    '    THE CONVENTION: clocked windows measure behaviour, never loading — a test that boots a real\n' +
+    '    plugin chain pays its first load at module top.\n' +
+    '    Add a module-top side-effect import to THIS test file so the transform is paid during COLLECTION:\n' +
+    `      import '${load.spec}';\n` +
+    '    The source keeps its dynamic import — this only decides WHERE the first load is paid. Widening the\n' +
+    '    timeout instead relocates the cliff to the next heavier shard.\n' +
+    '    This half judges only the test files a change adds or edits: static reach cannot tell which case\n' +
+    "    calls which handler, so it is not asked of every file at once (this gate's header, \"The source reach\")."
+  );
+}
+
+function check(root, registry, { reachScope = null } = {}) {
   const failures = [];
-  const { packages, artifactPackages, totalPackages, configTraps, publishedCount } = scan(root);
+  const { packages, artifactPackages, totalPackages, configTraps, publishedCount, reachJudged } = scan(
+    root,
+    reachScope,
+  );
 
   // Census guard. Every reading below is a scan result, and a scan that has
   // quietly stopped matching reports a spotless repo — the #4868 family. Zero
@@ -2292,6 +2362,10 @@ function check(root, registry) {
       );
     }
     for (const load of pkg.clockedLoads ?? []) {
+      if (load.chain) {
+        failures.push(sourceReachFailure(load));
+        continue;
+      }
       failures.push(
         `${load.file}:${load.line}: \`${load.form}('${load.spec}')\` is paid inside a function body — a CLOCKED window.\n` +
           (load.via
@@ -2404,7 +2478,7 @@ function check(root, registry) {
     );
   }
 
-  return { failures, packages, measured, publishedCount };
+  return { failures, packages, measured, publishedCount, reachJudged };
 }
 
 // ── reporting ───────────────────────────────────────────────────────────────
@@ -3809,6 +3883,33 @@ function selfTest() {
 
 // ── entry point ─────────────────────────────────────────────────────────────
 
+/**
+ * The files a change adds or edits since its merge base with `origin/main` (or
+ * `ref`): committed, staged, unstaged and untracked alike, deletions excluded,
+ * as repo-relative paths. `{ base: null, tried }` when no base can be found —
+ * the caller reports that instead of passing over it.
+ */
+function changedFilesSinceMergeBase(root, ref) {
+  const git = (...args) =>
+    execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  const tried = ref ? [ref] : ['origin/main', 'main'];
+  let base = null;
+  for (const candidate of tried) {
+    try {
+      base = git('merge-base', 'HEAD', candidate);
+      break;
+    } catch {
+      /* try the next ref */
+    }
+  }
+  if (!base) return { base: null, tried, files: new Set() };
+  const listed = [
+    ...git('diff', '--name-only', '--diff-filter=d', base).split('\n'),
+    ...git('ls-files', '--others', '--exclude-standard').split('\n'),
+  ];
+  return { base, tried, files: new Set(listed.filter(Boolean)) };
+}
+
 const argv = process.argv.slice(2);
 if (argv.includes('--self-test')) {
   if (selfTest() !== SELF_TEST_VERDICT) {
@@ -3822,8 +3923,28 @@ if (argv.includes('--self-test')) {
 } else if (argv.includes('--list')) {
   printList(REPO_ROOT);
 } else {
-  const { failures, packages, measured, publishedCount } = check(REPO_ROOT, KNOWN_UNALIASED_TEST_IMPORTS);
-  if (process.env.PROBE_DUMP) writeFileSync(process.env.PROBE_DUMP, JSON.stringify(packages.flatMap((p) => p.clockedLoads.filter((l) => l.chain)), null, 0)); // PROBE-TEMP
+  const reachAll = argv.includes('--reach-all');
+  const fromAt = argv.indexOf('--changed-from');
+  const fromRef = fromAt >= 0 ? argv[fromAt + 1] : null;
+  if (fromAt >= 0 && (!fromRef || fromRef.startsWith('--'))) {
+    console.error('check-test-source-alias: --changed-from needs a ref (for example origin/main).');
+    process.exit(2);
+  }
+  const changed = reachAll ? null : changedFilesSinceMergeBase(REPO_ROOT, fromRef);
+  const { failures, packages, measured, publishedCount, reachJudged } = check(
+    REPO_ROOT,
+    KNOWN_UNALIASED_TEST_IMPORTS,
+    { reachScope: changed ? changed.files : null },
+  );
+  if (changed && !changed.base) {
+    // A rule that cannot run must not read as a rule that passed.
+    failures.push(
+      `the source-reach half could not find a merge base with ${changed.tried.join(' or ')}, so it judged nothing.\n` +
+        '    It judges the test files a change adds or edits, measured from that base. Fetch the base\n' +
+        '    (`git fetch origin main`, deepening a shallow clone until HEAD meets it), name another with\n' +
+        '    `--changed-from <ref>`, or run the census over every test file with `--reach-all`.',
+    );
+  }
   if (failures.length > 0) {
     console.error('check-test-source-alias FAILED\n');
     for (const failure of failures) console.error(`  ✗ ${failure}\n`);
@@ -3837,7 +3958,11 @@ if (argv.includes('--self-test')) {
   console.log(
     `check-test-source-alias OK — ${packages.length} packages with tests scanned; ` +
       `${measured.size} registered as still resolving a workspace dep through \`dist/\`; ` +
-      `${publishedCount} published subpath(s) resolved through every alias table.` +
+      `${publishedCount} published subpath(s) resolved through every alias table; ` +
+      (reachAll
+        ? `the source reach judged every test file (${reachJudged} with a measured specifier to reach).`
+        : `the source reach judged ${reachJudged} test file(s) changed since ${changed.base.slice(0, 10)}` +
+          (fromRef ? ` (merge base with ${fromRef}).` : '.')) +
       (outOfAliasHalf === 0
         ? ''
         : ` ${outOfAliasHalf} of them under ${ALIAS_HALF_EXCLUDED_DIR}/ were not asked the vitest-alias half (decision F).`),
