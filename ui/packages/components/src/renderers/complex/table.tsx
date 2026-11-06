@@ -24,7 +24,7 @@ import {
   TableRow, 
   TableCell, 
   TableCaption 
-} from '../../ui';
+} from '../../ui/table';
 
 // A simple data-driven table
 ComponentRegistry.register('table', 

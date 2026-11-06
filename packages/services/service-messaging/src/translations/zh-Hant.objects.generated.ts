@@ -462,6 +462,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "地區語言",
         help: "註冊時提交的裝置地區語言，隨裝置儲存；推播不依它呈現：推播以收件人的語言送達（其使用者語言，其次為部署預設語言）。"
       },
+      origin: {
+        label: "伺服器來源",
+        help: "註冊裝置時主控台的載入來源（例如 https://crm.example.com）。發往該裝置的每則推播都會攜帶它，因此儲存了多個伺服器的行動端外殼會在這個伺服器上開啟推播。未帶來源註冊的裝置此項為空。"
+      },
       name: {
         label: "裝置名稱"
       },

@@ -6,10 +6,11 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { resolveFilterPlaceholders, toFilterNodeSafely } from '@object-ui/core';
+import { resolveFilterPlaceholders, toFilterNodeSafely, type FilterTokenScope } from '@object-ui/core';
 import { useFilterScope } from '@object-ui/react';
+import { usePermissions } from '@object-ui/permissions';
 import { parseFilterAST } from '@objectstack/spec/data';
 import { parseUrlFilterTriples, RANGE_OP_PARAM, serializeDrillFilterParams } from './drillUrlFilters.js';
 
@@ -151,8 +152,50 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * `useOpenRecordList` — the console's implementation of the drill "escape
- * hatch" (`DrillNavigationContext.openRecordList`).
+ * A drill's filter as the list route writes it EXACTLY, or `null` when the
+ * route cannot say it.
+ *
+ * The drill escape hatch ("Open in list", `drillDown.target: 'navigate'`)
+ * promises the list behind the number the user clicked: the bucket AND the
+ * widget's filter AND the measure's drill scope, all composed into `filter`.
+ * `serializeDrillFilterParams` alone keeps the later of two conditions on one
+ * param and skips an `$in` / `$nin` comparand, which writes a WIDER list than
+ * the drawer shows (a `status = sent` bucket under a `status = paid` measure
+ * scope lists every sent invoice instead of none). So the destination is
+ * offered only through {@link exactRecordListFilter}, the rule a related list's
+ * "View all" already follows: every condition written, or no destination.
+ *
+ * Placeholders are resolved FIRST, with the same scope the navigate arm
+ * resolves them with (see {@link useOpenRecordList}), because exactness is a
+ * question about the comparands the URL will carry, and a literal
+ * `{current_user_id}` is not one of them.
+ */
+export function drillRecordListFilter(
+  objectName: string,
+  filter: Record<string, unknown> | undefined,
+  scope: FilterTokenScope,
+  canRead: (objectName: string, field: string) => boolean,
+): Record<string, unknown> | null {
+  // Expand EVERY placeholder vocabulary in one call — date macros and
+  // session tokens. Calling only one of the two is the defect this helper
+  // exists to prevent (objectstack-ai/objectstack#3574): `{today}` would work and
+  // `{current_user_id}` would silently not.
+  const runtimeFilter = resolveFilterPlaceholders(filter, scope);
+  return exactRecordListFilter([runtimeFilter], (field) => canRead(objectName, field));
+}
+
+/** The pair a host hands `DrillNavigationProvider`. */
+export interface RecordListDrillNavigation {
+  /** Navigate to the list behind a drill; does nothing when `canOpenRecordList` answers `false`. */
+  openRecordList: (objectName: string, filter?: Record<string, unknown>) => void;
+  /** Whether the list route can say this drill's filter exactly. */
+  canOpenRecordList: (objectName: string, filter?: Record<string, unknown>) => boolean;
+}
+
+/**
+ * `useRecordListDrillNavigation` — the console's implementation of the drill
+ * "escape hatch" (`DrillNavigationContext.openRecordList` and
+ * `DrillNavigationContext.canOpenRecordList`).
  *
  * Navigates to the object's ADR-0055 bare data surface, scoped by a record
  * filter, using the console's `/apps/:appName/:object/data?filter[...]` route
@@ -160,6 +203,15 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * range serializes to `filter[field][gte]=…&filter[field][lt]=…` (objectstack-ai/objectstack#1752). Wire it
  * into a `DrillNavigationProvider` so the dashboard/report drill drawers can offer
  * "Open in list →" and honor `drillDown.target: 'navigate'`.
+ *
+ * ## Only an exact destination is offered
+ *
+ * `canOpenRecordList` answers whether {@link drillRecordListFilter} can write
+ * the whole drill filter, and the widgets draw "Open in list" and take the
+ * navigate arm only on `true`; otherwise the drill stays in the drawer, the
+ * same fallback as a host that wired no navigation. `openRecordList` writes
+ * that same exact filter, and refuses to navigate when there is none, so a
+ * caller that skipped the question still never lands on a wider list.
  *
  * ## Placeholders are resolved HERE, because this is where the scope is
  * (objectui#9022)
@@ -198,24 +250,39 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * everything else through untouched, so a placeholder-free drill produces a
  * byte-identical URL.
  */
-export function useOpenRecordList(): (objectName: string, filter?: Record<string, unknown>) => void {
+export function useRecordListDrillNavigation(): RecordListDrillNavigation {
   const navigate = useNavigate();
   const { appName } = useParams<{ appName?: string }>();
   // Session scope for `{current_user_id}` / `{current_org_id}`. Read at hook
-  // level — the returned handler is a callback, and hooks cannot be called from
-  // inside it. `FilterScopeProvider` memoizes its value on the two ids, so this
-  // does not churn the callback identity on unrelated renders.
+  // level — the returned handlers are callbacks, and hooks cannot be called
+  // from inside them. `FilterScopeProvider` memoizes its value on the two ids,
+  // so this does not churn the callback identity on unrelated renders.
   const filterScope = useFilterScope();
-
-  return useCallback(
-    (objectName: string, filter?: Record<string, unknown>) => {
-      // Expand EVERY placeholder vocabulary in one call — date macros and
-      // session tokens. Calling only one of the two is the defect this helper
-      // exists to prevent (objectstack-ai/objectstack#3574): `{today}` would work and
-      // `{current_user_id}` would silently not.
-      const runtimeFilter = resolveFilterPlaceholders(filter, filterScope);
-      navigate(recordListPath(appName, objectName, runtimeFilter));
-    },
-    [navigate, appName, filterScope],
+  // A condition on a field the viewer cannot read is one `ObjectDataPage`
+  // drops, so it is a condition the destination would not keep.
+  const { checkField } = usePermissions();
+  const canRead = useCallback(
+    (objectName: string, field: string) => checkField(objectName, field, 'read'),
+    [checkField],
   );
+
+  const canOpenRecordList = useCallback(
+    (objectName: string, filter?: Record<string, unknown>) =>
+      drillRecordListFilter(objectName, filter, filterScope, canRead) !== null,
+    [filterScope, canRead],
+  );
+  const openRecordList = useCallback(
+    (objectName: string, filter?: Record<string, unknown>) => {
+      const exact = drillRecordListFilter(objectName, filter, filterScope, canRead);
+      if (exact === null) return;
+      navigate(recordListPath(appName, objectName, exact));
+    },
+    [navigate, appName, filterScope, canRead],
+  );
+  return useMemo(() => ({ openRecordList, canOpenRecordList }), [openRecordList, canOpenRecordList]);
+}
+
+/** The navigate half of {@link useRecordListDrillNavigation}. */
+export function useOpenRecordList(): (objectName: string, filter?: Record<string, unknown>) => void {
+  return useRecordListDrillNavigation().openRecordList;
 }

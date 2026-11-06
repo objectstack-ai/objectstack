@@ -344,8 +344,18 @@ export interface PendingSchemaWork {
    * `widen_datetime_columns` it is the table's row count, because MySQL's
    * `ALTER … MODIFY` is a full rebuild holding a metadata lock — which is the
    * number that decides "now" versus "in a maintenance window".
+   *
+   * For `rebuild_table` it is `0`: the table is rebuilt only while empty. For
+   * `refuse_table` it is the row count the refusal names.
    */
   rows?: number;
+  /**
+   * [#30636] Set on a `refuse_table` entry only: the refusal's prose, rendered
+   * by `renderExistingTableAdoptionRefusal` — the renderer `initObjects`
+   * throws through — so the plan, `os migrate apply` and a `--json` reader
+   * read one text.
+   */
+  refusal?: string;
 }
 
 /**
@@ -359,6 +369,14 @@ export interface PendingSchemaWork {
  * They are rendered under their own heading for that reason: the additive
  * section tells the operator the work is never data-losing, and that claim must
  * not silently come to cover a row rewrite.
+ *
+ * [#30636] Two more describe the one existing-table shape the additive path
+ * cannot adopt — keyed by `_id`, with no `id` column (`existing-table-refusal.ts`):
+ * `rebuild_table` drops and recreates it while it is EMPTY (in place: it is
+ * not additive, though it deletes no row), and `refuse_table` is what the sync
+ * does when it holds rows — nothing. It is no work at all, so it is neither
+ * additive nor in place ({@link isRefusedSchemaWork}); the entry carries the
+ * refusal's text, and `os migrate apply` leaves that table exactly as it is.
  */
 export type PendingSchemaWorkKind =
   | 'create_table'
@@ -366,11 +384,18 @@ export type PendingSchemaWorkKind =
   | 'normalize_datetime_storage'
   | 'normalize_time_storage'
   | 'widen_datetime_columns'
-  | 'widen_time_columns';
+  | 'widen_time_columns'
+  | 'rebuild_table'
+  | 'refuse_table';
+
+/** [#30636] True for the kind that is a refusal — work the sync will NOT do. */
+export function isRefusedSchemaWork(kind: PendingSchemaWorkKind): boolean {
+  return kind === 'refuse_table';
+}
 
 /** True for the kinds that rewrite or rebuild existing data rather than adding to it. */
 export function isInPlaceSchemaWork(kind: PendingSchemaWorkKind): boolean {
-  return kind !== 'create_table' && kind !== 'add_columns';
+  return kind !== 'create_table' && kind !== 'add_columns' && !isRefusedSchemaWork(kind);
 }
 
 /** Ops that act on an index rather than a column — reconciled without a table rebuild. */

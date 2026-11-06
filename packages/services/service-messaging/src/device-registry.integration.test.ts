@@ -25,7 +25,10 @@
  *  - a takeover whose write is refused leaves the previous holder's row in
  *    place: the delete and the write are one engine transaction;
  *  - the database refuses a second holder of a token (the unique index), and
- *    two concurrent registrations of one token end with one row.
+ *    two concurrent registrations of one token end with one row;
+ *  - the registration's `origin` (ruling B on the push delivery decision) is
+ *    stored on the row, `null` without one, replaced by a refresh, answered
+ *    by `listDevices`, and copied into the data of a push to that device.
  *
  * Refusals assert `code` AND `status` (ADR-0112).
  */
@@ -35,9 +38,11 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SysUser } from '@objectstack/platform-objects';
 import { validationFailureDetails } from '@objectstack/types';
+import { PushDeliveryDataSchema } from '@objectstack/spec/api';
 import { UserDevice } from './objects/user-device.object.js';
 import { MessagingService } from './messaging-service.js';
 import { USER_DEVICE_OBJECT } from './device-registry.js';
+import { createPushChannel } from './push-channel.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const SYS = { context: { isSystem: true } } as any;
@@ -258,5 +263,63 @@ describe('push device registry: INotificationService device members over sys_use
             service.registerDevice(bob, { token: 'tok-race', platform: 'ios', deviceId: 'b2' }),
         ]);
         expect(await rows({ token: 'tok-race' })).toHaveLength(1);
+    });
+});
+
+describe('push device registry: the sending server (origin) is stored, read back and pushed', () => {
+    it('stores the registration\'s origin on the row and listDevices answers it', async () => {
+        const { service, alice, rows } = await boot();
+        await service.registerDevice(alice, { token: 'tok-o', platform: 'ios', deviceId: 'dev-o', origin: 'https://crm.example.com' });
+
+        const [row] = await rows({ device_id: 'dev-o' });
+        expect(row.origin).toBe('https://crm.example.com');
+        const [listed] = await service.listDevices(alice);
+        expect(listed.origin).toBe('https://crm.example.com');
+    });
+
+    it('stores null for a registration without origin, and the device answers no origin member', async () => {
+        const { service, alice, rows } = await boot();
+        await service.registerDevice(alice, { token: 'tok-n', platform: 'android', deviceId: 'dev-n' });
+
+        const [row] = await rows({ device_id: 'dev-n' });
+        expect(row.origin ?? null).toBeNull();
+        const [listed] = await service.listDevices(alice);
+        expect(listed).not.toHaveProperty('origin');
+    });
+
+    it('a refresh replaces the stored origin with the one it names, as it does appId and locale', async () => {
+        const { service, alice, rows } = await boot();
+        await service.registerDevice(alice, { token: 'tok-r', platform: 'ios', deviceId: 'dev-r', origin: 'https://a.example.com' });
+        await service.registerDevice(alice, { token: 'tok-r', platform: 'ios', deviceId: 'dev-r', origin: 'http://localhost:3000' });
+        expect((await rows({ device_id: 'dev-r' }))[0].origin).toBe('http://localhost:3000');
+
+        await service.registerDevice(alice, { token: 'tok-r', platform: 'ios', deviceId: 'dev-r' });
+        expect((await rows({ device_id: 'dev-r' }))[0].origin ?? null).toBeNull();
+    });
+
+    it('a push to the device carries the stored origin in its data; a device without one gets none', async () => {
+        const { service, alice } = await boot();
+        await service.registerDevice(alice, { token: 'tok-s', platform: 'ios', deviceId: 'with-origin', origin: 'https://crm.example.com' });
+        await service.registerDevice(alice, { token: 'tok-t', platform: 'android', deviceId: 'without-origin' });
+
+        const sent: Array<{ token: string; data: Record<string, string> }> = [];
+        const channel = createPushChannel({
+            getPush: () => ({
+                vendors: () => ['apns', 'fcm'],
+                async send(m) { sent.push({ token: m.token, data: m.data }); return { status: 'sent', messageId: m.token }; },
+            }),
+            devices: service,
+        });
+        const result = await channel.send({ logger: silent } as any, {
+            channel: 'push',
+            recipient: alice,
+            notification: { notificationId: 'ntf_o', title: 'Deal won', body: 'Acme', actionUrl: '/opportunity/1' },
+        } as any);
+
+        expect(result.ok).toBe(true);
+        const byToken = Object.fromEntries(sent.map((m) => [m.token, m.data]));
+        expect(byToken['tok-s']).toEqual({ notificationId: 'ntf_o', route: '/opportunity/1', origin: 'https://crm.example.com' });
+        expect(byToken['tok-t']).toEqual({ notificationId: 'ntf_o', route: '/opportunity/1' });
+        for (const m of sent) expect(PushDeliveryDataSchema.safeParse(m.data).success).toBe(true);
     });
 });

@@ -114,26 +114,43 @@ concurrency:
   cancel-in-progress: true
 
 # ── THE TWO SPEEDS (#22998) ──────────────────────────────────────────────────
-# A `pull_request` or `merge_group` run carries the FAST SET: `Build Core`,
-# `Test Core` (affected-only) and `Build Docs`. `main`'s 4-hourly `schedule` run,
-# its `push` runs and an on-demand `workflow_dispatch` carry the FULL BATTERY:
-# the fast set plus the four jobs below that spell
+# A `pull_request` run carries the FAST SET: `Build Core`, `Test Core`
+# (affected-only) and `Build Docs`. A `merge_group` run carries the fast set
+# plus the three `dogfood` shards (#30461, ruling record 6663883327, letter B),
+# whose job alone spells
+#
+#     github.event_name != 'pull_request'
+#
+# in its `if:`, so a dogfood red shows on the queue build of the entry that
+# carries it rather than first on `main`'s push run after it. It is advisory
+# there: the context is outside the required set (below), so the queue may
+# merge the entry before or despite the shards.
+# `main`'s 4-hourly `schedule` run, its `push` runs and an on-demand
+# `workflow_dispatch` carry the FULL BATTERY: all of that plus the three jobs
+# below that spell
 #
 #     github.event_name != 'pull_request' && github.event_name != 'merge_group'
 #
-# in their `if:` — `temporal-conformance`, `dogfood` (three shards),
-# `dogfood-verify` and `ui-published-artifacts`. Nothing is deleted: the jobs
-# moved off the per-PR path, the last one never had one (#26717). A red in one of them is a main-red for the owning lane, and the
-# publish lane reads the full battery before its approval (release.yml's
-# `full-battery` job, `scripts/ci/scheduled-full-run.mjs --release-gate`).
+# in their `if:` — `temporal-conformance`, `dogfood-verify` and
+# `ui-published-artifacts`. Nothing is deleted: the jobs moved off the per-PR
+# path, the last one never had one (#26717). A red in one of them is a main-red
+# for the owning lane, and the publish lane reads the full battery before its
+# approval (release.yml's `full-battery` job,
+# `scripts/ci/scheduled-full-run.mjs --release-gate`). ⛔ No affected-only
+# dogfood filter on the queue: the shards run on every entry, through the
+# `core` output, which is 'true' on `merge_group` (letter C was not ruled).
+# The queue enforces only the ruleset's required set, and `Dogfood Regression
+# Gate` is outside it since #22998 (check:required-contexts' tombstone); this
+# file does not decide whether it rejoins.
 #
-# Spelled as a DENY-list of the two per-PR events on purpose — the filter
+# Spelled as a DENY-list of the per-PR events on purpose — the filter
 # contract's half 1 below, applied to events: a trigger added to `on:` later
 # RUNS these jobs, and the failure direction of a wrong guess is a slower PR,
 # never a full battery that silently stopped running. `dogfood-gate` keeps
-# `if: always()` (check:shard-attestation pins it): with both legs skipped it
-# counts zero expected attestations and concludes success, exactly as on a
-# filter-skipped diff.
+# `if: always()` (check:shard-attestation pins it): with both legs skipped (a
+# pull request) it counts zero expected attestations and concludes success,
+# exactly as on a filter-skipped diff; on a queue build it counts the three
+# shards' credentials and `dogfood-verify`'s skip as zero expected.
 
 jobs:
   filter:
@@ -158,8 +175,9 @@ jobs:
       # 'true'` did.
       docs: ${{ github.event_name != 'merge_group' && steps.changes.outputs.docs || 'true' }}
       # Read by `test-plan`, `test` (ORed with `crosspkg`) and `build-core`,
-      # and on push / schedule by `dogfood`, `dogfood-verify` and
-      # `temporal-conformance` — see the `core` filter below and each job's `if:`.
+      # on merge_group / push / schedule by `dogfood`, and on push / schedule
+      # by `dogfood-verify` and `temporal-conformance` — see the `core` filter
+      # below and each job's `if:`.
       core: ${{ github.event_name != 'merge_group' && steps.changes.outputs.core || 'true' }}
       # Gates the `test` job ONLY, ORed with `core` — see the `crosspkg`
       # filter below and the `test` job's `if:` (#9829, #10015).
@@ -2390,9 +2408,11 @@ jobs:
     # below — the shard count can change without touching it.
     name: Dogfood Regression Gate (${{ matrix.shard }}/3)
     needs: filter
-    # See THE FILTER CONTRACT on the filter job's outputs (#4928). Full battery
-    # only: see THE TWO SPEEDS above `jobs:` (#22998).
-    if: ${{ !cancelled() && needs.filter.outputs.core != 'false' && github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
+    # See THE FILTER CONTRACT on the filter job's outputs (#4928). The queue
+    # build and the full battery, never a pull request: see THE TWO SPEEDS
+    # above `jobs:` (#22998; `merge_group` left this deny-list by #30461,
+    # ruling record 6663883327). `dogfood-verify` below keeps both events.
+    if: ${{ !cancelled() && needs.filter.outputs.core != 'false' && github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     # Backstop only — the stall guard on the test step is the primary detector
     # for a #4250-style hang (see Test Core). 30 min is ~6× a shard (~5 min;
@@ -2704,11 +2724,13 @@ jobs:
           overwrite: true
 
   dogfood-gate:
-    # Stable check name for a SHARDED job (#3622 follow-up). Since #22998 its
-    # legs run in the full battery only (THE TWO SPEEDS above `jobs:`) and the
-    # context leaves the required set; on a PR or queue build both legs skip
-    # and this gate counts zero expected attestations. The history below is
-    # why the name and the `if: always()` stay.
+    # Stable check name for a SHARDED job (#3622 follow-up). Since #22998 the
+    # context is outside the required set (THE TWO SPEEDS above `jobs:`). On a
+    # PR both legs skip and this gate counts zero expected attestations; on a
+    # queue build (since #30461) the three dogfood shards run and are counted,
+    # while `dogfood-verify` skips and is judged with zero expected; the full
+    # battery runs and counts both. The history below is why the name and the
+    # `if: always()` stay.
     #
     # Branch protection required the context "Dogfood Regression Gate". Once
     # the job became a 2-way matrix its checks publish as "Dogfood Regression

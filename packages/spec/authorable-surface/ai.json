@@ -46,6 +46,7 @@
     "ai/BlueprintDashboard:label",
     "ai/BlueprintDashboard:name",
     "ai/BlueprintDashboard:widgets",
+    "ai/BlueprintField:defaultValue",
     "ai/BlueprintField:expression",
     "ai/BlueprintField:label",
     "ai/BlueprintField:name",

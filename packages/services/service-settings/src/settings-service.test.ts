@@ -407,6 +407,37 @@ describe('SettingsService — resetNamespace / built-in reset action', () => {
   });
 });
 
+describe('SettingsService — the built-in action answers are written in the caller\'s language', () => {
+  it('the built-in reset answers in display.locale: zh-TW in Traditional, ru in Russian', async () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(brandingSettingsManifest);
+    await svc.set('branding', 'workspace_name', 'Acme');
+    const cleared = await svc.runAction('branding', 'reset', null, {}, { locale: 'zh-TW' });
+    expect(cleared).toMatchObject({ ok: true, severity: 'info', message: '已清除 1 個已儲存的值；環境變數/預設設定已重新生效。' });
+    expect((await svc.get('branding', 'workspace_name')).source).toBe('default');
+
+    const nothing = await svc.runAction('branding', 'reset', null, {}, { locale: 'ru' });
+    expect(nothing).toMatchObject({
+      ok: true,
+      message: 'Нет сохранённых значений для очистки: уже используются настройки из окружения или по умолчанию.',
+    });
+  });
+
+  it('an action with no handler is refused in display.locale; no locale, or one off the table, keeps English', async () => {
+    const svc = new SettingsService();
+    svc.registerManifest(mailSettingsManifest);
+    expect(await svc.runAction('mail', 'nope', null, {}, { locale: 'de-DE' })).toMatchObject({
+      ok: false,
+      severity: 'error',
+      message: 'Für die Aktion „nope“ in „mail“ ist kein Handler registriert.',
+    });
+    for (const display of [{}, { locale: 'sw-KE' }]) {
+      expect((await svc.runAction('mail', 'nope', null, {}, display)).message)
+        .toBe("No handler registered for action 'nope' in 'mail'.");
+    }
+  });
+});
+
 describe('SettingsService — save-time validation (required/visible/pattern)', () => {
   function aiService(): SettingsService {
     // #8026 — same reason as `mailService` below: the provider configs these
@@ -2743,5 +2774,109 @@ describe('auth lockout window is enforced again (#7169)', () => {
         ).not.toThrow();
       }
     }
+  });
+});
+
+describe('SettingsService — a clear goes through an env pin, every other write does not (#30385)', () => {
+  // Two keys a pin can sit on: one below the global rung, one on it.
+  const PINNED = {
+    namespace: 'pinned',
+    version: 1,
+    label: 'Pinned',
+    scope: 'tenant',
+    readPermission: 'setup.access',
+    writePermission: 'setup.write',
+    specifiers: [
+      { type: 'text', key: 'motto', label: 'Motto', scope: 'tenant', default: 'none' },
+      { type: 'text', key: 'banner', label: 'Banner', scope: 'global', default: 'none' },
+    ],
+  } as any;
+  const orgAdmin = { enforced: true, permissions: ['setup.access', 'setup.write'], userId: 'usr_org_admin' };
+  const platformAdmin = {
+    enforced: true,
+    permissions: ['setup.access', 'setup.write', 'manage_platform_settings'],
+    userId: 'usr_platform_admin',
+  };
+  const refusalOf = (p: Promise<unknown>) => p.then(() => undefined, (e: any) => e);
+
+  /** A stored value under a pin that is set after it: the operator's recovery. */
+  async function pinnedOverStored() {
+    const env: Record<string, string | undefined> = {};
+    const svc = new SettingsService({ env });
+    svc.registerManifest(PINNED);
+    await svc.set('pinned', 'motto', 'Stored');
+    env.OS_PINNED_MOTTO = 'Pinned';
+    return { env, svc };
+  }
+
+  it('a clear clears the stored value beneath the pin and changes nothing in force: the answer still reads env, locked', async () => {
+    const { env, svc } = await pinnedOverStored();
+    const changes: unknown[] = [];
+    svc.subscribe('pinned', (e) => { changes.push(e); });
+
+    const answer = await svc.set('pinned', 'motto', null);
+    expect(answer).toMatchObject({ value: 'Pinned', source: 'env', locked: true });
+    expect(answer.lockedReason).toContain('OS_PINNED_MOTTO');
+    expect(await svc.get('pinned', 'motto')).toMatchObject({ value: 'Pinned', source: 'env', locked: true });
+    expect(changes).toEqual([expect.objectContaining({ key: 'motto', action: 'reset' })]);
+
+    // Lift the pin: the key falls back to its default, not to the old value.
+    delete env.OS_PINNED_MOTTO;
+    expect(await svc.get('pinned', 'motto')).toMatchObject({ value: 'none', source: 'default', locked: false });
+  });
+
+  it('`undefined` is a clear too, alongside an ordinary write in the same batch', async () => {
+    const { env, svc } = await pinnedOverStored();
+    await svc.setMany('pinned', { motto: undefined, banner: 'Saved' });
+    delete env.OS_PINNED_MOTTO;
+    expect((await svc.get('pinned', 'motto')).source).toBe('default');
+    expect((await svc.get('pinned', 'banner')).value).toBe('Saved');
+  });
+
+  it('every other write is refused SETTINGS_LOCKED as before, the empty string included, and the whole batch stores nothing', async () => {
+    const { env, svc } = await pinnedOverStored();
+    for (const value of ['Other', '']) {
+      const refusal = await refusalOf(svc.set('pinned', 'motto', value));
+      expect(refusal).toBeInstanceOf(SettingsLockedError);
+      expect(refusal).toMatchObject({ code: 'SETTINGS_LOCKED', reason: 'locked-by-env', key: 'motto' });
+    }
+    const batch = await refusalOf(svc.setMany('pinned', { banner: 'Saved', motto: 'Other' }));
+    expect(batch).toMatchObject({ code: 'SETTINGS_LOCKED', reason: 'locked-by-env', key: 'motto' });
+
+    delete env.OS_PINNED_MOTTO;
+    expect(await svc.get('pinned', 'motto')).toMatchObject({ value: 'Stored', source: 'tenant' });
+    expect((await svc.get('pinned', 'banner')).source).toBe('default');
+  });
+
+  it('a locked row at an upper rung still refuses a clear below it', async () => {
+    const { env, svc } = await pinnedOverStored();
+    await (svc as any).upsertRow({
+      namespace: 'pinned', key: 'motto', scope: 'global', user_id: null, value: 'Platform motto',
+      value_enc: null, encrypted: false, locked: true, locked_reason: 'Set by the platform.',
+    });
+
+    const refusal = await refusalOf(svc.set('pinned', 'motto', null));
+    expect(refusal).toBeInstanceOf(SettingsLockedError);
+    expect(refusal).toMatchObject({ code: 'SETTINGS_LOCKED', reason: 'locked-by-global', key: 'motto' });
+
+    delete env.OS_PINNED_MOTTO;
+    expect(await svc.get('pinned', 'motto')).toMatchObject({ value: 'Platform motto', source: 'global', locked: true });
+  });
+
+  it('a locked row at the write\'s own rung refuses a non-platform clear, and the platform writes through it', async () => {
+    const env: Record<string, string | undefined> = { OS_PINNED_BANNER: 'Pinned banner' };
+    const svc = new SettingsService({ env });
+    svc.registerManifest(PINNED);
+    await (svc as any).upsertRow({
+      namespace: 'pinned', key: 'banner', scope: 'global', user_id: null, value: 'Platform banner',
+      value_enc: null, encrypted: false, locked: true, locked_reason: 'Set by the platform.',
+    });
+
+    const refusal = await refusalOf(svc.setMany('pinned', { banner: null }, orgAdmin));
+    expect(refusal).toBeInstanceOf(SettingsLockedError);
+    expect(refusal).toMatchObject({ code: 'SETTINGS_LOCKED', reason: 'locked-by-global', key: 'banner' });
+
+    const answer = await svc.setMany('pinned', { banner: null }, platformAdmin);
+    expect(answer.banner).toMatchObject({ value: 'Pinned banner', source: 'env', locked: true });
   });
 });

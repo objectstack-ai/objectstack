@@ -174,8 +174,13 @@ Per request, in this order:
 2. A `?locale=` query parameter
 3. The stack's `defaultLocale`
 
-Within the bundle, matching walks: exact (`zh-CN`) → case-insensitive →
-**base language** (`zh-CN` → `zh`) → variant expansion (`zh` → `zh-CN`). If
+Within the bundle, matching walks `resolveLocaleAmong`'s five steps
+(`@objectstack/spec/system`): exact (`zh-CN`) → case-insensitive → the
+**platform locale table** language (`zh-TW` / `zh-HK` / `zh-MO` → `zh-Hant`,
+`zh` → `zh-CN`) → **base language** (`zh-CN` → `zh`) → variant expansion
+(`es-MX` → `es-ES`, the first registered variant). The table step only adds
+answers for the table's aliases: a bundle with no `zh-Hant` still serves
+`zh-TW` its `zh-CN` strings. If
 nothing matches, the request walks the stack's **declared** fallback locale
 (`fallbackLocale`, else `defaultLocale`), and finally the literal label on the
 metadata. **Translation lookup never throws** — a missing string degrades to
@@ -235,7 +240,10 @@ in no package. `GET /meta/:type/:name`, `GET /meta/:type` and the book tree
 Objects follow the same rule for their `label`, `pluralLabel` and
 `description`: a value that differs from the owning package's declaration (a
 label an [object extension](/docs/data-modeling/object-extensions) contributes,
-for one) is served as written.
+for one) is served as written. An extension that renames the object and sets
+no `pluralLabel` is served with no plural in every locale, since the catalog's
+`pluralLabel` translates the old name, unless the owning package's `.custom`
+pair saves a translation of `objects.<name>.pluralLabel`: that one is served.
 
 An object's validation rule messages follow it too, on both places a reader
 sees them: the error a rejected write returns, and the rule served with the

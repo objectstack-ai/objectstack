@@ -565,11 +565,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_organization_id: {
         label: "Parent Organization",
-        help: "Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference."
+        help: "Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference. Meaningful only where the deployment runs several organizations."
       },
       sort_order: {
         label: "Sort Order",
-        help: "Display order among sibling organizations. Presentation only."
+        help: "Display order among sibling organizations. Presentation only. Meaningful only where the deployment runs several organizations."
       },
       id: {
         label: "Organization ID"
