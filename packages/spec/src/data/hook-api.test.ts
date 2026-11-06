@@ -174,10 +174,18 @@ describe('HookApi — the published hook ctx.api face', () => {
       const wrong: HookDeleteOptions = {
         where: { id: 'a' },
         // @ts-expect-error `returning` is an UPDATE option; the engine's delete
-        // set is `{ context, where, multi }` plus the pass-throughs.
+        // set is `{ context, where, multi, permanent }` plus the pass-throughs,
+        // and this face carries `{ where, multi }` of it.
         returning: true,
       };
-      expect([ok, wrong].length).toBe(2);
+      const purge: HookDeleteOptions = {
+        where: { id: 'a' },
+        // @ts-expect-error `permanent` is off this face: app-authored code
+        // cannot purge, its deletes enter the recycle bin (maintainer ruling A,
+        // recorded in 6691358077).
+        permanent: true,
+      };
+      expect([ok, wrong, purge].length).toBe(3);
     });
   });
 

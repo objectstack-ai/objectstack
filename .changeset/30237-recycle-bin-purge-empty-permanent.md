@@ -4,7 +4,7 @@
 '@objectstack/runtime': minor
 ---
 
-feat(objectql,spec): purge and empty the recycle bin, and delete a record for good (ADR-0148): `ObjectQL.purge(entryId)`, `ObjectQL.empty(object)` and `delete(object, { where: { id }, permanent: true })`, all authorized as the `purge` operation
+feat(objectql,spec,runtime): purge and empty the recycle bin, and delete a record for good (ADR-0148): `ObjectQL.purge(entryId)`, `ObjectQL.empty(object)` and `delete(object, { where: { id }, permanent: true })`, all authorized as the `purge` operation; hooks and app-authored bodies cannot pass `permanent`
 
 Clause-②: yes (widening)
 Metadata-protocol: added
