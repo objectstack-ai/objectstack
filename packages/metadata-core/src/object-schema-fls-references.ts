@@ -636,6 +636,11 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // A boolean facet of this lookup: it declares the target's name readable
     // by every reader of this record (#29171) and names no field.
     referenceNameVisible: keep,
+    // The earlier keys of THIS field (cloud#3652 ruling D3): names of columns
+    // the field had in earlier package versions. The parse refuses any entry
+    // that is a key another field of the object still declares, so no entry
+    // can name a field a caller is denied — kept, like a boolean facet.
+    renamedFrom: keep,
     // Names of ANOTHER object's fields — that object's projection governs them.
     // `displayField` / `descriptionField` / `lookupColumns` / `lookupFilters`
     // name fields of the `reference` target (the lookup picker reads them);

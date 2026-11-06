@@ -475,4 +475,29 @@ describe('notify click-through defaults to the trigger record', () => {
 
         expect(messaging.emitted[0].source).toBeUndefined();
     });
+
+    // A before-create run's record is the write's input: the driver issues the
+    // id at the write, after the hook, so the input carries one only when the
+    // caller wrote it. With no id there is no trigger record to link.
+    it('writes no source on a before-create run whose record has no id yet', async () => {
+        engine.registerFlow('notify_flow', notifyFlow({ recipients: ['user_1'], title: 'Ticket incoming' }));
+
+        const result = await engine.execute(
+            'notify_flow',
+            { record: { name: 'Pump' }, object: 'repair_ticket', event: 'beforeInsert' } as any,
+        );
+
+        expect(result.success).toBe(true);
+        expect(messaging.emitted).toHaveLength(1);
+        expect(messaging.emitted[0].source).toBeUndefined();
+        expect(messaging.emitted[0].payload.url).toBeUndefined();
+    });
+
+    it('links a before-create run whose caller wrote the id', async () => {
+        engine.registerFlow('notify_flow', notifyFlow({ recipients: ['user_1'], title: 'Ticket incoming' }));
+
+        await engine.execute('notify_flow', recordRun('beforeInsert'));
+
+        expect(messaging.emitted[0].source).toEqual({ object: 'repair_ticket', id: 't_7' });
+    });
 });
