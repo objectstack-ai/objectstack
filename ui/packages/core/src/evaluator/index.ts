@@ -11,8 +11,22 @@ export * from './ExpressionEvaluator.js';
 export * from './predicateInput.js';
 export * from './declaredPredicate.js';
 export * from './fieldRules.js';
-export * from './subjectPermissions.js';
-export * from './rowPredicateCanon.js';
+// Named, not `export *`: `SUBJECT_PERMISSIONS`, `SUBJECT_CAPABILITIES` stay in
+// the module for its in-package readers and off the public entry
+// (objectstack#25921: zero consumers).
+export {
+  bindSubjectPermissions,
+  subjectPermissionsOf,
+  bindSubjectCapabilities,
+  subjectCapabilitiesOf,
+} from './subjectPermissions.js';
+// Named, not `export *`: `ROW_PREDICATE_CANONICAL_ROOT` stays in the module for
+// its in-package readers and off the public entry (objectstack#25921: zero
+// consumers).
+export {
+  detectNonCanonicalRowSpelling,
+  type NonCanonicalRowSpelling,
+} from './rowPredicateCanon.js';
 export * from './listConditional.js';
 export * from './deadlineSettled.js';
 export * from './optionRules.js';

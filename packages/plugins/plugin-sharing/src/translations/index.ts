@@ -4,9 +4,11 @@
  * SharingTranslations — i18n bundle owned by this plugin (ADR-0029 D8).
  *
  * Object label/field/view/action translations for the sys_* objects this
- * plugin owns. Loaded at runtime via the plugin's `kernel:ready` hook
- * (`i18n.loadTranslations`). Regenerate with `os i18n extract` against
- * `scripts/i18n-extract.config.ts`.
+ * plugin owns, plus the `pages` entry of the record page it ships. Loaded at
+ * runtime via the plugin's `kernel:ready` hook (`i18n.loadTranslations`).
+ * Regenerate the `objects` bundles with `os i18n extract` against
+ * `scripts/i18n-extract.config.ts`; the `pages` entry is hand-authored in
+ * `./pages.ts`.
  */
 
 import type { TranslationBundle, TranslationData } from '@objectstack/spec/system';
@@ -15,9 +17,24 @@ import { enObjects } from './en.objects.generated.js';
 import { zhCNObjects } from './zh-CN.objects.generated.js';
 import { jaJPObjects } from './ja-JP.objects.generated.js';
 import { esESObjects } from './es-ES.objects.generated.js';
+import { zhHantObjects } from './zh-Hant.objects.generated.js';
+import { arObjects } from './ar.objects.generated.js';
+import { frObjects } from './fr.objects.generated.js';
+import { ptBRObjects } from './pt-BR.objects.generated.js';
+import { ruObjects } from './ru.objects.generated.js';
+import { deObjects } from './de.objects.generated.js';
+import { koObjects } from './ko.objects.generated.js';
 import { zhCNGeneratedSourceHashes } from './zh-CN.source-hashes.generated.js';
 import { jaJPGeneratedSourceHashes } from './ja-JP.source-hashes.generated.js';
 import { esESGeneratedSourceHashes } from './es-ES.source-hashes.generated.js';
+import { zhHantGeneratedSourceHashes } from './zh-Hant.source-hashes.generated.js';
+import { arGeneratedSourceHashes } from './ar.source-hashes.generated.js';
+import { frGeneratedSourceHashes } from './fr.source-hashes.generated.js';
+import { ptBRGeneratedSourceHashes } from './pt-BR.source-hashes.generated.js';
+import { ruGeneratedSourceHashes } from './ru.source-hashes.generated.js';
+import { deGeneratedSourceHashes } from './de.source-hashes.generated.js';
+import { koGeneratedSourceHashes } from './ko.source-hashes.generated.js';
+import { sharingPageTranslations, sharingPageSourceHashes } from './pages.js';
 
 /**
  * ## The provenance companions are READ here, not merely recorded
@@ -36,21 +53,59 @@ import { esESGeneratedSourceHashes } from './es-ES.source-hashes.generated.js';
  * before it can testify. So the only reader-visible consequence was the wrong
  * string on the page.
  *
- * `recorded` (3rd argument) stays `undefined` on purpose: it judges the
- * HAND-AUTHORED sections (`apps` / `dashboards` / `pages`), which this set does
- * not have — its bundles are entirely generated. The companion goes in the 4th
- * slot, which judges the generated ones. This is the shape
- * `@objectstack/platform-objects`'s own `metadata-translations/index.ts` uses.
+ * `recorded` (3rd argument) judges the HAND-AUTHORED sections (`apps` /
+ * `dashboards` / `pages`). This set has exactly one: the `pages` entry of the
+ * record page the plugin ships (`./pages.ts`), whose recorded digests go there.
+ * The generated companion goes in the 4th slot, which judges the generated
+ * `objects` bundles. Two tables, two predicates — the shape
+ * `@objectstack/plugin-approvals` uses for its own record page.
  *
  * ⛔ Do not drop the 4th argument to quiet a staleness report. Serving the
  * superseded draft is the bug; `check:i18n-stale-fill`'s UNSERVED PROVENANCE
  * verdict fails the build if a committed companion stops being consulted here.
  */
-const enSource: TranslationData = { objects: enObjects };
+const enSource: TranslationData = { objects: enObjects, pages: sharingPageTranslations.en };
 
 export const SharingTranslations: TranslationBundle = {
   en: enSource,
-  'zh-CN': withSourceFallback({ objects: zhCNObjects }, enSource, undefined, zhCNGeneratedSourceHashes),
-  'ja-JP': withSourceFallback({ objects: jaJPObjects }, enSource, undefined, jaJPGeneratedSourceHashes),
-  'es-ES': withSourceFallback({ objects: esESObjects }, enSource, undefined, esESGeneratedSourceHashes),
+  'zh-CN': withSourceFallback(
+    { objects: zhCNObjects, pages: sharingPageTranslations['zh-CN'] },
+    enSource, sharingPageSourceHashes['zh-CN'], zhCNGeneratedSourceHashes,
+  ),
+  'ja-JP': withSourceFallback(
+    { objects: jaJPObjects, pages: sharingPageTranslations['ja-JP'] },
+    enSource, sharingPageSourceHashes['ja-JP'], jaJPGeneratedSourceHashes,
+  ),
+  'es-ES': withSourceFallback(
+    { objects: esESObjects, pages: sharingPageTranslations['es-ES'] },
+    enSource, sharingPageSourceHashes['es-ES'], esESGeneratedSourceHashes,
+  ),
+  'zh-Hant': withSourceFallback(
+    { objects: zhHantObjects, pages: sharingPageTranslations['zh-Hant'] },
+    enSource, sharingPageSourceHashes['zh-Hant'], zhHantGeneratedSourceHashes,
+  ),
+  'ar': withSourceFallback(
+    { objects: arObjects, pages: sharingPageTranslations['ar'] },
+    enSource, sharingPageSourceHashes['ar'], arGeneratedSourceHashes,
+  ),
+  'fr': withSourceFallback(
+    { objects: frObjects, pages: sharingPageTranslations['fr'] },
+    enSource, sharingPageSourceHashes['fr'], frGeneratedSourceHashes,
+  ),
+  'pt-BR': withSourceFallback(
+    { objects: ptBRObjects, pages: sharingPageTranslations['pt-BR'] },
+    enSource, sharingPageSourceHashes['pt-BR'], ptBRGeneratedSourceHashes,
+  ),
+  'ru': withSourceFallback(
+    { objects: ruObjects, pages: sharingPageTranslations['ru'] },
+    enSource, sharingPageSourceHashes['ru'], ruGeneratedSourceHashes,
+  ),
+  'de': withSourceFallback(
+    { objects: deObjects, pages: sharingPageTranslations['de'] },
+    enSource, sharingPageSourceHashes['de'], deGeneratedSourceHashes,
+  ),
+  'ko': withSourceFallback(
+    { objects: koObjects, pages: sharingPageTranslations['ko'] },
+    enSource, sharingPageSourceHashes['ko'], koGeneratedSourceHashes,
+  ),
 };

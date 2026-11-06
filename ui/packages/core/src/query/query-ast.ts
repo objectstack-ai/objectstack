@@ -331,9 +331,3 @@ export class QueryASTBuilder {
     return ast;
   }
 }
-
-export const defaultQueryASTBuilder = new QueryASTBuilder();
-
-export function buildQueryAST(query: DriverQueryConfig): SqlQueryAST {
-  return defaultQueryASTBuilder.build(query);
-}

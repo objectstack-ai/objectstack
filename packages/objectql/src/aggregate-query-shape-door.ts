@@ -12,6 +12,10 @@
  *    used twice, an aggregation alias equal to a group column, or two group
  *    entries projecting one column — {@link assertAggregatedColumnsAreDistinct}.
  *
+ * [#29167, #29304] …and, ahead of the first, a `groupBy` entry of any form —
+ * a name, `{ field }`, or a bucket — naming a VIRTUAL field, which no driver
+ * stores a column for — {@link assertGroupByTargetsAreStored}.
+ *
  * ## What ran before this door, measured on `origin/main` `cb0a2fcf4f`
  *
  * Through `findData` (the `POST /api/v1/data/:object/query` door) over three
@@ -48,7 +52,7 @@
  * ingress door answers an unknown one first; a system column the map does not
  * declare is bucketed as before), or a registry-less host.
  *
- * ## A virtual field (`formula`) is refused, on its storage ground [#29167]
+ * ## A virtual field (`formula`) is refused, on its storage ground [#29167, #29304]
  *
  * A `formula` names no stored value class (its value is the expression's), so
  * the class reading above cannot judge it. It is refused on the ground the
@@ -56,18 +60,26 @@
  * VIRTUAL — computed on read, no column — judged by the spec's
  * `isVirtualSearchField` (`SEARCH_VIRTUAL_TYPES`), never a local type list,
  * and whatever its `returnType` says. Measured on `origin/main` `7788eedb`
- * before this arm, a month bucket over a `formula` with `returnType: 'date'`:
+ * before the bucket arm (#29167), a month bucket over a `formula` with
+ * `returnType: 'date'`, and on `origin/main` `447226b2` before the plain arm
+ * (#29304), a plain group over a `formula` (`returnType` `date` or `text`):
  *
  * | caller | answer |
  * |:--|:--|
  * | a SQL driver | `INVALID_FIELD` / 400 from the driver's missing-column backstop: no `path`, and a "run schema sync" prescription that cannot help |
  * | a driver with no native `aggregate` (the in-memory aggregation) | `200`, one `null` group holding every row |
  *
- * Both now answer {@link virtualDateBucketMessage}, `INVALID_FIELD` / 400 at
- * `groupBy.N.dateGranularity`, with the remedy those axes give: store the
- * value on a stored field and use that. `@objectstack/service-analytics`'s
- * `dataset-date-bucket-door.ts` gives the same refusal on the two faces that
- * reach no engine (the `/analytics/sql` dry run and the draft preview).
+ * Every `groupBy` entry is judged, whatever its form, by
+ * {@link assertGroupByTargetsAreStored}, ahead of the date-bucket door: a
+ * bucket answers {@link virtualDateBucketMessage} at
+ * `groupBy.N.dateGranularity` (the #29167 words), a plain group answers
+ * {@link virtualGroupMessage} at `groupBy.N` (a name) or `groupBy.N.field`
+ * (the object form) — `INVALID_FIELD` / 400 either way, with the remedy those
+ * axes give: store the value on a stored field and use that.
+ * `@objectstack/service-analytics`'s `dataset-date-bucket-door.ts` gives the
+ * same refusals on the faces that reach no engine (the `/analytics/sql` dry
+ * run and the draft preview), and its native-SQL strategy declines a grouped
+ * dimension over a virtual field, so that face reaches this door.
  *
  * ## The column names
  *
@@ -128,10 +140,68 @@ function virtualDateBucketMessage(
 }
 
 /**
+ * [#29304] The refusal of a plain group over a VIRTUAL field (see the module
+ * header): {@link virtualDateBucketMessage}'s words for a group key with no
+ * bucket. `@objectstack/service-analytics`'s `dataset-date-bucket-door.ts`
+ * carries the one copy, compared field for field by its tests.
+ */
+function virtualGroupMessage(object: string, path: string, field: string, type: string): string {
+  return `aggregate('${object}'): ${path} groups by '${field}', but '${field}' is a ${type} field — its value `
+    + 'is computed on read and never stored, so no driver materialises a column to group by. The query was NOT '
+    + `run. Denormalise the value onto '${object}' (a stored field, written when the source changes) and group `
+    + 'by that. A formula field is virtual: with no column behind it the group key reached the driver as a '
+    + 'column that does not exist, and an engine that aggregates in memory put every row into one null group '
+    + 'while the answer looked served.';
+}
+
+/**
+ * Refuse a `groupBy` entry of any form — a name, `{ field }`, or a
+ * `{ field, dateGranularity }` bucket — naming a field the object declares
+ * VIRTUAL (`formula`; the spec's `isVirtualSearchField`), `INVALID_FIELD` /
+ * 400 at the position it names. See the module header.
+ */
+export function assertGroupByTargetsAreStored(
+  object: string,
+  schema: unknown,
+  groupBy: unknown,
+): void {
+  if (!Array.isArray(groupBy) || groupBy.length === 0) return;
+  const fields = (schema as { fields?: unknown } | undefined)?.fields;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return;
+  for (const [i, entry] of groupBy.entries()) {
+    const named = typeof entry === 'string';
+    if (!named && (entry === null || typeof entry !== 'object' || Array.isArray(entry))) continue;
+    const { field, dateGranularity } = named
+      ? { field: entry, dateGranularity: undefined }
+      : entry as { field?: unknown; dateGranularity?: unknown };
+    if (typeof field !== 'string' || !Object.prototype.hasOwnProperty.call(fields, field)) continue;
+    const declared = (fields as Record<string, { type?: unknown }>)[field];
+    if (!isVirtualSearchField(declared as never)) continue;
+    const type = String(declared?.type);
+    if (dateGranularity != null) {
+      // [#29167] The bucket keeps its own words and position.
+      const path = `groupBy.${i}.dateGranularity`;
+      throw refusal(
+        'INVALID_FIELD',
+        virtualDateBucketMessage(object, path, field, type, String(dateGranularity)),
+        { field, fields: [field], object, param: 'groupBy', path },
+      );
+    }
+    const path = named ? `groupBy.${i}` : `groupBy.${i}.field`;
+    throw refusal(
+      'INVALID_FIELD',
+      virtualGroupMessage(object, path, field, type),
+      { field, fields: [field], object, param: 'groupBy', path },
+    );
+  }
+}
+
+/**
  * Refuse a `groupBy` entry whose `dateGranularity` buckets a field the object
- * declares neither a date nor a datetime, or a virtual (`formula`) field —
- * `INVALID_FIELD` / 400, naming the position, the field and its declared type.
- * See the module header.
+ * declares neither a date nor a datetime — `INVALID_FIELD` / 400, naming the
+ * position, the field and its declared type. A virtual field is judged ahead
+ * of this door, by {@link assertGroupByTargetsAreStored}. See the module
+ * header.
  */
 export function assertDateBucketTargetsAreTemporal(
   object: string,
@@ -147,18 +217,6 @@ export function assertDateBucketTargetsAreTemporal(
     const { field, dateGranularity } = entry as { field?: unknown; dateGranularity?: unknown };
     if (dateGranularity == null || typeof field !== 'string') continue;
     const path = `groupBy.${i}.dateGranularity`;
-    const declared = Object.prototype.hasOwnProperty.call(fields, field)
-      ? (fields as Record<string, { type?: unknown }>)[field]
-      : undefined;
-    // [#29167] A virtual field first: the class reading below has no class
-    // for it, so it would otherwise be skipped unjudged.
-    if (isVirtualSearchField(declared as never)) {
-      throw refusal(
-        'INVALID_FIELD',
-        virtualDateBucketMessage(object, path, field, String(declared?.type), String(dateGranularity)),
-        { field, fields: [field], object, param: 'groupBy', path },
-      );
-    }
     classes ??= declaredFieldClasses(fields);
     const cls = classes.get(field);
     if (cls === undefined || cls === 'date' || cls === 'datetime') continue;

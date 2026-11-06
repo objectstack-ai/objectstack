@@ -534,8 +534,8 @@ const LEDGER: readonly LedgerRow[] = [
     // ── [#28977] the /analytics/sql dry run vs the query for a date bucket over a column that is not a date: producer reads only ──
     {
         file: 'packages/services/service-analytics/src/__tests__/objectql-echo-non-date-bucket.test.ts',
-        method: 'analytics.query', receiver: 'service', count: 2, verdict: 'NOT_SDK',
-        why: 'the real AnalyticsService that AnalyticsServicePlugin registers over a live engine, called directly (no HTTP, no dispatcher envelope) to compare the query\'s refusal with the dry run\'s (a date bucket over a text, select, number, boolean or time column), and to read the `sql` the query serves for a date and a datetime bucket',
+        method: 'analytics.query', receiver: 'service', count: 4, verdict: 'NOT_SDK',
+        why: 'the real AnalyticsService that AnalyticsServicePlugin registers over a live engine, called directly (no HTTP, no dispatcher envelope) to compare the query\'s refusal with the dry run\'s (a date bucket over a text, select, number, boolean or time column), and to read the `sql` the query serves for a date and a datetime bucket; [#29304] and to read which strategy serves a stored, measure-only or cube dimension (native) and which refuses a formula dimension (the engine)',
     },
     {
         file: 'packages/client/src/analytics-automation-json-erasure.test.ts',
@@ -781,7 +781,10 @@ describe('#13079 §2 — positive controls on the matcher itself', () => {
         // bucket over a column that is not a date calls the same
         // plugin-registered AnalyticsService to compare the query's refusal
         // and served `sql` with `generateSql`'s.
-        expect(service.length, literalNote()).toBe(17);
+        // [#29304] Two more sites in that file: the route pin calls the same
+        // plugin-registered AnalyticsService to read which strategy serves a
+        // stored dimension and which refuses a formula one.
+        expect(service.length, literalNote()).toBe(19);
         expect([...new Set(service.map((s) => s.file))].sort()).toEqual([
             'packages/client/src/analytics-automation-json-erasure.test.ts',
             'packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts',
@@ -836,7 +839,7 @@ describe('#13079 §3 — every call site is classified', () => {
         expect(production, literalNote()).toEqual([]);
     });
 
-    it('records the split: 18 payload pins, 10 result-insensitive, 17 not-SDK', () => {
+    it('records the split: 18 payload pins, 10 result-insensitive, 19 not-SDK', () => {
         expect(verdictTotal('PAYLOAD_DEPENDENT')).toBe(18);
         expect(verdictTotal('RESULT_INSENSITIVE')).toBe(10);
         // [#21441] 8 -> 9: the date-bucket echo pin's producer call (§2).
@@ -844,7 +847,8 @@ describe('#13079 §3 — every call site is classified', () => {
         // [#28841] 11 -> 14: the dry-run parity pin's three producer calls (§2).
         // [#28852] 14 -> 15: its dateRange-precedence call.
         // [#28977] 15 -> 17: the non-date bucket dry-run parity pin's two producer calls (§2).
-        expect(verdictTotal('NOT_SDK')).toBe(17);
+        // [#29304] 17 -> 19: the same file's route pin, two producer calls (§2).
+        expect(verdictTotal('NOT_SDK')).toBe(19);
         // The three above are LEDGER sums and cannot move on a census reading;
         // this one is census-derived, so it carries the note. [#13874]
         expect(sdkSites.length, literalNote()).toBe(28);

@@ -115,7 +115,7 @@ describe('approval status vocabulary (#7232)', () => {
     // Ratchet for statuses and locales added later: a new entry that reaches a
     // bundle un-translated is seeded from the source text, which is the enum
     // value itself, so this case catches it without naming it.
-    for (const locale of ['en', 'zh-CN', 'ja-JP', 'es-ES']) {
+    for (const locale of ['en', 'zh-CN', 'ja-JP', 'es-ES', 'zh-Hant', 'ar', 'fr', 'pt-BR']) {
       const labels = resolvedStatusLabels(locale);
       expect(Object.keys(labels).sort()).toEqual([...APPROVAL_STATUSES].sort());
       const raw = Object.entries(labels)

@@ -172,8 +172,10 @@ export function createRegistryEmailTemplateLoader(
   };
 
   // [#28880] The bundle's tags, for the service's fold (module-private key,
-  // not on `TemplateLoader`): sorted, so variant expansion's "first match" is
-  // the lowest tag, whatever order the list carries.
+  // not on `TemplateLoader`): sorted, so each first-match step of
+  // `resolveLocaleAmong` (the table language's first mapped tag, variant
+  // expansion's first variant) answers the lowest tag, whatever order the
+  // list carries.
   const bundleLocales: TemplateBundleLocales = async (name) =>
     [...new Set((await readBundle(name)).map(itemLocale))].sort();
 

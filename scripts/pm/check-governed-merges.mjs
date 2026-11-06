@@ -196,7 +196,9 @@
  * `git diff --name-only` with rename detection prints only the NEW path, so
  * the same rename would read as ungoverned. `--branch` therefore diffs with
  * `--no-renames`, which prints the old and the new path as a delete and an
- * add — the same two paths the API reports.
+ * add — the same two paths the API reports. That holds for the PATH list
+ * only: the SIZE count below is read rename-aware (#30718), because that is
+ * how GitHub counts the lines.
  *
  * **A short page walk is a refusal too.** The changed-files endpoint pages at
  * 100 (measured on PR #17076: 100 + 100 + 60 = 260, `Link rel="next"` present
@@ -244,9 +246,13 @@
  *                     channel. A PR object without both numbers is a REFUSAL on
  *                     the derivation code (exit 1): never a "not governed"
  *                     answer and never a size of zero.
- *   `--branch <ref>`  `git diff --numstat --no-renames <merge-base> <ref>` —
- *                     the range the path list is taken from; a binary file
- *                     counts 0 lines here as it does on GitHub.
+ *   `--branch <ref>`  `git diff --numstat -M <merge-base> <ref>` — the range
+ *                     the path list is taken from, read RENAME-AWARE (#30718):
+ *                     a moved file counts its content change, as GitHub
+ *                     counts it, not a whole delete plus a whole add (with
+ *                     `--no-renames` PR #30594 read 4324 against GitHub's
+ *                     1806). A binary file counts 0 lines here as it does on
+ *                     GitHub.
  *   `--test <paths>`  `--additions <n> --deletions <n>`, both or neither. With
  *                     neither the size is NOT MEASURED and the verdict says so
  *                     on STDOUT — the path answer is complete and exits on its
@@ -254,9 +260,10 @@
  *                     size and which mode reads it. Handing the flags to a mode
  *                     that reads the number itself is two readings of one
  *                     number and is refused, the way two mode flags are.
- *   sweep (default)   `git diff-tree --numstat --no-renames -m --first-parent`
- *                     on each mainline commit (#19036) — the LANDED diff, off
- *                     the same call that lists the commit's paths, zero API. A
+ *   sweep (default)   `git diff-tree --numstat -M -m --first-parent` on each
+ *                     mainline commit (#19036, rename-aware since #30718) —
+ *                     the LANDED diff, beside the `--no-renames` call that
+ *                     lists the commit's paths, zero API. A
  *                     landing over the line is a sweep ENTRY on the size limb
  *                     alone, listed beside the governed merges with the same
  *                     attribution column, so a PR that slipped through the
@@ -264,9 +271,9 @@
  *                     read off the attribution GET the row already pays for, is
  *                     printed beside the landed number when the two differ; the
  *                     LISTING is decided on the landed number, which counts a
- *                     rename as a delete plus an add (`--no-renames`, the same
- *                     two paths the API reports) and so never reads under
- *                     GitHub's.
+ *                     rename the way GitHub does (`-M`). A move git does not
+ *                     pair (past its rename limit) falls back to a delete plus
+ *                     an add, which reads over GitHub's number, never under.
  *
  * What did NOT change: `testVerdict(paths)` with no size answers the PATH
  * question exactly as before (the queue guard's governed leg imports it for
@@ -2153,7 +2160,9 @@ export function deriveBranchPaths({ ref, base = 'origin/main', run }) {
   const paths = diff.out.split('\n').map((l) => l.trim()).filter((l) => l !== '');
   // The SIZE limb (2026-09-18 ruling) is read off the SAME range the list is:
   // `--numstat` per file, summed, a binary row counting 0 as it does on GitHub.
-  const numstat = run(['diff', '--numstat', '--no-renames', mergeBase.out, refRead.out]);
+  // ⚠️ `-M`, NOT `--no-renames` (#30718): the threshold's authority is GitHub's
+  // additions + deletions, which count a moved file by its content change.
+  const numstat = run(['diff', '--numstat', '-M', mergeBase.out, refRead.out]);
   if (!numstat.ok) {
     return refuse(
       `\`git diff --numstat\` failed against the merge base ${mergeBase.out.slice(0, 10)} (${numstat.error}) — ` +
@@ -2161,7 +2170,7 @@ export function deriveBranchPaths({ ref, base = 'origin/main', run }) {
       null,
     );
   }
-  const size = { ...parseNumstat(numstat.out), source: 'git diff --numstat on the same merge-base range' };
+  const size = { ...parseNumstat(numstat.out), source: 'git diff --numstat -M (rename-aware, as GitHub counts) on the same merge-base range' };
   return {
     ok: true,
     paths,
@@ -2223,7 +2232,7 @@ export function renderDerivation(derivation) {
   if (derivation?.kind === 'branch') {
     const sizeLine = derivation.size
       ? `\n    size: +${derivation.size.additions} / -${derivation.size.deletions} over ${derivation.size.files} file(s)` +
-        ` (${derivation.size.binaryFiles} binary, counted 0) — \`git diff --numstat --no-renames\` on the same range.`
+        ` (${derivation.size.binaryFiles} binary, counted 0) — \`git diff --numstat -M\` (rename-aware, as GitHub counts) on the same range.`
       : '';
     return (
       `derived from \`${derivation.command}\` (three-dot): ${derivation.count} path(s).\n` +
@@ -2898,11 +2907,13 @@ export function mainlineCommitsInWindow(root, ref, window, { repoId = null, log 
 
 /**
  * The paths a mainline commit changed against its first parent, AND the size
- * of that change — ONE `git diff-tree --numstat` per commit (#19036), where a
+ * of that change — `git diff-tree --numstat` per commit (#19036), where a
  * `--name-only` used to read the paths alone. The path list is the same list
  * byte for byte (the self-test pins it against `--name-only` on a real
- * fixture); the size is the LANDED diff's, summed by `parseNumstat` exactly as
- * `--branch` sums its range — a binary row counts 0 lines, as on GitHub. Zero
+ * fixture), read `--no-renames` so a rename names BOTH paths; the size is the
+ * LANDED diff's off a second, RENAME-AWARE read (`-M`, #30718), summed by
+ * `parseNumstat` exactly as `--branch` sums its range — a moved file counts its
+ * content change and a binary row 0 lines, as on GitHub. Two local reads, zero
  * API: the sweep can classify an oversized landing whose paths touch nothing
  * governed without a pull read, which is what lets it list one at all.
  *
@@ -2917,7 +2928,8 @@ export function commitChanges(root, sha) {
     const m = /^(?:\d+|-)\t(?:\d+|-)\t(.+)$/.exec(line);
     if (m) paths.push(m[1]);
   }
-  return { paths, size: { ...parseNumstat(out), source: 'git diff-tree --numstat against the first parent' } };
+  const sized = git(root, ['diff-tree', '-r', '--no-commit-id', '-M', '--numstat', '-m', '--first-parent', sha]);
+  return { paths, size: { ...parseNumstat(sized), source: 'git diff-tree --numstat -M (rename-aware, as GitHub counts) against the first parent' } };
 }
 
 /**
@@ -6146,7 +6158,7 @@ async function selfTest() {
     ['rev-parse --verify --quiet feature', ok40(B)],
     ['merge-base', ok40(M)],
     ['diff --name-only --no-renames', { ok: true, out: 'src/a.ts\nsrc/b.ts\n', error: '' }],
-    ['diff --numstat --no-renames', { ok: true, out: '3\t1\tsrc/a.ts\n10\t0\tsrc/b.ts\n', error: '' }],
+    ['diff --numstat -M', { ok: true, out: '3\t1\tsrc/a.ts\n10\t0\tsrc/b.ts\n', error: '' }],
   ]) });
   assert('a-derivable-branch-answers-the-three-dot-list-from-the-merge-base',
     derived.ok === true && derived.paths.join() === 'src/a.ts,src/b.ts' && derived.derivation.mergeBase === M, JSON.stringify(derived));
@@ -6157,12 +6169,28 @@ async function selfTest() {
     ['rev-parse --verify --quiet feature', ok40(B)],
     ['merge-base', ok40(M)],
     ['diff --name-only --no-renames', { ok: true, out: 'src/a.ts\n', error: '' }],
-    ['diff --numstat --no-renames', { ok: false, out: '', error: 'fatal: numstat unavailable' }],
+    ['diff --numstat -M', { ok: false, out: '', error: 'fatal: numstat unavailable' }],
   ]) });
   assert('a---numstat-that-does-not-read-REFUSES-the-whole-derivation-never-a-size-of-zero',
     noNumstat.ok === false && /numstat/.test(noNumstat.reason) && /never a size of zero/.test(noNumstat.reason) && noNumstat.paths === undefined, JSON.stringify(noNumstat));
   assert('⛔ the-diff-is-taken-with---no-renames-so-a-rename-out-of-a-governed-path-still-hits',
     derived.derivation.command.includes('--no-renames'), derived.derivation.command);
+  // #30718: the PATH list stays --no-renames, the SIZE read is rename-aware.
+  const branchCalls = [];
+  deriveBranchPaths({ ref: 'feature', run: (argv) => {
+    branchCalls.push(argv.join(' '));
+    return gitScript([
+      ['rev-parse --verify --quiet origin/main', ok40(A)],
+      ['rev-parse --verify --quiet feature', ok40(B)],
+      ['merge-base', ok40(M)],
+      ['diff --name-only --no-renames', { ok: true, out: 'src/a.ts\n', error: '' }],
+      ['diff --numstat -M', { ok: true, out: '1\t1\tsrc/a.ts\n', error: '' }],
+    ])(argv);
+  } });
+  const numstatCalls = branchCalls.filter((c) => c.includes('--numstat'));
+  assert('⭐ #30718 the---branch-SIZE-read-is-rename-aware-M-and-never---no-renames-while-the-path-list-keeps---no-renames',
+    numstatCalls.length === 1 && numstatCalls[0].includes(' -M ') && !numstatCalls[0].includes('--no-renames') &&
+      branchCalls.some((c) => c.startsWith('diff --name-only --no-renames')), JSON.stringify(branchCalls));
   const branchLine = renderDerivation(derived.derivation);
   assert('the-branch-reading-names-its-command-its-base-and-its-merge-base',
     branchLine.includes('three-dot') && branchLine.includes('--no-renames') && branchLine.includes(M.slice(0, 10)) &&
@@ -6784,6 +6812,58 @@ async function selfTest() {
     rmSync(overFx, { recursive: true, force: true });
   }
 
+  // ── ⭐ #30718: a RENAMED file counts by its rename-aware numstat ──────────
+  //
+  // The threshold's authority is GitHub's additions + deletions, which pair a
+  // moved file and count its content change. With `--no-renames` a move read
+  // as a whole delete plus a whole add (PR #30594: 4324 against GitHub's
+  // 1806). On a real repo: a 400-line file moved with ONE line edited counts
+  // +1 / -1 over ONE file through --branch and through the sweep's
+  // commitChanges, while both paths still reach the PATH list.
+  const renFx = mkdtempSync(join(tmpdir(), 'governed-merges-rename-size-'));
+  try {
+    const rg = (cwd, ...rest) =>
+      execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...rest],
+        { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const repo = join(renFx, 'repo');
+    rg(renFx, 'init', '-q', repo);
+    rg(repo, 'config', 'diff.renames', 'false'); // a config that turns rename detection off must not reach the size read
+    const body = Array.from({ length: 400 }, (_, i) => `line ${i}`);
+    mkdirSync(join(repo, 'old'), { recursive: true });
+    writeFileSync(join(repo, 'old', 'moved.txt'), `${body.join('\n')}\n`);
+    rg(repo, 'add', '-A');
+    rg(repo, 'commit', '-qm', 'chore: seed');
+    rg(repo, 'update-ref', 'refs/remotes/origin/main', rg(repo, 'rev-parse', 'main').trim());
+    rg(repo, 'checkout', '-q', '-b', 'feature');
+    mkdirSync(join(repo, 'new'), { recursive: true });
+    rg(repo, 'mv', 'old/moved.txt', 'new/moved.txt');
+    body[7] = 'line seven, edited';
+    writeFileSync(join(repo, 'new', 'moved.txt'), `${body.join('\n')}\n`);
+    rg(repo, 'add', '-A');
+    rg(repo, 'commit', '-qm', 'refactor: move the file (#30718)');
+    rg(repo, 'checkout', '-q', 'main');
+    const control = parseNumstat(rg(repo, 'diff', '--numstat', '--no-renames', 'main', 'feature'));
+    assert('the-rename-fixture-is-a-real-rename-the---no-renames-control-reads-a-whole-delete-plus-a-whole-add',
+      control.additions === 400 && control.deletions === 400 && control.files === 2, JSON.stringify(control));
+    const renamed = deriveBranchPaths({ ref: 'feature', run: (argv) => tryGit(repo, argv) });
+    assert('⭐ #30718 --branch-counts-a-renamed-file-by-its-rename-aware-numstat-plus-1-minus-1-over-ONE-file',
+      renamed.ok === true && renamed.size.additions === 1 && renamed.size.deletions === 1 && renamed.size.files === 1,
+      JSON.stringify(renamed.size ?? renamed));
+    assert('and-the-PATH-list-still-carries-BOTH-paths-of-the-rename',
+      renamed.ok === true && renamed.paths.join() === 'new/moved.txt,old/moved.txt', JSON.stringify(renamed.paths));
+    assert('and-the-branch-reading-names-the-rename-aware-read',
+      renderDerivation(renamed.derivation).includes('`git diff --numstat -M`'), renderDerivation(renamed.derivation));
+    const landed = commitChanges(repo, rg(repo, 'rev-parse', 'feature').trim());
+    assert('⭐ #30718 the-sweep-counts-the-same-landed-rename-plus-1-minus-1-and-lists-BOTH-paths',
+      landed.size.additions === 1 && landed.size.deletions === 1 && landed.size.files === 1 &&
+        landed.paths.join() === 'new/moved.txt,old/moved.txt',
+      JSON.stringify(landed));
+  } catch (error) {
+    assert('the-rename-size-fixture-could-be-built-and-run', false, String(error?.message ?? error).split('\n')[0]);
+  } finally {
+    rmSync(renFx, { recursive: true, force: true });
+  }
+
   // ── ⭐ #18055: the INCOMPLETE banner is BUILT, never thrown away ──────────
   //
   // The banner is assembled inside the ARGUMENT of the call that prints it, and
@@ -7100,7 +7180,7 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list. — and the #18055 banner set: the INCOMPLETE banner is BUILT on the attribution-failure path instead of throwing while it is built, it still returns EXIT_INCOMPLETE, the proxy hint renders from the plan the sweep now binds and stays empty both when the plan says no hint and when the incompleteness is not about attribution, and a real sweep whose every attribution channel fails prints the banner on STDERR and exits 2 — and the #19133 landing tiers: every register row carries H or S, Tier S is exactly the .claude/** row, a list is S only when every governed path is S (empty or ungoverned answers H), the verdict line and --json carry the tier while both tiers share exit 3, and the tier is recomputed on the lifted slice. — and the 2026-09-18 SIZE predicate: the ruled line, 3,000 since the maintainer's 2026-10-09 word, declared once and pinned on both sides and on the PR that prompted it; the number read off --pr's own GET (its absence a refusal), off --branch's --numstat on the range it lists (binary files at zero, a failed read a refusal), or off --additions/--deletions handed to --test (half a pair refused, the pair refused where the mode reads it itself); NOT MEASURED said on stdout when nothing read it; a certified regeneration lifting the path and not the size; and the verdict still ONE emitter — the governed code for either limb, byte-identical across --branch and --test on the same list and numbers. — and the #18989 guard set: the re-exec guard is the CALLER's name — the default is still this file's own, a caller that names its own guard is suppressed by that one alone, and neither the importer's name nor the patrol's silences this file any more — a suppressed run SPEAKS, naming the variable to unset, the 401 the silence would be read as and the proxy the request was supposed to take, while the Actions-runner leg stays inert and an already-flagged run is still answered by the FLAG; and the plan is declared a MIRROR pinned to its OWNER's source: the importer's own guard, the patrol's spelling, the patrol's own caller-guard parameter, and the module-scope await that is the measured REASON this is a copy rather than an import. — and the #19036 audit half: the sweep classifies on the SAME predicate the queue and the pre-check answer with (\`landsByHumanMerge\` on \`testVerdict\`), the size read LOCALLY off the landed diff by one \`git diff-tree --numstat\` per mainline commit that also lists its paths (byte-identical to the old \`--name-only\` list, a merge commit read against its first parent, a binary row at zero), so an oversized landing with NO governed path is an entry on the size limb alone — counted apart in the head, listed with the ⛔ SIZE row and the same attribution column, GitHub's pair printed beside the landed number only when it differs, exactly the threshold NOT listed, a governed AND oversized row carrying both limbs, a row classified with no size rendering as it did — and a REAL sweep over a fixture repo listing the over-by-one landing and not the at-threshold one, on stdout and in --json. — and the 2026-09-21 FORK predicate: a fork head (or a deleted fork repo) lands by human merge through the Tier H terminal with its own reason sentence, a same-repo head changes nothing on either tier, --test / --branch say NOT MEASURED for a head they cannot see, ZERO check runs read NOT MEASURED and never green, and both readings ride --pr's own GET. — and the closed argv: each mode reads a closed flag set and refuses every other on exit 1 (an unknown flag, another mode's flag, an equals spelling, a --repo, which prescribes the qualified --pr spelling), a bare --pr beside a PM_SWEEP_REPO naming another repository is refused with both qualified spellings, and the card's own invocation table replayed against a recording fake API: every refusal READS NOTHING, the qualified spelling answers from the repository it names, byte-identical with PM_SWEEP_REPO set.\n  ${liveNote}`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list. — and the #18055 banner set: the INCOMPLETE banner is BUILT on the attribution-failure path instead of throwing while it is built, it still returns EXIT_INCOMPLETE, the proxy hint renders from the plan the sweep now binds and stays empty both when the plan says no hint and when the incompleteness is not about attribution, and a real sweep whose every attribution channel fails prints the banner on STDERR and exits 2 — and the #19133 landing tiers: every register row carries H or S, Tier S is exactly the .claude/** row, a list is S only when every governed path is S (empty or ungoverned answers H), the verdict line and --json carry the tier while both tiers share exit 3, and the tier is recomputed on the lifted slice. — and the 2026-09-18 SIZE predicate: the ruled line, 3,000 since the maintainer's 2026-10-09 word, declared once and pinned on both sides and on the PR that prompted it; the number read off --pr's own GET (its absence a refusal), off --branch's --numstat on the range it lists (binary files at zero, a failed read a refusal), or off --additions/--deletions handed to --test (half a pair refused, the pair refused where the mode reads it itself); NOT MEASURED said on stdout when nothing read it; a certified regeneration lifting the path and not the size; and the verdict still ONE emitter — the governed code for either limb, byte-identical across --branch and --test on the same list and numbers. — and the #18989 guard set: the re-exec guard is the CALLER's name — the default is still this file's own, a caller that names its own guard is suppressed by that one alone, and neither the importer's name nor the patrol's silences this file any more — a suppressed run SPEAKS, naming the variable to unset, the 401 the silence would be read as and the proxy the request was supposed to take, while the Actions-runner leg stays inert and an already-flagged run is still answered by the FLAG; and the plan is declared a MIRROR pinned to its OWNER's source: the importer's own guard, the patrol's spelling, the patrol's own caller-guard parameter, and the module-scope await that is the measured REASON this is a copy rather than an import. — and the #19036 audit half: the sweep classifies on the SAME predicate the queue and the pre-check answer with (\`landsByHumanMerge\` on \`testVerdict\`), the size read LOCALLY off the landed diff by one \`git diff-tree --numstat\` per mainline commit that also lists its paths (byte-identical to the old \`--name-only\` list, a merge commit read against its first parent, a binary row at zero), so an oversized landing with NO governed path is an entry on the size limb alone — counted apart in the head, listed with the ⛔ SIZE row and the same attribution column, GitHub's pair printed beside the landed number only when it differs, exactly the threshold NOT listed, a governed AND oversized row carrying both limbs, a row classified with no size rendering as it did — and a REAL sweep over a fixture repo listing the over-by-one landing and not the at-threshold one, on stdout and in --json. — and the 2026-09-21 FORK predicate: a fork head (or a deleted fork repo) lands by human merge through the Tier H terminal with its own reason sentence, a same-repo head changes nothing on either tier, --test / --branch say NOT MEASURED for a head they cannot see, ZERO check runs read NOT MEASURED and never green, and both readings ride --pr's own GET. — and the closed argv: each mode reads a closed flag set and refuses every other on exit 1 (an unknown flag, another mode's flag, an equals spelling, a --repo, which prescribes the qualified --pr spelling), a bare --pr beside a PM_SWEEP_REPO naming another repository is refused with both qualified spellings, and the card's own invocation table replayed against a recording fake API: every refusal READS NOTHING, the qualified spelling answers from the repository it names, byte-identical with PM_SWEEP_REPO set. — and the #30718 rename-aware size: --branch and the sweep count a moved file by its \`-M\` numstat, as GitHub does (a 400-line move with one edit reads +1 / -1 over one file, a \`diff.renames=false\` config notwithstanding), while both PATH lists keep \`--no-renames\` and so still carry both paths.\n  ${liveNote}`);
 
   return SELF_TEST_VERDICT;
 }

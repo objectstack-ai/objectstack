@@ -1623,6 +1623,7 @@ covers the switch). This command writes the code into those rows.
 ```bash
 os migrate record-currency-codes --object opportunity --field amount --code USD          # Dry run: counts the rows, writes none
 os migrate record-currency-codes --object opportunity --field amount --code USD --apply  # Write the code (prompts)
+os migrate record-currency-codes --object opportunity --field amount --code EUR --org org_emea --apply   # One organization
 os migrate record-currency-codes --object opportunity --field amount --code USD --apply --yes --json   # CI / scripts
 ```
 
@@ -1633,6 +1634,21 @@ the field had under `fixed`, from the organization's `localization.currency`, or
 anything else. A row that holds a code is never touched, whatever the code, and a row
 with no amount owes none. If the stored amounts are in more than one currency, split
 them with your own writes first: nothing here can tell those rows apart.
+
+**One organization at a time.** Each organization has its own home currency, so one
+code is right for the rows of at most the organizations that use it. `--org <id>` fills
+only that organization's rows: the walk and every write run as that organization, and
+the walk filters on each row's own `organization_id`. When the object's rows belong to
+**more than one organization** and you give neither `--org` nor `--all-organizations`,
+the run (a dry run as well as `--apply`) is refused with `VALIDATION_ERROR` / 400 and
+exit 1 before any row is written, and the refusal lists each organization's codeless
+row count; under `--json` they are in its `organizations` array. Re-run with `--org`
+once per organization, each with the code its rows are in. `--all-organizations` is
+the explicit way to write the one code into every organization's codeless rows, and
+the report then counts each organization apart. `--org` and `--all-organizations`
+together are a usage error. When the rows belong to one organization (or name none),
+the run behaves as it always did. The command never reads an organization's
+`localization.currency` to pick a code for you.
 
 **A bad `--code` is refused before anything is opened.** A code that is not an
 uppercase ISO 4217 code (`usd`, `EURO`) is refused with `INVALID_FIELD` / 400 and
@@ -1658,6 +1674,7 @@ report.
 ```bash
 os migrate recompute-home-amounts --object invoice                               # Dry run: reports, writes none
 os migrate recompute-home-amounts --object invoice --since 2026-01-01            # Documents dated on or after Jan 1 only
+os migrate recompute-home-amounts --object invoice --org org_emea                # One organization's rows only
 os migrate recompute-home-amounts --object invoice --field amount --apply        # Write (prompts)
 os migrate recompute-home-amounts --object invoice --apply --yes --json          # CI / scripts
 ```
@@ -1683,7 +1700,10 @@ one amount; without it, every amount of the object that declares a home amount i
 recomputed. `--since YYYY-MM-DD` keeps the rows whose **document date** (the field
 `homeAmount.rateDate` names, the date that picks the rate) is on or after that day, a
 `datetime` read as its day in the organization's timezone; a row with no document date is
-outside every `--since` window. A malformed `--since` is refused with `VALIDATION_FAILED` /
+outside every `--since` window. `--org <id>` limits the run to one organization's rows,
+read and written as that organization; without it the run covers every organization,
+each in its own home currency, and is never refused for that (it writes no value you
+chose). A malformed `--since` is refused with `VALIDATION_FAILED` /
 400 before the database is opened; an object the deployment does not declare
 (`OBJECT_NOT_FOUND`), or one or a `--field` that declares no home amount (`INVALID_FIELD`),
 is refused after the boot and before any row is read.
@@ -1693,7 +1713,7 @@ is refused after the boot and before any row is read.
 | Reason | The row | Fix, then re-run |
 |:---|:---|:---|
 | `rate_missing` | No rate for its currency is in force on its document date (the report names both). | Add the rate. |
-| `code_blank` | An amount with no currency code: stored before the field switched to record mode. | [`os migrate record-currency-codes`](#os-migrate-record-currency-codes). It writes its one code into the codeless rows of **every** organization, so check the report's `code_blank` count per organization first. |
+| `code_blank` | An amount with no currency code: stored before the field switched to record mode. | [`os migrate record-currency-codes`](#os-migrate-record-currency-codes) with `--org`, once per organization, each with the code its rows are in; the report's `code_blank` count per organization says which ones owe codes. |
 | `document_date_blank` | A foreign-currency amount with no document date. | Fill the document date. |
 | `home_currency_unset` | Its organization has no `localization.currency`. | Set **Localization → Default currency**. |
 | `unconvertible` | A code, amount or document date the write itself refuses. | Correct the value. |
@@ -3225,7 +3245,7 @@ Two modes, chosen by the shape of the argument:
 
 ```bash
 # catalog mode — the TARGET runtime resolves the version from its own catalog
-os package install com.acme.crm --version 1.2.0 --runtime https://app.example.com
+os package install com.acme.crm --version 1.2.0 --url https://app.example.com
 
 # air-gapped mode — the artifact is read locally and sent inline; no catalog, works offline
 os package install ./dist/objectstack.json
@@ -3238,18 +3258,25 @@ catalog id that happens to match a file in the working directory is installed
 from that file instead.
 
 **The credential is the *runtime* identity, not your cloud login.** The target
-runtime authenticates the call with its own session, so `--email` / `--password`
-(or `OS_RUNTIME_EMAIL` / `OS_RUNTIME_PASSWORD`) name an account **on that
-runtime**. A `401` means exactly that, and the command says so; `os cloud login`
+runtime authenticates the call itself: pass a token it issued (`-t, --token`, or
+`OS_RUNTIME_TOKEN`), or `--email` / `--password` (or `OS_RUNTIME_EMAIL` /
+`OS_RUNTIME_PASSWORD`) for an account **on that runtime** — one or the other,
+not both. A `401` means exactly that, and the command says so; `os cloud login`
 credentials do not apply here.
+
+The server and the credential are spelled as in `os package export` and the
+other server-talking commands: `-u, --url` and `-t, --token`. `-r, --runtime`
+is gone with no alias, so a script that passes it is refused as an unknown flag;
+write `-u URL` instead.
 
 **Options:**
 
 | Flag | Env equivalent | Purpose |
 |---|---|---|
 | `package` (positional, required) | — | Package manifest id (`com.acme.crm`) **or** a path to a compiled artifact JSON |
-| `-r, --runtime <url>` | `OS_RUNTIME_URL` | Base URL of the runtime to install **into** (default `http://localhost:3000`) |
+| `-u, --url <url>` | `OS_RUNTIME_URL` | Base URL of the runtime to install **into** (default `http://localhost:3000`) |
 | `-v, --version <semver>` | — | Version to install in catalog mode (default `latest`). Air-gapped mode takes the version from the artifact |
+| `-t, --token <token>` | `OS_RUNTIME_TOKEN` | A token the target runtime issued (an API key); instead of `--email` / `--password` |
 | `--email <email>` | `OS_RUNTIME_EMAIL` | Account email on the target runtime |
 | `--password <password>` | `OS_RUNTIME_PASSWORD` | Account password on the target runtime |
 | `--confirm-global-uniques` | — | Affirm this app's installation-wide `unique` constraints are genuinely platform-wide — see below |

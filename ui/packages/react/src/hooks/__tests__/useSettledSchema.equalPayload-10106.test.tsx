@@ -20,7 +20,8 @@
  * So the cost of a fresh-object republish lands on the consumer as a DUPLICATE
  * RECORD QUERY — and the count is what the next reader has to be told by a red
  * test rather than by a card. `ObjectGantt`'s own gate pin
- * (`ObjectGantt.fetchGate-7225.test.tsx`) counts `find` calls for the MOUNT
+ * (the `ObjectGantt.fetchGate-7225` block of `ObjectGantt.harness.test.tsx`)
+ * counts `find` calls for the MOUNT
  * path only and deliberately does not pin this one, so nothing else in the
  * tree goes red on the day this regresses.
  *

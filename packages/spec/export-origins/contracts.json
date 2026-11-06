@@ -132,6 +132,7 @@
     "IBasicServiceRegistry": "src/contracts/service-registry.ts#IBasicServiceRegistry (interface)",
     "IBusinessUnitGraphService": "src/contracts/sharing-service.ts#IBusinessUnitGraphService (interface)",
     "ICacheService": "src/contracts/cache-service.ts#ICacheService (interface)",
+    "ICloudBindingService": "src/contracts/cloud-binding-service.ts#ICloudBindingService (interface)",
     "IClusterService": "src/contracts/cluster-service.ts#IClusterService (interface)",
     "ICounter": "src/contracts/cluster-service.ts#ICounter (interface)",
     "ICryptoProvider": "src/contracts/crypto-provider.ts#ICryptoProvider (interface)",

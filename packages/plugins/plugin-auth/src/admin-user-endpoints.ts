@@ -1036,6 +1036,11 @@ function multiOrgCreationJoinsCurrentOrganization(deps: AdminUserEndpointDeps): 
  * `VALIDATION_FAILED` with its `fields` for a name the catalog does not hold),
  * read as the data doors read a thrown error, and a sentence saying the user
  * was not created either.
+ *
+ * The reason follows as its own sentence, in the refusal's own words: the
+ * grant's name check says it once for every grant path, Setup's grant form
+ * included, and names the set to pick when the value typed is a set's label
+ * (`grant-permission-set-name.ts` in plugin-security). Nothing here restates it.
  */
 function grantRefusal(error: unknown): EndpointResult {
   const thrown = resolveThrownHttpError(error, 500);
@@ -1046,7 +1051,7 @@ function grantRefusal(error: unknown): EndpointResult {
       success: false,
       error: {
         code: thrown.code,
-        message: `The permission set was not assigned, so no user was created: ${thrown.message}`,
+        message: `The permission set was not assigned, so no user was created. ${thrown.message}`,
         ...(validation ? { fields: validation.fields } : {}),
       },
     },

@@ -13,7 +13,7 @@
  * BOTH `Intl` bounds, and the widget defaulted that width to a literal `2`. So
  * a JPY field rendered `¥1,234.50` for the same reason `formatCurrency` did,
  * one layer up. That card made the width derive from the currency's own
- * ISO 4217 minor-unit count — pinned below, unchanged.
+ * CLDR fraction-digit count — pinned below, unchanged.
  *
  * objectui#10276: that card ALSO let an authored field-level `precision` win
  * over the currency. `@objectstack/spec` declares that key as "Total digits

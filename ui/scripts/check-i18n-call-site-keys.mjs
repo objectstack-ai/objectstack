@@ -1315,7 +1315,25 @@ function staticTextSegments(node, source) {
 }
 
 /**
- * Dotted leaf paths of `packages/i18n/src/locales/en.ts`, read from its AST,
+ * The pack-shaped lazy namespaces (objectstack#30588): directories holding one
+ * PARTIAL pack per language — the same shape as `packages/i18n/src/locales/<code>.ts`,
+ * holding only the groups that moved out of the packs so the console's eager
+ * `en` chunk stops carrying them. Their keys are pack keys to every reader (a
+ * call site asks `t('marketplace.…')` of the default namespace, and the page
+ * merges the partial pack in before it renders), so every gate that reads pack
+ * keys reads `<dir>en.ts` as part of the `en` pack. ⛔ A directory added here
+ * is a directory of partial packs; the `studio` namespace is NOT one (it is a
+ * `{token}` string table of its own, read by `collectDesignerKeys` in
+ * `check-i18n-dead-keys.mjs`).
+ */
+export const PACK_NAMESPACE_DIRS = Object.freeze(['packages/i18n/src/namespaces/marketplace/']);
+
+/** Every directory a pack key is DEFINED in: the packs, then the namespaces. */
+export const PACK_DEFINITION_DIRS = Object.freeze(['packages/i18n/src/locales/', ...PACK_NAMESPACE_DIRS]);
+
+/**
+ * Dotted leaf paths of `packages/i18n/src/locales/en.ts` and of the `en` partial
+ * pack of every {@link PACK_NAMESPACE_DIRS} directory, read from their ASTs,
  * plus the leaf VALUES — the strings the app actually renders.
  *
  * Parsed rather than imported so the gate needs no build step and no TS loader.
@@ -1327,62 +1345,84 @@ function staticTextSegments(node, source) {
  * `leaves` either way: the key rules judge existence and need no value, and the
  * value rule declines to judge what it could not read rather than guessing.
  *
+ * A leaf defined in two of the files — or a leaf in one that is a group in
+ * another — THROWS: two homes for one key cannot both be what renders.
+ *
  * @returns {{ leaves: Set<string>, branches: Set<string>, values: Map<string, string> }}
  */
 export function collectEnKeys(root) {
-  const file = join(root, 'packages/i18n/src/locales/en.ts');
-  const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
-
-  const unwrap = (node) => {
-    let n = node;
-    while (ts.isAsExpression(n) || ts.isParenthesizedExpression(n) || (ts.isSatisfiesExpression?.(n) ?? false)) n = n.expression;
-    return n;
-  };
-
-  let literal = null;
-  const findEn = (node) => {
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.name.text === 'en' &&
-      node.initializer
-    ) {
-      const init = unwrap(node.initializer);
-      if (ts.isObjectLiteralExpression(init)) literal = init;
-    }
-    ts.forEachChild(node, findEn);
-  };
-  findEn(source);
-  if (!literal) throw new Error(`cannot find the \`const en = { … }\` object literal in ${file}`);
-
   const leaves = new Set();
   const branches = new Set();
   const values = new Map();
-  const walk = (object, prefix) => {
-    for (const prop of object.properties) {
-      if (!ts.isPropertyAssignment(prop)) {
-        throw new Error(`unsupported property form in ${file} at ${prefix || '<root>'}: ${ts.SyntaxKind[prop.kind]}`);
+  const homeOf = new Map();
+  // The pack is required; a namespace's `en` file is read when it exists. A
+  // missing one cannot hide anything: its keys simply are not defined, so every
+  // call site that asks for one is reported as asking for a missing key.
+  const files = [
+    join(root, 'packages/i18n/src/locales/en.ts'),
+    ...PACK_NAMESPACE_DIRS.map((dir) => join(root, dir, 'en.ts')).filter((file) => existsSync(file)),
+  ];
+  for (const file of files) {
+    const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+
+    const unwrap = (node) => {
+      let n = node;
+      while (ts.isAsExpression(n) || ts.isParenthesizedExpression(n) || (ts.isSatisfiesExpression?.(n) ?? false)) n = n.expression;
+      return n;
+    };
+
+    let literal = null;
+    const findEn = (node) => {
+      if (
+        ts.isVariableDeclaration(node) &&
+        ts.isIdentifier(node.name) &&
+        node.name.text === 'en' &&
+        node.initializer
+      ) {
+        const init = unwrap(node.initializer);
+        if (ts.isObjectLiteralExpression(init)) literal = init;
       }
-      const name =
-        ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name) || ts.isNumericLiteral(prop.name)
-          ? prop.name.text
-          : null;
-      if (name === null) {
-        throw new Error(`unsupported key form in ${file} at ${prefix || '<root>'}`);
+      ts.forEachChild(node, findEn);
+    };
+    findEn(source);
+    if (!literal) throw new Error(`cannot find the \`const en = { … }\` object literal in ${file}`);
+
+    const walk = (object, prefix) => {
+      for (const prop of object.properties) {
+        if (!ts.isPropertyAssignment(prop)) {
+          throw new Error(`unsupported property form in ${file} at ${prefix || '<root>'}: ${ts.SyntaxKind[prop.kind]}`);
+        }
+        const name =
+          ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name) || ts.isNumericLiteral(prop.name)
+            ? prop.name.text
+            : null;
+        if (name === null) {
+          throw new Error(`unsupported key form in ${file} at ${prefix || '<root>'}`);
+        }
+        const path = prefix ? `${prefix}.${name}` : name;
+        const value = unwrap(prop.initializer);
+        if (ts.isObjectLiteralExpression(value)) {
+          if (leaves.has(path)) {
+            throw new Error(`\`${path}\` is a group in ${file} and a key in ${homeOf.get(path)}`);
+          }
+          branches.add(path);
+          walk(value, path);
+        } else {
+          if (leaves.has(path) || branches.has(path)) {
+            throw new Error(
+              `\`${path}\` is defined in ${file} and in ${homeOf.get(path) ?? 'another file as a group'} — ` +
+                'a pack key lives in exactly one of the pack and its namespace',
+            );
+          }
+          leaves.add(path);
+          homeOf.set(path, file);
+          const text = staticString(value, source);
+          if (text !== null) values.set(path, text);
+        }
       }
-      const path = prefix ? `${prefix}.${name}` : name;
-      const value = unwrap(prop.initializer);
-      if (ts.isObjectLiteralExpression(value)) {
-        branches.add(path);
-        walk(value, path);
-      } else {
-        leaves.add(path);
-        const text = staticString(value, source);
-        if (text !== null) values.set(path, text);
-      }
-    }
-  };
-  walk(literal, '');
+    };
+    walk(literal, '');
+  }
   return { leaves, branches, values };
 }
 

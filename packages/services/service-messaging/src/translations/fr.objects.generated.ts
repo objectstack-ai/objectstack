@@ -462,6 +462,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Paramètres régionaux",
         help: "Paramètres régionaux de l’appareil, tels que l’enregistrement les a indiqués. Conservés pour l’appareil ; aucune notification push n’est rendue selon eux : une notification push arrive dans la langue du destinataire (sa langue d’utilisateur, sinon la langue par défaut du déploiement)."
       },
+      origin: {
+        label: "Origine du serveur",
+        help: "L’origine depuis laquelle la console a été chargée lors de l’enregistrement de l’appareil (par exemple https://crm.example.com). Chaque notification push envoyée à l’appareil la porte, afin qu’une application mobile ayant plusieurs serveurs enregistrés ouvre la notification sur celui-ci. Vide pour un appareil enregistré sans origine."
+      },
       name: {
         label: "Nom de l’appareil"
       },

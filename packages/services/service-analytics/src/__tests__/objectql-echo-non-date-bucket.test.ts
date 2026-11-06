@@ -27,6 +27,13 @@
  * from the SQL driver's missing-column backstop: both now answer the engine's
  * virtual-field refusal, field for field.
  *
+ * [#29304] …and a PLAIN group over a `formula`, which the native strategy
+ * compiled into `GROUP BY calc` and ran (`DATABASE_ERROR` / 500), the ObjectQL
+ * strategy handed the SQL driver's missing-column backstop, and the dry run
+ * rendered on both compositions (measured on `origin/main` `447226b2`). The
+ * native strategy now declines a grouped dimension over a virtual field, so
+ * the query and the dry run both answer the engine's plain-group refusal.
+ *
  * It now judges the keys `execute()` hands the engine with the service's one
  * reading of it (`dataset-date-bucket-door.ts`, #28852), after the `dateRange`
  * read and the column-asked-twice door as `query()` refuses, so it answers the
@@ -34,7 +41,7 @@
  * byte for byte (pinned below).
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import type { Cube } from '@objectstack/spec/data';
@@ -58,6 +65,8 @@ const CUBES = [
       // A time dimension over a text column, declaring one granularity: asked
       // raw, it is bucketed by that granularity (`withDeclaredGranularityDefaults`).
       region_month: { type: 'time', sql: 'region', label: 'Region month', granularities: ['month'] },
+      // [#29304] A string dimension over the formula, asked raw: a plain group.
+      calc_label: { type: 'string', sql: 'calc', label: 'Calc label' },
     },
   },
 ] as unknown as Cube[];
@@ -91,7 +100,15 @@ describe('[#28977] the /analytics/sql dry run refuses a date bucket over a colum
     engine = new ObjectQL({ logger: quiet } as never);
     engine.registerDriver(driver as never, true);
     await engine.init();
-    engine.registry.registerObject({ name: ACCOUNT, label: 'Account', fields: { name: { name: 'name', type: 'text' } } } as never);
+    engine.registry.registerObject({
+      name: ACCOUNT,
+      label: 'Account',
+      fields: {
+        name: { name: 'name', type: 'text' },
+        // [#29304] A formula on the related object, read through `account.`.
+        name_calc: { name: 'name_calc', type: 'formula', expression: 'name', returnType: 'text' },
+      },
+    } as never);
     engine.registry.registerObject({
       name: DEAL,
       label: 'Deal',
@@ -179,6 +196,52 @@ describe('[#28977] the /analytics/sql dry run refuses a date bucket over a colum
       object: DEAL, param: 'groupBy', path, field: 'calc', fields: ['calc'],
     });
     expect(asSql, 'the dry run vs the query').toEqual(asQuery);
+  });
+
+  /** The engine's plain-group refusal of the formula `field` on `object`, at `path`. */
+  const plainGroupRefusal = (object: string, field: string, path: string) => ({
+    message:
+      `aggregate('${object}'): ${path} groups by '${field}', but '${field}' is a formula field — its value is computed `
+      + 'on read and never stored, so no driver materialises a column to group by. The query was NOT run. Denormalise '
+      + `the value onto '${object}' (a stored field, written when the source changes) and group by that. A formula `
+      + 'field is virtual: with no column behind it the group key reached the driver as a column that does not exist, '
+      + 'and an engine that aggregates in memory put every row into one null group while the answer looked served.',
+    code: 'INVALID_FIELD', status: 400, httpStatus: 400,
+    object, param: 'groupBy', path, field, fields: [field],
+  });
+
+  it.each<[string, Query, [object: string, field: string, path: string]]>([
+    ['an inferred dimension', onObject({ dimensions: ['calc'] }), [DEAL, 'calc', 'groupBy.0']],
+    ['after a stored dimension', onObject({ dimensions: ['region', 'calc'] }), [DEAL, 'calc', 'groupBy.1']],
+    ["a cube dimension's sql", onCube({ dimensions: ['calc_label'] }), [DEAL, 'calc', 'groupBy.0']],
+    // The cross-object path's FK-resolve aggregate on the related object
+    // (`groupBy: ['id', attr]`): the engine's position there, judged by the
+    // service before the related object is read.
+    ["a related object's formula through 'account.'", onObject({ dimensions: ['account.name_calc'] }), [ACCOUNT, 'name_calc', 'groupBy.1']],
+  ])('[#29304] refuses a plain group over a formula (%s) on the query and the dry run alike, where native answered 500 and the dry run rendered GROUP BY calc', async (_label, query, expected) => {
+    const { asQuery, asSql } = await bothRefusals(query);
+    expect(asQuery).toEqual(plainGroupRefusal(...expected));
+    expect(asSql, 'the dry run vs the query').toEqual(asQuery);
+  });
+
+  it('[#29304] routes only a grouped formula off the native strategy: a stored dimension and a measure-only query stay native', async () => {
+    const aggregate = vi.spyOn(engine, 'aggregate');
+    try {
+      // The default composition answers both on the native strategy, which runs
+      // raw SQL and never calls `engine.aggregate`.
+      for (const query of [onObject({ dimensions: ['region'] }), onObject({}), onCube({ dimensions: ['region'] })]) {
+        const label = JSON.stringify(query);
+        const result = await analytics.query({ ...query } as never);
+        expect(result.rows, label).toHaveLength(1);
+        expect(result.sql, label).toContain('COALESCE(SUM(amount), 0)');
+      }
+      expect(aggregate, 'native: no engine aggregate').not.toHaveBeenCalled();
+      // A grouped formula declines to the ObjectQL strategy, whose engine refuses it.
+      await expect(analytics.query({ ...onObject({ dimensions: ['calc'] }) } as never)).rejects.toMatchObject({ code: 'INVALID_FIELD', path: 'groupBy.0' });
+      expect(aggregate, 'declined: the engine judged it').toHaveBeenCalledTimes(1);
+    } finally {
+      aggregate.mockRestore();
+    }
   });
 
   it.each<[string, Query, string]>([
