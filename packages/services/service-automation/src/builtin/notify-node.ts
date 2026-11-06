@@ -171,11 +171,14 @@ const DELETE_EVENTS: ReadonlySet<string> = new Set(['beforeDelete', 'afterDelete
  * explicit `actionUrl`, and a half-written pair (still dropped, as before) are
  * the author's word and are kept as written.
  *
- * Only when the run has a trigger record (`triggerRecordOf`): a record-change
- * run, a time-relative sweep's row, an action started on a record. A schedule
- * tick, an inbound API post and a manual start with no record have none and
- * link nowhere, as before. A delete event's record is gone once the write
- * lands, so it is not linked: the inbox never renders a dead link.
+ * Only when the run has a trigger record (`triggerRecordOf`): a record change
+ * other than a delete or a before-create, a time-relative sweep's row, an
+ * action started on a record. A schedule tick, an inbound API post and a
+ * manual start with no record have none and link nowhere, as before. A delete
+ * event's record is gone once the write lands, so it is not linked: the inbox
+ * never renders a dead link. A before-create run's record is the write's
+ * input, which carries an id only when the caller wrote one — the driver
+ * issues the id at the write, after the hook — so it links only then.
  */
 function defaultClickThroughOf(
     cfg: Pick<NotifyConfigParsed, 'sourceObject' | 'sourceId' | 'actionUrl'>,
@@ -706,7 +709,7 @@ function resolveStringSlot(
         ok: false,
         error:
             `notify: ${key} evaluated to ${evaluatedKindOf(evaluated)}, not a string — write a value expression that `
-            + 'evaluates to the record id, or to `null` to leave it unset — source: '
+            + 'evaluates to the record id, or to `null`, a written sourceId that resolves to nothing, so the pair is dropped rather than defaulted — source: '
             + `\`${sourceOf(raw)}\``,
     };
 }
@@ -882,11 +885,11 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     // literals, read as written.
                     sourceObject: {
                         type: 'string',
-                        description: 'Object name of the record the notification links to (writes sys_notification.source_object) — read as written: a single-brace {token} is not resolved here and is refused, as is a CEL value envelope; write the value. Only takes effect together with sourceId — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link. When sourceObject, sourceId and actionUrl are all left out, a run started by a record (a record change other than a delete, a time-relative sweep, an action on a record) links to that record.',
+                        description: 'Object name of the record the notification links to (writes sys_notification.source_object) — read as written: a single-brace {token} is not resolved here and is refused, as is a CEL value envelope; write the value. Only takes effect together with sourceId — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link. When sourceObject, sourceId and actionUrl are all left out, a run started by a record (a record change other than a delete or a before-create, a time-relative sweep, an action on a record) links to that record; a before-create run\'s record has no id until the driver issues one at the write, so it links only when the caller wrote the id.',
                     },
                     sourceId: {
                         type: 'string',
-                        description: 'Record id the notification links to (writes sys_notification.source_id) — a string, or a CEL value envelope evaluated per run to one, such as { dialect: \'cel\', source: \'record.id\' }; a single-brace {token} is refused. Only takes effect together with sourceObject — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link. The inbox synthesizes a `/{object}/{id}` deep-link from these. When sourceObject, sourceId and actionUrl are all left out, a run started by a record (a record change other than a delete, a time-relative sweep, an action on a record) links to that record.',
+                        description: 'Record id the notification links to (writes sys_notification.source_id) — a string, or a CEL value envelope evaluated per run to one, such as { dialect: \'cel\', source: \'record.id\' }; a single-brace {token} is refused. Only takes effect together with sourceObject — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link. The inbox synthesizes a `/{object}/{id}` deep-link from these. When sourceObject, sourceId and actionUrl are all left out, a run started by a record (a record change other than a delete or a before-create, a time-relative sweep, an action on a record) links to that record; a before-create run\'s record has no id until the driver issues one at the write, so it links only when the caller wrote the id.',
                     },
                     actorId: {
                         type: 'string',
