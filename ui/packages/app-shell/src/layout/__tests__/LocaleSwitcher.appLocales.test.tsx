@@ -37,13 +37,13 @@ vi.mock('lucide-react', async (importOriginal) => ({
   Globe: () => <span />,
 }));
 
-import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
+import { PLATFORM_LOCALES, PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { LocaleSwitcher, localeLabel } from '../LocaleSwitcher';
 
 /**
- * The eight built-in native names an app shipping only `en`+`zh` must NOT show:
- * every platform locale table language but English and Chinese, named as the
- * menu names them (`pt-BR` by `Intl.DisplayNames`, objectstack#30511).
+ * The eight built-in native names an app shipping only `en`+`zh-Hans` must NOT
+ * show: every platform locale table language but English and Chinese, named as
+ * the menu names them (from the table's own labels).
  */
 const PHANTOM_LABELS = PLATFORM_LOCALE_TAGS
   .filter((tag) => tag !== 'en' && !tag.startsWith('zh-'))
@@ -75,12 +75,12 @@ beforeEach(() => {
 
 describe('LocaleSwitcher — menu composed from the app locale list', () => {
   it('offers an app-shipped locale outside the built-in ten, named by Intl.DisplayNames', async () => {
-    mountConsole({ locales: async () => ['en', 'zh', 'th'] });
+    mountConsole({ locales: async () => ['en', 'zh-Hans', 'th'] });
 
-    // `th` has no built-in pack and no hand-written label; CLDR names it.
+    // `th` has no built-in pack and no platform locale table row; CLDR names it.
     await waitFor(() => expect(screen.getByText('ไทย')).toBeInTheDocument());
     expect(screen.getByText('English')).toBeInTheDocument();
-    expect(screen.getByText('中文')).toBeInTheDocument();
+    expect(screen.getByText('简体中文')).toBeInTheDocument();
   });
 
   it('offers an app-shipped locale supplied through config.resources', async () => {
@@ -106,10 +106,10 @@ describe('LocaleSwitcher — menu composed from the app locale list', () => {
   });
 
   it('shows ONLY what the app ships — the phantom eight are gone', async () => {
-    mountConsole({ locales: async () => ['en', 'zh'] });
+    mountConsole({ locales: async () => ['en', 'zh-Hans'] });
 
     await waitFor(() => expect(screen.getByText('English')).toBeInTheDocument());
-    expect(screen.getByText('中文')).toBeInTheDocument();
+    expect(screen.getByText('简体中文')).toBeInTheDocument();
     for (const phantom of PHANTOM_LABELS) {
       expect(screen.queryByText(phantom)).not.toBeInTheDocument();
     }
@@ -154,7 +154,7 @@ describe('LocaleSwitcher — menu composed from the app locale list', () => {
     expect(container.firstChild).toBeNull();
     expect(screen.queryByText('English')).not.toBeInTheDocument();
 
-    answer(['en', 'zh']);
+    answer(['en', 'zh-Hans']);
 
     await waitFor(() => expect(screen.getByText('English')).toBeInTheDocument());
     expect(screen.queryByText('日本語')).not.toBeInTheDocument();
@@ -173,5 +173,42 @@ describe('LocaleSwitcher — menu composed from the app locale list', () => {
     for (const label of BUILT_IN_PACK_LABELS) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
+  });
+});
+
+describe('localeLabel — the built-in packs are named by the platform locale table', () => {
+  it('names every table tag with its row label', () => {
+    for (const row of PLATFORM_LOCALES) {
+      expect(localeLabel(row.tag), row.tag).toBe(row.label);
+    }
+  });
+
+  it('names every table tag with its row label on a runtime without Intl.DisplayNames', () => {
+    // The table label must not be whatever the runtime's CLDR happens to say:
+    // with the runtime naming nothing, every row still reads its own label.
+    const displayNames = Intl.DisplayNames;
+    Object.defineProperty(Intl, 'DisplayNames', {
+      configurable: true,
+      writable: true,
+      value: undefined,
+    });
+    try {
+      for (const row of PLATFORM_LOCALES) {
+        expect(localeLabel(row.tag), row.tag).toBe(row.label);
+      }
+      // An app-shipped code still degrades to the bare code, not a crash.
+      expect(localeLabel('th')).toBe('th');
+    } finally {
+      Object.defineProperty(Intl, 'DisplayNames', {
+        configurable: true,
+        writable: true,
+        value: displayNames,
+      });
+    }
+  });
+
+  it('cannot read a label off Object.prototype', () => {
+    expect(localeLabel('constructor')).toBe('constructor');
+    expect(localeLabel('__proto__')).toBe('__proto__');
   });
 });
