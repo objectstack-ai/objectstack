@@ -65,6 +65,17 @@ import {
   refuseTwoCryptoProviderPlugins,
 } from './serve.js';
 
+// [#10126] Pay the first load of what `serve.ts` reaches through dynamic
+// `import()`s at MODULE LOAD, outside any clocked case.
+import '@objectstack/metadata-protocol';
+import '@objectstack/metadata';
+import '@objectstack/plugin-hono-server';
+import '@objectstack/rest';
+import '@objectstack/driver-turso';
+import '@objectstack/driver-sql';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-security';
+
 /** …/packages/cli/src/commands — seeded from `import.meta.url`. */
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 /** `serve.ts`'s CODE, with every comment span blanked. */

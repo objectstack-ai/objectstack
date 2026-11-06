@@ -6339,6 +6339,8 @@ export function createHostCryptoProvider(local: () => ICryptoProvider): {
         read: () => ctx.getServices().get(CRYPTO_PROVIDER_SERVICE),
         // Every init() has run once the kernel leaves `initializing` (Phase 2
         // begins) — read where the question is asked, never recorded here.
+        // Assumes `ctx.getKernel` (ObjectKernel's context has it); without it
+        // nothing is chosen before this plugin's own `kernel:ready` hook.
         initDone: () => {
           const state = ctx.getKernel?.()?.getState?.();
           return ready || (state !== undefined && state !== 'idle' && state !== 'initializing');
