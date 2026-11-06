@@ -15,7 +15,8 @@ import type {
   IQueueService,
   QueueBackoffPolicy,
 } from '@objectstack/spec/contracts';
-import { renderTemplate, renderPlainTextTemplate, requireVars, htmlToText } from './template-engine.js';
+import { renderTemplate, renderPlainTextTemplate, requireVars, htmlToText, type RenderOptions } from './template-engine.js';
+import { buildOptionLabelTable, type OptionLabelSources } from './option-label-table.js';
 import {
   SYS_EMAIL_ATTACHMENT_LIMIT_BYTES,
   encodeAttachmentsForRow,
@@ -680,6 +681,14 @@ export class EmailService implements IEmailService {
   private templateFallbackLocale?: () => string | undefined;
 
   /**
+   * Where an `option` hole's labels come from (the served objects and the
+   * i18n service), read at each render. Unset, or answering `undefined`, ⇒ no
+   * label table is built, and a template with an `option` hole is refused
+   * `TEMPLATE_INVALID` by the renderer.
+   */
+  private optionLabelSources?: () => OptionLabelSources | undefined;
+
+  /**
    * Set once queue delivery has been reported as unavailable, so the
    * degradation is stated at the FIRST send and not on every one
    * (AGENTS.md — "say it once, at the first degradation").
@@ -716,6 +725,16 @@ export class EmailService implements IEmailService {
    */
   setTemplateFallbackLocale(read: () => string | undefined): void {
     this.templateFallbackLocale = read;
+  }
+
+  /**
+   * Wire where a template's `{{ stage | option:opportunity.stage }}` holes
+   * read their option labels: the served object by name and the i18n
+   * service. Read at each render, so services registered after this one are
+   * seen.
+   */
+  setOptionLabelSources(read: () => OptionLabelSources | undefined): void {
+    this.optionLabelSources = read;
   }
 
   private declaredFallbackLocale(): string | undefined {
@@ -1572,13 +1591,37 @@ export class EmailService implements IEmailService {
     // `' zh-CN '` must not reach `Intl`, which throws a RangeError on it and
     // took the whole send down.
     const locale = preferred || row.locale;
-    const renderOpts = {
+    const renderOpts: RenderOptions = {
       ...(locale ? { locale } : {}),
       ...(input.timezone ? { timeZone: input.timezone } : {}),
       // The tenant default a `{{ amount | currency }}` hole formats in. The
       // caller supplies it; absent, such a hole refuses below, never USD.
       ...(input.currency ? { currency: input.currency } : {}),
     };
+    // An `option` hole prints a select value as its option's label in the
+    // RECIPIENT's language (ruling F on the option-label card): the table is
+    // built here, once for the three faces, from the served objects in the
+    // send's own locale — `preferred`, the recipient's, never the row's
+    // fallback and never an execution context's, so a scheduled flow running
+    // as the system still mails each recipient in their language. No locale ⇒
+    // the declared labels. An object, field or option list the table cannot be
+    // built from refuses the whole send `TEMPLATE_INVALID`, before any face is
+    // rendered; with no sources wired the renderer refuses the hole instead.
+    let optionLabels: ReturnType<typeof buildOptionLabelTable>;
+    try {
+      const sources = this.optionLabelSources?.();
+      optionLabels = sources
+        ? buildOptionLabelTable([row.subject, row.body_html, row.body_text], preferred || undefined, sources)
+        : undefined;
+    } catch (err: any) {
+      const message = String(err?.message ?? err);
+      if (!message.startsWith('TEMPLATE_INVALID: ')) throw err;
+      throw new Error(
+        `TEMPLATE_INVALID: email template ${input.template} (locale=${row.locale}): `
+        + message.slice('TEMPLATE_INVALID: '.length),
+      );
+    }
+    if (optionLabels) renderOpts.optionLabels = optionLabels;
     // Each face is rendered in ITS OWN encoding. Only `body_html` is markup,
     // so only it HTML-escapes its `{{x}}` holes. The subject (a mail header,
     // an inbox title) and `body_text` (the plain-text part, an inbox body) are
