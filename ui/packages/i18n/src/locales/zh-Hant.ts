@@ -3695,6 +3695,7 @@ const zhHant = {
     // objectui#13461 — the top bar's avatar button, which holds only the avatar.
     accountMenu: '賬戶選單',
     profile: '個人資料',
+    connectAiAssistant: '連線 AI 助手',
     logout: '退出登入',
     preferences: '偏好設定',
     theme: '主題',
@@ -4009,6 +4010,13 @@ const zhHant = {
       title: '千問辦公',
       body: '擴充 → 聯結器 → + 新增 → 貼上 JSON 配置:',
       hint: '也可手動新增:傳輸型別選 Streamable HTTP 並填寫此 URL。如果你的版本不支援瀏覽器登入,請新增請求頭 Authorization: Bearer <API 金鑰>(在下方建立)。',
+    },
+    client: {
+      title: '你用的是哪個 AI 助手？',
+      hint: '選擇你的助手，只看它的步驟。本瀏覽器會記住你的選擇。',
+    },
+    advanced: {
+      title: '高階：腳本與 CI',
     },
     apiKey: {
       title: 'API 金鑰',
