@@ -98,23 +98,23 @@ describe('MCP OAuth scope → tool-family gating', () => {
   });
 
   it('[#30891] delete_records with a data:write-only grant is refused WITHOUT reading or deleting', async () => {
-    const { json } = await call(runtime, bridge, [MCP_OAUTH_SCOPE_DATA_WRITE], {
+    const { json } = (await call(runtime, bridge, [MCP_OAUTH_SCOPE_DATA_WRITE], {
       jsonrpc: '2.0',
       id: 5,
       method: 'tools/call',
       params: { name: 'delete_records', arguments: { objectName: 'task', where: { done: true } } },
-    });
+    })) as { json: { error?: unknown; result?: { isError?: boolean } } };
     const failed = Boolean(json.error) || json.result?.isError === true;
     expect(failed).toBe(true);
     // Neither the selection read (the preview's ids and count) nor a delete ran.
     expect(bridge.calls.filter((c: any[]) => ['query', 'aggregate', 'remove'].includes(c[0]))).toEqual([]);
     // The single-record delete stays callable under the same grant.
-    const single = await call(runtime, bridge, [MCP_OAUTH_SCOPE_DATA_WRITE], {
+    const single = (await call(runtime, bridge, [MCP_OAUTH_SCOPE_DATA_WRITE], {
       jsonrpc: '2.0',
       id: 6,
       method: 'tools/call',
       params: { name: 'delete_record', arguments: { objectName: 'task', recordId: 't1', confirm: true } },
-    });
+    })) as { json: { result?: { isError?: boolean } } };
     expect(single.json.result?.isError).toBeFalsy();
   });
 
