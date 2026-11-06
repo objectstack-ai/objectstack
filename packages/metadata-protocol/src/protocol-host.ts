@@ -238,7 +238,6 @@ export interface ProtocolHost {
     readonly saveMetaItem: ObjectStackProtocolImplementation['saveMetaItem'];
     readonly saveMetaItemUnaudited: ObjectStackProtocolImplementation['saveMetaItemUnaudited'];
     readonly saveWriteBinding: ObjectStackProtocolImplementation['saveWriteBinding'];
-    readonly searchAll: ObjectStackProtocolImplementation['searchAll'];
     readonly seedExternalIdSaveRefusal: ObjectStackProtocolImplementation['seedExternalIdSaveRefusal'];
     readonly servedExpand: ObjectStackProtocolImplementation['servedExpand'];
     readonly servedLockState: ObjectStackProtocolImplementation['servedLockState'];

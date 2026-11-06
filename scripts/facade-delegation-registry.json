@@ -29,6 +29,12 @@
   "exceptions": [
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "getDiscovery",
+      "card": "#30147",
+      "reason": "codemod limit: closed-set, reads the instance method `searchAll` as a value (`typeof this.searchAll === 'function'` sets `capabilities.search`), and a host entry forwards a method through a closure that is always a function, so the moved probe would always answer true (#30518 PR2, measured by rest discovery-search-capability-agreement.test.ts)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
       "member": "publishPackageDrafts",
       "card": "#30020",
       "reason": "state-owning: closed-set, a bare `this` (not `this.<member>`) hands the instance itself on (#29985 report)"
