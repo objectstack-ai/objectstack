@@ -10,7 +10,8 @@ import { appOf, isPairOf, pairOf } from './customization-pair-lookup.js';
  * package, a `sys` kernel package, a manifest with no namespace — because
  * `appOf` is the identity until the ensure door resolves a member to its App.
  * Each row pins the literal pair, so a resolver that moves one package to
- * another App reds that row by name.
+ * another App reds that row by name. The rows' `type`, `scope` and `namespace`
+ * are read by nothing today: they are the App resolver's inputs when it lands.
  */
 const ROWS: ReadonlyArray<{ shape: string; manifest: { id: string; type?: string; scope?: string; namespace?: string }; pair: string }> = [
   {

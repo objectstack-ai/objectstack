@@ -8,7 +8,7 @@
 
 refactor(metadata-core): the customization pair of a package is looked up through the App that carries it
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 `@objectstack/metadata-core` exports `pairOf(base)`, `isPairOf(pairId, base)` and `appOf(packageId)`: the pair of a package is `customizationPackageId(appOf(base))` (ADR-0146 D3, with the customization unit being the App per ruling record 6691022506). `appOf` is the identity today, so every package is still its own App for customization and every answer is the one `customizationPackageId` / `isCustomizationPairOf` gave before: the same pair ids, the same refusals, the same served overrides, write gates, list and layered reads, uninstall refusal, flow precedence remedy and datasource import landing.
