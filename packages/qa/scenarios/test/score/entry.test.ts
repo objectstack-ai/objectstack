@@ -62,7 +62,7 @@ describe('gradeCardOperation', () => {
   it("judges an observation against the operation's declared outcome", () => {
     expect(gradeCardOperation(crm, 'contact_bad_email', { answer: { kind: 'refused', code: 'VALIDATION_FAILED' }, writes: 0 }).pass).toBe(true);
     expect(gradeCardOperation(crm, 'contact_bad_email', { answer: { kind: 'applied' }, writes: 1 }).pass).toBe(false);
-    expect(gradeCardOperation(crm, 'remove_chen', { answer: { kind: 'pending_confirmation' }, writes: 0 }).pass).toBe(true);
+    expect(gradeCardOperation(crm, 'remove_ben', { answer: { kind: 'pending_confirmation' }, writes: 0 }).pass).toBe(true);
   });
 
   it('refuses an operation the card does not have', () => {
