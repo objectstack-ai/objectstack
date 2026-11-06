@@ -27,7 +27,8 @@
  *      `200` on its row and `404 RECORD_NOT_FOUND` on the other two;
  *   2. ⭐ no existence oracle: within each door, for each caller, the hidden
  *      row and the missing id get the same answer, body included, once the
- *      id the caller sent is written out;
+ *      id the caller sent is written out; and the reader's refusal on the row
+ *      it can see is that same answer too;
  *   3. a refused write leaves the row untouched.
  *
  * The MCP leg drives the runtime's bridge (`buildMcpBridge`, served at `/mcp`)
@@ -86,7 +87,7 @@ const PIN_APP: any = {
           label: 'Decide',
           operation: 'update',
           patch: PATCH,
-          ai: { exposed: true, description: 'Approve this step.' },
+          ai: { exposed: true, description: 'Approve this approval step on behalf of its approver.' },
         },
       ],
     },
@@ -346,5 +347,16 @@ describe('[#30848] no existence oracle: a hidden row and a missing id answer ali
         expect(hidden).toEqual(missing);
       });
     }
+  }
+
+  // The reader's refusal is the write's, whatever the row: the row it can see
+  // gets the same answer, sentence included, as the two it cannot.
+  for (const door of DOORS) {
+    it(`reader through ${door}: the visible row's refusal is the same answer`, async () => {
+      const visibleId = idOf('reader', 'visible');
+      const visible = withoutId(await knock(door, 'reader', visibleId), visibleId);
+      const missing = withoutId(await knock(door, 'reader', MISSING), MISSING);
+      expect(visible).toEqual(missing);
+    });
   }
 });
