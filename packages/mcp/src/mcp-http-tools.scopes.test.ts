@@ -24,6 +24,9 @@ import type { McpActionBridge, McpDataBridge } from './mcp-http-tools.js';
 
 const READ_TOOLS = ['list_objects', 'describe_object', 'validate_expression', 'query_records', 'get_record', 'aggregate_records'];
 const WRITE_TOOLS = ['create_record', 'update_record', 'delete_record'];
+// [#30891] `delete_records` reads its selection (ids and a count) before it
+// deletes, so it registers only when the grant holds BOTH data scopes.
+const READ_WRITE_TOOLS = ['delete_records'];
 const ACTION_TOOLS = ['list_actions', 'run_action'];
 
 function makeBridge(): McpDataBridge & McpActionBridge & { calls: any[] } {
@@ -75,7 +78,7 @@ describe('MCP OAuth scope → tool-family gating', () => {
 
   it('undefined grantedScopes (API key / session) keeps the FULL tool surface', async () => {
     const names = await listTools(runtime, bridge, undefined);
-    expect(names).toEqual([...READ_TOOLS, ...WRITE_TOOLS, ...ACTION_TOOLS].sort());
+    expect(names).toEqual([...READ_TOOLS, ...WRITE_TOOLS, ...READ_WRITE_TOOLS, ...ACTION_TOOLS].sort());
   });
 
   it('data:read alone exposes only the read family', async () => {
@@ -83,9 +86,36 @@ describe('MCP OAuth scope → tool-family gating', () => {
     expect(names).toEqual([...READ_TOOLS].sort());
   });
 
-  it('data:write alone exposes only the write family', async () => {
+  it('data:write alone exposes only the write family, without delete_records', async () => {
     const names = await listTools(runtime, bridge, [MCP_OAUTH_SCOPE_DATA_WRITE]);
     expect(names).toEqual([...WRITE_TOOLS].sort());
+    expect(names).not.toContain('delete_records');
+  });
+
+  it('data:read with data:write exposes both families and delete_records', async () => {
+    const names = await listTools(runtime, bridge, [MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE]);
+    expect(names).toEqual([...READ_TOOLS, ...WRITE_TOOLS, ...READ_WRITE_TOOLS].sort());
+  });
+
+  it('[#30891] delete_records with a data:write-only grant is refused WITHOUT reading or deleting', async () => {
+    const { json } = (await call(runtime, bridge, [MCP_OAUTH_SCOPE_DATA_WRITE], {
+      jsonrpc: '2.0',
+      id: 5,
+      method: 'tools/call',
+      params: { name: 'delete_records', arguments: { objectName: 'task', where: { done: true } } },
+    })) as { json: { error?: unknown; result?: { isError?: boolean } } };
+    const failed = Boolean(json.error) || json.result?.isError === true;
+    expect(failed).toBe(true);
+    // Neither the selection read (the preview's ids and count) nor a delete ran.
+    expect(bridge.calls.filter((c: any[]) => ['query', 'aggregate', 'remove'].includes(c[0]))).toEqual([]);
+    // The single-record delete stays callable under the same grant.
+    const single = (await call(runtime, bridge, [MCP_OAUTH_SCOPE_DATA_WRITE], {
+      jsonrpc: '2.0',
+      id: 6,
+      method: 'tools/call',
+      params: { name: 'delete_record', arguments: { objectName: 'task', recordId: 't1', confirm: true } },
+    })) as { json: { result?: { isError?: boolean } } };
+    expect(single.json.result?.isError).toBeFalsy();
   });
 
   it('actions:execute alone exposes only the action family', async () => {
@@ -100,7 +130,7 @@ describe('MCP OAuth scope → tool-family gating', () => {
       MCP_OAUTH_SCOPE_DATA_WRITE,
       MCP_OAUTH_SCOPE_ACTIONS,
     ]);
-    expect(names).toEqual([...READ_TOOLS, ...WRITE_TOOLS, ...ACTION_TOOLS].sort());
+    expect(names).toEqual([...READ_TOOLS, ...WRITE_TOOLS, ...READ_WRITE_TOOLS, ...ACTION_TOOLS].sort());
   });
 
   it('an empty grant registers nothing (fail-closed)', async () => {
