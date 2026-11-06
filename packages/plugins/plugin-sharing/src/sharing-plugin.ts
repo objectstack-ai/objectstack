@@ -57,6 +57,7 @@ import {
   SysQueueMember,
   SysAssignmentCursor,
 } from './objects/index.js';
+import { SysQueueDetailPage } from './sys-queue.page.js';
 import { OwnershipQueueService, specsReadBusinessUnits, type OwnershipQueueEngine } from './ownership-queue-service.js';
 import { bindQueueGuards, bindQueueRecipientRecompute, reportShadowedAuthoredQueues } from './queue-hooks.js';
 import { SysBusinessUnit, SysBusinessUnitMember } from '@objectstack/platform-objects/identity';
@@ -652,6 +653,9 @@ export class SharingServicePlugin implements Plugin {
         SysQueueMember,
         SysAssignmentCursor,
       ],
+      // The queue's record page: its fields, and its members listed by the
+      // queue's name with "New" pre-filled (`sys-queue.page.ts`).
+      pages: [SysQueueDetailPage],
       // ADR-0029 D7 — contribute the sharing entries into the Setup app's
       // `group_access_control` slot (priority 200). This plugin owns these
       // objects (K2).

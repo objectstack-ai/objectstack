@@ -2760,7 +2760,7 @@ export class SettingsService {
         updated_at: new Date().toISOString(),
         updated_by: ctx.userId ?? null,
       };
-      const { previousEnc, previous } = await this.upsertRow(rowForKey);
+      const { previousEnc, previous, rowId } = await this.upsertRow(rowForKey);
 
       // The audit's `old_hash`, taken HERE: after the upsert's probe named the
       // previous row, and before the reap below destroys the ciphertext a
@@ -2798,6 +2798,9 @@ export class SettingsService {
               : digest ?? '',
             encrypted: isEncrypted,
             requestId: ctx.requestId,
+            // The stored settings row this write landed on, so the ledger row
+            // names it as its record (see `upsertRow`).
+            recordId: rowId,
           });
         } catch {
           // [#8145] Never fail a write because a ledger is unhappy — the same
@@ -3725,10 +3728,17 @@ export class SettingsService {
    * held BEFORE: `previousEnc` for the secret reaper (#8030), `previous` for
    * the audit's `old_hash` (#26465). Both come off the existence probe the
    * upsert makes anyway, so a write with no previous row costs no extra read.
+   *
+   * `rowId` is the id of the stored row the write landed on: the probed row's
+   * on an update, the engine's insert result's on an insert. The `config_change`
+   * ledger row records it as its `record_id`, so the ledger names the settings
+   * row the way the CRUD mirror's own row about that write does. `null` when the
+   * store hands back no id (the in-memory fallback, a host engine whose insert
+   * returns nothing).
    */
   private async upsertRow(
     row: SettingsRow,
-  ): Promise<{ previousEnc: string | null; previous: SettingsRow | null }> {
+  ): Promise<{ previousEnc: string | null; previous: SettingsRow | null; rowId: string | null }> {
     if (this.engine) {
       const { object, where, data } = this.rowIdentity(row);
       // All three engine calls carry the explicit system opt-in
@@ -3750,7 +3760,7 @@ export class SettingsService {
           data,
           context: SETTINGS_SYSTEM_CONTEXT,
         });
-        return { previousEnc, previous };
+        return { previousEnc, previous, rowId: SettingsService.rowIdOf(previous) };
       }
       // Under the opt-in the engine no longer checks that a user-scope row's
       // `user_id` names a user, so the service keeps that refusal before the
@@ -3769,8 +3779,8 @@ export class SettingsService {
           row.user_id,
         );
       }
-      await this.engine.insert(object, data, { context: SETTINGS_SYSTEM_CONTEXT });
-      return { previousEnc: null, previous: null };
+      const inserted = await this.engine.insert(object, data, { context: SETTINGS_SYSTEM_CONTEXT });
+      return { previousEnc: null, previous: null, rowId: SettingsService.rowIdOf(inserted) };
     }
     const idx = this.memoryIndexOf(row);
     if (idx >= 0) {
@@ -3779,10 +3789,20 @@ export class SettingsService {
       // carry keeps what the row held — above all its lock, which a write the
       // platform rung makes through it must leave in place.
       this.memory[idx] = { ...previous, ...row };
-      return { previousEnc: SettingsService.handleOf(previous.value_enc), previous };
+      return { previousEnc: SettingsService.handleOf(previous.value_enc), previous, rowId: null };
     }
     this.memory.push(row);
-    return { previousEnc: null, previous: null };
+    return { previousEnc: null, previous: null, rowId: null };
+  }
+
+  /**
+   * The stored id of a settings row, as the engine returned or read it; `null`
+   * when there is none. The in-memory fallback's rows carry no id, and nothing
+   * stores them anywhere a ledger row could point at.
+   */
+  private static rowIdOf(row: unknown): string | null {
+    const id = (row as { id?: unknown } | null | undefined)?.id;
+    return typeof id === 'string' && id !== '' ? id : typeof id === 'number' ? String(id) : null;
   }
 
   /**
