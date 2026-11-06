@@ -32,6 +32,12 @@
  * where the live strategy lowers them, so an unrecognised `dateRange` beside
  * either fault is refused about the `dateRange` on every face; the preview
  * answered the door's refusal.
+ *
+ * [#29304] …and a PLAIN dimension over a `formula` (`returnType` `date` or
+ * `text`), measured on `origin/main` `447226b2`: native `DATABASE_ERROR` /
+ * 500, ObjectQL the SQL driver's missing-column backstop (400, no `path`), the
+ * preview one `null` group holding the total. Every face now answers the
+ * engine's plain-group refusal at `groupBy.N`, field for field.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -64,6 +70,7 @@ const DATASET = DatasetSchema.parse({
     { name: 'calc', field: 'calc', type: 'date' },
     { name: 'region_month', field: 'region', type: 'date', dateGranularity: 'month' },
     { name: 'calc_month', field: 'calc', type: 'date', dateGranularity: 'month' },
+    { name: 'calc_s', field: 'calc_s', type: 'string' },
   ],
   measures: [{ name: 'total', aggregate: 'sum', field: 'amount' }],
 });
@@ -111,6 +118,8 @@ describe('[#28852] a date bucket over a column that is not a date, on every face
         opened_time: { name: 'opened_time', type: 'time' },
         // A formula the table stores no column for.
         calc: { name: 'calc', type: 'formula', expression: 'closed_on', returnType: 'date' },
+        // [#29304] …and one whose result is text.
+        calc_s: { name: 'calc_s', type: 'formula', expression: 'region', returnType: 'text' },
       },
     } as never);
     await engine.syncSchemas();
@@ -214,6 +223,38 @@ describe('[#28852] a date bucket over a column that is not a date, on every face
   it("[#29167] refuses a dataset dimension's declared dateGranularity over a formula", async () => {
     const refusal = await refusedAlike({ dimensions: ['calc_month'], measures: ['total'] });
     expect(refusal).toMatchObject({ path: 'groupBy.0.dateGranularity', field: 'calc', fields: ['calc'] });
+  });
+
+  it.each([
+    ['date', 'calc'],
+    ['text', 'calc_s'],
+  ])('[#29304] refuses a plain dimension over a formula (returnType %s) with the engine\'s refusal on every face, where native answered 500, ObjectQL the driver backstop, and the preview one null group', async (_label, field) => {
+    const refusal = await refusedAlike({ dimensions: [field], measures: ['total'] });
+    expect(refusal).toEqual({
+      message:
+        `aggregate('${OBJECT}'): groupBy.0 groups by '${field}', but '${field}' is a formula field — its value is `
+        + 'computed on read and never stored, so no driver materialises a column to group by. The query was NOT run. '
+        + `Denormalise the value onto '${OBJECT}' (a stored field, written when the source changes) and group by that. `
+        + 'A formula field is virtual: with no column behind it the group key reached the driver as a column that does '
+        + 'not exist, and an engine that aggregates in memory put every row into one null group while the answer looked '
+        + 'served.',
+      code: 'INVALID_FIELD', status: 400, httpStatus: 400,
+      object: OBJECT, param: 'groupBy', path: 'groupBy.0', field, fields: [field],
+    });
+  });
+
+  it('[#29304] names the position of a plain formula dimension after a stored one', async () => {
+    const refusal = await refusedAlike({ dimensions: ['region', 'calc_s'], measures: ['total'] });
+    expect(refusal).toMatchObject({ path: 'groupBy.1', field: 'calc_s', fields: ['calc_s'] });
+  });
+
+  it('[#29304] still serves a plain dimension over a stored column alike on every face', async () => {
+    for (const face of FACES) {
+      const result = await ask(face, { dimensions: ['region'], measures: ['total'] });
+      const rows = (result.rows as Array<Record<string, unknown>>).map((r) => ({ ...r, total: Number(r.total) }));
+      expect(rows.sort((a, b) => String(a.region).localeCompare(String(b.region))), face)
+        .toEqual([{ region: 'amer', total: 100 }, { region: 'emea', total: 50 }]);
+    }
   });
 
   /** Every face refuses `selection` with one refusal of `code`, message included. */
