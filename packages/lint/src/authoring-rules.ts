@@ -2565,11 +2565,13 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/validate-rollup-source-visibility.ts',
     surfaces: CLI_ONLY,
+    // The precedent the reason below names is #17936, the measured crossing of
+    // `validateRetiredPermissionResidue` onto `permission` writes.
     surfaceReason:
       'Advisory-tier rule over permission-set × summary-field pairs: it cannot refuse a write. CLI-only ' +
       'because the crossing it would take is unmeasured: nothing yet measures, per write, what a ' +
       '`permission` save hands this rule (the set, and the parent and child objects it judges the set ' +
-      'against), which is the measurement #17936 took before `validateRetiredPermissionResidue` crossed on ' +
+      'against), which is the measurement taken before `validateRetiredPermissionResidue` crossed on ' +
       '`permission` writes. Crossing on `permission` writes is therefore a separate decision with that ' +
       'precedent; crossing on `object` writes as well would fall under the RUNTIME_OBJECT_ADVISORY_VOLUME ' +
       'fence. Never a bare `runtimeTypes` edit.',
