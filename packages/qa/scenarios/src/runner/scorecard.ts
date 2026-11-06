@@ -9,8 +9,9 @@
  * Counting rules, so a figure always means one thing:
  *
  *   - Build: the artifact score's counted checks (`expect`, scored tags, agent
- *     actions); a build with no artifact is 0 of the card's `expect` count,
- *     never "not run" — a degraded build must show up.
+ *     actions, and one failing check per bare item name); a build with no
+ *     artifact is 0 of the card's `expect` count, never "not run" — a degraded
+ *     build must show up. Each bare item name is also listed as a finding.
  *   - Run-问数: one turn per (question, persona); it passes when the answer is
  *     correct AND cited AND leaks nothing. Leaks are also counted apart, so a
  *     leaking answer shows up even when it is otherwise right.
@@ -77,6 +78,11 @@ export function opsTally(r: RunHalf | undefined): Tally | undefined {
 /** An artifact-less build scores 0 of 1 — a degraded build is never "nothing to score". */
 const NO_ARTIFACT_TOTAL = 1;
 
+/** One finding per bare item name a build declared, named per item. */
+export function bareNameFindings(b: BuildHalf | undefined, half: string): string[] {
+  return (b?.score?.naming ?? []).map((c) => `${half}: bare item name ${c.check.slice('bare-name:'.length).replace(':', ' ')} (${c.detail})`);
+}
+
 export function modeScorecard(m: ModeRun): ModeScorecard {
   const first: HalfScores = {};
   const b = buildTally(m.build, NO_ARTIFACT_TOTAL);
@@ -89,7 +95,7 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
     mode: m.mode,
     first,
     tags: (m.build?.score ?? m.iterate?.build.score)?.tags.map((t) => ({ tag: t.tag, status: t.status })) ?? [],
-    findings: m.findings,
+    findings: [...m.findings, ...bareNameFindings(m.build, 'build'), ...bareNameFindings(m.iterate?.build, 'iterate build')],
   };
   if (m.skipped) out.skipped = m.skipped;
   if (m.iterate) {
@@ -162,10 +168,10 @@ export function runRecord(meta: RunRecordMeta, cardRun: CardRun): Record<string,
   for (const m of cardRun.modes) {
     const s = sc.modes.find((x) => x.mode === m.mode)!;
     const halves: Array<[string, Tally | undefined, string | undefined, unknown[]]> = [
-      ['build', s.first.build, m.build?.error, m.build?.score ? [...m.build.score.expect.checks, ...m.build.score.tags.flatMap((t) => t.checks), ...m.build.score.agentActions] : []],
+      ['build', s.first.build, m.build?.error, m.build?.score ? [...m.build.score.expect.checks, ...m.build.score.tags.flatMap((t) => t.checks), ...m.build.score.agentActions, ...m.build.score.naming] : []],
       ['run-ask', s.first.ask, m.run?.error, m.run?.questions ?? []],
       ['run-operations', s.first.operations, m.run?.error, m.run?.operations ?? []],
-      ['iterate-build', s.iterate?.build, m.iterate?.build.error, m.iterate?.build.score ? m.iterate.build.score.expect.checks : []],
+      ['iterate-build', s.iterate?.build, m.iterate?.build.error, m.iterate?.build.score ? [...m.iterate.build.score.expect.checks, ...m.iterate.build.score.naming] : []],
       ['iterate-run-ask', s.iterate?.ask, m.iterate?.run?.error, m.iterate?.run?.questions ?? []],
       ['iterate-run-operations', s.iterate?.operations, m.iterate?.run?.error, m.iterate?.run?.operations ?? []],
     ];
