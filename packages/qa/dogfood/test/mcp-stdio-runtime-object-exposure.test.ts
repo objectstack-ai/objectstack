@@ -366,7 +366,8 @@ describe.each(SHAPES)('the MCP stdio door follows a runtime-authored object\'s c
     expect(refusal(await k.call('get_record', { objectName: GATED, recordId: 'any' }))).toEqual(refused);
     expect(refusal(await k.call('create_record', { objectName: GATED, data: { name: 'leak-probe' } }))).toEqual(refused);
     expect(refusal(await k.call('update_record', { objectName: GATED, recordId: 'any', data: { name: 'x' } }))).toEqual(refused);
-    expect(refusal(await k.call('delete_record', { objectName: GATED, recordId: 'any' }))).toEqual(refused);
+    // `confirm: true` passes the delete confirmation gate, so the exposure gate behind it answers.
+    expect(refusal(await k.call('delete_record', { objectName: GATED, recordId: 'any', confirm: true }))).toEqual(refused);
     // Refused before dispatch: the table holds exactly what it held.
     expect(stores.get(GATED)?.size).toBe(2);
 
