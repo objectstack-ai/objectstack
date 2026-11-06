@@ -634,6 +634,20 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         confirmText: "¿Abandonar esta organización? Perderá el acceso a sus entornos y miembros.",
         successMessage: "Ha abandonado la organización"
       }
+    },
+    _sections: {
+      identity: {
+        label: "Identidad"
+      },
+      branding: {
+        label: "Marca"
+      },
+      configuration: {
+        label: "Configuración"
+      },
+      group_structure: {
+        label: "Estructura del grupo"
+      }
     }
   },
   sys_member: {
