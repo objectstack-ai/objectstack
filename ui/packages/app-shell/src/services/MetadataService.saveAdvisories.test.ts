@@ -167,3 +167,52 @@ describe('MetadataService saves reach the shell advisory surface (#4237)', () =>
     expect(invalidate).toHaveBeenCalledWith('object:account');
   });
 });
+
+/**
+ * The storage-sync advisory, in the producer's EXACT shape (objectstack#30723).
+ *
+ * Copied verbatim from `objectStorageSyncRefusedNotice` in
+ * `packages/metadata-protocol/src/protocol-registry-hydration.ts` (the server
+ * half, objectstack#30635 / PR #30691), with `reason` fixed to the fallback the
+ * producer prints for a driver error that carries no 4xx `status`; copied, not
+ * imported, so the console takes no server dependency for a fixture. Its `path`
+ * is EMPTY (the finding is about the whole object), and the adapter's
+ * interceptor reads it through the same six-string-keys `readSaveAdvisories`
+ * as the `MetadataClient` doors, so `''` must survive here too. The
+ * `MetadataClient` doors' half of this pin lives in
+ * `views/metadata-admin/useMetadataClient.advisorySink.test.tsx`.
+ */
+function storageSyncRefusedNotice(name: string) {
+  const reason = 'the reason is in the server log';
+  return {
+    rule: 'object-storage-sync-refused',
+    severity: 'warning' as const,
+    where: `object "${name}"`,
+    path: '',
+    message:
+      `object '${name}' was saved and is served, but its storage was NOT created or altered: `
+      + `the datasource refused its schema sync (${reason}). Until the sync runs, reads and writes `
+      + 'against it fail, or miss the columns this save added.',
+    hint:
+      "Resolve the datasource's refusal, then publish the object again (which re-runs the sync), "
+      + 'or restart the server, which syncs the storage of every registered object.',
+  };
+}
+
+describe('MetadataService object save shows a refused storage sync (objectstack#30723)', () => {
+  it('the save resolves, and the warning says "Saved" with the server message and hint verbatim', async () => {
+    const notice = storageSyncRefusedNotice('account');
+    const { adapter, sink, events } = makeWiredAdapter({ ...CLEAN_BODY, advisories: [notice] });
+
+    await expect(new MetadataService(adapter).saveObject(ACCOUNT, ACCOUNT_FIELDS)).resolves.toBeUndefined();
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'object', name: 'account', door: 'save', mode: 'publish' });
+    expect(sink.warning).toHaveBeenCalledTimes(1);
+    expect(sink.error).not.toHaveBeenCalled();
+    const [title, opts] = sink.warning.mock.calls[0]!;
+    expect(title).toMatch(/^Saved\b/);
+    expect(opts!.description).toContain(`[${notice.rule}] ${notice.where} — ${notice.message}`);
+    expect(opts!.description).toContain(notice.hint);
+  });
+});
