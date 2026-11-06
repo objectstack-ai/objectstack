@@ -1,6 +1,7 @@
 ---
 '@objectstack/mcp': patch
 '@objectstack/spec': patch
+'@object-ui/console': patch
 ---
 
 feat(mcp): `delete_records` deletes many records of one object in one confirmed call, by a filter or an id list (#30891)
@@ -17,5 +18,7 @@ An agent that had to clear a set of records called `delete_record` once per row,
 - **Scopes.** Over OAuth the tool needs both `data:read` and `data:write`: its preview reads the selection's ids and count, a read a `data:write`-only token is not granted.
 
 What a preview cannot say: which records a delete rule will refuse. The engine has no delete dry run, so the rules are judged when the confirmed call runs, and the preview says so.
+
+`@object-ui/console`: the Integrations page's "Download skill" SKILL.md is a byte-for-byte mirror of the server's (#31015's drift pin), so it carries the same `delete_records` bullet.
 
 `@objectstack/spec` changes only doc comments: `AIActionConfirmation` names `delete_records` as the third door of the confirmation member, and the error-code ledger's `ACTION_CONFIRMATION_REQUIRED` rows name both delete tools.

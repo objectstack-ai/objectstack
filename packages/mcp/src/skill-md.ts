@@ -294,13 +294,13 @@ create/update payload.
   Without \`confirm: true\` it deletes nothing and is REFUSED
   (\`ACTION_CONFIRMATION_REQUIRED\`) with a \`preview\`: how many records match
   and sample ids. Show that to your human, then retry with \`confirm: true\`.
-  A confirmed call deletes up to ${DELETE_RECORDS_MAX_PER_CALL} records, each under your permissions and the
-  object's delete rules (no one bypasses them); refused records stay and come
-  back grouped by reason with their ids, and \`remaining\` says how many still
-  match. Call again to continue. The answer's \`cap\` is the call's real cap
-  (lower on a deployment with a smaller read page). A fault (not a rule's refusal) stops the call
-  and names the record it stopped at. Over OAuth it needs both \`data:read\` and
-  \`data:write\`.
+  A confirmed call deletes up to ${DELETE_RECORDS_MAX_PER_CALL} records (fewer on a deployment with
+  a smaller read page; the answer's \`cap\` says), each under your permissions
+  and the object's delete rules (no one bypasses them); refused records stay
+  and come back grouped by reason with their ids, and \`remaining\` says how
+  many still match. Call again to continue. A fault (not a rule's refusal)
+  stops the call and names the record it stopped at. Over OAuth it needs both
+  \`data:read\` and \`data:write\`.
 - **list_actions()** — list the business actions available to you (only those
   the app author exposed to AI and you are permitted to run), with each
   action's declared parameters, whether it operates on a record, and whether
