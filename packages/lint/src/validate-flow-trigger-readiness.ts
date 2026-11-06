@@ -521,7 +521,6 @@ function descriptorRefusal(issues: ReadonlyArray<{ code: string; path: ReadonlyA
   return `${at}${schemaRefusalHead(first.message)}${moreIssues(issues.length)}`;
 }
 
-/** The start node of a flow definition, if any. */
 /**
  * The object-less action keys, as `isObjectLessActionKey`
  * (`packages/objectql/src/action-governance.ts`) answers them for a non-empty
@@ -558,6 +557,7 @@ function nonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
+/** The start node of a flow definition, if any. */
 function startNodeOf(flow: AnyRec): { node: AnyRec; index: number } | undefined {
   const nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];
   const index = nodes.findIndex((n) => n?.type === 'start');

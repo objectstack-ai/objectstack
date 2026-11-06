@@ -4,7 +4,7 @@
 
 fix(lint): `os validate` warns on a flow start input whose record declaration (`objectName`) can never work as written
 
-Clause-②: no
+Clause-②: yes (widening) — `@objectstack/lint` exports two new rule-id constants, `FLOW_INPUT_OBJECT_LESS` and `FLOW_INPUT_RECORD_READ_AS_LIST`; nothing that passed before is refused.
 Metadata-protocol: none
 
 Two new warnings from the flow trigger-readiness rule, beside `flow-input-unknown-object`. Both are advisory: no build or publish that passed before is refused.
