@@ -462,6 +462,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Configuración regional",
         help: "Configuración regional del dispositivo, tal como la indicó el registro. Se guarda para el dispositivo; ninguna notificación push se muestra según ella: llega en el idioma del destinatario (su configuración regional de usuario y, si no, la predeterminada de la implantación)."
       },
+      origin: {
+        label: "Origen del servidor",
+        help: "El origen desde el que se cargó la consola al registrar el dispositivo (por ejemplo, https://crm.example.com). Todas las notificaciones push al dispositivo lo incluyen, de modo que una app móvil con varios servidores guardados abre la notificación en este. Vacío en un dispositivo registrado sin él."
+      },
       name: {
         label: "Nombre del dispositivo"
       },

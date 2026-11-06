@@ -374,6 +374,9 @@ export class ProtocolHistoryAndPublishFacet {
         if (effects.seedApplied) response.seedApplied = effects.seedApplied;
         if (effects.materializeApplied) response.materializeApplied = effects.materializeApplied;
         if (effects.projectionApplied) response.projectionApplied = effects.projectionApplied;
+        // [#30635] A refused storage sync rides the same omitted-when-empty
+        // `advisories`, after the gate's findings; the publish is not failed.
+        if (effects.storageRefused) response.advisories = [...(response.advisories ?? []), effects.storageRefused];
         // [#10219] LAST, and awaited: tell the host that ONE item went live, so
         // it can announce `metadata:reloaded` and boot-cached consumers re-sync
         // without a restart — the parity the batch door has had since #2576.
@@ -1050,11 +1053,13 @@ export class ProtocolHistoryAndPublishFacet {
             seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[]; landed?: SeedAppliedLandedParsed[] };
             materializeApplied?: PublishMaterializeResult;
             projectionApplied?: MutationProjectionOutcome;
+            storageRefused?: RuntimeAuthoringIssue;
         }> {
         const out: {
             seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[]; landed?: SeedAppliedLandedParsed[] };
             materializeApplied?: PublishMaterializeResult;
             projectionApplied?: MutationProjectionOutcome;
+            storageRefused?: RuntimeAuthoringIssue;
         } = {};
         // Drafts skipped the registry mutation; on publish we now refresh the
         // runtime registry so live behaviour catches up immediately (matches
@@ -1090,7 +1095,11 @@ export class ProtocolHistoryAndPublishFacet {
         // — but it is a fact about a repository read, load-bearing for a guard
         // two files away, and nothing said so at either end. Folding at the
         // producer retires the question instead of restating the invariant.
-        await host.ensureObjectStorage(args.singularType, args.name);
+        //
+        // [#30635] A refused sync comes back as the advisory the caller is
+        // told; set only when it was refused, so a clean result is unchanged.
+        const storageRefused = await host.ensureObjectStorage(args.singularType, args.name);
+        if (storageRefused) out.storageRefused = storageRefused;
         // Publishing a `seed` is what makes its rows live — materialize them
         // NOW (best-effort, never fails the publish) so every publish path
         // (per-ref REST publish, the home banner, package publish-drafts)

@@ -283,7 +283,7 @@
 - auto 档判定随命令形状变,不随能力变 ⇒ 被拒的复合命令拆成裸动作重试再报 blocked。
 - 读数:带链接与管道的 `git push` 被拒,裸 `git push origin <分支>` 放行,拒绝文案不点名元素。
 - 判定跨天翻面 ⇒ ⛔ 一次拒绝不是能力边界;`permissions.allow` 条目才是仓库侧确定性通道。
-- `rerun_failed_jobs` 复用原 run 的提交与合并 ref,不拿新 main 重算。
+- 中继重跑(`rerun-failed.mjs` → `run_rerun_failed`)复用原 run 的提交与合并 ref,不拿新 main 重算。
 - ⇒ 基上缺已合修复(修复合入晚于该 run 建立)时重跑无效,改 merge main。
 - 经 `rerun-failed.mjs` 重跑 PR `ci.yml` 失败 job 仅一次,先在 PR 或卡写明 flake 理由;二败即真红。
 - `run_rerun_failed` 只收 `ci.yml`;他 workflow 的 flake 走下两条,⛔ 永不空提交、永不关了重开。

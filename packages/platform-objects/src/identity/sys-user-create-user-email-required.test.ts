@@ -80,3 +80,24 @@ describe('#28280 — Create User marks Email required exactly when the endpoint 
     expect(first?.visible?.source).toBe(featureGatePredicate('phoneNumber'));
   });
 });
+
+describe('#30117 — Create User picks its permission set from the catalog, never types it', () => {
+  // Setup shows permission sets by label; the grant stores a set's name
+  // (ADR-0131 D4). A bare `text` param drew an empty box that took only the
+  // name, so typing the label an administrator can see was refused. The param
+  // names the grant column's own picker instead (`ActionParamSchema.widget`),
+  // which the action dialog draws as a searchable list of the sets by label,
+  // submitting the chosen name: its VALUE stays `text`. Pinned here, on the
+  // source, because plugin-auth's route pin reads this package's built dist.
+  const permissionSet = (params as Array<Param & { type?: string; widget?: string }>).find(
+    (p) => p.name === 'permissionSet',
+  );
+
+  it('the param names the permission-set picker and keeps a text value', () => {
+    expect(permissionSet).toMatchObject({ type: 'text', widget: 'permission-ref', required: false });
+  });
+
+  it('it stays inline, so the dialog opens without plugin-security metadata loaded', () => {
+    expect(permissionSet).not.toHaveProperty('field');
+  });
+});

@@ -4613,6 +4613,18 @@ export class ObjectStackProtocolImplementation implements
      *         layer's MetadataService read reporting `degraded` with nothing
      *         in the registry to answer instead, carrying the failing loaders'
      *         messages on `cause`.
+     *
+     * [#29814] `opts.withDraft` adds the `draft` layer
+     * (`GetMetaItemLayeredResponseSchema.draft`): the pending draft row the
+     * strict `state: 'draft'` read of {@link getMetaItem} serves, at that
+     * read's address, AS STORED — converted like the `overlay` layer and
+     * credential-redacted like every layer, never governed, translated or
+     * stamped — or `null` when no draft is pending. Without the option the
+     * answer carries no `draft` key ("not served"). Only a door that has
+     * admitted its caller to pending drafts (`mayReadPendingDrafts` in
+     * `@objectstack/rest`, and its runtime twin) asks for it; every other
+     * reader of this method reads no draft. A failed draft read throws, as
+     * the overlay read does, for the same [#5707] reason.
      */
     async getMetaItemLayered(request: {
         type: string;
@@ -4620,13 +4632,15 @@ export class ObjectStackProtocolImplementation implements
         packageId?: string;
         /** [#26699] The bundle member whose layers to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string;
-    }): Promise<{
+    }, opts: { withDraft?: boolean } = {}): Promise<{
         type: string;
         name: string;
         code: unknown | null;
         overlay: unknown | null;
         overlayScope: 'env' | null;
         effective: unknown | null;
+        /** [#29814] The pending draft row as stored, only when `opts.withDraft` asked; `null` for none. */
+        draft?: unknown | null;
         /**
          * Load-time validation result for the effective payload — same
          * shape attached to getMetaItems/getMetaItem by
@@ -4657,7 +4671,7 @@ export class ObjectStackProtocolImplementation implements
         resettable: boolean;
     }> {
         // [#25467 E1] The body moved to `protocol-meta-layered-reads.ts`; it reaches this class through `protocol-host.ts`.
-        return getMetaItemLayered(protocolHost(this), request);
+        return getMetaItemLayered(protocolHost(this), request, opts);
     }
 
     /**
@@ -10032,7 +10046,7 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /** Docblock and body: {@link ProtocolRegistryHydrationFacet.ensureObjectStorage} in `protocol-registry-hydration.ts` [#29985 codemod]. */
-    private async ensureObjectStorage(type: string, name: string): Promise<void> {
+    private async ensureObjectStorage(type: string, name: string): Promise<RuntimeAuthoringIssue | undefined> {
         // [#29985 codemod] The body moved to `protocol-registry-hydration.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolRegistryHydrationFacet.ensureObjectStorage(protocolHost(this), type, name);
     }
@@ -11340,6 +11354,7 @@ export class ObjectStackProtocolImplementation implements
         seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[]; landed?: SeedAppliedLandedParsed[] };
         materializeApplied?: PublishMaterializeResult;
         projectionApplied?: MutationProjectionOutcome;
+        storageRefused?: RuntimeAuthoringIssue;
     }> {
         // [#29985 codemod] The body moved to `protocol-history-and-publish.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolHistoryAndPublishFacet.runPublishSideEffects(protocolHost(this), args);
