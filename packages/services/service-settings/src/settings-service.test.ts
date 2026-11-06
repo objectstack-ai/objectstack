@@ -407,6 +407,37 @@ describe('SettingsService — resetNamespace / built-in reset action', () => {
   });
 });
 
+describe('SettingsService — the built-in action answers are written in the caller\'s language', () => {
+  it('the built-in reset answers in display.locale: zh-TW in Traditional, ru in Russian', async () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(brandingSettingsManifest);
+    await svc.set('branding', 'workspace_name', 'Acme');
+    const cleared = await svc.runAction('branding', 'reset', null, {}, { locale: 'zh-TW' });
+    expect(cleared).toMatchObject({ ok: true, severity: 'info', message: '已清除 1 個已儲存的值；環境變數/預設設定已重新生效。' });
+    expect((await svc.get('branding', 'workspace_name')).source).toBe('default');
+
+    const nothing = await svc.runAction('branding', 'reset', null, {}, { locale: 'ru' });
+    expect(nothing).toMatchObject({
+      ok: true,
+      message: 'Нет сохранённых значений для очистки: уже используются настройки из окружения или по умолчанию.',
+    });
+  });
+
+  it('an action with no handler is refused in display.locale; no locale, or one off the table, keeps English', async () => {
+    const svc = new SettingsService();
+    svc.registerManifest(mailSettingsManifest);
+    expect(await svc.runAction('mail', 'nope', null, {}, { locale: 'de-DE' })).toMatchObject({
+      ok: false,
+      severity: 'error',
+      message: 'Für die Aktion „nope“ in „mail“ ist kein Handler registriert.',
+    });
+    for (const display of [{}, { locale: 'sw-KE' }]) {
+      expect((await svc.runAction('mail', 'nope', null, {}, display)).message)
+        .toBe("No handler registered for action 'nope' in 'mail'.");
+    }
+  });
+});
+
 describe('SettingsService — save-time validation (required/visible/pattern)', () => {
   function aiService(): SettingsService {
     // #8026 — same reason as `mailService` below: the provider configs these

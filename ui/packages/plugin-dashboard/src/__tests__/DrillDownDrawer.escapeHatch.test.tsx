@@ -75,3 +75,76 @@ describe('DrillDownDrawer — escape hatch & navigate target', () => {
     expect(screen.getByTestId('drill-down-body')).toBeInTheDocument();
   });
 });
+
+/**
+ * objectstack#30654 — the host's `canOpenRecordList` decides whether a drill
+ * has a list destination at all. A drill filter the host's route cannot say
+ * exactly (two conditions on one field, an `$in` scope) would open a WIDER
+ * list than the drawer, so the drawer offers no "Open in list" and
+ * `target: 'navigate'` stays in the drawer, the same fallback as a host with no
+ * `openRecordList`. A host that does not provide the member keeps the old
+ * behaviour exactly.
+ */
+describe('DrillDownDrawer — the host says whether the drill has an exact list (objectstack#30654)', () => {
+  function renderWith(
+    value: {
+      openRecordList?: (object: string, filter?: Record<string, unknown>) => void;
+      canOpenRecordList?: (object: string, filter?: Record<string, unknown>) => boolean;
+    },
+    props: Record<string, any> = {},
+  ) {
+    return render(
+      <DrillNavigationProvider value={value}>
+        <DrillDownDrawer
+          open
+          onClose={props.onClose ?? vi.fn()}
+          title="Sent × Paid Invoices"
+          objectName="invoice"
+          filter={{ $and: [{ status: 'paid' }, { status: 'sent' }] }}
+          dataSource={{ find: async () => ({ data: [] }), getObjectSchema: async () => ({ fields: {} }) }}
+          {...props}
+        />
+      </DrillNavigationProvider>,
+    );
+  }
+
+  it('offers no "Open in list" when the host answers false, and asks with the drill filter', () => {
+    const canOpenRecordList = vi.fn(() => false);
+    renderWith({ openRecordList: vi.fn(), canOpenRecordList });
+
+    expect(screen.queryByTestId('drill-open-in-list')).toBeNull();
+    expect(canOpenRecordList).toHaveBeenCalledWith('invoice', { $and: [{ status: 'paid' }, { status: 'sent' }] });
+    // Still a working drawer.
+    expect(screen.getByTestId('drill-down-body')).toBeInTheDocument();
+  });
+
+  it("target='navigate' stays in the drawer when the host answers false", () => {
+    const openRecordList = vi.fn();
+    const onClose = vi.fn();
+    renderWith({ openRecordList, canOpenRecordList: () => false }, { target: 'navigate', onClose });
+
+    expect(screen.getByTestId('drill-down-body')).toBeInTheDocument();
+    expect(openRecordList).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('offers "Open in list" when the host answers true', () => {
+    const openRecordList = vi.fn();
+    renderWith({ openRecordList, canOpenRecordList: () => true }, { filter: { status: 'sent' } });
+
+    fireEvent.click(screen.getByTestId('drill-open-in-list'));
+    expect(openRecordList).toHaveBeenCalledWith('invoice', { status: 'sent' });
+  });
+
+  it('CONTROL — a host without canOpenRecordList keeps the old behaviour: button shown, navigate navigates', async () => {
+    const openRecordList = vi.fn();
+    const { unmount } = renderWith({ openRecordList });
+    expect(screen.getByTestId('drill-open-in-list')).toBeInTheDocument();
+    unmount();
+
+    renderWith({ openRecordList }, { target: 'navigate' });
+    await waitFor(() =>
+      expect(openRecordList).toHaveBeenCalledWith('invoice', { $and: [{ status: 'paid' }, { status: 'sent' }] }),
+    );
+  });
+});

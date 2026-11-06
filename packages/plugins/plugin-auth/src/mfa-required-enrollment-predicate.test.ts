@@ -225,8 +225,9 @@ describe('the global mfa_required switch needs two-factor enrollment', () => {
     expect(off({ next: null, current: true })).toBeUndefined();
     expect(off({ next: true, current: 'true' })).toBeUndefined();
     expect(mfaRequiredEnrollmentPredicate(() => true)({ next: true, current: false })).toBeUndefined();
-    // Unknown locales fall back to English.
-    expect(off({ next: true, current: false, locale: 'fr-FR' })?.message).toBe(MFA_REQUIRED_ENROLLMENT_COPY.en);
+    // A language off the platform locale table falls back to English; French is on it.
+    expect(off({ next: true, current: false, locale: 'sw-KE' })?.message).toBe(MFA_REQUIRED_ENROLLMENT_COPY.en);
+    expect(off({ next: true, current: false, locale: 'fr-FR' })?.message).toBe(MFA_REQUIRED_ENROLLMENT_COPY.fr);
   });
 
   it('a settings service without write predicates is said at warn, only while the pin makes it matter', () => {

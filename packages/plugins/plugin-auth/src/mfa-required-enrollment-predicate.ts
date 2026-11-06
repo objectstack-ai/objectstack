@@ -47,6 +47,7 @@
 
 import { resolveLocale } from '@objectstack/core';
 import { resolveTwoFactorEnabled } from './auth-manager.js';
+import type { SettingsCopyLocale } from './settings-copy-locale.js';
 
 /** The `auth` settings key this guards. */
 export const MFA_REQUIRED_SETTING_KEY = 'mfa_required';
@@ -71,7 +72,13 @@ export function twoFactorEnrollableWithSwitchOn(): boolean {
   return resolveTwoFactorEnabled({ twoFactor: true });
 }
 
-/** The refusal, per language. */
+/**
+ * The refusal, per language: one entry per language on the platform locale
+ * table (`@objectstack/spec/system` `PLATFORM_LOCALES`), the four this table
+ * served first under their older codes (`zh-CN`, `ja-JP`, `es-ES`). Core's
+ * `resolveLocale` reads the caller's code through that table, so `zh-TW`
+ * finds the Traditional entry and `pt` the Brazilian one.
+ */
 export const MFA_REQUIRED_ENROLLMENT_COPY = {
   en:
     'Multi-factor authentication cannot be required on this deployment yet: OS_AUTH_TWO_FACTOR is set to off, ' +
@@ -89,7 +96,38 @@ export const MFA_REQUIRED_ENROLLMENT_COPY = {
     'desactivado y prevalece sobre este ajuste, así que nadie podría registrar una aplicación de autenticación y ' +
     'el requisito no se aplicaría. Establezca OS_AUTH_TWO_FACTOR=true (o elimínelo) en la implementación, ' +
     'reinicie y después active esta opción.',
-} as const;
+  'zh-Hant':
+    '本部署暫時無法強制多因素驗證：OS_AUTH_TWO_FACTOR 被設為關閉，它的優先順序高於本設定，' +
+    '因此沒有人能綁定驗證器應用程式，這項要求也不會生效。請先在部署上設定 OS_AUTH_TWO_FACTOR=true（或刪除它）並重新啟動，再開啟此項。',
+  ar:
+    'لا يمكن فرض المصادقة متعددة العوامل على هذا النشر بعد: تم ضبط OS_AUTH_TWO_FACTOR على الإيقاف، وهو يتقدّم ' +
+    'على هذا الإعداد، لذا لن يتمكن أحد من تسجيل تطبيق مصادقة ولن يُطبَّق هذا الشرط. اضبط OS_AUTH_TWO_FACTOR=true ' +
+    '(أو احذفه) على النشر وأعد تشغيله، ثم فعّل هذا الخيار.',
+  fr:
+    'L’authentification multifacteur ne peut pas encore être exigée sur ce déploiement : OS_AUTH_TWO_FACTOR est ' +
+    'désactivé et prévaut sur ce paramètre, si bien que personne ne pourrait enregistrer d’application ' +
+    'd’authentification et l’exigence ne serait pas appliquée. Définissez OS_AUTH_TWO_FACTOR=true (ou supprimez-le) ' +
+    'sur le déploiement et redémarrez, puis activez cette option.',
+  'pt-BR':
+    'Ainda não é possível exigir a autenticação multifator nesta implantação: OS_AUTH_TWO_FACTOR está desativado e ' +
+    'prevalece sobre esta configuração, então ninguém conseguiria cadastrar um aplicativo autenticador e a exigência ' +
+    'não seria aplicada. Defina OS_AUTH_TWO_FACTOR=true (ou remova-o) na implantação e reinicie; depois, ative esta ' +
+    'opção.',
+  ru:
+    'Пока нельзя требовать многофакторную аутентификацию в этом развёртывании: OS_AUTH_TWO_FACTOR выключен и имеет ' +
+    'приоритет над этой настройкой, поэтому никто не сможет подключить приложение-аутентификатор и требование не ' +
+    'будет действовать. Установите OS_AUTH_TWO_FACTOR=true (или удалите переменную) в развёртывании и перезапустите ' +
+    'его, затем включите этот параметр.',
+  de:
+    'Die Multi-Faktor-Authentifizierung kann in dieser Bereitstellung noch nicht verlangt werden: OS_AUTH_TWO_FACTOR ' +
+    'ist ausgeschaltet und hat Vorrang vor dieser Einstellung, sodass niemand eine Authenticator-App einrichten ' +
+    'könnte und die Anforderung nicht durchgesetzt würde. Setzen Sie OS_AUTH_TWO_FACTOR=true (oder entfernen Sie die ' +
+    'Variable) in der Bereitstellung, starten Sie neu und schalten Sie diese Option danach ein.',
+  ko:
+    '이 배포에서는 아직 다단계 인증을 필수로 설정할 수 없습니다. OS_AUTH_TWO_FACTOR가 꺼짐으로 설정되어 있고 이 설정보다 ' +
+    '우선하므로, 아무도 인증 앱을 등록할 수 없고 이 요구 사항도 적용되지 않습니다. 배포에서 OS_AUTH_TWO_FACTOR=true로 ' +
+    '설정하거나 이를 삭제한 뒤 다시 시작하고, 그다음 이 옵션을 켜세요.',
+} as const satisfies Record<SettingsCopyLocale, string>;
 
 const COPY_LOCALES = Object.keys(MFA_REQUIRED_ENROLLMENT_COPY);
 
