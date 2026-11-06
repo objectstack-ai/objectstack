@@ -32,6 +32,8 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { MCPServerPlugin, MCPServerRuntime } from '@objectstack/mcp';
+import type { PluginContext } from '@objectstack/core';
+import type { IDataEngine } from '@objectstack/spec/contracts';
 import { bootShowcase } from './showcase-boot.js';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
 import { catalogPermissionSet } from './catalog-permission-set.js';
@@ -84,7 +86,7 @@ function inProcessTransport() {
 
 describe('showcase: MCP describe_object answers the field-masked object schema the /meta door answers (ADR-0106)', () => {
   let stack: VerifyStack;
-  let ql: any;
+  let ql: IDataEngine;
   const tokens: Record<string, string> = {};
   const keys: Record<string, string> = {};
   let declaredFields: string[];
@@ -125,7 +127,7 @@ describe('showcase: MCP describe_object answers the field-masked object schema t
     process.env.OS_MCP_STDIO_API_KEY = apiKey;
     try {
       const local = new Map<string, unknown>();
-      const ctx: any = {
+      const ctx = {
         registerService: vi.fn((name: string, service: unknown) => local.set(name, service)),
         getService: vi.fn((name: string) => (local.has(name) ? local.get(name) : stack.kernel.getService(name))),
         replaceService: vi.fn(),
@@ -134,7 +136,7 @@ describe('showcase: MCP describe_object answers the field-masked object schema t
         trigger: vi.fn(async () => {}),
         logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
         getKernel: vi.fn(() => stack.kernel),
-      };
+      } as unknown as PluginContext;
       const plugin = new MCPServerPlugin({ autoStart: true });
       await plugin.init(ctx);
       const runtime = local.get('mcp') as MCPServerRuntime;
@@ -180,7 +182,7 @@ describe('showcase: MCP describe_object answers the field-masked object schema t
     expect(authored.status, `scratch set ${name} authored through the metadata door`).toBeLessThan(300);
     const ps = await catalogPermissionSet(ql, name);
     expect(ps, `scratch set ${name} served by the catalog`).toBeTruthy();
-    const userId = (await ql.findOne('sys_user', { where: { email }, context: SYS }))?.id;
+    const userId = (await ql.findOne('sys_user', { where: { email } }, { context: SYS }))?.id;
     expect(userId, `${email} provisioned`).toBeTruthy();
     await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: ps.name }, { context: SYS });
   }
@@ -205,7 +207,7 @@ describe('showcase: MCP describe_object answers the field-masked object schema t
     tokens.member = await stack.signUp(MEMBER);
     tokens.peer = await stack.signUp(PEER);
     tokens.walled = await stack.signUp(WALLED);
-    ql = await stack.kernel.getServiceAsync('objectql');
+    ql = await stack.kernel.getServiceAsync<IDataEngine>('objectql');
 
     // Every field the object declares, as the exempt admin is served it.
     const whole = await metaItem(tokens.admin);

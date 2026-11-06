@@ -46,6 +46,8 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { SecurityPlugin } from '@objectstack/plugin-security';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { HttpDispatcher } from '../http-dispatcher.js';
+// Paid at collection, not inside a case's clock: the dispatcher's reach loads it lazily.
+import '@objectstack/metadata';
 
 /** A kernel over `services`, with an `mcp` service that hands back the bridge `handleMcp` built. */
 function kernelOver(services: Record<string, any>) {
