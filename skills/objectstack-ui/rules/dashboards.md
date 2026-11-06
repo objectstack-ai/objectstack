@@ -100,10 +100,11 @@ Standardized answers to the recurring ambiguous cases:
   it is. Leave days: `sum` over the `formula` `days_requested` (`daysBetween(start, end)`) is
   refused (`date` fields: no `duration`) ⇒ a stored `number` `days_count` a
   `beforeInsert`/`beforeUpdate` hook writes, then `{ name: 'days_sum', aggregate: 'sum', field: 'days_count' }`.
-- **Breakdown by a multi-value field.** `multiselect`/`checkboxes`/`tags` and
-  any `multiple: true` field is refused as a dataset or cube dimension and as
-  `groupBy` (`INVALID_FIELD`; no per-member buckets). One widget per member,
-  filtered `{ tags: { $contains: 'urgent' } }`, or a single-value axis.
+- **Breakdown by a multi-value field.** `multiselect`/`checkboxes`/`tags`, any
+  `multiple: true` field, and a `formula` are refused as a dataset or cube
+  dimension and as `groupBy` (`INVALID_FIELD`; no per-member buckets). One
+  widget per member, filtered `{ tags: { $contains: 'urgent' } }`, or a
+  single-value axis.
 - **Filter by a parent's attribute** → a **dimension** (guaranteed to join); a
   lookup-path *filter* is not a reliable analytics-path construct.
 - **A dashboard filter driving several charts** → **not** a dataset: `globalFilters`
@@ -228,7 +229,7 @@ no second `filter` is required.
 
 `compareTo` is `{ kind, dimension? }` — the same shape the analytics executor
 reads (`DatasetSelection.compareTo`), so what a widget declares is exactly what
-runs. There is no second widget-side vocabulary.
+runs.
 
 | Key | Value | Behaviour |
 |:--|:--|:--|
