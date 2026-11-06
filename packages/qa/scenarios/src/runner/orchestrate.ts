@@ -7,7 +7,9 @@
  *             `os build`, `os verify` (opt-in proofs from the tags) → score the
  *             artifact → boot, seed, one user + key per persona → the Run half
  *             (every question as every persona it names, every operation as
- *             its persona, each over the app's own MCP) → the iterate change →
+ *             its persona, each over the app's own MCP, and the validation
+ *             operation's declared write re-sent by the runner itself as that
+ *             persona, `observeProbe`) → the iterate change →
  *             rebuild + re-score Build, and (unless disabled) re-run the Run half.
  *   template  scaffold a blank project → boot → install a VERIFIED build of the
  *             same card unmanaged (ADR-0131 D6) → the agent applies the iterate
@@ -26,7 +28,7 @@
  */
 
 import { applyExpectDelta, type LoadedScenario } from '../loader.js';
-import { scenarioNamespace } from '../schema.js';
+import { isWriteValidationOperation, scenarioNamespace } from '../schema.js';
 import {
   gradeCardAnswer,
   gradeCardOperation,
@@ -34,12 +36,13 @@ import {
   type OperationGrade,
   type OperationObservation,
   type PersonaRunGrade,
+  type ProbeObservation,
   type ScenarioArtifactScore,
 } from '../score/index.js';
 import type { AppHarness, PersonaAccount } from './app.js';
 import type { AgentDriver, StepRef } from './driver.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
-import { observeOperation, touchedRowId, type Row } from './observe.js';
+import { observeOperation, observeProbe, probeCall, touchedRowId, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
 import { buildPrompt, iteratePrompt, operationPrompt, personaHandles, questionPrompt, templateIteratePrompt, userHandleFields, verifyArgs } from './prompts.js';
 import type { ParsedTurn } from './transcript.js';
@@ -318,6 +321,27 @@ export function seedDependence(
 }
 
 /** The persona (not a card artifact) a scenario's audit trail names, from the user id the app recorded. */
+/**
+ * A validation operation's declared values as its probe sends them: a value in
+ * a user-handle field (`task.assignee` = `u_kim`) is that handle's user id, the
+ * persona's or the admin's, exactly as {@link seedApp} loads it; every other
+ * value is sent verbatim.
+ */
+export function probeValues(card: Card, op: Operation, accounts: readonly PersonaAccount[], adminId: string): Record<string, unknown> {
+  const handles = personaHandles(card);
+  const userFields = userHandleFields(card);
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(op.values ?? {})) {
+    if (typeof v === 'string' && userFields.has(`${op.object}.${k}`)) {
+      const persona = handles.get(v);
+      out[k] = accounts.find((a) => a.persona === persona)?.userId ?? adminId;
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
 function personaOfUser(userId: string | null, accounts: readonly PersonaAccount[], adminId: string): string | null {
   if (userId === null) return null;
   const hit = accounts.find((a) => a.userId === userId);
@@ -495,7 +519,20 @@ export async function runHalf(
           const id = touchedRowId(op, rowsByObject);
           auditActor = id === undefined ? null : personaOfUser(await app.auditActorUserId(op.object, id), accounts, app.adminUserId());
         }
-        res.observation = observeOperation({ op, turn, before, after, rowsByObject, ...(auditActor !== undefined ? { auditActor } : {}) });
+        // The validation operation's probe: the runner sends the declared write
+        // itself, as the same persona through the same MCP door, after the turn.
+        // A probe that cannot be sent leaves the platform half "not observed".
+        let probe: ProbeObservation | undefined;
+        if (isWriteValidationOperation(card, op.id)) {
+          try {
+            const call = probeCall(op, probeValues(card, op, accounts, app.adminUserId()));
+            const answer = await app.callTool(keyOf(op.actingAs), call.tool, call.args);
+            probe = observeProbe(call, answer, after, (await app.listRows(op.object)).rows as Row[]);
+          } catch (e) {
+            res.error = `probe: ${errText(e)}`;
+          }
+        }
+        res.observation = observeOperation({ op, turn, before, after, rowsByObject, ...(auditActor !== undefined ? { auditActor } : {}), ...(probe ? { probe } : {}) });
         res.grade = gradeCardOperation(scenario, op.id, res.observation);
       } catch (e) {
         res.error = errText(e);
