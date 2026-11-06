@@ -241,6 +241,11 @@ const ADMITTED = [
   // mount carrying the ADR-0068 gate first; no body or query parameter is
   // read and no stored state moves, so it has no individual effect pin below.
   'GET /api/v1/auth/admin/client-address',
+  // #30918 — another person's authorized AI assistants (OAuth consents) and
+  // when each was last used. A READ: an ObjectStack raw mount carrying the
+  // ADR-0068 gate first, then the closed `{ userId }` query; no stored state
+  // moves, so it has no individual effect pin below.
+  'GET /api/v1/auth/admin/authorized-clients',
   'POST /api/v1/auth/admin/unlock-user',
   'POST /api/v1/auth/admin/import-users',
   'POST /api/v1/auth/admin/oauth2/toggle-disabled',
@@ -710,6 +715,10 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
       // #28793. No body is read; the empty one is what the console's action
       // sends besides the `organizationId` it adds, which the handler ignores.
       'POST /api/v1/auth/admin/list-platform-admins': { body: {} },
+      // #30918. The one parameter the read takes: with none the handler answers
+      // `400 VALIDATION_ERROR` past the gate, which the `diedBeforeTheGate`
+      // predicate below reads as a void reading.
+      'GET /api/v1/auth/admin/authorized-clients': { query: `?userId=${targetUserId}` },
       'POST /api/v1/auth/admin/oauth2/toggle-disabled': { body: { client_id: 'standing-probe-client', disabled: false } },
       'POST /api/v1/auth/admin/sso/register': {
         body: {

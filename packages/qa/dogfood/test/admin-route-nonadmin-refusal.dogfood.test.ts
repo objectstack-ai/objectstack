@@ -283,6 +283,12 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
       bucket: 'objectstack-gate',
       note: 'a read: the gate runs first and the handler reads no body and no query parameter; the admin gets 200 { clientAddress, trustProxy }',
     },
+    // ── #30918 — another person's authorized AI assistants (a read) ─────────
+    'GET /api/v1/auth/admin/authorized-clients': {
+      bucket: 'objectstack-gate',
+      query: `?userId=${targetUserId}`,
+      note: 'a read: the gate runs before the query is read, so anon and member are refused whoever userId names; the admin gets 200 { clients, truncated } for the target',
+    },
     // ── #9653: the /admin/sso/* bridges, gated ahead of their delegation ────
     //
     // The ADR-0068 gate runs BEFORE the bridge re-dispatches into better-auth,

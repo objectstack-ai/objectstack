@@ -4457,21 +4457,24 @@ export class AuthManager {
    * write per consent per hour, from the verified principal and the server's
    * clock alone; the first failure in this process is reported at `error`
    * (`error` when the host logger carries it, else `warn`, called through the
-   * property — see {@link audienceLogError}).
+   * property — see {@link audienceLogError}; `console.error` when the manager
+   * was given no logger, so the report is never silent).
    */
   private scheduleMcpClientLastUse(principal: { userId: string; clientId?: string; organizationId?: string }): void {
     if (!principal.clientId) return;
     const stamper = (this.mcpClientLastUse ??= new McpClientLastUseStamper(
       mcpClientLastUseStoreFor(() => this.getDataEngine()),
       {
-        onFirstFailure: (error) =>
-          this.audienceLogError(
+        onFirstFailure: (error) => {
+          const message =
             '[AuthManager] The last-use time of authorized AI assistants could not be recorded: '
-              + 'the authorized-clients reads keep answering the last stamp that landed as if it were current. '
-              + 'Check that schema sync has added sys_oauth_consent.last_used_at and that the data engine is reachable; '
-              + 'each consent is retried once an hour, and only this first failure is reported.',
-            { error: error instanceof Error ? error.message : String(error) },
-          ),
+            + 'the authorized-clients reads keep answering the last stamp that landed as if it were current. '
+            + 'Check that schema sync has added sys_oauth_consent.last_used_at and that the data engine is reachable; '
+            + 'each consent is retried once an hour, and only this first failure is reported.';
+          const meta = { error: error instanceof Error ? error.message : String(error) };
+          if (this.config.logger) this.audienceLogError(message, meta);
+          else console.error(message, meta);
+        },
       },
     ));
     runAfterResponse(
