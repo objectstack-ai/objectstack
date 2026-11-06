@@ -156,8 +156,8 @@ const CASES = [
     // Under the $5,000 committee threshold, as the seeded EXP-2001 is.
     amount: 1500,
     // per_group: one from EACH group finalizes.
-    approvers: ['position:manager', 'position:auditor'],
-    rejecter: 'position:auditor',
+    approvers: ['position:showcase_manager', 'position:showcase_auditor'],
+    rejecter: 'position:showcase_auditor',
   },
   {
     flow: CommitteeQuorumFlow,
@@ -165,8 +165,8 @@ const CASES = [
     // At or above the $5,000 the committee's start gate requires (EXP-DEMO: 8,900).
     amount: 8900,
     // quorum: any 2 of 3 finalizes.
-    approvers: ['position:manager', 'position:legal'],
-    rejecter: 'position:finance',
+    approvers: ['position:showcase_manager', 'position:showcase_legal'],
+    rejecter: 'position:showcase_finance',
   },
 ] as const;
 

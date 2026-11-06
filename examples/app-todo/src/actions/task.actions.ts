@@ -4,7 +4,7 @@ import { defineAction } from '@objectstack/spec/ui';
 
 /** Mark Task as Complete */
 export const CompleteTaskAction = defineAction({
-  name: 'complete_task',
+  name: 'todo_complete_task',
   label: 'Mark Complete',
   objectName: 'todo_task',
   icon: 'check-circle',
@@ -21,7 +21,7 @@ export const CompleteTaskAction = defineAction({
 
 /** Mark Task as In Progress */
 export const StartTaskAction = defineAction({
-  name: 'start_task',
+  name: 'todo_start_task',
   label: 'Start Task',
   objectName: 'todo_task',
   icon: 'play-circle',
@@ -49,7 +49,7 @@ export const StartTaskAction = defineAction({
  * the handler runs with those values.
  */
 export const DeferTaskAction = defineAction({
-  name: 'defer_task',
+  name: 'todo_defer_task',
   label: 'Defer Task',
   objectName: 'todo_task',
   icon: 'clock',
@@ -76,7 +76,7 @@ export const DeferTaskAction = defineAction({
 
 /** Set Reminder — collect input, then run server-side (see DeferTaskAction). */
 export const SetReminderAction = defineAction({
-  name: 'set_reminder',
+  name: 'todo_set_reminder',
   label: 'Set Reminder',
   objectName: 'todo_task',
   icon: 'bell',
@@ -97,7 +97,7 @@ export const SetReminderAction = defineAction({
 
 /** Clone Task */
 export const CloneTaskAction = defineAction({
-  name: 'clone_task',
+  name: 'todo_clone_task',
   label: 'Clone Task',
   objectName: 'todo_task',
   icon: 'copy',
@@ -114,7 +114,7 @@ export const CloneTaskAction = defineAction({
 
 /** Mass Complete Tasks */
 export const MassCompleteTasksAction = defineAction({
-  name: 'mass_complete',
+  name: 'todo_mass_complete',
   label: 'Complete Selected',
   objectName: 'todo_task',
   icon: 'check-square',
@@ -131,7 +131,7 @@ export const MassCompleteTasksAction = defineAction({
 
 /** Delete Completed Tasks */
 export const DeleteCompletedAction = defineAction({
-  name: 'delete_completed',
+  name: 'todo_delete_completed',
   label: 'Delete Completed',
   objectName: 'todo_task',
   icon: 'trash',
@@ -156,7 +156,7 @@ export const DeleteCompletedAction = defineAction({
 
 /** Export Tasks to CSV */
 export const ExportToCsvAction = defineAction({
-  name: 'export_csv',
+  name: 'todo_export_csv',
   label: 'Export to CSV',
   objectName: 'todo_task',
   icon: 'download',
