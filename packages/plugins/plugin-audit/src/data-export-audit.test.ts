@@ -67,7 +67,7 @@ describe('[#30955] the export writer on the real `audit` slot', () => {
 
   /** The export rows at rest, oldest first. */
   const exportRows = async (): Promise<Array<Record<string, any>>> =>
-    (await engine.find(LEDGER, { where: { action: DATA_EXPORT_AUDIT_ACTION }, orderBy: [{ field: 'created_at', order: 'asc' }], context: SYS } as any)) as any;
+    (await engine.find(LEDGER, { where: { action: DATA_EXPORT_AUDIT_ACTION }, orderBy: [{ field: 'created_at', order: 'asc' }], context: SYS })) as Array<Record<string, any>>;
 
   beforeAll(async () => {
     kernel = new ObjectKernel({ logger: { level: 'silent' } });
