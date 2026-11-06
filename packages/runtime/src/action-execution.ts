@@ -3745,8 +3745,9 @@ export function refuseDeniedSubjectLoad(
  *   `403 PERMISSION_DENIED` with the middleware's user-facing sentence
  *   (`permission_denied`, the caller's locale, the deployment's override).
  *   A throw is a denial, never read as a grant.
- * - a system context, no security service, or one without `explain` ⇒ no
- *   refusal here: no permission set exists to deny with, as the data door.
+ * - no security service, or one without `explain` ⇒ no refusal here: no
+ *   permission set exists to deny with, as the data door. (A system context
+ *   is `explain`'s own bypass, as it is the middleware's: asked, not skipped.)
  */
 export async function refuseUngrantedDeclarativeUpdate(
     deps: ActionExecutionDeps,
@@ -3755,7 +3756,6 @@ export async function refuseUngrantedDeclarativeUpdate(
     ec: any,
     envId?: string,
 ): Promise<void> {
-    if (ec?.isSystem === true) return;
     let security: { explain?: (request: { object: string; operation: string }, context?: any) => Promise<{ allowed?: boolean } | undefined> } | undefined;
     try {
         security = await deps.resolveService(requestContext as HttpProtocolContext, 'security', envId);
