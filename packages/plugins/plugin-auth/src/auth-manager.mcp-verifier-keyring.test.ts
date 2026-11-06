@@ -112,7 +112,12 @@ async function verifierRig() {
     SYS,
   );
 
-  /** A token for this deployment's MCP resource, signed by the jwt plugin with the stored key. */
+  /**
+   * A token for this deployment's MCP resource, signed by the jwt plugin with
+   * the stored key. It carries `iat`, as every access token the provider mints
+   * does: the jwt plugin stamps none unless the payload names one, and the
+   * verifier refuses a token it cannot date against its consent (ruling A).
+   */
   const mint = async (): Promise<string> =>
     (await api.signJWT({
       body: {
@@ -122,6 +127,7 @@ async function verifierRig() {
           scope: 'data:read',
           iss: manager.getAuthIssuer(),
           aud: manager.getMcpResourceUrl(),
+          iat: Math.floor(Date.now() / 1000),
         },
       },
     })).token;
