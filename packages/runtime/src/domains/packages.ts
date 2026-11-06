@@ -175,6 +175,12 @@ import {
 // withheld: the declaration of that list, and the redactor that decided it.
 import { PackageExportManifestSchema, type PackageExportManifest } from '@objectstack/spec/api';
 import { getMetadataTypeRedactor } from '@objectstack/spec/kernel';
+// [#30379 ruling A] The disable door's dependent-rule scan reads a rule's
+// fields with the platform's one member reader, the reader the rule validator
+// asks before it refuses a write (`readsRecordColumn`), and judges a hop with
+// the spec's one reference arbiter: never a second parser.
+import { analyzeRelationshipTraversals } from '@objectstack/formula';
+import { referenceTargetOf } from '@objectstack/spec/data';
 
 /**
  * [#13598] The `protocol` service slot **as this domain reaches it** — one
@@ -877,6 +883,305 @@ async function summaryRefreshSettled(engine: unknown): Promise<void> {
  */
 function isDisableablePackage(engine: unknown, id: string | undefined): boolean {
     return (id !== undefined && isDisableableAppModule(engine, id)) || isWritablePackage(engine, id);
+}
+
+/**
+ * [#30379 ruling A, ADR-0141 Open items 4] The code `PATCH /packages/:id/disable`
+ * answers, with `409`, while a validation rule of any enabled package (declared
+ * dependent or not, an app's `.custom` pair included) reads a field the package
+ * adds through `objectExtensions` ({@link readDisableDependentRules}). Registered
+ * under `@objectstack/runtime` in `ERROR_CODE_LEDGER` (#30724); asserted by value.
+ * The refusal carries the code and a message naming every rule, and no
+ * `error.details` beyond the code: a machine-readable shape for the
+ * package · object · rule triples would be a `packages/spec` contract first.
+ * Held as its wire pair, the shape `check:error-status-conformance` reads.
+ */
+const PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE = { code: 'PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE', status: 409 } as const;
+
+/**
+ * One validation rule a disable would leave reading a field it withholds: the
+ * package that serves the rule, the object the rule is declared on, the rule's
+ * name, and the withheld fields it reads (`FIELD`, or `REF.FIELD` for a read
+ * one hop through a reference field of the rule's object).
+ */
+interface DisableDependentRule {
+    packageId: string;
+    object: string;
+    rule: string;
+    fields: string[];
+}
+
+/** The fields one validation rule reads: on its own object, and one hop through a reference field. */
+interface RuleFieldReads {
+    readonly own: Set<string>;
+    readonly hops: Map<string, Set<string>>;
+}
+
+/**
+ * The CEL source of a rule's predicate slot, or `undefined` when it is not CEL:
+ * the dialect is checked, not assumed (a bare string is CEL by the envelope's
+ * own default), as the rule validator reads the slot it evaluates.
+ */
+function celSourceOfRuleSlot(slot: unknown): string | undefined {
+    if (typeof slot === 'string') return slot.trim() ? slot : undefined;
+    if (!slot || typeof slot !== 'object') return undefined;
+    const { dialect, source } = slot as { dialect?: unknown; source?: unknown };
+    if (dialect !== undefined && dialect !== 'cel') return undefined;
+    return typeof source === 'string' && source.trim() ? source : undefined;
+}
+
+/**
+ * Fold what `rule` reads into `reads`, at any `conditional` depth.
+ *
+ *  - A predicate (`script` / `cross_field` `condition`, a `conditional`'s
+ *    `when`) is read with `analyzeRelationshipTraversals` (`@objectstack/formula`)
+ *    over both roots the evaluator binds, `record` and `previous`: every member
+ *    of the root is a read of that column (the rule validator's own reading,
+ *    `readsRecordColumn`), and a `record.REF.FIELD` read is also a hop the
+ *    engine hydrates from REF's target. A `previous` hop is never hydrated, so
+ *    it reads only its own column. A source that does not parse reads nothing
+ *    here: such a rule already refuses every write, whatever is enabled.
+ *  - A `state_machine` / `format` / `json_schema` rule reads the one `field` it
+ *    names. A `cross_field` rule's `fields` list is advisory (only its first
+ *    entry labels the violation), so its `condition` is what it reads.
+ */
+function addRuleFieldReads(rule: unknown, reads: RuleFieldReads, depth: number): void {
+    if (!rule || typeof rule !== 'object' || depth > 8) return;
+    const r = rule as { type?: unknown; condition?: unknown; when?: unknown; field?: unknown; then?: unknown; otherwise?: unknown };
+    const addPredicate = (slot: unknown): void => {
+        const source = celSourceOfRuleSlot(slot);
+        if (!source) return;
+        for (const root of ['record', 'previous'] as const) {
+            const analysis = analyzeRelationshipTraversals(source, root);
+            if (!analysis) continue;
+            for (const field of analysis.bareFields) reads.own.add(field);
+            for (const field of analysis.multiHopFields) reads.own.add(field);
+            for (const [field, related] of analysis.traversals) {
+                reads.own.add(field);
+                if (root !== 'record') continue;
+                let hop = reads.hops.get(field);
+                if (!hop) reads.hops.set(field, (hop = new Set()));
+                for (const name of related) hop.add(name);
+            }
+        }
+    };
+    if (r.type === 'script' || r.type === 'cross_field') addPredicate(r.condition);
+    if ((r.type === 'state_machine' || r.type === 'format' || r.type === 'json_schema') && typeof r.field === 'string') {
+        reads.own.add(r.field);
+    }
+    if (r.type === 'conditional') {
+        addPredicate(r.when);
+        addRuleFieldReads(r.then, reads, depth + 1);
+        addRuleFieldReads(r.otherwise, reads, depth + 1);
+    }
+}
+
+/** The field names a contribution body declares (`fields` keys holding a definition). */
+function declaredFieldNamesOf(body: unknown): string[] {
+    const fields = (body as { fields?: unknown } | null | undefined)?.fields;
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return [];
+    return Object.keys(fields).filter((name) => {
+        const def = (fields as Record<string, unknown>)[name];
+        return !!def && typeof def === 'object' && !Array.isArray(def);
+    });
+}
+
+/** The validation rules a contribution body declares. */
+function declaredRulesOf(body: unknown): Array<{ name?: unknown; active?: unknown }> {
+    const rules = (body as { validations?: unknown } | null | undefined)?.validations;
+    return Array.isArray(rules) ? rules.filter((rule) => !!rule && typeof rule === 'object') : [];
+}
+
+/**
+ * [#30379 ruling A, ADR-0141 Open items 4] The validation rules that would read
+ * a field the disable of `packageId` withholds, while the package that serves
+ * each rule stays enabled: any enabled package, declared dependent or not (no
+ * `manifest.dependencies` entry is read), an app's `.custom` pair included.
+ * `PATCH /packages/:id/disable` refuses while this is
+ * not empty: a disabled package's `objectExtensions` fields are withheld from
+ * the served object (`SchemaRegistry.resolveObject`), and a rule that reads a
+ * field its object no longer serves cannot be evaluated, so every write to that
+ * object would be refused for as long as the package stays off.
+ *
+ * ## What the disable withholds
+ *
+ * Per object the package extends: the fields its `extend` contributions add
+ * that neither the owner's own declaration nor an extension that stays served
+ * also declares. The registry's reading of a withheld member
+ * (`withholdDisabledExtensions`), asked of the state the disable would leave:
+ * the package's own extensions and every already-disabled package's leave the
+ * fold; everything else stays.
+ *
+ * ## Which rules are judged
+ *
+ * The rules the served object would carry once the disable lands, of every
+ * severity, on every object whose owner is enabled and is not the package
+ * itself (a disabled owner's object is refused whole, so no write reaches its
+ * rules), read off the registry's own fold
+ * (`getAllObjects(undefined, { withoutExtensionsOf })`), never re-assembled
+ * here:
+ *
+ *  - ONE rule per name, the copy the fold serves: a later layer's rule replaces
+ *    an earlier one of its name (`mergeValidationsByName`);
+ *  - with a tenant overlay's `message` and `active` on it (ADR-0029 D9.2a): a
+ *    packaged rule the tenant switched off through the overlay is off;
+ *  - from the base layer (the tenant overlay when one is registered, the owner
+ *    otherwise) and each `extend` contribution of any enabled package other
+ *    than this one, declared dependent or not, an app's `<base>.custom` pair
+ *    (where tenant-written rules live) included; less the rules the disable
+ *    withholds with the fields, which it also takes off a base that carries a
+ *    copy of them.
+ *
+ * Each rule is named after the LAST layer in fold order that declares its name
+ * (the layer its text comes from; a tenant overlay by that name). A rule
+ * switched off (`active: false`) reads nothing: switching the rule off is one
+ * of the remedies the refusal names. Formula fields are not judged: a formula
+ * over a withheld field answers `null`, never a refused write.
+ *
+ * A rule reads a withheld field when it names it on its own object, or names
+ * it one hop through a reference field whose target is an object the package
+ * extends ({@link addRuleFieldReads}).
+ *
+ * Ordered by package, object and rule. Empty for a package already disabled
+ * (the disable withholds nothing more) and for one that extends nothing.
+ */
+function readDisableDependentRules(registry: any, packageId: string): DisableDependentRule[] {
+    if (typeof registry?.getObjectContributors !== 'function' || typeof registry?.getAllObjects !== 'function') return [];
+    const disabled = (id: unknown): boolean =>
+        typeof registry.isPackageDisabled === 'function' && registry.isPackageDisabled(id);
+    if (disabled(packageId)) return [];
+
+    type Contributor = { packageId?: unknown; ownership?: unknown; definition?: unknown };
+    const leaves = (c: Contributor): boolean =>
+        c.ownership === 'extend' && (c.packageId === packageId || disabled(c.packageId));
+
+    const names: string[] = [];
+    for (const object of registry.getAllObjects() as Array<{ name?: unknown }>) {
+        if (typeof object?.name === 'string') names.push(object.name);
+    }
+
+    // Object → the fields the disable withholds from it; and the rules the fold
+    // takes off its base layer once the disable lands, on every object.
+    const withheldFields = new Map<string, Set<string>>();
+    const withheldRules = new Map<string, Set<string>>();
+    for (const name of names) {
+        const contributors = registry.getObjectContributors(name) as Contributor[];
+        const own = contributors.filter((c) => c.ownership === 'extend' && c.packageId === packageId);
+        const kept = contributors.filter((c) => !leaves(c));
+        const keptFields = new Set<string>();
+        const keptRules = new Set<string>();
+        for (const c of kept) {
+            if (c.ownership !== 'own' && c.ownership !== 'extend') continue;
+            for (const field of declaredFieldNamesOf(c.definition)) keptFields.add(field);
+            for (const rule of declaredRulesOf(c.definition)) if (typeof rule.name === 'string') keptRules.add(rule.name);
+        }
+        // The fields THIS disable withholds: the package's own additions. A field
+        // only an already-disabled package adds is withheld already, whatever
+        // this disable does.
+        const fields = new Set<string>();
+        for (const c of own) {
+            for (const field of declaredFieldNamesOf(c.definition)) if (!keptFields.has(field)) fields.add(field);
+        }
+        // The rules the fold would withhold once the disable lands — every
+        // leaving extension's, as the fold takes them off a base that carries them.
+        const rules = new Set<string>();
+        for (const c of contributors.filter(leaves)) {
+            for (const rule of declaredRulesOf(c.definition)) {
+                if (typeof rule.name === 'string' && !keptRules.has(rule.name)) rules.add(rule.name);
+            }
+        }
+        if (fields.size > 0) withheldFields.set(name, fields);
+        if (rules.size > 0) withheldRules.set(name, rules);
+    }
+    if (withheldFields.size === 0) return [];
+
+    // [#30379 contract review, must-fix 1] Every object as the served fold will
+    // serve it once the disable lands: `getAllObjects`' own fold with this
+    // package's `extend` contributions left out (an already-disabled package's
+    // are withheld on every fold), so a rule is judged ONCE per name, from the
+    // copy that wins (`mergeValidationsByName`), carrying the tenant overlay's
+    // `message` and `active` (`tenantRuleSettingsOf` / `withPackagedOwnerRules`).
+    // The one step a left-out fold does not take, a disable does: a base that
+    // carries a copy of a rule only the leaving extensions add has it taken off
+    // (`withoutWithheldMembers`), so those names are dropped below.
+    const after = new Map<string, { fields?: Record<string, unknown>; validations?: unknown }>();
+    for (const object of registry.getAllObjects(undefined, { withoutExtensionsOf: packageId }) as Array<{ name?: unknown }>) {
+        if (typeof object?.name === 'string') after.set(object.name, object as { fields?: Record<string, unknown>; validations?: unknown });
+    }
+
+    const dependents: DisableDependentRule[] = [];
+    for (const name of names) {
+        const contributors = registry.getObjectContributors(name) as Contributor[];
+        const owner = contributors.find((c) => c.ownership === 'own');
+        if (!owner || owner.packageId === packageId || disabled(owner.packageId)) continue;
+        const served = after.get(name);
+        if (!served) continue;
+        const base = contributors.find((c) => c.ownership === 'overlay') ?? owner;
+        const servedFields = served.fields ?? {};
+        const ownWithheld = withheldFields.get(name);
+        const rulesWithheld = withheldRules.get(name) ?? new Set<string>();
+
+        // The layer each served rule's text comes from: the LAST layer, in fold
+        // order (the base, then each kept `extend` contribution), that declares
+        // a rule of its name — the copy `mergeValidationsByName` serves.
+        const layerOf = new Map<string, Contributor>();
+        for (const layer of [base, ...contributors.filter((c) => c.ownership === 'extend' && !leaves(c))]) {
+            for (const rule of declaredRulesOf(layer.definition)) {
+                if (typeof rule.name === 'string') layerOf.set(rule.name, layer);
+            }
+        }
+
+        for (const rule of declaredRulesOf(served)) {
+            if (rule.active === false || typeof rule.name !== 'string' || rulesWithheld.has(rule.name)) continue;
+            const reads: RuleFieldReads = { own: new Set(), hops: new Map() };
+            addRuleFieldReads(rule, reads, 0);
+            const hit: string[] = [];
+            if (ownWithheld) for (const field of reads.own) if (ownWithheld.has(field)) hit.push(field);
+            for (const [ref, related] of reads.hops) {
+                const target = referenceTargetOf(servedFields[ref]);
+                const targetWithheld = target === undefined ? undefined : withheldFields.get(target);
+                if (!targetWithheld) continue;
+                for (const field of related) if (targetWithheld.has(field)) hit.push(`${ref}.${field}`);
+            }
+            if (hit.length === 0) continue;
+            dependents.push({
+                packageId: ruleLayerLabel(layerOf.get(rule.name) ?? base),
+                object: name,
+                rule: rule.name,
+                fields: [...new Set(hit)].sort(),
+            });
+        }
+    }
+    return dependents.sort((a, b) => a.packageId.localeCompare(b.packageId)
+        || a.object.localeCompare(b.object)
+        || a.rule.localeCompare(b.rule));
+}
+
+/**
+ * The name a served rule's layer goes by in the refusal: its package, or, for
+ * a tenant overlay (whose `packageId` is the provenance it was saved under, when
+ * there is one), the overlay itself — never a placeholder.
+ */
+function ruleLayerLabel(layer: { packageId?: unknown; ownership?: unknown }): string {
+    const pkg = typeof layer.packageId === 'string' && layer.packageId !== '' ? layer.packageId : undefined;
+    if (layer.ownership === 'overlay') return pkg === undefined ? 'tenant overlay' : `tenant overlay of ${pkg}`;
+    return pkg ?? (layer.ownership === 'own' ? 'unpackaged object' : 'unpackaged extension');
+}
+
+/**
+ * The sentence a dependent-rule refusal carries: `lead` (what was refused),
+ * then every rule as `package · object · rule (reads FIELD, …)`, then the remedy.
+ */
+function disableDependentRulesMessage(lead: string, dependents: readonly DisableDependentRule[]): string {
+    const one = dependents.length === 1;
+    const listed = dependents
+        .map((d) => `${d.packageId} · ${d.object} · ${d.rule} (reads ${d.fields.join(', ')})`)
+        .join('; ');
+    return `${lead}: ${one
+        ? 'an active validation rule reads a field'
+        : `${dependents.length} active validation rules read fields`} it adds through objectExtensions, `
+        + `which the disable would withhold — ${listed}. Switch off or change ${one ? 'that rule' : 'those rules'} first, `
+        + 'or keep the package enabled.';
 }
 
 /**
@@ -1853,6 +2158,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // mode is stored as sent — unchanged by this gate, and not a class
             // this door answers for.)
             const settings = request?.settings;
+            // [#30379 delta review, must-fix 3] Whether this install OVERWRITES a
+            // row that is enabled right now, read before either limb writes. Only
+            // then can `enableOnInstall: false` withhold a field a rule is served
+            // against; a fresh install (or a reinstall after a delete) and an
+            // overwrite of a disabled row withhold nothing served, so they honour
+            // `false` exactly as #18877 rules.
+            const overwritesEnabledRow = (registry.getPackage(pkgId) as { enabled?: unknown } | undefined)?.enabled === true;
             let pkg: any;
             const protocolSvc = await resolveProtocol(deps, _context).catch(() => null);
             try {
@@ -1965,13 +2277,35 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // declaration carries no `.default()` for the key, so absence
             // survives the parse and is read as absence.
             const requestedEnabled = request?.enableOnInstall;
+            let installDisableRefusal: string | undefined;
             if (requestedEnabled === true) {
                 const enabled = registry.enablePackage(pkgId);
                 if (enabled) pkg = enabled;
                 await summaryRefreshSettled(qlService);
             } else if (requestedEnabled === false) {
-                const disabled = registry.disablePackage(pkgId);
-                if (disabled) pkg = disabled;
+                // [#30379 ruling A, contract review should-fix] The same refusal
+                // as `PATCH /packages/:id/disable`, asked of the state the
+                // install just left: an overwrite of an enabled package that
+                // asks to come back disabled would withhold its extension
+                // fields from rules that stay active, and every write to their
+                // objects would be refused. The install itself has landed, so
+                // the package stays ENABLED (the row, the registry and the
+                // state file below all follow `pkg.enabled`) and the door
+                // answers the refusal instead of a 201 that claims a disable.
+                // [delta review, must-fix 3] Asked ONLY on an overwrite of a row
+                // that was enabled before this install: a fresh install, a
+                // reinstall after a delete and an overwrite of a disabled row
+                // withhold nothing served, and land disabled as asked.
+                const dependents = overwritesEnabledRow ? readDisableDependentRules(registry, pkgId) : [];
+                if (dependents.length > 0) {
+                    installDisableRefusal = disableDependentRulesMessage(
+                        `Package '${pkgId}' was installed and stays enabled: \`enableOnInstall: false\` cannot disable it`,
+                        dependents,
+                    );
+                } else {
+                    const disabled = registry.disablePackage(pkgId);
+                    if (disabled) pkg = disabled;
+                }
             }
             // ⭐ The DURABLE half, and it follows THE ROW THIS DOOR RETURNED —
             // never the request's intent. Written unconditionally rather than
@@ -2020,6 +2354,16 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 await writePackageStateAfterChange(deps, _context, pkgId, rowDisabled);
             } catch (err) {
                 console.warn('[handlePackages] failed to persist enableOnInstall', { id: pkgId, disabled: rowDisabled, error: (err as Error)?.message });
+            }
+            if (installDisableRefusal !== undefined) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        installDisableRefusal,
+                        PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.status,
+                        { code: PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.code },
+                    ),
+                };
             }
             const res = deps.success(pkg);
             res.status = 201;
@@ -2074,6 +2418,27 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 ? null
                 : requireWritablePackage(deps, qlService, id, 'disable');
             if (readOnly) return readOnly;
+            // [#30379 ruling A, ADR-0141 Open items 4] An enabled dependent
+            // refuses the disable: a validation rule of any enabled package
+            // (declared dependent or not, an app's `.custom` pair included)
+            // that reads a field this package adds through `objectExtensions`
+            // would refuse every write to its object once the field is
+            // withheld. Asked after the read-only check and BEFORE
+            // `disablePackage` and `setPackageDisabled`, so a refused disable
+            // leaves the row, the served objects and the environment's state
+            // file exactly as they were. The message names every rule; the
+            // refusal carries no `error.details` beyond the code.
+            const dependents = readDisableDependentRules(registry, id);
+            if (dependents.length > 0) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        disableDependentRulesMessage(`Package '${id}' cannot be disabled`, dependents),
+                        PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.status,
+                        { code: PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.code },
+                    ),
+                };
+            }
             // [#30962] The state store FIRST, the registry second, exactly as
             // the enable door above: a host store that refuses leaves the
             // package enabled and served, and the door answers the refusal.

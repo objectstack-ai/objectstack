@@ -13,7 +13,7 @@ const data = { provider: 'object' as const, object: 'todo_task' };
  * tasks — replacing the report entirely.
  *
  * Issue #1719: the dashboard's `overdue_tasks_table` / `due_today` widgets
- * were count-only `table` widgets on the `task_metrics` dataset — a single
+ * were count-only `table` widgets on the `todo_task_metrics` dataset — a single
  * summary row, not the record listing they intended. They are re-modelled
  * here as the `overdue` / `due_today` views, surfaced via app navigation;
  * the dashboard keeps the counts on its `metric` widgets.

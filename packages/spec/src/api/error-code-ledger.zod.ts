@@ -369,6 +369,10 @@ export const ERROR_CODE_LEDGER = {
     // not a residue. Registered HERE and not under a producing service for the
     // same reason as its `FLOW_*` neighbours: the action door, not the
     // predicate, is where the wire vocabulary is named.
+    // Second emitter: the MCP `delete_record` tool's gate
+    // (`recordDeleteConfirmationRefusal`, `packages/mcp/src/mcp-http-tools.ts`)
+    // answers this code, 428, with the same `details` shape for every record
+    // delete without the member; listed under `@objectstack/mcp` too.
     'ACTION_CONFIRMATION_REQUIRED',
     // [ADR-0126 §8 item 2] a packaged ACTION this installation switched off,
     // refused at dispatch — the activation-ledger consult in
@@ -1440,6 +1444,14 @@ export const ERROR_CODE_LEDGER = {
     // for the data door.
     'OBJECT_API_DISABLED',
     'OBJECT_API_METHOD_NOT_ALLOWED',
+    // The `delete_record` tool's confirmation gate (`mcp-http-tools.ts`,
+    // `recordDeleteConfirmationRefusal`): a record delete without the
+    // confirmation member as the boolean `true` is refused before any bridge
+    // is reached, 428, `details` shaped as `ActionConfirmationRequiredDetails`
+    // with `actionName: 'delete_record'`. Rendered by the tools' own coded
+    // result on both transports. Second EMITTER of the code `@objectstack/runtime`
+    // registers for `run_action`'s gate: provenance, not identity.
+    'ACTION_CONFIRMATION_REQUIRED',
   ],
   '@objectstack/service-datasource': [
     'DATASOURCE_ADMIN_ERROR',      // lifecycle/validation refusal from the datasource-admin service

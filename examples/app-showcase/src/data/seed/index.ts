@@ -236,7 +236,7 @@ const businessUnits = defineSeed(BusinessUnit, {
  * actually evaluates against:
  *   • depth grants (`readScope: 'unit' / 'unit_and_below'`) resolve membership
  *     through it (Setup → Access Control → Business Units, org-chart view);
- *   • the `share_new_inquiries_with_field_ops` sharing rule expands the
+ *   • the `showcase_share_new_inquiries_with_field_ops` sharing rule expands the
  *     `bu_field_ops` SUBTREE (Field Operations + West/East Coast);
  *   • the `showcase_field_ops_delegate` adminScope is bounded by it.
  *
