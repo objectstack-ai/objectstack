@@ -106,7 +106,8 @@ const VALID_ARGS: Record<string, Record<string, unknown>> = {
   get_record: { objectName: 'crm_opportunity', recordId: 'r1' },
   create_record: { objectName: 'crm_opportunity', data: { name: 'x' } },
   update_record: { objectName: 'crm_opportunity', recordId: 'r1', data: { name: 'x' } },
-  delete_record: { objectName: 'crm_opportunity', recordId: 'r1' },
+  // `confirm: true`: without it the confirmation gate refuses before the bridge.
+  delete_record: { objectName: 'crm_opportunity', recordId: 'r1', confirm: true },
   list_actions: {},
   run_action: { actionName: 'complete_task' },
   resume_run: { runId: 'run_1' },

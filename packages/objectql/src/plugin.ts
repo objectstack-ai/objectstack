@@ -69,6 +69,7 @@ import { SecurityCatalogNameConflictError, findEnvironmentHeldSecurityCatalogNam
 // boot's seal and its one switch (`bare-name-one-holder.ts`, "The cold boot").
 import { sealBareNameHoldersAtColdBoot } from './registry.js';
 import { BARE_NAME_COLD_BOOT_MODE } from './bare-name-one-holder.js';
+import { planPackageUpgrade } from './package-upgrade-environment.js';
 // [ADR-0029 D3] The registry's own refusal of a second owner — read, never
 // re-derived, when a residual object's name is already owned.
 import { ObjectOwnershipConflictError, collectManifestBoundActions, collectManifestObjectNames, describeBoundActionCollision, describeUnboundActionTargets, FIND_BOUND_ACTION_COLLISIONS, type BoundActionCollision } from './registry.js';
@@ -1030,6 +1031,16 @@ export class ObjectQLPlugin implements Plugin {
       // {@link restoreExtendedObjectCopies}.
       restoreExtendedObjectCopies: (packageId: string): Promise<void> =>
         this.restoreExtendedObjectCopies(ctx, packageId),
+      // [epic cloud#3652 Q3, #30884] The package upgrade plan with what only this
+      // environment knows: rows in each column the upgrade touches and rows a
+      // customer edited that the seed replay overwrites. Read-only; the install
+      // door's dry run and a host's install door call it. See
+      // {@link planPackageUpgrade}.
+      planUpgrade: (installed: unknown, incoming: unknown) =>
+        planPackageUpgrade(ql, installed, incoming, {
+          getObject: (name) => ql.registry.getObject(name),
+          warn: (message, meta) => ctx.logger.warn(message, meta),
+        }),
     });
 
     ctx.logger.info('ObjectQL engine registered', {

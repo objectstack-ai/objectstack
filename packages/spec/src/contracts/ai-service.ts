@@ -213,8 +213,10 @@ export interface AIToolDefinition {
  * `invokeBusinessAction` (`objectName` / `recordId` / `params`,
  * `packages/runtime/src/action-execution.ts`), which the MCP bridge builds
  * that object from. Each grows the member in the change that enforces it, so
- * neither ever accepts-and-ignores it. Two placements were rejected, and the
- * reasons are the contract:
+ * neither ever accepts-and-ignores it. A third door carries the same member
+ * at the top level of its input: the MCP `delete_record` tool (see
+ * {@link AIActionConfirmation}, "The second gate"). Two placements were
+ * rejected, and the reasons are the contract:
  *
  * - NOT inside `params`. That bag is not a free surface: it is CLOSED against
  *   the action author's own declared input vocabulary. `enforceActionParams`
@@ -298,6 +300,25 @@ export const AI_ACTION_CONFIRMATION_MEMBER = 'confirm';
  * names the action and the exact member to set. Nothing dispatches: the
  * action body does not run, no record is read or written, and the refusal
  * carries no `status`.
+ *
+ * ## The second gate: the MCP `delete_record` tool
+ *
+ * A record delete over MCP is permanent, so the same member gates it, by the
+ * maintainer's decision, for every object and with no declared flag to
+ * consult: `delete_record` (`packages/mcp/src/mcp-http-tools.ts`) refuses
+ * EVERY call that does not carry the member as the boolean `true`, before
+ * its data bridge is reached, so nothing is read or deleted. A non-boolean
+ * member (the string `"true"`, `1`) is refused first by the tool's closed
+ * input schema, with no code and no details, exactly as on `run_action`; an
+ * absent or `false` member reaches the gate, and its refusal is the one above:
+ * the same code and HTTP status, and `error.details` shaped as
+ * {@link ActionConfirmationRequiredDetails}, whose `actionName` is the tool's
+ * name, `delete_record`. A client that handles the action refusal confirms
+ * with its human and retries the same call with the member set.
+ *
+ * The gate's bounds are part of the decision: REST `DELETE /api/v1/data/...`
+ * (the human path) and the `update_record` tool stay outside it, no object is
+ * exempt, and any future bulk-delete tool takes the same gate.
  */
 export interface AIActionConfirmation {
     /**
@@ -317,7 +338,10 @@ export interface AIActionConfirmation {
  * client never has to hard-code the member's spelling from documentation.
  */
 export interface ActionConfirmationRequiredDetails {
-    /** The declarative action name the refused call addressed. */
+    /**
+     * The declarative action name the refused call addressed; on the MCP
+     * `delete_record` door, the tool's own name, `delete_record`.
+     */
     actionName: string;
     /** The object the action operates on; omitted for object-less actions. */
     objectName?: string;

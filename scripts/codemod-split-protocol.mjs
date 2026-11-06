@@ -589,7 +589,7 @@ function hostInterfaceEntries(hostText) {
  * decide, per instance method, where its body goes. Pure: the same texts give
  * the same plan.
  */
-function plan(T, text, hostText, { anchors = SECTION_ANCHORS, pins = PATH_READER_PINS, needles = PATH_READER_NEEDLES } = {}) {
+function plan(T, text, hostText, { anchors = SECTION_ANCHORS, pins = PATH_READER_PINS, needles = PATH_READER_NEEDLES, facade = false } = {}) {
   const { ts, hs } = T;
   const { sf, checker } = program(ts, HOST_PATH, text);
   const cls = hs.classOf(sf, CLASS_NAME);
@@ -664,7 +664,7 @@ function plan(T, text, hostText, { anchors = SECTION_ANCHORS, pins = PATH_READER
     if (sites.sites.some((s) => s.kind === 'constructor')) add('constructor-rewrite');
     const names = readNames(ts, ctx, m, new Set(sites.sites.filter((x) => x.kind === 'privateStatic').map((x) => x.start)));
     for (const r of names.reasons) add(r);
-    if (scope.bindings.has(name) || freeInHost.has(name)) add('name-taken');
+    if (!facade && (scope.bindings.has(name) || freeInHost.has(name))) add('name-taken');
     Object.assign(record, { imports: names.imports, moduleRefs: names.moduleRefs, free: names.free });
     if (reasons.length > 0) continue;
 
@@ -677,7 +677,11 @@ function plan(T, text, hostText, { anchors = SECTION_ANCHORS, pins = PATH_READER
     for (const [member, entry] of moved.hostEntries) {
       const have = existingEntries.get(member);
       if (have !== undefined && have !== entry.iface) add(`host-entry-conflict: ${member}`);
-      if (have === undefined && predicateMembers.has(member)) add(`host-entry-predicate: ${member}`);
+      if (have === undefined && predicateMembers.has(member)) {
+        // The facade form writes the predicate's entry typed as the predicate (#30147).
+        if (facade) moved.hostEntries.set(member, predicateEntry(ts, sf, cls, table, member));
+        else add(`host-entry-predicate: ${member}`);
+      }
     }
     if (moved.sites.length === 0) add('no-host-read');
     const movedBody = functionBodyOf(ts, moved.fnText);
@@ -730,7 +734,7 @@ function plan(T, text, hostText, { anchors = SECTION_ANCHORS, pins = PATH_READER
     if (Object.prototype.hasOwnProperty.call(pins, name)) add(`path-reader: ${name}`);
     const names = readNames(ts, ctx, m, new Set());
     for (const r of names.reasons) add(r);
-    if (scope.bindings.has(name) || freeInHost.has(name)) add('name-taken');
+    if (!facade && (scope.bindings.has(name) || freeInHost.has(name))) add('name-taken');
     Object.assign(record, { imports: names.imports, moduleRefs: names.moduleRefs, free: names.free });
     if (reasons.length > 0) continue;
     const baseBody = text.slice(m.body.getStart(sf), m.body.getEnd());
@@ -751,7 +755,9 @@ function plan(T, text, hostText, { anchors = SECTION_ANCHORS, pins = PATH_READER
   // reads and one writes) make every body that needs the writable one stay
   // only when protocol-host.ts already carries the readonly one — handled per
   // record above; between movers, the writable entry is the one written.
-  for (let changed = true; changed;) {
+  // The facade form (`facade`, the members pass) binds no moved name at module
+  // scope (a member is `<Facet>.<name>`), so neither name rule applies to it.
+  for (let changed = !facade; changed;) {
     changed = false;
     const byModule = groupMovers(records);
     // protocol.ts imports every mover by its name: two movers of one name (an
@@ -1309,7 +1315,7 @@ function verifyFacade(T, baseText, headText, baseHostText, headHostText, moduleT
  * compiler's `noUnusedLocals` counts them; other JSDoc text and `//` comments
  * do not.
  */
-function usedImportNames(ts, text) {
+function usedImportNames(ts, text, { docs = true } = {}) {
   const { sf, checker } = program(ts, HOST_PATH, text);
   const used = new Set();
   const isImportDecl = (d) => d.getSourceFile() === sf && (ts.isImportSpecifier(d) || ts.isImportClause(d) || ts.isNamespaceImport(d));
@@ -1331,7 +1337,7 @@ function usedImportNames(ts, text) {
   };
   const visit = (node) => {
     if (ts.isImportDeclaration(node)) return;
-    for (const doc of node.jsDoc ?? []) visitDoc(doc);
+    if (docs) for (const doc of node.jsDoc ?? []) visitDoc(doc);
     if (ts.isExportDeclaration(node) && node.moduleSpecifier) return;
     if (ts.isIdentifier(node) && !inJsDoc(ts, node)) {
       const parent = node.parent;
@@ -1655,10 +1661,13 @@ function gitShow(ref, path) {
 
 function generatedModulesOnDisk() {
   const out = new Map();
-  for (const [, , file] of SECTION_ANCHORS) {
-    if (!file) continue;
-    const p = join(SRC_DIR, file);
-    if (existsSync(p)) out.set(file, readFileSync(p, 'utf8'));
+  for (const [, , section] of SECTION_ANCHORS) {
+    if (!section) continue;
+    // A section's tables leaf (#30147) is read with it, so the members pass sees it.
+    for (const file of [section, tablesModuleOf(section)]) {
+      const p = join(SRC_DIR, file);
+      if (existsSync(p)) out.set(file, readFileSync(p, 'utf8'));
+    }
   }
   return out;
 }
@@ -1672,12 +1681,14 @@ function generatedModulesOnDisk() {
 // was split (a return type since spelled, #30054) is moved by THIS pass
 // instead, on the split file: `--members a,b` names the methods, and each goes
 // exactly as the first pass would have taken it (`plan`'s stay rules, which
-// read the split file as they read an unsplit one; any reason refuses, and the
-// pass names what it moves, never decides it). The stub, the host entries,
-// the facet member and the docblock rule are the first pass's (`planMove`,
-// `insertHostEntries`, `liftFunction`, docblock ownership), and the member goes
-// into the facet of its section, in class order. Only instance methods move:
-// a private static's facet stub is not a hand-series stub `plan` recognises.
+// read the split file as they read an unsplit one; the pass names what it
+// moves, never decides it). The stub, the host entries, the facet member and
+// the docblock rule are the first pass's (`planMove`, `insertHostEntries`,
+// `liftFunction`, docblock ownership), and the member goes into the facet of
+// its section, in class order. A method a stay rule holds moves only by one of
+// the receiver forms (#30147, below), and only for the reasons those forms
+// answer (`RECEIVER_SOLVES`); any other reason refuses. A private static moves
+// by those forms, and a private static readonly table to its section's leaf.
 //
 // What it grows, and the hand edits it accepts (the rule #30572 sets for the
 // `engine.ts` pass's `--members`): the receiving module's header gains the
@@ -1903,8 +1914,7 @@ function addModuleImports(ts, file, text, wanted, order = () => 0) {
  * every other byte stays. The inverse of `addModuleImports` on a module whose
  * own imports are all read. Pure.
  */
-function pruneModuleImports(ts, file, text) {
-  const used = usedImportNames(ts, text);
+function pruneModuleImports(ts, file, text, used = usedImportNames(ts, text)) {
   const { decls } = importDeclsOf(ts, file, text);
   const edits = [];
   for (const d of decls) {
@@ -1936,62 +1946,515 @@ function classPositions(ts, cls) {
   return pos;
 }
 
+// ── The receiver forms (#30147) ─────────────────────────────────────────────
+//
+// E1 rewrites a body (`this.<member>` → `host.<member>`), so it refuses what
+// that rewrite cannot carry: a local already named `host`, a private static
+// FIELD read through the class name, a body that reads no member (its `host`
+// parameter would go unread), and every private static that reads the class
+// itself. The two other facade codemods move those bodies UNEDITED, and this
+// pass ports their two mechanisms (#30147), for the members E1 refuses only:
+//
+//  - The `.call(host)` receiver. The body moves byte for byte to a facet
+//    static method whose `this` parameter is the `Pick` of what it reads
+//    (`this: Pick<ProtocolHost, …>`), and the stub runs it on the class's host:
+//    `return <Facet>.x.call(protocolHost(this), …)`. A member a body reads goes
+//    through the host as under E1 (a method as a forwarding closure, so it is
+//    called, never read as a value; a field as a getter, and a setter when the
+//    body assigns it); nothing in the body is rewritten.
+//  - The statics forwarder. `ObjectStackProtocolImplementationStatics`,
+//    declared ahead of the class and filled by a static block at its end, holds
+//    a forwarder to each static the moved bodies read (a method called on the
+//    class at call time, a field read when it is read). A facet module imports
+//    it AS `ObjectStackProtocolImplementation`, so a body that names the class
+//    reads `ObjectStackProtocolImplementation.x` unedited; a private static that
+//    reads `this` (the class) runs on it: `<Facet>.x.call(<Statics>, …)`.
+//
+// A body that reads nothing of the class (no `this`, no class name) moves as a
+// plain facet member with no host at all, its stub `return <Facet>.x(…)`, the
+// form the first pass gives a private static of that shape. A static table, a
+// private static readonly field whose initializer reads only imports, moves its
+// initializer to a leaf (`<section>-tables.ts`): an initializer runs while the
+// class is evaluated, so its module must not import `protocol.ts` or a module
+// that does (the facet module would, through the forwarder), and the field
+// reads its table back by name. A predicate a moved body reaches through the
+// host gets an entry typed as the predicate (`(err: unknown): err is Error =>
+// …`), so the narrowing survives the hop.
+//
+// The proof is the undo, as for E1, and the texts are equal by construction:
+// every stub, facet member, forwarder text, host entry and leaf is exactly what
+// this pass writes for the base member, and undoing them (each body and owned
+// docblock back, the forwarder and the leaf gone, the facet modules' imports
+// pruned) rebuilds the base tree byte for byte. A body moves unedited, so
+// `host-split.mjs`'s `checkMove` (identity modulo E1's rewrites) has nothing to
+// judge in these forms; the byte equality is that check's strict case.
+//
+// What a forwarder changes is named here, because it is the one difference a
+// body could tell apart: a static reached through it runs with the class as
+// `this` (a moved static of a subclass's call would see the class, not the
+// subclass); the class's statics are all private, so no subclass reaches one.
+
+const RECEIVER_CARD = '#30147';
+const STATICS_NAME = `${CLASS_NAME}Statics`;
+const STATICS_HOST_NAME = `${CLASS_NAME}StaticsHost`;
+
+/** The leaf a section's static tables move to, and its holder class: `protocol-write-gates.ts` -> `protocol-write-gates-tables.ts`, `ProtocolWriteGatesTables`. */
+const tablesModuleOf = (moduleFile) => moduleFile.replace(/\.ts$/, '-tables.ts');
+const tablesClassOf = (moduleFile) => facetNameOf(moduleFile).replace(/Facet$/, 'Tables');
+
+/** The note a facet module carries above its import of the forwarder AS the class. */
+const ROUTE_NOTE = `// ${MARK} \`${CLASS_NAME}\` here is \`${STATICS_NAME}\` (imported AS the class): forwarders to its statics (${RECEIVER_CARD}).`;
+
+/** The one-line docblock on a moved table's initializer: the field keeps its own. */
+const tableOneLiner = (name) => `/** The initializer of \`${CLASS_NAME}.${name}\`; the field's declaration there is its contract. */`;
+
+/**
+ * A host entry typed as the type predicate it forwards (`x is T`), for a
+ * member `insertHostEntries` would forward through an untyped closure, which
+ * drops the predicate: the interface line is the one E1 writes, the factory
+ * line spells the member's own parameters and predicate.
+ */
+function predicateEntry(ts, sf, cls, table, member) {
+  const isStatic = table.statics.has(member);
+  const m = cls.members.find((x) => ts.isMethodDeclaration(x) && x.body && x.name && ts.isIdentifier(x.name) && x.name.text === member
+    && hasModifier(ts, x, ts.SyntaxKind.StaticKeyword) === isStatic);
+  if (!m || !m.type || m.parameters.some((p) => !ts.isIdentifier(p.name) || p.dotDotDotToken || p.initializer || p.getText(sf).includes('\n'))) {
+    refuse(`${member}: a predicate host entry needs one-line identifier parameters and a spelled predicate`);
+  }
+  const params = m.parameters.map((p) => p.getText(sf)).join(', ');
+  const args = m.parameters.map((p) => p.name.text).join(', ');
+  return {
+    iface: isStatic ? `    readonly ${member}: (typeof ${CLASS_NAME})['${member}'];` : `    readonly ${member}: ${CLASS_NAME}['${member}'];`,
+    factory: `            ${member}: (${params}): ${m.type.getText(sf)} => ${isStatic ? CLASS_NAME : 'protocol'}.${member}(${args}),`,
+  };
+}
+
+/**
+ * What a body reads of the class, for the receiver forms: `self` maps each
+ * member read through `this` (an instance member for an instance method, a
+ * static for a static) to `{ read, write, call }`; `statics` maps each static
+ * read through the class name (and, for a static, through `this`) to `method`
+ * or `getter`, its forwarder's kind. `refusals` names what neither form
+ * carries: a bare or indexed `this`, `this.constructor`, `super`, the method's
+ * `arguments`, a method read as a value, a static written or a static field
+ * called (the forwarder is read-only and is another receiver), a member the
+ * class does not declare, and the class named other than as `<Class>.<static>`.
+ */
+function receiverReads(ts, sf, m, table, isStatic) {
+  const self = new Map();
+  const statics = new Map();
+  const refusals = [];
+  const no = (why) => { if (!refusals.includes(why)) refusals.push(why); };
+  const isCallee = (n) => ts.isCallExpression(n.parent) && n.parent.expression === n;
+  const written = (n) => {
+    const p = n.parent;
+    if (ts.isBinaryExpression(p) && p.left === n) return p.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && p.operatorToken.kind <= ts.SyntaxKind.LastAssignment;
+    if ((ts.isPrefixUnaryExpression(p) || ts.isPostfixUnaryExpression(p)) && [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(p.operator)) return true;
+    return ts.isDeleteExpression(p);
+  };
+  const routeStatic = (access, how) => {
+    const name = access.name.text;
+    const st = table.statics.get(name);
+    if (!st) { no(`${how}.${name} names no declared static`); return; }
+    if (written(access)) { no(`it writes the static ${name} (the forwarder is read-only)`); return; }
+    if (st.kind === 'method' && !isCallee(access)) { no(`it reads the static method ${name} as a value (a forwarder is another function)`); return; }
+    if (st.kind !== 'method' && isCallee(access)) { no(`it calls the static ${st.kind} ${name} (the receiver would change)`); return; }
+    statics.set(name, st.kind === 'method' ? 'method' : 'getter');
+  };
+  const visit = (node) => {
+    if (node.kind === ts.SyntaxKind.ThisKeyword && T_isMethodThis(ts, node, m)) {
+      const p = node.parent;
+      if (!ts.isPropertyAccessExpression(p) || p.expression !== node || !ts.isIdentifier(p.name)) { no('a bare or indexed `this`'); return; }
+      const name = p.name.text;
+      if (name === 'constructor') { no('`this.constructor`'); return; }
+      if (isStatic) {
+        routeStatic(p, 'this');
+        if (statics.has(name)) {
+          const u = self.get(name) ?? { read: false, write: false, call: false };
+          u[isCallee(p) ? 'call' : 'read'] = true;
+          self.set(name, u);
+        }
+      } else {
+        const member = table.instance.get(name);
+        if (!member) { no(`\`this.${name}\` names no declared instance member`); return; }
+        if (table.statics.has(name)) { no(`\`${name}\` is both an instance and a static member`); return; }
+        if (member.kind === 'method' && !isCallee(p)) { no(`instance method \`${name}\` read as a value`); return; }
+        const u = self.get(name) ?? { read: false, write: false, call: false };
+        u[written(p) ? 'write' : isCallee(p) ? 'call' : 'read'] = true;
+        self.set(name, u);
+      }
+      ts.forEachChild(p, (c) => { if (c !== node) visit(c); });
+      return;
+    }
+    if (node.kind === ts.SyntaxKind.SuperKeyword) { no('`super`'); return; }
+    if (ts.isIdentifier(node) && !inJsDoc(ts, node) && !isPropertyNameIdentifier(ts, node)) {
+      if (node.text === 'arguments') {
+        let p = node.parent;
+        while (p && p !== m && (ts.isArrowFunction(p) || !ts.isFunctionLike(p))) p = p.parent;
+        if (p === m) no('the method\'s `arguments`');
+      }
+      if (node.text === CLASS_NAME) {
+        const p = node.parent;
+        if (ts.isPropertyAccessExpression(p) && p.expression === node && ts.isIdentifier(p.name)) routeStatic(p, CLASS_NAME);
+        else no(`it names ${CLASS_NAME} other than as \`${CLASS_NAME}.<static>\``);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  for (const region of [...(m.typeParameters ?? []), ...m.parameters, m.type].filter(Boolean)) {
+    const scan = (n) => {
+      if (n.kind === ts.SyntaxKind.ThisKeyword || (ts.isIdentifier(n) && n.text === CLASS_NAME && !inJsDoc(ts, n))) no('its signature reads the class');
+      ts.forEachChild(n, scan);
+    };
+    scan(region);
+  }
+  if (m.body) ts.forEachChild(m.body, visit);
+  return { self, statics, refusals };
+}
+
+/** host-split's `isMethodThis`, on this script's TypeScript instance: `this` reached from `m` through arrows only. */
+function T_isMethodThis(ts, node, m) {
+  for (let p = node.parent; p; p = p.parent) {
+    if (p === m) return true;
+    if (ts.isArrowFunction(p)) continue;
+    if (ts.isFunctionLike(p) || ts.isClassLike(p)) return false;
+  }
+  return false;
+}
+
+/** The plan's stay reasons a receiver form answers: what E1's rewrite, or a host parameter, could not carry. */
+const RECEIVER_SOLVES = Object.freeze(['closed-set', 'no-host-read', 'static-reads-class', 'indent-irreversible']);
+
+/** The `{ start, end }` of a member's parameter list text, as the first pass spells it (from the first parameter to the list's end, trimmed). */
+const paramsTextOf = (sf, m) => (m.parameters.length ? sf.text.slice(m.parameters[0].getStart(sf), m.parameters.end).trim() : '');
+const argsOf = (m) => m.parameters.map((p) => (p.dotDotDotToken ? '...' : '') + p.name.getText()).join(', ');
+const pickTypeOf = (type, names) => `Pick<${type}, ${names.map((n) => `'${n}'`).join(' | ')}>`;
+
+/**
+ * The receiver-form move of one base member (an instance method E1 refuses, or
+ * a private static that reads the class), or the reasons it cannot move.
+ * Returns `{ form, name, module, stub, member, ownedDoc, hostEntries, routed,
+ * imports, moduleRefs, picks, body }`: `form` is `receiver` (an instance body
+ * run on the host), `statics` (a static body run on the forwarder), or `plain`
+ * (no receiver); `member` is the facet member's text from its line start;
+ * `routed` the statics the body reads through the forwarder. Pure.
+ */
+function receiverMove(T, planned, r) {
+  const { ts } = T;
+  const { sf, cls, ctx } = planned;
+  const m = r.node;
+  const isStatic = r.isStatic === true;
+  const held = r.reasons.filter((x) => !RECEIVER_SOLVES.includes(x.split(':')[0]));
+  if (held.length > 0) return { refusals: held };
+  const reads = receiverReads(ts, sf, m, ctx.table, isStatic);
+  if (reads.refusals.length > 0) return { refusals: reads.refusals.map((x) => `receiver: ${x}`) };
+  if (!r.module) return { refusals: ['section-kept'] };
+  const facet = facetNameOf(r.module);
+  const names = [...reads.self.keys()].sort();
+  const form = names.length === 0 ? 'plain' : isStatic ? 'statics' : 'receiver';
+  const routed = new Map(reads.statics);
+  const isPrivate = isPrivateMember(ts, m);
+  const span = isPrivate ? movableDocSpan(ts, sf, m) : null;
+  const ownedDoc = span ? span.text : null;
+  const body = sf.text.slice(m.body.getStart(sf), m.body.getEnd());
+  const thisParam = form === 'receiver' ? `this: ${pickTypeOf('ProtocolHost', names)}`
+    : form === 'statics' ? `this: ${pickTypeOf(STATICS_HOST_NAME, names)}` : null;
+  const params = [thisParam, paramsTextOf(sf, m)].filter(Boolean).join(', ');
+  const typeParams = m.typeParameters ? `<${sf.text.slice(m.typeParameters.pos, m.typeParameters.end).trim()}>` : '';
+  const async = hasModifier(ts, m, ts.SyntaxKind.AsyncKeyword) ? 'async ' : '';
+  const doc = ownedDoc ?? (isStatic ? staticOneLiner(r.name) : instanceOneLiner(r.name));
+  const member = `    ${doc}\n    static ${async}${r.name}${typeParams}(${params})${m.type ? `: ${m.type.getText(sf)}` : ''} ${body}`;
+  const args = argsOf(m);
+  const lead = `        // ${MARK} The body moved to \`${r.module}\``;
+  const stub = '{\n' + (form === 'receiver'
+    ? `${lead}; it runs on this class's host (\`${HOST_MODULE_BASENAME}\`) as \`this\`.\n        return ${facet}.${r.name}.call(protocolHost(this)${args ? `, ${args}` : ''});\n`
+    : form === 'statics'
+      ? `${lead}; it runs on \`${STATICS_NAME}\` as \`this\`.\n        return ${facet}.${r.name}.call(${STATICS_NAME}${args ? `, ${args}` : ''});\n`
+      : routed.size > 0
+        ? `${lead}; it reads this class's statics through \`${STATICS_NAME}\`.\n        return ${facet}.${r.name}(${args});\n`
+        : `${lead}; it reads nothing of this class.\n        return ${facet}.${r.name}(${args});\n`) + '    }';
+  const hostEntries = form === 'receiver' ? T.hs.hostEntriesFor({ instance: reads.self, statics: new Set() }, ctx.table, CLASS_NAME) : new Map();
+  const predicates = new Set(cls.members.filter((x) => ts.isMethodDeclaration(x) && x.type && ts.isTypePredicateNode(x.type) && !x.type.assertsModifier && x.name && ts.isIdentifier(x.name)).map((x) => x.name.text));
+  for (const k of [...hostEntries.keys()]) if (predicates.has(k)) hostEntries.set(k, predicateEntry(ts, sf, cls, ctx.table, k));
+  return {
+    refusals: [], form, name: r.name, module: r.module, isStatic, stub, member, ownedDoc, hostEntries, routed, picks: names, body,
+    imports: r.imports ?? new Map(), moduleRefs: new Map([...(r.moduleRefs ?? new Map())].filter(([n]) => n !== CLASS_NAME)),
+  };
+}
+
+/** The class member `name` the members pass may move: one instance method with a body, one static method with a body, or one static field. */
+function memberNamed(ts, cls, name) {
+  const found = cls.members.filter((m) => m.name && ts.isIdentifier(m.name) && m.name.text === name
+    && ((ts.isMethodDeclaration(m) && m.body) || (ts.isPropertyDeclaration(m) && hasModifier(ts, m, ts.SyntaxKind.StaticKeyword))));
+  if (found.length !== 1) refuse(`--members names ${name}, which ${CLASS_NAME} declares as ${found.length === 0 ? 'no method with a body and no static field' : 'more than one member'}`);
+  return found[0];
+}
+
+/**
+ * The table move of one private static readonly field: its initializer to the
+ * section's leaf. Returns `{ name, module, leaf, field (the head field text),
+ * member (the leaf member text), imports, init }`, or `{ refusals }`. The
+ * initializer may read the imports of `protocol.ts` and globals only: never
+ * `this`, the class, a top-level name of `protocol.ts` or a relative import
+ * (the leaf imports nothing that could import `protocol.ts`).
+ */
+function tableMove(T, planned, f, sectionOf) {
+  const { ts } = T;
+  const { sf, ctx } = planned;
+  const name = f.name.text;
+  const refusals = [];
+  if (!hasModifier(ts, f, ts.SyntaxKind.PrivateKeyword) || !hasModifier(ts, f, ts.SyntaxKind.ReadonlyKeyword) || !f.initializer) refusals.push('table: only a private static readonly field with an initializer moves');
+  const section = sectionOf(f);
+  if (!section.module) refusals.push('section-kept');
+  if (refusals.length > 0) return { refusals };
+  const scan = (n) => {
+    if (n.kind === ts.SyntaxKind.ThisKeyword || n.kind === ts.SyntaxKind.SuperKeyword) refusals.push('table: its initializer reads `this` or `super`');
+    ts.forEachChild(n, scan);
+  };
+  scan(f.initializer);
+  const names = readNames(ts, ctx, { typeParameters: undefined, parameters: [], type: f.type, body: f.initializer });
+  for (const r of names.reasons) refusals.push(r);
+  for (const [n] of names.moduleRefs) refusals.push(`table: its initializer reads ${n}, a top-level name of ${HOST_BASENAME} (the leaf never imports it)`);
+  for (const [local] of names.imports) {
+    const b = ctx.scope.bindings.get(local);
+    if (b && b.kind === 'import' && b.specifier.startsWith('.')) refusals.push(`table: its initializer reads ${local}, a relative import (the leaf imports packages only)`);
+  }
+  if (refusals.length > 0) return { refusals: [...new Set(refusals)] };
+  const init = sf.text.slice(f.initializer.getStart(sf), f.initializer.getEnd());
+  const head = sf.text.slice(f.getStart(sf), f.initializer.getStart(sf));
+  const tail = sf.text.slice(f.initializer.getEnd(), f.getEnd());
+  const holder = tablesClassOf(section.module);
+  return {
+    refusals: [], name, module: section.module, title: section.title, leaf: tablesModuleOf(section.module), init, imports: names.imports,
+    field: `${head}${holder}.${name}${tail}`,
+    member: `    ${tableOneLiner(name)}\n    static readonly ${name}${f.type ? `: ${f.type.getText(sf)}` : ''} = ${init};`,
+    start: f.initializer.getStart(sf), end: f.initializer.getEnd(),
+  };
+}
+
+/** The union of name -> `{ value }` maps, a name read as a value in any one read as a value. */
+function mergeUses(maps) {
+  const out = new Map();
+  for (const m of maps) for (const [n, u] of m) out.set(n, { value: Boolean(out.get(n)?.value) || u.value });
+  return new Map([...out].sort(byName));
+}
+
+/** The leaf a section's tables move to: the header, the initializers' imports, and one holder class. Pure. */
+function tablesModuleText(T, scope, moves) {
+  const { title, leaf } = moves[0];
+  const holder = tablesClassOf(moves[0].module);
+  const names = moves.map((t, i) => `\`${t.name}\`${i === moves.length - 1 ? '' : ','}`);
+  const out = [
+    '// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.',
+    '',
+    '/**',
+    ...wrapComment([MARK, 'The', 'static', 'tables', 'of', 'the', ...`"${title}"`.split(' '), 'section', 'of', `\`${CLASS_NAME}\`:`,
+      'the', 'initializers', 'of', ...names, 'moved', 'out', 'of', '`protocol.ts`', 'whole', 'by', '`scripts/codemod-split-protocol.mjs', '--members`', `(${RECEIVER_CARD}).`]),
+    ' *',
+    ' * A MOVE, not a redesign. Each initializer below is the one the class field of',
+    ' * the same name carried, byte for byte; the field keeps its docblock,',
+    ' * modifiers and type, and reads its table from here. An initializer runs',
+    ' * while its class is evaluated, so this module imports neither `protocol.ts`',
+    ' * nor any module that does: only what the initializers read, from where',
+    ' * `protocol.ts` imports it. Nothing re-exports this module, so the published',
+    ' * surface does not move.',
+    ' */',
+    '',
+    ...importLines(scope, [{ isStatic: true, imports: mergeUses(moves.map((t) => t.imports)), moduleRefs: new Map() }]),
+    '',
+    `export class ${holder} {`,
+    moves.map((t) => t.member).join('\n\n'),
+    '}',
+    '',
+  ];
+  return out.join('\n');
+}
+
+/** The forwarder `protocol.ts` carries for `kinds` (static -> `method` | `getter`): the text ahead of the class, and the static block at its end. Pure. */
+function staticsTexts(kinds) {
+  const members = [...kinds.keys()].sort();
+  const ahead = [
+    `// ${MARK} The statics of \`${CLASS_NAME}\` its facet modules read (${RECEIVER_CARD}), private ones`,
+    '// included, typed as the class declares them (an indexed access on the class). The static',
+    `// block at the end of the class fills \`${STATICS_NAME}\` with forwarders: a method is`,
+    '// called on the class at call time, a field is read when the body reads it. A facet module',
+    `// imports it AS \`${CLASS_NAME}\`, so a moved body reads \`${CLASS_NAME}.x\``,
+    '// unedited, and a moved static that reads `this` runs on it. `index.ts` re-exports neither, so',
+    '// neither reaches the package.',
+    `export interface ${STATICS_HOST_NAME} {`,
+    ...members.map((n) => `    readonly ${n}: (typeof ${CLASS_NAME})['${n}'];`),
+    '}',
+    `export const ${STATICS_NAME} = {} as ${STATICS_HOST_NAME};`,
+  ].join('\n');
+  const block = [
+    `    // ${MARK} Fills \`${STATICS_NAME}\` (declared above the class) for the facet modules.`,
+    '    static {',
+    `        Object.defineProperties(${STATICS_NAME}, {`,
+    ...members.map((n) => (kinds.get(n) === 'method'
+      ? `            ${n}: { value: (...args: Parameters<typeof ${CLASS_NAME}.${n}>) => ${CLASS_NAME}.${n}(...args) },`
+      : `            ${n}: { get: () => ${CLASS_NAME}.${n} },`)),
+    '        });',
+    '    }',
+  ].join('\n');
+  return { ahead, block };
+}
+
+/**
+ * Where the forwarder stands in a `protocol.ts`: the statics it carries (static
+ * -> kind, read off its static block) and the spans of its two texts, or null
+ * when it carries none. Refuses half of one.
+ */
+function staticsOf(ts, sf) {
+  const text = sf.text;
+  const cls = sf.statements.find((s) => ts.isClassDeclaration(s) && s.name?.text === CLASS_NAME);
+  const iface = sf.statements.find((s) => ts.isInterfaceDeclaration(s) && s.name.text === STATICS_HOST_NAME);
+  const blockOpen = `    // ${MARK} Fills \`${STATICS_NAME}\``;
+  const at = cls ? text.indexOf(blockOpen, cls.getStart(sf)) : -1;
+  if (!iface && at < 0) return null;
+  if (!iface || at < 0 || !cls) refuse(`${HOST_BASENAME} carries half of the ${STATICS_NAME} forwarder`);
+  const kinds = new Map();
+  const blockEnd = text.indexOf('\n        });\n    }', at);
+  if (blockEnd < 0) refuse(`${HOST_BASENAME}: the ${STATICS_NAME} static block does not close as written`);
+  for (const l of text.slice(at, blockEnd).split('\n')) {
+    const hit = /^ {12}([A-Za-z_$][\w$]*): \{ (value|get)/.exec(l);
+    if (hit) kinds.set(hit[1], hit[2] === 'value' ? 'method' : 'getter');
+  }
+  const aheadStart = text.indexOf(`// ${MARK} The statics of \`${CLASS_NAME}\``);
+  const constDecl = `export const ${STATICS_NAME} = {} as ${STATICS_HOST_NAME};`;
+  const aheadEnd = text.indexOf(constDecl, aheadStart) + constDecl.length;
+  if (aheadStart < 0 || aheadEnd < constDecl.length) refuse(`${HOST_BASENAME}: the ${STATICS_NAME} declarations are not as written`);
+  // The block was written as `\n\n<block>` after the class's last member.
+  return { kinds, ahead: { start: aheadStart, end: aheadEnd }, block: { start: at - 2, end: blockEnd + '\n        });\n    }'.length } };
+}
+
+/** Where the forwarder's two texts go in a `protocol.ts` that carries none: ahead of the class's leading comments, and after its last member. */
+function staticsSlots(ts, sf, cls) {
+  const ranges = ts.getLeadingCommentRanges(sf.text, cls.getFullStart()) ?? [];
+  const ahead = ranges.length > 0 ? lineStartOf(sf.text, ranges[0].pos) : lineStartOf(sf.text, cls.getStart(sf));
+  return { ahead, block: cls.members.at(-1).getEnd() };
+}
+
+/** `protocol.ts`'s import of a section's tables leaf, written after the facet's own import. */
+const tablesImportText = (moduleFile) => `\n// ${MARK} The static tables of the facet above: the class's fields read them (${RECEIVER_CARD}).\n`
+  + `import { ${tablesClassOf(moduleFile)} } from './${tablesModuleOf(moduleFile).replace(/\.ts$/, '.js')}';`;
+
 /**
  * Plan and apply the moves `names` asks for on a split `protocol.ts`.
  * Returns `{ host, hostModule, modules, records, pruned }` (`modules`: the
- * receiving modules' new texts). Refuses (exit 2) on a name the class does not
- * declare as one instance method with a body, one already moved, one any stay
- * rule holds, and every shape the section above says this pass does not grow.
- * Pure.
+ * receiving modules' new texts, a tables leaf included). Refuses (exit 2) on a
+ * name the class does not declare as one method with a body or one static
+ * field, one already moved, one a stay rule holds that no receiver form
+ * carries (#30147), and every shape the section above says this pass does not
+ * grow. Pure.
  */
 function generateMembers(T, text, hostText, moduleTexts, names, { anchors = SECTION_ANCHORS, pins = PATH_READER_PINS, needles = PATH_READER_NEEDLES } = {}) {
   const { ts } = T;
   globalTs = ts;
-  if (!names || names.length === 0) refuse(`--members needs a comma-separated list of ${CLASS_NAME} method names`);
-  if (new Set(names).size !== names.length) refuse(`--members names a method twice: ${names.join(', ')}`);
+  if (!names || names.length === 0) refuse(`--members needs a comma-separated list of ${CLASS_NAME} member names`);
+  if (new Set(names).size !== names.length) refuse(`--members names a member twice: ${names.join(', ')}`);
   if (!text.includes(MARK)) refuse(`${HOST_BASENAME} carries no ${MARK} stub: run the first pass on an unsplit file`);
-  const planned = plan(T, text, hostText, { anchors, pins, needles });
+  const planned = plan(T, text, hostText, { anchors, pins, needles, facade: true });
   const { sf, cls, ctx } = planned;
+  const sectionOf = sectionTable(ts, sf, cls, anchors);
+  const existingEntries = hostInterfaceEntries(hostText);
   const records = [];
+  const tables = [];
   for (const name of names) {
-    const found = cls.members.filter((m) => ts.isMethodDeclaration(m) && m.body && m.name && ts.isIdentifier(m.name) && m.name.text === name && !hasModifier(ts, m, ts.SyntaxKind.StaticKeyword));
-    if (found.length !== 1) refuse(`--members names ${name}, which ${CLASS_NAME} declares as ${found.length === 0 ? 'no instance method with a body' : 'more than one method'}`);
-    const r = planned.records.find((x) => x.node === found[0]);
-    if (r.reasons.some((x) => x.startsWith('already-moved'))) refuse(`${name} is already moved: its body is a stub`);
-    if (r.reasons.length > 0) refuse(`${name} stays on the class, as the first pass would keep it: ${r.reasons.map((x) => `${x} (${STAY_REASONS[x.split(':')[0]] ?? x})`).join('; ')}`);
+    const node = memberNamed(ts, cls, name);
+    if (ts.isPropertyDeclaration(node)) {
+      const t = tableMove(T, planned, node, sectionOf);
+      if (t.refusals.length > 0) refuse(`${name} stays on the class: ${t.refusals.join('; ')}`);
+      tables.push({ ...t, node });
+      continue;
+    }
+    const r = planned.records.find((x) => x.node === node);
+    if (!r) refuse(`--members names ${name}, which the plan does not read as a method with a body`);
+    if (r.reasons.some((x) => x.startsWith('already-moved')) || node.body.getText(sf).includes(MARK)) refuse(`${name} is already moved: its body is a stub`);
+    if (!r.isStatic && r.reasons.length === 0) { records.push(r); r.form = 'e1'; continue; }
+    const mv = receiverMove(T, planned, r);
+    if (mv.refusals.length > 0) {
+      refuse(`${name} stays on the class, as the first pass would keep it: ${r.reasons.map((x) => `${x} (${STAY_REASONS[x.split(':')[0]] ?? x})`).join('; ')}; `
+        + `and no receiver form (${RECEIVER_CARD}) carries it: ${mv.refusals.join('; ')}`);
+    }
+    Object.assign(r, { form: mv.form, mv });
     records.push(r);
   }
   records.sort((a, b) => a.node.getStart(sf) - b.node.getStart(sf));
+  tables.sort((a, b) => a.node.getStart(sf) - b.node.getStart(sf));
   const pos = classPositions(ts, cls);
 
-  // protocol.ts: each body becomes its lifted stub, a private docblock its link.
+  // protocol.ts: each body becomes its stub, a private docblock its link.
   const edits = [];
   const entries = new Map();
   const modules = new Map();
+  const routed = new Map();
   for (const r of records) {
     const facet = facetNameOf(r.module);
     const b = ctx.scope.bindings.get(facet);
     if (!b || b.kind !== 'import' || b.specifier !== `./${r.module.replace(/\.ts$/, '.js')}`) refuse(`${r.module}: ${HOST_BASENAME} does not import its facet ${facet} (this pass never starts a facet)`);
-    for (const [n] of r.moduleRefs) {
+    const refs = r.form === 'e1' ? r.moduleRefs : r.mv.moduleRefs;
+    for (const [n] of refs) {
       if (n !== CLASS_NAME && !ctx.scope.exported.has(n)) refuse(`${r.name} reads ${n}, a top-level name of ${HOST_BASENAME} it does not export: this pass does not widen the generated export list`);
     }
-    edits.push({ start: r.stub.start, end: r.stub.end, text: facetStubBody(r.name, r.module, r.node) });
+    edits.push({ start: r.stub?.start ?? r.node.body.getStart(sf), end: r.stub?.end ?? r.node.body.getEnd(), text: r.form === 'e1' ? facetStubBody(r.name, r.module, r.node) : r.mv.stub });
     r.ownedDoc = null;
-    if (isPrivateMember(ts, r.node)) {
+    if (r.form !== 'e1') r.ownedDoc = r.mv.ownedDoc;
+    else if (isPrivateMember(ts, r.node)) r.ownedDoc = movableDocSpan(ts, sf, r.node)?.text ?? null;
+    if (r.ownedDoc) {
       const span = movableDocSpan(ts, sf, r.node);
-      if (span) { r.ownedDoc = span.text; edits.push({ start: span.start, end: span.end, text: docStubOf(facet, r.name, r.module) }); }
+      edits.push({ start: span.start, end: span.end, text: docStubOf(facet, r.name, r.module) });
     }
-    for (const [member, entry] of r.hostEntries) {
+    for (const [member, entry] of (r.form === 'e1' ? r.hostEntries : r.mv.hostEntries)) {
+      const have = existingEntries.get(member);
+      if (have !== undefined && have !== entry.iface) refuse(`${r.name} needs the host entry ${entry.iface.trim()}, and ${HOST_MODULE_BASENAME} carries ${have.trim()}`);
       const prev = entries.get(member);
       if (!prev || (entry.factory.includes('\n') && !prev.factory.includes('\n'))) entries.set(member, entry);
     }
+    if (r.form !== 'e1') {
+      for (const [n, kind] of r.mv.routed) {
+        if (routed.has(n) && routed.get(n) !== kind) refuse(`${n}: two moved bodies read it as different kinds`);
+        routed.set(n, kind);
+      }
+    }
     modules.set(r.module, [...(modules.get(r.module) ?? []), r]);
   }
+
+  // The forwarder: what the class already forwards, and what the moved bodies read.
+  const have = staticsOf(ts, sf);
+  const kinds = new Map(have?.kinds ?? []);
+  for (const [n, kind] of routed) {
+    if (kinds.has(n) && kinds.get(n) !== kind) refuse(`${STATICS_NAME} forwards ${n} as a ${kinds.get(n)}, and a moved body reads it as a ${kind}`);
+    kinds.set(n, kind);
+  }
+  if (kinds.size > (have?.kinds.size ?? 0)) {
+    const t = staticsTexts(new Map([...kinds].sort(byName)));
+    if (have) {
+      edits.push({ start: have.ahead.start, end: have.ahead.end, text: t.ahead });
+      edits.push({ start: have.block.start, end: have.block.end, text: `\n\n${t.block}` });
+    } else {
+      const slots = staticsSlots(ts, sf, cls);
+      edits.push({ start: slots.ahead, end: slots.ahead, text: `${t.ahead}\n\n` });
+      edits.push({ start: slots.block, end: slots.block, text: `\n\n${t.block}` });
+    }
+  }
+
+  // The tables: each initializer to its section's leaf, the leaf imported once after its facet.
+  const leaves = new Map();
+  for (const t of tables) leaves.set(t.leaf, [...(leaves.get(t.leaf) ?? []), t]);
+  const moduleOut = new Map();
+  for (const [leaf, moves] of leaves) {
+    if (moduleTexts.has(leaf)) refuse(`${leaf} exists: this pass writes a section's tables leaf whole, once`);
+    for (const t of moves) edits.push({ start: t.start, end: t.end, text: `${tablesClassOf(t.module)}.${t.name}` });
+    const facetImport = sf.statements.find((s) => ts.isImportDeclaration(s) && s.moduleSpecifier.text === `./${moves[0].module.replace(/\.ts$/, '.js')}`);
+    if (!facetImport) refuse(`${moves[0].module}: ${HOST_BASENAME} does not import its facet (this pass never starts a facet)`);
+    edits.push({ start: facetImport.getEnd(), end: facetImport.getEnd(), text: tablesImportText(moves[0].module) });
+    moduleOut.set(leaf, tablesModuleText(T, ctx.scope, moves));
+  }
+
   const inserted = T.hs.insertHostEntries(hostText, applyEdits(text, edits), new Map([...entries].sort(byName)));
   const pruned = pruneImports(ts, inserted.protocol, usedImportNames(ts, inserted.protocol));
 
   // The receiving modules: the members in class order, the header's names, the imports.
-  const moduleOut = new Map();
   for (const [file, movers] of modules) {
     const mod = moduleTexts.get(file);
     if (mod == null || !mod.includes(MARK)) refuse(`${file} is not on disk as a facet module the first pass wrote: this pass adds to a written facet, never starts one`);
@@ -2003,7 +2466,7 @@ function generateMembers(T, text, hostText, moduleTexts, names, { anchors = SECT
     for (const r of movers) {
       const at = r.node.getStart(sf);
       const next = facet.members.find((m) => m.name && pos.has(m.name) && pos.get(m.name) > at);
-      const t = facetMemberText(ts, r.fnText, r.ownedDoc);
+      const t = r.form === 'e1' ? facetMemberText(ts, r.fnText, r.ownedDoc) : r.mv.member;
       if (next) modEdits.push({ start: next.start, end: next.start, text: `${t}\n\n` });
       else modEdits.push({ start: facet.members.at(-1).end, end: facet.members.at(-1).end, text: `\n\n${t}` });
     }
@@ -2019,18 +2482,33 @@ function generateMembers(T, text, hostText, moduleTexts, names, { anchors = SECT
       wanted.set(local, { ...w, value: Boolean(prev && prev.value) || w.value });
     };
     for (const r of movers) {
-      for (const [local, use] of r.imports) {
+      const imports = r.form === 'e1' ? r.imports : r.mv.imports;
+      for (const [local, use] of imports) {
         const b = ctx.scope.bindings.get(local);
         if (!b || b.kind !== 'import') refuse(`import binding ${local} not found`);
         want(local, { specifier: b.specifier, form: b.form, imported: b.imported, value: use.value && !b.typeOnly });
       }
-      for (const [n, use] of r.moduleRefs) want(n, { specifier: './protocol.js', form: 'named', imported: n, value: use.value });
-      want('ProtocolHost', { specifier: './protocol-host.js', form: 'named', imported: 'ProtocolHost', value: false });
+      for (const [n, use] of (r.form === 'e1' ? r.moduleRefs : r.mv.moduleRefs)) want(n, { specifier: './protocol.js', form: 'named', imported: n, value: use.value });
+      if (r.form === 'e1' || r.form === 'receiver') want('ProtocolHost', { specifier: './protocol-host.js', form: 'named', imported: 'ProtocolHost', value: false });
+      if (r.form !== 'e1' && r.mv.routed.size > 0) want(CLASS_NAME, { specifier: './protocol.js', form: 'named', imported: STATICS_NAME, value: true });
+      if (r.form === 'statics') want(STATICS_HOST_NAME, { specifier: './protocol.js', form: 'named', imported: STATICS_HOST_NAME, value: false });
     }
     const order = (s) => (ctx.scope.importOrder.has(s) ? ctx.scope.importOrder.get(s) : Number.MAX_SAFE_INTEGER);
-    moduleOut.set(file, addModuleImports(ts, file, applyEdits(mod, modEdits), wanted, order));
+    moduleOut.set(file, withRouteNote(ts, file, addModuleImports(ts, file, applyEdits(mod, modEdits), wanted, order)));
   }
-  return { host: pruned.text, hostModule: inserted.host, modules: moduleOut, records, pruned: pruned.removed };
+  return { host: pruned.text, hostModule: inserted.host, modules: moduleOut, records: [...records, ...tables], pruned: pruned.removed };
+}
+
+/** A facet module that imports the forwarder AS the class carries `ROUTE_NOTE` on the line above that import; one that does not, carries none. */
+function withRouteNote(ts, file, text) {
+  const routedImport = importDeclsOf(ts, file, text).decls.find((d) => d.named.some((e) => e.local === CLASS_NAME && e.imported === STATICS_NAME));
+  const has = text.includes(`${ROUTE_NOTE}\n`);
+  if (routedImport && !has) {
+    const at = lineStartOf(text, routedImport.start);
+    return `${text.slice(0, at)}${ROUTE_NOTE}\n${text.slice(at)}`;
+  }
+  if (!routedImport && has) return text.replace(`${ROUTE_NOTE}\n`, '');
+  return text;
 }
 
 /**
@@ -2040,7 +2518,7 @@ function generateMembers(T, text, hostText, moduleTexts, names, { anchors = SECT
  * more. Returns the text, or null (after `fail`) when the head is not a module
  * this pass can read.
  */
-function undoMembersModule(ts, file, text, names, title, fail) {
+function undoMembersModule(ts, file, text, names, title, fail, baseBound = null) {
   let out = text;
   for (const name of names) {
     const facet = facetOf(ts, file, out);
@@ -2060,14 +2538,44 @@ function undoMembersModule(ts, file, text, names, title, fail) {
   if (!header) { fail(`${file}: its header's first paragraph is not the one the first pass writes`); return null; }
   for (const n of names) if (!header.names.includes(n)) fail(`${file}: its header does not list ${n}`);
   out = out.slice(0, header.start) + wrapComment(headerWords(title, header.names.filter((n) => !names.includes(n)))).join('\n') + out.slice(header.end);
-  return pruneModuleImports(ts, file, out);
+  // A binding only a docblock's link reads is dropped too unless the base binds
+  // it (#30147): a link elsewhere in the module to a name a moved body imports
+  // would otherwise keep that import alive. Which names the base binds is the
+  // one fact this undo reads off the base, as the host entries' undo does.
+  const code = usedImportNames(ts, out, { docs: false });
+  const all = usedImportNames(ts, out);
+  const used = baseBound ? new Set([...all].filter((n) => code.has(n) || baseBound.has(n))) : all;
+  return withRouteNote(ts, file, pruneModuleImports(ts, file, out, used));
+}
+
+/** The local names a module's import declarations bind. */
+function importBoundNames(ts, file, text) {
+  const out = new Set();
+  for (const d of importDeclsOf(ts, file, text).decls) for (const n of [d.defaultName, d.nsName, ...d.named.map((e) => e.local)]) if (n) out.add(n);
+  return out;
+}
+
+/** A host block's keyed groups, each the text of its lines (a setter is its getter's continuation). */
+function hostGroups(text, openMarker, closeMarker, keyOf, isContinuation) {
+  const open = text.indexOf(openMarker);
+  const close = text.indexOf(closeMarker, open);
+  const out = new Map();
+  if (open < 0 || close < 0) return out;
+  let key;
+  for (const l of text.slice(open + openMarker.length, close).split('\n')) {
+    const k = keyOf(l);
+    if (k !== undefined) { key = k; out.set(k, l); } else if (key !== undefined && isContinuation(l)) out.set(key, `${out.get(key)}\n${l}`);
+    else key = undefined;
+  }
+  return out;
 }
 
 /**
  * Prove this pass's moves against the pre-move tree, from the texts alone (it
  * shares no state with `generateMembers`). `base` / `head`: `{ text, host,
- * modules }` (`protocol.ts`, `protocol-host.ts`, the section modules by file).
- * Returns `{ failures, moved, checks, pruned, linesBefore, linesAfter }`.
+ * modules }` (`protocol.ts`, `protocol-host.ts`, the section modules and the
+ * tables leaves by file). Returns `{ failures, moved, checks, pruned,
+ * linesBefore, linesAfter, forms }`.
  */
 function verifyMembers(T, base, head, { anchors = SECTION_ANCHORS, pins = PATH_READER_PINS, needles = PATH_READER_NEEDLES } = {}) {
   const { ts, hs } = T;
@@ -2076,15 +2584,23 @@ function verifyMembers(T, base, head, { anchors = SECTION_ANCHORS, pins = PATH_R
   const fail = (msg) => failures.push(msg);
   const moved = [];
   const checks = [];
+  const tables = [];
   const baseSf = parseSourceFile(HOST_PATH, base.text);
   const headSf = parseSourceFile(HOST_PATH, head.text);
   const baseCls = hs.classOf(baseSf, CLASS_NAME);
   const headCls = hs.classOf(headSf, CLASS_NAME);
-  const done = (pruned = []) => ({ failures, moved: moved.map((mv) => mv.name), checks, pruned, linesBefore: lineCount(base.text), linesAfter: lineCount(head.text) });
+  const forms = () => {
+    const n = new Map();
+    for (const mv of moved) n.set(mv.form ?? '?', (n.get(mv.form ?? '?') ?? 0) + 1);
+    if (tables.length) n.set('table', tables.length);
+    return Object.fromEntries(n);
+  };
+  const done = (pruned = []) => ({ failures, moved: [...moved.map((mv) => mv.name), ...tables.map((t) => t.name)], checks, pruned, linesBefore: lineCount(base.text), linesAfter: lineCount(head.text), forms: forms() });
   if (!baseCls || !headCls) { fail(`no class ${CLASS_NAME} at base or head`); return done(); }
   const marker = new RegExp(`^\\{\\s*// ${MARK.replace(/[[\]]/g, '\\$&')} The body moved to \`(protocol-[a-z0-9-]+\\.ts)\``);
   const key = (m) => `${hasModifier(ts, m, ts.SyntaxKind.StaticKeyword) ? 'static ' : ''}${m.name && ts.isIdentifier(m.name) ? m.name.text : ts.SyntaxKind[m.kind]}`;
   const methodsOf = (cls) => new Map(cls.members.filter((m) => ts.isMethodDeclaration(m) && m.body).map((m) => [key(m), m]));
+  const fieldsOf = (cls) => new Map(cls.members.filter((m) => ts.isPropertyDeclaration(m) && hasModifier(ts, m, ts.SyntaxKind.StaticKeyword) && m.name && ts.isIdentifier(m.name)).map((m) => [m.name.text, m]));
   const baseMethods = methodsOf(baseCls);
   const headMethods = methodsOf(headCls);
   if ([...baseMethods.keys()].join() !== [...headMethods.keys()].join()) fail(`${CLASS_NAME} does not declare the same methods in the same order at base and head`);
@@ -2095,21 +2611,38 @@ function verifyMembers(T, base, head, { anchors = SECTION_ANCHORS, pins = PATH_R
     const bHit = marker.exec(bm.body.getText(baseSf));
     if (bHit && !hHit) fail(`${k}: a stub at base is a body at head`);
     if (!hHit || bHit) continue;
-    if (k.startsWith('static ')) { fail(`${k}: a static's body moved (this pass moves instance methods only)`); continue; }
-    moved.push({ name: hm.name.text, hm, bm, file: hHit[1] });
+    moved.push({ name: hm.name.text, isStatic: k.startsWith('static '), hm, bm, file: hHit[1] });
   }
-  if (moved.length === 0) fail('nothing moved: the head carries no stub its base did not');
+  const basePlan = plan(T, base.text, base.host, { anchors, pins, needles, facade: true });
+  const sectionOf = sectionTable(ts, baseSf, basePlan.cls, anchors);
+  const baseFields = fieldsOf(basePlan.cls);
+  const headFields = fieldsOf(headCls);
+  if ([...baseFields.keys()].join() !== [...headFields.keys()].join()) fail(`${CLASS_NAME} does not declare the same static fields in the same order at base and head`);
+  for (const [name, hf] of headFields) {
+    const bf = baseFields.get(name);
+    if (!bf || hf.getText(headSf) === bf.getText(basePlan.sf)) continue;
+    const t = tableMove(T, basePlan, bf, sectionOf);
+    if (t.refusals.length > 0) { fail(`${name}: its field changed, and it is no table this pass moves (${t.refusals.join('; ')})`); continue; }
+    if (hf.getText(headSf) !== t.field) fail(`${name}: its field is not the base field reading its table from ${t.leaf}`);
+    tables.push({ ...t, hf });
+  }
+  if (moved.length === 0 && tables.length === 0) fail('nothing moved: the head carries no stub or table its base did not');
 
-  const basePlan = plan(T, base.text, base.host, { anchors, pins, needles });
   const headPrivateStatics = new Set([...hs.memberTable(headCls).statics].filter(([, s]) => s.private).map(([n]) => n));
+  const expectedEntries = new Map();
+  const routed = new Map();
   for (const mv of moved) {
     const { name, hm, bm, file } = mv;
-    const r = basePlan.records.find((x) => x.node.name?.text === name && !x.isStatic);
+    const r = basePlan.records.find((x) => x.node.name?.text === name && Boolean(x.isStatic) === mv.isStatic);
     if (!r) { fail(`${name}: no record of it at base`); continue; }
-    if (r.reasons.length > 0) fail(`${name}: a stay rule holds it at base (${r.reasons.join('; ')})`);
     if (r.module !== file) { fail(`${name}: its stub names ${file}, and its section's module is ${r.module ?? 'none'}`); continue; }
     mv.title = r.section;
-    if (hm.body.getText(headSf) !== facetStubBody(name, file, bm)) fail(`${name}: the stub is not the first pass's lifted stub`);
+    const e1 = !mv.isStatic && r.reasons.length === 0;
+    const rm = e1 ? null : receiverMove(T, basePlan, r);
+    if (rm && rm.refusals.length > 0) { fail(`${name}: a stay rule holds it at base, and no receiver form carries it (${[...r.reasons, ...rm.refusals].join('; ')})`); continue; }
+    mv.form = e1 ? 'e1' : rm.form;
+    const wantStub = e1 ? facetStubBody(name, file, bm) : rm.stub;
+    if (hm.body.getText(headSf) !== wantStub) fail(`${name}: the stub is not the one this pass writes for its form (${mv.form})`);
     const facet = facetNameOf(file);
     const span = isPrivateMember(ts, bm) ? movableDocSpan(ts, baseSf, bm) : null;
     mv.ownedDoc = span ? span.text : null;
@@ -2124,8 +2657,22 @@ function verifyMembers(T, base, head, { anchors = SECTION_ANCHORS, pins = PATH_R
     if (!fm) { fail(`${name}: ${file} at head holds no facet member ${name}`); continue; }
     mv.fm = fm;
     mv.modText = modText;
-    if (r.reasons.length === 0 && modText.slice(fm.start, fm.end) !== facetMemberText(ts, r.fnText, mv.ownedDoc)) {
-      fail(`${name}: the facet member is not its base method's text as the first pass lifts it (docblock, parameters, return type, body)`);
+    const wantMember = e1 ? facetMemberText(ts, r.fnText, mv.ownedDoc) : rm.member;
+    if (modText.slice(fm.start, fm.end) !== wantMember) {
+      fail(`${name}: the facet member is not its base method's text as this pass writes it (${mv.form}: docblock, parameters, return type, body)`);
+    }
+    for (const [k, e] of (e1 ? r.hostEntries : rm.hostEntries)) if (!expectedEntries.has(k) || e.factory.includes('\n')) expectedEntries.set(k, e);
+    if (!e1) {
+      for (const [n, kind] of rm.routed) routed.set(n, kind);
+      // The body moved unedited: its undo is the facet member's body, byte for byte.
+      mv.restored = modText.slice(fm.node.body.getStart(fo.sf), fm.node.body.getEnd());
+      if (mv.restored !== base.text.slice(bm.body.getStart(baseSf), bm.body.getEnd())) fail(`${name}: its moved body is not the base body, byte for byte`);
+      const thisParam = fm.node.parameters[0];
+      const pk = thisParam && ts.isIdentifier(thisParam.name) && thisParam.name.text === 'this'
+        ? /^this: Pick<(\w+), (.+)>$/s.exec(modText.slice(thisParam.getStart(fo.sf), thisParam.getEnd())) : null;
+      mv.picks = pk && pk[1] === 'ProtocolHost' ? pk[2].split('|').map((q) => q.trim().slice(1, -1)) : [];
+      checks.push({ name, ok: true, form: mv.form, counts: null });
+      continue;
     }
     const fnText = unliftMethod(ts, modText.slice(fm.node.getStart(fo.sf), fm.end));
     const fnBody = fnText === null ? null : functionBodyOf(ts, fnText);
@@ -2143,27 +2690,37 @@ function verifyMembers(T, base, head, { anchors = SECTION_ANCHORS, pins = PATH_R
       ])
       : head.text;
     const c = hs.checkMove({ baseSource: base.text, headSource: headA, moduleSource: `${fnText}\n`, moduleFile: file, member: name, className: CLASS_NAME });
-    checks.push({ name, ok: c.ok, counts: c.counts });
+    checks.push({ name, ok: c.ok, form: 'e1', counts: c.counts });
     for (const p of c.problems) fail(`host-split check ${name}: ${p}`);
   }
 
-  // The modules: each receiving one undoes to its base; every other is its base.
+  // The modules: each receiving one undoes to its base; a tables leaf is its generator's text; every other is its base.
   const touched = new Map();
   for (const mv of moved) if (mv.fm) touched.set(mv.file, [...(touched.get(mv.file) ?? []), mv]);
+  const leaves = new Map();
+  for (const t of tables) leaves.set(t.leaf, [...(leaves.get(t.leaf) ?? []), t]);
   for (const file of new Set([...base.modules.keys(), ...head.modules.keys()])) {
     const b = base.modules.get(file) ?? null;
     const h = head.modules.get(file) ?? null;
+    if (leaves.has(file)) {
+      if (b !== null) fail(`${file}: a tables leaf at base (this pass writes one whole, once)`);
+      if (h !== tablesModuleText(T, basePlan.ctx.scope, leaves.get(file))) fail(`${file}: not the leaf this pass writes for the tables it holds`);
+      continue;
+    }
     if (!touched.has(file)) {
       if (b !== h) fail(`${file}: changed, and no member this pass moved is in it`);
       continue;
     }
     if (b === null || !b.includes(MARK)) { fail(`${file}: not a facet module at base (this pass never starts a facet)`); continue; }
     const mvs = touched.get(file);
-    const u = undoMembersModule(ts, file, h, mvs.map((mv) => mv.name), mvs[0].title, fail);
+    if (h !== null && withRouteNote(ts, file, h) !== h) fail(`${file}: its import of ${STATICS_NAME} AS the class does not carry the note above it, as this pass writes it (or the note stands alone)`);
+    const u = undoMembersModule(ts, file, h, mvs.map((mv) => mv.name), mvs[0].title, fail, importBoundNames(ts, file, b));
     if (u !== null && u !== b) fail(`undoing the moves out of ${file} does not rebuild its base (first difference at line ${firstDiff(u, b)})`);
   }
 
-  // protocol.ts: each body and owned docblock back; the factory loses the entries the base did not carry.
+  // protocol.ts: each body and owned docblock back, each table's initializer back
+  // (read off its leaf at head), the forwarder and the leaves' imports gone; the
+  // factory loses the entries the base did not carry.
   const edits = [];
   for (const mv of moved) {
     if (!mv.fm || mv.restored === undefined) continue;
@@ -2173,12 +2730,48 @@ function verifyMembers(T, base, head, { anchors = SECTION_ANCHORS, pins = PATH_R
       if (span) edits.push({ start: span.start, end: span.end, text: mv.ownedDoc });
     }
   }
+  for (const [leaf, ts_] of leaves) {
+    const leafText = head.modules.get(leaf) ?? '';
+    const leafSf = parseSourceFile(join(SRC_DIR, leaf), leafText);
+    const holder = leafSf.statements.find((s) => ts.isClassDeclaration(s) && s.name?.text === tablesClassOf(ts_[0].module));
+    for (const t of ts_) {
+      const lm = holder?.members.find((m) => ts.isPropertyDeclaration(m) && m.name?.getText(leafSf) === t.name && m.initializer);
+      if (!lm) { fail(`${leaf}: holds no table ${t.name}`); continue; }
+      edits.push({ start: t.hf.initializer.getStart(headSf), end: t.hf.initializer.getEnd(), text: leafText.slice(lm.initializer.getStart(leafSf), lm.initializer.getEnd()) });
+    }
+    const imp = tablesImportText(ts_[0].module);
+    const at = head.text.indexOf(imp);
+    if (at < 0 || head.text.indexOf(imp, at + 1) >= 0) fail(`${HOST_BASENAME} does not import ${leaf} once, as this pass writes it`);
+    else edits.push({ start: at, end: at + imp.length, text: '' });
+  }
+  const baseStatics = staticsOf(ts, baseSf);
+  const headStatics = staticsOf(ts, headSf);
+  const wantKinds = new Map([...(baseStatics?.kinds ?? []), ...routed].sort(byName));
+  if (wantKinds.size > 0) {
+    if (!headStatics) fail(`${HOST_BASENAME} carries no ${STATICS_NAME} forwarder, and the moved bodies read ${[...routed.keys()].join(', ')} through it`);
+    else {
+      const t = staticsTexts(wantKinds);
+      if (head.text.slice(headStatics.ahead.start, headStatics.ahead.end) !== t.ahead || head.text.slice(headStatics.block.start, headStatics.block.end) !== `\n\n${t.block}`) {
+        fail(`${STATICS_NAME}: not the forwarder this pass writes for the base's statics and the ones the moved bodies read`);
+      }
+      if (baseStatics) {
+        const bt = staticsTexts(baseStatics.kinds);
+        edits.push({ start: headStatics.ahead.start, end: headStatics.ahead.end, text: bt.ahead });
+        edits.push({ start: headStatics.block.start, end: headStatics.block.end, text: `\n\n${bt.block}` });
+      } else {
+        if (head.text.slice(headStatics.ahead.end, headStatics.ahead.end + 2) !== '\n\n') fail(`${STATICS_NAME}: its declarations are not followed by one blank line`);
+        edits.push({ start: headStatics.ahead.start, end: headStatics.ahead.end + 2, text: '' });
+        edits.push({ start: headStatics.block.start, end: headStatics.block.end, text: '' });
+      }
+    }
+  } else if (headStatics) fail(`${HOST_BASENAME} carries a ${STATICS_NAME} forwarder no moved body reads`);
   let rebuilt = applyEdits(head.text, edits);
   const baseFactory = hostBlockKeys(base.text, FACTORY_OPEN, FACTORY_CLOSE, factoryKey);
   const baseIface = hostBlockKeys(base.host, IFACE_OPEN, IFACE_CLOSE, ifaceKey);
   if (!baseFactory || !baseIface) fail('the base carries no host factory or no ProtocolHost interface');
   else {
-    const f = dropHostGroups(rebuilt, FACTORY_OPEN, FACTORY_CLOSE, factoryKey, baseFactory.keys, (l) => /^ {12}set /.test(l));
+    const setter = (l) => /^ {12}set /.test(l);
+    const f = dropHostGroups(rebuilt, FACTORY_OPEN, FACTORY_CLOSE, factoryKey, baseFactory.keys, setter);
     if (f.missing) fail(`${HOST_BASENAME} at head carries no host factory`);
     rebuilt = f.text;
     const i = dropHostGroups(head.host, IFACE_OPEN, IFACE_CLOSE, ifaceKey, baseIface.keys, () => false);
@@ -2186,10 +2779,16 @@ function verifyMembers(T, base, head, { anchors = SECTION_ANCHORS, pins = PATH_R
     if (i.text !== base.host) fail(`undoing the moves does not rebuild the base ${HOST_MODULE_BASENAME} (first difference at line ${firstDiff(i.text, base.host)})`);
     if (JSON.stringify([...f.dropped].sort()) !== JSON.stringify([...i.dropped].sort())) fail(`the factory and the interface gained different entries: factory ${f.dropped.join(', ')}; interface ${i.dropped.join(', ')}`);
     const picked = new Set(moved.flatMap((mv) => mv.picks ?? []));
-    for (const k of i.dropped) if (!picked.has(k)) fail(`${HOST_MODULE_BASENAME} gained ${k}, which no moved body's host type names`);
+    const headFactory = hostGroups(head.text, FACTORY_OPEN, FACTORY_CLOSE, factoryKey, setter);
+    const headIface = hostGroups(head.host, IFACE_OPEN, IFACE_CLOSE, ifaceKey, () => false);
+    for (const k of i.dropped) {
+      if (!picked.has(k)) fail(`${HOST_MODULE_BASENAME} gained ${k}, which no moved body's host type names`);
+      const e = expectedEntries.get(k);
+      if (e && (headIface.get(k) !== e.iface || headFactory.get(k) !== e.factory)) fail(`the host entry ${k} is not the one this pass writes for it`);
+    }
   }
   const prune = pruneImports(ts, base.text, usedImportNames(ts, head.text));
-  const movedText = `${moved.map((mv) => mv.restored ?? '').join('\n')}\n${moved.map((mv) => mv.ownedDoc ?? '').join('\n')}`;
+  const movedText = `${moved.map((mv) => mv.restored ?? '').join('\n')}\n${moved.map((mv) => mv.ownedDoc ?? '').join('\n')}\n${tables.map((t) => t.init).join('\n')}`;
   for (const n of prune.removed) {
     if (!new RegExp(`\\b${n.replace(/\$/g, '\\$')}\\b`).test(movedText)) fail(`${HOST_BASENAME} lost the import binding ${n}, which no moved body reads`);
   }
@@ -2203,19 +2802,23 @@ function verifyMembers(T, base, head, { anchors = SECTION_ANCHORS, pins = PATH_R
 
 function printVerifyMembers(v) {
   for (const f of v.failures) console.error(`  ✗ ${f}`);
-  console.log(`undo proof (${MEMBERS_CARD}): ${v.moved.length} moved method(s) (${v.moved.join(', ') || 'none'}); ` +
-    `host-split check: ${v.checks.filter((c) => c.ok).length}/${v.checks.length} pass; ${HOST_BASENAME} ${v.linesBefore} -> ${v.linesAfter} lines; ` +
+  const forms = Object.entries(v.forms ?? {}).map(([f, n]) => `${f} ${n}`).join(', ') || 'none';
+  const e1 = v.checks.filter((c) => c.form === 'e1');
+  console.log(`undo proof (${MEMBERS_CARD}, ${RECEIVER_CARD}): ${v.moved.length} moved member(s) (${v.moved.join(', ') || 'none'}); forms: ${forms}; ` +
+    `host-split check: ${e1.filter((c) => c.ok).length}/${e1.length} E1 move(s) pass (the receiver forms move bodies unedited, proved byte-equal); ${HOST_BASENAME} ${v.linesBefore} -> ${v.linesAfter} lines; ` +
     `undoing the moves ${v.failures.length > 0 ? 'does NOT' : 'does'} rebuild the base ${HOST_BASENAME}, ${HOST_MODULE_BASENAME} and section modules byte-for-byte ` +
     `once the ${v.pruned.length} import binding(s) only moved bodies read are pruned from the base (${v.pruned.join(', ') || 'none'})`);
 }
 
 function generatedModulesAt(ref) {
   const out = new Map();
-  for (const [, , file] of SECTION_ANCHORS) {
-    if (!file) continue;
-    try {
-      out.set(file, execFileSync('git', ['show', `${ref}:${SRC_REL}/${file}`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'ignore'] }));
-    } catch { /* absent at the ref */ }
+  for (const [, , section] of SECTION_ANCHORS) {
+    if (!section) continue;
+    for (const file of [section, tablesModuleOf(section)]) {
+      try {
+        out.set(file, execFileSync('git', ['show', `${ref}:${SRC_REL}/${file}`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'ignore'] }));
+      } catch { /* absent at the ref */ }
+    }
   }
   return out;
 }
@@ -2237,7 +2840,10 @@ async function mainMembers(T, argv) {
   const base = { text: readFileSync(HOST_PATH, 'utf8'), host: readFileSync(HOST_MODULE_PATH, 'utf8'), modules: generatedModulesOnDisk() };
   const out = generateMembers(T, base.text, base.host, base.modules, names);
   console.log(`# codemod-split-protocol --members (${MEMBERS_CARD}): named methods onto the landed facade`);
-  for (const r of out.records) console.log(`- ${r.name} -> ${facetNameOf(r.module)} (${r.module}): ${r.bodyLines} body lines${r.ownedDoc ? ', its docblock with it' : ''}`);
+  for (const r of out.records) {
+    if (r.leaf) console.log(`- ${r.name} (a static table) -> ${tablesClassOf(r.module)} (${r.leaf}): its initializer`);
+    else console.log(`- ${r.name} -> ${facetNameOf(r.module)} (${r.module}), ${r.form}: ${r.bodyLines} body lines${r.ownedDoc ? ', its docblock with it' : ''}`);
+  }
   const head = { text: out.host, host: out.hostModule, modules: new Map([...base.modules, ...out.modules]) };
   console.log(`output tree sha256: ${treeHash(new Map([[HOST_BASENAME, out.host], [HOST_MODULE_BASENAME, out.hostModule], ...out.modules]))}`);
   const v = verifyMembers(T, base, head);
@@ -2354,6 +2960,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'members pass': 8,
   'members proof': 12,
   'members refusals': 10,
+  'receiver forms': 10,
+  'receiver proof': 10,
+  'receiver refusals': 7,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
 
@@ -2736,6 +3345,123 @@ ${pad}
         && refused(() => gen(['engineReader'], { ...base, modules: new Map([['protocol-first.ts', handHeader]]) })));
       refuses('a module that declares a name the body imports refuses',
         () => gen(['laterReader'], { ...base, modules: new Map([['protocol-first.ts', handFacet.replace('const HAND_LOCAL = 1;', 'const HAND_LOCAL = 1;\nconst laterOnly = (n: number): number => n;')]]) }));
+    }
+
+    // The receiver forms (#30147): members E1 refuses move unedited. The landed
+    // facade gains, by hand, a method with a local named `host` (E1's rewrite
+    // set refuses it: `receiver`), a private static that reads the class through
+    // `this` (`statics`), and a static table; the first pass's `readsNoMember`
+    // (`plain`), `readsClass` (`plain`, reading a static through the forwarder)
+    // and `readsPredicate` (E1 through a predicate entry) move with them.
+    {
+      const rbase = { ...base, text: base.text
+        .replace('    private keptOne(): number {', `    private static readonly TABLE: ReadonlySet<string> = new Set(['a', 'b']);
+
+    private hostLocal(n: number): number {
+${pad}
+        const host = n;
+        return host + this.engine.v + (this.flag ? 1 : 0);
+    }
+
+    private static readsThis(n: number): number {
+${pad}
+        return this.secret(n) + ObjectStackProtocolImplementation.TABLE.size;
+    }
+
+    private bareStatic(): unknown {
+${pad}
+        return this;
+    }
+
+    private keptOne(): number {`) };
+      const RNAMES = ['hostLocal', 'readsThis', 'readsNoMember', 'readsClass', 'readsPredicate', 'TABLE'];
+      const rgen = (names, b = rbase) => generateMembers(T, b.text, b.host, b.modules, names, opts);
+      let rout = null;
+      try { rout = rgen(RNAMES); } catch (e) { rout = { error: String(e.message ?? e) }; }
+      const rhead = rout.error ? rbase : { text: rout.host, host: rout.hostModule, modules: new Map([...rbase.modules, ...rout.modules]) };
+      const rvm = (h) => verifyMembers(T, rbase, h, opts);
+      const rv = rout.error ? { failures: [rout.error], moved: [], checks: [], forms: new Map() } : rvm(rhead);
+      const rfacet = rhead.modules.get('protocol-first.ts') ?? '';
+      const leaf = rhead.modules.get('protocol-first-tables.ts') ?? '';
+      const formOf = (n) => { const r = (rout.records ?? []).find((x) => x.name === n); return r ? (r.form ?? (r.leaf ? 'table' : undefined)) : undefined; };
+
+      open('receiver forms');
+      {
+        check('the receiver forms prove against the landed facade by their undo', rv.failures.length === 0 && rv.moved.length === RNAMES.length,
+          [...rv.failures, `moved ${rv.moved.join()}`].join(' | '));
+        check('each member gets its form: receiver, statics, plain, E1 through a predicate entry, and a table',
+          formOf('hostLocal') === 'receiver' && formOf('readsThis') === 'statics' && formOf('readsNoMember') === 'plain'
+          && formOf('readsClass') === 'plain' && formOf('readsPredicate') === 'e1' && formOf('TABLE') === 'table'
+          && JSON.stringify(rv.forms) === JSON.stringify({ plain: 2, e1: 1, receiver: 1, statics: 1, table: 1 }),
+          `${RNAMES.map((n) => `${n}=${formOf(n)}`).join(' ')} | proof ${JSON.stringify(rv.forms)}`);
+        check('a receiver stub runs the unedited body on the host; the facet member takes the Pick of what it reads as `this`',
+          rhead.text.includes('return ProtocolFirstFacet.hostLocal.call(protocolHost(this), n);')
+          && rfacet.includes("static hostLocal(this: Pick<ProtocolHost, 'engine' | 'flag'>, n: number): number {")
+          && rfacet.includes('        const host = n;\n        return host + this.engine.v + (this.flag ? 1 : 0);'), rfacet);
+        check('a statics stub runs the unedited body on the forwarder',
+          rhead.text.includes(`return ProtocolFirstFacet.readsThis.call(${STATICS_NAME}, n);`)
+          && rfacet.includes(`static readsThis(this: Pick<${STATICS_HOST_NAME}, 'secret'>, n: number): number {`)
+          && rfacet.includes('        return this.secret(n) + ObjectStackProtocolImplementation.TABLE.size;'), rfacet);
+        check('a plain stub calls its facet member with no host',
+          rhead.text.includes('return ProtocolFirstFacet.readsNoMember(n);') && rhead.text.includes('it reads nothing of this class.')
+          && rhead.text.includes(`it reads this class's statics through \`${STATICS_NAME}\`.`), rhead.text);
+        check('the forwarder carries each routed static once, by kind, ahead of the class and in its closing static block',
+          rhead.text.includes(`export interface ${STATICS_HOST_NAME} {\n    readonly TABLE: (typeof ${CLASS_NAME})['TABLE'];\n    readonly secret: (typeof ${CLASS_NAME})['secret'];\n}`)
+          && rhead.text.includes(`            TABLE: { get: () => ${CLASS_NAME}.TABLE },\n            secret: { value: (...args: Parameters<typeof ${CLASS_NAME}.secret>) => ${CLASS_NAME}.secret(...args) },`)
+          && rhead.text.indexOf(`export const ${STATICS_NAME}`) < rhead.text.indexOf(`export class ${CLASS_NAME}`), rhead.text.slice(0, 1600));
+        check('the facet module imports the forwarder AS the class, under its note',
+          rfacet.includes(`${ROUTE_NOTE}\nimport { ${STATICS_NAME} as ${CLASS_NAME} } from './protocol.js';`)
+          || new RegExp(`${ROUTE_NOTE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\nimport \\{[^}]*\\b${STATICS_NAME} as ${CLASS_NAME}\\b`).test(rfacet),
+          rfacet.split('\n').filter((l) => l.startsWith('import') || l.startsWith('//')).join(' | '));
+        check('a table\'s initializer moves to a leaf that imports no relative module; the field reads it back',
+          rhead.text.includes('    private static readonly TABLE: ReadonlySet<string> = ProtocolFirstTables.TABLE;')
+          && leaf.includes("    static readonly TABLE: ReadonlySet<string> = new Set(['a', 'b']);") && !/from '\.\.?\//.test(leaf), leaf);
+        check('a predicate reached through the host keeps its predicate in the factory entry',
+          rhead.text.includes('            isThing: (x: unknown): x is string => protocol.isThing(x),'), rhead.text.split('\n').filter((l) => l.includes('isThing')).join(' | '));
+        let again = null;
+        try { again = rgen([...RNAMES].reverse()); } catch { again = null; }
+        check('two runs (names in any order) write byte-identical trees', again !== null && !rout.error
+          && treeHash(new Map([['h', again.host], ['p', again.hostModule], ...again.modules])) === treeHash(new Map([['h', rout.host], ['p', rout.hostModule], ...rout.modules])));
+      }
+
+      open('receiver proof');
+      {
+        const same = (a, b) => a.text === b.text && a.host === b.host && a.modules.size === b.modules.size
+          && [...a.modules].every(([f, t]) => b.modules.get(f) === t);
+        const fails = (label, h) => {
+          const v = rvm(h);
+          check(label, !rout.error && !same(h, rhead) && v.failures.length > 0, same(h, rhead) ? 'the mutation did not land' : 'proved');
+        };
+        const withR = (patch) => ({ ...rhead, ...patch });
+        const withRFacet = (text) => withR({ modules: new Map([...rhead.modules, ['protocol-first.ts', text]]) });
+        fails('one edited character in a receiver body fails', withRFacet(rfacet.replace('const host = n;', 'const host = -n;')));
+        fails('a receiver stub that calls without the host fails', withR({ text: rhead.text.replace('ProtocolFirstFacet.hostLocal.call(protocolHost(this), n)', 'ProtocolFirstFacet.hostLocal.call(this, n)') }));
+        fails('a statics stub run on the class instead of the forwarder fails', withR({ text: rhead.text.replace(`ProtocolFirstFacet.readsThis.call(${STATICS_NAME}, n)`, `ProtocolFirstFacet.readsThis.call(${CLASS_NAME}, n)`) }));
+        fails('a widened `this` Pick fails', withRFacet(rfacet.replace("this: Pick<ProtocolHost, 'engine' | 'flag'>", "this: Pick<ProtocolHost, 'count' | 'engine' | 'flag'>")));
+        fails('a forwarder entry no moved body reads fails', withR({ text: rhead.text.replace(`            TABLE: { get: () => ${CLASS_NAME}.TABLE },`, `            TABLE: { get: () => ${CLASS_NAME}.TABLE },\n            guarded: { value: (...args: Parameters<typeof ${CLASS_NAME}.guarded>) => ${CLASS_NAME}.guarded(...args) },`) }));
+        fails('a forwarder method entry turned into a getter fails', withR({ text: rhead.text.replace(`            secret: { value: (...args: Parameters<typeof ${CLASS_NAME}.secret>) => ${CLASS_NAME}.secret(...args) },`, `            secret: { get: () => ${CLASS_NAME}.secret },`) }));
+        fails('one edited character in a moved table fails', withR({ modules: new Map([...rhead.modules, ['protocol-first-tables.ts', leaf.replace("new Set(['a', 'b'])", "new Set(['a', 'c'])")]]) }));
+        fails('a leaf that imports protocol.ts fails', withR({ modules: new Map([...rhead.modules, ['protocol-first-tables.ts', leaf.replace('\nexport class ProtocolFirstTables {', "\nimport { ObjectStackProtocolImplementation } from './protocol.js';\n\nexport class ProtocolFirstTables {")]]) }));
+        fails('a predicate entry that drops its predicate fails', withR({ text: rhead.text.replace('            isThing: (x: unknown): x is string => protocol.isThing(x),', '            isThing: (...a) => protocol.isThing(...a),') }));
+        fails('a facet import of the forwarder without its note fails', withRFacet(rfacet.replace(`${ROUTE_NOTE}\n`, '')));
+      }
+
+      open('receiver refusals');
+      {
+        const refuses = (label, fn) => check(label, refused(fn));
+        refuses('a bare `this` refuses (the receiver would hand back the host)', () => rgen(['bareStatic']));
+        refuses('`this.constructor` refuses (constructor-rewrite is not a receiver reason)', () => rgen(['viaConstructor']));
+        refuses('a static written through the class refuses (the forwarder is read-only)',
+          () => rgen(['readsThis'], { ...rbase, text: rbase.text.replace('return this.secret(n) + ObjectStackProtocolImplementation.TABLE.size;', 'ObjectStackProtocolImplementation.TABLE = new Set();\n        return this.secret(n);') }));
+        refuses('a static method read as a value refuses (a forwarder is another function)',
+          () => rgen(['readsThis'], { ...rbase, text: rbase.text.replace('return this.secret(n) + ObjectStackProtocolImplementation.TABLE.size;', 'const f = ObjectStackProtocolImplementation.secret;\n        return f(n);') }));
+        refuses('a table whose initializer reads a relative import refuses (the leaf imports packages only)',
+          () => rgen(['TABLE'], { ...rbase, text: rbase.text.replace("new Set(['a', 'b'])", 'new Set([String(already)])') }));
+        refuses('a receiver read of a field the host carries writable refuses (the entry would differ)',
+          () => rgen(['hostLocal'], { ...rbase, text: rbase.text.replace('(this.flag ? 1 : 0)', 'this.count') }));
+        refuses('a table whose initializer reads a top-level name of protocol.ts refuses',
+          () => rgen(['TABLE'], { ...rbase, text: rbase.text.replace("new Set(['a', 'b'])", 'new Set([String(LOCAL)])') }));
+      }
     }
   }
 

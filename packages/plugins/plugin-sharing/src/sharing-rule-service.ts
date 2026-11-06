@@ -42,7 +42,12 @@ import type { SharingEngine } from './sharing-service.js';
 import type { SharingService } from './sharing-service.js';
 import { isInternalRecipientRefusal } from './sharing-service.js';
 import { normalizeAccessLevel, normalizeStoredAccessLevel } from './access-level.js';
-import { parseCriteria, isMatchAllCriteria, MATCH_ALL_CRITERIA_MESSAGE } from './rule-criteria.js';
+import {
+  parseCriteria,
+  isMatchAllCriteria,
+  MATCH_ALL_CRITERIA_MESSAGE,
+  SharingRuleObjectNotEnforcedError,
+} from './rule-criteria.js';
 import { TeamGraphService, teamHasMember } from './team-graph.js';
 import { PositionGraphService } from './position-graph.js';
 import { BusinessUnitGraphService } from './business-unit-graph.js';
@@ -832,6 +837,20 @@ export class SharingRuleService implements ISharingRuleService {
     // admin owns or has customized — most importantly an admin's
     // `active: false` on an over-sharing rule must survive redeploys.
     const seedMode = input.managedBy === 'package' || input.managedBy === 'platform';
+
+    // [#30621] A rule on an object no sharing gate consults would save and then
+    // share nothing: refuse it here, with the reconcile's own verdict. The
+    // `sys_sharing_rule` hook guard makes the same check on the `/data` door;
+    // this write runs under the system context, which that guard lets pass.
+    // An upsert that keeps a stored rule on its object is not a move, so a
+    // rule saved before this check can still be switched off.
+    if (!context?.isSystem) {
+      const stored: any = Array.isArray(existing) ? existing[0] : undefined;
+      if (!stored || stored.object_name !== input.object) {
+        const refusal = this.sharing.sharingRuleObjectRefusal(input.object);
+        if (refusal) throw new SharingRuleObjectNotEnforcedError(input.object, refusal);
+      }
+    }
 
     if (Array.isArray(existing) && existing[0]) {
       const row: any = existing[0];

@@ -17,8 +17,8 @@
 
 | Status | Records |
 |---|---|
-| Accepted | 130 |
-| Proposed | 5 |
+| Accepted | 131 |
+| Proposed | 4 |
 | Superseded | 4 |
 | Draft | 3 |
 | Deferred | 2 |
@@ -120,7 +120,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0047](./0047-object-ui-run-modes.md) | Two run modes for object UI — data views vs interface pages, user filters, and runtime visualization choice | Accepted — 2026-06-12; revised 2026-06-19; amended 2026-11-02, interface-p… | 2026-06-12 | — | — |
 | [ADR-0048](./0048-cross-package-metadata-collision.md) | Cross-package metadata collision — package-id identity, namespace install gate, package-scoped resolution | Revised — 2026-06-13 — supersedes the original per-item collision detecti… | 2026-06-13 | — | ADR-0146 |
 | [ADR-0049](./0049-no-unenforced-security-properties.md) | Spec must not declare security properties the runtime does not enforce (enforce-or-remove gate) | Accepted — 2026-06-15 — implemented: fail-closed `DESTRUCTIVEOPERATIONS` (… | 2026-06-15 | — | — |
-| [ADR-0050](./0050-form-layout-vs-presentation.md) | Form layout vs presentation — split the overloaded `FormView.type` | Proposed — 2026-06-15 · Amended (2026-10-20, letter B′ on #24692, ruling r… | 2026-06-15 | — | — |
+| [ADR-0050](./0050-form-layout-vs-presentation.md) | Form layout vs presentation — split the overloaded `FormView.type` | Accepted — 2026-10-28, letter A′ on #27032, ruling record 6464210455 — cut… | 2026-10-28 | — | — |
 | [ADR-0051](./0051-inline-metadata-views-in-docs.md) | Inline metadata views in docs — the ` ```metadata ` fenced block | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 2; proposed 2… | 2026-10-28 | — | — |
 | [ADR-0052](./0052-audit-is-not-the-activity-feed.md) | Audit is not the activity feed — decompose collaboration, activity, and audit into bounded contexts | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 2; proposed 2… | 2026-10-28 | — | — |
 | [ADR-0053](./0053-date-and-datetime-semantics.md) | `date` is a timezone-naive calendar day; `datetime` is an instant rendered in a reference timezone | Accepted — 2026-06-16 — Phase 1 + addendum D-A1 implemented (`sql-driver.t… | 2026-06-16 | — | — |

@@ -14,12 +14,14 @@ import { enMetadataForms } from './en.metadata-forms.generated.js';
 import { zhCNMetadataForms } from './zh-CN.metadata-forms.generated.js';
 import { jaJPMetadataForms } from './ja-JP.metadata-forms.generated.js';
 import { esESMetadataForms } from './es-ES.metadata-forms.generated.js';
+import { zhHantMetadataForms } from './zh-Hant.metadata-forms.generated.js';
 
 const LOCALES = [
   { name: 'en', forms: enMetadataForms as Record<string, any> },
   { name: 'zh-CN', forms: zhCNMetadataForms as Record<string, any> },
   { name: 'ja-JP', forms: jaJPMetadataForms as Record<string, any> },
   { name: 'es-ES', forms: esESMetadataForms as Record<string, any> },
+  { name: 'zh-Hant', forms: zhHantMetadataForms as Record<string, any> },
 ];
 
 describe('ADR-0090 D2/D3 — metadata-form translations use the v2 vocabulary', () => {
