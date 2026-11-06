@@ -4,7 +4,7 @@ navTitle: Error Code Catalog
 description: Complete reference for all ObjectStack error codes with causes, fixes, and retry strategies
 ---
 
-ObjectStack uses a structured error system of **error categories** and **57 error codes reachable on the wire**, catalogued in full below (that count is pinned by `packages/spec/src/api/error-catalog-docs.test.ts` against the wire face). Every error includes a machine-readable code, HTTP status mapping, and retry guidance.
+ObjectStack uses a structured error system of **error categories** and **58 error codes reachable on the wire**, catalogued in full below (that count is pinned by `packages/spec/src/api/error-catalog-docs.test.ts` against the wire face). Every error includes a machine-readable code, HTTP status mapping, and retry guidance.
 
 This catalog documents the **wire face** — the codes a client can actually receive. That is not quite the
 `StandardErrorCode` enum: the enum also carries in-process spellings the REST door translates at the
@@ -545,6 +545,11 @@ spelling never crosses HTTP.
 **Cause:** The record is locked by another process or user.  
 **Fix:** Wait for the lock to be released, or contact the lock holder.  
 **Retry:** `retry_backoff`
+
+### `PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`
+**Cause:** `PATCH /api/v1/packages/:id/disable` was refused because a validation rule of an enabled package (declared dependent or not, an app's `.custom` pair included, any severity) reads a field this package adds to another object through `objectExtensions`. Disabling it would withhold that field, and every write to the object would then fail the rule. Each rule is judged as the object serves it: one rule per name (the copy a later layer declares wins), with a tenant overlay's switch honoured. The message names each rule as `package · object · rule (reads FIELD)`, one or several, after the layer whose copy is served (`tenant overlay` for a rule the overlay declares itself). Nothing changed. `POST /api/v1/packages` answers the same code for an overwrite of an enabled package with `enableOnInstall: false` that would leave such a package disabled: the overwrite itself lands and the package stays enabled. A fresh install with `enableOnInstall: false` lands disabled, as before.  
+**Fix:** Switch off or change each named rule first, or disable the package that owns it, then disable this package; or keep it enabled. A formula over the field is no reason to refuse: it answers `null`.  
+**Retry:** `no_retry`
 
 ---
 

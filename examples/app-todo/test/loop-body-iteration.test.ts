@@ -135,7 +135,7 @@ describe('#19206 — the loop body runs and binds `currentTask`', () => {
     const { automation, data, emits } = await bootTodoKernel();
     const id = await seedOverdueTask(data, 'Renew the domain', 5);
 
-    const result: any = await automation.execute('overdue_escalation');
+    const result: any = await automation.execute('todo_overdue_escalation');
     expect(result.success, result.error).toBe(true);
 
     // 1. The loop body's FIRST node ran against the right row. `update_priority`
@@ -163,7 +163,7 @@ describe('#19206 — the loop body runs and binds `currentTask`', () => {
     await seedOverdueTask(data, 'Bravo', 9, 'usr_b');
     await seedOverdueTask(data, 'Charlie', 12, 'usr_c');
 
-    const result: any = await automation.execute('overdue_escalation');
+    const result: any = await automation.execute('todo_overdue_escalation');
     expect(result.success, result.error).toBe(true);
 
     // A binding that leaked across iterations (one item reused for all three)
@@ -191,7 +191,7 @@ describe('#19206 — the loop body runs and binds `currentTask`', () => {
     await seedOverdueTask(data, 'Orphan', 6, '');
     await seedOverdueTask(data, 'Charlie', 12, 'usr_c');
 
-    const result: any = await automation.execute('overdue_escalation');
+    const result: any = await automation.execute('todo_overdue_escalation');
     expect(result.success, result.error).toBe(true);
 
     // The two notifiable rows were both reached — the failure between them was
@@ -206,7 +206,7 @@ describe('#19206 — the loop body runs and binds `currentTask`', () => {
       due_date: daysAgoIso(-1), owner: 'usr_test_owner',
     }, SYSTEM);
 
-    const result: any = await automation.execute('task_reminder');
+    const result: any = await automation.execute('todo_task_reminder');
     expect(result.success, result.error).toBe(true);
 
     expect(emits).toHaveLength(1);

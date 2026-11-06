@@ -627,6 +627,19 @@ export function registerExternalDatasourceRoutes(
    * which told the caller to re-declare a datasource that does not exist. Both
    * fields are required, so an unrelated error carrying a stray `status`
    * cannot re-route itself.
+   *
+   * [#30609] A second relay of the same kind, the one `badRequest` makes
+   * first: an error carrying the `503` / `SERVICE_UNAVAILABLE` envelope has
+   * classified itself as a DEPENDENCY OUTAGE, and this family's `400` told the
+   * caller the request was malformed, the opposite of "retry". The import's
+   * landing reads the effective tenancy posture, and a registered `tenancy`
+   * service that cannot answer throws `AuthzStoreUnavailableError` there
+   * (`classifyAdmissionTenancyPosture`); nothing is saved, so only the status
+   * was wrong. Read off the envelope, as `badRequest` and the MCP
+   * `import_object` tool read it, rather than off the authorization brand, so
+   * every route here relays any service's declared outage the same way: the
+   * `EXTERNAL_DATASOURCE_ERROR` routes share the catch and the same truth. Both
+   * fields are required, for the reason above.
    */
   const answerThrown = (
     res: any,
@@ -640,6 +653,9 @@ export function registerExternalDatasourceRoutes(
       return sendError(res, nested.status, nested.code, nested.message, nested.extra);
     }
     const envelope = err as { code?: unknown; status?: unknown } | null | undefined;
+    if (envelope?.status === 503 && envelope?.code === 'SERVICE_UNAVAILABLE') {
+      return sendError(res, 503, 'SERVICE_UNAVAILABLE', (err as Error).message);
+    }
     if (envelope?.status === 404 && envelope?.code === 'RESOURCE_NOT_FOUND') {
       return sendError(res, 404, 'RESOURCE_NOT_FOUND', (err as Error).message);
     }

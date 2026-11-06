@@ -327,7 +327,7 @@ type CreateConsoleStaticPluginKeepsItsRatifiedSignature = Expect<
     typeof createConsoleStaticPlugin,
     (
       distPath: string,
-      options?: { isDev?: boolean; rootRedirect?: boolean },
+      options?: { isDev?: boolean; rootRedirect?: boolean; cloudflareWebAnalytics?: { token: string } },
     ) => { name: string; init: () => Promise<void>; start: (ctx: any) => Promise<void> }
   >
 >;
