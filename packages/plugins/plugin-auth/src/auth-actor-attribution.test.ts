@@ -252,7 +252,7 @@ describe('an impersonation session names its administrator on identity writes (#
       await e.insert('sys_user', { id: 'u1' } as any);
       await e.update('sys_user', { id: 'u1' } as any);
       await e.delete('sys_user', { where: { id: 'u1' } } as any);
-      await e.find('sys_user', { where: {} } as any);
+      await e.find('sys_user', { where: {} });
     });
     const expected = { context: { attributedUserId: 'usr_target', impersonatedBy: 'usr_admin', isSystem: true } };
     expect(engine.insert).toHaveBeenCalledWith('sys_user', { id: 'u1' }, expected);
