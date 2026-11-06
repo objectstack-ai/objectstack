@@ -202,7 +202,7 @@ export const Invoice = ObjectSchema.create({
   set → field permission `when`, rules/security.md).
 - **`readonly: true` governs the end-user surface, not trusted system writers.**
   A non-system write (REST/UI, and any `runAs:'user'` flow — the default) has
-  the field **stripped** from any non-system write; the write reports
+  the field **stripped**; the write reports
   success but the value never lands. System-context writes —
   `runAs:'system'` flows, system hooks, seeds, imports, migrations — are exempt
   and DO write it. So the pattern "users can't edit this, but automation
@@ -448,9 +448,10 @@ os validate     # Zod schema + CEL predicates (record.<field> existence) + bindi
 ```
 
 It catches what otherwise surfaces only at runtime, where a bare field ref
-(`done` for `record.done`) faults: an `error` validation rule, `requiredWhen`
-or option `visibleWhen` refuses the write naming it, a `readonlyWhen` locks
-its field, a formula reads `null` (logged), a form shows a `visibleWhen` field.
+(`done` for `record.done`) faults: an `error` validation rule or `requiredWhen`
+refuses the write naming it, an option `visibleWhen` only a write picking the
+option (forms still offer it); a `readonlyWhen` field stays editable and the
+save succeeds without its change (logged); a formula reads `null` (logged).
 `os lint` is a *separate*
 pass that additionally checks the data model against the conventions in this
 skill (relationships, master-detail, roll-ups) — run it too.
