@@ -24,6 +24,7 @@ displacement cost. The amendment lands as the rewrite did — by the maintainer'
 · **Amended in place** (2026-11-06, decision D2 on epic [objectstack-ai/cloud#3652](https://github.com/objectstack-ai/cloud/issues/3652), ruling record [`6681380041`](https://github.com/objectstack-ai/cloud/issues/3652#issuecomment-6681380041), maintainer, verbatim: 「修订为允许只提示（推荐）」):
 a base's upgrade plan may report, as advice, each `.custom` override that hides a vendor change; `basedOn` still never gates, and nothing is refused, merged or rebased on the finding ([D2](#d2), [D6](#d6), the [Supersede table](#supersede-table)'s §9 row, [Consequences](#consequences), merge question 2).
 It lands by the maintainer's hand-merge of the PR cut from #30881.
+· **Amended in place** (2026-11-06, ruling record [`6691022506`](https://github.com/objectstack-ai/objectstack/issues/29594#issuecomment-6691022506) on [#29594](https://github.com/objectstack-ai/objectstack/issues/29594), maintainer, verbatim: 「① 定制单位 = App；同意」, and the second ruling record [`6691217245`](https://github.com/objectstack-ai/objectstack/issues/29594#issuecomment-6691217245) there, verbatim: 「内核白名单，可以下一版本再处理，首批名单建议：Users、Organizations；其他同意。」): the customization unit is the App, so there is one pair per App, `<app id>.custom`, shared by every package its artifact delivers and never one per module; the kernel is one platform suite with one platform pair, `com.objectstack.kernel.custom`, whose range is the platform version; no kernel object is customizable in this version, and the kernel whitelist (Users, Organizations) belongs to the next one ([D3](#d3), [D11](#d11), Q4, [Consequences](#consequences), merge questions 8, 9 and 10). It lands by the maintainer's hand-merge of the PR cut from #31014.
 **Decided by**: the maintainer, 2026-10-30, in the desktop session that re-planned the epic, verbatim and
 untranslated as epic #28236 records them — the direction 「方向定为包级覆盖：代码和 Studio 用同一机制，定制都进 .custom。」; the suffix 「同意 后缀改成 .custom」; the eight questions 「等我拍板的 8 个问题，全部同意」; the extension
 fields 「扩展字段用 __c 后缀，只有 .custom 包能用。」; the item toolbar 「同意新增 2h「Studio 项工具栏」并放在 2a 之前」;
@@ -281,48 +282,109 @@ package-less overlay row) — superseded by this decision before any card implem
 replaced by N-17); a **virtual package** standing for "this environment's customization layer" — the `.custom` package
 is real, exported and versioned, which is what the maintainer asked of it under [D3](#d3).
 
-### D3 — Every installed base gets a paired `<base>.custom` package: auto-created, dependency declared, namespace explicit, and the base cannot be uninstalled while it exists {#d3}
+### D3 — Every installed App gets one paired `<app id>.custom` package, and the kernel suite one platform pair: auto-created, dependency declared, namespace explicit, and the App cannot be uninstalled while its pair exists {#d3}
 
 **Underneath, a real package.** ADR-0070 D1 holds: an item the customer adds "to HotCRM" lives in a writable package.
-That package is **`hotcrm.custom`** — an ordinary writable package, one per base, never one per environment, that
-declares its dependency on the base in `manifest.dependencies` (ADR-0141 D1/D5: checked before install, co-owning the
-namespace it shares by declaration). Maintainer, verbatim, on the suffix: 「同意 后缀改成 .custom」. The pairing idea
+That package is **`app.objectstack.hotcrm.custom`** — an ordinary writable package, one per App, never one per module
+of the App and never one per environment, that declares its dependency on the App in `manifest.dependencies`
+(ADR-0141 D1/D5: checked before install, co-owning the namespace it shares by declaration). Maintainer,
+verbatim, on the suffix: 「同意 后缀改成 .custom」. The pairing idea
 is the maintainer's from the 2026-10-30 thread: 「假设未来客户安装了很多软件包，对具体软件包的定制岂不是在 软件包中直接看更方便，如果在setup，都混在一起了。」; 「流必须住在可写包里（ADR-0070），能否虚拟一个 hotcrm.customize 包，但是设计者看的时候应该在一个及诶慢。」 (verbatim; the last word is a typing slip for 界面, "one interface" — editorial note, not part of
 the quote; the suffix was later ruled `.custom`).
 
-- **Auto-created, without a prompt, on the customer's first customization of the base** — from Studio, from the clone
-  door ([D4](#d4)), from the migration ([D11](#d11)). Epic #28236 records this as ruling D-3 without a quoted sentence;
+**The unit is the App** (amended 2026-11-06, ruling record 6691022506 on #29594). An App is what a consumer installs
+and sees: the `type: 'app'` package and the `type: 'module'` and `type: 'plugin'` packages its artifact delivers
+(ADR-0019 D1–D4), one artifact at one version (ADR-0130 D1/D6). Its customer's changes are therefore one package too.
+HotCRM at `objectstack-ai/hotcrm` `6961ab1` is the App `app.objectstack.hotcrm` and four modules,
+`app.objectstack.hotcrm.service`, `app.objectstack.hotcrm.revenue`, `app.objectstack.hotcrm.marketing` and
+`app.objectstack.hotcrm.o2c`, all `namespace: 'crm'` and all `6.1.0`, so it has one pair,
+`app.objectstack.hotcrm.custom`.
+
+- **A module never owns a pair.** A customization of any item or object of any package of the App lands in the App's
+  pair. Asked for any package of the App, the ensure door answers the App's pair: it creates the pair on the first ask
+  (`201`) and answers the existing pair after (`200`), and it never answers `422` for a package of the same App.
+- **`422 NAMESPACE_CONFLICT` stays** for a pair namespace held by a package outside the App's artifact; the registry's
+  co-ownership arms (`packages/objectql/src/registry.ts#coOwnersOf`) are unchanged.
+- **What the rest of this record means by the pair.** Elsewhere in this record, "the base's `<base>.custom`", "the
+  pair" and "the paired `.custom`" name the pair this decision assigns a base: its App's pair, or the platform pair
+  below for a kernel package. `hotcrm` is this record's shorthand for `app.objectstack.hotcrm`, so its `hotcrm.custom`
+  names `app.objectstack.hotcrm.custom`.
+
+Every pair has these properties:
+
+- **Auto-created, without a prompt, on the customer's first customization of the App** (of any of its packages) —
+  from Studio, from the clone door ([D4](#d4)), from the migration ([D11](#d11)). Epic #28236 records this as ruling
+  D-3 without a quoted sentence;
   this record is its record. One **ensure door** creates it idempotently ("create if absent"; N-13) and is the only
   creation path: no second door builds the pair. This amends ADR-0070 D3 for the paired case: D3 forbade the *silent
-  catch-all* and left a prompted auto-provision open (ADR-0070 open question 1); a deterministic, per-base,
+  catch-all* and left a prompted auto-provision open (ADR-0070 open question 1); a deterministic, per-App,
   dependency-declaring target whose item header and folded switcher say where the item went is neither a catch-all nor
   silent, so the prompt is dropped here and stays everywhere else D3 names.
-- **Namespace explicit: `<base namespace>_custom`, never derived** (Q4). For HotCRM (`namespace: 'crm'`) the pair's
-  namespace is `crm_custom`; the ensure door sets it, and `deriveNamespaceFromPackageId`'s answer for `hotcrm.custom` —
-  `custom` — is never written. So a new object authored into the pair is `crm_custom_<short>`, and the namespace gate
-  (ADR-0048 §3.2) admits it beside the base. Extension **field** names on base objects are a different rule
-  ([D10](#d10): `__c`); the namespace rule reads object names, not field names.
-- **Dependency range.** The ensure door writes the installed base's major — `^<major>` of the base's `manifest.version`
-  at creation. Today that range is read where ADR-0141 D2 reads any dependency: when the pair itself is installed or
-  re-installed (an export of `hotcrm.custom` deployed into another environment), judged against the base record found
-  there. Nothing intercepts an upgrade of the base (ADR-0141 D3 defers that), so the range is also the declaration a
-  future interception would read. `^<major>` admits the base's minor and patch versions at a re-install and refuses a
+- **Namespace explicit: `<app namespace>_custom`, never derived** (Q4): the App package's own namespace plus the
+  suffix. For HotCRM (`namespace: 'crm'`) the pair's namespace is `crm_custom`; the ensure door sets it, and
+  `deriveNamespaceFromPackageId`'s answer for `app.objectstack.hotcrm.custom` — `custom` — is never written. So a new
+  object authored into the pair is `crm_custom_<short>`, and the namespace gate (ADR-0048 §3.2) admits it beside the
+  App's packages. A `sys_` object name is admitted only from a package whose namespace is `sys`
+  (`packages/spec/src/kernel/namespace-prefix.ts#validateObjectNamespacePrefix`; ruling record 6691022506 closes
+  today's pass-through for every other namespace), so no pair authors a bare `sys_<short>`. Extension **field** names
+  on base objects are a different rule ([D10](#d10): `__c`); the namespace rule reads object names, not field names.
+- **Dependency range.** The ensure door writes the installed App's major — `^<major>` of the App package's
+  `manifest.version` at creation (HotCRM `6.1.0`: `^6`); the platform pair's range is the platform version's (below).
+  Today that range is read where ADR-0141 D2 reads any dependency: when the pair itself is installed or re-installed
+  (an export of `app.objectstack.hotcrm.custom` deployed into another environment), judged against the App record
+  found there. Nothing intercepts an upgrade of the App (ADR-0141 D3 defers that), so the range is also the declaration
+  a future interception would read. `^<major>` admits the App's minor and patch versions at a re-install and refuses a
   different major, which is where `basedOn` is read by a human. *Decided here where the rulings were silent; merge
   question 1.*
 - **Walled postures.** Under `group` / `isolated` the ensure door answers `403` for a tenant administrator (the walled
   postures' rule for an environment-level write — ADR-0126 §5, ADR-0131 D12); the operator creates and fills the pair. Under `single` the
   administrator holding `manage_metadata` does.
-- **Uninstall of the base is refused while its `.custom` exists**, naming the pair — the epic's two-minute check,
+- **A readable verdict before Customize** (ruling record 6691022506, (b)). The package list row and the ensure door
+  serve a readable `customizable` verdict and the pair a Customize would land in, so the console offers Customize only
+  where it would succeed.
+- **Uninstall of the App is refused while its pair exists**, naming the pair — the epic's two-minute check,
   verbatim: 「卸载 HotCRM 被拒并点名 `hotcrm.custom`」. The administrator exports or deletes `hotcrm.custom` first; the
   refusal is a resource-state conflict in the family `uninstallPackage` already answers for an extended object (`409`,
   the `PackageUninstallExtendedError` shape), from the same door, so a refused uninstall leaves no half-removed base.
   This supersedes ADR-0141 D3's uninstall item for the paired case only; the general item — a dependent that is not
   the base's own `.custom` — stays deferred with its trigger (N-14).
-- **It receives**: overrides and new items authored from the base's Studio surface ([D2](#d2)), "new similar" copies
-  of the base's flows ([D4](#d4)), extensions of the base's objects ([D10](#d10)), the migrated package-less rows
-  ([D11](#d11)), and environment-level permission sets **for** the base (new sets, never an override of the base's —
-  [D6](#d6)). Upgrading the base never touches it (ADR-0126 D4 wall 3: upgrades rewrite the base, never the customer's
-  choices — here the customer's package).
+- **It receives**: overrides and new items authored from the Studio surface of the App or of any of its modules
+  ([D2](#d2)), "new similar" copies of their flows ([D4](#d4)), extensions of their objects ([D10](#d10)), the migrated
+  package-less rows ([D11](#d11)), and environment-level permission sets **for** the App (new sets, never an override
+  of the base's — [D6](#d6)). Upgrading the App never touches it (ADR-0126 D4 wall 3: upgrades rewrite the base, never
+  the customer's choices — here the customer's package).
+
+**The kernel is one platform suite with one platform pair** (ruling record 6691022506; the maintainer's premise,
+verbatim: 「内核作为平台套件、版本随运行时、总是全套安装」). The kernel packages — manifest `scope` `system` or `cloud`
+(`packages/metadata-protocol/src/package-writability.ts#READ_ONLY_PACKAGE_SCOPES`), the platform's own packages that
+Studio's package list leaves out — form one suite, and the suite has one pair, the **platform pair**
+`com.objectstack.kernel.custom` (*decided here where the rulings were silent; merge question 8*). Its namespace is
+`sys_custom`, the kernel namespace `sys` plus the suffix. Everything above holds for it, except:
+
+- **Its range is the platform version, never a kernel manifest's `version`.** The platform ships one version: the
+  changeset `fixed` group (`.changeset/config.json`) is one group of 109 packages, at 18.3.0 on `origin/main`
+  `33bc8ae5`, while the kernel manifests' own `version` fields (0.1.0 to 3.x) are unrelated to that release. The range
+  is `^<major>` of the platform version at creation (`^18` today). It is declared in `engines.platform`, never as a
+  `manifest.dependencies` entry, because no package holds `com.objectstack.kernel`. *Decided here where the rulings
+  were silent; merge question 9.*
+- **A kernel package may be absent, and its overrides stay.** "The kernel always installed in full" is a goal, not
+  today's behaviour (ruling record 6691022506, ②): `serve` mounts by tier preset, by the stack's `requires`
+  capabilities and by the always-on slate
+  (`packages/spec/src/kernel/platform-capabilities.ts#PLATFORM_ALWAYS_ON_CAPABILITIES`), Security and Audit mount as
+  optional, and a cloud host kernel has no Auth. So the platform pair never refuses an install because a kernel
+  package is absent: an override of an absent package's item is kept and marked, and the `customizable` verdict is
+  served for the packages present. An App's pair treats a module that a later version of the App no longer delivers
+  the same way: the module's overrides are kept and marked, and neither the upgrade nor the pair's install is refused.
+- **No kernel object is customizable in this version** (the second ruling record, 6691217245 on #29594). Every kernel
+  object is served as not customizable: Studio offers no Customize on one, and the ensure door refuses a kernel
+  package with that readable verdict, never with `422`, so no platform pair is created in this version. The **next
+  version** opens the first kernel whitelist, Users and Organizations only (plugin-auth's user object and the
+  organizations plugin's organization object): `__c` fields, forms, views and page layouts; never deleting or retyping
+  a vendor field, never an identity flow, never permission or sharing semantics. Two prerequisites travel with it: the
+  "system object" heuristics that test a `sys_` prefix are replaced by a declared reading (`isSystem`,
+  `packages/spec/src/system/constants/platform-object-names.ts#hasPlatformObjectPrefix`), so a customer's
+  `sys_custom_<short>` object inherits none of them; and `customizable` is judged at every write into the platform
+  pair, by the package of the overridden object, not only at the ensure door.
 
 **On top, one surface.** Studio opens HotCRM and the designer sees **one** HotCRM: the pillar rails list the base's
 items (read-only, viewable with the [D1](#d1) tools) and the pair's items (writable) **in the same list**, the latter
@@ -338,6 +400,11 @@ maintainer, verbatim: 「我建议先等包级覆盖开发完，再考虑这个�
 **Upgrade and audit.** "What did we change on HotCRM" is one place: `hotcrm.custom` plus the base's switched-off items
 ([D4](#d4)). Studio's landing carries one line per package ("n customized, m switched off", read from [D8](#d8)'s
 per-package read and the ledger); Setup carries nothing per package.
+
+Not taken (2026-11-06, ruling record 6691022506): (a) **a pair per package**, which puts a pair on a module its consumer
+cannot see (ADR-0019 D2); (c) **N pairs sharing `<ns>_custom`**; (e) **an explicit split key**: a vendor who wants
+separate customization ships a separate App (ADR-0130 D6). ADR-0019 and ADR-0130 are not amended. Only this decision
+moves, from one pair per read-only package to one pair per App and one platform pair.
 
 ### D4 — The operational switch is offered on the item in Studio; clone survives only as "new similar"; Setup › Packaged automation retires {#d4}
 
@@ -538,7 +605,12 @@ name suffixed, the base untouched (N-23c).
 - **Migrate** (N-16, Q5). Every `sys_metadata` row with `package_id` NULL that overlays an item a code package ships
   becomes a declared override of that item in the base's `<base>.custom` (created by [D3](#d3)'s ensure door as needed),
   `basedOn` set to the installed base package's `manifest.version` at migration. A package-less row for an item **no** package ships is
-  environment metadata, not an overlay, and is not touched. The migration is idempotent and reports per base what it
+  environment metadata, not an overlay, and is not touched. A row over an item a kernel package ships is not migrated
+  while the ensure door refuses a kernel package ([D3](#d3), amended 2026-11-06): like the row of any base whose pair
+  that door refuses (`packages/metadata-protocol/src/protocol-customization-package.ts#customizationPairEnsureRefusal`),
+  it stays as it is, served as [D8](#d8) item 1 says, and its package-less write stays open until the kernel whitelist
+  admits the item into the platform pair (*decided here where the rulings were silent; merge question 10*). The
+  migration is idempotent and reports per base what it
   moved; it runs as a CLI ceremony the administrator invokes, in the shape ADR-0131 D10 set.
 - **Close** (N-16). After the migration, a package-less write onto a packaged item (`PUT /api/v1/meta/:type/:name` with
   no `?package`, the "Customize with an overlay" path Setup offers) is refused with a prescription naming the pair:
@@ -594,7 +666,7 @@ is fixed above where it bites.
 | Q1 | Undeclared same-name item of a base's item | Refused at publish — every dependent package in the base's closure, every overridable type; the paired `.custom` declares or renames, any other dependent renames (scope ruled 2026-10-31, #28364; the declarer ruled A on #28390) | [D2](#d2) |
 | Q2 | Where the override is declared | In the item body (`overrides: { package, basedOn }`) | [D2](#d2) |
 | Q3 | Flows under a changing definition | Real version pinning first; the override after it | [D9](#d9) |
-| Q4 | The pair's namespace | Explicit `<base namespace>_custom`, never derived | [D3](#d3) |
+| Q4 | The pair's namespace | Explicit `<base namespace>_custom`, never derived; the base is the App, so `<app namespace>_custom`, and `sys_custom` for the platform pair (amended 2026-11-06, ruling record 6691022506) | [D3](#d3) |
 | Q5 | Package-less overlay writes | Closed after the migration | [D11](#d11) |
 | Q6 | Clone | Kept only as "new similar" into `.custom` | [D4](#d4) |
 | Q7 | Changes to a base field | Limited to a display-property whitelist | [D10](#d10) |
@@ -616,9 +688,10 @@ is fixed above where it bites.
 - **The clauses of eight records move** — six superseded in part (ADR-0126, 0131, 0005, 0048, 0141, 0070) and two
   amended (ADR-0009, 0029) — each with its gate and pin named ([Supersede table](#supersede-table)); every
   implementation card cites its row and changes exactly that pin. No pin is deleted.
-- **Cost, stated.** A base's uninstall needs the pair removed first; a customer with many bases has many `.custom`
-  packages (one per base, folded under each in Studio); the migration of [D11](#d11) is an administrator's ceremony;
-  the Setup overlay path customers use today closes once migrated; `__c` is a visible suffix on every customer field;
+- **Cost, stated.** An App's uninstall needs the pair removed first; a customer with many Apps has many `.custom`
+  packages (one per App and never one per module, folded under each in Studio); the migration of [D11](#d11) is an
+  administrator's ceremony; the Setup overlay path customers use today closes once migrated; `__c` is a visible suffix
+  on every customer field;
   a dependent that wants its own item under a name its base already uses renames it — only the paired `.custom` declares an
   override (#28364, #28390), so a partner that wants a different base view ships it under its own name, and a real partner
   need to replace a base item reopens #28390 as its option B with that evidence. Flow customization waits for pinning
@@ -714,6 +787,32 @@ of Q1's refusal and `action` — were ruled by the maintainer on 2026-10-31 (dec
    points, so a Studio author cannot write it into a non-paired package, an `os`-built artifact cannot carry it, and a
    vendor artifact that carries it is refused on entry. The ruling fixes who may use the suffix; the enforcement points
    are this record's.
+8. **The platform pair's id is `com.objectstack.kernel.custom`** ([D3](#d3), amended 2026-11-06); ruling record
+   6691022506 leaves the id to this record. Its base id `com.objectstack.kernel` names the suite, not one package, in
+   the `com.objectstack.` family every kernel manifest's id uses. No package, fixture or example holds it (zero
+   occurrences in `objectstack-ai/objectstack` `33bc8ae5` and `objectstack-ai/hotcrm` `6961ab1`). It satisfies
+   `packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN`, and
+   `packages/spec/src/kernel/customization-package.ts#customizationBasePackageId` inverts the pair to it. Weighed and
+   not taken: `com.objectstack.platform`, the ruling's own word for the suite, because 22 test files at that head use
+   it as a stand-in for one kernel package, where a pair derived per package and the platform pair would be the same
+   id and no test could tell the two lookups apart; `com.objectstack.sys`, because it names a namespace and a package
+   is identified by its id (ADR-0048); `com.objectstack`, because it names the vendor, whose own Apps are not the
+   kernel.
+9. **The platform pair's range is declared in `engines.platform`, as `^<major>` of the platform version** ([D3](#d3),
+   amended 2026-11-06). `manifest.dependencies` cannot carry it: no package holds `com.objectstack.kernel`, so ADR-0141
+   D2's check (`packages/metadata-core/src/protocol-handshake.ts#checkDeclaredDependencies`) would answer it absent at
+   every install. `engines.platform` is the manifest's declared platform range, and the install handshake already
+   reads it (`packages/metadata-core/src/protocol-handshake.ts#resolveDeclaredRange`) against the protocol major, which
+   `packages/spec/src/kernel/protocol-version.ts#PROTOCOL_VERSION` keeps in lockstep with the platform's. `^<major>` is
+   merge question 1's reversible middle, applied to the platform. The platform version is the release version the
+   `fixed` group ships, `@objectstack/runtime`'s own `package.json` version, and ⛔ not whatever
+   `packages/runtime/src/runtime-version.ts#resolveRuntimeVersion` answers: that is the injected `OS_RUNTIME_VERSION`
+   stamp (an image tag or a git sha) whenever one is set.
+10. **A package-less row over a kernel item waits for the kernel whitelist** ([D11](#d11), amended 2026-11-06). While
+    the ensure door refuses a kernel package (ruling record 6691217245), the migration cannot create the platform pair,
+    so the row is not migrated: it stays as it is, served as [D8](#d8) item 1 says, and its package-less write stays
+    open, as for any base whose pair that door refuses today. Closing that write with no pair to name would leave an
+    administrator no way to change an existing kernel customization until the next version.
 
 ## Refs
 
@@ -741,6 +840,12 @@ of Q1's refusal and `action` — were ruled by the maintainer on 2026-10-31 (dec
   [`6681380041`](https://github.com/objectstack-ai/cloud/issues/3652#issuecomment-6681380041)); the finding itself is
   card [#30886](https://github.com/objectstack-ai/objectstack/issues/30886), on the upgrade plan of
   [#30884](https://github.com/objectstack-ai/objectstack/issues/30884).
+- Card [#31014](https://github.com/objectstack-ai/objectstack/issues/31014) (2026-11-06, the amendment in place that
+  makes the App the customization unit and names the platform pair: ruling records
+  [`6691022506`](https://github.com/objectstack-ai/objectstack/issues/29594#issuecomment-6691022506) and
+  [`6691217245`](https://github.com/objectstack-ai/objectstack/issues/29594#issuecomment-6691217245) on
+  [#29594](https://github.com/objectstack-ai/objectstack/issues/29594)); ADR-0019 (D1–D4) and ADR-0130 (D1, D6) are
+  read, not amended.
 - [#27356](https://github.com/objectstack-ai/objectstack/issues/27356) rows 12, 13, 14, 19, 20, 21 and their landed
   PRs #27376, #27927, #28076.
 - ADR-0005, ADR-0009, ADR-0010, ADR-0029, ADR-0048 (and its 2026-10-08 addendum), ADR-0070, ADR-0126, ADR-0131,
