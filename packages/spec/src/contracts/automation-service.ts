@@ -297,6 +297,24 @@ export interface AutomationContext {
      * Callers do NOT set this — the engine derives it, exactly like {@link runAs}.
      */
     flowRunId?: string;
+    /**
+     * The administrator (a `sys_user` id) at the keyboard when the request or
+     * write that started this run came from an impersonation session. Every
+     * door that starts a run from an envelope carrying it sets it: the
+     * record-change trigger from the triggering hook's
+     * `provenance.impersonatedBy`, and the manual trigger route and a
+     * `type: 'flow'` action from the caller's `ExecutionContext.impersonatedBy`.
+     * The run's data nodes carry it onto every write as
+     * `ExecutionContext.impersonatedBy`, so the audit writer names the
+     * administrator on the run's writes as on the request that started it.
+     *
+     * ATTRIBUTION ONLY: {@link userId} stays the impersonated user, whose
+     * grants a `runAs:'user'` run resolves, and nothing in the authorization
+     * path reads this. Absent on every run a user's own write started. Cleared
+     * when an approval decision hands the run to the decider, who is not
+     * impersonated.
+     */
+    impersonatedBy?: string;
     /** Additional contextual data */
     params?: Record<string, unknown>;
     /**

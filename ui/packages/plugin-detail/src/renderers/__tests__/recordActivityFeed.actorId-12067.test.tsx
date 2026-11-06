@@ -87,3 +87,29 @@ describe('record:activity self-fetch expands `actor_id` (objectui#12067)', () =>
     expect(dataSource.find.mock.calls[0][1].$expand).toEqual(['actor_id']);
   });
 });
+
+describe('activityRowToFeedItem — a write made from an impersonation session names the administrator', () => {
+  const impersonated = (meta: Record<string, unknown>) => ({
+    ...base,
+    actor_name: '王工',
+    metadata: JSON.stringify({ old: null, new: {}, ...meta }),
+  });
+  const ZH = '{{admin}} 代{{user}}操作';
+
+  it('reads 「Dev Admin 代王工操作」 with the translated template', () => {
+    const row = impersonated({ impersonated_by: 'u-admin', impersonated_by_name: 'Dev Admin' });
+    expect(activityRowToFeedItem(row, '系统', ZH)?.actor).toBe('Dev Admin 代王工操作');
+  });
+
+  it('falls back to the English template, and to the unknown-user text for an administrator the writer could not name', () => {
+    expect(activityRowToFeedItem(impersonated({ impersonated_by: 'u-admin', impersonated_by_name: 'Dev Admin' }), 'System')?.actor)
+      .toBe('Dev Admin on behalf of 王工');
+    expect(activityRowToFeedItem(impersonated({ impersonated_by: 'u-admin' }), 'System', ZH, '未知')?.actor)
+      .toBe('未知 代王工操作');
+  });
+
+  it("CONTROL: the user's own write reads as the user alone", () => {
+    expect(activityRowToFeedItem(impersonated({}), 'System', ZH)?.actor).toBe('王工');
+    expect(activityRowToFeedItem({ ...base, actor_name: '王工' }, 'System', ZH)?.actor).toBe('王工');
+  });
+});

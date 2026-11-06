@@ -1181,6 +1181,7 @@ const es = {
   detail: {
     editInlineHint: "Haga doble clic para editar",
     systemActor: "Sistema",
+    impersonatedActor: "{{admin}} en nombre de {{user}}",
     unknownUser: "Desconocido",
     back: "Volver",
     edit: "Editar",

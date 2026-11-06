@@ -55,8 +55,8 @@
  *    administrator roster (`plugin-security`). None is a parent record's field
  *    map, and narrowing them by a parent's field set would only delete their
  *    own vocabulary.
- *  - `metadata` is not narrowed: the mirror records only the delegated-write
- *    attribution there.
+ *  - `metadata` is not narrowed: the mirror records only attribution there —
+ *    the delegated-write pair and the impersonating administrator.
  *
  * ## Fail closed
  *
