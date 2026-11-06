@@ -9,6 +9,14 @@
  * the deployment's default-on MCP surface into a three-minute connect flow
  * for people who don't know what MCP is:
  *
+ *   0. on top, in plain words, what a connected assistant can do (look up,
+ *      create, change and delete the records you may, run actions — always
+ *      as you), a few example requests to paste into the client, and which
+ *      one to try first to see the connection work. The page cannot tell
+ *      whether you have connected (#30894 owns that read), so the hint is
+ *      shown to everyone and never derived from a click. Protocol words
+ *      (MCP, OAuth, Streamable HTTP) appear only where a client's own form
+ *      or menu asks for them,
  *   1. the environment's MCP URL (from `/discovery` → `routes.mcp`) + copy,
  *   2. the portable SKILL.md download (`GET /api/v1/mcp/skill`), beside the
  *      URL, for everyone,
@@ -75,6 +83,7 @@ import {
   ExternalLink,
   KeyRound,
   AlertCircle,
+  Sparkles,
 } from 'lucide-react';
 import { TokenStorage } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
@@ -185,6 +194,13 @@ function Unavailable({ title, reason, remedy }: { title: string; reason: string;
     </div>
   );
 }
+
+/** The example requests the capabilities card offers, in the order shown; the first is the one to try first. */
+const EXAMPLE_REQUEST_KEYS = [
+  'connectAgent.capabilities.example1',
+  'connectAgent.capabilities.example2',
+  'connectAgent.capabilities.example3',
+] as const;
 
 /** The `mcpServers` JSON shape most clients import, with the client's own transport spelling. */
 function mcpServersJson(type: string | null, url: string): string {
@@ -307,7 +323,37 @@ export function ConnectAgent() {
 
   return (
     <div className="space-y-4">
-      {/* ── MCP URL + skill download ─────────────────────────────────── */}
+      {/* ── What a connected assistant can do, and what to ask it first ── */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Sparkles className="h-4 w-4" />
+            {t('connectAgent.capabilities.title')}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <p className="text-muted-foreground">{t('connectAgent.capabilities.body')}</p>
+          <div className="space-y-1.5">
+            <h4 className="text-xs font-medium text-muted-foreground">
+              {t('connectAgent.capabilities.examplesTitle')}
+            </h4>
+            <ul className="space-y-1.5">
+              {EXAMPLE_REQUEST_KEYS.map((key) => {
+                const request = t(key);
+                return (
+                  <li key={key} className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 rounded-md bg-muted px-3 py-1.5">{request}</span>
+                    <CopyButton text={request} />
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+          <p className="text-xs text-muted-foreground">{t('connectAgent.capabilities.tryFirst')}</p>
+        </CardContent>
+      </Card>
+
+      {/* ── Connection address + skill download ──────────────────────── */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-base">

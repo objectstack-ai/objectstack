@@ -3994,13 +3994,22 @@ const zh = {
     requiredFields: '必填项：{{fields}}',
   },
   connectAgent: {
+    capabilities: {
+      title: '连接后，AI 助手能做什么',
+      body: '连接后，AI 助手可以查找、新建、修改和删除你有权操作的记录，并运行本系统中的操作。它始终以你的身份工作：只能看到和做你自己的权限允许的事。',
+      examplesTitle: '在助手中试试这些请求',
+      example1: '列出我能看到的对象。',
+      example2: '统计这些对象各有多少条记录。',
+      example3: '我在这里能运行哪些操作？每个操作是做什么的？',
+      tryFirst: '先试第一条：如果助手回答出你平时用的对象，就说明连接成功了。',
+    },
     disabled: {
-      title: '此部署已停用 MCP',
-      body: 'MCP 服务已关闭(OS_MCP_SERVER_ENABLED=false),暂无可连接的端点。请联系运维人员重新启用。',
+      title: '此部署已关闭 AI 助手连接',
+      body: '此部署关闭了 AI 助手连接(OS_MCP_SERVER_ENABLED=false),暂时无法连接。请联系运维人员重新开启。',
     },
     url: {
-      title: '本系统的 MCP 端点',
-      body: '任何支持 MCP 的 AI 客户端都用这个 URL 连接。身份是自助的:部署自身就是 OAuth 2.1 授权服务器,交互式客户端只需在浏览器登录——以你自己的身份连接,每次调用都受你的权限和行级安全约束。',
+      title: '本系统的连接地址',
+      body: '你的 AI 助手用这个地址连接。你在浏览器中以自己的身份登录,助手做的每件事都受你自己的权限约束。',
       downloadSkill: '下载 SKILL.md',
       skillHint: '可移植的智能体技能文件:教会任何支持技能的智能体如何使用本系统。',
     },
@@ -4009,7 +4018,7 @@ const zh = {
       reachability: 'claude.ai(网页版)由 Anthropic 服务器发起连接——部署需公网 HTTPS 可达。Claude Desktop 等本地客户端可直连内网部署。',
     },
     claudeCode: {
-      body: '一条命令,首次使用时自动弹出 OAuth 登录:',
+      body: '一条命令,首次使用时自动在浏览器中打开登录:',
       plugin: '或安装官方插件(附带 ObjectStack 技能和引导式 /objectstack:connect 命令):',
     },
     cursor: {
@@ -4023,21 +4032,21 @@ const zh = {
     },
     codex: {
       body: '在 Codex 客户端中:设置 → MCP 服务器 → 添加服务器,按下表填写:',
-      hint: '保存后按提示重启,在 objectstack 旁点击「Authenticate」并在浏览器登录。在输入框中输入 /mcp 可查看是否已连接。如果你的版本不支持浏览器登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方创建)。',
+      hint: '保存后按提示重启,在 objectstack 旁点击「Authenticate」并在浏览器登录。在输入框中输入 /mcp 可查看是否已连接。如果你的版本不支持浏览器登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方「高级：脚本与 CI」中创建)。',
     },
     workbuddy: {
       body: '腾讯 WorkBuddy:连接器 → 自定义连接器 → 配置 MCP,把以下条目合并进 mcpServers(配置保存在 ~/.workbuddy/mcp.json):',
-      hint: '保存后在 objectstack 连接器上点击「信任」——未信任前不会生效。如果你的版本没有弹出登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方创建)。',
+      hint: '保存后在 objectstack 连接器上点击「信任」——未信任前不会生效。如果你的版本没有弹出登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方「高级：脚本与 CI」中创建)。',
     },
     doubao: {
       title: '豆包工作',
       body: '技能 · 连接器 → 新建 → 新建自定义连接器,按下表填写:',
-      hint: '按提示在浏览器登录。若未出现登录,在自定义 Headers 中添加 Authorization: Bearer <API 密钥>(在下方创建)。云端运行的任务要求部署可通过公网 HTTPS 访问。',
+      hint: '按提示在浏览器登录。若未出现登录,在自定义 Headers 中添加 Authorization: Bearer <API 密钥>(在下方「高级：脚本与 CI」中创建)。云端运行的任务要求部署可通过公网 HTTPS 访问。',
     },
     qwenwork: {
       title: '千问办公',
       body: '扩展 → 连接器 → + 添加 → 粘贴 JSON 配置:',
-      hint: '也可手动添加:传输类型选 Streamable HTTP 并填写此 URL。如果你的版本不支持浏览器登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方创建)。',
+      hint: '也可手动添加:传输类型选 Streamable HTTP 并填写此 URL。如果你的版本不支持浏览器登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方「高级：脚本与 CI」中创建)。',
     },
     client: {
       title: '你用的是哪个 AI 助手？',
