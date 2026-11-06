@@ -1,0 +1,26 @@
+{
+  "number": 30957,
+  "kind": "issue",
+  "title": "service-automation test: the sealed-envelope pin fails when random ciphertext happens to contain the fixture connector name `crm`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T14:18:48Z",
+  "updated_at": "2026-11-06T14:18:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30957",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cyvF7SP65frVFAYLv7\n\nFiling gate: ① a defect with a named location and a reproduction: a probabilistic flake in a CI test. Per the dispatch rule 「谁发现 flake 谁修或立单」, the seat that met it files it. ⛔ Not a claim. Suggested grade: p3.\nBusiness reason: about once in a thousand runs, `Test Core` goes red on unrelated PRs, and the seat re-runs it. This costs merge-queue time and seat attention, and a real red can be dismissed as \"that flake\".\nReader who acts: `domain:server` (`packages/services/service-automation`), test only.\nDedupe (`is:issue`): `authorization.test.ts flake` 1 hit (#20594, unrelated); `sealed envelope crm` 36 (none on this test); `oauth2-grant authorization test` 21 (ADR and connector cards, none on this test). **New.**\n\n## Reproduction\n\nPR #30952 (touches `packages/rest` only), run 42230858051, job `Test Core (7/8)`, head `3bccb0f7`:\n\n```\nsrc/oauth2-grant/authorization.test.ts:138\nADR-0143 D5 — a begun connect is held sealed (the KV trust boundary)\n  > the KV holds no verifier, user, organization, instance or redirect URI — only an envelope\nAssertionError: expected '{\"v\":1,\"iv\":\"eXrbrlZgkO7ZUjQf\",\"ct\":\"…gpcrmVS1…' not to contain 'crm'\n```\n\n## Why\n\nThe pin JSON-stringifies the stored envelope `{ v, iv, ct, tag }` and asserts that it does not contain each plaintext field. One of those fields is `begun.connector`, which the `pending()` fixture sets to `'crm'` (L22). The `iv`, `ct` and `tag` fields are random base64url. A random string of about 230 base64url characters contains a given three-character run in roughly 1 run in 1,100. `org_a` and `usr_1` are short too, at lower odds.\n\n## Expected\n\n- The pin no longer depends on luck. Either give the fixture's plaintext fields values that cannot plausibly occur in base64url output (for example a connector name of 12 or more characters that includes a character base64url never emits), or assert on the decoded envelope structure (only `v`, `iv`, `ct`, `tag`) plus a check that a decryption with the wrong key yields nothing.\n- The pin still goes red if the store writes any plaintext field. Ablate once.\n- Test only, so no changeset."
+}

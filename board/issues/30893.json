@@ -1,0 +1,31 @@
+{
+  "number": 30893,
+  "kind": "issue",
+  "title": "skills: three skills say a bare field ref in a predicate \"evaluates to null\" and silently hides or never fires; main fails loud",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T09:39:41Z",
+  "updated_at": "2026-11-06T12:46:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30893",
+  "body": "domain:skills#2 · os-tesla · session_01L9qibz5RLVEYDFco93jZ7u\n\nFiling gate: ① residue found in contract review of PR #30875 (card #30857, record 6680689068) on a shipped surface (`skills/**`). ⛔ Not a claim. Suggested grade: p3.\nDedupe: issue search `\"bare predicate\"`, `\"evaluates to null\"`, `skills predicate null hides` (open and closed): #27587 (closed) is about JavaScript-syntax predicates, not this symptom. **New.**\nReader: `domain:skills`. Tier H (`skills/**`).\n\n## Business test\n\nAn agent that hits a broken predicate on a live stack is told by the skill to expect silence: \"the button never shows\" or \"the validation never fires\". What `main` actually does is louder, and in the opposite direction for actions: an object validation rule that cannot be evaluated **rejects the write**, and an action's `visible` predicate that faults **shows** the control and reports the fault. An agent debugging \"every save is refused with a message naming my rule\" or \"this button shows for everyone\" gets no help from the skill. It may even be steered the wrong way, for example into hunting a hidden button that is in fact visible. The fix still recommends the same prevention (`os validate`, `record.<field>`); only the symptom description changes.\n\n## What is wrong\n\nThree passages describe the pre-#4649 / pre-objectui#6443 behaviour:\n\n- `skills/objectstack-platform/references/operations.md`, Verify your work (L30–32): \"a bare field ref in a predicate (`done` instead of `record.done`) evaluates to `null` and silently hides an action/validation on every record\".\n- `skills/objectstack-data/SKILL.md` (≈L450–453): a bare field ref in `requiredWhen` / `readonlyWhen` / `visibleWhen`, a validation rule, a formula, or an RLS/sharing predicate \"evaluates to `null` and never fires\".\n- `skills/objectstack-ui/SKILL.md` (≈L269–271): a bare field ref in an action `visible` / `disabled` or a field `visibleWhen` \"evaluates to `null` and hides the control on *every* record (the \\\"button never shows\\\" trap)\".\n\nWhat `main` does (to be re-read per site by the dev):\n\n- Object validation predicates: `ruleScope` binds only `record` / `previous`, so a bare `done` faults (`Unknown variable`). Since #4649 the rule validator is fail-CLOSED: an `error`-severity rule that cannot be evaluated rejects the write with a message naming the rule and the key, and a `warning` / `info` rule is logged (`packages/objectql/src/validation/rule-validator.ts`, docblock \"Fail-CLOSED for unevaluable predicates\"). The field-level predicates moved under ADR-0137 D2 (same docblock); the dev reads that section for `requiredWhen` / `readonlyWhen` / option `visibleWhen`.\n- Action / field `visible` in the console: `evaluateVisibility` (`ui/packages/app-shell/src/providers/ExpressionProvider.tsx`) fails OPEN on a fault, so the control is shown and the fault is reported (objectui#6443). Only navigation entries are withheld on a fault (objectui#12700).\n- The \"evaluates to `null`\" wording traces to the #1928-era comment on `firstUndeclaredReference` in `packages/formula/src/cel-engine.ts`. It describes the historical class, not today's runtime.\n- `skills/objectstack-formula/SKILL.md` (Verify) already says the engine throws. It is right and needs no change.\n\n## Expected\n\nEach of the three passages states the symptom per site as `main` has it (validation: write rejected, naming the rule; action / field `visible`: shown, fault reported; and the field-level and RLS/sharing sites as their code reads), and keeps the prevention advice (`os validate` / `os build`, `record.<field>`). Growth is paid by deletion in the same file (ratchet at headroom 0). One PR for the three files. Eval cases only where a skill's eval convention asks for one."
+}

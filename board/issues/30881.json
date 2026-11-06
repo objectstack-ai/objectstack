@@ -1,0 +1,35 @@
+{
+  "number": 30881,
+  "kind": "issue",
+  "title": "docs(adr): ADR-0146 amendment — an upgrade plan may report a `.custom` override that hides a vendor change, as advice only; `basedOn` still never gates (epic cloud#3652 D2)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T09:03:03Z",
+  "updated_at": "2026-11-06T14:07:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30881",
+  "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **③ a task on the maintainer's word.** Epic objectstack-ai/cloud#3652, coordinator session 2026-11-06, verbatim: 「我觉得先把受管软件包的开发循环走顺了」, then 「同意，然后第一步先解决我本地开发的软件包怎么能够方便地发布到云端」. Phase 2 lists \"`.custom` drift: on a base upgrade, check each override's `basedOn` and list overrides that now hide a vendor change.\" Decision D2 on the epic (2026-11-06), the maintainer's selection verbatim: 「修订为允许只提示（推荐）」. Amend ADR-0146 to allow an advisory finding, \"this override hides a vendor change\", in the upgrade plan. It stays advisory: no blocking and no auto-merge. Ruling Q1 on cloud#3652, verbatim: 「a 本地 os dev（推荐）」.\n\n**Governed surface.** `docs/adr/**` is Tier H (AGENTS.md Prime Directive 14, `AGENTS.md:271-307`; register `GOVERNED_SURFACES` in `scripts/pm/check-governed-merges.mjs`).\n- Authoring is open to the claiming seat. The PR **stays a draft for the maintainer's own merge**.\n- ⛔ No seat merges it, queues it, arms auto-merge, flips it out of draft, or submits an approving review.\n- This is how ADR-0146's previous amendment landed: \"by the maintainer's hand-merge of the PR cut from #28390\" (`docs/adr/0146-…:23`).\n\nLane: `domain:skills`. The pm-dispatch lane table gives `docs/adr/**` to `domain:skills` (`.claude/skills/pm-dispatch/SKILL.md:161`). The previous ADR-0146 amendment card, #28390, carried `domain:skills`.\n\n## 维护者速读\n\nADR-0146 现在写明「`basedOn` 只记录、不判断」「升级差异推迟」。按你刚才的裁决，这张卡只改 ADR 的文字：允许升级预览给出一条提示，「这个 `.custom` 覆盖挡住了本次升级对同名项的修改」。只提示，不拒绝安装，不自动合并。ADR 属于受管文件，PR 保持草稿，由你亲手合并。代码改动在另一张卡（03），等这张合并后再做。\n\n## Today (objectstack `origin/main` `8b9cc712`; ADR-0146 unchanged since `c50e0dfa`)\n\nThe passages that rule the finding out, in `docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md` (measured):\n- **D2**, `:209-212`: \"`basedOn` records which version of the base **package** … **`basedOn` is recorded, not judged**: no door compares it with the installed base's version, no upgrade diff is produced, and nothing is refused on it (epic #28236, *Not in this epic*: upgrade diff / `basedOn` checking, recorded only).\"\n- **D2**, `:262`: \"**Diff-vs-base and the upgrade skip-report stay deferred**\".\n- **Merge question 2**, `:679-681`: \"`basedOn` is recorded and never judged … listed only so the declaration's contract carries the ruling and no card reads `basedOn` as a gate\".\n- **Consequences**, `:598-601`: \"an overridden item shadows the vendor's later change to that one item until the customer re-bases it, and the platform computes no diff to help\".\n- **Supersede table**, `:563`: §9's \"diff-vs-base and the skip-report stay deferred\".\n- **Status line** (`:3-23`): the house form of an amendment is a dated \"**Amended in place** (date, ruling …, verbatim …)\" sentence on the status line. The index (`docs/adr/README.md`) is generated from that line by `pnpm adr:index` and must not be hand-edited (`README.md:3`, `:8`).\n\nThe code carries the same sentence; it is changed by card 03, not here:\n- `packages/spec/src/kernel/override-declaration.zod.ts:137`, `:141`;\n- `packages/metadata-protocol/src/protocol-served-overrides.ts:46`.\n\n## Expected\n\n1. **A dated amendment on the status line:** \"**Amended in place** (2026-11-…, decision D2 on objectstack-ai/cloud#3652, maintainer, verbatim: 「修订为允许只提示（推荐）」): an upgrade plan may report an override that hides a vendor change, as advice; nothing is refused on it.\" It links the epic's ruling comment.\n2. **D2 (`:209-212`)** reads: `basedOn` is recorded and **never gates**. One reader is admitted, the package upgrade plan, which may list as advisory findings:\n   - (a) a `.custom` item that declares an override of a base item the upgrade changes between the installed and the new version;\n   - (b) an override whose `basedOn` is not the installed base version.\n   - No door refuses on either, no token is asked, and nothing is merged, rebased or rewritten automatically. Whole-document replace (ADR-0005 principle 3) is unchanged.\n3. **`:262` and the Supersede table row** read: the advisory upgrade finding of D2 is chartered. A field-level diff-vs-base view and the skip-report as a merge tool stay deferred.\n4. **Merge question 2 (`:679-681`)** keeps \"no card reads `basedOn` as a gate\" and adds the one advisory reader.\n5. **Consequences (`:598-601`)**: \"the platform computes no diff to help\" becomes: the upgrade plan names each override that now hides a change; re-basing stays the customer's act.\n6. One sentence keeps ADR-0141 D3 intact: the advisory finding is not the base-upgrade interception D3 defers, since it refuses nothing. Merge question 1's `^<major>` reasoning is unchanged.\n7. `pnpm adr:index` regenerated in the same PR. No other ADR is touched.\n\n## Acceptance\n\n- The diff touches only `docs/adr/0146-…md` and the generated `docs/adr/README.md`.\n- The ADR lint step and `pnpm check:pm-governed-prose` pass.\n- Every passage listed under Today either admits the advisory finding or is shown unchanged on purpose.\n- The PR is opened **as a draft**, says \"Tier H — maintainer merges\", and is never merged, queued or armed by a seat.\n- Card 03's `Blocked-by:` points here and is cleared when the maintainer merges.\n\nSerial: no Phase 1 dependency. 03 waits on this; 01a does not.\n\nDedupe (2026-11-06), run as `gh api -X GET search/issues -f q=…`:\n- `repo:objectstack-ai/objectstack ADR-0146 amendment is:issue is:open` → 3 hits: #30245 (validation-message translation, unrelated), and two seat posts (#7623, #6015). None.\n- `repo:objectstack-ai/objectstack ADR-0146 basedOn advisory upgrade is:issue` → 1 hit: #29893 (QA run). None.\n- `repo:objectstack-ai/objectstack basedOn is:issue` → 47 hits; the only open ones are QA runs #29648 and #29560.\n\nSuggested-grade: p2 · a short governed text change that unblocks 03. It is the ruling's own record.\n\nClause-②: no · ADR text only. No spec key, route or error code. The widening (a new finding kind in the plan) is card 03's, and is judged there.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

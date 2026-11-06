@@ -1,0 +1,34 @@
+{
+  "number": 30891,
+  "kind": "issue",
+  "title": "MCP: delete records by filter in one confirmed call, with refusals grouped by reason, instead of one delete_record per row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "enhancement",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T09:25:09Z",
+  "updated_at": "2026-11-06T14:10:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30891",
+  "body": "coordinator#1 · hotlong · session_6eb9ec2e0e3f410b91239dab7a337b9e\n\nFiling gate: **③ a task on the maintainer's word.** Coordinator session, 2026-11-06: after reviewing screenshots of an MCP client (Claude app) working against a hosted environment, the maintainer said 「这些问题都需要立卡处理」, then 「你只需要立卡，不需要派发」.\n\nReader: `domain:server` (`packages/mcp/src/mcp-http-tools.ts`, `stdio-data-bridge.ts`), designed together with #30813 (`delete_record` requires `confirm: true`, dispatched). Suggested priority p1. Triage decides.\n\nDedupe:\n- objectstack `delete_records MCP`: 2 hits, neither is this.\n- objectstack `bulk delete filter`: open hits are #30813 and QA runs.\n- cloud `bulk delete filter`: open #3571 (recycle bin, cloud side), related, not this.\n\n## 维护者速读\n\n用户让 AI 通过 MCP 删掉一个应用里的数据（几百条），AI 只能一条一条删，几百条就要调几百次。删到一半，又有一批被业务规则拒绝（比如「已关闭商机的明细不能删」），AI 只能停下来让用户挑办法，其中一个选项是先改记录状态绕过规则。需要一个按条件批量删除、一次确认、按原因汇总拒绝的工具。\n\n## What was seen (a hosted environment with HotCRM 6.0.0)\n\n- Asked to delete all of an app's data (about 400 rows across 20 objects), the client planned one `delete_record` per row.\n- After 50 calls, 21 rows were deleted and 29 refused by the package's own rules: line items of closed opportunities are locked, and one parent was under approval.\n- The client then offered to reopen the closed opportunities so their children could be deleted, which would change records and fire automation.\n\n## Ask\n\n1. **A bulk delete tool** taking an object and a filter (or an id list). It answers first with what it would delete: count, a sample, and the refusals the engine would give, grouped by reason. It deletes only on a confirmed second call. The confirmation follows #30813's contract, so there is one confirmation rule for one-row and many-row deletes.\n2. **Refusals come back grouped**, for example \"29 refused: line items of a closed opportunity are locked (rule <name>)\", not one error per row.\n3. Runs as the caller: their permissions, row-level security and the package's delete rules. ⛔ No bypass of business rules.\n4. A cap per call (the lane proposes it), with the answer saying how many remain.\n\n**Open question for the maintainer**, asked by the maintainer in the session (「我是管理员也不能清理历史数据吗？」): should an administrator have a \"purge this object's data\" control that bypasses a package's locking rules? Coordinator's lean is no: business rules bind administrators too, and a full reset goes through removing sample data (objectstack-ai/cloud#3657) or uninstalling and reinstalling. Rule it before the lane builds item 3.\n\n## Acceptance\n\n- Tests pin the preview call (count, sample, grouped refusals, nothing deleted), the confirmed call, the cap and the remainder, and that a locking rule refuses rows for an administrator too.\n- An MCP client deletes a few hundred rows across objects in a handful of calls.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

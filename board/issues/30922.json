@@ -1,0 +1,34 @@
+{
+  "number": 30922,
+  "kind": "issue",
+  "title": "Access policy per organization: allowed IP ranges, session idle/absolute/concurrent limits and an MFA requirement of off / administrators / everyone, with the deployment value as default and floor",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1",
+    "repo:cloud"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T11:51:00Z",
+  "updated_at": "2026-11-06T12:53:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30922",
+  "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **③ a task on the maintainer's word.** For cloud#3668 (Enterprise P2-8) the maintainer selected, verbatim, 「支持按组织（推荐）」 (access policy per organization) and 「可以，按三档做（推荐）」 (an MFA requirement of off / administrators / everyone, where \"administrators\" means ADR-0090 D12's three kinds). Gaps measured by the cloud#3668 dev (report 6684026104). Platform gaps go to the platform: 「平台的问题应该在平台处理」 (objectstack#30765). Consumer: objectstack-ai/cloud#3668, `pm:blocked` on this card.\n\n## 维护者速读\n\n企业版一个数据库里可以有多个组织，但现在 IP 白名单、会话闲置和最长时长、同时在线数这些策略，整个部署只有一份。双重验证也只有全局开关和按组织的「全员必须开」，没有「管理员必须开」这一档。按你的两个决定：这些策略改为每个组织可以各自设置，部署级设置作为默认值和下限；双重验证做成三档，不强制 / 管理员必须开 / 全员必须开，管理员按 ADR-0090 D12 的三类认定。\n\n## Measured (objectstack `2ffdb649`)\n\n- The whole `auth` settings namespace is scope `global` (`packages/services/service-settings/src/manifests/auth.manifest.ts:13`).\n  - `allowed_ip_ranges` (`:372`) feeds one `AuthManagerOptions.allowedIpRanges` (`auth-manager.ts:6009`).\n  - The idle, absolute and concurrent limits (`:334`, `:344`, `:354`) feed single deployment values (`auth-manager.ts:1056-1058`), enforced at `auth-manager-password-session-policy.ts:616-644`.\n- MFA:\n  - a global `auth.mfa_required` (`auth.manifest.ts:286`, `auth-plugin.ts:2317`);\n  - a per-organization `sys_organization.require_mfa` (`auth-manager-password-session-policy.ts:183-190`);\n  - `resolveUserAuthGates` has no administrator dimension.\n- objectos-ee runs several organizations in one database under `OS_TENANCY_POSTURE=isolated|group` (cloud `apps/objectos-ee/objectstack.config.ts:866`).\n\n## Expected\n\n1. **Per-organization values.** The access-policy keys can be set per organization. The deployment value is the default.\n   - The deployment value is also the floor: an organization may tighten but not loosen. Narrower IP ranges, shorter timeouts and a stronger MFA level are allowed; the reverse is not.\n   - The lane states the rule exactly for each key.\n   - Resolution happens per request against the caller's organization.\n2. **MFA levels:** `off` | `administrators` | `everyone`.\n   - `administrators` covers ADR-0090 D12's tenant-level, organization-level and delegated administrators, and reuses the existing predicates (⛔ no new admin concept).\n   - Map `require_mfa` and the global flag onto the levels, with a migration.\n3. **The last-admin break-glass guard** and the existing self-lock-out save guard (`allowed-ip-ranges.ts`, `GET /admin/client-address`) hold per organization.\n4. **Spec:** whatever settings or schema keys this adds go through the spec rules (`Clause-②` judged on the diff).\n\n## Acceptance\n\n- Tests:\n  - two organizations in one deployment with different IP ranges and MFA levels, each enforced on its own members;\n  - an organization cannot loosen below the deployment floor;\n  - an `administrators` level holds an org admin and lets a plain member through.\n\nSuggested-grade: p1 · Enterprise priority (maintainer).\n\nDedupe (2026-11-06): `allowed_ip_ranges per organization` → 3 hits (#30302 closed, #2571 closed, #2375 closed); `require_mfa role` → 5 hits (#24538 closed, #23287 closed, #23335 closed, #10757 closed)\n. None covers this gap (the open hits are QA runs or unrelated settings cards)."
+}

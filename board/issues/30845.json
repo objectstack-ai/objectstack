@@ -4,7 +4,7 @@
   "title": "pm-dispatch: a pending-changeset correction is confirmed by the dispatching seat's record, never by a maintainer wait",
   "state": "open",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -19,7 +19,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T06:21:43Z",
-  "updated_at": "2026-11-06T07:05:10Z",
+  "updated_at": "2026-11-06T14:10:33Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

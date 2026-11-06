@@ -1,0 +1,31 @@
+{
+  "number": 30916,
+  "kind": "issue",
+  "title": "scripts/adr-index.mjs reads header fields only from an ADR's first 40 lines, so a longer status note silently empties the Supersedes cell while check:adr-index still passes",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T11:01:44Z",
+  "updated_at": "2026-11-06T12:58:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30916",
+  "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **(a) a measured defect in an internal tool**, found by the objectstack#30881 dev and confirmed by contract review 6682453235 on PR objectstack-ai/objectstack#30899 (should-fix: \"file a follow-up card\").\n\n## 维护者速读\n\n生成 ADR 目录的脚本只读每份 ADR 的前 40 行。ADR 顶部的状态说明一旦变长，「Supersedes / Amends」等字段被挤到第 40 行之后，目录里那一栏就会悄悄变空，而目录检查照样通过。这次 ADR-0146 的修订刻意把说明压短，才没触发。下一次谁写长一点就会中招。\n\n## Measured\n\n- `scripts/adr-index.mjs`: `HEADER_WINDOW = 40`. It reads `**Key**:` header fields only within the first 40 lines.\n- ADR-0146 after the amendment: `Supersedes` at line 38, `Amends` at 39, `Builds on` at 40. Two lines of headroom remain.\n- An earlier draft of the amendment, with a 7-line status note, pushed `Supersedes in part` to line 42. The regenerated index then emptied ADR-0146's Supersedes cell (ADR-0126, 0131, 0005, 0048, 0141 and 0070 became an em dash), and the run still exited 0. CI's `check:adr-index` runs in `--report` mode and always exits 0.\n\n## Expected\n\n- Header parsing reads the whole header block (up to the first heading or the first blank-line-delimited body), not a fixed line window. Or it fails loudly when a known key appears after the window.\n- The CI check fails when a regenerated index would drop a field that the previous index carried.\n\n## Acceptance\n\n- A self-test with an ADR whose status note pushes `Supersedes` past line 40: the index keeps the cell, or the tool exits non-zero.\n\nSuggested-grade: p3 · an internal tool; no user door."
+}

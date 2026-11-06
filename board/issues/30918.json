@@ -1,0 +1,35 @@
+{
+  "number": 30918,
+  "kind": "issue",
+  "title": "Auth: no ledgered read lists the AI assistants a person has authorized, records when one was last used, or lets an admin see a managed person's",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:server",
+    "enhancement",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T11:14:00Z",
+  "updated_at": "2026-11-06T13:16:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30918",
+  "body": "domain:ui#3 · os-tesla · session_01L9qibxW6qraU2Z3mwupUGp\n\nFiling gate: ③ the maintainer's order that names this work: #30894 (「都同意，立卡」, 2026-11-06), whose triage audit 6682129286 says: \"The server read the page needs, if one is missing, is filed to `domain:server` first.\" ⛔ Not a claim. Triage sets the grade and the lane. Suggested grade: p1 (#30894's grade; it is the half that blocks it).\n\n**Business reason.** The OAuth consent page tells a person 「您可以随时在账户设置中撤销访问权限。」. A person who lost a laptop with Claude Desktop on it, or stopped using an assistant, needs to see what can act as them; an administrator needs the same for a person they manage. #30894 builds that list in the console, and today the server gives the console nothing it may read.\n\n**Reader.** The `domain:server` seat (`@objectstack/plugin-auth`, the route ledger and the client), then the `domain:ui` seat holding #30894.\n\n**Dedupe.** `get-consents` (open: only #30345, which is about revoking a JWT, not listing); `oauth consent list ledger` (none about a list); `mcp token last used` (none). **New.**\n\n## Measured (`origin/main` `7d9682ffd7`, showcase `--fresh`, admin and a member, a registered \"Claude Desktop\" client through authorize → consent → token → an MCP `tools/list` call)\n\nFull reading with request lines: `/mnt/project-files/ui-seat-3/r2026-11-06/30894/reading-7d9682ff.md` (project files).\n\n1. **No ledgered read of a person's authorized assistants.** `GET /api/v1/data/sys_oauth_consent`, `…/sys_oauth_access_token`, `…/sys_oauth_refresh_token` all answer 404 `OBJECT_API_DISABLED`. The only read is better-auth's `GET /api/v1/auth/oauth2/get-consents` (200, the session user's rows: `clientId`, `scopes`, `createdAt`), with the name from `GET /oauth2/public-client`. Both are in `BETTER_AUTH_MOUNTED_SURFACE` (`packages/plugins/plugin-auth/src/auth-route-ledger.ts:354`, `:417` for `delete-consent`) but have no `AUTH_ROUTE_LEDGER` row and no `@objectstack/client` method. The ui seat will not build the console on an unledgered vendor route.\n2. **Nothing records when an assistant was last used.** MCP access tokens are JWTs and are not stored: `sys_oauth_access_token` held 0 rows after two MCP calls. Only `sys_oauth_refresh_token.rotated_at` moves, and only on a refresh.\n3. **No door for an administrator over a managed person.** `get-consents?user_id=…` (also `userId=`) ignores the parameter and returns the administrator's own consent; the tables are not on the data API.\n\nAPI keys need nothing: the data API returns a person's own `sys_api_key` rows with `last_used_at` (`_self` scope), a platform admin reads every row, and `PATCH revoked: true` already ends access.\n\n## Wanted\n\n- [ ] A ledgered, client-exposed read of the session user's authorized assistants: client id, display name, scopes, authorized at, and a last-used time (or an explicit \"not recorded\"; the server lane picks the shape).\n- [ ] The same read for a person an administrator manages, under the platform's existing admin-over-user rule, refused for anyone else.\n- [ ] If \"last used\" is wanted: the server records it on an MCP call made with the client's token (the lane picks where; ⛔ no per-request write storm, a coarse timestamp is enough).\n- [ ] Revoke stays with #30345 / PR #30879; once it lands, the same door (or `delete-consent`, ledgered) is the withdraw the list's Revoke calls.\n- [ ] Tests on the real plugin: a member reads only their own; an admin reads a managed member's; a stranger is refused.\n\nUnblocks: #30894. Related: #30345, PR #30879. Not ui scope either: the Account half of #30894 needs a nav entry in `packages/platform-objects/src/apps/account.app.ts`."
+}

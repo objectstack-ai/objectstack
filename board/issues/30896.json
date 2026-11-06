@@ -1,0 +1,36 @@
+{
+  "number": 30896,
+  "kind": "issue",
+  "title": "Connect an Agent shows all seven clients at once; ask which one the person uses and show only those steps",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T09:42:19Z",
+  "updated_at": "2026-11-06T14:07:51Z",
+  "closed_at": "2026-11-06T14:00:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30896",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiling gate: ③ the maintainer's direct order. Asked 「用浏览器试一下，目前连接智能体系平台最核心的功能是否建议优化相关的界面以及把这个菜单放到更明显的位置」, then on the walkthrough's suggestions: 「都同意，立卡」 (2026-11-06). Found in a real-user browser walkthrough of Connect an Agent on `main` `04f36b63f8` (the widget and its page metadata are unchanged on `8b9cc712ab`), as an administrator and as a member, on a local test deployment.\n\n**Business reason.** A person uses one AI client. To find their steps they scroll past six others written in another client's vocabulary, and the API key form for scripts sits among them as if it were a client.\n\n**Reader.** The UI lane dev, in `ui/packages/app-shell/src/console/connect/ConnectAgentWidget.tsx:261-438` (the card grid and the API key card at line 367). Generic blocks only: a choice of client (tabs or a select) and a collapsible section, both from `@object-ui/components`.\n\n**Duplicates.** Searched `connect agent in:title` (23 hits). #30029 / #30056 added three Chinese clients and merged the two Claude cards; none changes how the cards are chosen.\n\n## Measured\n\nAt an 800 px wide pane the page is 1729 px tall: the endpoint card, one Claude card (claude.ai / Desktop and Claude Code), then Codex, Cursor, WorkBuddy, 豆包工作, 千问办公 and the API key card, all open. The API key card is a peer in the same grid.\n\n## Expected\n\n1. After the endpoint, the page asks which client you use (Claude, Codex, Cursor, WorkBuddy, 豆包工作, 千问办公) and shows that one's steps. The choice is remembered for this person on this device, and switching is one click.\n2. The API key form moves to a collapsed 高级: scripts and CI section at the bottom.\n3. The endpoint and the SKILL.md download stay at the top for everyone."
+}

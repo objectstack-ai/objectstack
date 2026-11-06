@@ -13,18 +13,21 @@
   "labels": [
     "documentation",
     "domain:spec",
-    "priority:p3",
+    "pm:dispatched",
+    "priority:p2",
     "repo:cloud"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T21:48:39Z",
-  "updated_at": "2026-11-05T21:48:39Z",
+  "updated_at": "2026-11-06T13:32:52Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30667",
   "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **(b) a declared contract that contradicts its consumer**, found by the cloud#3607 dev (report 6670283670, `out_of_scope_findings`) after the maintainer ruled **B** on cloud#3607 (record 6669966107; their selection, verbatim: 「B 没写就拒收（推荐）」).\n\n**Owner.** The `repo:cloud` lane (`repo:cloud#3`, objectstack-ai/objectstack#30278) follows it to close. It changes describe text only, with no key, type or accept set: `Clause-②: no`. It is spec-lane work; triage routes it.\n\n## 维护者速读\n\n按你在 cloud#3607 的裁决 B，cloud 现在会拒收「写了 measure 却没写 aggregate」的数值组件。但 spec 里这个键的说明还写着「不写就用读取方自己的默认值」（宽松版），严格版也写着「或填 null 用读取方默认值」。cloud 自己的设计模型就是对着严格版生成蓝图的，它会读到这句与实际行为相反的话。只改描述文字。\n\n## Measured (objectstack `origin/main`)\n\n- `packages/spec/src/ai/solution-blueprint.zod.ts:244`, lenient widget `aggregate`: \"…SET it on every widget that aggregates; omitted, the reader falls back to a default of its own, which may not be the average or extreme a widget means.\"\n- `:509`, strict mirror `aggregate`: \"How the widget aggregates its records, or null for the reader's own default. … Write it, never null, on every widget that aggregates.\"\n- Consumer: cloud PR objectstack-ai/cloud#3639 (`blueprintWidgetRefusals`, rule `aggregate_missing`) refuses, by name, a non-table widget that names a `measure` and carries no `aggregate`. A count widget (no measure) is unaffected.\n\n## Expected\n\nBoth describes say what a reader may do when `aggregate` is absent on a widget that names a measure: it may refuse the widget. They must not promise a default. The spec lane picks the exact words, for example \"omitted on a widget that names a measure, the widget is incomplete and a reader may refuse it\", in the same voice as `WIDGET_MEASURE_RULE`'s \"a reader must refuse it\". The strict mirror's `null` stays legal for a count widget, and the describe says so.\n\n## Acceptance\n\n- Describe text only. No schema change, so no ledger row moves.\n- If a spec test pins the old wording, update that pin.\n- `Clause-②: no`.\n\nSerial: none on the spec side. On the cloud side, the next pin move picks it up; nothing waits on it.\n\nDedupe (issues, open and closed, 2026-11-05): `repo:objectstack-ai/objectstack blueprint widget aggregate describe reader default is:issue` → 12 hits (#30430 closed, the parent that added the key; #20163, #14302 and #21464 are on other keys). `solution-blueprint aggregate refused is:issue` → 10 hits (#30584 open, the field `defaultValue`, not this key; the rest are closed or on other keys).\n\nSuggested-grade: p3 · describe text; the in-app designer prompt already overrides it."

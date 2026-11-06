@@ -1,0 +1,31 @@
+{
+  "number": 30907,
+  "kind": "issue",
+  "title": "controlled_by_parent admits an optional master (3/3): docs and the authoring skills teach it instead of a copied owner field",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:skills",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T10:18:01Z",
+  "updated_at": "2026-11-06T10:58:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30907",
+  "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ② maintainer-directed task. Maintainer ruling, verbatim (Claude Code session, 2026-11-06): 「A」. The ruling: `controlled_by_parent` admits an optional master, and a detail row with no master is visible only to its owner (Salesforce parity: a contact without an account is a private contact). Rejected: B, a membership key collecting its object's own id; C, one-hop RLS traversal; D, no platform change. Routing, verbatim: 「能交给车队开发的你不要自己开发」. The plan was re-read by an isolated contract-review-tier reviewer before filing (PASS WITH FIXES, fixes folded in). It lands in three serial cards (this one and its two siblings), each safe on its own.\n\n## Why (measured 2026-11-06, the first live scenario run, objectstack-ai/cloud#3600)\n\nThe rule \"a rep sees the contacts of accounts they own; a contact need not have an account\" has no declarative form in spec 18.3.0:\n- RLS `account.owner == current_user.id` is refused: `rls-predicate-unenforceable` (`packages/lint/src/validate-rls-predicate-enforceability.ts:316`).\n- A membership key with `valueField: 'id'` is refused: `membership-key-value-field-invalid` (`validate-membership-key-declarations.ts:80`).\n- `controlled_by_parent` with `required: false` on the master is refused at two doors: `ObjectSchema.create()` (`packages/spec/src/data/object.zod.ts:4406-4417`) and the parse refinement, shape `master-not-required` (`object.zod.ts:2743-2752`, `controlled-by-parent-master.ts:178-185`).\n\nThe only working route today is a copied owner field plus two hooks. The AI-built app took that route, and its hook failed `verify`.\n\nCard 3 of 3: docs and the published authoring skills.\n\nBlocked-by: #30906\n\n## Ask\n\n1. **Skills** (`skills/**`, a governed surface: land it through the governed path). Teach the optional master for \"visible by the parent's owner, parent optional\" instead of a copied owner field plus hooks: `skills/objectstack-data/rules/relationships.md`, `rules/security.md`, `references/lint-rules.md`, `SKILL.md`, and the `evals/*.json` that pin the old rule. Add one line that a membership key cannot collect its object's own id (`membership-key-value-field-invalid`).\n2. **Docs** that restate ADR-0055 §1: `content/docs/permissions/authorization.mdx:539-545`, `rls.mdx`, `sharing-rules.mdx`, `permissions-matrix.mdx`, `index.mdx`. ⛔ Release-owned pages are not touched (AGENTS.md documentation guardrails).\n3. Confirm the scenario scorer's row-scope check (`packages/qa/scenarios/src/score/scenario-tags.ts:343`) still accepts an optional-master cbp detail. It already accepts any cbp object, so no change is expected.\n\nKnown follow-up outside these repos: objectui Studio's Required toggle writes `true` or nothing, so an optional master cannot be authored from Studio yet. The epic seat raises it with the maintainer.\n\nReader: the `domain:skills` lane seat, from `pm:queue` once card 2 closes."
+}

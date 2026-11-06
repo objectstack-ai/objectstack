@@ -1,0 +1,31 @@
+{
+  "number": 30945,
+  "kind": "issue",
+  "title": "plugin-audit: two comments still say a config_change row holds only a digest, after #30923 made non-secret rows carry readable before and after values",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T13:14:04Z",
+  "updated_at": "2026-11-06T13:55:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30945",
+  "body": "domain:server#1 · os-elon-musk · session_016WV4cytLmJxfAmgPVjUbbW\n\nFiling gate: ① a named location, from the contract review of PR #30937 (card #30923, record 6685638224), should-fix items. ⛔ Not a claim.\n\nPR #30937 makes a settings `config_change` audit row carry readable `old_value` and `new_value` for non-secret keys (secrets keep a placeholder), and narrows those values in `audit-log-field-redaction.ts` for a reader whose field-level security masks the settings store's `value`. Two comments in `packages/plugins/plugin-audit/src/` still describe the old row:\n\n1. `audit-plugin.ts` about :277-279 says the `config_change` row's digest sits next to the CRUD mirror's row \"that carries the value\". That now holds only for secret keys.\n2. `audit-log-read-visibility.ts` about :51-58 says a `config_change` row with no `record_id` \"carries no record's field values\". The behaviour is still right (the redaction keys on `object_name`), but the sentence is now false.\n\nWanted: both comments say what the code does after #30937. Comment-only, no behaviour change, `skip-changeset`.\n\nSuggested grade: p3, `domain:server`. Serial: after PR #30937 lands."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 30887,
+  "kind": "issue",
+  "title": "The deploy command and `os package publish --install` show the upgrade plan before installing — declared renames printed, undeclared renames and type changes stopped until `--confirm-upgrade` (epic cloud#3652 Q3)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T09:06:53Z",
+  "updated_at": "2026-11-06T10:01:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30887",
+  "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nBlocked-by: #30871\nBlocked-by: #30884\nBlocked-by: objectstack-ai/cloud#3654\n\nFiling gate: **③ a task on the maintainer's word.** Epic objectstack-ai/cloud#3652, coordinator session 2026-11-06, verbatim: 「我觉得先把受管软件包的开发循环走顺了」, then 「同意，然后第一步先解决我本地开发的软件包怎么能够方便地发布到云端」. On the deploy command's shape (#30871 amendment), verbatim: 「开发人员也记不住啊」, then 「同意」. Rulings on cloud#3652 (2026-11-06), verbatim:\n- Q1: 「a 本地 os dev（推荐）」.\n- Q3: 「默认拒绝，需显式映射（推荐）」.\n- D3: 「写进清单 renamedFrom」. The mapping is declared by the package author on the field (objectstack card 07), not passed on the command line.\n\nCarrier: objectstack (the CLI). The plan is computed by the framework (01a) and served on cloud's door (01c); this card only reads and prints it.\n\n## 维护者速读\n\n第一期的部署命令（`os deploy` 和 `os dev` 里按 `d`）会直接装进云端环境。这张卡让它先显示「这次会改什么」：增删字段、改类型、声明过的改名、疑似改名、种子数据变化。只有新增或声明过的改名、没有风险时，照常直接部署，不打断。遇到没声明的改名或改类型，按 Q3 停下来，告诉开发者两条路：在字段上写 `renamedFrom` 再部署，或者看过预览后确认。\n\n## Today (objectstack `origin/main` `8b9cc712`; cited files unchanged since `c50e0dfa`)\n\n- `os package publish --install` sends the version with `install_env_id` and prints \"Installed into environment\" (`packages/cli/src/commands/package/publish.ts:821`, `:858-863`). It shows no plan. (measured)\n- The deploy command and the `d` key do not exist yet; #30871 (amendment 2026-11-06T08:21Z) adds them. (measured on the issue)\n- `os package install` handles one finding-set token today, `--confirm-access-upgrade` (`commands/package/install.ts:174`, `:307`). 01a adds `--dry-run` and `--confirm-upgrade` there for self-hosted. (measured, then planned)\n\n## Expected\n\n1. Before installing, the deploy command reads cloud's plan (01c) and prints it grouped by change: added, removed, type change, **declared rename** (`old → new`, from the package's `renamedFrom`), suspected rename (undeclared), seed change (with mode), and permission widening.\n2. **Nothing risky → no prompt.** A plan with only additions and declared renames deploys as today, so the `d` key stays one key press. The declared renames are printed in the result.\n3. **Q3 findings stop the deploy** before any write. The two ways forward are printed:\n   - declare `renamedFrom: ['<old>']` on the new field, then deploy again;\n   - or `--confirm-upgrade` after reading the plan.\n   - On a TTY the `d` key path offers the confirmation inline. With `--json` the plan and the refusal are one document, and the exit is non-zero.\n   - ⛔ No `--rename` flag: the mapping lives in the package (D3).\n4. `os package publish --install` gets `--confirm-upgrade` and the same refusal printing. Its release meaning is unchanged.\n5. `--dry-run` on the deploy command prints the plan and stops.\n\n## Acceptance\n\n- Tests with a stubbed control plane:\n  - additions-only → no prompt, deploys;\n  - a declared rename → no prompt, deploys, and the rename is printed;\n  - an undeclared suspected rename → non-zero exit, plan printed with the `renamedFrom` hint, nothing published;\n  - the same run with the token → deploys, and the token reaches the request body;\n  - `--dry-run` writes nothing.\n- An `os dev` test: the `d` key on a plan with an undeclared rename shows the prompt; declining deploys nothing.\n\nSerial: after #30871 lands, which creates the deploy command and the `d` key, and after 01a and 01c, which fix the shapes this card prints. 07 must be in the CLI's spec dependency so a package can carry `renamedFrom`.\n\nDedupe (2026-11-06): the change-preview queries listed on 01a and 01c were run (`package upgrade plan dry run install-local` 17, `package upgrade preview diff` open 12, cloud `change preview package install` open 2). No CLI card prints an upgrade plan.\n\nSuggested-grade: p2 · the developer-facing half of the change preview; useless before 01c lands.\n\nClause-②: no · CLI flags and output only. No spec key, schema or error code is added here.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

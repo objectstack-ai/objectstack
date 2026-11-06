@@ -1,0 +1,31 @@
+{
+  "number": 30895,
+  "kind": "issue",
+  "title": "Connect an Agent is buried in Setup and in a collapsed Account group; put it where each person looks, and call it Connect an AI Assistant",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T09:41:49Z",
+  "updated_at": "2026-11-06T14:02:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30895",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiling gate: ③ the maintainer's direct order. Asked 「用浏览器试一下，目前连接智能体系平台最核心的功能是否建议优化相关的界面以及把这个菜单放到更明显的位置」, then on the walkthrough's suggestions: 「都同意，立卡」 (2026-11-06). Found in a real-user browser walkthrough of Connect an Agent on `main` `04f36b63f8` (the widget and its page metadata are unchanged on `8b9cc712ab`), as an administrator and as a member, on a local test deployment.\n\n**Business reason.** Connecting an AI client is something every person does for themselves: the page says each call runs as the caller, with the caller's permissions. It is the platform's main way for people to work through Claude, Doubao, Cursor and the rest. Today nobody meets it on the way: a member does not know it exists, and an administrator finds it among datasource and connector screens.\n\n**Reader.** The UI lane dev. The entries come from `packages/mcp/src/connect-ui.ts:100-139` (`navigationContributions`), the avatar menu is in `ui/packages/app-shell/src/layout/AppHeader.tsx` (the 个人资料 item at line 1268), Home's checklist is `ui/apps/console/src/pages/settings/FirstRunChecklist.tsx`, and the labels are `nav_connect_agent` and `pages.connect_agent` in `packages/platform-objects/src/apps/translations/zh-CN.ts:30,73,195` and the `en.ts` twin.\n\n**Duplicates.** Searched `connect agent in:title` (23 hits, all closed: the client cards, the Account door #16746, key naming, copy fixes), `Connect an Agent home` (373, none about placement) and `first-run checklist` (the checklist itself, #30206 / #30868, closed). None moves the entry.\n\n## Measured\n\n| Who | Path today | What they see |\n|:--|:--|:--|\n| Administrator | Setup → 集成 (the second-last of 8 groups) → item 36 of the 40 shown (35 of 39 on `8b9cc712ab`, which drops 功能开关) | Between 数据源 and 连接器凭据 |\n| Member (`chen@example.test`) | Account → 开发者 → 连接智能体 | 开发者 is collapsed by default (`expanded: false`); Setup answers 403 |\n| Everyone | Home, the avatar menu, the app switcher | No entry |\n\nThe avatar menu holds 个人资料, 我的组织, theme, language and notifications, and sign out: the person's own things, which is where this belongs.\n\n## Expected\n\n1. The avatar menu has an item that opens the page, for every signed-in person.\n2. Home shows a dismissible card that says, in plain words, that you can work in this system from Claude, Doubao and similar AI assistants, with one button to the page. It is hidden once dismissed or once the person has connected one.\n3. The administrator's first-run checklist on Home gains a row for it. Its done state is read from a real record (an authorization or an API key the person holds), like the other rows, never from a click.\n4. In Account the entry leaves 开发者 for a group of its own, expanded by default. In Setup it moves out of the bottom of 集成 to the top part of the nav.\n5. The page and its entries are called 连接 AI 助手 / Connect an AI Assistant. Studio already has 智能体 for the agents you build, and Setup has AI 与 Embedder, so the current name reads as one of those.\n\nNothing in the top bar: it is already full. Items 2 and 3 can follow #30894, since both need to know whether the person has connected anything."
+}

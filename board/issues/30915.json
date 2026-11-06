@@ -1,0 +1,34 @@
+{
+  "number": 30915,
+  "kind": "issue",
+  "title": "@objectstack/scenarios ships .ts-only exports, so a consumer's built entry cannot load `./score` (ERR_MODULE_NOT_FOUND) or must inline it; give it a minimal unpublished build step and a narrow scorer entry",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T11:01:20Z",
+  "updated_at": "2026-11-06T12:49:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30915",
+  "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **(a) a measured defect with a named consumer**, found by the cloud#3604 dev (report 6682453462 on objectstack-ai/cloud#3604). Ruling D on objectstack-ai/objectstack#30291 (verbatim 「同意 D」) moved the deterministic scorer into the private `@objectstack/scenarios` (entry `@objectstack/scenarios/score`). Cloud consumes it through its `link:` to the pinned framework tree. Carrier: objectstack (maintainer, 2026-11-06: 「平台的问题应该在平台处理」, objectstack-ai/objectstack#30765).\n\n## 维护者速读\n\n评估打分器已经按你的裁决搬进平台的私有包 `@objectstack/scenarios`，但这个包只有 `.ts` 源码、没有构建产物。cloud 引用它时，测试和类型检查都能过，但 cloud 打包后的运行时加载不到它（会报 ERR_MODULE_NOT_FOUND）；换成内联打包，就等于把源码复制进 cloud（产物从 2.87 MB 涨到 3.95 MB），违反裁决。平台这边只需要给这个包加一个不对外发布的最小构建步骤，最好再给打分器单独一个窄入口。cloud#3604 的引用那一半在等这张卡。\n\n## Measured (by the cloud#3604 dev, objectstack `c50e0dfa`)\n\n- `vitest` and `tsc` in cloud resolve `@objectstack/scenarios/score` through `link:`.\n- **Linked as a dependency:** `tsup` leaves it external, and Node cannot load cloud's `dist/index.js`. The `.ts` source imports with `.js` specifiers, so the load fails with `ERR_MODULE_NOT_FOUND` (ESM and CJS). objectos and objectos-ee load that dist at boot, and `graph-snapshot.mjs` reads `scoreGraphShape` from it.\n- **Linked as a devDependency:** `tsup` inlines the scenarios source plus `@objectstack/plugin-sharing` into cloud's dist (2.87 MB → 3.95 MB). That is a build-time vendored copy, which the ruling forbids.\n\n## Expected\n\n1. `@objectstack/scenarios` gains a minimal build step: dist ESM + CJS + `.d.ts`, with `exports[\"./score\"]` pointing at the built files. The package stays private and unpublished. The framework's pin-tree and Dockerfile builds pick the step up, so cloud needs no change for that.\n2. A narrow scorer entry, so a consumer of `./score` (`scoreGraphShape`, the run grader) does not pull `scenario-tags`' `plugin-sharing` / `objectql` imports.\n\n## Acceptance\n\n- A built-consumer test: a package that depends on `@objectstack/scenarios` and builds with `tsup` can `import('@objectstack/scenarios/score')` from its dist under plain Node.\n- The `./score` entry's import graph excludes `plugin-sharing` and `objectql`.\n\nUnblocks: objectstack-ai/cloud#3604's import half. Its pin-move half is PR objectstack-ai/cloud#3663.\n\nSuggested-grade: p2."
+}

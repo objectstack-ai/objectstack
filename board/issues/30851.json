@@ -2,8 +2,8 @@
   "number": 30851,
   "kind": "issue",
   "title": "Impersonation attribution follow-ups after #30213: plugin-auth identity writes and the approval resume decider segment",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-elon-musk"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T06:39:23Z",
-  "updated_at": "2026-11-06T08:07:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T09:06:53Z",
+  "closed_at": "2026-11-06T09:05:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30851",
   "body": "domain:server#4 · os-elon-musk · session_016WV4czvZykUqhYxYXSSDt4\n\nFollow-ups from the contract review of PR #30800 (card #30213, ruling A; records 6676544432 and 6677397495). PR #30800 merged as `fd749a45e`. Neither item is a door ruling A names, and neither blocked that PR. ⛔ Not a claim.\n\n1. **plugin-auth identity-table writes carry no administrator.** Writes that plugin-auth makes under `authSystemWriteContext` / `withSystemContext` while an administrator is impersonating a user set `attributedUserId` to the impersonated user, and carry no `impersonatedBy`. The audit row for such a write is therefore indistinguishable from the user's own. Expected: the same attribution-only `impersonated_by` stamp PR #30800 adds on record writes (`sys_audit_log.metadata`), read from the same session, never from the request body. Precedent for the key: `packages/plugins/plugin-auth/src/auth-session-audit.ts`.\n2. **The approval resume signal carries no impersonation state.** `deciderSegmentContext` (`packages/services/service-automation/src/run-resume.ts`) drops `impersonatedBy` for a decider's segment, but has two gaps:\n   - (a) the early return for `context.userId === decider` keeps the trigger-time stamp on the decider's own segment, even when the decider decided in their own name;\n   - (b) a decider who decides while impersonated gets no stamp at all.\n\n   Expected: the decider's segment carries exactly the decision-time `impersonatedBy` (absent when the decider acted as themselves).\n\nNot included here: the `sys_comment` fork (comments write no ledger or activity row). That is a separate maintainer decision on #30213, with options A/B/C.\n\nSuggested grade: p3, `domain:server`. Serial: none (PR #30800 has merged)."

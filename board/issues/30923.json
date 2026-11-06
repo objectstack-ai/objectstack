@@ -1,0 +1,37 @@
+{
+  "number": 30923,
+  "kind": "issue",
+  "title": "Settings config_change audit records only a digest of the new value, so a policy change's before and after cannot be read from any door",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p1",
+    "repo:cloud"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T11:51:47Z",
+  "updated_at": "2026-11-06T13:37:06Z",
+  "closed_at": "2026-11-06T13:35:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30923",
+  "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **(b) a contract gap with a named consumer**, measured by the cloud#3668 dev (report 6684026104). The consumer is the Enterprise policy-change audit (objectstack-ai/cloud#3668: \"every change records who, when, and the before and after values\"), which is `pm:blocked` on this card. Platform gaps go to the platform (maintainer, 「平台的问题应该在平台处理」, objectstack#30765).\n\n## 维护者速读\n\n修改设置时，平台会写一条审计记录，但只记录了谁、什么时候、改了哪个键，以及新值的摘要。改前是什么、改后是什么，都读不出来。安全审查要求访问策略的每次修改都能看到前后的值。要做的是让设置修改的审计记下可读的前后值，密钥类的值仍然只记摘要或打码。\n\n## Measured (objectstack `2ffdb649`)\n\n- `packages/services/service-settings/src/config-change-audit.ts:258-299`: the `config_change` row records `user_id`, the actor, the time, the key, and a DIGEST of the new value. It records no before value and no readable after value.\n- By contrast, a `sys_organization.require_mfa` flip already gets the CRUD mirror's `old_value` / `new_value` (`sys_organization` is not in plugin-audit `SKIP_OBJECTS`, `audit-writers.ts:254`).\n\n## Expected\n\n- `config_change` records readable `old_value` and `new_value` for non-secret settings.\n- Keys whose manifest marks them secret or sensitive keep a digest or redaction. The lane states the rule and where the flag comes from.\n- This applies to every door that writes settings (Setup, the API, an EE console).\n\n## Acceptance\n\n- Tests: changing `auth.allowed_ip_ranges` records its before and after; a secret key records no plaintext.\n\nSuggested-grade: p1 · Enterprise priority (maintainer).\n\nDedupe (2026-11-06): `config_change old_value` → 5 hits (#7675 closed, #9517 closed, #26456 closed, #15207 closed); `settings audit before after` → 611 hits (#30748 open, #30665 open, #30894 open, #30512 open)\n. None covers this gap (the open hits are QA runs or unrelated settings cards)."
+}

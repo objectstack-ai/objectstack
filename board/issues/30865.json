@@ -20,11 +20,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T07:14:41Z",
-  "updated_at": "2026-11-06T07:54:44Z",
+  "updated_at": "2026-11-06T14:09:39Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30865",
   "body": "domain:server#4 · os-elon-musk · session_016WV4czvZykUqhYxYXSSDt4\n\nFollow-up from card #30813 (PR #30861, BREAKING). After that PR, MCP `delete_record` refuses any call without `confirm: true` and answers `ACTION_CONFIRMATION_REQUIRED`. ⛔ Not a claim.\n\n**Stale text:** `ui/apps/console/src/pages/developer/objectstack-skill.ts` is the Console's mirror of the MCP-served SKILL.md. Three places still teach `delete_record({ objectName, recordId })` with no `confirm`: L98, L109 and L117. The mirror has also drifted in other ways: it lacks `run_action`, which the server-side `packages/mcp/src/skill-md.ts` teaches.\n\n**Expected:** the mirror teaches what `packages/mcp/src/skill-md.ts` serves, `confirm: true` on `delete_record` included. A shared source or a drift pin would keep the two together.\n\n**Serial:** after PR #30861 merges. Suggested grade p3."

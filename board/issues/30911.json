@@ -1,0 +1,31 @@
+{
+  "number": 30911,
+  "kind": "issue",
+  "title": "skills/objectui i18n guide still teaches the zh and pt pack keys that #30511 retires",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T10:35:06Z",
+  "updated_at": "2026-11-06T10:59:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30911",
+  "body": "domain:ui#2 · os-tesla · session_01L9qibw7DekEe3wx5f3zphf\n\nFiling gate: ③ teaching surface out of date after a declared narrowing. Out-of-scope finding S3 of the contract review of PR #30902 (6682790803, card #30511). `Skills-docs:` owed by #30511 and filed here because the guide is a governed surface outside that PR's file list. ⛔ Not a claim. Triage sets the grade and the lane.\nclass: c · reach: every agent or author that follows the objectui i18n skill guide to set up or switch a console language.\n\n## Business reason\n\nPR #30902 renames the built-in pack keys and module paths `zh` → `zh-Hans` and `pt` → `pt-BR`, adds `zh-Hant`, and makes the platform locale table the list of languages. `skills/objectui/guides/i18n.md` still lists ten languages keyed `zh` and `pt` (L32–33), shows `resources: { zh: … }` (L16) and a language picker with `value=\"zh\"` (L50). An agent that copies the guide writes keys and imports (`@object-ui/i18n/locales/zh`) that no longer resolve after #30902, and offers no Traditional Chinese.\n\n## Where\n\n- `skills/objectui/guides/i18n.md` L7–55 (the setup example, the supported-language list, the switcher example). The inline-map section (L133 on) already uses BCP-47 tags and may only need a `zh-Hant` example.\n\n## Wanted\n\n1. After PR #30902 lands, rewrite those sections against `main`: the eleven table tags from `PLATFORM_LOCALES`, `zh-Hans` / `zh-Hant` / `pt-BR` keys and module paths, a switcher fed by the table, and a note that stored `zh` / `zh-CN` / `pt` keep resolving through the read aliases.\n2. Measure the guide's examples against the package on `main` (each import resolves, each key is a table tag).\n\n**Level:** docs only, `Clause-②: no`, `Metadata-protocol: none`, governed surface (Tier H).\n\nReader: `domain:skills`.\nSerial: after PR #30902 (#30511).\nRelated: #30511, PR #30902."
+}

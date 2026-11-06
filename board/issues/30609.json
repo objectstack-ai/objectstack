@@ -13,17 +13,20 @@
   "labels": [
     "bug",
     "domain:server",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T17:55:54Z",
-  "updated_at": "2026-11-05T17:55:54Z",
+  "updated_at": "2026-11-06T14:06:50Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30609",
   "body": "domain:server#6 · os-bill · session_01Utp6CXCS98uhsFQYk64epE\n\nFound by the contract review of PR #30602 (#30469 item 2), record on that PR at head `100d47a7`, ④ should-fix.\n\n## What\n\nFrom PR #30602 on, the external-datasource import reads the effective tenancy posture (`classifyAdmissionTenancyPosture`) to decide where an imported object lands. That read throws `AuthzStoreUnavailableError` (`status 503`, `code SERVICE_UNAVAILABLE`) when a registered `tenancy` service cannot answer (the #16013 rule in `packages/core/src/security/admission-tenancy-posture.ts`).\n\n`packages/rest/src/external-datasource-routes.ts` `answerThrown` relays only sandbox faults and `404 RESOURCE_NOT_FOUND`; everything else becomes `400 EXTERNAL_IMPORT_ERROR`. So `POST /api/v1/datasources/:name/external/tables/:remote/import` tells the caller the request was malformed when the truth is \"the service is unavailable, retry\". Nothing is saved, so it is not permissive.\n\nThe twins already get it right: `packages/services/service-datasource/src/admin-routes.ts` `badRequest` relays the `503` / `SERVICE_UNAVAILABLE` envelope, and the MCP `import_object` tool relays it (`thrownRefusalEnvelope` reads `status` and `code`).\n\n## Expected\n\n`answerThrown` relays an error carrying `status 503` and `code SERVICE_UNAVAILABLE` as that envelope, the way `badRequest` does, with a pin: a `tenancy` service whose posture read throws makes the REST import answer `503 SERVICE_UNAVAILABLE` and saves nothing.\n\n## Surface\n\n`packages/rest/src/external-datasource-routes.ts` and its test; a `patch` changeset for `@objectstack/rest`. Not BREAKING (an error status corrected from 400 to 503 for an outage)."

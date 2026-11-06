@@ -1,7 +1,7 @@
 {
   "number": 26373,
   "kind": "issue",
-  "title": "[PM seat] domain:devx · seat 3 — 🟢 os-elon-musk · 由 os-elon-musk 账户的项目负责",
+  "title": "[PM seat] domain:devx · seat 3 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "os-elon-musk"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T00:41:13Z",
-  "updated_at": "2026-11-05T21:31:38Z",
+  "updated_at": "2026-11-06T12:11:08Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26373",
-  "body": "domain:devx#3 · os-elon-musk · session_016WV4cz3RTQjLh7hZBLzgtZ\n\n⚠️ **Seat-post stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md`. This is **`domain:devx` seat 3**. Seat 1 is #6023, seat 2 is #20163 (⛔ this post is neither).\n\n<sub>Refreshed 2026-11-05T21:29Z (seated).</sub>\n\n- **Current PM:** 🟢 `os-elon-musk` (`GET /user`) · `session_016WV4cz3RTQjLh7hZBLzgtZ`, in the project thread \"Devx 车道派发(第二席)\" of the os-elon-musk account's project \"Objectstack\". Summons: the maintainer, verbatim 「5小时后开两个 devx 车道」 / 「现在就开，等 5小时后开始派发」 (2026-11-05T16:32–16:33Z), then 「你的车道都可以开始派发了」 (2026-11-05T21:21Z), in that project. Grounds: the previous holder's clock-out brief 6430981430 is the newest event on this post.\n- **Concurrency:** 5 card threads (the maintainer, relayed by the project coordinator 2026-11-05T21:28Z: 「所有席位都是并发5」).\n- **Patrol / Mailbox:** none; the seat is woken by its project's events and PR subscriptions.\n- **Ledger:** in flight #30477, #30479, #30481 (p1 scenario cards, claims carry `Seat: domain:devx#3`). Lane ledger = labels + assignee + `Claim:` comments + `head:claude/` PRs.\n- **Split:** seat 1 (#6023, same project) takes odd positions of the lane's total order, this seat even; seat 2 (#20163, marchtian) picks under the claim race. Re-read assignee and newest comments before every claim; yield to an earlier one.\n- **Hot-file serial queue:** none held. The scenario siblings share one registration line in `packages/qa/scenarios/test/library.test.ts`; each PR merges `main` after a sibling lands.\n- **Standing constraints honoured (maintainer, recorded on #20163):** `ui/.github/**` and the root `ci.yml` are ⛔ out of bounds for now; changesets go to the root `.changeset/`; no PR on the objectui repository.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
+  "body": "domain:devx#3 · os-elon-musk · session_016WV4cz3RTQjLh7hZBLzgtZ\n\n⚠️ **Seat-post stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md`. This is **`domain:devx` seat 3**. Seat 1 is #6023, seat 2 is #20163 (⛔ this post is neither).\n\n<sub>Refreshed 2026-11-06T12:10Z (clocked out).</sub>\n\n- **Current PM:** ⏳ vacant. The last incumbent was `os-elon-musk` · `session_016WV4cz3RTQjLh7hZBLzgtZ` (project thread \"Devx 车道派发(第二席)\"), seated 2026-11-05T21:29Z and clocked out 2026-11-06T12:10Z on the maintainer's 「devx 车道处理完当前任务就下班」 (05:42Z) and 「devx 留一个席位」 (11:54Z): devx seat 1 (#6023) stays on duty. The clock-out brief is the newest comment. `check-handover` exit 0. Re-summon: `/pm-dispatch devx seat 3`, then read this post and its newest comments.\n- **Ledger:** seat 3 holds no card, no PR and no open decision.\n- **Split:** while seat 3 is vacant, seat 1 picks the whole lane's total order; seat 2 (#20163, marchtian) under the claim race. A re-seated seat 3 takes only unclaimed `pm:queue` cards (re-read assignee and newest comments before every claim; yield to an earlier one). Claims carry `Seat: domain:devx#3`.\n- **Hot-file serial queue:** seat 3 holds none.\n- **Standing constraints honoured (maintainer, recorded on #20163):** `ui/.github/**` and the root `ci.yml` are ⛔ out of bounds for now; changesets go to the root `.changeset/`; no PR on the objectui repository.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
 }

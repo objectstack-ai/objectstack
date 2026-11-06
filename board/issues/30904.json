@@ -1,0 +1,35 @@
+{
+  "number": 30904,
+  "kind": "issue",
+  "title": "Marketplace classification: one multi-facet taxonomy (industry, function, …) defined in the spec for hundreds of templates; today spec and cloud carry two category enums that disagree",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "needs-user-decision",
+    "pm:dispatched",
+    "priority:p1",
+    "repo:cloud"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T10:07:08Z",
+  "updated_at": "2026-11-06T10:59:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30904",
+  "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **③ a task on the maintainer's word.** In the `repo:cloud#3` seat session (2026-11-06), on how gallery (scenario demo) templates appear in the marketplace, the maintainer said, verbatim:\n- 「至于分类以后有个模板的时候，我们还是需要有行业或者是多角度的分类吧。」\n- 「以后可能会有上百个模板呀」\n\nRecord: objectstack-ai/cloud#3649 comment 6682254371.\n\n**Owner.** The `repo:cloud` lane (`repo:cloud#3`) follows it to close. The taxonomy is a platform contract (`@objectstack/spec`), so the definition lands here first and cloud consumes it (maintainer, 2026-11-06: 「平台的问题应该在平台处理」, objectstack-ai/objectstack#30765). **Step 1 is a proposal for the maintainer, not code.**\n\n## 维护者速读\n\n以后模板会有上百个，只按一个分类找不过来，需要多维度分类，比如按行业、按部门或职能，可能还有场景类型、公司规模，可以组合筛选。另外现在有个现成的问题：平台 spec 和 cloud 各有一套分类，取值不一样。平台写的是 `integration`、`developer-tools`，有 `erp`、`ai`；cloud 写的是 `integrations`、`devtools`，有 `sales`、`marketing`、`app`。分类应该只有一套，定在平台，cloud 照用。第一步只出方案（有哪几个维度、每个维度有哪些取值、是否多选），给你看过再开工。\n\n## Today (measured)\n\n- **Spec:** `packages/spec/src/marketplace/marketplace.zod.ts:166-183`, `MarketplaceCategorySchema`, a single-value enum: crm, erp, hr, finance, project, collaboration, analytics, integration, automation, ai, security, developer-tools, ui-theme, storage, other. The listing also has free-form `tags` (`:255-256`) and a `tags` filter (`:417-418`).\n- **Cloud:** `packages/service-tenant/src/marketplace-taxonomy.ts:48-64`, `PACKAGE_CATEGORY_OPTIONS`, a strict single-value `sys_package.category`: app, crm, sales, marketing, finance, hr, operations, project, productivity, data, integrations, devtools, utility, other. The browse page derives its category chips from it. `is_starter` is a separate template flag.\n- The two lists disagree in spelling (`integration` / `integrations`, `developer-tools` / `devtools`) and in membership. Nothing reconciles them.\n\n## Asked\n\n1. **Proposal (step 1).** Facets and their values, for example industry, function or department, solution type (app / template / connector / theme), and maybe company size. State, for each facet, whether it is single or multi-valued, and what becomes of the current `category` and of free `tags`. Show the mapping from both existing enums. Post it on this card for the maintainer. ⛔ No code before their word.\n2. **After approval:** the spec defines the facets once. The listing and manifest schemas carry them (`Clause-②`: judged then). The liveness ledger names the consumers: cloud's catalog (follow-up objectstack-ai/cloud#3661) and the console marketplace UI (`ui/`).\n\nRelated: the package-level Beta marker for gallery templates (objectstack-ai/cloud#3649, in rework) may also belong in the listing schema. That card reports its carrier.\n\nDedupe (2026-11-06): `repo:objectstack-ai/objectstack marketplace category taxonomy is:issue` → 4 hits (#30289, #13285 closed and on other subjects; #12708, #6015 seat posts); `marketplace facet filter industry is:issue` → 3 hits (#29002 a QA run, #15213 closed, #12708 a seat post). None covers a marketplace taxonomy.\n\nSuggested-grade: p2 · the scenario library's gallery grows toward hundreds of templates.\n"
+}

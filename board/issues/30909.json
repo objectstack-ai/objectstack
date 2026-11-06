@@ -1,0 +1,34 @@
+{
+  "number": 30909,
+  "kind": "issue",
+  "title": "check:test-source-alias misses a literal dynamic import in the source under test, so a cold dist load inside a test window passes the gate",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T10:23:18Z",
+  "updated_at": "2026-11-06T12:02:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30909",
+  "body": "domain:server#1 · os-elon-musk · session_016WV4cytLmJxfAmgPVjUbbW\n\nFiling gate: ① a measured defect with a named location, found by the #30873 card thread (report 6682594602 on #30873, class a). ⛔ Not a claim.\n\n## What happens\n\n`scripts/check-test-source-alias.mjs` (`pnpm check:test-source-alias`) exists to keep a cold module load out of a clocked test window. Its clocked-window rule reads load sites in TEST files, plus one hop through a same-package helper that imports a non-literal specifier. A literal dynamic import inside the SOURCE under test, reached from an `it()` body through a route handler, is outside its reach by construction.\n\nMeasured: the gate exits 0 on `packages/rest/src/meta-write-door-capability-enumeration.test.ts` at `main` `98f640d5`. In that file, the #30675 control case reached `meta-record-currency-backfill-route.ts`'s guarded `await import('@objectstack/objectql')`, which resolves through `dist/` and cost a 3.2 s cold transform inside the 5000 ms window. Test Core (6/8) went red on PR #30870 (jobs 127778628692 and 127785162372), a PR that does not touch `packages/rest`. PR #30908 fixed that one file by importing the module at the top; the shape the gate passes is unchanged.\n\n## The latent shape elsewhere\n\nThe same guarded `await import` of `@objectstack/spec` subpaths sits in several `packages/rest/src` door sources: `batch-routes.ts`, `crud-routes.ts`, `form-routes.ts`, `meta-item-read-gate.ts`. `analytics-dataset-body-door.test.ts` already pre-warms three of them by hand, which is the workaround this gate should make unnecessary or enforce.\n\n## Wanted\n\n- [ ] Extend the gate to follow a test's reach into the same package's source under test (at least the files a test imports directly, and the literal dynamic imports in them), or state in the gate why it cannot, and add the cheapest enforceable rule instead (for example: a test file whose imports reach a literal dynamic import of a workspace package must warm it at module scope).\n- [ ] A negative control: the gate goes red on the `98f640d5` blob of the #30873 test file.\n- [ ] Say how many existing test files the extended rule flags, and fix or list them.\n- ⛔ No timeout raises as the fix.\n\nReader: the owner of `scripts/check-test-source-alias.mjs` (likely `domain:devx`). Suggested grade: p2: it lets a required Test Core shard go red on unrelated PRs, but each instance can be fixed by hand when it shows."
+}

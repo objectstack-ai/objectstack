@@ -11,18 +11,20 @@
     "type": "Bot"
   },
   "labels": [
+    "domain:ui",
     "enhancement",
+    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T05:20:54Z",
-  "updated_at": "2026-11-03T05:56:05Z",
+  "updated_at": "2026-11-06T12:29:16Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29800",
   "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\nFiling gate: ② out-of-scope finding, class b, from #29748 (PR #29798; os-dev report card comment 6596091494) · filed by `domain:ui#1` · ⛔ Not a claim.\nReader: `repo:mobile` (the shell). It is filed on this board because the relay cannot write to objectstack-ai/mobile for this account; the mobile seat may move it there. No grade: triage sets it.\n\n**Business reason.** The Console's profile page now shows an \"App lock\" row read from `getAppLock()`, and tapping it opens the shell's native settings screen (ruling objectstack-ai/mobile#145 option A: every write stays native). After someone changes the lock there and comes back, the row can keep showing the old state until the page is opened again.\n\n**Why (read in code by the objectstack#29748 dev, not measured on a device).**\n- The bridge has no change event for the app lock (HYBRID-SHELL.md \"App lock\", objectstack-ai/mobile#181 head `77ded7bb`: \"No event announces a change\").\n- The Console re-reads on mount, on `visibilitychange` to visible, and on window focus.\n- On Android the settings screen is pushed inside the same activity (`app/console.tsx` `router.push('/app-lock-settings')`), so the WebView may get no `visibilitychange` and no focus when it comes back.\n\n**Wanted (one of these, the shell's call).**\n- (a) The shell emits an `appLockChanged` event, or re-sends `getAppLock()`'s value, when the settings screen closes. The Console then listens for it.\n- (b) The shell guarantees a `visibilitychange` (or focus) on the WebView when its own screen pops.\n\nEither way the Console follow-up is small, and the `domain:ui` lane takes it once the shell's contract says which.\n\nLinks back: #29748, PR #29798, objectstack-ai/mobile#145, objectstack-ai/mobile#181."

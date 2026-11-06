@@ -4,7 +4,7 @@
   "title": "fix(rest,runtime)!: the import doors and the catalog refresh read the walled-catalog verdict the metadata save door reads",
   "state": "open",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -22,7 +22,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T22:44:02Z",
-  "updated_at": "2026-11-06T07:27:58Z",
+  "updated_at": "2026-11-06T14:10:16Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

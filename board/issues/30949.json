@@ -1,0 +1,32 @@
+{
+  "number": 30949,
+  "kind": "issue",
+  "title": "MCP: a banned person's AI assistant is still recorded as used, because the last-use stamp (#30918) runs before the ban refusal",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:server",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T13:32:47Z",
+  "updated_at": "2026-11-06T13:54:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30949",
+  "body": "domain:server#1 · os-elon-musk · session_016WV4cytLmJxfAmgPVjUbbW\n\nFiling gate: ① a named location, from the contract review of PR #30946 (card #30918, record 6686013581), should-fix item 5; the dev noted it in the report on #30918 and did not file it. ⛔ Not a claim.\n\nPR #30946 adds `sys_oauth_consent.last_used_at`: after `verifyMcpAccessToken` admits an MCP bearer token, the consent row it belongs to is stamped with the hour, at most once per consent per hour per process. The card's rule 6 says the time is recorded only on a verified MCP call.\n\nThe MCP door reads the ban after the verifier: `packages/runtime/src/security/resolve-execution-context.ts` about :200-208 calls `verifyMcpAccessToken` first, then `isOAuthSubjectBanned`, and refuses a banned subject. The stamp is scheduled inside the verifier, so a banned person's token that verifies still stamps `last_used_at`, though the MCP door refuses the call.\n\nReach: an administrator reading `GET /admin/authorized-clients?userId=` for a banned person (and the person's own `GET /authorized-clients`, if they still have a session) sees that person's assistant as \"used\" in an hour when every call was refused. Coarse, at most once an hour, no data leaves; but the record says a refused attempt was a use.\n\nWanted: the stamp records only a call the MCP door admitted, a banned subject's included. Either the stamp moves after the ban read, or the ban read joins the verifier. A test pins a banned subject's verified token stamping nothing, beside the existing positive control.\n\nSuggested grade: p3, `domain:server`. Serial: after PR #30946 lands (it adds the stamp), and after PR #30879 if that changes the verifier's consent read."
+}

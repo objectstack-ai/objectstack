@@ -4,7 +4,7 @@
   "title": "fix(plugin-auth)!: an allowed IP range that names no range is refused at save and never matches at the gate",
   "state": "open",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -22,7 +22,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T23:04:45Z",
-  "updated_at": "2026-11-06T08:04:51Z",
+  "updated_at": "2026-11-06T14:10:22Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

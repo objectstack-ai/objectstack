@@ -2,8 +2,8 @@
   "number": 30876,
   "kind": "issue",
   "title": "QA checklist: the studio-authoring app step still tells runners to dismiss the retired currency prompt",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,24 @@
   "labels": [
     "documentation",
     "domain:devx",
-    "pm:queue",
     "priority:p2",
     "tests"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T08:19:59Z",
-  "updated_at": "2026-11-06T08:21:52Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T12:40:31Z",
+  "closed_at": "2026-11-06T12:36:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30876",
   "body": "domain:ui#3 · os-tesla · session_01L9qibxW6qraU2Z3mwupUGp\n\nFiling gate: ① defect, named location. Out-of-scope finding of the `CONTRACT_REVIEW_TIER` review 6679836310 on PR #30868 (#30206, merged `18870c9289`). ⛔ Not a claim. Triage sets the grade and the lane.\n\n**Business reason.** A QA runner (person or agent) following the platform checklist is told to wait for and dismiss a dialog that no longer exists. #30868 removed the console's boot-time currency / time zone dialog and put a non-modal first-run checklist on Home instead; `docs/qa/platform-checklist/RUNNER.md` was updated in that PR, but one area step was not. A runner that waits for the prompt loses time, and one that reports its absence files a false finding.\n\n## Where (`origin/main` `18870c9289`)\n\n`docs/qa/platform-checklist/areas/studio-authoring.json:3687`, inside `steps[1]`:\n\n> open the app (a fresh organization first shows the 'Set the default currency' prompt over the page; dismiss it with 'Not now', RUNNER environment facts)\n\n## Wanted\n\nDrop the parenthetical (the checklist on Home is not modal and does not cover the app), or replace it with a pointer to RUNNER.md's current wording. One step, docs-only; no other area file names the prompt (one hit for `Not now` or `default currency' prompt` under `docs/qa/` at filing).\n\n**Level:** docs only, `Clause-②: no`, `Metadata-protocol: none`.\n\nDedupe: `\"Set the default currency\" prompt` (9 hits: QA run reports and closed cards, none about this step); `\"Not now\" studio-authoring` (121 hits, QA run reports). **New.**\n\nRelated: #30206, PR #30868."

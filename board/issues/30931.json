@@ -1,0 +1,37 @@
+{
+  "number": 30931,
+  "kind": "pull_request",
+  "title": "i18n(service-settings): ship the built-in settings pages in ru, de and ko",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T12:17:30Z",
+  "updated_at": "2026-11-06T12:59:24Z",
+  "closed_at": "2026-11-06T12:59:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-06T12:59:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30931",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D7v5H7BaFmL7sUCoN7tSxhm)_\n\ndomain:server#1 · os-elon-musk · session_016WV4cya5ej5GQV86RPbRPK\n\nPart of #30512 — package 6 of 11, second half (`@objectstack/service-settings` in `ru`, `de`, `ko`; the first half, `zh-Hant`, `ar`, `fr`, `pt-BR`, landed in #30870). With it every built-in settings page carries all eleven platform languages. The card stays open: platform-objects follows, and the last PR of the series makes the bundle check read the platform locale table.\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** 「设置」里内置的设置页（邮件、短信、品牌、公司、本地化、认证、文件存储、AI 与向量、知识库，以及 `@objectstack/objectql` 注册的数据生命周期页）的页标题和说明、分组、字段名和帮助、选项、提示条、操作按钮和来源标记，补上俄语、德语、韩语 3 种。繁中、阿语、法语、巴葡已在上半包（#30870）落地，至此本包 11 种语言齐全。\n- **为什么改：** 平台语言表要求每个界面带齐 11 种语言；这是第 3 期按包补齐的第 6 个包的下半。用这 3 种语言的管理员打开「设置」不再看到英文。\n- **风险与回滚：** 只加 3 个翻译文件和注册行，不动逻辑、schema、接口；原有 8 种语言一字未改。交接提交里改 `localization-currency-lock` / `localization-locale-options` 文案表的部分**按席位裁决整段去掉**：#30630（已作为 #30734 落地）拥有这两张表，且已带齐 11 种语言。测试改动只是覆盖测试把 3 种新语言加进列表（覆盖变宽，没有放宽断言）。回滚即撤 PR。\n- **先看：** `src/translations/index.ts`（按表标签注册，排在上半包 4 种之后），再看 `settings-translation-coverage.test.ts`，然后抽看任一新语言文件。\n- **两分钟验证：** `pnpm --filter @objectstack/service-settings exec vitest run src/translations/settings-translation-coverage.test.ts` 全绿。\n- **需要你做的：** 无，席位落地。\n\n## What changes\n\n- Three new hand-authored translation modules under the platform locale table's tags (`ru`, `de`, `ko`), covering every built-in settings manifest: page titles and descriptions, group headings, field labels and help, option labels, banners, action buttons and the source badges. Country pickers name each country in the reader's language through `Intl.DisplayNames`, as the existing locales do.\n- `src/translations/index.ts` registers them in `settingsBuiltinTranslations` after the first half's four and exports them beside the existing eight.\n- Carried from the released handover commit `bc852648` (session `session_01Utp6Cai5CRdAs4u9gTipWU`) **without** its `localization-currency-lock.ts` / `localization-locale-options.ts` hunks, per the seat's ruling of 2026-11-05: #30630, landed as #30734, owns those copy tables and already carries all eleven languages there. This PR does not touch them.\n\n## Tests\n\n- `settings-translation-coverage.test.ts` holds the three new locales to the same full coverage of every built-in manifest. No assertion changed.\n\n## Acceptance notes\n\n- **Quality bar (#17508 / PR #19345):** every leaf written for the reader; placeholders, code spans, URLs and identifiers byte-identical, checked mechanically per leaf against `en` and against `zh-CN` (which carries the inline-manifest keys `en.ts` does not): key set, `{{holes}}`, `{holes}`, backtick spans, angle tokens, all three locales zero diffs. Russian and Korean keep identifiers, hosts and URLs in Latin script.\n- **Leaves equal to English, on purpose:** provider, product and protocol names (`SMTP`, `S3`, `OpenAI`, `Anthropic`, `Vercel AI Gateway`, `Turso / libSQL`, `RAGFlow`, …) and the terms the existing `zh-CN` / `ja-JP` / `es-ES` also leave in English (`Base URL`, `Embedder`), in all three; in `de` also words German uses as they are (`Host`, `Port`, `Branding`, `Website`, `Region`, `Backend`, `Adapter`, `Bucket`, `Global`) and the country names `Intl.DisplayNames` spells the same in German (`Andorra`, `Afghanistan`, …).\n- No cross-locale coincidence: `check:i18n-stale-fill` passes with the baseline untouched.\n- No string opens with `os ` followed by a lowercase word (`check-cli-command-ids` passes), and the whole \"Lint · docs & code guards\" lane was run locally before opening.\n\n## Verification\n\n<details><summary>Package suite, typecheck, build (verify lock)</summary>\n\n```\nturbo run build --filter=!@objectstack/docs: 118/118 tasks successful, exit 0   (at head 6e64d7fe, on main 0e882086)\npnpm --filter @objectstack/service-settings test && typecheck   (at head 6e64d7fe)\n Test Files  71 passed (71)\n      Tests  1349 passed (1349)\nos-verify-lock: VERDICT batch-last-exit 0   (a frozen-lockfile install ran first, joined with ';';\n  build, test and typecheck are one '&&' chain, so this exit covers all three)\nsame patch at 02754089 (stacked on settings A's head 9c22c667, main a2f523aa): 71 files, 1349 passed, VERDICT command-exit 0\n```\n</details>\n\n<details><summary>i18n gates, the derived families and the docs &amp; code guards lane</summary>\n\n```\nnode scripts/check-i18n-bundles.mjs (all packages; service-settings has no extract config)   (at 6e64d7fe)\ncheck-i18n-bundles: OK (10 package(s) — all bundles in sync, no undeclared authoring keys).   EXIT 0\nnode scripts/check-i18n-stale-fill.mjs                          (at 6e64d7fe)\ncheck-i18n-stale-fill: OK (11 bundle set(s) — no new stale fills, 1 baselined).   EXIT 0\nnode scripts/check-cli-command-ids.mjs                          (at 6e64d7fe)   EXIT 0\ndispatch-gates --commands (at 02754089): 60 families, each run and recorded with its exit code: 60 x exit 0\ndispatch-gates --ran: 60 derived, 60 run, 0 NOT-MEASURED (a derived zero)\nre-derived at 6e64d7fe: the identical 60-command list\npnpm lint (repo-wide, at 02754089): exit 0\nCI lane \"Lint · docs & code guards\", every command run locally   (at 02754089)\n  56 commands (lane-verdict excepted), 56 x exit 0, check-cli-command-ids included\nchanged lines 2070 (+2068 / -2), 6 files: under the 3000-line human-merge threshold\n```\n</details>\n\nThe branch is one commit on `main` `0e882086` (after #30870 landed). Its diff has the same patch id (`6eede7e4`) as `02754089`, where the derived families, `pnpm lint` and the docs & code guards lane ran with settings A's head beneath it. The whole-tree build, the package suite and the three i18n / command-id checks were re-run on this head, after main's #30836 / #30838 / #30867 / #30874 changed `@objectstack/objectql` and `@objectstack/spec`; none of them touches `service-settings`.\n\nDogfood: not run — content-only package PR, no `!` in the title and no `(narrowing)` arm.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cya5ej5GQV86RPbRPK)_\n"
+}

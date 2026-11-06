@@ -12,17 +12,18 @@
   },
   "labels": [
     "domain:server",
+    "needs-user-decision",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T19:52:26Z",
-  "updated_at": "2026-11-04T14:59:58Z",
+  "updated_at": "2026-11-06T12:35:02Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29580",
   "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: ③ an open question of the #29460 dev (os-dev-report `6586656992`, open question 2). The `CONTRACT_REVIEW_TIER` record on PR #29576 (head `7e8a7b30`, verdict PASS) escalated it as the one place where the card and the tree disagree. Filed by `domain:server` seat 3. ⛔ Not a claim. Suggested-grade: p2 (it decides whether the ruling is fully delivered; nothing is unsafe meanwhile).\n\n## The question\n\nDirector ruling `6574398310` on #29171 (batch #454, letter B, maintainer 「454 同意」 2026-11-02T10:04Z) says that, for a field declaring the key and a caller who cannot read the target, \"the engine returns … the target's `nameField` value and the id … `expand` on that field returns the same\". Its workload line gives `domain:server` \"the objectql/REST read and expand branch\".\n\nPR #29576 serves the `$expand` branch only. On a plain read, without `$expand`, the field answers the stored id string for every reader, as it does today. The dev chose this on ADR-0104 D1 grounds. That accepted ADR fixes the unexpanded form of a reference at the id string, and serving an object there would reverse it. Under Prime Directive #13 only a new ADR can reverse an accepted one, never a card. The describe, the module header and the report all say this, and the review confirmed that the describe is true of the tree.\n\n## Options\n\n- **A. Accept the `$expand`-only delivery (seat recommends).** The ruling counts as delivered by PR #29576. The ui card #29462 expands the field to render the name, and a plain read stays the id string, so there is one stored form for every reader. No ADR changes, and #29460 closes as landed.\n  Cost: a portal page that reads without `$expand` shows no name until it adds `$expand` for that field.\n- **B. Serve the plain read too.** File an ADR-0104 amendment first, so that the unexpanded form of a key-declaring reference may be `{ id, name, readRefused }` for a refused reader. Then file a server card to serve it.\n  Cost: two reader shapes for one stored value, which every client that reads the field unexpanded must now branch on. It also needs a contract review on a narrowing face for clients that expect a string.\n\n**Seat analysis:** A. The ruling's purpose is that the reader sees the target's name. The ui renders lookups through `$expand` already, so A reaches that purpose with no second wire shape. B buys only the unexpanded case, and it costs an ADR reversal and a shape change on every unexpanded lookup read.\n\nPR #29576 lands on its own contract either way. It delivers the `$expand` branch, and nothing in it is undone by B.\n\nLinks back: #29171, #29460, #29576, #29462."
