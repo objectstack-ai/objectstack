@@ -246,8 +246,10 @@ The provider stack for a third-party app comes from the packages that read it:
   `auto` / `light` / `dark` mode.
 - `MetadataProvider` / `useMetadata` (`@object-ui/app-shell`) — apps / objects /
   dashboards / pages metadata from the API.
-- `UploadProvider` / `useUpload` (`@object-ui/providers`) — the upload adapter the
-  file and image fields upload through.
+- `UploadProvider` / `useUpload` (`@object-ui/fields`) — the adapter file and image
+  fields upload through; `createObjectStackUploadAdapter`
+  (`@object-ui/data-objectstack`) is ObjectStack's. Its contract `UploadAdapter` /
+  `UploadOptions` / `UploadResult` is `@object-ui/types`'s; `fields` re-exports it.
 
 ```tsx
 import { SchemaRendererProvider, ThemeProvider } from '@object-ui/react';
@@ -304,7 +306,7 @@ a private workspace demo app, not a published package.
 |------|-----|
 | Bare renderer in existing app | `@object-ui/react` |
 | Need the data-source / theme providers | `SchemaRendererProvider`, `ThemeProvider` from `@object-ui/react` |
-| Need file / image uploads | + `@object-ui/providers` (`UploadProvider`) |
+| Need file / image uploads | + `@object-ui/fields` (`UploadProvider`), `@object-ui/data-objectstack` (adapter) |
 | Need shell + object/dashboard/page/record views | + `@object-ui/app-shell` |
 | Need full admin console (sidebar, system hub, navigation) | study `apps/console` patterns |
 | Need a CLI-driven dev server | `@object-ui/cli` (`objectui dev`) |
@@ -337,12 +339,7 @@ Access in code: `import.meta.env.VITE_API_BASE_URL`
 
 ### Module not found errors
 - Run `pnpm install` to ensure workspace links are resolved
-- Run `pnpm build` — downstream packages need built `dist/` directories
 - Check `tsconfig.json` path aliases match project structure
-
-### Turbo cache issues
-- `pnpm turbo run build --force` to bypass cache
-- Delete `.turbo/` directory for clean state
 
 ### Vite HMR not working
 - Check `vite.config.ts` has `react()` plugin

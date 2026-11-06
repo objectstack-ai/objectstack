@@ -493,6 +493,26 @@ export const ERROR_CODE_LEDGER = {
     // direct-mount door of the same route; the two doors now state the same
     // failure the same way. Provenance, not identity (see above).
     'PACKAGE_DELETE_PARTIAL',
+    // [ADR-0141 Open item 4, ruling A on #30379] 409 from the package disable
+    // door (`PATCH /packages/:id/disable`, `domains/packages.ts`): the disable
+    // is refused because a validation rule of a package that stays enabled
+    // (any severity; an app's `.custom` pair, where tenant-written rules live,
+    // included) reads a field this package adds through `objectExtensions`.
+    // Disabling it would withhold that field, and every write to the object
+    // would then fail that rule. The refusal names each package · object ·
+    // rule triple it found, one or several. The remedy: disable or change the
+    // reading rule first, or keep this package enabled. A formula over the
+    // field is no reason to refuse: it answers `null`. Registered AHEAD of its
+    // producer (the `ACTION_CONFIRMATION_REQUIRED` split shape): the door's
+    // scan is #30379's and asserts this string by value. ⛔ NOT a `*_DISABLED`
+    // re-spelling: those name WHICH thing is off, and this names WHY a disable
+    // is refused, and the rule it names is what the operator acts on. Nor a
+    // mirror of `DEPENDENCY_MISSING`: no `manifest.dependencies` entry is
+    // read, so "RESTRICTED" (the standard `DELETE_RESTRICTED` word for a 409
+    // refused over a dependent) carries `BY_VALIDATION_RULE` to say which
+    // dependent. PACKAGE and DISABLE are tokens no standard member carries, so
+    // it needs no waiver.
+    'PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE',
     'PROJECT_MEMBERSHIP_REQUIRED',
     'RECORD_GONE',                // share link resolves but the record was deleted
     'ROUTE_NOT_FOUND',

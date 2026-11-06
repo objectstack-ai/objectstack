@@ -128,12 +128,21 @@ document **whole** for every read that serves the base's name
   override, `effective` = the override), the list scoped to the base and the
   environment-wide list all serve the override, stamped `_packageId: 'hotcrm'`. The
   declaration counts only from the pair — the stored row's own `package_id` must be
-  `hotcrm.custom` — and for every type of `OVERRIDABLE_METADATA_TYPES` (`@objectstack/spec/kernel`)
-  but `action`: a `view`, `dashboard`, `report`, `email_template`, `translation`, `flow`,
-  `page`, `app`, `dataset`, `doc`, `book` or `mapping`. An `action` override waits for
-  ADR-0146 D9's conditions and is not served yet. A declaration from any other package is ignored.
+  `hotcrm.custom` — and for every type of `OVERRIDABLE_METADATA_TYPES` (`@objectstack/spec/kernel`):
+  a `view`, `dashboard`, `report`, `email_template`, `translation`, `flow`, `action`,
+  `page`, `app`, `dataset`, `doc`, `book` or `mapping`. A declaration from any other package is ignored.
   The import door and the connector pull read a named `mapping` through the by-name read,
   so they run the pair's mapping.
+- **An `action` override changes what runs, never who may run it** (ADR-0146 D9). It is served
+  wherever the action is drawn or run (the object read's `actions`, the run doors) and replaces
+  the base's behaviour (`type`, `target`, `body`, `params`, `label`, `visible`, …) whole, for the
+  people who could already run the base's action. It keeps the base's `objectName`: every door
+  matches the base's action as `OBJECT:NAME`, so an override that moves it to another object is
+  refused `403 NOT_OVERRIDABLE` with rule `declared_package_ships_no_such_item`. An override that
+  drops a capability from the base's `requiredPermissions`, sets `ai.exposed: true` on an action
+  the base keeps off the agent surface, or drops the base's `ai.requiresConfirmation: true` is
+  refused `403 NOT_OVERRIDABLE` with rule `declared_action_widens_access`; adding a capability
+  is allowed.
 - **Removing the override brings the base's back.** `DELETE /meta/:type/:name?package=hotcrm.custom`
   ("Restore package original") deletes the pair's row, for every type above, and every read
   then serves the base's document again. A `DELETE` naming `hotcrm` removes nothing of the pair's.

@@ -4271,6 +4271,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.flowProblems.connectRefused.missingTarget': 'Cannot connect: this flow has no node "{target}".',
   'engine.flowProblems.connectRefused.self': 'Cannot connect "{source}" to itself.',
   'engine.flowProblems.connectRefused.repeat': '"{source}" already connects to "{target}". Select that connection to change it.',
+  // objectstack#30038 — the publish refusal of a flow bound to an object outside its package's closure,
+  // worded from the served entry's rule id and path (`previews/flow-closure-refusal.ts`).
+  'engine.flowProblems.closureRefusal.triggerObject': 'This flow starts on records of "{object}", an object this package cannot use. A package can use only its own objects, the objects of the packages it declares as dependencies, and system objects. Pick an object from the list, or declare a dependency on the package that defines "{object}".',
+  'engine.flowProblems.closureRefusal.scanObject': 'This flow\u2019s scheduled scan reads records of "{object}", an object this package cannot use. A package can use only its own objects, the objects of the packages it declares as dependencies, and system objects. Pick an object from the list, or declare a dependency on the package that defines "{object}".',
+  'engine.flowProblems.closureRefusal.inputObject': 'Input "{input}" takes a record of "{object}", an object this package cannot use. A package can use only its own objects, the objects of the packages it declares as dependencies, and system objects. Pick an object from the list for this input, or declare a dependency on the package that defines "{object}".',
   'engine.repeater.empty': 'No items. Click + to add.',
   'engine.cancel': 'Cancel',
   'engine.close': 'Close',

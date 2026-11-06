@@ -341,3 +341,36 @@ describe('[#30542] the install door judges a declared action override against th
         expect([saved, ledger]).toEqual([[], []]);
     });
 });
+
+/**
+ * [#30623] An `action` is keyed `<objectName>:<name>`: a pair's declared
+ * override of an action its base ships on another object is refused
+ * `declared_package_ships_no_such_item`, and the refusal names both objects
+ * and the base action's `objectName` to keep, in the judge's one sentence.
+ */
+describe('[#30623] the install door names the object a moved action override left', () => {
+    const overrides = { package: BASE, basedOn: '1.0.0' };
+    const holdings: Holdings = { [BASE]: { action: [{ name: 'crm_close', objectName: 'crm_account', label: 'Close' }] } };
+    const pairOf = (action: Record<string, unknown>) =>
+        ({ id: PAIR, version: '1.0.0', namespace: 'crm_custom', dependencies: deps(BASE), actions: [action] });
+    const messageOf = (res: any) => res.payload?.error?.details?.refusals?.[0]?.message as string;
+
+    it('an override of crm_account:crm_close declared on crm_lead names both objects and keeps objectName: crm_account', async () => {
+        const { res, saved, ledger } = await install(pairOf({ name: 'crm_close', objectName: 'crm_lead', label: 'Ours', overrides }), [{ id: BASE }], holdings);
+        expect(res.status, JSON.stringify(res.payload)).toBe(403);
+        expect(res.payload?.error?.code).toBe('NOT_OVERRIDABLE');
+        expect(refusedOf(res)).toEqual([['action', 'crm_close', 'declared_package_ships_no_such_item']]);
+        expect(messageOf(res).split('. ')[0]).toBe(
+            `'action/crm_close' declares an override of '${BASE}' on object 'crm_lead', but '${BASE}' ships its action 'crm_close' on object 'crm_account'`);
+        expect(messageOf(res)).toContain("keep the base action's `objectName: 'crm_account'` in the override");
+        expect([saved, ledger]).toEqual([[], []]);
+    });
+
+    it('CONTROL: a name the base does not ship at all keeps the name sentence', async () => {
+        const { res } = await install(pairOf({ name: 'crm_reopen', objectName: 'crm_account', label: 'Ours', overrides }), [{ id: BASE }], holdings);
+        expect(res.status, JSON.stringify(res.payload)).toBe(403);
+        expect(refusedOf(res)).toEqual([['action', 'crm_reopen', 'declared_package_ships_no_such_item']]);
+        expect(messageOf(res).split('. ')[0]).toBe(`'action/crm_reopen' declares an override of '${BASE}', which ships no action named 'crm_reopen'`);
+        expect(messageOf(res)).toContain('or correct the name');
+    });
+});

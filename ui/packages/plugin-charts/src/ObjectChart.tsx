@@ -559,7 +559,7 @@ export const ObjectChart = (props: ObjectChartProps) => {
     fieldByDim: Record<string, string> | null;
   } | null>(null);
   // Host-provided "open in list" navigation for the drill escape hatch.
-  const { openRecordList } = useDrillNavigation();
+  const { openRecordList, canOpenRecordList } = useDrillNavigation();
   const tt = useSafeTranslate();
   // The active UI language, for `pickLocalized` on the drill heading below.
   // Read HERE rather than at the read site because that site lives inside
@@ -1228,15 +1228,18 @@ export const ObjectChart = (props: ObjectChartProps) => {
   //
   // Documented fallback, same as the drawer's: when the host wired no
   // `DrillNavigationContext.openRecordList` there is nowhere to navigate, so the
-  // drill degrades to the in-place drawer exactly as the JSDoc promises. The
-  // header's "Open in list" escape hatch stays independent of `target`.
+  // drill degrades to the in-place drawer exactly as the JSDoc promises; so does
+  // a host whose `canOpenRecordList` says its list route cannot carry this drill
+  // filter exactly (a wider list than the clicked segment is no destination).
+  // The header's "Open in list" escape hatch stays independent of `target`.
   const navigateOnly =
     !onSegmentClick &&
     !!drillEvent &&
     !drillRefused &&
     !!schema.objectName &&
     drillDown?.target === 'navigate' &&
-    !!openRecordList;
+    !!openRecordList &&
+    (!canOpenRecordList || canOpenRecordList(schema.objectName, drillFilter));
   useEffect(() => {
     if (!navigateOnly) return;
     openRecordList!(schema.objectName as string, drillFilter);
@@ -1685,8 +1688,12 @@ export const ObjectChart = (props: ObjectChartProps) => {
       </div>
     );
     // Escape hatch — escalate this segment peek to the object's full list page,
-    // scoped by the same filter. Shown only when the host wired navigation.
-    const escapeHatch = openRecordList && schema.objectName ? (
+    // scoped by the same filter. Shown only when the host wired navigation and
+    // its list route can say that filter exactly (`canOpenRecordList`).
+    const escapeHatch =
+      openRecordList &&
+      schema.objectName &&
+      (!canOpenRecordList || canOpenRecordList(schema.objectName, merged)) ? (
       <Button
         type="button"
         variant="ghost"

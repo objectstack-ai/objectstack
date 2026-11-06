@@ -6,32 +6,84 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+// A primitive whose sub-parts nothing outside this package imports is
+// re-exported as a named list, not `export *` (objectstack#25921): the parts
+// left off stay in their module for this package's own renderers.
 export * from './accordion';
-export * from './alert-dialog';
+export {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from './alert-dialog';
 export * from './alert';
 export * from './aspect-ratio';
 export * from './avatar';
 export * from './badge';
-export * from './breadcrumb';
+export {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+} from './breadcrumb';
 export * from './button';
 export * from './calendar';
 export * from './card';
-export * from './carousel';
+export { Carousel, type CarouselApi } from './carousel';
 export * from './checkbox';
 export * from './collapsible';
-export * from './command';
-export * from './context-menu';
+export {
+  Command,
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from './command';
+export {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from './context-menu';
 export * from './dialog';
-export * from './drawer';
+export {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from './drawer';
 export * from './dropdown-menu';
-export * from './form';
+export {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from './form';
 export * from './hover-card';
-export * from './input-otp';
 export * from './input';
 export * from './label';
-export * from './menubar';
-export * from './navigation-menu';
-export * from './pagination';
+export { Menubar } from './menubar';
+export { Pagination } from './pagination';
 export * from './popover';
 export * from './progress';
 export * from './radio-group';
@@ -39,7 +91,15 @@ export * from './radio-group';
 // and exporting them from both places would collide (TS2308) — `src/index.ts`
 // star-exports `./ui` and `./custom` side by side.
 export * from './scroll-area';
-export * from './select';
+export {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from './select';
 export * from './separator';
 export * from './sheet';
 export * from './sidebar';
@@ -48,10 +108,17 @@ export * from './slider';
 export * from './sonner';
 export { Toaster } from './sonner';
 export * from './switch';
-export * from './table';
+export {
+  Table,
+  TableBody,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from './table';
 export * from './tabs';
 export * from './textarea';
 export * from './toggle-group';
 export * from './toggle';
 export * from './tooltip';
-export * from './typography';

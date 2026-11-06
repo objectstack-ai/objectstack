@@ -30,12 +30,17 @@
  * lock out, and it is let through.
  *
  * The way back when locked out anyway — a list saved from another address, or
- * an address that changed — is the settings env override every auth key has:
- * `OS_AUTH_ALLOWED_IP_RANGES` set to an empty value, then a restart. The
- * refusal names it.
+ * an address that changed — is the settings env override every auth key has,
+ * in four steps, and the refusal names them: start the server with
+ * `OS_AUTH_ALLOWED_IP_RANGES` set to an empty value (the override wins over
+ * the stored list, so the gate is open), sign in, clear the stored list (a
+ * settings write of `null` to the key, which the override lets through,
+ * #30385), then remove the variable. Removing it without the clear brings the
+ * stored list back at the next restart.
  */
 
 import { resolveLocale } from '@objectstack/core';
+import type { SettingsCopyLocale } from './settings-copy-locale.js';
 import { ipMatchesRange, type AuthManager } from './auth-manager.js';
 import { FORWARDED_CLIENT_ADDRESS_HEADERS } from './client-address-forwarding.js';
 
@@ -111,14 +116,18 @@ export interface AllowedIpRangesWriteRefusal {
   constraint: { clientAddress: string | null };
 }
 
-interface RefusalCopy {
+export interface AllowedIpRangesRefusalCopy {
   outside(address: string): string;
   undetermined: string;
   recovery: string;
 }
 
-/** One entry per locale the settings bundle ships. */
-const COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', RefusalCopy> = {
+/**
+ * One entry per language on the platform locale table, the four served first
+ * under their older codes; `resolveLocale` reads a caller's code through that
+ * table (`zh-TW` → `zh-Hant`).
+ */
+export const ALLOWED_IP_RANGES_REFUSAL_COPY: Record<SettingsCopyLocale, AllowedIpRangesRefusalCopy> = {
   en: {
     outside: (address) =>
       `No entry in this list matches ${address}, the address you are connected from, so saving it would refuse your `
@@ -127,7 +136,10 @@ const COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', RefusalCopy> = {
       'The server cannot establish the address you are connected from, and while any list is set it refuses every '
       + 'such request, your own next sign-in included. Save the list from a connection whose address the server can '
       + 'establish.',
-    recovery: ` If you are locked out, start the server with ${ALLOWED_IP_RANGES_ENV} set to an empty value.`,
+    recovery:
+      ` If you are locked out, start the server with ${ALLOWED_IP_RANGES_ENV} set to an empty value, sign in, `
+      + 'clear the stored list with a settings request that sets allowed_ip_ranges to null '
+      + '(PUT /api/settings/auth), then remove the variable.',
   },
   'zh-CN': {
     outside: (address) =>
@@ -136,7 +148,9 @@ const COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', RefusalCopy> = {
     undetermined:
       '服务器无法确定你当前连接所用的地址；只要设置了列表，这样的请求都会被拒绝，你自己下一次登录也不例外。'
       + '请在服务器能确定地址的连接上保存。',
-    recovery: `如果已被锁在外面，可将环境变量 ${ALLOWED_IP_RANGES_ENV} 设为空值后重启服务器。`,
+    recovery:
+      `如果已被锁在外面：将环境变量 ${ALLOWED_IP_RANGES_ENV} 设为空值后重启服务器并登录，`
+      + '用一次把 allowed_ip_ranges 设为 null 的设置请求（PUT /api/settings/auth）清除已保存的列表，再去掉该环境变量。',
   },
   'ja-JP': {
     outside: (address) =>
@@ -145,7 +159,10 @@ const COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', RefusalCopy> = {
     undetermined:
       'サーバーは現在の接続のアドレスを確定できません。リストが設定されている間はそのようなリクエストはすべて拒否され、'
       + 'ご自身の次回のサインインも同様です。サーバーがアドレスを確定できる接続から保存してください。',
-    recovery: `締め出された場合は、環境変数 ${ALLOWED_IP_RANGES_ENV} を空の値にしてサーバーを再起動してください。`,
+    recovery:
+      `締め出された場合は、環境変数 ${ALLOWED_IP_RANGES_ENV} を空の値にしてサーバーを再起動してサインインし、`
+      + 'allowed_ip_ranges を null にする設定リクエスト（PUT /api/settings/auth）で保存済みのリストを消去してから、'
+      + '環境変数を削除してください。',
   },
   'es-ES': {
     outside: (address) =>
@@ -156,15 +173,90 @@ const COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', RefusalCopy> = {
       'El servidor no puede determinar la dirección desde la que está conectado y, mientras haya una lista, rechaza '
       + 'todas esas solicitudes, incluido su propio próximo inicio de sesión. Guarde la lista desde una conexión cuya '
       + 'dirección el servidor pueda determinar.',
-    recovery: ` Si queda bloqueado, inicie el servidor con ${ALLOWED_IP_RANGES_ENV} con un valor vacío.`,
+    recovery:
+      ` Si queda bloqueado, inicie el servidor con ${ALLOWED_IP_RANGES_ENV} con un valor vacío, inicie sesión, `
+      + 'borre la lista guardada con una solicitud de ajustes que ponga allowed_ip_ranges a null '
+      + '(PUT /api/settings/auth) y después quite la variable.',
+  },
+  'zh-Hant': {
+    outside: (address) =>
+      `這份清單中沒有任何一項與你目前連線所用的位址 ${address} 相符，儲存後你自己下一次登入就會被拒絕。`
+      + '請把你的位址或所在網段加進清單，或在清單能相符的位址上儲存。',
+    undetermined:
+      '伺服器無法確定你目前連線所用的位址；只要設定了清單，這樣的請求都會被拒絕，你自己下一次登入也不例外。'
+      + '請在伺服器能確定位址的連線上儲存。',
+    recovery: `如果已被鎖在外面，可將環境變數 ${ALLOWED_IP_RANGES_ENV} 設為空值後重新啟動伺服器。`,
+  },
+  ar: {
+    outside: (address) =>
+      `لا يطابق أي إدخال في هذه القائمة العنوان ${address} الذي تتصل منه، لذا فإن حفظها سيرفض تسجيل دخولك التالي `
+      + 'أنت نفسك. أضف عنوانك أو نطاقه إلى القائمة، أو احفظ القائمة من عنوان تطابقه.',
+    undetermined:
+      'لا يستطيع الخادم تحديد العنوان الذي تتصل منه، وما دامت هناك قائمة مضبوطة فإنه يرفض كل طلب من هذا النوع، '
+      + 'بما في ذلك تسجيل دخولك التالي. احفظ القائمة من اتصال يستطيع الخادم تحديد عنوانه.',
+    recovery: ` إذا مُنعت من الدخول، فشغّل الخادم مع ضبط ${ALLOWED_IP_RANGES_ENV} على قيمة فارغة.`,
+  },
+  fr: {
+    outside: (address) =>
+      `Aucune entrée de cette liste ne correspond à ${address}, l’adresse depuis laquelle vous êtes connecté : `
+      + 'l’enregistrer refuserait votre propre prochaine connexion. Ajoutez votre adresse ou sa plage à la liste, ou '
+      + 'enregistrez la liste depuis une adresse qu’elle autorise.',
+    undetermined:
+      'Le serveur ne parvient pas à établir l’adresse depuis laquelle vous êtes connecté et, tant qu’une liste est '
+      + 'définie, il refuse toutes ces requêtes, y compris votre propre prochaine connexion. Enregistrez la liste '
+      + 'depuis une connexion dont le serveur peut établir l’adresse.',
+    recovery: ` Si vous êtes bloqué, démarrez le serveur avec ${ALLOWED_IP_RANGES_ENV} défini sur une valeur vide.`,
+  },
+  'pt-BR': {
+    outside: (address) =>
+      `Nenhuma entrada desta lista corresponde a ${address}, o endereço do qual você está conectado, então salvá-la `
+      + 'recusaria o seu próprio próximo login. Adicione o seu endereço ou a faixa dele à lista, ou salve a lista a '
+      + 'partir de um endereço que ela aceite.',
+    undetermined:
+      'O servidor não consegue determinar o endereço do qual você está conectado e, enquanto houver uma lista '
+      + 'definida, recusa todas essas solicitações, inclusive o seu próprio próximo login. Salve a lista a partir de '
+      + 'uma conexão cujo endereço o servidor consiga determinar.',
+    recovery: ` Se você ficar bloqueado, inicie o servidor com ${ALLOWED_IP_RANGES_ENV} definido como um valor vazio.`,
+  },
+  ru: {
+    outside: (address) =>
+      `Ни одна запись этого списка не соответствует адресу ${address}, с которого вы подключены, поэтому после `
+      + 'сохранения ваш собственный следующий вход будет отклонён. Добавьте в список свой адрес или его диапазон '
+      + 'либо сохраните список с адреса, который ему соответствует.',
+    undetermined:
+      'Сервер не может определить адрес, с которого вы подключены, и, пока задан любой список, отклоняет все такие '
+      + 'запросы, включая ваш собственный следующий вход. Сохраните список через подключение, адрес которого сервер '
+      + 'может определить.',
+    recovery: ` Если доступ уже потерян, запустите сервер с пустым значением ${ALLOWED_IP_RANGES_ENV}.`,
+  },
+  de: {
+    outside: (address) =>
+      `Kein Eintrag dieser Liste passt zu ${address}, der Adresse, von der aus Sie verbunden sind. Nach dem Speichern `
+      + 'würde daher Ihre eigene nächste Anmeldung abgewiesen. Fügen Sie Ihre Adresse oder deren Bereich der Liste '
+      + 'hinzu oder speichern Sie die Liste von einer Adresse aus, die sie zulässt.',
+    undetermined:
+      'Der Server kann die Adresse, von der aus Sie verbunden sind, nicht ermitteln, und solange eine Liste gesetzt '
+      + 'ist, weist er alle solchen Anfragen ab, auch Ihre eigene nächste Anmeldung. Speichern Sie die Liste über eine '
+      + 'Verbindung, deren Adresse der Server ermitteln kann.',
+    recovery: ` Wenn Sie ausgesperrt sind, starten Sie den Server mit ${ALLOWED_IP_RANGES_ENV} auf einem leeren Wert.`,
+  },
+  ko: {
+    outside: (address) =>
+      `이 목록에는 현재 접속한 주소 ${address}와 일치하는 항목이 없어, 저장하면 본인의 다음 로그인이 거부됩니다. `
+      + '본인의 주소나 그 대역을 목록에 추가하거나, 목록과 일치하는 주소에서 저장하세요.',
+    undetermined:
+      '서버가 현재 접속한 주소를 확인할 수 없으며, 목록이 설정되어 있는 동안에는 이러한 요청을 모두 거부합니다. '
+      + '본인의 다음 로그인도 마찬가지입니다. 서버가 주소를 확인할 수 있는 연결에서 목록을 저장하세요.',
+    recovery: ` 접속이 차단되었다면 ${ALLOWED_IP_RANGES_ENV}를 빈 값으로 설정한 채 서버를 시작하세요.`,
   },
 };
 
-const COPY_LOCALES = Object.keys(COPY);
+const COPY_LOCALES = Object.keys(ALLOWED_IP_RANGES_REFUSAL_COPY);
 
-function copyFor(locale: string | undefined): RefusalCopy {
+/** The refusal copy for a caller's locale: through the platform locale table, else English. */
+export function allowedIpRangesRefusalCopy(locale: string | undefined): AllowedIpRangesRefusalCopy {
   const picked = locale ? resolveLocale(locale, COPY_LOCALES) : undefined;
-  return COPY[(picked ?? 'en') as keyof typeof COPY];
+  return ALLOWED_IP_RANGES_REFUSAL_COPY[(picked ?? 'en') as SettingsCopyLocale];
 }
 
 /**
@@ -184,7 +276,7 @@ export function allowedIpRangesWritePredicate(
     if (!mgr) return undefined;
     const address = judgedClientAddress(mgr, transport);
     if (address && ranges.some((range) => ipMatchesRange(address, range))) return undefined;
-    const copy = copyFor(locale);
+    const copy = allowedIpRangesRefusalCopy(locale);
     return {
       message: (address ? copy.outside(address) : copy.undetermined) + copy.recovery,
       constraint: { clientAddress: address ?? null },

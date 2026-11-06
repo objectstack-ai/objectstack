@@ -4,8 +4,8 @@
  * [#29985 codemod] The "Save refusals, saveMetaItem, saveConflict,
  * migrateStoredMetadata" facet of `ObjectStackProtocolImplementation`: the
  * bodies of `metaTypeNamespaceExists`, `viewContainerNameCollisionRefusal`,
- * `saveMetaItemUnaudited`, `migrateStoredMetadata` moved out of `protocol.ts`
- * whole by `scripts/codemod-split-protocol.mjs`.
+ * `saveMetaItem`, `saveMetaItemUnaudited`, `migrateStoredMetadata` moved out of
+ * `protocol.ts` whole by `scripts/codemod-split-protocol.mjs`.
  *
  * A MOVE, not a redesign. `ProtocolSaveFacet` is a stateless facet over the host
  * (ruling 6624345766): each static method below is the body of the class
@@ -77,6 +77,8 @@ import {
 } from './protocol-write-face.js';
 import { isNonCanonicalStoredType } from './protocol-stored-overlay-types.js';
 import type { SaveMetaItemRequest } from './protocol-door-requests.js';
+import { withRefusalAudit } from './protocol-refusal-audit.js';
+import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 
@@ -296,6 +298,30 @@ export class ProtocolSaveFacet {
             }
         }
         return undefined;
+    }
+
+    /** The body of `ObjectStackProtocolImplementation#saveMetaItem`; the method's docblock there is its contract. */
+    static async saveMetaItem(host: Pick<ProtocolHost, 'recordMetadataAudit' | 'saveMetaItemUnaudited'>, request: SaveMetaItemRequest): Promise<{
+            state: "draft" | "active";
+            message: string;
+            advisories?: {
+                rule: string;
+                path: string;
+                where: string;
+                message: string;
+                hint: string;
+                severity: "error" | "info" | "warning";
+            }[] | undefined;
+            projectionApplied?: MutationProjectionOutcome | undefined;
+            success: boolean;
+            version: string;
+            seq: number;
+        }> {
+        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
+        return withRefusalAudit((entry) => host.recordMetadataAudit(entry), {
+            operation: 'save', type: request.type, name: request.name, actor: request.actor,
+            source: request.source ?? 'protocol.saveMetaItem',
+        }, () => host.saveMetaItemUnaudited(request));
     }
 
     /** [#28355] The body of {@link saveMetaItem} before its refusal audit; that method's docblock is the contract. */
@@ -2070,7 +2096,12 @@ export class ProtocolSaveFacet {
                     // [#6602] The SAME scope the row was just written with.
                     organizationId: null,
                 });
-                await host.ensureObjectStorage(request.type, request.name);
+                // [#30635] A refused storage sync is told to the caller too:
+                // one `warning` on this answer's `advisories`, after the
+                // gate's findings and the save's own notices. The save is not
+                // failed (the row is written, registered and served).
+                const storageRefused = await host.ensureObjectStorage(request.type, request.name);
+                if (storageRefused) saveNotices.push(storageRefused);
             }
             // ADR-0010 — success audit (best-effort).
             await host.recordMetadataAudit({

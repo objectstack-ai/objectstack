@@ -63,7 +63,9 @@ async function serve(input: RequestInfo | URL, init?: RequestInit): Promise<Resp
       body = { type: seg[0], items: q.get('preview') === 'draft' ? [] : server.published };
     } else if (seg.length === 3 && seg[2] === 'layers') {
       const row = server.published.find((o) => o.name === seg[1]);
-      if (row) body = { code: row, overlay: null, effective: row };
+      // objectstack#29793 — the stored draft is the `draft` layer, served for a draft-only name too.
+      const draft = server.drafts.get(seg[1]) ?? null;
+      if (row || draft) body = { code: row ?? null, overlay: null, effective: row ?? null, draft };
       else [status, body] = [404, { error: { code: 'NOT_FOUND', message: 'absent' } }];
     } else if (seg.length === 2 && q.get('state') === 'draft') {
       const row = server.drafts.get(seg[1]);

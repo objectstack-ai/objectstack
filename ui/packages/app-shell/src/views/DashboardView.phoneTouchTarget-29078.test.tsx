@@ -29,7 +29,9 @@ vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
   useLocation: () => ({ pathname: '/apps/crm/dashboard/ops_board', search: '' }),
 }));
-vi.mock('./useOpenRecordList', () => ({ useOpenRecordList: () => vi.fn() }));
+vi.mock('./useOpenRecordList', () => ({
+  useRecordListDrillNavigation: () => ({ openRecordList: vi.fn(), canOpenRecordList: () => true }),
+}));
 vi.mock('./MetadataInspector', () => ({
   MetadataPanel: () => null,
   useMetadataInspector: () => ({ showDebug: false }),

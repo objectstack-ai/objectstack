@@ -104,9 +104,9 @@
  *   the `currency` type (#19629, ruling 5791803339 letter B) and refused at
  *   parse, so a currency field declares no `scale` for this table to default.
  *   Ruling 5805782503 (letter 乙) words the refusal's remedy: a currency's
- *   decimal places are the currency's, not a setting — its ISO 4217 minor
- *   unit decides its display. The amount's cell resolves its fraction
- *   digits from the currency's own ISO 4217 minor-unit count and never read
+ *   decimal places are the currency's, not a setting — its CLDR fraction
+ *   digits decide its display. The amount's cell resolves its fraction
+ *   digits from the currency's own CLDR fraction-digit count and never read
  *   the key; when the ruling landed (the renderer reading is recorded in
  *   `liveness/field.json`, row `scale`), the
  *   grid summary footer and the dashboard metric widget did read it on a

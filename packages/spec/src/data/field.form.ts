@@ -78,8 +78,8 @@ export const fieldForm = defineForm({
         // #19992 — the help text follows the key's describe ("Total digits")
         // and the object designer's quick-add row (`object.form.ts`): the old
         // "Decimal places (e.g., 2 for $10.50)" taught the one reading the
-        // contract refuses. A currency's decimal places are its ISO 4217 minor
-        // unit and are declared nowhere.
+        // contract refuses. A currency's decimal places are its CLDR fraction
+        // digits and are declared nowhere.
         { field: 'precision', visibleWhen: "data.type == 'currency' || data.type == 'number'", helpText: 'Total digits' },
         { field: 'scale', visibleWhen: "data.type == 'number'", helpText: 'Number of decimal digits' },
         // `useGrouping` is shown once it is enforced (ruling 5916202706: offer

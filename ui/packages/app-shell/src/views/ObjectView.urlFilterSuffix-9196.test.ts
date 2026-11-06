@@ -78,7 +78,15 @@ const objectRoute = (qs: string) => parseUrlEqualityFilterTriples(new URLSearchP
 
 describe("objectui#9196 — the card's three rows, both readers, one run", () => {
   it('row 1 — an unknown operator suffix is dropped by BOTH readers', () => {
-    expect(dataSurface('filter[owners][contains]=u1')).toEqual([]);
+    // `[contains]` was this row's unknown suffix until objectstack#30743 gave
+    // the `/data` surface a text-operator spelling; `[like]` is still unknown
+    // to both.
+    expect(dataSurface('filter[owners][like]=u1')).toEqual([]);
+    expect(objectRoute('filter[owners][like]=u1')).toEqual([]);
+  });
+
+  it('row 1, after objectstack#30743 — `[contains]` executes on /data ONLY, and is dropped on the object route', () => {
+    expect(dataSurface('filter[owners][contains]=u1')).toEqual([['owners', 'contains', 'u1']]);
     expect(objectRoute('filter[owners][contains]=u1')).toEqual([]);
   });
 
@@ -160,6 +168,7 @@ describe('objectui#9196 — no emitted field name ever carries a bracket', () =>
     ]);
     expect(inputs.flatMap((qs) => dataSurface(qs))).toEqual([
       ['amount', '>=', '100'],
+      ['owners', 'contains', 'u1'],
       ['owners', '=', 'u1'],
       ['account.region', '=', 'NA'],
     ]);
