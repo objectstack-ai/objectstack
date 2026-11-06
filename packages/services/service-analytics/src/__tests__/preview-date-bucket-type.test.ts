@@ -251,7 +251,7 @@ describe('[#28852] a date bucket over a column that is not a date, on every face
   it('[#29304] still serves a plain dimension over a stored column alike on every face', async () => {
     for (const face of FACES) {
       const result = await ask(face, { dimensions: ['region'], measures: ['total'] });
-      const rows = (result.rows as Array<Record<string, unknown>>).map((r) => ({ ...r, total: Number(r.total) }));
+      const rows = (result.rows as Array<Record<string, unknown>>).map((r) => ({ region: r.region, total: Number(r.total) }));
       expect(rows.sort((a, b) => String(a.region).localeCompare(String(b.region))), face)
         .toEqual([{ region: 'amer', total: 100 }, { region: 'emea', total: 50 }]);
     }
