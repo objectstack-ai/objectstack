@@ -3723,6 +3723,9 @@ export class RestServer {
                     ? this.securityServiceProvider(await this.resolveRequestEnvironmentId(environmentId, req))
                     : undefined
             ),
+            // [#30126 row 12] A refusal's `errors.*` override, as the import
+            // runner's messages resolve theirs.
+            resolveMessageTranslator: () => this.resolveMessageTranslator(environmentId, req),
         };
     }
 

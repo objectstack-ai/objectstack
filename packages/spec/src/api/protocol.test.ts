@@ -1930,14 +1930,6 @@ describe('GetMetaItemsRequestSchema declares `names` — the batch by-names list
   it('types names as an optional string list, input and output alike', () => {
     expectTypeOf<GetMetaItemsRequest['names']>().toEqualTypeOf<string[] | undefined>();
   });
-
-  it('is declared ahead of its producer: the describe opens with the planned marker, never a tracker id', () => {
-    // No list door reads `names` yet; the change that serves it drops the
-    // marker and this pin with it.
-    const description = GetMetaItemsRequestSchema.shape.names.description ?? '';
-    expect(description).toMatch(/^\[PLANNED — not yet served\] /);
-    expect(description).not.toMatch(/#\d{3,}/);
-  });
 });
 
 describe('MetadataProtocol declares getMetaItemLayered', () => {

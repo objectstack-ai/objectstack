@@ -66,7 +66,7 @@
  */
 
 import type { AudienceCaller, Book, ResolvedBook, ResolverDoc } from '@objectstack/spec/system';
-import { preferredLocaleFromHeader } from '@objectstack/spec/system';
+import { preferredLocaleFromHeader, renderOperationMessage } from '@objectstack/spec/system';
 import { apiExposureDenialReason } from '@objectstack/spec/data';
 import { resolveObjectSortability } from '@objectstack/spec/api';
 import { canonicalMetaUrlType, pluralToSingular, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
@@ -143,7 +143,19 @@ export interface MetaReadGateAudienceSources {
      * gated audiences DENY (ADR-0049).
      */
     resolveSecurityService(): Promise<MetaReadGatePermissionSetResolver | undefined>;
+    /**
+     * [#30126 row 12] The deployment's `errors.*` override lookup (an
+     * `II18nService.t`-compatible function), or `undefined` when there is none —
+     * the hook `renderOperationMessage` reads first, as plugin-security's
+     * refusals hand it. Absent: the built-in catalog alone, still in the
+     * caller's locale. A rejection is read as "no override", never as a fault:
+     * a refusal's wording must not turn a 403 into a 500.
+     */
+    resolveMessageTranslator?(): Promise<MetaReadGateMessageTranslator | undefined>;
 }
+
+/** An `II18nService.t`-compatible lookup, as {@link MetaReadGateAudienceSources.resolveMessageTranslator} answers it. */
+export type MetaReadGateMessageTranslator = (key: string, locale: string, params?: Record<string, unknown>) => string;
 
 /** How a transport reads a whole metadata type (the list half of the ports). */
 export interface MetaReadGateListSource {
@@ -790,11 +802,44 @@ function callerSystemPermissions(ctx: MetaReadGateCaller | undefined): Set<strin
     return new Set<string>(Array.isArray(ctx.systemPermissions) ? ctx.systemPermissions : []);
 }
 
+/**
+ * [#30126 row 12] The sentence a `403 PERMISSION_DENIED` of this gate carries:
+ * the operation catalog's `permission_denied`, rendered in the caller's locale
+ * (`ExecutionContext.locale`, which the shared assembler resolved from the
+ * request's `Accept-Language`, then the `localization` settings) — the one
+ * catalog plugin-security's object and capability refusals render, ⛔ never a
+ * second one here. It names nothing, as that key never does
+ * (`operation-message.ts` states why): the caller already knows which app,
+ * dashboard or view they opened, and its API name (`com.objectstack.setup`)
+ * is exactly the vocabulary that must not reach a person. The name stays on
+ * the request URL.
+ *
+ * Resolution is `renderOperationMessage`'s: the deployment's
+ * `errors.permission_denied` override where the transport hands a lookup in,
+ * then the built-in catalog for the locale, then `en`.
+ */
+async function permissionDeniedMessage(
+    sources: MetaReadGateAudienceSources,
+    ctx: MetaReadGateCaller | undefined,
+): Promise<string> {
+    const locale = typeof ctx?.locale === 'string' && ctx.locale.length > 0 ? ctx.locale : undefined;
+    let translate: MetaReadGateMessageTranslator | undefined;
+    try {
+        translate = await sources.resolveMessageTranslator?.();
+    } catch {
+        translate = undefined;
+    }
+    return renderOperationMessage({ messageKey: 'permission_denied' }, { locale, translate });
+}
+
 /** [#22639] The by-name refusal of a list view or a dashboard the caller may not open — the app arm's whole refusal (#8013). */
-function audienceRefusal(kind: 'view' | 'dashboard', name: string): MetaItemReadRefusal {
+async function audienceRefusal(
+    sources: MetaReadGateAudienceSources,
+    ctx: MetaReadGateCaller | undefined,
+): Promise<MetaItemReadRefusal> {
     return {
         reason: 'audience-permission', status: 403, code: 'PERMISSION_DENIED',
-        message: `You do not have permission to open the '${name}' ${kind}.`,
+        message: await permissionDeniedMessage(sources, ctx),
     };
 }
 
@@ -1618,7 +1663,9 @@ const DOCS_HOLDER_MESSAGE = 'This documentation is limited to holders of a permi
 export function createMetaItemReadGate(
     sources: MetaItemReadGateSources,
     metaType: string,
-    name: string,
+    // [#30126 row 12] Read by no gate since the refusals stopped naming the
+    // item; kept so both transports' calls stay as they are.
+    _name: string,
     documents: readonly any[],
     policy: MetaReadGatePolicy,
 ): (document: any) => Promise<MetaItemReadVerdict> {
@@ -1632,6 +1679,8 @@ export function createMetaItemReadGate(
 
     if (metaType === 'app') {
         type AppGateInputs = {
+            /** [#30126 row 12] The caller, kept for the refusal's locale. */
+            ctx: MetaReadGateCaller;
             sysPerms: Set<string>;
             serviceGate?: (n: string) => boolean;
             servabilityGate?: NavServabilityGate;
@@ -1668,7 +1717,7 @@ export function createMetaItemReadGate(
             const docAudienceGate = authorExempt
                 ? undefined
                 : await resolveNavDocAudience(sources, documents);
-            return { sysPerms, serviceGate, servabilityGate, docAudienceGate, authorExempt };
+            return { ctx, sysPerms, serviceGate, servabilityGate, docAudienceGate, authorExempt };
         })());
         return async (document) => {
             if (document == null) return serve(document);
@@ -1690,7 +1739,7 @@ export function createMetaItemReadGate(
                 if (gated.withheld === 'permission') {
                     return refuse({
                         reason: 'app-permission', status: 403, code: 'PERMISSION_DENIED',
-                        message: `You do not have permission to open the '${name}' app.`,
+                        message: await permissionDeniedMessage(sources, gateInputs.ctx),
                     });
                 }
                 // [#18066] The transport's own absence answer, so this arm
@@ -1722,7 +1771,7 @@ export function createMetaItemReadGate(
             // whole refusal, author or not.
             const sysPerms = callerSystemPermissions(ctx);
             if (sysPerms && !holdsRequiredPermissions(document.requiredPermissions, sysPerms)) {
-                return refuse(audienceRefusal('dashboard', name));
+                return refuse(await audienceRefusal(sources, ctx));
             }
             if (policy.arms !== 'all') return serve(document);
             // ADR-0057 D10: gate dashboard widgets by `requiresService` (mirrors
@@ -1747,7 +1796,7 @@ export function createMetaItemReadGate(
             const gated = filterViewForUser(document, sysPerms, isAggregatedViewContainer);
             // ONE view the caller does not hold: refused whole, on every door,
             // author or not — the app arm's whole refusal.
-            if (gated == null) return refuse(audienceRefusal('view', name));
+            if (gated == null) return refuse(await audienceRefusal(sources, ctx));
             // A container's entries are pruned per caller; on a door that
             // honours ruling 5856774816's author exemption, a caller who may
             // write the container reads it as stored (see
@@ -2433,7 +2482,7 @@ export interface MetaItemQueryRefusal {
     readonly status: 400;
     readonly code: 'VALIDATION_ERROR';
     readonly message: string;
-    readonly rule: 'unknown-parameter' | 'repeated-parameter' | 'layered-member' | 'bracketed-parameter';
+    readonly rule: 'unknown-parameter' | 'repeated-parameter' | 'layered-member' | 'bracketed-parameter' | 'names-on-package';
 }
 
 /**
@@ -2525,9 +2574,11 @@ function repeatedOnceRefusal(
 }
 
 /**
- * [#23214] The `/meta` doors whose only query rule is ARITY: none of them
- * declares a closed query set, so recognition (rule 1 of
- * {@link metaItemQueryRefusal}) never applies to them.
+ * [#23214] The `/meta` doors that read their query under the ARITY rule. None
+ * of the last three declares a closed query set, so recognition (rule 1 of
+ * {@link metaItemQueryRefusal}) never applies to them; [#29236] the list
+ * declares one ({@link META_LIST_QUERY_PARAMS}), asked first, by
+ * {@link metaListQueryRefusal}.
  *  - `list` — `GET /meta/:type`;
  *  - `book-tree` — `GET /meta/book/:name/tree`;
  *  - `drafts` — `GET /meta/_drafts`;
@@ -2546,7 +2597,9 @@ export type MetaQueryArityDoor = 'list' | 'book-tree' | 'drafts' | 'state';
  *    one inclusion, and `?id=` the app list's one app. Each is compared or
  *    joined as one value, so a repeat would become a name no item has (`'a,b'`)
  *    or a filter that matches nothing, or would read as absent: for `package`,
- *    a list of every package.
+ *    a list of every package. [#29236] `?names=` is the list's batch by-names
+ *    filter, ONE comma-separated value ({@link metaListNames}): a repeat would
+ *    be two lists of names, of which reading either one drops the other.
  *  - `book-tree`: `?package=` scopes the book and doc reads.
  *  - `drafts`: `?packageId=` and `?type=` each narrow the draft list to one
  *    package and one type; a repeat reached `listDrafts` as an array.
@@ -2556,7 +2609,7 @@ export type MetaQueryArityDoor = 'list' | 'book-tree' | 'drafts' | 'state';
  * Declared in this order on purpose: two repeated names answer for the first.
  */
 export const META_QUERY_ARITY_DOORS: Readonly<Record<MetaQueryArityDoor, readonly string[]>> = Object.freeze({
-    list: Object.freeze(['package', 'preview', 'object', 'include', 'id']),
+    list: Object.freeze(['package', 'preview', 'object', 'include', 'id', 'names']),
     'book-tree': Object.freeze(['package']),
     drafts: Object.freeze(['packageId', 'type']),
     state: Object.freeze(['from']),
@@ -2577,6 +2630,139 @@ export function metaQueryArityRefusal(door: MetaQueryArityDoor, query: unknown):
     if (!query || typeof query !== 'object') return undefined;
     return repeatedOnceRefusal(query as Record<string, unknown>, META_QUERY_ARITY_DOORS[door])
         ?? metaBracketedFilterRefusal(door, query);
+}
+
+/**
+ * [#29236] The closed query-parameter set of `GET /meta/:type`, the list
+ * (AGENTS.md 〈Route & surface ownership〉 rule 5; the ingress policy in
+ * `./query-allowlist.ts`). It declared none, so every name it does not read
+ * was ignored: `?names=` before this card, a misspelt `?name=`, or `?ids=`
+ * each answered the whole list with `200`, which a caller cannot tell from a
+ * filter that matched everything.
+ *
+ * **Measured** from the read points of both transports' list and of the chain
+ * they share ({@link createMetaListAnswer}): `package` (the scope,
+ * `metaItemPackageBinding`), `preview` (the draft overlay), `object` (the view
+ * switcher), `include` (the doc bodies, the position grants), `id` (the app
+ * list's one app), `names` (the batch by-names filter, {@link metaListNames}),
+ * and `locale` — read a frame down, by {@link metaRequestLocale} behind the doc
+ * locale collapse and the translation step, never in a handler body. The
+ * maintainer's ruling named the first six; `locale` joins them because the list
+ * already reads it, so leaving it out would turn every working
+ * `?locale=zh-CN` list read into a `400` (the item read's closed set carries it
+ * for the same reason, {@link META_ITEM_READ_PARAMS}).
+ *
+ * `meta-list-projection-parity.test.ts` in `@objectstack/runtime` derives the
+ * list's read points from the source and holds this set equal to them, so a
+ * name the list starts reading reaches it, or the census goes red.
+ */
+export const META_LIST_QUERY_PARAMS: readonly string[] = Object.freeze([
+    'package', 'preview', 'object', 'include', 'id', 'names', 'locale',
+]);
+
+/**
+ * The bracketed spellings (`param[`…) the list judges with its own located
+ * sentence, by the type whose step reads `param`: `package` on every type, at
+ * the door's arity step ({@link metaBracketedFilterRefusal}); `id` on `app` and
+ * `object` on `view`, in the chain ({@link refuseBracketedListFilter}).
+ * Recognition leaves exactly these to that sentence, which names the one
+ * spelling the filter takes; every other bracketed key — `names[]`, `id[]` on a
+ * type that reads no `id` — is a name the list does not read, refused here.
+ */
+function bracketedKeyJudgedByList(metaType: string, key: string): boolean {
+    if (key.startsWith('package[')) return true;
+    if (metaType === 'app' && key.startsWith('id[')) return true;
+    return metaType === 'view' && key.startsWith('object[');
+}
+
+/**
+ * [#29236] THE query decision of the `/meta/:type` list's entry, for both
+ * transports, asked before any read of the query:
+ *
+ *  1. **recognition** — a name outside {@link META_LIST_QUERY_PARAMS}, answered
+ *     with the located sentence `refuseUnknownQueryParams` answers
+ *     (`unknownQueryParamRefusalMessage`, `./query-allowlist.ts`), so a
+ *     misspelt filter is `400`, never the whole list with `200`. A bracketed
+ *     spelling the list judges itself ({@link bracketedKeyJudgedByList}) is
+ *     left to that sentence;
+ *  2. **arity** — {@link metaQueryArityRefusal} for the `list` door, which
+ *     unwraps a one-element array IN PLACE.
+ *
+ * `metaType` is the FOLDED singular type. `RestServer`'s door writes the
+ * answer in the nested `{ error: { code, message } }` its recognition and
+ * arity gates write; the runtime dispatcher's twin writes it through
+ * `deps.error`, with the same `error.code` and message.
+ */
+export function metaListQueryRefusal(metaType: string, query: unknown): MetaItemQueryRefusal | undefined {
+    return metaListUnknownParamRefusal(metaType, query) ?? metaQueryArityRefusal('list', query);
+}
+
+/**
+ * Rule 1 of {@link metaListQueryRefusal} alone, for `RestServer`'s door, which
+ * asks rule 2 through `refuseRepeatedQueryParams` (the gate it has always
+ * asked) right after it.
+ */
+export function metaListUnknownParamRefusal(metaType: string, query: unknown): MetaItemQueryRefusal | undefined {
+    if (!query || typeof query !== 'object') return undefined;
+    const judged: Record<string, true> = {};
+    for (const key of Object.keys(query)) {
+        if (!bracketedKeyJudgedByList(metaType, key)) judged[key] = true;
+    }
+    const message = unknownQueryParamRefusalMessage(judged, META_LIST_QUERY_PARAMS);
+    if (message !== undefined) return { status: 400, code: 'VALIDATION_ERROR', message, rule: 'unknown-parameter' };
+    if (metaType === 'package' && Object.prototype.hasOwnProperty.call(query, 'names')) {
+        return { status: 400, code: 'VALIDATION_ERROR', message: NAMES_ON_PACKAGE_LIST_MESSAGE, rule: 'names-on-package' };
+    }
+    return undefined;
+}
+
+/**
+ * [#29236, contract review 6672872746] `?names=` on the `package` list. A
+ * `package` list item is keyed by its id (`manifest.id`) and carries no
+ * `name`, so a names filter there could never match and would answer `200 []`
+ * for every value: the silent zero the list's closed set exists to remove. It
+ * is refused instead, on both transports, before any read. Matching packages
+ * by id is a different behaviour and not served here.
+ */
+export const NAMES_ON_PACKAGE_LIST_MESSAGE =
+    "Query parameter 'names' is not served on the 'package' list: package items are keyed by id, not by name, "
+    + 'so no name could match. The list was not served. Leave the parameter out to list every package you can see.';
+
+/**
+ * [#29236, ruling 6580261740 letter A] THE reading of `?names=` on the
+ * `/meta/:type` list, for both transports and the chain: ONE comma-separated
+ * value (the data routes' spelling of `fields`, `searchFields`, `orderby`),
+ * each name trimmed, blanks dropped, repeats folded. Absent, `undefined`: no
+ * filter. A value that names no item at all (`?names=`, `?names=,`) is
+ * REFUSED — `400 VALIDATION_ERROR`, never read as every item, the #28548 rule
+ * the list's other narrowing filters keep — and THROWN, so each transport's own
+ * `catch` shapes it, as {@link refuseEmptyListFilter} does.
+ *
+ * Ask it AFTER {@link metaListQueryRefusal}, which refuses a repeated `names`
+ * and unwraps a one-element array, so the value read here is one string. A
+ * value that is not a string is no filter this reading knows, so it is read as
+ * absent — the decision above never hands one over.
+ *
+ * A name that matches no item is simply absent from the answer (no `404`): the
+ * list answers the items it would answer without the filter, narrowed to these
+ * names (`GetMetaItemsRequestSchema.names` in `@objectstack/spec/api`).
+ */
+export function metaListNames(query: Readonly<Record<string, unknown>> | undefined): readonly string[] | undefined {
+    const raw = query?.names;
+    if (typeof raw !== 'string') return undefined;
+    const names = [...new Set(raw.split(',').map((s) => s.trim()).filter(Boolean))];
+    if (names.length === 0) {
+        const err: any = new Error(
+            `Query parameter 'names' names no item; got ${JSON.stringify(raw)}. The list was not served: `
+            + 'a list of no names is not a filter. Name at least one item, spelled ?names=A,B, or leave the '
+            + 'parameter out to list every item you can see.',
+        );
+        err.status = 400;
+        err.code = 'VALIDATION_ERROR';
+        err.param = 'names';
+        throw err;
+    }
+    return names;
 }
 
 /**
@@ -3622,7 +3808,7 @@ export interface MetaListAnswerSources extends MetaItemReadGateSources {
 export interface MetaListRequest {
     /** The SINGULAR type (the caller folds `/meta/docs` once, at its boundary). */
     readonly metaType: string;
-    /** The list route's query. The chain reads `id`, `object` and `include` off it (and `locale`, through `requestLocale`). */
+    /** The list route's query. The chain reads `id`, `object`, `include` and [#29236] `names` off it (and `locale`, through `requestLocale`). */
     readonly query: Readonly<Record<string, unknown>> | undefined;
     /**
      * `?preview=draft`, ADMITTED — the transport's own declaration, made with
@@ -3823,6 +4009,20 @@ async function describeMetaPositionList(sources: MetaListAnswerSources, list: an
  *     narrows (permission decides what exists for this caller; the filter
  *     narrows within it, never the reverse, ADR-0045 §3), and on the raw doc
  *     items, before the locale collapse (`_packageId` scopes membership).
+ *  2a. [#29236] Every type — `?names=a,b` keeps the items of those names
+ *     ({@link metaListNames}: an EMPTY value is refused `400
+ *     VALIDATION_ERROR`; a name that matches nothing is simply absent, never a
+ *     404). After the gate, by the rule step 3 keeps, and before the mask and
+ *     the translation, so those run on the named items only. Each transport
+ *     also hands the names to the store read (`GetMetaItemsRequest.names`), so
+ *     the protocol filters before it decorates; this step is what holds the
+ *     answer for a store that does not filter. Narrowing the gate's INPUT that
+ *     way moves no verdict: every list gate judges an item on its own facts and
+ *     on per-request facts (the books, the registered services and objects),
+ *     never on which sibling items are listed. The doc list's corpus IS the
+ *     listed docs, but a book claims a doc by that doc's own placement keys
+ *     (`resolveDocAudiences`), so a doc's audience is the same in any corpus
+ *     that holds it.
  *  3. `app` — `?id=<app>` narrows to the app of that `name` (#7566); absent
  *     means no filter, and [#28548] an EMPTY value is refused (`400
  *     VALIDATION_ERROR`), never read as absent, as is a bracketed key
@@ -3882,6 +4082,19 @@ export function createMetaListAnswer(
             if (list) {
                 const judged = await createMetaListReadGate(sources, metaType)(list);
                 if (judged !== list) visible = withItems(visible, judged);
+            }
+        }
+
+        // 2a. [#29236] `?names=a,b`, on every type — after the gate, before
+        // the mask and the translation. An EMPTY one is refused, never read as
+        // absent ({@link metaListNames}).
+        const names = metaListNames(query);
+        if (names) {
+            const list = listItemsOf(visible);
+            if (list) {
+                const wanted = new Set(names);
+                const named = list.filter((it: any) => it && typeof it === 'object' && wanted.has(it.name));
+                if (named.length !== list.length) visible = withItems(visible, named);
             }
         }
 

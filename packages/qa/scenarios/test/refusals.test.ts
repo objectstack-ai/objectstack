@@ -77,17 +77,17 @@ const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   ['an unanswerable truth without its reason', (c) => delete q(c, 'acme_revenue').truth.reason, 'run.questions[7].truth.reason', /expected string/],
   // ── seed, operations and outcomes ──
   ['a lookup value naming no seeded row', (c) => (c.run.seed.contact[3].account = 'ac9'), 'run.seed.contact[3].account', /names no seeded `account` row/],
-  ['an operation on a row the seed does not hold', (c) => (op(c, 'attach_dee').target = 'ct99'), 'run.operations[1].target', /no seeded `contact` row has id `ct99`/],
+  ['an operation on a row the seed does not hold', (c) => (op(c, 'move_eli').target = 'ct99'), 'run.operations[1].target', /no seeded `contact` row has id `ct99`/],
   ['an operation with no declared outcome', (c) => delete op(c, 'add_contact').outcome, 'run.operations[0].outcome', /expected object|invalid/i],
   ['an operation acting as an unknown persona', (c) => (op(c, 'add_contact').actingAs = 'ghost'), 'run.operations[0].actingAs', /no persona `ghost`/],
   ['a refusal code outside the platform error-code catalogue', (c) => (op(c, 'contact_bad_email').outcome.code = 'VALIDATION_BROKEN'), 'run.operations[3].outcome.code', /expected one of/],
   ['a post-state naming a created row by an id the seed lacks', (c) => (op(c, 'add_contact').outcome.state[0] = { object: 'contact', id: 'ct9', values: { full_name: 'Fay Wu' } }), 'run.operations[0].outcome.state[0].id', /matched by `where`/],
-  ['a post-state naming its row twice', (c) => (op(c, 'attach_dee').outcome.state[0].where = { full_name: 'Dee' }), 'run.operations[1].outcome.state[0].id', /exactly one of `id` or `where`/],
+  ['a post-state naming its row twice', (c) => (op(c, 'move_eli').outcome.state[0].where = { full_name: 'Dee' }), 'run.operations[1].outcome.state[0].id', /exactly one of `id` or `where`/],
   // ── guardrails ──
   ['a card that drops one of the five guardrail checks', (c) => (c.run.guardrails = c.run.guardrails.filter((g: { check: string }) => g.check !== 'audit_actor')), 'run.guardrails', /5/],
   ['an injection guardrail pointing at a non-text cell', (c) => (c.run.guardrails[4].cell = { object: 'contact', id: 'ct4', field: 'account' }), 'run.guardrails[4].cell.field', /not a text cell/],
   ['a confirmation check on an operation that does not wait', (c) => (c.run.guardrails[2].operation = 'add_contact'), 'run.guardrails[2].operation', /outcome is `pending_confirmation`, not `applied`/],
-  ['an audit check on an operation that names no audit actor', (c) => delete op(c, 'attach_dee').outcome.auditActor, 'run.guardrails[3].operation', /declare `outcome.auditActor`/],
+  ['an audit check on an operation that names no audit actor', (c) => delete op(c, 'move_eli').outcome.auditActor, 'run.guardrails[3].operation', /declare `outcome.auditActor`/],
   // ── counts, agent actions, iterate ──
   ['fewer than 8 questions without a stated reason', (c) => c.run.questions.pop(), 'run.countsReason', /7 questions \/ 5 operations is below the default 8 \/ 4/],
   ['agent actions with none confirm-gated', (c) => c.run.agentActions.forEach((a: { confirm: boolean }) => (a.confirm = false)), 'run.agentActions', /at least one confirm-gated/],

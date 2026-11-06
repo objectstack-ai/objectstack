@@ -1939,12 +1939,17 @@ export class ObjectStackClient {
     /**
      * Get all items of a specific metadata type
      * @param type - Metadata type name (e.g., 'object', 'plugin')
-     * @param options - Optional filters (e.g., packageId to scope by package)
+     * @param options - Optional filters: `packageId` scopes the list to one
+     *   package; `names` narrows it to the items of those names, in ONE request
+     *   (sent as `?names=a,b,c`). A name that matches no item is simply absent
+     *   from the answer. An empty `names` array is sent as an empty filter,
+     *   which the server refuses with `400`; leave `names` out to list every item.
      */
-    getItems: async (type: string, options?: { packageId?: string }): Promise<GetMetaItemsResponse> => {
+    getItems: async (type: string, options?: { packageId?: string; names?: readonly string[] }): Promise<GetMetaItemsResponse> => {
         const route = this.getRoute('metadata');
         const params = new URLSearchParams();
         if (options?.packageId) params.set('package', options.packageId);
+        if (options?.names !== undefined) params.set('names', options.names.join(','));
         const qs = params.toString();
         const url = `${this.baseUrl}${route}/${type}${qs ? `?${qs}` : ''}`;
         const res = await this.fetch(url);
@@ -8194,9 +8199,11 @@ export class ScopedEnvironmentClient {
       const res = await this.parent._fetch(this.metaUrl(''));
       return this.parent._unwrap<GetMetaTypesResponse>(res);
     },
-    getItems: async (type: string, options?: { packageId?: string }): Promise<GetMetaItemsResponse> => {
+    /** The unscoped surface's `getItems`, `names` included (one `?names=a,b,c` request). */
+    getItems: async (type: string, options?: { packageId?: string; names?: readonly string[] }): Promise<GetMetaItemsResponse> => {
       const params = new URLSearchParams();
       if (options?.packageId) params.set('package', options.packageId);
+      if (options?.names !== undefined) params.set('names', options.names.join(','));
       const qs = params.toString();
       const res = await this.parent._fetch(this.metaUrl(`/${type}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemsResponse>(res);

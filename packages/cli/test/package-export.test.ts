@@ -136,7 +136,7 @@ describe('os package export', () => {
         return new Response(JSON.stringify({ success: true, data: answered }), { status: 200 });
       }));
       const file = join(out, exportedPackageDirectory(i, 3, entry.id), EXPORTED_PACKAGE_FILE);
-      const r = await run(PackageInstall, [file, '--runtime', 'http://target.test']);
+      const r = await run(PackageInstall, [file, '--url', 'http://target.test']);
       expect(r.exit, r.out).toBeUndefined();
       expect(posted).toHaveLength(1);
       expect(posted[0].manifest).toEqual(entry);

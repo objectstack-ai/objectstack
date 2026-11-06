@@ -152,6 +152,11 @@ export { DATA_RECORD_READ_PARAMS } from './rest-server.js';
 // list and the book tree): one list per door (`META_QUERY_ARITY_DOORS`), which
 // `RestServer` hands `refuseRepeatedQueryParams` and the dispatcher asks
 // through `metaQueryArityRefusal`.
+//
+// [#29236] …and the list's closed query set (`META_LIST_QUERY_PARAMS`), asked
+// with its arity as one decision (`metaListQueryRefusal`), and the one reading
+// of its batch by-names filter (`metaListNames`, `?names=a,b`), which both
+// transports push down to the store read.
 export {
     createMetaBookTreeAnswer,
     createMetaItemAnswer,
@@ -165,6 +170,9 @@ export {
     metaCallerOrganizationId,
     metaItemLayersDeprecationHeaders,
     metaItemQueryRefusal,
+    META_LIST_QUERY_PARAMS,
+    metaListNames,
+    metaListQueryRefusal,
     metaMemberSelector,
     META_QUERY_ARITY_DOORS,
     metaQueryArityRefusal,

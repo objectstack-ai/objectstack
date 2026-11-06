@@ -190,6 +190,11 @@
  * read the parent and ⛔ never re-send. Every read is an unpaced GET, and the
  * one write is paced like every write verb.
  *
+ * ## The mailbox branch delete — `mailbox_branch_delete`
+ *
+ * Its fences and its landing are listed once, in `ops.mjs`'s header ("The one
+ * row that deletes a ref"); they are AUTHORITATIVE here, each that fails named.
+ *
  * ## The advisory rows that write — fenced on the ADVISORY, printing none of its text
  *
  * `ops.mjs`'s header section "The rows that write a security advisory"
@@ -467,6 +472,7 @@ import {
   GOVERNED_REVIEW_FILES_PAGE_SIZE,
   GOVERNED_REVIEW_OPS,
   LOGIN_SHAPE,
+  MAILBOX_LABEL,
   OPS,
   PERMISSIONS,
   PR_LANDED_STATE,
@@ -891,6 +897,46 @@ export async function confirmSubIssue(req, answer, pre, payload, api, t, { sleep
   }
   if (!answer) return { ok: false, why: `nothing sent — #${child}'s parent read named #${parent}, but ${last} ${windowMs} ms later: the two reads disagree; read #${parent}'s sub-issues before anything else` };
   return { ok: false, why: `${platform} accepted, but ${last} ${windowMs} ms later — UNCONFIRMED: read #${parent}'s sub-issues before anything else, ⛔ do not re-send` };
+}
+
+/**
+ * The mailbox branch delete's fences on the reads (header): `[]` to send, else one sentence per fence that fails —
+ * an unread pull is one, judged alone. `pull`, `open` and `ref` are `rest` answers; a 404 ref fences nothing. Pure.
+ */
+export function mailboxBranchFenceFailures({ repo, branch, pull, open, ref }) {
+  if (pull?.status !== 200 || !pull.json || typeof pull.json !== 'object') return [`${pull?.call} -> HTTP ${pull?.status}: the pull could not be read`];
+  const pr = pull.json;
+  const out = [];
+  if (pr.state !== 'closed') out.push(`the pull is ${pr.state}, not closed`);
+  if (!labelNames(pr.labels).includes(MAILBOX_LABEL)) out.push(`the pull does not carry ${MAILBOX_LABEL}`);
+  if (pr.head?.ref !== branch) out.push(`the pull's head is ${pr.head?.ref ?? 'unread'}, not ${branch}`);
+  if (String(pr.head?.repo?.full_name ?? '').toLowerCase() !== repo.toLowerCase()) out.push(`the pull's head lives on ${pr.head?.repo?.full_name ?? 'no repository'}, not ${repo}`);
+  if (open?.status !== 200 || !Array.isArray(open.json)) out.push(`${open?.call} -> HTTP ${open?.status}: the open pulls on ${branch} could not be read`);
+  else if (open.json.length) out.push(`open pull(s) ${open.json.map((p) => `#${p?.number}`).join(', ')} have ${branch} as head — the DELETE would close them`);
+  const at = ref?.status === 200 && ref.json?.ref === `refs/heads/${branch}` ? ref.json.object?.sha : undefined;
+  if (ref?.status !== 404 && typeof at !== 'string') out.push(`${ref?.call} -> HTTP ${ref?.status}: the ref ${branch} could not be read`);
+  else if (ref?.status !== 404 && at !== pr.head?.sha) out.push(`${branch} is at ${at.slice(0, 12)}, not the pull's head ${String(pr.head?.sha ?? 'unread').slice(0, 12)} — a commit pushed after the close is not the mailbox's`);
+  return out;
+}
+
+/** The fences, AUTHORITATIVE (header): the three reads, then `{}` to send or `{ fail }`, the DELETE NOT SENT. Never throws. */
+export async function mailboxBranchPreflight(req, payload, api, t) {
+  const { pull, branch } = req.mailboxBranch;
+  const repo = payload.repo;
+  const pr = await rest(api, `/repos/${repo}/pulls/${pull}`, {}, t);
+  const open = await rest(api, `/repos/${repo}/pulls?state=open&head=${encodeURIComponent(`${repo.split('/')[0]}:${branch}`)}`, {}, t);
+  const ref = await rest(api, `/repos/${repo}/git/ref/heads/${branch}`, {}, t);
+  const failures = mailboxBranchFenceFailures({ repo, branch, pull: pr, open, ref });
+  return failures.length ? { fail: `REFUSED at the relay's fence on #${pull}'s head ${branch}, nothing sent — ${failures.join('; ')}` } : {};
+}
+
+/** Did the delete LAND? The ref read back absent (header); a ref still there, or unread, is FAILED. Never throws. */
+export async function confirmMailboxBranch(req, answer, payload, api, t) {
+  const { branch } = req.mailboxBranch;
+  const back = await rest(api, `/repos/${payload.repo}/git/ref/heads/${branch}`, {}, t);
+  const platform = `HTTP ${answer.status}${answer.detail ? ` — ${answer.detail}` : ''}`;
+  if (back.status !== 404) return { ok: false, why: `${platform}, but ${back.call} answered HTTP ${back.status}: the branch ${back.status === 200 ? 'is still there' : 'could not be read back'} — read it before anything else` };
+  return { ok: true, why: '', idempotent: !(answer.status >= 200 && answer.status < 300), result: `deleted ${branch} (read back absent)` };
 }
 
 /**
@@ -1424,8 +1470,8 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
         break;
       }
       const req = filled.req;
-      // The failed-jobs re-run (header): its fences on the run and its pull, judged HERE on the reads before the POST — refused, NOT SENT.
-      const pre = req.rerunFailed ? await rerunFailedPreflight(req, payload, api, t) : null;
+      // The failed-jobs re-run and the mailbox branch delete (header): their fences, judged HERE on the reads before the write — refused, NOT SENT.
+      const pre = req.rerunFailed ? await rerunFailedPreflight(req, payload, api, t) : req.mailboxBranch ? await mailboxBranchPreflight(req, payload, api, t) : null;
       if (pre?.fail) {
         const why = scrub(pre.fail, [token]);
         rows.push({ action: i + 1, op: action.op, call: `${req.verb} ${req.path}`, status: 'not sent', result: `FAILED: ${why}` });
@@ -1510,15 +1556,18 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
       // The failed-jobs re-run is confirmed by reading the run back (header): attempt 2, its failed jobs queued or in progress.
       // The hierarchy link is confirmed by reading the parent's list back (header): the child's id listed, or no longer.
       // The advisory rows are confirmed by their own answer (header): an id, every login sent, the state asked for — never by resultOf.
+      // The mailbox branch delete is confirmed by reading the ref back (header): absent, or it is FAILED.
       const landed = req.updateBranch
         ? await confirmUpdateBranch(req, r, payload, api, t, ub)
         : req.rerunFailed
           ? await confirmRerunFailed(req, r, pre, payload, api, t, rr)
-          : sub
-            ? await confirmSubIssue(req, r, sub, payload, api, t, si)
-            : adv || req.advisoryReport || req.advisoryCreate
-              ? confirmAdvisory(req, r, adv)
-              : requestLanded(req, r);
+          : req.mailboxBranch
+            ? await confirmMailboxBranch(req, r, payload, api, t)
+            : sub
+              ? await confirmSubIssue(req, r, sub, payload, api, t, si)
+              : adv || req.advisoryReport || req.advisoryCreate
+                ? confirmAdvisory(req, r, adv)
+                : requestLanded(req, r);
       const call = req.graphql ? `POST /graphql ${req.graphql.mutation}` : r.call;
       rows.push({ action: i + 1, op: action.op, call, status: r.status, result: landed.ok ? (landed.idempotent ? 'already absent (idempotent)' : scrub(landed.result ?? resultOf(req, r.json, r.status), [token])) : `FAILED: ${scrub(landed.why, [token])}` });
       if (!landed.ok) {
@@ -1593,11 +1642,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the run_rerun_failed: the five fences judged HERE on the run and its pull, read immediately before ONE bodiless POST — the pull's current head by its own GET, never the run's embedded copy, and a run naming no pull refused by name; each refused with the POST not sent and accepted on the measured run; a run, pull, baseline or fence that fails is zero writes; the 201 confirmed only by reading attempt 2 back with its failed jobs queued or in progress, naming their job ids; attempt 2 never seen, a failed job completed, or a job list unread is FAILED; no annotation": 21,
   "the hierarchy link: sub_issue_add and sub_issue_remove read the parent's and the child's own answers, then the child's parent (add) or the parent's whole list (remove), immediately before ONE write whose body is the child's REST id from its own answer — never its number, never replace_parent; a pull, a transferred or unread card, a child under another parent, one the parent does not list, or a read that is neither answer is zero writes; a child already under this parent is a no-op landed on the list; the answer confirmed only when the parent's list reads the child back (or no longer does) inside the window; a refused write, a list that never settles or never reads whole is FAILED; no annotation, and the rows ride a stroke beside other ops": 20,
   "the advisory rows: advisory_report and advisory_create are ONE POST of their body each, landed on a 2xx carrying an id — a draft's reading state draft — that the row and a notice annotation name; advisory_collaborators_add, advisory_versions and advisory_state read the advisory first and send ONE PATCH — every existing login kept with the missing ones added, an all-present list a no-op, the versions entries alone, or the one state a legal transition reaches, the reopen and the publish among them — or nothing at all on a fence: an unread, other or wrong-state advisory, an illegal move, a list the versions may not replace or a publish whose versions are not set; each lands only when its answer shows the result, a publish only read back as published with the versions it was sent, and a landed publish alone is annotated with its id; ⛔ the marker in a report's or a draft's summary, description and packages and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation": 41,
+  "the mailbox branch delete: the pull's own answer, the open pulls on its head and the ref read immediately before ONE DELETE of the ref under the App token — an open, unlabelled, other-headed or forked pull, an open pull on that head, a ref moved off the pull's head, or a read that does not answer is zero writes with every failing fence named; the DELETE lands only when the ref reads back absent, a ref already gone an idempotent landing and one still there FAILED; and mailbox-open's close stroke — comment, close, delete — leaves no branch, while a head outside claude/mailbox-* sends no DELETE": 7,
   "advisory_read: ONE GET after the sender gate and nothing written; the read, advisory and sender fences judged on that answer — target-write by the maintainer's ruling, a sender off the advisory's collaborators sealed for, one without write refused before the GET, any other gate closed — then the answer sealed to the seat's key and emitted as notice parts the reader parses back, opening byte for byte for that key and read alone; a failed or unsealed seal and an over-cap answer FAILED with nothing emitted; ⛔ the marker in the summary, description and vulnerabilities, and the advisory's id, reach no log line, row, step summary or annotation, and the sealed answer alone carries no marker": 18,
 });
 // Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
-// hierarchy link battery, 20 → 21 with the advisory rows' battery, 21 → 22 with advisory_read's: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 22;
+// hierarchy link battery, 20 → 21 with the advisory rows' battery, 21 → 22 with advisory_read's, 22 → 23 with the mailbox
+// branch delete's: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 23;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -2455,6 +2506,50 @@ export async function selfTest() {
       );
       // The needle is assembled so this line does not match itself: a pattern for the message would spell its number group.
       t('⛔ the parser is the reader\'s, imported — this file spells no pattern for the message of its own', [readReal(SELF_PATH, 'utf8').includes(['number=', '(['].join('')), typeof parseRelayAnnotation], [false, 'function']);
+    }
+
+    // ── the mailbox branch delete ───────────────────────────────────────────
+    battery("the mailbox branch delete: the pull's own answer, the open pulls on its head and the ref read immediately before ONE DELETE of the ref under the App token — an open, unlabelled, other-headed or forked pull, an open pull on that head, a ref moved off the pull's head, or a read that does not answer is zero writes with every failing fence named; the DELETE lands only when the ref reads back absent, a ref already gone an idempotent landing and one still there FAILED; and mailbox-open's close stroke — comment, close, delete — leaves no branch, while a head outside claude/mailbox-* sends no DELETE");
+    {
+      const PR = 30141;
+      const BR = 'claude/mailbox-ui-3';
+      const PULL = `GET /repos/${REPO}/pulls/${PR}`;
+      const OPEN = `GET /repos/${REPO}/pulls`;
+      const DEL = `DELETE /repos/${REPO}/git/refs/heads/${BR}`;
+      const BACK = `GET /repos/${REPO}/git/ref/heads/${BR}`;
+      const HEAD = 'a'.repeat(40);
+      const at = (sha) => ({ status: 200, json: { ref: `refs/heads/${BR}`, object: { sha, type: 'commit' } } });
+      const box = (o = {}) => ({ number: PR, state: 'closed', labels: [{ name: 'pm:mailbox' }, { name: 'pinned' }], head: { ref: BR, sha: HEAD, repo: { full_name: REPO } }, ...o });
+      const good = { ...allowed, [PULL]: { status: 200, json: box() }, [OPEN]: { status: 200, json: [] }, [DEL]: { status: 204, json: null }, [BACK]: [at(HEAD), { status: 404, json: { message: 'Not Found' } }] };
+      const drop = base([{ op: 'mailbox_branch_delete', pull: PR, branch: BR }]);
+      const ok = await run(drop, good);
+      t("the good case: the pull, the open pulls on its head, the ref at the pull's head, then ONE DELETE of the ref under the App token, then the ref read back absent — exit 0, the row naming it deleted", [ok.exit, ok.seen.slice(1).map((s) => s.call), writes(ok.seen).map((s) => [s.call, s.body, s.auth]), ok.rows[0].result, ok.annotations], [EXIT_OK, [PULL, OPEN, BACK, DEL, BACK], [[DEL, null, `Bearer ${TOKEN}`]], `deleted ${BR} (read back absent)`, []]);
+      const urls = [];
+      await mailboxBranchPreflight(OPS.mailbox_branch_delete.requests({ op: 'mailbox_branch_delete', pull: PR, branch: BR }, REPO)[0], { repo: REPO }, 'https://api.test', { token: TOKEN, fetch: async (url) => (urls.push(url), { status: 200, headers: new Headers(), json: async () => [] }) });
+      t("the open-pulls read is filtered to this repository's owner and the branch — an unfiltered or mis-owned read would answer for other heads", urls[1], `https://api.test/repos/${REPO}/pulls?state=open&head=objectstack-ai%3Aclaude%2Fmailbox-ui-3`);
+      const fences = [
+        [{ [PULL]: { status: 200, json: box({ state: 'open' }) } }, 'the pull is open, not closed'],
+        [{ [PULL]: { status: 200, json: box({ labels: [{ name: 'pinned' }] }) } }, 'does not carry pm:mailbox'],
+        [{ [PULL]: { status: 200, json: box({ head: { ref: 'claude/mailbox-ui-2', sha: HEAD, repo: { full_name: REPO } } }) } }, "the pull's head is claude/mailbox-ui-2, not claude/mailbox-ui-3"],
+        [{ [PULL]: { status: 200, json: box({ head: { ref: BR, sha: HEAD, repo: { full_name: 'someone/objectstack' } } }) } }, "head lives on someone/objectstack, not objectstack-ai/objectstack"],
+        [{ [BACK]: at('b'.repeat(40)) }, `${BR} is at bbbbbbbbbbbb, not the pull's head aaaaaaaaaaaa — a commit pushed after the close is not the mailbox's`],
+        [{ [BACK]: { status: 503, json: { message: 'down' } } }, 'the ref claude/mailbox-ui-3 could not be read'],
+        [{ [OPEN]: { status: 200, json: [{ number: 30999 }] } }, 'open pull(s) #30999 have claude/mailbox-ui-3 as head — the DELETE would close them'],
+        [{ [PULL]: { status: 404, json: { message: 'Not Found' } } }, 'the pull could not be read'],
+        [{ [OPEN]: { status: 503, json: { message: 'down' } } }, 'the open pulls on claude/mailbox-ui-3 could not be read'],
+      ];
+      const fenced = await Promise.all(fences.map(async ([over, phrase]) => { const r = await run(drop, { ...good, ...over }); return [r.exit, writes(r.seen).length, r.rows[0]?.status, r.rows[0]?.result.includes(phrase)]; }));
+      t('⛔ each fence refuses with the DELETE NOT SENT and names itself: an open pull, no pm:mailbox, another head, a forked head, an open pull on the head, a ref moved past the head, an unread ref, an unread pull, an unread open-pulls list', fenced, fences.map(() => [EXIT_ACTION_FAILED, 0, 'not sent', true]));
+      const kept = await run(drop, { ...good, [BACK]: at(HEAD) });
+      t('⛔ a 204 whose ref still reads back is a FAILED action, never a landing', [kept.exit, kept.rows[0].status, kept.rows[0].result.includes('the branch is still there')], [EXIT_ACTION_FAILED, 204, true]);
+      const gone = await run(drop, { ...good, [BACK]: { status: 404, json: { message: 'Not Found' } }, [DEL]: { status: 422, json: { message: 'Reference does not exist' } } });
+      t('a ref already gone — absent before (no sha to fence), the DELETE answering 422, absent after — is an idempotent landing', [gone.exit, gone.rows[0].result], [EXIT_OK, 'already absent (idempotent)']);
+      const { planClose } = await import('../mailbox-open.mjs');
+      const closing = { ...good, [`POST /repos/${REPO}/issues/${PR}/comments`]: { status: 201, json: { id: 9 } }, [`PATCH /repos/${REPO}/issues/${PR}`]: { status: 200, json: { number: PR, state: 'closed' } } };
+      const closed = await run(base(planClose({ repo: REPO, pull: PR, head: BR }).actions), closing);
+      t("⭐ after close, no branch: mailbox-open's close stroke sends the comment, the close and then the DELETE, reads the pull only after closing it, and ends on the ref read back absent — exit 0", [closed.exit, writes(closed.seen).map((s) => s.call), closed.seen.map((s) => s.call).indexOf(PULL) > closed.seen.map((s) => s.call).indexOf(`PATCH /repos/${REPO}/issues/${PR}`), closed.seen.at(-1).call, closed.rows.at(-1).result], [EXIT_OK, [`POST /repos/${REPO}/issues/${PR}/comments`, `PATCH /repos/${REPO}/issues/${PR}`, DEL], true, BACK, `deleted ${BR} (read back absent)`]);
+      const other = await run(base(planClose({ repo: REPO, pull: PR, head: 'claude/project-thread-mvsts5' }).actions), closing);
+      t('…while a head outside claude/mailbox-* — a thread branch the seat still works on — is closed and left: no DELETE, nothing under /git/', [other.exit, writes(other.seen).map((s) => s.call), other.seen.some((s) => s.call.includes('/git/'))], [EXIT_OK, [`POST /repos/${REPO}/issues/${PR}/comments`, `PATCH /repos/${REPO}/issues/${PR}`], false]);
     }
 
     // ── the advisory rows that write ────────────────────────────────────────

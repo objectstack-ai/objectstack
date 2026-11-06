@@ -63,6 +63,7 @@ export const jaJP: TranslationData = {
         nav_record_shares: { label: 'レコード共有' },
         nav_queues: { label: 'キュー' },
         nav_queue_members: { label: 'キューメンバー' },
+        nav_assignment_rules: { label: '割り当てルール' },
         // Conditionally contributed by `@objectstack/plugin-auth` (only when an
         // external IdP is wired), so `check:app-nav-i18n` cannot see it — see
         // the rationale in `en.ts` (#6659). Wording matches this locale's
