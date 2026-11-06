@@ -297,7 +297,10 @@ create/update payload.
   A confirmed call deletes up to ${DELETE_RECORDS_MAX_PER_CALL} records, each under your permissions and the
   object's delete rules (no one bypasses them); refused records stay and come
   back grouped by reason with their ids, and \`remaining\` says how many still
-  match. Call again to continue.
+  match. Call again to continue. The answer's \`cap\` is the call's real cap
+  (lower on a deployment with a smaller read page). A fault (not a rule's refusal) stops the call
+  and names the record it stopped at. Over OAuth it needs both \`data:read\` and
+  \`data:write\`.
 - **list_actions()** — list the business actions available to you (only those
   the app author exposed to AI and you are permitted to run), with each
   action's declared parameters, whether it operates on a record, and whether

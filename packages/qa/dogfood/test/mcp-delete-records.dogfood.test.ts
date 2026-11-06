@@ -24,9 +24,15 @@
 //   • control: REST `DELETE /data/:object/:id` refuses the same admin on a
 //     locked row, so the tool answers what the platform's other door answers;
 //   • the cap: 203 matching rows, one call deletes 200 and says 3 remain, the
-//     next call deletes the 3 (the count is the runtime's real aggregate).
+//     next call deletes the 3 (the count is the runtime's real aggregate), on
+//     a host whose maximum page size IS the cap, so a read one row past it is
+//     refused; and a host whose page size is under the cap runs at that size;
+//   • a rule's refusal vs a fault: a sandboxed hook body's refusal (no code)
+//     is grouped as REST answers it, `400 HOOK_ABORTED`, and the call goes on;
+//     a code hook's bare `throw new Error` is REST's `500`, a fault, and ends
+//     the call at that row with what was already deleted.
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
@@ -35,7 +41,10 @@ import { AI_ACTION_CONFIRMATION_MEMBER } from '@objectstack/spec/contracts';
 
 const LOCKED = 'dlr_close_task';
 const BULK = 'dlr_bulk_row';
+const GUARDED = 'dlr_guarded_row';
 const LOCK_SENTENCE = 'This task belongs to a closed period, so it can no longer be deleted.';
+const APPROVED_SENTENCE = 'This row is approved, so it can no longer be deleted.';
+const FAULT_SENTENCE = 'dlr ledger store went away mid-write';
 
 const CloseTask = ObjectSchema.create({
   name: LOCKED,
@@ -56,6 +65,16 @@ const BulkRow = ObjectSchema.create({
   },
 });
 
+const GuardedRow = ObjectSchema.create({
+  name: GUARDED,
+  label: 'Guarded row',
+  fields: {
+    name: Field.text({ label: 'Name', required: true }),
+    approved: Field.boolean({ label: 'Approved' }),
+    broken: Field.boolean({ label: 'Broken' }),
+  },
+});
+
 const fixture = defineStack({
   manifest: {
     id: 'com.dogfood.mcp-delete-records',
@@ -65,7 +84,7 @@ const fixture = defineStack({
     name: 'MCP delete_records fixture',
     description: 'A package locking rule that refuses a user delete of a closed-period row, for #30891.',
   },
-  objects: [CloseTask, BulkRow],
+  objects: [CloseTask, BulkRow, GuardedRow],
   hooks: [
     {
       // A package's locking rule, in HotCRM's shape: a USER's delete of a
@@ -79,10 +98,43 @@ const fixture = defineStack({
         throw Object.assign(new Error(LOCK_SENTENCE), { code: 'RECORD_LOCKED', status: 409 });
       },
     },
+    {
+      // A package's rule written as a sandboxed body: its refusal declares no code.
+      name: 'dlr_approved_guard',
+      object: GUARDED,
+      events: ['beforeDelete'],
+      body: {
+        language: 'js',
+        source: `if (ctx.previous && ctx.previous.approved === true) throw new Error(${JSON.stringify(APPROVED_SENTENCE)});`,
+      },
+    },
+    {
+      // A code hook that crashes on one row: not a rule's verdict, a fault.
+      name: 'dlr_broken_store',
+      object: GUARDED,
+      events: ['beforeDelete'],
+      handler: async (ctx: any) => {
+        if (ctx.previous?.broken === true) throw new Error(FAULT_SENTENCE);
+      },
+    },
   ],
 });
 
 const idOf = (b: any) => b?.id ?? b?.record?.id ?? b?.data?.id;
+
+/** Run `body` with the deployment's read window set (read per request by the data door), then restore it. */
+async function withReadWindow<T>(vars: Record<string, string>, body: () => Promise<T>): Promise<T> {
+  const before = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+  Object.assign(process.env, vars);
+  try {
+    return await body();
+  } finally {
+    for (const [k, v] of Object.entries(before)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
 
 describe('MCP delete_records on a real stack: preview, grouped refusals, an admin under a locking rule, the cap (#30891)', () => {
   let stack: VerifyStack;
@@ -188,26 +240,121 @@ describe('MCP delete_records on a real stack: preview, grouped refusals, an admi
     }, 60_000);
   });
 
-  it('the cap: 203 matching rows, one call deletes 200 and says 3 remain, the next call deletes the 3', async () => {
+  it('the cap, on a host whose maximum page size IS the cap: 203 rows, one call deletes 200 and says 3 remain, the next deletes the 3', async () => {
     const rows = Array.from({ length: 203 }, (_, i) => ({ name: `bulk ${i}`, batch: 'cap' }));
     for (const slice of [rows.slice(0, 200), rows.slice(200)]) {
       const res = await stack.apiAs(admin, 'POST', `/data/${BULK}/createMany`, slice);
       expect(res.status, await res.clone().text()).toBeLessThan(300);
     }
 
-    const preview = await tool('delete_records', { objectName: BULK, where: { batch: 'cap' } });
-    expect(preview.isError).toBe(true);
-    expect(preview.payload.preview).toMatchObject({ matched: 203, wouldAttempt: 200, cap: 200 });
+    await withReadWindow({ OS_DATA_MAX_PAGE_SIZE: '200' }, async () => {
+      // Lit control: this host refuses a read one row past the cap.
+      const over = await stack.apiAs(admin, 'GET', `/data/${BULK}?limit=201`);
+      expect(over.status, await over.clone().text()).toBe(400);
+      expect(await over.text()).toContain('MAX_RECORDS_EXCEEDED');
 
-    const first = await tool('delete_records', { objectName: BULK, where: { batch: 'cap' }, [AI_ACTION_CONFIRMATION_MEMBER]: true });
-    expect(first.isError, first.text).toBe(false);
-    expect(first.payload).toMatchObject({ matched: 203, attempted: 200, deleted: 200, refused: 0, remaining: 3 });
-    expect(first.payload.next).toContain('3 matching record(s) were past this call\'s cap of 200');
+      const preview = await tool('delete_records', { objectName: BULK, where: { batch: 'cap' } });
+      expect(preview.isError).toBe(true);
+      expect(preview.payload.preview, preview.text).toMatchObject({ matched: 203, wouldAttempt: 200, cap: 200 });
 
-    const second = await tool('delete_records', { objectName: BULK, where: { batch: 'cap' }, [AI_ACTION_CONFIRMATION_MEMBER]: true });
-    expect(second.payload).toMatchObject({ matched: 3, attempted: 3, deleted: 3, remaining: 0 });
+      const first = await tool('delete_records', { objectName: BULK, where: { batch: 'cap' }, [AI_ACTION_CONFIRMATION_MEMBER]: true });
+      expect(first.isError, first.text).toBe(false);
+      expect(first.payload).toMatchObject({ matched: 203, attempted: 200, deleted: 200, refused: 0, remaining: 3 });
+      expect(first.payload.next).toContain('3 matching record(s) were past this call\'s cap of 200');
 
-    const after = await tool('delete_records', { objectName: BULK, where: { batch: 'cap' } });
-    expect(after.payload.preview).toMatchObject({ matched: 0, wouldAttempt: 0 });
+      const second = await tool('delete_records', { objectName: BULK, where: { batch: 'cap' }, [AI_ACTION_CONFIRMATION_MEMBER]: true });
+      expect(second.payload).toMatchObject({ matched: 3, attempted: 3, deleted: 3, remaining: 0 });
+
+      const after = await tool('delete_records', { objectName: BULK, where: { batch: 'cap' } });
+      expect(after.payload.preview).toMatchObject({ matched: 0, wouldAttempt: 0 });
+    });
   }, 180_000);
+
+  it('a host whose maximum page size is under the cap: the call runs at that size and says so', async () => {
+    const ids = [
+      await create(BULK, { name: 'small 1', batch: 'small' }),
+      await create(BULK, { name: 'small 2', batch: 'small' }),
+      await create(BULK, { name: 'small 3', batch: 'small' }),
+    ];
+
+    await withReadWindow({ OS_DATA_MAX_PAGE_SIZE: '2' }, async () => {
+      const preview = await tool('delete_records', { objectName: BULK, where: { batch: 'small' } });
+      expect(preview.payload.preview, preview.text).toMatchObject({ matched: 3, wouldAttempt: 2, cap: 2 });
+
+      const done = await tool('delete_records', { objectName: BULK, where: { batch: 'small' }, [AI_ACTION_CONFIRMATION_MEMBER]: true });
+      expect(done.isError, done.text).toBe(false);
+      expect(done.payload).toMatchObject({ matched: 3, attempted: 2, deleted: 2, remaining: 1, cap: 2 });
+
+      const tooMany = await tool('delete_records', { objectName: BULK, recordIds: ids, [AI_ACTION_CONFIRMATION_MEMBER]: true });
+      expect(tooMany.isError).toBe(true);
+      expect(tooMany.text).toContain('at most 2 ids per call');
+    });
+    const left = (await Promise.all(ids.map((id) => readStatus(BULK, id)))).filter((s) => s === 200);
+    expect(left).toHaveLength(1);
+  }, 120_000);
+
+  describe('a rule\'s refusal is grouped; a fault ends the call', () => {
+    let plain: string[];
+    let approved: string;
+    let broken: string;
+
+    beforeAll(async () => {
+      plain = [
+        await create(GUARDED, { name: 'plain 1' }),
+        await create(GUARDED, { name: 'plain 2' }),
+        await create(GUARDED, { name: 'plain 3' }),
+      ];
+      approved = await create(GUARDED, { name: 'approved', approved: true });
+      broken = await create(GUARDED, { name: 'broken', broken: true });
+    }, 60_000);
+
+    it('control: REST DELETE answers the body\'s refusal 400 HOOK_ABORTED and the code hook\'s crash 500', async () => {
+      const refused = await stack.apiAs(admin, 'DELETE', `/data/${GUARDED}/${approved}`);
+      const refusedBody = await refused.text();
+      expect(refused.status, refusedBody).toBe(400);
+      expect(refusedBody).toContain('HOOK_ABORTED');
+      expect(refusedBody).toContain(APPROVED_SENTENCE);
+
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const crashed = await stack.apiAs(admin, 'DELETE', `/data/${GUARDED}/${broken}`);
+        expect(crashed.status, await crashed.clone().text()).toBe(500);
+      } finally {
+        errors.mockRestore();
+      }
+      expect(await readStatus(GUARDED, approved)).toBe(200);
+      expect(await readStatus(GUARDED, broken)).toBe(200);
+    }, 60_000);
+
+    it('confirmed: the refusal is grouped and the walk goes on; the fault stops it, naming the row and what was deleted', async () => {
+      const done = await tool('delete_records', {
+        objectName: GUARDED,
+        recordIds: [plain[0], approved, plain[1], broken, plain[2]],
+        [AI_ACTION_CONFIRMATION_MEMBER]: true,
+      });
+
+      expect(done.isError, done.text).toBe(true);
+      const { error, progress } = done.payload;
+      expect(error.message).toContain(`stopped at record '${broken}'`);
+      expect(error.message).toContain(FAULT_SENTENCE);
+      expect(error.message).toContain('2 record(s) were deleted before it and stay deleted; 1 were not attempted');
+      expect(progress).toMatchObject({
+        matched: 5,
+        attempted: 4,
+        deleted: 2,
+        refused: 1,
+        refusals: [{ code: 'HOOK_ABORTED', status: 400, reason: APPROVED_SENTENCE, count: 1, recordIds: [approved] }],
+        stoppedAt: broken,
+        notAttempted: 1,
+      });
+
+      // Ground truth over REST.
+      expect(await readStatus(GUARDED, plain[0]!)).toBe(404);
+      expect(await readStatus(GUARDED, plain[1]!)).toBe(404);
+      expect(await readStatus(GUARDED, approved)).toBe(200);
+      expect(await readStatus(GUARDED, broken)).toBe(200);
+      // Past the fault: never attempted.
+      expect(await readStatus(GUARDED, plain[2]!)).toBe(200);
+    }, 60_000);
+  });
 });

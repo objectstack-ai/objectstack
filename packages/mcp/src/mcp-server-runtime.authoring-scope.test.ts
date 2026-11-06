@@ -53,9 +53,11 @@ import type {
 // ---------------------------------------------------------------------------
 
 const READ_TOOLS = ['list_objects', 'describe_object', 'validate_expression', 'query_records', 'get_record', 'aggregate_records'];
-const WRITE_TOOLS = ['create_record', 'update_record', 'delete_record', 'delete_records'];
+const WRITE_TOOLS = ['create_record', 'update_record', 'delete_record'];
+/** [#30891] Registered only when the grant holds both data:read and data:write. */
+const READ_WRITE_TOOLS = ['delete_records'];
 const ACTION_TOOLS = ['list_actions', 'run_action'];
-const NATIVE_TOOLS = [...READ_TOOLS, ...WRITE_TOOLS, ...ACTION_TOOLS].sort();
+const NATIVE_TOOLS = [...READ_TOOLS, ...WRITE_TOOLS, ...READ_WRITE_TOOLS, ...ACTION_TOOLS].sort();
 
 /** The shape a host injects: names the host chose, none of them native. */
 const AUTHORING_TOOLS: AIToolDefinition[] = [

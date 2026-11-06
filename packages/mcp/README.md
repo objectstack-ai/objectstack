@@ -131,8 +131,9 @@ and `resume_run` only when it implements `resumeRun`; a bridge without those
 seams serves the rest and advertises nothing it cannot do.
 
 OAuth scopes narrow the families at consent time: `data:read` covers
-list/describe/query/aggregate/get, `data:write` covers create/update/delete (both delete tools), and
-`actions:execute` covers `list_actions` / `run_action` / `resume_run`. A tool outside the grant
+list/describe/query/aggregate/get, `data:write` covers create/update/delete, and
+`actions:execute` covers `list_actions` / `run_action` / `resume_run`. `delete_records` needs both
+`data:read` and `data:write`: its preview reads the selection's ids and count. A tool outside the grant
 is **not registered at all**, so the SDK rejects it as an unknown tool — the
 grant doubles as dispatch-time enforcement.
 

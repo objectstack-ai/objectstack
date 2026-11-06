@@ -29,7 +29,7 @@
  * `packages/qa/dogfood/test/mcp-delete-records.dogfood.test.ts`.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { AI_ACTION_CONFIRMATION_MEMBER } from '@objectstack/spec/contracts';
@@ -41,10 +41,11 @@ import {
   assertEngineFindOnePredicate,
   type EngineFindOneQueryInput,
 } from '@objectstack/metadata-core';
+import { planQueryReadWindow, resolveQueryReadLimits } from '@objectstack/types';
 
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import { createStdioDataBridge } from './stdio-data-bridge.js';
-import { DELETE_RECORDS_MAX_PER_CALL, type McpDataBridge } from './mcp-http-tools.js';
+import { DELETE_RECORDS_MAX_PER_CALL, deleteRecordsCap, type McpDataBridge } from './mcp-http-tools.js';
 
 const OBJECT = 'dlr_task';
 
@@ -103,9 +104,11 @@ function staleRefusal(): Error {
  * a package's delete rules do: a `locked` row is refused with
  * `RECORD_LOCKED` / 409 whoever asks, a row another user owns with
  * `PERMISSION_DENIED` / 403 (carrying `details`), and a `stale` row is
- * deleted under a roll-up the engine could not recompute.
+ * deleted under a roll-up the engine could not recompute. A row carrying
+ * `throws` throws that value instead, whatever it is (a fault, a sandboxed
+ * body's refusal).
  */
-function engineDouble(rows: Map<string, Row>, opts: { aggregate?: boolean } = {}) {
+function engineDouble(rows: Map<string, Row>, opts: { aggregate?: boolean; countAsString?: boolean } = {}) {
   const contexts: unknown[] = [];
   const engine: Record<string, unknown> = {
     find: vi.fn(async (_o: string, query?: any, options?: any) => {
@@ -135,6 +138,7 @@ function engineDouble(rows: Map<string, Row>, opts: { aggregate?: boolean } = {}
       contexts.push(options?.context);
       const id = String(options?.where?.id);
       const row = rows.get(id);
+      if (row?.throws !== undefined) throw row.throws;
       if (row?.locked === true) {
         throw Object.assign(new Error(LOCKED_REASON), { code: 'RECORD_LOCKED', status: 409 });
       }
@@ -155,7 +159,9 @@ function engineDouble(rows: Map<string, Row>, opts: { aggregate?: boolean } = {}
     engine.aggregate = vi.fn(async (_o: string, query: any) => {
       contexts.push(query?.context);
       const count = [...rows.values()].filter((r) => matches(r, query?.where)).length;
-      return [Object.fromEntries((query.aggregations as Array<{ alias: string }>).map((a) => [a.alias, count]))];
+      // A SQL driver may answer COUNT(*) as a decimal string (a 64-bit integer).
+      const value = opts.countAsString ? String(count) : count;
+      return [Object.fromEntries((query.aggregations as Array<{ alias: string }>).map((a) => [a.alias, value]))];
     });
   }
   return { engine: engine as any, contexts };
@@ -207,6 +213,34 @@ async function callTool(bridge: McpDataBridge, name: string, args: Record<string
 const parsed = (result: ToolResult) => JSON.parse(result.content[0]!.text);
 
 const task = (id: string, extra: Row = {}): [string, Row] => [id, { id, title: `task ${id}`, status: 'done', ...extra }];
+
+/**
+ * The data door's read window in front of a bridge: every `query` is planned
+ * with the platform's own rule (`planQueryReadWindow` over the deployment's
+ * `OS_DATA_*` limits), which REFUSES a read over the window, never clamps it.
+ * The limits each read asked for are recorded.
+ */
+function windowedBridge(inner: McpDataBridge): McpDataBridge & { limits: Array<number | undefined> } {
+  const limits: Array<number | undefined> = [];
+  return {
+    ...inner,
+    limits,
+    async query(object, options) {
+      const limit = (options as { limit?: number } | undefined)?.limit;
+      limits.push(limit);
+      planQueryReadWindow({ surface: 'list', object, ...(limit !== undefined ? { limit } : {}) }, resolveQueryReadLimits());
+      return inner.query(object, options);
+    },
+  };
+}
+
+function fillRows(rows: Map<string, Row>, n: number, extra: (i: number) => Row = () => ({})): void {
+  rows.clear();
+  for (let i = 0; i < n; i++) {
+    const [id, row] = task(`r${String(i).padStart(3, '0')}`, extra(i));
+    rows.set(id, row);
+  }
+}
 
 describe('MCP delete_records: many records of one object in one confirmed call (#30891)', () => {
   let rows: Map<string, Row>;
@@ -474,6 +508,151 @@ describe('MCP delete_records: many records of one object in one confirmed call (
     const refused = json.error !== undefined || json.result?.isError === true;
     expect(refused, JSON.stringify(json).slice(0, 300)).toBe(true);
     expect(double.engine.delete).not.toHaveBeenCalled();
+  });
+
+  describe('the selection read stays inside the deployment\'s read window', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('a host whose maximum page size is the cap: a filter over it is read at the cap and counted, never refused', async () => {
+      vi.stubEnv('OS_DATA_MAX_PAGE_SIZE', String(DELETE_RECORDS_MAX_PER_CALL));
+      fillRows(rows, 205);
+      const host = windowedBridge(bridge);
+
+      // Lit control: the window really refuses one row past the cap.
+      await expect(host.query(OBJECT, { where: {}, limit: DELETE_RECORDS_MAX_PER_CALL + 1 })).rejects.toMatchObject({
+        code: 'MAX_RECORDS_EXCEEDED',
+      });
+      host.limits.length = 0;
+
+      const previewed = await callTool(host, 'delete_records', { objectName: OBJECT, where: {} });
+      const { preview } = parsed(previewed);
+      expect(preview, previewed.content[0]!.text).toMatchObject({ matched: 205, wouldAttempt: 200, cap: 200 });
+
+      const answer = parsed(await callTool(host, 'delete_records', { objectName: OBJECT, where: {}, [AI_ACTION_CONFIRMATION_MEMBER]: true }));
+      expect(answer).toMatchObject({ matched: 205, attempted: 200, deleted: 200, remaining: 5, cap: 200 });
+      expect(rows.size).toBe(5);
+      // Every selection read asked for at most the cap.
+      expect(host.limits.length).toBeGreaterThan(0);
+      for (const limit of host.limits) expect(limit).toBeLessThanOrEqual(DELETE_RECORDS_MAX_PER_CALL);
+    });
+
+    it('exactly the cap matching is answered exactly, with nothing left to continue', async () => {
+      vi.stubEnv('OS_DATA_MAX_PAGE_SIZE', String(DELETE_RECORDS_MAX_PER_CALL));
+      fillRows(rows, DELETE_RECORDS_MAX_PER_CALL);
+      const host = windowedBridge(bridge);
+
+      const answer = parsed(await callTool(host, 'delete_records', { objectName: OBJECT, where: {}, [AI_ACTION_CONFIRMATION_MEMBER]: true }));
+      expect(answer).toMatchObject({ matched: 200, attempted: 200, deleted: 200, remaining: 0 });
+      expect(answer.next).toBeUndefined();
+      expect(rows.size).toBe(0);
+    });
+
+    it('a count a SQL driver answers as a decimal string is read as the count', async () => {
+      fillRows(rows, 203);
+      const sql = stdioBridge(engineDouble(rows, { countAsString: true }).engine);
+
+      const { preview } = parsed(await callTool(sql, 'delete_records', { objectName: OBJECT, where: {} }));
+      expect(preview).toMatchObject({ matched: 203, wouldAttempt: 200 });
+      expect('matchedMoreThan' in preview).toBe(false);
+    });
+
+    it.each([
+      ['maximum page size', 'OS_DATA_MAX_PAGE_SIZE'],
+      ['query row budget', 'OS_DATA_QUERY_ROW_BUDGET'],
+    ])('a %s under the cap lowers this call\'s cap to it, and the answer says so', async (_label, variable) => {
+      vi.stubEnv(variable, '50');
+      expect(deleteRecordsCap()).toBe(50);
+      fillRows(rows, 60);
+      const host = windowedBridge(bridge);
+
+      const { preview } = parsed(await callTool(host, 'delete_records', { objectName: OBJECT, where: {} }));
+      expect(preview).toMatchObject({ matched: 60, wouldAttempt: 50, cap: 50 });
+
+      const answer = parsed(await callTool(host, 'delete_records', { objectName: OBJECT, where: {}, [AI_ACTION_CONFIRMATION_MEMBER]: true }));
+      expect(answer).toMatchObject({ matched: 60, attempted: 50, deleted: 50, remaining: 10, cap: 50 });
+      expect(answer.next).toContain('cap of 50');
+      for (const limit of host.limits) expect(limit).toBeLessThanOrEqual(50);
+    });
+
+    it('an id list longer than a lowered cap is refused before anything is read, and nothing is deleted', async () => {
+      vi.stubEnv('OS_DATA_MAX_PAGE_SIZE', '2');
+      const result = await callTool(bridge, 'delete_records', {
+        objectName: OBJECT,
+        recordIds: ['t1', 't3', 't6'],
+        [AI_ACTION_CONFIRMATION_MEMBER]: true,
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain('at most 2 ids per call');
+      expect(double.engine.find).not.toHaveBeenCalled();
+      expect(double.engine.delete).not.toHaveBeenCalled();
+      expect(rows.size).toBe(6);
+    });
+  });
+
+  describe('a fault stops the call; a rule\'s refusal does not', () => {
+    it.each([
+      ['an uncoded throw (a code hook\'s bare Error, a lost connection)', new Error('socket hang up'), undefined, undefined],
+      ['a coded 5xx', Object.assign(new Error('The store is unavailable.'), { code: 'INTERNAL_ERROR', status: 500 }), 'INTERNAL_ERROR', 500],
+      ['a driver\'s own string code', Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), { code: 'ECONNREFUSED' }), 'ECONNREFUSED', undefined],
+    ])('%s ends the call at that row: an error naming it and what was already deleted', async (_label, thrown, code, status) => {
+      rows.get('t3')!.throws = thrown;
+
+      const result = await callTool(bridge, 'delete_records', {
+        objectName: OBJECT,
+        where: { status: 'done' },
+        [AI_ACTION_CONFIRMATION_MEMBER]: true,
+      });
+
+      expect(result.isError).toBe(true);
+      const { error, progress } = parsed(result);
+      expect(error.code).toBe(code);
+      expect(error.status).toBe(status);
+      expect(error.message).toContain("stopped at record 't3'");
+      expect(error.message).toContain((thrown as Error).message);
+      expect(error.message).toContain('1 record(s) were deleted before it and stay deleted; 2 were not attempted');
+      // t1 deleted, t2 refused by its lock, t3 the fault; t4 and t5 never asked.
+      expect(progress).toMatchObject({
+        matched: 5,
+        attempted: 3,
+        deleted: 1,
+        refused: 1,
+        refusals: [{ code: 'RECORD_LOCKED', status: 409, count: 1, recordIds: ['t2'] }],
+        stoppedAt: 't3',
+        notAttempted: 2,
+        remaining: 4,
+      });
+      expect(progress.next).toBeUndefined();
+      expect(double.engine.delete).toHaveBeenCalledTimes(3);
+      expect([...rows.keys()]).toEqual(['t2', 't3', 't4', 't5', 't6']);
+    });
+
+    it('a sandboxed hook body\'s refusal (no code) is a refusal: grouped as the data door answers it, and the call goes on', async () => {
+      const sentence = 'This task is approved and cannot be deleted.';
+      // The shape the sandbox runner relays a body's own throw in: the body's
+      // sentence on `innerMessage`, no `code`.
+      rows.get('t3')!.throws = Object.assign(new Error(`[sandbox] hook body threw: ${sentence}`), {
+        name: 'SandboxError',
+        innerMessage: sentence,
+      });
+
+      const result = await callTool(bridge, 'delete_records', {
+        objectName: OBJECT,
+        recordIds: ['t1', 't3', 't6'],
+        [AI_ACTION_CONFIRMATION_MEMBER]: true,
+      });
+
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      expect(parsed(result)).toMatchObject({
+        attempted: 3,
+        deleted: 2,
+        refused: 1,
+        refusals: [{ code: 'HOOK_ABORTED', status: 400, reason: sentence, count: 1, recordIds: ['t3'] }],
+      });
+      expect([...rows.keys()]).toEqual(['t2', 't3', 't4', 't5']);
+    });
   });
 
   it('the long-lived server the stdio transport serves refuses, previews and deletes the same way', async () => {
