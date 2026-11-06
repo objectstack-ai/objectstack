@@ -1325,8 +1325,22 @@ function staticTextSegments(node, source) {
  * is a directory of partial packs; the `studio` namespace is NOT one (it is a
  * `{token}` string table of its own, read by `collectDesignerKeys` in
  * `check-i18n-dead-keys.mjs`).
+ *
+ * Each directory is declared WITH ITS FRAME: the source directories (relative
+ * to `ui/`) whose files render under the gate that fetches the namespace. A key
+ * only the namespace defines is a raw key anywhere else, so class 9
+ * (`namespace-key-outside-frame`) refuses it at a call site outside these
+ * directories. The directory is the frame's outer bound; which files INSIDE it
+ * a page outside the frame imports is the census of that namespace's boundary
+ * test (`marketplaceNamespaceBoundary.test.ts` for this one). A namespace is
+ * added here or nowhere, so it cannot arrive without its frame.
  */
-export const PACK_NAMESPACE_DIRS = Object.freeze(['packages/i18n/src/namespaces/marketplace/']);
+export const PACK_NAMESPACE_FRAMES = Object.freeze({
+  'packages/i18n/src/namespaces/marketplace/': Object.freeze(['packages/app-shell/src/console/marketplace/']),
+});
+
+/** The pack-shaped namespace directories: the keys of {@link PACK_NAMESPACE_FRAMES}. */
+export const PACK_NAMESPACE_DIRS = Object.freeze(Object.keys(PACK_NAMESPACE_FRAMES));
 
 /** Every directory a pack key is DEFINED in: the packs, then the namespaces. */
 export const PACK_DEFINITION_DIRS = Object.freeze(['packages/i18n/src/locales/', ...PACK_NAMESPACE_DIRS]);
@@ -1348,21 +1362,28 @@ export const PACK_DEFINITION_DIRS = Object.freeze(['packages/i18n/src/locales/',
  * A leaf defined in two of the files — or a leaf in one that is a group in
  * another — THROWS: two homes for one key cannot both be what renders.
  *
- * @returns {{ leaves: Set<string>, branches: Set<string>, values: Map<string, string> }}
+ * `namespaceOf` maps every leaf a namespace file defines to that namespace's
+ * directory; a leaf absent from it is resident in the eager pack.
+ *
+ * @param {readonly string[]} [namespaceDirs] the namespace directories to read (default {@link PACK_NAMESPACE_DIRS})
+ * @returns {{ leaves: Set<string>, branches: Set<string>, values: Map<string, string>, namespaceOf: Map<string, string> }}
  */
-export function collectEnKeys(root) {
+export function collectEnKeys(root, namespaceDirs = PACK_NAMESPACE_DIRS) {
   const leaves = new Set();
   const branches = new Set();
   const values = new Map();
   const homeOf = new Map();
+  const namespaceOf = new Map();
   // The pack is required; a namespace's `en` file is read when it exists. A
   // missing one cannot hide anything: its keys simply are not defined, so every
   // call site that asks for one is reported as asking for a missing key.
   const files = [
-    join(root, 'packages/i18n/src/locales/en.ts'),
-    ...PACK_NAMESPACE_DIRS.map((dir) => join(root, dir, 'en.ts')).filter((file) => existsSync(file)),
+    { file: join(root, 'packages/i18n/src/locales/en.ts'), namespace: null },
+    ...namespaceDirs
+      .map((dir) => ({ file: join(root, dir, 'en.ts'), namespace: dir }))
+      .filter(({ file }) => existsSync(file)),
   ];
-  for (const file of files) {
+  for (const { file, namespace } of files) {
     const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
 
     const unwrap = (node) => {
@@ -1416,6 +1437,7 @@ export function collectEnKeys(root) {
           }
           leaves.add(path);
           homeOf.set(path, file);
+          if (namespace !== null) namespaceOf.set(path, namespace);
           const text = staticString(value, source);
           if (text !== null) values.set(path, text);
         }
@@ -1423,7 +1445,7 @@ export function collectEnKeys(root) {
     };
     walk(literal, '');
   }
-  return { leaves, branches, values };
+  return { leaves, branches, values, namespaceOf };
 }
 
 // ── source walk ──────────────────────────────────────────────────────────────
@@ -1976,11 +1998,40 @@ function resolveFactoryTable(root, source, argument, parseModule) {
  */
 export function analyze(
   root,
-  /** @type {{ families?: DynamicKeyFamily[], handRolled?: { file: string, name: string }[] }} */
-  { families = DYNAMIC_KEY_FAMILIES, handRolled = HAND_ROLLED_TABLES } = {},
+  /** @type {{ families?: DynamicKeyFamily[], handRolled?: { file: string, name: string }[], frames?: Record<string, readonly string[]> }} */
+  { families = DYNAMIC_KEY_FAMILIES, handRolled = HAND_ROLLED_TABLES, frames = PACK_NAMESPACE_FRAMES } = {},
 ) {
-  const { leaves, branches, values } = collectEnKeys(root);
+  for (const [dir, frame] of Object.entries(frames)) {
+    if (!Array.isArray(frame) || frame.length === 0 || frame.some((prefix) => typeof prefix !== 'string' || !prefix.endsWith('/'))) {
+      throw new Error(
+        `the pack namespace \`${dir}\` declares no frame: list the source directories (each ending in \`/\`) ` +
+          'whose files render under the gate that fetches it, in PACK_NAMESPACE_FRAMES',
+      );
+    }
+  }
+  const { leaves, branches, values, namespaceOf } = collectEnKeys(root, Object.keys(frames));
   const resolvesLeaf = (key) => leaves.has(key) || PLURAL_SUFFIXES.some((suffix) => leaves.has(key + suffix));
+
+  // Class 9 (objectstack#30645): which namespace a key lives in ONLY, or null
+  // when the eager pack answers it (or nothing does — class 1's business).
+  const residentLeaves = [...leaves].filter((key) => !namespaceOf.has(key));
+  const namespaceOnlyKey = (key) => {
+    const forms = [key, ...PLURAL_SUFFIXES.map((suffix) => key + suffix)].filter((form) => leaves.has(form));
+    if (forms.length === 0 || forms.some((form) => !namespaceOf.has(form))) return null;
+    return namespaceOf.get(forms[0]);
+  };
+  const namespaceOnlyHead = (head) => {
+    if (residentLeaves.some((key) => key.startsWith(head))) return null;
+    const first = [...namespaceOf.keys()].find((key) => key.startsWith(head));
+    return first === undefined ? null : namespaceOf.get(first);
+  };
+  /** Per namespace: the call-site keys read inside its frame — the live control on class 9. */
+  const framedReads = new Map(Object.keys(frames).map((dir) => [dir, 0]));
+  const judgeFrame = (dir, relPath, at, detail) => {
+    if (dir === null) return;
+    if (frames[dir].some((prefix) => relPath.startsWith(prefix))) framedReads.set(dir, framedReads.get(dir) + 1);
+    else findings.push({ reason: 'namespace-key-outside-frame', ...at, detail, expected: dir, frame: frames[dir] });
+  };
   // Materialised once, not inside the predicate: spreading a 2.6k-entry Set per
   // candidate head is the shape that made `all-locales-key-parity` quadratic
   // (7.51s -> 25ms once hoisted; see AGENTS.md 测试纪律).
@@ -2406,6 +2457,9 @@ export function analyze(
             referencedKeys.add(key);
             for (const suffix of PLURAL_SUFFIXES) referencedKeys.add(key + suffix);
             if (returnsObjects && branches.has(key)) referencedBranches.add(key);
+
+            if (resolvesLeaf(key)) judgeFrame(namespaceOnlyKey(key), relPath, at, key);
+            else if (returnsObjects && branches.has(key)) judgeFrame(namespaceOnlyHead(`${key}.`), relPath, at, `${key}.*`);
           }
 
           // objectui#3810 — the inline default is dead code the moment the key
@@ -2542,6 +2596,8 @@ export function analyze(
             const head = staticHead(argument);
             if (head && !headMatches(head)) {
               findings.push({ reason: 'missing-prefix', ...at, detail: head });
+            } else if (head) {
+              judgeFrame(namespaceOnlyHead(head), relPath, at, `${head}*`);
             }
             // Reverse-sweep bookkeeping: a leaf sharing this prefix is a
             // possible runtime target of the substitution, so it is live —
@@ -2652,7 +2708,16 @@ export function analyze(
     findings.push({ reason: 'undeclared-dynamic-family', ...observed.sites[0], detail: head });
   }
 
-  return { findings, counters, enKeyCount: leaves.size, referencedKeys, referencedBranches, dynamicHeads, dynamicFamilies };
+  return {
+    findings,
+    counters,
+    enKeyCount: leaves.size,
+    referencedKeys,
+    referencedBranches,
+    dynamicHeads,
+    dynamicFamilies,
+    framedReads,
+  };
 }
 
 // ── baseline ─────────────────────────────────────────────────────────────────
@@ -2828,6 +2893,15 @@ const HINTS = {
     ' downstream of `t()`, is spelled with SINGLE braces (`{x}`) and is out of this rule\'s range' +
     ' by construction. Same rule, same reasons, over the copy TABLES:' +
     ' `packages/i18n/src/__tests__/fallback-placeholder-spelling-3512.test.ts`.',
+  'namespace-key-outside-frame':
+    'The key EXISTS, but only in a lazy pack-shaped namespace (PACK_NAMESPACE_FRAMES), and this call' +
+    ' site is outside the directories that namespace\'s frame wraps (objectstack#30645). Only the frame' +
+    ' fetches the namespace, so here the key renders raw — or in English, when an earlier visit fetched' +
+    ' only `en`. Every pack gate is green on it, because the namespace is part of the pack to them. Fix' +
+    ' it by moving the key back into the resident pack (`packages/i18n/src/locales/<code>.ts`, all ten' +
+    ' languages, out of the namespace\'s ten partial packs), or by reading it only inside the frame. ⛔' +
+    ' Do NOT widen the frame to cover this file: a frame is the directories that render under the gate,' +
+    ' and a file outside them gains no fetch from being listed.',
   'dead-sibling-fallback':
     'The key EXISTS in `en`, and this fallback is written as the call\'s SIBLING' +
     ' (`t(key) || \'English\'`) rather than as an argument — so it is dead on every path, not just' +
@@ -2850,7 +2924,7 @@ const invokedDirectly = isEntrypoint(import.meta.url);
 
 if (invokedDirectly) {
   const root = resolve(scriptDir, '..');
-  const { findings, counters, enKeyCount } = analyze(root);
+  const { findings, counters, enKeyCount, framedReads } = analyze(root);
 
   // Guard against a refactor quietly emptying the comparison: with no keys and
   // no call sites every assertion below is trivially satisfied. Same reason
@@ -2921,6 +2995,20 @@ if (invokedDirectly) {
     process.exit(1);
   }
 
+  // Class 9's floor (objectstack#30645): a namespace whose own frame reads none
+  // of its keys means the frame or the namespace reader is wrong, and "0 outside
+  // the frame" would then be read off a rule that sees no namespace key at all.
+  for (const [dir, reads] of framedReads) {
+    if (reads === 0) {
+      console.error(
+        `The namespace-frame scan collapsed: no call site inside the frame of \`${dir}\` reads a key only that` +
+          ' namespace defines. Either PACK_NAMESPACE_FRAMES names the wrong directories or the namespace is no' +
+          ' longer read, and class 9 would be passing on an empty set.',
+      );
+      process.exit(1);
+    }
+  }
+
   const { unexpected, stale } = applyBaseline(findings, readBaseline(root));
 
   console.log(
@@ -2971,6 +3059,11 @@ if (invokedDirectly) {
       `${counters.keyBuilderSites} head(s) read off a key-building helper rather than a call site.`,
   );
   console.log(
+    `Namespace frames: ${framedReads.size} pack-shaped namespace(s) — ` +
+      [...framedReads].map(([dir, reads]) => `${dir} read ${reads} time(s) inside its frame`).join(', ') +
+      '; a key only a namespace defines is refused anywhere outside that namespace\'s frame.',
+  );
+  console.log(
     `Sibling fallbacks: ${counters.siblingFallbacks} call site(s) sit left of a ||/?? — ` +
       `${counters.judgedSiblingFallbacks} judged, ${counters.computedSiblingFallbacks} with a non-literal ` +
       `right operand, ${counters.optionalCallFallbacks} an optional call (fallback is live), ` +
@@ -2987,6 +3080,7 @@ if (invokedDirectly) {
   const parity = unexpected.filter((finding) => finding.reason === 'interpolation-parity');
   const siblings = unexpected.filter((finding) => finding.reason === 'dead-sibling-fallback');
   const spelling = unexpected.filter((finding) => finding.reason === 'unresolvable-default-spelling');
+  const outsideFrame = unexpected.filter((finding) => finding.reason === 'namespace-key-outside-frame');
   // objectui#4964's classes read on their own too: they are all about a template
   // family whose HEAD resolves, which is precisely the case the two key classes
   // above declare out of scope.
@@ -3008,7 +3102,10 @@ if (invokedDirectly) {
     'unresolvable-default-spelling',
   ]);
   const keyFindings = unexpected.filter(
-    (finding) => !VALUE_CLASSES.has(finding.reason) && !FAMILY_CLASSES.has(finding.reason),
+    (finding) =>
+      !VALUE_CLASSES.has(finding.reason) &&
+      !FAMILY_CLASSES.has(finding.reason) &&
+      finding.reason !== 'namespace-key-outside-frame',
   );
 
   if (unexpected.length === 0 && stale.length === 0) {
@@ -3018,8 +3115,9 @@ if (invokedDirectly) {
         ' createSafeTranslation defaults row repeats it too, every call site passes' +
         ' exactly the arguments that value has holes for, every inline defaultValue spells its' +
         ' placeholders the one way the provider-less fallback resolves, no call site carries a' +
-        ' literal fallback beside itself, and every dynamic key family either checks its members' +
-        ' against a declared vocabulary or says in writing why it has none.',
+        ' literal fallback beside itself, every dynamic key family either checks its members' +
+        ' against a declared vocabulary or says in writing why it has none, and no key only a lazy' +
+        ' namespace defines is read outside that namespace\'s frame.',
     );
     process.exit(0);
   }
@@ -3125,6 +3223,19 @@ if (invokedDirectly) {
       console.error(`  ${finding.file}:${finding.line}:${finding.column}  [${finding.reason}]  ${finding.detail}`);
       console.error(`      default text: ${quote(finding.expected)}`);
       console.error(`      ${finding.actual}`);
+    }
+  }
+
+  if (outsideFrame.length > 0) {
+    console.error(
+      `\n${outsideFrame.length} call site${outsideFrame.length === 1 ? '' : 's'} outside a namespace's frame ` +
+        `read${outsideFrame.length === 1 ? 's' : ''} a key only that lazy namespace defines — nothing fetches ` +
+        'the namespace there, so the user reads the raw key (or English, if an earlier visit fetched only `en`):',
+    );
+    for (const finding of outsideFrame) {
+      console.error(`  ${finding.file}:${finding.line}:${finding.column}  [${finding.reason}]  ${finding.detail}`);
+      console.error(`      defined only in: ${finding.expected}en.ts`);
+      console.error(`      its frame:       ${finding.frame.join(', ')}`);
     }
   }
 
