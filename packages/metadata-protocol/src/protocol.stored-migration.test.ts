@@ -1120,6 +1120,10 @@ describe('migrateStoredMetadata — the v18 stored shapes refused with no lossle
     };
 
     it('#23270 — each refused controlled_by_parent shape is listed by object; a conforming object is counted canonical', async () => {
+        // [ADR-0055 §1 as amended · #30905 ruling A] `crm_false` — its only
+        // `master_detail` declared `required: false` — is an optional master
+        // now, so it is counted canonical beside `crm_ok`, no longer listed.
+        // Its twin `crm_two` (two masters) still is.
         const { engine, tables } = makeStubEngine([
             cbpObject('crm_two', { quote: md('crm_quote', { required: true }), order: md('crm_order', { required: true }) }),
             cbpObject('crm_none', {}),
@@ -1132,18 +1136,17 @@ describe('migrateStoredMetadata — the v18 stored shapes refused with no lossle
 
         const report = await protocol.migrateStoredMetadata();
 
-        expect(report.canonical).toBe(1);
+        expect(report.canonical).toBe(2);
         expect(report.rows.map((r) => [r.name, r.outcome, r.todos.map((t) => [t.conversionId, t.path])])).toEqual([
             ['crm_two', 'skipped', [['cbp-master-relation-tiers-retired', 'objects[0].fields']]],
             ['crm_none', 'skipped', [['cbp-master-relation-tiers-retired', 'objects[0].sharingModel']]],
             ['crm_lookup', 'skipped', [['cbp-master-relation-tiers-retired', 'objects[0].sharingModel']]],
-            ['crm_false', 'skipped', [['cbp-master-relation-tiers-retired', 'objects[0].sharingModel']]],
         ]);
         const text = formatStoredMigrationReport(report).join('\n');
         expect(text).toContain('object/crm_two [env-wide]');
         expect(text).toContain('TODO cbp-master-relation-tiers-retired:');
         expect(text).toMatch(/which of them is the master is the owner's choice: the upgrade never picks one/);
-        expect(text).toMatch(/☐ TODO: 4 site\(s\) in 4 row\(s\) are left as stored/);
+        expect(text).toMatch(/☐ TODO: 3 site\(s\) in 3 row\(s\) are left as stored/);
         // Listed, never written — on --apply too — and no verdict flips over it.
         expect(storedMigrationClean(report)).toBe(true);
         const applied = await protocol.migrateStoredMetadata({ apply: true });

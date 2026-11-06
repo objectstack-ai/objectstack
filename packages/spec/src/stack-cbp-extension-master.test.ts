@@ -110,9 +110,23 @@ describe('[#23210] defineStack judges a controlled_by_parent object on its merge
     expect(cbpIssues(withField(OTHER)).map(([p]) => p)).toEqual(['objectExtensions.0.fields']);
   });
 
+  it('an extension that makes the one master optional passes, as its declared control does; beside a second master it is refused', () => {
+    // [ADR-0055 §1 as amended · #30905 ruling A] The object's only `master_detail`
+    // declared `required: false` is an optional master — accepted on the merged
+    // field set exactly as on the object declared directly.
+    const optional = { type: 'master_detail', reference: 'cbpx_header', required: false };
+    const stack = { manifest: MANIFEST, objects: OBJECTS(), objectExtensions: [{ extend: 'cbpx_line', fields: { header: optional } }] };
+    expect(cbpIssues(stack)).toEqual([]);
+    expect(ObjectStackDefinitionSchema.safeParse(stack).success).toBe(true);
+    expect(cbpIssues({ manifest: MANIFEST, objects: OBJECTS({ header: optional }) })).toEqual([]);
+    // The twin: the same optional master beside a second `master_detail` the
+    // extension adds is no one master, and is refused at the extension.
+    const twin = { manifest: MANIFEST, objects: OBJECTS({ header: optional }), objectExtensions: [{ extend: 'cbpx_line', fields: { other: { ...OTHER, required: false } } }] };
+    expect(cbpIssues(twin).map(([p]) => p)).toEqual(['objectExtensions.0.fields']);
+  });
+
   it('an extension that demotes the one master is refused, in the words of the declared control', () => {
     for (const demoted of [
-      { type: 'master_detail', reference: 'cbpx_header', required: false },
       { type: 'text' },
       { type: 'lookup', reference: 'cbpx_header', required: true },
     ]) {
