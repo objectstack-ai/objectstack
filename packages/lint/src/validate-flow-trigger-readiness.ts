@@ -233,10 +233,10 @@ export interface FlowTriggerReadinessFinding {
 export const FLOW_TRIGGER_UNKNOWN_OBJECT = 'flow-trigger-unknown-object';
 /**
  * #29442 (#29425 ruling A) — a start input declared a record reference
- * (`variables[].objectName`) names an object this stack does not define. Once
- * the start doors enforce the declaration (planned), every door that starts the
- * flow by name will load such an input from that object, so a wrong name will
- * refuse every start that supplies the input. The same hedge and
+ * (`variables[].objectName`) names an object this stack does not define. The
+ * start doors enforce the declaration (PR #30628): every door that starts the
+ * flow by name loads such an input from that object, so a wrong name
+ * refuses every start that supplies the input. The same hedge and
  * the same closure verdict as `flow-trigger-unknown-object`: advisory with no
  * package closure, an error under one.
  */
@@ -1092,10 +1092,10 @@ export function validateFlowTriggerReadiness(
     //     family has a use for.
 
     // 1i. #29442 (#29425 ruling A) — a start input declared a record reference
-    //     names an object this stack does not define. Once the start doors
-    //     enforce the declaration (planned), every door that starts the flow
-    //     by name will load the input from exactly that name in the caller's
-    //     scope, so a wrong name will refuse every start that supplies the
+    //     names an object this stack does not define. The start doors
+    //     enforce the declaration (PR #30628): every door that starts the flow
+    //     by name loads the input from exactly that name in the caller's
+    //     scope, so a wrong name refuses every start that supplies the
     //     input. Judged like the trigger's object (1 and 1b-i): a `sys_`
     //     name is a platform object and is not judged, and the verdict is the
     //     closure's when one is stated. The schema owns the declaration's
@@ -1117,8 +1117,8 @@ export function validateFlowTriggerReadiness(
           {
             message:
               `declares input '${variableName}' the id of a record of object '${objectName}', which this ` +
-              `stack does not define — if the name is wrong, every start that supplies the input will be ` +
-              `refused once the start doors enforce the declaration.` +
+              `stack does not define — if the name is wrong, every start that supplies the input is ` +
+              `refused.` +
               suggestName(objectName, objectNames),
             hint:
               `Set the input's objectName to the object's exact registered name, or ignore this if another ` +
