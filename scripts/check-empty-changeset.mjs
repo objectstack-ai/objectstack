@@ -124,7 +124,7 @@
 // opposite (#18160, ruling D on #17712, 2026-09-14):
 //
 //     COLLISION            -> rename yours; restore theirs from base
-//     DELIBERATE CORRECTION -> do NOT restore it; get it confirmed on the PR
+//     DELIBERATE CORRECTION -> do NOT restore it; declare it on the PR, the seat's record confirms
 //
 // The second class is a PR that changed behaviour a PENDING release note
 // describes and corrected that note in the same stroke. It is refused exactly as
@@ -547,8 +547,17 @@ export const FOREIGN_REMEDY = 'rename yours; restore theirs from base';
  * `sum` / `avg` / `min` / `max` and rewrites
  * `.changeset/aggregate-field-type-compatibility.md`, whose base text stated
  * booleans were refused for exactly those four aggregates.
+ *
+ * The remedy NAMES the confirmer, by pointing at the record that confirms. A
+ * remedy that only said "get it confirmed" sent devs to ask the maintainer in
+ * the PR body and seats to hold the landing until the maintainer answered,
+ * while the rule already placed the confirmation with the dispatching seat's
+ * own record (pm-dispatch references/landing-operations.md): its ACCEPT for a
+ * text-only diff, otherwise its same-head at-tier contract-review PASS. The
+ * verdict is unchanged; only the way out is spelled so nobody waits.
  */
-export const FOREIGN_CORRECTION_REMEDY = 'do NOT restore it -- say so on the PR and get it confirmed';
+export const FOREIGN_CORRECTION_REMEDY =
+  'do NOT restore it -- declare the DELIBERATE CORRECTION on the PR, naming each note; the dispatching seat confirms it by its own record (its ACCEPT, or its same-head at-tier contract-review PASS: pm-dispatch references/landing-operations.md), never a maintainer wait';
 
 // ONE source for the two-class remedy, rendered TWICE: as indented lines in the
 // human body, and joined into the single line a `::error` annotation has to be.
@@ -606,10 +615,13 @@ function reportForeign(rows) {
       'above is the one thing not to do: the note you rewrote describes behaviour THIS PR',
       'changed, so restoring it from the base republishes a sentence that is now false, and',
       'no label and no diff shape makes that safe. Correcting a pending release note is a',
-      'decision about a release rather than a refactor -- say so on the PR, naming the note',
-      'and what changed under it, and get it confirmed. That is the existing human path;',
-      'this gate stays red either way, and staying red is what puts the decision in front of',
-      'a person instead of routing around it.',
+      'decision about a release rather than a refactor -- declare it on the PR as a',
+      'DELIBERATE CORRECTION, naming each note and quoting the corrected sentences. Who',
+      'confirms it is the dispatching seat, by its own record: its ACCEPT for a text-only',
+      'diff, otherwise its same-head at-tier contract-review PASS (pm-dispatch',
+      'references/landing-operations.md). Do not ask the maintainer to confirm it, and do',
+      'not wait for one; this gate stays red either way, and staying red is what puts the',
+      'correction in front of that record instead of routing around it.',
     ].join('\n'),
   );
   for (const { file } of rows) {
@@ -688,7 +700,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#6129: main drift must not move the verdict, in EITHER direction': 6,
   '#6129, the other half: a base branch that DELETES': 2,
   "A' (#17712): a changeset the PR did not add is neither modified nor deleted": 29,
-  'D (#18160): the refusal names BOTH classes, body and annotation pinned equal': 12,
+  'D (#18160): the refusal names BOTH classes, body and annotation pinned equal': 14,
   '#4690, one step later: no merge base at all is a failure': 1,
   'The consumer: this gate\'s own CI step (#6129)': 34,
   'The second consumer: where THIS SELF-TEST runs (#6509)': 12,
@@ -1454,8 +1466,17 @@ function selfTest() {
         'D two-class: the body names the second class in the ruling\'s own terms, not as a generic caveat',
       );
       assert(
-        text.includes('there is no second command to run') && text.includes('get it confirmed'),
+        text.includes('there is no second command to run') && text.includes('the dispatching seat, by its own record'),
         'D two-class: the second class is ROUTED to the confirmation path rather than to the restore',
+      );
+      assert(
+        FOREIGN_CORRECTION_REMEDY.includes('the dispatching seat confirms it by its own record')
+          && FOREIGN_CORRECTION_REMEDY.includes('references/landing-operations.md'),
+        'D two-class: the remedy NAMES the confirmer by pointing at the record that confirms -- "get it confirmed" with no confirmer sent devs to the maintainer',
+      );
+      assert(
+        text.includes('Do not ask the maintainer to confirm it'),
+        'D two-class: the body says in words that the maintainer is not the confirmer -- the wait this remedy exists to end',
       );
 
       // The equality pin, taken against the REAL rendered body.
