@@ -57,7 +57,7 @@ function runNode(code: string, kind: 'module' | 'commonjs'): { out: Record<strin
     encoding: 'utf8',
   });
   const lines = stdout.trim().split('\n');
-  return { out: JSON.parse(lines[0]!) as Record<string, unknown>, resolved: JSON.parse(lines.at(-1)!) as string[] };
+  return { out: JSON.parse(lines[0]!) as Record<string, unknown>, resolved: JSON.parse(lines[lines.length - 1]!) as string[] };
 }
 
 const probe = (mod: string) => `
