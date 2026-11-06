@@ -31,7 +31,15 @@
 import { readFile } from 'node:fs/promises';
 import { resolve as resolvePath, basename, dirname, isAbsolute } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
-import { PackageSchema } from '@objectstack/spec/marketplace';
+import {
+  CreatePackageRequestSchema,
+  explainSolutionTypeContradiction,
+  LEGACY_CATEGORY_MAPPING,
+  MarketplaceBusinessFunctionSchema,
+  PackageSchema,
+  type MarketplaceSolutionType,
+} from '@objectstack/spec/marketplace';
+import { ManifestSchema, resolveInstallModes } from '@objectstack/spec/kernel';
 import { printHeader, printKV, printSuccess, printError, printStep, printWarning, isExitSignal } from '../../utils/format.js';
 import { DEFAULT_CLOUD_URL, tryReadCloudConfig } from '../../utils/cloud-config.js';
 import { resolveCloudActiveEnvironmentId } from '../../utils/active-environment.js';
@@ -229,6 +237,86 @@ function deriveVersion(artifact: any, fallback: string | undefined): string {
 }
 
 /**
+ * The refusal for a retired `category`, from the manifest or the hidden
+ * `--category` flag, naming the facets that replace it — for the value given
+ * when `LEGACY_CATEGORY_MAPPING` knows it.
+ *
+ * Refused, never dropped: an author who wrote a category meant to classify the
+ * package, and silently publishing it unclassified would hide that. Refused
+ * before any network call, so nothing is half-published.
+ */
+export function retiredCategoryRefusal(source: 'manifest' | 'flag', value: unknown): string {
+  const where = source === 'flag'
+    ? '`--category` was removed'
+    : 'objectstack.manifest.json declares `category`, which was removed';
+  const head = `${where} in @objectstack/spec 18: the marketplace taxonomy is \`businessFunctions\` `
+    + '(1-3 business functions, the primary one first), optional `industries` (up to 3) and `solutionType` '
+    + '(`app`, `template` or `connector`).';
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  const mapping = raw ? LEGACY_CATEGORY_MAPPING[raw] : undefined;
+  const functions = MarketplaceBusinessFunctionSchema.options.join(', ');
+  const fix = 'Delete `category` and declare the facets in objectstack.manifest.json.';
+  if (!mapping) {
+    return `${head} ${fix} Business functions: ${functions}.`;
+  }
+  const tag = 'tag' in mapping && mapping.tag ? ` Keep "${mapping.tag}" in \`tags\` if it helps search.` : '';
+  if (mapping.kind === 'unlistable') {
+    return `${head} "${raw}" has no replacement: ${mapping.reason}. Delete \`category\`.`;
+  }
+  if (mapping.kind === 'manual') {
+    return `${head} "${raw}" maps to "solutionType": "${mapping.solutionType}", and its business functions are `
+      + `yours to choose (1-3 of: ${functions}). ${fix}${tag}`;
+  }
+  const declared = mapping.businessFunctions.map((f) => `"${f}"`).join(', ');
+  const review = mapping.review ? ' Check them: this old value covered several functions.' : '';
+  return `${head} "${raw}" maps to "businessFunctions": [${declared}], "solutionType": "${mapping.solutionType}".`
+    + `${review} ${fix}${tag}`;
+}
+
+/** The facet keys `objectstack.manifest.json` declares, and the wire key each is sent under. */
+const TAXONOMY_WIRE_KEYS = {
+  businessFunctions: 'business_functions',
+  industries: 'industries',
+  solutionType: 'solution_type',
+  maturity: 'maturity',
+} as const;
+
+/**
+ * Read the marketplace facets off `objectstack.manifest.json` and check them
+ * against the built artifact: each key's own shape (the spec's schema for it),
+ * then the declared `solutionType` against what the artifact ships
+ * (`explainSolutionTypeContradiction`). Returns the body keys to send, or the
+ * refusal. An absent key is not sent, so a re-publish leaves the stored value
+ * alone.
+ */
+export function readPublishTaxonomy(
+  manifest: Record<string, unknown>,
+  artifact: any,
+): { ok: true; body: Record<string, unknown> } | { ok: false; message: string } {
+  const body: Record<string, unknown> = {};
+  for (const [key, wire] of Object.entries(TAXONOMY_WIRE_KEYS)) {
+    if (manifest[key] === undefined) continue;
+    const field = CreatePackageRequestSchema.shape[key as keyof typeof TAXONOMY_WIRE_KEYS];
+    const parsed = field.safeParse(manifest[key]);
+    if (!parsed.success) {
+      const why = parsed.error.issues.map((issue) => issue.message).join('; ');
+      return { ok: false, message: `objectstack.manifest.json \`${key}\` is not valid: ${why}` };
+    }
+    body[wire] = parsed.data;
+  }
+  const solutionType = body.solution_type as MarketplaceSolutionType | undefined;
+  if (solutionType !== undefined) {
+    const modes = ManifestSchema.shape.installModes.safeParse(artifact?.manifest?.installModes);
+    const contradiction = explainSolutionTypeContradiction(solutionType, {
+      installModes: resolveInstallModes(modes.success ? { installModes: modes.data } : undefined),
+      connectorCount: Array.isArray(artifact?.connectors) ? artifact.connectors.length : 0,
+    });
+    if (contradiction !== undefined) return { ok: false, message: contradiction };
+  }
+  return { ok: true, body };
+}
+
+/**
  * Load `objectstack.manifest.json` from `cwd` if it exists. Returns the
  * parsed JSON plus the directory it was loaded from (used to resolve
  * relative `readmePath` / per-locale README paths). Returns `null` when
@@ -398,8 +486,12 @@ export default class PackagePublish extends Command {
     description: Flags.string({
       description: 'Short package description',
     }),
+    // REMOVED with the spec's `category`. Still declared, hidden, so passing
+    // it is answered with the facets that replace it rather than oclif's bare
+    // "Nonexistent flag".
     category: Flags.string({
-      description: 'Marketplace category slug (e.g. crm, hr, devtools)',
+      description: 'REMOVED: declare businessFunctions / industries / solutionType in objectstack.manifest.json',
+      hidden: true,
     }),
     // ⛔ No `default:` here. The package upsert is also the RE-publish path, and
     // the control plane patches an existing package's visibility whenever the
@@ -520,13 +612,31 @@ export default class PackagePublish extends Command {
       printSuccess(`Loaded artifact (${(artifactRaw.length / 1024).toFixed(1)} KB)`);
 
       // Load `objectstack.manifest.json` (optional). Provides declarative
-      // defaults for manifestId / displayName / category / tagline / readme
+      // defaults for manifestId / displayName / the facets / tagline / readme
       // / per-locale translations etc. CLI flags always win over manifest.
       const tplManifest = await tryLoadTemplateManifest(process.cwd());
       if (tplManifest) {
         printStep(`Loaded objectstack.manifest.json`);
       }
       const m = tplManifest?.data ?? {};
+      // The retired `category`, from either source, is refused before
+      // anything else is read or sent — see retiredCategoryRefusal.
+      if (flags.category !== undefined) {
+        printError(retiredCategoryRefusal('flag', flags.category));
+        this.exit(1);
+        return;
+      }
+      if (m.category !== undefined) {
+        printError(retiredCategoryRefusal('manifest', m.category));
+        this.exit(1);
+        return;
+      }
+      const taxonomy = readPublishTaxonomy(m, artifact);
+      if (!taxonomy.ok) {
+        printError(taxonomy.message);
+        this.exit(1);
+        return;
+      }
       for (const warning of uncarriedManifestWarnings(m)) printWarning(warning);
       const baseDir = tplManifest?.baseDir ?? process.cwd();
 
@@ -636,8 +746,10 @@ export default class PackagePublish extends Command {
       } else if (tagline) {
         pkgBody.description = tagline;
       }
-      const cat = flags.category ?? (typeof m.category === 'string' ? m.category : undefined);
-      if (cat) pkgBody.category = cat;
+      // The marketplace facets (`businessFunctions`, `industries`,
+      // `solutionType`, `maturity`), already checked above. `category` never
+      // reaches this point.
+      Object.assign(pkgBody, taxonomy.body);
       // Listing tags, as the author wrote them. The hosted route owns the
       // shape and the bounds (it trims, de-duplicates and caps them) and
       // answers a 400 that is printed as it is; this command keeps no copy of
@@ -835,7 +947,8 @@ export default class PackagePublish extends Command {
           console.log('');
           console.log(
             '  Fix the items above on the sys_package row (use --readme / --readme-file,\n' +
-            '  --icon-url, --description, --category) and re-run with --submit or --auto-approve.',
+            '  --icon-url, --description; the facets in objectstack.manifest.json) and re-run with\n' +
+            '  --submit or --auto-approve.',
           );
         }
         this.exit(1);

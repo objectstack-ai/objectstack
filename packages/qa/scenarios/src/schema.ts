@@ -18,6 +18,7 @@
  */
 
 import { ErrorCode } from '@objectstack/spec/api';
+import { MarketplaceBusinessFunctionsSchema } from '@objectstack/spec/marketplace';
 import { z } from 'zod';
 
 /** A machine name: snake_case, the convention for data values in this repo. */
@@ -71,7 +72,7 @@ export const ExpectSchema = z.strictObject({
 });
 export type ScenarioExpect = z.infer<typeof ExpectSchema>;
 
-// ── Layer 3: capabilities + category ────────────────────────────────────────
+// ── Layer 3: capabilities + business functions ────────────────────────────────────────
 
 /**
  * `<area>.<name>`. The AREA half is a closed set read from the tree
@@ -85,24 +86,15 @@ export const CapabilityTagSchema = z
     'must be `<area>.<name>`, e.g. `records-forms.master-detail`',
   );
 
-/** The cloud marketplace taxonomy — a closed enum. */
-export const SCENARIO_CATEGORIES = [
-  'app',
-  'crm',
-  'sales',
-  'marketing',
-  'finance',
-  'hr',
-  'operations',
-  'project',
-  'productivity',
-  'data',
-  'integrations',
-  'devtools',
-  'utility',
-  'other',
-] as const;
-export const CategorySchema = z.enum(SCENARIO_CATEGORIES);
+/**
+ * A card's business functions — the marketplace taxonomy's business-function
+ * facet, read from `@objectstack/spec/marketplace` and never restated here:
+ * 1-3 distinct values, the primary one first. A card graduates into a
+ * marketplace template, so it is classified the way the template will be
+ * listed. (This used to be a hand copy of the cloud catalog's single-category
+ * list; the taxonomy now lives once, in the spec.)
+ */
+export const BusinessFunctionsSchema = MarketplaceBusinessFunctionsSchema;
 
 // ── Layer 4: run.seed / run.questions / run.personas ────────────────────────
 
@@ -443,7 +435,7 @@ export const ScenarioCardSchema = z.strictObject({
   /** The fixed "today" relative windows are computed against (`YYYY-MM-DD`). */
   asOf: z.iso.date().optional(),
   capabilities: z.array(CapabilityTagSchema).min(1),
-  category: CategorySchema,
+  businessFunctions: BusinessFunctionsSchema,
   run: z.strictObject({
     seed: z.record(MachineNameSchema, z.array(SeedRowSchema).min(1)),
     questions: z.array(QuestionSchema).min(5),

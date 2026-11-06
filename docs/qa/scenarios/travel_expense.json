@@ -53,7 +53,7 @@
     "ai.ask-data",
     "ai.agent-actions"
   ],
-  "category": "finance",
+  "businessFunctions": ["finance"],
   "run": {
     "seed": {
       "department": [

@@ -23,7 +23,7 @@
     "ai.ask-data",
     "access-security.field-permissions"
   ],
-  "category": "finance",
+  "businessFunctions": ["finance"],
   "run": {
     "seed": {
       "account": [
