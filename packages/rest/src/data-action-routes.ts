@@ -1784,8 +1784,12 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 // machine code the shared resolver reads off the error —
                 // never the error's text, which a driver can fill with a
                 // comparand.
+                // An object name the registry does not know is the one read
+                // refusal that writes no row: no object, so no data moved, and
+                // the name is only the caller's path text, unverified.
                 if (exportRun) {
                     const { status, code } = resolveThrownHttpError(error, 500);
+                    if (code === 'OBJECT_NOT_FOUND') return;
                     await recordDataExport(this, environmentId, req, {
                         ...exportRun,
                         truncated: exportTruncatedAtLimit(exportRun.rowCount, exportRun.limit, exportLastPage),

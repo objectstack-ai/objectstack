@@ -869,10 +869,11 @@ describe('[#30955] export route — the ledger hears of every export it streams'
     expect(events[0].errorCode).toBe('INVALID_FIELD');
   });
 
-  it('an export of an object name the registry does not know, past an export gate that let it through, hands ONE failed event (404 OBJECT_NOT_FOUND)', async () => {
-    // Pinned as built, for the review to judge: the gates passed and the read
-    // began, so by the door's one rule this is an export that failed, not a
-    // refusal. Only a caller the export gate admits for that name reaches it.
+  it('an export of an object name the registry does not know, past an export gate that let it through, is a refusal: 404 OBJECT_NOT_FOUND and no event', async () => {
+    // Seat decision on the contract review: no object, so no data moved, and
+    // the name is only the caller's path text — it is never written to the
+    // ledger as an `object_name`. Only a caller the export gate admits for
+    // that name reaches this branch.
     const gateAsked: string[] = [];
     const { events, run } = await bootAudited({
       canExport: async (object) => { gateAsked.push(object); return true; },
@@ -881,15 +882,11 @@ describe('[#30955] export route — the ledger hears of every export it streams'
     expect(answer.status).toBe(404);
     expect(answer.json?.code ?? answer.json?.error?.code).toBe('OBJECT_NOT_FOUND');
     expect(gateAsked).toEqual(['no_such_object']);
+    expect(events).toEqual([]);
+    // Control on the same boot: a known object still hands its event.
+    expect((await run('task', { format: 'csv' })).status).toBe(200);
     expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({
-      objectName: 'no_such_object',
-      outcome: 'failed',
-      status: 404,
-      errorCode: 'OBJECT_NOT_FOUND',
-      rowCount: 0,
-      truncated: false,
-    });
+    expect(events[0]).toMatchObject({ objectName: 'task', outcome: 'succeeded' });
   });
 
   it('a sink that throws changes nothing about the file the caller gets', async () => {
