@@ -101,9 +101,9 @@ Standardized answers to the recurring ambiguous cases:
   `beforeInsert`/`beforeUpdate` hook writes, then `{ name: 'days_sum', aggregate: 'sum', field: 'days_count' }`.
 - **Breakdown by a multi-value field.** `multiselect`/`checkboxes`/`tags` and
   any `multiple: true` field is refused as a dataset or cube dimension and as
-  `groupBy` (`INVALID_FIELD`; no per-member buckets); a `formula` too, as a
-  dataset dimension at compile (`DATASET_INVALID`). One widget per member,
-  filtered `{ tags: { $contains: 'urgent' } }`, or a single-value axis.
+  `groupBy` (`INVALID_FIELD`; no per-member buckets); so is a `formula` (at a
+  dataset's compile, `DATASET_INVALID`). One widget per member, filtered
+  `{ tags: { $contains: 'urgent' } }`, or a single-value axis.
 - **Filter by a parent's attribute** → a **dimension** (guaranteed to join); a
   lookup-path *filter* is not a reliable analytics-path construct.
 - **A dashboard filter driving several charts** → **not** a dataset: `globalFilters`
