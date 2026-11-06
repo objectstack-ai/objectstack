@@ -103,6 +103,35 @@ describe('judgeRecord — "passed every half", read from the record', () => {
   });
 });
 
+describe('judgeRecord — ⛔ a not-measured turn is not a pass, even under a `pass` verdict', () => {
+  it('a refused seed row leaves every half `pass` in the record, and the record still does not pass', async () => {
+    // ct4 is a contact: every question on contacts, and every operation that names it, is not measured.
+    const { record } = await runCrm({ refuse: ['democrm_contact/ct4'] });
+    const verdicts = (record.results as Array<{ id: string; verdict: string }>).filter((r) => /scratch\.(run-ask|run-operations)$/.test(r.id)).map((r) => r.verdict);
+    expect(verdicts).toEqual(['pass', 'pass']); // the scorecard counts not-measured turns in neither passed nor total
+    const j = judgeRecord(asRecord(record));
+    expect(j.passed).toBe(false);
+    expect(j.halves.every((h) => h.verdict === 'pass')).toBe(true);
+    expect(j.reasons.length).toBeGreaterThan(0);
+    for (const r of j.reasons) expect(r).toMatch(/^crm_account_with_contacts\.(scratch|template)\.(run|iterate-run) (question|operation) \S+.*: not measured — seed: /);
+    // Every Run half the record holds is read: scratch first run, scratch re-run, template re-run.
+    expect(new Set(j.reasons.map((r) => r.split(' ')[0]))).toEqual(
+      new Set([`${CARD_ID}.scratch.run`, `${CARD_ID}.scratch.iterate-run`, `${CARD_ID}.template.iterate-run`]),
+    );
+  });
+
+  it('an operation marked not measured is a reason of its own', async () => {
+    const { record } = await runCrm();
+    const cardRun = record.cardRun as { modes: Array<{ mode: string; run: { operations: Array<Record<string, unknown>> } }> };
+    const scratch = cardRun.modes.find((m) => m.mode === 'scratch')!;
+    const [first, ...rest] = scratch.run.operations;
+    const edited = { ...record, cardRun: { ...cardRun, modes: cardRun.modes.map((m) => (m === scratch ? { ...m, run: { ...m.run, operations: [{ ...first, notMeasured: 'seed: needs democrm_account ac1, which the app refused' }, ...rest] } } : m)) } };
+    expect(judgeRecord(asRecord(edited)).reasons).toEqual([
+      `${CARD_ID}.scratch.run operation ${String(first!.operation)} as ${String(first!.persona)}: not measured — seed: needs democrm_account ac1, which the app refused`,
+    ]);
+  });
+});
+
 describe('exportGallery — one passing, generic app', () => {
   it('writes the apps/<id>/ layout: source, run record, scorecard, transcript, README, and the index', async () => {
     const { out, fx, opts } = await setup();
@@ -209,6 +238,20 @@ describe('exportGallery — one passing, generic app', () => {
     expect(parseIndex(readFileSync(join(out, 'index.json'), 'utf8')).apps).toEqual([]);
     expect(s.unowned).toEqual(['hand_made']);
     expect(existsSync(join(out, 'apps', 'hand_made'))).toBe(true);
+  });
+
+  it('an app whose newest record has a not-measured turn is refused, and a previous export of it removed', async () => {
+    const { out, runs, opts } = await setup();
+    await exportGallery(opts());
+    const later = await runCrm({ date: '2026-12-01', refuse: ['democrm_contact/ct4'] });
+    writeRecord(runs, later.record);
+    const s = await exportGallery(opts({ recordings: [later.recording] }));
+    expect(s.exported).toEqual([]);
+    expect(s.refused[0]!.reasons[0]).toMatch(/did not pass every half/);
+    expect(s.refused[0]!.reasons.slice(1).every((r) => r.includes(': not measured — seed: '))).toBe(true);
+    expect(s.removed).toEqual([{ id: CARD_ID, why: expect.stringContaining('not measured') }]);
+    expect(existsSync(join(out, 'apps', CARD_ID))).toBe(false);
+    expect(parseIndex(readFileSync(join(out, 'index.json'), 'utf8')).apps).toEqual([]);
   });
 
   it('the newest record decides, even when an older one passed', async () => {

@@ -31,7 +31,13 @@ const QuestionResultSchema = z.looseObject({
   error: z.string().optional(),
 });
 
-const RunHalfSchema = z.looseObject({ questions: z.array(QuestionResultSchema) });
+const OperationResultSchema = z.looseObject({
+  operation: z.string().min(1),
+  persona: z.string().min(1),
+  notMeasured: z.string().optional(),
+});
+
+const RunHalfSchema = z.looseObject({ questions: z.array(QuestionResultSchema), operations: z.array(OperationResultSchema) });
 
 const ModeRunSchema = z.looseObject({
   mode: z.enum(['scratch', 'template']),

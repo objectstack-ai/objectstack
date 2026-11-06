@@ -236,15 +236,22 @@ export interface FixtureRun {
   recording: Recording;
 }
 
-/** One run of the crm card, both modes; `iterateRun: false` leaves the iterate Run halves not run. */
-export async function runCrm(opts: { work?: string; date?: string; iterateRun?: boolean; modes?: Array<'scratch' | 'template'> } = {}): Promise<FixtureRun> {
+/** One run of the crm card, both modes; `iterateRun: false` leaves the iterate Run halves not run; `refuse` makes every booted app refuse those seed rows. */
+export async function runCrm(
+  opts: { work?: string; date?: string; iterateRun?: boolean; modes?: Array<'scratch' | 'template'>; /** Seed rows every booted app refuses, `object/id`. */ refuse?: string[] } = {},
+): Promise<FixtureRun> {
   const scenario = loadCrm();
   const work = opts.work ?? tempDir('work');
-  let current = new FakeApp();
+  const fresh = () => {
+    const app = new FakeApp();
+    for (const r of opts.refuse ?? []) app.refuse.add(r);
+    return app;
+  };
+  let current = fresh();
   const ops = fakeOps(work, () => current);
   const boot = ops.boot.bind(ops);
   ops.boot = async (dir) => {
-    current = new FakeApp();
+    current = fresh();
     return boot(dir);
   };
   const driver = new RecordingDriver(new ScriptedDriver(scenario, ops, () => current));

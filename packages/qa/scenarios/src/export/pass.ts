@@ -19,6 +19,12 @@
  *     first Build and Run rows are `not-run` by construction (the mode installs
  *     a verified build and builds nothing first), so they are not asked. A
  *     template mode that was skipped holds `not-run` in every row and fails.
+ *   - No turn may be NOT MEASURED, in any Run half the record holds (the
+ *     first Run and the iterate re-run, both modes), questions and operations
+ *     alike. The scorecard leaves a not-measured turn (one that reads a seed
+ *     row the app refused) out of both passed and total, so its half can still
+ *     read `pass`; the gallery is trust-first, and a turn nobody measured is a
+ *     claim nobody proved. Each one is a reason of its own.
  */
 
 import type { ScenarioRunRecord, Verdict } from './record.js';
@@ -40,7 +46,7 @@ export interface PassJudgement {
   passed: boolean;
   /** Every owed half with its verdict, in order. */
   halves: HalfVerdict[];
-  /** Why it did not pass, one line per reason; empty when it passed. */
+  /** Why it did not pass, one line per reason (a failing half, or a not-measured turn); empty when it passed. */
   reasons: string[];
 }
 
@@ -57,6 +63,20 @@ export function judgeRecord(record: ScenarioRunRecord): PassJudgement {
       const verdict = byId.get(id) ?? 'missing';
       halves.push({ id, verdict });
       if (verdict !== 'pass') reasons.push(`${id}: ${verdict}`);
+    }
+  }
+  for (const m of record.cardRun.modes) {
+    const runs = [
+      ['run', m.run],
+      ['iterate-run', m.iterate?.run],
+    ] as const;
+    for (const [phase, half] of runs) {
+      for (const q of half?.questions ?? []) {
+        if (q.notMeasured) reasons.push(`${card}.${m.mode}.${phase} question ${q.question}${q.persona ? ` as ${q.persona}` : ''}: not measured — ${q.notMeasured}`);
+      }
+      for (const o of half?.operations ?? []) {
+        if (o.notMeasured) reasons.push(`${card}.${m.mode}.${phase} operation ${o.operation} as ${o.persona}: not measured — ${o.notMeasured}`);
+      }
     }
   }
   return { passed: reasons.length === 0, halves, reasons };
