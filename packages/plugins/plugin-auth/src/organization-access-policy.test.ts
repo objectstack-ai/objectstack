@@ -367,6 +367,16 @@ describe('the concurrent cap: the deployment counts every session, an organizati
     expect(revoked(engine)).toEqual(['a_newer']);
   });
 
+  it('the session hook sweeps the target organization\'s cap when a session switches in', async () => {
+    const { engine, manager, add } = await withSessions({}, { [ORG_A]: { max_concurrent_sessions_per_user: 1 } });
+    await add('a_newer', ORG_A, 5);
+    await add('b_switching', ORG_B, 30);
+    const hooks: any = (manager as any).composeDatabaseHooks();
+    const ctx = { context: { session: { session: { id: 'b_switching', userId: 'u1', activeOrganizationId: ORG_B }, user: { id: 'u1' } } } };
+    await hooks.session.update.before({ activeOrganizationId: ORG_A }, ctx);
+    expect(revoked(engine)).toEqual(['a_newer']);
+  });
+
   it('the deployment cap still counts every session, whatever organization', async () => {
     const { engine, manager, add } = await withSessions({ maxConcurrentSessions: 2 }, {});
     await add('a1', ORG_A, 30);
