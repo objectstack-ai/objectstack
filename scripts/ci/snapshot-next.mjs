@@ -24,6 +24,8 @@
 //       stopped on), then the bare `changeset version --snapshot next`, then
 //       `guard` with the pack, then the tree put back. Publishes nothing and
 //       needs no npm token. Run locally or by the lane before the approval.
+//       It refuses a dirty tree and owns the tree while it runs: the restore
+//       puts every tracked path back to HEAD, so an edit made meanwhile is lost.
 //   node scripts/ci/snapshot-next.mjs --self-test
 //
 // ## Why each check exists
