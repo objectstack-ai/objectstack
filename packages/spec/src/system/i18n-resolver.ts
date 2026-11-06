@@ -522,8 +522,12 @@ export function resolveBundleLocale(
   bundle: Record<string, unknown>,
   requested: string,
 ): string | undefined {
-  // 1. Exact match (fast path).
-  if (bundle[requested] !== undefined) return requested;
+  // 1. Exact match (fast path). An own key only: an `Object.prototype`
+  // member name (`constructor`, `toString`, `__proto__`) is found on every
+  // plain-object bundle and is never a locale the bundle registered.
+  if (Object.prototype.hasOwnProperty.call(bundle, requested) && bundle[requested] !== undefined) {
+    return requested;
+  }
   return resolveLocaleAmong(requested, Object.keys(bundle));
 }
 
@@ -591,7 +595,9 @@ function pickData<D>(
   locale: string,
 ): D | undefined {
   if (!bundle) return undefined;
-  const exact = bundle[locale];
+  // An own key only, as in `resolveBundleLocale`: an inherited member is
+  // never bundle data, so `constructor` reads as an unknown code, not a function.
+  const exact = Object.prototype.hasOwnProperty.call(bundle, locale) ? bundle[locale] : undefined;
   if (exact !== undefined) return exact;
   const resolved = resolveBundleLocale(bundle, locale);
   return resolved !== undefined ? bundle[resolved] : undefined;
