@@ -1274,52 +1274,6 @@
         ""
       ]
     },
-    "marketplace/CreatePackageRequest": {
-      "sites": [
-        "businessFunctions",
-        "industries"
-      ]
-    },
-    "marketplace/MarketplaceBusinessFunctions": {
-      "sites": [
-        ""
-      ]
-    },
-    "marketplace/MarketplaceIndustries": {
-      "sites": [
-        ""
-      ]
-    },
-    "marketplace/MarketplaceListing": {
-      "sites": [
-        "businessFunctions",
-        "industries"
-      ]
-    },
-    "marketplace/MarketplaceSearchResponse": {
-      "sites": [
-        "items.element.businessFunctions",
-        "items.element.industries"
-      ]
-    },
-    "marketplace/Package": {
-      "sites": [
-        "businessFunctions",
-        "industries"
-      ]
-    },
-    "marketplace/TemplateManifest": {
-      "sites": [
-        "businessFunctions",
-        "industries"
-      ]
-    },
-    "marketplace/UpdatePackageRequest": {
-      "sites": [
-        "businessFunctions",
-        "industries"
-      ]
-    },
     "security/CriteriaSharingRule": {
       "sites": [
         "sharedWith"
