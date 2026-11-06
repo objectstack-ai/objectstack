@@ -4607,6 +4607,13 @@ const en = {
       body: 'Extensions → Connectors → + Add → Paste JSON config:',
       hint: 'Or add it by hand as Streamable HTTP with this URL. If your version offers no browser sign-in, add the request header Authorization: Bearer <API key> (create a key below).',
     },
+    client: {
+      title: 'Which AI assistant do you use?',
+      hint: 'Choose yours to see only its steps. This browser remembers your choice.',
+    },
+    advanced: {
+      title: 'Advanced: scripts and CI',
+    },
     apiKey: {
       title: 'API keys',
       badge: 'headless',

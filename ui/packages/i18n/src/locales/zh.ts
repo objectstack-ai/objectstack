@@ -4006,6 +4006,13 @@ const zh = {
       body: '扩展 → 连接器 → + 添加 → 粘贴 JSON 配置:',
       hint: '也可手动添加:传输类型选 Streamable HTTP 并填写此 URL。如果你的版本不支持浏览器登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方创建)。',
     },
+    client: {
+      title: '你用的是哪个 AI 助手？',
+      hint: '选择你的助手，只看它的步骤。本浏览器会记住你的选择。',
+    },
+    advanced: {
+      title: '高级：脚本与 CI',
+    },
     apiKey: {
       title: 'API 密钥',
       badge: '无头场景',

@@ -3872,6 +3872,13 @@ const pt = {
       body: 'Extensões → Conectores → + Adicionar → Colar configuração JSON:',
       hint: 'Ou adicione manualmente como Streamable HTTP com esta URL. Se a sua versão não oferecer login pelo navegador, adicione o cabeçalho Authorization: Bearer <chave de API> (crie uma chave abaixo).',
     },
+    client: {
+      title: 'Qual assistente de IA você usa?',
+      hint: 'Escolha o seu para ver apenas os passos dele. Este navegador lembra a sua escolha.',
+    },
+    advanced: {
+      title: 'Avançado: scripts e CI',
+    },
     apiKey: {
       title: 'Chaves de API',
       badge: 'headless',
