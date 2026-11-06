@@ -247,11 +247,23 @@ above declared `multiple: true`), is refused
 Group by a field that stores one value instead. Like the measure check, it
 stays silent when the field's type cannot be resolved.
 
+A dimension over a **virtual** field, a `formula`, is refused under a second
+id. A formula is computed on read and never stored, whatever its `returnType`,
+so no driver has a column to group by: the analytics service refuses a query
+grouped by one with `400 INVALID_FIELD`, and refuses to compile a dataset that
+declares one over its own object with `400 DATASET_INVALID`, whichever members
+the query names. So such a dimension is refused
+(`dimension-virtual-field-refused`) at `datasets[N].dimensions[M].field`; a
+dimension through a relationship path is judged on the object the path
+reaches. Store the value in a field of its own (written by a hook or a flow
+when its source changes) and point the dimension at that field.
+
 Both checks also judge the members of an analytics cube (`analyticsCubes`),
 because an authored cube is queried through the same analytics door. A cube
 dimension whose `sql` column is declared with a structured-JSON type or as a
 multi-value field is refused (`dimension-json-stored-field-refused`) at
-`analyticsCubes[N].dimensions.<key>.sql`. A cube measure is judged exactly as a
+`analyticsCubes[N].dimensions.<key>.sql`, and one whose `sql` column is a
+formula is refused (`dimension-virtual-field-refused`) at the same path. A cube measure is judged exactly as a
 dataset measure is, its `type` being the aggregate: a pair outside the table is
 refused (`measure-aggregate-field-type-refused`, at
 `analyticsCubes[N].measures.<key>.type`). That covers `sum`, `avg`, `min` or
