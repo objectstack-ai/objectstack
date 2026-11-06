@@ -20,7 +20,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
-import { ErrorCode } from '@objectstack/spec/api';
+import type { ErrorCode } from '@objectstack/spec/api';
 
 import {
   GUARDRAIL_CHECKS,
@@ -146,8 +146,11 @@ type Persona = ScenarioCard['run']['personas'][number];
 
 /**
  * The two codes a faithful build answers an operation its acting persona
- * cannot reach with. Parsed through the spec's catalogue (ADR-0112), so a code
- * the platform stops answering refuses here at load instead of drifting.
+ * cannot reach with. Typed against the spec's catalogue (`ErrorCode`, ADR-0112),
+ * so a code the platform stops answering fails this package's typecheck instead
+ * of drifting. Spelled as literals because `check:dispatcher-error-vocabulary`
+ * judges the `code` these feed into `want` below, and it reads a constant only
+ * when the constant resolves to a literal.
  *
  *   NOT_REACHABLE_ROW_CODE  a by-id write on a row the caller cannot READ is
  *                           answered not-found, indistinguishable from a
@@ -156,8 +159,8 @@ type Persona = ScenarioCard['run']['personas'][number];
  *                           to a field it must not read, is refused by the
  *                           security gate before the object's validation runs.
  */
-const NOT_REACHABLE_ROW_CODE: ErrorCode = ErrorCode.parse('RECORD_NOT_FOUND');
-const HIDDEN_WRITE_CODE: ErrorCode = ErrorCode.parse('PERMISSION_DENIED');
+const NOT_REACHABLE_ROW_CODE: ErrorCode = 'RECORD_NOT_FOUND';
+const HIDDEN_WRITE_CODE: ErrorCode = 'PERMISSION_DENIED';
 
 function duplicates<T>(items: readonly T[], keyOf: (t: T) => string, at: IssuePath, what: string, refuse: Refuse) {
   const seen = new Set<string>();
