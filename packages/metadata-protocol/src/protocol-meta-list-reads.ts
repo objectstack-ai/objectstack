@@ -51,7 +51,7 @@ import { viewIdentityPatch } from './protocol-view-normalization.js';
 import { isServedOverrideRowOf } from './served-override.js';
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItems`; the method's docblock there is its contract. */
-export async function getMetaItems(host: Pick<ProtocolHost, 'readFlattenedMetaItems'>, request: { type: string; packageId?: string; previewDrafts?: boolean }) {
+export async function getMetaItems(host: Pick<ProtocolHost, 'readFlattenedMetaItems'>, request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean }) {
     // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. This one
     // is load-bearing twice over: the SchemaRegistry indexes code-authored
     // items under the SINGULAR type, and the overlay-hydration branch below
@@ -78,7 +78,7 @@ export async function getMetaItemsPerPackage(host: Pick<ProtocolHost, 'readFlatt
 }
 
 /** The body of `ObjectStackProtocolImplementation#readFlattenedMetaItems`; the method's docblock there is its contract. */
-export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'baseServesBundleMember' | 'convertStoredItem' | 'declinesStoredRow' | 'disabledActionsOf' | 'engine' | 'environmentId' | 'expandStoredViewContainers' | 'findEnvironmentRows' | 'flowRegistrationsOf' | 'foldObjectExtendersFromRegistry' | 'getServicesRegistry' | 'governServedObject' | 'hydrateOverlayIntoRegistry' | 'isStoredEntryOfDeclinedName' | 'isUnservedSealedOverlay' | 'isWritablePackage' | 'lookupArtifactItem' | 'namesWithOwnStoredRow' | 'readActiveOverlayRows' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'shippedArtifactsOf' | 'shippingPackagesOf' | 'shipsBundleName' | 'storedOverlayEntries'>, request: { type: string; packageId?: string; previewDrafts?: boolean },
+export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'baseServesBundleMember' | 'convertStoredItem' | 'declinesStoredRow' | 'disabledActionsOf' | 'engine' | 'environmentId' | 'expandStoredViewContainers' | 'findEnvironmentRows' | 'flowRegistrationsOf' | 'foldObjectExtendersFromRegistry' | 'getServicesRegistry' | 'governServedObject' | 'hydrateOverlayIntoRegistry' | 'isStoredEntryOfDeclinedName' | 'isUnservedSealedOverlay' | 'isWritablePackage' | 'lookupArtifactItem' | 'namesWithOwnStoredRow' | 'readActiveOverlayRows' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'shippedArtifactsOf' | 'shippingPackagesOf' | 'shipsBundleName' | 'storedOverlayEntries'>, request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean },
         audience: 'served' | 'execution',
         layer: 'effective' | 'per-package' = 'effective',) {
     const { packageId } = request;
@@ -688,6 +688,21 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
     // the package does not ship: it is not in the package's list.
     if (unseated) {
         items = (items as any[]).filter((it) => !(it && typeof it === 'object' && unseated.has(it)));
+    }
+
+    // [#29236, ruling 6580261740 letter A] `GetMetaItemsRequest.names` — the
+    // list door's `?names=a,b`, pushed down: only the items of those names,
+    // kept HERE, once every source is merged and before any step below, so the
+    // narrowing, the hiding, the lock selection, the governance and the
+    // serving decorations all run on the named items alone. Every step below
+    // judges an item by its own name and rows, so the named items are served
+    // exactly as the whole list would serve them. A name that matches nothing
+    // is simply absent. Absent, every item (the list as before); the door
+    // refuses an empty filter before it reads, so an empty one never names
+    // "every item" here either: it keeps none.
+    if (request.names !== undefined) {
+        const wanted = new Set(request.names);
+        items = (items as any[]).filter((it) => it && typeof it === 'object' && wanted.has((it as any).name));
     }
 
     // [#28409, ADR-0146 D8 items 1–2, #28238's list half] THE ENV-WIDE
