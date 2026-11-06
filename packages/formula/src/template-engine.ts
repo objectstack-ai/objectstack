@@ -38,7 +38,24 @@ type Formatter = (
   locale: string,
   timeZone?: string,
   currency?: string,
+  optionLabels?: OptionLabelTable,
 ) => string;
+
+/**
+ * The option labels a mail render hands the `option` formatter: for each
+ * `object.field` a template's `option` holes name, the label of each of the
+ * field's options keyed by its stored value, in the locale the face is
+ * rendered in (`{ 'opportunity.stage': { needs_analysis: 'Needs Analysis' } }`).
+ * The caller that renders the mail builds it; this package never reads
+ * metadata or translations.
+ */
+export type OptionLabelTable = Readonly<Record<string, Readonly<Record<string, string>>>>;
+
+/** One stored option value as its label from `labels`, or as stored when the labels hold no such value. */
+function optionLabelOf(value: unknown, labels: Readonly<Record<string, string>> | undefined): string {
+  const stored = baseString(value);
+  return labels !== undefined && Object.prototype.hasOwnProperty.call(labels, stored) ? labels[stored] : stored;
+}
 
 function asNumber(v: unknown): number | undefined {
   if (typeof v === 'number') return v;
@@ -140,10 +157,41 @@ const FORMATTERS: Record<string, Formatter> = {
   json: (v) => {
     try { return JSON.stringify(v); } catch { return String(v); }
   },
+  // option:opportunity.stage  → a mail template only (`OPTION_ARGUMENT_RULE`):
+  // the stored value of a select field as its option's label, read from the
+  // table the mail renderer hands in for that `object.field`, in the locale
+  // the face renders in. A value the table does not hold prints as stored
+  // (an option the field no longer declares, say). With no table for the
+  // field it throws, whatever the value (`optionTableRefusal`): the hole
+  // promises a label, so the stored value is never printed in its place, as
+  // `currency` never picks a currency. A multi-select value labels each
+  // element, joined with `, `.
+  option: (v, arg, _locale, _timeZone, _currency, optionLabels) => {
+    const objectField = arg ?? '';
+    const refusal = optionTableRefusal(`option:${objectField}`, objectField, optionLabels);
+    if (refusal) throw new RangeError(refusal);
+    const labels = optionLabels![objectField];
+    if (Array.isArray(v)) return v.map((item) => optionLabelOf(item, labels)).join(', ');
+    return optionLabelOf(v, labels);
+  },
 };
 
-/** Public list of whitelisted template formatters (for introspection/docs). */
-export const TEMPLATE_FORMATTERS: string[] = Object.keys(FORMATTERS);
+/**
+ * The formatters only a mail template's holes name. A mail render holds what
+ * they read and an in-app slot does not: `option` prints an option's label in
+ * the recipient's language from a table the mail renderer builds per send.
+ */
+const MAIL_ONLY_FORMATTERS: readonly string[] = ['option'];
+
+/**
+ * Public list of the template formatters an in-app template slot names (for
+ * introspection/docs). A mail template names these and
+ * {@link MAIL_TEMPLATE_FORMATTERS}' mail-only ones.
+ */
+export const TEMPLATE_FORMATTERS: string[] = Object.keys(FORMATTERS).filter((name) => !MAIL_ONLY_FORMATTERS.includes(name));
+
+/** Public list of the template formatters a mail template's holes name: {@link TEMPLATE_FORMATTERS}, then `option`. */
+export const MAIL_TEMPLATE_FORMATTERS: string[] = Object.keys(FORMATTERS);
 
 // ───────────────────────── hole grammar both dialects share ───────────────
 //
@@ -174,6 +222,15 @@ export const TEMPLATE_FORMATTERS: string[] = Object.keys(FORMATTERS);
 //   name: its doors judge the roots of a hole's path against the slot's
 //   closed scope and do not read an argument, so a path there would reach
 //   the page unjudged.
+// - `option` is a mail template's formatter only (`OPTION_ARGUMENT_RULE`):
+//   it prints a select value as its option's label in the recipient's
+//   language, from a table the mail renderer builds per send, and an in-app
+//   slot has no such table. The in-app dialect refuses it as a formatter it
+//   does not know (`known-formatter`). Its argument is the bare
+//   `object.field` the value belongs to (`option:opportunity.stage`); any
+//   other argument names no option list and is refused (`option-field-shape`).
+//   Whether the object and field exist is judged against the app's objects
+//   by the mail grammar's caller (`judgeMailHoleGrammar`'s `objects`).
 
 /** The rule a refused hole breaks. */
 export type TemplateHoleGrammarRule =
@@ -182,7 +239,12 @@ export type TemplateHoleGrammarRule =
   | 'known-formatter'
   | 'currency-code-literal'
   | 'currency-code-path-mail-only'
-  | 'currency-code-path-undeclared';
+  | 'currency-code-path-undeclared'
+  | 'option-field-shape'
+  | 'option-object-unknown'
+  | 'option-object-outside-closure'
+  | 'option-field-unknown'
+  | 'option-field-no-options';
 
 /**
  * The `currency` argument rule, in the one sentence the mail renderer, the
@@ -193,6 +255,72 @@ export const CURRENCY_ARGUMENT_RULE =
   'A `currency` argument is either a literal ISO 4217 code in three capital letters (`currency:EUR`) or, '
   + 'in a mail template only, `@` followed by a path into the send\'s data whose value is such a code '
   + '(`currency:@currency_code`).';
+
+/**
+ * The `option` argument rule, in the one sentence the mail renderer, the
+ * `email-template-hole-grammar` authoring rule and the spec's
+ * `email_template` face descriptions all quote.
+ */
+export const OPTION_ARGUMENT_RULE =
+  'An `option` hole, in a mail template only, prints the label of the select option whose value it holds, in the '
+  + 'recipient\'s language, and its argument names the object and the field the value belongs to, written bare as '
+  + '`object.field` (`{{ stage | option:opportunity.stage }}`): the object is one the app has and the field one '
+  + 'of its fields that declares options. A multi-select value prints the label of each of its values, joined '
+  + 'with `, `, and a value outside the field\'s options prints as stored.';
+
+/**
+ * Why an `option` hole cannot be rendered, or `null` when it can: the hole
+ * prints the labels of its `object.field`, so it is rendered only when the
+ * caller handed in a label table ({@link OptionLabelTable}) holding that key.
+ * The mail renderer builds the table per recipient locale from the field's
+ * options; a render that reached the hole without one would otherwise print
+ * the stored value where the published grammar promises a label. Every
+ * renderer that refuses such a hole shows this sentence, and a renderer can
+ * ask it before it formats anything, as it asks `currencyDefaultRefusal`.
+ *
+ * @param hole         the hole as written, braces included, or the formatter part when no hole text is at hand
+ * @param objectField  the hole's `object.field` argument
+ * @param optionLabels the label table the caller supplied, if any
+ */
+export function optionTableRefusal(hole: string, objectField: string, optionLabels: unknown): string | null {
+  if (
+    optionLabels !== null
+    && typeof optionLabels === 'object'
+    && Object.prototype.hasOwnProperty.call(optionLabels, objectField)
+    && (optionLabels as Record<string, unknown>)[objectField] !== null
+    && typeof (optionLabels as Record<string, unknown>)[objectField] === 'object'
+  ) return null;
+  return (
+    `the hole ${hole} prints the option labels of \`${objectField}\`, and no label table for that field reached `
+    + 'this render: the renderer builds one in the recipient\'s locale from the field\'s options, and none was '
+    + `supplied. The stored value is not printed in place of the label. ${OPTION_ARGUMENT_RULE}`
+  );
+}
+
+/** An `option` argument as written: one object name, a dot, one field name, no quotes and no `@`. */
+const OPTION_FIELD_RE = /^(\w+)\.(\w+)$/;
+
+/** The object and field an `option` hole names. */
+export interface OptionFieldReference {
+  object: string;
+  field: string;
+}
+
+/**
+ * The object and field an `option` hole names (`option:opportunity.stage` →
+ * `{ object: 'opportunity', field: 'stage' }`), or `undefined` when the
+ * formatter part is not that form. The argument is read as written: a quoted
+ * one (`option:'opportunity.stage'`), a marked path (`option:@stage_ref`), one
+ * with no dot, more than one dot or an empty side is not a reference.
+ *
+ * @param formatterPart the text after the hole's first `|`, trimmed
+ */
+export function optionFieldReference(formatterPart: string): OptionFieldReference | undefined {
+  const colon = formatterPart.indexOf(':');
+  if (colon === -1 || formatterPart.slice(0, colon).trim() !== 'option') return undefined;
+  const m = OPTION_FIELD_RE.exec(formatterPart.slice(colon + 1).trim());
+  return m ? { object: m[1], field: m[2] } : undefined;
+}
 
 /** A hole the shared grammar refuses, with the sentence an author is shown. */
 export interface TemplateHoleGrammarRefusal {
@@ -380,6 +508,7 @@ export function judgeHoleFormatter(
   arg: string | undefined,
   dialect: TemplateHoleDialect = 'in-app',
 ): TemplateHoleGrammarRefusal | null {
+  const known = dialect === 'mail' ? MAIL_TEMPLATE_FORMATTERS : TEMPLATE_FORMATTERS;
   if (chainsASecondFormatter(formatterPart)) {
     return {
       rule: 'one-formatter',
@@ -396,18 +525,31 @@ export function judgeHoleFormatter(
       message:
         `the hole ${hole} ${formatter === '' ? 'writes no formatter name after the `|`' : `writes '${formatter}' where the formatter name goes`}, `
         + 'so it would never format the value: a formatter is one word, optionally followed by `:` and its '
-        + `argument, \`{{ path | formatter[:arg] }}\`. Known formatters: ${TEMPLATE_FORMATTERS.join(', ')}. Write one `
+        + `argument, \`{{ path | formatter[:arg] }}\`. Known formatters: ${known.join(', ')}. Write one `
         + 'of them, or format the value in the caller that supplies the data and pass the finished text as its own '
         + 'variable.',
     };
   }
-  if (!TEMPLATE_FORMATTERS.includes(formatter)) {
+  if (!known.includes(formatter)) {
+    const mailOnly = MAIL_ONLY_FORMATTERS.includes(formatter)
+      ? `\`${formatter}\` formats only in a mail template, whose renderer reads what it needs per recipient; `
+        + 'it is not a formatter of this template. '
+      : '';
     return {
       rule: 'known-formatter',
       message:
         `the hole ${hole} names the formatter '${formatter}', which is not a template formatter, so it would `
-        + `never format the value. Known formatters: ${TEMPLATE_FORMATTERS.join(', ')}. Correct the name, or `
+        + `never format the value. ${mailOnly}Known formatters: ${known.join(', ')}. Correct the name, or `
         + 'format the value in the caller that supplies the data and pass the finished text as its own variable.',
+    };
+  }
+  if (formatter === 'option' && optionFieldReference(formatterPart) === undefined) {
+    return {
+      rule: 'option-field-shape',
+      message:
+        `the hole ${hole} ${arg === undefined || arg === '' ? 'names no object and field after `option`' : `gives the option formatter the argument \`${formatterPart.slice(formatterPart.indexOf(':') + 1).trim()}\``}, `
+        + 'so no option list is named to label the value with: the argument is one object name and one field '
+        + `name joined by a dot, written bare, with no quotes and no \`@\`. ${OPTION_ARGUMENT_RULE}`,
     };
   }
   if (formatter === 'currency' && arg !== undefined && !isCurrencyCode(arg)) {
@@ -442,16 +584,23 @@ export function judgeHoleFormatter(
  * `opts.currency` is the tenant default currency a `currency` with no
  * argument formats in. Without one, that call throws a `RangeError` carrying
  * {@link currencyDefaultRefusal}'s sentence: it never picks a currency.
+ *
+ * `opts.optionLabels` is the label table an `option` hole reads
+ * ({@link OptionLabelTable}), keyed by the hole's `object.field` argument.
+ * A value it does not hold for that key prints as stored. With no table, or
+ * one without that key, that call throws a `RangeError` carrying
+ * {@link optionTableRefusal}'s sentence: it never prints the stored value
+ * where a label was promised.
  */
 export function formatValue(
   name: string,
   value: unknown,
   arg: string | undefined,
-  opts: { locale?: string; timeZone?: string; currency?: string } = {},
+  opts: { locale?: string; timeZone?: string; currency?: string; optionLabels?: OptionLabelTable } = {},
 ): string | undefined {
   const fmt = FORMATTERS[name];
   if (!fmt) return undefined;
-  return fmt(value, arg, opts.locale ?? 'en-US', opts.timeZone, opts.currency);
+  return fmt(value, arg, opts.locale ?? 'en-US', opts.timeZone, opts.currency, opts.optionLabels);
 }
 
 function baseString(value: unknown): string {

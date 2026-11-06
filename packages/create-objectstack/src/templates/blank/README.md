@@ -185,7 +185,7 @@ database (locally, `.objectstack/data/`) as an item of the package
   `src/` does not register, the `.custom` package among them, to
   `objectstack-export/NN-ID/objectstack.json`. Commit that directory, and once
   the deployment is up install each file into it in the numbered order with
-  `npx os package install objectstack-export/NN-ID/objectstack.json --runtime URL`.
+  `npx os package install objectstack-export/NN-ID/objectstack.json --url URL`.
 
 `pnpm build` prints a notice when your local dev database holds such a change.
 

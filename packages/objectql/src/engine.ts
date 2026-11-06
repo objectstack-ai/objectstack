@@ -6200,11 +6200,12 @@ export class ObjectQL implements IObjectQLEngine {
       // An engine-owned producer like the two above, so the post-hook `check`
       // (judged above, on the row as the hooks left it) does not see the owner
       // a rule picks — that owner is the platform's routing, not the caller's
-      // steering. Free for every object no rule names (`rulesFor` is a registry
-      // read).
+      // steering. Free for every object no rule can name (`mayRoute` is a
+      // registry read: a declared rule names the object, or organizations can
+      // author rules and the object carries the queue column they route by).
       {
         const evaluator = this.assignment();
-        if (evaluator.rulesFor(object).length > 0) {
+        if (evaluator.mayRoute(object)) {
           const activeOrg = opCtx.context?.tenantId ? String(opCtx.context.tenantId) : null;
           const candidates = [];
           for (let i = 0; i < rows.length; i++) {

@@ -56,6 +56,7 @@ import { useProtocolCheckSkippedText } from './protocolCheckSkipped.js';
 import { ProtocolCheckSkippedNote } from './ProtocolCheckSkippedNote.js';
 import { ConnectorCredentialsStep } from './ConnectorCredentialsStep.js';
 import { packagesHref } from '../../views/metadata-admin/packageSource.js';
+import { MarketplaceNamespaceGate } from './MarketplaceNamespaceGate.js';
 
 /**
  * The card grid's track (objectui#12616): a card is never narrower than 240px,
@@ -306,7 +307,19 @@ type OrgDeployState =
   | { phase: 'served'; manifestId: string; version: string | undefined; name: string; app: ServedApp | null }
   | { phase: 'timeout'; manifestId: string; version: string | undefined; name: string };
 
+/**
+ * The page under the frame that fetches its strings first — the
+ * `marketplace` namespace (`MarketplaceNamespaceGate.tsx` says why).
+ */
 export function MarketplacePage() {
+  return (
+    <MarketplaceNamespaceGate>
+      <MarketplacePageBody />
+    </MarketplaceNamespaceGate>
+  );
+}
+
+function MarketplacePageBody() {
   const navigate = useNavigate();
   const { appName } = useParams();
   const { isAdmin, isResolved } = useWorkspaceAdminStatus();

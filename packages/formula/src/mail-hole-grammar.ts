@@ -25,7 +25,7 @@
  * same formatter parts (`currency :EUR` is `currency` with `EUR` in both) and
  * refuse the rest with the same sentence: a formatter name of one word
  * (`{{ due | date-long }}` is refused, never printed as written), one
- * formatter per hole, a formatter the whitelist names (`TEMPLATE_FORMATTERS`),
+ * formatter per hole, a formatter the whitelist names (`MAIL_TEMPLATE_FORMATTERS`),
  * and a `currency` argument that is a literal ISO 4217 code. A refused hole is a hole — it is found, located and
  * named — and the renderer refuses to render it rather than print a wrong
  * value or formatter syntax.
@@ -39,13 +39,32 @@
  * renderer resolves it and refuses a value that is not a code
  * (`currencyCodeValueRefusal`) — it never formats the amount in a default
  * currency in its place.
+ *
+ * One formatter is the mail dialect's own: `option:object.field` prints a
+ * select value as its option's label in the recipient's language
+ * (`OPTION_ARGUMENT_RULE`), from a table the renderer builds per send. Its
+ * argument is parsed ({@link ParsedMailHole}.`optionField`) and, when the
+ * caller hands in the app's objects ({@link MailHoleGrammarOptions}.`objects`),
+ * judged against them: the object must exist, the field must be one of its
+ * fields, and that field must declare options. A name the objects do not
+ * carry that has a platform prefix (`sys_`, `cloud_`, `ai_`) is rung ④ of the
+ * object-reference ladder: a package outside this app may register it, so the
+ * grammar does not refuse it and does not judge its field
+ * ({@link optionObjectUnregisteredPlatform}); the authoring rule advises on it
+ * at the CLI doors. Objects that are the live served universe (the publish
+ * door, the renderer; {@link MailHoleGrammarOptions}.`liveUniverse`) have no
+ * rung ④: there nothing else can register the name, and it is refused.
  */
 
+import { hasPlatformObjectPrefix } from '@objectstack/spec/system';
 import {
   CURRENCY_ARGUMENT_RULE,
   currencyCodePath,
   judgeHoleFormatter,
+  OPTION_ARGUMENT_RULE,
+  optionFieldReference,
   splitHoleFormatter,
+  type OptionFieldReference,
   type TemplateHoleGrammarRefusal,
 } from './template-engine';
 
@@ -78,6 +97,12 @@ export interface ParsedMailHole {
    * as written (`@currency_code`).
    */
   codePath?: string;
+  /**
+   * Set for `option:object.field`: the object and field whose option labels
+   * the renderer prints the value with. `arg` keeps the text as written
+   * (`opportunity.stage`), which is also the key of the renderer's label table.
+   */
+  optionField?: OptionFieldReference;
   /** Set when the grammar refuses the hole: it is not rendered, and authoring refuses it. */
   refusal?: TemplateHoleGrammarRefusal;
 }
@@ -106,11 +131,13 @@ export function parseMailHole(inner: string, hole = `{{${inner}}}`): ParsedMailH
   }
   const formatter = name;
   const codePath = refusal ? undefined : currencyCodePath(formatterPart);
+  const optionField = refusal ? undefined : optionFieldReference(formatterPart);
   return {
     path,
     formatter,
     ...(arg !== undefined ? { arg } : {}),
     ...(codePath !== undefined ? { codePath } : {}),
+    ...(optionField !== undefined ? { optionField } : {}),
     ...(refusal ? { refusal } : {}),
   };
 }
@@ -133,6 +160,108 @@ export interface MailHoleGrammarOptions {
    * judged at render, where a code that does not resolve is refused.
    */
   variables?: readonly string[];
+  /**
+   * The objects an `option` hole may name, each object's name to its fields'
+   * names, each field's value `true` when the field declares options; `null`
+   * for an object that resolves but whose fields are not in hand (a platform
+   * object a stack names without carrying it), whose field is then not
+   * judged here. Present, an `option:object.field` hole is judged against
+   * it: an object it does not name (`option-object-unknown`), a field that
+   * object does not have (`option-field-unknown`) and a field without options
+   * (`option-field-no-options`) are refused. A name it does not carry that
+   * has a platform prefix is not refused and its field not judged
+   * ({@link optionObjectUnregisteredPlatform}). Absent, the reference is not
+   * judged here.
+   */
+  objects?: ReadonlyMap<string, ReadonlyMap<string, boolean> | null>;
+  /**
+   * `true` when `objects` is the deployment's whole served object universe —
+   * the live objects the metadata publish door carries, or the renderer's at
+   * send — rather than one app's declaration. Then nothing else can register
+   * a name `objects` does not carry, so rung ④ does not apply: a
+   * platform-prefixed name it does not carry is refused
+   * (`option-object-unknown`) like any other. Absent or `false`, rung ④
+   * applies ({@link optionObjectUnregisteredPlatform}).
+   */
+  liveUniverse?: boolean;
+  /**
+   * The package a write belongs to, when `objects` is the live universe
+   * narrowed to that package's closure (its own objects, the objects of the
+   * packages its manifest declares in `dependencies`, and platform objects) —
+   * the publish door's reading of a write into a package. Implies
+   * `liveUniverse`. A name `objects` does not carry is then outside that
+   * closure, whether it belongs to an undeclared package or to none, and is
+   * refused as such (`option-object-outside-closure`), the remedy being to
+   * declare the dependency.
+   */
+  packageScope?: { readonly packageId: string };
+}
+
+/**
+ * Whether an `option` hole's object is rung ④ of the object-reference ladder
+ * against `objects`: not among them, and spelled with a platform prefix
+ * (`sys_`, `cloud_`, `ai_`), so a package outside this app may still register
+ * it. Unless the objects are the live universe (`liveUniverse`), such a name
+ * is neither refused nor judged by {@link judgeMailHoleGrammar}; a caller that
+ * advises (the authoring rule at the CLI doors, at `warning`) reads this.
+ */
+export function optionObjectUnregisteredPlatform(
+  ref: OptionFieldReference,
+  objects: ReadonlyMap<string, ReadonlyMap<string, boolean> | null>,
+): boolean {
+  return !objects.has(ref.object) && hasPlatformObjectPrefix(ref.object);
+}
+
+/** Why an `option` hole's object and field cannot label its value, or `null` when the field declares options. */
+function optionFieldRefusal(
+  hole: string,
+  ref: OptionFieldReference,
+  objects: ReadonlyMap<string, ReadonlyMap<string, boolean> | null>,
+  liveUniverse: boolean,
+  packageId: string | undefined,
+): TemplateHoleGrammarRefusal | null {
+  if (!liveUniverse && packageId === undefined && optionObjectUnregisteredPlatform(ref, objects)) return null;
+  const fields = objects.get(ref.object);
+  if (fields === undefined && packageId !== undefined) {
+    return {
+      rule: 'option-object-outside-closure',
+      message:
+        `the hole ${hole} names the object \`${ref.object}\`, which is outside package \`${packageId}\`'s closure `
+        + '(its own objects, the objects of the packages its manifest declares in `dependencies`, and platform '
+        + `objects), so no option list labels the value. ${OPTION_ARGUMENT_RULE} Declare a dependency on the package `
+        + `that defines \`${ref.object}\` in the \`dependencies\` of \`${packageId}\`'s manifest, or name an object `
+        + 'inside that closure.',
+    };
+  }
+  if (fields === undefined) {
+    return {
+      rule: 'option-object-unknown',
+      message:
+        `the hole ${hole} names the object \`${ref.object}\`, which resolves to no object this app defines, a `
+        + 'package of its artifact provides or the platform provides, so no option list labels the value. '
+        + `${OPTION_ARGUMENT_RULE} Name the object the value comes from by its \`name\`.`,
+    };
+  }
+  if (fields === null) return null;
+  const hasOptions = fields.get(ref.field);
+  if (hasOptions === undefined) {
+    return {
+      rule: 'option-field-unknown',
+      message:
+        `the hole ${hole} names the field \`${ref.field}\`, which the object \`${ref.object}\` does not have, so `
+        + `no option list labels the value. ${OPTION_ARGUMENT_RULE} Name the field the value comes from by its \`name\`.`,
+    };
+  }
+  if (!hasOptions) {
+    return {
+      rule: 'option-field-no-options',
+      message:
+        `the hole ${hole} names the field \`${ref.object}.${ref.field}\`, which declares no options, so it has no `
+        + `option labels to print. ${OPTION_ARGUMENT_RULE} Name a select field, or print the value with a plain `
+        + 'hole or another formatter.',
+    };
+  }
+  return null;
 }
 
 /** One hole of a mail template face that the grammar refuses. */
@@ -151,8 +280,19 @@ export function judgeMailHoleGrammar(face: string, options: MailHoleGrammarOptio
   const findings: MailHoleGrammarFinding[] = [];
   for (const m of face.matchAll(mailHolePattern())) {
     const parsed = parseMailHole(m[2], m[0]);
+    const optionRefusal = parsed?.optionField !== undefined && options.objects !== undefined
+      ? optionFieldRefusal(
+        m[0],
+        parsed.optionField,
+        options.objects,
+        options.liveUniverse === true,
+        options.packageScope?.packageId || undefined,
+      )
+      : null;
     if (parsed?.refusal) {
       findings.push({ start: m.index ?? 0, text: m[0], refusal: parsed.refusal });
+    } else if (optionRefusal) {
+      findings.push({ start: m.index ?? 0, text: m[0], refusal: optionRefusal });
     } else if (parsed?.codePath !== undefined && variables.length > 0 && !isDeclaredPath(parsed.codePath, variables)) {
       findings.push({
         start: m.index ?? 0,

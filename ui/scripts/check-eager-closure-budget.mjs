@@ -2226,6 +2226,16 @@ export const PER_CHUNK_GZIP_CEILINGS = Object.freeze({
   //
   // ⚠️ RAISED ×1.20 by objectui#12653 (2026-10-16), the maintainer's 20%
   // ruling, from 50,000 (the entry on MAX_EAGER_CLOSURE_GZIP_BYTES).
+  //
+  // READ, ⛔ not moved, by objectstack#30588 (2026-11-05): the pack's
+  // `marketplace.*` group (bar the keys Studio's packages page reads) left
+  // the ten packs for the lazy `marketplace` namespace
+  // (`packages/i18n/src/namespaces/marketplace/`). On two console builds
+  // (`CI=true vite build`, `apps/console/dist/eager-closure.json`) at
+  // `bdbaf80c` and at that card's head this chunk read 59,951 -> 57,010
+  // gzipped bytes, headroom 49 -> 2,990. The eager closure read 2,204,342 ->
+  // 2,201,440 (-2,902), with no chunk added and none but this one moving by
+  // more than 40 bytes.
   'i18n-locale-en': 60_000,
   // Raised by the maintainer ruling of 2026-09-08, ⛔ not by a measurement here:
   // `main` had been red on this line since `f76f43628`. The bytes that put it

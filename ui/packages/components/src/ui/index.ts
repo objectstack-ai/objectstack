@@ -35,7 +35,7 @@ export {
 export * from './button';
 export * from './calendar';
 export * from './card';
-export { Carousel, type CarouselApi, CarouselItem } from './carousel';
+export { Carousel, type CarouselApi } from './carousel';
 export * from './checkbox';
 export * from './collapsible';
 export {
@@ -80,11 +80,9 @@ export {
   FormMessage,
 } from './form';
 export * from './hover-card';
-export { InputOTPGroup, InputOTPSeparator } from './input-otp';
 export * from './input';
 export * from './label';
-export { Menubar, MenubarItem, MenubarMenu } from './menubar';
-export { NavigationMenuItem } from './navigation-menu';
+export { Menubar } from './menubar';
 export { Pagination } from './pagination';
 export * from './popover';
 export * from './progress';
