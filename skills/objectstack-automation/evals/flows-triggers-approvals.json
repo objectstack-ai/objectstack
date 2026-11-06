@@ -242,6 +242,24 @@
           "beforeUpdate"
         ]
       }
+    },
+    {
+      "id": 14,
+      "prompt": "When a `crm_case`'s `priority` becomes `urgent`, send its owner an inbox notification; clicking the notification should open that case.",
+      "expected_output": "A `record_change` flow bound on the `start` node `config` (`objectName: 'crm_case'`, `triggerType: 'record-after-update'`, condition `previous.priority != 'urgent' && record.priority == 'urgent'`) and a `notify` node with `recipients: { dialect: 'cel', source: 'record.owner_id' }`, an inline `title`, `channels: ['inbox']`, and no `sourceObject` / `sourceId` / `actionUrl`: a notify that writes none of the three links to the run's trigger record, here the case. An explicit pair or `actionUrl` is only for linking elsewhere and wins when written; half a pair is dropped, never defaulted; a run with no trigger record (a schedule tick) links nowhere. `requires` lists `automation`, `triggers`, `messaging`.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "record-after-update",
+          "notify",
+          "recipients",
+          "trigger record"
+        ],
+        "must_not_contain": [
+          "sourceObject:",
+          "actionUrl:"
+        ]
+      }
     }
   ]
 }

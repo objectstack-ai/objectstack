@@ -44,6 +44,10 @@ export { judgeOverrideWrite, overrideWriteIdentityOf, overrideWriteItemsOf, type
 // exported for the doors outside this package — `os validate` and the
 // marketplace install — so every door that lets a field in asks one judgement.
 export { judgeExtensionFieldSuffix, extensionFieldSuffixRefusalError, objectBodyExtensionFieldSuffixRefusal, type ExtensionFieldSuffixRefusal, type ExtensionFieldSuffixRule, type ExtensionFieldSuffixSubject } from './protocol-extension-field-suffix.js';
+// [ADR-0146 D10, second rule] An extension's `fields` entry re-declaring an
+// owner's field beyond the display-property whitelist: one judge, asked by the
+// save doors here and by `os validate` and the marketplace install outside.
+export { judgeRedeclaredOwnerFields, redeclaredFieldChanges, redeclaredOwnerFieldRefusalError, redeclaredOwnerFieldInstallMessage, type RedeclaredOwnerFieldRefusal, type RedeclaredOwnerFieldSubject, type ObjectOwnerDeclaration } from './protocol-extension-redeclared-owner-field.js';
 
 // The probe-first replacement's shared vocabulary: the raw-SQL seam type the
 // exported migrations below take, and the dialect classifier their reports
@@ -269,6 +273,12 @@ export { unmanagedInstallPostureRefusal } from './package-unmanaged-install.js';
 // (`@objectstack/runtime`) asks the same one ahead of both its install limbs,
 // its no-protocol fallback included, instead of keeping a second copy.
 export { customizationPairManifestRefusal } from './protocol-customization-package.js';
+
+// [ADR-0029 D7] The refusal of `navigationContributions` on a package created
+// at runtime, whose install never registers them. The install primitive asks
+// it; exported so `POST /packages` (`@objectstack/runtime`) asks the same one
+// ahead of both its install limbs, its no-protocol fallback included.
+export { runtimeNavigationContributionsRefusal } from './protocol-package-install.js';
 
 // #4556 — the `sys_metadata_history.recorded_by` sentinel → NULL conversion,
 // as an ADR-0119 D2 migration plan. Run by `os migrate recorded-by`.

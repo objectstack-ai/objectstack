@@ -115,8 +115,7 @@ A server-side `body` (or a registered `handler`) receives `ctx` with `input` (th
 the active organization as `ctx.user?.organizationId ?? ctx.session?.organizationId`
 — the blessed name (same axes and `undefined` cases as hooks, objectstack-data).
 Bodies execute **trusted** (`ctx.api` /
-`ctx.engine` bypass RLS/FLS), so a body that must scope by org reads it from
-`ctx` explicitly. `ctx.session.positions` (absent when the caller holds none) is
+`ctx.engine` bypass RLS/FLS). `ctx.session.positions` (absent when the caller holds none) is
 **not an authorization input** — ask the security service for privilege (ADR-0095).
 
 ## Opening in a New Tab (`openIn` / `opensInNewTab` / `newTabUrl`)
@@ -135,7 +134,7 @@ export const PrintA3Action = defineAction({
   name: 'print_a3',
   label: 'Print Summary Sheet (A3)',
   type: 'url',
-  target: '/print/a3?id=${record.id}',   // static template; interpolated at click
+  target: '/print/a3?id=${record.id}',   // interpolated at click
   openIn: 'new-tab',
   locations: ['list_toolbar'],
 });
@@ -156,7 +155,7 @@ export const OpenInvoicePdfAction = defineAction({
   label: 'Open PDF',
   objectName: 'invoice',
   type: 'script',
-  target: 'open_invoice_pdf',   // registered handler; skipped while newTabUrl is set
+  target: 'open_invoice_pdf',   // registered handler
   opensInNewTab: true,
   newTabUrl: '/api/v1/invoice/{recordId}/pdf',
   locations: ['record_header'],
@@ -172,7 +171,9 @@ export const OpenInvoicePdfAction = defineAction({
 ## Action Parameter Patterns
 
 Prefer **field-backed** params (`{ field: 'email' }`): label (i18n), type,
-validation, options, placeholder and widget come from the object metadata;
+validation, options, placeholder and widget come from the object metadata
+(`widget` only while the param keeps or restates the field's `type`; a param
+that overrides `type` names its own `widget`);
 `objectOverride` borrows a field of another object, and `defaultFromRow: true`
 pre-fills from the selected row in `list_item` contexts.
 

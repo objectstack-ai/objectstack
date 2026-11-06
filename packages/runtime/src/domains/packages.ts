@@ -65,8 +65,9 @@ import {
 // and a second copy would be the next place it drifts.
 import { isWritablePackage, READ_ONLY_PACKAGE_SCOPES } from '@objectstack/metadata-protocol';
 // [ADR-0146 D3] The pair-shaped-id predicate the install primitive asks — asked
-// at `POST /packages` too, ahead of both its install limbs.
-import { customizationPairManifestRefusal } from '@objectstack/metadata-protocol';
+// at `POST /packages` too, ahead of both its install limbs; and, the same way,
+// its [ADR-0029 D7] refusal of a runtime-created package's navigation contributions.
+import { customizationPairManifestRefusal, runtimeNavigationContributionsRefusal } from '@objectstack/metadata-protocol';
 // [#28117] The one reader of a manifest's declared dependency ids (ADR-0141),
 // shared with the registry's co-owner gate.
 import { declaredDependencyIds } from '@objectstack/core';
@@ -1682,6 +1683,17 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     handled: true,
                     response: deps.error(installBodyRefusal(body, declaredBody.error.issues), 400),
                 };
+            }
+            // [#30072] ADR-0029 D7 — a package created here cannot contribute
+            // navigation: neither limb below registers a contribution (only a
+            // code package's `registerApp` does), so the key would be stored,
+            // answered `201` and never shown. The primitive's own predicate,
+            // asked here so the no-protocol fallback is judged too; ⛔ never a
+            // second copy of the rule. After the whole-body verdict, ahead of
+            // the 409: a request-shape refusal never depends on server state.
+            const navRefusal = runtimeNavigationContributionsRefusal(manifest);
+            if (navRefusal !== undefined) {
+                return { handled: true, response: deps.error(navRefusal, 400) };
             }
             // Every option below is read off the PARSED request, and only when
             // the body arrived in the wrapped form — the one form that declares

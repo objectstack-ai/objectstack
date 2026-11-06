@@ -219,7 +219,7 @@
     {
       "id": 13,
       "prompt": "HotCRM (`hotcrm`, 3.2.0) ships the `crm_pipeline` dataset and the `crm_sales_overview` page. Can we replace both with our own the way we replaced its `crm_account_grid` view, or is that only for views?",
-      "expected_output": "The same declaration, both types. In `hotcrm.custom`, an item of the same name and type with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` in its body replaces the base's dataset or page whole, and every read of the name serves it: a pair's declared override is served for a view, dashboard, report, email_template, translation, flow, page, app, dataset, doc, book or mapping. Not an edit of HotCRM's read-only item, not a package-unbound Setup row, and not an object extension (`__c` fields add to an object and replace no dataset or page).",
+      "expected_output": "The same declaration, both types. In `hotcrm.custom`, an item of the same name and type with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` in its body replaces the base's dataset or page whole, and every read of the name serves it: a pair's declared override is served for a view, dashboard, report, email_template, translation, flow, action, page, app, dataset, doc, book or mapping. Not an edit of HotCRM's read-only item, not a package-unbound Setup row, and not an object extension (`__c` fields add to an object and replace no dataset or page).",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -247,6 +247,24 @@
         "must_not_contain": [
           "/rollback",
           "PUT /api/v1/meta/view/crm_account_grid"
+        ]
+      }
+    },
+    {
+      "id": 15,
+      "prompt": "HotCRM (`hotcrm`, 3.2.0) ships the `crm_close_deal` action on `crm_opportunity` with `requiredPermissions: ['crm_close_deal']`. The customer wants it relabelled \"Mark won\", run a different script, and usable by every sales rep, including reps without that capability. How do we change it?",
+      "expected_output": "Relabel it and change what it runs with a declared override in the paired `hotcrm.custom`: an action of the same name on the same object (`objectName: 'crm_opportunity'`) carrying `overrides: { package: 'hotcrm', basedOn: '3.2.0' }`. Its behaviour (`label`, `type`, `body`, …) replaces the base's whole, and it runs for whoever could already run the base action. It cannot widen who that is: dropping `crm_close_deal` from `requiredPermissions` is refused `403 NOT_OVERRIDABLE` (`declared_action_widens_access`), and so is turning `ai.exposed` on or `ai.requiresConfirmation` off. Give the reps the capability through their permission set instead. Moving the action to another object is refused too (`declared_package_ships_no_such_item`). Not an edit of HotCRM's read-only action and not a copy under the same name from a dependent package.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "hotcrm.custom",
+          "overrides:",
+          "requiredPermissions",
+          "declared_action_widens_access"
+        ],
+        "must_not_contain": [
+          "requiredPermissions: []",
+          "PUT /api/v1/meta/action/crm_close_deal"
         ]
       }
     }

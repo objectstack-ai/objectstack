@@ -855,6 +855,17 @@ function requestedItemPath(context: HttpProtocolContext): string | undefined {
 type MetaLayeredProtocol = MetaDomainProtocol & Required<Pick<MetaDomainProtocol, 'getMetaItemLayered'>>;
 
 /**
+ * [#29814] The layered read with its draft option — the implementation's
+ * (`@objectstack/metadata-protocol`) second parameter, which the spec's
+ * one-parameter declaration leaves out because it is no part of the request a
+ * client sends: the transport decides it from the caller's draft-read admission.
+ */
+type LayeredReadWithDraft = (
+    request: Parameters<MetaLayeredProtocol['getMetaItemLayered']>[0],
+    opts: { withDraft?: boolean },
+) => ReturnType<MetaLayeredProtocol['getMetaItemLayered']>;
+
+/**
  * [#20478] Answer the layered view — `GET /meta/:type/:name/layers`, and the
  * deprecated `?layers=` flag on the item read: read the protocol's
  * `getMetaItemLayered` exactly as `RestServer`'s layered read reads it, hand the
@@ -897,14 +908,20 @@ async function answerMetaLayered(
 ): Promise<HttpDispatcherResult> {
     const { type, name, packageId, maskPosture, memberSelector = {} } = request;
     const mayWriteItem = saveVerdict().allowed;
+    // [#29814] The pending draft layer, asked for only when this caller may
+    // read pending drafts ({@link mayReadPendingDrafts}, admitted in its own
+    // declaration as every draft switch in this domain is). A caller it does
+    // not admit is answered the layers without a `draft` key, byte-identical to
+    // a read that never asked, as `RestServer`'s layered read answers.
+    const layeredOptions = { withDraft: mayReadPendingDrafts(context.executionContext) };
     let answer: MetaLayeredAnswer;
     try {
-        const layered = await protocol.getMetaItemLayered({
+        const layered = await (protocol as { getMetaItemLayered: LayeredReadWithDraft }).getMetaItemLayered({
             type,
             name,
             ...(packageId ? { packageId } : {}),
             ...memberSelector,
-        });
+        }, layeredOptions);
         answer = await createMetaLayeredAnswer(
             metaItemReadGateSources(deps, context, protocol, mayWriteItem),
             // [#28337] The member the layers were read at, for step 1c.

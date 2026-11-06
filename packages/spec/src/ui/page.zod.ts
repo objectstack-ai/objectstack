@@ -730,10 +730,11 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * Measured on the renderer (read points recorded in `liveness/page.json`,
    * row `regions`): `buildExpressionScope` builds the ambient scope —
    * `current_user`, `user`, `ctx.user`, `os.user`, `features`, and nothing
-   * else; `configEvaluationScope` composes this surface's evaluator from it,
-   * adding `record` (only when the page has a row — on an app page, once the
-   * renderer mounts the page's `record` binding) and `page`. The one root
-   * added beside those is the `api` data source's `data`, below.
+   * else; `buildNodeEvaluationScope` composes this surface's evaluator from it,
+   * adding `record` (the page's row: the record a record page opens, or the
+   * row an app page's `record` binding reads, `null` when that read finds no
+   * row or is refused as forbidden) and `page`. The one root added beside
+   * those is the `api` data source's `data`, below.
    *
    * ## `data` — only where an `api` data source binds it
    *
@@ -744,9 +745,8 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * predicate only through the predicate-scope channel
    * (`PredicateScopeProvider`), whose ambient feeder, `ExpressionProvider`,
    * publishes no `data`. So on such an element a `data.*` read faults, and a
-   * faulting `visibleWhen` renders the component: `data.total > 0` and
-   * `data.total == 0` both show it, a gate that never gates. The row the page
-   * is about is `record`.
+   * faulting `visibleWhen` withholds the component: `data.total > 0` and
+   * `data.total == 0` both hide it. The row the page is about is `record`.
    *
    * The one `data` this surface has is the API binding's (see
    * {@link ElementApiDataSourceSchema}): on an element whose `dataSource` is
@@ -767,7 +767,7 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * this surface does not have. See that key's own describe in
    * `component.zod.ts` rather than assuming either environment carries over.
    */
-  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `features` and `os.user` — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). It mounts NO `data` root on an element that no `api` data source binds: there a `data.*` read faults and a faulting predicate renders the component, so such a gate never gates; the page's row is `record` — the record a record page opens, or the row an app page's `record` binding reads (none without one; a block's own `dataSource` binds no `record` for its siblings). A count or a plan is a field on that row (a `summary` roll-up: `record.environment_count > 1`; `record.plan != 'free'`), never `features.*`, which are the deployment's public auth flags, the same for every organisation. `data` is mounted only on an element whose `dataSource` is an `api` data source (`provider: 'api'`): there, and on every element nested inside it, `data` is the value the binding selects, and the element's `visibleWhen` is decided once the read answers. To gate a component on a system capability, write `current_user.hasCapability('<name>')` with the name the gated action's `requiredPermissions` declares — it answers from the viewer's `systemPermissions`, the list the action gate reads, never a proxy such as `current_user.can('<object>', 'edit')`; a host that binds no capability list makes it fault, and a faulting predicate renders the component. ADR-0066 D4: `visibleWhen` hides, `requiredPermissions` refuses. ⚠️ A `page:tabs` item `visibleWhen` is a different evaluator: it binds `data` to the record ROW. e.g. \"page.selectedProjectId != ''\""),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `features` and `os.user` — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). It mounts NO `data` root on an element that no `api` data source binds: there a `data.*` read faults and a faulting predicate withholds the component, so `data.total > 0` and `data.total == 0` both hide it; the page's row is `record` — the record a record page opens, or the row an app page's `record` binding reads (none without one; a block's own `dataSource` binds no `record` for its siblings). A count or a plan is a field on that row (a `summary` roll-up: `record.environment_count > 1`; `record.plan != 'free'`), never `features.*`, which are the deployment's public auth flags, the same for every organisation. `data` is mounted only on an element whose `dataSource` is an `api` data source (`provider: 'api'`): there, and on every element nested inside it, `data` is the value the binding selects, and the element's `visibleWhen` is decided once the read answers. To gate a component on a system capability, write `current_user.hasCapability('<name>')` with the name the gated action's `requiredPermissions` declares — it answers from the viewer's `systemPermissions`, the list the action gate reads, never a proxy such as `current_user.can('<object>', 'edit')`; a host that binds no capability list makes it fault, and a faulting predicate withholds the component. ADR-0066 D4: `visibleWhen` hides, `requiredPermissions` refuses. ⚠️ A `page:tabs` item `visibleWhen` is a different evaluator: it binds `data` to the record ROW. e.g. \"page.selectedProjectId != ''\""),
   // `visibility` REMOVED at 18 (#23543 F4, ADR-0089 D2): through 17 it was the
   // page component's deprecated spelling of `visibleWhen`, folded onto it at
   // parse by a `.transform` that went with the key. The tombstone carries the
@@ -844,17 +844,22 @@ export const PageComponentSchema = lazySchema(() => strictObject({
  *
  * Semantics are the one-record binding the record blocks take from an element
  * `dataSource`: read the bound set under the caller's identity, take its FIRST
- * row by `sort`, re-read when the bound object is written. Zero rows, or a row
- * the caller may not read, leaves `record` unbound: a predicate reading it
- * faults, and a faulting `visibleWhen` renders the component. There is no
+ * row by `sort`, re-read when the bound object is written. There is no
  * `limit` — the page binds one row by definition.
  *
  * What a predicate wants from the row is a FIELD on it: a count is a
  * `summary` (roll-up) field, a plan or tier is the field the object carries —
  * `record.environment_count > 1`, `record.plan != 'free'`.
  *
- * Planned in the renderer: until the console mounts this binding, `record`
- * stays unbound on an app page, as it was before the key existed.
+ * The console reads the binding once per page open: the first row under
+ * `sort`, under the caller's identity. Every component's `visibleWhen` on the
+ * page sees that row as `record`, and a record block that binds its own row
+ * still provides that row to its own subtree. A page drawn through
+ * `interfaceConfig.source` reads no binding. A predicate sees three states:
+ * pending, where the page body is not drawn until the read settles; no row,
+ * or a read the server refuses as forbidden (403), where `record` is null, so
+ * absent and not-yours read the same; and any other failure, where the page
+ * body is not drawn.
  */
 export const PageRecordBindingSchema = lazySchema(() => strictObject({
   surface: 'this page record binding',
@@ -2000,7 +2005,7 @@ export const PageSchema = lazySchema(() => strictObject({
    * every other page type ({@link checkPageRecordBindingPlacement}).
    */
   record: PageRecordBindingSchema.optional()
-    .describe("The row an app page is about — a one-row query `{ object, view?, filter?, sort? }` whose FIRST row (by `sort`, read under the caller's identity) the page's components read as `record` in `visibleWhen`. A count or a plan is a field on that row: a `summary` roll-up (`record.environment_count > 1`) or the object's own field (`record.plan != 'free'`). No row, no `record`: the predicate faults and the component renders. Only on `type: 'app'` — refused on every other page type (a record page's row is the record it opens). Planned in the renderer: until the console mounts it, `record` stays unbound on an app page."),
+    .describe("The row an app page is about — a one-row query `{ object, view?, filter?, sort? }`. The console reads it once per page open: the FIRST row under `sort`, under the caller's identity. Every component's `visibleWhen` sees that row as `record`; a record block that binds its own row still provides that row to its own subtree. A page drawn through `interfaceConfig.source` reads no binding. A count or a plan is a field on that row: a `summary` roll-up (`record.environment_count > 1`) or the object's own field (`record.plan != 'free'`). Three states: while the read is pending, the page body is not drawn; no row, or a read the server refuses as forbidden (403), binds `record` as null; any other failure draws no page body. Only on `type: 'app'` — refused on every other page type (a record page's row is the record it opens)."),
 
   // recordReview / blankLayout fields removed — the record_review/blank page
   // types have no renderer and were dropped from PageTypeSchema (framework#2265);

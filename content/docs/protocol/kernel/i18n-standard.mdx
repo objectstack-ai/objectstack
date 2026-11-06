@@ -163,33 +163,48 @@ The rule:
 - **Adding or removing a language** is a change to the table, followed by one
   backfill of every surface. Nothing else declares the list.
 
-**Read aliases.** Codes that stored values already carry keep resolving:
+**Read aliases.** Codes that stored values already carry, and the
+script-subtag spellings browsers and operating systems send, keep resolving:
 `PLATFORM_LOCALE_READ_ALIASES` maps each to a table tag, and
-`platformLocaleTagOf(code)` answers the table tag a stored code means.
+`platformLocaleTagOf(code)` answers the table tag a code means.
 
-| Stored code | Reads as |
+| Code | Reads as |
 |:--|:--|
-| `zh`, `zh-CN`, `zh-SG` | `zh-Hans` |
-| `zh-TW`, `zh-HK`, `zh-MO` | `zh-Hant` |
+| `zh`, `zh-CN`, `zh-SG`, `zh-Hans-CN`, `zh-Hans-SG` | `zh-Hans` |
+| `zh-TW`, `zh-HK`, `zh-MO`, `zh-Hant-TW`, `zh-Hant-HK`, `zh-Hant-MO` | `zh-Hant` |
 | `ja-JP` | `ja` |
 | `es-ES` | `es` |
 | `pt` | `pt-BR` |
 | `en-US` | `en` |
 
 A table tag answers itself, the match ignores case (`zh-cn` reads as
-`zh-Hans`), and any other code answers `undefined`: no region fallback is
-guessed, so `pt-PT` is not `pt-BR`. New writes use the table's tags. The
+`zh-Hans`), and any other code answers `undefined`. The list is closed and is
+read row by row, never as a pattern, so no region or script fallback is
+guessed: `pt-PT` is not `pt-BR`, and a script-subtag spelling without a row
+(`zh-Hant-US`) answers `undefined` too. New writes use the table's tags. The
 examples on this page that spell `zh-CN` stay valid, because `zh-CN` is a read
 alias of `zh-Hans`.
 
 `platformLocaleTagOf` answers which table language a code *means*; the
-fallback ladder below answers which key of a bundle *serves* a request. A
-reader that uses both maps the code first and then resolves the table tag
-against the bundle, so they do not contradict each other: `pt` means `pt-BR`,
-and a request for `pt-BR` may still be served by a bundle's `pt` key. The
-ladder alone cannot tell the two Chinese scripts apart: once a bundle holds
-both `zh-Hans` and `zh-Hant`, a request for `zh` or `zh-CN` is answered by key
-order (`zh-Hant` when that key comes first), where the table says `zh-Hans`.
+fallback ladder answers which key of a bundle *serves* a request. The ladder is
+one function, `resolveLocaleAmong`: `resolveBundleLocale` runs it over a
+bundle's keys, and core's `resolveLocale` is the same function. Its steps are
+exact match, case-insensitive match, then the **same table language**, then
+base language, then the first registered variant. The table-language step maps
+the request through `platformLocaleTagOf` and takes the key spelled as that
+table tag, else the first key the table maps to it, so the two answers never
+contradict each other: `pt` means `pt-BR`, and a request for `pt-BR` is served
+by a bundle's `pt` key. A bundle holding both scripts answers `zh`, `zh-CN` and
+`zh-Hans-CN` with its Simplified key and `zh-TW` and `zh-Hant-TW` with its
+Traditional one, whatever order the keys were registered in.
+
+Two kinds of request still go to the base-language and first-variant steps,
+where registration order decides. A code the table does not name skips the
+table step: over keys registered as `en`, `zh-CN`, `zh-Hant` a `zh-Hant-US`
+request gets `zh-CN`, and with `zh-Hant` registered before `zh-CN` it gets
+`zh-Hant`. A request whose table language has no key falls through the same
+way: `zh-TW` over `en`, `zh-CN` gets `zh-CN`, because a related language beats
+none.
 
 ### Locale Fallback
 

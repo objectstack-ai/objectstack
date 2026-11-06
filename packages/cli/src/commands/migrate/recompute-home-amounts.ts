@@ -60,6 +60,12 @@ async function confirm(question: string): Promise<boolean> {
  * and keep the command's exit code at 1 until a re-run converts them
  * (ADR-0144 Open item 8). Idempotent: a re-run with nothing listed is the
  * verification. No `sys_migration` flag is recorded: nothing gates on the run.
+ *
+ * `--org <id>` limits the run to one organization's rows, the same flag
+ * `os migrate record-currency-codes` takes (ruling 6670707546 item 3), handed
+ * to `recomputeHomeAmounts` as its organization filter. Without it the run
+ * covers every organization, each in its own home currency, and is never
+ * refused for it: a recompute writes no value the operator chose.
  */
 export default class MigrateRecomputeHomeAmounts extends Command {
   static override description =
@@ -70,6 +76,7 @@ export default class MigrateRecomputeHomeAmounts extends Command {
   static override examples = [
     '$ os migrate recompute-home-amounts --object invoice',
     '$ os migrate recompute-home-amounts --object invoice --since 2026-01-01',
+    '$ os migrate recompute-home-amounts --object invoice --org org_emea',
     '$ os migrate recompute-home-amounts --object invoice --field amount --apply',
     '$ os migrate recompute-home-amounts --object invoice --apply --yes --json',
   ];
@@ -88,6 +95,10 @@ export default class MigrateRecomputeHomeAmounts extends Command {
         'Only rows whose DOCUMENT DATE (homeAmount.rateDate, the date that picks the rate) is on or after this ' +
         'date, YYYY-MM-DD. A datetime document date is read as its calendar day in the organization\'s timezone; ' +
         'a row with no document date is outside every --since window',
+    }),
+    org: Flags.string({
+      description:
+        'Only this organization\'s rows (its id). Default: every organization, each in its own home currency',
     }),
     apply: Flags.boolean({
       description: 'Write the recomputed home amounts and rates (default is a read-only dry run)',
@@ -168,8 +179,8 @@ export default class MigrateRecomputeHomeAmounts extends Command {
       }
       const ok = await confirm(
         chalk.bold(
-          `\nRewrite the stored home amounts of ${flags.object}${flags.field ? `.${flags.field}` : ''} at the rates ` +
-            'in force now, on this database? [y/N] ',
+          `\nRewrite the stored home amounts of ${flags.object}${flags.field ? `.${flags.field}` : ''}` +
+            `${flags.org !== undefined ? ` in organization ${flags.org}` : ''} at the rates in force now, on this database? [y/N] `,
         ),
       );
       if (!ok) {
@@ -228,6 +239,7 @@ export default class MigrateRecomputeHomeAmounts extends Command {
         object: flags.object,
         field: flags.field,
         since: flags.since,
+        organizationId: flags.org,
         apply,
         maxRecords: flags['max-records'],
         source: 'os migrate recompute-home-amounts',

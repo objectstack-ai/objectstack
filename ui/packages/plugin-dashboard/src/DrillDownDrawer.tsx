@@ -111,14 +111,21 @@ export const DrillDownDrawer: React.FC<DrillDownDrawerProps> = ({
   className,
   report,
 }) => {
-  const { openRecordList } = useDrillNavigation();
+  const { openRecordList, canOpenRecordList } = useDrillNavigation();
   const isReportDrill = isDatasetBoundReport(report);
 
   // `target: 'navigate'` skips the in-place view and opens the object's full
-  // list page directly — but only when a host navigation handler exists and
-  // this is a raw-record drill (a report drill has no single list page).
-  // Otherwise it degrades gracefully to the drawer below.
-  const navigateOnly = target === 'navigate' && !!openRecordList && !isReportDrill && !!objectName;
+  // list page directly — but only when a host navigation handler exists, this
+  // is a raw-record drill (a report drill has no single list page), and the
+  // host's list route can say `filter` exactly (`canOpenRecordList`; a wider
+  // list than the clicked number is no destination). Otherwise it degrades
+  // gracefully to the drawer below.
+  const navigateOnly =
+    target === 'navigate' &&
+    !!openRecordList &&
+    !isReportDrill &&
+    !!objectName &&
+    (!canOpenRecordList || canOpenRecordList(objectName, filter));
   React.useEffect(() => {
     if (open && navigateOnly) {
       openRecordList!(objectName, filter);

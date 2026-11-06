@@ -416,3 +416,138 @@ describe('[#22985] a refused object-storage sync on publish is an error, once', 
         expect(spy.error).not.toHaveBeenCalled();
     });
 });
+
+// ---------------------------------------------------------------------------
+// [#30635] A refused object-storage sync is reported to the CALLER too, on
+// the answer's `advisories` — not only in the server log.
+// ---------------------------------------------------------------------------
+// The #22985 line above tells the operator; the admin or AI that saved the
+// object read a plain success and learned nothing until reads and writes
+// against the object failed. Both doors that run the sync now carry one
+// `warning` advisory naming the object, on the 2xx they already answer: the
+// save (`PUT /meta/object/NAME`, `saveMetaItem` in publish mode) and the
+// single-item publish (`POST /meta/object/NAME/publish`). Status and every
+// other key are unchanged, and a clean sync answers without the key at all.
+//
+// The driver's text is quoted only when the driver declared it a client
+// refusal (a 4xx `status`), the rule every 2xx side-effect report on these
+// doors follows (`clientFacingFailureText`); otherwise the advisory says the
+// reason is in the server log, where the #22985 line carries it whole.
+
+/** The advisory's stable rule id — the key a client groups or suppresses it by. */
+const SYNC_REFUSED_RULE = 'object-storage-sync-refused';
+
+describe('[#30635] a refused object-storage sync rides the answer as a warning advisory', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    /** Quiets (and keeps) the #22985 log line, which is pinned above. */
+    const quietConsole = () => vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    /** A driver refusal that DECLARES itself a client refusal (4xx `status`). */
+    function declareRefusal(engine: any, text: string): void {
+        engine.syncObjectSchema = vi.fn(async () => {
+            throw Object.assign(new Error(text), { status: 409 });
+        });
+    }
+
+    const syncRefused = (res: any) => (res.advisories ?? []).filter((a: any) => a.rule === SYNC_REFUSED_RULE);
+
+    it('save door: a refused sync answers success with one warning naming the object, and withholds undeclared driver text', async () => {
+        const error = quietConsole();
+        const { protocol, syncedObjects } = makeProtocol(new Set(['ticket']));
+
+        const res = await protocol.saveMetaItem({
+            type: 'object', name: 'ticket', item: objectBody('ticket'), packageId: PKG,
+        });
+
+        // The publish the answer stands for is not undone.
+        expect(res.success).toBe(true);
+        expect(res.state).toBe('active');
+        expect(syncedObjects).toEqual([]);
+        const [advisory, ...rest] = syncRefused(res);
+        expect(rest).toEqual([]);
+        expect(advisory).toMatchObject({
+            rule: SYNC_REFUSED_RULE, severity: 'warning', path: '', where: 'object "ticket"',
+        });
+        expect(advisory.message).toContain("'ticket'");
+        expect(typeof advisory.hint).toBe('string');
+        // An undeclared driver failure is withheld from the 2xx body…
+        expect(advisory.message).not.toContain('there is already an index');
+        expect(advisory.message).toContain('server log');
+        // …and still reaches the server log whole (#22985).
+        expect(error.mock.calls.some((args) => args[1] === 'there is already an index named ticket')).toBe(true);
+    });
+
+    it('save door: a DECLARED driver refusal is quoted on the advisory', async () => {
+        quietConsole();
+        const { protocol, engine } = makeProtocol();
+        declareRefusal(engine, "Schema sync REFUSED for the existing table 'ticket': it holds 2 rows.");
+
+        const res = await protocol.saveMetaItem({
+            type: 'object', name: 'ticket', item: objectBody('ticket'), packageId: PKG,
+        });
+
+        expect(res.success).toBe(true);
+        const [advisory] = syncRefused(res);
+        expect(advisory?.severity).toBe('warning');
+        expect(advisory?.message).toContain("Schema sync REFUSED for the existing table 'ticket': it holds 2 rows.");
+    });
+
+    it('CONTROL save door: a clean sync answers with no `advisories` key at all', async () => {
+        const { protocol, syncedObjects } = makeProtocol();
+
+        const res = await protocol.saveMetaItem({
+            type: 'object', name: 'ticket', item: objectBody('ticket'), packageId: PKG,
+        });
+
+        expect(res.success).toBe(true);
+        expect(syncedObjects).toEqual(['ticket']);
+        expect('advisories' in res).toBe(false);
+    });
+
+    it('CONTROL save door: a draft save runs no sync and reports none', async () => {
+        const { protocol, engine } = makeProtocol(new Set(['ticket']));
+
+        const res = await protocol.saveMetaItem({
+            type: 'object', name: 'ticket', item: objectBody('ticket'), packageId: PKG, mode: 'draft',
+        });
+
+        expect(res.success).toBe(true);
+        expect(engine.syncObjectSchema).not.toHaveBeenCalled();
+        expect('advisories' in res).toBe(false);
+    });
+
+    it('publish door: a refused sync answers success with the same warning', async () => {
+        quietConsole();
+        const { protocol, engine } = makeProtocol();
+        await protocol.saveMetaItem({
+            type: 'object', name: 'ticket', item: objectBody('ticket'), packageId: PKG, mode: 'draft',
+        });
+        declareRefusal(engine, "Schema sync REFUSED for the existing table 'ticket': it holds 2 rows.");
+
+        const res = await protocol.publishMetaItem({ type: 'object', name: 'ticket' });
+
+        expect(res.success).toBe(true);
+        const [advisory, ...rest] = syncRefused(res);
+        expect(rest).toEqual([]);
+        expect(advisory).toMatchObject({
+            rule: SYNC_REFUSED_RULE, severity: 'warning', path: '', where: 'object "ticket"',
+        });
+        expect(advisory.message).toContain("Schema sync REFUSED for the existing table 'ticket': it holds 2 rows.");
+    });
+
+    it('CONTROL publish door: a clean sync answers with no `advisories` key at all', async () => {
+        const { protocol, syncedObjects } = makeProtocol();
+        await protocol.saveMetaItem({
+            type: 'object', name: 'ticket', item: objectBody('ticket'), packageId: PKG, mode: 'draft',
+        });
+
+        const res = await protocol.publishMetaItem({ type: 'object', name: 'ticket' });
+
+        expect(res.success).toBe(true);
+        expect(syncedObjects).toEqual(['ticket']);
+        expect('advisories' in res).toBe(false);
+    });
+});

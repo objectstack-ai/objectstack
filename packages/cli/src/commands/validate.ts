@@ -81,6 +81,9 @@ import { findExtensionFieldSuffixRefusals } from '../utils/extension-field-suffi
 // [ADR-0146 D10, second rule] The field-patch target check's walk; the verdict
 // is the marketplace install door's own judge.
 import { findFieldPatchTargetRefusals } from '../utils/field-patch-targets.js';
+// [ADR-0146 D10, second rule] An extension re-declaring an owner's field beyond
+// the display-property whitelist; the verdict is the save and install doors' own.
+import { findRedeclaredOwnerFieldRefusals } from '../utils/extension-redeclared-owner-fields.js';
 // [#29051] An undeclared top-level flow cycle (ADR-0044): the automation
 // engine's own judge (`findUndeclaredFlowCycle`, `@objectstack/metadata-core`).
 import { findFlowCycleRefusals } from '../utils/flow-undeclared-cycle.js';
@@ -750,6 +753,35 @@ export default class Validate extends Command {
         printBulletList(
           patchTargetRefusals.map((r) => `${r.path} ${r.message}`),
           { noun: 'field-patch refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 3a-v-bis. [ADR-0146 D10, second rule] A base field changes only within
+      //     the display-property whitelist: an `objectExtensions[].fields`
+      //     entry naming a field another package of this artifact declares
+      //     replaces that field whole, so it is refused when it changes
+      //     anything else. The verdict is the save and install doors' own
+      //     (`judgeRedeclaredOwnerFields`); see
+      //     `utils/extension-redeclared-owner-fields.ts` for the walk.
+      const redeclaredRefusals = findRedeclaredOwnerFieldRefusals(result.data as Record<string, unknown>);
+      if (redeclaredRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: redeclaredRefusals,
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        const n = redeclaredRefusals.length;
+        console.log('');
+        printError(`${n} extension field${n > 1 ? 's re-declare' : ' re-declares'} an owner's field beyond its display properties (ADR-0146 D10)`);
+        printBulletList(
+          redeclaredRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
+          { noun: 'extension-field refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
         );
         this.exit(1);
       }
