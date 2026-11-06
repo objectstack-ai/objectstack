@@ -183,6 +183,49 @@ describe('[#23343] auth.account_invitation renders its own invitation in each lo
   });
 });
 
+/**
+ * [#30212 row 2, ruling E] The link keeps its lifetime, so the mail's last
+ * line must tell a reader whose link lapsed how to get a new one on their own:
+ * the sign-in page's forgot-password entry, named as the console labels it in
+ * each locale (`auth.login.forgotPasswordText`), for the account's own address,
+ * and only then the administrator. The old line sent them straight to the
+ * administrator.
+ */
+const EXPECTED_SELF_SERVE: Record<Locale, string> = {
+  'en-US': 'If the link has expired, get a new one from the sign-in page: choose "Forgot password?" and enter ada@acme.test. If that does not work, contact Dana Admin.',
+  'zh-CN': '如果链接已失效，请在登录页点击「忘记密码？」并输入 ada@acme.test，获取新的链接；如仍无法设置，请联系 Dana Admin。',
+  'ja-JP': 'リンクの有効期限が切れた場合は、サインイン画面の「パスワードをお忘れですか？」から ada@acme.test を入力して、新しいリンクを受け取ってください。それでも設定できない場合は、Dana Admin さんにお問い合わせください。',
+  'es-ES': 'Si el enlace ha caducado, solicita uno nuevo desde la página de inicio de sesión: elige «¿Olvidaste tu contraseña?» e introduce ada@acme.test. Si así no puedes, ponte en contacto con Dana Admin.',
+};
+
+/** The line it replaces: the administrator as the only way out. */
+const OLD_ADMIN_ONLY: Record<Locale, string> = {
+  'en-US': 'If the link has expired, contact Dana Admin.',
+  'zh-CN': '如果链接已失效，请联系 Dana Admin。',
+  'ja-JP': 'リンクの有効期限が切れた場合は、Dana Admin さんにお問い合わせください。',
+  'es-ES': 'Si el enlace ha caducado, ponte en contacto con Dana Admin.',
+};
+
+describe('[#30212] auth.account_invitation points an expired link at a new one first', () => {
+  for (const locale of LOCALES) {
+    it(`${locale}: the HTML and text bodies end on the self-serve line, administrator second`, async () => {
+      const sent = (await send(locale)).sent[0]!;
+      const html = String(sent.html);
+      const text = String(sent.text);
+      // The HTML body escapes the quotes it renders; read it as a reader would.
+      const htmlProse = html.replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+      expect(htmlProse).toContain(`<p>${EXPECTED_SELF_SERVE[locale]}</p>`);
+      expect(text.trimEnd().endsWith(EXPECTED_SELF_SERVE[locale]), text).toBe(true);
+      for (const body of [htmlProse, text]) {
+        expect(body).not.toContain(OLD_ADMIN_ONLY[locale]);
+        // Self-serve before the administrator, inside the one line.
+        const line = body.slice(body.indexOf(EXPECTED_SELF_SERVE[locale]));
+        expect(line.indexOf('ada@acme.test')).toBeLessThan(line.indexOf('Dana Admin'));
+      }
+    });
+  }
+});
+
 describe('[#23343] auth.account_invitation refuses a send missing a required variable', () => {
   const REQUIRED: Array<[string, (d: any) => void]> = [
     ['user.email', (d) => { delete d.user.email; }],
