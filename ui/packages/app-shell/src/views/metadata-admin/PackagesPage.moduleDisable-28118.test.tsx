@@ -250,8 +250,11 @@ describe('PackageDetailSheet — a disable the server refuses for a dependent va
       ? reply(status, { success: false, error: { code, message } })
       : undefined;
 
-  async function confirmDisable() {
-    fireEvent.click(screen.getByRole('button', { name: label('disable') }));
+  /** The sheet's Disable, in the language it renders. */
+  const disableLabel = (language?: 'zh') => (language ? ZH['engine.packages.detail.disable'] : label('disable'));
+
+  async function confirmDisable(language?: 'zh') {
+    fireEvent.click(screen.getByRole('button', { name: disableLabel(language) }));
     const dialog = await screen.findByTestId('pkg-detail-disable-dialog');
     fireEvent.click(within(dialog).getByTestId('pkg-detail-disable-confirm'));
     await vi.waitFor(() => expect(lifecycleCalls()).toEqual(['disable']));
@@ -275,7 +278,7 @@ describe('PackageDetailSheet — a disable the server refuses for a dependent va
     stubWire([], refuseDisable(409, CODE, SENTENCE));
     await renderSheet(moduleRow(), language);
     if (language) expect(heading).not.toBe(label('disableRestricted'));
-    await confirmDisable();
+    await confirmDisable(language);
 
     expect(await screen.findByTestId('pkg-detail-refusal-heading')).toHaveTextContent(heading!);
     const text = screen.getByTestId('pkg-detail-refusal-text');
@@ -286,7 +289,7 @@ describe('PackageDetailSheet — a disable the server refuses for a dependent va
     expect(text.textContent).toContain(SENTENCE);
     expect(screen.queryByTestId('refusal-more')).toBeNull();
     // Still on offer: the package was not switched off.
-    expect(screen.getByRole('button', { name: language ? ZH['engine.packages.detail.disable'] : label('disable') })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: disableLabel(language) })).toBeInTheDocument();
   });
 
   it('CONTROL: another refusal code keeps the first-sentence drawing, with no heading', async () => {
