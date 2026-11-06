@@ -19,7 +19,7 @@
  * `@objectstack/spec/kernel` (`customization-package.ts`), ⛔ never a local
  * spelling:
  *
- *   - id — {@link customizationPackageId}: `<base>.custom`;
+ *   - id — `customizationPackageId`, asked through {@link pairOf}: `<base>.custom`;
  *   - namespace — {@link customizationNamespace}: `<base namespace>_custom`, SET
  *     EXPLICITLY on the manifest so `installPackage`'s id-derived default
  *     (`deriveNamespaceFromPackageId('hotcrm.custom')` = `custom`) never runs
@@ -101,8 +101,8 @@ import {
     customizationBasePackageId,
     customizationDependencyRange,
     customizationNamespace,
-    customizationPackageId,
 } from '@objectstack/spec/kernel';
+import { pairOf } from '@objectstack/metadata-core';
 import type { CustomizationNamespaceRefusal } from '@objectstack/spec/kernel';
 
 /** The HTTP route that serves the door — named by every refusal that points at it. */
@@ -252,7 +252,7 @@ export async function ensureCustomizationPackage(
     }
     const baseId = declared.data.basePackageId;
 
-    const pair = customizationPackageId(baseId);
+    const pair = pairOf(baseId);
     if (!pair.ok) {
         throw refusal(400, pair.reason === 'base_is_customization_package'
             ? `Package '${baseId}' is itself a paired customization package, and a pair is never paired again: `

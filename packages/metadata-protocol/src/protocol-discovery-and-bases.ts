@@ -42,11 +42,11 @@ import { restoreTranslatedEchoes } from './protocol-translated-echo.js';
 import type { RestoredTranslatedSlot } from './protocol-translated-echo.js';
 import {
     DEFAULT_METADATA_TYPE_REGISTRY,
-    customizationPackageId,
     getMetadataCreateSeed,
     getMetadataTypeActions,
     getMetadataTypeSchema,
 } from '@objectstack/spec/kernel';
+import { pairOf } from '@objectstack/metadata-core';
 import { storedBodyForCarryForward } from './protocol-credential-carry-forward.js';
 import type { Equal, MetaTypesListing } from './protocol-meta-types-listing.js';
 import {
@@ -407,7 +407,7 @@ export class ProtocolDiscoveryAndBasesFacet {
      */
     static async getPairTranslationBundle(host: Pick<ProtocolHost, 'findEnvironmentRows'>, basePackageId: string): Promise<TranslationBundle | undefined> {
         if (typeof basePackageId !== 'string' || basePackageId === '') return undefined;
-        const pair = customizationPackageId(basePackageId);
+        const pair = pairOf(basePackageId);
         if (!pair.ok) return undefined;
         const layer = await readAuthoredTranslationLayer({
             find: (table: string, opts: { where?: Record<string, unknown>; [key: string]: unknown } = {}) =>
