@@ -173,21 +173,24 @@ describe('Home asks for the objects it names, never the whole registry (objectst
   });
 
   it('outside an app, a refresh asks the roster’s names again in one ?names= request', async () => {
-    let refresh: ((type?: string) => Promise<void>) | undefined;
-    function RefreshHandle() {
-      refresh = useMetadata().refresh;
+    const handle: { refresh?: (type?: string) => Promise<void> } = {};
+    function RefreshHandle({ into }: { into: typeof handle }) {
+      const { refresh } = useMetadata();
+      React.useEffect(() => {
+        into.refresh = refresh;
+      }, [into, refresh]);
       return null;
     }
     const calls = mount(
       <>
-        <RefreshHandle />
+        <RefreshHandle into={handle} />
         <GateProbe />
       </>,
     );
     await waitFor(() => expect(screen.getByTestId('gate')).toHaveAttribute('data-cloud', 'false'));
     await settle();
     await act(async () => {
-      await refresh!('object');
+      await handle.refresh!('object');
     });
     await settle();
     expect(screen.getByTestId('gate')).toHaveAttribute('data-cloud', 'false');
