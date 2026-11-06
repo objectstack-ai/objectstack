@@ -453,6 +453,9 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
         // [#27627] The sum unchanged by the app metadata bundle (no slot).
         // [#28470] The sum 5 → 6: the record page's stream reads (`readStream`).
         // [#30675] The sum unchanged by the record-currency code backfill (no slot).
+        // [#30955] The sum unchanged by the export door's audit event: it hands
+        // the plugin-audit writer the query as read under `readQuery`, which is
+        // not a QueryAST slot and reaches no engine.
         expect(Object.keys(REGISTRAR_QUERY_SLOT_FLOORS).sort()).toEqual([...REST_SERVER_REGISTRAR_FILES].sort());
         expect(CENSUS.filter(({ file }) => REGISTRAR_SOURCES.has(file)).map(({ file }) => file))
             .toEqual([...REST_SERVER_REGISTRAR_FILES]);

@@ -371,9 +371,11 @@ async function assertImportObjectExists(p: any, objectName: string, environmentI
  *
  * One event per export that cleared every gate and began reading, whether the
  * stream completed or failed; a refused request is no export and hands none.
- * `query` is the query AS READ: the writer reduces it to field names and
+ * `readQuery` is the query AS READ: the writer reduces it to field names and
  * operators before anything reaches the ledger, and records only that a search
- * term applied, never the term.
+ * term applied, never the term. It is not spelled `query` on purpose: it is no
+ * query handed to the engine, and `rest-server-canonical-query-ast.test.ts`
+ * censuses every `query:` line in this file as a server-built QueryAST slot.
  */
 interface DataExportAuditEvent {
     context: unknown;
@@ -384,7 +386,7 @@ interface DataExportAuditEvent {
     requestedLimit: number;
     limitCap: number;
     truncated: boolean;
-    query: { filter?: unknown; search?: string; searchFields?: string[] };
+    readQuery: { filter?: unknown; search?: string; searchFields?: string[] };
     outcome: 'succeeded' | 'failed';
     status?: number;
     errorCode?: string;
@@ -1602,7 +1604,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     limit,
                     requestedLimit,
                     limitCap: HARD_CAP,
-                    query: {
+                    readQuery: {
                         ...(filter !== undefined ? { filter } : {}),
                         ...(search ? { search } : {}),
                         ...(search && searchFields ? { searchFields } : {}),

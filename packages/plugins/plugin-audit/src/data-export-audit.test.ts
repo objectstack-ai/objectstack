@@ -156,7 +156,7 @@ describe('[#30955] the export writer on the real `audit` slot', () => {
 
   it('the row never carries an exported cell value: not the filter comparands, not the search term', async () => {
     await audit.recordDataExport(exportEvent({
-      query: {
+      readQuery: {
         filter: {
           name: SECRET,
           $or: [
@@ -216,7 +216,7 @@ describe('[#30955] the filter summary keeps names and operators, never a compara
     const { terms, omitted } = summarizeExportFilter(filter);
     expect(terms).toHaveLength(EXPORT_FILTER_SUMMARY_MAX_TERMS);
     expect(omitted).toBe(8);
-    const row = buildDataExportAuditRow(exportEvent({ query: { filter } }));
+    const row = buildDataExportAuditRow(exportEvent({ readQuery: { filter } }));
     expect(metadataOf(row).filter_terms_omitted).toBe(8);
   });
 
@@ -251,7 +251,7 @@ describe('[#30955] a lost row is loud, once per cause, and never throws', () => 
     const logger = { error: vi.fn(), warn: vi.fn(), debug: vi.fn() };
     const writer = createDataExportAuditWriter({ getEngine: () => engine, logger });
 
-    await expect(writer.recordDataExport(exportEvent({ query: { filter: { name: SECRET }, search: SECRET } }))).resolves.toBeUndefined();
+    await expect(writer.recordDataExport(exportEvent({ readQuery: { filter: { name: SECRET }, search: SECRET } }))).resolves.toBeUndefined();
     await expect(writer.recordDataExport(exportEvent())).resolves.toBeUndefined();
 
     expect(engine.insert).toHaveBeenCalledTimes(2);

@@ -105,7 +105,7 @@ export interface DataExportAuditEvent {
    * The query as the door read it. Reduced to names and operators before it
    * reaches the row: the comparands and the search term are never recorded.
    */
-  query?: { filter?: unknown; search?: unknown; searchFields?: unknown };
+  readQuery?: { filter?: unknown; search?: unknown; searchFields?: unknown };
   outcome: DataExportOutcome;
   /** On a failure: the HTTP status the door answered. */
   status?: number;
@@ -310,7 +310,7 @@ export function buildDataExportAuditRow(
   const ctx = event.context ?? {};
   const userId = nonEmpty(ctx.userId);
   const performedBy = nonEmpty(ctx.performedBy?.clientId);
-  const query = event.query ?? {};
+  const query = event.readQuery ?? {};
 
   const limit = wholeNumber(event.limit);
   const requestedLimit = wholeNumber(event.requestedLimit);

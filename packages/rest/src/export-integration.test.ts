@@ -801,7 +801,7 @@ describe('[#30955] export route — the ledger hears of every export it streams'
       limitCap: 50_000,
       truncated: false,
       outcome: 'succeeded',
-      query: {},
+      readQuery: {},
     });
     expect(events[0].context).toMatchObject({ userId: 'test-user', tenantId: 'org_a' });
   });
@@ -834,7 +834,7 @@ describe('[#30955] export route — the ledger hears of every export it streams'
     const filter = { done: true };
     await run('task', { format: 'csv', filter: JSON.stringify(filter), search: '代码', searchFields: 'title' });
     expect(events).toHaveLength(1);
-    expect(events[0].query).toEqual({ filter, search: '代码', searchFields: ['title'] });
+    expect(events[0].readQuery).toEqual({ filter, search: '代码', searchFields: ['title'] });
     expect(events[0].rowCount).toBe(1);
   });
 
@@ -867,6 +867,29 @@ describe('[#30955] export route — the ledger hears of every export it streams'
     expect(events[0]).toMatchObject({ objectName: 'task', outcome: 'failed', status: 400, rowCount: 0 });
     expect(answer.json?.code).toBe('INVALID_FIELD');
     expect(events[0].errorCode).toBe('INVALID_FIELD');
+  });
+
+  it('an export of an object name the registry does not know, past an export gate that let it through, hands ONE failed event (404 OBJECT_NOT_FOUND)', async () => {
+    // Pinned as built, for the review to judge: the gates passed and the read
+    // began, so by the door's one rule this is an export that failed, not a
+    // refusal. Only a caller the export gate admits for that name reaches it.
+    const gateAsked: string[] = [];
+    const { events, run } = await bootAudited({
+      canExport: async (object) => { gateAsked.push(object); return true; },
+    });
+    const answer = await run('no_such_object', { format: 'csv' });
+    expect(answer.status).toBe(404);
+    expect(answer.json?.code ?? answer.json?.error?.code).toBe('OBJECT_NOT_FOUND');
+    expect(gateAsked).toEqual(['no_such_object']);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      objectName: 'no_such_object',
+      outcome: 'failed',
+      status: 404,
+      errorCode: 'OBJECT_NOT_FOUND',
+      rowCount: 0,
+      truncated: false,
+    });
   });
 
   it('a sink that throws changes nothing about the file the caller gets', async () => {
