@@ -145,7 +145,7 @@ const CLI_ROOT = join(HERE, '..');
 //
 // `account` satisfied both halves all along and was invisible anyway:
 // `@objectstack/mcp` contributes `nav_connect_agent` into
-// `grp_account_developer` (`connect-ui.ts`, #16746) and commit c744c0af3 supplied its
+// `grp_account_ai_assistant` (`connect-ui.ts`, #16746) and commit c744c0af3 supplied its
 // label in all four locales — while this gate printed a BYTE-IDENTICAL
 // `OK (…)` line before and after that landing, because every site below
 // narrowed to one app name. Widening the three obvious filters is NOT the fix:
@@ -407,8 +407,8 @@ const CONTRIBUTORS = [
     source: '@objectstack/mcp (CONNECT_AGENT_UI_BUNDLE)',
     // The one contributor that lands in BOTH apps: `CONNECT_AGENT_UI_BUNDLE`
     // carries two `navigationContributions` entries pointing at one page —
-    // `setup`/`group_integrations` for admins and `account`/
-    // `grp_account_developer` for the per-user half (#16746). The Account half
+    // `setup`/`group_overview` for admins and `account`/
+    // `grp_account_ai_assistant` for the per-user half (#16746). The Account half
     // is the contribution this gate was blind to.
     apps: ['setup', 'account'],
     async load() {

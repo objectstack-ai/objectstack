@@ -3462,6 +3462,7 @@ const ja = {
     // objectui#13461 — the top bar's avatar button, which holds only the avatar.
     accountMenu: 'アカウントメニュー',
     profile: "プロフィール",
+    connectAiAssistant: "AI アシスタントを接続",
     logout: "ログアウト",
     preferences: "設定",
     theme: "テーマ",

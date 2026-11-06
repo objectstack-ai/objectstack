@@ -3531,6 +3531,7 @@ const es = {
     // objectui#13461 — the top bar's avatar button, which holds only the avatar.
     accountMenu: 'Menú de la cuenta',
     profile: "Perfil",
+    connectAiAssistant: "Conectar un asistente de IA",
     logout: "Cerrar sesión",
     preferences: "Preferencias",
     theme: "Tema",
