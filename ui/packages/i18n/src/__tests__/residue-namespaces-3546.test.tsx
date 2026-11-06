@@ -698,7 +698,8 @@ describe('objectui#3546 slice seven — the ratchet residue', () => {
     expect(at(builtInLocales.en, 'auth.login.devAdminHint.title')).toBe('Local development instance');
     expect(at(builtInLocales.ru, 'approvalsInbox.recallUnavailable')).toBe('Отзыв недоступен в этой среде.');
     expect(at(builtInLocales.ru, 'workspace.multiOrgDisabled')).toContain('в этой среде');
-    expect(at(builtInLocales.ar, 'connectAgent.disabled.title')).toBe('MCP معطّل في هذا النشر');
+    // The Connect an AI Assistant page rewrote this title in plain words; it keeps the word.
+    expect(at(builtInLocales.ar, 'connectAgent.disabled.title')).toContain('في هذا النشر');
     expect(at(builtInLocales.ar, 'workspace.multiOrgDisabled')).toContain('في هذا النشر');
     // …and the "X ist disabled" sentence shape comes from the pack's own
     // `gantt.readOnlyHint`, not from a fresh construction.

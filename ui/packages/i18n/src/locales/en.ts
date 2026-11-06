@@ -4595,13 +4595,22 @@ const en = {
     requiredFields: 'Required: {{fields}}',
   },
   connectAgent: {
+    capabilities: {
+      title: 'What your AI assistant can do here',
+      body: 'Once connected, your AI assistant can look up, create, change and delete the records you are allowed to, and run this system\'s actions. It always works as you: it sees and does only what your own permissions allow.',
+      examplesTitle: 'Requests to try in your assistant',
+      example1: 'List the objects I can see.',
+      example2: 'Count how many records each of those objects has.',
+      example3: 'What actions can I run here, and what does each one do?',
+      tryFirst: 'Start with the first one: if your assistant answers with the objects you work with, the connection works.',
+    },
     disabled: {
-      title: 'MCP is disabled on this deployment',
-      body: 'The MCP surface is off (OS_MCP_SERVER_ENABLED=false), so there is nothing to connect. Ask your operator to re-enable it.',
+      title: 'Connecting AI assistants is turned off here',
+      body: 'This deployment has AI assistant connections turned off (OS_MCP_SERVER_ENABLED=false), so there is nothing to connect. Ask your operator to turn them back on.',
     },
     url: {
-      title: 'This system\'s MCP endpoint',
-      body: 'Any MCP-capable AI client connects with this URL. Identity is self-serve: the deployment is its own OAuth 2.1 authorization server, so interactive clients just open a browser login — you connect as yourself, and every call runs under your own permissions and row-level security.',
+      title: 'This system\'s connection address',
+      body: 'Your AI assistant connects with this address. You sign in as yourself in the browser, so everything it does runs under your own permissions.',
       downloadSkill: 'Download SKILL.md',
       skillHint: 'The portable agent skill: teaches any skills-capable agent how to work with this system.',
     },
@@ -4610,7 +4619,7 @@ const en = {
       reachability: 'claude.ai (web) connects from Anthropic\'s servers — the deployment must be reachable over public HTTPS. Claude Desktop and local clients also reach intranet deployments.',
     },
     claudeCode: {
-      body: 'One command — the OAuth login opens automatically on first use:',
+      body: 'One command — the browser sign-in opens automatically on first use:',
       plugin: 'Or install the official plugin (adds the ObjectStack skill and a guided /objectstack:connect command):',
     },
     cursor: {
@@ -4624,21 +4633,21 @@ const en = {
     },
     codex: {
       body: 'In the Codex app: Settings → MCP servers → Add server, then fill in:',
-      hint: 'Save, restart when prompted, then click Authenticate next to objectstack and sign in through the browser. Type /mcp in the composer to check it is connected. If your version offers no browser sign-in, add the header Authorization: Bearer <API key> (create a key below).',
+      hint: 'Save, restart when prompted, then click Authenticate next to objectstack and sign in through the browser. Type /mcp in the composer to check it is connected. If your version offers no browser sign-in, add the header Authorization: Bearer <API key> (create one under Advanced: scripts and CI below).',
     },
     workbuddy: {
       body: 'Connectors → Custom connector → Configure MCP, then merge this entry into mcpServers (WorkBuddy keeps it in ~/.workbuddy/mcp.json):',
-      hint: 'Save, then click Trust on the objectstack connector — it stays inactive until trusted. If your version shows no sign-in prompt, add the request header Authorization: Bearer <API key> (create a key below).',
+      hint: 'Save, then click Trust on the objectstack connector — it stays inactive until trusted. If your version shows no sign-in prompt, add the request header Authorization: Bearer <API key> (create one under Advanced: scripts and CI below).',
     },
     doubao: {
       title: 'Doubao Work',
       body: 'Skills · Connectors → New → New custom connector, then fill in:',
-      hint: 'Sign in through the browser when prompted. If no sign-in appears, add the custom header Authorization: Bearer <API key> (create a key below). Tasks that run in the cloud need a deployment reachable over public HTTPS.',
+      hint: 'Sign in through the browser when prompted. If no sign-in appears, add the custom header Authorization: Bearer <API key> (create one under Advanced: scripts and CI below). Tasks that run in the cloud need a deployment reachable over public HTTPS.',
     },
     qwenwork: {
       title: 'QwenWork',
       body: 'Extensions → Connectors → + Add → Paste JSON config:',
-      hint: 'Or add it by hand as Streamable HTTP with this URL. If your version offers no browser sign-in, add the request header Authorization: Bearer <API key> (create a key below).',
+      hint: 'Or add it by hand as Streamable HTTP with this URL. If your version offers no browser sign-in, add the request header Authorization: Bearer <API key> (create one under Advanced: scripts and CI below).',
     },
     client: {
       title: 'Which AI assistant do you use?',
