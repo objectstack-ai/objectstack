@@ -1062,3 +1062,73 @@ describe('[#30756] a boot whose state file leaves an enabled package\'s rule rea
         }
     }, 120_000);
 });
+
+describe('[#30756] the enable door judges the rules on an object the package owns', () => {
+    const OWNER = 'com.qa.own.owner';
+    const READER = 'com.qa.own.reader';
+    const EXTENDER = 'com.qa.own.flags';
+    const THING = 'qo_thing';
+    const FLAG = 'qo_flag';
+    const RULE = 'qo_flag_required';
+    const CODE = 'PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE';
+    const NAMESPACES: Record<string, string> = { [OWNER]: 'qo', [READER]: 'qr', [EXTENDER]: 'qf' };
+    const manifestOf = (id: string) => ({ id, name: id, namespace: NAMESPACES[id], version: '1.0.0', type: 'module' });
+
+    let previousHome: string | undefined;
+    beforeAll(() => {
+        previousHome = process.env.OS_HOME;
+        process.env.OS_HOME = mkdtempSync(join(home, 'enable-owned-'));
+    });
+    afterAll(() => {
+        process.env.OS_HOME = previousHome;
+    });
+
+    /**
+     * The disabled owner's object, an ENABLED reader's rule on it reading the extender's field, and the extender
+     * disabled unless `extenderEnabled`: the object comes into service only with the owner's enable.
+     */
+    async function door({ extenderEnabled }: { extenderEnabled: boolean }) {
+        const registry = new SchemaRegistry({ multiTenant: false, collisionPolicy: 'error' } as any);
+        (registry as any).logLevel = 'silent';
+        const kernel: any = {
+            getService: (name: string) => (name === 'objectql' ? Promise.resolve({ registry }) : null),
+            context: { getService: () => null },
+        };
+        const dispatcher = new HttpDispatcher(kernel);
+        const context = {
+            request: {},
+            executionContext: { userId: 'u_admin', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'] },
+        } as any;
+        for (const id of [OWNER, READER, EXTENDER]) {
+            const installed = await dispatcher.handlePackages('', 'POST', { manifest: manifestOf(id) }, {}, context);
+            expect(installed.response?.status, `precondition: ${id} installs`).toBe(201);
+        }
+        registry.registerObject({ name: THING, label: 'Thing', fields: { name: { name: 'name', type: 'text', label: 'Name' } } } as any, OWNER);
+        registry.registerObject({ name: THING, fields: { [FLAG]: { name: FLAG, type: 'boolean', label: 'Flag' } } } as any, EXTENDER, undefined, 'extend');
+        registry.registerObject({
+            name: THING,
+            validations: [{ name: RULE, type: 'script', severity: 'error', message: 'Flag it', condition: `record.${FLAG} == null` }],
+        } as any, READER, undefined, 'extend');
+        registry.disablePackage(OWNER);
+        if (!extenderEnabled) registry.disablePackage(EXTENDER);
+        const enable = (id: string) => dispatcher.handlePackages(`/${id}/enable`, 'PATCH', {}, {}, context);
+        return { registry, enable };
+    }
+
+    it('refuses the owner\'s enable while an enabled package\'s rule on its object reads a field a disabled package withholds', async () => {
+        const { registry, enable } = await door({ extenderEnabled: false });
+        const result: any = await enable(OWNER);
+        expect({ status: result.response?.status, code: result.response?.body?.error?.code }).toEqual({ status: 409, code: CODE });
+        expect(String(result.response?.body?.error?.message)).toBe(
+            `Package '${OWNER}' cannot be enabled: an active validation rule the enable would serve reads a field that a disabled package adds through objectExtensions, which stays withheld — ${READER} · ${THING} · ${RULE} (reads ${FLAG}). Switch off or change that rule first, or enable '${EXTENDER}' first.`,
+        );
+        expect(registry.getPackage(OWNER)?.enabled).toBe(false);
+    });
+
+    it('control: with the field\'s package enabled, the owner\'s enable proceeds', async () => {
+        const { registry, enable } = await door({ extenderEnabled: true });
+        const result: any = await enable(OWNER);
+        expect(result.response?.status, String(result.response?.body?.error?.message)).toBe(200);
+        expect(registry.getPackage(OWNER)?.enabled).toBe(true);
+    });
+});

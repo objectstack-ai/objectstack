@@ -5340,7 +5340,7 @@ export class SchemaRegistry {
       : undefined;
     const contributors = leavesExtensionsOut(options) || asEnabled !== undefined ? this.objectContributors.get(fqn) : undefined;
     if (!contributors || !contributors.some((c) => isLeftOutExtension(c, options!)
-      || (c.ownership === 'extend' && c.packageId === asEnabled))) return this.resolveObject(fqn);
+      || (asEnabled !== undefined && c.ownership === 'extend' && c.packageId === asEnabled))) return this.resolveObject(fqn);
     const kept = contributors.filter((c) => !isLeftOutExtension(c, options!));
     const ownerContrib = kept.find(c => c.ownership === 'own');
     if (!ownerContrib) return undefined;
