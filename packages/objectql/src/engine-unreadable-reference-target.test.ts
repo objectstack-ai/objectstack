@@ -562,6 +562,55 @@ describe('a reference a service verb vouches for on its own write: that one valu
     expect(items()).toEqual([]);
   });
 
+  describe('the mark is spent on the vouched write: a hook that runs as the user under it is judged as any write is', () => {
+    /**
+     * An afterInsert hook on the task that, under the vouched insert, inserts
+     * a second task naming the SAME vouched id in the SAME field — through the
+     * api it is handed (the triggering user's context), or through
+     * `withRunAs('user')`, as an app-authored `runAs: 'user'` hook does. Its
+     * refusal is captured, and the outer write is left to finish.
+     */
+    const armEchoHook = (via: 'api' | 'runAs-user') => {
+      const refusals: unknown[] = [];
+      engine.registerHook('afterInsert', async (ctx: any) => {
+        if (ctx.input?.data?.title !== 'outer') return;
+        const api = via === 'api' ? ctx.api : ctx.api.withRunAs('user', { hook: 'echo', object: ITEM, event: 'afterInsert' });
+        try {
+          await api.object(ITEM).insert({ title: 'echo', duty: UNREADABLE });
+        } catch (err) {
+          refusals.push(err);
+        }
+      }, { object: ITEM });
+      return refusals;
+    };
+
+    for (const via of ['api', 'runAs-user'] as const) {
+      it(`a hook writing through ${via === 'api' ? 'the api it is handed' : "withRunAs('user')"} that names the vouched id again is refused reference_not_found`, async () => {
+        const refusals = armEchoHook(via);
+        await insert(ITEM, { title: 'outer', duty: UNREADABLE }, vouched(UNREADABLE));
+        expect(refusals).toHaveLength(1);
+        expect(envelopeOf(refusals[0])).toEqual(notFound('duty'));
+        // The verb's own write landed; the hook's did not.
+        expect(items().map((r) => r.title)).toEqual(['outer']);
+      });
+    }
+
+    it('control: the same hook under an unmarked system write lands its echo (the hook\'s refusal above is the mark being spent, not the hook failing)', async () => {
+      const refusals: unknown[] = [];
+      engine.registerHook('afterInsert', async (ctx: any) => {
+        if (ctx.input?.data?.title !== 'outer') return;
+        try {
+          await ctx.api.object(ITEM).insert({ title: 'echo', duty: UNREADABLE });
+        } catch (err) {
+          refusals.push(err);
+        }
+      }, { object: ITEM });
+      await engine.insert(ITEM, { title: 'outer', duty: UNREADABLE }, { context: { isSystem: true } });
+      expect(refusals).toEqual([]);
+      expect(items().map((r) => r.title).sort()).toEqual(['echo', 'outer']);
+    });
+  });
+
   it('control: a caller whose read of the target object is refused outright is admitted for the vouched value only', async () => {
     await insert(ITEM, { duty: 't_mine' }, vouched('t_mine', 'duty', ITEM, CAROL));
     expect(items().some((r) => r.duty === 't_mine')).toBe(true);

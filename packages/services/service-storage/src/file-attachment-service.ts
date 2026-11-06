@@ -19,6 +19,9 @@ import { StorageMetadataStore, organizationOutOfWriteReach, type StorageWriteCon
 // The upload ownership rule, asked of the upload the attach-on-commit verb
 // names — the commit door's own rule and its one refusal.
 import { isFileUploader, NOT_UPLOADER_CODE, NOT_UPLOADER_MESSAGE, NOT_UPLOADER_STATUS } from './upload-ownership.js';
+// The one definition of "is anything holding this file?" — the reap guard's —
+// asked so the attach-on-commit verb vouches only for an upload nothing holds.
+import { findFileHolder } from './attachment-lifecycle.js';
 // The attach rule's one verdict (parent EDIT), asked here before a producer
 // spends work on a file it could not attach.
 import {
@@ -170,11 +173,15 @@ export interface ICallerFileAttachmentService {
    * The file must be the upload the caller is completing: a `sys_file` row
    * whose `owner_id` is the caller (the upload doors stamp it from the
    * session), still `pending`, in the `attachments` scope, in the caller's
-   * organization, with its bytes held by the storage backend. Any other id —
+   * organization, held by nothing yet (no `sys_attachment` names it and no
+   * record field owns it — `findFileHolder`), with its bytes held by the
+   * storage backend. That is the whole premise of the vouch: the one file this
+   * call turns from the caller's unattached upload into an attachment, and
+   * nothing else. Any other id —
    * another user's upload, an id that names no file — is refused with the
    * upload ownership rule's one answer (`PERMISSION_DENIED` / `403`, the same
-   * body for both); a committed file `RESOURCE_CONFLICT` / `409`; another
-   * scope `INVALID_REQUEST` / `400`.
+   * body for both); a committed or already-held file `RESOURCE_CONFLICT` /
+   * `409`; another scope `INVALID_REQUEST` / `400`.
    *
    * Then the attach authorization, before any write: {@link assertMayAttach}
    * (the permission to create an attachment, and the parent-EDIT attach rule),
@@ -314,6 +321,14 @@ export class FileAttachmentService implements IFileAttachmentService, ICallerFil
         403,
         'attachUploadAs: this upload was started in another organization than the one the caller acts in; ' +
           'switch back to that organization to attach it.',
+      );
+    }
+    if ((await findFileHolder(engine, file.id, file as unknown as Record<string, unknown>)) !== null) {
+      refuse(
+        'RESOURCE_CONFLICT',
+        409,
+        'This upload is already attached to a record or owned by a record field, so it cannot be attached on ' +
+          'completion. Start a new upload and complete it with attachTo.',
       );
     }
     const notHeld = await heldBytesRefusal(storage, file);

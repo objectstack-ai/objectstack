@@ -544,6 +544,7 @@ export {
   VOUCHED_REFERENCES,
   vouchForReference,
   isVouchedReference,
+  withoutVouchedReferences,
   type VouchedReference,
 } from './vouched-reference.js';
 
