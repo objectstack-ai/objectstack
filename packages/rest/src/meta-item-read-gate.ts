@@ -66,7 +66,7 @@
  */
 
 import type { AudienceCaller, Book, ResolvedBook, ResolverDoc } from '@objectstack/spec/system';
-import { preferredLocaleFromHeader } from '@objectstack/spec/system';
+import { preferredLocaleFromHeader, renderOperationMessage } from '@objectstack/spec/system';
 import { apiExposureDenialReason } from '@objectstack/spec/data';
 import { resolveObjectSortability } from '@objectstack/spec/api';
 import { canonicalMetaUrlType, pluralToSingular, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
@@ -143,7 +143,19 @@ export interface MetaReadGateAudienceSources {
      * gated audiences DENY (ADR-0049).
      */
     resolveSecurityService(): Promise<MetaReadGatePermissionSetResolver | undefined>;
+    /**
+     * [#30126 row 12] The deployment's `errors.*` override lookup (an
+     * `II18nService.t`-compatible function), or `undefined` when there is none —
+     * the hook `renderOperationMessage` reads first, as plugin-security's
+     * refusals hand it. Absent: the built-in catalog alone, still in the
+     * caller's locale. A rejection is read as "no override", never as a fault:
+     * a refusal's wording must not turn a 403 into a 500.
+     */
+    resolveMessageTranslator?(): Promise<MetaReadGateMessageTranslator | undefined>;
 }
+
+/** An `II18nService.t`-compatible lookup, as {@link MetaReadGateAudienceSources.resolveMessageTranslator} answers it. */
+export type MetaReadGateMessageTranslator = (key: string, locale: string, params?: Record<string, unknown>) => string;
 
 /** How a transport reads a whole metadata type (the list half of the ports). */
 export interface MetaReadGateListSource {
@@ -790,11 +802,44 @@ function callerSystemPermissions(ctx: MetaReadGateCaller | undefined): Set<strin
     return new Set<string>(Array.isArray(ctx.systemPermissions) ? ctx.systemPermissions : []);
 }
 
+/**
+ * [#30126 row 12] The sentence a `403 PERMISSION_DENIED` of this gate carries:
+ * the operation catalog's `permission_denied`, rendered in the caller's locale
+ * (`ExecutionContext.locale`, which the shared assembler resolved from the
+ * request's `Accept-Language`, then the `localization` settings) — the one
+ * catalog plugin-security's object and capability refusals render, ⛔ never a
+ * second one here. It names nothing, as that key never does
+ * (`operation-message.ts` states why): the caller already knows which app,
+ * dashboard or view they opened, and its API name (`com.objectstack.setup`)
+ * is exactly the vocabulary that must not reach a person. The name stays on
+ * the request URL.
+ *
+ * Resolution is `renderOperationMessage`'s: the deployment's
+ * `errors.permission_denied` override where the transport hands a lookup in,
+ * then the built-in catalog for the locale, then `en`.
+ */
+async function permissionDeniedMessage(
+    sources: MetaReadGateAudienceSources,
+    ctx: MetaReadGateCaller | undefined,
+): Promise<string> {
+    const locale = typeof ctx?.locale === 'string' && ctx.locale.length > 0 ? ctx.locale : undefined;
+    let translate: MetaReadGateMessageTranslator | undefined;
+    try {
+        translate = await sources.resolveMessageTranslator?.();
+    } catch {
+        translate = undefined;
+    }
+    return renderOperationMessage({ messageKey: 'permission_denied' }, { locale, translate });
+}
+
 /** [#22639] The by-name refusal of a list view or a dashboard the caller may not open — the app arm's whole refusal (#8013). */
-function audienceRefusal(kind: 'view' | 'dashboard', name: string): MetaItemReadRefusal {
+async function audienceRefusal(
+    sources: MetaReadGateAudienceSources,
+    ctx: MetaReadGateCaller | undefined,
+): Promise<MetaItemReadRefusal> {
     return {
         reason: 'audience-permission', status: 403, code: 'PERMISSION_DENIED',
-        message: `You do not have permission to open the '${name}' ${kind}.`,
+        message: await permissionDeniedMessage(sources, ctx),
     };
 }
 
@@ -1618,7 +1663,9 @@ const DOCS_HOLDER_MESSAGE = 'This documentation is limited to holders of a permi
 export function createMetaItemReadGate(
     sources: MetaItemReadGateSources,
     metaType: string,
-    name: string,
+    // [#30126 row 12] Read by no gate since the refusals stopped naming the
+    // item; kept so both transports' calls stay as they are.
+    _name: string,
     documents: readonly any[],
     policy: MetaReadGatePolicy,
 ): (document: any) => Promise<MetaItemReadVerdict> {
@@ -1632,6 +1679,8 @@ export function createMetaItemReadGate(
 
     if (metaType === 'app') {
         type AppGateInputs = {
+            /** [#30126 row 12] The caller, kept for the refusal's locale. */
+            ctx: MetaReadGateCaller;
             sysPerms: Set<string>;
             serviceGate?: (n: string) => boolean;
             servabilityGate?: NavServabilityGate;
@@ -1668,7 +1717,7 @@ export function createMetaItemReadGate(
             const docAudienceGate = authorExempt
                 ? undefined
                 : await resolveNavDocAudience(sources, documents);
-            return { sysPerms, serviceGate, servabilityGate, docAudienceGate, authorExempt };
+            return { ctx, sysPerms, serviceGate, servabilityGate, docAudienceGate, authorExempt };
         })());
         return async (document) => {
             if (document == null) return serve(document);
@@ -1690,7 +1739,7 @@ export function createMetaItemReadGate(
                 if (gated.withheld === 'permission') {
                     return refuse({
                         reason: 'app-permission', status: 403, code: 'PERMISSION_DENIED',
-                        message: `You do not have permission to open the '${name}' app.`,
+                        message: await permissionDeniedMessage(sources, gateInputs.ctx),
                     });
                 }
                 // [#18066] The transport's own absence answer, so this arm
@@ -1722,7 +1771,7 @@ export function createMetaItemReadGate(
             // whole refusal, author or not.
             const sysPerms = callerSystemPermissions(ctx);
             if (sysPerms && !holdsRequiredPermissions(document.requiredPermissions, sysPerms)) {
-                return refuse(audienceRefusal('dashboard', name));
+                return refuse(await audienceRefusal(sources, ctx));
             }
             if (policy.arms !== 'all') return serve(document);
             // ADR-0057 D10: gate dashboard widgets by `requiresService` (mirrors
@@ -1747,7 +1796,7 @@ export function createMetaItemReadGate(
             const gated = filterViewForUser(document, sysPerms, isAggregatedViewContainer);
             // ONE view the caller does not hold: refused whole, on every door,
             // author or not — the app arm's whole refusal.
-            if (gated == null) return refuse(audienceRefusal('view', name));
+            if (gated == null) return refuse(await audienceRefusal(sources, ctx));
             // A container's entries are pruned per caller; on a door that
             // honours ruling 5856774816's author exemption, a caller who may
             // write the container reads it as stored (see

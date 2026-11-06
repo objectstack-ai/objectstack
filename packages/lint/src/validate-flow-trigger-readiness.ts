@@ -174,6 +174,12 @@
 //     start input declared a record reference (`variables[].objectName`) names
 //     an object this stack does not define. It is not a never-fire verdict —
 //     a start that omits the input still runs — so it sits with the hedged id.
+//   - `warning` — `flow-input-object-less` and `flow-input-record-read-as-list`
+//     (1j), two declarations of a start input that can never work as written:
+//     one names the object-less placeholder and loads nothing, the other is
+//     one id the flow also reads as a list, so every start supplying it is
+//     refused. Neither is a never-fire verdict, and both keep the
+//     declaration's existing verdicts as they were.
 //   - `warning` — `flow-draft-status-ambiguous`. Draft flows DO fire, so this is
 //     an ambiguity of intent, not a dead flow. Gating it would refuse a stack
 //     whose flows all work.
@@ -207,6 +213,7 @@ import {
   apiTriggerVerifierOf,
   resolveFlowTriggerKind,
 } from '@objectstack/spec/automation';
+import { walkFlowNodes } from './flow-walk.js';
 import { closureDependencyRemedy, recordsOf, suggestName } from './object-graph.js';
 
 export type FlowTriggerReadinessSeverity = 'error' | 'warning';
@@ -226,14 +233,32 @@ export interface FlowTriggerReadinessFinding {
 export const FLOW_TRIGGER_UNKNOWN_OBJECT = 'flow-trigger-unknown-object';
 /**
  * #29442 (#29425 ruling A) — a start input declared a record reference
- * (`variables[].objectName`) names an object this stack does not define. Once
- * the start doors enforce the declaration (planned), every door that starts the
- * flow by name will load such an input from that object, so a wrong name will
- * refuse every start that supplies the input. The same hedge and
+ * (`variables[].objectName`) names an object this stack does not define. The
+ * start doors enforce the declaration (PR #30628): every door that starts the
+ * flow by name loads such an input from that object, so a wrong name
+ * refuses every start that supplies the input. The same hedge and
  * the same closure verdict as `flow-trigger-unknown-object`: advisory with no
  * package closure, an error under one.
  */
 export const FLOW_INPUT_UNKNOWN_OBJECT = 'flow-input-unknown-object';
+/**
+ * A start input declared a record reference names the object-less
+ * placeholder (`objectName: 'global'`). The pattern accepts it, but the start
+ * doors' load treats an object-less key as nothing to load
+ * (`loadActionSubjectRecord`, `packages/runtime/src/action-execution.ts`,
+ * through `isObjectLessActionKey`), so the value reaches the run unjudged: a
+ * declaration that loads nothing. Advisory: it refuses no start.
+ */
+export const FLOW_INPUT_OBJECT_LESS = 'flow-input-object-less';
+/**
+ * A start input declared ONE record id (`variables[].objectName`) that a
+ * row-addressing node of the same flow reads as a LIST of ids
+ * (`filter.id.$in`). Start admission judges the input once per reading
+ * (`refuseUnreadableFlowStartRecords`): one id for the declaration, a list for
+ * the `$in` read, and no value is both, so every start that supplies the input
+ * is refused `400`. Advisory: the failure is loud, only late.
+ */
+export const FLOW_INPUT_RECORD_READ_AS_LIST = 'flow-input-record-read-as-list';
 export const FLOW_DRAFT_STATUS_AMBIGUOUS = 'flow-draft-status-ambiguous';
 export const FLOW_TRIGGER_UNKNOWN_EVENT = 'flow-trigger-unknown-event';
 /**
@@ -494,6 +519,42 @@ function descriptorRefusal(issues: ReadonlyArray<{ code: string; path: ReadonlyA
   if (!first) return 'refused';
   const at = first.path.length ? `${first.path.join('.')}: ` : '';
   return `${at}${schemaRefusalHead(first.message)}${moreIssues(issues.length)}`;
+}
+
+/**
+ * The object-less action keys, as `isObjectLessActionKey`
+ * (`packages/objectql/src/action-governance.ts`) answers them for a non-empty
+ * name: `'global'` (`GLOBAL_ACTION_OBJECT_KEY`) and `'*'`. Spelled here rather
+ * than imported because lint depends on `@objectstack/spec` and never on a
+ * runtime package; kept in lockstep with that predicate by hand, as
+ * `stack.zod.ts`'s `GLOBAL_ACTION_SCOPE` is.
+ */
+const OBJECT_LESS_KEYS: ReadonlySet<string> = new Set(['global', '*']);
+
+/** The three CRUD node types start admission reads a row id from (`filter.id`). */
+const ROW_ADDRESSING_CRUD_NODE_TYPES: ReadonlySet<string> = new Set(['get_record', 'update_record', 'delete_record']);
+
+/**
+ * The variable a value slot hands on unchanged, or `undefined` — start
+ * admission's own reading (`handedOnVariable`,
+ * `packages/runtime/src/flow-start-admission.ts`): a CEL envelope whose whole
+ * source is one variable name, bare or through `vars`. Anything computed is
+ * not a hand-off, and is not judged here either.
+ */
+function handedOnVariable(slot: unknown): string | undefined {
+  if (slot === null || typeof slot !== 'object' || Array.isArray(slot)) return undefined;
+  const { dialect, source } = slot as { dialect?: unknown; source?: unknown };
+  if (dialect !== 'cel' || typeof source !== 'string') return undefined;
+  const match = /^(?:vars\.)?([A-Za-z_][A-Za-z0-9_]*)$/.exec(source.trim());
+  return match ? match[1] : undefined;
+}
+
+function plainRecord(value: unknown): AnyRec | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as AnyRec) : undefined;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
 /** The start node of a flow definition, if any. */
@@ -1031,10 +1092,10 @@ export function validateFlowTriggerReadiness(
     //     family has a use for.
 
     // 1i. #29442 (#29425 ruling A) — a start input declared a record reference
-    //     names an object this stack does not define. Once the start doors
-    //     enforce the declaration (planned), every door that starts the flow
-    //     by name will load the input from exactly that name in the caller's
-    //     scope, so a wrong name will refuse every start that supplies the
+    //     names an object this stack does not define. The start doors
+    //     enforce the declaration (PR #30628): every door that starts the flow
+    //     by name loads the input from exactly that name in the caller's
+    //     scope, so a wrong name refuses every start that supplies the
     //     input. Judged like the trigger's object (1 and 1b-i): a `sys_`
     //     name is a platform object and is not judged, and the verdict is the
     //     closure's when one is stated. The schema owns the declaration's
@@ -1056,8 +1117,8 @@ export function validateFlowTriggerReadiness(
           {
             message:
               `declares input '${variableName}' the id of a record of object '${objectName}', which this ` +
-              `stack does not define — if the name is wrong, every start that supplies the input will be ` +
-              `refused once the start doors enforce the declaration.` +
+              `stack does not define — if the name is wrong, every start that supplies the input is ` +
+              `refused.` +
               suggestName(objectName, objectNames),
             hint:
               `Set the input's objectName to the object's exact registered name, or ignore this if another ` +
@@ -1067,6 +1128,83 @@ export function validateFlowTriggerReadiness(
         ),
       );
     });
+
+    // 1j. Two declarations of a start input the schema accepts and the start
+    //     doors can never honour as written. Both are additive to 1i: its
+    //     verdict on the same name is left exactly as it was.
+    //
+    //   - The object-less placeholder: the doors' load skips an object-less
+    //     key, so the declared input is loaded from nothing and its value runs
+    //     unjudged.
+    //   - One id the flow also reads as a list: start admission judges the
+    //     input once per reading — one id for the declaration, a list for a
+    //     CRUD node's `filter.id.$in` — and no value is both, so every start
+    //     supplying it is refused `400`. Read the way admission reads it
+    //     (`flowDeclaredRecordReads`): only an `isInput` variable, only a
+    //     CRUD node with a literal `objectName`, only a `$in` that hands the
+    //     input on as it is, and not where a `loop` or `map` rebinds the name.
+    //     A list read through a `subflow` or `map` hand-off is not judged here.
+    const declaredInputs = new Map<string, string>();
+    (Array.isArray(flow.variables) ? (flow.variables as unknown[]) : []).forEach((entry, variableIndex) => {
+      const variable = plainRecord(entry);
+      const objectName = nonEmptyString(variable?.objectName);
+      const variableName = nonEmptyString(variable?.name);
+      if (!variable || !objectName) return;
+      if (OBJECT_LESS_KEYS.has(objectName)) {
+        const shown = variableName ?? `#${variableIndex}`;
+        findings.push({
+          severity: 'warning',
+          rule: FLOW_INPUT_OBJECT_LESS,
+          where: `flow "${flowName}" › input "${shown}"`,
+          path: `flows[${flowIndex}].variables[${variableIndex}].objectName`,
+          message:
+            `declares input '${shown}' a record of '${objectName}', the object-less placeholder, so no start ` +
+            `loads it from any object and its value reaches the run unjudged`,
+          hint:
+            `Set the input's objectName to the object whose record id the input carries, or remove ` +
+            `objectName if the input is not a record id`,
+        });
+      }
+      if (variable.isInput === true && variableName && !declaredInputs.has(variableName)) {
+        declaredInputs.set(variableName, objectName);
+      }
+    });
+    if (declaredInputs.size > 0) {
+      const walked = walkFlowNodes(flow, `flows[${flowIndex}]`);
+      // A `loop` or `map` binds its item (and index) variable over the run's
+      // own variables, so a read of that name is not a read of the start input.
+      for (const { node } of walked) {
+        const config = plainRecord(node.config);
+        if (!config || (node.type !== 'loop' && node.type !== 'map')) continue;
+        const iterator = nonEmptyString(config.iteratorVariable) ?? (node.type === 'map' ? 'item' : undefined);
+        if (iterator !== undefined) declaredInputs.delete(iterator);
+        const index = nonEmptyString(config.indexVariable);
+        if (index !== undefined) declaredInputs.delete(index);
+      }
+      for (const { node, path } of walked) {
+        if (typeof node.type !== 'string' || !ROW_ADDRESSING_CRUD_NODE_TYPES.has(node.type)) continue;
+        const config = plainRecord(node.config);
+        const readObject = nonEmptyString(config?.objectName);
+        const idOperators = plainRecord(plainRecord(config?.filter)?.id);
+        const listed = handedOnVariable(idOperators?.$in);
+        if (!readObject || listed === undefined || !declaredInputs.has(listed)) continue;
+        const declaredObject = declaredInputs.get(listed);
+        const nodeLabel = nonEmptyString(node.label) ?? nonEmptyString(node.id) ?? path;
+        findings.push({
+          severity: 'warning',
+          rule: FLOW_INPUT_RECORD_READ_AS_LIST,
+          where: `flow "${flowName}" › input "${listed}"`,
+          path: `${path}.config.filter.id.$in`,
+          message:
+            `declares input '${listed}' one record id of '${declaredObject}', and ${node.type} "${nodeLabel}" ` +
+            `reads it as a list of '${readObject}' ids (filter.id.$in), so no value is both and every start ` +
+            `that supplies the input is refused`,
+          hint:
+            `Remove the input's objectName if it carries a list of ids, or read it as one id with filter.id ` +
+            `or filter.id.$eq`,
+        });
+      }
+    }
 
     // 2. Auto-triggered flow whose status is 'draft' — authored or defaulted
     //    (defineFlow parses at definition time, so the two are the same here).

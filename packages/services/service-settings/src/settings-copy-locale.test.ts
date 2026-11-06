@@ -28,6 +28,7 @@ const SAMPLE_ARGS: Record<string, unknown[]> = {
   lockedText: ['2 objects'],
   unsetText: ['2 objects'],
   resetCleared: [3],
+  resetStillPinned: [2],
   noHandler: ['probe', 'branding'],
 };
 

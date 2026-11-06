@@ -61,9 +61,11 @@ export interface ProtocolHost {
     readonly applyRemoteMetadataMutation: ObjectStackProtocolImplementation['applyRemoteMetadataMutation'];
     readonly applySeedBodies: ObjectStackProtocolImplementation['applySeedBodies'];
     readonly artifactLockLayerAt: ObjectStackProtocolImplementation['artifactLockLayerAt'];
+    readonly assertExpandTargetsExist: ObjectStackProtocolImplementation['assertExpandTargetsExist'];
     readonly assertLockAllowsDelete: ObjectStackProtocolImplementation['assertLockAllowsDelete'];
     readonly assertLockAllowsWrite: ObjectStackProtocolImplementation['assertLockAllowsWrite'];
     readonly assertObjectRegistered: ObjectStackProtocolImplementation['assertObjectRegistered'];
+    readonly assertProjectionFieldsExist: ObjectStackProtocolImplementation['assertProjectionFieldsExist'];
     readonly assertRuntimeAuthoringRules: ObjectStackProtocolImplementation['assertRuntimeAuthoringRules'];
     readonly assertVersionMatch: ObjectStackProtocolImplementation['assertVersionMatch'];
     readonly authoredLockFamily: ObjectStackProtocolImplementation['authoredLockFamily'];
@@ -84,6 +86,7 @@ export interface ProtocolHost {
     readonly credentialChannels: ObjectStackProtocolImplementation['credentialChannels'];
     readonly declinesStoredRow: ObjectStackProtocolImplementation['declinesStoredRow'];
     readonly defaultRecordPageSaveRefusal: ObjectStackProtocolImplementation['defaultRecordPageSaveRefusal'];
+    readonly deleteMetaItemUnaudited: ObjectStackProtocolImplementation['deleteMetaItemUnaudited'];
     readonly detachMetadataMutationPubSub: ObjectStackProtocolImplementation['detachMetadataMutationPubSub'];
     readonly diffMetaItem: ObjectStackProtocolImplementation['diffMetaItem'];
     readonly disabledActionsOf: ObjectStackProtocolImplementation['disabledActionsOf'];
@@ -170,6 +173,7 @@ export interface ProtocolHost {
     readonly probeRecord: ObjectStackProtocolImplementation['probeRecord'];
     readonly promoteDraftForPublish: ObjectStackProtocolImplementation['promoteDraftForPublish'];
     readonly publishMaterializers: ObjectStackProtocolImplementation['publishMaterializers'];
+    readonly publishMetaItemUnaudited: ObjectStackProtocolImplementation['publishMetaItemUnaudited'];
     readonly publishMetadataMutation: ObjectStackProtocolImplementation['publishMetadataMutation'];
     readonly readActiveOverlayRows: ObjectStackProtocolImplementation['readActiveOverlayRows'];
     readonly readFlattenedMetaItems: ObjectStackProtocolImplementation['readFlattenedMetaItems'];
@@ -217,6 +221,7 @@ export interface ProtocolHost {
     readonly rethrowUnlessMetadataStoreUnprovisioned: ObjectStackProtocolImplementation['rethrowUnlessMetadataStoreUnprovisioned'];
     readonly revertCommit: ObjectStackProtocolImplementation['revertCommit'];
     readonly rollBackUnmanagedImport: ObjectStackProtocolImplementation['rollBackUnmanagedImport'];
+    readonly rollbackMetaItemUnaudited: ObjectStackProtocolImplementation['rollbackMetaItemUnaudited'];
     readonly runAuthoringGate: ObjectStackProtocolImplementation['runAuthoringGate'];
     readonly runMutationProjector: ObjectStackProtocolImplementation['runMutationProjector'];
     readonly runPublishSideEffects: ObjectStackProtocolImplementation['runPublishSideEffects'];
@@ -224,8 +229,10 @@ export interface ProtocolHost {
     readonly runtimeViewContainerPackage: ObjectStackProtocolImplementation['runtimeViewContainerPackage'];
     readonly saveConflict: ObjectStackProtocolImplementation['saveConflict'];
     readonly saveMetaItem: ObjectStackProtocolImplementation['saveMetaItem'];
+    readonly saveMetaItemUnaudited: ObjectStackProtocolImplementation['saveMetaItemUnaudited'];
     readonly saveWriteBinding: ObjectStackProtocolImplementation['saveWriteBinding'];
     readonly seedExternalIdSaveRefusal: ObjectStackProtocolImplementation['seedExternalIdSaveRefusal'];
+    readonly servedExpand: ObjectStackProtocolImplementation['servedExpand'];
     readonly servedLockState: ObjectStackProtocolImplementation['servedLockState'];
     readonly shippedArtifactsOf: ObjectStackProtocolImplementation['shippedArtifactsOf'];
     readonly shippingPackagesOf: ObjectStackProtocolImplementation['shippingPackagesOf'];

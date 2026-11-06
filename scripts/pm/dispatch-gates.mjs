@@ -15255,18 +15255,28 @@ export function changedPathsFromGit({ cwd = ROOT, base = DEFAULT_BASE_REF } = {}
 /**
  * The changed-line count of the same change set (the 2026-09-18 human-merge
  * line threshold, `HUMAN_MERGE_LINE_THRESHOLD` in check-governed-merges.mjs):
- * `git diff --numstat --no-renames <merge-base>` against the WORKING TREE, so
+ * `git diff --numstat -M <merge-base>` against the WORKING TREE, so
  * committed and uncommitted edits to tracked files count in one read, plus
  * every untracked file counted from disk — under-derivation is the one
  * failure direction the path derivation above refuses, and the size follows
- * it. A binary file (a NUL in its first 8000 bytes, git's own heuristic) is a
+ * it.
+ *
+ * ⚠️ Rename-AWARE on purpose (#30718), unlike the `--name-only --no-renames`
+ * path list above. The threshold's authority is GitHub's additions +
+ * deletions, and GitHub counts a moved file by its content change, not as a
+ * whole delete plus a whole add. `--no-renames` here read #30594 as 4324 lines
+ * against GitHub's 1806, and a dev told "over 3000" splits work that is not
+ * over the line. `-M` is spelled out so a `diff.renames=false` config cannot
+ * turn it off. A move git does not pair (an unstaged `mv`, whose new path is
+ * still untracked, or a pair past git's rename limit) still counts as a delete
+ * plus an add: that reads OVER GitHub, never under. A binary file (a NUL in its first 8000 bytes, git's own heuristic) is a
  * file and 0 lines, as GitHub counts it. An untracked file that cannot be read
  * is counted as 0 lines and NAMED in the reading rather than crashing the
  * derivation. Throws on a `--numstat` that does not read: an unanswered size
  * is never a size of zero.
  */
 export function changedLinesFromGit({ cwd = ROOT, mergeBase, untracked = null }) {
-  const tracked = runGit(['diff', '--numstat', '--no-renames', mergeBase], cwd);
+  const tracked = runGit(['diff', '--numstat', '-M', mergeBase], cwd);
   if (tracked.status !== 0) {
     throw new Error(`git diff --numstat ${mergeBase.slice(0, 9)} failed — ${tracked.stderr || `exit ${tracked.status}`}; the changed-line count cannot be answered, and an unanswered count is never zero`);
   }
@@ -15294,7 +15304,7 @@ export function changedLinesFromGit({ cwd = ROOT, mergeBase, untracked = null })
     binaryFiles: counted.binaryFiles + untrackedBinary,
     untrackedFiles: others.length,
     unreadableFiles: unreadable,
-    source: 'git diff --numstat off the merge base against the working tree, plus untracked files counted from disk',
+    source: 'git diff --numstat -M (rename-aware, as GitHub counts) off the merge base against the working tree, plus untracked files counted from disk',
   };
 }
 

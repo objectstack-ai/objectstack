@@ -20,6 +20,13 @@ export interface SettingsActionCopy {
   resetCleared(count: number): string;
   /** The built-in reset found no saved value to clear. */
   resetNothing: string;
+  /**
+   * Appended to either reset answer when `count` (> 0) of the namespace's keys
+   * are still pinned by an environment variable, which the reset leaves in
+   * force. Written to follow the answer directly: it carries the space its
+   * language puts between two sentences, and none where it puts none.
+   */
+  resetStillPinned(count: number): string;
   /** No handler is registered for `actionId` in `namespace`. */
   noHandler(actionId: string, namespace: string): string;
 }
@@ -29,26 +36,31 @@ export const SETTINGS_ACTION_COPY: Record<SettingsCopyLocale, SettingsActionCopy
   en: {
     resetCleared: (n) => `Cleared ${n} saved value(s); environment/default configuration is back in effect.`,
     resetNothing: 'No saved values to clear — already using environment/default configuration.',
+    resetStillPinned: (n) => ` ${n} setting(s) remain pinned by environment variables.`,
     noHandler: (actionId, namespace) => `No handler registered for action '${actionId}' in '${namespace}'.`,
   },
   'zh-CN': {
     resetCleared: (n) => `已清除 ${n} 个已保存的值；环境变量/默认配置已重新生效。`,
     resetNothing: '没有可清除的已保存值：当前已在使用环境变量/默认配置。',
+    resetStillPinned: (n) => `仍有 ${n} 个设置由环境变量固定。`,
     noHandler: (actionId, namespace) => `“${namespace}”中的操作“${actionId}”没有注册处理程序。`,
   },
   'zh-Hant': {
     resetCleared: (n) => `已清除 ${n} 個已儲存的值；環境變數/預設設定已重新生效。`,
     resetNothing: '沒有可清除的已儲存值：目前已在使用環境變數/預設設定。',
+    resetStillPinned: (n) => `仍有 ${n} 個設定由環境變數固定。`,
     noHandler: (actionId, namespace) => `「${namespace}」中的操作「${actionId}」沒有註冊處理常式。`,
   },
   'ja-JP': {
     resetCleared: (n) => `保存済みの値を ${n} 件消去しました。環境変数/既定の設定が再び有効になっています。`,
     resetNothing: '消去する保存済みの値はありません。すでに環境変数/既定の設定を使用しています。',
+    resetStillPinned: (n) => `${n} 件の設定は引き続き環境変数で固定されています。`,
     noHandler: (actionId, namespace) => `「${namespace}」のアクション「${actionId}」にはハンドラーが登録されていません。`,
   },
   ko: {
     resetCleared: (n) => `저장된 값 ${n}개를 지웠습니다. 환경 변수/기본 설정이 다시 적용됩니다.`,
     resetNothing: '지울 저장된 값이 없습니다. 이미 환경 변수/기본 설정을 사용하고 있습니다.',
+    resetStillPinned: (n) => ` 설정 ${n}개는 여전히 환경 변수로 고정되어 있습니다.`,
     noHandler: (actionId, namespace) => `'${namespace}'의 '${actionId}' 작업에 등록된 핸들러가 없습니다.`,
   },
   'es-ES': {
@@ -56,6 +68,10 @@ export const SETTINGS_ACTION_COPY: Record<SettingsCopyLocale, SettingsActionCopy
       `Se ${n === 1 ? 'ha borrado 1 valor guardado' : `han borrado ${n} valores guardados`}; vuelve a aplicarse `
       + 'la configuración del entorno o la predeterminada.',
     resetNothing: 'No hay valores guardados que borrar: ya se usa la configuración del entorno o la predeterminada.',
+    resetStillPinned: (n) =>
+      n === 1
+        ? ' 1 ajuste sigue fijado por una variable de entorno.'
+        : ` ${n} ajustes siguen fijados por variables de entorno.`,
     noHandler: (actionId, namespace) =>
       `No hay ningún controlador registrado para la acción «${actionId}» en «${namespace}».`,
   },
@@ -65,6 +81,7 @@ export const SETTINGS_ACTION_COPY: Record<SettingsCopyLocale, SettingsActionCopy
         one: 'قيمة محفوظة واحدة', two: 'قيمتين محفوظتين', few: 'قيم محفوظة', many: 'قيمة محفوظة', other: 'قيمة محفوظة',
       })}؛ وعاد إعداد البيئة أو الإعداد الافتراضي إلى العمل.`,
     resetNothing: 'لا توجد قيم محفوظة لمسحها، فإعداد البيئة أو الإعداد الافتراضي مستخدم بالفعل.',
+    resetStillPinned: (n) => ` عدد الإعدادات التي لا تزال مثبّتة بمتغيرات البيئة: ${n}.`,
     noHandler: (actionId, namespace) => `لا يوجد معالج مسجّل للإجراء «${actionId}» في «${namespace}».`,
   },
   fr: {
@@ -72,6 +89,10 @@ export const SETTINGS_ACTION_COPY: Record<SettingsCopyLocale, SettingsActionCopy
       `${n === 1 ? '1 valeur enregistrée effacée' : `${n} valeurs enregistrées effacées`} ; la configuration de `
       + 'l’environnement ou par défaut s’applique de nouveau.',
     resetNothing: 'Aucune valeur enregistrée à effacer : la configuration de l’environnement ou par défaut est déjà utilisée.',
+    resetStillPinned: (n) =>
+      n === 1
+        ? ' 1 paramètre reste fixé par une variable d’environnement.'
+        : ` ${n} paramètres restent fixés par des variables d’environnement.`,
     noHandler: (actionId, namespace) =>
       `Aucun gestionnaire n’est enregistré pour l’action « ${actionId} » dans « ${namespace} ».`,
   },
@@ -80,12 +101,17 @@ export const SETTINGS_ACTION_COPY: Record<SettingsCopyLocale, SettingsActionCopy
       `${n === 1 ? '1 valor salvo foi apagado' : `${n} valores salvos foram apagados`}; a configuração do ambiente `
       + 'ou padrão voltou a valer.',
     resetNothing: 'Não há valores salvos para apagar: a configuração do ambiente ou padrão já está em uso.',
+    resetStillPinned: (n) =>
+      n === 1
+        ? ' 1 configuração continua fixada por uma variável de ambiente.'
+        : ` ${n} configurações continuam fixadas por variáveis de ambiente.`,
     noHandler: (actionId, namespace) => `Nenhum manipulador registrado para a ação "${actionId}" em "${namespace}".`,
   },
   ru: {
     resetCleared: (n) =>
       `Очищено сохранённых значений: ${n}; снова действуют настройки из окружения или по умолчанию.`,
     resetNothing: 'Нет сохранённых значений для очистки: уже используются настройки из окружения или по умолчанию.',
+    resetStillPinned: (n) => ` Настроек, по-прежнему закреплённых переменными окружения: ${n}.`,
     noHandler: (actionId, namespace) => `Для действия «${actionId}» в «${namespace}» не зарегистрирован обработчик.`,
   },
   de: {
@@ -95,6 +121,10 @@ export const SETTINGS_ACTION_COPY: Record<SettingsCopyLocale, SettingsActionCopy
     resetNothing:
       'Keine gespeicherten Werte zu löschen: Es gilt bereits die Konfiguration aus der Umgebung bzw. die '
       + 'Standardkonfiguration.',
+    resetStillPinned: (n) =>
+      n === 1
+        ? ' 1 Einstellung bleibt durch eine Umgebungsvariable festgelegt.'
+        : ` ${n} Einstellungen bleiben durch Umgebungsvariablen festgelegt.`,
     noHandler: (actionId, namespace) => `Für die Aktion „${actionId}“ in „${namespace}“ ist kein Handler registriert.`,
   },
 };

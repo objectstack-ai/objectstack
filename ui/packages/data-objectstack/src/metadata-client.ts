@@ -591,6 +591,15 @@ export interface MetadataLayered<T = unknown> {
   /** Merged effective view — what the runtime actually sees. */
   effective: T | null;
   /**
+   * objectstack#29793 — the pending draft row exactly as stored (spec
+   * `GetMetaItemLayeredResponseSchema.draft`): untranslated, ungoverned, no
+   * injected columns. `null` when no draft is pending. ABSENT when the server
+   * did not serve the layer (it serves it only to a caller its draft-read
+   * admission admits): absence means "not served", never "no draft", so this
+   * key is forwarded only when the server sent it.
+   */
+  draft?: T | null;
+  /**
    * Load-time validation result for `effective` (server-computed via
    * the same Zod registry used at save time). Undefined for types
    * without a registered Zod schema. Surfaced by the Studio as a
@@ -1777,6 +1786,8 @@ export class MetadataClient {
         overlay: (envelope.overlay ?? null) as T | null,
         overlayScope: envelope.overlayScope,
         effective: (envelope.effective ?? null) as T | null,
+        // objectstack#29793 — the draft layer, forwarded only when served.
+        ...('draft' in body ? { draft: (body.draft ?? null) as T | null } : {}),
         ...(body._diagnostics ? { _diagnostics: body._diagnostics as MetadataDiagnostics } : {}),
         lock: envelope.lock,
         ...(envelope.lockReason !== undefined ? { lockReason: envelope.lockReason } : {}),
@@ -1809,6 +1820,7 @@ export class MetadataClient {
       overlay: body.overlay ?? null,
       overlayScope: body.overlayScope ?? null,
       effective: body.effective ?? null,
+      ...('draft' in body ? { draft: (body.draft ?? null) as T | null } : {}),
       ...(body._diagnostics ? { _diagnostics: body._diagnostics as MetadataDiagnostics } : {}),
       ...(body.lock !== undefined ? { lock: body.lock as MetadataLayered['lock'] } : {}),
       ...(body.lockReason !== undefined ? { lockReason: body.lockReason as string } : {}),

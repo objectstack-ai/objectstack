@@ -30,9 +30,13 @@
  * lock out, and it is let through.
  *
  * The way back when locked out anyway — a list saved from another address, or
- * an address that changed — is the settings env override every auth key has:
- * `OS_AUTH_ALLOWED_IP_RANGES` set to an empty value, then a restart. The
- * refusal names it.
+ * an address that changed — is the settings env override every auth key has,
+ * in four steps, and the refusal names them: start the server with
+ * `OS_AUTH_ALLOWED_IP_RANGES` set to an empty value (the override wins over
+ * the stored list, so the gate is open), sign in, clear the stored list (a
+ * settings write of `null` to the key, which the override lets through,
+ * #30385), then remove the variable. Removing it without the clear brings the
+ * stored list back at the next restart.
  */
 
 import { resolveLocale } from '@objectstack/core';
@@ -132,7 +136,10 @@ export const ALLOWED_IP_RANGES_REFUSAL_COPY: Record<SettingsCopyLocale, AllowedI
       'The server cannot establish the address you are connected from, and while any list is set it refuses every '
       + 'such request, your own next sign-in included. Save the list from a connection whose address the server can '
       + 'establish.',
-    recovery: ` If you are locked out, start the server with ${ALLOWED_IP_RANGES_ENV} set to an empty value.`,
+    recovery:
+      ` If you are locked out, start the server with ${ALLOWED_IP_RANGES_ENV} set to an empty value, sign in, `
+      + 'clear the stored list with a settings request that sets allowed_ip_ranges to null '
+      + '(PUT /api/settings/auth), then remove the variable.',
   },
   'zh-CN': {
     outside: (address) =>
@@ -141,7 +148,9 @@ export const ALLOWED_IP_RANGES_REFUSAL_COPY: Record<SettingsCopyLocale, AllowedI
     undetermined:
       '服务器无法确定你当前连接所用的地址；只要设置了列表，这样的请求都会被拒绝，你自己下一次登录也不例外。'
       + '请在服务器能确定地址的连接上保存。',
-    recovery: `如果已被锁在外面，可将环境变量 ${ALLOWED_IP_RANGES_ENV} 设为空值后重启服务器。`,
+    recovery:
+      `如果已被锁在外面：将环境变量 ${ALLOWED_IP_RANGES_ENV} 设为空值后重启服务器并登录，`
+      + '用一次把 allowed_ip_ranges 设为 null 的设置请求（PUT /api/settings/auth）清除已保存的列表，再去掉该环境变量。',
   },
   'ja-JP': {
     outside: (address) =>
@@ -150,7 +159,10 @@ export const ALLOWED_IP_RANGES_REFUSAL_COPY: Record<SettingsCopyLocale, AllowedI
     undetermined:
       'サーバーは現在の接続のアドレスを確定できません。リストが設定されている間はそのようなリクエストはすべて拒否され、'
       + 'ご自身の次回のサインインも同様です。サーバーがアドレスを確定できる接続から保存してください。',
-    recovery: `締め出された場合は、環境変数 ${ALLOWED_IP_RANGES_ENV} を空の値にしてサーバーを再起動してください。`,
+    recovery:
+      `締め出された場合は、環境変数 ${ALLOWED_IP_RANGES_ENV} を空の値にしてサーバーを再起動してサインインし、`
+      + 'allowed_ip_ranges を null にする設定リクエスト（PUT /api/settings/auth）で保存済みのリストを消去してから、'
+      + '環境変数を削除してください。',
   },
   'es-ES': {
     outside: (address) =>
@@ -161,7 +173,10 @@ export const ALLOWED_IP_RANGES_REFUSAL_COPY: Record<SettingsCopyLocale, AllowedI
       'El servidor no puede determinar la dirección desde la que está conectado y, mientras haya una lista, rechaza '
       + 'todas esas solicitudes, incluido su propio próximo inicio de sesión. Guarde la lista desde una conexión cuya '
       + 'dirección el servidor pueda determinar.',
-    recovery: ` Si queda bloqueado, inicie el servidor con ${ALLOWED_IP_RANGES_ENV} con un valor vacío.`,
+    recovery:
+      ` Si queda bloqueado, inicie el servidor con ${ALLOWED_IP_RANGES_ENV} con un valor vacío, inicie sesión, `
+      + 'borre la lista guardada con una solicitud de ajustes que ponga allowed_ip_ranges a null '
+      + '(PUT /api/settings/auth) y después quite la variable.',
   },
   'zh-Hant': {
     outside: (address) =>

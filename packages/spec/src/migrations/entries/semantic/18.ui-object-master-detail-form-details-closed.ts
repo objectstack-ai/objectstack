@@ -29,8 +29,8 @@ export const entry: SemanticMigration = {
     + 'object\'s field. Write `childObject` on every entry; write `name` where a column said '
     + '`field` (or `fieldName`, `key`) or was a bare field-name string; delete `scale` from a '
     + 'column that renders as a currency column, whether it declares `type: \'currency\'` or takes '
-    + 'it from a `currency` child field — nothing replaces it, the currency\'s ISO 4217 minor unit '
-    + 'decides; delete any key neither shape declares.',
+    + 'it from a `currency` child field — nothing replaces it, the currency\'s CLDR fraction digits '
+    + 'decide; delete any key neither shape declares.',
   reason: 'The block draws one inline grid per detail entry, hydrating an authored column list '
     + 'with the same rule and into the same grid as the other two carriers of the inline grid '
     + 'column, but nothing judged its entries: a key the renderer does not read was ignored in '

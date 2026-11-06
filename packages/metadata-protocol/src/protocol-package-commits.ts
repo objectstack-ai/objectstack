@@ -6,8 +6,8 @@
  * bodies of `revertStoredPackage`, `duplicatePackage`,
  * `importUnmanagedPackage`, `reassignOrphanedMetadata`, `listCommits`,
  * `readRevertableCommit`, `revertCommit`, `rollbackToPackageCommit`,
- * `rollbackMetaItemUnaudited` moved out of `protocol.ts` whole by
- * `scripts/codemod-split-protocol.mjs`.
+ * `rollbackMetaItem`, `rollbackMetaItemUnaudited` moved out of `protocol.ts`
+ * whole by `scripts/codemod-split-protocol.mjs`.
  *
  * A MOVE, not a redesign. `ProtocolPackageCommitsFacet` is a stateless facet over the host
  * (ruling 6624345766): each static method below is the body of the class
@@ -67,6 +67,7 @@ import {
 } from './protocol-client-failures.js';
 import { isNonCanonicalStoredType } from './protocol-stored-overlay-types.js';
 import type { RollbackMetaItemRequest } from './protocol-door-requests.js';
+import { withRefusalAudit } from './protocol-refusal-audit.js';
 import type { ProtocolHost } from './protocol-host.js';
 
 /**
@@ -1927,6 +1928,21 @@ export class ProtocolPackageCommitsFacet {
             }
         }
         return { success: failed.length === 0, revertedCommits, failed };
+    }
+
+    /** The body of `ObjectStackProtocolImplementation#rollbackMetaItem`; the method's docblock there is its contract. */
+    static async rollbackMetaItem(host: Pick<ProtocolHost, 'recordMetadataAudit' | 'rollbackMetaItemUnaudited'>, request: RollbackMetaItemRequest): Promise<{
+            success: boolean;
+            version: string;
+            seq: number;
+            restoredFromVersion: number;
+            message?: string;
+        }> {
+        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
+        return withRefusalAudit((entry) => host.recordMetadataAudit(entry), {
+            operation: 'rollback', type: request.type, name: request.name, actor: request.actor,
+            source: 'protocol.rollbackMetaItem',
+        }, () => host.rollbackMetaItemUnaudited(request));
     }
 
     /** [#28355] The body of {@link rollbackMetaItem} before its refusal audit; that method's docblock is the contract. */
