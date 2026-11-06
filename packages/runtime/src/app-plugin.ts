@@ -739,7 +739,6 @@ export class AppPlugin implements Plugin {
                     `[AppPlugin] the host's package-state store (${PACKAGE_STATE_STORE_PLUGIN_NAME}) could not read `
                     + `which packages are disabled, so the boot stops rather than bring them back enabled: `
                     + `${(err as Error)?.message ?? String(err)}`,
-                    { cause: err },
                 );
             }
             if (disabled.size > 0) {

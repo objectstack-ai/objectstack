@@ -764,7 +764,7 @@ interface PackageRowRegistryHost {
  */
 class HostPackageStateRefusal extends Error {
     constructor(readonly packageId: string, cause: unknown) {
-        super((cause as Error)?.message ?? String(cause), { cause });
+        super((cause as Error)?.message ?? String(cause));
         this.name = 'HostPackageStateRefusal';
     }
 }
