@@ -24,7 +24,7 @@ displacement cost. The amendment lands as the rewrite did — by the maintainer'
 · **Amended in place** (2026-11-06, decision D2 on epic [objectstack-ai/cloud#3652](https://github.com/objectstack-ai/cloud/issues/3652), ruling record [`6681380041`](https://github.com/objectstack-ai/cloud/issues/3652#issuecomment-6681380041), maintainer, verbatim: 「修订为允许只提示（推荐）」):
 a base's upgrade plan may report, as advice, each `.custom` override that hides a vendor change; `basedOn` still never gates, and nothing is refused, merged or rebased on the finding ([D2](#d2), [D6](#d6), the [Supersede table](#supersede-table)'s §9 row, [Consequences](#consequences), merge question 2).
 It lands by the maintainer's hand-merge of the PR cut from #30881.
-· **Amended in place** (2026-11-06, ruling record [`6691022506`](https://github.com/objectstack-ai/objectstack/issues/29594#issuecomment-6691022506) on [#29594](https://github.com/objectstack-ai/objectstack/issues/29594), maintainer, verbatim: 「① 定制单位 = App；同意」, and the second ruling record [`6691217245`](https://github.com/objectstack-ai/objectstack/issues/29594#issuecomment-6691217245) there, verbatim: 「内核白名单，可以下一版本再处理，首批名单建议：Users、Organizations；其他同意。」): the customization unit is the App, so there is one pair per App, `<app id>.custom`, shared by every package its artifact delivers and never one per module; the kernel is one platform suite with one platform pair, `com.objectstack.kernel.custom`, whose range is the platform version; no kernel object is customizable in this version, and the kernel whitelist (Users, Organizations) belongs to the next one ([D3](#d3), [D11](#d11), Q4, [Consequences](#consequences), merge questions 8 to 12); the App of a package is read from the declarations the registry holds, a package that declares no App is its own unit, and a pair created under the old per-package unit is folded into its App's pair by the migration ceremony (merge questions 11 and 12). It lands by the maintainer's hand-merge of the PR cut from #31014.
+· **Amended in place** (2026-11-06, ruling record [`6691022506`](https://github.com/objectstack-ai/objectstack/issues/29594#issuecomment-6691022506) on [#29594](https://github.com/objectstack-ai/objectstack/issues/29594), maintainer, verbatim: 「① 定制单位 = App；同意」, and the second ruling record [`6691217245`](https://github.com/objectstack-ai/objectstack/issues/29594#issuecomment-6691217245) there, verbatim: 「内核白名单，可以下一版本再处理，首批名单建议：Users、Organizations；其他同意。」): the customization unit is the App, so there is one pair per App, `<app id>.custom`, shared by every package its artifact delivers and never one per module; the kernel is one platform suite with one platform pair, `com.objectstack.kernel.custom`, whose range is the platform version; no kernel object is customizable in this version, and the kernel whitelist (Users, Organizations) belongs to the next one ([D3](#d3), [D11](#d11), Q4, [Consequences](#consequences), merge questions 8 to 12); the App of a package is read from the declarations the registry holds, a package that declares no App is its own unit, and a pair created under the old per-package unit is re-identified as its App's pair by the migration ceremony (merge questions 11 and 12). It lands by the maintainer's hand-merge of the PR cut from #31014.
 **Decided by**: the maintainer, 2026-10-30, in the desktop session that re-planned the epic, verbatim and
 untranslated as epic #28236 records them — the direction 「方向定为包级覆盖：代码和 Studio 用同一机制，定制都进 .custom。」; the suffix 「同意 后缀改成 .custom」; the eight questions 「等我拍板的 8 个问题，全部同意」; the extension
 fields 「扩展字段用 __c 后缀，只有 .custom 包能用。」; the item toolbar 「同意新增 2h「Studio 项工具栏」并放在 2a 之前」;
@@ -619,11 +619,13 @@ name suffixed, the base untouched (N-23c).
   it stays as it is, served as [D8](#d8) item 1 says, and its package-less write stays open until the kernel whitelist
   admits the item into the platform pair (*decided here where the rulings were silent; merge question 10*). A pair
   created under the per-package unit before 2026-11-06 — a module's `<module id>.custom`, or the one kernel
-  package's pair that today's door creates before it answers `422` to the next — is folded by the same ceremony: its
-  items and declared overrides move into its App's pair, re-declared against the same base, and the emptied package
-  is uninstalled; until moved it is served as it is, and a kernel one waits for the whitelist with the rows above
-  (*decided here where the rulings were silent; merge question 12*). The migration is idempotent and reports per
-  base what it moved; it runs as a CLI ceremony the administrator invokes, in the shape ADR-0131 D10 set.
+  package's pair that today's door creates before it answers `422` to the next — is re-identified by the same
+  ceremony as its App's pair: the installed record's id and dependency are rewritten to the App's, and its
+  namespace, items and declared overrides stay in place against the same base; until then it is served as it is,
+  the ensure door serves the readable verdict naming the ceremony rather than `422`, and a kernel one waits for the
+  whitelist with the rows above (*decided here where the rulings were silent; merge question 12*). The migration
+  is idempotent and reports per base what it moved; it runs as a CLI ceremony the administrator invokes, in the
+  shape ADR-0131 D10 set.
 - **Close** (N-16). After the migration, a package-less write onto a packaged item (`PUT /api/v1/meta/:type/:name` with
   no `?package`, the "Customize with an overlay" path Setup offers) is refused with a prescription naming the pair:
   `packagelessAddress` stops answering an unbound binding for a packaged name, and the five-type
@@ -840,22 +842,32 @@ of Q1's refusal and `action` — were ruled by the maintainer on 2026-10-31 (dec
     second pair in `crm_custom` is (c), not taken, and the namespace gate would refuse it — while it stays an App in
     its own right for install, open and uninstall (ADR-0141 D3 unchanged); uninstalling it alone keeps and marks its
     overrides, as for a module a later App version drops, and the uninstall refusal that names the pair is the
-    App's. A package that declares no `type: 'app'` package — an operator-provisioned internal contribution
-    (ADR-0019 D2), a `type: 'plugin'` installed on its own, a code-registered package outside any App — is its own
+    App's. The reading walks declared parents: a package that declares no `type: 'app'` package directly but whose
+    declared parents all resolve to one App is a member of that App, and one whose parents resolve to different
+    Apps gets the readable verdict — never `422` for a package of the same App (HotCRM has no such nested module
+    today). A package that declares no `type: 'app'` package, directly or through its declared parents — an
+    operator-provisioned internal contribution (ADR-0019 D2), a `type: 'plugin'` installed on its own, a
+    code-registered package outside any App — is its own
     unit: its pair is `<its id>.custom` with namespace `<its namespace>_custom`, the rule this amendment retires for
     the members of an App; a kernel package is never such a unit, its pair is the platform pair. The lookup the
     server lane landed first (`pairOf(base)` = `customizationPackageId(appOf(base))`, PR #31026) carries this
     reading in `appOf`, which is the identity until the ensure door's change.
-12. **A pair created under the per-package unit is folded into its App's pair by the migration ceremony, and served
-    until moved** ([D11](#d11), amended 2026-11-06). This decision has been in force since 2026-10-31 and the ensure
+12. **A pair created under the per-package unit is re-identified as its App's pair by the migration ceremony, and
+    served until then** ([D11](#d11), amended 2026-11-06). D3 has been in force since 2026-10-31 and the ensure
     door is landed, so an environment may already hold `app.objectstack.hotcrm.service.custom`, or the one kernel
     pair today's door creates before its `422`s. After this amendment such a package is the pair of nothing (the
     pair predicate answers false for the module, and its declared overrides would fall under [D2](#d2) Q1 with no
-    place under this record), so [D11](#d11)'s ceremony moves its items and declared overrides into the App's pair,
-    re-declared against the same base with the same `basedOn`, and uninstalls the emptied package; until the
-    ceremony runs it is served as it is, its declared overrides honoured as today, so nothing a customer built goes
-    dark on upgrade. A kernel one waits with [D11](#d11)'s kernel rows: served as it is until the whitelist version
-    folds its admitted rows into the platform pair and lists the rest. Refusing or deleting such a pair would discard
+    place under this record), so [D11](#d11)'s ceremony re-identifies it as the App's pair: the installed record's
+    id and dependency are rewritten to the App's, and its namespace, items, rows and declared overrides stay in
+    place against the same base with the same `basedOn`. Moving the items into a newly created App pair cannot run
+    against today's gates — the old pair owns `<ns>_custom`, so the ensure door answers `422` to the App's pair
+    (`packages/metadata-protocol/src/protocol-customization-package.ts#customizationPairEnsureRefusal`) and the
+    install door `NamespaceConflictError` — and uninstalling it first would drop its `__c` fields with their data;
+    the old unit let an App hold at most one such pair, since a second owner of the namespace was refused. Until
+    the ceremony runs the pair is served as it is, its declared overrides honoured as today, and the ensure door
+    serves the readable verdict naming the ceremony, not `422`, so nothing a customer built goes dark on upgrade.
+    A kernel one waits with [D11](#d11)'s kernel rows: served as it is until the whitelist version re-identifies it
+    as the platform pair and lists the rows it cannot admit. Refusing or deleting such a pair would discard
     customer work this record's earlier text invited.
 
 ## Refs
