@@ -110,10 +110,10 @@ export const Lead = ObjectSchema.create({
 
 // Agent capability is reached through skills — there is no inline tool list.
 export const SupportBot = defineAgent({
-  name: 'support_bot',
+  name: 'crm_support_bot',
   label: 'Support Bot',
   role: 'Front-line support triage',
   instructions: 'Answer support questions and open cases when needed.',
-  skills: ['case_management'],
+  skills: ['crm_case_management'],
 });
 ```

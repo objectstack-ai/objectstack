@@ -49,7 +49,7 @@ filter; keep `filter` on the widget when binding a dataset.
   id: 'revenue_by_region',
   type: 'bar',
   title: 'Revenue by Region',
-  dataset: 'sales',
+  dataset: 'crm_sales',
   dimensions: ['region'],
   values: ['revenue'],
   layout: { x: 0, y: 0, w: 6, h: 4 },
@@ -143,7 +143,7 @@ dataset, so Level B only surfaces in Studio previews and hand-coded react-page
 import type { Dashboard } from '@objectstack/spec/ui';
 
 export const SalesDashboard: Dashboard = {
-  name: 'sales_dashboard',
+  name: 'crm_sales_dashboard',
   label: 'Sales Performance',
   columns: 12,
   gap: 4,
@@ -152,9 +152,9 @@ export const SalesDashboard: Dashboard = {
   header: {
     showTitle: true,
     actions: [
-      { label: 'New Opportunity', icon: 'Plus',     actionType: 'modal',  actionUrl: 'create_opportunity' },
+      { label: 'New Opportunity', icon: 'Plus',     actionType: 'modal',  actionUrl: 'crm_create_opportunity' },
       { label: 'Forecast',        icon: 'TrendingUp', actionType: 'url',   actionUrl: '/reports/forecast' },
-      { label: 'Export',          icon: 'Download', actionType: 'script', actionUrl: 'export_dashboard_pdf' },
+      { label: 'Export',          icon: 'Download', actionType: 'script', actionUrl: 'crm_export_dashboard_pdf' },
     ],
   },
 
@@ -171,7 +171,7 @@ export const SalesDashboard: Dashboard = {
     {
       id: 'total_pipeline_value', type: 'metric',
       title: 'Total Pipeline',
-      dataset: 'opportunity_metrics', values: ['total_amount'],
+      dataset: 'crm_opportunity_metrics', values: ['total_amount'],
       filter: { stage: { $nin: ['closed_won', 'closed_lost'] } },
       layout: { x: 0, y: 0, w: 3, h: 2 },
       colorVariant: 'success',   // the accent only
@@ -187,7 +187,7 @@ export const SalesDashboard: Dashboard = {
     {
       id: 'revenue_vs_last_year', type: 'line',
       title: 'Revenue — This Year vs Last',
-      dataset: 'order_metrics', dimensions: ['closed_at'], values: ['total_sum'],
+      dataset: 'crm_order_metrics', dimensions: ['closed_at'], values: ['total_sum'],
       filter: { closed_at: { $gte: '{current_year_start}', $lte: '{current_year_end}' } },
       compareTo: { kind: 'previousYear' },
       layout: { x: 3, y: 0, w: 9, h: 4 },
@@ -214,9 +214,9 @@ vocabularies.
 
 ```typescript
 // One control, two objects: re-target on one widget, opt the other out.
-{ id: 'revenue_by_region', dataset: 'order_metrics', values: ['total_sum'],
+{ id: 'revenue_by_region', dataset: 'crm_order_metrics', values: ['total_sum'],
   filterBindings: { region: 'sales_region' } },
-{ id: 'projects_at_risk', dataset: 'project_metrics', values: ['project_count'],
+{ id: 'projects_at_risk', dataset: 'crm_project_metrics', values: ['project_count'],
   filterBindings: { task_status: false } },
 ```
 
@@ -259,14 +259,14 @@ compareTo: { kind: 'previousYear', dimension: 'close_date' }     // several — 
   reuses the original `filter` shape and replaces only the date-bound clauses.
 
 ```typescript
-// Metric — WoW delta (binds the task_metrics dataset; filter = runtimeFilter)
-{ id: 'done_this_week', type: 'metric', dataset: 'task_metrics', values: ['task_count'],
+// Metric — WoW delta (binds the crm_task_metrics dataset; filter = runtimeFilter)
+{ id: 'done_this_week', type: 'metric', dataset: 'crm_task_metrics', values: ['task_count'],
   filter: { assignee: '{current_user_id}', status: 'done',
             completed_at: { $gte: '{week_start}' } },
   compareTo: { kind: 'previousPeriod' } }
 
 // Bar — YoY overlay on a stable category set
-{ id: 'headcount_by_dept', type: 'bar', dataset: 'employee_metrics',
+{ id: 'headcount_by_dept', type: 'bar', dataset: 'crm_employee_metrics',
   dimensions: ['department'], values: ['headcount'],
   filter: { status: { $ne: 'terminated' } },
   compareTo: { kind: 'previousYear' } }
@@ -286,7 +286,7 @@ import { defineDataset, type DashboardWidget } from '@objectstack/spec/ui';
 
 // In the dataset (Guides → Analytics Datasets):
 defineDataset({
-  name: 'contract_metrics', label: 'Contract Metrics', object: 'contract',
+  name: 'crm_contract_metrics', label: 'Contract Metrics', object: 'contract',
   dimensions: [{ name: 'signed_date', field: 'signed_date', type: 'date', dateGranularity: 'month' }],
   measures: [{ name: 'signed_count', aggregate: 'count' }],
 });
@@ -304,7 +304,7 @@ defineDataset({
 
 // The widget just selects the dimension by name:
 const signedByMonth: DashboardWidget = { id: 'signed_by_month', type: 'line',
-  dataset: 'contract_metrics', dimensions: ['signed_date'], values: ['signed_count'],
+  dataset: 'crm_contract_metrics', dimensions: ['signed_date'], values: ['signed_count'],
   filter: { signed_date: { $gte: '{12_months_ago}' } },
   compareTo: { kind: 'previousYear' } };
 ```
@@ -361,8 +361,7 @@ behind it; **drill-to-record** opens one record.
 * **Escape hatch — "Open in list →".** The drawer header offers a link to the
   object's *full* list page (sort / bulk-select / export / shareable URL),
   scoped by the same drill filter. The in-place drawer is the default (peek
-  without losing the dashboard); the escape hatch escalates when the user wants
-  the full surface.
+  without losing the dashboard).
 * **`metric` / `chart` widgets are not click-drillable** in the dataset form
   (they render the aggregate only; `compareTo` still applies). Surface the detail
   through a `table` / `pivot` widget instead.
@@ -380,14 +379,14 @@ records, click a row to open one, or "Open in list →" for the full list page.
 import { defineReport } from '@objectstack/spec/ui';
 
 // ADR-0021: a report binds a `dataset` and selects `rows` (dimensions) +
-// `values` (measures) BY NAME. The `opportunity_metrics` dataset defines the
+// `values` (measures) BY NAME. The `crm_opportunity_metrics` dataset defines the
 // object, the `amount_sum` measure, and the `forecast_category` + `close_date`
 // (dateGranularity: 'quarter') dimensions — see Guides → Analytics Datasets.
 export const PipelineCoverageReport = defineReport({
-  name: 'pipeline_coverage_by_quarter',
+  name: 'crm_pipeline_coverage_by_quarter',
   label: 'Pipeline Coverage (Quarter)',
   type: 'matrix',
-  dataset: 'opportunity_metrics',
+  dataset: 'crm_opportunity_metrics',
   rows: ['forecast_category'],   // down axis
   columns: ['close_date'],       // across axis (ADR-0021 D2) — matrix pivots rows × columns
   values: ['amount_sum'],        // measures placed in the cells
@@ -437,7 +436,7 @@ widgets can compose without hand-rolling each query. Register under
 import { defineCube } from '@objectstack/spec/data';
 
 export const opportunityCube = defineCube({
-  name: 'opportunity',
+  name: 'crm_opportunity',
   title: 'Opportunities',
   sql: 'opportunity',            // underlying object name (snake_case)
   public: true,
