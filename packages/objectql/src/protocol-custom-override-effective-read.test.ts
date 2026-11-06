@@ -470,7 +470,8 @@ describe('[#28409] a same-named item outside X\'s closure is served under its ow
  * `<kernel>.custom` with overrides in it. The verdict refuses the ENSURE call
  * only: the pair stays installed, the overrides in it stay served by every
  * read of the base's name, and a further override saved into it is admitted
- * by the write gate, which never asks the ensure door.
+ * by the write gate, which never asks the ensure door. The overlay-write
+ * closes (ADR-0146 D11) stay shut on a kernel item, naming no pair.
  */
 describe('[#29594] a kernel base\'s pair an earlier version created keeps serving its overrides', () => {
     it('the ensure call is refused 409; the override already in the pair is served, and another save into it lands', async () => {
@@ -496,7 +497,7 @@ describe('[#29594] a kernel base\'s pair an earlier version created keeps servin
         expect(columnsOf(await read(protocol))).toEqual(BASE_COLUMNS.slice(0, 3));
     });
 
-    it('the closes that named the pair leave a kernel item\'s save open: there is no pair to send it to', async () => {
+    it('the closes keep refusing a kernel item\'s save, naming no pair: kernel objects are not customizable in this version', async () => {
         const body = listBody(UNBOUND_COLUMNS);
         // Control: an App's item — the package-less save and the save naming the base are closed onto the pair.
         const app = await boot();
@@ -505,11 +506,20 @@ describe('[#29594] a kernel base\'s pair an earlier version created keeps servin
         await expect(app.protocol.saveMetaItem({ type: 'view', name: VIEW, item: body, mode: 'draft', packageId: BASE } as any))
             .rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403, message: expect.stringContaining(PAIR) });
 
-        // A kernel item: the ensure door creates no pair, so neither close names one.
+        // A kernel item: still closed, 403 as before the kernel verdict, but
+        // the ensure door creates no pair for it, so neither sentence names one.
         const kernel = await boot(baseManifest({ scope: 'system' }));
-        await kernel.protocol.saveMetaItem({ type: 'view', name: VIEW, item: body, mode: 'draft' } as any);
-        expect(kernel.rowsOf(VIEW).map((r) => r.package_id ?? null)).toEqual([null]);
-        await kernel.protocol.saveMetaItem({ type: 'view', name: VIEW, item: body, mode: 'draft', packageId: BASE } as any);
-        expect(kernel.rowsOf(VIEW).map((r) => r.package_id ?? null)).toEqual([null, BASE]);
+        const packageless = await kernel.protocol.saveMetaItem({ type: 'view', name: VIEW, item: body, mode: 'draft' } as any)
+            .then(() => null, (error: any) => error);
+        expect(packageless).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+        expect(packageless.message).toContain(`ships in kernel package '${BASE}' (scope 'system')`);
+        expect(packageless.message).toContain('kernel objects are not customizable in this version, so a write naming no package is refused');
+        expect(packageless.message).not.toContain(PAIR);
+        const named = await kernel.protocol.saveMetaItem({ type: 'view', name: VIEW, item: body, mode: 'draft', packageId: BASE } as any)
+            .then(() => null, (error: any) => error);
+        expect(named).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+        expect(named.message).toContain(`kernel objects are not customizable in this version, so a write naming '${BASE}' is refused`);
+        expect(named.message).not.toContain(PAIR);
+        expect(kernel.rowsOf(VIEW)).toEqual([]);
     });
 });

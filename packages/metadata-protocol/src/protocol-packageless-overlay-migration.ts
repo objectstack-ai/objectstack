@@ -144,6 +144,7 @@ import type { ObjectStackProtocolImplementation } from './protocol.js';
 import {
     overlayPairFixAdmits,
     overlayPairFixOf,
+    type OverlayWriteClose,
     overrideDeclarationRefusedByShape,
     overrideWriteMemberOf,
     type OverrideWriteVerdictAsk,
@@ -756,7 +757,11 @@ export interface PackagelessWriteSubject {
  *    locale the base does not ship is refused there (#28777) and stays open:
  *    the ceremony moves such a row as the pair's own member, declaring
  *    nothing (#28904), and the close reaches only the declared-override
- *    moves, so its package-less write is the one it had before the close.
+ *    moves, so its package-less write is the one it had before the close;
+ *  - [#29594] an item a kernel package ships stays closed where it was
+ *    before the kernel verdict, though the ensure door creates no pair for
+ *    it: the subject carries the base's `kernelScope`, and the refusal says
+ *    kernel objects are not customizable in this version, naming no pair.
  *
  * Registry reads first; the one store read (the item's rows) only for a name
  * the registry has not already left open.
@@ -764,7 +769,7 @@ export interface PackagelessWriteSubject {
 export async function packagelessCloseSubject(
     this: PackagelessCloseHost,
     request: PackagelessWriteSubject,
-): Promise<{ base: string; pair: string } | null> {
+): Promise<OverlayWriteClose | null> {
     if (typeof request.packageId === 'string' && request.packageId.length > 0) return null;
     const type = PLURAL_TO_SINGULAR[request.type] ?? request.type;
     const shippers = this.overlayBaseShippers(request.type, request.name);
@@ -803,5 +808,5 @@ export async function packagelessCloseSubject(
 
     // Step 2's gate: the declared body, into the pair.
     if (!overlayPairFixAdmits(this, fix, { type, name: request.name, body, member })) return null;
-    return { base, pair: fix.pair };
+    return fix.kernelScope === undefined ? { base, pair: fix.pair } : { base, pair: fix.pair, kernelScope: fix.kernelScope };
 }

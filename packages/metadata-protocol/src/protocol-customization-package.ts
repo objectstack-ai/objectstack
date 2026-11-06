@@ -173,9 +173,8 @@ function kernelPackageScopeOf(row: PairPackageRow | undefined): string | undefin
  * know beforehand that a kernel package has none (the "new similar" doors).
  */
 export function kernelPackageScope(engine: unknown, packageId: string): string | undefined {
-    const registry = (engine as { registry?: Partial<PairRegistry> } | null | undefined)?.registry;
-    if (!registry || typeof registry.getPackage !== 'function') return undefined;
-    return kernelPackageScopeOf(registry.getPackage(packageId));
+    const manifest = installedManifestsOfEngine(engine)(packageId);
+    return kernelPackageScopeOf(manifest === undefined ? undefined : { manifest });
 }
 
 /**
@@ -338,6 +337,15 @@ export function customizationPairEnsureRefusal(
     registry: PairRegistry,
     baseId: string,
     pairId: string,
+    options: {
+        /**
+         * `false` asks every other judgement of the door with the kernel
+         * verdict left out: the overlay-write closes read it so that a
+         * kernel item stays closed exactly where it was closed before the
+         * verdict (`overlayPairFixOf`). The door itself always judges it.
+         */
+        readonly judgeKernel?: boolean;
+    } = {},
 ): Error | undefined {
     const base = registry.getPackage(baseId);
     if (!base) {
@@ -350,7 +358,7 @@ export function customizationPairEnsureRefusal(
     // version of this door created for a kernel package stays installed, and
     // the overrides inside it stay served and writable (the override gate and
     // the served-override read never ask this door).
-    const kernelScope = kernelPackageScopeOf(base);
+    const kernelScope = options.judgeKernel === false ? undefined : kernelPackageScopeOf(base);
     if (kernelScope !== undefined) {
         return refusal(409, `Package '${baseId}' is a kernel package (scope '${kernelScope}'): kernel objects are not `
             + `customizable in this version, so '${baseId}' has no paired customization package and '${pairId}' is `
