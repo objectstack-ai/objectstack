@@ -315,6 +315,30 @@ describe('resolveLocale and resolveBundleLocale — one shared case list', () =>
         ['zh-SG', ['en', 'zh-Hant', 'zh-CN'], 'zh-CN'],
         ['zh-Hans', ['en', 'zh-Hant', 'zh-CN'], 'zh-CN'],
         ['zh-TW', ['en', 'zh', 'zh-Hant'], 'zh-Hant'],
+        // The script-subtag spellings a browser or OS sends are read aliases too.
+        ['zh-Hant-TW', ['en', 'zh-CN', 'zh-Hant'], 'zh-Hant'],
+        ['zh-Hant-TW', ['en', 'zh-Hant', 'zh-CN'], 'zh-Hant'],
+        ['zh-Hant-HK', ['en', 'zh-CN', 'zh-Hant'], 'zh-Hant'],
+        ['zh-Hant-HK', ['en', 'zh-Hant', 'zh-CN'], 'zh-Hant'],
+        ['zh-Hant-MO', ['en', 'zh-CN', 'zh-Hant'], 'zh-Hant'],
+        ['zh-Hant-MO', ['en', 'zh-Hant', 'zh-CN'], 'zh-Hant'],
+        ['zh-Hans-CN', ['en', 'zh-CN', 'zh-Hant'], 'zh-CN'],
+        ['zh-Hans-CN', ['en', 'zh-Hant', 'zh-CN'], 'zh-CN'],
+        ['zh-Hans-SG', ['en', 'zh-CN', 'zh-Hant'], 'zh-CN'],
+        ['zh-Hans-SG', ['en', 'zh-Hant', 'zh-CN'], 'zh-CN'],
+        ['ZH-HANT-tw', ['en', 'zh-CN', 'zh-Hant'], 'zh-Hant'],
+        ['zh-Hant-TW', ['en', 'zh', 'zh-Hant'], 'zh-Hant'],
+        // ...and so are keys spelled that way: a key counts as the script it names.
+        ['zh-TW', ['en', 'zh-CN', 'zh-Hant-TW'], 'zh-Hant-TW'],
+        ['zh-TW', ['en', 'zh-Hant-TW', 'zh-CN'], 'zh-Hant-TW'],
+        ['zh-Hant', ['en', 'zh-CN', 'zh-Hant-TW'], 'zh-Hant-TW'],
+        ['zh-Hant', ['en', 'zh-Hant-TW', 'zh-CN'], 'zh-Hant-TW'],
+        ['zh-CN', ['en', 'zh-Hant', 'zh-Hans-CN'], 'zh-Hans-CN'],
+        ['zh-CN', ['en', 'zh-Hans-CN', 'zh-Hant'], 'zh-Hans-CN'],
+        ['zh-Hant-TW', ['en', 'zh', 'zh-Hant-HK'], 'zh-Hant-HK'],
+        ['zh-Hant-TW', ['en', 'zh-Hant-HK', 'zh'], 'zh-Hant-HK'],
+        // One script registered: a related language still beats none.
+        ['zh-Hant-TW', ['en', 'zh-CN'], 'zh-CN'],
         // Today's alias-spelled bundles keep answering.
         ['ja', ['en', 'zh-CN', 'ja-JP', 'es-ES'], 'ja-JP'],
         ['es', ['en', 'zh-CN', 'ja-JP', 'es-ES'], 'es-ES'],
@@ -343,6 +367,19 @@ describe('resolveLocale and resolveBundleLocale — one shared case list', () =>
         i18n.loadTranslations('zh-Hant', { settings: '設定' });
         expect(i18n.t('settings', 'zh-HK')).toBe('設定');
         expect(i18n.t('settings', 'zh')).toBe('设置');
+    });
+
+    it.each<[order: string, loadOrder: string[]]>([
+        ['Simplified loaded first', ['zh-CN', 'zh-Hant']],
+        ['Traditional loaded first', ['zh-Hant', 'zh-CN']],
+    ])('a script-subtag reader of the in-memory service gets its own script (%s)', (_order, loadOrder) => {
+        const text: Record<string, string> = { 'zh-CN': '设置', 'zh-Hant': '設定' };
+        const i18n = createMemoryI18n();
+        i18n.loadTranslations('en', { settings: 'Settings' });
+        for (const locale of loadOrder) i18n.loadTranslations(locale, { settings: text[locale] });
+        expect(i18n.t('settings', 'zh-Hant-TW')).toBe('設定');
+        expect(i18n.t('settings', 'zh-Hant-HK')).toBe('設定');
+        expect(i18n.t('settings', 'zh-Hans-CN')).toBe('设置');
     });
 });
 

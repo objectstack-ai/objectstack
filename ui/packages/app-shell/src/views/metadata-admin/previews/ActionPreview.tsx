@@ -54,8 +54,7 @@ import {
 } from '@object-ui/components';
 import type { ActionParam } from '@object-ui/types';
 import { actionCopySource, isActionCopyEnvelope } from '@object-ui/core';
-import { paramDegradesWithoutTarget } from '../../../utils/paramToField.js';
-import { resolveParamWidgetType } from '@object-ui/fields';
+import { paramDegradesWithoutTarget, paramToField } from '../../../utils/paramToField.js';
 import type { MetadataPreviewProps } from '../preview-registry.js';
 import { t as tr, tFormat } from '../i18n.js';
 import { PreviewShell, PreviewMessage, PreviewErrorBoundary } from './PreviewShell.js';
@@ -499,9 +498,11 @@ const INHERITED_TARGET = '(inherited from the bound field)';
  * The widget key `ActionParamDialog` will render this param through, and
  * whether that widget DEGRADED to a text box for want of a target.
  *
- * Asked of the adapter that PERFORMS the mapping (`paramToField`'s
- * `resolveParamWidgetType` / `paramDegradesWithoutTarget`), never restated
- * here. The preview's declared job is to show what will render, so "what will
+ * Asked of the adapter that PERFORMS the mapping (`paramToField` itself and
+ * `paramDegradesWithoutTarget`), never restated here. So an authored `widget`
+ * is answered the way the dialog draws it: a registered name wins over `type`
+ * (`widget: 'permission-ref'` on a `text` param is the permission-set picker),
+ * and an unregistered one degrades to the `type` widget. The preview's declared job is to show what will render, so "what will
  * render" has to be one question with one answer — the same discipline
  * objectui#5654 imposed on the dialog's own hint logic.
  *
@@ -533,8 +534,11 @@ const INHERITED_TARGET = '(inherited from the bound field)';
 function runtimeWidgetFor(p: ActionParam): { widget: string | undefined; degraded: boolean } {
   if (!p.type) return { widget: undefined, degraded: false };
   const referenceTo = p.reference ?? (p.field ? INHERITED_TARGET : undefined);
-  const degraded = paramDegradesWithoutTarget({ name: p.name ?? '', label: '', type: p.type, referenceTo });
-  return { widget: degraded ? 'text' : resolveParamWidgetType(p.type), degraded };
+  const resolved = { name: p.name ?? '', label: '', type: p.type, referenceTo, widget: p.widget };
+  const degraded = paramDegradesWithoutTarget(resolved);
+  // Asked only when not degraded: `paramToField` warns in development about
+  // the very degradation this preview reports in its own words below.
+  return { widget: degraded ? 'text' : paramToField(resolved).type, degraded };
 }
 
 /**
@@ -703,6 +707,27 @@ function renderFieldMock(p: ActionParam, fieldLabel: string, locale?: string): R
               (p.reference != null
                 ? tFormat('engine.actionPreview.param.searchObject', locale, { object: p.reference })
                 : tr('engine.actionPreview.param.searchRecords', locale))}
+          </span>
+        </button>
+      );
+    case 'permission-ref':
+      // A param that names the permission-set picker (`widget:
+      // 'permission-ref'`): the dialog draws a searchable list of the security
+      // catalog's sets by label, so it is mocked as a picker, never as the
+      // text box its `text` type alone would draw.
+      return (
+        <button
+          type="button"
+          disabled
+          role="combobox"
+          aria-expanded={false}
+          aria-haspopup="listbox"
+          className={`${cls} flex items-center gap-1.5 text-left text-muted-foreground`}
+          data-testid="action-preview-permission-ref"
+        >
+          <Search className="h-3 w-3 shrink-0" aria-hidden />
+          <span className="truncate">
+            {placeholder || tFormat('engine.actionPreview.param.selectPlaceholder', locale, { label: fieldLabel })}
           </span>
         </button>
       );

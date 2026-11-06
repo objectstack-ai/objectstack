@@ -30,6 +30,16 @@ describe('sys_user_device declaration', () => {
         expect((UserDeviceSchema as any).shape.platform.options.slice().sort()).toEqual([...admitted].sort());
     });
 
+    it('has an optional, unbounded origin column for the origin the registration names', () => {
+        const origin = UserDevice.fields.origin as any;
+        expect(origin).toMatchObject({ type: 'text', required: false });
+        // Spec's origin pattern bounds the shape, not the length: a bounded column would
+        // refuse a value the registration accepts.
+        expect(origin.maxLength).toBeUndefined();
+        expect((RegisterDeviceRequestSchema as any).shape.origin).toBeDefined();
+        expect((UserDeviceSchema as any).shape.origin).toBeDefined();
+    });
+
     it('carries the two unique indexes the registry relies on', () => {
         expect(UserDevice.indexes).toEqual(expect.arrayContaining([
             expect.objectContaining({ fields: ['user_id', 'device_id'], unique: 'global' }),

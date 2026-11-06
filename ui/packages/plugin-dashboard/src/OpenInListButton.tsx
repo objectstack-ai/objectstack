@@ -12,7 +12,8 @@
  * export / shareable URL) — the Looker / Power BI "see records → open in
  * Explore/page" pattern. It delegates the console-specific URL building + SPA
  * routing to the host via {@link useDrillNavigation}; when no host provided a
- * handler (or no object is known) it renders nothing, so the drawer simply
+ * handler, no object is known, or the host's `canOpenRecordList` says its list
+ * route cannot carry `filter` exactly, it renders nothing, so the drawer simply
  * stays a self-contained peek.
  */
 
@@ -38,11 +39,14 @@ export const OpenInListButton: React.FC<OpenInListButtonProps> = ({
   onNavigate,
   className,
 }) => {
-  const { openRecordList } = useDrillNavigation();
+  const { openRecordList, canOpenRecordList } = useDrillNavigation();
   const tt = useSafeTranslate();
 
   // No host navigation handler, or nothing to open → no escape hatch.
   if (!openRecordList || !objectName) return null;
+  // A host whose list route cannot say this filter exactly would open a wider
+  // list than the drawer shows; no destination is better than a wrong one.
+  if (canOpenRecordList && !canOpenRecordList(objectName, filter)) return null;
 
   return (
     <Button

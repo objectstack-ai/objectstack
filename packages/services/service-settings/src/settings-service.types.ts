@@ -259,6 +259,15 @@ export interface SettingsAuditSink {
     valueDigest: string;
     encrypted: boolean;
     requestId?: string;
+    /**
+     * The id of the stored settings row the write landed on: a `sys_setting`
+     * row for a tenant or user value, a `sys_platform_setting` row for a global
+     * one. Recorded as the ledger row's `record_id`, beside the object
+     * `scope` selects, so the ledger names the settings row the same way the
+     * CRUD mirror's row about that write does. `null` or absent when the store
+     * returned no id (the in-memory fallback).
+     */
+    recordId?: string | null;
   }): Promise<void> | void;
 }
 

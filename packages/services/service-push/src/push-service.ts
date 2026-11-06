@@ -6,8 +6,10 @@ import type { PushVendor } from '@objectstack/spec/system';
  * One push to one device, as the push channel hands it over.
  *
  * `data` is the push's delivery data (`PushDeliveryDataSchema`,
- * `@objectstack/spec/api`): the notification id and, when it is a same-server
- * path, its `route`. Every value is a string, because FCM's `message.data`
+ * `@objectstack/spec/api`): the notification id; when it is a same-server
+ * path, its `route`; and, when the device registered one, its `origin` (the
+ * server the Console was loaded from, by which a shell with several saved
+ * servers opens the push). Every value is a string, because FCM's `message.data`
  * takes only strings. Each transport places it where its vendor reads it: FCM
  * in `message.data`, APNs at the top level of the payload beside `aps`.
  */

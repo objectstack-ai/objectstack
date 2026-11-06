@@ -61,10 +61,10 @@ import {
   BreadcrumbItem,
   BreadcrumbLink,
   BreadcrumbPage,
-  BreadcrumbSeparator,
   Separator,
   Skeleton,
 } from '../index';
+import { BreadcrumbSeparator } from '../ui/breadcrumb';
 
 // ─── Alert Snapshots ────────────────────────────────────────────────────
 
