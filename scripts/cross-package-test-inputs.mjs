@@ -1279,6 +1279,7 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/services/service-storage/src/storage-route-ledger.ts',
       'packages/services/service-i18n/src/i18n-route-ledger.ts',
       'packages/services/service-settings/src/settings-route-ledger.ts',
+      'packages/services/service-messaging/src/messaging-route-ledger.ts',
       // [#29443] The personal-view door's ledger, imported the same way.
       'packages/plugins/plugin-auth/src/personal-view-route-ledger.ts',
       // flow-trigger / validation conformance pin spec's zod schemas.
