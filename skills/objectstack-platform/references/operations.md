@@ -24,11 +24,11 @@
 
 ## Verify your work
 
-ObjectStack metadata mistakes fail **silently at runtime**, not at edit time:
-a bare field ref in a predicate (`done` instead of `record.done`) evaluates to
-`null` and silently hides an action/validation on every record; a
-dangling dashboard widget binding renders an empty chart (ADR-0021). Both are
-caught at author time by one command:
+Metadata mistakes surface at runtime, not at edit time: a bare field ref in a
+predicate (`done` for `record.done`) faults, so an `error` validation rule
+refuses each write naming the rule and an action's `visible` hides it; a
+dangling dashboard widget binding renders an empty chart. Both are caught at
+author time by one command:
 
 ```bash
 os validate     # Zod schema + CEL predicates + widget bindings — no artifact
