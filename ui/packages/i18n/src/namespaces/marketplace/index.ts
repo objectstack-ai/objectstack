@@ -126,7 +126,7 @@ export const MARKETPLACE_LANGUAGE_CODES: readonly string[] = Object.freeze(Objec
 const own = (record: object, key: string): boolean =>
   Object.prototype.hasOwnProperty.call(record, key);
 
-const hasMarketplaceCatalogue = (code: string): boolean => own(MARKETPLACE_LOADERS, code);
+const hasMarketplaceCatalogue = (code: string): code is PlatformLocaleTag => own(MARKETPLACE_LOADERS, code);
 
 /**
  * The tag of the catalogue that serves `lang`, read the way the packs resolve —
