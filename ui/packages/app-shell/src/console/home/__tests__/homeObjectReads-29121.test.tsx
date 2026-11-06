@@ -27,7 +27,7 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import React from 'react';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MetadataProvider, useMetadata } from '../../../providers/MetadataProvider';
 import { readObjectsByName, useObjectPresence } from '../../../hooks/useObjectPresence';
 import { useNavMemberGates } from '../../../hooks/useNavMemberGates';
@@ -170,6 +170,31 @@ describe('Home asks for the objects it names, never the whole registry (objectst
     expect(screen.getByTestId('gate')).toHaveAttribute('data-cloud', 'true');
     expect(screen.getByTestId('gate')).toHaveAttribute('data-queue', 'true');
     expect(metaReads(calls)).toEqual(['object?names=sys_cloud_only,sys_queue']);
+  });
+
+  it('outside an app, a refresh asks the roster’s names again in one ?names= request', async () => {
+    let refresh: ((type?: string) => Promise<void>) | undefined;
+    function RefreshHandle() {
+      refresh = useMetadata().refresh;
+      return null;
+    }
+    const calls = mount(
+      <>
+        <RefreshHandle />
+        <GateProbe />
+      </>,
+    );
+    await waitFor(() => expect(screen.getByTestId('gate')).toHaveAttribute('data-cloud', 'false'));
+    await settle();
+    await act(async () => {
+      await refresh!('object');
+    });
+    await settle();
+    expect(screen.getByTestId('gate')).toHaveAttribute('data-cloud', 'false');
+    expect(metaReads(calls).filter((c) => c.startsWith('object?names=') || c.startsWith('object/'))).toEqual([
+      'object?names=sys_cloud_only,sys_queue',
+      'object?names=sys_cloud_only,sys_queue',
+    ]);
   });
 
   it('an activity row names its object from a read of that object alone', async () => {
