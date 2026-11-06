@@ -82,7 +82,7 @@ Legend: **[native]** = a better-auth config/plugin does the enforcing; **[custom
 |---|---|---|---|
 | `mfa_required` (deployment level: `off` / `administrators` / `everyone`) *(levels amended 2026-11-06; was a global toggle — see the status line)* | off | post-`/sign-in` session gate | **[custom]** `twoFactor` plugin already provides TOTP + backup codes (opt-in via `sys_user.two_factor_enabled` + `sys_two_factor`). When the level covers the user (`everyone`: every user; `administrators`: the tenant-level, organization-level and delegated administrators of [ADR-0090](./0090-permission-model-v2-concept-convergence.md) D12), a session for a user with `two_factor_enabled = false` is marked **un-stepped-up** and gated out of all protected resources until enrollment + verification |
 | `mfa_grace_period_days` | 7 | same | **[custom]+[field]** `sys_user.mfa_required_at`; allow a grace window to enroll before hard-blocking |
-| `access_policy.mfa_required` (per-org, settings tenant rung) *(store amended 2026-11-06; was `sys_organization.require_mfa`, now retired — see the note under D7)* | — | `customSession` org resolution | **[custom]** an org may *require* MFA above the global floor, on the same three levels: `off` (nothing beyond the deployment's) or a level at least as strong as the deployment's, a stronger level only (`off`, then `administrators`, then `everyone`) *(levels amended 2026-11-06 — see the status line)* |
+| `access_policy.mfa_required` (per-org, settings tenant rung) *(store amended 2026-11-06; was `sys_organization.require_mfa`, now retired — see the note under D7)* | — | `customSession` org resolution | **[custom]** an org may *require* MFA above the global floor, on the same three levels: `off` (nothing beyond the deployment's) or a level at least as strong as the deployment's, never a weaker one (`off`, then `administrators`, then `everyone`) *(levels amended 2026-11-06 — see the status line)* |
 
 > better-auth makes MFA *available*; making it *required* is the missing enforcement. Gate at the session-validation seam so a half-authenticated (password-only) session cannot read data.
 >
@@ -178,7 +178,8 @@ Plus admin-facing surface: a `sys_user` list-view filter for locked accounts + a
 > [#30922](https://github.com/objectstack-ai/objectstack/issues/30922), maintainer, verbatim: 「修订 ADR 写明存放位置（推荐）」;
 > implemented by PR [#31013](https://github.com/objectstack-ai/objectstack/pull/31013)).** TL;DR 6, D3, D5 and this
 > section named `sys_organization.*` columns as the per-organization store. The store is the settings **tenant rung**
-> instead (ADR-0007's cascade at scope `tenant`; ADR-0131): a tenant-scoped settings namespace, `access_policy`, one
+> instead (ADR-0007's cascade at scope `tenant`; ADR-0131 (organization ownership is total: each such row is owned by
+> its organization, and only the settings global rung leaves `sys_setting`)): a tenant-scoped settings namespace, `access_policy`, one
 > `sys_setting` row per organization, carrying the organization's allowed IP ranges, its idle, absolute and concurrent
 > session limits, and its MFA requirement. The deployment's `auth` values (scope `global`) are the default and the floor.
 > The rule is unchanged: an organization may only *tighten*, never loosen, the deployment's floor.
