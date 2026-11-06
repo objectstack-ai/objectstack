@@ -19,13 +19,14 @@ import type { ICloudBindingService } from '@objectstack/spec/contracts';
 import { resolveCloudUrl } from './cloud-url.js';
 import type { ConnectionCredentialStore } from './connection-credential-store.js';
 
-/** The kernel service name {@link createCloudBinding}'s answer is registered under. */
-export const CLOUD_BINDING_SERVICE = 'cloud-binding';
-
 export interface CloudBindingOptions {
     /** The plugin's `controlPlaneApiKey` option (the env→cloud service key); `OS_CLOUD_API_KEY` when absent. */
     controlPlaneApiKey?: string;
-    /** The plugin's `controlPlaneUrl` option; `OS_CLOUD_URL`, then the default, when absent. */
+    /**
+     * The plugin's `controlPlaneUrl` option; `OS_CLOUD_URL`, then the default,
+     * when absent. An explicit empty (or blank) value declares that this
+     * server has no control plane, the same as a decline spelling.
+     */
     controlPlaneUrl?: string;
     /** Where a self-hosted bind persisted its `oscc_` bearer. */
     store: Pick<ConnectionCredentialStore, 'read'>;
@@ -40,6 +41,13 @@ export interface CloudBindingOptions {
  * derivation `isCloudManaged` reads in `@objectstack/core`
  * (`resolveControlPlaneApiKey`), so "platform-managed" and "which bearer"
  * cannot disagree.
+ *
+ * The control-plane URL is {@link resolveCloudUrl}'s answer, with one
+ * exception: an explicit empty option answers `''`, "no control plane".
+ * `resolveCloudUrl` reads that `''` as unset and falls through to the
+ * environment and the default, while this plugin's own routes read it as
+ * "cloud not configured". The routes read their URL through this member, so
+ * the binding and the routes give the one option one reading.
  */
 export function createCloudBinding(options: CloudBindingOptions): ICloudBindingService {
     const credential = (): string =>
@@ -47,6 +55,12 @@ export function createCloudBinding(options: CloudBindingOptions): ICloudBindingS
     return {
         credential,
         bound: () => credential() !== '',
-        controlPlaneUrl: () => resolveCloudUrl(options.controlPlaneUrl),
+        controlPlaneUrl: () => resolveBindingUrl(options.controlPlaneUrl),
     };
+}
+
+/** {@link resolveCloudUrl}, except that an explicit empty (or blank) option answers `''`. */
+function resolveBindingUrl(explicit: string | undefined): string {
+    if (typeof explicit === 'string' && explicit.trim() === '') return '';
+    return resolveCloudUrl(explicit);
 }

@@ -849,11 +849,17 @@ const DEFAULT_MAP_STYLE_ORIGIN = 'https://demotiles.maplibre.org';
  *   sign-up form loads Cloudflare's script, which draws the challenge in a
  *   frame from the same origin. With the challenge off, neither is listed and
  *   `frame-src` is left to `default-src 'self'`, exactly as before.
+ * - {@link CLOUDFLARE_WEB_ANALYTICS_ORIGIN} in `connect-src` only while the
+ *   host passes the `cloudflareWebAnalytics` option: the beacon the document
+ *   then carries reports each page view there. The beacon itself loads by the
+ *   document's nonce, so its host is not in `script-src`. Without the option,
+ *   neither the tag nor the origin is written, exactly as before.
  */
 function consoleContentSecurityPolicy(input: {
   nonce: string;
   reactPages: boolean;
   turnstile: boolean;
+  cloudflareWebAnalytics: boolean;
   errorReportingOrigin: string | undefined;
   mapStyleOrigin: string | undefined;
   storageUploadOrigin: string | undefined;
@@ -867,6 +873,7 @@ function consoleContentSecurityPolicy(input: {
   if (input.mapStyleOrigin !== undefined) connectSrc.push(input.mapStyleOrigin);
   if (input.errorReportingOrigin !== undefined) connectSrc.push(input.errorReportingOrigin);
   if (input.storageUploadOrigin !== undefined) connectSrc.push(input.storageUploadOrigin);
+  if (input.cloudflareWebAnalytics) connectSrc.push(CLOUDFLARE_WEB_ANALYTICS_ORIGIN);
   connectSrc.push(...input.extraConnectSources);
   const directives: string[][] = [
     ['default-src', "'self'"],
@@ -885,6 +892,57 @@ function consoleContentSecurityPolicy(input: {
 
 /** Cloudflare Turnstile's origin: its loader script and its challenge frame. */
 const TURNSTILE_ORIGIN = 'https://challenges.cloudflare.com';
+
+/**
+ * Cloudflare Web Analytics' beacon script, as the site's manual JavaScript
+ * snippet names it. It is written into the document only when the host passes
+ * the `cloudflareWebAnalytics` option ({@link cloudflareWebAnalyticsBeaconScript}).
+ *
+ * Its host is ⛔ NOT added to `script-src`: the tag carries the document's
+ * nonce, which admits that one element whatever its `src`, while a host entry
+ * would admit every file the host serves.
+ */
+const CLOUDFLARE_WEB_ANALYTICS_BEACON_SRC = 'https://static.cloudflareinsights.com/beacon.min.js';
+
+/** The origin Cloudflare Web Analytics' beacon reports page views to. */
+const CLOUDFLARE_WEB_ANALYTICS_ORIGIN = 'https://cloudflareinsights.com';
+
+/**
+ * A Cloudflare Web Analytics site token: 32 hexadecimal digits. The character
+ * set is what keeps the token from carrying anything but itself into the
+ * document; the attribute it lands in is escaped as well.
+ */
+const CLOUDFLARE_WEB_ANALYTICS_TOKEN = /^[0-9a-f]{32}$/i;
+
+/**
+ * The site token of the host's `cloudflareWebAnalytics` option, or `undefined`
+ * when the option is left out; a token outside {@link CLOUDFLARE_WEB_ANALYTICS_TOKEN}
+ * refuses the boot. The refusal names the value's length and kind, never the
+ * value: a credential passed here by mistake would otherwise land in the boot
+ * log.
+ */
+function readCloudflareWebAnalyticsToken(option: { token: string } | undefined): string | undefined {
+  if (option === undefined) return undefined;
+  const token: unknown = (option as { token?: unknown } | null)?.token;
+  if (typeof token === 'string' && CLOUDFLARE_WEB_ANALYTICS_TOKEN.test(token)) return token;
+  const shown = typeof token === 'string' ? `a ${token.length}-character string` : token === null ? 'null' : typeof token;
+  throw new Error(
+    `Console static: the cloudflareWebAnalytics option's token is ${shown}, which is not a Cloudflare Web Analytics `
+    + 'site token. Pass the 32 hexadecimal digits the site\'s JavaScript snippet carries as its token, or leave the '
+    + 'option out to serve the console without the beacon.',
+  );
+}
+
+/**
+ * The Cloudflare Web Analytics beacon tag for `token`, deferred, with the
+ * token as the `data-cf-beacon` JSON the beacon reads. The attribute value is
+ * escaped, so nothing in it can close the attribute or the tag. It is written
+ * before {@link stampScriptNonce} runs, which gives it the document's nonce.
+ */
+function cloudflareWebAnalyticsBeaconScript(token: string): string {
+  const config = escapeHtml(JSON.stringify({ token }));
+  return `<script defer src="${CLOUDFLARE_WEB_ANALYTICS_BEACON_SRC}" data-cf-beacon="${config}"></script>`;
+}
 
 /**
  * Whether the opt-in Turnstile challenge on sign-up is on: BOTH variables set
@@ -995,8 +1053,19 @@ function stampScriptNonce(html: string, nonce: string): string {
  * the anonymous form door serves that slug, and otherwise gets the same
  * not-found answer as before. Mounted
  * only with the Console, because without it there is no page to send anyone to.
+ *
+ * `cloudflareWebAnalytics: { token }` adds Cloudflare Web Analytics to the
+ * document this plugin serves, and to no other: the beacon tag, stamped with
+ * the document's nonce, and the origin it reports to in `connect-src`. It is an
+ * option rather than an env var so a host that mounts the Console more than
+ * once (a control plane and its tenant planes) can count one mount only. A
+ * token that is not 32 hexadecimal digits refuses the boot. Left out, the
+ * document and its policy are exactly what they were without it.
  */
-export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: boolean; rootRedirect?: boolean }) {
+export function createConsoleStaticPlugin(
+  distPath: string,
+  options?: { isDev?: boolean; rootRedirect?: boolean; cloudflareWebAnalytics?: { token: string } },
+) {
   return {
     name: 'com.objectstack.console-static',
 
@@ -1017,6 +1086,8 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
       // The deployment's default map style (#26001), on the contract the
       // runtime-config door serves it under, so the policy allows that URL.
       const mapStyleOrigin = readMapStyleOrigin(process.env);
+      // The host's own option, checked at boot like the two reads above.
+      const cloudflareWebAnalyticsToken = readCloudflareWebAnalyticsToken(options?.cloudflareWebAnalytics);
 
       const indexPath = path.join(absoluteDist, 'index.html');
       if (!fs.existsSync(indexPath)) {
@@ -1097,6 +1168,10 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
         }
         const capTag = reactPagesCapabilityScript(reactPages);
         html = html.replace(/<head(\s[^>]*)?>/i, (m) => `${m}\n    ${capTag}`);
+        if (cloudflareWebAnalyticsToken !== undefined) {
+          const beaconTag = cloudflareWebAnalyticsBeaconScript(cloudflareWebAnalyticsToken);
+          html = html.replace(/<head(\s[^>]*)?>/i, (m) => `${m}\n    ${beaconTag}`);
+        }
         // Stamped while the document holds only the build's markup and the
         // server's own tags: nothing read at request time is written yet, so
         // no runtime value can ever carry the nonce.
@@ -1117,6 +1192,7 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
           nonce,
           reactPages,
           turnstile: readTurnstileEnabled(),
+          cloudflareWebAnalytics: cloudflareWebAnalyticsToken !== undefined,
           errorReportingOrigin: shell?.errorReportingOrigin,
           mapStyleOrigin,
           storageUploadOrigin: await readStorageUploadOrigin(ctx, reportStorageUploadOriginFailure),

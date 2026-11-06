@@ -11,8 +11,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ICloudBindingService } from '@objectstack/spec/contracts';
-import { CLOUD_BINDING_SERVICE, createCloudBinding } from './cloud-binding.js';
+import { CLOUD_BINDING_SERVICE, type ICloudBindingService } from '@objectstack/spec/contracts';
+import { createCloudBinding } from './cloud-binding.js';
 import { CloudConnectionPlugin } from './cloud-connection-plugin.js';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { DEFAULT_CLOUD_URL } from './cloud-url.js';
@@ -70,9 +70,22 @@ describe('createCloudBinding — the control-plane URL', () => {
         vi.stubEnv('OS_CLOUD_URL', 'off');
         expect(createCloudBinding({ store }).controlPlaneUrl()).toBe('');
     });
+
+    // [#30762] An explicit empty option is the host saying "no control plane",
+    // the reading the plugin's routes always gave it. It does not fall through
+    // to OS_CLOUD_URL or the default the way an absent option does.
+    it.each(['', '   '])('is empty for an explicit empty option %j, over OS_CLOUD_URL and the default', (option) => {
+        expect(createCloudBinding({ store, controlPlaneUrl: option }).controlPlaneUrl()).toBe('');
+        vi.stubEnv('OS_CLOUD_URL', 'https://env.example.com');
+        expect(createCloudBinding({ store, controlPlaneUrl: option }).controlPlaneUrl()).toBe('');
+    });
 });
 
 describe('CloudConnectionPlugin — registers the binding in init()', () => {
+    it('registers it under the name the contract exports, the one service-push reads', () => {
+        expect(CLOUD_BINDING_SERVICE).toBe('cloud-binding');
+    });
+
     it('registers cloud-binding, declared in providesServices, reading the plugin\'s own credential store', async () => {
         const services = new Map<string, unknown>();
         const plugin = new CloudConnectionPlugin({ credentialPath: join(dir, 'cloud-connection.json'), controlPlaneUrl: 'https://cp.example.com' });

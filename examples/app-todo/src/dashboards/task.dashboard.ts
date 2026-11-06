@@ -5,7 +5,7 @@ import type { Dashboard } from '@objectstack/spec/ui';
 /**
  * Task Overview dashboard.
  *
- * ADR-0021 single-form: every widget is bound to the `task_metrics` dataset
+ * ADR-0021 single-form: every widget is bound to the `todo_task_metrics` dataset
  * (`dataset` + `dimensions` + `values`, measures/dimensions referenced BY
  * NAME) so the numbers stay consistent with every other surface. The
  * dual-form migration window is over — no widget carries the legacy inline
@@ -13,7 +13,7 @@ import type { Dashboard } from '@objectstack/spec/ui';
  * `runtimeFilter` (presentation scope).
  */
 export const TaskDashboard: Dashboard = {
-  name: 'task_dashboard',
+  name: 'todo_task_dashboard',
   label: 'Task Overview',
   description: 'Key task metrics and productivity overview',
 
@@ -28,7 +28,7 @@ export const TaskDashboard: Dashboard = {
       id: 'total_tasks',
       title: 'Total Tasks',
       type: 'metric',
-      dataset: 'task_metrics',
+      dataset: 'todo_task_metrics',
       values: ['task_count'],
       layout: { x: 0, y: 0, w: 3, h: 2 },
     },
@@ -37,7 +37,7 @@ export const TaskDashboard: Dashboard = {
       title: 'Completed Today',
       type: 'metric',
       filter: { status: 'completed', completed_date: { $gte: '{today}' } },
-      dataset: 'task_metrics',
+      dataset: 'todo_task_metrics',
       values: ['task_count'],
       layout: { x: 3, y: 0, w: 3, h: 2 },
     },
@@ -46,7 +46,7 @@ export const TaskDashboard: Dashboard = {
       title: 'Overdue Tasks',
       type: 'metric',
       filter: { due_date: { $lt: '{today}' }, status: { $ne: 'completed' } },
-      dataset: 'task_metrics',
+      dataset: 'todo_task_metrics',
       values: ['task_count'],
       layout: { x: 6, y: 0, w: 3, h: 2 },
     },
@@ -55,7 +55,7 @@ export const TaskDashboard: Dashboard = {
       title: 'Completion Rate',
       type: 'metric',
       filter: { created_at: { $gte: '{current_week_start}' } },
-      dataset: 'task_metrics',
+      dataset: 'todo_task_metrics',
       values: ['task_count'],
       layout: { x: 9, y: 0, w: 3, h: 2 },
     },
@@ -72,7 +72,7 @@ export const TaskDashboard: Dashboard = {
       title: 'Tasks by Status',
       type: 'pie',
       filter: { status: { $ne: 'completed' } },
-      dataset: 'task_metrics',
+      dataset: 'todo_task_metrics',
       dimensions: ['status'],
       values: ['task_count'],
       layout: { x: 0, y: 2, w: 6, h: 4 },
@@ -82,7 +82,7 @@ export const TaskDashboard: Dashboard = {
       title: 'Tasks by Priority',
       type: 'bar',
       filter: { status: { $ne: 'completed' } },
-      dataset: 'task_metrics',
+      dataset: 'todo_task_metrics',
       dimensions: ['priority'],
       values: ['task_count'],
       layout: { x: 6, y: 2, w: 6, h: 4 },
@@ -94,7 +94,7 @@ export const TaskDashboard: Dashboard = {
       title: 'Weekly Task Completion',
       type: 'line',
       filter: { status: 'completed', completed_date: { $gte: '{4_weeks_ago}' } },
-      dataset: 'task_metrics',
+      dataset: 'todo_task_metrics',
       dimensions: ['completed_date'],
       values: ['task_count'],
       layout: { x: 0, y: 6, w: 8, h: 4 },
@@ -104,7 +104,7 @@ export const TaskDashboard: Dashboard = {
       title: 'Tasks by Category',
       type: 'donut',
       filter: { status: { $ne: 'completed' } },
-      dataset: 'task_metrics',
+      dataset: 'todo_task_metrics',
       dimensions: ['category'],
       values: ['task_count'],
       layout: { x: 8, y: 6, w: 4, h: 4 },

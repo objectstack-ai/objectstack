@@ -1606,7 +1606,7 @@
           "the permission-zoo sets examples/app-showcase/src/security/permission-sets.ts: showcase_manager grants showcase_contact read (line 124), showcase_contributor omits it (lines 36-45) — the both-sides read-gate probe binds a user to each"
         ],
         "knownGaps": [
-          "STALE (QA run #24616): the child-read-gate clause needs two members bound to the manager and contributor positions, and a stock boot provides them — the search:qa-contributor-bound-member recipe (invite, sign-up, then an admin POST of sys_user_position; run it twice, once with position 'manager', once with 'contributor'). It is not blocked(fixture) on a single-user boot; the paging clauses still run on the seeded admin alone",
+          "STALE (QA run #24616): the child-read-gate clause needs two members bound to the showcase_manager and showcase_contributor positions, and a stock boot provides them — the search:qa-contributor-bound-member recipe (invite, sign-up, then an admin POST of sys_user_position; run it twice, once with position 'showcase_manager', once with 'showcase_contributor'). It is not blocked(fixture) on a single-user boot; the paging clauses still run on the seeded admin alone",
           "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
@@ -2444,7 +2444,7 @@
         "drag one task bar to new dates; capture the PATCH and re-read the record over the API",
         "reload and confirm the bar re-renders from the persisted dates",
         "on an extended fixture (per knownGaps): configure dependencies + a locked row (the direct drag on a locked leaf needs only knownGaps[0]'s lockField overlay); run toolbar auto-schedule; capture the confirm dialog, cancel once (verify zero writes), run again and apply",
-        "trigger a veto path (write rejected server-side) and confirm the bar snaps back. Runnable on stock with no lockField (QA run #24616): bind a member to the `contributor` position (search:qa-contributor-bound-member's steps; task_own_rows shows it only its assigned tasks), open the gantt as that member, have the admin reassign one of its tasks away over the API, then drag that bar — the PATCH answers 404 and the bar snaps back with 'Save failed — the change was rolled back'"
+        "trigger a veto path (write rejected server-side) and confirm the bar snaps back. Runnable on stock with no lockField (QA run #24616): bind a member to the `showcase_contributor` position (search:qa-contributor-bound-member's steps; task_own_rows shows it only its assigned tasks), open the gantt as that member, have the admin reassign one of its tasks away over the API, then drag that bar — the PATCH answers 404 and the bar snaps back with 'Save failed — the change was rolled back'"
       ],
       "acceptance": [
         {
@@ -6156,7 +6156,7 @@
       "surface": "mixed",
       "personas": [
         "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
-        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password). Neither stock demo persona is an updater on showcase_task: the updater is a member bound to the `contributor` position (allowEdit on showcase_task), whose task RLS (task_own_rows) shows only tasks assigned to it — so assign it some tasks first (admin PATCH assignee), QA runs #24558 / #24616"
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password). Neither stock demo persona is an updater on showcase_task: the updater is a member bound to the `showcase_contributor` position (allowEdit on showcase_task), whose task RLS (task_own_rows) shows only tasks assigned to it — so assign it some tasks first (admin PATCH assignee), QA runs #24558 / #24616"
       ],
       "fixtures": {
         "app": "showcase",
