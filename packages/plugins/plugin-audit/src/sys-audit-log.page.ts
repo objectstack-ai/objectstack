@@ -11,16 +11,17 @@ import type { Page } from '@objectstack/spec/ui';
  *
  * ## Why the page exists: the other rows about the same record
  *
- * A settings write records a `config_change` row whose `new_value` is a
- * DIGEST, never the value (`service-settings`' `config-change-audit.ts`), so
- * the row alone cannot answer "what was it changed to". The CRUD mirror
+ * A settings write records a `config_change` row whose `old_value` and
+ * `new_value` carry the setting's readable before and after for a key that
+ * is not secret-valued, and only its digest for a secret-valued key
+ * (`service-settings`' `config-change-audit.ts`). The CRUD mirror
  * (`audit-writers.ts`) writes its own row about the same write, on the stored
- * settings row, and that row carries the change: a non-secret value's old and
- * new state, a secret's only as the mirror's ledger view masks it. Both rows
- * name the same settings row as `record_id` (the `config_change` writer
- * records the id of the row the write landed on), so this page lists every
- * ledger row whose `record_id` is this row's: the `config_change` row and the
- * mirror's rows sit side by side, and the value is one row down.
+ * settings row: a non-secret value's old and new state, a secret's only as
+ * the mirror's ledger view masks it. Both rows name the same settings row as
+ * `record_id` (the `config_change` writer records the id of the row the write
+ * landed on), so this page lists every ledger row whose `record_id` is this
+ * row's: the `config_change` row and the mirror's rows sit side by side, the
+ * history of that settings row in one list.
  *
  * The list is the ledger itself, keyed on the pointer's id half on both sides
  * (`relationshipField` and `relationshipValueField` both `record_id`): the
