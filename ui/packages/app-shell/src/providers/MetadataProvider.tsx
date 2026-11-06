@@ -167,6 +167,24 @@ const NO_NAMES: readonly string[] = Object.freeze([]) as readonly string[];
  */
 const NAMES_ONLY_SCOPE = '';
 
+/**
+ * objectstack#29444 — the key of the batched names scope: the objects a
+ * reader asks only the presence of, outside an app (the console's roster
+ * gate on Home), answered by ONE `GET /meta/object?names=a,b,c` per set of
+ * names not asked yet, instead of one by-name read each. A symbol, so no
+ * package id can collide with it.
+ *
+ * It is its own entry, never the names-only scope's: a list answer carries no
+ * by-name envelope (no `sortability`), shares no request with the adapter's
+ * `getObjectSchema` (objectui#13044), and cannot tell an absent object from a
+ * refused one (`OBJECT_PACKAGE_DISABLED`), so a route's reader never takes
+ * its answer for its own.
+ */
+const NAMES_BATCH_SCOPE: unique symbol = Symbol('names-batch');
+
+/** A scope's key: a package id, {@link NAMES_ONLY_SCOPE}, or {@link NAMES_BATCH_SCOPE}. */
+type ObjectScopeKey = string | typeof NAMES_BATCH_SCOPE;
+
 interface MetadataProviderProps {
   children: ReactNode;
   adapter: ObjectStackAdapter;
@@ -946,8 +964,9 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
   const cacheRef = useRef<Map<string, TypeCacheEntry>>(new Map());
   const itemPromisesRef = useRef<Map<string, ItemPromiseMap>>(new Map());
   // objectui#12811 — the package-scoped object reads, keyed by package id,
-  // and the names-only scope under NAMES_ONLY_SCOPE (objectui#12980).
-  const scopesRef = useRef<Map<string, ObjectScopeEntry>>(new Map());
+  // and the names-only scope under NAMES_ONLY_SCOPE (objectui#12980), and
+  // the batched names scope under NAMES_BATCH_SCOPE (objectstack#29444).
+  const scopesRef = useRef<Map<ObjectScopeKey, ObjectScopeEntry>>(new Map());
   // Types whose session entry this boot wrote under NO_ORG_SCOPE because the
   // active organization had not resolved yet (objectui#5243).
   const unscopedSeedTypesRef = useRef<Set<string>>(new Set<string>());
@@ -1412,7 +1431,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
   );
 
   const fetchScopeName = useCallback(
-    (packageId: string, entry: ObjectScopeEntry, name: string): Promise<void> => {
+    (packageId: ObjectScopeKey, entry: ObjectScopeEntry, name: string): Promise<void> => {
       entry.names.set(name, 'pending');
       return readItem('object', name).then(({ item, failed, refusal, answer }) => {
         if (scopesRef.current.get(packageId) !== entry) return;
@@ -1452,6 +1471,66 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
     [bump, readItem],
   );
 
+  // objectstack#29444 — the batched names scope's read: `names` in ONE
+  // `GET /meta/object?names=a,b,c` (`meta.getItems`, ruling A of
+  // objectstack#29236). The list door answers each name through the same
+  // per-caller gate, object mask and translation as the by-name read, and
+  // leaves out an object of a disabled package as that read refuses it.
+  //
+  //  - A name the answer holds is answered with its definition.
+  //  - A name the answer leaves out is answered MISSING, as a by-name 404 is:
+  //    the door answers an unknown name by its absence, never a 404.
+  //  - A read that obtained no answer fails EVERY name it asked, as a failed
+  //    by-name read fails its one (objectui#13009, objectui#13052): no name is
+  //    recorded missing, and none is asked again until `invalidate`,
+  //    `refresh` or an organization switch.
+  //
+  // Only the asked names are read out of the answer, so an item the request
+  // did not name never lands in the scope.
+  const fetchScopeNames = useCallback(
+    (entry: ObjectScopeEntry, names: readonly string[]): Promise<void> => {
+      for (const name of names) entry.names.set(name, 'pending');
+      return adapterRef.current
+        .getClient()
+        .meta.getItems('object', { names })
+        .then(
+          (res: unknown) => {
+            if (scopesRef.current.get(NAMES_BATCH_SCOPE) !== entry) return;
+            const asked = new Set(names);
+            const items = extractItems(res).filter((it: any) => asked.has(it?.name));
+            ingestObjectList(items, res);
+            const served = new Set(items.map((it: any) => it.name as string));
+            entry.items = [...entry.items.filter((it: any) => !asked.has(it?.name)), ...items];
+            const missing = entry.missing.filter((name) => !asked.has(name));
+            for (const name of names) {
+              entry.names.set(name, 'answered');
+              if (!served.has(name)) missing.push(name);
+            }
+            entry.missing = missing;
+            const answers = { ...entry.answers };
+            for (const name of names) delete answers[name];
+            entry.answers = answers;
+            debug(`fetched object names scope names=${names.length} items=${items.length}`);
+            bump();
+          },
+          (err: unknown) => {
+            if (scopesRef.current.get(NAMES_BATCH_SCOPE) !== entry) return;
+            debug(`fetch failed object names scope names=${names.length}`, err);
+            const answer = failedReadAnswer(err);
+            const answers = { ...entry.answers };
+            for (const name of names) {
+              entry.names.set(name, 'failed');
+              if (answer) answers[name] = answer;
+              else delete answers[name];
+            }
+            entry.answers = answers;
+            bump();
+          },
+        );
+    },
+    [bump],
+  );
+
   /** Refetch every scope in place: the items stay until the answers replace them. */
   const refreshScopes = useCallback((): Promise<void>[] => {
     // `getItem` answers from the `object` entry's by-name cache; a refresh
@@ -1462,11 +1541,17 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
     const pending: Promise<void>[] = [];
     for (const [packageId, entry] of scopesRef.current) {
       if (entry.status === 'idle') continue;
+      if (packageId === NAMES_BATCH_SCOPE) {
+        // objectstack#29444 — its names are asked again in one request, as they were asked.
+        const names = Array.from(entry.names.keys());
+        if (names.length > 0) pending.push(fetchScopeNames(entry, names));
+        continue;
+      }
       if (packageId !== NAMES_ONLY_SCOPE) pending.push(fetchScopeList(packageId, entry));
       for (const name of Array.from(entry.names.keys())) pending.push(fetchScopeName(packageId, entry, name));
     }
     return pending;
-  }, [dropAdapterObjectReads, fetchScopeList, fetchScopeName, getEntry]);
+  }, [dropAdapterObjectReads, fetchScopeList, fetchScopeName, fetchScopeNames, getEntry]);
 
   const refresh = useCallback(
     async (type?: string): Promise<void> => {
@@ -1781,10 +1866,19 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
   // registry is already loaded (Studio was opened, say), the scope is cut from
   // it and nothing is requested. With `names` and no `packageId` it is the
   // names-only scope (objectui#12980): no package list, each name by name.
+  //
+  // objectstack#29444 — `batch: true`, this package's own hand-off beside
+  // `views: false` (`useNavMemberGates`, outside an app), reads a names-only
+  // scope from the batched names scope: the names not asked yet are asked in
+  // one `?names=` request. Under the draft preview, whose client has no
+  // names filter, it is the names-only scope, each name by name.
   const readObjectScope = useCallback(
-    (scope: { packageId?: string; names?: readonly string[]; views?: false }) => {
+    (scope: { packageId?: string; names?: readonly string[]; views?: false; batch?: true }) => {
       const namesOnly = !scope.packageId && !!scope.names && scope.names.length > 0;
-      const packageId = scope.packageId || (namesOnly ? NAMES_ONLY_SCOPE : undefined);
+      const batched = namesOnly && scope.views === false && scope.batch === true && !previewClientRef.current;
+      const packageId: ObjectScopeKey | undefined = batched
+        ? NAMES_BATCH_SCOPE
+        : scope.packageId || (namesOnly ? NAMES_ONLY_SCOPE : undefined);
       if (packageId === undefined) {
         const status = getEntry('object').status;
         const served = readType('object');
@@ -1815,13 +1909,14 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
             // No package list to wait for: the names are asked at once.
             entry.status = 'ready';
             entry.answered = true;
-          } else {
+          } else if (typeof packageId === 'string') {
             void fetchScopeList(packageId, entry);
           }
         }
       }
       let namesSettled = true;
       const failedNames: string[] = [];
+      const toBatch: string[] = [];
       if (scope.names && scope.names.length > 0) {
         if (!entry.answered) {
           namesSettled = false;
@@ -1847,10 +1942,12 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
               continue;
             }
             namesSettled = false;
-            void fetchScopeName(packageId, entry, name);
+            if (batched) toBatch.push(name);
+            else void fetchScopeName(packageId, entry, name);
           }
         }
       }
+      if (toBatch.length > 0) void fetchScopeNames(entry, toBatch);
       // objectui#13052 — `settled` stays false while a name's read has
       // failed (a failure is not an answer, objectui#13009); `failed` names
       // those reads once nothing else is still in flight, so a reader can stop
@@ -1897,7 +1994,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
         views: scopeViews.views,
       };
     },
-    [fetchScopeList, fetchScopeName, getEntry, readType, viewsForObjects],
+    [fetchScopeList, fetchScopeName, fetchScopeNames, getEntry, readType, viewsForObjects],
   );
 
   const value = useMemo<MetadataContextValue>(() => {

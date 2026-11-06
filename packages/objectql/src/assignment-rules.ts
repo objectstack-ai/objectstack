@@ -15,6 +15,25 @@
  * (ADR-0138 D1 item 3's order: hooks, then assignment rules). An update never
  * evaluates a rule.
  *
+ * ## Two sources, and their order
+ *
+ * A rule is DECLARED (a stack's `assignmentRules`, read from the registry) or
+ * AUTHORED by an organization (a `sys_assignment_rule` row, owned by
+ * `@objectstack/plugin-sharing`; one row is one rule with one entry, named
+ * after the rule). The engine is first-match, and an object's authored rules
+ * go FIRST — ascending by `sort_order`, then by `name` — with the declared
+ * rules, in registry order, as the fallback. The other order would let an
+ * organization's rule never win: the activation ledger that switches a
+ * declared rule off is one deployment-wide row per rule with no organization
+ * column, so an organization cannot switch a package rule off for itself
+ * alone (ruling A on organization-authored routing, its execution parameter
+ * 1). An authored row under a declared rule's name is not evaluated — one
+ * name means one rule (ADR-0131 D4): the declared rule answers for it, as the
+ * declared queue answers for a `sys_queue` row under its name. The rows are
+ * validated on save by plugin-sharing's guard, which compiles `criteria` and
+ * `load` through {@link assignmentExpressionRefusals}, the paths this module
+ * evaluates them by.
+ *
  * ## As which identity
  *
  * A platform step, not app automation: every read — the queue's members, a
@@ -28,9 +47,14 @@
  * `owner_id` (when a member or a user was chosen) and `queue` (for a queue
  * target). Nothing else. It never refuses an insert: an empty pool parks the
  * row and warns once per rule; a queue that resolves nowhere in the row's
- * organization leaves the row ownerless with `queue` unset and warns; a read
- * that fails leaves the row as it was (with `queue` set when the entry had
- * already chosen one) and warns. Intake is never refused by assignment.
+ * organization leaves the row ownerless with `queue` unset and warns; a user
+ * target who is not an active member of the row's organization
+ * ({@link organizationMemberStanding}) leaves the row ownerless the same way
+ * and warns once; a read that fails leaves the row as it was (with `queue`
+ * set when the entry had already chosen one) and warns — the organization's
+ * own rules unreadable included, which routes the row by no rule rather than
+ * by the fallback its own rules would have overtaken. Intake is never refused
+ * by assignment.
  *
  * ## The strategies
  *
@@ -48,7 +72,7 @@
  */
 
 import { compileCelToFilter, ExpressionEngine } from '@objectstack/formula';
-import { METADATA_ACTIVATION_TABLE } from '@objectstack/core';
+import { METADATA_ACTIVATION_TABLE, isUserBanInForce } from '@objectstack/core';
 import { resolveInjectedColumnProvenance } from '@objectstack/spec/data';
 import type { IOwnershipQueueService } from '@objectstack/spec/contracts';
 
@@ -64,6 +88,12 @@ export const OWNERSHIP_QUEUE_SOURCE_SLOT: unique symbol = Symbol.for('objectstac
 export const ASSIGNMENT_CURSOR_OBJECT = 'sys_assignment_cursor';
 /** The registry type and the activation-ledger `metadata_type` of an assignment rule. */
 export const ASSIGNMENT_RULE_TYPE = 'assignment_rule';
+/** An organization's own assignment rules (owned by `@objectstack/plugin-sharing`). */
+export const ASSIGNMENT_RULE_OBJECT = 'sys_assignment_rule';
+/** The organization membership table a user target is resolved against. */
+const MEMBER_OBJECT = 'sys_member';
+/** The user table whose ban columns a user target's standing reads. */
+const USER_OBJECT = 'sys_user';
 
 const OWNER_FIELD = 'owner_id';
 const QUEUE_FIELD = 'queue';
@@ -114,6 +144,12 @@ interface ActiveRule {
   entries: RuleEntry[];
 }
 
+/** One evaluation's memo: least-loaded counts and user-target standings, never older than the insert that asked. */
+interface EvaluationPass {
+  loads: Map<string, Map<string, number>>;
+  standings: Map<string, Promise<OrganizationMemberStanding>>;
+}
+
 function present(v: unknown): string | null {
   if (v == null) return null;
   const s = String(v);
@@ -151,6 +187,90 @@ function ruleOf(item: unknown): ActiveRule | null {
     });
   }
   return entries.length > 0 ? { name: item.name, object: item.object, entries } : null;
+}
+
+/**
+ * A stored `sys_assignment_rule` row as the rule it is: one entry, named after
+ * the rule, so the round-robin cursor keys it (rule, entry, organization) like
+ * any declared entry. `null` for a row that does not read as a rule.
+ */
+function authoredRuleOf(row: Record<string, unknown>): ActiveRule | null {
+  const name = present(row.name);
+  if (!name) return null;
+  return ruleOf({
+    name,
+    object: row.object_name,
+    entries: [{
+      name,
+      criteria: row.criteria,
+      assignTo: { type: row.recipient_type, value: row.recipient_id },
+      strategy: row.strategy,
+      load: row.load,
+    }],
+  });
+}
+
+function sortOrderOf(row: Record<string, unknown>): number {
+  const n = Number(row.sort_order ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * The refusals of an entry's `criteria` and `load`, compiled by the paths
+ * this module evaluates them by — `criteria` by the expression engine that
+ * {@link AssignmentRuleEvaluator} interprets it with, `load` by the pushdown
+ * compiler its least-loaded count lowers it with. Empty when both compile (or
+ * are absent). The save guard of an organization's `sys_assignment_rule` row
+ * asks this, so a rule the engine could not evaluate is refused when it is
+ * written, never discovered as a warning at an insert.
+ */
+export function assignmentExpressionRefusals(entry: { criteria?: unknown; load?: unknown }): Array<{ field: 'criteria' | 'load'; message: string }> {
+  const out: Array<{ field: 'criteria' | 'load'; message: string }> = [];
+  const criteria = expressionOf(entry.criteria);
+  if (criteria) {
+    const compiled = ExpressionEngine.compile(criteria as any);
+    if (!compiled.ok) {
+      out.push({ field: 'criteria', message: (compiled as any).error?.message ?? 'the condition does not compile' });
+    }
+  }
+  const load = expressionOf(entry.load);
+  if (load) {
+    const compiled = compileCelToFilter(load.source, { variables: {} });
+    if (!compiled.ok) {
+      out.push({ field: 'load', message: compiled.detail ?? compiled.reason });
+    }
+  }
+  return out;
+}
+
+/**
+ * Where a user stands in an organization, for a user target: `member` — a
+ * `sys_member` row in that organization, and no ban in force on the user
+ * (`isUserBanInForce`, the one ban predicate); `not_member`; `banned`; or
+ * `unconfirmable` — no membership table is registered, so no user can be
+ * confirmed as anyone's member. A failed read throws: the caller says what
+ * the row does then.
+ *
+ * The one predicate for an active member of an organization on this surface:
+ * the engine asks it of every user target at insert, and plugin-sharing's
+ * save guard asks it of an organization rule's user target.
+ */
+export type OrganizationMemberStanding = 'member' | 'not_member' | 'banned' | 'unconfirmable';
+
+export async function organizationMemberStanding(
+  read: Pick<AssignmentHost, 'hasObject' | 'find'>,
+  userId: string,
+  organizationId: string,
+): Promise<OrganizationMemberStanding> {
+  if (!read.hasObject(MEMBER_OBJECT)) return 'unconfirmable';
+  const pinned = { isSystem: true, tenantId: organizationId, positions: [], permissions: [] };
+  const memberships = await read.find(MEMBER_OBJECT, { user_id: userId, organization_id: organizationId }, pinned, 1);
+  if (!Array.isArray(memberships) || memberships.length === 0) return 'not_member';
+  if (!read.hasObject(USER_OBJECT)) return 'member';
+  const users = await read.find(USER_OBJECT, { id: userId }, { isSystem: true, positions: [], permissions: [] }, 1);
+  const user = Array.isArray(users) ? users[0] : undefined;
+  if (!user) return 'not_member';
+  return isUserBanInForce(user) ? 'banned' : 'member';
 }
 
 /** Does `object` carry the platform's `queue` column, with storage behind it? */
@@ -191,6 +311,22 @@ export class AssignmentRuleEvaluator {
   }
 
   /**
+   * Can an insert into `object` be routed at all? The engine's cheap gate:
+   * `true` when a declared rule names the object, or when organizations can
+   * author rules (`sys_assignment_rule` is registered) and the object carries
+   * the queue column those rules need. Registry reads only.
+   */
+  mayRoute(object: string): boolean {
+    return this.rulesFor(object).length > 0 || this.authoredRulesPossible(object);
+  }
+
+  private authoredRulesPossible(object: string): boolean {
+    return object !== ASSIGNMENT_RULE_OBJECT
+      && this.host.hasObject(ASSIGNMENT_RULE_OBJECT)
+      && carriesQueueColumn(this.host.getSchema(object));
+  }
+
+  /**
    * Evaluate `object`'s rules over `candidates`, writing `owner_id` / `queue`
    * onto each row in place. Never throws.
    */
@@ -198,20 +334,44 @@ export class AssignmentRuleEvaluator {
     const pending = candidates.filter((c) => present(c.row[OWNER_FIELD]) === null && present(c.row[QUEUE_FIELD]) === null);
     if (pending.length === 0) return;
     const declared = this.rulesFor(object);
-    if (declared.length === 0) return;
-    let rules: ActiveRule[];
-    try {
-      rules = await this.switchedOn(declared);
-    } catch {
-      rules = declared;
-    }
-    if (rules.length === 0) return;
-
-    // Batch-local least-loaded adjustments, keyed per rule, entry and organization.
-    const loads = new Map<string, Map<string, number>>();
-    for (const candidate of pending) {
+    const authoredPossible = this.authoredRulesPossible(object);
+    if (declared.length === 0 && !authoredPossible) return;
+    let fallback: ActiveRule[] = [];
+    if (declared.length > 0) {
       try {
-        await this.assignOne(object, rules, candidate, loads);
+        fallback = await this.switchedOn(declared);
+      } catch {
+        fallback = declared;
+      }
+    }
+
+    // An organization's own rules, read once per organization in the batch;
+    // `null` marks an organization whose rules could not be read.
+    const authored = new Map<string, ActiveRule[] | null>();
+    if (authoredPossible) {
+      const declaredNames = new Set(declared.map((r) => r.name));
+      for (const name of this.declaredRuleNames()) declaredNames.add(name);
+      for (const { organizationId } of pending) {
+        if (organizationId && !authored.has(organizationId)) {
+          authored.set(organizationId, await this.authoredRules(object, organizationId, declaredNames));
+        }
+      }
+    }
+
+    // Batch-local least-loaded adjustments, keyed per rule, entry and
+    // organization, and user-target standings, keyed per user and organization.
+    const pass: EvaluationPass = { loads: new Map(), standings: new Map() };
+    for (const candidate of pending) {
+      const own = candidate.organizationId ? authored.get(candidate.organizationId) : undefined;
+      // The organization's rules go first; when they could not be read the row
+      // is written as it stood — never routed by the fallback they overtake.
+      if (own === null) continue;
+      const rules = own ? [...own, ...fallback] : fallback;
+      // A row with no organization is reported (inside `assignOne`) only when
+      // a declared rule names its object; no rule at all is the cheap case.
+      if (rules.length === 0) continue;
+      try {
+        await this.assignOne(object, rules, candidate, pass);
       } catch (err: any) {
         // ⛔ Intake is never refused by assignment.
         this.host.logger?.warn?.('[assignment] evaluation failed — the row is written as it stood', {
@@ -221,11 +381,65 @@ export class AssignmentRuleEvaluator {
     }
   }
 
+  /** Every declared assignment rule's name, switched on or off, any object — the one namespace an authored row may not take. */
+  private declaredRuleNames(): string[] {
+    let items: unknown[];
+    try {
+      items = this.host.listRules();
+    } catch {
+      return [];
+    }
+    return (Array.isArray(items) ? items : [])
+      .map((item) => (isRecord(item) && typeof item.name === 'string' ? item.name : null))
+      .filter((name): name is string => name !== null);
+  }
+
+  /**
+   * `organizationId`'s own active rules for `object`, in evaluation order
+   * (`sort_order`, then `name`) — or `null` when the read failed, which the
+   * caller answers by routing the organization's rows by no rule.
+   */
+  private async authoredRules(object: string, organizationId: string, declaredNames: ReadonlySet<string>): Promise<ActiveRule[] | null> {
+    const ctx = { isSystem: true, tenantId: organizationId, positions: [], permissions: [] };
+    let rows: Record<string, unknown>[];
+    try {
+      rows = await this.host.find(ASSIGNMENT_RULE_OBJECT, { object_name: object, organization_id: organizationId }, ctx);
+    } catch (err: any) {
+      this.host.logger?.warn?.(`[assignment] the assignment rules of organization '${organizationId}' could not be read — its new '${object}' rows are written as they stood, routed by no rule`, {
+        object, organization: organizationId, error: err?.message,
+      });
+      return null;
+    }
+    const ordered = (Array.isArray(rows) ? rows : [])
+      .filter(isRecord)
+      .sort((a, b) => sortOrderOf(a) - sortOrderOf(b) || String(a.name ?? '').localeCompare(String(b.name ?? '')));
+    const rules: ActiveRule[] = [];
+    for (const row of ordered) {
+      const name = present(row.name);
+      if (name && declaredNames.has(name)) {
+        this.warnOnce(`shadowed::${organizationId}::${name}`, `[assignment] organization '${organizationId}' has an assignment rule named '${name}', which is the name of a rule an installed app declares — one name means one rule, so the app's rule answers for it and the organization's is not evaluated. Rename the organization's rule to keep it.`, {
+          rule: name, organization: organizationId,
+        });
+        continue;
+      }
+      if (row.active === false || row.active === 0 || row.active === '0' || row.active === 'false') continue;
+      const rule = authoredRuleOf(row);
+      if (!rule) {
+        this.warnOnce(`unreadable::${organizationId}::${name ?? String(row.id ?? '')}`, `[assignment] organization '${organizationId}' has an assignment rule${name ? ` '${name}'` : ''} that does not read as a rule (no recipient, or an unknown recipient type) — it routes nothing until it is corrected`, {
+          rule: name, organization: organizationId,
+        });
+        continue;
+      }
+      if (rule.object === object) rules.push(rule);
+    }
+    return rules;
+  }
+
   private async assignOne(
     object: string,
     rules: readonly ActiveRule[],
     { row, organizationId }: AssignmentCandidate,
-    loads: Map<string, Map<string, number>>,
+    pass: EvaluationPass,
   ): Promise<void> {
     if (!organizationId) {
       this.warnOnce(`no-org::${object}`, `[assignment] a row of '${object}' has no organization, so no assignment rule is evaluated for it — it is written ownerless`, { object });
@@ -235,7 +449,7 @@ export class AssignmentRuleEvaluator {
     for (const rule of rules) {
       for (const entry of rule.entries) {
         if (!this.matches(rule, entry, row)) continue;
-        await this.route(object, rule, entry, row, organizationId, ctx, loads);
+        await this.route(object, rule, entry, row, organizationId, ctx, pass);
         return; // the first matching entry of the first matching rule decides
       }
     }
@@ -259,10 +473,10 @@ export class AssignmentRuleEvaluator {
     row: Record<string, unknown>,
     organizationId: string,
     ctx: Record<string, unknown>,
-    loads: Map<string, Map<string, number>>,
+    pass: EvaluationPass,
   ): Promise<void> {
     if (entry.assignTo.type === 'user') {
-      row[OWNER_FIELD] = entry.assignTo.value;
+      await this.routeToUser(rule, entry.assignTo.value, row, organizationId, pass);
       return;
     }
     const queueName = entry.assignTo.value;
@@ -303,13 +517,57 @@ export class AssignmentRuleEvaluator {
     }
     try {
       const chosen = entry.strategy === 'least_loaded'
-        ? await this.leastLoaded(object, rule, entry, members, organizationId, ctx, loads)
+        ? await this.leastLoaded(object, rule, entry, members, organizationId, ctx, pass.loads)
         : await this.roundRobin(rule, entry, members, organizationId, ctx);
       if (chosen) row[OWNER_FIELD] = chosen;
     } catch (err: any) {
       if (!(err instanceof AssignmentReadFailure)) throw err;
       this.host.logger?.warn?.('[assignment] a strategy read failed — the row parks in the queue', { rule: rule.name, entry: entry.name, error: err.message });
     }
+  }
+
+  /**
+   * A user target owns the row only while the user is an active member of the
+   * row's organization (ruling A's execution parameter 2). One that no longer
+   * resolves is a lapsed target, handled as a lapsed queue is: the row is
+   * written ownerless and the lapse is logged once, never refused.
+   */
+  private async routeToUser(
+    rule: ActiveRule,
+    userId: string,
+    row: Record<string, unknown>,
+    organizationId: string,
+    pass: EvaluationPass,
+  ): Promise<void> {
+    const key = `${userId}::${organizationId}`;
+    let standing = pass.standings.get(key);
+    if (!standing) {
+      standing = organizationMemberStanding(this.host, userId, organizationId);
+      pass.standings.set(key, standing);
+    }
+    let answer: OrganizationMemberStanding;
+    try {
+      answer = await standing;
+    } catch (err: any) {
+      this.host.logger?.warn?.('[assignment] the user target\'s membership could not be read — the row is written as it stood', {
+        rule: rule.name, user: userId, organization: organizationId, error: err?.message,
+      });
+      return;
+    }
+    if (answer === 'member') {
+      row[OWNER_FIELD] = userId;
+      return;
+    }
+    if (answer === 'unconfirmable') {
+      this.warnOnce(`unconfirmable::${rule.name}`, `[assignment] rule '${rule.name}' assigns to user '${userId}', but no organization membership table ('${MEMBER_OBJECT}') is registered, so no user can be confirmed as a member — the row is written ownerless.`, {
+        rule: rule.name, user: userId, organization: organizationId,
+      });
+      return;
+    }
+    const why = answer === 'banned' ? 'whose account is banned' : `who is not a member of organization '${organizationId}'`;
+    this.warnOnce(`lapsed-user::${rule.name}::${userId}::${organizationId}`, `[assignment] rule '${rule.name}' assigns to user '${userId}', ${why} — the row is written ownerless. Point the rule at a current member, or at a queue.`, {
+      rule: rule.name, user: userId, organization: organizationId, standing: answer,
+    });
   }
 
   private async leastLoaded(

@@ -118,7 +118,9 @@ to a new protocol major — never to silence a mismatch.
 
 **Object naming:** The object `name` is the canonical identifier and equals the physical table name. Embed any domain prefix directly in the name (e.g. `name: 'crm_account'`); the object-level `namespace` *field* is retired (ADR-0129 D3) and refused at load. Never set `tableName`, and never add a `sys_metadata` object to a runtime manifest.
 
-**`manifest.namespace` (ADR-0048):** Optional, but **enforced once set**. When a package declares `manifest.namespace: 'crm'`, every `object.name` must start with `crm_` or `defineStack` errors (`validateNamespacePrefix` in `@objectstack/spec`); the legacy `<ns>__<short>` double-underscore form is rejected, and `sys_`-prefixed names are platform-reserved and exempt. The namespace is also a package-ownership key — installing two packages that both claim `crm` fails with `NamespaceConflictError` (downgrade to a warning with `OS_METADATA_COLLISION=warn`). `os lint` additionally emits a non-fatal `naming/namespace-prefix` warning for bare-named UI/automation items (app, page, dashboard, flow, action, report, dataset) when a namespace is set.
+**`manifest.namespace` (ADR-0048):** Optional, but **enforced once set**. When a package declares `manifest.namespace: 'crm'`, every `object.name` must start with `crm_` or `defineStack` errors (`validateNamespacePrefix` in `@objectstack/spec`); the legacy `<ns>__<short>` double-underscore form is rejected, and `sys_`-prefixed names are platform-reserved and exempt. The namespace is also a package-ownership key — installing two packages that both claim `crm` fails with `NamespaceConflictError` (downgrade to a warning with `OS_METADATA_COLLISION=warn`).
+
+**One rule for every name:** every metadata name a package authors starts with its namespace — flows, actions, hooks, apps, pages, dashboards, reports, datasets, queues, positions, permission sets, skills (`crm_send_email`, `crm_sales_rep`) — so no two installed packages share one. Exceptions: fields, object extensions and container views (derived from a prefixed object), and translations (`<ns>_<locale>`). Today `defineStack` refuses only a bare object name and `os build` a bare doc name; `os lint`'s `naming/namespace-prefix` warns only when one package declares an app, page, dashboard, flow, report or dataset name twice, or an action name twice on one object.
 
 **Customizing an installed package (ADR-0146):** Customize an installed base `hotcrm` in its paired writable `hotcrm.custom`, which depends on it: a same-named item there with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (its `manifest.id`/`manifest.version`) replaces the base's document whole. Reads honour it only from the pair (the row's `package_id`), for a view, dashboard, report, email_template, translation, flow, action, page, app, dataset, doc, book or mapping, never judging `basedOn`. An email template is one item per (name, locale): an override names a locale the base ships; one it does not ship is added without `overrides`. Then no `?package`, `?package=hotcrm`, the layered read and both lists serve it, and removing the pair's item (`DELETE …?package=hotcrm.custom`) serves the base's again; the env-wide list holds one item per name one code package ships (a dependent's stays under its own `?package=`); a pre-D11 unbound Setup row wins over the base's until `os migrate packageless-overlays` moves it, and once movable as a declared override, its package-less save, publish, reset and rollback are refused (D11); an email-template row at a locale the base does not ship moves as the pair's own member and keeps that write. The base's address serves the pair's added locale too (both lists, the layered read with `code` null and `effective` the pair's, the execution list, a send in that locale); one a dependent adds under the base's name is served only under its own `?package=`. An undeclared pair row or a dependent's row at a base-shipped locale is an orphan in the layered read's `overlay`, `effective` = the base's. An override may narrow a public form's anonymous intake, never re-open one any honoured body withdrew. `GET /packages/hotcrm.custom/export` carries it with `overrides`.
 
@@ -302,7 +304,7 @@ token through the `CAPABILITY_PROVIDERS` registry in
 | Token | Provider package |
 |:--|:--|
 | `automation` | `@objectstack/service-automation` — flows, and any declarative `connectors:` entry |
-| `analytics` `cache` `storage` `queue` `job` `messaging` `realtime` `settings` `sms` `push` | `@objectstack/service-` + the token |
+| `analytics` `cache` `storage` `queue` `job` `messaging` `realtime` `settings` `sms` `push` | `@objectstack/service-` + the token ([the `push` block](./references/operations.md#mobile-push)) |
 | `marketplace` | `@objectstack/service-package` |
 | `audit` `email` `sharing` `approvals` `webhooks` | `@objectstack/plugin-` + the token |
 | `pinyin-search` | `@objectstack/plugin-pinyin-search` |
@@ -331,8 +333,7 @@ Five rules that change what you write:
 - **Declaring is a demand.** A capability YOU declared whose provider package is
   absent is a hard boot error; one the platform auto-injects for you stays
   best-effort (warn and continue).
-- **`auth` implies `email`.** Auth callbacks (password reset, email
-  verification, magic link, invitation) need the mail service, so the CLI
+- **`auth` implies `email`.** Auth callbacks need the mail service, so the CLI
   appends `email` whenever `auth` is required.
 - **Keep `automation` whenever `plugins:` lists a connector** — connector
   executors register their provider factories with it, and without it they have
@@ -382,7 +383,7 @@ an entry carries no `password`:
 demoStaff: [
   { name: 'Legal Lead', email: 'lead@example.com' },
   { name: 'Legal Counsel 1', email: 'counsel1@example.com', manager: 'lead@example.com',
-    position: 'legal_counsel', permissionSets: ['contracts_editor'] }],
+    position: 'crm_legal_counsel', permissionSets: ['crm_contracts_editor'] }],
 ```
 
 `name` is what a seed reference resolves by; `position` / `permissionSets`
@@ -396,11 +397,11 @@ existing account on the boot banner.
 
 ---
 
-→ Part 2 — Plugin Development & Kernel Extension: [references/plugin-development.md](./references/plugin-development.md) (Quick Reference — Detailed Rules · ObjectKernel vs LiteKernel · Plugin Interface — Quick Overview · PluginContext API · Complete Plugin Example · Using Plugins · Testing Plugins · Well-Known Plugin Names & Services · MetadataPlugin Runtime Boundary · Health Monitoring · Feature Flags); its detailed rules stay at [rules/plugin-lifecycle.md](./rules/plugin-lifecycle.md) · [rules/service-registry.md](./rules/service-registry.md) · [references/plugin-hooks.md](./references/plugin-hooks.md).
+→ Part 2 — Plugin Development & Kernel Extension: [references/plugin-development.md](./references/plugin-development.md); its detailed rules stay at [rules/plugin-lifecycle.md](./rules/plugin-lifecycle.md) · [rules/service-registry.md](./rules/service-registry.md) · [references/plugin-hooks.md](./references/plugin-hooks.md).
 
 ---
 
-→ Part 3 — Operations: CLI, Testing, Deployment: [references/operations.md](./references/operations.md) (Daily-loop commands · Build & runtime · Verify your work · Ports & networking · Data & migrations · Environments & deploy · Shipping a plugin · Testing pattern · Deployment targets · Health & observability · Common ops pitfalls).
+→ Part 3 — Operations: CLI, Testing, Deployment: [references/operations.md](./references/operations.md).
 
 ---
 

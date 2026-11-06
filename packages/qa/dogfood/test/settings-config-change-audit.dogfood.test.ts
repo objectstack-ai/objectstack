@@ -134,7 +134,9 @@ describe('#8145: a settings write reaches sys_audit_log as config_change', () =>
       key: 'workspace_name',
       encrypted: false,
     });
-    // A digest, never the value — the ledger describes the change, not the data.
+    // [#30923] The after, readable — `workspace_name` is not secret-valued —
+    // beside its digest (ADR-0007 § Audit & history).
+    expect(JSON.parse(String(row.new_value))).toMatchObject({ value: WORKSPACE_NAME });
     expect(JSON.parse(String(row.new_value)).digest).toBeTruthy();
     // Generous timeout so a REGRESSION reports `waitForRows`'s own message
     // ("expected at least one config_change row…") rather than vitest's 5s
@@ -157,15 +159,16 @@ describe('#8145: a settings write reaches sys_audit_log as config_change', () =>
     // The pointer pair: object_name names the store, record_id the row in it.
     expect(change.record_id).toBe(String(settingRows[0].id));
     // The record page's same-record list keys on record_id: beside the
-    // config_change row it finds the CRUD mirror's row about the same write,
-    // which holds the non-secret value the digest row does not.
+    // config_change row it finds the CRUD mirror's row about the same write.
+    // [#30923] Both now carry the non-secret value: the config_change row
+    // records it readable, as ADR-0007 § Audit & history decides.
     const mirror = (await findRows(ql, 'sys_audit_log', { record_id: change.record_id })).filter((r) =>
       ['create', 'update'].includes(String(r.action)),
     );
     expect(mirror.length).toBeGreaterThanOrEqual(1);
     expect(mirror.every((r) => r.object_name === change.object_name)).toBe(true);
     expect(mirror.some((r) => String(r.new_value ?? '').includes(WORKSPACE_NAME))).toBe(true);
-    expect(String(change.new_value)).not.toContain(WORKSPACE_NAME);
+    expect(JSON.parse(String(change.new_value)).value).toBe(WORKSPACE_NAME);
   }, 30_000);
 
   it('the shipped `config_changes` list view — its OWN declared filter — now matches', async () => {

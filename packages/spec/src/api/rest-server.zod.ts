@@ -538,7 +538,8 @@ export const MetadataEndpointsConfigSchema = lazySchema(() => z.object({
     maintenance: z.boolean().default(true)
       .describe(
         'Mount the whole-store maintenance operations — `GET /meta/diagnostics`, '
-        + '`GET /meta/_drafts` and the `POST /meta/_migrate-stored` write door',
+        + '`GET /meta/_drafts`, the `POST /meta/_migrate-stored` write door and the '
+        + '`POST /meta/_migrate-record-currency-codes` record-currency code backfill',
       ),
     /**
      * [REMOVED in commit b3a63d32c] Gated a route that does not exist: the REST server

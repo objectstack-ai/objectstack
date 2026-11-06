@@ -11,14 +11,18 @@
  *
  *   - the data the app is loaded with (the card's seed rows, verbatim): object
  *     and field machine names, and the values each field must accept;
- *   - the people who use it: one permission set per persona, named by the
- *     persona's id, with what that persona must not see and which rows it
- *     sees (the card states these as requirements of the app);
- *   - the business actions an agent may call, when the card declares them.
+ *   - the people who use it: one permission set per persona, named
+ *     `<namespace>_<persona id>`, with what that persona must not see and
+ *     which rows it sees (the card states these as requirements of the app);
+ *   - the business actions an agent may call, when the card declares them;
+ *   - the naming rule: EVERY item the app declares is named
+ *     `<namespace>_<short>`, not only its objects ({@link namingRule}). The
+ *     scorer reports a bare one as a Build finding, so every authoring prompt
+ *     (build, iterate, template iterate) states it.
  *
  * The card handed in here is already namespace-relative (`namespace.ts`): its
- * object names carry the project's prefix, so the contract states them as the
- * build must write them.
+ * item names carry the card's prefix (`democrm_`), so the contract states them
+ * as the build must write them.
  *
  * The questions, their truths, the operations and their outcomes are never in
  * a build prompt. A question turn carries the question, the card's fixed
@@ -27,7 +31,8 @@
  */
 
 import type { LoadedScenario } from '../loader.js';
-import type { ScenarioCard } from '../schema.js';
+import { scenarioNamespace, type ScenarioCard } from '../schema.js';
+import { permissionSetName } from './namespace.js';
 
 type Card = ScenarioCard;
 type Persona = Card['run']['personas'][number];
@@ -45,14 +50,61 @@ export function personaHandles(card: Card): Map<string, string> {
   return out;
 }
 
-function personaLine(p: Persona): string {
+/**
+ * The scope fields whose seed values are user handles, `object.field`: a
+ * field a persona's direct (non-path) `scope` rule names that the card does
+ * not declare as a lookup or a select, and that is not `id`. In the crm card
+ * that is `account.owner` (`u_sam`, `u_tia`). Every other direct scope field
+ * holds a row id or an option value (`asset.custodian` = `e06`, an employee
+ * row; `ticket_comment.visibility` = `public`), which the seed loads verbatim.
+ */
+export function userHandleFields(card: Card): Set<string> {
+  const declared = new Set([
+    ...(card.expect.lookups ?? []).map((l) => `${l.object}.${l.field}`),
+    ...(card.expect.selectFields ?? []).map((s) => `${s.object}.${s.field}`),
+  ]);
+  const out = new Set<string>();
+  for (const p of card.run.personas) {
+    for (const sc of p.scope ?? []) {
+      const key = `${sc.object}.${sc.field}`;
+      if (!sc.field.includes('.') && sc.field !== 'id' && !declared.has(key)) out.add(key);
+    }
+  }
+  return out;
+}
+
+/** The handles a seed row names in a {@link userHandleFields} field that no persona signs in as (`u_tia`): the seed loads each as the admin user. */
+export function unheldHandles(card: Card): string[] {
+  const held = personaHandles(card);
+  const out = new Set<string>();
+  for (const key of userHandleFields(card)) {
+    const [object, field] = key.split('.') as [string, string];
+    for (const row of card.run.seed[object] ?? []) {
+      const v = row[field];
+      if (typeof v === 'string' && !held.has(v)) out.add(v);
+    }
+  }
+  return [...out].sort();
+}
+
+/** The every-item-prefixed rule, in every authoring prompt. */
+export function namingRule(card: Card): string {
+  const ns = scenarioNamespace(card);
+  return (
+    `Naming: this app's namespace is \`${ns}\`. Name EVERY metadata item you declare \`${ns}_<name>\` — not only objects, ` +
+    'but also views, apps, pages, dashboards, reports, datasets, actions, flows, permission sets, picklists, skills, agents ' +
+    'and every other item. Fields are not items and keep their plain names. A bare item name fails the build.'
+  );
+}
+
+function personaLine(card: Card, p: Persona): string {
   const hides = [
     ...(p.hidden.objects ?? []).map((o) => `the object \`${o}\``),
     ...(p.hidden.fields ?? []).map((f) => `the field \`${f.object}.${f.field}\``),
   ];
   const scope = (p.scope ?? []).map((s) => `\`${s.object}\` rows whose \`${s.field}\` is ${JSON.stringify(s.value)}`);
   return (
-    `- \`${p.id}\` (${p.role}): must not read ${hides.join(' or ')}` +
+    `- \`${permissionSetName(card, p.id)}\` for \`${p.id}\` (${p.role}): must not read ${hides.join(' or ')}` +
     (scope.length ? `; sees only ${scope.join(' and ')}` : '') +
     '.'
   );
@@ -66,18 +118,20 @@ export function dataContract(card: Card): string {
   lines.push(
     'After you finish, a test runner loads the rows below through the data API and signs each person in. ' +
       'Use these object and field machine names exactly (lookup values are the `id` of the referenced row), ' +
-      'and make every value shown valid for its field. The object names already carry this project’s namespace prefix.',
+      'and make every value shown valid for its field. The object names already carry this app’s namespace prefix.',
   );
+  lines.push('');
+  lines.push(namingRule(card));
   lines.push('');
   lines.push('```json');
   lines.push(JSON.stringify(card.run.seed, null, 1));
   lines.push('```');
   lines.push('');
   lines.push(
-    'People: declare one permission set per person below, named exactly by the id, granting what that role needs ' +
-      'on the app’s objects and nothing it must not see. The runner signs each in as a user holding only that set.',
+    'People: declare one permission set per person below, named exactly as shown, granting what that role needs ' +
+      'on the app’s objects and nothing it must not see. The runner signs each person in as a user holding only that set.',
   );
-  for (const p of card.run.personas) lines.push(personaLine(p));
+  for (const p of card.run.personas) lines.push(personaLine(card, p));
   const handles = personaHandles(card);
   if (handles.size) {
     lines.push('');
@@ -85,6 +139,22 @@ export function dataContract(card: Card): string {
       `Row ownership: a row whose ${[...new Set(card.run.personas.flatMap((p) => (p.scope ?? []).filter((s) => !s.field.includes('.')).map((s) => `\`${s.field}\``)))].join(' / ')} names a handle ` +
         `(${[...handles].map(([h, id]) => `\`${h}\` = \`${id}\``).join(', ')}) is loaded as owned by that person’s user.`,
     );
+    const userFields = [...userHandleFields(card)];
+    if (userFields.length) {
+      const unheld = unheldHandles(card);
+      const held = [
+        ...new Set(
+          card.run.personas.flatMap((p) => (p.scope ?? []).filter((sc) => userHandleFields(card).has(`${sc.object}.${sc.field}`)).map((sc) => `\`${String(sc.value)}\` → the \`${p.id}\` user`)),
+        ),
+      ];
+      lines.push(
+        `In ${userFields.map((k) => `\`${k}\``).join(' / ')} the value is a handle that stands for a user, and the handle text is never stored: ` +
+          `the runner loads that field, and the row’s owner (\`owner_id\`), with that user’s id (${[
+            ...held,
+            ...(unheld.length ? [`${unheld.map((h) => `\`${h}\``).join(', ')}, which no person below holds → the admin user the runner signs in as`] : []),
+          ].join('; ')}). Make that field accept a user id; a rule on it matches that user.`,
+      );
+    }
   }
   if (card.run.agentActions?.length) {
     lines.push('');
@@ -94,19 +164,37 @@ export function dataContract(card: Card): string {
   return lines.join('\n');
 }
 
-const BUILD_PREAMBLE =
-  'You are building an ObjectStack app in this project (scaffolded by `create-objectstack`; follow the project’s AGENTS.md ' +
-  'and its objectstack skills). Author the metadata, then run `npx objectstack validate` and `npx objectstack build` ' +
-  'and fix what they report until both pass. Work without asking questions.';
+/**
+ * The `objectstack verify` arguments the runner scores a build with
+ * (`buildHalf` in `orchestrate.ts` runs exactly these), so every authoring
+ * loop can be told to run the same proof before it stops.
+ */
+export function verifyArgs(card: Card): string[] {
+  return ['verify', ...verifyFlags(card)];
+}
+
+/** The three commands a scratch build is scored on, as the agent runs them: `validate`, `build`, then {@link verifyArgs}. */
+function authoringChecks(card: Card): string {
+  return `run \`npx objectstack validate\`, \`npx objectstack build\` and \`npx objectstack ${verifyArgs(card).join(' ')}\` and fix what they report until all three pass`;
+}
+
+function buildPreamble(card: Card): string {
+  return (
+    'You are building an ObjectStack app in this project (scaffolded by `create-objectstack`; follow the project’s AGENTS.md ' +
+    `and its objectstack skills). Author the metadata, then ${authoringChecks(card)}. Work without asking questions.`
+  );
+}
 
 export function buildPrompt(card: Card): string {
-  return [BUILD_PREAMBLE, '', '## The app', '', text(card.prompt.detailed), '', dataContract(card)].join('\n');
+  return [buildPreamble(card), '', '## The app', '', text(card.prompt.detailed), '', dataContract(card)].join('\n');
 }
 
 export function iteratePrompt(card: Card): string {
   return [
-    'This project holds a working ObjectStack app. Apply the change below, then run `npx objectstack validate` and ' +
-      '`npx objectstack build` and fix what they report until both pass. Keep everything else working. Work without asking questions.',
+    `This project holds a working ObjectStack app. Apply the change below, then ${authoringChecks(card)}. ` +
+      'Keep everything else working. Work without asking questions.',
+    '',
+    namingRule(card),
     '',
     `Change: ${text(card.iterate.change)}`,
   ].join('\n');
@@ -130,6 +218,8 @@ export function templateIteratePrompt(card: Card, server: TemplateServer): strin
       `through the server’s metadata API (\`GET/PUT ${server.baseUrl}/api/v1/meta/<type>/<name>\`, signed in at ` +
       `\`POST ${server.baseUrl}/api/v1/auth/sign-in/email\` as ${server.adminEmail} / ${server.adminPassword}). ` +
       'Check each item you save reads back. Work without asking questions.',
+    '',
+    namingRule(card),
     '',
     `Change: ${text(card.iterate.change)}`,
   ].join('\n');

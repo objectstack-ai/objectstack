@@ -42,6 +42,7 @@ import {
 } from '@object-ui/app-shell';
 
 import { AppContent, ConsolePermissionsRequest, ConsolePermissionsScope } from './AppContent';
+import { FirstRunChecklist } from './pages/settings/FirstRunChecklist';
 import { publishAuthState } from './i18nSession';
 import { FaviconSync } from './components/FaviconSync';
 import { RootLandingRedirect } from './components/RootLandingRedirect';
@@ -195,11 +196,18 @@ function NativeShellRouting() {
   return null;
 }
 
-/** Wraps `DefaultHomeLayout` so the FAB gets the signed-in user id. */
+/**
+ * Wraps `DefaultHomeLayout` so the FAB gets the signed-in user id, and draws
+ * an administrator's first-run checklist above the page's own sections
+ * (objectstack#30206). The route sits under `ConsolePermissionsScope`, which
+ * is what tells the checklist whether this session may write the settings it
+ * lists; for anyone else it draws nothing.
+ */
 function HomeRoute() {
   const { user } = useAuth();
   return (
     <DefaultHomeLayout userId={user?.id}>
+      <FirstRunChecklist />
       <DefaultHomePage />
     </DefaultHomeLayout>
   );

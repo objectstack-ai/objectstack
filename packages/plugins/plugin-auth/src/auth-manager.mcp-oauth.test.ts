@@ -42,6 +42,36 @@ import { oauthProvider } from '@better-auth/oauth-provider';
 const ENV_KEYS = ['OS_MCP_SERVER_ENABLED', 'OS_OIDC_PROVIDER_ENABLED', 'OS_OIDC_DCR_ENABLED'] as const;
 const savedEnv: Record<string, string | undefined> = {};
 
+/**
+ * [objectstack-ai/cloud#3606, ruling A] A consent store double in better-auth's
+ * adapter dialect: `findMany` / `findOne` over the provider's camelCase field
+ * names with `eq` clauses, the only shape the consent read sends. `reads`
+ * counts every call, so a leg can pin how many reads one verification costs.
+ */
+function consentStore(
+  consents: Array<{ clientId: string; userId: string; referenceId?: string | null; createdAt: Date }>,
+  clients: Array<{ clientId: string; skipConsent?: boolean }> = [],
+) {
+  const tables: Record<string, Array<Record<string, unknown>>> = { oauthConsent: consents, oauthClient: clients };
+  const reads: string[] = [];
+  const pick = (model: string, where: Array<{ field: string; value: unknown }>) =>
+    (tables[model] ?? []).filter((row) => where.every((w) => row[w.field] === w.value));
+  return {
+    reads,
+    adapter: {
+      async findMany({ model, where }: { model: string; where: Array<{ field: string; value: unknown }> }) {
+        reads.push(`findMany ${model}`);
+        return pick(model, where).map((row) => ({ ...row }));
+      },
+      async findOne({ model, where }: { model: string; where: Array<{ field: string; value: unknown }> }) {
+        reads.push(`findOne ${model}`);
+        const [row] = pick(model, where);
+        return row ? { ...row } : null;
+      },
+    },
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   for (const k of ENV_KEYS) {
@@ -323,12 +353,21 @@ describe('verifyMcpAccessToken (local JWKS verification, fail-closed)', () => {
     jwks = { keys: [{ ...jwk, alg: 'RS256', kid: 'test-key' }] };
   });
 
+  // The grants these legs' tokens were minted under: consented an hour ago,
+  // with no organization and in `org-a`. The consent read itself is pinned in
+  // the describe block below.
+  const CONSENTED = new Date(Date.now() - 3_600_000);
   function manager(): AuthManager {
     const m = new AuthManager({
       secret: 'test-secret-at-least-32-chars-long',
       baseUrl: 'https://acme.example.com',
     });
     vi.spyOn(m, 'getApi').mockResolvedValue({ getJwks: async () => jwks } as any);
+    const { adapter } = consentStore([
+      { clientId: 'client-abc', userId: 'user-1', referenceId: null, createdAt: CONSENTED },
+      { clientId: 'client-abc', userId: 'user-1', referenceId: 'org-a', createdAt: CONSENTED },
+    ]);
+    vi.spyOn(m, 'getAuthContext').mockResolvedValue({ adapter });
     return m;
   }
 
@@ -491,6 +530,148 @@ describe('verifyMcpAccessToken (local JWKS verification, fail-closed)', () => {
     process.env.OS_MCP_SERVER_ENABLED = 'false'; // opt out of the default-on surface
     const token = await signToken();
     expect(await manager().verifyMcpAccessToken(token)).toBeNull();
+  });
+});
+
+/**
+ * [objectstack-ai/cloud#3606, ruling A] The consent read `verifyMcpAccessToken`
+ * makes on every call: the token's grant must still stand. What the REAL
+ * provider stores, deletes and answers is pinned end to end in
+ * mcp-token-revocation.test.ts; these legs pin how the verifier reads it,
+ * including shapes that provider never produces.
+ */
+describe('verifyMcpAccessToken reads the consent the token was minted under (ruling A)', () => {
+  const ISSUER = 'https://acme.example.com/api/v1/auth';
+  const AUDIENCE = 'https://acme.example.com/api/v1/mcp';
+  const HOUR_AGO = new Date(Date.now() - 3_600_000);
+
+  let privateKey: CryptoKey;
+  let jwks: { keys: any[] };
+
+  beforeEach(async () => {
+    process.env.OS_MCP_SERVER_ENABLED = 'true';
+    const pair = await generateKeyPair('RS256');
+    privateKey = pair.privateKey as CryptoKey;
+    jwks = { keys: [{ ...(await exportJWK(pair.publicKey)), alg: 'RS256', kid: 'test-key' }] };
+  });
+
+  function managerOver(store: { adapter: unknown } | undefined): AuthManager {
+    const m = new AuthManager({ secret: 'test-secret-at-least-32-chars-long', baseUrl: 'https://acme.example.com' });
+    vi.spyOn(m, 'getApi').mockResolvedValue({ getJwks: async () => jwks } as any);
+    if (store) vi.spyOn(m, 'getAuthContext').mockResolvedValue(store);
+    return m;
+  }
+
+  function signToken(claims: Record<string, unknown> = {}, issuedAt = Math.floor(Date.now() / 1000)) {
+    return new SignJWT({ scope: 'data:read', azp: 'client-abc', client_id: 'client-abc', ...claims })
+      .setProtectedHeader({ alg: 'RS256', kid: 'test-key' })
+      .setIssuer(ISSUER)
+      .setAudience(AUDIENCE)
+      .setSubject('user-1')
+      .setIssuedAt(issuedAt)
+      .setExpirationTime(issuedAt + 3600)
+      .sign(privateKey);
+  }
+
+  it('admits a token whose consent stands — at the cost of exactly ONE read', async () => {
+    const store = consentStore([{ clientId: 'client-abc', userId: 'user-1', referenceId: null, createdAt: HOUR_AGO }]);
+    expect(await managerOver(store).verifyMcpAccessToken(await signToken())).toEqual({
+      userId: 'user-1',
+      scopes: ['data:read'],
+      clientId: 'client-abc',
+    });
+    expect(store.reads).toEqual(['findMany oauthConsent']);
+  });
+
+  it('refuses a token whose consent is gone (revoked, or withdrawn in the Console)', async () => {
+    const store = consentStore([]);
+    expect(await managerOver(store).verifyMcpAccessToken(await signToken())).toBeNull();
+  });
+
+  it('refuses a token minted BEFORE its consent was created — revoked, then granted again', async () => {
+    const issuedAt = Math.floor(Date.now() / 1000) - 120;
+    // The control: the same token is admitted by a consent from before it.
+    const before = consentStore([
+      { clientId: 'client-abc', userId: 'user-1', referenceId: null, createdAt: new Date((issuedAt - 1) * 1000) },
+    ]);
+    expect(await managerOver(before).verifyMcpAccessToken(await signToken({}, issuedAt))).not.toBeNull();
+    // A consent created in the token's own second still admits it: `iat` is whole seconds.
+    const sameSecond = consentStore([
+      { clientId: 'client-abc', userId: 'user-1', referenceId: null, createdAt: new Date(issuedAt * 1000 + 999) },
+    ]);
+    expect(await managerOver(sameSecond).verifyMcpAccessToken(await signToken({}, issuedAt))).not.toBeNull();
+    const after = consentStore([
+      { clientId: 'client-abc', userId: 'user-1', referenceId: null, createdAt: new Date((issuedAt + 1) * 1000) },
+    ]);
+    expect(await managerOver(after).verifyMcpAccessToken(await signToken({}, issuedAt))).toBeNull();
+  });
+
+  it('reads the consent of the token\'s OWN organization — another organization\'s consent admits nothing', async () => {
+    const store = consentStore([
+      { clientId: 'client-abc', userId: 'user-1', referenceId: 'org-b', createdAt: HOUR_AGO },
+      { clientId: 'client-abc', userId: 'user-1', referenceId: null, createdAt: HOUR_AGO },
+    ]);
+    const m = managerOver(store);
+    expect(await m.verifyMcpAccessToken(await signToken({ organization_id: 'org-a' }))).toBeNull();
+    expect((await m.verifyMcpAccessToken(await signToken({ organization_id: 'org-b' })))?.organizationId).toBe('org-b');
+    // A token with no organization reads the consent with none, never one bound to an organization.
+    const orgOnly = consentStore([{ clientId: 'client-abc', userId: 'user-1', referenceId: 'org-b', createdAt: HOUR_AGO }]);
+    expect(await managerOver(orgOnly).verifyMcpAccessToken(await signToken())).toBeNull();
+  });
+
+  it('reads the consent of the token\'s OWN client and user — another client\'s consent admits nothing', async () => {
+    const store = consentStore([
+      { clientId: 'client-other', userId: 'user-1', referenceId: null, createdAt: HOUR_AGO },
+      { clientId: 'client-abc', userId: 'user-2', referenceId: null, createdAt: HOUR_AGO },
+    ]);
+    expect(await managerOver(store).verifyMcpAccessToken(await signToken())).toBeNull();
+  });
+
+  it('a server-only `skip_consent` client has no consent row and is admitted without one (ruling A, step 5)', async () => {
+    const skip = consentStore([], [{ clientId: 'client-abc', skipConsent: true }]);
+    expect(await managerOver(skip).verifyMcpAccessToken(await signToken())).not.toBeNull();
+    expect(skip.reads).toEqual(['findMany oauthConsent', 'findOne oauthClient']);
+    // The control: the same client without the flag is refused.
+    const consenting = consentStore([], [{ clientId: 'client-abc', skipConsent: false }]);
+    expect(await managerOver(consenting).verifyMcpAccessToken(await signToken())).toBeNull();
+  });
+
+  it('fails CLOSED when the consent store errors', async () => {
+    const store = {
+      adapter: {
+        findMany: async () => { throw new Error('consent store unreachable'); },
+        findOne: async () => { throw new Error('consent store unreachable'); },
+      },
+    };
+    expect(await managerOver(store).verifyMcpAccessToken(await signToken())).toBeNull();
+  });
+
+  it('fails CLOSED when better-auth exposes no storage adapter at all', async () => {
+    // The mocked better-auth instance carries no `$context`, so nothing is read.
+    expect(await managerOver(undefined).verifyMcpAccessToken(await signToken())).toBeNull();
+  });
+
+  it('refuses a token carrying no `azp` — the consent read has no client to key on', async () => {
+    const store = consentStore([{ clientId: 'client-abc', userId: 'user-1', referenceId: null, createdAt: HOUR_AGO }]);
+    expect(await managerOver(store).verifyMcpAccessToken(await signToken({ azp: undefined }))).toBeNull();
+    expect(store.reads).toEqual([]);
+  });
+
+  it('refuses a consent whose `createdAt` cannot be read, and a token with no `iat`', async () => {
+    const unreadable = consentStore([
+      { clientId: 'client-abc', userId: 'user-1', referenceId: null, createdAt: 'not a date' as unknown as Date },
+    ]);
+    expect(await managerOver(unreadable).verifyMcpAccessToken(await signToken())).toBeNull();
+    const store = consentStore([{ clientId: 'client-abc', userId: 'user-1', referenceId: null, createdAt: HOUR_AGO }]);
+    const now = Math.floor(Date.now() / 1000);
+    const noIat = await new SignJWT({ scope: 'data:read', azp: 'client-abc' })
+      .setProtectedHeader({ alg: 'RS256', kid: 'test-key' })
+      .setIssuer(ISSUER)
+      .setAudience(AUDIENCE)
+      .setSubject('user-1')
+      .setExpirationTime(now + 3600)
+      .sign(privateKey);
+    expect(await managerOver(store).verifyMcpAccessToken(noIat)).toBeNull();
   });
 });
 

@@ -76,7 +76,8 @@ function writeDraft(body: Record<string, unknown>): string {
 const mockClient = {
   list: vi.fn(async () => []),
   listDrafts: vi.fn(async () => []),
-  layered: vi.fn(async () => ({ effective: PAGE, code: PAGE, editable: true })),
+  // …and the `draft` layer, the pending draft as stored (objectstack#29814).
+  layered: vi.fn(async () => ({ effective: PAGE, code: PAGE, editable: true, draft: door.draft ? JSON.parse(JSON.stringify(door.draft.body)) : null })),
   // The draft read serves the body and its version; no draft is `null`.
   getDraft: vi.fn(async () =>
     door.draft

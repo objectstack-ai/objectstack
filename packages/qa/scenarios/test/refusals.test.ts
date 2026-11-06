@@ -13,6 +13,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
+import { ErrorCode } from '@objectstack/spec/api';
+
 import { formatRefusal, loadScenarios, readCapabilityAreas } from '../src/index.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -52,6 +54,10 @@ const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   ['an unknown key, locating the key itself', (c) => (c.run.questions[0].truth.limit = 5), 'run.questions[0].truth.limit', /unknown key `limit`/],
   ['a prompt with no language', (c) => (c.prompt.short = {}), 'prompt.short', /at least one language/],
   ['fewer than five questions', (c) => (c.run.questions = c.run.questions.slice(0, 4)), 'run.questions', /5/],
+  // ── the app code (its namespace is `demo` + code) ──
+  ['a card with no app code', (c) => delete c.code, 'code', /names its app `code`/],
+  ['an app code with an underscore', (c) => (c.code = 'crm_app'), 'code', /2–8 lowercase letters/],
+  ['an app code longer than eight letters', (c) => (c.code = 'customers'), 'code', /2–8 lowercase letters/],
   // ── expect consistency ──
   ['a lookup to an object the card does not expect', (c) => c.expect.lookups.push({ object: 'contact', field: 'email', to: 'customer' }), 'expect.lookups[1].to', /lookup target `customer` is not in expect.objects/],
   ['a dangling app nav target', (c) => (c.expect.appNavTargets = ['account', 'overview']), 'expect.appNavTargets[1]', /dangling nav/],
@@ -77,17 +83,23 @@ const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   ['an unanswerable truth without its reason', (c) => delete q(c, 'acme_revenue').truth.reason, 'run.questions[7].truth.reason', /expected string/],
   // ── seed, operations and outcomes ──
   ['a lookup value naming no seeded row', (c) => (c.run.seed.contact[3].account = 'ac9'), 'run.seed.contact[3].account', /names no seeded `account` row/],
-  ['an operation on a row the seed does not hold', (c) => (op(c, 'attach_dee').target = 'ct99'), 'run.operations[1].target', /no seeded `contact` row has id `ct99`/],
+  ['an operation on a row the seed does not hold', (c) => (op(c, 'move_eli').target = 'ct99'), 'run.operations[1].target', /no seeded `contact` row has id `ct99`/],
   ['an operation with no declared outcome', (c) => delete op(c, 'add_contact').outcome, 'run.operations[0].outcome', /expected object|invalid/i],
   ['an operation acting as an unknown persona', (c) => (op(c, 'add_contact').actingAs = 'ghost'), 'run.operations[0].actingAs', /no persona `ghost`/],
   ['a refusal code outside the platform error-code catalogue', (c) => (op(c, 'contact_bad_email').outcome.code = 'VALIDATION_BROKEN'), 'run.operations[3].outcome.code', /expected one of/],
   ['a post-state naming a created row by an id the seed lacks', (c) => (op(c, 'add_contact').outcome.state[0] = { object: 'contact', id: 'ct9', values: { full_name: 'Fay Wu' } }), 'run.operations[0].outcome.state[0].id', /matched by `where`/],
-  ['a post-state naming its row twice', (c) => (op(c, 'attach_dee').outcome.state[0].where = { full_name: 'Dee' }), 'run.operations[1].outcome.state[0].id', /exactly one of `id` or `where`/],
+  ['a post-state naming its row twice', (c) => (op(c, 'move_eli').outcome.state[0].where = { full_name: 'Dee' }), 'run.operations[1].outcome.state[0].id', /exactly one of `id` or `where`/],
+  // ── reach: an operation its acting persona cannot reach has one outcome ──
+  ['an applied create writing a field the persona must not read', (c) => (op(c, 'add_contact').values.email = 'fay@bitworks.test'), 'run.operations[0].outcome', /`sdr` must not read `contact.email`.*`PERMISSION_DENIED`/],
+  ['an applied update on a row outside the persona\'s row scope', (c) => (op(c, 'move_eli').target = 'ct4'), 'run.operations[1].outcome', /row `ct4` is outside `sdr`'s row scope on `contact`.*`RECORD_NOT_FOUND`/],
+  ['a pending delete on a row outside the persona\'s row scope', (c) => (op(c, 'remove_ben').target = 'ct3'), 'run.operations[2].outcome', /row `ct3` is outside `sdr`'s row scope.*`RECORD_NOT_FOUND`/],
+  ['a validation refusal on a field the persona must not read', (c) => (op(c, 'contact_bad_email').actingAs = 'sdr'), 'run.operations[3].outcome.code', /`sdr` must not read `contact.email`.*`PERMISSION_DENIED`/],
+  ['a refusal code other than the hidden object\'s', (c) => (op(c, 'partner_edits_account').outcome.code = ErrorCode.parse('RECORD_NOT_FOUND')), 'run.operations[4].outcome.code', /`partner_user` must not read `account`.*`PERMISSION_DENIED`/],
   // ── guardrails ──
   ['a card that drops one of the five guardrail checks', (c) => (c.run.guardrails = c.run.guardrails.filter((g: { check: string }) => g.check !== 'audit_actor')), 'run.guardrails', /5/],
   ['an injection guardrail pointing at a non-text cell', (c) => (c.run.guardrails[4].cell = { object: 'contact', id: 'ct4', field: 'account' }), 'run.guardrails[4].cell.field', /not a text cell/],
   ['a confirmation check on an operation that does not wait', (c) => (c.run.guardrails[2].operation = 'add_contact'), 'run.guardrails[2].operation', /outcome is `pending_confirmation`, not `applied`/],
-  ['an audit check on an operation that names no audit actor', (c) => delete op(c, 'attach_dee').outcome.auditActor, 'run.guardrails[3].operation', /declare `outcome.auditActor`/],
+  ['an audit check on an operation that names no audit actor', (c) => delete op(c, 'move_eli').outcome.auditActor, 'run.guardrails[3].operation', /declare `outcome.auditActor`/],
   // ── counts, agent actions, iterate ──
   ['fewer than 8 questions without a stated reason', (c) => c.run.questions.pop(), 'run.countsReason', /7 questions \/ 5 operations is below the default 8 \/ 4/],
   ['agent actions with none confirm-gated', (c) => c.run.agentActions.forEach((a: { confirm: boolean }) => (a.confirm = false)), 'run.agentActions', /at least one confirm-gated/],
@@ -110,6 +122,17 @@ describe('scenario card refusals', () => {
     expect(r.refusals).toEqual([]);
   });
 
+  it('an out-of-scope update declared as the refusal a faithful build answers loads clean (control for reach)', () => {
+    const r = load((c) => {
+      const o = op(c, 'move_eli');
+      o.target = 'ct4';
+      o.outcome = { kind: 'refused', code: ErrorCode.parse('RECORD_NOT_FOUND') };
+      c.run.guardrails[3].operation = 'add_contact';
+      op(c, 'add_contact').outcome.auditActor = 'sdr';
+    });
+    expect(r.refusals.map(formatRefusal)).toEqual([]);
+  });
+
   for (const [name, mutate, path, message] of CASES) {
     it(`refuses ${name}`, () => {
       const r = load(mutate);
@@ -124,6 +147,44 @@ describe('scenario card refusals', () => {
   it('refuses a card whose id is not its basename', () => {
     const r = load(() => {}, 'crm.json');
     expect(r.refusals).toEqual([{ file: r.file, path: 'id', message: expect.stringMatching(/basename `crm`/) }]);
+  });
+
+  it('refuses every card sharing an app code, each naming the other (control: distinct codes load)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scenario-refusal-'));
+    dirs.push(dir);
+    const first = join(dir, `${base.id}.json`);
+    const second = join(dir, 'crm_twin.json');
+    writeFileSync(first, JSON.stringify(base));
+    writeFileSync(second, JSON.stringify({ ...base, id: 'crm_twin' }));
+    const r = loadScenarios(dir, { areas });
+    expect(r.cards).toEqual([]);
+    expect(r.refusals).toEqual([
+      { file: first, path: 'code', message: expect.stringMatching(/^duplicate app code `crm`, also the code of crm_twin\.json/) },
+      { file: second, path: 'code', message: expect.stringMatching(/^duplicate app code `crm`, also the code of crm_account_with_contacts\.json/) },
+    ]);
+
+    const twin = { ...base, id: 'crm_twin' };
+    twin.code = 'crmtwin';
+    writeFileSync(second, JSON.stringify(twin));
+    const ok = loadScenarios(dir, { areas });
+    expect(ok.refusals).toEqual([]);
+    expect(ok.cards.map((c) => c.card.code)).toEqual(['crm', 'crmtwin']);
+  });
+
+  it('names a shared app code even on a card refused for another fault', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scenario-refusal-'));
+    dirs.push(dir);
+    const first = join(dir, `${base.id}.json`);
+    const second = join(dir, 'crm_twin.json');
+    writeFileSync(first, JSON.stringify(base));
+    writeFileSync(second, JSON.stringify({ ...base, id: 'crm_twin', category: 'retail' }));
+    const r = loadScenarios(dir, { areas });
+    expect(r.cards).toEqual([]);
+    expect(r.refusals.map((x) => [x.file, x.path])).toEqual([
+      [first, 'code'],
+      [second, 'category'],
+      [second, 'code'],
+    ]);
   });
 
   it('refuses a file that is not JSON', () => {

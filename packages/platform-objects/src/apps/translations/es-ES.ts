@@ -16,6 +16,7 @@ export const esES: TranslationData = {
         grp_account_inbox: { label: 'Bandeja de entrada' },
         grp_account_security: { label: 'Seguridad' },
         grp_account_developer: { label: 'Desarrollador' },
+        grp_account_ai_assistant: { label: 'Asistente de IA' },
         nav_account_profile: { label: 'Perfil' },
         nav_account_notifications: { label: 'Notificaciones' },
         nav_account_approvals: { label: 'Aprobaciones pendientes' },
@@ -25,9 +26,9 @@ export const esES: TranslationData = {
         nav_account_api_keys: { label: 'Claves API' },
         nav_account_oauth_apps: { label: 'Aplicaciones OAuth' },
         // Contributed at runtime by `@objectstack/mcp` into
-        // `grp_account_developer`; the Setup twin's key does not answer for the
+        // `grp_account_ai_assistant`; the Setup twin's key does not answer for the
         // Account app (one `apps.<app>.navigation` namespace per app).
-        nav_connect_agent: { label: 'Conectar un agente' },
+        nav_connect_agent: { label: 'Conectar un asistente de IA' },
       },
     },
     setup: {
@@ -49,6 +50,7 @@ export const esES: TranslationData = {
         group_advanced: { label: 'Avanzado' },
 
         nav_system_overview: { label: 'Resumen del Sistema' },
+        nav_connect_agent: { label: 'Conectar un asistente de IA' },
 
         nav_users: { label: 'Usuarios' },
         nav_organization: { label: 'Organización' },
@@ -63,13 +65,13 @@ export const esES: TranslationData = {
         nav_record_shares: { label: 'Registros Compartidos' },
         nav_queues: { label: 'Colas' },
         nav_queue_members: { label: 'Miembros de Colas' },
+        nav_assignment_rules: { label: 'Reglas de Asignación' },
         // Conditionally contributed by `@objectstack/plugin-auth` (only when an
         // external IdP is wired), so `check:app-nav-i18n` cannot see it — see
         // the rationale in `en.ts` (#6659). Wording matches this locale's
         // `sys_sso_provider.pluralLabel`.
         nav_sso_providers: { label: 'Proveedores SSO' },
         nav_api_keys: { label: 'Claves API' },
-        nav_connect_agent: { label: 'Conectar un agente' },
 
         nav_approvals_inbox: { label: 'Centro de aprobaciones' },
         nav_approval_requests: { label: 'Solicitudes' },
@@ -186,7 +188,7 @@ export const esES: TranslationData = {
         + 'privados de tu organización e instalarlos aquí.',
     },
     connect_agent: {
-      label: 'Conectar un agente',
+      label: 'Conectar un asistente de IA',
       subtitle:
         'Concede a cualquier cliente de IA compatible con MCP acceso controlado a este sistema: '
         + 'cada llamada se ejecuta con los permisos propios de quien la realiza y con seguridad a nivel de fila.',

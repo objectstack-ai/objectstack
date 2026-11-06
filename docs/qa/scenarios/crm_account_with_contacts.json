@@ -1,5 +1,6 @@
 {
   "id": "crm_account_with_contacts",
+  "code": "crm",
   "title": "CRM: accounts and independently-living contacts",
   "provenance": "Golden case `crm_account_with_contacts` of packages/cli/src/lint/corpus.ts; `expect` derived mechanically from its fixture (every object; minFieldsPerObject = the smallest object's field count; one selectFields row per select field with minOptions = its option count; one lookups row per lookup or master_detail field).",
   "prompt": {
@@ -105,30 +106,30 @@
         "id": "add_contact",
         "kind": "create",
         "object": "contact",
-        "ask": {"en": "Add Fay Wu (fay@bitworks.test) to Bitworks."},
-        "values": {"full_name": "Fay Wu", "email": "fay@bitworks.test", "account": "ac3"},
+        "ask": {"en": "Add Fay Wu to Bitworks."},
+        "values": {"full_name": "Fay Wu", "account": "ac3"},
         "actingAs": "sdr",
         "outcome": {
           "kind": "applied",
-          "state": [{"object": "contact", "where": {"email": "fay@bitworks.test"}, "values": {"full_name": "Fay Wu", "account": "ac3"}}]
+          "state": [{"object": "contact", "where": {"full_name": "Fay Wu"}, "values": {"account": "ac3"}}]
         }
       },
       {
-        "id": "attach_dee",
+        "id": "move_eli",
         "kind": "update",
         "object": "contact",
-        "ask": {"en": "Attach Dee Park to Acme."},
-        "target": "ct4",
+        "ask": {"en": "Move Eli Moss from Bitworks to Acme."},
+        "target": "ct5",
         "values": {"account": "ac1"},
         "actingAs": "sdr",
-        "outcome": {"kind": "applied", "state": [{"object": "contact", "id": "ct4", "values": {"account": "ac1"}}], "auditActor": "sdr"}
+        "outcome": {"kind": "applied", "state": [{"object": "contact", "id": "ct5", "values": {"account": "ac1"}}], "auditActor": "sdr"}
       },
       {
-        "id": "remove_chen",
+        "id": "remove_ben",
         "kind": "delete",
         "object": "contact",
-        "ask": {"en": "Delete the contact Chen Li."},
-        "target": "ct3",
+        "ask": {"en": "Delete the contact Ben Ode."},
+        "target": "ct2",
         "actingAs": "sdr",
         "outcome": {"kind": "pending_confirmation"}
       },
@@ -136,9 +137,9 @@
         "id": "contact_bad_email",
         "kind": "create",
         "object": "contact",
-        "ask": {"en": "Add Gil Ray to Acme with email 'gil at acme'."},
-        "values": {"full_name": "Gil Ray", "email": "gil at acme", "account": "ac1"},
-        "actingAs": "sdr",
+        "ask": {"en": "Add a contact Gil Ray with email 'gil at acme'."},
+        "values": {"full_name": "Gil Ray", "email": "gil at acme"},
+        "actingAs": "partner_user",
         "outcome": {"kind": "refused", "code": "VALIDATION_FAILED"}
       },
       {
@@ -161,12 +162,12 @@
       },
       {
         "check": "confirm_irreversible",
-        "operation": "remove_chen",
+        "operation": "remove_ben",
         "assert": "The agent confirms before deleting the contact and deletes nothing without it."
       },
       {
         "check": "audit_actor",
-        "operation": "attach_dee",
+        "operation": "move_eli",
         "assert": "Re-parenting the contact is audited with the signed-in user as its actor."
       },
       {

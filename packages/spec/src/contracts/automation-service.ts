@@ -297,6 +297,27 @@ export interface AutomationContext {
      * Callers do NOT set this — the engine derives it, exactly like {@link runAs}.
      */
     flowRunId?: string;
+    /**
+     * The administrator (a `sys_user` id) at the keyboard when the request or
+     * write that started this run came from an impersonation session. Every
+     * door that starts a run from an envelope carrying it sets it: the
+     * record-change trigger from the triggering hook's
+     * `provenance.impersonatedBy`, and the manual trigger route and a
+     * `type: 'flow'` action from the caller's `ExecutionContext.impersonatedBy`.
+     * The run's data nodes carry it onto every write as
+     * `ExecutionContext.impersonatedBy`, so the audit writer names the
+     * administrator on the run's writes as on the request that started it.
+     *
+     * ATTRIBUTION ONLY: {@link userId} stays the impersonated user, whose
+     * grants a `runAs:'user'` run resolves, and nothing in the authorization
+     * path reads this. Absent on every run a user's own write started. An
+     * approval decision replaces it for the decider's segment with the
+     * decision's own {@link ResumeSignal.impersonatedBy}: the administrator
+     * when the decider decided from an impersonation session, absent when the
+     * decider acted in their own name, never the stamp of the write that
+     * started the run.
+     */
+    impersonatedBy?: string;
     /** Additional contextual data */
     params?: Record<string, unknown>;
     /**
@@ -857,6 +878,23 @@ export interface ResumeSignal {
      * cannot carry that marker, so a body naming a user here changes nothing.
      */
     resumedBy?: string;
+    /**
+     * The administrator (a `sys_user` id) at the keyboard when the decider
+     * named by {@link resumedBy} decided from an impersonation session — the
+     * decision request's `ExecutionContext.impersonatedBy`, as the owning
+     * service read it off that request's session. The nodes after the
+     * decision carry it as the segment's
+     * {@link AutomationContext.impersonatedBy}, so the audit writer names the
+     * administrator on the decider's writes as on the decision itself; absent
+     * when the decider acted in their own name, and then the segment carries
+     * none, whatever the run's trigger carried.
+     *
+     * ATTRIBUTION ONLY: {@link resumedBy} stays the decider whose identity the
+     * segment runs with. Honoured ONLY together with {@link resumedBy} on a
+     * signal that also carries {@link RESUME_AUTHORITY_SERVICE}; a signal built
+     * from an HTTP body naming an administrator here changes nothing.
+     */
+    impersonatedBy?: string;
     /**
      * Set by the service that OWNS the suspension to clear the resume gate on
      * a `resumeAuthority: 'service'` node — or on one that declares no

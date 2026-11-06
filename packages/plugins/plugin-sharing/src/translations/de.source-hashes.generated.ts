@@ -18,6 +18,7 @@
  */
 
 export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
+  "objects.sys_assignment_rule.fields.name.label": "5274417ff1ccaf01",
   "objects.sys_queue.fields.name.label": "5274417ff1ccaf01",
   "objects.sys_queue_member.fields.recipient_type.options.position": "9a24c02e441eb0b4",
   "objects.sys_queue_member.fields.recipient_type.options.team": "42b87165ac826b2b",

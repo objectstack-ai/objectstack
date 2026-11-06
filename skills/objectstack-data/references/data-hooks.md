@@ -85,7 +85,7 @@ import { defineHook, HookContext } from '@objectstack/spec/data';
 
 const myHook = defineHook({
   // Required: Unique identifier (snake_case)
-  name: 'my_validation_hook',
+  name: 'crm_validation_hook',
 
   // Required: Target object(s)
   object: 'account',  // string | string[] | '*'
@@ -513,7 +513,7 @@ is **not** in the partial patch) and flip that position to `filled`:
 import { defineHook } from '@objectstack/spec/data';
 
 const fillPositionOnHire = defineHook({
-  name: 'fill_position_on_hire',
+  name: 'crm_fill_position_on_hire',
   object: 'candidate',
   events: ['afterUpdate'],
   body: {
@@ -769,7 +769,7 @@ handler: async (ctx: HookContext) => {
 
 ```typescript
 const protectStrategicAccounts = defineHook({
-  name: 'protect_strategic_accounts',
+  name: 'crm_protect_strategic_accounts',
   object: 'account',
   events: ['beforeDelete'],
   body: {
@@ -793,7 +793,7 @@ const protectStrategicAccounts = defineHook({
 
 ```typescript
 const createAuditTrail = defineHook({
-  name: 'audit_trail',
+  name: 'crm_audit_trail',
   object: ['account', 'contact', 'opportunity'],
   events: ['afterInsert', 'afterUpdate', 'afterDelete'],
   async: false,                    // must run inside the transaction
@@ -818,7 +818,7 @@ const createAuditTrail = defineHook({
 
 ```typescript
 const cascadeAccountUpdate = defineHook({
-  name: 'cascade_account_updates',
+  name: 'crm_cascade_account_updates',
   object: 'account',
   events: ['afterUpdate'],
   handler: async (ctx) => {
@@ -846,9 +846,9 @@ const cascadeAccountUpdate = defineHook({
 
 ```typescript
 const maskSensitiveData = defineHook({
-  name: 'mask_pii',
+  name: 'crm_mask_pii',
   object: ['contact', 'lead'],
-  events: ['afterFind'],   // fires for findOne too — no separate afterFindOne
+  events: ['afterFind'],
   handler: async (ctx) => {
     // Exempt the engine's own elevated reads (`isSystem`) — internal writes
     // and self-reads must see the real values.
@@ -894,7 +894,7 @@ these at startup: no `register*Hook` boilerplate, and the declarative fields
 ```typescript
 // objectstack.config.ts
 export default defineStack({
-  hooks: [taskHook, { name: 'h', object: 'account', events: ['beforeInsert'], handler: 'normalize' }],
+  hooks: [taskHook, { name: 'crm_h', object: 'account', events: ['beforeInsert'], handler: 'normalize' }],
   functions: { normalize: async (ctx) => { /* ... */ } },
 });
 ```

@@ -89,7 +89,7 @@ const en: TranslationData = {
         details: { label: 'Details' },
       },
       _actions: {
-        complete: {
+        todo_complete: {
           label: 'Complete',
           confirmText: 'Mark this task as completed?',
           successMessage: 'Task completed',

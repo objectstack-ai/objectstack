@@ -655,6 +655,21 @@ export function registerMetaCollectionRoutes(this: MetaCollectionRouteHost, scop
                     // against. Refused, not resolved — see
                     // `query-multiplicity.ts` for why picking one of two
                     // conflicting intents is worse than a 400.
+                    // [#29236] …and before the arity gate, RECOGNITION: the list
+                    // declares its closed query set (`META_LIST_QUERY_PARAMS`), so
+                    // a name it does not read — a misspelt filter — is a located
+                    // 400, never the whole list with a 200. The one decision the
+                    // runtime dispatcher's twin asks too (`metaListQueryRefusal`),
+                    // written in the nested envelope `refuseUnknownQueryParams`
+                    // writes.
+                    const listType = this.metaTypeSingular(req.params.type);
+                    const unknownParam = metaReadGate.metaListUnknownParamRefusal(listType, req.query);
+                    if (unknownParam) {
+                        res.status(unknownParam.status).json({
+                            error: { code: unknownParam.code, message: unknownParam.message },
+                        });
+                        return;
+                    }
                     // [#23214] The list lives beside the shared decision, so the
                     // runtime dispatcher's twin refuses the same names.
                     if (refuseRepeatedQueryParams(req, res, metaReadGate.META_QUERY_ARITY_DOORS.list)) return;
@@ -706,9 +721,16 @@ export function registerMetaCollectionRoutes(this: MetaCollectionRouteHost, scop
                     // transport-level `environmentId` — the `as any` this
                     // literal used to carry is retired now that the spec
                     // declares `previewDrafts`.
+                    // [#29236] `?names=a,b`, read once (an empty one is refused
+                    // here, before the store read) and pushed down to the store
+                    // as `GetMetaItemsRequest.names`, so the protocol filters
+                    // before it decorates. The chain narrows by the same
+                    // reading after the gate.
+                    const names = metaReadGate.metaListNames(req.query);
                     const listRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                         type: req.params.type,
                         packageId,
+                        ...(names ? { names: [...names] } : {}),
                         ...(previewDrafts ? { previewDrafts: true } : {}),
                         ...(environmentId ? { environmentId } : {}),
                     };
@@ -734,7 +756,7 @@ export function registerMetaCollectionRoutes(this: MetaCollectionRouteHost, scop
                     // declaration above — and the chain never re-reads it.
                     const answer = await metaReadGate.createMetaListAnswer(
                         this.metaListAnswerSources(environmentId, req, p),
-                        { metaType: this.metaTypeSingular(req.params.type), query: req.query, previewDrafts },
+                        { metaType: listType, query: req.query, previewDrafts },
                     )(items);
                     if (!answer.ok) {
                         sendFieldVisibilityFault(res, answer.object);

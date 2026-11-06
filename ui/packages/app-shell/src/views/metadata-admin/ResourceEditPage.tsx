@@ -171,7 +171,7 @@ import { declarationOnlyAuthoredObject } from './sharing-rule-catalog.js';
 import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
 import { useNavigationWrites } from '../../hooks/useNavigationSync.js';
 import { RefusalMessage } from '../../components/RefusalMessage.js';
-import { authoredObjectBuffer, authoredPublishedObject, type ObjectLayers } from './authoredObjectBuffer.js';
+import { authoredBuffer, authoredPublished, editsAuthoredLayers, type AuthoredLayers } from './authoredObjectBuffer.js';
 
 /** What an environment section is handed: the item's name and its definition on screen. */
 interface EnvironmentSectionProps {
@@ -1415,12 +1415,14 @@ function MetadataResourceEditPageImpl({
         // layer on every reload and the next save sent it again. The
         // baseline is only for an item that has no pending draft at all.
         const baseline = (lay.effective ?? lay.code ?? {}) as Record<string, unknown>;
-        // objectstack#29793 — an object is edited as its author wrote it:
-        // the stored draft as-is, else `overlay ?? code` (`authoredObjectBuffer`).
-        // The served draft and `effective` are translated or governed, with the
-        // platform's injected columns, so neither is an object's buffer; a
-        // draft whose stored copy was not served installs nothing, as above.
-        const authored = type === 'object' ? authoredObjectBuffer(lay as ObjectLayers, draftReal) : null;
+        // objectstack#29793, objectstack#30786 — a type whose served reads are
+        // translated (an object, a view, an app, a dashboard, …) is edited as
+        // its author wrote it: the stored draft as-is, else the published item
+        // as authored (`authoredBuffer`). Its served draft is translated for
+        // this console's locale (an object's governed besides), so it is never
+        // the buffer; a draft whose stored copy was not served installs
+        // nothing, as above.
+        const authored = editsAuthoredLayers(type) ? authoredBuffer(type, lay as AuthoredLayers, draftReal) : null;
         if (authored?.kind === 'unserved') {
           setDraftRefused({ message: t('engine.studio.refusal.draftUnreadable', locale) });
           setLoadFailed(true);
@@ -2033,10 +2035,11 @@ function MetadataResourceEditPageImpl({
       // just created has never been published (the page then navigates to the
       // item, whose load reads it afresh). `/layers` answers 404 for both, so
       // it is not asked: the answer already held stands.
-      // objectstack#29793 — …except for an object, whose buffer IS a layer
-      // (the stored `draft` this save just wrote, which a caller the server
-      // serves that layer to is answered for a draft-only name too).
-      const layerless = type !== 'object' && (createMode || (savedName === name && holdsNoLayer(layered)));
+      // objectstack#29793, objectstack#30786 — …except for a type whose buffer
+      // IS a layer (`editsAuthoredLayers`: the stored `draft` this save just
+      // wrote, which a caller the server serves that layer to is answered for a
+      // draft-only name too).
+      const layerless = !editsAuthoredLayers(type) && (createMode || (savedName === name && holdsNoLayer(layered)));
       const [lay, draftResp] = await Promise.all([
         layerless ? layered : client.layered<any>(type, savedName, refreshScope),
         client.getDraft<any>(type, savedName, refreshScope).catch(() => null),
@@ -2052,10 +2055,11 @@ function MetadataResourceEditPageImpl({
       // the next save to send. The baseline is only for a save that left no
       // draft row to read back.
       const freshBaseline = (lay?.effective ?? itemToSave) as Record<string, unknown>;
-      // objectstack#29793 — an object's refreshed buffer is the stored draft
-      // the save wrote, else `overlay ?? code` (see the load effect); with no
-      // layer at all, the document this save just sent.
-      const authored = type === 'object' ? authoredObjectBuffer(lay as ObjectLayers, draftReal) : null;
+      // objectstack#29793, objectstack#30786 — the refreshed buffer of a type
+      // with translated reads is the stored draft the save wrote, else the
+      // published item as authored (see the load effect); with no layer at
+      // all, the document this save just sent.
+      const authored = editsAuthoredLayers(type) ? authoredBuffer(type, lay as AuthoredLayers, draftReal) : null;
       if (authored?.kind === 'unserved') {
         setDraftRefused({ message: t('engine.studio.refusal.draftUnreadable', locale) });
         setLoadFailed(true);
@@ -2262,8 +2266,8 @@ function MetadataResourceEditPageImpl({
       if (resetSemantic) {
         const lay = await client.layered<any>(type, name, layeredScope);
         setLayered(lay);
-        // objectstack#29793 — an object as its author wrote it (`overlay ?? code`).
-        const fresh = (type === 'object' ? authoredPublishedObject(lay as ObjectLayers) : lay.effective ?? lay.code ?? {}) as Record<string, unknown>;
+        // objectstack#29793 — the published item as its author wrote it.
+        const fresh = authoredPublished(type, lay as AuthoredLayers);
         setDraft(fresh);
         draftSnapshotRef.current = fresh;
         // Designer-capable types stay in design mode; allow the auto-on
@@ -2338,9 +2342,10 @@ function MetadataResourceEditPageImpl({
       // spread cannot express deletion and would resurrect a published key
       // the draft had cleared.
       const freshBaseline = (lay.effective ?? draft) as Record<string, unknown>;
-      // objectstack#29793 — an object's buffer after the publish: the stored
-      // draft that remains, else the promoted body as authored (`overlay ?? code`).
-      const authored = type === 'object' ? authoredObjectBuffer(lay as ObjectLayers, draftReal) : null;
+      // objectstack#29793, objectstack#30786 — the buffer of a type with
+      // translated reads after the publish: the stored draft that remains,
+      // else the promoted body as authored.
+      const authored = editsAuthoredLayers(type) ? authoredBuffer(type, lay as AuthoredLayers, draftReal) : null;
       if (authored?.kind === 'unserved') {
         setDraftRefused({ message: t('engine.studio.refusal.draftUnreadable', locale) });
         setLoadFailed(true);
@@ -2399,8 +2404,8 @@ function MetadataResourceEditPageImpl({
       // with no layer still has none, and `/layers` would answer 404.
       const lay = layered && holdsNoLayer(layered) ? layered : await client.layered<any>(type, name, layeredScope);
       setLayered(lay);
-      // objectstack#29793 — an object as its author wrote it (`overlay ?? code`).
-      const fresh = (type === 'object' ? authoredPublishedObject(lay as ObjectLayers) : lay.effective ?? lay.code ?? {}) as Record<string, unknown>;
+      // objectstack#29793 — the published item as its author wrote it.
+      const fresh = authoredPublished(type, lay as AuthoredLayers);
       setDraft(fresh);
       draftSnapshotRef.current = fresh;
       setHasDraft(false);

@@ -256,13 +256,14 @@ const DECLARED: Exemption[] = [
       'formatted and no face is rendered.',
   },
   {
-    file: 'apps/console/src/pages/settings/workspaceTimezonePromptLogic.ts',
+    file: 'apps/console/src/pages/settings/firstRunChecklistLogic.ts',
     expression: 'const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;',
     count: 1,
     verdict: 'not applicable',
     reason:
-      'reads the HOST time zone for the workspace-timezone prompt (objectui#11758), the one member of ' +
-      '`resolvedOptions()` the locale does not decide; nothing is formatted and no face is rendered.',
+      'reads the HOST time zone the first-run checklist offers for the system timezone (objectstack#30206, ' +
+      'formerly the workspace-timezone prompt, objectui#11758), the one member of `resolvedOptions()` the ' +
+      'locale does not decide; nothing is formatted and no face is rendered.',
   },
   {
     file: 'packages/app-shell/src/console/organizations/CreateWorkspaceDialog.tsx',

@@ -16,7 +16,10 @@
  * It is raised only for a package this session recorded loading sample data
  * into (`sampleDataNotice.ts`), and only while a notification provider is
  * mounted: the page renders this component under that guard, since
- * `useNotifications()` throws outside one.
+ * `useNotifications()` throws outside one. A language switch that sends the
+ * page's frame back to its load skeleton unmounts this component too, with
+ * the installer still on the page: that is not a leave, so no banner is
+ * raised (`useMarketplaceFrameHolding`).
  */
 
 import { useEffect, useRef } from 'react';
@@ -24,11 +27,13 @@ import { useNavigate } from 'react-router-dom';
 import { useNotifications } from '@object-ui/react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { attachBanner, requestClearConfirm, sampleDataNotice, withdrawBanner } from './sampleDataNotice.js';
+import { useMarketplaceFrameHolding } from './marketplaceFrameHolding.js';
 
 export function SampleDataLeaveBanner({ manifestId }: { manifestId: string | null }) {
   const { notify, dismiss } = useNotifications();
   const { t } = useObjectTranslation();
   const navigate = useNavigate();
+  const isFrameHolding = useMarketplaceFrameHolding();
   // The cleanup below runs once the page is gone, so it reads the functions
   // of the last render rather than those of the render that set it up.
   const latest = useRef({ notify, dismiss, t, navigate });
@@ -41,6 +46,8 @@ export function SampleDataLeaveBanner({ manifestId }: { manifestId: string | nul
     // Back on the package page: its install note speaks for the sample data.
     withdrawBanner(manifestId);
     return () => {
+      // The frame took the page back for a language's strings: still here.
+      if (isFrameHolding?.()) return;
       const notice = sampleDataNotice(manifestId);
       if (!notice) return;
       const { notify: raise, dismiss: drop, t: tr, navigate: go } = latest.current;
@@ -60,7 +67,7 @@ export function SampleDataLeaveBanner({ manifestId }: { manifestId: string | nul
       });
       attachBanner(notice.manifestId, () => drop(id));
     };
-  }, [manifestId]);
+  }, [manifestId, isFrameHolding]);
 
   return null;
 }
