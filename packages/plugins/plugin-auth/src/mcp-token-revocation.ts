@@ -48,10 +48,20 @@
  *    MCP access token, or a server-only `skip_consent` client, which has no
  *    consent row to delete, keeps the provider's honest answer.
  *  - `invalid_request` with one of the provider's "this token is not one I
- *    know" descriptions ({@link UNKNOWN_TOKEN_DESCRIPTIONS}): RFC 7009 section
- *    2.2 answers an invalid token with 200, so this module does. Every other
- *    `invalid_request` (a malformed request, a repeated parameter) and every
- *    `invalid_client` passes through unchanged.
+ *    know" descriptions ({@link UNKNOWN_TOKEN_DESCRIPTIONS}): the provider
+ *    searched only where the `token_type_hint` pointed, and RFC 7009 section
+ *    2.1 requires a hint that does not locate the token to widen the search
+ *    to every token type the server supports. So this module looks for an MCP
+ *    access token first, exactly as above (same client: revoked; another
+ *    client: a 200 that touches nothing; a `skip_consent` client: the honest
+ *    `unsupported_token_type`). Only a token that is not one answers 200 as
+ *    unknown (RFC 7009 section 2.2). Every other `invalid_request` (a
+ *    malformed request, a repeated parameter) and every `invalid_client`
+ *    passes through unchanged.
+ *
+ * A store error while revoking answers 503 (RFC 7009 section 2.2.1: the
+ * token still stands and the client may retry later), and a retry completes
+ * the revoke, because every step is idempotent.
  *
  * Which client authenticated is read off the request in the provider's own
  * order (`extractClientCredentials`): a JWT client assertion's `sub`, else
@@ -279,6 +289,14 @@ function revoked(vendor: Response): Response {
   return new Response('null', { status: 200, headers });
 }
 
+/** A JSON OAuth error answer, never cached. */
+function oauthError(status: number, error: string, description: string): Response {
+  return new Response(JSON.stringify({ error, error_description: description }), {
+    status,
+    headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+  });
+}
+
 /**
  * The `/oauth2/revoke` answer, given the request (unread) and the provider's
  * response to it. See the module header for each branch.
@@ -295,28 +313,33 @@ export async function answerMcpTokenRevocation(
   } catch {
     return vendor;
   }
-  if (
+  const unknownToProvider =
     refusal?.error === 'invalid_request'
     && typeof refusal.error_description === 'string'
-    && UNKNOWN_TOKEN_DESCRIPTIONS.has(refusal.error_description)
-  ) {
-    return revoked(vendor);
-  }
-  if (refusal?.error !== 'unsupported_token_type') return vendor;
+    && UNKNOWN_TOKEN_DESCRIPTIONS.has(refusal.error_description);
+  if (!unknownToProvider && refusal?.error !== 'unsupported_token_type') return vendor;
+  // What a token that is not an MCP access token of this deployment is
+  // answered: unknown to the provider too → 200 (RFC 7009 §2.2); otherwise
+  // the provider's own answer.
+  const notMcpToken = unknownToProvider ? revoked(vendor) : vendor;
 
   if (!(request.headers.get('content-type') ?? '').toLowerCase().includes('application/x-www-form-urlencoded')) {
-    return vendor;
+    return notMcpToken;
   }
   let form: URLSearchParams;
   try {
     form = new URLSearchParams(await request.text());
   } catch {
-    return vendor;
+    return notMcpToken;
   }
   const raw = form.get('token');
-  if (!raw) return vendor;
+  if (!raw) return notMcpToken;
+  // RFC 7009 §2.1: a hint that did not locate the token does not end the
+  // search, so an MCP access token is looked for whatever the hint said.
   const grant = await deps.verifyClaims(stripAccessTokenAuthorizationScheme(raw));
-  if (!grant) return vendor;
+  if (!grant) return notMcpToken;
+  // A verified token whose client this module cannot read off the request is
+  // never answered 200: that would claim a revoke that did not happen.
   const clientId = authenticatedClientIdOf(request, form);
   if (!clientId) return vendor;
   // Another client's token: nothing of the owner's is touched (RFC 7009 §2.1).
@@ -325,16 +348,18 @@ export async function answerMcpTokenRevocation(
   try {
     const store = await deps.getStore();
     if (!store) throw new Error('better-auth exposes no storage adapter');
-    if (await isSkipConsentClient(store, clientId)) return vendor;
+    if (await isSkipConsentClient(store, clientId)) {
+      return unknownToProvider
+        ? oauthError(400, 'unsupported_token_type', 'JWT access tokens are self-contained and cannot be revoked server-side')
+        : vendor;
+    }
     await revokeMcpGrant(store, grant);
   } catch {
-    // Handed to the caller, never swallowed: the client is told the grant
-    // still stands and retries (every step above is idempotent), and
-    // `handleRequest` logs the 500 with its body as it logs every one.
-    return new Response(
-      JSON.stringify({ error: 'server_error', error_description: 'the grant could not be revoked; retry the request' }),
-      { status: 500, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } },
-    );
+    // Handed to the caller, never swallowed: RFC 7009 §2.2.1's 503 tells the
+    // client the token still stands and to retry (every step above is
+    // idempotent), and `handleRequest` logs it with its body as it logs every
+    // 5xx.
+    return oauthError(503, 'server_error', 'the grant could not be revoked; retry the request');
   }
   return revoked(vendor);
 }

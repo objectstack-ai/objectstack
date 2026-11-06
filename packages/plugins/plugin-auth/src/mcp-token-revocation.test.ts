@@ -22,10 +22,13 @@
  *    expired JWT bearer → 401", pins that a refused bearer is a 401 there);
  *  - the Console's `delete-consent` refuses the same bearer, with no extra write;
  *  - a revoke sent by ANOTHER client answers 200 and the owner's token works;
+ *  - a `token_type_hint` naming another token type does not end the search
+ *    (RFC 7009 §2.1): the MCP access token is revoked all the same;
  *  - an unknown or invalid token answers 200 (RFC 7009 §2.2), while a request
  *    the provider refuses before it looks at the token keeps its refusal;
  *  - a store error in the consent read refuses (fail closed);
- *  - a store error while revoking is handed to the caller as a 500;
+ *  - a store error while revoking is handed to the caller as a 503
+ *    (RFC 7009 §2.2.1);
  *  - a token minted before its consent was granted again stays refused;
  *  - a server-only `skip_consent` client keeps the provider's honest
  *    `unsupported_token_type` and is admitted without a consent row.
@@ -225,6 +228,28 @@ describe('[ruling A] /oauth2/revoke revokes an MCP access token through its cons
     expect((await r.revoke({ token: access_token, client_id: clientId })).status).toBe(200);
   }, 60_000);
 
+  it('a hint naming another token type does not end the search: the MCP access token is still revoked (RFC 7009 §2.1)', async () => {
+    const r = await rig();
+    const { clientId, access_token } = await r.connect();
+    expect(await r.manager.verifyMcpAccessToken(access_token), 'the control').toMatchObject({ clientId });
+
+    const res = await r.revoke({ token: access_token, token_type_hint: 'refresh_token', client_id: clientId });
+    expect(await bodyOf(res)).toEqual({ status: 200, body: null });
+    expect(await r.manager.verifyMcpAccessToken(access_token), 'the revoked bearer is refused').toBeNull();
+    expect(await r.rowsAtRest('sys_oauth_consent'), 'the consent is deleted').toEqual([]);
+    expect(await r.rowsAtRest('sys_oauth_refresh_token'), 'the refresh family is deleted').toEqual([]);
+  }, 60_000);
+
+  it('under that hint, ANOTHER client\'s revoke still answers 200 and changes nothing', async () => {
+    const r = await rig();
+    const { clientId, access_token } = await r.connect();
+    const intruder = await r.registerClient();
+    const res = await r.revoke({ token: access_token, token_type_hint: 'refresh_token', client_id: intruder });
+    expect(await bodyOf(res)).toEqual({ status: 200, body: null });
+    expect(await r.manager.verifyMcpAccessToken(access_token)).toMatchObject({ clientId });
+    expect(await r.rowsAtRest('sys_oauth_consent')).toHaveLength(1);
+  }, 60_000);
+
   it('the Console\'s `delete-consent` refuses the same bearer on the next request, with no extra write', async () => {
     const r = await rig();
     const { clientId, cookie, access_token } = await r.connect();
@@ -323,12 +348,13 @@ describe('[ruling A] store errors', () => {
     expect(await r.manager.verifyMcpAccessToken(access_token), 'the control: the store answers again').toMatchObject({ clientId });
   }, 60_000);
 
-  it('a store error while revoking is handed to the caller as a 500, and a retry completes the revoke', async () => {
+  it('a store error while revoking is handed to the caller as a 503 (RFC 7009 §2.2.1), and a retry completes the revoke', async () => {
     const r = await rig();
     const { clientId, access_token } = await r.connect();
     const failing = vi.spyOn(r.driver as any, 'delete').mockRejectedValue(new Error('store unreachable'));
     const res = await r.revoke({ token: access_token, token_type_hint: 'access_token', client_id: clientId });
-    expect(await bodyOf(res)).toMatchObject({ status: 500, body: { error: 'server_error' } });
+    expect(await bodyOf(res)).toMatchObject({ status: 503, body: { error: 'server_error' } });
+    expect(res.headers.get('cache-control')).toBe('no-store');
     expect(await r.manager.verifyMcpAccessToken(access_token), 'nothing was revoked, and the client was told').toMatchObject({ clientId });
     failing.mockRestore();
     expect((await r.revoke({ token: access_token, token_type_hint: 'access_token', client_id: clientId })).status).toBe(200);
@@ -350,6 +376,11 @@ describe('[ruling A, step 5] a server-only `skip_consent` client', () => {
 
     expect(await r.manager.verifyMcpAccessToken(access_token)).toMatchObject({ clientId });
     const res = await r.revoke({ token: access_token, token_type_hint: 'access_token', client_id: clientId });
-    expect(await bodyOf(res)).toMatchObject({ status: 400, body: { error: 'unsupported_token_type' } });
+    const provider = await bodyOf(res);
+    expect(provider).toMatchObject({ status: 400, body: { error: 'unsupported_token_type' } });
+    // Under a hint naming another token type, the same honest answer, word for word.
+    const hinted = await r.revoke({ token: access_token, token_type_hint: 'refresh_token', client_id: clientId });
+    expect(await bodyOf(hinted)).toEqual(provider);
+    expect(await r.manager.verifyMcpAccessToken(access_token)).toMatchObject({ clientId });
   }, 60_000);
 });
