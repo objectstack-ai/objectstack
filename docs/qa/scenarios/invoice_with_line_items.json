@@ -24,7 +24,7 @@
     "access-security.field-permissions",
     "access-security.row-scope"
   ],
-  "category": "finance",
+  "businessFunctions": ["finance"],
   "run": {
     "seed": {
       "account": [

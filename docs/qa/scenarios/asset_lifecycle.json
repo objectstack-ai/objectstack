@@ -67,7 +67,7 @@
     "ai.ask-data",
     "ai.agent-actions"
   ],
-  "category": "operations",
+  "businessFunctions": ["administration"],
   "run": {
     "seed": {
       "department": [

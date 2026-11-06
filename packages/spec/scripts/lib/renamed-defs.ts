@@ -199,14 +199,17 @@ export const RENAMED_DEFS: Readonly<Record<string, string>> = {
   'cloud/CreatePackageRequest': 'marketplace/CreatePackageRequest',
   'cloud/CreatePackageVersionRequest': 'marketplace/CreatePackageVersionRequest',
   'cloud/ListingStatus': 'marketplace/ListingStatus',
-  'cloud/MarketplaceCategory': 'marketplace/MarketplaceCategory',
+  // ─── RETIRED, do not re-add: `cloud/MarketplaceCategory` → `marketplace/MarketplaceCategory`
+  // and `cloud/PackageCategory` → `marketplace/PackageCategory` (0 keys carried —
+  // an enum def and a string def). Both targets left whole with the marketplace
+  // `category` keys (the D3 `marketplace-category-retired`, `RETIRED_DEFS_BY_MAJOR[18]`,
+  // the deliberate manifest deletion); the taxonomy facets replace them.
   'cloud/MarketplaceInstallRequest': 'marketplace/MarketplaceInstallRequest',
   'cloud/MarketplaceInstallResponse': 'marketplace/MarketplaceInstallResponse',
   'cloud/MarketplaceListing': 'marketplace/MarketplaceListing',
   'cloud/MarketplaceSearchRequest': 'marketplace/MarketplaceSearchRequest',
   'cloud/MarketplaceSearchResponse': 'marketplace/MarketplaceSearchResponse',
   'cloud/Package': 'marketplace/Package',
-  'cloud/PackageCategory': 'marketplace/PackageCategory',
   'cloud/PackageDependency': 'marketplace/PackageDependency',
   'cloud/PackageLocale': 'marketplace/PackageLocale',
   'cloud/PackageManifest': 'marketplace/PackageManifest',

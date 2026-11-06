@@ -221,6 +221,7 @@ import { createAuthInstance, type AuthInstanceHost } from './auth-manager-auth-i
 import { buildPluginList, type PluginListHost } from './auth-manager-plugin-list.js';
 import { resolveTurnstileKeys } from './turnstile-sign-up.js';
 import { assertTrustedAppSchemes, registeredAppSchemesOf } from './one-time-token-handoff.js';
+import type { MintScimConnectionCredentialInput, MintedScimConnectionCredential } from './scim-connection-service.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -6262,6 +6263,32 @@ export class AuthManager {
   /** Whether this deployment declared `server.trustProxy` ({@link AuthManagerOptions.trustProxy}). */
   public trustsForwardedHeaders(): boolean {
     return this.config.trustProxy === true;
+  }
+
+  /**
+   * [#30958] Is the SCIM 2.0 service provider mounted on this deployment? The
+   * same decision `buildPluginList` mounts `@better-auth/scim` on
+   * ({@link resolveScimEnabled}), so the credential door's "SCIM is off"
+   * refusal can never disagree with the `/scim/v2` routes actually served.
+   */
+  public isScimWired(): boolean {
+    return resolveScimEnabled(this.config.plugins);
+  }
+
+  /**
+   * [#30958] Mint a SCIM connection bearer with this deployment's auth secret,
+   * the key the mounted SCIM plugin's verifier digests with
+   * (`buildPluginList`), so the bearer is one that plugin accepts. The secret
+   * never leaves the manager. The only caller is the platform-admin
+   * `/admin/scim/mint-credential` mount (`scim-connection-admin.ts`), which
+   * hands the engine to write through.
+   */
+  public async mintScimConnectionCredential(
+    engine: IDataEngine,
+    input: MintScimConnectionCredentialInput,
+  ): Promise<MintedScimConnectionCredential> {
+    const { mintScimConnectionCredential } = await import('./scim-connection-service.js');
+    return mintScimConnectionCredential(engine as never, this.resolveAuthSecret(), input);
   }
 
   /**

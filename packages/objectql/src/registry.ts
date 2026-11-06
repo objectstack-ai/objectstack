@@ -748,10 +748,18 @@ type ServedObjectLayer = 'served' | 'code';
  *
  * Both may be given; a contribution either one leaves out is left out. The
  * base layer (`own` / `overlay`) is never left out.
+ *
+ * [#30756] `asEnabled` asks the opposite question of a DISABLED package: the
+ * fold as it will serve once that package is enabled, its `extend`
+ * contributions folded in instead of withheld ({@link SchemaRegistry.withholdDisabledExtensions}).
+ * Every other disabled package's stay withheld. The enable door's pre-check
+ * reads it, as the disable door's reads `withoutExtensionsOf`; for a package
+ * that is not disabled it changes nothing.
  */
 export interface ObjectExtensionFoldOptions {
   withoutExtensionsOf?: string;
   onlyExtensionsOf?: string;
+  asEnabled?: string;
 }
 
 /** Whether `options` leaves any contribution out (otherwise the fold is the ordinary one). */
@@ -5275,9 +5283,15 @@ export class SchemaRegistry {
    *
    * `undefined` when no extension of the object is withheld, so the ordinary
    * fold runs unchanged.
+   *
+   * [#30756] `asEnabled` names a package whose contributions are kept although
+   * it is disabled: the fold the enable of that package would leave
+   * ({@link ObjectExtensionFoldOptions}).
    */
-  private withholdDisabledExtensions(contributors: readonly ObjectContributor[]): WithheldExtensions | undefined {
-    const withheld = contributors.filter((c) => c.ownership === 'extend' && this.isPackageDisabled(c.packageId));
+  private withholdDisabledExtensions(contributors: readonly ObjectContributor[], asEnabled?: string): WithheldExtensions | undefined {
+    const withheld = contributors.filter((c) => c.ownership === 'extend'
+      && this.isPackageDisabled(c.packageId)
+      && (asEnabled === undefined || c.packageId !== asEnabled));
     if (withheld.length === 0) return undefined;
     const kept = contributors.filter((c) => !withheld.includes(c));
     const owner = contributors.find((c) => c.ownership === 'own')?.definition;
@@ -5319,14 +5333,21 @@ export class SchemaRegistry {
    * patches travel twice, the second time as if the owner shipped them.
    */
   private resolveObjectLeavingExtensionsOut(fqn: string, options: ObjectExtensionFoldOptions | undefined): ServiceObject | undefined {
-    const contributors = leavesExtensionsOut(options) ? this.objectContributors.get(fqn) : undefined;
-    if (!contributors || !contributors.some((c) => isLeftOutExtension(c, options!))) return this.resolveObject(fqn);
+    // [#30756] A disabled package folded in as if enabled; one that is not
+    // disabled changes nothing, so it does not leave the cached fold.
+    const asEnabled = options?.asEnabled !== undefined && this.isPackageDisabled(options.asEnabled)
+      ? options.asEnabled
+      : undefined;
+    const contributors = leavesExtensionsOut(options) || asEnabled !== undefined ? this.objectContributors.get(fqn) : undefined;
+    if (!contributors || !contributors.some((c) => isLeftOutExtension(c, options!)
+      || (asEnabled !== undefined && c.ownership === 'extend' && c.packageId === asEnabled))) return this.resolveObject(fqn);
     const kept = contributors.filter((c) => !isLeftOutExtension(c, options!));
     const ownerContrib = kept.find(c => c.ownership === 'own');
     if (!ownerContrib) return undefined;
     const base = kept.find(c => c.ownership === 'overlay') ?? ownerContrib;
-    // …and a disabled package's, as on every served fold ({@link withholdDisabledExtensions}).
-    const withheld = this.withholdDisabledExtensions(kept);
+    // …and a disabled package's, as on every served fold ({@link withholdDisabledExtensions}),
+    // except the one `asEnabled` names.
+    const withheld = this.withholdDisabledExtensions(kept, asEnabled);
     return withheld
       ? this.foldExtendersOntoDefinition(withheld.kept, withoutWithheldMembers(base.definition, withheld))
       : this.foldExtenders(kept, base);

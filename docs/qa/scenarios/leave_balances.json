@@ -54,7 +54,7 @@
     "ai.ask-data",
     "ai.agent-actions"
   ],
-  "category": "hr",
+  "businessFunctions": ["hr"],
   "run": {
     "seed": {
       "department": [
