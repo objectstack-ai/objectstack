@@ -742,11 +742,13 @@ export async function main(argv, deps = {}) {
 // An entry's inputs pick a lane of another file, so the claim "the relay starts that lane alone" is a claim
 // about THAT file. Two readers keep it measured, not recalled: `declaredDispatchInputs` reads the inputs the
 // file declares under its `workflow_dispatch` trigger, and `jobsStartedBy` evaluates every job's `if:` for a
-// given event and inputs — job by job in `needs` order, with three values (true, false, UNKNOWN), so a guard
-// this reading cannot decide (a running job's result or outputs, a function it does not model) reads as a
-// job that MAY run, never as one that skips. Both are text readings of the workflow's own shape (two-space
-// YAML, a job's `if:` at four spaces), not a YAML library — a file they cannot read yields no inputs or no
-// jobs, and every case that uses them first pins that they read something.
+// given event and inputs — and, for a `schedule` run, the cron that fired it (`github.event.schedule`), when
+// the caller names one — job by job in `needs` order, with three values (true, false, UNKNOWN), so a guard
+// this reading cannot decide (a running job's result or outputs, a function it does not model, a scheduled
+// run whose cron the caller did not name) reads as a job that MAY run, never as one that skips. Both are
+// text readings of the workflow's own shape (two-space YAML, a job's `if:` at four spaces), not a YAML
+// library — a file they cannot read yields no inputs or no jobs, and every case that uses them first pins
+// that they read something.
 // ---------------------------------------------------------------------------
 
 /**
@@ -912,9 +914,13 @@ function evaluateGuard(expr, { lookup, status }) {
  * status function is read as GitHub reads it, `success() && (guard)`; a job
  * with no guard is `success()`. A skipped job's outputs are empty; a job that
  * runs answers UNKNOWN for its result and its outputs, so a job downstream of
- * one is decided only when its guard does not depend on them. Pure.
+ * one is decided only when its guard does not depend on them. On a `schedule`
+ * run `github.event.schedule` is the cron that fired it: `schedule` names it,
+ * and a guard that reads it on a run whose cron was not named is UNKNOWN (the
+ * job MAY run) — the reader never guesses which clock fired. On every other
+ * event the context is empty, as GitHub leaves it. Pure.
  */
-export function jobsStartedBy(text, { event, inputs = {} }) {
+export function jobsStartedBy(text, { event, inputs = {}, schedule = null }) {
   const jobs = workflowJobs(text);
   const state = {};
   const out = { runs: [], mayRun: [], skipped: [], unread: [] };
@@ -931,6 +937,7 @@ export function jobsStartedBy(text, { event, inputs = {} }) {
       const lookup = (path) => {
         if (path === 'github.event_name') return event;
         if (path === 'github.ref') return `refs/heads/${WORKFLOW_DISPATCH_REF}`;
+        if (path === 'github.event.schedule') return event === 'schedule' ? (schedule ?? UNKNOWN) : null;
         if (path.startsWith('inputs.')) return event === 'workflow_dispatch' ? (inputs[path.slice('inputs.'.length)] ?? null) : null;
         const need = /^needs\.([A-Za-z0-9_-]+)\.(outputs\.|result$)/.exec(path);
         if (need) {
@@ -1478,18 +1485,30 @@ export async function selfTest() {
       return [file, onDisk !== null && Object.entries(entry).every(([name, value]) => onDisk[name]?.type === typeof value)];
     }), WORKFLOW_DISPATCH_ALLOWLIST.map((file) => [file, true]));
     // The lane claim, measured: release.yml's own job guards evaluated for the relay's dispatch. The reader is pinned to
-    // read all eight jobs and to tell the lanes apart (schedule, push and the repair dispatch are its controls), and a
-    // guard mutated in memory must change the answer — so the pin can fail, and a job added there is judged by its guard.
-    const started = (text, event, sent) => jobsStartedBy(text, { event, inputs: dispatchRunInputs(declaredDispatchInputs(text), sent) });
+    // read all ten jobs and to tell the lanes apart (the two schedules, push and the repair dispatch are its controls),
+    // and a guard mutated in memory must change the answer — so the pin can fail, and a job added there is judged by its
+    // guard.
+    const started = (text, event, sent, schedule = null) => jobsStartedBy(text, { event, inputs: dispatchRunInputs(declaredDispatchInputs(text), sent), schedule });
     const relayRun = started(releaseText, 'workflow_dispatch', WORKFLOW_DISPATCH_INPUTS[RELEASE]);
-    t('the reader reads every job of release.yml, each with a guard it can evaluate', [Object.keys(workflowJobs(releaseText)).sort(), relayRun.unread], [['docker', 'full-battery', 'publish', 'release-integrity', 'snapshot-next', 'snapshot-next-preflight', 'stale-prompts', 'version-pr'], []]);
-    t('⭐ the relay\'s dispatch starts version-pr ALONE — release-integrity, stale-prompts, full-battery, publish, docker and both snapshot jobs are skipped, none undecided (measured live: runs 38351525685 and 38357219168, before the snapshot lane existed)', [relayRun.runs, relayRun.mayRun, [...relayRun.skipped].sort()], [['version-pr'], [], ['docker', 'full-battery', 'publish', 'release-integrity', 'snapshot-next', 'snapshot-next-preflight', 'stale-prompts']]);
+    t('the reader reads every job of release.yml, each with a guard it can evaluate', [Object.keys(workflowJobs(releaseText)).sort(), relayRun.unread], [['docker', 'full-battery', 'publish', 'release-integrity', 'snapshot-next', 'snapshot-next-card', 'snapshot-next-preflight', 'snapshot-next-supersede', 'stale-prompts', 'version-pr'], []]);
+    t('⭐ the relay\'s dispatch starts version-pr ALONE — release-integrity, stale-prompts, full-battery, publish, docker and the four snapshot jobs are skipped, none undecided (measured live: runs 38351525685 and 38357219168, before the snapshot lane existed)', [relayRun.runs, relayRun.mayRun, [...relayRun.skipped].sort()], [['version-pr'], [], ['docker', 'full-battery', 'publish', 'release-integrity', 'snapshot-next', 'snapshot-next-card', 'snapshot-next-preflight', 'snapshot-next-supersede', 'stale-prompts']]);
     const repair = started(releaseText, 'workflow_dispatch', { refresh_version_pr: false });
     t('control: the repair dispatch the entry refuses (refresh_version_pr false) starts the audit and MAY reach publish — the reader tells the lanes apart', [repair.runs.includes('release-integrity'), repair.runs.includes('version-pr'), repair.mayRun.includes('publish')], [true, false, true]);
-    t('control: schedule starts version-pr alone, push starts the audit and never version-pr', [started(releaseText, 'schedule', {}).runs, started(releaseText, 'push', {}).runs.includes('release-integrity'), started(releaseText, 'push', {}).runs.includes('version-pr')], [['version-pr'], true, false]);
+    // release.yml carries TWO crons (the 6-hourly bookkeeping refresh and the daily `next` snapshot proposal), told
+    // apart by `github.event.schedule` in each scheduled job's `if:`. Neither cron is spelled here: both are read off
+    // the file and classified by what each starts, so the hour can move in release.yml alone.
+    const crons = [...releaseText.matchAll(/^ {4}- cron: '([^']+)'\s*$/gm)].map((m) => m[1]);
+    const byCron = Object.fromEntries(crons.map((cron) => [cron, started(releaseText, 'schedule', {}, cron)]));
+    const bookkeepingCron = crons.find((cron) => byCron[cron].runs.includes('version-pr'));
+    const snapshotCron = crons.find((cron) => byCron[cron].runs.includes('snapshot-next-preflight'));
+    t('control: release.yml declares two crons, and the reader told which one fired reads the bookkeeping cron as version-pr ALONE, none undecided', [crons.length, bookkeepingCron !== undefined && bookkeepingCron !== snapshotCron, bookkeepingCron ? [byCron[bookkeepingCron].runs, byCron[bookkeepingCron].mayRun] : null], [2, true, [['version-pr'], []]]);
+    t('control: the daily snapshot cron starts the snapshot preflight ALONE — the snapshot job, its supersede and its card may run behind it (each reads the preflight\'s result or outputs), and version-pr, release-integrity, stale-prompts, full-battery, publish and docker are skipped', snapshotCron ? [byCron[snapshotCron].runs, [...byCron[snapshotCron].mayRun].sort(), [...byCron[snapshotCron].skipped].sort()] : null, [['snapshot-next-preflight'], ['snapshot-next', 'snapshot-next-card', 'snapshot-next-supersede'], ['docker', 'full-battery', 'publish', 'release-integrity', 'stale-prompts', 'version-pr']]);
+    const unnamedClock = started(releaseText, 'schedule', {});
+    t('control: a schedule run whose cron is NOT named leaves version-pr and the snapshot preflight undecided (MAY run), never skipped and never started — the reader does not guess which clock fired', [unnamedClock.runs, unnamedClock.mayRun.includes('version-pr') && unnamedClock.mayRun.includes('snapshot-next-preflight'), unnamedClock.unread], [[], true, []]);
+    t('control: push starts the audit and never version-pr nor a snapshot job', [started(releaseText, 'push', {}).runs.includes('release-integrity'), started(releaseText, 'push', {}).runs.includes('version-pr'), [...started(releaseText, 'push', {}).runs, ...started(releaseText, 'push', {}).mayRun].some((j) => j.startsWith('snapshot-next'))], [true, false, false]);
     const unguarded = releaseText.replace("(github.event_name == 'workflow_dispatch' && !inputs.refresh_version_pr && !inputs.snapshot_next)", "(github.event_name == 'workflow_dispatch' && inputs.refresh_version_pr && !inputs.snapshot_next)");
     const added = `${releaseText.replace(/\n+$/u, '')}\n\n  extra-lane:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n`;
-    t('⛔ the pin can fail: a release-integrity guard that lost its negation, or a ninth job with no guard, is started by the relay\'s dispatch', [unguarded !== releaseText && started(unguarded, 'workflow_dispatch', REFRESH).runs.includes('release-integrity'), started(added, 'workflow_dispatch', REFRESH).runs.includes('extra-lane')], [true, true]);
+    t('⛔ the pin can fail: a release-integrity guard that lost its negation, or an eleventh job with no guard, is started by the relay\'s dispatch', [unguarded !== releaseText && started(unguarded, 'workflow_dispatch', REFRESH).runs.includes('release-integrity'), started(added, 'workflow_dispatch', REFRESH).runs.includes('extra-lane')], [true, true]);
   }
 
   // ── the run_rerun_failed row ──────────────────────────────────────────────

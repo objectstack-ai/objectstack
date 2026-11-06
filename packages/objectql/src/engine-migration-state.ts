@@ -7,10 +7,10 @@
  * `mediaValueShapeStrictFor`, `objectHasCoveredValueField`,
  * `valueShapeStrictFor`, `isFileReferencesMigrationVerified`,
  * `haveFileColumnsMoved`, `readMigrationFlagMemoized`,
- * `valueShapeViolationsAdmitted`, `admittedViolationSink`,
- * `recordObservedDeviation`, `retractCreationAttestation`,
- * `invalidateDataMigrationFlags`, `destroy` moved out of `engine.ts` whole by
- * `scripts/codemod-split-engine.mjs`.
+ * `readMigrationFlagRowMemoized`, `valueShapeViolationsAdmitted`,
+ * `admittedViolationSink`, `recordObservedDeviation`,
+ * `retractCreationAttestation`, `invalidateDataMigrationFlags`, `destroy` moved
+ * out of `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
  *
  * A MOVE, not a redesign. {@link MigrationStateFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -46,7 +46,7 @@ import { DATA_MIGRATION_FLAG_OBJECT, FILE_REFERENCES_MIGRATION_ID, isDataMigrati
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isScannableValueShapeField } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolationSink } from './validation/record-validator.js';
-import type { AdmittedValueShapeViolationTally } from './engine-top-level.js';
+import type { AdmittedValueShapeViolationTally, MigrationFlagRead } from './engine-top-level.js';
 import { ObjectQLStatics as ObjectQL } from './engine.js';
 import type { ObjectQL as ObjectQLClass } from './engine.js';
 
@@ -75,6 +75,7 @@ export interface MigrationStateHost {
   objectHasMediaField: ObjectQLClass['objectHasMediaField'];
   readFileReferencesFlagRow: ObjectQLClass['readFileReferencesFlagRow'];
   readMigrationFlagRowMemoized: ObjectQLClass['readMigrationFlagRowMemoized'];
+  readMigrationFlagVerified: ObjectQLClass['readMigrationFlagVerified'];
   readonly recordedDeviations: ObjectQLClass['recordedDeviations'];
   readonly retractedCreationAttestations: ObjectQLClass['retractedCreationAttestations'];
   unregisterDriver: ObjectQLClass['unregisterDriver'];
@@ -193,6 +194,30 @@ export class MigrationStateFacet {
    */
   static async readMigrationFlagMemoized(this: Pick<MigrationStateHost, 'readMigrationFlagRowMemoized'>, slot: 'fileReferencesMigrationVerified' | 'valueShapesMigrationVerified', migrationId: string, verifiedLog: string): Promise<boolean> {
     return (await this.readMigrationFlagRowMemoized(slot, migrationId, verifiedLog)).verified;
+  }
+
+  /**
+   * The same memoized read, handed back WHOLE (#15989).
+   *
+   * The row carries two facts a consumer can want — is the migration verified,
+   * and have the columns moved — and they must come from one read: two reads
+   * can straddle a `--apply` and answer out of one another's date, which for
+   * these two facts means "verified, columns not moved" (the JSON arm) and
+   * "not verified, columns moved" (an unreachable state) both become
+   * observable. {@link readMigrationFlagMemoized} is this function projected
+   * onto its first field, so the two can never disagree.
+   */
+  static async readMigrationFlagRowMemoized(this: Pick<MigrationStateHost, 'fileReferencesMigrationVerified' | 'readMigrationFlagVerified' | 'valueShapesMigrationVerified'>, slot: 'fileReferencesMigrationVerified' | 'valueShapesMigrationVerified', migrationId: string, verifiedLog: string): Promise<MigrationFlagRead> {
+    const cached = this[slot];
+    if (cached) return await cached;
+    const pending = this.readMigrationFlagVerified(migrationId, verifiedLog);
+    this[slot] = pending;
+    const result = await pending;
+    // Only a read that actually consulted the ledger may be remembered. Clear
+    // by identity so a concurrent `invalidateDataMigrationFlags()` (or a
+    // re-read that already replaced this slot) is not undone here.
+    if (!result.conclusive && this[slot] === pending) this[slot] = null;
+    return result;
   }
 
   /** The body of `ObjectQL#valueShapeViolationsAdmitted`; the method's docblock there is its contract. */

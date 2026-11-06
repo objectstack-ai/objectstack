@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { PLATFORM_ADMIN_SETTINGS_GATE } from './platform-admin-action-gate.js';
 
 /**
  * sys_sso_provider — Registered external SSO identity provider (OIDC / SAML)
@@ -101,6 +102,8 @@ export const SysSsoProvider = ObjectSchema.create({
       // /sso/register would drop clientId/clientSecret (top-level → Zod-stripped)
       // and persist an unusable `oidc_config = null` provider.
       target: '/api/v1/auth/admin/sso/register',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_SETTINGS_GATE],
       // Platform-admin standing (ADR-0068 D4) — see the actions header above.
       visible: 'current_user.isPlatformAdmin == true',
       refreshAfter: true,
@@ -143,6 +146,8 @@ export const SysSsoProvider = ObjectSchema.create({
       // re-dispatches to /sso/register (admin gate runs). The response returns
       // the SP ACS + metadata URLs to configure on the IdP.
       target: '/api/v1/auth/admin/sso/register-saml',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_SETTINGS_GATE],
       // Platform-admin standing (ADR-0068 D4) — see the actions header above.
       visible: 'current_user.isPlatformAdmin == true',
       refreshAfter: true,
@@ -175,6 +180,8 @@ export const SysSsoProvider = ObjectSchema.create({
       // feature is OFF the bridge returns a clear "not enabled for this
       // environment" error instead of a bare 404.
       target: '/api/v1/auth/admin/sso/request-domain-verification',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_SETTINGS_GATE],
       // Platform-admin standing (ADR-0068 D4) — see the actions header above.
       visible: 'current_user.isPlatformAdmin == true',
       params: [
@@ -211,6 +218,8 @@ export const SysSsoProvider = ObjectSchema.create({
       // on success. Routed through the env bridge, which maps @better-auth/sso's
       // empty 204 / 502 into a clear success/error toast.
       target: '/api/v1/auth/admin/sso/verify-domain',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_SETTINGS_GATE],
       // Platform-admin standing (ADR-0068 D4) — see the actions header above.
       visible: 'current_user.isPlatformAdmin == true',
       successMessage: 'Domain ownership verified',

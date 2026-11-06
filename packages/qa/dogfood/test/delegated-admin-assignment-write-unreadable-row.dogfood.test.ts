@@ -132,15 +132,15 @@ describe("behind the organization wall, a delegated administrator's assignment w
     const unitB = await unit(orgB, 'Delegated Unreadable B Unit', 'DG-B1');
 
     const ownerB = await userId(OWNER_B);
-    positionB = await assignment(orgB, ownerB, 'contributor', unitB);
+    positionB = await assignment(orgB, ownerB, 'showcase_contributor', unitB);
     // Inside the scope, written by the delegate itself through the door — so
     // the record-level write rules after the gate (the creator's own row)
     // admit its edit too, and the edit measures the gate's verdict.
     const created = await call(tokens.delegate, 'POST', '/data/sys_user_position',
-      { user_id: ownerA, position: 'contributor', business_unit_id: scopeUnitA });
+      { user_id: ownerA, position: 'showcase_contributor', business_unit_id: scopeUnitA });
     expect(created.status, `delegate assigns inside its scope — ${JSON.stringify(created.body)}`).toBeLessThan(300);
     inScopeA = idOf(created.body);
-    outOfScopeA = await assignment(orgA, delegate, 'contributor', outsideUnitA);
+    outOfScopeA = await assignment(orgA, delegate, 'showcase_contributor', outsideUnitA);
     expect(delegate && ownerA && positionB && inScopeA && outOfScopeA, 'every row carries an id').toBeTruthy();
   }, 300_000);
 

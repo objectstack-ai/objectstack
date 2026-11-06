@@ -58,6 +58,7 @@
     "AuthoredRowWriteVerdict (type)",
     "AutomationContext (interface)",
     "AutomationResult (interface)",
+    "CLOUD_BINDING_SERVICE (const)",
     "CRYPTO_CONTEXT_SCOPES (const)",
     "CacheStats (interface)",
     "ChatWithToolsOptions (interface)",

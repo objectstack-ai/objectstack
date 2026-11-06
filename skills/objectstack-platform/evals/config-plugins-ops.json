@@ -270,6 +270,23 @@
           "PUT /api/v1/meta/action/crm_close_deal"
         ]
       }
+    },
+    {
+      "id": 16,
+      "prompt": "We run the official image on one host with a volume at /home/node/.objectstack and never set any OS_* variable. After pulling the new tag the container exits at once: OS_DATABASE_URL, OS_AUTH_SECRET and OS_SECRET_KEY are not set. Get us back up without losing the logins and the stored credentials.",
+      "expected_output": "The image presets `OS_DEPLOYMENT_DURABILITY_CHECK_ENABLED=true`, so `os start` exits before it writes a database file or a secret while any of the three is unset; set all three on the run command, never in the image. Keep the values the old container generated, read from its `/home/node/.objectstack` (`docker exec` or the volume): `OS_AUTH_SECRET` is the contents of `auth-secret`, `OS_SECRET_KEY` the contents of `dev-crypto-key`, and `OS_DATABASE_URL=file:/home/node/.objectstack/data/objectstack.db` on the kept volume (or migrate that file to a database). Fresh secrets would leave every saved credential unreadable and sign everyone out.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "auth-secret",
+          "dev-crypto-key",
+          "objectstack.db",
+          "/home/node/.objectstack"
+        ],
+        "must_not_contain": [
+          "OS_DEV_CRYPTO_KEY"
+        ]
+      }
     }
   ]
 }

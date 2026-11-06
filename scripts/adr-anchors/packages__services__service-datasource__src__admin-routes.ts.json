@@ -1,0 +1,7 @@
+{
+  "file": "packages/services/service-datasource/src/admin-routes.ts",
+  "adrs": [
+    "ADR-0131"
+  ],
+  "invariant": "A datasource is a `datasource` item of the environment's metadata catalog, the record `PUT /meta/datasource/:name` writes. Under `group` / `isolated` (ADR-0131 D3, D12 items 7–8, D11) every route of the datasource admin family that writes a datasource record (create, update, remove, migrate-credential) asks `walledCatalogWriteVerdict` (`@objectstack/metadata-core`) for the type `datasource` after the `manage_platform_settings` capability gate and before the service is resolved, and answers its refusal `403 PERMISSION_DENIED` with the verdict's sentence; only the platform operator rung is admitted, never an organization's holder of the capability. The verdict is asked, never restated here, and is inert under `single` and with no `tenancy` service. Routes that write no record (list, read, driver catalog, both probes, remote tables, object draft) do not ask it."
+}

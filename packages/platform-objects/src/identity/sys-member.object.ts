@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { PLATFORM_ADMIN_USERS_GATE } from './platform-admin-action-gate.js';
 import { F } from '@objectstack/spec/shared';
 import {
   BUILTIN_MEMBERSHIP_ROLE_OPTIONS,
@@ -177,6 +178,8 @@ export const SysMember = ObjectSchema.create({
       locations: ['list_toolbar'],
       type: 'api',
       target: '/api/v1/auth/organization/add-member',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
       // Offered only to the one standing the door admits (ADR-0068 D4):
       // `current_user.isPlatformAdmin` is the ADR-0095 D3 PLATFORM_ADMIN
       // posture rung — what the session payload emits and what the mount's
