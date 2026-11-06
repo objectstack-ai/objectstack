@@ -1807,7 +1807,10 @@ export class SharingService implements ISharingService {
     if (declared === 'controlled_by_parent') {
       return 'Author the rule on its master object instead.';
     }
-    if (schema && effectiveSharingModel(schema) !== 'public' && hasOwnerField(schema) && hasPhantomOwnerAnchor(schema)) {
+    // Asked before the model: a federated object whose `owner_id` is the
+    // injected anchor already HAS that field, public or not, and a private
+    // model would still meet the phantom-anchor refusal.
+    if (schema && hasOwnerField(schema) && hasPhantomOwnerAnchor(schema)) {
       return `To use sharing rules on it, declare a real remote '${OWNER_FIELD}' column on the federated object.`;
     }
     return `To use sharing rules on it, give the object a private or read-only sharing model `

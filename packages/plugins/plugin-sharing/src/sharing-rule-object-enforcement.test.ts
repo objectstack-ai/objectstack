@@ -42,6 +42,7 @@ const ORG = 'org_30621';
 const ENFORCED = 'os30621_deal';
 const OWNERLESS = 'os30621_session';
 const PUBLIC_OWNED = 'os30621_notice';
+const PUBLIC_FEDERATED = 'os30621_ext_customer';
 
 const SYSTEM: ExecutionContext = { isSystem: true, positions: [], permissions: [] };
 const ADMIN = {
@@ -88,6 +89,12 @@ async function boot() {
     name: PUBLIC_OWNED, label: 'Notice', sharingModel: 'public_read_write',
     fields: { ...recordFields, owner_id: text('owner_id') },
   } as never);
+  // A PUBLIC federated object (ADR-0015): the registry injects `owner_id` as an
+  // anchor the remote table does not have. Registered only, never written to.
+  ql.registerObject({
+    name: PUBLIC_FEDERATED, label: 'External customer', sharingModel: 'public_read_write',
+    external: { remoteName: 'customers' }, fields: { id: { ...text('id'), primary: true }, name: text('name') },
+  } as never);
   ql.registerObject({
     name: 'sys_sharing_rule', label: 'Sharing Rule', isSystem: true,
     fields: {
@@ -102,7 +109,7 @@ async function boot() {
   const sharing = new SharingService({ engine: ql as never });
   const rules = new SharingRuleService({ engine: ql as never, sharing });
   bindRuleObjectEnforcementGuard(ql as never, sharing);
-  return { ql, rules };
+  return { ql, rules, sharing };
 }
 
 const rowFor = (object: string, name: string) => ({
@@ -166,6 +173,24 @@ describe('[#30621] the /data door refuses a sharing rule on an object without re
     await ql.update('sys_sharing_rule', { id: 'srule_legacy_rule', object_name: OWNERLESS, active: false }, { context: ADMIN } as never);
     const [row] = await storedRules(ql);
     expect(row?.active === false || row?.active === 0).toBe(true);
+  });
+});
+
+describe('[#30621] the refusal sentence names the remedy for the arm that refused', () => {
+  it('a PUBLIC federated object with the injected owner anchor is told to declare a real remote owner_id', async () => {
+    const { ql, sharing } = await boot();
+    expect((ql as any).getSchema(PUBLIC_FEDERATED)?.fields?.owner_id, 'the registry injected the anchor').toBeTruthy();
+    const refusal = sharing.sharingRuleObjectRefusal(PUBLIC_FEDERATED);
+    expect(refusal).toContain(`'${PUBLIC_FEDERATED}'`);
+    expect(refusal).toMatch(/declare a real remote 'owner_id' column/);
+    // Not the generic remedy: the object already has an owner_id, and a
+    // private model would still meet the phantom-anchor refusal.
+    expect(refusal).not.toMatch(/sharingModel: 'private'/);
+    const err = await ql.insert('sys_sharing_rule', rowFor(PUBLIC_FEDERATED, 'ext_rule'), { context: ADMIN } as never)
+      .catch((x: unknown) => x as any);
+    expect(err?.code).toBe('SHARING_NOT_ENABLED');
+    expect(err?.status).toBe(422);
+    expect(await storedRules(ql)).toHaveLength(0);
   });
 });
 
