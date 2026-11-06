@@ -221,15 +221,18 @@ class ScriptedDriver implements AgentDriver {
   }
 }
 
-function setup(opts: { degradedBuild?: boolean; leak?: { question: string; persona: string }; bareItems?: boolean; declares?: string } = {}) {
+function setup<A extends FakeApp = FakeApp>(
+  opts: { degradedBuild?: boolean; leak?: { question: string; persona: string }; bareItems?: boolean; declares?: string; app?: () => A } = {},
+) {
   const scenario = load();
-  let current = new FakeApp();
-  const apps: FakeApp[] = [];
+  const fresh = opts.app ?? (() => new FakeApp() as A);
+  let current = fresh();
+  const apps: A[] = [];
   const getApp = () => current;
   const ops = fakeOps(getApp, opts);
   const boot = ops.boot.bind(ops);
   ops.boot = async (dir) => {
-    current = new FakeApp();
+    current = fresh();
     apps.push(current);
     return boot(dir);
   };
@@ -273,12 +276,59 @@ describe('runCard — the crm card, both modes, a clean agent', () => {
     expect(renderScorecard(sc)).toContain('| Run-问数 | 9/9 | — |');
   });
 
-  it('seeds ownership from the persona handles: Acme and Bitworks are owned by the sdr user', async () => {
+  it('seeds ownership from the persona handles: Acme and Bitworks are owned by the sdr user, Shopwell by the admin', async () => {
     const { scenario, ops, driver, apps } = setup();
     await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     const accounts = apps[0]!.rows.democrm_account!;
     expect(accounts.filter((r) => r.owner_id === 'u-sdr').map((r) => r.id)).toEqual(['ac1', 'ac3']);
-    expect(accounts.find((r) => r.id === 'ac2')!.owner_id).toBeUndefined();
+    expect(accounts.find((r) => r.id === 'ac2')!.owner_id).toBe('u-admin');
+  });
+});
+
+/**
+ * The data door of a faithful build: `account.owner` is a user lookup and
+ * `contact.account` a lookup to account, and the door refuses a value naming
+ * no such record, as the first live run's app did (`VALIDATION_FAILED ·
+ * Account Owner: no sys_user record has id "u_sam"`). Built from the card in
+ * the repo, not from that run's recording, which this container does not hold.
+ */
+class UserLookupApp extends FakeApp {
+  readonly users = new Set(['u-admin']);
+  override async createPersona(persona: string, permissionSet: string): Promise<PersonaAccount> {
+    const acct = await super.createPersona(persona, permissionSet);
+    this.users.add(acct.userId);
+    return acct;
+  }
+  override async insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer> {
+    const refuse = (message: string): HttpAnswer => ({ ok: false, status: 400, body: { error: message, code: 'VALIDATION_FAILED' }, code: 'VALIDATION_FAILED', message });
+    for (const userField of ['owner', 'owner_id']) {
+      const v = row[userField];
+      if (object === 'democrm_account' && v !== undefined && !this.users.has(String(v))) return refuse(`Account Owner: no sys_user record has id "${String(v)}"`);
+    }
+    if (object === 'democrm_contact' && row.account !== null && !(this.rows.democrm_account ?? []).some((a) => a.id === row.account)) {
+      return refuse(`Account: no democrm_account record has id "${String(row.account)}"`);
+    }
+    return super.insertRow(object, row);
+  }
+}
+
+describe('runCard — the seed against a build whose owner field is a user lookup', () => {
+  it('the double refuses the handle the old seed sent, so it can fail', async () => {
+    const app = new UserLookupApp();
+    expect(await app.insertRow('democrm_account', { id: 'ac1', name: 'Acme', industry: 'tech', owner: 'u_sam', owner_id: 'u-admin' })).toMatchObject({ ok: false, code: 'VALIDATION_FAILED' });
+    expect(await app.insertRow('democrm_contact', { id: 'ct1', account: 'ac1' })).toMatchObject({ ok: false, code: 'VALIDATION_FAILED' });
+  });
+
+  it('loads all 8 rows: the owner field carries the persona user id, and a handle no persona holds is the admin', async () => {
+    const { scenario, ops, driver, apps } = setup({ app: () => new UserLookupApp() });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    const seed = run.modes[0]!.run!.seed;
+    expect(seed).toEqual({ inserted: 8, refused: [], handlesAsAdmin: ['u_tia'] });
+    const owners = Object.fromEntries(apps[0]!.rows.democrm_account!.map((r) => [r.id, [r.owner, r.owner_id]]));
+    expect(owners).toEqual({ ac1: ['u-sdr', 'u-sdr'], ac2: ['u-admin', 'u-admin'], ac3: ['u-sdr', 'u-sdr'] });
+    expect(apps[0]!.rows.democrm_contact!.map((r) => r.id)).toEqual(['ct1', 'ct2', 'ct3', 'ct4', 'ct5']);
+    expect(apps[0]!.rows.democrm_contact!.find((r) => r.id === 'ct1')!.owner_id).toBeUndefined(); // a path scope (`account.owner`) owns nothing
+    expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 5, total: 5 }); // every write found its seeded target
   });
 });
 

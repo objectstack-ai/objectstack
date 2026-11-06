@@ -50,6 +50,43 @@ export function personaHandles(card: Card): Map<string, string> {
   return out;
 }
 
+/**
+ * The scope fields whose seed values are user handles, `object.field`: a
+ * field a persona's direct (non-path) `scope` rule names that the card does
+ * not declare as a lookup or a select, and that is not `id`. In the crm card
+ * that is `account.owner` (`u_sam`, `u_tia`). Every other direct scope field
+ * holds a row id or an option value (`asset.custodian` = `e06`, an employee
+ * row; `ticket_comment.visibility` = `public`), which the seed loads verbatim.
+ */
+export function userHandleFields(card: Card): Set<string> {
+  const declared = new Set([
+    ...(card.expect.lookups ?? []).map((l) => `${l.object}.${l.field}`),
+    ...(card.expect.selectFields ?? []).map((s) => `${s.object}.${s.field}`),
+  ]);
+  const out = new Set<string>();
+  for (const p of card.run.personas) {
+    for (const sc of p.scope ?? []) {
+      const key = `${sc.object}.${sc.field}`;
+      if (!sc.field.includes('.') && sc.field !== 'id' && !declared.has(key)) out.add(key);
+    }
+  }
+  return out;
+}
+
+/** The handles a seed row names in a {@link userHandleFields} field that no persona signs in as (`u_tia`): the seed loads each as the admin user. */
+export function unheldHandles(card: Card): string[] {
+  const held = personaHandles(card);
+  const out = new Set<string>();
+  for (const key of userHandleFields(card)) {
+    const [object, field] = key.split('.') as [string, string];
+    for (const row of card.run.seed[object] ?? []) {
+      const v = row[field];
+      if (typeof v === 'string' && !held.has(v)) out.add(v);
+    }
+  }
+  return [...out].sort();
+}
+
 /** The every-item-prefixed rule, in every authoring prompt. */
 export function namingRule(card: Card): string {
   const ns = scenarioNamespace(card);
@@ -102,6 +139,15 @@ export function dataContract(card: Card): string {
       `Row ownership: a row whose ${[...new Set(card.run.personas.flatMap((p) => (p.scope ?? []).filter((s) => !s.field.includes('.')).map((s) => `\`${s.field}\``)))].join(' / ')} names a handle ` +
         `(${[...handles].map(([h, id]) => `\`${h}\` = \`${id}\``).join(', ')}) is loaded as owned by that person’s user.`,
     );
+    const userFields = [...userHandleFields(card)];
+    if (userFields.length) {
+      const unheld = unheldHandles(card);
+      lines.push(
+        `In ${userFields.map((k) => `\`${k}\``).join(' / ')} the handle stands for a user: the runner loads that field with the person’s user id, ` +
+          'not the handle text, so a rule on it matches that user' +
+          (unheld.length ? `; a handle no person below holds (${unheld.map((h) => `\`${h}\``).join(', ')}) is loaded as the admin user.` : '.'),
+      );
+    }
   }
   if (card.run.agentActions?.length) {
     lines.push('');
@@ -111,19 +157,35 @@ export function dataContract(card: Card): string {
   return lines.join('\n');
 }
 
-const BUILD_PREAMBLE =
-  'You are building an ObjectStack app in this project (scaffolded by `create-objectstack`; follow the project’s AGENTS.md ' +
-  'and its objectstack skills). Author the metadata, then run `npx objectstack validate` and `npx objectstack build` ' +
-  'and fix what they report until both pass. Work without asking questions.';
+/**
+ * The `objectstack verify` arguments the runner scores a build with
+ * (`buildHalf` in `orchestrate.ts` runs exactly these), so every authoring
+ * loop can be told to run the same proof before it stops.
+ */
+export function verifyArgs(card: Card): string[] {
+  return ['verify', ...verifyFlags(card)];
+}
+
+/** The three commands a scratch build is scored on, as the agent runs them: `validate`, `build`, then {@link verifyArgs}. */
+function authoringChecks(card: Card): string {
+  return `run \`npx objectstack validate\`, \`npx objectstack build\` and \`npx objectstack ${verifyArgs(card).join(' ')}\` and fix what they report until all three pass`;
+}
+
+function buildPreamble(card: Card): string {
+  return (
+    'You are building an ObjectStack app in this project (scaffolded by `create-objectstack`; follow the project’s AGENTS.md ' +
+    `and its objectstack skills). Author the metadata, then ${authoringChecks(card)}. Work without asking questions.`
+  );
+}
 
 export function buildPrompt(card: Card): string {
-  return [BUILD_PREAMBLE, '', '## The app', '', text(card.prompt.detailed), '', dataContract(card)].join('\n');
+  return [buildPreamble(card), '', '## The app', '', text(card.prompt.detailed), '', dataContract(card)].join('\n');
 }
 
 export function iteratePrompt(card: Card): string {
   return [
-    'This project holds a working ObjectStack app. Apply the change below, then run `npx objectstack validate` and ' +
-      '`npx objectstack build` and fix what they report until both pass. Keep everything else working. Work without asking questions.',
+    `This project holds a working ObjectStack app. Apply the change below, then ${authoringChecks(card)}. ` +
+      'Keep everything else working. Work without asking questions.',
     '',
     namingRule(card),
     '',

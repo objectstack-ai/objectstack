@@ -41,7 +41,7 @@ import type { AgentDriver, StepRef } from './driver.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
 import { observeOperation, touchedRowId, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
-import { buildPrompt, iteratePrompt, operationPrompt, personaHandles, questionPrompt, templateIteratePrompt, verifyFlags } from './prompts.js';
+import { buildPrompt, iteratePrompt, operationPrompt, personaHandles, questionPrompt, templateIteratePrompt, userHandleFields, verifyArgs } from './prompts.js';
 import type { ParsedTurn } from './transcript.js';
 
 // ── What the orchestrator needs from the outside world ──────────────────────
@@ -113,7 +113,12 @@ export interface OperationResult {
 
 export interface RunHalf {
   personas: Array<Omit<PersonaAccount, 'apiKey'>>;
-  seed: { inserted: number; refused: Array<{ object: string; id: string; code?: string; message?: string }> };
+  seed: {
+    inserted: number;
+    refused: Array<{ object: string; id: string; code?: string; message?: string }>;
+    /** Handles a user-handle field named that no persona holds, each loaded as the admin user (`u_tia`). */
+    handlesAsAdmin?: string[];
+  };
   questions: QuestionResult[];
   operations: OperationResult[];
   error?: string;
@@ -276,7 +281,7 @@ async function buildHalf(
   }
   half.commands.push(await ops.os(dir, ['validate']));
   half.commands.push(await ops.os(dir, ['build']));
-  half.commands.push(await ops.os(dir, ['verify', ...verifyFlags(scenario.card)]));
+  half.commands.push(await ops.os(dir, verifyArgs(scenario.card))); // the invocation every authoring prompt names
   const artifact = ops.readArtifact(dir);
   if (artifact === undefined) {
     half.error = half.error ?? 'no dist/objectstack.json after `objectstack build`';
@@ -311,16 +316,31 @@ export async function runHalf(
     }
     const adminKey = await app.adminApiKey();
 
-    // Seed, with row ownership mapped from the persona handles.
+    // Seed, with row ownership mapped from the persona handles. A row whose
+    // direct scope field names a persona's handle is owned (`owner_id`, the
+    // platform's record owner) by that persona's user. A user-handle field
+    // (`account.owner`, `userHandleFields`) is itself loaded with a user id —
+    // the persona's, or the admin's for a handle no persona holds (`u_tia`) —
+    // because a faithful build models it as a user lookup, which refuses the
+    // handle text. Any other scope field names a row or an option and is sent
+    // verbatim.
     const handles = personaHandles(card);
     const ownerFields = new Set(card.run.personas.flatMap((p) => (p.scope ?? []).filter((s) => !s.field.includes('.')).map((s) => `${s.object}.${s.field}`)));
+    const userFields = userHandleFields(card);
     for (const object of seedOrder(scenario)) {
       for (const row of card.run.seed[object] ?? []) {
         const body: Record<string, unknown> = { ...row };
         for (const [k, v] of Object.entries(row)) {
-          const persona = typeof v === 'string' && ownerFields.has(`${object}.${k}`) ? handles.get(v) : undefined;
+          if (typeof v !== 'string' || !ownerFields.has(`${object}.${k}`)) continue;
+          const persona = handles.get(v);
           const acct = persona ? accounts.find((a) => a.persona === persona) : undefined;
           if (acct) body.owner_id = acct.userId;
+          if (userFields.has(`${object}.${k}`)) {
+            const userId = acct?.userId ?? app.adminUserId();
+            body[k] = userId;
+            body.owner_id = userId;
+            if (!acct) half.seed.handlesAsAdmin = [...new Set([...(half.seed.handlesAsAdmin ?? []), v])].sort();
+          }
         }
         const r = await app.insertRow(object, body);
         if (r.ok) half.seed.inserted++;

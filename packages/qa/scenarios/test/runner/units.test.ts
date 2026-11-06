@@ -24,7 +24,7 @@ import {
 import { asksToConfirm, countWrites, noWriteAttempted, observedAnswer, observeOperation, uncodedToolError } from '../../src/runner/observe.js';
 import { citationLabels, namespaceOfConfig, namespacedScenario, permissionSetName, templateHostName } from '../../src/runner/namespace.js';
 import { changeSize, hiddenValues, installableManifest, seedOrder, withoutItems } from '../../src/runner/orchestrate.js';
-import { buildPrompt, dataContract, iteratePrompt, questionPrompt, templateIteratePrompt, verifyFlags } from '../../src/runner/prompts.js';
+import { buildPrompt, dataContract, iteratePrompt, questionPrompt, templateIteratePrompt, unheldHandles, userHandleFields, verifyArgs, verifyFlags } from '../../src/runner/prompts.js';
 import { parseStreamJson, refusalCodeOf, toolNameOf, type ParsedTurn } from '../../src/runner/transcript.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -215,6 +215,27 @@ describe('prompts, seed order, template manifest and change size', () => {
     expect(contract).toContain('- `democrm_delete_contact` on `democrm_contact`');
     expect(contract).toContain('`democrm_partner_user` for `partner_user`');
     expect(contract).not.toMatch(/named exactly by the id/);
+  });
+
+  it('both authoring loops name the verify invocation the runner scores with, next to validate and build', () => {
+    const card = namespacedScenario(crm).card;
+    expect(verifyArgs(card)).toEqual(['verify', '--reference-shapes']);
+    for (const p of [buildPrompt(card), iteratePrompt(card)]) {
+      expect(p).toContain('run `npx objectstack validate`, `npx objectstack build` and `npx objectstack verify --reference-shapes` and fix what they report until all three pass');
+    }
+  });
+
+  it('a user-handle field is a scope field the card declares as neither lookup nor select; the contract says it is loaded with a user id', () => {
+    const card = namespacedScenario(crm).card;
+    expect([...userHandleFields(card)]).toEqual(['democrm_account.owner']);
+    expect(unheldHandles(card)).toEqual(['u_tia']);
+    expect(dataContract(card)).toContain(
+      'In `democrm_account.owner` the handle stands for a user: the runner loads that field with the person’s user id, not the handle text, ' +
+        'so a rule on it matches that user; a handle no person below holds (`u_tia`) is loaded as the admin user.',
+    );
+    // A scope field that names a row (`ticket.assignee` → agent, `customer.id`) or an option (`ticket_comment.visibility`) is not one.
+    const desk = loadScenarioFile(resolve(HERE, '../../../../../docs/qa/scenarios/service_desk.json'), { areas: readCapabilityAreas(AREAS_DIR) }).card!;
+    expect([...userHandleFields(desk.card)]).toEqual([]);
   });
 
   it('chooses verify proofs from the tags, and seeds a lookup target before its referrer', () => {
