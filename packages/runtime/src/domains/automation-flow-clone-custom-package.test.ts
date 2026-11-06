@@ -110,7 +110,7 @@ interface Answer {
  * protocol refuses (an illegal machine name among it) throws the way the real
  * engine throws. The default rig's engine is a map that accepts anything.
  */
-async function boot(options: { parse?: boolean } = {}) {
+async function boot(options: { parse?: boolean; baseScope?: 'system' | 'cloud' } = {}) {
     const engine = new ObjectQL();
     liveEngines.push(engine);
     engine.registerDriver(new SqlDriver({
@@ -124,8 +124,9 @@ async function boot(options: { parse?: boolean } = {}) {
     engine.registry.registerObject(SysMetadataAuditObject as any, TEST_PACKAGE_ID);
     await engine.syncSchemas();
     (engine.registry as unknown as { logLevel: string }).logLevel = 'silent';
-    engine.registry.installPackage(BASE as any, 'code');
-    (engine as unknown as { manifests: Map<string, unknown> }).manifests.set(BASE.id, BASE);
+    const base = options.baseScope === undefined ? BASE : { ...BASE, scope: options.baseScope };
+    engine.registry.installPackage(base as any, 'code');
+    (engine as unknown as { manifests: Map<string, unknown> }).manifests.set(BASE.id, base);
     engine.registry.installPackage(EXT as any, 'code');
     engine.registry.installPackage(OTHER as any, 'code');
     engine.registry.installPackage(SEALED as any, 'marketplace');
@@ -257,6 +258,35 @@ describe('[#28149] the default target: the copy lands in <base>.custom, switched
         expect(rig.published.length, 'the second clone persisted another package').toBe(pairsAfterFirst);
         expect((await rig.rows('acme_lead_followup_two')).map((r) => r.package_id)).toEqual([PAIR]);
     }, 60_000);
+});
+
+/**
+ * [#29594, ruling record 6691217245] A kernel package (scope `system` /
+ * `cloud`) has no pair in this version: the ensure door refuses it 409. The
+ * flow door's default landing IS the ensure door, so a copy of a kernel-shipped
+ * flow with no `package` named answers that refusal as relayed, and the
+ * registration made before the landing is undone (`restoreFlowRegistration`):
+ * the engine holds no copy, nothing is stored, and no pair is created.
+ */
+describe('[#29594] a kernel-shipped flow: no pair to land the copy in', () => {
+    for (const baseScope of ['system', 'cloud'] as const) {
+        it(`scope '${baseScope}', no \`package\` named: 409 with the ensure door's sentence, and the engine holds no copy`, async () => {
+            const rig = await boot({ baseScope });
+            const before = [...rig.flows.keys()].sort();
+
+            const answer = await rig.clone(SOURCE, { name: 'acme_lead_followup', label: 'Lead follow-up (ACME)' });
+
+            expect(answer.status, JSON.stringify(answer.body)).toBe(409);
+            expect(answer.code).toBe('RESOURCE_CONFLICT');
+            expect(JSON.stringify(answer.body)).toContain(`Package '${BASE.id}' is a kernel package (scope '${baseScope}')`);
+            expect(rig.flows.has('acme_lead_followup')).toBe(false);
+            expect([...rig.flows.keys()].sort()).toEqual(before);
+            expect(await rig.rows('acme_lead_followup')).toEqual([]);
+            expect(rig.installed()).not.toContain(PAIR);
+            // The original keeps running, untouched.
+            expect(rig.flows.get(SOURCE)?.status).toBe('active');
+        }, 60_000);
+    }
 });
 
 describe('[#29650, ADR-0146 D2/D4] New similar while the source\'s override is live', () => {
