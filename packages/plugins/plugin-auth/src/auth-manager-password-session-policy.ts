@@ -675,7 +675,7 @@ export async function enforceSessionControls(
       // that IS over its limit fully live.
       await engine.update(
         'sys_session',
-        { id: sessionId, expires_at: new Date(now - 1000), revoked_at: new Date(now), revoke_reason: 'concurrent_cap' },
+        { id: sessionId, expires_at: new Date(now - 1000), revoked_at: new Date(now), revoke_reason: reason },
         { context: SYSTEM_CTX } as any,
       ).catch((e: unknown) => this.logDurabilityDegradation(
         'AuthManager: a session that exceeded its configured limit was NOT revoked — the '
@@ -786,7 +786,7 @@ export async function enforceConcurrentCap(
       // abandon the rest of the sweep — but it reports instead of swallowing.
       await engine.update(
         'sys_session',
-        { id: sn.id, expires_at: new Date(now - 1000), revoked_at: new Date(now), revoke_reason: reason },
+        { id: sn.id, expires_at: new Date(now - 1000), revoked_at: new Date(now), revoke_reason: 'concurrent_cap' },
         { context: SYSTEM_CTX } as any,
       ).catch((e: unknown) => this.logDurabilityDegradation(
         'AuthManager: a session over the concurrent-session cap was NOT revoked — the sign-in '
