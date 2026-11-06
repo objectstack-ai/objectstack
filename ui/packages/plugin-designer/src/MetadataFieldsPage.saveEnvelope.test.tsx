@@ -161,6 +161,16 @@ vi.mock('./FieldDesigner', () => ({
 
 import { MetadataFieldsPage } from './MetadataFieldsPage';
 
+/**
+ * objectstack#30786 — the page takes its edit base off the layered read
+ * (`GET …/layers`, `overlay ?? code`), not the served item read, so this double
+ * answers that read: the item it used to serve becomes the `code` layer (and
+ * `effective`), beside the same envelope carriers.
+ */
+function servedAsLayers({ item, ...carriers }: { item: unknown } & Record<string, unknown>) {
+  return { ...carriers, code: item, overlay: null, effective: item };
+}
+
 // ---------------------------------------------------------------------------
 // A real MetadataClient over a fetch that speaks the framework's shapes
 // ---------------------------------------------------------------------------
@@ -197,10 +207,10 @@ function realClient(): MetadataClient {
         });
         return json({ success: true, name: 'showcase_project' });
       }
-      if (/\/meta\/object\/showcase_project(\?|$)/.test(url)) {
+      if (/\/meta\/object\/showcase_project\/layers(\?|$)/.test(url)) {
         getCount += 1;
         // The ONE shape objectstack#5563 left standing for a single-item read.
-        return json(OBJECT_ENVELOPE);
+        return json(servedAsLayers(OBJECT_ENVELOPE));
       }
       return json({ items: [] });
     }) as unknown as typeof fetch,

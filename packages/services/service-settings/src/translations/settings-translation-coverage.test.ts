@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Settings-translation coverage guard (zh-CN / ja-JP / es-ES).
+ * Settings-translation coverage guard (every shipped non-English locale).
  *
  * Every built-in settings manifest ships English labels inline; the console
  * localizes them by resolving `settings.<namespace>.…` against the shipped
@@ -24,7 +24,7 @@ import { describe, it, expect } from 'vitest';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import { lifecycleSettingsManifest } from '@objectstack/objectql';
 import * as manifestsModule from '../manifests/index.js';
-import { en, zhCN, jaJP, esES } from './index.js';
+import { en, zhCN, jaJP, esES, zhHant, ar, fr, ptBR } from './index.js';
 
 // The manifests barrel also exports action handlers and the aggregate array;
 // keep only the manifest objects.
@@ -53,6 +53,10 @@ const LOCALES: Array<[string, { settings?: Record<string, any> }]> = [
   ['zh-CN', zhCN],
   ['ja-JP', jaJP],
   ['es-ES', esES],
+  ['zh-Hant', zhHant],
+  ['ar', ar],
+  ['fr', fr],
+  ['pt-BR', ptBR],
 ];
 
 function missingFor(data: { settings?: Record<string, any> }, m: SettingsManifest): string[] {

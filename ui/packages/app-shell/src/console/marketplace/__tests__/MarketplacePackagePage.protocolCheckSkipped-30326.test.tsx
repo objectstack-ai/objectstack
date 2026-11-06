@@ -98,6 +98,8 @@ async function install() {
   const button = await screen.findByRole('button', { name: '«marketplace.action.install»' });
   await act(async () => {});
   fireEvent.click(button);
+  // objectstack#30325 — Install opens the confirm; its Install installs.
+  fireEvent.click(await screen.findByTestId('install-preview-confirm'));
 }
 
 const MANAGED = { manifestId: 'com.acme.psa', version: '1.0.0', versionId: 'ver_1', installedAt: '2026-11-05T00:00:00Z', upgradedFrom: null };

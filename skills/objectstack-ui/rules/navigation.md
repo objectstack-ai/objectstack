@@ -32,8 +32,8 @@ export const CrmApp = App.create({
         { id: 'nav_pipeline',    type: 'object', objectName: 'opportunity', viewName: 'pipeline_kanban', label: 'Sales Pipeline', icon: 'columns-3' },
         // One-off slice on the bare data surface (Run Modes, below):
         { id: 'nav_my_open',     type: 'object', objectName: 'opportunity', filters: { owner_id: '{current_user_id}', status: 'open' }, label: 'My Open Deals', icon: 'user-check' },
-        { id: 'nav_dash',        type: 'dashboard', dashboardName: 'sales_dashboard', label: 'Sales Dashboard', icon: 'chart-bar' },
-        { id: 'nav_report',      type: 'report',    reportName: 'opportunities_by_stage', label: 'Opps by Stage', icon: 'bar-chart-3' },
+        { id: 'nav_dash',        type: 'dashboard', dashboardName: 'crm_sales_dashboard', label: 'Sales Dashboard', icon: 'chart-bar' },
+        { id: 'nav_report',      type: 'report',    reportName: 'crm_opportunities_by_stage', label: 'Opps by Stage', icon: 'bar-chart-3' },
         // No `reportName` = the app's report index; the console adds none itself:
         { id: 'nav_reports',     type: 'report',    label: 'Reports', icon: 'library' },
       ],
@@ -72,7 +72,7 @@ navigation pointing at objects. Escalate only on explicit signals:
   author a view for it; a slice graduates to a named view only when it is
   curated and reused. Values support `{current_user_id}` / `{current_org_id}`.
   Never treat it as security: the surface shows what row-level permissions
-  allow. (Canonical rules: objectui ADR-0055, "parameterized bare data
+  allow. (objectui ADR-0055: "parameterized bare data
   surface".)
 - **Interface page** — persona split ("sales reps see…", customer portal,
   给业务部门的简化界面); capability narrowing ("users must not change views",
@@ -102,7 +102,7 @@ its own, but new pages define `columns`/`sort`/`filterBy` on the page.
 import { definePage } from '@objectstack/spec/ui';
 
 export const TaskWorkbenchPage = definePage({
-  name: 'task_workbench',
+  name: 'crm_task_workbench',
   label: 'Task Workbench',
   type: 'list',
   object: 'task',

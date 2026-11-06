@@ -1,5 +1,6 @@
 {
   "id": "project_with_tasks",
+  "code": "project",
   "title": "Project management: projects owning inline-edited tasks with roll-ups",
   "provenance": "Golden case `project_with_tasks` of packages/cli/src/lint/corpus.ts; `expect` derived mechanically from its fixture (every object; minFieldsPerObject = the smallest object's field count; one selectFields row per select field with minOptions = its option count; one lookups row per lookup or master_detail field).",
   "prompt": {
@@ -110,8 +111,8 @@
         "id": "add_task",
         "kind": "create",
         "object": "task",
-        "ask": {"en": "Add a 3-hour 'Launch checklist' task to the Website relaunch."},
-        "values": {"title": "Launch checklist", "project": "p1", "status": "todo", "estimate_hours": 3, "assignee": "u_kim"},
+        "ask": {"en": "Add a 'Launch checklist' task to the Website relaunch."},
+        "values": {"title": "Launch checklist", "project": "p1", "status": "todo", "assignee": "u_kim"},
         "actingAs": "contractor",
         "outcome": {
           "kind": "applied",
@@ -145,8 +146,8 @@
         "id": "task_without_title",
         "kind": "create",
         "object": "task",
-        "ask": {"en": "Add a 2-hour task to the Mobile app, with no title."},
-        "values": {"project": "p2", "status": "todo", "estimate_hours": 2, "assignee": "u_kim"},
+        "ask": {"en": "Add a task to the Mobile app, with no title."},
+        "values": {"project": "p2", "status": "todo", "assignee": "u_kim"},
         "actingAs": "contractor",
         "outcome": {"kind": "refused", "code": "VALIDATION_FAILED"}
       },

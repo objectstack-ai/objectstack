@@ -55,7 +55,9 @@ const mockClient = vi.hoisted(() => {
     references: vi.fn(async () => []),
     layered: vi.fn(async (type: string, name: string) => {
       const eff = server.active.get(k(type, name)) ?? null;
-      return { code: null, overlay: eff, overlayScope: eff ? 'env' : null, effective: eff, editable: true, deletable: true, resettable: false, lock: 'none' };
+      // As the server serves an admitted author, and no layer of a draft it refuses to read: the pending draft as stored (objectstack#30859).
+      const draft = server.gated.has(k(type, name)) ? undefined : (server.drafts.get(k(type, name)) ?? null);
+      return { code: null, overlay: eff, overlayScope: eff ? 'env' : null, effective: eff, ...(draft === undefined ? {} : { draft }), editable: true, deletable: true, resettable: false, lock: 'none' };
     }),
     getDraft: vi.fn(async (type: string, name: string) => {
       if (server.gated.has(k(type, name))) {

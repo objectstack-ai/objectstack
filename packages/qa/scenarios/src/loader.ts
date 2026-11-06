@@ -10,6 +10,11 @@
  *      the tree? (a lookup names a listed object; a question reads a field a
  *      seed row carries; a capability area is a checklist area; …)
  *
+ * One judgement needs the whole directory: an app `code` is unique across the
+ * library, because each card's app gets a namespace of its own (`demo` + code,
+ * `scenarioNamespace` in `schema.ts`). So {@link loadScenarios} refuses every card that
+ * shares a code; {@link loadScenarioFile}, handed one file, cannot judge it.
+ *
  * A card with any refusal is not returned at all: a half-valid card would let
  * a runner score against a scenario that does not mean what it says.
  *
@@ -20,7 +25,10 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
+import { ErrorCode } from '@objectstack/spec/api';
+
 import {
+  AppCodeSchema,
   GUARDRAIL_CHECKS,
   ScenarioCardSchema,
   type ScenarioCard,
@@ -94,20 +102,42 @@ export function loadScenarios(dir: string, options: LoadOptions): LoadResult {
     .filter((name) => name.endsWith('.json'))
     .sort()
     .map((name) => join(dir, name));
+  const loaded = files.map((file) => ({ file, ...loadOne(file, options) }));
+
+  // ── app codes: one card per code across the library ──
+  // A card refused for another fault still holds its code, so the clash is
+  // named now rather than after the other fault is fixed.
+  const holders = new Map<string, string[]>();
+  for (const one of loaded) if (one.code !== undefined) holders.set(one.code, [...(holders.get(one.code) ?? []), one.file]);
+
   const result: LoadResult = { cards: [], refusals: [] };
-  for (const file of files) {
-    const one = loadScenarioFile(file, options);
-    if (one.card) result.cards.push(one.card);
+  for (const one of loaded) {
+    const others = one.code === undefined ? [] : holders.get(one.code)!.filter((f) => f !== one.file);
+    if (others.length > 0) {
+      one.refusals.push({
+        file: one.file,
+        path: 'code',
+        message: `duplicate app code \`${one.code}\`, also the code of ${others.map((f) => basename(f)).join(', ')}: each card's app needs a namespace of its own`,
+      });
+    } else if (one.card) {
+      result.cards.push(one.card);
+    }
     result.refusals.push(...one.refusals);
   }
   return result;
 }
 
-/** Load one card file. */
+/** Load one card file. Code uniqueness is a library judgement: see {@link loadScenarios}. */
 export function loadScenarioFile(
   file: string,
   options: LoadOptions,
 ): { card?: LoadedScenario; refusals: Refusal[] } {
+  const { card, refusals } = loadOne(file, options);
+  return card ? { card, refusals } : { refusals };
+}
+
+/** One file, plus its well-formed app code (read even when the card is refused for another fault). */
+function loadOne(file: string, options: LoadOptions): { card?: LoadedScenario; refusals: Refusal[]; code?: string } {
   const refusals: Refusal[] = [];
   const refuse = (path: IssuePath, message: string) =>
     refusals.push({ file, path: formatPath(path), message });
@@ -119,6 +149,8 @@ export function loadScenarioFile(
     refuse([], `not valid JSON: ${(e as Error).message}`);
     return { refusals };
   }
+  const rawCode = (raw as { code?: unknown } | null)?.code;
+  const code = AppCodeSchema.safeParse(rawCode).success ? (rawCode as string) : undefined;
 
   const parsed = ScenarioCardSchema.safeParse(raw);
   if (!parsed.success) {
@@ -130,16 +162,38 @@ export function loadScenarioFile(
         refuse(issue.path as IssuePath, issue.message);
       }
     }
-    return { refusals };
+    return { refusals, ...(code !== undefined ? { code } : {}) };
   }
 
   const card = parsed.data;
   const computed = checkCard(card, basename(file, '.json'), options, refuse);
-  if (refusals.length > 0) return { refusals };
-  return { card: { file, card, ...computed }, refusals };
+  if (refusals.length > 0) return { refusals, code: card.code };
+  return { card: { file, card, ...computed }, refusals, code: card.code };
 }
 
 type Refuse = (path: IssuePath, message: string) => void;
+type Persona = ScenarioCard['run']['personas'][number];
+
+/**
+ * The two codes a faithful build answers an operation its acting persona
+ * cannot reach with. Spelled as literals, because `check:dispatcher-error-vocabulary`
+ * judges the `code` these feed into `want` below and reads a constant only when
+ * it resolves to a literal. Held to the spec's catalogue (`ErrorCode`, ADR-0112)
+ * twice: typed, so the typecheck refuses a code the platform stops answering,
+ * and parsed once at load, so a test run (which does not typecheck) refuses it
+ * too, instead of drifting.
+ *
+ *   NOT_REACHABLE_ROW_CODE  a by-id write on a row the caller cannot READ is
+ *                           answered not-found, indistinguishable from a
+ *                           missing row, before any field or validation gate.
+ *   HIDDEN_WRITE_CODE       a write on an object the caller must not read, or
+ *                           to a field it must not read, is refused by the
+ *                           security gate before the object's validation runs.
+ */
+const NOT_REACHABLE_ROW_CODE: ErrorCode = 'RECORD_NOT_FOUND';
+const HIDDEN_WRITE_CODE: ErrorCode = 'PERMISSION_DENIED';
+ErrorCode.parse(NOT_REACHABLE_ROW_CODE);
+ErrorCode.parse(HIDDEN_WRITE_CODE);
 
 function duplicates<T>(items: readonly T[], keyOf: (t: T) => string, at: IssuePath, what: string, refuse: Refuse) {
   const seen = new Set<string>();
@@ -308,6 +362,12 @@ function checkCard(
     return v === undefined ? null : v;
   };
 
+  /** Whether `p` sees `row` of `object`: every row-scope rule it declares on that object holds. */
+  const inScope = (p: Persona, object: string, row: SeedRow): boolean => {
+    const resolve = resolverFor(object);
+    return (p.scope ?? []).filter((sc) => sc.object === object).every((sc) => resolve(row, sc.field) === sc.value);
+  };
+
   // ── personas: hidden refs and row scope resolve ──
   duplicates(run.personas, (p) => p.id, ['run', 'personas'], 'persona id', refuse);
   const personas = new Set(run.personas.map((p) => p.id));
@@ -389,8 +449,7 @@ function checkCard(
         personaTruths[q.id][id] = { kind: 'withheld' };
         return;
       }
-      const rules = (p.scope ?? []).filter((sc) => sc.object === q.object);
-      const scoped = rows.filter((r) => rules.every((sc) => ctx.resolve(r, sc.field) === sc.value));
+      const scoped = rows.filter((r) => inScope(p, q.object, r));
       const truth = evaluate(scoped, [...at, 'personas', j]);
       if (truth) personaTruths[q.id][id] = truth;
     });
@@ -402,6 +461,33 @@ function checkCard(
   if (!run.operations.some((o) => o.kind === 'create' || o.kind === 'update')) {
     refuse(['run', 'operations'], 'needs at least one create or update through the app');
   }
+  // Reach: a persona is a requirement of the app (`hidden` = must not read,
+  // `scope` = sees only those rows), so an operation its acting persona cannot
+  // reach has exactly one outcome a faithful build gives, decided from the card
+  // alone — the object hidden, then the target row out of scope (the row gate
+  // runs before the field gate), then a written field hidden. Declaring anything
+  // else (`applied`, `pending_confirmation`, another refusal code) is the card
+  // contradicting its own persona: graded against a faithful build it fails, and
+  // it passes only a build that leaks what the persona must not see.
+  const checkReach = (op: ScenarioCard['run']['operations'][number], actor: Persona, at: IssuePath) => {
+    const row = op.target === undefined ? undefined : rowById.get(op.object)?.get(op.target);
+    const hiddenField = Object.keys(op.values ?? {}).find((field) =>
+      (actor.hidden.fields ?? []).some((f) => f.object === op.object && f.field === field),
+    );
+    let want: { code: ErrorCode; why: string } | undefined;
+    if ((actor.hidden.objects ?? []).includes(op.object)) {
+      want = { code: HIDDEN_WRITE_CODE, why: `\`${actor.id}\` must not read \`${op.object}\`` };
+    } else if (row !== undefined && !unscoped.has(actor.id) && !inScope(actor, op.object, row)) {
+      want = { code: NOT_REACHABLE_ROW_CODE, why: `row \`${op.target}\` is outside \`${actor.id}\`'s row scope on \`${op.object}\`` };
+    } else if (hiddenField !== undefined) {
+      want = { code: HIDDEN_WRITE_CODE, why: `\`${actor.id}\` must not read \`${op.object}.${hiddenField}\`, which this ${op.kind} writes` };
+    }
+    if (want === undefined || (op.outcome.kind === 'refused' && op.outcome.code === want.code)) return;
+    refuse(
+      [...at, 'outcome', ...(op.outcome.kind === 'refused' ? ['code'] : [])],
+      `${want.why}, so a faithful build refuses this ${op.kind} with \`${want.code}\` — declare that refusal, or change the target, the values or \`actingAs\` so the persona can reach what the operation writes`,
+    );
+  };
   run.operations.forEach((op, i) => {
     const at: IssuePath = ['run', 'operations', i];
     if (!objects.has(op.object) || seed[op.object] === undefined) {
@@ -416,6 +502,8 @@ function checkCard(
       checkRef(op.object, field, value, [...at, 'values', field]);
     }
     if (!personas.has(op.actingAs)) refuse([...at, 'actingAs'], `no persona \`${op.actingAs}\``);
+    const actor = run.personas.find((p) => p.id === op.actingAs);
+    if (actor !== undefined) checkReach(op, actor, at);
     const out = op.outcome;
     if (out.kind !== 'applied') return;
     if (out.auditActor !== undefined && !personas.has(out.auditActor)) {

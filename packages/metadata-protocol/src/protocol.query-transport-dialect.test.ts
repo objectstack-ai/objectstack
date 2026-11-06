@@ -212,7 +212,9 @@ function resolveCanonical(name: string): string {
 // ---------------------------------------------------------------------------
 
 describe('[#16066] §3 the single source is the spec export', () => {
-    const source = readFileSync(resolve(HERE, 'protocol.ts'), 'utf8');
+    // [#30518] `findData`'s body moved to its facet (`protocol-data-crud.ts`),
+    // so the call site is read there; the class stays read for a local table.
+    const source = ['protocol.ts', 'protocol-data-crud.ts'].map((f) => readFileSync(resolve(HERE, f), 'utf8')).join('\n');
 
     it('no local `WIRE_QUERY_ALIAS_SLOTS` / `WIRE_DOLLAR_ALIASES` declaration survives', () => {
         expect(source).not.toMatch(/(?:const|let|var)\s+WIRE_QUERY_ALIAS_SLOTS\b/);

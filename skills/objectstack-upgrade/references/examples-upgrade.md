@@ -70,7 +70,7 @@ _N sites, M conversions. Ported into sources from `os migrate meta --out`._
 
 | Item | Site | Options | Recommendation | Blocking? |
 |:--|:--|:--|:--|:--|
-| `agent.tools` → which skill | `src/ai/support-bot.ts:12` | `case_management` · new skill | `case_management` | no — parses without it |
+| `agent.tools` → which skill | `src/ai/support-bot.ts:12` | `crm_case_management` · new skill | `crm_case_management` | no — parses without it |
 
 ## 4 · Pending, per deployment
 
@@ -110,10 +110,10 @@ export const Lead = ObjectSchema.create({
 
 // Agent capability is reached through skills — there is no inline tool list.
 export const SupportBot = defineAgent({
-  name: 'support_bot',
+  name: 'crm_support_bot',
   label: 'Support Bot',
   role: 'Front-line support triage',
   instructions: 'Answer support questions and open cases when needed.',
-  skills: ['case_management'],
+  skills: ['crm_case_management'],
 });
 ```
