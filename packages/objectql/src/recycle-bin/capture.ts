@@ -224,7 +224,7 @@ export class RecycleBinCapture {
       return undefined;
     }
     const deletedAt = new Date();
-    const deletedBy = this.context?.userId;
+    const deletedBy = this.deletedBy();
     const organizationId = this.organizationOf(rows[0].values);
     const clearedReferences: RecycleBinClearedReference[] = [...(this.set?.clearedReferences ?? [])];
     const entry: RecycleBinEntry = RecycleBinEntrySchema.parse({
@@ -232,7 +232,7 @@ export class RecycleBinCapture {
       record_id: this.id,
       record_count: rows.length,
       snapshot: { rows, clearedReferences },
-      ...(typeof deletedBy === 'string' && deletedBy !== '' ? { deleted_by: deletedBy } : {}),
+      ...(deletedBy !== undefined ? { deleted_by: deletedBy } : {}),
       deleted_at: deletedAt.toISOString(),
       retention_days: this.retentionDays,
       purge_after: recycleBinPurgeAfter(deletedAt, this.retentionDays),
@@ -270,6 +270,21 @@ export class RecycleBinCapture {
         }
       },
     };
+  }
+
+  /**
+   * Who deleted the rows, as the audit ledger credits a write: the subject the
+   * delete was authorized as, else the human credited for a delete the system
+   * authorized on their behalf (`attributedUserId`, a better-auth-originated
+   * write). `undefined` for the system's own deletes. It is the person whose
+   * entries `allowRestoreOwnDeleted` lets restore.
+   */
+  private deletedBy(): string | undefined {
+    const context = this.context as { userId?: unknown; attributedUserId?: unknown } | undefined;
+    for (const candidate of [context?.userId, context?.attributedUserId]) {
+      if (typeof candidate === 'string' && candidate !== '') return candidate;
+    }
+    return undefined;
   }
 
   /**

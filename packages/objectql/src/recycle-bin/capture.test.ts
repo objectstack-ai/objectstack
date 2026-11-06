@@ -275,6 +275,13 @@ describe('a by-id delete writes ONE recycle-bin entry (ADR-0148 D1)', () => {
     expect(entry.deleted_by).toBeUndefined();
   });
 
+  it('credits the human a system-authorized delete was made for, as the audit ledger does', async () => {
+    const { engine, driver } = await makeEngine();
+    driver.seed('loner', { id: 'l1', name: 'x' });
+    await engine.delete('loner', { where: { id: 'l1' }, context: { isSystem: true, attributedUserId: 'u_bob' } } as any);
+    expect(entriesOf(driver)[0].deleted_by).toBe('u_bob');
+  });
+
   it('leaves the secret column out of the snapshot (D4)', async () => {
     const { engine, driver } = await makeEngine();
     seedAccountTree(driver);
