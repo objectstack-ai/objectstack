@@ -3874,6 +3874,30 @@ const es = {
   cloudWorkspaceTimezoneNotice: {
     seeded: "La zona horaria del entorno se configuró en {{zone}} a partir de su navegador al crearlo. Puede cambiarla en Configuración → Localización.",
   },
+  deploymentNotice: {
+    title: "Este servidor guarda sus datos y secretos en su propio disco",
+    titleLow: "Termine de configurar esta implementación",
+    intro: "Nadie definió dónde guarda estos elementos esta implementación de producción. Entregue la configuración siguiente a quien administre el servidor, para que reemplazarlo no haga perder nada.",
+    finding: {
+      databaseLocalFile: "Sus datos de negocio son un archivo en este servidor ({{file}}). Si se reemplaza el servidor o su disco, se pierden.",
+      authSecretGenerated: "El secreto de inicio de sesión se generó en este servidor. Si se pierde, se cierra la sesión de todos.",
+      dataKeyFile: "La clave que cifra las contraseñas y claves de API guardadas es un archivo en este servidor ({{file}}). Si se pierde, ya no se pueden leer.",
+      fileStorageLocal: "Los archivos subidos se guardan en el disco de este servidor.",
+      emailNotConfigured: "No hay ningún servicio de correo configurado, así que las invitaciones y los restablecimientos de contraseña no se envían por correo.",
+    },
+    copy: {
+      button: "Copiar la configuración",
+      database: "Su base de datos, por ejemplo postgres://user:pass@db-host:5432/app, o file:/path/on/a/kept/volume/app.db. Hoy los datos están en {{file}}: tráigalos antes de cambiar.",
+      carryOver: "Conserve el valor actual: el contenido de {{file}}",
+      newValue: "Un valor aleatorio largo, el mismo en cada reinicio, por ejemplo la salida de: openssl rand -hex 32",
+    },
+    copied: "Copiado",
+    hide: "Ocultar",
+    hideNoAuditLog: "Esta implementación no lleva registro de auditoría, así que el aviso no se puede ocultar.",
+    hideFailed: "No se pudo ocultar el aviso. Inténtelo de nuevo.",
+    hiddenLine: "El aviso de la implementación está oculto. Lo que indica sigue vigente.",
+    showAgain: "Mostrar de nuevo",
+  },
   aiApprovals: {
     title: "Aprobaciones de IA",
     description: "Acciones propuestas por un agente de IA que necesitan revisión humana antes de ejecutarse.",

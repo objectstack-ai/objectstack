@@ -3796,6 +3796,30 @@ const de = {
   cloudWorkspaceTimezoneNotice: {
     seeded: "Die Zeitzone der Umgebung wurde beim Erstellen anhand Ihres Browsers auf {{zone}} festgelegt. Sie können sie unter Einstellungen → Lokalisierung ändern.",
   },
+  deploymentNotice: {
+    title: "Dieser Server speichert Ihre Daten und Geheimnisse auf seiner eigenen Festplatte",
+    titleLow: "Schließen Sie die Einrichtung dieser Bereitstellung ab",
+    intro: "Niemand hat festgelegt, wo diese Produktionsbereitstellung sie aufbewahrt. Geben Sie die folgenden Einstellungen an die Person weiter, die den Server betreibt, damit beim Ersetzen nichts verloren geht.",
+    finding: {
+      databaseLocalFile: "Ihre Geschäftsdaten sind eine Datei auf diesem Server ({{file}}). Wird der Server oder seine Festplatte ersetzt, gehen sie verloren.",
+      authSecretGenerated: "Das Anmeldegeheimnis wurde auf diesem Server erzeugt. Geht es verloren, werden alle abgemeldet.",
+      dataKeyFile: "Der Schlüssel, der gespeicherte Passwörter und API-Schlüssel verschlüsselt, ist eine Datei auf diesem Server ({{file}}). Geht er verloren, können sie nicht mehr gelesen werden.",
+      fileStorageLocal: "Hochgeladene Dateien liegen auf der Festplatte dieses Servers.",
+      emailNotConfigured: "Es ist kein E-Mail-Dienst eingerichtet, daher werden Einladungen und Passwort-Zurücksetzungen nicht per E-Mail versendet.",
+    },
+    copy: {
+      button: "Einstellungen kopieren",
+      database: "Ihre Datenbank, z. B. postgres://user:pass@db-host:5432/app, oder file:/path/on/a/kept/volume/app.db. Derzeit liegen die Daten in {{file}}: Übertragen Sie sie vor dem Umstellen.",
+      carryOver: "Den aktuellen Wert übernehmen: den Inhalt von {{file}}",
+      newValue: "Ein langer Zufallswert, bei jedem Neustart derselbe, z. B. die Ausgabe von: openssl rand -hex 32",
+    },
+    copied: "Kopiert",
+    hide: "Ausblenden",
+    hideNoAuditLog: "Diese Bereitstellung führt kein Audit-Protokoll, daher kann der Hinweis nicht ausgeblendet werden.",
+    hideFailed: "Der Hinweis konnte nicht ausgeblendet werden. Versuchen Sie es erneut.",
+    hiddenLine: "Der Bereitstellungshinweis ist ausgeblendet. Was er beschreibt, gilt weiterhin.",
+    showAgain: "Wieder anzeigen",
+  },
   aiApprovals: {
     title: "KI-Genehmigungen",
     description: "Von einem KI-Agenten vorgeschlagene Aktionen, die vor der Ausführung eine menschliche Prüfung benötigen.",

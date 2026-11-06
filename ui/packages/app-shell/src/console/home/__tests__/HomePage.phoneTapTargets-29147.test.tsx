@@ -133,6 +133,12 @@ vi.mock('../../../preview/usePublishAllDrafts', () => ({
 vi.mock('../../../hooks/useInboxBell', () => ({ useInboxBell: () => ({ markRead: vi.fn() }) }));
 vi.mock('../../../layout/ActivityObjectLabel', () => ({ ActivityObjectLabel: () => null }));
 
+// The deployment notice reads its own state from the server for an administrator
+// (objectstack#30120); its fetch, its gate and its copy are pinned in
+// `deployment-notice/__tests__/DeploymentNotice.test.tsx`, so it is stubbed here
+// like every other source this page reads.
+vi.mock('../../deployment-notice/DeploymentNotice', () => ({ DeploymentNotice: () => null }));
+
 import { HomePage } from '../HomePage';
 
 /** Enough apps that the strip folds the rest behind "More". */
