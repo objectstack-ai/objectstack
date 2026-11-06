@@ -213,9 +213,10 @@ function getViewLabel(view: any, viewPath: string): { label?: unknown; path: str
  * their object, and `functions` are code handlers, not metadata items.
  *
  * A name carries the namespace when it IS the namespace (the namespace-named
- * app, ADR-0019), starts with `<ns>_`, or starts with the platform-reserved
- * `sys_` — the exemption the object rule (`validateObjectNamespacePrefix`)
- * grants; `carriesPackageNamespace` is that one predicate, shared with
+ * app, ADR-0019), starts with `<ns>_` or `<ns>.` (the dotted capability
+ * shape, `billing.refund`), or starts with the platform-reserved `sys_` — the
+ * exemption the object rule (`validateObjectNamespacePrefix`) grants;
+ * `carriesPackageNamespace` is that one predicate, shared with
  * `os generate` so a scaffold is never written in a spelling this rule
  * reports. An item that declares `overrides` (ADR-0146 D2) replaces the base
  * package's item OF THE SAME NAME, so its name is the base's and is not

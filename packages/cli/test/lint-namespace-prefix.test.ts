@@ -93,6 +93,18 @@ describe('lint — every package-authored name carries the package namespace (ru
       expect(prefixIssues({ manifest: { namespace: 'crm' }, flows: [{ name: 'sys_cleanup' }] })).toEqual([]);
     });
 
+    it('a dot-namespaced name, the capability shape (`billing.refund`)', () => {
+      expect(prefixIssues({
+        manifest: { namespace: 'crm' },
+        capabilities: [{ name: 'crm.export_data' }],
+      })).toEqual([]);
+      // Its twin: a dotted name under ANOTHER namespace is still bare here.
+      expect(bareIssues({
+        manifest: { namespace: 'crm' },
+        capabilities: [{ name: 'billing.refund' }],
+      } as any).map((i) => i.fix)).toEqual(['crm_billing.refund']);
+    });
+
     it('objects — the object prefix is `defineStack`\'s error, not repeated here', () => {
       expect(prefixIssues({
         manifest: { namespace: 'crm' },

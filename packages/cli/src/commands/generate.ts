@@ -150,9 +150,10 @@ export interface ScaffoldBinds {
  * In a project whose manifest declares a `namespace`, that is
  * `${namespace}_${name}`, which is the name `defineStack`'s namespace-prefix
  * gate demands. `namesObject` says which generators write one, so that
- * `runMetadataGeneration` reads the manifest only for those.
- * `generate-object-namespace-prefix.test.ts` pins both the prefix and the
- * flag against the templates.
+ * `runMetadataGeneration` refuses for those when the config does not load:
+ * with the namespace unknown, the object name it would write is one
+ * `defineStack` may refuse. `generate-object-namespace-prefix.test.ts` pins
+ * both the prefix and the flag against the templates.
  *
  * Every other metadata name carries it too (ruling C on #30798). The
  * scaffold's own `name` on an action, a flow, a dashboard, an app, a skill, a

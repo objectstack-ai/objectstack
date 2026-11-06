@@ -71,7 +71,10 @@ export async function readProjectNamespace(cwd: string = process.cwd()): Promise
  * (ruling C on #30798): it IS the namespace (the namespace-named app,
  * ADR-0019), starts with `<namespace>_`, or starts with the platform-reserved
  * `sys_` — the exemption the object rule (`validateObjectNamespacePrefix`)
- * grants.
+ * grants. A name that starts with `<namespace>.` carries it too: that is the
+ * dotted shape `CapabilitySchema` documents (`billing.refund`), and the only
+ * names whose charset admits a dot, so `showcase.export_data` in the
+ * `showcase` package is already namespaced.
  *
  * ONE predicate for the two places the CLI asks it: `os lint`'s
  * `naming/namespace-prefix` judges a name with it, and `os generate` decides
@@ -79,7 +82,10 @@ export async function readProjectNamespace(cwd: string = process.cwd()): Promise
  * written in a spelling the lint then reports.
  */
 export function carriesPackageNamespace(name: string, namespace: string): boolean {
-  return name === namespace || name.startsWith(`${namespace}_`) || name.startsWith('sys_');
+  return name === namespace
+    || name.startsWith(`${namespace}_`)
+    || name.startsWith(`${namespace}.`)
+    || name.startsWith('sys_');
 }
 
 /**
