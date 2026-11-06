@@ -2364,6 +2364,28 @@ const ja = {
       dark: "ダーク",
       system: "システム",
     },
+    // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
+    assignedWork: {
+      title: 'この人が担当しているレコード',
+      loading: 'この人が担当しているレコードを数えています…',
+      countFailed: 'この人が担当しているレコードを数えられませんでした: {{message}}',
+      noClient: 'ここではこの人が担当しているレコードを数えられません。',
+      none: 'この人が担当している、あなたが読み取れるレコードはありません。',
+      summary: 'あなたが読み取れるレコードのうち {{total}} 件を担当しています: 所有 {{owned}} 件、割り当て {{assigned}} 件。',
+      row: '{{object}} · {{field}}',
+      notTransferable: '複数の人を入れられる項目のため、ここでは引き継げません。',
+      truncated: 'すべてのユーザー項目は数えていません。担当レコードはさらにある可能性があります。',
+      unreadable: '読み取り権限がないため数えていません: {{objects}}',
+      handoverTo: '引き継ぎ先',
+      handoverHint: '任意です。利用停止は引き継ぎを待ちません。',
+      handover: '引き継ぐ',
+      handingOver: '引き継ぎ中…',
+      handoverNext: '次のまとまりを引き継ぐ',
+      targetBanned: 'その人は利用停止中です。有効なユーザーを選んでください。',
+      transferRefused: '引き継ぎは拒否されました: {{message}}',
+      report: '{{updated}} 件を引き継ぎました。{{failed}} 件は移せませんでした。まだ {{remaining}} 件を担当しています。',
+      failure: '{{object}} {{id}}: {{message}}',
+    },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
       managedUsers: {

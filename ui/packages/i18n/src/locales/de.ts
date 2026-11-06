@@ -2362,6 +2362,28 @@ const de = {
       dark: "Dunkel",
       system: "System",
     },
+    // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
+    assignedWork: {
+      title: 'Datensätze dieser Person',
+      loading: 'Datensätze dieser Person werden gezählt…',
+      countFailed: 'Die Datensätze dieser Person konnten nicht gezählt werden: {{message}}',
+      noClient: 'Die Datensätze dieser Person können hier nicht gezählt werden.',
+      none: 'Diese Person hat keine Datensätze, die Sie lesen können.',
+      summary: 'Datensätze, die Sie lesen können: {{total}}. Besitzer: {{owned}}, zugewiesen: {{assigned}}.',
+      row: '{{object}} · {{field}}',
+      notTransferable: 'Enthält mehrere Personen und kann hier nicht übergeben werden.',
+      truncated: 'Nicht alle Benutzerfelder wurden gezählt; diese Person kann weitere halten.',
+      unreadable: 'Nicht gezählt, weil Sie sie nicht lesen können: {{objects}}',
+      handoverTo: 'Übergeben an',
+      handoverHint: 'Optional. Die Sperre wartet nicht auf die Übergabe.',
+      handover: 'Übergeben',
+      handingOver: 'Wird übergeben…',
+      handoverNext: 'Nächsten Stapel übergeben',
+      targetBanned: 'Diese Person ist gesperrt. Wählen Sie einen aktiven Benutzer.',
+      transferRefused: 'Die Übergabe wurde abgelehnt: {{message}}',
+      report: 'Übergeben: {{updated}}, nicht verschiebbar: {{failed}}, noch gehalten: {{remaining}}.',
+      failure: '{{object}} {{id}}: {{message}}',
+    },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
       managedUsers: {

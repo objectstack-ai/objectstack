@@ -2419,6 +2419,28 @@ const pt = {
       dark: "Escuro",
       system: "Sistema",
     },
+    // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
+    assignedWork: {
+      title: 'Registros desta pessoa',
+      loading: 'Contando os registros desta pessoa…',
+      countFailed: 'Não foi possível contar os registros desta pessoa: {{message}}',
+      noClient: 'Os registros desta pessoa não podem ser contados aqui.',
+      none: 'Esta pessoa não tem registros que você possa ler.',
+      summary: 'Registros que você pode ler: {{total}}. Em propriedade: {{owned}}, atribuídos: {{assigned}}.',
+      row: '{{object}} · {{field}}',
+      notTransferable: 'Aceita várias pessoas, por isso não pode ser transferido aqui.',
+      truncated: 'Nem todos os campos de usuário foram contados; esta pessoa pode ter mais.',
+      unreadable: 'Não contados porque você não pode lê-los: {{objects}}',
+      handoverTo: 'Transferir para',
+      handoverHint: 'Opcional. O banimento não espera pela transferência.',
+      handover: 'Transferir',
+      handingOver: 'Transferindo…',
+      handoverNext: 'Transferir o próximo lote',
+      targetBanned: 'Essa pessoa está banida. Escolha um usuário ativo.',
+      transferRefused: 'A transferência foi recusada: {{message}}',
+      report: 'Transferidos: {{updated}}, não movidos: {{failed}}, ainda com a pessoa: {{remaining}}.',
+      failure: '{{object}} {{id}}: {{message}}',
+    },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
       managedUsers: {

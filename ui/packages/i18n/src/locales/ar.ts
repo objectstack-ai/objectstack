@@ -2601,6 +2601,28 @@ const ar = {
       dark: "داكن",
       system: "النظام",
     },
+    // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
+    assignedWork: {
+      title: 'السجلات التي يحتفظ بها هذا الشخص',
+      loading: 'جارٍ عدّ السجلات التي يحتفظ بها هذا الشخص…',
+      countFailed: 'تعذّر عدّ السجلات التي يحتفظ بها هذا الشخص: {{message}}',
+      noClient: 'لا يمكن عدّ السجلات التي يحتفظ بها هذا الشخص هنا.',
+      none: 'لا يحتفظ هذا الشخص بأي سجلات يمكنك قراءتها.',
+      summary: 'يحتفظ بـ {{total}} من السجلات التي يمكنك قراءتها: مالك لـ {{owned}}، ومُسند إليه {{assigned}}.',
+      row: '{{object}} · {{field}}',
+      notTransferable: 'يضم هذا الحقل عدة أشخاص، لذا لا يمكن تسليمه هنا.',
+      truncated: 'لم تُعدّ كل حقول المستخدم؛ قد يحتفظ هذا الشخص بالمزيد.',
+      unreadable: 'لم تُعدّ لأنك لا تستطيع قراءتها: {{objects}}',
+      handoverTo: 'تسليم إلى',
+      handoverHint: 'اختياري. لا ينتظر الحظر اكتمال التسليم.',
+      handover: 'تسليم',
+      handingOver: 'جارٍ التسليم…',
+      handoverNext: 'تسليم الدفعة التالية',
+      targetBanned: 'هذا الشخص محظور. اختر مستخدمًا نشطًا.',
+      transferRefused: 'رُفض التسليم: {{message}}',
+      report: 'سُلّم {{updated}}، وتعذّر نقل {{failed}}، ولا يزال {{remaining}} لديه.',
+      failure: '{{object}} {{id}}: {{message}}',
+    },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
       managedUsers: {
