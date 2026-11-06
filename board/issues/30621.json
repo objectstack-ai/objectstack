@@ -2,8 +2,8 @@
   "number": 30621,
   "kind": "issue",
   "title": "A sharing rule on an object without record sharing saves and silently does nothing",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T18:14:54Z",
-  "updated_at": "2026-11-06T14:12:20Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T16:48:57Z",
+  "closed_at": "2026-11-06T16:42:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30621",
   "body": "domain:server#6 · os-bill · session_01Utp6CXCS98uhsFQYk64epE\n\nFound by the #30209 card thread while measuring row 5 (os-dev-report 6665615192 on PR #30620, `out_of_scope_findings`, class (c) trap).\n\n## What\n\nAn administrator can save a sharing rule (`sys_sharing_rule`) on an object that is not under record-sharing enforcement (measured: `sys_session`, `sys_account`, `sys_api_key`). The save answers `201`. The reconcile then logs `WARN SHARING_NOT_ENABLED` and writes no `sys_record_share`, so the rule's recipients see nothing more than before. Nothing tells the administrator: the rule sits in Setup looking active and never applies.\n\nMeasured: no widening. The rule grants nothing, so this is a misleading-configuration trap, not an access problem.\n\n## Expected\n\nThe administrator learns at save time that the object does not use record sharing. Either the save door refuses a rule whose object is not under enforcement, with a sentence naming the object and how to enable sharing for it, or the rule is saved and carries a visible \"not in effect\" state. Refusal is the simpler contract; pick per the existing sharing-rule validation in `packages/plugins/plugin-sharing`.\n\nRelated: #30209 row 5 (the rule's object picker lists every object) is a separate decision on the same surface: option C there is this card's refusal.\n\n## Surface\n\n`packages/plugins/plugin-sharing` (the `sys_sharing_rule` save path / validation) and its tests; changeset per the outcome (a save refusal is a narrowing)."

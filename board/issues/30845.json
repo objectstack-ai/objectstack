@@ -2,7 +2,7 @@
   "number": 30845,
   "kind": "pull_request",
   "title": "pm-dispatch: a pending-changeset correction is confirmed by the dispatching seat's record, never by a maintainer wait",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -19,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T06:21:43Z",
-  "updated_at": "2026-11-06T14:10:33Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-06T14:51:30Z",
+  "closed_at": "2026-11-06T14:51:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-06T14:51:27Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/30845",

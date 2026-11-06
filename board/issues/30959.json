@@ -1,0 +1,32 @@
+{
+  "number": 30959,
+  "kind": "issue",
+  "title": "plugin-auth: a SCIM group push grants nothing — no projection maps a group to a role or permission set, though last-admin-guard counts it a live write shape",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:blocked",
+    "priority:p1",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T14:21:19Z",
+  "updated_at": "2026-11-06T16:26:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30959",
+  "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **(b) a contract gap with a named consumer**, measured by the cloud#3667 dev on a real licensed objectos-ee serve (report on objectstack-ai/cloud#3667, Enterprise SCIM leaver lifecycle; draft PR objectstack-ai/cloud#3672). Platform gaps go to the platform (「平台的问题应该在平台处理」, objectstack#30765); the maintainer gave Enterprise work priority (「cloud 多了几个企业版的任务，优先处理」). Consumer: objectstack-ai/cloud#3667 (live Okta / Entra ID provisioning).\n\n## 维护者速读\n\nIdP 把用户推进某个 SCIM 组以后，平台会建组、加成员，但不会因此给这个用户任何角色或权限集。企业版要求「IdP 里的组决定平台里的权限」，现在做不到。需要平台支持把 SCIM 组映射到角色或权限集。\n\n## Measured (cloud pin `2ffdb649` on the serve; objectstack `6ddf827236` read)\n\n- SCIM `POST /api/v1/auth/scim/v2/Groups` with the user as a member → 201. The user's `sys_user_permission_set` rows and `sys_member.role` are unchanged (cloud#3672 parks this as `it.skip`).\n- `packages/plugins/plugin-auth/src/auth-manager-plugin-list.ts:798` calls `scim({ connections, authentication, identity })` with no projection, so `@better-auth/scim`'s group membership touches nothing in the platform's grant model.\n- `last-admin-guard.ts` names a SCIM group-mapping change as a write shape it guards, which describes a mapping that does not exist.\n\n## Expected\n\n- A declared mapping from a SCIM group (by `displayName` or `externalId`, per connection or per organization; the lane decides) to an organization role and/or permission sets. Membership add and remove apply and revoke the grant.\n- Grants go through the existing assignment doors (assignable-set boundary, last-admin guard), not around them. A mapping that would drop the last admin is refused as the guard refuses other shapes.\n- Each grant change writes the audit row the assignment door already writes, attributed to the SCIM connection.\n\n## Acceptance\n\n- Tests: push a mapped group with a member → the set is granted; remove the member → revoked; an unmapped group grants nothing; a mapping that would remove the last admin → refused as a SCIM 403.\n\nSuggested-grade: p1 · Enterprise priority (maintainer).\n\nDedupe (2026-11-06): `SCIM group role mapping` → 21 hits (#27314 open is the bridges epic, a different surface; the rest closed); `scim projection` → 47 hits, top 4 closed and unrelated. None covers this gap."
+}

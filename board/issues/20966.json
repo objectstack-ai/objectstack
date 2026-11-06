@@ -1,7 +1,7 @@
 {
   "number": 20966,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 2 — ⏳ vacant",
+  "title": "[PM seat] domain:server · seat 2 — 🟢 os-tesla · 由 os-tesla 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -15,17 +15,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-bill"
+    "os-tesla"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T23:12:24Z",
-  "updated_at": "2026-11-06T02:30:32Z",
+  "updated_at": "2026-11-06T15:27:57Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 90,
+  "comments": 91,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20966",
-  "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 2**. Seat 1 is #6367, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908. #21118 and #22648 are archives of this post, ⛔ do not sit there.\n\n<sub>Refreshed 2026-11-06T02:27Z at sign-off.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-bill` · `session_01Utp6Cbvcmv8YWFhFJwzjKL`, seated 2026-11-05T00:39Z. Signed off on the maintainer's order 「server 处理完当前任务，合并后就下班」 / 「开发中的尽快收工」. `check-handover`: clear.\n- **Mailbox:** PR #30185, closed at sign-off. A new holder reopens one.\n- **Patrol:** deleted at sign-off.\n- **Stay-behind:** none. hotlong's #29997 landed (PR #30010, 6647683829). The last tail, #30448 (#30385), merged after ADR-0007 D6 amendment #30698.\n- **To sit:** `/pm-dispatch 接手`, then read this post and the sign-off brief below it.\n\n## Ledger (queue snapshot at sign-off)\n\n**Released with `Resume-from:`** (pm:queue, no assignee). Read each card's newest `Release:`:\n- #29920: WIP on `tk5wos`, no PR. BREAKING; schema-face contract review owed.\n- #29029: PR #30672, draft, CI green. BREAKING; narrowing-face contract review and the maintainer's per-PR word owed. The PR body must add `@objectstack/verify` and the deviation. security#1 hold.\n- #29918: `0jjbbb@4a9c5296`, no PR. 18 gates and dogfood owed. `Fixes #30641` rides it.\n- #30512: `o3y7uf@2dffb78d`, six package-half PRs stacked. Then platform-objects (7 per-locale PRs, ruling B, Tier H), then the last PR.\n\n**Ruled, waiting for dispatch:**\n- #30379: A. A server card, a spec card and a ui line are owed.\n- #30066, #30209, #30210, #30208 row 6, #30172: the rulings are on each card.\n- #30730: the server half of #30172. Build it on PR #30727's branch; spec lands first. Knock mailbox #30557.\n\n**Epic #8345 handover:** #30674 goes first (order in project files `epic-8345/dispatch-30674.md`). #30675 and #30676 are behind `Blocked-by: #30674`; #30676 is Tier H.\n\n**Follow-ups filed tonight:** #30633, #30635, #30636, #30664, #30665 (now unblocked), #30670.\n\n## Hot-file serial queue\n\n- None held. #30465 is serial behind #30391, which landed.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Online sibling seats (os-elon-musk): `domain:server#1` (mailbox #30658), `#3` (#30660), `#5` (#30661). Each was sent `seat-offline`.\n"
+  "body": "domain:server#2 · os-tesla · session_01L9qibyvxbrLP4jm4PargoH\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 2**. Seat 1 is #6367, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908. #21118 and #22648 are archives of this post, ⛔ do not sit there.\n\n<sub>Refreshed at seating 2026-11-06T15:26Z, seat-taken comment 6688442935.</sub>\n\n## Current PM — 🟢 os-tesla\n\n- **Holder:** `os-tesla` · `session_01L9qibyvxbrLP4jm4PargoH` · seated 6688442935 · 由 os-tesla 账户的项目负责 (\"Objectstack security ui server spec\" project). Previous PM: `os-bill` · `session_01Utp6Cbvcmv8YWFhFJwzjKL`, vacant since its seat-offline brief 6675251774.\n- **Mailbox:** #30985 (subscribed). **Patrol:** `trig_01YU53kkqcPdnAaUJgkQVAMv` hourly (`25 * * * *`).\n- **Pointer:** Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#2` + `head:claude/` PRs. Posture and ledger live in the project (姿态台账住项目).\n\n## Ledger\n\n- **In flight:** none yet. **Stay-behind:** none.\n- Inherited from the previous holder (brief 6675251774): the released and ruled cards it listed are now closed or held by other seats (#29029 #30512 #30379 under `os-elon-musk`; #30209 in the maintainer's inbox). Still owed by this seat: #30208 rows 5 and 6 (ruling E, comment 6670396132: server card first, then a ui card).\n- Out of scope: every `pm:epic` subtree. No new cards from other lanes. Up to 5 card threads.\n\n## Hot-file serial queue\n\n- None held by this seat. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Standing constraints (maintainer, carried):** seats self-run contract review at `CONTRACT_REVIEW_TIER`; pm-dispatch-reviewed PRs are landed by the seat; Tier H / human-gate (>3000 lines) PRs request `os-zhuang`. ⛔ Release PRs are never touched.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes. PRs open only through the relay `pr_create`.\n- **Publication:** a merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Online sibling seats (`os-elon-musk`):** `domain:server#1` #6367, `#3` #26761, `#4` #27737, `#5` #28677.\n- **Successor:** run `/pm-dispatch 接手`, then read this post and the latest brief.\n\n<!-- signed: domain:server#2 · os-tesla · session_01L9qibyvxbrLP4jm4PargoH -->\n"
 }

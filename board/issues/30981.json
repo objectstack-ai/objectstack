@@ -1,0 +1,35 @@
+{
+  "number": 30981,
+  "kind": "pull_request",
+  "title": "plugin-audit: correct two stale config_change comments after #30937",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T15:10:17Z",
+  "updated_at": "2026-11-06T17:11:12Z",
+  "closed_at": "2026-11-06T17:11:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-06T17:11:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30981",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DJQ32N7D7QcUWJ5SjJDMCT5)_\n\ndomain:server#4 · os-elon-musk · session_016WV4d1abDZNVe9GRYCpLEn\n\nFixes #30945\n\nClaim: 6688172302 (full re-post with `sys-audit-log.page.ts` on the surface)\n\nClause-②: no (comment-only)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：`plugin-audit` 三处注释。只改注释，不改任何代码行为。\n- 为什么改：#30937 之后，非密钥设置的 `config_change` 审计行自己就带可读的改前值和改后值，旧注释还说它只有摘要、不带字段值。\n- 风险与回滚：零运行时风险，单提交可整体回滚。\n- 先看：`audit-plugin.ts` 第 277 行起；`audit-log-read-visibility.ts` 第 57 行起；`sys-audit-log.page.ts` 文件头第 14 行起。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nThree comments in `packages/plugins/plugin-audit/src/`. No code line changes.\n\n- `audit-plugin.ts` (the `pages:` comment, about :277). It said a `config_change` row's digest sits next to the CRUD mirror's row \"that carries the value\". After #30937, `config-change-audit.ts` writes `old_value` / `new_value` as `{ namespace, key, scope, value, digest }`, with `value` omitted only for a secret-valued key. The comment now says the record page puts the `config_change` row beside the mirror's rows about the same settings row, that a non-secret key's row carries its readable before and after itself, and that a secret-valued key's row carries only the digest.\n- `audit-log-read-visibility.ts` (the \"Rows about no record\" bullet, about :57). It said these rows carry no record's field values. A `config_change` row stored before its writer recorded the settings row has no `record_id`, but still names its store as `object_name` and still carries the setting's `value` and `digest`. The false clause is removed. A new sentence says what `redactAuditLogRows` does: it keys on `object_name` and `action`, not on `record_id`, so a `config_change` row naming `sys_setting` or `sys_platform_setting` has `value` and `digest` dropped on both sides for a reader whose field-level security masks that store's `value`, with or without a `record_id`.\n- `sys-audit-log.page.ts` (module header, about :14-24). It said a `config_change` row's `new_value` is a DIGEST, never the value, and that the value is one row down. It now says the row carries a non-secret key's readable before and after and only the digest for a secret-valued key, and that the page lists the `config_change` row beside the mirror's rows as the settings row's history.\n\n## Why\n\nPR #30937 (#30923) made the row readable and added the `object_name`-keyed narrowing in `audit-log-field-redaction.ts`. These three comments still described the earlier digest-only row. Found in that PR's contract review (6685638224), filed as #30945.\n\n## Verification\n\n`skip-changeset`: comment-only, nothing publishes a different behaviour.\n\n`node scripts/pm/dispatch-gates.mjs --ran`: 47 derived, 41 run with exit 0, 6 NOT MEASURED (exit 3, prerequisite not met), 0 unrun.\n\n- NOT MEASURED, reason: they read `dist/` of the whole workspace, which a fresh worktree has not built. `check:dts-closure`, `check:dual-build-cjs-loads`, `check:i18n`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content`. CI runs them.\n- NOT MEASURED, reason: shallow clone cannot reach the pinned positive-control commit. `check-plugin-teardown-shape.mjs --self-test` (checker health only). CI runs it.\n\nNo dogfood run, no unit test change: the diff touches no executable line.\n\n## Acceptance notes\n\n- None.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [ ] 3. No formatter ran; `pnpm lint` passes. (No formatter ran; lint not run locally, CI runs it.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [ ] 6. (n/a, not touched) `packages/spec` touched: its generated artifacts are regenerated and committed.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1abDZNVe9GRYCpLEn\n<!-- signed: domain:server#4 · os-elon-musk · session_016WV4czvZykUqhYxYXSSDt4 -->"
+}

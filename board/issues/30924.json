@@ -13,21 +13,19 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
+    "pm:blocked",
     "priority:p1",
     "repo:cloud"
   ],
-  "assignees": [
-    "os-elon-musk"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T11:52:29Z",
-  "updated_at": "2026-11-06T13:44:32Z",
+  "updated_at": "2026-11-06T15:21:59Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30924",
   "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **(b) a contract gap with a named consumer**, measured by the cloud#3668 dev (report 6684026104 on objectstack-ai/cloud#3668, Enterprise P2-8). The maintainer told the cloud seat 「cloud 多了几个企业版的任务，优先处理」 and ruled platform gaps go to the platform (「平台的问题应该在平台处理」, objectstack#30765). Consumer: the Enterprise enforcement report (objectstack-ai/cloud#3668), which is `pm:blocked` on this card.\n\n## 维护者速读\n\n因为 IP 不在白名单、或者没开双重验证而被拦下的登录，平台现在什么记录都不写：IP 拦截只在进程里打一行告警，双重验证拦截只是一个会话门槛。企业版的「谁、从哪里、因为哪条规则被拦」报表因此无数据可读。要做的是每次策略拦截写一条审计记录。\n\n## Measured (objectstack `2ffdb649`)\n\n- **ADR-0069 D5 IP refusal:** the auth-route middleware returns 403 (`packages/plugins/plugin-auth/src/auth-plugin.ts:3262`) before better-auth resolves an account. It writes only a once-per-process warn line (`:3138`).\n- **ADR-0069 D3 MFA hold:** `auth-manager-password-session-policy.ts:248` pushes an `AuthGate` and returns. No row is written.\n- `login_failed` carries a refusal code only for the password and lockout refusals of `/sign-in/email` (`auth-session-audit.ts:261`).\n\n## Expected\n\n- One `sys_audit_log` row per policy refusal: the account where it can be resolved, the client address, the rule (`ip_allow_list` | `mfa_required`, extensible), the organization where known, and the time.\n- Follow the incumbent shape: a `login_failed` row with `context.reason` (`auth-session-audit.ts:261`), unless the lane judges a dedicated action better. Say which.\n- Rate-limit or aggregate so a scanner hammering the IP gate cannot flood the table, and state the rule.\n\n## Acceptance\n\n- Tests: an out-of-range sign-in writes one row with the rule and address; an MFA-held sign-in writes one row; a flood is bounded.\n\nSerial: after objectstack#30922 (both edit `auth-manager-password-session-policy.ts`).\n\nSuggested-grade: p1 · Enterprise priority (maintainer).\n\nDedupe (2026-11-06): `IP_NOT_ALLOWED audit` → 4 hits (#24818 closed, #30203 closed, #24739 closed, #2375 closed); `MFA_REQUIRED audit row` → 24 hits (#30302 closed, #30201 closed, #28942 open, #29151 open)\n. None covers this gap (the open hits are QA runs or unrelated settings cards)."

@@ -2,7 +2,7 @@
   "number": 30933,
   "kind": "pull_request",
   "title": "feat(cli): os deploy — the managed-package dev loop in one command; installs pick the only environment, keep it across login, and refuse before any write",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T12:20:12Z",
-  "updated_at": "2026-11-06T14:09:29Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-06T14:32:10Z",
+  "closed_at": "2026-11-06T14:32:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-06T14:32:08Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/30933",

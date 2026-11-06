@@ -2,8 +2,8 @@
   "number": 30345,
   "kind": "issue",
   "title": "plugin-auth: an MCP JWT access token cannot be revoked — /oauth2/revoke answers 400 and delete-consent ends nothing, against IAuthService.verifyMcpAccessToken's 'falsy when revoked' (objectstack-ai/cloud#3606 ruling A)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,8 +12,6 @@
   },
   "labels": [
     "bug",
-    "pm:blocking",
-    "pm:dispatched",
     "priority:p1",
     "repo:cloud",
     "security"
@@ -24,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T06:49:38Z",
-  "updated_at": "2026-11-06T14:07:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T15:03:04Z",
+  "closed_at": "2026-11-06T15:01:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30345",
   "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **executing a recorded ruling**. The maintainer ruled objectstack-ai/cloud#3606 **A** (record 6651680613), verbatim:\n\n> 方案 A（推荐）： 以平台已有的「授权同意」记录为准。撤销或撤回时删掉这条记录，每次 MCP 请求都查一次，记录不在就拒绝。不新增对象、表或门禁，控制台的撤回也随之真正生效。代价是每次 MCP 请求多一次带索引的读取，撤销后用户下次连接要重新同意。\n\nThis card carries the platform half. objectstack-ai/cloud#3606 keeps the cloud half: a pin move, then a tenant-rig e2e. It waits on this card with `pm:blocked` + `Blocked-by:`.\n\n**Owner.** The `repo:cloud` lane (`repo:cloud#3`, objectstack-ai/objectstack#30278) follows this card to close, because it carries cloud facts. The code is pure objectstack, `packages/plugins/plugin-auth`, so triage routes it.\n\nPriority: **p1**, inherited from objectstack-ai/cloud#3606. A platform card filed from an app-repo ruling is not downgraded.\n\n## 维护者速读\n\n把 MCP 访问权授给 agent 之后收不回来：调撤销接口返回 400，控制台「撤回授权」接口显示成功，但令牌照样能用，要等 1 小时过期。按已有裁决，改成以平台已有的「授权同意」记录为准：撤销或撤回时删掉它，每次 MCP 请求都查一次，记录不在就拒绝。\n\n## Measured\n\nThese readings come from cloud's tenant-kernel rig, by the cloud#3606 dev (report objectstack-ai/cloud#3606 comment 6651405267): cloud `7e486932`, framework pin `1a3ea0c0`, `@better-auth/oauth-provider` 1.7.12. The client is a DCR public client (`token_endpoint_auth_method: none`) using PKCE S256, with `resource` set to the MCP URL.\n- `POST /api/v1/auth/oauth2/revoke` with form `token=<access>` + `token_type_hint=access_token` + `client_id` → **400** `{\"error\":\"unsupported_token_type\",\"error_description\":\"JWT access tokens are self-contained and cannot be revoked server-side\"}`. Then `tools/list` with the same bearer → 200. Omitting the hint gives the same 400.\n- Revoking the refresh token → 200, and the access token still answers 200.\n- `GET /api/v1/auth/oauth2/get-consents` → 200, with the person's consents. `POST /api/v1/auth/oauth2/delete-consent {id}` → 200, but afterwards the bearer still answers `tools/list` 200 and the refresh token still answers 200.\n- An invalid token (`token=garbage`, `token_type_hint=access_token`) → **400** `invalid_request` \"Invalid access token\". RFC 7009 §2.2 says 200.\n- No cloud code serves or rewrites `/oauth2/*`.\n\n## Governing text (read at objectstack `origin/main` `bfca0efb`)\n\n- `packages/spec/src/contracts/auth-service.ts:287-296`: `verifyMcpAccessToken` \"Resolves to the token's principal, or a falsy value when the token is unknown/expired/revoked … callers fail CLOSED on anything but a verified result.\"\n- The implementation contradicts it at `packages/plugins/plugin-auth/src/auth-manager.ts:4310-4312`: \"JWT access tokens are not server-tracked, so revocation takes effect at expiry\". This is declared ≠ enforced, so the implementation must honour the contract; ⛔ do not narrow the contract.\n- RFC 7009 §2.1 (revoking the grant) and §2.2 (an invalid token answers 200).\n\n## The ruled design (option A of objectstack-ai/cloud#3606 comment 6651442702)\n\n1. Wrap `/oauth2/revoke`. For an MCP JWT access token, verify it against this deployment's JWKS and require `azp` to equal the requesting `client_id`. If it does not match, answer a 200 no-op that touches no other client's grant. Confidential-client authentication stays with the provider and runs first, unchanged. On a match: delete that consent (client, user, organization reference), revoke the client's refresh family for that user, and answer 200.\n2. `delete-consent` takes effect through the same check (step 3), with no extra write.\n3. `verifyMcpAccessToken`, or the execution-context resolver right after it, reads the consent by (`azp`, `sub`, `organization_id`) on every MCP request. It refuses when the consent is missing or newer than the token's `iat`, and fails closed on a store error.\n4. An unknown or invalid token answers 200 (RFC 7009 §2.2).\n5. Server-only `skip_consent` clients have no consent row. They keep the honest `unsupported_token_type` answer and are exempt from step 3.\n6. No new object, table or gate. Accepted costs: one indexed read per MCP request; the person consents again on the next connect after a revoke.\n\n## Acceptance\n\n- A test on the real provider: a DCR public client authorizes with PKCE, then revokes its access token with `client_id` only → 200, and the same bearer is refused by `verifyMcpAccessToken`, so it gets a 401 at the MCP route.\n- `delete-consent` followed by the same bearer → refused.\n- A revoke sent by another client → 200, and the owner's token still works.\n- An invalid token → 200.\n- A store error in the consent read → refused (fail closed).\n- The `auth-manager.ts` revocation note is rewritten to match.\n\nDedupe (issues, open and closed, 2026-11-05), none carrying this:\n- `repo:objectstack-ai/objectstack verifyMcpAccessToken revoked is:issue`: 3 hits (#24137, #24061, #22269).\n- `oauth2 revoke JWT access token MCP is:issue`: 3 hits (#23943, #25096, #6015).\n- `delete-consent MCP is:issue`: 2 hits (#12104, #22371)."

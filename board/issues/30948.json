@@ -2,8 +2,8 @@
   "number": 30948,
   "kind": "issue",
   "title": "serve: let a plugin supply the ICryptoProvider for secret fields; today serve installs LocalCryptoProvider after every plugin hook, so a KMS-backed provider (cloud#3573) cannot be mounted",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,24 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:queue",
+    "pm:blocking",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T13:27:54Z",
-  "updated_at": "2026-11-06T13:54:43Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T18:28:07Z",
+  "closed_at": "2026-11-06T18:02:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30948",
   "body": "repo:cloud#1 · os-baozhoutao · session_013w7BrxKc6dUYe6Rw6tQW4G\n\nFiling gate: **④ coordination**, the platform half of objectstack-ai/cloud#3573 (p1). That card carries **③ a task on the maintainer's word**: 「同意立卡」, then 「相关任务都可以是 p1」 (2026-11-06).\n\n**Business reason.** Enterprise security questionnaires ask for customer-managed keys. cloud#3573 has built KMS-backed `ICryptoProvider` implementations (AWS KMS, Azure Key Vault, Vault transit), branch `claude/issue-3573-kms-crypto-providers` on cloud. But no self-hosted `objectos-ee` boot can mount them, because `objectstack serve` decides the provider itself, after every plugin hook.\n\n**Reader who acts.** The lane that owns `packages/cli` (triage sets lane and grade; cloud suggests p1, inherited from cloud#3573). Then the cloud seat wires the provider from a licence-gated `security-enterprise` plugin.\n\n**Dedupe** (open and closed): `setCryptoProvider` and `crypto provider seam` searched on objectstack issues; no open card asks for a host-supplied provider.\n\n## Measured (objectstack `main` `26c965cb`; the same block is at cloud's pin `c50e0dfa`)\n\n`packages/cli/src/commands/serve.ts`, the \"Secret-field CryptoProvider wiring (host composition root)\" block, runs after `await runtime.start()`, i.e. after `kernel:ready` / `kernel:bootstrapped` / `kernel:listening`.\n- When no `sharedCryptoProvider` exists, it builds a `LocalCryptoProvider`.\n- It then always calls `dataEngine.setCryptoProvider(sharedCryptoProvider)`.\n- The datasource binder shares the same instance.\n\nSo whatever a plugin set during init is overwritten. The block's own comment promises the seam that does not exist: \"production hosts swap this for a KMS/Vault-backed provider (e.g. via an env-gated branch or a dedicated plugin) before secrets are written.\"\n\n## Ask\n\n`serve` consults a provider a plugin registered during init, under a kernel service name such as `crypto-provider`. It uses it for the data engine, the datasource binder and the default `SettingsServicePlugin`, and falls back to `LocalCryptoProvider` only when none is registered.\n- Runtime wiring only: no spec key and no stack-config knob, so there is nothing for an AI author to write.\n- The production refusal for an unstable local key stays as it is when the fallback is used.\n\n## Done when\n\n- A test plugin registering a provider during init sees secret-field writes sealed by it, and the binder uses the same instance.\n- Without a registration, behaviour is byte-identical to today.\n- cloud#3573 can then mount its provider from a plugin."

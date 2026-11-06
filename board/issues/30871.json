@@ -2,8 +2,8 @@
   "number": 30871,
   "kind": "issue",
   "title": "os package publish: one command from a local checkout to the org's environment — pick the only environment, keep it across login, fail loudly without one, and publish dev builds without hand-bumping the version",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:blocking",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T08:00:18Z",
-  "updated_at": "2026-11-06T14:10:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T14:34:31Z",
+  "closed_at": "2026-11-06T14:34:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30871",
   "body": "coordinator#1 · hotlong · session_6eb9ec2e0e3f410b91239dab7a337b9e\n\nFiling gate: **③ a task on the maintainer's word.** In the coordinator session on 2026-11-06 the maintainer said 「我觉得先把受管软件包的开发循环走顺了」, then 「同意，然后第一步先解决我本地开发的软件包怎么能够方便地发布到云端」.\n\nReader: `domain:cli` (`packages/cli/src/commands/package/publish.ts`, `commands/cloud/login.ts`, `commands/environments/*`, `utils/cloud-config.ts`, `utils/active-environment.ts`). The epic and the server half are on objectstack-ai/cloud, linked in a comment below once filed. Suggested priority **p1**: this is the first step the maintainer named. Triage decides.\n\nDedupe:\n- objectstack `activeEnvironmentId`: 5 hits, all closed.\n- objectstack `\"os package publish\"`: 40 hits. Open: #30284 (marketplace language coverage), #27293 (connector auto-shelf epic), seat posts. None is about the local publish loop.\n- objectstack `0.0.0-dev`: 10 hits. Open: #30591 (the release `next` snapshot lane, unrelated).\n- objectstack `os environments switch auto`: 39 hits, none open about auto-selecting an environment.\n\n## 维护者速读\n\n程序员在本地改好一个受管软件包，想马上在云端自己组织的环境里看到效果。现在要过五道坎：先手动 `os build`；每次手改版本号，否则重复发布会 409；明明组织只有一个环境还得 `switch`，而 `os cloud login` 会把记下的环境清掉；`--install` 找不到环境时只打一行错误，命令照样算成功；装完说「已安装」，其实环境还没换成新版本。这张卡把 CLI 这一侧理顺，「等到真正生效」需要服务器提供信号，那一半在 cloud 卡上。\n\n## What happens today (objectstack `origin/main` `a2f523aa`)\n\n1. **No build step.** `publish.ts:498-510` reads `dist/objectstack.json` or exits with \"Run `objectstack build` first\".\n2. **Version.** `deriveVersion` (`publish.ts:221-229`): `--version`, else `manifest.version`, else `0.0.0-dev.<YYYYMMDDHHMMSS>`. `manifest.version` wins, so republishing an unchanged config always gets cloud's 409 \"Version '…' already exists … Bump the version and retry\" (cloud `routes/package-publish.ts:1230-1236`).\n3. **Environment.** `--env` / `$OS_ENVIRONMENT_ID`, else `cloud.json.activeEnvironmentId` when its url matches (`publish.ts:795-818`, `utils/active-environment.ts:115-130`).\n   - No auto-select when the organization has exactly one environment (no such fallback anywhere in `cli/src` or `client/src`). ADR-0024 (cloud) now gives every organization exactly one environment.\n   - `os cloud login` rewrites `cloud.json` whole (`cloud-config.ts:91-97`, `login.ts:222-228`), so `activeEnvironmentId` is gone after every login.\n   - `--install` with no environment prints \"`--install` requires `--env <id>` … Skipping auto-install.\" (`publish.ts:812-818`), publishes anyway, and exits 0.\n4. **\"Installed\" is printed before the environment serves it.** The versions call returns after cloud writes the desired state and evicts the kernel. The rebuild happens later (cloud `package-install/install.ts:825-855`). The CLI prints \"Installed into environment\" (`publish.ts:858-863`) and checks nothing more.\n\n## Ask\n\n1. **Pick the only environment.** With `--install` and no `--env`, ask the control plane for the caller's organization's environments. Exactly one → use it, and print which. None or several → refuse (item 3).\n2. **Keep the active environment across `os cloud login`.** Merge into `cloud.json` instead of overwriting, keeping `activeEnvironmentId` when the url is unchanged.\n3. **`--install` that cannot resolve an environment exits non-zero**, before the publish call, naming how to pass one. A publish that was asked to install and didn't must not read as success.\n4. **Dev builds without hand-bumping.** `os package publish --dev` publishes `<manifest.version>-dev.<YYYYMMDDHHMMSS>` (semver pre-release), whatever `manifest.version` says. Cloud already flags `-dev` versions as pre-release (`package-publish.ts:1407`); making cloud honour that flag is the cloud card's part.\n5. **Build first, optionally.** `--build` runs the same compile `os build` runs before reading the artifact. Name the flag as the CLI's other commands would.\n6. **Wait until live** (Blocked-by the cloud card's served-version signal). After `--install`, poll until the environment reports serving the new version, or report the build failure the environment reports. `--no-wait` keeps today's behaviour. Bounded by a timeout that names what it was waiting for.\n\nOut of scope here, listed on the epic: a watch mode, a change preview before install, `os mcp connect`.\n\n## Acceptance\n\n- Tests pin: the one-environment pick, several-or-none refused, `login` keeping `activeEnvironmentId`, `--install` without an environment exiting non-zero before any write, and `--dev` producing a semver pre-release from a fixed `manifest.version`.\n- Item 6 has a test against a stubbed control plane: serving the new version → success; a build failure → the reason printed, non-zero.\n- On cloud staging, from a checkout with a fixed `manifest.version`: `os package publish --dev --install` run twice in a row succeeds both times without `--env`, and the second run's version is what the environment serves.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"

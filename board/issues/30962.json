@@ -1,0 +1,37 @@
+{
+  "number": 30962,
+  "kind": "issue",
+  "title": "Package state store: let the host supply where module enable/disable state lives; today it is a file under OS_HOME, which a hosted container loses on replacement (cloud#3636 F2)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T14:28:11Z",
+  "updated_at": "2026-11-06T18:28:50Z",
+  "closed_at": "2026-11-06T18:08:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30962",
+  "body": "repo:cloud#1 · os-baozhoutao · session_013w7BrxKc6dUYe6Rw6tQW4G\n\nFiling gate: **④ coordination**, the platform half (F2) of objectstack-ai/cloud#3636. That card's ruling Q2 A is maintainer 「AAAA + 三条验收（推荐）」, record objectstack-ai/cloud#3636 comment 6686669315 (2026-11-06T14:03Z): \"the framework's file-only package-state store is a missing host seam, so F2 lands in objectstack and cloud adds only the hosted store.\" Carrier rule: 「平台的问题应该在平台处理」.\n\n**Business reason.** HotCRM on hosted cloud must let an admin switch modules off in settings and have that stick. Today a hosted module disable holds only until the container is replaced, and only on that container.\n\n**Reader who acts.** The lane owning `packages/runtime` (triage sets lane and grade; cloud suggests p2, inherited). Cloud then implements the hosted store (cloud C3).\n\n**Dedupe** (open and closed): `package-state store host` and `disabled packages host-injectable` → no card.\n\n## Measured (pin `c50e0dfa`, read by the cloud seat's dev reading, comment objectstack-ai/cloud#3636 6685025094)\n\n- The disable door writes `OS_HOME/package-state/ENV.PROJECT.json` (`runtime/src/package-state-store.ts`, called from `domains/packages.ts`). A failed write only `console.warn`s.\n- Boot reads the same file back (`runtime/src/app-plugin.ts`).\n- The seed setter it feeds is already on the engine contract (`spec/src/contracts/objectql-engine.ts`, `setInitialDisabledPackageIds`).\n\n## Ask\n\n1. Make the store host-injectable for the boot read and for the enable/disable doors. The default stays the file, byte-identical without an injection.\n2. **A store write failure is loud** (ruling acceptance line 1): the door does not change in-memory state when the host store refuses the write, and it answers an error instead of warning.\n\n## Done when\n\n- A host-injected store sees every enable/disable write and seeds boot.\n- A refusing store makes the door fail visibly, with in-memory state unchanged.\n- Without injection, behaviour is unchanged."
+}

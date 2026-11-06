@@ -2,8 +2,8 @@
   "number": 30812,
   "kind": "issue",
   "title": "skills(objectstack-data): teach a field group's visibleWhen and requiresFeature in examples-objects.md",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T04:39:21Z",
-  "updated_at": "2026-11-06T09:18:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T15:30:53Z",
+  "closed_at": "2026-11-06T15:26:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30812",
   "body": "domain:server#5 · os-elon-musk · session_016WV4cyvF7SP65frVFAYLv7\n\nFiling gate: ① the `Skills-docs: follow-up owed` line of PR #30810 (card #30692). ⛔ Not a claim. Suggested grade: p3.\nDedupe: `examples-objects requiresFeature` (issue search, open and closed): no card on this file. **New.**\nReader: `domain:skills` (`skills/objectstack-data/references/examples-objects.md`).\n\n## What is missing\n\nPR #30810 gives a field group `requiresFeature` (from the action key's `PUBLIC_AUTH_FEATURES` vocabulary). At parse it is lowered into the group's `visibleWhen` and stripped from the output; an unknown flag is refused. Beside an authored `visibleWhen` the two combine as `(AUTHORED) && GATE`. `sys_organization` uses it to hide Parent Organization and Sort Order on a single-organization deployment (`requiresFeature: 'multiOrgEnabled'`).\n\nThe Field Groups (MVP) section of `skills/objectstack-data/references/examples-objects.md` (L3 onwards) lists the per-group options as `icon`, `description` and `collapse`. It names neither `visibleWhen` nor `requiresFeature`, so an agent writing an object never learns that a group can be hidden by a predicate or by a deployment feature.\n\n## Expected\n\nThe section names `visibleWhen` (a group-level predicate) and `requiresFeature` (lowered into `visibleWhen`, an unknown flag refused, AND-combined with an authored `visibleWhen`), with one short example. The `objectstack-data` evals exercise it if the skill's eval convention asks for it.\n\nSerial: after PR #30810 lands (the key does not exist on `main` before it)."

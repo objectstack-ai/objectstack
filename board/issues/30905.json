@@ -2,8 +2,8 @@
   "number": 30905,
   "kind": "issue",
   "title": "controlled_by_parent admits an optional master (1/3): spec, lint and the read owner branch: a null-master detail row is readable by its owner only",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:access",
     "domain:server",
     "pm:blocking",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T10:17:55Z",
-  "updated_at": "2026-11-06T14:07:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T18:31:22Z",
+  "closed_at": "2026-11-06T18:08:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30905",
   "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ② maintainer-directed task. Maintainer ruling, verbatim (Claude Code session, 2026-11-06): 「A」. The ruling: `controlled_by_parent` admits an optional master, and a detail row with no master is visible only to its owner (Salesforce parity: a contact without an account is a private contact). Rejected: B, a membership key collecting its object's own id; C, one-hop RLS traversal; D, no platform change. Routing, verbatim: 「能交给车队开发的你不要自己开发」. The plan was re-read by an isolated contract-review-tier reviewer before filing (PASS WITH FIXES, fixes folded in). It lands in three serial cards (this one and its two siblings), each safe on its own.\n\n## Why (measured 2026-11-06, the first live scenario run, objectstack-ai/cloud#3600)\n\nThe rule \"a rep sees the contacts of accounts they own; a contact need not have an account\" has no declarative form in spec 18.3.0:\n- RLS `account.owner == current_user.id` is refused: `rls-predicate-unenforceable` (`packages/lint/src/validate-rls-predicate-enforceability.ts:316`).\n- A membership key with `valueField: 'id'` is refused: `membership-key-value-field-invalid` (`validate-membership-key-declarations.ts:80`).\n- `controlled_by_parent` with `required: false` on the master is refused at two doors: `ObjectSchema.create()` (`packages/spec/src/data/object.zod.ts:4406-4417`) and the parse refinement, shape `master-not-required` (`object.zod.ts:2743-2752`, `controlled-by-parent-master.ts:178-185`).\n\nThe only working route today is a copied owner field plus two hooks. The AI-built app took that route, and its hook failed `verify`.\n\nClause-②: yes. Card 1 of 3: spec, lint, record, read.\n\n## Ask\n\n1. **Spec.** A `controlled_by_parent` object may declare its one `master_detail` with an explicit `required: false`. Retire the `master-not-required` refusal at both doors for that case; every other refusal stays (several masters, required lookup only, `readonly` / `system` master). **Omitted `required` still means required**: `forceCbpMasterDetailRequired` and the D2 conversion `cbp-master-detail-required-defaulted` stay untouched. Move `isControlledByParentMasterField`, `resolveCbpRelation` (`security-plugin-cbp-relation.ts:164`, today `required === true` only) and `reportCbpMasterUnresolved`'s advice (`:223-250`) together.\n2. **Compatibility.** No accepted stored object changes meaning. A stored row the v18 upgrade listed as `master-not-required` (`conversions/refused-shapes.ts:148-155`; today registered `[metadata_spec_invalid]` and denied every read) becomes a valid optional-master detail. Retire that arm of `refused-shapes.ts`, and register a D3 semantic entry beside `18.cbp-master-relation-tiers-retired`. Changeset: `minor` on spec, `Metadata-protocol: added`.\n3. **Lint** (`data-model-rules.ts:398`, `relationship/master-detail-required`): under cbp, error on an omitted `required` and on a `readonly` / `system` master; an explicit `false` passes.\n4. **Read: the owner branch, at the one chokepoint.** In `computeControlledByParentFilter` (`security-plugin-cbp-read-filter.ts`), OR a second arm with the unchanged master arm, for rows whose master FK is null: `owner_id == caller`, or `viewAllRecords` on the detail. This one function is ANDed by the authz middleware, `getReadFilter` (which feeds analytics and the engine's `ReadableIds` composer for attachment/comment/activity/approval parent gates) and `computeDelegatedReadFilter`, so search, export, MCP, REST and reports follow. The `$or` lives inside the cbp layer, which stays ANDed under the Layer-0 tenant wall. Rules to state and test:\n   - a non-null-master row is never readable through the owner arm; a null-master row is never readable through the master arm;\n   - **View All on the detail admits null-master rows only; it does not bypass the master arm** (unchanged);\n   - a null-master row with `owner_id` null (an ADR-0142 queue row), or on an object with no `owner_id` column (`ownership` other than `'user'`, `injected-system-columns.ts:234-243`), is readable by nobody but View All until claimed;\n   - chains: an intermediate level whose own master is null is readable to its owner, and its children's master arm sees exactly that (`$or` with nested scopes compiles, `readable-ids-conformance.ts:226,262`).\n5. **Explain engine** (`explain-engine.ts:1991-2017`, `MASTER_UNRESOLVED_DETAIL` at `:1138`): narrate the owner arm.\n6. **Record**: amend ADR-0055 §1 and §2.\n7. **Tests**: each rule above, including that a caller who can read another master cannot see null-master rows they do not own.\n\nWhy this card is safe alone: the write gate is unchanged, so it still refuses a null-master insert (`MasterReferenceMissingError` 422) and no null-master rows can exist yet. Note the new predicate shape `fk IS NULL AND owner_id = ?` for the driver review.\n\nReader: the `domain:server` lane seat (with `domain:spec` for item 1), from `pm:queue`. Contract-tier review owed."

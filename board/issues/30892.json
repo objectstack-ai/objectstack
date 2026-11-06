@@ -19,16 +19,16 @@
     "priority:p1"
   ],
   "assignees": [
-    "os-elon-musk"
+    "os-tesla"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T09:25:54Z",
-  "updated_at": "2026-11-06T12:56:54Z",
+  "updated_at": "2026-11-06T19:38:17Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30892",
   "body": "coordinator#1 · hotlong · session_6eb9ec2e0e3f410b91239dab7a337b9e\n\nFiling gate: **③ a task on the maintainer's word.** Coordinator session, 2026-11-06: after reviewing screenshots of an MCP client (Claude app) working against a hosted environment, the maintainer said 「这些问题都需要立卡处理」, then 「你只需要立卡，不需要派发」.\n\nReader: `domain:server` (`packages/mcp`, with `packages/services/service-storage`). Cloud's half (storage quota, the bucket) follows on objectstack-ai/cloud if the design needs it. Suggested priority p1. Triage decides.\n\nDedupe:\n- objectstack `MCP attachment`, `file field MCP`: open hits are QA runs, #3146 (recycle bin), #30812, #30379. None is file access over MCP.\n- cloud `MCP attachment`: open hits unrelated.\n\n## 维护者速读\n\n两个真实场景：一是拍一张发票，让 AI 建报销单并把发票图片挂上去；二是系统里存着规章制度的附件，让 AI 下载下来分析。现在 MCP 两样都做不到：工具里没有任何读写文件的。AI 能看懂照片、把字段填进报销单，但挂不上原图；存成附件的 PDF 也读不到。\n\n## What is there today (objectstack `origin/main`)\n\n- The MCP tools in `packages/mcp/src/mcp-http-tools.ts` read and write records and run actions. None touches storage: no upload, download or presign anywhere in `packages/mcp/src`.\n- Records carry `Field.file` / `Field.image` (`spec/src/data/field.zod.ts:3473-3474`) and attachments live in `service-storage` (`attachment-lifecycle.ts`).\n- An AI client sees an image the user attaches in its own chat, but it has no bytes to send. The MCP protocol has no standard client-to-server file transfer.\n\n## Ask\n\n1. **Read a file.** A tool that, for an attachment or a file field the caller can see, returns its text for analysis (PDF and Word extracted to text; images as an image content block where the protocol allows), plus a short-lived download link for a person. Access follows the record: no record access, no file. A size cap, named in the answer.\n2. **Attach a file through a one-time upload link.** A tool that, for a record the caller may edit, returns a short-lived, single-use link bound to that record and field. The person opens it on their phone and picks the photo, and it lands as the record's attachment. The link expires in minutes and uploads count toward the storage quota.\n3. Direct upload through the protocol when clients can send file content; out of scope until then, noted so the design leaves room.\n\n## Acceptance\n\n- Tests pin access following the record, the size cap, the link's single use and expiry, and the binding to one record and field.\n- On a hosted environment: an MCP client reads a PDF attachment's text and summarises it. A photographed invoice ends up attached to the expense record it created, through the link.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"

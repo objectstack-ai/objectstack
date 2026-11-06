@@ -1,0 +1,35 @@
+{
+  "number": 30988,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0048 §5 describes the namespace-prefix lint as it now ships",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T15:49:14Z",
+  "updated_at": "2026-11-06T17:11:15Z",
+  "closed_at": "2026-11-06T17:11:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-06T17:11:12Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30988",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D9HSxC7WngZADjXgb6UHCVp)_\n\ndomain:devx#1 · os-elon-musk · session_016WV4cyadQ5Zhih2y1GNTQm\n\nFixes #30804\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:只改 ADR-0048 §5 的一条 lint 说明，让它与已发布的 `naming/namespace-prefix` 一致。\n- **为什么改**:原条目还写着「只查 7 类、只豁免同名 app 和 `sys_`」;#30842 与 #30927 合并后已不是这样。\n- **风险与回滚**:纯文档，不发布任何包(`skip-changeset`)。回滚即 revert。\n- **先看**:`docs/adr/0048-cross-package-metadata-collision.md` 的 §5 第一条。\n- **两分钟验证**:对照 `packages/cli/src/commands/lint.ts` 的 `NAME_JUDGED_ELSEWHERE`、`carriesPackageNamespace` 和 `PLATFORM_REQUESTED_BARE_NAMES` 读一遍新条目。\n- **需要你做的**:这是 `docs/adr` 的 Tier H 改动，需要 os-zhuang 或 hotlong 批准后合并。\n\n## What changes\n\nADR-0048 §5's first bullet described the old `naming/namespace-prefix`: a warning on seven types (`app`, `page`, `dashboard`, `flow`, `action`, `report`, `dataset`) that exempted only the namespace-named app and `sys_` names. It now describes the rule as it ships after #30842 and #30927:\n\n- it warns on every bare package-authored top-level name in every manifest collection, and gives the rename as its `fix`;\n- it leaves objects (`defineStack` refuses those), views, docs (`docs/namespace-prefix`), extensions, translation bundles, fields, `functions` and `overrides` items to other checks;\n- a name carries the namespace when it is the namespace itself (ADR-0019), starts with `<ns>_`, is a `<ns>.<short>` capability name, or starts with `sys_`;\n- the permission set `guest_portal` is exempt, because the public form doors request it by that bare name (ADR-0138), and the exemption is named `PLATFORM_REQUESTED_BARE_NAMES`;\n- it still reports a name declared twice in one package, it is warning-only, and the refusal is phase 3 (#30806).\n\nThe bullet links both maintainer rulings it rests on:\n\n- dotted capability names carry the namespace, 2026-11-06T11:08Z, recorded in [#30804 comment 6683456244](https://github.com/objectstack-ai/objectstack/issues/30804#issuecomment-6683456244);\n- `guest_portal` is exempt, 2026-11-06T14:57Z, recorded in [#30804 comment 6687835712](https://github.com/objectstack-ai/objectstack/issues/30804#issuecomment-6687835712).\n\nNo other line of the ADR changes. Its status, decision and addenda are untouched.\n\n## Why\n\nRuling C on #30798 (maintainer, verbatim 「同意 c」): every package-authored metadata name carries its namespace, phased. Phase 2 (#30804) shipped as #30842 (the lint and `os generate`) and #30927 (the example renames and the `guest_portal` exemption). This one-file PR brings the ADR's phasing list in line and closes the card.\n\n## Acceptance notes\n\n- **Tier H.** This touches `docs/adr/**`, so it needs a governed approver (os-zhuang or hotlong). Auto-merge is not armed.\n- **Changeset:** none. It is a docs-only PR and releases nothing, so it carries the `skip-changeset` label.\n- **Two other sentences in the ADR mention the rule and stay as written.** §3.4 item 4 (the `os lint` rule \"keeps authoring hygiene\") and the paragraph after it (a package shipping two `page/home` items \"stays covered by the `naming/namespace-prefix` lint\") are both still true.\n\n## Verification\n\n- Every identifier the bullet names exists on `main` at `9d313f3ac`: `NAME_JUDGED_ELSEWHERE`, `carriesPackageNamespace` and `PLATFORM_REQUESTED_BARE_NAMES`.\n- Local gates: `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at `3329301de` derived 21 commands. All 21 ran and exited 0, and `--ran` reconciles 21 derived / 21 run / 0 NOT-MEASURED.\n\n<details><summary>Gates run at 3329301de (21)</summary>\n\n```text\nnode scripts/check-adr-links.mjs :: exit 0\nnode scripts/check-adr-links.mjs --self-test :: exit 0\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/ci/plan-test-core-shards.mjs --self-test :: exit 0\npnpm --filter @objectstack/lint run check:doc-formula-expressions :: exit 0\npnpm check:adr-anchors :: exit 0\npnpm check:adr-index :: exit 0\npnpm check:adr-symbol-anchors :: exit 0\npnpm check:ci-filter-parity :: exit 0\npnpm check:closed-ceremony-text :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:doc-authoring :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:pm-governed-merges :: exit 0\npnpm check:pm-prior-rulings :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:watch-hint-literal :: exit 0\n```\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (`packages/spec` not touched.)\n- [x] 2. Every name I added uses the casing for its kind. (No names added.)\n- [x] 3. No formatter ran; `pnpm lint` passes. (Markdown only.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here. (Publishes nothing: `skip-changeset`.)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (n/a)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cyadQ5Zhih2y1GNTQm\n"
+}

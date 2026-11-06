@@ -13,18 +13,20 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T21:38:23Z",
-  "updated_at": "2026-11-06T05:08:48Z",
+  "updated_at": "2026-11-06T19:45:52Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30665",
   "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ③ a maintainer ruling that names this card: #30385 ruling A (Ruling confirmed on the card, maintainer 「同意」 2026-11-05T21:34Z), item 5 — \"The ui half (a clear control on a locked field, which needs the server to say whether a stored value sits beneath the pin) is a separate `domain:ui` card.\" ⛔ Not a claim. Suggested grade: p2 (the server half is p1).\nBlocked-by: #30823\nDedupe: `clear locked field settings ui`. Nearest: #30385 (server half, PR #30448). **New.**\n\n## What happens\n\nA settings field pinned by an environment variable shows the lock badge and is read-only. When a value was saved before the pin (the #30385 case: an allowed-IP list saved in Setup, then pinned by `OS_AUTH_ALLOWED_IP_RANGES` for recovery), the admin has no way in Setup to clear that saved value, so removing the variable later brings the old value back.\n\nAfter PR #30448 the server accepts a clear (`null`) of an env-pinned key and sets the stored value to `null`; nothing in force changes while the pin holds.\n\n## Expected\n\n- On a locked field that has a stored value beneath the pin, Setup offers \"clear the saved value\" (wording per the ruling: clear the stored value, never \"delete\"), with a line that the environment value stays in force.\n- On a locked field with no stored value, no control appears.\n- The page needs the server to say whether a stored value sits beneath the pin. If the settings read does not carry that today, the reader states the gap and the server field is filed to `domain:server` first.\n\nReader: `domain:ui` (Setup settings pages)."

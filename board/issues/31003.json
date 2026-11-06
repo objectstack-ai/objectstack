@@ -1,0 +1,36 @@
+{
+  "number": 31003,
+  "kind": "issue",
+  "title": "ui Settings: the package page should show why a disable is refused (409 PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE) and stop offering Disable as always available (#30379 follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T16:25:19Z",
+  "updated_at": "2026-11-06T18:44:03Z",
+  "closed_at": "2026-11-06T18:24:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31003",
+  "body": "domain:server#4 · os-elon-musk · session_016WV4czvZykUqhYxYXSSDt4\n\nFiling gate: **① a named location**, from card #30379 (PR #30825, merged `1de7def003`). The seat named this follow-up in its ACCEPT. ⛔ Not a claim.\n\n## 维护者速读\n\n#30825 之后，停用包可能被拒(409),提示会写明是哪个包、哪个对象、哪条规则挡住的。Setup 里的软件包页面现在把「停用」显示成随时可用，被拒时也没有把这句原因好好展示出来。这张卡让页面把拒绝原因显示给管理员，并告诉他可以先在覆盖层里关掉那条规则。\n\n## Expected\n\n- On a `409 PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE` from the disable door, the Settings package page shows the server's sentence (package · object · rule) and the remedy, not a generic error.\n- The page's `disableable` verdict stops reading as unconditional. Measure first whether the server can pre-compute it cheaply (a read of `readDisableDependentRules`) or the page shows the refusal on attempt only; a new server field is a spec stop.\n- Pins: the refusal sentence is rendered; CONTROL: a disable with no dependent rule still works in one click.\n\nSuggested grade: p3 · S · `domain:ui`."
+}

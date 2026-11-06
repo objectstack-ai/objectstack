@@ -1,0 +1,30 @@
+{
+  "number": 30973,
+  "kind": "pull_request",
+  "title": "feat(app-shell): Connect an Agent marks claude.ai (web) and Doubao cloud tasks as not available on a non-public address",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T14:54:28Z",
+  "updated_at": "2026-11-06T19:51:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30973",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao4R5vgzn4JR1Ewtt4rWD5cr)_\n\nFixes #30897\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：「连接 AI 助手」页显示的地址不是公网 HTTPS（http://、localhost、内网地址）时，claude.ai 网页版和豆包工作的云端任务会标出「此部署不可用」，一句话说明原因（写出该地址），并说明怎样才能用（把系统部署到公网 HTTPS 地址）。\n- 为什么改：公司在内网试用时照着 claude.ai 步骤粘贴地址，连接失败却没有可执行的原因；页面本来就知道自己显示的地址，可以先说清楚。\n- 风险与回滚：只在页面显示层判断地址，不改任何服务端行为；Claude Desktop、Claude Code、Codex、Cursor 等本地客户端的步骤不变；公网 HTTPS 地址下页面与之前完全一样。回滚即 revert 本 PR。\n- 先看：`ui/packages/app-shell/src/console/connect/deploymentReach.ts`（地址判定）、`ConnectAgentWidget.tsx` 里的 `Unavailable` 与两处使用、测试文件末尾新增的 describe。\n- 两分钟验证：本地部署打开 设置 → 连接 AI 助手：Claude 页签下 claude.ai 一栏出现虚线框「claude.ai（网页版）：此部署不可用」，切到「豆包工作」出现「云端任务：此部署不可用」，切到 Codex 没有提示。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `deploymentReach.ts` (new): `isPublicHttpsAddress(address)` — false for a non-`https:` address, `localhost` / `*.localhost`, a single-label host, `.local` / `.internal`, and loopback, private (10/8, 172.16/12, 192.168/16), link-local, CGNAT and unspecified IPv4 literals, plus `::1`, `fc00::/7`, `fe80::/10` and IPv4-mapped private IPv6. A host name with a dot is taken as public (the page cannot see the reader's DNS).\n- `ConnectAgentWidget.tsx`: when the MCP address is not public HTTPS, the claude.ai / Claude Desktop column shows an `Unavailable` note (title, one-sentence reason naming the address's origin, remedy) in place of the static reachability small print, and the Doubao Work steps gain the same note for cloud tasks. Claude Desktop's steps, Claude Code, Codex, Cursor, WorkBuddy and QwenWork are unchanged. On a public HTTPS address nothing renders differently from `main`.\n- i18n: five new keys under `connectAgent.unreachable` in all ten console packs (PR #30902 is not on `main`: today's `zh.ts` / `pt.ts`).\n- Root changeset `.changeset/30897-connect-agent-unreachable-address.md` (`@object-ui/app-shell`, `@object-ui/i18n`: patch).\n\n## Tests\n\nIn `ConnectAgentWidget.keyName-13355.test.tsx` (the component's one harness file), a new top-level describe: the address classification table (16 non-public, 5 public); on `http://localhost:3000` the claude.ai note with the address and the Doubao cloud-task note render, Claude Desktop / Claude Code steps stay, Codex and Cursor carry no note; on `https://crm.example.com` no note renders and the original reachability line is back. The test `t` mock now echoes the `address` option beside `name`.\n\n## Acceptance notes\n\n- The page judges only the address it shows (the discovery-relative MCP route resolved against the console's origin). A public-looking domain that resolves to a private IP on the reader's network is taken as public: the page cannot see DNS.\n- The Doubao hint keeps its last sentence about cloud tasks needing public HTTPS; on a non-public address the note now says so first, for this deployment.\n- The fallback hints that say \"create a key below\" are unchanged here; #30898 rewrites that copy and will name Advanced.\n\n## Verification\n\nHead `1851c124`: branch restarted on `main` `6ddf8272` (PR #30943's merge), this card's commit re-applied cleanly; full `pnpm build` on that base (118/118).\n\n<details><summary>Live check on a local deployment (showcase with the fresh flag, console Vite dev, admin)</summary>\n\n- before (`main`): on `http://localhost` the claude.ai column shows the address with a copy button and the static small print \"claude.ai (web) connects from Anthropic's servers — the deployment must be reachable over public HTTPS\"; the Doubao steps carry the same kind of static line. Nothing reacts to the address.\n- after: Claude tab — a note \"claude.ai (web): not available for this deployment / claude.ai connects from Anthropic's servers, and they cannot reach http://localhost:5197: only a public HTTPS address is reachable from there. / Serve this system at a public HTTPS address (https:// on a domain the internet can reach) to make it available.\"; Doubao Work tab — \"Cloud tasks: not available for this deployment\" with the same reason shape and remedy; Codex tab — no note.\n</details>\n\n<details><summary>Local tests and gates</summary>\n\n- `pnpm --dir ui exec vitest run packages/app-shell/src/console/connect/ packages/i18n/ packages/app-shell/src/__tests__/product-neutral-renderer.ratchet.test.ts` → 99 files, 1565 passed, 13 skipped (widget file 12/12)\n- `pnpm --filter @object-ui/i18n run type-check && pnpm --filter @object-ui/app-shell run type-check` → exit 0\n- eslint `packages/app-shell/src/console/connect/` → 0 errors (3 pre-existing `no-explicit-any` warnings); `pnpm check:new-line-citations` → 0 new\n- `dispatch-gates --commands` derived 36 commands on 1851c124; all 36 exit 0 (incl. `node scripts/check-sdui-manifest.mjs`, `pnpm --dir ui exec vitest run scripts/` 170 files passed); `--ran` reconciliation: 36 run, 0 NOT-MEASURED, 0 UNRUN.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibzWZSWpaweunqGyeA9)_\n"
+}

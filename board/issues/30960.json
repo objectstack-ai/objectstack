@@ -1,0 +1,36 @@
+{
+  "number": 30960,
+  "kind": "issue",
+  "title": "plugin-auth: SCIM-driven writes leave sys_audit_log rows with actor, user_id and metadata null, so no audit row names the SCIM connection that acted",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:blocking",
+    "priority:p1",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T14:21:46Z",
+  "updated_at": "2026-11-06T17:12:34Z",
+  "closed_at": "2026-11-06T17:11:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30960",
+  "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **(b) a contract gap with a named consumer**, measured by the cloud#3667 dev on a real licensed objectos-ee serve (report on objectstack-ai/cloud#3667, Enterprise SCIM leaver lifecycle; draft PR objectstack-ai/cloud#3672). Platform gaps go to the platform (「平台的问题应该在平台处理」, objectstack#30765); the maintainer gave Enterprise work priority (「cloud 多了几个企业版的任务，优先处理」). Consumer: objectstack-ai/cloud#3667 (live Okta / Entra ID provisioning). Second consumer: objectstack-ai/cloud#3665 (the Enterprise audit export needs attributable rows).\n\n## 维护者速读\n\nIdP 通过 SCIM 开通、停用或删除用户时，平台会写审计记录，但这些记录的「谁做的」一栏是空的，看不出是哪个 SCIM 连接（哪个 IdP）干的。审计员因此没法追溯离职员工是被谁停用的。需要让这类记录标明 SCIM 连接。\n\n## Measured (cloud pin `2ffdb649` on the serve)\n\n- Every SCIM-driven `sys_audit_log` row (the `sys_user` create, the deactivation's ban update, `sys_member`, `sys_scim_*`) has `actor`, `user_id` and `metadata` all null. Read from the SQLite store after a licensed boot; parked as `it.skip` in cloud#3672.\n- The verifier `verifyScimBearerToken` resolves a connection, but nothing carries that principal into the writes' audit context.\n\n## Expected\n\n- SCIM writes are attributed to the connection as a service principal: `actor` in the existing `svc:<name>` form or a SCIM-specific one (the lane decides, and follows the incumbent shape), with the connection id in `metadata`. `user_id` stays null, because no human acted.\n- Same for the ban update a deactivation writes, so \"who deactivated this account\" has an answer.\n\n## Acceptance\n\n- Tests: a SCIM create, a deactivation and a delete each write rows whose actor names the connection; the rows never carry the bearer.\n\nSuggested-grade: p1 · Enterprise priority (maintainer).\n\nDedupe (2026-11-06): `SCIM audit actor` → 29 hits, top 4 closed and unrelated; `sys_audit_log actor null` → 64 hits (#30955 open is export; #27539, #27414, #26474 closed, the same null-actor class on other writers). None covers SCIM."
+}

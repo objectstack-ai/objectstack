@@ -1,0 +1,35 @@
+{
+  "number": 31020,
+  "kind": "issue",
+  "title": "spec: PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio'] lists delete_package, with chatbot.tool.delete_package labels in every ui locale (blocks cloud#3656)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cloud",
+    "enhancement",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p1",
+    "repo:cloud"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T18:19:49Z",
+  "updated_at": "2026-11-06T19:53:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31020",
+  "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **(b) a contract gap with a named consumer**. objectstack-ai/cloud#3656's PR #3686 adds the `delete_package` build tool, which only ever stages a person-confirmed removal. Cloud's `platform-tool-names-conformance.test.ts` is red on it until the framework registry lists the tool. Precedent: #27002 and eca7cd2008 (cloud#3565's record-write tool). Lane: `domain:cloud`.\n\n## 维护者速读\n\ncloud 给 AI 和 MCP 加了一个「删除环境里搭的应用」的工具（只发起删除，由人确认）。平台有一张「平台工具名单」，cloud 的测试要求每个工具都登记在册、并且每种语言都有显示名。这张卡在名单里加上 `delete_package`，补上各语言的显示名。\n\n## Expected\n\n- `packages/spec/src/system/constants/platform-tool-names.ts`: add `delete_package` to `PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio']`.\n- `chatbot.tool.delete_package` labels in every `ui/packages/i18n` locale pack, following the existing tool-label pattern and gates (`check:i18n`).\n- Whatever spec conformance tests pin the list.\n\n## Acceptance\n\n- Spec tests and i18n gates green. Cloud's conformance test turns green once the cloud pin moves past this card.\n\nSuggested-grade: p1 (blocks a p1).\n\nDedupe (2026-11-06): `PLATFORM_TOOLS_BY_PACKAGE` → #27002, #16512 (closed, other tools). None for delete_package."
+}

@@ -2,7 +2,7 @@
   "number": 30841,
   "kind": "pull_request",
   "title": "pm(scripts): retired lane aliases are written as domain:server at the label doors; domain:rest joins the retired block",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -18,10 +18,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T06:17:52Z",
-  "updated_at": "2026-11-06T14:10:27Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-06T14:36:11Z",
+  "closed_at": "2026-11-06T14:36:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-06T14:36:08Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/30841",

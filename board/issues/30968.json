@@ -1,0 +1,33 @@
+{
+  "number": 30968,
+  "kind": "issue",
+  "title": "skills(objectstack-platform): teach `os deploy`, the managed-package dev loop (when to deploy, the command, reading a refusal or a failed build)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T14:33:34Z",
+  "updated_at": "2026-11-06T18:38:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30968",
+  "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **④ coordination child** of objectstack#30871, scope amendment item 5. The maintainer agreed to the amendment (「同意」, amendment comment 6680520228 on #30871): 「The skill teaches it … This part may route to `domain:skills` as its own card; the claiming seat decides.」 The claiming seat (`repo:cloud#3`) routed it here once the command name was fixed and landed: PR #30933, `feat(cli): os deploy`, merged as `780c6c34`.\n\n## 维护者速读\n\n`os deploy` 已经合入：在本地项目目录里一条命令就能把托管包装进组织的开发环境，并等到它真正生效。但 AI 助手加载的 skill 里还没有这条命令，助手会继续教用户先 `os package publish` 再手动安装。这张卡把这条开发循环写进 skill。\n\n## Measured (objectstack `780c6c34`)\n\n- `git grep -n \"os deploy\" -- skills/` → 0 hits.\n- `skills/objectstack-api/SKILL.md:430` and `skills/objectstack-platform/SKILL.md` teach `os build` / `os validate`, but not the step from a local build to a running environment.\n\n## Expected\n\nTeach, in the skill that owns platform / CLI guidance, only what PR #30933 shipped. Read the command's `--help` and the PR body as the source of truth; do not paraphrase from this card.\n- **When to deploy:** to see an edit on the org's development environment. Contrast it with `os package publish`, which publishes a release version.\n- **The command:** `os deploy` (or `npm run deploy` in a scaffolded project, or the `d` key in `os dev`). It picks the only environment and keeps the choice across login. Cover the flags that exist, such as `--no-wait`.\n- **Reading a failure:** the refusals it raises before any write, the build failure the environment reports, and the wait timeout that names what it waited for. For each, what the assistant tells the user to do next.\n\n## Acceptance\n\n- The skill's text matches the landed CLI (every flag and message named in the skill exists in `packages/cli`).\n- An eval case, if the skill's eval set covers CLI flows, asks \"how do I see my change on my environment\" and expects `os deploy`.\n\nSuggested-grade: p2.\n\nDedupe (2026-11-06): `os deploy skill` (open issues) → 37 hits, top 5 none (#30871 is the parent; #30857 is image env vars)."
+}

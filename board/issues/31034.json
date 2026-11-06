@@ -1,0 +1,34 @@
+{
+  "number": 31034,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): runbook patrol names the review claim by its key and reads the owed list from check-owed-reviews",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T19:01:31Z",
+  "updated_at": "2026-11-06T19:47:23Z",
+  "closed_at": "2026-11-06T19:47:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-06T19:47:21Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31034",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"huangyiirene\"} -->\n_Requested by **Irene** · [project thread](https://claude.ai/code/project/chan_01TJXtQ1tVD26ecLDZxFS67x?thread=cmsg_01TJXtQ1tVD26ecLDZxFS67xRaRtG7juPKBiHi7ami7kzB)_\n\nFixes #28763\n\nClause-②: no\nMetadata-protocol: none\n\n`dispatch-gates --tier` reads no path-derived model mandate for this surface (\"no path-derived mandate: the surface hits none of the 4 declared glob(s)\"). Any contract-review tier owed is waived by the maintainer's standing order in this project (2026-11-03); the dispatching seat runs the contract review.\n\n## 维护者速读\n\n- 改了什么:`pm-dispatch` 巡查常设项两行(dispatch-runbook.md L44–45):巡查改跑 `node scripts/pm/check-owed-reviews.mjs` 取 TAKE 行,认领行按键名 `Contract-review-claim:` 并指向 `contract-review.md`。\n- 为什么改:旧行让复核者留 `Claim:` 评论,`check-owed-reviews.mjs` 读作 missing,「不双做」只在散文里成立;旧巡查只搜等复核标记,漏掉无标记的欠审、交接、hold 与失效认领。\n- 风险与回滚:只改内部 agent 规程文字(`.claude/**`,不发包,无 changeset);回滚即 revert。\n- 行账:文件净增行 0(245 行不变);两行 108 / 119 → 113 / 119 字节,均在 120 字节上限内。\n- 先看:`.claude/skills/pm-dispatch/references/dispatch-runbook.md` L44–45 对照 `contract-review.md` L25–29。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`.claude/skills/pm-dispatch/references/dispatch-runbook.md`, 〈巡查常设项〉, two lines replaced in place:\n\n- **L44 (SF-2):** the patrol ran `is:pr is:open label:needs:contract-review` and now runs `node scripts/pm/check-owed-reviews.mjs` (the list `contract-review.md` L25 names) and takes its `TAKE` rows, the status the script gives an owed head with nobody on it and a trigger holding (`WAIT` rows stay with the lane, `HELD` and `DONE` need nothing). The account-keyed self-exclusion (剔除本账户署名的 PR) stays, as record 6561911910 ④ judged.\n- **L45 (SF-1):** the reviewer left a `Claim:` comment (session, account) and now posts a `Contract-review-claim:` line. Its form, lapse and double-claim rule are pointed to `contract-review.md` (L27–29), with no second spelling of the form in the runbook. \"已有他席认领即跳过(同账户亦然)\" becomes \"有活认领 ⛔ 不双做\": a live claim blocks whoever holds it, the same account included.\n\nMeasured on `main` at `41dc3024`:\n\n- `contract-review.md` L27: `Contract-review-claim: <session> · head <full sha> · <UTC>`; L28: the claim lapses when the head moves or after 2 h with no record, and on a double claim the first poster holds.\n- `scripts/pm/check-owed-reviews.mjs --help`: `[--repo OWNER/NAME] [--board OWNER/NAME] [--now ISO] [--json]`, report-only, default repo `objectstack-ai/objectstack`. Its `claim` column reads `Contract-review-claim:` lines only (`live` / `lapsed` / `none`). The runbook spells the bare invocation, no flags (the file is mode 100644, so it is run with `node`).\n\n## Why\n\nThe runbook disagreed with `contract-review.md` and with the script that every seat runs for the owed list, so a reviewer following the runbook posted a claim the list could not see.\n\n## Verification\n\n<details><summary>Local gates on cdf61f36: 17 derived, 17 run with exit 0, 0 NOT MEASURED (`dispatch-gates --ran`)</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 17 commands for the 1 changed file. All ran after `pnpm install --frozen-lockfile --ignore-scripts` and `turbo run build` for `@objectstack/formula`, `@objectstack/lint`, `@objectstack/objectql` (exit 0), each under a 900 s timeout with `NODE_OPTIONS=--max-old-space-size=8192` and its exit code captured before any pipe.\n- All 17 exited 0, among them `check:pm-skill-ratchet` (line ratchet), `check:pm-skill-id-lint`, `check:skill-frame-sync`, `check:doc-authoring`, `check:pm-governed-merges` and `check-comment-mask-corpus.mjs`.\n- Also run, from the roster block: `pnpm check:pm-settings-deny-roster` (roster under `.claude`) and `pnpm check:pm-governed-prose`, both exit 0.\n- `--ran` printed: `17 derived famil(ies) accounted for — 17 run, 0 NOT-MEASURED (a DERIVED zero — all 17 recorded an exit code and none of them is 3)`.\n- `node scripts/check-commit-card-trailers.mjs --range origin/main..HEAD`: exit 0 before the push.\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (No schema touched.)\n- [x] 2. Every name I added uses the casing for its kind. (No names added.)\n- [x] 3. No formatter ran. (Markdown only: no lintable source touched, so `pnpm lint` was not run.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. Nothing publishes (`.claude/**` only): `skip-changeset`; both declaration lines are filled in above.\n- [x] 6. `packages/spec` not touched; nothing to regenerate.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (The 维护者速读 section is Chinese, per the lane template.)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01J8VVAmitqSAFN9FfDRLzzh\n\n<!-- signed: domain:skills#3 · huangyiirene · session_01J8VVAj7CvjkGXvgXzd6RZ7 -->\n"
+}

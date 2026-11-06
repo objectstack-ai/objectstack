@@ -1,0 +1,32 @@
+{
+  "number": 31011,
+  "kind": "issue",
+  "title": "console marketplace: facet filters (business function, industry, solution type) and a Beta badge replace the single category chip row — reads the spec taxonomy (objectstack#30904)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T17:17:09Z",
+  "updated_at": "2026-11-06T18:46:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31011",
+  "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\nBlocked-by: objectstack#30904\n\nFiling gate: **④ coordination child** of objectstack#30904. It is the console `ui/` part of the maintainer's taxonomy ruling (ruling §6, recorded on #30904: 「关掉，Beta 并入分类方案」 and the three taxonomy decisions, all recommended). The ruling says the console part is filed as its own objectstack card. The readings below are the #30904 dev's (PR #30980, report 6690814417).\n\n## 维护者速读\n\n市场页现在只有一排「分类」小标签，用的是即将退役的旧分类。新方案按职能、行业、解决方案类型三个维度筛选，再加一个 Beta 徽标。这张卡把控制台的市场页和详情页改成按这三个维度筛选、显示 Beta，多语言词条也从规格里的枚举生成，不再另抄一份。\n\n## Readings (objectstack, at the #30904 dev's base)\n\n- `ui/packages/app-shell/src/console/marketplace/MarketplacePage.tsx`:\n  - category state :363; chips built from `it.category` :555; client filter :571; render :710-722;\n  - card badge `pkg.category` :965;\n  - raw-value fallback :560-566;\n  - `listMarketplacePackages({ limit: 100 })` filters on the client :407.\n- `MarketplacePackagePage.tsx`: `categoryLabel` :1425-1426, badge :1542.\n- `ui/packages/i18n/src/namespaces/marketplace/*.ts` (9 locales): the `category` block (en.ts :223) copies the retired spec enum.\n\n## Expected\n\n1. Replace the category chip row with facet filters:\n   - `businessFunctions`: multi-select, OR within the facet;\n   - `industries`: hidden while no loaded listing carries one;\n   - `solutionType`: a tab or segment.\n\n   Facets combine with AND, with a count per value.\n2. Card badge: the primary business function (`businessFunctions[0]`), plus a Beta badge when `maturity === 'beta'`. The detail page shows every business function, the industries, the solution type and the Beta badge.\n3. i18n:\n   - delete `marketplace.category.*`;\n   - add `marketplace.businessFunction.*` (11), `marketplace.industry.*` (10), `marketplace.solutionType.*` (3) and `marketplace.maturity.beta`, keyed by iterating the spec schemas' `.options` from `@objectstack/spec/marketplace`;\n   - a parity test, so no second list exists.\n4. Data: the cloud catalog rows' snake_case `business_functions` / `industries` / `solution_type` / `maturity`, once objectstack-ai/cloud#3661 lands. Until then every facet hides; drop the raw-value fallback.\n5. Server-side filtering and pagination (ruling §6 ui item 4): facets across hundreds of templates cannot filter 100 rows on the client. Do it in this card or name a sibling.\n\n## Acceptance\n\n- Tests: the filters combine as stated; Beta shows only for `beta`; facets hide with no data; the i18n parity test fails when a spec value has no label.\n\nSerial: after objectstack#30904 (PR #30980) merges. Pairs with objectstack-ai/cloud#3661 for data.\n\nSuggested-grade: p2 (inherits the taxonomy cards)."
+}

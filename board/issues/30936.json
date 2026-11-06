@@ -2,8 +2,8 @@
   "number": 30936,
   "kind": "issue",
   "title": "Console static plugin: let the host add the Cloudflare Web Analytics beacon to the console document (a createConsoleStaticPlugin option); today nothing adds a head script or widens script-src",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-elon-musk"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T12:33:57Z",
-  "updated_at": "2026-11-06T13:24:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T15:36:34Z",
+  "closed_at": "2026-11-06T15:33:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30936",
   "body": "repo:cloud#1 · os-baozhoutao · session_013w7BrxKc6dUYe6Rw6tQW4G\n\nFiling gate: **④ coordination**, the platform half of objectstack-ai/cloud#3590, which carries **③ a task on the maintainer's word**: 「同意立卡」 (2026-11-05, console traffic analytics for `cloud.objectos.ai`). That card's own instruction, verbatim: \"Adding the script and the `script-src` entry may need a framework option, because the console document and its nonce CSP are the framework's. If so, file the platform card first and wait for it. ⛔ Do not rewrite the framework's CSP from cloud by string replacement.\"\n\n**Business reason.** Nobody can say today how many people open the hosted console, or from where. cloud#3590 adds Cloudflare Web Analytics, which is free, sets no cookies and adds no new subprocessor. Every console document is served by this framework's console static plugin, so cloud cannot add the beacon without an option here.\n\n**Reader who acts.** The lane that owns `packages/cli` (triage sets the lane). Then the cloud seat moves the pin and passes the option (cloud#3590 is `pm:blocked` on this card).\n\n**Dedupe** (objectstack issues, open and closed): `cloudflareinsights` 0. `createConsoleStaticPlugin script` 12 and `console CSP script-src` 11; none asks for a host-supplied head script. The nearest is #28100 (Turnstile, a fixed origin read from env).\n\n## Measured (pin `2ffdb649` and objectstack `main` `26c965cb`, the same at both)\n\nAll of this is in `packages/cli/src/utils/console.ts`:\n- `createConsoleStaticPlugin(distPath, options?: { isDev?: boolean; rootRedirect?: boolean })` is the only console server.\n- `readIndexHtml` writes the base tag and the react-pages capability script, then `stampScriptNonce` nonces every script start tag.\n- `serveDocument` mints the nonce per request and calls `consoleContentSecurityPolicy`.\n- That policy's `script-src` is `'self'` + nonce + `'wasm-unsafe-eval'`. It adds `'unsafe-eval'` only for react-pages, and `TURNSTILE_ORIGIN` only when both Turnstile env keys are set.\n- The only operator widening is `OS_CONSOLE_CSP_CONNECT_SRC`, which affects `connect-src` only. No option or env var adds a head script.\n\ncloud reaches the plugin only through `mountConsoleStatic` (cloud `packages/objectos-runtime/src/node-server.ts`). The control plane and the tenant plane call it separately.\n\n## Ask\n\nAdd an option to `createConsoleStaticPlugin`, for example `cloudflareWebAnalytics?: { token: string }`.\n- **Without it,** the document and the policy stay byte-identical.\n- **With it:**\n  1. Refuse at boot a token outside a narrow charset (Cloudflare site tokens are 32 hex characters), the way `readExtraConnectSources` refuses.\n  2. In `readIndexHtml`, before `stampScriptNonce`, write the manual snippet so it carries the nonce: a deferred `script` tag whose `src` is `https://static.cloudflareinsights.com/beacon.min.js`, with a `data-cf-beacon` attribute holding the token JSON.\n  3. Add `https://cloudflareinsights.com` to `connect-src`, documented in the policy jsdoc the way `TURNSTILE_ORIGIN` is.\n\nIt should be an option rather than an env var, so a host can pass it to one plane only. cloud passes it on the control plane and never on tenant planes (customers' apps, out of scope per cloud#3590), and that holds by construction.\n\n**Open point for the implementing lane, not decided here.** cloud#3590's steps (written by the coordinator, not quoted from the maintainer) list `https://static.cloudflareinsights.com` in `script-src` too. A script element that carries the nonce loads whatever its host, so that entry is not needed to load the beacon. The jsdoc in this file warns that a CDN host in `script-src` admits every file the host serves. Measure whether the beacon loads anything further from that host before adding the entry.\n\n## Done when\n\n- Unit tests: with the option, the document carries the nonced beacon tag and the policy carries the new origin(s). Without it, both are byte-identical to today. A malformed token refuses boot.\n- cloud#3590 can pass the option at the control-plane mount once its pin carries this."

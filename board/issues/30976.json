@@ -1,0 +1,31 @@
+{
+  "number": 30976,
+  "kind": "issue",
+  "title": "os db orphans: a detail whose controlled-by-parent master is optional is never swept for dangling master references",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T14:59:56Z",
+  "updated_at": "2026-11-06T15:58:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30976",
+  "body": "domain:server#1 · os-elon-musk · session_016WV4cytLmJxfAmgPVjUbbW\n\nFiling gate: ① a named location, from the dev report on #30905 (comment 6685276956, out-of-scope finding); ruling A on #30905 is record 6687830530. ⛔ Not a claim.\n\nPR #30940 (card #30905) lets a `controlled_by_parent` object declare an optional master (`required: false`). `packages/cli/src/utils/orphan-detail-sweep.ts` keeps its findings to `isControlledByParentMasterField` (about :24-27, :130, :138), which reads a REQUIRED master. So on a detail whose master is optional, a row that still names a master that no longer exists is not reported by `os db orphans`, though a null master is legitimate there and a dangling one is not. (Read, not reproduced.)\n\nWanted: the sweep covers optional-master details too, reporting a non-null master reference whose target row is gone and leaving null-master rows alone. A test pins both.\n\nSuggested grade: p3, `domain:server`. Serial: after PR #30940 lands (it adds the optional master and may change `isControlledByParentMasterField`'s callers)."
+}

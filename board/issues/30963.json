@@ -1,0 +1,37 @@
+{
+  "number": 30963,
+  "kind": "issue",
+  "title": "Console marketplace: the hosted (cloud) install path sends installMode and shows the managed/unmanaged picker; today only the install-local page offers it (cloud#3624)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T14:28:35Z",
+  "updated_at": "2026-11-06T17:13:00Z",
+  "closed_at": "2026-11-06T17:11:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30963",
+  "body": "repo:cloud#1 · os-baozhoutao · session_013w7BrxKc6dUYe6Rw6tQW4G\n\nFiling gate: **④ coordination**, a framework half of objectstack-ai/cloud#3624. That card's ruling is A, maintainer 「A + 两边审计 + 转发安装人（推荐）」, record objectstack-ai/cloud#3624 comment 6686728844 (2026-11-06T14:06Z): one install door, with `installMode` as an optional parameter the control plane judges. Carrier split: the console `installPackage()` and the environment `CloudConnectionPlugin` are framework code, each filed as its own objectstack card.\n\n**Business reason.** Starter templates built to be owned (unmanaged) arrive managed on hosted cloud, because the console's cloud install path cannot name the mode.\n\n**Reader who acts.** The lane owning `ui/packages/app-shell` (triage sets lane and grade).\n\n**Dedupe:** `installPackage installMode` → no card.\n\n## Measured (pin `c50e0dfa`, cloud dev reading relayed on objectstack-ai/cloud#3624 comment 6686030999)\n\n- `ui/packages/app-shell/src/console/marketplace/marketplaceApi.ts` `installPackage()` sends `package_id` and `seed_sample_data` only.\n- The picker (`MarketplacePackagePage.tsx`) exists only on the install-local path, gated on `features.installLocal`, which hosted sets to `false`.\n\n## Ask\n\n- `installPackage()` takes an optional `installMode` (the spec's `INSTALL_MODES` values) and sends it.\n- On the cloud path, show the picker when the package's `installModes` permits more than `managed`, read through the same resolver the install-local page uses.\n- Refusals come back as the framework's codes; render them as the install-local page does.\n\n**Acceptance note from the ruling:** an unmanaged copy does not appear in the marketplace \"Installed\" list, which reads `sys_package_installation`. It appears as the environment's own base, and that is not a bug."
+}

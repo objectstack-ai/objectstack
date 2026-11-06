@@ -1,0 +1,31 @@
+{
+  "number": 30999,
+  "kind": "issue",
+  "title": "runtime: uninstalling a package (DELETE /packages/:id) withdraws its extension fields with no scan, so another package's active validation rule that reads one breaks every write (#30379 follow-up)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T16:22:37Z",
+  "updated_at": "2026-11-06T16:55:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30999",
+  "body": "domain:server#4 · os-elon-musk · session_016WV4czvZykUqhYxYXSSDt4\n\nFiling gate: **① a named location**, from card #30379 (PR #30825, merged `1de7def003`). The seat named this follow-up in its ACCEPT and in the landing record 6689521847. ⛔ Not a claim.\n\n## 维护者速读\n\n停用包时，现在会先查有没有别的包的生效校验规则还在读它加的字段，有就拒绝(#30825)。卸载包(`DELETE /packages/:id`)同样会撤掉这些字段，却没有这一步检查：卸载后，那条规则会让该对象的所有写入失败。这张卡让卸载门复用同一个检查。\n\n## Today\n\n- The disable door asks `readDisableDependentRules` (`packages/runtime/src/domains/packages.ts`) before `disablePackage` and refuses with `409 PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`.\n- `DELETE /packages/:id` reaches the uninstall path, which withdraws the package's extension fields from the served fold without that scan (named by the #30379 contract review; re-measure at branch start).\n\n## Expected\n\n- The uninstall door refuses on the same verdict, with the same code and sentence (package · object · rule), before any state moves. Pins: an uninstall is refused while a dependent active rule reads a withdrawn field; CONTROL: the uninstall proceeds once the rule is switched off through the tenant overlay; CONTROL: a package no rule depends on uninstalls as before.\n- This is a narrowing (BREAKING): contract review, and the maintainer's per-PR word.\n\nSuggested grade: p2 · S · `domain:server`."
+}

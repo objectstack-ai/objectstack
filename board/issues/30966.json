@@ -1,0 +1,32 @@
+{
+  "number": 30966,
+  "kind": "issue",
+  "title": "plugin-auth SSO: a SAML account_not_linked refusal redirects to the success callbackURL and ignores errorCallbackURL (OIDC honours it)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T14:31:21Z",
+  "updated_at": "2026-11-06T14:58:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30966",
+  "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **(b) a contract gap with a named consumer**. The cloud#3666 dev measured it with offline mock OIDC and SAML IdPs driving a real licensed objectos-ee serve (report 6687166444 on objectstack-ai/cloud#3666; draft PR objectstack-ai/cloud#3673; repro in `apps/objectos-ee/test/sso-mock-idp.e2e.test.ts`). Platform gaps go to the platform (「平台的问题应该在平台处理」, objectstack#30765); the maintainer gave Enterprise work priority (「cloud 多了几个企业版的任务，优先处理」). Consumer: objectstack-ai/cloud#3666 (Enterprise SSO with Okta / Entra ID).\n\n## 维护者速读\n\n用 SAML 登录、但对应账号不允许关联时，平台会把用户跳回「登录成功」的页面，只在网址后面挂一个错误参数，而不是跳到错误页。用户会看到一个似乎登录了、其实没登录的页面。OIDC 在同样的情况下是正确跳到错误页的，SAML 应该和它一样。\n\n## Measured (cloud pin `2ffdb649` on the serve)\n\n- SAML ACS, account-not-linked refusal → `302` to the SUCCESS `callbackURL` with `?error=account_not_linked`; `errorCallbackURL` is ignored.\n- OIDC callback, same refusal → `302` to `errorCallbackURL`.\n\n## Expected\n\n- The SAML ACS sends every refusal to `errorCallbackURL` when one is given, as the OIDC callback does. If the cause is upstream (`@better-auth/sso`), the lane patches it or wraps the ACS, and says which.\n\n## Acceptance\n\n- Tests: the SAML takeover case lands on `errorCallbackURL`, and a success still lands on `callbackURL`.\n\nSuggested-grade: p2.\n\nDedupe (2026-11-06): `account_not_linked errorCallbackURL` → 0. None."
+}

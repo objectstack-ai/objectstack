@@ -2,8 +2,8 @@
   "number": 30379,
   "kind": "issue",
   "title": "[Decision] A package can be disabled while an enabled package's validation rule reads one of its extension fields, and then every write to that object is refused",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "domain:server",
     "enhancement",
     "pm:blocking",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T08:28:06Z",
-  "updated_at": "2026-11-06T14:07:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T16:16:27Z",
+  "closed_at": "2026-11-06T16:10:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 10,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30379",
   "body": "domain:server#4 · os-bill · session_01Utp6CZMkHvuDeVYgTD73qF\n\nFiling gate: ④ a policy choice the lane cannot make alone. Raised as the #30304 dev's open question and judged by the contract review of PR #30362, record 6653307077, should-fix 3: \"acceptable for this PR … It is not acceptable to leave undecided.\" Filed by `domain:server` seat 4. ⛔ Not a claim. Suggested-grade: p2 (HotCRM's module suites hotcrm#2315 / hotcrm#2316 rely on module disable).\n\n## What happens (after PR #30362)\n\nWhen package B is disabled, its `objectExtensions` fields are withheld from the served object (#30304). If a validation rule of another package A, still enabled, reads one of those fields, every write to that object answers `400 VALIDATION_FAILED` naming the rule for as long as B stays disabled. PR #30362 pins this.\n\nThis is the existing fail-closed answer for a rule over a field the record does not declare (`packages/objectql/src/validation/rule-validator.ts`, since #4649); PR #30362 adds no code there. The disable door (`packages/runtime/src/domains/packages.ts`) checks no dependents, so nothing stops B from being switched off under A's rule. The failure is loud (a 400 naming the rule, never a 5xx or a silent verdict change). A formula over the withheld field answers `null` with 200 and needs no ruling.\n\n## Options\n\n- **A — refuse the disable** while an enabled package's validation rule (or formula) reads one of the package's extension fields; the refusal names the reading package and rule.\n- **B — skip such rules while disabled**: a rule whose referenced field is withheld by a package disable is not evaluated, and the skip is logged.\n- **C — require the dependency at install**: a package whose rule reads another package's extension field must declare that package as a dependency, and disable already refuses while a dependent is enabled (measure whether it does today).\n- **D — keep the fail-closed answer** as is, and document it in the package-disable docs.\n\nSeat note (not a ruling): A is the most local and keeps the data guarantee. B weakens a validation the author wrote. C is the cleanest authoring rule but larger.\n\nReader who acts: the maintainer for the ruling; then `domain:server`.\n\nDedupe: `disable package validation rule dependent`, `VALIDATION_FAILED disabled extension field`. **New.**"

@@ -1,0 +1,34 @@
+{
+  "number": 31010,
+  "kind": "pull_request",
+  "title": "docs(skills): teach MCP delete_record confirm: true in the objectstack-ai tools table",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T17:08:15Z",
+  "updated_at": "2026-11-06T18:08:12Z",
+  "closed_at": "2026-11-06T18:08:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-06T18:08:09Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31010",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"huangyiirene\"} -->\n_Requested by **Irene** · [project thread](https://claude.ai/code/project/chan_01TJXtQ1tVD26ecLDZxFS67x?thread=cmsg_01TJXtQ1tVD26ecLDZxFS67x6tDhuaKixCSrDFhtTS2kgC)_\n\nFixes #30863\n\nClause-②: no\nMetadata-protocol: none\n\n`dispatch-gates` mandates the contract-review model tier for `skills/**` (clause ①). The maintainer's standing order in this project (2026-11-03) waives it; this PR was developed below that tier, and the dispatching seat runs the contract review.\n\n## 维护者速读\n\n- 改了什么:`objectstack-ai` 技能 MCP 工具表 L202 一行:`delete_record` 不带 `confirm: true` 会被 `ACTION_CONFIRMATION_REQUIRED`(428)拒绝,agent 须先问人再重试;另加一个 `'@objectstack/skills': patch` changeset。\n- 为什么改:PR #30861 让 MCP `delete_record` 必须带 `confirm: true`,旧行只写\"annotated destructive\",照技能调用的 agent 会被拒。\n- 风险与回滚:只改教学文字,无 schema、键或行为变化;回滚即 revert。\n- Token 账:SKILL.md 5539 → 5563(上限 6801,余量 1238),无需付账;`skills/**` 净增行 0。\n- 先看:`skills/objectstack-ai/SKILL.md` L202 与 `packages/mcp/src/mcp-http-tools.ts` 的 `delete_record` 注册(描述与 `confirm` 成员)。\n- 需要你做的:无;席位负责复审与落地。\n\n## What changes\n\n- `skills/objectstack-ai/SKILL.md` L202, the MCP tools-table row for `create_record`, `update_record`, `delete_record`: \"writes; `delete_record` is annotated destructive\" becomes \"writes; `delete_record` is refused with `ACTION_CONFIRMATION_REQUIRED` (428) unless it sends `confirm: true` — ask the human first, then retry\".\n- `.changeset/30863-skills-ai-delete-record-confirm.md`: `'@objectstack/skills': patch`, with `Clause-②: no` and `Metadata-protocol: none`. No `skip-changeset`.\n\nMeasured on `main` at `8ae0ab9b0` (PR #30861 landed as `c77dd17f26`):\n\n- `packages/mcp/src/mcp-http-tools.ts` registers `delete_record` with the description \"A call is REFUSED unless it also sends confirm: true — ask the human first, then retry; nothing is deleted on a refused call.\" Its schema declares the member as `[AI_ACTION_CONFIRMATION_MEMBER]` (`confirm`), an optional boolean, and the handler answers `recordDeleteConfirmationRefusal` with code `ACTION_CONFIRMATION_REQUIRED` and HTTP status 428.\n- `packages/runtime/src/action-execution.ts`: `ACTION_CONFIRMATION_REQUIRED_CODE = 'ACTION_CONFIRMATION_REQUIRED'`, `ACTION_CONFIRMATION_REQUIRED_STATUS = 428`, the same refusal `run_action` answers.\n- The row's wording follows the server's own `run_action` / `delete_record` description rule (\"send confirm: true — ask the human first, then retry\"); no key or code is introduced that `main` lacks.\n\nEval sweep: `skills/objectstack-ai/evals/skills-tools-knowledge.json` is this skill's only eval file, and no case mentions `delete_record`, `confirm` or `destructive`. Nothing to change there.\n\n**Token ratchet** (`node scripts/check-skills-token-ratchet.mjs`): `skills/objectstack-ai/SKILL.md` before 5539 tokens, after 5563 tokens, ceiling 6801 (headroom 1238). No ceiling moves, no deletion needed. Net lines in `skills/**`: 0 (one row replaced in place).\n\n## Why\n\nAfter PR #30861, an agent that followed the skill's tools table sent `delete_record` without `confirm` and was refused. The skill now teaches the call the server accepts.\n\n## Verification\n\n<details><summary>Local gates on 54666fae: 45 derived, 45 run with exit 0, 0 NOT MEASURED (`dispatch-gates --ran`)</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 45 commands for the 2 changed files. All ran after `pnpm install --frozen-lockfile` and a full `pnpm build` (119/119 tasks, exit 0), each under a 900 s timeout with `NODE_OPTIONS=--max-old-space-size=8192` (heap headroom for this cloud container) and its exit code captured before any pipe.\n- All 45 exited 0, among them `check-skills-token-ratchet.mjs`, `check:skill-docs`, `check:skill-identifier-liveness`, `check:skill-compatibility`, `check:skill-frame-sync`, `check:doc-authoring`, `check-empty-changeset.mjs`, `check-changeset-no-major.mjs`, `check:dts-closure`, `check:dual-build-cjs-loads` and `check-comment-mask-corpus.mjs`.\n- `--ran` printed: `45 derived famil(ies) accounted for — 45 run, 0 NOT-MEASURED (a DERIVED zero — all 45 recorded an exit code and none of them is 3)`.\n- `node scripts/check-commit-card-trailers.mjs --range origin/main..HEAD`: exit 0 before the push.\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (No schema touched.)\n- [x] 2. Every name I added uses the casing for its kind. (No names added.)\n- [x] 3. No formatter ran. (Markdown only: no lintable source touched, so `pnpm lint` was not run.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` not touched; nothing to regenerate.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (The 维护者速读 section is Chinese, per the lane template.)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01J8VVAmcenQmYUv4fvtB68m\n"
+}

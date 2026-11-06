@@ -1,0 +1,37 @@
+{
+  "number": 30958,
+  "kind": "issue",
+  "title": "plugin-auth: no door mints a SCIM connection bearer (`mintScimConnectionCredential` has no caller and the object refuses create), so no IdP can connect",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p1",
+    "repo:cloud"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T14:20:53Z",
+  "updated_at": "2026-11-06T18:51:47Z",
+  "closed_at": "2026-11-06T18:47:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30958",
+  "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **(b) a contract gap with a named consumer**, measured by the cloud#3667 dev on a real licensed objectos-ee serve (report on objectstack-ai/cloud#3667, Enterprise SCIM leaver lifecycle; draft PR objectstack-ai/cloud#3672). Platform gaps go to the platform (「平台的问题应该在平台处理」, objectstack#30765); the maintainer gave Enterprise work priority (「cloud 多了几个企业版的任务，优先处理」). Consumer: objectstack-ai/cloud#3667 (live Okta / Entra ID provisioning).\n\n## 维护者速读\n\nSCIM 自动开通需要一个连接令牌，IdP（Okta / Entra ID）要拿它来调用平台。平台里铸令牌的函数已经写好，但没有任何地方调用它，管理员也无法通过数据接口创建，所以现在没有人能拿到令牌，真实的 IdP 也就接不上。需要给管理员一个铸造（以及吊销）SCIM 连接令牌的入口。\n\n## Measured (objectstack `6ddf827236`; cloud pin `2ffdb649` on the serve)\n\n- `POST /api/v1/data/sys_scim_connection_credential` as the platform admin → `405 OBJECT_API_METHOD_NOT_ALLOWED` (allowed: list, aggregate, export). The object declares the plugin-auth SCIM connection service its only writer.\n- `git grep mintScimConnectionCredential` → defined at `packages/plugins/plugin-auth/src/scim-connection-service.ts:164`, with no production caller and no export from `@objectstack/plugin-auth`'s entry.\n- `auth-manager-plugin-list.ts:798` wires `verifyScimBearerToken` only (`connections: []`; the upstream `managedConnections` catalog is deliberately not adopted, ruling 2026-08-25).\n- The cloud suite had to write the bearer straight into the store to run at all.\n\n## Expected\n\n- An admin-only door (route, action or Setup surface; the lane decides, and says why) that mints a connection bearer through `mintScimConnectionCredential`. The secret is shown once and never readable afterwards, as the service's header says. Revoking or rotating a connection goes through the same door.\n- The mint and the revoke each write a `sys_audit_log` row naming the admin and the connection, never the secret.\n\n## Acceptance\n\n- Tests: an admin mints a bearer and a SCIM `POST /Users` with it answers 201; a non-admin is refused; a revoked bearer answers 401; the audit rows exist and carry no secret.\n\nSuggested-grade: p1 · Enterprise priority (maintainer).\n\nDedupe (2026-11-06): `SCIM credential mint` → 35 hits, top 4 closed and unrelated (#8192 is at-rest posture); `mintScimConnectionCredential` → 4 hits, all closed (#14522 transactions, #14360 active:false). None covers this gap."
+}
