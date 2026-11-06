@@ -155,7 +155,7 @@ const createMemoryEngine = () => {
     },
     async find(name: string, q: any = {}) {
       let out = rows(name).filter((r) => matches(r, q.where));
-      if (q.limit) out = out.slice(0, q.limit);
+      if (typeof q.limit === 'number') out = out.slice(0, q.limit);
       return out.map((r) => project(r, q.fields));
     },
     async count(name: string, q: any = {}) {

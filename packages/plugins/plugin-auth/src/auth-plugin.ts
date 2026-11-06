@@ -69,7 +69,10 @@ import {
 } from './identity-write-guard.js';
 import { registerLastAdminGuard } from './last-admin-guard.js';
 import { registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
-import { bindOrganizationAccessPolicy } from './organization-access-policy-binding.js';
+import {
+  bindOrganizationAccessPolicy,
+  type OrganizationAccessPolicySecuritySurface,
+} from './organization-access-policy-binding.js';
 import { MFA_REQUIREMENT_LEVELS, readMfaRequirementLevel } from './organization-access-policy.js';
 import { registerMfaRequiredEnrollmentPredicate } from './mfa-required-enrollment-predicate.js';
 import { registerPersonalViewHooks } from './personal-view-hooks.js';
@@ -2809,7 +2812,7 @@ export class AuthPlugin implements Plugin {
         engine: () => manager.getDataEngine(),
         security: () => {
           try {
-            return ctx.getService<any>('security');
+            return ctx.getService<OrganizationAccessPolicySecuritySurface>('security');
           } catch {
             return undefined;
           }

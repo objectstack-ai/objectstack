@@ -55,8 +55,12 @@ export interface AccessPolicySettingsSurface {
   ): void;
 }
 
-/** The `security` service member the delegated-administrator check asks (plugin-security). */
-interface SecuritySetResolver {
+/**
+ * The `security` service member the delegated-administrator check asks
+ * (plugin-security's registered security service). Structural: plugin-auth
+ * does not depend on plugin-security.
+ */
+export interface OrganizationAccessPolicySecuritySurface {
   resolvePermissionSetsForContext(context: Record<string, unknown>): Promise<unknown[]>;
 }
 
@@ -66,7 +70,7 @@ export interface OrganizationAccessPolicyBindingDeps {
   /** The data engine, for the cross-organization MFA probe and the column move. */
   engine: () => any;
   /** The `security` service, when plugin-security is composed. */
-  security: () => SecuritySetResolver | undefined;
+  security: () => OrganizationAccessPolicySecuritySurface | undefined;
   logger: { info(message: string): void; warn(message: string): void; error(message: string): void };
 }
 
