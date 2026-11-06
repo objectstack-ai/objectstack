@@ -39,7 +39,7 @@
  *   The pair is a rename, so neither key is listed as added or removed. When
  *   the two types differ, the rename is ALSO a type change, judged on its own:
  *   a declared rename never stands in for a type-change confirmation
- *   (repo:cloud#3's scope note on the card);
+ *   (the card's scope note, objectstack#30884 comment 6685166393);
  * - suspected renames: within one object, a stored field removed while a
  *   stored field is added, with no `renamedFrom` linking them. One finding per
  *   removed field, naming every unlinked added field as a candidate. Both keys
@@ -211,6 +211,18 @@ export function typeChangeCategory(from: { type?: unknown }, to: { type?: unknow
 
 const DEFAULT_SEED_MODE: string = SeedSchema.shape.mode.parse(undefined);
 const DEFAULT_SEED_EXTERNAL_ID: string | string[] = SeedSchema.shape.externalId.parse(undefined);
+
+/**
+ * Does a replay of a dataset in this mode write its columns over a row it
+ * MATCHED by `externalId`? `upsert` and `update` do (a column declaring
+ * `applyOn: 'create'` excepted); `insert` and `ignore` never touch a matched
+ * row, and `replace` deletes every row before it inserts, so it matches none.
+ * The rows a customer edited that an upgrade's replay would overwrite are
+ * counted for these modes only.
+ */
+export function seedModeOverwritesMatchedRows(mode: string): boolean {
+  return mode === 'upsert' || mode === 'update';
+}
 
 interface ReadDataset extends UpgradePlanSeedDataset {
   raw: Bag;

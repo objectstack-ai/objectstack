@@ -2,6 +2,7 @@
 
 import { Args, Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
+import { comparePackageVersions, seedModeOverwritesMatchedRows } from '@objectstack/metadata-core';
 import { loadConfig } from '../utils/config.js';
 import { authoringRuleUnionStack } from '../utils/stack-collections.js';
 import {
@@ -39,24 +40,10 @@ function getNames(items: any[] | undefined): Map<string, any> {
   return map;
 }
 
-function getFieldNames(obj: any): string[] {
-  if (!obj?.fields || typeof obj.fields !== 'object') return [];
-  return Object.keys(obj.fields);
-}
-
-function getFieldType(obj: any, fieldName: string): string | undefined {
-  return obj?.fields?.[fieldName]?.type;
-}
-
-function isFieldRequired(obj: any, fieldName: string): boolean {
-  return obj?.fields?.[fieldName]?.required === true;
-}
-
 function diffNamedArrays(
   beforeItems: any[] | undefined,
   afterItems: any[] | undefined,
   category: string,
-  detectFieldChanges: boolean,
 ): DiffEntry[] {
   const entries: DiffEntry[] = [];
   const beforeMap = getNames(beforeItems);
@@ -86,71 +73,102 @@ function diffNamedArrays(
     }
   }
 
-  // Modified items — field-level diff for objects
-  if (detectFieldChanges) {
-    for (const [name, beforeObj] of beforeMap) {
-      const afterObj = afterMap.get(name);
-      if (!afterObj) continue;
+  return entries;
+}
 
-      const beforeFields = getFieldNames(beforeObj);
-      const afterFields = getFieldNames(afterObj);
-      const beforeSet = new Set(beforeFields);
-      const afterSet = new Set(afterFields);
+function seedModeNote(mode: string): string {
+  if (seedModeOverwritesMatchedRows(mode)) return '; a replay writes its columns over the rows it matches';
+  if (mode === 'replace') return '; a replay deletes every row of the object and inserts these';
+  return '';
+}
 
-      // Removed fields
-      for (const f of beforeFields) {
-        if (!afterSet.has(f)) {
-          entries.push({
-            type: 'removed',
-            category: `${category}.${name}.fields`,
-            name: f,
-            breaking: true,
-            detail: 'field removed',
-          });
-        }
-      }
+/**
+ * Objects, fields and seed datasets, read from the package upgrade plan
+ * (`comparePackageVersions`, `@objectstack/metadata-core`) — the comparison
+ * the install door's dry run and the `manifest` service's `planUpgrade` read,
+ * so this command and an install cannot disagree about one pair of versions.
+ *
+ * Printed per object as before: removed fields, added fields, then (new with
+ * the plan) declared renames, type changes, then suspected renames, then the
+ * object's label change. A suspected rename's two keys stay listed as removed
+ * and added, as the plan lists them: nothing declares otherwise.
+ */
+function diffObjectsAndSeeds(beforeConfig: any, afterConfig: any): DiffEntry[] {
+  const plan = comparePackageVersions(beforeConfig, afterConfig);
+  const entries: DiffEntry[] = [];
 
-      // Added fields
-      for (const f of afterFields) {
-        if (!beforeSet.has(f)) {
-          const breaking = isFieldRequired(afterObj, f);
-          entries.push({
-            type: 'added',
-            category: `${category}.${name}.fields`,
-            name: f,
-            breaking,
-            detail: breaking ? 'required field added' : 'optional field added',
-          });
-        }
-      }
+  for (const name of plan.objects.removed) entries.push({ type: 'removed', category: 'objects', name, breaking: true });
+  for (const name of plan.objects.added) entries.push({ type: 'added', category: 'objects', name, breaking: false });
 
-      // Type changes
-      for (const f of beforeFields) {
-        if (!afterSet.has(f)) continue;
-        const oldType = getFieldType(beforeObj, f);
-        const newType = getFieldType(afterObj, f);
-        if (oldType && newType && oldType !== newType) {
-          entries.push({
-            type: 'modified',
-            category: `${category}.${name}.fields`,
-            name: f,
-            breaking: true,
-            detail: `type changed: ${oldType} → ${newType}`,
-          });
-        }
-      }
+  const afterObjects = getNames(afterConfig.objects);
+  for (const [name, beforeObj] of getNames(beforeConfig.objects)) {
+    const afterObj = afterObjects.get(name);
+    if (!afterObj) continue;
+    const category = `objects.${name}.fields`;
+    const mine = <T extends { object: string }>(list: T[]): T[] => list.filter((item) => item.object === name);
 
-      // Label / ownership changes on the object itself
-      if (beforeObj.label !== afterObj.label) {
-        entries.push({
-          type: 'modified',
-          category,
-          name,
-          breaking: false,
-          detail: `label changed: "${beforeObj.label ?? '(none)'}" → "${afterObj.label ?? '(none)'}"`,
-        });
-      }
+    for (const f of mine(plan.fields.removed)) {
+      entries.push({ type: 'removed', category, name: f.field, breaking: true, detail: 'field removed' });
     }
+    for (const f of mine(plan.fields.added)) {
+      entries.push({
+        type: 'added',
+        category,
+        name: f.field,
+        breaking: f.required,
+        detail: f.required ? 'required field added' : 'optional field added',
+      });
+    }
+    for (const r of mine(plan.declaredRenames)) {
+      entries.push({ type: 'modified', category, name: r.to, breaking: true, detail: `renamed from ${r.from}, declared by renamedFrom` });
+    }
+    for (const t of mine(plan.typeChanges)) {
+      entries.push({ type: 'modified', category, name: t.field, breaking: true, detail: `type changed: ${t.from} → ${t.to}` });
+    }
+    for (const s of mine(plan.suspectedRenames)) {
+      entries.push({
+        type: 'modified',
+        category,
+        name: s.field,
+        breaking: true,
+        detail: `suspected rename to ${s.candidates.map((c) => c.field).join(' or ')}: no renamedFrom declares it, `
+          + 'so the new key installs as a new empty column',
+      });
+    }
+
+    // Label / ownership changes on the object itself
+    if (beforeObj.label !== afterObj.label) {
+      entries.push({
+        type: 'modified',
+        category: 'objects',
+        name,
+        breaking: false,
+        detail: `label changed: "${beforeObj.label ?? '(none)'}" → "${afterObj.label ?? '(none)'}"`,
+      });
+    }
+  }
+
+  for (const d of plan.seeds.removed) {
+    entries.push({ type: 'removed', category: 'data', name: d.key, breaking: false, detail: `seed dataset removed, mode ${d.mode}` });
+  }
+  for (const d of plan.seeds.added) {
+    entries.push({
+      type: 'added',
+      category: 'data',
+      name: d.key,
+      breaking: false,
+      detail: `seed dataset added: ${d.records} record(s); mode ${d.mode}${seedModeNote(d.mode)}`,
+    });
+  }
+  for (const d of plan.seeds.changed) {
+    const mode = d.fromMode === d.mode ? d.mode : `${d.fromMode} → ${d.mode}`;
+    entries.push({
+      type: 'modified',
+      category: 'data',
+      name: d.key,
+      breaking: false,
+      detail: `seed dataset changed: ${d.changed.join(', ')}; mode ${mode}${seedModeNote(d.mode)}`,
+    });
   }
 
   return entries;
@@ -159,13 +177,11 @@ function diffNamedArrays(
 /**
  * Every change between two folded stacks, in the order the command prints
  * them: objects with their field-level changes first, then each name-level
- * category.
+ * category, then seed datasets.
  */
 export function diffStacks(beforeConfig: any, afterConfig: any): DiffEntry[] {
-  const allDiffs: DiffEntry[] = [];
-
-  // Objects (with field-level diff)
-  allDiffs.push(...diffNamedArrays(beforeConfig.objects, afterConfig.objects, 'objects', true));
+  const plan = diffObjectsAndSeeds(beforeConfig, afterConfig);
+  const allDiffs: DiffEntry[] = plan.filter((entry) => entry.category !== 'data');
 
   // Views, Flows, Agents, Apps (name-level diff)
   const simpleCats: Array<{ key: string; label: string }> = [
@@ -181,10 +197,9 @@ export function diffStacks(beforeConfig: any, afterConfig: any): DiffEntry[] {
   ];
 
   for (const cat of simpleCats) {
-    allDiffs.push(
-      ...diffNamedArrays(beforeConfig[cat.key], afterConfig[cat.key], cat.label, false),
-    );
+    allDiffs.push(...diffNamedArrays(beforeConfig[cat.key], afterConfig[cat.key], cat.label));
   }
+  allDiffs.push(...plan.filter((entry) => entry.category === 'data'));
   return allDiffs;
 }
 

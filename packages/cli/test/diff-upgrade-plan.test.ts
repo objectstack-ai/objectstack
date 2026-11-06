@@ -91,3 +91,66 @@ describe('os diff — the output it printed before the plan, unchanged', () => {
     ]);
   });
 });
+
+describe('os diff — what the upgrade plan adds', () => {
+  const lead = (fields: Record<string, unknown>, data?: unknown[]) => ({
+    objects: [{ name: 'acme_lead', label: 'Lead', fields }],
+    ...(data ? { data } : {}),
+  });
+
+  it('a field removed and one added with no renamedFrom: both listed, and a suspected rename on the removed key', () => {
+    expect(diffStacks(lead({ company: { type: 'text' } }), lead({ account_name: { type: 'text' } }))).toEqual([
+      { type: 'removed', category: 'objects.acme_lead.fields', name: 'company', breaking: true, detail: 'field removed' },
+      { type: 'added', category: 'objects.acme_lead.fields', name: 'account_name', breaking: false, detail: 'optional field added' },
+      {
+        type: 'modified', category: 'objects.acme_lead.fields', name: 'company', breaking: true,
+        detail: 'suspected rename to account_name: no renamedFrom declares it, so the new key installs as a new empty column',
+      },
+    ]);
+  });
+
+  it('the same pair with renamedFrom: one rename, no removed, added or suspected entry', () => {
+    expect(diffStacks(
+      lead({ company: { type: 'text' } }),
+      lead({ account_name: { type: 'text', renamedFrom: ['company'] } }),
+    )).toEqual([
+      { type: 'modified', category: 'objects.acme_lead.fields', name: 'account_name', breaking: true, detail: 'renamed from company, declared by renamedFrom' },
+    ]);
+  });
+
+  it('a declared rename that changes type prints the type change too', () => {
+    expect(diffStacks(
+      lead({ amount: { type: 'text' } }),
+      lead({ amount_value: { type: 'number', renamedFrom: ['amount'] } }),
+    ).map((e) => e.detail)).toEqual(['renamed from amount, declared by renamedFrom', 'type changed: text → number']);
+  });
+
+  it('seed datasets, after every other category, each with its mode', () => {
+    const before = lead({}, [
+      { object: 'acme_stage', mode: 'upsert', records: [{ name: 'new' }] },
+      { object: 'acme_region', records: [{ name: 'emea' }] },
+      { object: 'acme_old', mode: 'insert', records: [{ name: 'x' }] },
+    ]);
+    const after = {
+      ...lead({}, [
+        { object: 'acme_stage', mode: 'upsert', records: [{ name: 'new' }, { name: 'won' }] },
+        { object: 'acme_region', records: [{ name: 'apac' }] },
+        { object: 'acme_tier', mode: 'replace', records: [{ name: 'gold' }] },
+      ]),
+      views: [{ name: 'lead_list' }],
+    };
+    expect(diffStacks(before, after)).toEqual([
+      { type: 'added', category: 'views', name: 'lead_list', breaking: false },
+      { type: 'removed', category: 'data', name: 'acme_old', breaking: false, detail: 'seed dataset removed, mode insert' },
+      {
+        type: 'added', category: 'data', name: 'acme_tier', breaking: false,
+        detail: 'seed dataset added: 1 record(s); mode replace; a replay deletes every row of the object and inserts these',
+      },
+      {
+        type: 'modified', category: 'data', name: 'acme_stage', breaking: false,
+        detail: 'seed dataset changed: records; mode upsert; a replay writes its columns over the rows it matches',
+      },
+      { type: 'modified', category: 'data', name: 'acme_region', breaking: false, detail: 'seed dataset changed: records; mode ignore' },
+    ]);
+  });
+});
