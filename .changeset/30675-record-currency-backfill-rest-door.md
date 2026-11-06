@@ -4,6 +4,7 @@
 '@objectstack/objectql': patch
 '@objectstack/cli': patch
 '@objectstack/metadata-protocol': patch
+'@objectstack/spec': patch
 ---
 
 feat(rest, client): a tenant-admin REST door for the record-currency code backfill

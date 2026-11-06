@@ -225,7 +225,7 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **types** | `boolean` | optional (default: `true`) | Mount the metadata type list — `GET /meta` and `GET /meta/types` (one handler, two paths) |
 | **items** | `boolean` | optional (default: `true`) | Mount the per-type item list — `GET /meta/:type`, and nothing else |
 | **item** | `boolean` | optional (default: `true`) | Mount the whole per-item face — `GET`, `PUT` and `DELETE /meta/:type/:name`, its `/references` and `/layers` reads, the history family (`GET` `/history`, `/audit`, `/diff`, `/published`; `POST` `/publish`, `/rollback`), `GET /meta/book/:name/tree` and the app metadata bundle `GET /meta/app/:appId/bundle`, which registers through the same per-item registrar because every member it serves is the item read's own answer |
-| **maintenance** | `boolean` | optional (default: `true`) | Mount the whole-store maintenance operations — `GET /meta/diagnostics`, `GET /meta/_drafts` and the `POST /meta/_migrate-stored` write door |
+| **maintenance** | `boolean` | optional (default: `true`) | Mount the whole-store maintenance operations — `GET /meta/diagnostics`, `GET /meta/_drafts`, the `POST /meta/_migrate-stored` write door and the `POST /meta/_migrate-record-currency-codes` record-currency code backfill |
 | **schema** | `never` | optional | [REMOVED] `metadata.endpoints.schema` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — it gated a route that does not exist: the REST server mounts no `GET /meta/:type/:name/schema`, so `false` removed nothing and `true` added nothing. Delete the key; `endpoints.types` / `items` / `item` / `maintenance` are the switches that gate real mounts. |
 
 
