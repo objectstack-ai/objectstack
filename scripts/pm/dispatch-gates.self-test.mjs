@@ -110,6 +110,7 @@ import {
   changeKindGates,
   changeKindLines,
   changedLineLines,
+  changedLinesFromGit,
   changedPathsFromGit,
   checkFamilyCoverageGaps,
   ciOnlyMeasurement,
@@ -10477,6 +10478,48 @@ export function selfTest({ tier = 'full' } = {}) {
   t('the threshold is read from the gate — no second copy here — and it is the ruled 3000', HUMAN_MERGE_LINE_THRESHOLD === 3000 && changedLineLines({ additions: 3001, deletions: 0 }).join('\n').includes('OVER'));
   t('a text buffer counts its lines, an unterminated last line included', lineCountOf(Buffer.from('a\nb\n')) === 2 && lineCountOf(Buffer.from('a\nb')) === 2 && lineCountOf(Buffer.alloc(0)) === 0);
   t('a buffer with a NUL in its first 8000 bytes is binary: null, which the caller counts as zero lines', lineCountOf(Buffer.from([0x61, 0, 0x62])) === null);
+  // #30718: the size count is RENAME-AWARE, as GitHub's additions + deletions
+  // are, while the path list beside it keeps --no-renames and names BOTH paths.
+  // A 400-line file moved with one line edited is +1 / -1 over ONE file, not
+  // the whole delete plus whole add `--no-renames` read (#30594: 4324 against
+  // GitHub's 1806). A `diff.renames=false` config must not turn it back off.
+  {
+    const renFx = mkdtempSync(nodePath.join(tmpdir(), 'dispatch-gates-rename-size-'));
+    try {
+      const rg = (...argv) => {
+        const r = spawnSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...argv], { cwd: renFx, encoding: 'utf8' });
+        if (r.status !== 0) throw new Error(`git ${argv.join(' ')}: ${r.stderr}`);
+        return r.stdout;
+      };
+      rg('init', '-q');
+      rg('config', 'diff.renames', 'false');
+      const body = Array.from({ length: 400 }, (_, i) => `line ${i}`);
+      mkdirSync(nodePath.join(renFx, 'old'), { recursive: true });
+      writeFileSync(nodePath.join(renFx, 'old', 'moved.txt'), `${body.join('\n')}\n`);
+      rg('add', '-A');
+      rg('commit', '-qm', 'seed');
+      const seedSha = rg('rev-parse', 'HEAD').trim();
+      mkdirSync(nodePath.join(renFx, 'new'), { recursive: true });
+      rg('mv', 'old/moved.txt', 'new/moved.txt');
+      body[7] = 'line seven, edited';
+      writeFileSync(nodePath.join(renFx, 'new', 'moved.txt'), `${body.join('\n')}\n`);
+      rg('add', '-A');
+      rg('commit', '-qm', 'move the file');
+      const size = changedLinesFromGit({ cwd: renFx, mergeBase: seedSha, untracked: [] });
+      t('⭐ #30718 a renamed file counts by its rename-aware numstat: +1 / -1 over ONE file, as GitHub counts it',
+        size.additions === 1 && size.deletions === 1 && size.files === 1, JSON.stringify(size));
+      const control = rg('diff', '--numstat', '--no-renames', seedSha);
+      t('…on a fixture that really is a rename: the --no-renames control reads a whole delete plus a whole add',
+        /^400\t0\tnew\/moved\.txt$/m.test(control) && /^0\t400\told\/moved\.txt$/m.test(control), control);
+      const listed = changedPathsFromGit({ cwd: renFx, base: seedSha });
+      t('…while the path list beside it still names BOTH paths of the move, and its size is the same rename-aware count',
+        listed.paths.join() === 'new/moved.txt,old/moved.txt' && listed.size.additions === 1 && listed.size.deletions === 1, JSON.stringify(listed.paths));
+    } catch (error) {
+      t('the #30718 rename-size fixture could be built and run', false, String(error?.message ?? error).split('\n')[0]);
+    } finally {
+      rmSync(renFx, { recursive: true, force: true });
+    }
+  }
   // Same liveness guards as the mandatory table: dead data reading as
   // protection is the incident class itself.
   const deadSuspects = SUSPECT_TIER_GLOBS.filter(
