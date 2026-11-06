@@ -122,7 +122,12 @@
  */
 
 import { parseCelToAst, sqlPredicateToCel, type CelAstNode } from '@objectstack/formula';
-import { controlledByParentOwnerMayEdit, isControlledByParentMasterField, referenceCarrierOf } from '@objectstack/spec/data';
+import {
+  controlledByParentMasterOf,
+  controlledByParentOwnerMayEdit,
+  isControlledByParentMasterField,
+  referenceCarrierOf,
+} from '@objectstack/spec/data';
 import { describeAnchorForbiddenBits, type AnchorBindingContext } from '@objectstack/spec/security';
 import {
   indexObjectGraph,
@@ -375,6 +380,12 @@ interface CbpRelation {
  * `security-controlled-by-parent-no-relation`, two or more is
  * `security-controlled-by-parent-ambiguous-relation`.
  *
+ * ⚠️ Amended by ruling A of #30905 (ADR-0055 §1 as amended): with none
+ * declared `required: true`, the object's ONLY `master_detail`, declared
+ * `required: false` (read `=== false`, so an omitted `required` is not it), is
+ * the one candidate, an optional master. The spec's `controlledByParentMasterOf`
+ * picks it, as the parse does.
+ *
  * This used to be a three-tier table (`CBP_TIERS`, #7503 / #14747) mirroring a
  * three-tier fallback in the runtime: a required `master_detail`, else ANY
  * `master_detail`, else a required `lookup`. ADR-0055 §1 never recorded the
@@ -400,9 +411,21 @@ interface CbpRelation {
  * names the real defect (the alias key) rather than this rule guessing past it.
  */
 function cbpMasterCandidates(obj: AnyRec): CbpRelation[] {
-  return recordsOf(obj.fields)
-    .filter((f) => isControlledByParentMasterField(f) && refOf(f))
-    .map((f) => ({ field: String(f.name ?? '?'), type: 'master_detail', master: refOf(f) as string }));
+  const fields = recordsOf(obj.fields);
+  const relationOf = (f: AnyRec): CbpRelation => ({
+    field: String(f.name ?? '?'),
+    type: 'master_detail',
+    master: refOf(f) as string,
+  });
+  const required = fields.filter((f) => isControlledByParentMasterField(f) && refOf(f)).map(relationOf);
+  if (required.length > 0) return required;
+  // [ADR-0055 §1 as amended · #30905 ruling A] With no required one, the
+  // object's only `master_detail` declared `required: false` is its optional
+  // master — the spec's resolver says which, so the parse and this linter
+  // still read one sentence.
+  const master = controlledByParentMasterOf(Object.fromEntries(fields.map((f) => [String(f.name ?? '?'), f])));
+  const optional = master?.optional ? fields.find((f) => String(f.name ?? '?') === master.field) : undefined;
+  return optional && refOf(optional) ? [relationOf(optional)] : [];
 }
 
 /**
@@ -636,8 +659,9 @@ function pushCbpNoRelation(findings: SecurityFinding[], objName: string, path: s
     // the object is unusable rather than locked down are this id's
     // `os explain` entry.
     message:
-      `declares sharingModel 'controlled_by_parent' but no required master_detail field to derive access ` +
-      `from, so every read is denied and every write refused (422 INVALID_METADATA)`,
+      `declares sharingModel 'controlled_by_parent' but no master_detail field to derive access from ` +
+      `(one declared required: true, or its only one declared required: false), so every read is ` +
+      `denied and every write refused (422 INVALID_METADATA)`,
     // [#22161] One remedy line; that an object with no master decides its
     // own baseline, and what each value means, is this id's `os explain`
     // entry.

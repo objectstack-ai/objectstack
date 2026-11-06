@@ -1319,6 +1319,18 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`cbp-master-relation-tiers-retired`.',
   },
   {
+    id: 'cbp-optional-master-admitted',
+    order: 119,
+    text:
+      'It then admits an optional master under `controlled_by_parent` (ADR-0055 §1 and §2 as amended, '
+      + 'maintainer ruling A): an object whose only `master_detail` is declared `required: false` derives its '
+      + 'master from it, and a detail row that names no master is read by its owner and by View All on the '
+      + 'detail, never through a master, while a row that names one is read through it as before. The builder '
+      + 'keeps an explicit `required: false` as written and still forces an omitted one to `true`, and the '
+      + 'stored-row listing stops naming the shape. Writes are unchanged: an empty master reference is still '
+      + 'refused with 422. Its D3 record is the semantic entry `cbp-optional-master-admitted`.',
+  },
+  {
     id: 'chart-config-aria-retired',
     order: 31,
     text:
