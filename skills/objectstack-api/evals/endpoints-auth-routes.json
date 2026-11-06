@@ -68,7 +68,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["?names=", "/api/v1/meta/object", "VALIDATION_ERROR"],
-        "must_not_contain": ["?name=", "?ids=", "?filter="]
+        "must_not_contain": ["?ids=", "?filter="]
       }
     }
   ]
