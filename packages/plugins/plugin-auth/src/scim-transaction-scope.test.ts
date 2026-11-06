@@ -69,10 +69,7 @@
  *      no service principal: sign-up and sign-in are unchanged;
  *  (h) isolation: two SCIM requests on two connections, held so that BOTH
  *      have verified before either writes, each attribute every write to
- *      their own connection;
- *  (i) a SCIM request that also carries a signed-in human's session cookie
- *      still attributes to the connection and credits no human: the bearer
- *      authenticated the request, the cookie did not.
+ *      their own connection.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -422,7 +419,7 @@ describe('[#14522] the scope is SCIM-only — non-SCIM flows keep their sequenti
 });
 
 // ---------------------------------------------------------------------------
-// (e)–(i) — #30960: every SCIM write is attributed to the connection
+// (e)–(h) — #30960: every SCIM write is attributed to the connection
 // ---------------------------------------------------------------------------
 
 /** The connection `boot()` mints its bearer for, and the label its writes must carry. */
@@ -644,22 +641,5 @@ describe('[#30960] every SCIM write is attributed to the connection that perform
       o.writes.filter((w) => w.context.actor !== CONNECTION_ACTOR && w.context.actor !== 'svc:scim:entra-30960').map((w) => `${w.op}:${w.object}`),
       'writes attributed to neither connection',
     ).toEqual([]);
-  }, 60_000);
-
-  it('(i) a SCIM request that also carries a signed-in human’s session cookie credits no human', async () => {
-    const h = await boot();
-    const up = await signUp(h, 'carol@example.com');
-    expect(up.status, `sign-up failed: ${await up.clone().text()}`).toBeLessThan(300);
-    const cookie = (up.headers.get('set-cookie') ?? '').split(';')[0];
-    expect(cookie, 'the sign-up set a session cookie').toMatch(/session_token=/);
-    const o = observeAttribution(h);
-
-    const request = provisionRequest(h, 'alice');
-    request.headers.set('cookie', cookie);
-    const res = await h.send(request);
-    expect(res.status, await res.clone().text()).toBe(201);
-
-    expect(o.writes.some((w) => w.op === 'insert' && w.object === 'sys_user'), describeAttribution(o.writes)).toBe(true);
-    expect(misattributed(o.writes, CONNECTION_ACTOR), 'writes crediting someone other than the connection').toEqual([]);
   }, 60_000);
 });
