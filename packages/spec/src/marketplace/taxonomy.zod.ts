@@ -5,7 +5,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import type { InstallMode } from '../kernel/manifest.zod';
 
 /**
- * # Marketplace taxonomy — the ONE classification of a listed package
+ * Marketplace taxonomy — the ONE classification of a listed package.
  *
  * A package used to carry a single `category`, and that one value had to say
  * two different things at once: who the package is FOR (a business function)
