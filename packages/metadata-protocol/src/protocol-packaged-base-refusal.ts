@@ -51,7 +51,6 @@ import { resolvePackageClosure } from '@objectstack/lint/runtime';
 import { overlayMemberField, overlayMemberOfBody, overlayMemberValue } from './migrations/overlay-index.js';
 import {
     customizationBasePackageId,
-    customizationPackageId,
     DEFAULT_METADATA_TYPE_REGISTRY,
     getOverrideTypeClassification,
     isCustomizationPairOf,
@@ -60,7 +59,7 @@ import {
 } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec';
-import { ITEM_KEY_DISCRIMINATORS, itemDiscriminator } from '@objectstack/metadata-core';
+import { ITEM_KEY_DISCRIMINATORS, itemDiscriminator, pairOf } from '@objectstack/metadata-core';
 
 /**
  * The `ObjectStackProtocolImplementation` members the functions below read —
@@ -194,7 +193,7 @@ export function refusePackagedBaseOverride(
 function sealedDeclareOrRenameTail(type: string, basePackageId: unknown, writerPackageId: unknown): string {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
     if (!isOpenOverrideType(singular) || typeof basePackageId !== 'string') return '';
-    const pair = customizationPackageId(basePackageId);
+    const pair = pairOf(basePackageId);
     if (!pair.ok) return '';
     const writer = typeof writerPackageId === 'string' && writerPackageId.length > 0 ? writerPackageId : undefined;
     if (writer !== undefined && writer !== pair.value) {
@@ -214,7 +213,7 @@ function sealedDeclareOrRenameTail(type: string, basePackageId: unknown, writerP
 function sealedDeclareOrRenameClause(type: string, basePackageId: unknown, writerPackageId: unknown): string | undefined {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
     if (!isOpenOverrideType(singular) || typeof basePackageId !== 'string') return undefined;
-    const pair = customizationPackageId(basePackageId);
+    const pair = pairOf(basePackageId);
     if (!pair.ok) return undefined;
     const writer = typeof writerPackageId === 'string' && writerPackageId.length > 0 ? writerPackageId : undefined;
     if (writer !== undefined && writer !== pair.value) {
@@ -397,7 +396,7 @@ export type OverrideWriteVerdictAsk = (request: OverrideWriteSubject, writtenSco
  * closes name — write it into `base`'s pair, declaring the override — can be
  * taken, or `null` when it cannot: read from the steps that write takes.
  *
- *  - the base has a pair id (`customizationPackageId`; an id ending in
+ *  - the base has a pair id ({@link pairOf}; an id ending in
  *    `.custom` has none);
  *  - the ensure door would answer or create the pair
  *    ({@link customizationPairEnsureRefusal});
@@ -416,7 +415,7 @@ export function overlayPairFixOf(
     host: { readonly engine: ObjectStackProtocolImplementation['engine'] },
     base: string,
 ): OverlayPairFix | null {
-    const pairId = customizationPackageId(base);
+    const pairId = pairOf(base);
     if (!pairId.ok) return null; // no pair to name (the census's `no_pair`)
     const pair = pairId.value;
     const registry = (host.engine as { registry?: PairRegistry } | undefined)?.registry;
@@ -681,7 +680,7 @@ export function isPairRowRemoval(type: string, basePackageId: unknown, packageId
     if (!isOpenOverrideType(singular)) return false;
     if (typeof basePackageId !== 'string') return false;
     if (typeof packageId !== 'string' || packageId.length === 0) return false;
-    const pair = customizationPackageId(basePackageId);
+    const pair = pairOf(basePackageId);
     return pair.ok && pair.value === packageId;
 }
 
@@ -1072,7 +1071,7 @@ export function judgeOverrideWrite(
                 + 'override is refused (ADR-0146 D9). Remove `overrides` and rename the item.');
         }
         const base = declaration.base;
-        const pair = base === undefined ? undefined : customizationPackageId(base);
+        const pair = base === undefined ? undefined : pairOf(base);
         if (base === undefined || pair === undefined || !pair.ok || !isCustomizationPairOf(packageId, base)) {
             const who = packageId === undefined ? 'a row bound to no package' : `package '${packageId}'`;
             const only = pair?.ok

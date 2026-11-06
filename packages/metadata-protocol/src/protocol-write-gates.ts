@@ -33,9 +33,8 @@ import { resolveTenancyPosture } from '@objectstack/types';
 import { envWritableMetadataTypes } from './sys-metadata-repository.js';
 import { managedItemSealedSentence } from './packaged-base-regime.js';
 import type { StoredOverlayRow } from './item-lock.js';
-import { itemDiscriminator } from '@objectstack/metadata-core';
+import { itemDiscriminator, pairOf } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
-import { customizationPackageId } from '@objectstack/spec/kernel';
 import { baseAddressServesMember, readOnlyShippingPackages, shippingPackageIds } from './protocol-environment-rows.js';
 import { canonicalMetaType, canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { boundPackageOf } from './protocol-package-bindings.js';
@@ -327,7 +326,7 @@ export class ProtocolWriteGatesFacet {
         const shipping = host.shippingPackagesOf(type);
         if (!host.shipsBundleName(type, name, base, shipping)) return undefined;
         if (shippingPackageIds(host.shippedArtifactsOf(type, name, shipping, member)).has(base)) return undefined;
-        const pair = customizationPackageId(base);
+        const pair = pairOf(base);
         return pair.ok ? pair.value : undefined;
     }
 

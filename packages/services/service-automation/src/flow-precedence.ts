@@ -85,13 +85,12 @@
 // tsup config externalises only `dependencies`/`peerDependencies` the bundler
 // answered it by inlining objectql's implementation into this package's dist.
 // `pnpm check:undeclared-dep-imports` is the gate over that class.
-import { isCodeArtifactBody } from '@objectstack/metadata-core';
+import { isCodeArtifactBody, pairOf } from '@objectstack/metadata-core';
 // [#28412, ADR-0146 D9 item 1] The one served-override predicate (N-10) and
 // the stored row's own binding the protocol's hydration records — never a
 // second spelling of "is this the declared override", and never the body's
 // `_packageId`.
 import { isServedOverrideRowOf, storedRowBindingOf } from '@objectstack/metadata-protocol';
-import { customizationPackageId } from '@objectstack/spec/kernel';
 import type { FlowContender, FlowShadowingRecord, PackagedFlowSource } from './engine.js';
 
 /** One flow name's resolved winner, plus the receipt when it displaced others. */
@@ -256,7 +255,7 @@ function precedenceRank(contender: FlowContender): number {
  * run.
  */
 function undeclaredRemedy(owner: string | undefined): string {
-    const pair = owner === undefined ? undefined : customizationPackageId(owner);
+    const pair = owner === undefined ? undefined : pairOf(owner);
     const where = pair?.ok
         ? `declare it as an override in '${pair.value}' (overrides: { package: '${owner}', basedOn })`
         : 'declare it as an override in the shipping package\'s paired .custom package';
