@@ -2391,29 +2391,25 @@ jobs:
           bash scripts/release-spec-changes.sh --generate
           bash scripts/release-spec-changes.sh --verify
 
-      - name: Refuse tooling material in a published @object-ui package
-        run: node ui/scripts/check-published-dist-tooling.mjs --no-build
-
       # THE GUARD: every package publishes under `next` alone, at one snapshot
       # version of the whole group, and every packed manifest resolves inside
       # the snapshot. Fails the job before anything reaches the registry.
       - name: Guard the publish (dist-tag, versions, plan, packed manifests)
         run: node scripts/ci/snapshot-next.mjs guard --pack-dir "${RUNNER_TEMP}/snapshot-next-pack"
 
-      # The ruling's command, run off the installed binary rather than through
-      # `pnpm run` / `pnpm exec`, which export npm_config_globalconfig: the
-      # nested pnpm `changeset publish` spawns would then hand npm one file as
-      # both its user and its global config (scripts/release-publish.sh says
-      # why). `--no-git-tag`: no tag is created, and none could be pushed.
+      # The publish: scripts/release-snapshot-publish.sh runs the stable lane's
+      # published-dist tooling refusal, then the ruling's command,
+      # `changeset publish --tag next --no-git-tag`, off the workspace's own
+      # binary (never through `pnpm run`, whose npm_config_globalconfig breaks
+      # the nested publish — scripts/release-publish.sh says why). No tag is
+      # created, and this job holds no credential that could push one.
       - name: Publish to npm under next (no git tag)
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" >> "$HOME/.npmrc"
-          unset npm_config_globalconfig NPM_CONFIG_GLOBALCONFIG
-          PATH="${GITHUB_WORKSPACE}/node_modules/.bin:${PATH}"
-          changeset publish --tag next --no-git-tag
+          bash scripts/release-snapshot-publish.sh
 
       # Every package of the group at the snapshot version on npm, with the
       # stable lane's own bounded read-back (it absorbs latency, never absence).

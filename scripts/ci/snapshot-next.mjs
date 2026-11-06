@@ -37,9 +37,10 @@
 //   1. the publish command's own tag. The lane runs exactly PUBLISH_COMMAND, and
 //      `changeset publish --tag T` gives every release in its plan tag T (v3's
 //      `getReleaseTag` returns the given tag before anything else). The self-test
-//      pins release.yml's snapshot job to that one publish line and no other
-//      publishing command, and `guard` refuses a `@changesets/cli` major other
-//      than the one whose rule was read.
+//      pins release.yml's snapshot job to one call of
+//      scripts/release-snapshot-publish.sh, that script to that one publish line,
+//      and both to no other publishing command; `guard` refuses a
+//      `@changesets/cli` major other than the one whose rule was read.
 //   2. pre mode, where changesets publishes under the pre state's tag instead.
 //      Refused before any deployment is queued (changesets itself refuses both
 //      `version --snapshot` and `publish --tag` in pre mode, so an approval then
@@ -74,12 +75,15 @@ import { PUBLISH_JOB_NAME } from '../release-pending-publish.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../..');
 const RELEASE_WORKFLOW = resolve(HERE, '../../.github/workflows/release.yml');
+const PUBLISH_SCRIPT = resolve(HERE, '../release-snapshot-publish.sh');
 
 // The one dist-tag this lane writes, and the one command that writes it -- the
-// ruling's own words. release.yml's snapshot job must run this line and no other
-// publishing command (pinned by the self-test).
+// ruling's own words. release.yml's snapshot job runs it through PUBLISH_SCRIPT_CALL,
+// that script carries this line and no other publishing command, and neither
+// carries a tag push, a Release or a dist-tag write (pinned by the self-test).
 export const SNAPSHOT_TAG = 'next';
 export const PUBLISH_COMMAND = 'changeset publish --tag next --no-git-tag';
+export const PUBLISH_SCRIPT_CALL = 'bash scripts/release-snapshot-publish.sh';
 export const VERSION_COMMAND = 'changeset version --snapshot next';
 
 // The version `changeset version --snapshot next` writes with this repository's
@@ -601,8 +605,8 @@ const FORBIDDEN_IN_SNAPSHOT = Object.freeze([
   [/docker-publish\.yml/, 'the runtime image'],
 ]);
 
-/** The snapshot lane's wiring in release.yml; empty means it holds. */
-export function snapshotWiring(yamlText) {
+/** The snapshot lane's wiring in release.yml and its publish script; empty means it holds. */
+export function snapshotWiring(yamlText, publishScriptText) {
   const findings = [];
   const blocks = jobBlocks(yamlText);
   const preflightJob = blocks.get(PREFLIGHT_JOB);
@@ -639,14 +643,22 @@ export function snapshotWiring(yamlText) {
   if (!group || /^release-publish-/.test(group)) findings.push(`\`${SNAPSHOT_JOB}\` needs a concurrency group of its own, never the stable \`release-publish-\` group (got ${JSON.stringify(group)})`);
   if (!has(snap, /^ {6}contents:\s*read\s*$/) || has(snap, /^ {6}contents:\s*write\b/)) findings.push(`\`${SNAPSHOT_JOB}\` must hold \`contents: read\` and nothing more for contents: it pushes no tag and cuts no Release`);
 
-  // The commands, in order.
-  const publishLines = snap.filter((line) => /\bchangeset\s+publish\b/.test(line));
-  if (publishLines.length !== 1 || !publishLines[0].trimEnd().endsWith(PUBLISH_COMMAND)) {
-    findings.push(`\`${SNAPSHOT_JOB}\` must run exactly one publish, \`${PUBLISH_COMMAND}\` (found ${publishLines.length}: ${publishLines.map((l) => l.trim()).join(' | ') || 'none'})`);
+  // The publish: one call of the publish script from the job, and in that
+  // script exactly one publish line, spelled as the ruling spells it.
+  const script = String(publishScriptText ?? '').split('\n').filter((line) => !/^\s*#/.test(line));
+  if (has(snap, /\bchangeset\s+publish\b/)) findings.push(`\`${SNAPSHOT_JOB}\` runs \`changeset publish\` itself; the publish lives in \`${PUBLISH_SCRIPT_CALL}\` alone`);
+  const calls = snap.filter((line) => line.includes(PUBLISH_SCRIPT_CALL));
+  if (calls.length !== 1) findings.push(`\`${SNAPSHOT_JOB}\` must call \`${PUBLISH_SCRIPT_CALL}\` exactly once (found ${calls.length})`);
+  const publishLines = script.filter((line) => /\bchangeset\s+publish\b/.test(line));
+  if (publishLines.length !== 1 || publishLines[0].trim() !== PUBLISH_COMMAND) {
+    findings.push(`the publish script must run exactly one publish, \`${PUBLISH_COMMAND}\` (found ${publishLines.length}: ${publishLines.map((l) => l.trim()).join(' | ') || 'none'})`);
+  }
+  for (const [re, what] of FORBIDDEN_IN_SNAPSHOT) {
+    if (script.some((line) => re.test(line))) findings.push(`the publish script carries ${what}: the snapshot lane pushes no tag, cuts no Release, moves no dist-tag and builds no image`);
   }
   const at = (lines, re) => lines.findIndex((line) => re.test(line));
   const guardAt = at(snap, /node scripts\/ci\/snapshot-next\.mjs guard\b/);
-  const publishAt = at(snap, /\bchangeset\s+publish\b/);
+  const publishAt = at(snap, /bash scripts\/release-snapshot-publish\.sh\b/);
   const versionAt = at(snap, /\bchangeset version --snapshot next\s*$/);
   if (versionAt === -1) findings.push(`\`${SNAPSHOT_JOB}\` never runs the bare \`${VERSION_COMMAND}\``);
   if (guardAt === -1 || publishAt === -1 || guardAt > publishAt || versionAt > guardAt) findings.push(`\`${SNAPSHOT_JOB}\` must run the version step, then \`snapshot-next.mjs guard\`, then the publish`);
@@ -678,7 +690,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the packed manifests: no workspace range, every intra-group range satisfied': 7,
   'the registry read: 404 is never published, anything unread is never guessed': 5,
   'verify: next names the snapshot, latest never moves to it': 4,
-  'release.yml: the snapshot wiring': 14,
+  'release.yml: the snapshot wiring': 15,
   'release.yml: exclusivity, evaluated job by job': 7,
 });
 const SELF_TEST_BATTERY_FLOOR = 11;
@@ -819,11 +831,13 @@ export async function selfTest() {
 
   battery('release.yml: the snapshot wiring');
   const yml = readFileSync(RELEASE_WORKFLOW, 'utf8');
-  // The publish STEP's line (the header comments spell the command too).
-  const PUBLISH_LINE = /\n {10}changeset publish --tag next --no-git-tag\n/;
-  const fires = (mutated, needle) => mutated !== yml && snapshotWiring(mutated).some((f) => f.includes(needle));
-  await t('the checked-in release.yml holds', () => {
-    const f = snapshotWiring(yml);
+  const sh = readFileSync(PUBLISH_SCRIPT, 'utf8');
+  // The publish script's code line (its header comments spell the command too).
+  const PUBLISH_LINE = /\nchangeset publish --tag next --no-git-tag\n/;
+  const fires = (mutated, needle) => mutated !== yml && snapshotWiring(mutated, sh).some((f) => f.includes(needle));
+  const firesSh = (mutated, needle) => mutated !== sh && snapshotWiring(yml, mutated).some((f) => f.includes(needle));
+  await t('the checked-in release.yml and publish script hold', () => {
+    const f = snapshotWiring(yml, sh);
     if (f.length) failures.push(...f.map((x) => `  wiring: ${x}`));
     return f.length === 0;
   });
@@ -833,9 +847,10 @@ export async function selfTest() {
   await t('an if: under !cancelled() is refused', () => fires(yml.replace(/(\n {2}snapshot-next:[\s\S]*?\n {4}if: >-\n\s*)success\(\) &&/, '$1!cancelled() &&'), 'success() &&'));
   await t('the stable publish group is refused', () => fires(yml.replace('group: release-snapshot-next-', 'group: release-publish-'), 'concurrency group'));
   await t('contents: write is refused', () => fires(yml.replace(/(\n {2}snapshot-next:[\s\S]*?\n {6})contents: read/, '$1contents: write'), 'contents: read'));
-  await t('a publish with another tag is refused', () => fires(yml.replace(PUBLISH_LINE, '\n          changeset publish --tag latest --no-git-tag\n'), 'exactly one publish'));
-  await t('a publish that keeps git tags is refused', () => fires(yml.replace(PUBLISH_LINE, '\n          changeset publish --tag next\n'), 'exactly one publish'));
-  await t('a git push in the snapshot job is refused', () => fires(yml.replace(PUBLISH_LINE, `\n          ${PUBLISH_COMMAND}\n          git push origin --tags\n`), 'git push'));
+  await t('a publish with another tag is refused', () => firesSh(sh.replace(PUBLISH_LINE, '\nchangeset publish --tag latest --no-git-tag\n'), 'exactly one publish'));
+  await t('a publish that keeps git tags is refused', () => firesSh(sh.replace(PUBLISH_LINE, '\nchangeset publish --tag next\n'), 'exactly one publish'));
+  await t('a git push in the publish script, or in the job, is refused', () => firesSh(sh.replace(PUBLISH_LINE, `\n${PUBLISH_COMMAND}\ngit push origin --tags\n`), 'git push') && fires(yml.replace(`          ${PUBLISH_SCRIPT_CALL}\n`, `          ${PUBLISH_SCRIPT_CALL}\n          git push origin --tags\n`), 'git push'));
+  await t('a publish run inline in the job is refused', () => fires(yml.replace(`          ${PUBLISH_SCRIPT_CALL}\n`, `          ${PUBLISH_SCRIPT_CALL}\n          changeset publish --tag next --no-git-tag\n`), 'runs `changeset publish` itself'));
   await t('a guard after the publish is refused', () => fires(yml.replace(/node scripts\/ci\/snapshot-next\.mjs guard\b/, 'node scripts/ci/snapshot-next.mjs gaurd'), 'then the publish'));
   await t('a preflight without the distance-zero gate is refused', () => fires(yml.replace(/(--release-commit "\$commit") --require-distance-zero/, '$1'), '--require-distance-zero'));
   await t('a snapshot job reading inputs.force is refused', () => fires(yml.replace(/(\n {2}snapshot-next:[\s\S]*?\n {4}if: >-\n[^\n]*\n)/, '$1      !inputs.force &&\n'), 'inputs.force'));
