@@ -54,6 +54,8 @@ line two \${k}\`;
     namedHost() { const host = 1; return host; }
     staticField() { return ${C}.LIMIT; }
     staticAsValue() { const f = ${C}.helper; return f(1); }
+    probesMethod() { return { search: typeof this.read === 'function' }; }
+    methodAsValue() { const f = this.read; return f('k'); }
     bareConstructor() { return this.constructor; }
     undeclared() { return this.nope; }
     *generator() { yield this.count; }
@@ -142,6 +144,9 @@ describe('host-split: the move', () => {
         ['namedHost', 'already named `host`'],
         ['staticField', 'private static `LIMIT` (field) read'],
         ['staticAsValue', 'private static `helper` (method) read as a value'],
+        // [#30518] `getDiscovery`'s shape: a host entry forwards a method through a closure, always a function.
+        ['probesMethod', 'instance method `read` read as a value'],
+        ['methodAsValue', 'instance method `read` read as a value'],
         ['bareConstructor', '`this.constructor` not followed by `.<static>`'],
         ['undeclared', '`this.nope` names no declared instance member'],
         ['generator', 'a generator method'],
