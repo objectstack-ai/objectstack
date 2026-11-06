@@ -92,6 +92,12 @@ const drain = async () => {
   for (let i = 0; i < 25; i++) await new Promise((resolve) => setImmediate(resolve));
 };
 
+/** The stamp's own consent read: the one query that selects `last_used_at` by client and user. */
+function isStampRead(query: unknown): boolean {
+  const q = query as { fields?: unknown; where?: Record<string, unknown> } | undefined;
+  return Array.isArray(q?.fields) && q.fields.includes('last_used_at') && !!q.where && 'client_id' in q.where;
+}
+
 async function rig() {
   const engine = new ObjectQL();
   engines.push(engine);
@@ -110,7 +116,10 @@ async function rig() {
   const manager = makeManager();
   const api: any = await manager.getApi();
 
-  // Every read and write of the consent table, counted at the engine.
+  // Every write of the consent table, and every read the STAMP makes of it
+  // (the one that selects `last_used_at`), counted at the engine. The
+  // verifier's own per-call consent read (#30879) goes through better-auth's
+  // adapter and never selects the stamp, so it is not counted here.
   let consentWrites = 0;
   let consentReads = 0;
   const realUpdate = engine.update.bind(engine);
@@ -120,15 +129,20 @@ async function rig() {
     return (realUpdate as any)(object, ...rest);
   }) as never);
   vi.spyOn(engine, 'find').mockImplementation((async (object: string, ...rest: unknown[]) => {
-    if (object === 'sys_oauth_consent') consentReads += 1;
+    if (object === 'sys_oauth_consent' && isStampRead(rest[0])) consentReads += 1;
     return (realFind as any)(object, ...rest);
   }) as never);
 
-  /** A token for this deployment's MCP resource, signed by the jwt plugin at the current (fake) time. */
+  /**
+   * A token for this deployment's MCP resource, signed by the jwt plugin at
+   * the current (fake) time, with the `iat` the provider mints into every
+   * access token (the verifier's consent read compares it, #30879).
+   */
   const mint = async (claims: Record<string, unknown> = {}): Promise<string> =>
     (await api.signJWT({
       body: {
         payload: {
+          iat: Math.floor(Date.now() / 1000),
           sub: USER,
           azp: CLIENT,
           scope: 'data:read',
@@ -164,9 +178,16 @@ async function rig() {
     return value == null || value === '' ? null : new Date(value).toISOString();
   };
 
+  /** The person withdraws a consent: the row is deleted, as `/oauth2/delete-consent` and `/oauth2/revoke` delete it. */
+  const withdraw = async (consentId: string): Promise<void> => {
+    const ctx = await manager.getAuthContext();
+    await ctx.adapter.delete({ model: 'oauthConsent', where: [{ field: 'id', value: consentId }] });
+  };
+
   return {
     engine,
     manager,
+    withdraw,
     makeManager,
     api,
     logger,
@@ -287,9 +308,9 @@ describe('[#30918] nothing a client sends reaches the stamp', () => {
     expect(await r.manager.verifyMcpAccessToken(foreignKey)).toBeNull();
     expect(await r.manager.verifyMcpAccessToken(expired)).toBeNull();
     expect(await r.manager.verifyMcpAccessToken('not.a.token')).toBeNull();
-    const principal = await r.manager.verifyMcpAccessToken(noAzp);
-    expect(principal, 'a client_id-only token still verifies').toMatchObject({ userId: USER });
-    expect(principal?.clientId).toBeUndefined();
+    // #30879 keys the verifier's consent read by `azp`, so a token without one
+    // is refused before the stamp could see it.
+    expect(await r.manager.verifyMcpAccessToken(noAzp), 'a client_id-only token is refused').toBeNull();
 
     // Positive control on the same process: a verified token for another
     // client stamps, so the stamp path is live while the five above did not.
@@ -403,7 +424,8 @@ describe('[#30918] a failing store', () => {
       return realUpdate(object, ...rest);
     }) as never);
 
-    for (const at of [HOUR_10 + 5 * MINUTE, HOUR_11 + 5 * MINUTE, HOUR_11 + 65 * MINUTE]) {
+    // Every call after the consent was granted (10:17), so the verifier admits each.
+    for (const at of [HOUR_10 + 20 * MINUTE, HOUR_11 + 5 * MINUTE, HOUR_11 + 65 * MINUTE]) {
       vi.setSystemTime(at);
       await r.manager.verifyMcpAccessToken(await r.mint());
       await drain();
@@ -425,7 +447,7 @@ describe('[#30918] a failing store', () => {
     const realFind = (r.engine.find as any).getMockImplementation();
     vi.mocked(r.engine.find).mockImplementation((async (object: string, ...rest: unknown[]) => {
       const rows = await realFind(object, ...rest);
-      if (object === 'sys_oauth_consent' && withdrawAfterNextRead) {
+      if (object === 'sys_oauth_consent' && withdrawAfterNextRead && isStampRead(rest[0])) {
         withdrawAfterNextRead = false;
         await r.engine.delete('sys_oauth_consent', { where: { id: withdrawn }, ...SYS } as never);
       }
@@ -459,5 +481,68 @@ describe('[#30918] a failing store', () => {
     await r.manager.verifyMcpAccessToken(await r.mint());
     await drain();
     expect(reportsOf().map(([, meta]) => meta)).toEqual([{ error: 'no such column: last_used_at' }]);
+  }, 60_000);
+});
+
+describe('[#30918 × #30879] the stamp lands only on the consent that admitted the call', () => {
+  it('a revoked consent stamps nothing; a consent granted again is not stamped by a token of the old grant', async () => {
+    const r = await rig();
+    const first = await r.consent();
+    const oldToken = await r.mint();
+    expect(await r.manager.verifyMcpAccessToken(oldToken)).toMatchObject({ userId: USER, clientId: CLIENT });
+    await vi.waitFor(async () => expect(await r.stampOf(first)).toBe(iso(HOUR_10)));
+    await drain();
+    const writes = r.writes();
+
+    // Withdrawn: the verifier refuses the token, so nothing is stamped, in
+    // this hour or the next.
+    await r.withdraw(first);
+    vi.setSystemTime(HOUR_11 + 3 * MINUTE);
+    expect(await r.manager.verifyMcpAccessToken(oldToken), 'a revoked consent refuses its token').toBeNull();
+    await drain();
+    expect(r.writes(), 'a revoked consent stamps nothing').toBe(writes);
+
+    // Granted again: the old token belongs to the old grant and is refused;
+    // the new consent stays unstamped until a token of ITS grant is used.
+    vi.setSystemTime(HOUR_11 + 4 * MINUTE);
+    const again = await r.consent();
+    expect(await r.manager.verifyMcpAccessToken(oldToken), 'a token older than the consent is refused').toBeNull();
+    await drain();
+    expect(await r.stampOf(again)).toBeNull();
+    expect(r.writes()).toBe(writes);
+
+    vi.setSystemTime(HOUR_11 + 5 * MINUTE);
+    expect(await r.manager.verifyMcpAccessToken(await r.mint())).toMatchObject({ userId: USER });
+    await vi.waitFor(async () => expect(await r.stampOf(again)).toBe(iso(HOUR_11)));
+  }, 60_000);
+
+  it('a re-grant that lands between the verdict and the stamp is not stamped with the old token\'s use', async () => {
+    const r = await rig();
+    const first = await r.consent();
+    const oldToken = await r.mint();
+    let regranted: string | undefined;
+
+    // The race on the real engine: the verdict admits the old token under its
+    // consent; before the stamp (which runs after the response) reads, the
+    // person revokes and grants again, two minutes later.
+    let regrantBeforeStampRead = true;
+    const realFind = (r.engine.find as any).getMockImplementation();
+    vi.mocked(r.engine.find).mockImplementation((async (object: string, ...rest: unknown[]) => {
+      if (object === 'sys_oauth_consent' && regrantBeforeStampRead && isStampRead(rest[0])) {
+        regrantBeforeStampRead = false;
+        await r.withdraw(first);
+        vi.setSystemTime(HOUR_10 + 19 * MINUTE);
+        regranted = await r.consent();
+      }
+      return realFind(object, ...rest);
+    }) as never);
+
+    expect(await r.manager.verifyMcpAccessToken(oldToken), 'the verdict admits the token under its consent').toMatchObject({
+      userId: USER,
+    });
+    await drain();
+    expect(regranted, 'the re-grant ran inside the stamp').toBeDefined();
+    expect(r.writes(), 'the new consent is newer than the token, so it is not stamped').toBe(0);
+    expect(await r.stampOf(regranted!)).toBeNull();
   }, 60_000);
 });

@@ -27,8 +27,9 @@
  * body is one literal of exactly the {@link McpAccessTokenHost} members that
  * method reads, plus a `.call`. `verifyMcpAccessToken` is no longer `async`:
  * it returns the moved function's own promise with one `.then` on it, which
- * hands a verified principal to the coarse last-use stamp
- * (`mcp-client-last-use.ts`, #30918) and resolves to the same value.
+ * hands a verified principal (and the verified token, for its `iat`) to the
+ * coarse last-use stamp (`mcp-client-last-use.ts`, #30918) and resolves to
+ * the same value.
  *
  * A method goes as a closure that calls it on the manager at call time, so a
  * test double or spy set on the manager is still the one a body reaches —

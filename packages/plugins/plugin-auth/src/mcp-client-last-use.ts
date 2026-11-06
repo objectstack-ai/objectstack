@@ -20,11 +20,27 @@
  *
  * Only {@link McpClientLastUseStamper.record}, and only with the principal
  * `AuthManager.verifyMcpAccessToken` has just verified: the token's subject,
- * its `azp` client and its `organization_id` claim, every one read from a
- * signature this server checked. The time is the server's clock. No request
- * field, header or body reaches the stamp, and the consent doors better-auth
- * serves (`/oauth2/consent`, `/oauth2/update-consent`) do not carry the
- * column. A token with no `azp` names no client, so it stamps nothing.
+ * its `azp` client, its `organization_id` claim and its `iat`, every one read
+ * from a signature this server checked. The time is the server's clock. No
+ * request field, header or body reaches the stamp, and the consent doors
+ * better-auth serves (`/oauth2/consent`, `/oauth2/update-consent`) do not
+ * carry the column. A token with no `azp` names no client, so it stamps
+ * nothing.
+ *
+ * ## Only the consent that admitted the call
+ *
+ * The verifier admits a token only while the consent it was minted under
+ * stands (#30879, `mcp-token-revocation.ts` `mcpConsentAdmits`): the consent
+ * for (`azp`, `sub`, organization) exists and was created no later than the
+ * token's `iat`. The stamp picks its consent by that same rule
+ * ({@link consentForToken}), so it can only land on the consent that admitted
+ * the call. A revoked consent refuses the call, so it stamps nothing. A
+ * consent revoked and granted again belongs to the new grant: an old token is
+ * refused, and even when the re-grant lands between the verdict and the stamp
+ * (the stamp runs after the response), the new consent is newer than the old
+ * token and is not stamped with the old token's use. A consent deleted
+ * between the stamp's read and its write is a no-op (below). A server-only
+ * `skip_consent` client has no consent row, so it stamps nothing.
  *
  * ## How coarse, and why an hour
  *
@@ -79,11 +95,13 @@ export const MCP_CLIENT_LAST_USE_MEMO_CAP = 10_000;
  */
 export const MCP_CLIENT_LAST_USE_FAILURE_REPORT_CAP = 16;
 
-/** The verified principal, exactly as `verifyMcpAccessToken` returns it. */
+/** The verified principal, as `verifyMcpAccessToken` returns it, plus the verified token's `iat`. */
 export interface VerifiedMcpPrincipal {
   userId: string;
   clientId?: string;
   organizationId?: string;
+  /** The verified token's `iat`, in seconds. Without one, no consent admits the token, so nothing is stamped. */
+  issuedAt?: number;
 }
 
 /** One consent row, as the store reads it for the stamp. */
@@ -91,6 +109,8 @@ export interface StampableConsent {
   id: string;
   /** The consent's organization, `null`/empty when it binds none. */
   referenceId: string | null;
+  /** When the consent was granted, `null` when the row does not say. */
+  createdAt: Date | null;
   /** The stored stamp, `null` when none has been written. */
   lastUsedAt: Date | null;
 }
@@ -104,18 +124,23 @@ export interface McpClientLastUseStore {
 }
 
 /**
- * The consent a verified token was minted under, by the provider's own rule
- * (`findConsent` in `@better-auth/oauth-provider`): the consent bound to the
- * token's organization when it carries one, otherwise the consent bound to
- * none.
+ * The consent a verified token was minted under, by the rule the verifier
+ * admits it by (`mcpConsentAdmits`, #30879): the consent bound to the token's
+ * organization when it carries one, otherwise the consent bound to none (the
+ * provider's own `findConsent` rule), and only when it was created no later
+ * than the token was issued, compared in whole seconds, the unit of `iat`. A
+ * newer consent is a later grant the token does not belong to.
  */
 export function consentForToken(
   consents: readonly StampableConsent[],
   organizationId: string | undefined,
+  issuedAt: number | undefined,
 ): StampableConsent | undefined {
-  return organizationId
+  const consent = organizationId
     ? consents.find((row) => row.referenceId === organizationId)
     : consents.find((row) => !row.referenceId);
+  if (!consent || typeof issuedAt !== 'number' || !Number.isFinite(issuedAt) || !consent.createdAt) return undefined;
+  return Math.floor(consent.createdAt.getTime() / 1000) <= issuedAt ? consent : undefined;
 }
 
 /** The start of the clock hour `nowMs` falls in. */
@@ -155,7 +180,7 @@ export function mcpClientLastUseStoreFor(getEngine: () => unknown): McpClientLas
         'sys_oauth_consent',
         {
           where: { client_id: clientId, user_id: userId },
-          fields: ['id', 'reference_id', 'last_used_at'],
+          fields: ['id', 'reference_id', 'created_at', 'last_used_at'],
           // One consent per organization the person granted this client in.
           limit: 1000,
         },
@@ -164,6 +189,7 @@ export function mcpClientLastUseStoreFor(getEngine: () => unknown): McpClientLas
       return (Array.isArray(rows) ? rows : []).map((row: Record<string, unknown>) => ({
         id: String(row.id),
         referenceId: typeof row.reference_id === 'string' && row.reference_id ? row.reference_id : null,
+        createdAt: toDate(row.created_at),
         lastUsedAt: toDate(row.last_used_at),
       }));
     },
@@ -207,7 +233,7 @@ export class McpClientLastUseStamper {
    * is already stamped. Resolves once the stamp is settled; never rejects.
    */
   async record(principal: VerifiedMcpPrincipal): Promise<void> {
-    const { userId, clientId, organizationId } = principal;
+    const { userId, clientId, organizationId, issuedAt } = principal;
     if (!userId || !clientId) return;
     const hour = lastUseHourOf((this.opts.now ?? Date.now)());
     const key = JSON.stringify([clientId, userId, organizationId ?? null]);
@@ -221,7 +247,7 @@ export class McpClientLastUseStamper {
       if (oldest !== undefined) this.settled.delete(oldest);
     }
     try {
-      const consent = consentForToken(await this.store.consentsFor(clientId, userId), organizationId);
+      const consent = consentForToken(await this.store.consentsFor(clientId, userId), organizationId, issuedAt);
       if (!consent) return;
       if (consent.lastUsedAt && consent.lastUsedAt.getTime() >= hour) return;
       await this.store.stamp(consent.id, new Date(hour));

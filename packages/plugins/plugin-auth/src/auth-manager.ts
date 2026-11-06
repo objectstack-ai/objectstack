@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Auth, BetterAuthOptions } from 'better-auth';
-import type { JSONWebKeySet } from 'jose';
+import { decodeJwt, type JSONWebKeySet } from 'jose';
 import type { SCIMIdentityState, SCIMTransactionContext } from '@better-auth/scim';
 // better-auth value imports (betterAuth + plugins) are deferred via dynamic
 // import() in getOrCreateAuth() / buildPluginList() so that disabled plugins
@@ -4530,9 +4530,10 @@ export class AuthManager {
    * [#30918] A token that verifies also schedules, AFTER the verdict and off
    * the request's path, the coarse last-use stamp on the consent it was minted
    * under (`mcp-client-last-use.ts`): at most one write per consent per hour
-   * in each process, from this verified principal and the server's clock. The stamp reads and
-   * writes nothing the verdict depends on, and its failure is never this
-   * method's failure.
+   * in each process, from this verified token and the server's clock, and
+   * only on the consent that admitted it (the consent read above, by the same
+   * rule). The stamp reads and writes nothing the verdict depends on, and its
+   * failure is never this method's failure.
    */
   verifyMcpAccessToken(
     token: string,
@@ -4548,9 +4549,12 @@ export class AuthManager {
     };
     // [#30918] A token that verified is a verified MCP call: its consent's
     // coarse last-use stamp is settled after the response, never awaited here,
-    // and from the verified principal only (`mcp-client-last-use.ts`).
+    // and from the verified token only (`mcp-client-last-use.ts`). The
+    // verifier has just admitted the token by its consent (#30879,
+    // `mcpConsentAdmits`), so a revoked consent refuses the call and stamps
+    // nothing; the stamp picks its consent by the same rule.
     return verifyMcpAccessToken.call(host, token).then((principal) => {
-      if (principal) this.scheduleMcpClientLastUse(principal);
+      if (principal) this.scheduleMcpClientLastUse(principal, token);
       return principal;
     });
   }
@@ -4568,8 +4572,20 @@ export class AuthManager {
    * property — see {@link audienceLogError}; `console.error` when the manager
    * was given no logger, so the report is never silent).
    */
-  private scheduleMcpClientLastUse(principal: { userId: string; clientId?: string; organizationId?: string }): void {
+  private scheduleMcpClientLastUse(
+    principal: { userId: string; clientId?: string; organizationId?: string },
+    token: string,
+  ): void {
     if (!principal.clientId) return;
+    // The token has just verified, so its payload is the one the signature
+    // covers: its `iat` is what the verifier admitted the consent against.
+    let issuedAt: number | undefined;
+    try {
+      const iat = decodeJwt(token).iat;
+      issuedAt = typeof iat === 'number' ? iat : undefined;
+    } catch {
+      issuedAt = undefined;
+    }
     const stamper = (this.mcpClientLastUse ??= new McpClientLastUseStamper(
       mcpClientLastUseStoreFor(() => this.getDataEngine()),
       {
@@ -4586,7 +4602,7 @@ export class AuthManager {
       },
     ));
     runAfterResponse(
-      () => stamper.record(principal),
+      () => stamper.record({ ...principal, ...(issuedAt !== undefined ? { issuedAt } : {}) }),
       () => {
         // `record` never rejects; its own failure report is above.
       },
