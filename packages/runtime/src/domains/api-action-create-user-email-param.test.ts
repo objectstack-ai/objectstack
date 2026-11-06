@@ -28,6 +28,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
 import { SysUser } from '@objectstack/platform-objects/identity';
+import { ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec/identity';
 import { ActionActivationProjection } from '@objectstack/objectql';
 
 const OBJECT = 'sys_user';
@@ -79,7 +80,9 @@ const CTX = (): HttpProtocolContext => ({
         },
     },
     environmentId: 'platform',
-    executionContext: { userId: 'u_admin', tenantId: 'org_1', systemPermissions: [] },
+    // [#30771] The capabilities the platform-admin rung carries: `create_user`
+    // declares `requiredPermissions: ['manage_users']`, which both doors check.
+    executionContext: { userId: 'u_admin', tenantId: 'org_1', systemPermissions: [...(ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions ?? [])] },
 } as unknown as HttpProtocolContext);
 
 const rest = (h: ReturnType<typeof boot>, params: Record<string, unknown>) =>
