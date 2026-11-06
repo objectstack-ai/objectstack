@@ -2719,6 +2719,11 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         // twin (`buildAutomationContext`): a refused run's message renders in
         // it. See `AutomationContext.locale`.
         ...(typeof ec?.locale === 'string' && ec.locale.length > 0 ? { locale: ec.locale } : {}),
+        // [#30213] The administrator an impersonation session names, the
+        // trigger door's twin (`buildAutomationContext`): attribution only, so
+        // the flow's own writes record who was at the keyboard. Absent on the
+        // user's own click. See `AutomationContext.impersonatedBy`.
+        ...(typeof ec?.impersonatedBy === 'string' && ec.impersonatedBy.trim() ? { impersonatedBy: ec.impersonatedBy.trim() } : {}),
         params: runParams,
         // [#19846] Which of those keys the CALLER supplied, stated here where it
         // is known rather than inferred downstream from the merged bag.
