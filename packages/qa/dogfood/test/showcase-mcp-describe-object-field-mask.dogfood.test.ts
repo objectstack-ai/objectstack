@@ -48,7 +48,7 @@ const PEER = 'mcp-schema-peer@verify.test';
 const WALLED = 'mcp-schema-walled@verify.test';
 
 /** Does `name` occur in `text` as an identifier token? */
-const mentions = (text: string, name: string) => (text.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []).includes(name);
+const mentions = (text: string, name: string) => (text.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? ([] as string[])).includes(name);
 
 interface ToolAnswer {
   isError: boolean;
