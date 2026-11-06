@@ -199,10 +199,10 @@ describe('PushServiceConfigSchema — direct vendor blocks', () => {
   });
 });
 
-// Read by `PushServicePlugin` (`@objectstack/service-push`, #29041): the direct
-// transport and its vendor blocks are served, so they claim nothing unread
-// (ADR-0049: a marker states a fact). The relay is refused at boot until its
-// sender ships (#29920), so its block keeps a marker that says so.
+// Read by `PushServicePlugin` (`@objectstack/service-push`): both transports
+// are served, the direct one (#29041) and the hosted relay (#29920), so no
+// block claims anything unread (ADR-0049: a marker states a fact). The relay
+// is refused at boot only on a deployment that declared no control plane.
 describe('push transport configuration is read', () => {
   it('describes the relay block as served, sending once the server is bound (#29920)', () => {
     expect(PushRelayTransportConfigSchema.description).not.toMatch(/PLANNED/);
