@@ -828,3 +828,22 @@ describe('syncObjectStackDeps', () => {
     expect(pkg.dependencies['@objectstack/spec']).toBe('^6.0.0');
   });
 });
+
+// ── The dev loop's cloud step ships with every scaffold ──────────────────────
+//
+// A freshly created project deploys with `npm run deploy` — no command to
+// remember, and the same one `os dev`'s `d` key runs. Every bundled template
+// is held to it, and to the exact command: a `deploy` script that ran
+// something else (`objectstack build`, `objectstack package publish`) would
+// pass a presence check while never reaching the environment.
+describe('bundled templates ship a deploy script', () => {
+  for (const template of fs
+    .readdirSync(TEMPLATES_DIR, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)) {
+    it(`${template}/package.json runs \`objectstack deploy\` as \`deploy\``, () => {
+      const pkg = JSON.parse(fs.readFileSync(path.join(TEMPLATES_DIR, template, 'package.json'), 'utf8'));
+      expect(pkg.scripts?.deploy).toBe('objectstack deploy');
+    });
+  }
+});
