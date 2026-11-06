@@ -5130,7 +5130,8 @@ function fieldPatchesDescription(): string {
  *   fields: { sales_stage: Field.select([...]) },
  *   // A base field's display properties only (ADR-0146 D10), applied by the
  *   // registry merge (`mergeObjectDefinitions`) — see `fieldPatches`.
- *   // `industry` is picklist-bound, so only its label; `type` declares its own options.
+ *   // Where `industry` is picklist-bound, as on HotCRM's `crm_account`, only its
+ *   // label is patchable; an option patch goes on a field declaring its own options.
  *   fieldPatches: { industry: { label: 'Sector' }, type: { options: { customer: { label: 'Client' } } } },
  * }]
  * ```
