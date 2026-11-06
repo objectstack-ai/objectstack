@@ -54,6 +54,11 @@
  * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
  * and the class keeps none for it; a public or protected method's docblock
  * stays on the class, the contract, and its function keeps the placeholder.
+ *
+ * One body was written here rather than moved: `priorMasterIdsCallerReads`,
+ * the stored master an update's pre-check reads, as the caller's read door
+ * serves the FK. Its private method on the class is a delegation of the same
+ * shape.
  */
 
 import { referenceTargetOf } from '@objectstack/spec/data';
@@ -70,6 +75,7 @@ import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rul
 import { resolveMasterDetailRelation } from './master-detail.js';
 import { isFederatedObject } from './federated-object.js';
 import { masterIdOf, servedAsStored, staticReadonlyStoredView, undeclaredRelatedFields } from './engine.js';
+import { storedReferencesCallerReads } from './engine-referential-integrity.js';
 import type { ObjectQL } from './engine.js';
 
 /**
@@ -336,6 +342,46 @@ export async function resolvePreviewParents(
     parents: landingIds.map(headerOf),
     previousParents: priorIds.map((id, i) => (repoints[i] ? headerOf(id) : undefined)),
   };
+}
+
+/**
+ * The master each of an update's stored rows hangs off, as THIS caller's own
+ * read door serves the master-detail FK: the header the ADR-0113 pre-check of
+ * a parent-scoped `requiredWhen` reads as `previousParent` when the write
+ * names the FK.
+ *
+ * `{ id }` for a row whose FK the read door serves this caller exactly as
+ * stored ({@link storedReferencesCallerReads}, the update's one projection of
+ * stored rows onto the caller's read): `id` is the stored master, or
+ * `undefined` for a row that hangs off none. `null` for a row whose FK it does
+ * not — hidden, or served transformed, or a row the door does not return: the
+ * prior master is UNKNOWN to this caller, and the write binds one fixed header
+ * for it, the unresolved one, so neither whether the pre-check reads a second
+ * header nor which one it reads depends on what the column holds. A SYSTEM
+ * caller is answered from the rows as stored, as before.
+ *
+ * A stored row that carries no FK key at all is read as holding no master, as
+ * `masterIdOf` reads it: the key is spelled out as empty before the
+ * projection, so a system caller's answer for it is `{ id: undefined }`.
+ */
+export async function priorMasterIdsCallerReads(
+  this: Pick<MasterDetailRelatedHost, 'find' | 'logger'>,
+  schema: unknown,
+  rows: ReadonlyArray<Record<string, unknown> | null | undefined>,
+  context: ExecutionContext | undefined,
+): Promise<Array<{ readonly id: string | number | undefined } | null>> {
+  const rel = resolveMasterDetailRelation(schema as any);
+  if (!rel) return rows.map(() => null);
+  const stored = rows.map((row) => {
+    const own = row && typeof row === 'object' ? row : {};
+    return Object.prototype.hasOwnProperty.call(own, rel.fk) ? own : { ...own, [rel.fk]: undefined };
+  });
+  const served = await storedReferencesCallerReads.call(
+    this, (schema as { name?: unknown } | null | undefined)?.name, stored, [rel.fk], context,
+  );
+  return served.map((view) => (
+    view && Object.prototype.hasOwnProperty.call(view, rel.fk) ? { id: masterIdOf(rel.fk, null, view) } : null
+  ));
 }
 
 /**
