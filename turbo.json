@@ -701,7 +701,7 @@
       ]
     },
     "@objectstack/scenarios#test": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["build"],
       "outputs": [],
       "env": ["OS_TEST_TIERS"],
       "inputs": [

@@ -388,6 +388,9 @@ function managerVerifyingAgainst(server: { auth: any }): AuthManager {
   vi.spyOn(m, 'getApi').mockResolvedValue({
     getJwks: async () => await server.auth.api.getJwks(),
   } as any);
+  // [objectstack-ai/cloud#3606, ruling A] The consent read goes to the same
+  // running server's storage adapter, where its provider stored the consent.
+  vi.spyOn(m, 'getAuthContext').mockImplementation(async () => await server.auth.$context);
   return m;
 }
 

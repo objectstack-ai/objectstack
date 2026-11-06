@@ -1,10 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `@objectstack/scenarios/score` — score a LOADED card against what a run
- * produced: a built artifact (`dist/objectstack.json`), an observed write, or
- * an agent's answer. The entry the scenario runner calls; private, like the
- * rest of this package.
+ * `@objectstack/scenarios/score/full` — score a LOADED card against what a
+ * run produced: a built artifact (`dist/objectstack.json`), an observed write,
+ * or an agent's answer. The entry the scenario runner calls; private, like the
+ * rest of this package. The narrow `@objectstack/scenarios/score` is
+ * `./narrow.ts`: everything here except the capability-tag checks and the
+ * card-level functions below.
  *
  * Every function takes a {@link LoadedScenario} (what `loadScenarios` /
  * `loadScenarioFile` return), so the card it judges against has already passed
