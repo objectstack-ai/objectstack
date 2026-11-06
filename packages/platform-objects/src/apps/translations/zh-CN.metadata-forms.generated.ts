@@ -112,6 +112,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "可见条件",
         helpText: "基于记录的 CEL 谓词（例如 record.type == 'invoice'）——仅当其为 TRUE 时，录入表单才显示整个分组（包括标题）。"
       },
+      "fieldGroups.requiresFeature": {
+        label: "所需功能",
+        helpText: "该分组需要的部署功能（例如 multiOrgEnabled）：功能关闭时，录入表单和记录详情页隐藏整个分组。与「可见条件」同时设置时，两者都成立才显示该分组。分组中的字段仍可通过 API 读取。"
+      },
       fields: {
         label: "字段",
         helpText: "添加该对象将存储的列"
