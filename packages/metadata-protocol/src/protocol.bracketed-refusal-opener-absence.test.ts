@@ -50,6 +50,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import {
   PLATFORM_SCHEDULE_CREATE_RECORD_ORG_MISSING,
