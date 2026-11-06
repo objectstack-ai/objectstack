@@ -2584,6 +2584,41 @@ export const FieldSchema = lazySchema(() => {
   // `index: true` created no index. Declare the index in object `indexes[]`.
   externalId: z.boolean().default(false).describe('Not read: no upsert, import or seed matches on this flag. A seed dataset names its match field in its own `externalId`; an import names it in the mapping\'s `upsertKey`.'),
 
+  /**
+   * Package-author rename declaration (epic cloud#3652, ruling D3, verbatim
+   * 「写进清单 renamedFrom」, under Q3 「默认拒绝，需显式映射（推荐）」 — this
+   * supersedes item 5 of objectstack#24443's ruling A, "No rename spelling is
+   * added to the spec"). The earlier key or keys of THIS field, so an upgrade
+   * from a version that still has the old key carries that column's data to
+   * this field instead of dropping the old column out of the declaration and
+   * adding an empty one.
+   *
+   * Judged at parse, minimally: each entry is a field key (this grammar, here,
+   * where one field is all there is to see). The rest — not the field's own
+   * key, not a key another field of the same object still declares, not an
+   * old key two fields both claim, each entry once — needs the field's key in
+   * its object's `fields` map (`name` is optional) or the whole map, and lives
+   * in `ObjectSchema`'s superRefine (`refuseDishonestRenamedFrom`), whose
+   * refusals name the object, the field and the old key. Type
+   * compatibility between the old and the new field is NOT judged here: it
+   * depends on the installed version, so the upgrade plan judges it.
+   *
+   * Read only at package upgrade (the upgrade plan and the rename execution);
+   * no record read, write or query reads it. Declared ahead of those readers
+   * — `planned` in `liveness/field.json`.
+   */
+  renamedFrom: z.array(
+    z.string().regex(/^[a-z_][a-z0-9_]*$/, {
+      message: 'Each `renamedFrom` entry is an earlier key of this field, so it must be a field key: lowercase snake_case (e.g. "account_name").',
+    }),
+  ).optional().describe(
+    'Earlier keys of THIS field, written in the field-key grammar (lowercase snake_case), e.g. `renamedFrom: [\'company\']` on a field now keyed `account_name`. '
+    + 'On a package upgrade from a version that has one of these keys and not this one, the platform carries that column\'s data to this field instead of adding an empty column. '
+    + 'A field renamed twice lists both earlier keys. Each entry once; never this field\'s own key; never a key another field of the same object still declares (that name is still in use); never an old key another field of the same object also claims. '
+    + 'Read only at package upgrade: no record read, write or query reads it, and the type of the old column is judged by the upgrade plan, not here. '
+    + 'Declared ahead of the upgrade step that carries the data: until that step ships, no upgrade carries a column on this declaration.',
+  ),
+
   // ADR-0010 — runtime protection envelope (internal — set by the loader).
   // `field` is a registered metadata type, so `MetadataPlugin`'s loader stamps
   // `_packageId` / `_provenance` on it. Undeclared, they were dropped on every

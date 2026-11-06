@@ -64,6 +64,8 @@ async function bootPlugin(postures: Record<string, Array<{ code: string; message
       if (object === 'sys_api_key' && q?.where?.key === keyHash) {
         return [{ id: 'key_1', key: keyHash, user_id: OWNER, revoked: false, scopes: '[]' }];
       }
+      // The key's owner exists: an API key authenticates only as an owner who exists.
+      if (object === 'sys_user' && q?.where?.id === OWNER) return [{ id: OWNER }];
       return [];
     },
     async insert(_o: string, row: any) { return row; },

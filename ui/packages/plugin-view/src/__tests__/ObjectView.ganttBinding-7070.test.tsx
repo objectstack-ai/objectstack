@@ -11,8 +11,9 @@
  * `startDateField` / `endDateField` at `'start_date'` / `'end_date'` for every
  * view, declared or not, exactly as the app-shell and ListView faces did.
  *
- * The sibling of `ObjectView.calendarBinding-7029` next door. Fixing two of the
- * three faces would leave this one fabricating the same names one route over —
+ * The sibling of the `ObjectView.calendarBinding-7029` block in
+ * `ObjectView.harness.test.tsx` next door. Fixing two of the three faces would
+ * leave this one fabricating the same names one route over —
  * which is the shape of the original defect, where objectui#3129 fixed the
  * timeline axis at app-shell alone and the two plugin faces kept inventing.
  *

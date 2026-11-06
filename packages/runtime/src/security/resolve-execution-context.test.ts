@@ -32,11 +32,15 @@ function bounded<T>(rows: T[], opts: any): T[] {
 }
 
 function makeQl(apiKeyRows: any[]) {
+  // The owners the key rows name exist: an API key authenticates only as an
+  // owner who exists.
+  const owners = [...new Set(apiKeyRows.map((r) => r.user_id).filter((id) => typeof id === 'string' && id))].map((id) => ({ id }));
   return {
     async find(object: string, opts: any) {
       const where = opts?.where ?? {};
-      if (object !== 'sys_api_key') return [];
-      return bounded(apiKeyRows.filter((row) => {
+      const table = object === 'sys_api_key' ? apiKeyRows : object === 'sys_user' ? owners : undefined;
+      if (!table) return [];
+      return bounded(table.filter((row) => {
         for (const [k, v] of Object.entries(where)) {
           if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
           if (row[k] !== v) return false;
@@ -212,6 +216,8 @@ describe('resolveExecutionContext — localization (timezone + locale)', () => {
   }: { settings?: any[]; prefs?: any[]; settingsService?: any }) {
     const tables: Record<string, any[]> = {
       sys_api_key: apiKeyRows,
+      // The key's owner exists: an API key authenticates only as an owner who exists.
+      sys_user: [{ id: 'u1' }],
       sys_user_preference: prefs,
       sys_setting: settings,
     };
@@ -321,7 +327,7 @@ describe('resolveExecutionContext — the platform-scoped (Default Organization)
   const RAW = 'osk_admin';
   /** @param adminGrantOrg the organization that owns u1's admin_full_access grant. */
   function makeAuthQl(extraGrants = [], adminGrantOrg: string | null = 'org_default') {
-    const tables = {
+    const tables: Record<string, any[]> = {
       // [#8287] Re-spelled from `organization_id`: these fixtures use the key as a
       // VEHICLE to authenticate u1 into orgA, and `active_organization_id` is the
       // column the verifier reads for exactly that. The assertions below depend on
@@ -329,6 +335,8 @@ describe('resolveExecutionContext — the platform-scoped (Default Organization)
       // out), so this keeps them meaningful rather than merely green.
       sys_api_key: [{ id: 'k1', key: hashApiKey(RAW), revoked: false, user_id: 'u1', active_organization_id: 'orgA', expires_at: FUTURE }],
       sys_member: [{ user_id: 'u1', organization_id: 'orgA', role: 'owner' }],
+      // The key's owner exists: an API key authenticates only as an owner who exists.
+      sys_user: [{ id: 'u1' }],
       sys_organization: [{ id: 'org_default', slug: 'default' }, { id: 'orgA', slug: 'org-a' }],
       sys_user_permission_set: [
         { id: 'ups_global', user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: adminGrantOrg },
@@ -410,6 +418,8 @@ describe('resolveExecutionContext — posture plumbing (#2947)', () => {
       // out), so this keeps them meaningful rather than merely green.
       sys_api_key: [{ id: 'k1', key: hashApiKey(RAW), revoked: false, user_id: 'u1', active_organization_id: 'orgA', expires_at: FUTURE }],
       sys_member: [{ user_id: 'u1', organization_id: 'orgA', role: 'member' }],
+      // The key's owner exists: an API key authenticates only as an owner who exists.
+      sys_user: [{ id: 'u1' }],
       sys_user_permission_set: userPermSets,
       sys_permission_set: permissionSets,
       sys_position: [], sys_position_permission_set: [], sys_user_position: [],
@@ -652,6 +662,8 @@ describe('[#13906 decision 1 A, runtime door] the tenancy posture seam tells "ne
         { user_id: 'u_exmember', organization_id: 'org_B' },
         { user_id: 'u_orgless', organization_id: 'org_A' },
       ],
+      // The key's owner exists: an API key authenticates only as an owner who exists.
+      sys_user: [{ id: 'u_exmember' }, { id: 'u_orgless' }],
       sys_user_permission_set: [], sys_permission_set: [],
       sys_position: [], sys_position_permission_set: [], sys_user_position: [],
     };

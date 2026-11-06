@@ -19,7 +19,9 @@
  *      · `sys_audit_log` with `action: 'config_change'` — the platform-wide
  *        compliance ledger, via {@link SettingsAuditSink}. This is what the
  *        shipped `config_changes` list view and any
- *        `$filter={"action":"config_change"}` read.
+ *        `$filter={"action":"config_change"}` read. It carries the value
+ *        before and after the write, readable for a key that is not
+ *        secret-valued (#30923).
  *      · `sys_setting_audit` with `action: 'set' | 'reset'` — the
  *        settings-specific append-only trail, via {@link SettingsAuditWriter},
  *        carrying `namespace`/`key`/`scope`/`old_hash`/`new_hash`/`source`
@@ -257,6 +259,29 @@ export interface SettingsAuditSink {
     actor?: string;
     action: 'set' | 'reset';
     valueDigest: string;
+    /**
+     * [#30923] The value the write stored, READABLE — the after half of the
+     * `config_change` row (ADR-0007 § Audit & history: every write records its
+     * before and after).
+     *
+     * Present only on a `set` of a key that is not secret-valued. A
+     * secret-valued key is one its manifest declares `encrypted: true`, which
+     * `type: 'password'` forces (the service's `encryptedKeys`): its write is
+     * described by `valueDigest` alone, masked `<encrypted:…>`, and never by
+     * this field. Absent on a `reset`, which stores nothing.
+     */
+    value?: unknown;
+    /**
+     * [#30923] What the write REPLACED — the before half: the value the same
+     * stored row (the one `recordId` names) held before this write.
+     *
+     * `null` when that row held no value: a first write, or a row an earlier
+     * reset cleared. Otherwise `digest` fingerprints the previous value,
+     * masked exactly as `valueDigest` is, and `value` is the previous value
+     * READABLE, present only when neither the key nor the row it replaced
+     * (a row stored `encrypted: true`) is secret-valued.
+     */
+    previous?: { value?: unknown; digest: string } | null;
     encrypted: boolean;
     requestId?: string;
     /**
