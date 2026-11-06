@@ -60,6 +60,16 @@ vi.mock('@object-ui/plugin-grid', async (importOriginal) => ({
 
 import { MetadataFieldsPage } from './MetadataFieldsPage';
 
+/**
+ * objectstack#30786 — the page takes its edit base off the layered read
+ * (`GET …/layers`, `overlay ?? code`), not the served item read, so this double
+ * answers that read: the item it used to serve becomes the `code` layer (and
+ * `effective`), beside the same envelope carriers.
+ */
+function servedAsLayers({ item, ...carriers }: { item: unknown } & Record<string, unknown>) {
+  return { ...carriers, code: item, overlay: null, effective: item };
+}
+
 // ---------------------------------------------------------------------------
 // The gate double
 // ---------------------------------------------------------------------------
@@ -135,8 +145,8 @@ function gatedClient(): MetadataClient {
           422,
         );
       }
-      if (/\/meta\/object\/probe_widget(\?|$)/.test(url)) {
-        return json({ type: 'object', name: 'probe_widget', item: STORED });
+      if (/\/meta\/object\/probe_widget\/layers(\?|$)/.test(url)) {
+        return json(servedAsLayers({ type: 'object', name: 'probe_widget', item: STORED }));
       }
       return json({ items: [] });
     }) as unknown as typeof fetch,

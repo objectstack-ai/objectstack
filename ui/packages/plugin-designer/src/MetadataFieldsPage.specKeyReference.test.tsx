@@ -152,6 +152,16 @@ vi.mock('./FieldDesigner', () => ({
 
 import { MetadataFieldsPage } from './MetadataFieldsPage';
 
+/**
+ * objectstack#30786 — the page takes its edit base off the layered read
+ * (`GET …/layers`, `overlay ?? code`), not the served item read, so this double
+ * answers that read: the item it used to serve becomes the `code` layer (and
+ * `effective`), beside the same envelope carriers.
+ */
+function servedAsLayers({ item, ...carriers }: { item: unknown } & Record<string, unknown>) {
+  return { ...carriers, code: item, overlay: null, effective: item };
+}
+
 let puts: Array<Record<string, unknown>> = [];
 
 function json(body: unknown, status = 200): Response {
@@ -171,7 +181,7 @@ function realClient(): MetadataClient {
         puts.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
         return json({ success: true, name: 'probe_widget' });
       }
-      if (/\/meta\/object\/probe_widget(\?|$)/.test(url)) return json(OBJECT_ENVELOPE);
+      if (/\/meta\/object\/probe_widget\/layers(\?|$)/.test(url)) return json(servedAsLayers(OBJECT_ENVELOPE));
       return json({ items: [] });
     }) as unknown as typeof fetch,
   });
@@ -466,8 +476,8 @@ describe('objectui#6041 · WRITE — the save carries `reference`, never `refere
           localPuts.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
           return json({ success: true, name: 'md_probe' });
         }
-        if (/\/meta\/object\/md_probe(\?|$)/.test(url)) {
-          return json({ type: 'object', name: 'md_probe', item: body });
+        if (/\/meta\/object\/md_probe\/layers(\?|$)/.test(url)) {
+          return json(servedAsLayers({ type: 'object', name: 'md_probe', item: body }));
         }
         return json({ items: [] });
       }) as unknown as typeof fetch,
@@ -562,8 +572,8 @@ describe('objectui#8058 · a lookup whose target survives only as `referenceTo`'
           localPuts.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
           return json({ success: true, name: 'probe_widget' });
         }
-        if (/\/meta\/object\/probe_widget(\?|$)/.test(url)) {
-          return json({ ...OBJECT_ENVELOPE, item: { ...OBJECT_BODY, fields } });
+        if (/\/meta\/object\/probe_widget\/layers(\?|$)/.test(url)) {
+          return json(servedAsLayers({ ...OBJECT_ENVELOPE, item: { ...OBJECT_BODY, fields } }));
         }
         return json({ items: [] });
       }) as unknown as typeof fetch,
