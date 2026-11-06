@@ -360,8 +360,8 @@ owner's upgrades. A patch carries display keys only
 values and rules stay the owner's. A key the tenant edited keeps the tenant's
 text; between two extensions the higher `priority` wins. A patch naming a field
 or option value the target lacks is refused at install and by `os validate`, and
-a `picklist`-bound field's options are never patchable. Example:
-`defineObjectExtension({ extend: 'crm_account', fieldPatches: { industry: { label: 'Sector', options: { technology: { label: 'Tech' } } } } })`.
+a `picklist`-bound field's options (HotCRM's `industry`) are never patchable. Example:
+`defineObjectExtension({ extend: 'crm_account', fieldPatches: { industry: { label: 'Sector' }, type: { options: { customer: { label: 'Client' } } } } })`.
 
 **An object an installed package ships** (ADR-0146 D10) is extended from the
 base's paired `.custom` package (`hotcrm.custom`; **objectstack-platform**
