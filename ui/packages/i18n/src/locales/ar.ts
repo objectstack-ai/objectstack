@@ -1269,6 +1269,7 @@ const ar = {
   detail: {
     editInlineHint: "انقر نقرًا مزدوجًا للتحرير",
     systemActor: "النظام",
+    impersonatedActor: "{{admin}} نيابةً عن {{user}}",
     unknownUser: "غير معروف",
     created: "أُنشئ",
     updated: "حُدِّث",

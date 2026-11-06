@@ -86,7 +86,7 @@
  * `sys_migration` flag (the `summary-nulls` reasoning: a flag nothing reads).
  */
 
-import { keysetWalk, type KeysetPageQuery } from '@objectstack/types';
+import { isSandboxOrigin, isSandboxOwnFault, keysetWalk, mapDataError, sandboxBusinessMessage, type KeysetPageQuery } from '@objectstack/types';
 import { objectNotFoundError, withTransientRetry, type RetryOptions } from '@objectstack/core';
 import { isValueDomainMember } from '@objectstack/spec/shared';
 
@@ -430,7 +430,7 @@ async function walkCodelessRows(
         // what is still codeless.
         const message = (err as any)?.message ?? String(err);
         logger.warn(`[record-currency-backfill] ${object} record ${String(id)}: ${message}`);
-        report.failures.push({ recordId: String(id), error: message });
+        report.failures.push({ recordId: String(id), error: rowFailureSentence(err, object, message) });
       }
     }
   }
@@ -439,6 +439,25 @@ async function walkCodelessRows(
     a.organizationId === b.organizationId ? 0 : a.organizationId === null ? 1 : b.organizationId === null ? -1 : a.organizationId < b.organizationId ? -1 : 1,
   );
   return report;
+}
+
+/**
+ * [#30675] The sentence a failed row's report entry carries. The report is now
+ * also a REST answer (`POST /meta/_migrate-record-currency-codes`), so a
+ * sandboxed hook's throw is read as the write doors read it — the import row's
+ * rule (`toFailedResult`, `@objectstack/core`'s import runner): a sandboxed
+ * error the `/data` door answers with a 5xx (a crash, a declared 5xx, the
+ * sandbox's own fault) takes that door's withheld sentence, and a sandboxed
+ * refusal takes the hook's own sentence, never the `hook '<name>' threw:`
+ * debug wrapper. Any other throw keeps its message, as before. The operator's
+ * log line above keeps the whole text.
+ */
+function rowFailureSentence(err: unknown, object: string, message: string): string {
+  if (isSandboxOrigin(err) || isSandboxOwnFault(err)) {
+    const door = mapDataError(err, object);
+    if (door.status >= 500) return String(door.body.error);
+  }
+  return sandboxBusinessMessage(err) ?? message;
 }
 
 /** Human-readable report body, shared by the CLI's dry-run and apply output. */
@@ -462,7 +481,12 @@ export function formatRecordCurrencyBackfillReport(report: RecordCurrencyBackfil
     }
   }
   if (report.codeless === 0) {
-    lines.push(`✓ Every ${pair} amount already has its currency code — nothing to backfill.`);
+    // A walk the cap cut short saw only some rows, so it cannot say "every".
+    lines.push(
+      report.truncated
+        ? `No codeless ${pair} amount among the ${report.scannedRecords} row(s) examined.`
+        : `✓ Every ${pair} amount already has its currency code — nothing to backfill.`,
+    );
   } else {
     lines.push(
       report.applied
@@ -485,6 +509,14 @@ export function formatRecordCurrencyBackfillReport(report: RecordCurrencyBackfil
   }
   if (report.truncated) {
     lines.push('⚠ Walk incomplete — some rows were not examined; re-run without the cap to finish.');
+    // An unscoped run judged "one organization" from the rows it examined: the
+    // rows past the cap were never checked for another organization's.
+    if (report.organizationId === null && !report.allOrganizations) {
+      lines.push(
+        '  The organization check saw only the rows examined: rows past the cap may belong to another ' +
+          'organization, so name the organization (one run per organization) before writing.',
+      );
+    }
   }
   // Claims no row or table, never that nothing was written: the command that
   // prints it boots through the driver's connect, which can switch a SQLite

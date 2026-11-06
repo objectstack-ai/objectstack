@@ -162,6 +162,31 @@ const DOORS: readonly Door[] = [
     // capability gate, so the door set loses a spelling, not a capability.
 ];
 
+/**
+ * [#30675] The `/meta` write doors that write a DATA object's rows, not
+ * metadata, and so are not `manage_metadata` doors: they reach no protocol
+ * method, and their gate is a tenant Setup capability resolved for the
+ * caller's current organization. Enumerated in the same closed set (the
+ * comparison below derives from both tables), with their own refusal cases in
+ * the `#30675` describe at the end of this file.
+ */
+interface DataDoor {
+    readonly label: string;
+    readonly method: 'POST';
+    readonly path: string;
+    readonly capability: string;
+    readonly body: unknown;
+}
+
+const DATA_DOORS: readonly DataDoor[] = [
+    {
+        label: 'POST /meta/_migrate-record-currency-codes — record-currency code backfill [#30675]',
+        method: 'POST', path: `${META}/_migrate-record-currency-codes`,
+        capability: 'setup.write',
+        body: { object: 'deal', field: 'currency_code', code: 'USD' },
+    },
+];
+
 /** Every protocol method any door reaches — all present, so 501 is never the answer. */
 const PROTOCOL_METHODS = [...new Set(DOORS.map((d) => d.protocolMethod))];
 
@@ -190,14 +215,14 @@ const META_SEGMENT = /(?:^|\/)meta(?:\/|$)/;
  * The same door, addressed on another mount base
  * (`/api/v1/meta/...` → `/api/v1/environments/:environmentId/meta/...`).
  */
-function onBase(door: Door, base: string): string {
+function onBase(door: Pick<Door, 'path'>, base: string): string {
     return `${base}${door.path.slice(UNSCOPED_BASE.length)}`;
 }
 
 /** Every door, on every base the composition under test mounts. */
 function expectedDoors(bases: readonly string[]): string[] {
     return bases
-        .flatMap((base) => DOORS.map((d) => `${d.method} ${onBase(d, base)}`))
+        .flatMap((base) => [...DOORS, ...DATA_DOORS].map((d) => `${d.method} ${onBase(d, base)}`))
         .sort();
 }
 
@@ -320,7 +345,7 @@ describe('#11473 — "CLOSED, enumerated set" holds for EVERY base, not just the
         expect(doors).toEqual(expectedDoors([UNSCOPED_BASE, SCOPED_BASE]));
         // Stated as a count too, because the number is the part that regressed:
         // the pre-#11473 prefix filter saw 5 of these 10.
-        expect(doors).toHaveLength(DOORS.length * 2);
+        expect(doors).toHaveLength((DOORS.length + DATA_DOORS.length) * 2);
     });
 
     it("'required' mounts ONLY the scoped base — the case a `/api/v1/meta` prefix filter enumerated as empty", () => {
@@ -335,7 +360,7 @@ describe('#11473 — "CLOSED, enumerated set" holds for EVERY base, not just the
         );
         const doors = stack.registeredWriteDoors();
         expect(doors).toEqual(expectedDoors([SCOPED_BASE]));
-        expect(doors).toHaveLength(DOORS.length);
+        expect(doors).toHaveLength(DOORS.length + DATA_DOORS.length);
         expect(doors.every((d: string) => d.includes(SCOPED_BASE))).toBe(true);
         // And nothing is left on the unscoped base to fall back to.
         expect(doors.some((d: string) => d.includes(`${META}/`))).toBe(false);
@@ -608,4 +633,57 @@ describe('ADR-0131 D6 — `manage_org_presentation` is refused, and no door thre
         expect(out.body).toMatchObject({ error: { code: 'FORBIDDEN' } });
         expect(stack.calls[MIGRATE_DOOR.protocolMethod]).toBe(0);
     });
+});
+
+/**
+ * [#30675] The data doors' own refusal cases. Booted with NO data engine, so a
+ * caller the gate admits gets `501 NOT_IMPLEMENTED` — the answer that tells the
+ * gate's verdict apart from the refusal, the role the protocol call count plays
+ * for the metadata doors above. No case here reaches a row (the route's own
+ * test file drives the walk and the writes on a real engine).
+ */
+describe('#30675 — the data doors refuse on their own capability, not `manage_metadata`', () => {
+    const knockData = async (door: DataDoor, context: Record<string, unknown> | undefined, base = UNSCOPED_BASE) => {
+        const stack = boot(context, base === UNSCOPED_BASE ? {} : { enableProjectScoping: true, projectResolution: 'auto' });
+        const path = onBase(door, base);
+        const route = (stack.rest as any).getRoutes().find((r: any) => r.method === door.method && r.path === path);
+        if (!route) throw new Error(`route not registered: ${door.method} ${path}`);
+        const res = mockRes();
+        await route.handler({
+            method: door.method, path, params: base === UNSCOPED_BASE ? {} : { environmentId: 'env_probe' },
+            query: {}, headers: {}, body: door.body,
+        }, res);
+        return { status: res.statusCode, body: res.json.mock.calls.at(-1)?.[0] };
+    };
+
+    it.each(DATA_DOORS.map((d) => [d.label, d] as const))('%s → anonymous gets 401 from the /meta umbrella', async (_l, door) => {
+        expect((await knockData(door, undefined)).status).toBe(401);
+    });
+
+    it.each(DATA_DOORS.map((d) => [d.label, d] as const))(
+        '%s → refuses a capability-less caller, a `manage_metadata` holder and `setup.access` alone (403)',
+        async (_l, door) => {
+            for (const systemPermissions of [[], ['manage_metadata'], ['setup.access', 'studio.access']]) {
+                const out = await knockData(door, { userId: 'u', tenantId: 'org_a', systemPermissions });
+                expect(out.status).toBe(403);
+                expect(out.body).toMatchObject({ error: { code: 'FORBIDDEN' } });
+            }
+        },
+    );
+
+    it.each(DATA_DOORS.map((d) => [d.label, d] as const))(
+        '%s → the control: its own capability (and `isSystem`) passes the gate, on both bases',
+        async (_l, door) => {
+            for (const base of [UNSCOPED_BASE, SCOPED_BASE]) {
+                for (const ctx of [
+                    { userId: 'u', tenantId: 'org_a', systemPermissions: [door.capability] },
+                    { isSystem: true, tenantId: 'org_a' },
+                ]) {
+                    const out = await knockData(door, ctx, base);
+                    expect(out.status).toBe(501);
+                    expect(out.body).toMatchObject({ error: { code: 'NOT_IMPLEMENTED' } });
+                }
+            }
+        },
+    );
 });

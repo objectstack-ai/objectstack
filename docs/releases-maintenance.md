@@ -190,12 +190,19 @@ nothing.
 
 ### Release channels
 
-There are two npm channels, and both are published by `release.yml`:
+There are two npm channels, and both are published by `release.yml`. `next` has two
+publishers and two version shapes:
 
 | dist-tag | Carries | Published by |
 |---|---|---|
-| `latest` | the stable release (GA) | `release.yml`, outside pre mode — the Version Packages PR flow below |
-| `next` | the pre-release (`X.Y.Z-next.N`) | `release.yml` in pre mode: `.changeset/pre.json` says `mode: pre`, `tag: next`, and `changeset publish` publishes under that tag |
+| `latest` | the stable release (GA) | `release.yml`, outside pre mode — the Version Packages PR flow below. The only path that writes `latest` |
+| `next` | the pre-release (`X.Y.Z-next.N`) during a release-candidate cycle | `release.yml` in pre mode: `.changeset/pre.json` says `mode: pre`, `tag: next`, and `changeset publish` publishes under that tag |
+| `next` | a snapshot of `main` (`0.0.0-next-YYYYMMDDHHMMSS`) outside a cycle | `release.yml`'s snapshot lane: **Actions → Release → Run workflow** with `snapshot_next` checked, then a required reviewer approves `Snapshot next of main <commit> (awaiting approval)` at `environment: release`. It cuts the newest commit whose full battery is green on it, runs `changeset version --snapshot next` in the runner only (never committed), and runs `changeset publish --tag next --no-git-tag`: no tag, no GitHub Release, no Version Packages PR change, `latest` untouched. It refuses while `.changeset/pre.json` says `mode: pre` at the selected commit or at main's tip, read again after the approval (the cycle owns `next`) and while any fixed-group member has no version on npm (a first publish takes `latest`). ADR-0125, amendment of 2026-11-05 |
+
+A snapshot version sorts below every stable version, so the next stable publish's
+dist-tag step moves `next` back up to it. An app that needs a fix the day it lands
+pins `next`; `latest` users see no change. ⛔ No AI seat dispatches the snapshot lane
+or approves its deployment (AGENTS.md Prime Directive 15).
 
 There is no `rc` channel. The Cut RC lane that cut `X.Y.Z-rc.N` is retired and its
 workflow deleted, and a pre-release cycle enters pre mode with tag `next`, never `rc`.
@@ -228,8 +235,10 @@ waits at `environment: release` for a required reviewer to approve a job named
 `Publish <version> to npm (awaiting approval)` — the version read from the commit,
 never one you supply (ADR-0125 D1/D2). ⛔ **Actions → Release → Run workflow** is
 **not** the GA publish path: since ADR-0125 D4 that dispatch takes no version input at
-all, and left unchecked it starts the repair lane for a publish that died partway —
-checked, it starts the bookkeeping lane described next.
+all, and with neither `refresh_version_pr` nor `snapshot_next` checked it starts the
+repair lane for a publish that died partway — `refresh_version_pr` starts the
+bookkeeping lane described next, and `snapshot_next` the `next` snapshot lane above,
+which runs no stable job.
 
 The cut, in order (each step is explained below):
 

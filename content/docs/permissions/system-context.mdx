@@ -197,6 +197,7 @@ One of the largest consumers of the flag;
 | 48 | Object API-exposure gate bypassed (`apiEnabled` / `apiMethods`) | runtime | Get: internal self-writes ignore exposure declarations — these govern **external** exposure, not engine self-writes. The gate is `refuseUnexposedDataAction`, which `callData` asks first and the `/data` domain asks before its request gate; `callData` reads the same bypass once more for each nested-relation condition's target | `callData`, `refuseUnexposedDataAction` |
 | 49 | Action `requiredPermissions` bypassed | runtime | Get: engine self-invocation runs any action | `actionPermissionError` |
 | 50 | `manage_metadata` bypassed on metadata writes | runtime, rest | Get: schema writes without the capability (the permission-set clone door's save included) — and, because REST's save door and the stored-version read doors ask one save verdict, an app's full stored version on `/layers`, `?layers=true` and `/diff`, whatever its entry gates withhold | `handleMetadataRequest`, `registerMetaCollectionRoutes`, `registerMetaItemWriteRoutes`, `registerMetaItemHistoryRoutes`, `metaSaveVerdict`, `handlePermissionSetCloneWrite` |
+| 50b | `setup.write` bypassed on the record-currency code backfill door | rest | Get: `POST /meta/_migrate-record-currency-codes` without the capability. The door still fills only the caller's current organization's rows: a system context with no organization is refused like any other caller | `registerMetaRecordCurrencyBackfillRoute` |
 | 51 | The shared metadata-write verdict itself returns `allowed` | metadata-core | Get: the one function all of row 50's doors consult answers yes before any capability is examined | `metaWriteCapabilityVerdict` |
 | 52 | Anonymous-deny seam satisfied on the domain dispatchers and the package/federation routes | runtime, rest | Get: passes with no `userId` | `handleActionsRequest`, `handleAIRequest`, `handleAutomationRequest`, `handleMetadataRequest`, `handleSecurityRequest`, `handlePackagesRequest`, `handleAnalyticsRequest`, `handleI18nRequest`, `registerExternalDatasourceRoutes`, `refusePackageRequest` |
 | 53 | MCP principal check satisfied | runtime | Get: MCP surface reachable with no user | `handleMcpRequest` |
@@ -622,6 +623,7 @@ and CI refuses one that differs from what the tree produces.
 | `packages/rest/src/meta-collection-routes.ts#registerMetaCollectionRoutes` | 1 | 50 |
 | `packages/rest/src/meta-item-history-routes.ts#registerMetaItemHistoryRoutes` | 2 | 50 |
 | `packages/rest/src/meta-item-write-routes.ts#registerMetaItemWriteRoutes` | 1 | 50 |
+| `packages/rest/src/meta-record-currency-backfill-route.ts#registerMetaRecordCurrencyBackfillRoute` | 1 | 50b |
 | `packages/rest/src/package-routes.ts#refusePackageRequest` | 2 | 52, 54 |
 | `packages/rest/src/rest-server.ts#enforceAuth` | 1 | 18 |
 | `packages/rest/src/rest-server.ts#mayReadAuthoringTrail` | 1 | 8b |

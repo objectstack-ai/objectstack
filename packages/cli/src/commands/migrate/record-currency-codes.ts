@@ -304,6 +304,13 @@ export default class MigrateRecordCurrencyCodes extends Command {
 
       if (report.failures.length > 0) {
         printError(`${report.failures.length} row(s) could not be written — re-run to finish them.`);
+      } else if (report.truncated) {
+        // The cap cut the walk short: neither "done" nor "nothing to do" is known.
+        printWarning(
+          `Walk incomplete — ${report.scannedRecords} row(s) examined, ${report.codeless} codeless` +
+            (apply ? `, ${report.written} written` : '') +
+            '. Re-run without --max-records (or with a higher one) to finish.',
+        );
       } else if (apply && report.written > 0) {
         printSuccess(
           `Wrote ${report.code} on ${report.written} row(s). ` +
