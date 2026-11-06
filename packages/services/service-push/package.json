@@ -2,7 +2,7 @@
   "name": "@objectstack/service-push",
   "version": "18.2.0",
   "license": "Apache-2.0",
-  "description": "Push service for ObjectStack — IPushService over the APNs (token auth) and FCM HTTP v1 transports, configured by PushServiceConfigSchema with credentials by reference.",
+  "description": "Push service for ObjectStack — IPushService over the hosted push relay (cloud binding credential) and the APNs (token auth) and FCM HTTP v1 transports, configured by PushServiceConfigSchema with credentials by reference.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
