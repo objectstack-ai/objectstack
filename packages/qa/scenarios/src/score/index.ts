@@ -15,19 +15,25 @@
  */
 
 import type { LoadedScenario } from '../loader.js';
+import { scenarioNamespace } from '../schema.js';
 import { gradeOperation, type OperationGrade, type OperationObservation } from './scenario-operation-grade.js';
 import { gradePersonaRun, type HiddenScope, type PersonaRunGrade, type RunTranscript } from './scenario-run-grade.js';
 import { scoreScenarioArtifact, type ScenarioArtifactScore } from './scenario-tags.js';
 
 export * from './scenario-graph.js';
+export * from './scenario-naming.js';
 export * from './scenario-operation-grade.js';
 export * from './scenario-run-grade.js';
 export * from './scenario-score.js';
 export * from './scenario-tags.js';
 
-/** Score one built artifact against one loaded card: `expect`, capability tags and agent actions. */
+/**
+ * Score one built artifact against one loaded card: `expect`, capability tags,
+ * agent actions, and every non-object item named without the card's namespace
+ * prefix (`demo` + code) as a failing check of its own.
+ */
 export function scoreCardArtifact(scenario: LoadedScenario, artifact: unknown): ScenarioArtifactScore {
-  return scoreScenarioArtifact(artifact, scenario.card);
+  return scoreScenarioArtifact(artifact, scenario.card, { namespace: scenarioNamespace(scenario.card) });
 }
 
 /** Judge one observed write against the outcome the card declares for operation `operationId`. */

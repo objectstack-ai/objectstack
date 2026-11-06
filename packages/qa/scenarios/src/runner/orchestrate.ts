@@ -15,11 +15,18 @@
  *             A refused install (`UNCOPYABLE`, …) is a finding, recorded and
  *             never worked around.
  *
+ * Names: the app is always in the card's own namespace, `demo` + its code
+ * (`democrm`). Scratch mode scaffolds the project under that name; template
+ * mode installs a template that declares it into a host of its own
+ * (`templateHostName`). A project or template declaring any other namespace is
+ * skipped with the reason, never read against it.
+ *
  * Scoring is `@objectstack/scenarios/score` (ruling D on #30291) and nothing
  * else; this module only gathers what the graders take.
  */
 
 import { applyExpectDelta, type LoadedScenario } from '../loader.js';
+import { scenarioNamespace } from '../schema.js';
 import {
   gradeCardAnswer,
   gradeCardOperation,
@@ -31,7 +38,7 @@ import {
 } from '../score/index.js';
 import type { AppHarness, PersonaAccount } from './app.js';
 import type { AgentDriver, StepRef } from './driver.js';
-import { citationLabels, namespaceOfArtifact, namespacedScenario } from './namespace.js';
+import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
 import { observeOperation, touchedRowId, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
 import { buildPrompt, iteratePrompt, operationPrompt, personaHandles, questionPrompt, templateIteratePrompt, verifyFlags } from './prompts.js';
@@ -46,12 +53,17 @@ export interface BootedApp {
 }
 
 export interface ProjectOps {
-  scaffold(name: string): Promise<{ dir: string; result: CommandResult }>;
+  /**
+   * `npm create objectstack <name>` in a directory of its own, `under` (one per
+   * card and mode): the project name is what the scaffolder derives the
+   * namespace from, so two modes of one card cannot share a parent.
+   */
+  scaffold(name: string, under: string): Promise<{ dir: string; result: CommandResult }>;
   os(dir: string, args: readonly string[]): Promise<CommandResult>;
   readArtifact(dir: string): unknown | undefined;
   boot(dir: string): Promise<BootedApp>;
   harness(url: string): AppHarness;
-  /** The `namespace` the scaffolded project's manifest declares (card objects are read relative to it). */
+  /** The `namespace` the scaffolded project's manifest declares; checked against the card's own before a build. */
   namespace?(dir: string): string | undefined;
 }
 
@@ -175,6 +187,17 @@ export function changeSize(before: unknown, after: unknown): ChangeSize {
   return { added, removed, changed, total: added.length + removed.length + changed.length };
 }
 
+/** `artifact` less every item `baseline` carries (by collection and name): an environment's metadata minus what was there before. */
+export function withoutItems(artifact: Record<string, unknown[]>, baseline: Record<string, unknown[]>): Record<string, unknown[]> {
+  const nameOf = (item: unknown) => (typeof item === 'object' && item !== null ? (item as { name?: unknown }).name : undefined);
+  return Object.fromEntries(
+    Object.entries(artifact).map(([key, items]) => {
+      const there = new Set((baseline[key] ?? []).map(nameOf));
+      return [key, items.filter((item) => !there.has(nameOf(item)))];
+    }),
+  );
+}
+
 /** Seed objects in lookup order: a row's lookup target is inserted before it. */
 export function seedOrder(scenario: LoadedScenario): string[] {
   const { seed } = scenario.card.run;
@@ -281,7 +304,7 @@ export async function runHalf(
   try {
     await app.signInAdmin();
     for (const p of card.run.personas) {
-      const acct = await app.createPersona(p.id);
+      const acct = await app.createPersona(p.id, permissionSetName(card, p.id));
       accounts.push(acct);
       const { apiKey: _k, ...shown } = acct;
       half.personas.push(shown);
@@ -371,19 +394,26 @@ async function withApp<T>(ops: ProjectOps, dir: string, findings: string[], use:
 
 // ── The modes ───────────────────────────────────────────────────────────────
 
-/** Did the build pass — every counted check of the card's `expect`? */
-export const buildPassed = (b: BuildHalf | undefined): boolean => !!b?.score && b.score.expect.checks.length > 0 && b.score.expect.checks.every((c) => c.pass);
+/** Did the build pass — every counted check of the card's `expect`, and no bare item name? */
+export const buildPassed = (b: BuildHalf | undefined): boolean =>
+  !!b?.score && b.score.expect.checks.length > 0 && [...b.score.expect.checks, ...b.score.naming].every((c) => c.pass);
 
 async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: ProjectOps, opts: RunOptions): Promise<{ mode: ModeRun; verified?: unknown }> {
   const mode: ModeRun = { mode: 'scratch', findings: [] };
-  const { dir, result } = await ops.scaffold(`${original.card.id.replace(/_/g, '-')}-scratch`);
+  // The project is named after the card's namespace, which is what the scaffolder derives its namespace from.
+  const ns = scenarioNamespace(original.card);
+  const { dir, result } = await ops.scaffold(ns, `${original.card.id.replace(/_/g, '-')}-scratch`);
   if (result.exit !== 0) {
     mode.skipped = `scaffold failed: ${result.tail.slice(-500)}`;
     return { mode };
   }
-  const ns = ops.namespace?.(dir);
-  const scenario = namespacedScenario(original, ns);
-  const labels = citationLabels(original, ns);
+  const declared = ops.namespace ? ops.namespace(dir) : ns;
+  if (declared !== ns) {
+    mode.skipped = `the scaffolded project declares namespace \`${declared ?? '(none)'}\`, not the card's \`${ns}\`: its names would not be the card's`;
+    return { mode };
+  }
+  const scenario = namespacedScenario(original);
+  const labels = citationLabels(original);
   const card = scenario.card;
   const ref = { card: card.id, mode: 'scratch' as const };
   mode.build = await buildHalf(scenario, dir, ops, async () => (await driver.author({ ...ref, phase: 'build', step: 'author', cwd: dir, prompt: buildPrompt(card) })).turn, scenario);
@@ -402,17 +432,23 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
 }
 
 async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: ProjectOps, opts: RunOptions, verified: { artifact: unknown; source: string } | undefined): Promise<ModeRun> {
-  // The installed copy keeps the TEMPLATE's namespace, not the blank project's.
-  const ns = verified ? namespaceOfArtifact(verified.artifact) : undefined;
-  const scenario = namespacedScenario(original, ns);
-  const labels = citationLabels(original, ns);
+  // The installed copy keeps the TEMPLATE's namespace, which must be the card's own.
+  const ns = scenarioNamespace(original.card);
+  const scenario = namespacedScenario(original);
+  const labels = citationLabels(original);
   const card = scenario.card;
   const mode: ModeRun = { mode: 'template', findings: [] };
   if (!verified) {
     mode.skipped = 'no verified build of this card to install: the from-scratch build did not pass and no template was supplied';
     return mode;
   }
-  const { dir, result } = await ops.scaffold(`${card.id.replace(/_/g, '-')}-template`);
+  const templateNs = namespaceOfArtifact(verified.artifact);
+  if (templateNs !== ns) {
+    mode.skipped = `the template declares namespace \`${templateNs ?? '(none)'}\`, not the card's \`${ns}\`: its names would not be the card's`;
+    return mode;
+  }
+  // The blank host gets a namespace of its own (`templateHostName` says why).
+  const { dir, result } = await ops.scaffold(templateHostName(original.card), `${card.id.replace(/_/g, '-')}-template`);
   if (result.exit !== 0) {
     mode.skipped = `scaffold failed: ${result.tail.slice(-500)}`;
     return mode;
@@ -421,6 +457,9 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
   await withApp(ops, dir, mode.findings, async (app, booted) => {
     await app.signInAdmin();
     const { manifest, installModesSupplied } = installableManifest(verified.artifact);
+    const collections = Object.keys(manifest).filter((k) => Array.isArray(manifest[k]));
+    // What the environment serves before the copy lands — the platform's own items (`setup`, `admin_full_access`, …) and the host's — is not the app.
+    const baseline = await app.metadataAsArtifact(collections);
     const install = await app.installUnmanaged(manifest);
     mode.template = {
       source: verified.source,
@@ -431,7 +470,6 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
       mode.findings.push(`unmanaged install refused: ${install.status} ${install.code ?? ''} ${install.message ?? ''}`.trim());
       return;
     }
-    const collections = Object.keys(manifest).filter((k) => Array.isArray(manifest[k]));
     const before = await app.metadataAsArtifact(collections);
     const build: BuildHalf = { commands: [], score: null };
     try {
@@ -442,7 +480,7 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
     }
     const after = await app.metadataAsArtifact(collections);
     try {
-      build.score = scoreCardArtifact(iterated, after);
+      build.score = scoreCardArtifact(iterated, withoutItems(after, baseline));
     } catch (e) {
       build.error = build.error ?? `score: ${errText(e)}`;
     }
