@@ -72,7 +72,7 @@ async function boot(): Promise<ObjectQL> {
 
 /** An event row stored in `organization`, as the emit path stores it. */
 async function stored(ql: ObjectQL, organization: string, topic: string): Promise<void> {
-    await ql.insert('sys_notification', { topic, title: topic }, { context: { isSystem: true, tenantId: organization } as ExecutionContext });
+    await ql.insert('sys_notification', { topic }, { context: { isSystem: true, tenantId: organization } as ExecutionContext });
 }
 
 function channel(id: string): MessagingChannel {
