@@ -4656,17 +4656,35 @@ jobs:
   # over stays in `test:e2e:live:nightly` instead of joining the `:ci`
   # allowlist.
   #
-  # Ceiling: there is no CI population yet, so it is derived from one cold
-  # local run on 4 shared cores (#27154, 2026-10-28), by the rule above Lint UI:
-  # install 60 s + closure build 384 s + Console build 119 s + backend boot
-  # 19 s + specs 26 s + browser provisioning and setup ~120 s ≈ 730 s
-  # (12.2 min) => max(36.5, 27.2) => 40. Re-derive from the first population.
+  # Ceiling, by the rule above Lint UI, re-derived from the first CI population
+  # (#27228). Population: every `CI` run on `main` with event `push` or
+  # `schedule` and status `completed`, created between #27212's merge
+  # (2026-10-28T11:47:32Z) and 2026-11-06T05:50:51Z: 1,230 runs (1,177 push,
+  # 53 schedule), read from
+  #   GET repos/{owner}/{repo}/actions/workflows/ci.yml/runs
+  #       ?branch=main&event=push|schedule&status=completed&created=A..B
+  # in two-day windows (one listing answers at most 1,000 runs), and this
+  # job's check-run on each head sha from
+  #   GET repos/{owner}/{repo}/commits/{sha}/check-runs?check_name=Live E2E UI
+  # kept when its job URL names one of those runs. Duration is `completed_at`
+  # minus `started_at`. Every run carries the job: 1,131 success (1,078 push,
+  # 53 schedule), 95 skipped, 2 failure (423 s, 316 s), 2 cancelled (91 s,
+  # 0 s); none reached the old ceiling.
+  #   - success: n=1131, min 68 s, median 326 s, p95 551 s, p99 578 s,
+  #     max 627 s (10.45 min) => max(31.35, 25.45) => 35.
+  # The slow tail is the cold case: the five slowest (627, 611, 600, 596,
+  # 590 s) spend 393-442 s in the closure build, at or above the 384 s of
+  # the cold local run on 4 shared cores (#27154) that set the old 40
+  # (≈ 730 s => max(36.5, 27.2) => 40), so the measured max, not that
+  # estimate, is the slowest successful run.
+  # Re-derive when the job's work changes; ui/scripts/__tests__/
+  # turbo-cache-save-bound.test.ts holds the value.
   live-e2e-ui:
     name: Live E2E UI
     needs: filter
     if: ${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false' || needs.filter.outputs.core != 'false') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 35
     permissions:
       contents: read
     env:

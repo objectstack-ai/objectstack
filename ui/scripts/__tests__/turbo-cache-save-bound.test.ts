@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import { parse as parseYaml } from 'yaml';
 
-import { rootCiPath, UI_JOBS } from './helpers/root-ci';
+import { rootCiPath, UI_JOBS, UI_LIVE_E2E_JOB } from './helpers/root-ci';
 
 /**
  * objectui#6577 — cache bookkeeping voided a verdict the gate had already
@@ -69,13 +69,24 @@ const CACHE_JOBS = [DEPS_JOB, ...Object.values(UI_JOBS)];
  *     was "does not rise" (#6577's ruled-out non-fix).
  *   - lint-ui, build-e2e-ui: #25869 row F13, the ceiling comment above lint-ui.
  *   - ui-deps: the derivation on that job.
+ *   - live-e2e-ui: the derivation on that job, by the lint-ui rule over its
+ *     first `main` population (objectstack#27228). It saves no cache, so it
+ *     is pinned here for its ceiling alone, not one of `CACHE_JOBS`.
  */
 const CEILINGS: Record<string, number> = {
   [DEPS_JOB]: 25,
   [UI_JOBS.typeCheck]: 40,
   [UI_JOBS.lint]: 40,
   [UI_JOBS.buildE2e]: 35,
+  [UI_LIVE_E2E_JOB]: 35,
 };
+
+/** The pinned jobs whose ceiling in `wf` is not the pinned value, as `key: found ≠ pinned`. */
+function movedCeilings(wf: { jobs: Record<string, Job> }): string[] {
+  return Object.entries(CEILINGS)
+    .filter(([key, pinned]) => wf.jobs[key]?.['timeout-minutes'] !== pinned)
+    .map(([key, pinned]) => `${key}: ${wf.jobs[key]?.['timeout-minutes']} ≠ ${pinned}`);
+}
 
 function job(key: string): Job {
   const found = workflow.jobs[key];
@@ -196,6 +207,18 @@ describe('root ci.yml — the ui jobs\' cache saves are bounded and non-fatal (o
     // check still reports `cancelled` (objectui#6577, objectui#7048). Moving
     // one is a deliberate act: re-derive it beside the job, move it here.
     expect(job(key)['timeout-minutes'], `the \`${key}\` job ceiling moved`).toBe(ceiling);
+    expect(movedCeilings(workflow).filter((m) => m.startsWith(`${key}:`))).toEqual([]);
+  });
+
+  it('the ceiling pin fires on a moved Live E2E UI ceiling — the control', () => {
+    // The value it carried before the re-derivation, and a job that lost its
+    // ceiling altogether: each must read as moved, and nothing else may.
+    const moved = structuredClone(workflow);
+    moved.jobs[UI_LIVE_E2E_JOB]['timeout-minutes'] = 40;
+    expect(movedCeilings(moved)).toEqual([`${UI_LIVE_E2E_JOB}: 40 ≠ 35`]);
+    delete moved.jobs[UI_LIVE_E2E_JOB]['timeout-minutes'];
+    expect(movedCeilings(moved)).toEqual([`${UI_LIVE_E2E_JOB}: undefined ≠ 35`]);
+    expect(movedCeilings(workflow)).toEqual([]);
   });
 });
 
