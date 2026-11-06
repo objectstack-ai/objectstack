@@ -1101,6 +1101,39 @@ describe('validateSecurityPosture · controlled_by_parent with no relation (#750
     expect(authoring[0]).toMatchObject({ severity: 'error', path: 'objects[1].fields.order.required' });
   });
 
+  // [#30905 ruling A · ADR-0055 §1 as amended] The only master_detail,
+  // declared `required: false`, is the optional master: it resolves.
+  it('stays silent on the OPTIONAL master — the only master_detail, declared required: false', () => {
+    expect(
+      cbpOnly(cbpStack({ order: { name: 'order', type: 'master_detail', reference: 'work_order', required: false } })),
+    ).toEqual([]);
+    expect(
+      cbpOnly(cbpStack([{ name: 'order', type: 'master_detail', reference: 'work_order', required: false }])),
+    ).toEqual([]);
+  });
+
+  it('errors on two master_details declared required: false — neither is the one master', () => {
+    expect(
+      cbpOnly(
+        cbpStack({
+          a: { name: 'a', type: 'master_detail', reference: 'work_order', required: false },
+          b: { name: 'b', type: 'master_detail', reference: 'work_order', required: false },
+        }),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('a required master beside a master_detail declared required: false: the required one is the master', () => {
+    expect(
+      cbpOnly(
+        cbpStack({
+          order: { name: 'order', type: 'master_detail', reference: 'work_order', required: true },
+          other: { name: 'other', type: 'master_detail', reference: 'work_order', required: false },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
   // Step 3 used to be pinned silent here; it is HotCRM's
   // `crm_campaign_member` / `crm_event_attendee` / `crm_article_feedback` shape.
   it('errors on a REQUIRED lookup (the retired third tier)', () => {
@@ -1169,7 +1202,16 @@ describe('validateSecurityPosture · controlled_by_parent with no relation (#750
   // ── ONE rule, read by the parse and by this linter — held equal ─────────
   it.each([
     ['one required master_detail', { order: { type: 'master_detail', label: 'O', reference: 'work_order', required: true } }, []],
-    ['a non-required master_detail', { order: { type: 'master_detail', label: 'O', reference: 'work_order' } }, ['sharingModel']],
+    // [#30905 ruling A] The optional master: accepted by both.
+    ['the only master_detail, required: false', { order: { type: 'master_detail', label: 'O', reference: 'work_order', required: false } }, []],
+    [
+      'two master_details, neither required',
+      {
+        a: { type: 'master_detail', label: 'A', reference: 'work_order', required: false },
+        b: { type: 'master_detail', label: 'B', reference: 'work_order' },
+      },
+      ['sharingModel'],
+    ],
     ['a required lookup', { order: { type: 'lookup', label: 'O', reference: 'work_order', required: true } }, ['sharingModel']],
     ['no relation', { note: { type: 'text', label: 'N' } }, ['sharingModel']],
     [
@@ -1190,6 +1232,33 @@ describe('validateSecurityPosture · controlled_by_parent with no relation (#750
       .filter((f) => f.rule === SECURITY_CBP_NO_RELATION || f.rule === SECURITY_CBP_AMBIGUOUS_RELATION)
       .map((f) => f.path.replace(/^objects\[1\]\./, ''));
     expect(lint).toEqual(parsePaths);
+  });
+});
+
+// [#30905 ruling A] The one recorded divergence between the parse and this
+// linter. The parse reads the PARSED map, where an omitted `required` is
+// `false`, so it admits the only master_detail without one as the optional
+// master; this linter reads the authored shape, sees the omission, and
+// resolves no master (the runtime's unparsed read agrees); the data-model rule
+// reports it at `error` with both spellings. `ObjectSchema.create()` reads the
+// omission as `required: true`.
+describe('validateSecurityPosture · an omitted required on the only master_detail (#30905 ruling A)', () => {
+  it('the parse admits it as optional; this linter and the data-model rule refuse it', () => {
+    const fields = { order: { type: 'master_detail', label: 'O', reference: 'work_order' } };
+    const child = { name: 'work_order_item', label: 'Work Order Item', sharingModel: 'controlled_by_parent', fields };
+    expect(cbpParseIssuePaths(child)).toEqual([]);
+    const stack = {
+      objects: [
+        { name: 'work_order', label: 'Work Order', sharingModel: 'private', fields: { name: { name: 'name', label: 'Name' } } },
+        child,
+      ],
+    };
+    expect(validateSecurityPosture(stack).filter((f) => f.rule === SECURITY_CBP_NO_RELATION)).toHaveLength(1);
+    const authoring = lintDataModel(stack.objects as any[]).filter(
+      (issue) => issue.rule === 'relationship/master-detail-required',
+    );
+    expect(authoring).toHaveLength(1);
+    expect(authoring[0]).toMatchObject({ severity: 'error', path: 'objects[1].fields.order.required' });
   });
 });
 
@@ -2021,6 +2090,9 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
       // #30303: the shared extension fold's own collections (`object-graph.ts`, scanned with this rule) —
       // JS Map / Set / Array methods, and `other.carrier`, the fold's own record of a package's entry.
       'byTarget', 'kept', 'other', 'list', 'lastWriter', 'tiedKeys', 'tied',
+      // #30905: `cbpMasterCandidates`' required-master list (`.length`, a JS property) and the spec
+      // resolver's answer (`controlledByParentMasterOf`: `.field` / `.optional`, fields of its own return value).
+      'requiredMasters', 'master',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
