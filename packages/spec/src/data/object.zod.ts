@@ -5152,8 +5152,10 @@ function fieldPatchesDescription(): string {
     '(`mergeObjectDefinitions`) after the additive merges, on every object read: a tenant\'s own text keeps ' +
     'winning, and between two extensions the higher `priority` wins. A patch naming a field or option value ' +
     'the target does not have is refused at install and by `os validate`; a field the same extension ' +
-    'replaces in `fields` is refused here. Example: `fieldPatches: { industry: { label: \'Sector\', ' +
-    'inlineHelpText: \'The market the account sells into\', options: { technology: { label: \'Tech\' } } } }`.'
+    'replaces in `fields` is refused here. An option of a field bound to a shared `picklist` is never ' +
+    'patchable: its labels are the picklist\'s, so only a field declaring its own `options` takes an option ' +
+    'patch. Example: `fieldPatches: { industry: { label: \'Sector\', inlineHelpText: \'The market the ' +
+    'account sells into\' }, type: { options: { customer: { label: \'Client\' } } } }`.'
   );
 }
 
@@ -5168,7 +5170,9 @@ function fieldPatchesDescription(): string {
  *   fields: { sales_stage: Field.select([...]) },
  *   // A base field's display properties only (ADR-0146 D10), applied by the
  *   // registry merge (`mergeObjectDefinitions`) — see `fieldPatches`.
- *   fieldPatches: { industry: { label: 'Sector', options: { technology: { label: 'Tech' } } } },
+ *   // Where `industry` is picklist-bound, as on HotCRM's `crm_account`, its options are not
+ *   // patchable (its display keys are); an option patch goes on a field declaring its own options.
+ *   fieldPatches: { industry: { label: 'Sector' }, type: { options: { customer: { label: 'Client' } } } },
  * }]
  * ```
  */
