@@ -207,6 +207,14 @@ export interface ApprovalResumeSurface {
      */
     resumedBy?: string;
     /**
+     * The administrator impersonating {@link resumedBy} when the decision came
+     * from an impersonation session (`ResumeSignal.impersonatedBy`), read off
+     * the decision request's context ({@link impersonatorOf}); the engine
+     * stamps it on the decider's segment. Absent when the decider acted in
+     * their own name, and never sent without `resumedBy`.
+     */
+    impersonatedBy?: string;
+    /**
      * #3801: the engine refuses a resume of an `approval` suspension unless
      * the signal carries this marker — the proof that the resume is the tail
      * of a decision THIS service already authorized and recorded, not a raw
@@ -960,6 +968,13 @@ export interface StrandedContinuationSignal {
    * original carried none.
    */
   resumedBy?: string;
+  /**
+   * The administrator the original resume named as impersonating
+   * {@link resumedBy} (`ResumeSignal.impersonatedBy`), so a replay stamps the
+   * decider's segment exactly as the decision did. Absent when the original
+   * carried none.
+   */
+  impersonatedBy?: string;
 }
 
 /**
@@ -1108,6 +1123,18 @@ const RECORD_DELETE_CANCEL_LIMIT = 200;
 function actingUserId(context: ExecutionContext | undefined): string | null {
   const userId = context?.userId;
   return typeof userId === 'string' && userId ? userId : null;
+}
+
+/**
+ * The administrator a request's context names as impersonating its user — the
+ * session-resolved, attribution-only `ExecutionContext.impersonatedBy` — as a
+ * non-blank string, or `undefined`. Never read off a caller's input.
+ */
+function impersonatorOf(context: ExecutionContext | undefined): string | undefined {
+  const by = context?.impersonatedBy;
+  if (typeof by !== 'string') return undefined;
+  const trimmed = by.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 /**
@@ -5268,7 +5295,7 @@ export class ApprovalService implements IApprovalService {
    */
   private async serviceResume(
     runId: string,
-    signal: { output?: Record<string, unknown>; branchLabel?: string; resumedBy?: string },
+    signal: { output?: Record<string, unknown>; branchLabel?: string; resumedBy?: string; impersonatedBy?: string },
   ): Promise<{ runId: string; repairable: boolean; error: string } | undefined> {
     const result = await this.automation!.resume!(runId, { ...signal, [RESUME_AUTHORITY_SERVICE]: true });
     const reported = result as
@@ -5485,7 +5512,7 @@ export class ApprovalService implements IApprovalService {
     runId: string,
     requestId: string,
     what: string,
-    signal: { output?: Record<string, unknown>; branchLabel?: string; resumedBy?: string },
+    signal: { output?: Record<string, unknown>; branchLabel?: string; resumedBy?: string; impersonatedBy?: string },
     decision: string,
   ): Promise<{ resumed: boolean; resumeError?: string; resumeFailure?: ResumeFailureReport }> {
     const missing = this.missingRunCapability(runId, requestId, what, 'resume');
@@ -5546,6 +5573,7 @@ export class ApprovalService implements IApprovalService {
         await this.journalStrandedContinuation(requestId, {
           branchLabel: signal.branchLabel, output: signal.output, decision, what,
           ...(signal.resumedBy ? { resumedBy: signal.resumedBy } : {}),
+          ...(signal.resumedBy && signal.impersonatedBy ? { impersonatedBy: signal.impersonatedBy } : {}),
         });
       }
       throw strandedDecisionFailure(
@@ -5618,6 +5646,11 @@ export class ApprovalService implements IApprovalService {
       // vouches for nobody, so its auto-decision names no decider and the run
       // keeps the identity it had.
       const decider = actingUserId(context);
+      // The administrator at the keyboard when this decision came from an
+      // impersonation session, off the decision request's own context (the
+      // session), never off the input: the decider's segment names them, as
+      // the decision's own audit row does. Only beside a decider.
+      const impersonatedBy = decider ? impersonatorOf(context) : undefined;
       const outcome = await this.resumeRecordedOutcome(
         result.runId, requestId, `the ${result.decision} decision`,
         {
@@ -5629,6 +5662,7 @@ export class ApprovalService implements IApprovalService {
           // whitelist already rejects them; this is defense in depth).
           output: { ...(result.outputs ?? {}), decision: result.decision, requestId },
           ...(decider ? { resumedBy: decider } : {}),
+          ...(impersonatedBy ? { impersonatedBy } : {}),
         },
         result.decision,
       );
@@ -8025,6 +8059,11 @@ export class ApprovalService implements IApprovalService {
         // The journalled decider (ruling A): the replayed nodes after the
         // decision run as the person who decided, not as the run's trigger.
         ...(typeof signal.resumedBy === 'string' && signal.resumedBy ? { resumedBy: signal.resumedBy } : {}),
+        // The journalled impersonator beside that decider: the replayed
+        // segment is stamped exactly as the decision's own resume would have.
+        ...(typeof signal.resumedBy === 'string' && signal.resumedBy
+          && typeof signal.impersonatedBy === 'string' && signal.impersonatedBy.trim()
+          ? { impersonatedBy: signal.impersonatedBy.trim() } : {}),
       },
       signal.decision,
     );

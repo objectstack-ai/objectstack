@@ -6069,7 +6069,17 @@ export class AutomationEngine implements IAutomationService {
      *  - a decider the signal names WITHOUT the service marker: only the
      *    service that authenticated and recorded the decision may name its
      *    decider, and an HTTP body cannot carry the symbol;
-     *  - a decider who is already the run's acting user.
+     *  - a decider who is already the run's acting user, but for the
+     *    impersonation stamp below.
+     *
+     * Whoever decides, the decider's segment carries exactly the decision's
+     * own {@link ResumeSignal.impersonatedBy} as its
+     * {@link AutomationContext.impersonatedBy} — the administrator who decided
+     * while impersonating the decider, as the owning service read it off the
+     * decision request's session — and none when the decider acted in their
+     * own name. The stamp of the write that started the run never survives
+     * into a human decider's segment. Attribution only, like the stamp it
+     * replaces.
      *
      * On a resolution failure the decider's segment carries no positions or
      * permission sets, so its data operations fall back to the baseline member
