@@ -510,7 +510,10 @@ export const CEILINGS = new Map([
   // shrank to 689 characters (card item 3). One pointer line per moved block.
   // 6128 -> 6123: A2′ — the release-stamp line left the count (see
   // STAMP_LINE_REPIN); the file's count fell by the same 5, headroom unchanged.
-  ['skills/objectstack-data/SKILL.md', 6123],
+  // 6123 -> 6078: re-locked at the landed count. The rule index's `rules/lifecycle.md`
+  // entry names the save notice (+16); the `lifecycle` property row dropped the
+  // bounding-policy clause that entry and `rules/lifecycle.md` already carry (-25).
+  ['skills/objectstack-data/SKILL.md', 6078],
   ['skills/objectstack-formula/SKILL.md', 5997], //     -53 (was 6055), then -5 A2′ (was 6002)
   ['skills/objectstack-i18n/SKILL.md', 6333], //        -11 (was 6349), then -5 A2′ (was 6338)
   // 12705 -> 12984 (2026-08-31 app-repo-principles raise, see the block above).
@@ -678,7 +681,12 @@ export const CEILINGS = new Map([
   // headings); the row carried 2,727 tokens of headroom left by an earlier
   // shrink that nobody re-locked, so the TOC needed no raise. Pinned AT the
   // measurement — zero headroom, the ratchet's steady state.
-  ['skills/objectstack-data/references/data-hooks.md', 10066],
+  // 10066 -> 10011: re-locked at the landed count. A `ctx.notice` row in the sandbox
+  // table and a `notice?` member in the HookContext listing (+95), paid by three
+  // same-file restatements: the reverse-engineering aside in the `body` intro, the
+  // `tenantId` blockquote (the listing comment and the two-axes note say both
+  // halves) and the `ctx.user` paragraph under the `??` line that shows it (-141).
+  ['skills/objectstack-data/references/data-hooks.md', 10011],
   ['skills/objectstack-data/rules/datasources.md', 911],
   // -552 (was 3584): re-locked at the landed count (#16374) after PR #16187
   // (the two `tree` rows) and PR #16369 (the ASCII decision tree deleted)
