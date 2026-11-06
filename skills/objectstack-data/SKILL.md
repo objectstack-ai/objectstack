@@ -337,7 +337,7 @@ See [rules/indexing.md](./rules/indexing.md) for composite indexes, unique scope
 refused), the retired `type` / `partial`, and partial / gin / gist indexes at the
 database layer.
 
-→ Moved verbatim to [references/examples-objects.md](./references/examples-objects.md) § Lifecycle Hooks (the hooks reference itself is [references/data-hooks.md](./references/data-hooks.md)).
+→ Moved verbatim to [references/examples-objects.md](./references/examples-objects.md) § Lifecycle Hooks.
 
 ---
 
@@ -346,7 +346,8 @@ database layer.
 To add fields/validations/indexes to an object you do not own, author
 `defineObjectExtension({ extend, fields, fieldPatches, priority })` and register it on
 `defineStack({ objectExtensions: [...] })`. `priority` sets merge order (default
-`200`, range `0–999`); an extension can add but never remove. ⛔ Not the same key
+`200`, range `0–999`); an extension can add but never remove, except that a new
+`label` without `pluralLabel` clears the base plural unless a tenant authored it (set both). ⛔ Not the same key
 as object-level `ownership` (the record-ownership enum
 `'user' | 'business_unit' | 'org' | 'none'`). Schema:
 `node_modules/@objectstack/spec/src/data/object.zod.ts` (`ObjectExtensionSchema`).
