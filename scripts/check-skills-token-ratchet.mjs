@@ -496,8 +496,9 @@ export const CEILINGS = new Map([
   // objectstack-platform's bootstrap reference), the "When to Use" restatement
   // of the assignment-rules heading and the scaffolded-project validate line
   // (objectstack-formula's Verify section). Re-locked AT the measurement,
-  // headroom 0 tokens.
-  ['skills/objectstack-automation/SKILL.md', 6448],
+  // headroom 0 tokens — 6448 at first, then 6444 once the bare-name phase-2
+  // rename (crm_ prefixes, "The third automation family" cut) merged in.
+  ['skills/objectstack-automation/SKILL.md', 6444],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:

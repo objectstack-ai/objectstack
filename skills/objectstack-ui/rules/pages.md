@@ -101,7 +101,7 @@ a list prints as shown via the view's `allowPrinting`.
 import { definePage } from '@objectstack/spec/ui';
 
 export const InvoicePrintPage = definePage({
-  name: 'invoice_print', label: 'Invoice', type: 'record', object: 'invoice',
+  name: 'crm_invoice_print', label: 'Invoice', type: 'record', object: 'invoice',
   print: { paperSize: 'A4', margins: { top: 15, right: 12, bottom: 15, left: 12 },
            repeatHeader: true, repeatFooter: true, pageNumbers: true },
   regions: [
@@ -149,7 +149,7 @@ on unknown tags / missing required props / forbidden constructs (event handlers,
 
 ```typescript
 export const ReleaseNotesPage = definePage({
-  name: 'release_notes', label: 'Release Notes', type: 'home', kind: 'html',
+  name: 'crm_release_notes', label: 'Release Notes', type: 'home', kind: 'html',
   source: `
 <flex direction="col" gap={6} style={{"maxWidth":"768px","margin":"0 auto","padding":"40px"}}>
   <h1 style={{"fontSize":"32px","fontWeight":700,"color":"hsl(var(--foreground))"}}>Release Notes</h1>
@@ -319,8 +319,7 @@ grounding the AI assistant reads about a package.
 2. **Namespace-prefixed filename.** The filename stem becomes the doc
    `name` (`^[a-z][a-z0-9_]*$`) and must start with the package namespace
    (`crm_…`). `os build` refuses a bare `user_guide`
-   (`docs/namespace-prefix`) — hygiene, not uniqueness: two packages
-   coexist on one bare name (ADR-0048 §3.4).
+   (`docs/namespace-prefix`).
 3. **Title** resolves: frontmatter `title:` → first `#` heading → `name`.
    Optional frontmatter `description:` is a one-line summary the docs portal
    shows under the title — add it on index/overview docs.

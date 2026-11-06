@@ -9,14 +9,13 @@ Grant CRUD access per object with boolean bits on a permission set:
 import { definePermissionSet } from '@objectstack/spec';
 
 export const salesUser = definePermissionSet({
-  name: 'sales_user',
+  name: 'crm_sales_user',
   objects: {
     account: { allowRead: true, allowCreate: true, allowEdit: true },
     contact: { allowRead: true },
   },
 });
 
-// Register it on the stack root under `permissions`:
 // defineStack({ permissions: [salesUser], ... })
 ```
 
@@ -167,8 +166,8 @@ rowLevelSecurity: [
 ## Positions grant only what they name; portal users are `external`
 
 - A position distributes **only** the sets its `permissionSets` names
-  (ADR-0131 D3/D4): `{ name: 'sales_rep', label: 'Sales Rep', permissionSets:
-  ['sales_user'] }`. A set that merely shares the position's name is reported,
+  (ADR-0131 D3/D4): `{ name: 'crm_sales_rep', label: 'Sales Rep', permissionSets:
+  ['crm_sales_user'] }`. A set that merely shares the position's name is reported,
   never granted; a name matching no set confers nothing.
 - A portal or partner user is an organization member on the `external`
   membership tier (closed list `owner`, `admin`, `delegated_admin`, `member`,

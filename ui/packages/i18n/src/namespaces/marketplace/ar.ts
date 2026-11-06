@@ -164,6 +164,21 @@ const ar = {
       unmanagedSuccess: "تم نسخ v{{version}} من \"{{name}}\" إلى وقت التشغيل هذا كبيانات وصفية خاصة به، في القاعدة {{base}}. النسخة قابلة للتحرير ولا تتلقى أي ترقية.",
       unmanagedStrippedLocks: "كانت الحزمة تقفل هذه العناصر. النسخة قابلة للتحرير، لذلك لم تُنسخ أقفالها:",
       unmanagedIgnored: "لا يدعم وقت التشغيل هذا التثبيت غير المُدار، لذلك ثُبّت \"{{name}}\" كحزمة مُدارة (مسجّلة كتعليمات برمجية) بدلاً من نسخه. رقِّ وقت التشغيل، ثم ألغِ تثبيت الحزمة وثبّتها مرة أخرى كنسخة غير مُدارة.",
+      // objectstack#30325 — the confirm in front of a local Install: what the
+      // install adds, read from the manifest it installs (MarketplacePackagePage).
+      preview: {
+        title: "تثبيت {{name}}؟",
+        reinstallTitle: "إعادة تثبيت {{name}}؟",
+        intro: "يضيف التثبيت ما يلي إلى وقت التشغيل هذا:",
+        reading: "جارٍ قراءة ما تضيفه هذه الحزمة…",
+        unreadable: "تعذّرت قراءة ما تضيفه هذه الحزمة قبل التثبيت. ستذكر نتيجة التثبيت ما تم تحميله.",
+        objects: "الكائنات",
+        permissionSets: "مجموعات الأذونات",
+        sampleRecords: "السجلات التجريبية",
+        atMost: "حتى {{count}}",
+        sampleNote: "تُحمَّل السجلات التجريبية مع التطبيق. يمكنك حذفها من هذه الصفحة بعد التثبيت.",
+        suggestsEveryone: "بعد التثبيت سيقترح منح «{{set}}» لجميع المستخدمين المسجّلين (موضع Everyone). لن يُمنح أي شيء حتى توافق.",
+      },
     },
     // objectui#12146 — the install dialog opened as an UPDATE of the copy
     // this environment holds (MarketplacePackagePage).

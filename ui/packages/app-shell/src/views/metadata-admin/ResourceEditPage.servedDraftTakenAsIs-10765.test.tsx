@@ -119,6 +119,9 @@ const mockClient = vi.hoisted(() => {
         overlay: eff,
         overlayScope: eff ? 'env' : null,
         effective: eff,
+        // The pending draft row as stored (objectstack#29814): the buffer of a
+        // type whose served reads are translated (objectstack#30786).
+        draft: server.drafts.get(k(type, name)) ?? null,
         editable: true,
         deletable: true,
         resettable: false,
