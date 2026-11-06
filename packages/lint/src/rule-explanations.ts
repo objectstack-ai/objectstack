@@ -921,6 +921,51 @@ const SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const SECURITY_ROLLUP_SOURCE_UNREADABLE_EXPLANATION: RuleExplanation = {
+  rule: 'security-rollup-source-unreadable',
+  covers: 'why a roll-up shows child data its reader cannot read',
+  paragraphs: [
+    'A `summary` field is a column stored on the parent. The engine recomputes it after every child write, ' +
+      'as the system and over the whole child collection, so the value is a property of the parent, never of ' +
+      'one reader\'s view of the children. On read the column answers only to the parent field\'s own ' +
+      'field-level security. A permission set that hides the aggregated child field (`readable: false`) or ' +
+      'grants no read on the child object therefore still reads the roll-up: the sum, average, minimum, ' +
+      'maximum or count of child values it cannot read one by one.',
+    'Reported for each permission set and each summary field the set can read: it grants read on the parent ' +
+      'object (its own entry, otherwise its `\'*\'` entry) and its own field entry does not hide the column. ' +
+      'A set with no entry for the column reads it, as the field merge does with an absent key. A set holding ' +
+      'View All or Modify All on the child reads every child field and row, so it is not reported. A `count` ' +
+      'reads no value, so only its child object is judged. A child object this stack does not define is not ' +
+      'judged. Each set is judged on its own: a holder of two sets reads what their union grants.',
+    'This is a warning, not an error: the pair is legal and is often meant, such as an order total shown to ' +
+      'staff who may not see line costs. If the value should not be visible to the set, hide the summary ' +
+      'column for it with `fields: { \'<object>.<summary>\': { readable: false } }`; a set that holds View All ' +
+      'or Modify All on the parent must drop that bit first, because the bypass makes the mask inert. If the ' +
+      'set may see the child data, grant the read on the child instead.',
+  ],
+};
+
+const SECURITY_ROLLUP_SOURCE_ROW_SCOPED_EXPLANATION: RuleExplanation = {
+  rule: 'security-rollup-source-row-scoped',
+  covers: 'why a roll-up counts child rows its reader cannot see',
+  paragraphs: [
+    'A `summary` field is recomputed as the system over the whole child collection and, on read, answers ' +
+      'only to the parent field\'s own field-level security. Row-level security on the child narrows which ' +
+      'child rows a reader sees, not what the roll-up adds up, so a reader whose rows are scoped still reads ' +
+      'a total, count or extreme taken over every child row of the parent.',
+    'Reported as a note when the permission set reads the summary column and the child object and field, and ' +
+      'its reads of the child meet a row policy: one of its own `rowLevelSecurity` entries that applies to a ' +
+      'read of the child (not `enabled: false`, `object` the child or `\'*\'`, `operation` `select` or ' +
+      '`all`) with a `using` predicate, or, when it carries no such entry, the child\'s `defaultRowScope`. ' +
+      'Only the policy\'s presence is judged, never its predicate: whether a predicate admits every row a ' +
+      'parent\'s roll-up reads depends on the data. A policy that lists `positions` narrows the rows of those ' +
+      'holders only, and the note names them. Record sharing (`sharingModel`, `readScope`) is not read.',
+    'If the roll-up should not be visible to the narrowed reader, hide the summary column for the set with ' +
+      '`fields: { \'<object>.<summary>\': { readable: false } }`. If the total over every row is meant, nothing ' +
+      'needs to change.',
+  ],
+};
+
 const SECURITY_OWD_ALIAS_EXPLANATION: RuleExplanation = {
   rule: 'security-owd-alias',
   covers: 'which sharing values are retired or misplaced',
@@ -5717,6 +5762,8 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SECURITY_WILDCARD_VAMA_EXPLANATION.rule]: SECURITY_WILDCARD_VAMA_EXPLANATION,
   [SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION.rule]: SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION,
   [SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION.rule]: SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION,
+  [SECURITY_ROLLUP_SOURCE_UNREADABLE_EXPLANATION.rule]: SECURITY_ROLLUP_SOURCE_UNREADABLE_EXPLANATION,
+  [SECURITY_ROLLUP_SOURCE_ROW_SCOPED_EXPLANATION.rule]: SECURITY_ROLLUP_SOURCE_ROW_SCOPED_EXPLANATION,
   [SECURITY_OWD_ALIAS_EXPLANATION.rule]: SECURITY_OWD_ALIAS_EXPLANATION,
   [SECURITY_DELEGATION_MISSING_REASON_EXPLANATION.rule]: SECURITY_DELEGATION_MISSING_REASON_EXPLANATION,
   [VISIBILITY_ROOT_MISLAYERED_EXPLANATION.rule]: VISIBILITY_ROOT_MISLAYERED_EXPLANATION,
