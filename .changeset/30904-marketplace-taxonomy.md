@@ -1,13 +1,13 @@
 ---
-'@objectstack/spec': patch
-'@objectstack/cli': patch
+'@objectstack/spec': minor
+'@objectstack/cli': minor
 'create-objectstack': patch
 ---
 
 feat(spec)!: one marketplace taxonomy — business functions, industries, a solution type and a maturity flag replace the single `category` (#30904)
 
-Clause-②: yes (widening) — new facet keys and `maturity`; it also narrows (`category` retired and refused by name); a contract review runs before the queue
-Metadata-protocol: none
+Clause-②: yes (narrowing) — new facet keys and `maturity` widen; `category` retired and refused by name narrows; a contract review runs before the queue
+Metadata-protocol: narrowed
 
 <!-- adr-0087: registered marketplace-category-retired -->
 
