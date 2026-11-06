@@ -7,7 +7,7 @@ import {
     type PushRelayPayload,
     type PushRelayRequest,
 } from '@objectstack/spec/api';
-import type { ICloudBindingService } from '@objectstack/spec/contracts';
+import { CLOUD_BINDING_SERVICE, type ICloudBindingService } from '@objectstack/spec/contracts';
 import type { PushRelayTransportConfigParsed, PushVendor } from '@objectstack/spec/system';
 import type { IPushTransport, PushMessage, PushSendResult } from '../push-service.js';
 
@@ -22,8 +22,13 @@ import type { IPushTransport, PushMessage, PushSendResult } from '../push-servic
  */
 export const PUSH_RELAY_PATH = '/api/v1/cloud/push/send';
 
-/** The kernel service the binding credential is read from (`ICloudBindingService`, `@objectstack/cloud-connection`). */
-export const CLOUD_BINDING_SERVICE = 'cloud-binding';
+/**
+ * The kernel service the binding credential is read from (`ICloudBindingService`,
+ * registered by `@objectstack/cloud-connection`). The name lives beside the
+ * contract in `@objectstack/spec/contracts`; re-exported here so this
+ * package's existing public export keeps its spelling and its value.
+ */
+export { CLOUD_BINDING_SERVICE };
 
 /**
  * The visible line a relay delivery shows when the caller names none: the

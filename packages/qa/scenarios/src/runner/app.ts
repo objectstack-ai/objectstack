@@ -23,6 +23,12 @@
  *   unmanaged install  POST /api/v1/marketplace/install-local { packageId, manifest,
  *                      installMode: 'unmanaged' } (ADR-0131 D6)
  *   metadata           GET  /api/v1/meta/:type
+ *   a persona's tool   POST /api/v1/mcp, a JSON-RPC `tools/call` with `Authorization:
+ *                      Bearer <its API key>` — the door the agent uses, so the probe of a
+ *                      validation operation meets the persona's own permissions and the
+ *                      app's validation exactly as the agent's write would. The tool's
+ *                      answer is its text content; a refusal is that text carrying
+ *                      `{ error: { code, status } }` with `isError` set.
  *
  * The data API's refusal is the flat `{ error, code }` envelope; the auth and
  * install doors answer `{ success: false, error: { code, message } }`. Both
@@ -55,6 +61,43 @@ export function codeOf(body: unknown): { code?: string; message?: string } {
   return {};
 }
 
+/** An MCP tool's answer: its text content, and whether the tool flagged it as an error. */
+export interface ToolAnswer {
+  output: unknown;
+  isError: boolean;
+}
+
+function isBag(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/**
+ * The JSON-RPC response in an MCP HTTP answer: the body itself (JSON response
+ * mode), or the first `data:` event carrying a result or an error (SSE).
+ */
+export function readJsonRpc(text: string): Record<string, unknown> | undefined {
+  const candidates = text.trimStart().startsWith('{')
+    ? [text]
+    : text.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice('data:'.length));
+  for (const c of candidates) {
+    try {
+      const msg: unknown = JSON.parse(c);
+      if (isBag(msg) && ('result' in msg || 'error' in msg)) return msg;
+    } catch {
+      /* not a JSON-RPC line */
+    }
+  }
+  return undefined;
+}
+
+/** A `tools/call` result as a {@link ToolAnswer}: its text blocks joined, as the agent's transcript reads them. */
+export function toolAnswerOf(result: unknown): ToolAnswer {
+  const r = isBag(result) ? result : {};
+  const content = Array.isArray(r.content) ? r.content : [];
+  const texts = content.filter(isBag).filter((c) => c.type === 'text' && typeof c.text === 'string').map((c) => c.text as string);
+  return { output: texts.length === content.length ? texts.join('\n') : content, isError: r.isError === true };
+}
+
 export interface PersonaAccount {
   persona: string;
   userId: string;
@@ -82,6 +125,8 @@ export interface AppHarness {
   installUnmanaged(manifest: Record<string, unknown>): Promise<HttpAnswer>;
   /** The environment's metadata of every collection the template carries, as an artifact. */
   metadataAsArtifact(collections: readonly string[]): Promise<Record<string, unknown[]>>;
+  /** One MCP tool call as the owner of `apiKey`, through the door the agent uses (`mcpUrl`). */
+  callTool(apiKey: string, tool: string, args: Record<string, unknown>): Promise<ToolAnswer>;
 }
 
 export interface HttpAppOptions {
@@ -236,6 +281,19 @@ export class HttpApp implements AppHarness {
   installUnmanaged(manifest: Record<string, unknown>): Promise<HttpAnswer> {
     const packageId = typeof manifest.id === 'string' ? manifest.id : 'scenario_template';
     return this.call('POST', '/api/v1/marketplace/install-local', { packageId, manifest, installMode: 'unmanaged' }, { session: this.admin });
+  }
+
+  async callTool(apiKey: string, tool: string, args: Record<string, unknown>): Promise<ToolAnswer> {
+    const res = await fetch(this.mcpUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool, arguments: args } }),
+    });
+    const text = await res.text();
+    const rpc = readJsonRpc(text);
+    if (!res.ok || rpc === undefined) throw new Error(`tools/call ${tool}: ${res.status} ${text.slice(0, 300)}`.trim());
+    if (isBag(rpc.error)) throw new Error(`tools/call ${tool}: JSON-RPC ${String(rpc.error.code ?? '')} ${String(rpc.error.message ?? '')}`.trim());
+    return toolAnswerOf(rpc.result);
   }
 
   async metadataAsArtifact(collections: readonly string[]): Promise<Record<string, unknown[]>> {

@@ -86,6 +86,8 @@ async function mount(opts: {
   /** The kernel services the console plugin's context resolves by name. */
   services?: Map<string, unknown>;
   warnings?: string[];
+  /** The host's options to the console plugin itself. */
+  plugin?: Parameters<typeof createConsoleStaticPlugin>[1];
 } = {}) {
   const server = new HonoHttpServer(0);
   server.installNotFoundSeam();
@@ -107,7 +109,7 @@ async function mount(opts: {
     } as any);
     for (const fn of hooks) await fn();
   }
-  await createConsoleStaticPlugin(distPath).start({
+  await createConsoleStaticPlugin(distPath, opts.plugin).start({
     getServiceAsync: async () => server,
     getService: (name: string) => {
       if (opts.services?.has(name)) return opts.services.get(name);
@@ -560,4 +562,146 @@ describe('the opt-in Turnstile challenge on sign-up', () => {
   function res(response: Response): string | null {
     return response.headers.get('content-security-policy');
   }
+});
+
+describe('the host\'s cloudflareWebAnalytics option', () => {
+  const TOKEN = '0123456789abcdef0123456789ABCDEF';
+  const BEACON_SRC = 'https://static.cloudflareinsights.com/beacon.min.js';
+  const REPORT_ORIGIN = 'https://cloudflareinsights.com';
+
+  /**
+   * The document and the policy this suite's shell is served with when no
+   * option is passed, as `main` served them before the option existed (read
+   * at `f108e6d2`), with the per-response nonce written as `NONCE`.
+   */
+  const DOCUMENT_WITHOUT_OPTION = [
+    '<!doctype html><html><head>',
+    '    <script nonce="NONCE">window.__OBJECTUI_CAPABILITIES_DISABLED__=(window.__OBJECTUI_CAPABILITIES_DISABLED__||[]).concat(\'react-pages\');</script>',
+    '    <base href="/_console/"><meta charset="UTF-8"><title></title>',
+    '<script nonce="NONCE">window.early = 1;</script>',
+    '<SCRIPT nonce="NONCE">window.shim = "</" + "script>";</SCRIPT>',
+    '<style>#boot-splash{display:flex}</style>',
+    '<script nonce="NONCE" type="module" crossorigin src="./assets/index-BQWjE1TW.js"></script>',
+    '</head><body><div id="root"></div></body></html>',
+  ].join('\n');
+  const POLICY_WITHOUT_OPTION = [
+    "default-src 'self'",
+    "script-src 'self' 'nonce-NONCE' 'wasm-unsafe-eval'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https:",
+    "connect-src 'self' https://demotiles.maplibre.org",
+    "manifest-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "frame-ancestors 'self'",
+  ].join('; ');
+
+  /** The response's document and policy, its nonce written as `NONCE`. */
+  async function served(request: (p: string) => Promise<Response>): Promise<{ html: string; policy: string }> {
+    const res = await request('/_console/');
+    expect(res.status).toBe(200);
+    const policy = res.headers.get('content-security-policy')!;
+    const nonce = headerNonce(policy);
+    const html = await res.text();
+    return { html: html.split(nonce).join('NONCE'), policy: policy.split(nonce).join('NONCE') };
+  }
+
+  /** The `data-cf-beacon` value of the document's one beacon tag, as a browser decodes it. */
+  function beaconConfig(html: string): unknown {
+    const tags = scriptTags(html).filter((tag) => tag.includes(BEACON_SRC));
+    expect(tags).toHaveLength(1);
+    const match = /\sdata-cf-beacon="([^"]*)"/.exec(tags[0]);
+    expect(match, 'a double-quoted data-cf-beacon attribute').not.toBeNull();
+    const decoded = match![1]
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
+    return JSON.parse(decoded);
+  }
+
+  it('writes the beacon tag under the document\'s nonce, and adds the origin it reports to in connect-src', async () => {
+    const request = await mount({ plugin: { cloudflareWebAnalytics: { token: TOKEN } } });
+    const res = await request('/_console/');
+    const raw = res.headers.get('content-security-policy');
+    const nonce = headerNonce(raw);
+    const html = await res.text();
+
+    const beacon = scriptTags(html).filter((tag) => tag.includes(BEACON_SRC));
+    expect(beacon).toHaveLength(1);
+    expect(beacon[0]).toContain(` nonce="${nonce}"`);
+    expect(beacon[0]).toMatch(/\sdefer\b/);
+    expect(beacon[0]).toContain(` src="${BEACON_SRC}"`);
+    expect(beaconConfig(html)).toEqual({ token: TOKEN });
+    // The build's three, the capability global and the beacon: every one nonced.
+    const tags = scriptTags(html);
+    expect(tags).toHaveLength(5);
+    for (const tag of tags) expect(tag).toContain(` nonce="${nonce}"`);
+
+    const policy = directives(raw);
+    expect(policy.get('connect-src')).toEqual(["'self'", 'https://demotiles.maplibre.org', REPORT_ORIGIN]);
+    // The beacon loads by the nonce: script-src names no host for it.
+    expect(policy.get('script-src')).toEqual(["'self'", `'nonce-${nonce}'`, "'wasm-unsafe-eval'"]);
+    expect(raw).not.toContain('static.cloudflareinsights.com');
+  });
+
+  it('keeps OS_CONSOLE_CSP_CONNECT_SRC working beside it, after the report origin', async () => {
+    process.env.OS_CONSOLE_CSP_CONNECT_SRC = 'https://tiles.example.com';
+    const request = await mount({ plugin: { cloudflareWebAnalytics: { token: TOKEN } } });
+    const { policy } = await served(request);
+    expect(directives(policy).get('connect-src')).toEqual([
+      "'self'",
+      'https://demotiles.maplibre.org',
+      REPORT_ORIGIN,
+      'https://tiles.example.com',
+    ]);
+  });
+
+  for (const [label, plugin] of [
+    ['no options at all', undefined],
+    ['the other options only', { isDev: false, rootRedirect: true }],
+    ['the option key left undefined', { cloudflareWebAnalytics: undefined }],
+  ] as const) {
+    it(`serves the document and the policy byte-identical to before with ${label}`, async () => {
+      const request = await mount({ plugin });
+      const { html, policy } = await served(request);
+      expect(html).toBe(DOCUMENT_WITHOUT_OPTION);
+      expect(policy).toBe(POLICY_WITHOUT_OPTION);
+    });
+  }
+
+  it.each([
+    ['an empty string', ''],
+    ['31 hex digits', TOKEN.slice(1)],
+    ['33 hex digits', `${TOKEN}0`],
+    ['32 characters that are not all hex', 'g'.repeat(32)],
+    ['a token padded with whitespace', ` ${TOKEN} `],
+    ['a token that would close the attribute', `${TOKEN.slice(0, 16)}"><script>x()</script>`],
+    ['a token that would close the JSON', `${TOKEN.slice(0, 30)}",`],
+    ['a number', 42],
+    ['null', null],
+  ])('refuses the boot when the token is %s, without echoing it', async (_label, token) => {
+    const failure = await mount({ plugin: { cloudflareWebAnalytics: { token } as unknown as { token: string } } })
+      .then(() => undefined, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    const { message } = failure as Error;
+    expect(message).toMatch(/cloudflareWebAnalytics option's token is .*not a Cloudflare Web Analytics site token/);
+    if (typeof token === 'string' && token.length > 0) expect(message).not.toContain(token);
+  });
+
+  it('refuses the boot when the option carries no token', async () => {
+    await expect(mount({ plugin: { cloudflareWebAnalytics: {} as unknown as { token: string } } }))
+      .rejects.toThrow(/cloudflareWebAnalytics option's token is undefined/);
+  });
+
+  it('keeps the token inside the attribute: the JSON\'s own quotes are escaped, so the tag parses as one element', async () => {
+    const request = await mount({ plugin: { cloudflareWebAnalytics: { token: TOKEN } } });
+    const { html } = await served(request);
+    const tag = scriptTags(html).find((t) => t.includes(BEACON_SRC))!;
+    expect(tag).toBe(
+      `<script nonce="NONCE" defer src="${BEACON_SRC}" data-cf-beacon="{&quot;token&quot;:&quot;${TOKEN}&quot;}">`,
+    );
+    expect(html).toContain(`${tag}</script>`);
+  });
 });

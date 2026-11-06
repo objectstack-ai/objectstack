@@ -214,7 +214,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       channel: {
         label: "Kanal",
-        help: "Der Kanal: inbox (Benachrichtigungen in der App, immer verfügbar), email (sobald ein E-Mail-Dienst konfiguriert ist), sms (sobald ein SMS-Dienst konfiguriert ist) oder die ID eines Kanals, den ein installiertes Plugin hinzufügt. Geben Sie * für alle Kanäle ein. Eine ID, die kein Kanal verwendet, trifft auf nichts zu."
+        help: "Der Kanal: inbox (Benachrichtigungen in der App, immer verfügbar), email (sobald ein E-Mail-Dienst konfiguriert ist), sms (sobald ein SMS-Dienst konfiguriert ist), push (sobald ein Push-Dienst konfiguriert ist, an die registrierten Geräte des Benutzers) oder die ID eines Kanals, den ein installiertes Plugin hinzufügt. Geben Sie * für alle Kanäle ein. Eine ID, die kein Kanal verwendet, trifft auf nichts zu."
       },
       enabled: {
         label: "Aktiviert",

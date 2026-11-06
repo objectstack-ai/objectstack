@@ -22,6 +22,7 @@ import { enObjects } from '../apps/translations/en.objects.generated.js';
 import { zhCNObjects } from '../apps/translations/zh-CN.objects.generated.js';
 import { jaJPObjects } from '../apps/translations/ja-JP.objects.generated.js';
 import { esESObjects } from '../apps/translations/es-ES.objects.generated.js';
+import { zhHantObjects } from '../apps/translations/zh-Hant.objects.generated.js';
 import { SysApiKey } from './sys-api-key.object.js';
 
 interface CopyAction {
@@ -38,6 +39,7 @@ const TRANSLATED = [
   ['zh-CN', zhCNObjects],
   ['ja-JP', jaJPObjects],
   ['es-ES', esESObjects],
+  ['zh-Hant', zhHantObjects],
 ] as const;
 
 // `successMessage` is a `template` slot: the parsed object carries the

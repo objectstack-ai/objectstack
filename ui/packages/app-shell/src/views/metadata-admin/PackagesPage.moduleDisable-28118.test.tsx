@@ -36,6 +36,16 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 import { PackageDetailSheet, PackagesPage, type InstalledPackageRow } from './PackagesPage';
 import { t } from './i18n';
 import { initRuntimeConfig, resetRuntimeConfigForTesting } from '../../runtime-config';
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+// The sheet's package form reaches the CEL authoring helpers, which load these
+// two lazily; warmed here so their first load is paid at import, not inside a
+// test's bounded wait.
+import '@objectstack/formula';
+import '@objectstack/lint';
+
+// The zh catalogue of the designer strings is fetched on first use; loaded here
+// so a zh render answers in zh from its first paint.
+const ZH = await loadStudioCatalogue('zh');
 
 const label = (key: string) => t(`engine.packages.detail.${key}`, 'en');
 
@@ -72,8 +82,11 @@ const reply = (status: number, body: unknown) =>
 
 let calls: { path: string; method: string }[];
 
-/** Serve the drafts read, the lifecycle doors and (for the page) the list door. */
-function stubWire(packages: unknown[] = []) {
+/**
+ * Serve the drafts read, the lifecycle doors and (for the page) the list door.
+ * `answer` serves a door's own reply first (a refusal), when it returns one.
+ */
+function stubWire(packages: unknown[] = [], answer?: (path: string, method: string) => Response | undefined) {
   calls = [];
   vi.stubGlobal(
     'fetch',
@@ -81,6 +94,8 @@ function stubWire(packages: unknown[] = []) {
       const path = new URL(String(input), 'http://console.test').pathname;
       const method = (init?.method ?? 'GET').toUpperCase();
       calls.push({ path, method });
+      const own = answer?.(path, method);
+      if (own) return own;
       if (path.startsWith('/api/v1/meta/_drafts')) return reply(200, { success: true, data: { drafts: [] } });
       if (path === '/api/v1/packages' && method === 'GET') return reply(200, { success: true, data: { packages } });
       if (path === '/api/v1/cloud-connection/installed') return reply(404, {});
@@ -103,11 +118,16 @@ const settle = () =>
     await new Promise((r) => setTimeout(r, 0));
   });
 
-async function renderSheet(pkg: InstalledPackageRow) {
-  render(
+async function renderSheet(pkg: InstalledPackageRow, language?: 'zh') {
+  const sheet = (
     <MemoryRouter>
       <PackageDetailSheet pkg={pkg} open onOpenChange={() => {}} onChanged={() => {}} />
-    </MemoryRouter>,
+    </MemoryRouter>
+  );
+  render(
+    language
+      ? <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }}>{sheet}</I18nProvider>
+      : sheet,
   );
   await screen.findByTestId('pkg-scope');
   await settle();
@@ -218,5 +238,80 @@ describe('Installed Apps view — a marketplace suite\'s module row (objectstack
     await screen.findByRole('button', { name: label('viewInfo') });
     await settle();
     expect(screen.queryByRole('button', { name: label('disable') })).toBeNull();
+  });
+});
+
+describe('PackageDetailSheet — a disable the server refuses for a dependent validation rule (objectstack#31003)', () => {
+  const CODE = 'PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE';
+  // The disable door's own sentence, as it spells it: the rule as
+  // package · object · rule, then the remedy.
+  const LISTING = 'com.acme.suite.custom · account · credit_cap (reads credit_limit)';
+  const REMEDY = 'Switch off or change that rule first, or keep the package enabled.';
+  const SENTENCE =
+    `Package '${MODULE_ID}' cannot be disabled: an active validation rule reads a field it adds through ` +
+    `objectExtensions, which the disable would withhold — ${LISTING}. ${REMEDY}`;
+  const refuseDisable = (status: number, code: string, message: string) => (path: string, method: string) =>
+    method === 'PATCH' && path.endsWith('/disable')
+      ? reply(status, { success: false, error: { code, message } })
+      : undefined;
+
+  /** The sheet's Disable, in the language it renders. */
+  const disableLabel = (language?: 'zh') => (language ? ZH['engine.packages.detail.disable'] : label('disable'));
+
+  async function confirmDisable(language?: 'zh') {
+    fireEvent.click(screen.getByRole('button', { name: disableLabel(language) }));
+    const dialog = await screen.findByTestId('pkg-detail-disable-dialog');
+    fireEvent.click(within(dialog).getByTestId('pkg-detail-disable-confirm'));
+    await vi.waitFor(() => expect(lifecycleCalls()).toEqual(['disable']));
+    await settle();
+  }
+
+  it('the confirm dialog says a dependent validation rule can still refuse the disable', async () => {
+    stubWire();
+    await renderSheet(moduleRow());
+    fireEvent.click(screen.getByRole('button', { name: label('disable') }));
+    const dialog = await screen.findByTestId('pkg-detail-disable-dialog');
+    expect(within(dialog).getByTestId('pkg-detail-disable-may-refuse')).toHaveTextContent(label('disableMayBeRefused'));
+    expect(within(dialog).getByText(label('disableDescription'))).toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', undefined, label('disableRestricted')],
+    ['zh', 'zh' as const, ZH['engine.packages.detail.disableRestricted']],
+  ])('(%s) a 409 draws the heading in the reader\'s language and the server\'s whole sentence', async (_name, language, heading) => {
+    expect(heading, 'the catalogue carries the heading').toBeTruthy();
+    stubWire([], refuseDisable(409, CODE, SENTENCE));
+    await renderSheet(moduleRow(), language);
+    if (language) expect(heading).not.toBe(label('disableRestricted'));
+    await confirmDisable(language);
+
+    expect(await screen.findByTestId('pkg-detail-refusal-heading')).toHaveTextContent(heading!);
+    const text = screen.getByTestId('pkg-detail-refusal-text');
+    // Whole, never cut to its first sentence: the rule listing and the remedy
+    // are both on screen, with no "More" in front of either.
+    expect(text).toHaveTextContent(LISTING);
+    expect(text).toHaveTextContent(REMEDY);
+    expect(text.textContent).toContain(SENTENCE);
+    expect(screen.queryByTestId('refusal-more')).toBeNull();
+    // Still on offer: the package was not switched off.
+    expect(screen.getByRole('button', { name: disableLabel(language) })).toBeInTheDocument();
+  });
+
+  it('CONTROL: another refusal code keeps the first-sentence drawing, with no heading', async () => {
+    stubWire([], refuseDisable(403, 'WRITABLE_PACKAGE_REQUIRED', 'Package is read-only. Disable it from its owner.'));
+    await renderSheet(moduleRow());
+    await confirmDisable();
+    expect(await screen.findByTestId('refusal-lead')).toHaveTextContent('Package is read-only.');
+    expect(screen.getByTestId('refusal-more')).toBeInTheDocument();
+    expect(screen.queryByTestId('pkg-detail-refusal-heading')).toBeNull();
+  });
+
+  it('CONTROL: a disable with no dependent rule lands in one confirm, with no refusal drawn', async () => {
+    stubWire();
+    await renderSheet(moduleRow());
+    await confirmDisable();
+    expect(await screen.findByText(label('disabled'))).toBeInTheDocument();
+    expect(screen.queryByTestId('pkg-detail-refusal-heading')).toBeNull();
+    expect(lifecycleCalls()).toEqual(['disable']);
   });
 });

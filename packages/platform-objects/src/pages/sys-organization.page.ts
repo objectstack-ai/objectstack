@@ -80,7 +80,7 @@ export const SysOrganizationDetailPage: Page = {
             position: 'top',
             items: [
               {
-                label: { en: 'Members', 'zh-CN': '成员', 'ja-JP': 'メンバー', 'es-ES': 'Miembros' },
+                label: { en: 'Members', 'zh-CN': '成员', 'ja-JP': 'メンバー', 'es-ES': 'Miembros', 'zh-Hant': '成員' },
                 icon: 'users',
                 children: [
                   {
@@ -92,13 +92,13 @@ export const SysOrganizationDetailPage: Page = {
                       sort: [{ field: 'created_at', order: 'desc' }],
                       limit: 25,
                       showViewAll: true,
-                      title: { en: 'Members', 'zh-CN': '成员', 'ja-JP': 'メンバー', 'es-ES': 'Miembros' },
+                      title: { en: 'Members', 'zh-CN': '成员', 'ja-JP': 'メンバー', 'es-ES': 'Miembros', 'zh-Hant': '成員' },
                     },
                   },
                 ],
               },
               {
-                label: { en: 'Invitations', 'zh-CN': '邀请', 'ja-JP': '招待', 'es-ES': 'Invitaciones' },
+                label: { en: 'Invitations', 'zh-CN': '邀请', 'ja-JP': '招待', 'es-ES': 'Invitaciones', 'zh-Hant': '邀請' },
                 icon: 'mail',
                 children: [
                   {
@@ -110,13 +110,13 @@ export const SysOrganizationDetailPage: Page = {
                       sort: [{ field: 'created_at', order: 'desc' }],
                       limit: 25,
                       showViewAll: true,
-                      title: { en: 'Invitations', 'zh-CN': '邀请', 'ja-JP': '招待', 'es-ES': 'Invitaciones' },
+                      title: { en: 'Invitations', 'zh-CN': '邀请', 'ja-JP': '招待', 'es-ES': 'Invitaciones', 'zh-Hant': '邀請' },
                     },
                   },
                 ],
               },
               {
-                label: { en: 'Teams', 'zh-CN': '团队', 'ja-JP': 'チーム', 'es-ES': 'Equipos' },
+                label: { en: 'Teams', 'zh-CN': '团队', 'ja-JP': 'チーム', 'es-ES': 'Equipos', 'zh-Hant': '團隊' },
                 icon: 'users-round',
                 children: [
                   {
@@ -128,7 +128,7 @@ export const SysOrganizationDetailPage: Page = {
                       sort: [{ field: 'name', order: 'asc' }],
                       limit: 25,
                       showViewAll: true,
-                      title: { en: 'Teams', 'zh-CN': '团队', 'ja-JP': 'チーム', 'es-ES': 'Equipos' },
+                      title: { en: 'Teams', 'zh-CN': '团队', 'ja-JP': 'チーム', 'es-ES': 'Equipos', 'zh-Hant': '團隊' },
                     },
                   },
                 ],

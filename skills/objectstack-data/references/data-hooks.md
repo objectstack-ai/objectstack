@@ -310,9 +310,7 @@ onError: 'log'
 
 A hook can carry its logic in one of two shapes. Everything above this point
 showed the inline **`handler`** function; the section below documents the
-**`body`** form — the one a metadata-only runtime actually executes, and the one
-that was previously undocumented (you had to reverse-engineer
-`@objectstack/runtime` to use it).
+**`body`** form — the one a metadata-only runtime actually executes.
 
 ### `body` (sandboxed) vs `handler` (inline) — pick one
 
@@ -360,12 +358,13 @@ The sandbox is handed a **JSON snapshot** of these (built by
 | `ctx.previous` | object \| `undefined` | Pre-write record on update/delete. **`undefined` on insert** → use `!ctx.previous` to detect *create*. |
 | `ctx.result` | object \| `undefined` | `after*` only. ⚠️ **partial** on afterUpdate — see gotcha 1. |
 | `ctx.user` | object \| `undefined` | `{ id, name, email, organizationId }`. `undefined` for system / unauthenticated writes. |
-| `ctx.session` | object \| `undefined` | `{ userId, organizationId, isSystem, … }`. **No role list** — `session.roles` was retired in 17.0.0: it was declared but never produced, so every read was `undefined`. |
+| `ctx.session` | object \| `undefined` | `{ userId, organizationId, isSystem, … }`. **No role list** — `session.roles` was retired in 17.0.0 (declared, never produced). |
 | `ctx.event` | string | e.g. `'afterUpdate'` — dispatch on it when one hook subscribes to several events. |
 | `ctx.object` | string | The target object name. |
 | `ctx.api` | object | Cross-object CRUD. Gated by `api.read` / `api.write` — see below. |
 | `ctx.log` | `{ debug, info, warn, error }` | Gated by `log`. Call **`ctx.log.info(msg, data?)`** — `ctx.log` is an **object, not** callable as `ctx.log(msg)`. Emission is **best-effort** (see Troubleshooting). |
 | `ctx.crypto` | `{ randomUUID }` | Gated by `crypto.uuid`. |
+| `ctx.notice` | `(message) => void` | **Tell the saver what this save set in motion** — answered as the create/update `notice`, shown on the save toast. No capability; insert/update only; last call wins. [`rules/lifecycle.md` § Save Notice](../rules/lifecycle.md#save-notice). |
 | `ctx.title` | `(field?) => Promise<string \| null>` | **Name the record, not its id.** `ctx.title()` resolves this object's `nameField`, a **formula** included (no extra read); `ctx.title('account_id')` resolves a lookup's title (needs `api.read`). `null` when there is no title, never the id. **Per door:** `body` has it; a deprecated `handler` gets it at runtime, undeclared on `HookContext` (TS2339 when annotated) — use `body`; `ql.registerHook` and a bare `ObjectQL` `bindHooks` lack it. |
 
 (Action bodies additionally receive `ctx.recordId` and `ctx.record`, and their
@@ -599,6 +598,7 @@ interface HookContext {
   // Engine access
   ql: IDataEngine;       // ObjectQL engine instance
   api?: ScopedContext;   // Cross-object CRUD API
+  notice?: (message: string) => void; // Save notice: rules/lifecycle.md § Save Notice
 
   // User info shortcut (undefined for system / unauthenticated writes)
   user?: {
@@ -622,14 +622,6 @@ predicates, and in seed rows. Read it as **`organizationId`**:
 const org = ctx.user?.organizationId ?? ctx.session?.organizationId;
 ```
 
-> The former `ctx.session.tenantId` alias was removed in v16 — read the
-> org under `organizationId`. (The generic driver-layer `execCtx.tenantId` /
-> `DriverOptions.tenantId` isolation knob is a separate axis and is unaffected.)
-
-`ctx.user` is the ergonomic shortcut for an authenticated caller; it is
-`undefined` for system / unauthenticated writes, so read `ctx.session?.organizationId`
-when a hook must work regardless of whether a user resolved.
-
 > **Two isolation axes — don't conflate them.** `organization_id` is
 > **org row-scoping**: many organizations share one database and every row
 > carries its owning org (`current_user.organizationId` filters reads/writes;
@@ -638,7 +630,8 @@ when a hook must work regardless of whether a user resolved.
 > ADR-0132). That is different from
 > **environment / database-per-tenant** isolation (`service-tenant`,
 > `driver-turso`), where "tenant" means an entire environment/database and the
-> generic driver-layer `tenantId` knob can carry that environment id. The
+> generic driver-layer `tenantId` knob (`execCtx.tenantId` / `DriverOptions.tenantId`)
+> can carry that environment id. The
 > object-metadata `tenancy.*` knob configures the *mechanism* (isolation on/off
 > + which column); the *value* you read and write is your `organization_id`
 > column. Under `single` the bootstrapped Default Organization is the only

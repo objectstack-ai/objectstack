@@ -15,7 +15,7 @@
 //    (`object`) it is 400 VALIDATION_ERROR, and an unknown parameter on a
 //    by-name door is 400 naming it.
 //  - `?package=all` on a list door answers byte-identically to no parameter.
-//  - A member bound to the `client_liaison` position (the showcase's one FLS
+//  - A member bound to the `showcase_client_liaison` position (the showcase's one FLS
 //    persona: `showcase_client_liaison` withholds budget, spent and
 //    budget_remaining on showcase_project) reads a definition whose
 //    `sortability.fields` does not list `budget` at all, and the data sort on
@@ -59,7 +59,7 @@ describe('[#26572] the v18 /meta read doors, over HTTP on a booted showcase', ()
     // The assignment carries the holder's organization, as a write through a
     // door does: an unstamped row is UNKNOWN tenancy.
     await ql.insert('sys_user_position', {
-      user_id: user.id, position: 'client_liaison', organization_id: membership?.organization_id,
+      user_id: user.id, position: 'showcase_client_liaison', organization_id: membership?.organization_id,
     }, SYS);
   }, 240_000);
 

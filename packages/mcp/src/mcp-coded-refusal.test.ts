@@ -100,7 +100,8 @@ const SITES: readonly Site[] = [
   { tool: 'get_record', args: { objectName: 'task', recordId: 't9' }, member: 'get' },
   { tool: 'create_record', args: { objectName: 'task', data: { title: 'x' } }, member: 'create' },
   { tool: 'update_record', args: { objectName: 'task', recordId: 't9', data: { title: 'x' } }, member: 'update' },
-  { tool: 'delete_record', args: { objectName: 'task', recordId: 't9' }, member: 'remove' },
+  // `confirm: true` passes the confirmation gate, so the call reaches `remove`.
+  { tool: 'delete_record', args: { objectName: 'task', recordId: 't9', confirm: true }, member: 'remove' },
   { tool: 'list_actions', args: {}, member: 'listActions' },
   { tool: 'run_action', args: { actionName: 'complete' }, member: 'runAction', actionDoor: true },
   { tool: 'resume_run', args: { runId: 'r1' }, member: 'resumeRun', actionDoor: true },

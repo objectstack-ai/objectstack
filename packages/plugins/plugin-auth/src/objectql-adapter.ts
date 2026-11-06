@@ -754,6 +754,9 @@ export function withSystemContext(engine: IDataEngine): IDataEngine {
   // better-auth-owned write: the attributed human, the administrator
   // impersonating them on an impersonation session, and a forwarded AI agent's
   // client ([ADR-0090 D10 rule 5, #28367]), so the audit row records each side.
+  // Inside a SCIM protocol request it is the verified connection instead, as
+  // the service principal `actor: 'svc:scim:CONNECTION_ID'` with no human
+  // ([#30960]; `ScimRequestScope.connectionId` says how it reaches here).
   const asAttributedSystem = async (q: any) => ({
     ...(q ?? {}),
     context: { ...(await authSystemWriteContext()), ...(q?.context ?? {}) },
