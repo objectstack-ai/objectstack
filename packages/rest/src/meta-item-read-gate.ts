@@ -2433,7 +2433,7 @@ export interface MetaItemQueryRefusal {
     readonly status: 400;
     readonly code: 'VALIDATION_ERROR';
     readonly message: string;
-    readonly rule: 'unknown-parameter' | 'repeated-parameter' | 'layered-member' | 'bracketed-parameter';
+    readonly rule: 'unknown-parameter' | 'repeated-parameter' | 'layered-member' | 'bracketed-parameter' | 'names-on-package';
 }
 
 /**
@@ -2660,10 +2660,24 @@ export function metaListUnknownParamRefusal(metaType: string, query: unknown): M
         if (!bracketedKeyJudgedByList(metaType, key)) judged[key] = true;
     }
     const message = unknownQueryParamRefusalMessage(judged, META_LIST_QUERY_PARAMS);
-    return message === undefined
-        ? undefined
-        : { status: 400, code: 'VALIDATION_ERROR', message, rule: 'unknown-parameter' };
+    if (message !== undefined) return { status: 400, code: 'VALIDATION_ERROR', message, rule: 'unknown-parameter' };
+    if (metaType === 'package' && Object.prototype.hasOwnProperty.call(query, 'names')) {
+        return { status: 400, code: 'VALIDATION_ERROR', message: NAMES_ON_PACKAGE_LIST_MESSAGE, rule: 'names-on-package' };
+    }
+    return undefined;
 }
+
+/**
+ * [#29236, contract review 6672872746] `?names=` on the `package` list. A
+ * `package` list item is keyed by its id (`manifest.id`) and carries no
+ * `name`, so a names filter there could never match and would answer `200 []`
+ * for every value: the silent zero the list's closed set exists to remove. It
+ * is refused instead, on both transports, before any read. Matching packages
+ * by id is a different behaviour and not served here.
+ */
+export const NAMES_ON_PACKAGE_LIST_MESSAGE =
+    "Query parameter 'names' is not served on the 'package' list: package items are keyed by id, not by name, "
+    + 'so no name could match. The list was not served. Leave the parameter out to list every package you can see.';
 
 /**
  * [#29236, ruling 6580261740 letter A] THE reading of `?names=` on the

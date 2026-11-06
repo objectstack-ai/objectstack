@@ -23,6 +23,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
     META_LIST_QUERY_PARAMS,
     META_QUERY_ARITY_DOORS,
+    NAMES_ON_PACKAGE_LIST_MESSAGE,
     metaListQueryRefusal,
     metaQueryArityRefusal,
     type MetaQueryArityDoor,
@@ -349,5 +350,38 @@ describe('[#29236] the list\'s closed query set — recognition before arity', (
         const app = await driveList('app', { 'id[]': 'crm' });
         expect(app.status).toBe(400);
         expect(JSON.stringify(app.body)).toContain("Query parameter 'id[]' names no app");
+    });
+
+    // [contract review 6672872746] A `package` list item is keyed by id and carries no `name`, so
+    // `?names=` there could only ever answer `200 []`. It is refused instead, before any read.
+    it('refuses `?names=` on the `package` list with its own located sentence', () => {
+        expect(NAMES_ON_PACKAGE_LIST_MESSAGE).toBe(
+            "Query parameter 'names' is not served on the 'package' list: package items are keyed by id, not by name, "
+            + 'so no name could match. The list was not served. Leave the parameter out to list every package you can see.',
+        );
+        for (const names of ['crm', 'crm,helpdesk', '', ['a', 'b']]) {
+            expect(metaListQueryRefusal('package', { names })).toEqual({
+                status: 400, code: 'VALIDATION_ERROR', message: NAMES_ON_PACKAGE_LIST_MESSAGE, rule: 'names-on-package',
+            });
+        }
+        // An undeclared key on the `package` list keeps the recognition sentence, which outranks it.
+        expect(metaListQueryRefusal('package', { names: 'crm', zeta: '1' })?.message).toBe(unknownListParam('zeta'));
+        // Controls: the `package` list without `names`, and `names` on every other type.
+        expect(metaListQueryRefusal('package', {})).toBeUndefined();
+        expect(metaListQueryRefusal('package', { preview: 'draft' })).toBeUndefined();
+        for (const type of ['object', 'app', 'view', 'flow']) expect(metaListQueryRefusal(type, { names: 'crm' })).toBeUndefined();
+    });
+
+    it('RestServer: `?names=` on `/meta/package` answers the nested 400 before any protocol read', async () => {
+        const { protocol, status, body } = await driveList('package', { names: 'com.acme.crm' });
+        expect({ status, body }).toEqual({
+            status: 400, body: { error: { code: 'VALIDATION_ERROR', message: NAMES_ON_PACKAGE_LIST_MESSAGE } },
+        });
+        expect(protocol.getMetaItems).not.toHaveBeenCalled();
+        // Control: the same door without `names` reaches the protocol read (this double declares no
+        // `package` type, so what answers then is the type check, not the names refusal).
+        const control = await driveList('package', {});
+        expect(JSON.stringify(control.body)).not.toContain('keyed by id');
+        expect(control.protocol.getMetaTypes).toHaveBeenCalled();
     });
 });

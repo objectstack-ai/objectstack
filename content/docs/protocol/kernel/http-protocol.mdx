@@ -971,7 +971,9 @@ To read several items of one type in a single request, name them:
 `GET /api/v1/meta/object?names=account,contact` answers only those items, among
 the ones the caller may see. The value is one comma-separated list; a name that
 matches no item is simply absent from `items`, and an empty value (`?names=`) is
-refused with `400 VALIDATION_ERROR`. The list reads a closed set of query
+refused with `400 VALIDATION_ERROR`. `?names=` works on every type except
+`package`, whose items are keyed by id rather than name; the `package` list
+refuses it with `400 VALIDATION_ERROR`. The list reads a closed set of query
 parameters (`package`, `preview`, `object`, `include`, `id`, `names` and
 `locale`) and refuses any other name with `400 VALIDATION_ERROR` instead of
 ignoring it.

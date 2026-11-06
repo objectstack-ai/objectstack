@@ -228,6 +228,16 @@ describe('[#23214] /meta — the four arity doors, over the list both transports
             expect(localised.protocol.getMetaItems.mock.calls[0][0]).not.toHaveProperty('names');
         });
 
+        it('refuses `?names=` on the `package` list (its items are keyed by id) before the protocol read', async () => {
+            for (const path of ['/meta/package']) {
+                const { dispatcher, protocol } = boot();
+                const answer = await get(dispatcher, path, { names: 'com.acme' });
+                expect({ path, status: answer.status, code: answer.body?.error?.code }).toEqual({ path, status: 400, code: 'VALIDATION_ERROR' });
+                expect(answer.body?.error?.message).toMatch(/^Query parameter 'names' is not served on the 'package' list: package items are keyed by id/);
+                expect(protocol.getMetaItems).not.toHaveBeenCalled();
+            }
+        });
+
         it('refuses an EMPTY `names` with 400 VALIDATION_ERROR before the protocol read', async () => {
             const { dispatcher, protocol } = boot();
             const answer = await get(dispatcher, '/meta/view', { names: '' });
