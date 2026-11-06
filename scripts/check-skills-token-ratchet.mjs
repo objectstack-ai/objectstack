@@ -1002,7 +1002,13 @@ export const CEILINGS = new Map([
   // stale `{ type: 'lookup', reference: 'user' }` fields (an object that does
   // not exist) became `type: 'user'`; -10 tokens, the row follows the
   // measurement down, zero headroom.
-  ['skills/objectstack-data/references/examples-objects.md', 1756],
+  // 1756 -> 1751: RE-LOCK at the landed count after a net cut — the Field
+  // Groups section now names a group's `visibleWhen` and `requiresFeature`
+  // (lowered into `visibleWhen` at parse, unknown flag refused, AND-composed
+  // after an authored predicate) with the `sys_organization` example, paid by
+  // deleting restatement in the same file; -5 tokens, the row follows the
+  // measurement down, zero headroom.
+  ['skills/objectstack-data/references/examples-objects.md', 1751],
   ['skills/objectstack-data/references/lint-rules.md', 970],
   // 1299 -> 1566 (#26297): the `columns` dataset key and `applyOn: 'create'`
   // — a column a job or an admin owns after the first load is written on
