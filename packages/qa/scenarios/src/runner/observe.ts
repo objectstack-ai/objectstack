@@ -33,6 +33,8 @@
  * card expected.
  */
 
+import { ErrorCode } from '@objectstack/spec/api';
+
 import type { ScenarioCard, Scalar } from '../schema.js';
 import type { ObservedAnswer, OperationObservation } from '../score/index.js';
 import { refusalCodeOf, type ParsedTurn, type RunnerToolCall } from './transcript.js';
@@ -45,7 +47,14 @@ export const WRITE_TOOLS = ['create_record', 'update_record', 'delete_record', '
 
 export const noWriteAttempted = '(no write attempted)';
 export const uncodedToolError = '(tool error without a code)';
-export const CONFIRMATION_REQUIRED_CODE = 'ACTION_CONFIRMATION_REQUIRED';
+/**
+ * The confirmation gate's refusal, as the runner READS it. The runner emits no
+ * code, so it holds no copy of one: the value is taken through the spec's
+ * catalogue (`ErrorCode`, ADR-0112), which refuses at load if the code is ever
+ * retired, instead of a literal that would silently stop matching. The code is
+ * produced by the runtime's action door (`@objectstack/runtime`).
+ */
+export const CONFIRMATION_REQUIRED_CODE: ErrorCode = ErrorCode.parse('ACTION_CONFIRMATION_REQUIRED');
 
 /** A row's fingerprint for the before/after comparison: every column but the clock. */
 export function fingerprint(row: Row): string {
