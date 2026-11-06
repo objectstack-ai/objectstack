@@ -156,3 +156,64 @@ describe('a disabled package\'s objectExtensions', () => {
     expect(fieldsOf(registry.getObject(OBJECT))).toEqual(['name', 'qe_credit', 'qe_score', 'qe_shared']);
   });
 });
+
+/**
+ * [#30756] `getAllObjects(undefined, { asEnabled })`: the fold the enable of a
+ * DISABLED package would leave, which the enable door's pre-check reads. That
+ * package's extension is folded in; every other disabled package's stays
+ * withheld; the registry's own state does not move; and the option changes
+ * nothing for a package that is not disabled, or when it is unset.
+ */
+describe('[#30756] the asEnabled fold', () => {
+  const APP_PKG = 'com.qa.asen.app';
+  const MODULE_PKG = 'com.qa.asen.orders';
+  const OTHER_PKG = 'com.qa.asen.scoring';
+  const OBJECT = 'qa_account';
+  const manifest = (id: string, type: string) =>
+    ({ id, name: id, version: '1.0.0', type, namespace: 'qa', ...(type === 'module' ? { dependencies: { [APP_PKG]: '^1.0.0' } } : {}) }) as any;
+
+  let registry: SchemaRegistry;
+  beforeEach(() => {
+    registry = new SchemaRegistry({ multiTenant: false });
+    (registry as any).logLevel = 'silent';
+    registry.installPackage(manifest(APP_PKG, 'app'), 'code');
+    registry.installPackage(manifest(MODULE_PKG, 'module'), 'code');
+    registry.installPackage(manifest(OTHER_PKG, 'module'), 'code');
+    registry.registerObject({
+      name: OBJECT, label: 'Account', fields: { name: { name: 'name', type: 'text', label: 'Name' } },
+    } as any, APP_PKG, 'qa', 'own');
+    registry.registerObject({
+      name: OBJECT,
+      fields: { qa_credit: { name: 'qa_credit', type: 'number', label: 'Credit' } },
+      validations: [{ name: 'qa_credit_positive', type: 'script', severity: 'error', message: 'Credit', condition: 'record.qa_credit < 0' }],
+    } as any, MODULE_PKG, 'qa', 'extend');
+    registry.registerObject({
+      name: OBJECT,
+      fields: { qa_score: { name: 'qa_score', type: 'number', label: 'Score' } },
+      validations: [{ name: 'qa_score_capped', type: 'script', severity: 'error', message: 'Score', condition: 'record.qa_score > 10' }],
+    } as any, OTHER_PKG, 'qa', 'extend');
+  });
+
+  const served = (options?: { asEnabled?: string }) => registry.getAllObjects(undefined, options).find((o) => o.name === OBJECT) as any;
+  const fieldsOf = (body: any): string[] => Object.keys(body?.fields ?? {}).filter((f) => f.startsWith('qa_') || f === 'name').sort();
+  const rulesOf = (body: any): string[] => (body?.validations ?? []).map((r: any) => r.name).sort();
+
+  it('folds the named disabled package in, keeps every other disabled package withheld, and moves no state', () => {
+    registry.disablePackage(MODULE_PKG);
+    registry.disablePackage(OTHER_PKG);
+    const body = served({ asEnabled: MODULE_PKG });
+    expect(fieldsOf(body)).toEqual(['name', 'qa_credit']);
+    expect(rulesOf(body)).toEqual(['qa_credit_positive']);
+    expect(registry.isPackageDisabled(MODULE_PKG)).toBe(true);
+    expect(fieldsOf(registry.getObject(OBJECT)), 'the served fold is unchanged by the read').toEqual(['name']);
+  });
+
+  it('control: unset, or naming a package that is not disabled, the fold is today\'s, byte for byte', () => {
+    registry.disablePackage(MODULE_PKG);
+    const today = JSON.stringify(served());
+    expect(JSON.stringify(served({}))).toBe(today);
+    expect(JSON.stringify(served({ asEnabled: OTHER_PKG }))).toBe(today);
+    expect(JSON.stringify(served({ asEnabled: 'com.qa.asen.unknown' }))).toBe(today);
+    expect(fieldsOf(served({ asEnabled: OTHER_PKG }))).toEqual(['name', 'qa_score']);
+  });
+});
