@@ -37,6 +37,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           account_locked: "계정 잠김",
           config_change: "구성 변경",
           import: "가져오기",
+          export: "내보내기",
           platform_admin_standing_change: "플랫폼 관리자 권한 변경",
           action_invocation: "작업 호출"
         }

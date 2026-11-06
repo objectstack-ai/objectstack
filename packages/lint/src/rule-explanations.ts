@@ -921,6 +921,68 @@ const SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const SECURITY_ROLLUP_SOURCE_UNREADABLE_EXPLANATION: RuleExplanation = {
+  rule: 'security-rollup-source-unreadable',
+  covers: 'why a roll-up shows child data its reader cannot read',
+  paragraphs: [
+    'A `summary` field is a column stored on the parent. The engine recomputes it after every child write, ' +
+      'as the system and over the whole child collection, so the value is a property of the parent, never of ' +
+      'one reader\'s view of the children. On read the column answers only to the parent field\'s own ' +
+      'field-level security. A permission set that cannot read the child object, the aggregated child field, ' +
+      'or a child field the roll-up\'s `filter` tests therefore still reads the roll-up: the sum, average, ' +
+      'minimum, maximum or count of child values it cannot read one by one.',
+    '"Can read" is judged as the runtime decides it, through three gates. The object grant: the set\'s own ' +
+      'entry for the object, otherwise its `\'*\'` entry, which covers a private object only with View All ' +
+      'or Modify All. The field entry: `readable: false` hides the field, unless the set holds View All or ' +
+      'Modify All on the object; a set with no entry for a field reads it. The capability gate: an object\'s ' +
+      '`requiredPermissions` (the list, or the `read` bucket of the per-operation map) and a field\'s ' +
+      '`requiredPermissions` refuse the read unless the set\'s `systemPermissions` hold every listed ' +
+      'capability. View All and Modify All do not lift the capability gate, so a set holding them on the ' +
+      'child is still reported for a gated child object or field.',
+    'Reported for each permission set and each summary field the set can see: it reads the parent object ' +
+      'and the summary field through all three gates. A set that cannot see the column is not reported. A ' +
+      '`count` reads no value, so its `field` is not judged; the fields its `filter` tests are. Only the ' +
+      'top-level keys of a `filter` are judged: a dotted key reads through a lookup into another object and ' +
+      'is not. A child object this stack does not define is not judged. Each set is judged on its own: a ' +
+      'holder of two sets reads what their union grants, capabilities included.',
+    'This is a warning, not an error: the pair is legal and is often meant, such as an order total shown to ' +
+      'staff who may not see line costs. If the value should not be visible to the set, hide the summary ' +
+      'column for it with `fields: { \'<object>.<summary>\': { readable: false } }`. That entry hides the ' +
+      'column from every holder of the set, and a co-held set with no entry for the column does not restore ' +
+      'it, because only sets that declare an entry vote in the field merge (View All or Modify All on the ' +
+      'parent in a co-held set does restore it); to keep the column for some ' +
+      'holders, declare `readable: true` on it in the sets they hold. A set that holds View All or Modify All ' +
+      'on the parent must drop that bit first, because the bypass makes the entry inert. If the set may see ' +
+      'the child data, grant the read on the child instead.',
+  ],
+};
+
+const SECURITY_ROLLUP_SOURCE_ROW_SCOPED_EXPLANATION: RuleExplanation = {
+  rule: 'security-rollup-source-row-scoped',
+  covers: 'why a roll-up counts child rows its reader cannot see',
+  paragraphs: [
+    'A `summary` field is recomputed as the system over the whole child collection and, on read, answers ' +
+      'only to the parent field\'s own field-level security. Row-level security on the child narrows which ' +
+      'child rows a reader sees, not what the roll-up adds up, so a reader whose rows are scoped still reads ' +
+      'a total, count or extreme taken over every child row of the parent.',
+    'Reported as a note when the permission set can see the summary column and reads the child object, the ' +
+      'aggregated field and the fields the roll-up\'s `filter` tests, and its reads of the child meet a row ' +
+      'policy: one of its own `rowLevelSecurity` entries that applies to a read of the child (not ' +
+      '`enabled: false`, `object` the child or `\'*\'`, `operation` `select` or `all`) with a `using` ' +
+      'predicate, or, when it carries no such entry, the child\'s `defaultRowScope`. A set holding View All ' +
+      'or Modify All on the child skips row security only where the runtime lets it: a private child, a ' +
+      'child with tenancy off, or an auth-managed one. On any other child its policies still narrow its ' +
+      'rows and are reported. Only the policy\'s presence is judged, never its predicate: whether a ' +
+      'predicate admits every row a parent\'s roll-up reads depends on the data. A policy that lists ' +
+      '`positions` narrows the rows of those holders only, and the note names them. Record sharing ' +
+      '(`sharingModel`, `readScope`) is not read.',
+    'If the roll-up should not be visible to the narrowed reader, hide the summary column for the set with ' +
+      '`fields: { \'<object>.<summary>\': { readable: false } }`. That entry hides it from every holder of the ' +
+      'set, and a co-held set with no entry does not restore it; declare `readable: true` on it in the sets ' +
+      'whose holders should keep it. If the total over every row is meant, nothing needs to change.',
+  ],
+};
+
 const SECURITY_OWD_ALIAS_EXPLANATION: RuleExplanation = {
   rule: 'security-owd-alias',
   covers: 'which sharing values are retired or misplaced',
@@ -5717,6 +5779,8 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SECURITY_WILDCARD_VAMA_EXPLANATION.rule]: SECURITY_WILDCARD_VAMA_EXPLANATION,
   [SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION.rule]: SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION,
   [SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION.rule]: SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION,
+  [SECURITY_ROLLUP_SOURCE_UNREADABLE_EXPLANATION.rule]: SECURITY_ROLLUP_SOURCE_UNREADABLE_EXPLANATION,
+  [SECURITY_ROLLUP_SOURCE_ROW_SCOPED_EXPLANATION.rule]: SECURITY_ROLLUP_SOURCE_ROW_SCOPED_EXPLANATION,
   [SECURITY_OWD_ALIAS_EXPLANATION.rule]: SECURITY_OWD_ALIAS_EXPLANATION,
   [SECURITY_DELEGATION_MISSING_REASON_EXPLANATION.rule]: SECURITY_DELEGATION_MISSING_REASON_EXPLANATION,
   [VISIBILITY_ROOT_MISLAYERED_EXPLANATION.rule]: VISIBILITY_ROOT_MISLAYERED_EXPLANATION,

@@ -37,6 +37,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           account_locked: "Compte verrouillé",
           config_change: "Modification de configuration",
           import: "Import",
+          export: "Export",
           platform_admin_standing_change: "Changement de statut d’administrateur de plateforme",
           action_invocation: "Appel d’action"
         }

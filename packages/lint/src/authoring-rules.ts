@@ -140,6 +140,7 @@ import { validateSecurityPosture, validateSecurityRoleWord } from './validate-se
 import { validateOrgAxisRedLines } from './validate-org-axis-red-lines.js';
 import { validateSharingRuleEnforceability } from './validate-sharing-rule-enforceability.js';
 import { validateExternalOwnerSharing } from './validate-external-owner-sharing.js';
+import { validateRollupSourceVisibility } from './validate-rollup-source-visibility.js';
 import { validateRlsPredicateEnforceability } from './validate-rls-predicate-enforceability.js';
 import {
   validateMembershipKeyDeclarations,
@@ -2550,6 +2551,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
     run: (stack) => validateExternalOwnerSharing(stack),
+  },
+  // A roll-up `summary` a permission set reads, over child data the same set
+  // cannot read — a hidden source field, an unreadable child object, or child
+  // rows a row-level policy narrows. The roll-up keeps its documented
+  // semantics (system-elevated, the whole child collection, the parent field's
+  // own FLS on read); this tells the author so where they configure the set.
+  // Advisory: the pair is legal and often meant.
+  {
+    name: 'validateRollupSourceVisibility',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-rollup-source-visibility.ts',
+    surfaces: CLI_ONLY,
+    // The precedent the reason below names is #17936, the measured crossing of
+    // `validateRetiredPermissionResidue` onto `permission` writes.
+    surfaceReason:
+      'Advisory-tier rule over permission-set × summary-field pairs: it cannot refuse a write. CLI-only ' +
+      'because the crossing it would take is unmeasured: nothing yet measures, per write, what a ' +
+      '`permission` save hands this rule (the set, and the parent and child objects it judges the set ' +
+      'against), which is the measurement taken before `validateRetiredPermissionResidue` crossed on ' +
+      '`permission` writes. Crossing on `permission` writes is therefore a separate decision with that ' +
+      'precedent; crossing on `object` writes as well would fall under the RUNTIME_OBJECT_ADVISORY_VOLUME ' +
+      'fence. Never a bare `runtimeTypes` edit.',
+    run: (stack) => validateRollupSourceVisibility(stack),
   },
   // #4983 — the sibling surface of the rule above, and ADR-0056 D4's gate,
   // which had never been wired to anything: `isSupportedRlsExpression` existed

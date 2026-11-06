@@ -37,6 +37,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           account_locked: "Conta bloqueada",
           config_change: "Alteração de configuração",
           import: "Importação",
+          export: "Exportação",
           platform_admin_standing_change: "Alteração do status de administrador da plataforma",
           action_invocation: "Invocação de ação"
         }
