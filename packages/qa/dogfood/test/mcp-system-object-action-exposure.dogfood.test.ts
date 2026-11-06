@@ -324,21 +324,31 @@ describe('[#27681, #27900] sys_user identity actions over MCP: what each bucket\
     const onUser = await listedOnUser(memberAgent);
     expect(onUser.map((a) => a.name)).not.toContain('ban_user');
 
-    // With objectName, the tool layer admits a `sys_*` action only where the
-    // listing does, so it answers the system-object refusal.
+    // Scoped (objectName) and by name answer the same refusal: the declared
+    // gate's sentence with the REST door's 403. The scoped call is not told the
+    // action is unexposed, because it is exposed; the caller's grant is why.
     const scoped = await tool(memberAgent, 'run_action', {
       actionName: 'ban_user', objectName: 'sys_user', recordId: agentTargetUserId, params: { banReason: 'member agent' }, confirm: true,
     });
-    expect(scoped.isError, scoped.text).toBe(true);
-    expect(messageOf(scoped)).toContain('system object "sys_user" is not exposed via MCP');
-
-    // By name, the runtime resolves it and its capability gate answers 403.
     const byName = await tool(memberAgent, 'run_action', {
       actionName: 'ban_user', recordId: agentTargetUserId, params: { banReason: 'member agent' }, confirm: true,
     });
-    expect(byName.isError, byName.text).toBe(true);
-    expect(messageOf(byName)).toContain('requires capability [manage_users]');
+    for (const refused of [scoped, byName]) {
+      expect(refused.isError, refused.text).toBe(true);
+      expect(refused.payload?.error, refused.text).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+      expect(messageOf(refused)).toContain('requires capability [manage_users]');
+      expect(messageOf(refused)).not.toContain('is not exposed via MCP');
+    }
+    expect(messageOf(scoped)).toBe(messageOf(byName));
     expect(await isBanned(agentTargetUserId)).toBe(false);
+  }, 120_000);
+
+  it('CONTROL: an action genuinely not exposed to AI keeps the system-object sentence for the member\'s agent (#30771)', async () => {
+    // `impersonate_user` declares a gate too, but no `ai` block: its absence
+    // from the listing is exposure, so the sentence stays.
+    const scoped = await tool(memberAgent, 'run_action', { actionName: 'impersonate_user', objectName: 'sys_user', recordId: agentTargetUserId });
+    expect(scoped.isError).toBe(true);
+    expect(messageOf(scoped)).toContain('system object "sys_user" is not exposed via MCP');
   }, 120_000);
 
   it('C: the agent\'s unconfirmed ban_user is refused 428 before any forward; confirmed, it is served as the agent (#28367) and bans the user', async () => {

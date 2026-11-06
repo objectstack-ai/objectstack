@@ -154,9 +154,39 @@ describe('[#30771] a hidden action is still refused when called', () => {
                 objectName: OBJECT, recordId: 'u_target', params: PARAMS[name],
             }));
             expect(String(err?.message)).toContain('requires capability [manage_users]');
+            // The REST door's status and its standard code (ADR-0112).
+            expect(err).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
             expect(request).not.toHaveBeenCalled();
         });
     }
+});
+
+describe('[#30771] capabilityRefusal: why the scoped MCP pre-screen finds an action missing', () => {
+    it('answers the gate\'s refusal for an exposed action the member cannot run — the one run_action throws by name', async () => {
+        const { dispatcher, request } = boot();
+        const bridge = dispatcher.buildMcpBridge(MEMBER());
+        for (const name of PINNED) {
+            const refusal = await bridge.capabilityRefusal(name, OBJECT);
+            expect(refusal, name).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+            const thrown = await refusalOf(bridge.runAction(name, { recordId: 'u_target', params: PARAMS[name] }));
+            expect(refusal.message, name).toBe(thrown.message);
+        }
+        expect(request).not.toHaveBeenCalled();
+    });
+
+    it('answers nothing for the admin, for an action not exposed to AI, and for one not declared there', async () => {
+        const { dispatcher } = boot();
+        expect(await dispatcher.buildMcpBridge(ADMIN()).capabilityRefusal('ban_user', OBJECT)).toBeUndefined();
+        const member = dispatcher.buildMcpBridge(MEMBER());
+        // CONTROL: `impersonate_user` declares a gate but no `ai` block, so its
+        // absence from the listing is exposure, and the tool keeps the
+        // system-object sentence for it.
+        const impersonate = (SysUser as any).actions.find((a: any) => a.name === 'impersonate_user');
+        expect(impersonate.requiredPermissions).toEqual(['manage_users']);
+        expect(impersonate.ai?.exposed).not.toBe(true);
+        expect(await member.capabilityRefusal('impersonate_user', OBJECT)).toBeUndefined();
+        expect(await member.capabilityRefusal('no_such_action', OBJECT)).toBeUndefined();
+    });
 });
 
 describe('[#30771] the listing and the run doors read one declaration', () => {

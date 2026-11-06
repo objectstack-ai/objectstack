@@ -983,6 +983,30 @@ export function actionPermissionError(_deps: ActionExecutionDeps, actionDef: any
 }
 
 /**
+ * [#30771] {@link actionPermissionError} as the ADR-0112 refusal the MCP
+ * `run_action` door throws: `403`, the standard code for it, and the gate's
+ * own sentence — the status `POST /actions/...` answers for the same
+ * declaration. `null` when the gate admits the caller. One reading of one
+ * declaration, so the by-name call and the MCP tool layer's scoped pre-screen
+ * (`McpActionBridge.capabilityRefusal`) answer a gated action alike.
+ */
+export interface ActionPermissionRefusal {
+    code: string;
+    status: 403;
+    message: string;
+}
+
+export function actionPermissionRefusal(
+    deps: ActionExecutionDeps,
+    actionDef: any,
+    ec: any,
+    objectName?: string,
+): ActionPermissionRefusal | null {
+    const message = actionPermissionError(deps, actionDef, ec, objectName);
+    return message ? { code: standardErrorCodeForHttpStatus(403), status: 403, message } : null;
+}
+
+/**
  * [ADR-0126 §8 item 2] The activation refusal a DISABLED packaged action is
  * answered with — `409 ACTION_DISABLED`.
  *
@@ -4319,9 +4343,12 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     const exposureError = actionAiExposureError(deps, action, objectName);
     if (exposureError) throw new Error(exposureError);
 
-    // ADR-0066 D4 capability gate — same declaration the REST route enforces.
-    const gateError = actionPermissionError(deps, action, ec, objectName);
-    if (gateError) throw new Error(gateError);
+    // ADR-0066 D4 capability gate — same declaration the REST route enforces,
+    // thrown with the REST door's `403` and its standard code (#30771).
+    const gateRefusal = actionPermissionRefusal(deps, action, ec, objectName);
+    if (gateRefusal) {
+        throw Object.assign(new Error(gateRefusal.message), { code: gateRefusal.code, status: gateRefusal.status });
+    }
 
     // [ADR-0126 §8 item 2] ACTIVATION CONSULT — door 2 of 2. A packaged action
     // the installation switched off is refused here, before the param contract
