@@ -510,7 +510,10 @@ export const CEILINGS = new Map([
   // shrank to 689 characters (card item 3). One pointer line per moved block.
   // 6128 -> 6123: A2′ — the release-stamp line left the count (see
   // STAMP_LINE_REPIN); the file's count fell by the same 5, headroom unchanged.
-  ['skills/objectstack-data/SKILL.md', 6123],
+  // 6123 -> 6078: re-locked at the landed count. The rule index's `rules/lifecycle.md`
+  // entry names the save notice (+16); the `lifecycle` property row dropped the
+  // bounding-policy clause that entry and `rules/lifecycle.md` already carry (-25).
+  ['skills/objectstack-data/SKILL.md', 6078],
   ['skills/objectstack-formula/SKILL.md', 5997], //     -53 (was 6055), then -5 A2′ (was 6002)
   ['skills/objectstack-i18n/SKILL.md', 6333], //        -11 (was 6349), then -5 A2′ (was 6338)
   // 12705 -> 12984 (2026-08-31 app-repo-principles raise, see the block above).
@@ -678,7 +681,14 @@ export const CEILINGS = new Map([
   // headings); the row carried 2,727 tokens of headroom left by an earlier
   // shrink that nobody re-locked, so the TOC needed no raise. Pinned AT the
   // measurement — zero headroom, the ratchet's steady state.
-  ['skills/objectstack-data/references/data-hooks.md', 10066],
+  // 10066 -> 10011: re-locked at the landed count (main measured 10056; the
+  // move is -45). A `ctx.notice` row in the sandbox table and a `notice?` member
+  // in the HookContext listing, paid by same-file restatements: the
+  // reverse-engineering aside in the `body` intro, the `tenantId` blockquote
+  // (its two halves live in the listing comment and the two-axes note, which
+  // now names the two `tenantId` symbols), the `ctx.user` paragraph under the
+  // `??` line that shows it, and the `session.roles` history clause.
+  ['skills/objectstack-data/references/data-hooks.md', 10011],
   ['skills/objectstack-data/rules/datasources.md', 911],
   // -552 (was 3584): re-locked at the landed count (#16374) after PR #16187
   // (the two `tree` rows) and PR #16369 (the ASCII decision tree deleted)
@@ -1002,7 +1012,15 @@ export const CEILINGS = new Map([
   // stale `{ type: 'lookup', reference: 'user' }` fields (an object that does
   // not exist) became `type: 'user'`; -10 tokens, the row follows the
   // measurement down, zero headroom.
-  ['skills/objectstack-data/references/examples-objects.md', 1756],
+  // 1756 -> 1728: RE-LOCK at the landed count after two net cuts — the Field
+  // Groups section now names a group's `visibleWhen` and `requiresFeature`
+  // (lowered into `visibleWhen` at parse, unknown flag refused, AND-composed
+  // after an authored predicate) with the `sys_organization` example, paid by
+  // deleting restatement in the same file (-5), on top of the hook-example
+  // rename that dropped its intro line (-14) and left headroom, then the
+  // review's module pointer paid by the custom-Page aside (the ui skill's
+  // rule); the row follows the measurement down, zero headroom.
+  ['skills/objectstack-data/references/examples-objects.md', 1728],
   ['skills/objectstack-data/references/lint-rules.md', 970],
   // 1299 -> 1566 (#26297): the `columns` dataset key and `applyOn: 'create'`
   // — a column a job or an admin owns after the first load is written on
@@ -1014,7 +1032,7 @@ export const CEILINGS = new Map([
   // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
   ['skills/objectstack-data/references/seeds.md', 1566],
   ['skills/objectstack-platform/references/bootstrap.md', 1351],
-  ['skills/objectstack-platform/references/operations.md', 3119],
+  ['skills/objectstack-platform/references/operations.md', 3108],
   ['skills/objectstack-platform/references/plugin-development.md', 3137],
   ['skills/objectstack-upgrade/references/examples-upgrade.md', 1197],
 
