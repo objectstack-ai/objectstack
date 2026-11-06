@@ -185,6 +185,21 @@
  * The same skips 1, 3 and 4 hold, plus a member that writes no `sql`; and on
  * a measure, skip 5 and a measure that writes no `type`.
  *
+ * ## [#30773] The virtual-dimension leg — `dimension-virtual-field-refused`
+ *
+ * A dimension over a VIRTUAL field — computed on read, never stored (the
+ * spec's `isVirtualSearchField` / `SEARCH_VIRTUAL_TYPES`, today `formula`),
+ * whatever its `returnType` — groups by a column no driver materialises. Every
+ * analytics face refuses that group at query time with `400 INVALID_FIELD` at
+ * `groupBy.N` (`assertGroupByTargetsAreStored` in `@objectstack/objectql`), and
+ * the dataset compile refuses a dataset declaring one over its own object with
+ * `400 DATASET_INVALID`. This leg makes the same refusal where the author is
+ * standing, on a dataset dimension and a cube dimension alike, resolved on the
+ * object graph exactly as the JSON-stored leg resolves it (dotted paths
+ * included, judged on the object the LEAF lives on) and under the same skips.
+ * ⛔ The verdict is the spec predicate's, never a local type list. A formula is
+ * never JSON-stored, so the two dimension ids never fire on one member.
+ *
  * ## [#25778] The duration leg — `measure-duration-field-type-refused`
  *
  * A dataset measure written `duration: { from, to, unit }` aggregates the time
@@ -207,7 +222,8 @@
  * there; an `analytics_cube` write is dispatched to no rule today.
  *
  * The function keeps its name: it is the registry's key (`authoring-rules.ts`),
- * and the dimension, duration and cube legs ride on that one entry.
+ * and the dimension, virtual-dimension, duration and cube legs ride on that one
+ * entry.
  */
 
 import {
@@ -215,6 +231,7 @@ import {
   STRUCTURED_JSON_TYPES,
   isAggregateCompatibleWithFieldType,
   isMultiValueField,
+  isVirtualSearchField,
   virtualFieldAggregateRemedy,
   type ValueShapeFieldDef,
 } from '@objectstack/spec/data';
@@ -250,6 +267,14 @@ export const MEASURE_AGGREGATE_FIELD_TYPE_REFUSED = 'measure-aggregate-field-typ
 export const DIMENSION_JSON_STORED_FIELD_REFUSED = 'dimension-json-stored-field-refused';
 
 /**
+ * [#30773] Stable diagnostic id for a dataset or cube dimension whose column is
+ * VIRTUAL — computed on read, never stored (the spec's `isVirtualSearchField`).
+ * Named beside {@link DIMENSION_JSON_STORED_FIELD_REFUSED}: the same member, the
+ * storage axis instead of the value-shape one.
+ */
+export const DIMENSION_VIRTUAL_FIELD_REFUSED = 'dimension-virtual-field-refused';
+
+/**
  * [#25778] Stable diagnostic id for a dataset duration measure whose `from` or
  * `to` names a field declared anything but `datetime`. Named for the same axis
  * as {@link MEASURE_AGGREGATE_FIELD_TYPE_REFUSED}, the field's declared type,
@@ -271,6 +296,7 @@ export interface DatasetMeasureAggregateFinding {
   rule:
     | typeof MEASURE_AGGREGATE_FIELD_TYPE_REFUSED
     | typeof DIMENSION_JSON_STORED_FIELD_REFUSED
+    | typeof DIMENSION_VIRTUAL_FIELD_REFUSED
     | typeof MEASURE_DURATION_FIELD_TYPE_REFUSED;
   /** Human-readable location, e.g. `dataset "sales" › measure "avg_closed"` or `cube "sales" › dimension "meta"`. */
   where: string;
@@ -435,6 +461,33 @@ function jsonStoredDimensionFinding(
 }
 
 /**
+ * [#30773] The finding for a dimension that groups by a VIRTUAL column, in one
+ * set of words for a dataset dimension and a cube dimension alike: one verdict
+ * sentence and one remedy line — the remedy the query-time doors name (store
+ * the value on a stored field and group by that). Which doors refuse it, and
+ * why a computed value is no group key, are `os explain
+ * dimension-virtual-field-refused`.
+ */
+function virtualDimensionFinding(
+  site: MemberSite,
+  leaf: Extract<FieldPathVerdict, { kind: 'ok' }>,
+  shape: ValueShapeFieldDef,
+): DatasetMeasureAggregateFinding {
+  return {
+    severity: 'error',
+    rule: DIMENSION_VIRTUAL_FIELD_REFUSED,
+    where: site.where,
+    path: site.path,
+    message:
+      `groups by field "${site.column}" (${declaredAs(shape)} on ${site.declarer}), a value computed on read ` +
+      'and never stored, so no query can group by it',
+    hint:
+      `Store the value in a stored field of "${leaf.object}" (written when its source changes) and point this ` +
+      'dimension at that field, or remove the dimension.',
+  };
+}
+
+/**
  * The finding for a measure whose aggregate the column's declaration cannot
  * carry ({@link acceptsDeclaration} said no), in one set of words for a
  * dataset measure and a cube measure alike.
@@ -578,23 +631,22 @@ function cubeMemberFindings(cube: AnyRec, cubePath: string, graph: ObjectGraph):
     if (!sql) continue;
     const column = columnOf(sql);
     if (!column) continue;
+    const name = strName(dimension.name) ?? path;
+    const site: MemberSite = {
+      where: `cube "${cubeName}" › dimension "${name}"`,
+      path: `${path}.sql`,
+      column: sql,
+      declarer: declarerOf(column.verdict, object),
+    };
+    // [#30773] The storage axis first, as the engine's door judges it first.
+    if (isVirtualSearchField(column.shape)) {
+      findings.push(virtualDimensionFinding(site, column.verdict, column.shape));
+      continue;
+    }
     const cls = groupKeyClassOf(column.shape);
     if (cls === null) continue;
 
-    const name = strName(dimension.name) ?? path;
-    findings.push(
-      jsonStoredDimensionFinding(
-        {
-          where: `cube "${cubeName}" › dimension "${name}"`,
-          path: `${path}.sql`,
-          column: sql,
-          declarer: declarerOf(column.verdict, object),
-        },
-        column.verdict,
-        column.shape,
-        cls,
-      ),
-    );
+    findings.push(jsonStoredDimensionFinding(site, column.verdict, column.shape, cls));
   }
 
   for (const { rec: measure, path } of collectionEntries(cube.measures, `${cubePath}.measures`)) {
@@ -635,8 +687,8 @@ function cubeMemberFindings(cube: AnyRec, cubePath: string, graph: ObjectGraph):
 /**
  * Refuse every dataset measure whose `aggregate` the field's declaration
  * cannot carry, [#25778] every duration column not declared `datetime`, and
- * every dataset dimension whose field is JSON-stored; then
- * [#21082] every cube dimension whose `sql` column is JSON-stored, and
+ * every dataset dimension whose field is JSON-stored or [#30773] virtual; then
+ * [#21082] every cube dimension whose `sql` column is JSON-stored or virtual, and
  * [#21419] every cube measure whose `type` the column's declaration cannot
  * carry. Returns findings (empty =
  * clean): each dataset's dimensions before its measures, then each cube's.
@@ -679,23 +731,22 @@ export function validateDatasetMeasureAggregates(stack: unknown): DatasetMeasure
       if (!fieldType) return;
 
       const shape = shapeOf(verdict, fieldType);
+      const dimensionName = strName(dimension.name) ?? `#${k}`;
+      const site: MemberSite = {
+        where: `dataset "${dsName}" › dimension "${dimensionName}"`,
+        path: `datasets[${di}].dimensions[${k}].field`,
+        column: field,
+        declarer: declarerOf(verdict, object),
+      };
+      // ── [#30773] The virtual-dimension leg: a group key over a column no driver stores ──
+      if (isVirtualSearchField(shape)) {
+        findings.push(virtualDimensionFinding(site, verdict, shape));
+        return;
+      }
       const cls = groupKeyClassOf(shape);
       if (cls === null) return;
 
-      const dimensionName = strName(dimension.name) ?? `#${k}`;
-      findings.push(
-        jsonStoredDimensionFinding(
-          {
-            where: `dataset "${dsName}" › dimension "${dimensionName}"`,
-            path: `datasets[${di}].dimensions[${k}].field`,
-            column: field,
-            declarer: declarerOf(verdict, object),
-          },
-          verdict,
-          shape,
-          cls,
-        ),
-      );
+      findings.push(jsonStoredDimensionFinding(site, verdict, shape, cls));
     });
 
     recordsOf(ds.measures).forEach((measure, k) => {
