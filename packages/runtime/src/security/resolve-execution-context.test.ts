@@ -327,7 +327,7 @@ describe('resolveExecutionContext — the platform-scoped (Default Organization)
   const RAW = 'osk_admin';
   /** @param adminGrantOrg the organization that owns u1's admin_full_access grant. */
   function makeAuthQl(extraGrants = [], adminGrantOrg: string | null = 'org_default') {
-    const tables = {
+    const tables: Record<string, any[]> = {
       // [#8287] Re-spelled from `organization_id`: these fixtures use the key as a
       // VEHICLE to authenticate u1 into orgA, and `active_organization_id` is the
       // column the verifier reads for exactly that. The assertions below depend on
