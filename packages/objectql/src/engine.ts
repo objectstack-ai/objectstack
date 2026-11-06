@@ -84,6 +84,7 @@ import {
 // [#30237, ADR-0148] The recycle bin's write side: the capture body, and the
 // retention seam the host hands over (`RecycleBinCaptureHost`).
 import { openRecycleBinCapture, type RecycleBinCapture } from './recycle-bin/capture.js';
+import { emptyRecycleBin, purgeRecycleBinEntry, readPermanentDelete, type RecycleBinRemovalOptions } from './recycle-bin/purge.js';
 import type { RecycleBinRetentionSettings } from './recycle-bin/retention.js';
 // [#25522 cut 6] The predicate-write hook dispatch bodies; the methods of the
 // same names below hand each body the members it reads (`HookDispatchHost`).
@@ -8647,7 +8648,7 @@ export class ObjectQL implements IObjectQLEngine {
     object: string,
     id: string | number,
     context: ExecutionContext | undefined,
-    predicate: boolean,
+    skip: boolean,
   ): RecycleBinCapture | undefined {
     // [#30237] The body lives in `recycle-bin/capture.ts`, its docblock with it (see `RecycleBinCaptureHost`).
     const readRegistry = () => this._registry;
@@ -8664,7 +8665,49 @@ export class ObjectQL implements IObjectQLEngine {
       getDriver: (...a) => this.getDriver(...a),
       buildDriverOptions: (...a) => this.buildDriverOptions(...a),
     };
-    return openRecycleBinCapture.call(host, object, id, context, predicate);
+    return openRecycleBinCapture.call(host, object, id, context, skip);
+  }
+
+  /**
+   * [#30237, ADR-0148 D1] Purge one recycle-bin entry: its rows can no longer be
+   * restored. `true` when the entry was removed; `false` when no entry with that
+   * id is visible to the caller's organization, or the composition registers no
+   * bin (`PlatformObjectsPlugin`).
+   *
+   * Authorized as the `purge` operation on the object the entry's rows belong
+   * to, the recycle-bin manager's verb: until `@objectstack/plugin-security`
+   * maps it to its grant, every caller that is not the system is refused. The
+   * body lives in `recycle-bin/purge.ts`, its docblock with it.
+   */
+  purge(entryId: string | number, options?: RecycleBinRemovalOptions): Promise<boolean> {
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof purgeRecycleBinEntry> = {
+      get _registry() { return readRegistry(); },
+      getDriver: (...a) => this.getDriver(...a),
+      buildDriverOptions: (...a) => this.buildDriverOptions(...a),
+      executeWithMiddleware: (...a) => this.executeWithMiddleware(...a),
+    };
+    return purgeRecycleBinEntry.call(host, entryId, options);
+  }
+
+  /**
+   * [#30237, ADR-0148 D1] Empty the recycle bin of one object: remove every
+   * entry of `object` the caller's organization holds, and answer how many.
+   * `0` when the composition registers no bin. A platform object (`sys_`,
+   * `cloud_`, `ai_`) is refused `400`: the bin never takes one.
+   *
+   * One `purge` operation on `object`, so one authorization covers the act,
+   * as for {@link purge}. The body lives in `recycle-bin/purge.ts`.
+   */
+  empty(object: string, options?: RecycleBinRemovalOptions): Promise<number> {
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof emptyRecycleBin> = {
+      get _registry() { return readRegistry(); },
+      getDriver: (...a) => this.getDriver(...a),
+      buildDriverOptions: (...a) => this.buildDriverOptions(...a),
+      executeWithMiddleware: (...a) => this.executeWithMiddleware(...a),
+    };
+    return emptyRecycleBin.call(host, object, options);
   }
 
   /**
@@ -8925,13 +8968,18 @@ export class ObjectQL implements IObjectQLEngine {
     // reads THIS predicate cannot be looser than this method.
     const dispatch = resolveEngineDeleteDispatch(options as EngineDeleteDispatchInput | undefined);
     const id: any = dispatch.kind === 'by-id' ? dispatch.id : undefined;
+    // [#30237, ADR-0148, Q3 = A] A permanent delete writes no recycle-bin entry
+    // and is authorized as `purge`, the recycle-bin manager's verb. Refused here,
+    // before any middleware or hook, unless it is a by-id delete of an object
+    // the bin takes (see `readPermanentDelete`).
+    const permanent = readPermanentDelete(object, options, dispatch.kind);
     // [#23221] Is this the child delete a cascade issued? Decided here, once,
     // before any middleware or hook runs, so the claim is this call's alone.
     const referentialCascadeDelete = this.claimReferentialCascadeDelete(object, id);
 
     const opCtx: OperationContext = {
       object,
-      operation: 'delete',
+      operation: permanent ? 'purge' : 'delete',
       options,
       context: options?.context,
     };
@@ -9341,8 +9389,9 @@ export class ObjectQL implements IObjectQLEngine {
               // with it: the transaction's rollback when one covers the bin,
               // the capture's compensation otherwise. A caller's `multi: true`
               // opens none, even here: the lifecycle sweep reaps by id with it.
+              // Nor does a permanent delete, which is the point of it.
               const runByIdDelete = async (writeContext?: ExecutionContext) => {
-                const bin = this.openRecycleBinCapture(object, hookContext.input.id as string | number, writeContext, options?.multi === true);
+                const bin = this.openRecycleBinCapture(object, hookContext.input.id as string | number, writeContext, options?.multi === true || permanent);
                 await this.cascadeDeleteRelations(object, [hookContext.input.id as string | number], writeContext, 0, bin?.onCollected)
                   .catch((e: unknown) => { throw cascadeStoppedRefusal(e, object); });
                 const entry = await bin?.write();

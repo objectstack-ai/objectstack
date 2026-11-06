@@ -1,7 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { hookBodyRunnerFactory, actionBodyRunnerFactory } from './body-runner.js';
+import { ObjectQL, ScopedContext } from '@objectstack/objectql';
+import { RECYCLE_BIN_ENTRY_FIELDS } from '@objectstack/spec/data';
+import { hookBodyRunnerFactory, actionBodyRunnerFactory, jobBodyRunnerFactory } from './body-runner.js';
 import { QuickJSScriptRunner } from './quickjs-runner.js';
 
 describe('hookBodyRunnerFactory', () => {
@@ -574,5 +576,165 @@ describe('actionBodyRunnerFactory', () => {
       // semantics (that path carries no caller identity).
       expect(await probeUser({ userId: 'u_1', tenantId: 'org_1', roles: ['sales'] })).toBe('null');
     });
+  });
+});
+
+// [ADR-0148 D3, maintainer ruling A recorded in 6691358077] App-authored code
+// cannot purge: a body's delete always enters the recycle bin. A job body runs
+// under a fresh `{ isSystem: true, tenantId }` envelope, and the system is never
+// refused the engine's `purge` verb, so the rule is held by the body's API.
+// Real `ObjectQL` over a row-keeping driver: "nothing removed, no entry skipped"
+// is a reading of the rows, not of a stub's call log.
+describe('a body cannot delete permanently: its deletes enter the recycle bin', () => {
+  type Row = Record<string, unknown>;
+  const runner = new QuickJSScriptRunner({ hookTimeoutMs: 10_000 });
+  const WRITE_CAPS = ['api.read', 'api.write'];
+
+  function makeDriver() {
+    const stores = new Map<string, Map<string, Row>>();
+    const storeFor = (o: string) => {
+      let st = stores.get(o);
+      if (!st) { st = new Map(); stores.set(o, st); }
+      return st;
+    };
+    const matches = (row: Row, where: any) =>
+      !where || Object.entries(where).every(([k, v]) => k.startsWith('$') || (row[k] ?? null) === (v ?? null));
+    const driver: any = {
+      name: 'primary', version: '0.0.0', supports: {},
+      rowsOf: (o: string) => Array.from(storeFor(o).values()),
+      seed(o: string, row: Row) { storeFor(o).set(String(row.id), { ...row }); },
+      async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
+      async syncSchema() {},
+      async find(o: string, ast: any) {
+        const rows = Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
+        const page = typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
+        return page.map((r) => ({ ...r }));
+      },
+      async findOne(o: string, ast: any) {
+        for (const r of storeFor(o).values()) if (matches(r, ast?.where)) return { ...r };
+        return null;
+      },
+      async create(o: string, data: Row) {
+        const id = (data.id as string) ?? `r_${storeFor(o).size + 1}`;
+        const row = JSON.parse(JSON.stringify({ ...data, id }));
+        storeFor(o).set(id, row);
+        return { ...row };
+      },
+      async update(o: string, id: string, data: Row) {
+        const up = { ...storeFor(o).get(String(id)), ...data, id };
+        storeFor(o).set(String(id), up);
+        return { ...up };
+      },
+      async delete(o: string, id: string) { return storeFor(o).delete(String(id)); },
+      async count(o: string, ast: any) { return (await driver.find(o, ast)).length; },
+    };
+    return driver;
+  }
+
+  async function makeEngine() {
+    const engine = new ObjectQL();
+    const driver = makeDriver();
+    engine.registerDriver(driver, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: 'sys_recycle_bin', label: 'Recycle Bin Entry', managedBy: 'engine-owned', fields: { ...RECYCLE_BIN_ENTRY_FIELDS },
+    } as any, '__test__');
+    engine.registry.registerObject({
+      name: 'pdb_ticket', label: 'Ticket', fields: { id: { name: 'id', type: 'text' }, name: { name: 'name', type: 'text' } },
+    } as any, '__test__');
+    const deletes: Array<{ id: unknown; operation: string }> = [];
+    engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+      if (opCtx.object === 'pdb_ticket' && (opCtx.operation === 'delete' || opCtx.operation === 'purge')) {
+        deletes.push({ id: opCtx.options?.where?.id, operation: opCtx.operation });
+      }
+      await next();
+    });
+    // One entry already in the bin, so "no entry lost" is a reading of a non-empty bin.
+    driver.seed('pdb_ticket', { id: 't0', name: 'old' });
+    await engine.delete('pdb_ticket', { where: { id: 't0' }, context: { isSystem: true } });
+    driver.seed('pdb_ticket', { id: 't1', name: 'live' });
+    deletes.length = 0;
+    const entries = () => driver.rowsOf('sys_recycle_bin').map((e: Row) => e.record_id).sort();
+    return { engine, driver, deletes, entries };
+  }
+
+  const jobRunning = (engine: unknown, source: string) =>
+    jobBodyRunnerFactory(runner, { ql: engine, appId: 'pdb' })({
+      name: 'nightly_purge',
+      body: { language: 'js', capabilities: WRITE_CAPS, source },
+    })!;
+
+  it('a job body (system envelope) passing `permanent: true` is refused 400 VALIDATION_ERROR naming the rule; nothing is removed', async () => {
+    const { engine, driver, deletes, entries } = await makeEngine();
+    expect(entries()).toEqual(['t0']);
+    const outcome = await jobRunning(engine, `
+      try {
+        await ctx.api.object('pdb_ticket').delete({ where: { id: 't1' }, permanent: true });
+        return { outcome: 'completed', reason: 'purged' };
+      } catch (e) {
+        return { outcome: 'degraded', reason: e.code + ' ' + e.status + ' ' + e.message };
+      }`)({} as any);
+    expect(outcome?.outcome).toBe('degraded');
+    expect(outcome?.reason).toMatch(/^VALIDATION_ERROR 400 /);
+    expect(outcome?.reason).toContain('app-authored code cannot purge; its deletes enter the recycle bin');
+    expect(deletes).toEqual([]);
+    expect(driver.rowsOf('pdb_ticket').map((r: Row) => r.id)).toEqual(['t1']);
+    expect(entries()).toEqual(['t0']);
+  });
+
+  it('uncaught, the refusal fails the job run with the envelope on the host side (`param: permanent` stays host-side)', async () => {
+    const { engine, driver, entries } = await makeEngine();
+    await expect(jobRunning(engine, `
+      await ctx.api.object('pdb_ticket').delete({ where: { id: 't1' }, permanent: true });
+      return { outcome: 'completed' };`)({} as any)).rejects.toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(driver.rowsOf('pdb_ticket').map((r: Row) => r.id)).toEqual(['t1']);
+    expect(entries()).toEqual(['t0']);
+  });
+
+  it('a hook body and an action body are refused the same way', async () => {
+    const { engine, driver, deletes, entries } = await makeEngine();
+    const source = `
+      try { await ctx.api.object('pdb_ticket').delete({ where: { id: 't1' }, permanent: true }); return { got: 'purged' }; }
+      catch (e) { return { got: e.code + ' ' + e.status }; }`;
+    const hook = hookBodyRunnerFactory(runner, { ql: engine, appId: 'pdb' })({
+      name: 'purge_on_close', object: 'pdb_case', events: ['beforeUpdate'],
+      body: { language: 'js', capabilities: WRITE_CAPS, source },
+    } as any)!;
+    const engineCtx: any = { object: 'pdb_case', event: 'beforeUpdate', input: {}, api: new ScopedContext({ isSystem: true } as any, engine as any) };
+    await hook(engineCtx);
+    expect(engineCtx.input.got).toBe('VALIDATION_ERROR 400');
+    const action = actionBodyRunnerFactory(runner, { ql: engine, appId: 'pdb' })({
+      name: 'purge_ticket', object: 'pdb_ticket', type: 'script',
+      body: { language: 'js', capabilities: WRITE_CAPS, source },
+    })!;
+    const value = await action({ params: {}, record: {}, executionContext: { isSystem: true } });
+    expect(value).toEqual({ got: 'VALIDATION_ERROR 400' });
+    expect(deletes).toEqual([]);
+    expect(driver.rowsOf('pdb_ticket').map((r: Row) => r.id)).toEqual(['t1']);
+    expect(entries()).toEqual(['t0']);
+  });
+
+  for (const [label, opts] of [
+    ['`permanent: false`', `{ where: { id: 't1' }, permanent: false }`],
+    ['no `permanent` key', `{ where: { id: 't1' } }`],
+  ] as const) {
+    it(`a job body's delete with ${label} is the ordinary delete: the record enters the bin`, async () => {
+      const { engine, driver, deletes, entries } = await makeEngine();
+      const outcome = await jobRunning(engine, `
+        await ctx.api.object('pdb_ticket').delete(${opts});
+        return { outcome: 'completed' };`)({} as any);
+      expect(outcome).toEqual({ outcome: 'completed' });
+      expect(deletes).toEqual([{ id: 't1', operation: 'delete' }]);
+      expect(driver.rowsOf('pdb_ticket')).toEqual([]);
+      expect(entries()).toEqual(['t0', 't1']);
+    });
+  }
+
+  it('host code keeps the engine\'s permanent delete (Q3 = A): only app-authored bodies are refused', async () => {
+    const { engine, driver, deletes, entries } = await makeEngine();
+    await engine.delete('pdb_ticket', { where: { id: 't1' }, permanent: true, context: { isSystem: true } });
+    expect(deletes).toEqual([{ id: 't1', operation: 'purge' }]);
+    expect(driver.rowsOf('pdb_ticket')).toEqual([]);
+    expect(entries()).toEqual(['t0']);
   });
 });
