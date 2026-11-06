@@ -4681,8 +4681,14 @@ jobs:
   #   - success: n=3205, min 68 s, median 407 s, p95 563 s, p99 589 s,
   #     max 822 s (13.7 min; job 125022934909, a queue run on a slow runner:
   #     615 s closure build, 94 s specs) => max(41.1, 28.7) => 45.
-  #     The next slowest are 775, 740, 733, 704 and 701 s, all queue runs;
-  #     push and schedule alone top out at 624 s and would give 35.
+  #     The next slowest, to the last step, are 772, 738, 731, 702 and 699 s
+  #     (reported 775, 740, 733, 704 and 701 s), all queue runs; push and
+  #     schedule alone top out at 624 s and would give 35.
+  # `pull_request` runs are not in the population: they were not read in
+  # full, which the sibling rule ("every successful job") asks for. A sample
+  # of 93 successful ones on the same slow days (2026-11-01 to 2026-11-03)
+  # tops out at 675 s, under the 822 s that decides the value, so 45 holds
+  # either way; the next re-derivation should read them in full.
   # The slow tail is the cold case: those jobs spend 406-615 s in the
   # closure build, above the 384 s of the cold local run on 4 shared cores
   # (#27154) that set the old 40 (≈ 730 s => max(36.5, 27.2) => 40), so the
