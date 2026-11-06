@@ -21,7 +21,7 @@ import {
   RecordedDriver,
   subscriptionOnlyEnv,
 } from '../../src/runner/driver.js';
-import { asksToConfirm, countWrites, NOT_ATTEMPTED, observedAnswer, observeOperation, UNCODED_TOOL_ERROR } from '../../src/runner/observe.js';
+import { asksToConfirm, countWrites, noWriteAttempted, observedAnswer, observeOperation, uncodedToolError } from '../../src/runner/observe.js';
 import { citationLabels, namespaceOfConfig, namespacedScenario } from '../../src/runner/namespace.js';
 import { changeSize, hiddenValues, installableManifest, seedOrder } from '../../src/runner/orchestrate.js';
 import { buildPrompt, dataContract, questionPrompt, verifyFlags } from '../../src/runner/prompts.js';
@@ -98,13 +98,13 @@ describe('observedAnswer — the ordered rules', () => {
     const refused = turnOf('', [{ name: 'update_record', input: { objectName: obj }, output: '{"error":{"code":"PERMISSION_DENIED"}}', isError: true }]);
     expect(observedAnswer(refused, obj, 0)).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED' });
   });
-  it('no write call and the reply asks to confirm ⇒ pending_confirmation; otherwise NOT_ATTEMPTED', () => {
+  it('no write call and the reply asks to confirm ⇒ pending_confirmation; otherwise noWriteAttempted', () => {
     expect(observedAnswer(turnOf('Are you sure you want to delete Chen Li?'), obj, 0)).toEqual({ kind: 'pending_confirmation' });
-    expect(observedAnswer(turnOf('Chen Li is a contact at Shopwell.'), obj, 0)).toEqual({ kind: 'refused', code: NOT_ATTEMPTED });
+    expect(observedAnswer(turnOf('Chen Li is a contact at Shopwell.'), obj, 0)).toEqual({ kind: 'refused', code: noWriteAttempted });
   });
-  it('a failed write call with no code ⇒ UNCODED_TOOL_ERROR, and a call on another object is not this write', () => {
-    expect(observedAnswer(turnOf('', [{ name: 'create_record', input: { objectName: obj }, output: 'MCP error -32602', isError: true }]), obj, 0)).toEqual({ kind: 'refused', code: UNCODED_TOOL_ERROR });
-    expect(observedAnswer(turnOf('', [{ name: 'create_record', input: { objectName: 'account' }, output: '{}' }]), obj, 0)).toEqual({ kind: 'refused', code: NOT_ATTEMPTED });
+  it('a failed write call with no code ⇒ uncodedToolError, and a call on another object is not this write', () => {
+    expect(observedAnswer(turnOf('', [{ name: 'create_record', input: { objectName: obj }, output: 'MCP error -32602', isError: true }]), obj, 0)).toEqual({ kind: 'refused', code: uncodedToolError });
+    expect(observedAnswer(turnOf('', [{ name: 'create_record', input: { objectName: 'account' }, output: '{}' }]), obj, 0)).toEqual({ kind: 'refused', code: noWriteAttempted });
     expect(asksToConfirm('确认删除吗')).toBe(true);
   });
 });

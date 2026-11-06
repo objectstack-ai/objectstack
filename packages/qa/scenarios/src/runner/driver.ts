@@ -81,10 +81,11 @@ export interface AgentDriver {
 /** Environment variables that would make the CLI bill an API key instead of the login. */
 export const API_BILLING_ENV = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'] as const;
 
+// The cost ruling recorded on objectstack-ai/cloud#3600; the message below carries its substance, not its id.
 export class ApiBillingRefusedError extends Error {
   constructor(reason: string) {
     super(
-      `the scenario runner drives a local Claude Code login only, never an API-billed model (cost ruling on cloud#3600): ${reason}. ` +
+      `the scenario runner drives a local Claude Code login only, never an API-billed model: ${reason}. ` +
         'Unset it and run `claude auth login` with your subscription.',
     );
     this.name = 'ApiBillingRefusedError';

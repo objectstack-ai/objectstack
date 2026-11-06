@@ -23,12 +23,14 @@
  *   3. a write call answered a coded refusal          → `refused <that code>`
  *   4. no write call, and the reply asks the person to confirm
  *                                                     → `pending_confirmation`
- *   5. a write call failed with no code               → `refused UNCODED_TOOL_ERROR`
- *   6. nothing attempted                              → `refused NOT_ATTEMPTED`
+ *   5. a write call failed with no code               → `refused (tool error without a code)`
+ *   6. nothing attempted                              → `refused (no write attempted)`
  *
- * The two synthetic codes in 5 and 6 are outside the spec's catalogue on
- * purpose: no card can declare them, so an operation the agent never carried
- * out can never grade as the refusal the card expected.
+ * The two labels in 5 and 6 are deliberately not error codes: parenthesized
+ * prose, outside the spec's catalogue and outside its spelling, so no card can
+ * declare them and nobody can mistake one for a code a door answered. An
+ * operation the agent never carried out can never grade as the refusal the
+ * card expected.
  */
 
 import type { ScenarioCard, Scalar } from '../schema.js';
@@ -41,8 +43,8 @@ export type Row = Readonly<Record<string, unknown>>;
 /** The write tools of the MCP data surface, and the business-action door. */
 export const WRITE_TOOLS = ['create_record', 'update_record', 'delete_record', 'run_action'] as const;
 
-export const NOT_ATTEMPTED = 'NOT_ATTEMPTED';
-export const UNCODED_TOOL_ERROR = 'UNCODED_TOOL_ERROR';
+export const noWriteAttempted = '(no write attempted)';
+export const uncodedToolError = '(tool error without a code)';
 export const CONFIRMATION_REQUIRED_CODE = 'ACTION_CONFIRMATION_REQUIRED';
 
 /** A row's fingerprint for the before/after comparison: every column but the clock. */
@@ -88,8 +90,8 @@ export function observedAnswer(turn: ParsedTurn, object: string, writes: number)
   if (codes.includes(CONFIRMATION_REQUIRED_CODE)) return { kind: 'pending_confirmation' };
   if (codes.length > 0) return { kind: 'refused', code: codes[codes.length - 1]! };
   if (calls.length === 0 && asksToConfirm(turn.replyText)) return { kind: 'pending_confirmation' };
-  if (calls.length > 0) return { kind: 'refused', code: UNCODED_TOOL_ERROR };
-  return { kind: 'refused', code: NOT_ATTEMPTED };
+  if (calls.length > 0) return { kind: 'refused', code: uncodedToolError };
+  return { kind: 'refused', code: noWriteAttempted };
 }
 
 function matches(row: Row, where: Readonly<Record<string, Scalar>>): boolean {
