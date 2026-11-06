@@ -334,22 +334,24 @@ Status legend: **[done]** shipped · **[proposed]** not yet built ·
 **[deferred]** out of scope here.
 
 - **[done]** Authoring lint: `naming/namespace-prefix` in `os lint` warns on
-  every bare package-authored top-level name in every manifest collection, and
-  gives the rename as its `fix` (ruling C on #30798, #30804). It does not judge
-  objects (`defineStack` refuses those), views (named for their object), docs
-  (`docs/namespace-prefix`), extensions, translation bundles, fields,
-  `functions`, or an item that declares `overrides`. A name carries the
+  every bare package-authored top-level name in every manifest collection of a
+  package that declares `manifest.namespace` (a package without one is not
+  judged), and gives the rename as its `fix` (ruling C on #30798, #30804). It
+  does not judge objects (`defineStack` refuses those), views (named for their
+  object), docs (`docs/namespace-prefix`), extensions, translation bundles,
+  fields, `functions`, or an item that declares `overrides`. A name carries the
   namespace when it is the namespace itself (the namespace-named app per
-  ADR-0019), starts with `<ns>_`, is a `<ns>.<short>` capability name
-  (maintainer ruling 2026-11-06T11:08Z, recorded in
+  ADR-0019), starts with `<ns>_`, is a dotted `<ns>.<short>` name, the
+  capability shape (maintainer ruling 2026-11-06T11:08Z, recorded in
   [#30804 comment 6683456244](https://github.com/objectstack-ai/objectstack/issues/30804#issuecomment-6683456244)),
   or starts with `sys_`. The permission set `guest_portal` is exempt, because
   the public form doors request it by that bare name (ADR-0138; maintainer
   ruling 2026-11-06T14:57Z, recorded in
   [#30804 comment 6687835712](https://github.com/objectstack-ai/objectstack/issues/30804#issuecomment-6687835712);
-  `PLATFORM_REQUESTED_BARE_NAMES`). The rule also reports a name
-  declared twice in one package. It is warning-only; the refusal is phase 3
-  of the same ruling (#30806).
+  `PLATFORM_REQUESTED_BARE_NAMES`). The rule also reports a name declared
+  twice in one package among its apps, pages, dashboards, flows, actions (per
+  `objectName`), reports and datasets. It is warning-only; the refusal is
+  phase 3 of the same ruling (#30806).
 - **[done] Phase 1 — install-time namespace gate.** `NamespaceConflictError` +
   the gate in `SchemaRegistry.installPackage` (refuses a package whose
   `manifest.namespace` is already owned by a different installed package;
