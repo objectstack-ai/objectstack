@@ -606,6 +606,7 @@ The letters as filed on #25403 and on ruling `6377678758`:
 4. **A disabled dependency.** D2 judges presence and version. Whether `enabled: false` on X should satisfy, refuse, or
    warn for a dependent is measured against what the save door's closure and the data door do with a disabled package
    today.
+   **Ruled** (#30379, record 6670643454, letter A): an enabled dependent (a rule that reads a field X adds) refuses the disable.
 5. **`optional` and `AppManifestSchema.dependencies`** — D8 items 2 and 3.
 6. **The carved-out module's `type`.** D7 states `type: 'app'`. The card confirms the artifact `os build` writes for a
    standalone module carries it, and reads what each install door does today with a top-level package of another type

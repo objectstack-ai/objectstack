@@ -6,6 +6,7 @@ import { createLazyCounterStore } from '@objectstack/plugin-auth/rate-limit-stor
 import { resolveKernelCache } from './kernel-cache.js';
 import { SmsService, LogSmsTransport, maskPhoneNumber, normalizeSmsRecipient } from './sms-service.js';
 import { SmsDailyQuota } from './sms-daily-quota.js';
+import { smsTestCopy, type SmsTestCopy } from './sms-test-copy.js';
 import { makeSmsTransport, smsProviderOptionsFrom, type SmsProviderTag } from './transports/index.js';
 
 /**
@@ -83,32 +84,26 @@ const SYSTEM_CTX = { isSystem: true } as const;
  * Every refusal is admin copy the settings page shows: it names what the admin
  * does (press Send test SMS signed in as an admin whose account has a number),
  * never a request field or an endpoint. The `to` override is for API callers
- * and is documented here, not in the refusal.
+ * and is documented here, not in the refusal. Each is written in the caller's
+ * language (`copy`, {@link smsTestCopy}).
  */
 async function resolveSmsTestRecipient(
   payload: unknown,
   userId: unknown,
   getEngine: () => IDataEngine | undefined,
+  copy: SmsTestCopy,
 ): Promise<{ to: string } | { refusal: string }> {
   const named = payload && typeof payload === 'object' ? (payload as { to?: unknown }).to : undefined;
   if (typeof named === 'string' && named.trim() !== '') {
     const to = normalizeSmsRecipient(named);
-    return to ? { to } : { refusal: 'Provide a valid "to" phone number (E.164 recommended).' };
+    return to ? { to } : { refusal: copy.invalidTo };
   }
   if (typeof userId !== 'string' || userId === '') {
-    return {
-      refusal: 'No recipient — nothing was sent. The test SMS goes to the signed-in admin\'s own phone number, '
-        + 'and no one is signed in on this call. Sign in as an admin whose account has a phone number, then '
-        + 'press Send test SMS again.',
-    };
+    return { refusal: copy.noSignedIn };
   }
   const engine = getEngine();
   if (!engine) {
-    return {
-      refusal: 'No data engine is available to read your account\'s phone number — nothing was sent. '
-        + 'The test SMS goes to the signed-in admin\'s own number, so it can be sent only once that number '
-        + 'can be read; press Send test SMS again when the data service is up.',
-    };
+    return { refusal: copy.noEngine };
   }
   let row: Record<string, unknown> | null;
   try {
@@ -118,20 +113,12 @@ async function resolveSmsTestRecipient(
       { context: SYSTEM_CTX },
     );
   } catch (err: any) {
-    return {
-      refusal: `Could not read your account's phone number to send the test SMS to (${err?.message ?? String(err)}) `
-        + '— nothing was sent. The test SMS goes to the signed-in admin\'s own number; press Send test SMS '
-        + 'again once your account can be read.',
-    };
+    return { refusal: copy.readFailed(err?.message ?? String(err)) };
   }
   const raw = row?.phone_number;
   const to = typeof raw === 'string' ? normalizeSmsRecipient(raw) : undefined;
   if (!to) {
-    return {
-      refusal: 'Your account has no phone number, and the test SMS is sent to the signed-in admin\'s own number '
-        + '— nothing was sent. A number is on an account only where phone sign-in is enabled: press Send test SMS '
-        + 'while signed in as an admin whose account has a phone number.',
-    };
+    return { refusal: copy.noNumber };
   }
   return { to };
 }
@@ -326,12 +313,16 @@ export class SmsServicePlugin implements Plugin {
         // number — see `resolveSmsTestRecipient`.
         if (!this.options.transport && typeof settings.registerAction === 'function') {
           const svc = this.service;
-          settings.registerAction('sms', 'test', async ({ values, payload, ctx: actionCtx }: any) => {
+          settings.registerAction('sms', 'test', async ({ values, payload, ctx: actionCtx, locale }: any) => {
+            // The answer is the toast the administrator reads: written in the
+            // caller's display language (English when none is given), as the
+            // `mail/test` and `storage/test` answers are.
+            const copy = smsTestCopy(typeof locale === 'string' ? locale : undefined);
             const overrides = (payload && typeof payload === 'object' && payload.values && typeof payload.values === 'object')
               ? payload.values
               : (payload ?? {});
             const merged: Record<string, unknown> = { ...(values ?? {}), ...overrides };
-            const recipient = await resolveSmsTestRecipient(payload, actionCtx?.userId, () => resolveDataEngine(ctx));
+            const recipient = await resolveSmsTestRecipient(payload, actionCtx?.userId, () => resolveDataEngine(ctx), copy);
             if ('refusal' in recipient) {
               return { ok: false, severity: 'error', message: recipient.refusal };
             }
@@ -339,7 +330,7 @@ export class SmsServicePlugin implements Plugin {
 
             const resolved = providerFromSettings(merged);
             if (resolved.missing) {
-              return { ok: false, severity: 'error', message: `${resolved.provider}: missing ${resolved.missing}.` };
+              return { ok: false, severity: 'error', message: copy.missing(resolved.provider, resolved.missing) };
             }
 
             let target: SmsService = svc;
@@ -348,7 +339,7 @@ export class SmsServicePlugin implements Plugin {
                 const transport = makeSmsTransport({ provider: resolved.provider, options: resolved.options, logger: ctx.logger });
                 target = new SmsService({ transport, configured: true, logger: ctx.logger });
               } catch (err: any) {
-                return { ok: false, severity: 'error', message: `Failed to build ${resolved.provider} transport: ${err?.message ?? String(err)}` };
+                return { ok: false, severity: 'error', message: copy.buildFailed(resolved.provider, err?.message ?? String(err)) };
               }
             }
             // A LogSmsTransport "send" is not a delivery — say so instead of
@@ -359,8 +350,7 @@ export class SmsServicePlugin implements Plugin {
               return {
                 ok: false,
                 severity: 'warning',
-                message: 'No SMS delivery transport is active (provider: None — log only), so the test SMS was NOT sent. '
-                  + 'Pick a provider, fill in its credentials and save before testing.',
+                message: copy.logOnly,
               };
             }
 
@@ -371,19 +361,19 @@ export class SmsServicePlugin implements Plugin {
                 templateParams: { content: 'ObjectStack SMS test message.' },
               });
               if (result.status === 'failed') {
-                return { ok: false, severity: 'error', message: result.error ?? 'Send failed.' };
+                return { ok: false, severity: 'error', message: copy.failed(result.error) };
               }
               // Name the transport that actually carried it. When the form
               // names no delivering provider, the live service did — the one
               // the deployment configured at boot, never `log` (refused above).
-              const via = target === svc ? 'the deployment\'s configured transport' : resolved.provider;
+              const via = target === svc ? undefined : resolved.provider;
               return {
                 ok: true,
                 severity: 'info',
-                message: `Sent test SMS to ${maskPhoneNumber(to)} via ${via} (id=${result.messageId ?? result.id}).`,
+                message: copy.sent(maskPhoneNumber(to), via, String(result.messageId ?? result.id)),
               };
             } catch (err: any) {
-              return { ok: false, severity: 'error', message: err?.message ?? String(err) };
+              return { ok: false, severity: 'error', message: copy.failed(err?.message ?? String(err)) };
             }
           });
         }
