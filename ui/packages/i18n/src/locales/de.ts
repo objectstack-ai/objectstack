@@ -2671,6 +2671,8 @@ const de = {
         title: 'Audit-Protokoll',
         subtitle: 'Schreibgeschützte Systemaktivität und Datensatzänderungen. Neueste zuerst.',
         openAsList: 'Als Liste öffnen',
+        openEntryPage: 'Eintragsseite öffnen',
+        openEntryPageHint: 'Die Eintragsseite listet alle Änderungen am selben Datensatz auf, die neueste zuerst.',
         openPresetAsList: '{{label}} als Liste öffnen',
         presets: 'Voreinstellungen',
         presetOtherSource: 'Diese Ansicht liest eine andere Datenquelle.',

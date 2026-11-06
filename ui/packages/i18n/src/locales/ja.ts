@@ -2673,6 +2673,8 @@ const ja = {
         title: '監査ログ',
         subtitle: '読み取り専用のシステムアクティビティとレコード変更。新しい順に表示します。',
         openAsList: 'リストで開く',
+        openEntryPage: 'エントリページを開く',
+        openEntryPageHint: 'エントリページには、同じレコードへのすべての変更が新しい順に表示されます。',
         openPresetAsList: '{{label}} をリストで開く',
         presets: 'プリセット',
         presetOtherSource: 'このビューは別のデータソースを読み取ります。',

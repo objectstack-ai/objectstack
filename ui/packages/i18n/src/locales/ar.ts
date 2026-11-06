@@ -2925,6 +2925,8 @@ const ar = {
         title: 'سجل التدقيق',
         subtitle: 'نشاط النظام وتغييرات السجلات للقراءة فقط. الأحدث أولاً.',
         openAsList: 'فتح كقائمة',
+        openEntryPage: 'فتح صفحة الإدخال',
+        openEntryPageHint: 'تعرض صفحة الإدخال كل التغييرات على السجل نفسه، الأحدث أولاً.',
         openPresetAsList: 'فتح {{label}} كقائمة',
         presets: 'إعدادات مسبقة',
         presetOtherSource: 'يقرأ هذا العرض مصدر بيانات آخر.',

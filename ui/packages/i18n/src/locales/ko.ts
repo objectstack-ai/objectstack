@@ -2671,6 +2671,8 @@ const ko = {
         title: '감사 로그',
         subtitle: '읽기 전용 시스템 활동 및 레코드 변경 내역입니다. 최신 항목이 먼저 표시됩니다.',
         openAsList: '목록으로 열기',
+        openEntryPage: '항목 페이지 열기',
+        openEntryPageHint: '항목 페이지에는 같은 레코드의 모든 변경 사항이 최신순으로 표시됩니다.',
         openPresetAsList: '{{label}}을(를) 목록으로 열기',
         presets: '프리셋',
         presetOtherSource: '이 뷰는 다른 데이터 소스를 읽습니다.',
