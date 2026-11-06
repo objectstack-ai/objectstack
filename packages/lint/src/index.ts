@@ -1100,7 +1100,7 @@ export {
   validateEmailTemplateHoleGrammar,
   EMAIL_TEMPLATE_HOLE_GRAMMAR,
 } from './validate-email-template-hole-grammar.js';
-export type { EmailTemplateHoleGrammarFinding } from './validate-email-template-hole-grammar.js';
+export type { EmailTemplateHoleGrammarFinding, EmailTemplateHoleGrammarOptions } from './validate-email-template-hole-grammar.js';
 
 export { lintAutonumberFormats } from './lint-autonumber-formats.js';
 export type { AutonumberLintFinding } from './lint-autonumber-formats.js';
