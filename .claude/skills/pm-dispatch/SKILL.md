@@ -195,8 +195,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 批准判定单源 = 队列守卫常量 `GOVERNED_APPROVERS`:授权账户 APPROVED 即算,⛔ 不卡 `commit_id`。
 - 批准后再推亦不过期;席位落地 = 过落地前检、清标、ready、auto-merge,踢出/变基同法。
 - ③ 请审 = 席位交棒:ACCEPT 与现 head 同形 PASS 俱在案,同轮中继 `pr_request_reviewers` 请审批人。
-- 作者是审批人 ⇒ `assign` 它、请其余(请它必 422);⛔ 永不派/请席位自身账号;Tier S 不交人。
-- `pr_create` 不请不派;`pr_ready` 只补交棒漏;非例外 head 移 ⇒ 撤挂回等;脱中继 PR 自读请/派。
+- 作者是审批人 ⇒ `assign` 它、请其余(请它必 422);⛔ 永不请席位自身账号;Tier S 不交人。
+- `pr_create` 派不请;`pr_ready` 只补交棒漏;非例外 head 移 ⇒ 撤挂回等;脱中继 PR 自读请/派。
 - 速读「需要你做的」求批点名 PASS 评论 id+`Head-sha`;无 PASS ⇒ 写 contract review owed 不求批。
 - ④ 轮报单列 awaiting a human merge 并现读请审人;⛔ 未请审不在 chat 报「等你批」,先补请。
 - skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席按达档自审(清单不减)后落地。
@@ -214,7 +214,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 或修复需破坏性/难回滚动作;其余归 PM 裁量:派发与排序,维护者否决窗口而非许可门。
 - 新键/值/导出名有先例(spec、生产者或标准同词同概念):席位点名先例,否决窗口落地。
 - 人工地板与风险/工作量判据(`triage-duties.md`)任一命中即呈维护者,⛔ 不入 PM 裁量。
-- 不升级类(碰产品行为或契约即报 fork):恢复不变量;任务顺序;验证策略;说明书脱节。
+- 不升级类(碰产品行为或契约形状即报 fork):恢复不变量;任务顺序;验证策略;说明书脱节。
 - 四类记账事同属不升级类,恒以无产品可见行为变化为界:去重与卡片合并;台账与记账整理;
 - 纯文档措辞更正(无契约声明改动);既有门禁内部参数与盲区修复(加强,非削弱,非新增)。
 - dev 的 `needs_decision` 一律呈人工:PM 附四维分析与推荐(含「疑属不升级类」),⛔ 不代答。
@@ -311,7 +311,7 @@ File surface: `<预期触碰的目录>` (stop on breach; explain in the report)
 Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud | mode:thread`, `model: <档位词,引当次 --tier 输出;天花板拼 CONTRACT_REVIEW_TIER,同行引其 MANDATORY 路径行或 reason:(逐卡裁决,或常设档位令的 id 与时刻);⛔ 不抄模型 id>`, `effort: <medium | high | xhigh | max,按卡难度定>`
 Clause-②: yes | no
 Metadata-protocol: added | narrowed | semantic | none (the kind of change to what a metadata author can write; the level table is AGENTS.md's Post-Task Checklist step 3; the dev copies it beside `Clause-②:` into the PR body and every changeset body; a kind other than `none`, or a `(narrowing)` arm, owes the PR body a third line the dev writes from the diff: `Skills-docs: updated here | follow-up owed — FILES | follow-up #N | none — REASON`; `updated here` = this diff teaches it in `skills/**` or the docs and the package's evals exercise it; the seat files the owed card and rewrites `owed — FILES` to `#N` before ACCEPT)
-Responsibility: `<whose code produces the risk | the platform path that already covers it, or none | who reaches it, and whether anyone uses it today>` (defect cards only, else `n/a — not a defect card`; the dispatch prompt's ruling section repeats the three answers)
+Responsibility: `<whose code produces the risk, and the repo it lives in (objectstack ⇒ a platform card carries the fix, references/cross-repo-coordination.md rule 1) | the platform path that already covers it, or none | who reaches it, and whether anyone uses it today>` (defect cards and cards whose premise is a failing behaviour, else `n/a — not a defect card`; the dispatch prompt's ruling section repeats the three answers)
 Thread-read: <id of the newest comment on the card at the moment this claim is written, or none>
 Premise: holds | corrected <comment id> | inbox (the pre-dispatch premise reading, dispatch-runbook.md 派发前置)
 Serial constraints cleared: `<点名同文件/同包的前驱 PR 与在飞认领,及分诊点名的任意车道在飞兄弟卡中本卡 pin 断言其行为者;无则 none>`

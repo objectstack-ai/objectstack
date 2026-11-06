@@ -830,6 +830,13 @@ as a shell of empty group anchors, and each capability plugin contributes the
 entries for the objects it owns, so the rendered menu always matches the loaded
 plugins. A disabled plugin contributes nothing and its slot stays empty.
 
+The key is honoured only from a code package, whose contributions are registered
+when it loads at boot: a package created at runtime (`POST /api/v1/packages`) that
+carries `navigationContributions` is refused with `400 VALIDATION_ERROR`, so to add
+an entry to an installed app's own menu save an override of that app in its
+customization package, and to contribute entries into another package's app ship
+them in a code package.
+
 ```typescript
 navigationContributions: [
   {

@@ -42,7 +42,7 @@
  *    is what is charted.
  *
  * `filter` / `sort` on the inline rungs are pinned by
- * `ObjectGantt.inlineQueryKeys-8769.test.tsx` (its `staticDataSpelling` row),
+ * the `ObjectGantt.inlineQueryKeys-8769` block of `ObjectGantt.harness.test.tsx` (its `staticDataSpelling` row),
  * not repeated here.
  */
 

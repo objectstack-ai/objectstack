@@ -229,12 +229,17 @@ export const SysAuditLog = ObjectSchema.create({
       name: 'config_changes',
       label: 'Config',
       data: { provider: 'object', object: 'sys_audit_log' },
-      // [#24611] No Object column. Its rows carry no `record_id`, so no pointer
-      // names their target, and the column drew one of three stored API names
+      // [#24611] No Object column: it drew one of three stored API names
       // (`sys_setting`, `sys_platform_setting` for a global-scope change,
-      // `sys_user` for an import). Which setting changed is in `metadata` and
-      // `new_value`, and the row's page still shows `object_name` and the
-      // `tenant_id` a global change leaves empty.
+      // `sys_user` for an import) as text. A `config_change` row names the
+      // settings row it changed as its `record_id` (service-settings'
+      // `config-change-audit.ts`), so the row's page draws that pair as the
+      // setting's card and lists the ledger's other rows about the same
+      // setting, the mirror's row with the value among them
+      // (`sys-audit-log.page.ts`). An `import` row, and a `config_change` row
+      // written before its writer recorded the id, carry no `record_id`.
+      // Which setting changed is also in `metadata`, and the row's page shows
+      // the `tenant_id` a global change leaves empty.
       columns: ['created_at', 'action', 'user_id'],
       // `export` removed (#8147) — retired from the enum, nothing ever wrote it.
       // `import` KEPT deliberately: `plugin-auth`'s admin user-import writes a

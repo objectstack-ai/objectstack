@@ -241,6 +241,12 @@ import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import { countSeedRows, matchSeedRows, purgeSeedRows, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
+import {
+    isStampableOwner,
+    stampSeedOwner,
+    type SeedOwnerStampInput,
+    type SeedOwnerStampResult,
+} from './marketplace-install-local-seed-owner.js';
 import { planCustomizationPairInstall, type PairInstallItem } from './marketplace-install-local-customization-pair.js';
 import type {
     AuthSessionApi, ConnectorCredentialRef, IAuthService, IAutomationService, IHttpServer, IMetadataService, IObjectQLEngine,
@@ -266,7 +272,13 @@ import { customizationPairManifestRefusal } from '@objectstack/metadata-protocol
 // asked at the managed install exactly as the publish doors ask them.
 import { judgeOverrideWrite, overrideWriteIdentityOf, overrideWriteItemsOf, type OverrideWriteItem, type OverrideWriteRule } from '@objectstack/metadata-protocol';
 // [ADR-0146 D10, #28564] The `__c` extension-field reservation's one judge, step 1c''.
-import { judgeExtensionFieldSuffix } from '@objectstack/metadata-protocol';
+import {
+    judgeExtensionFieldSuffix,
+    judgeRedeclaredOwnerFields,
+    redeclaredOwnerFieldInstallMessage,
+    type ObjectOwnerDeclaration,
+    type RedeclaredOwnerFieldRefusal,
+} from '@objectstack/metadata-protocol';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { unknownQueryParamRefusalMessage } from '@objectstack/rest';
 // [#25366] The code the registry's security-catalog refusal carries, compared
@@ -1161,6 +1173,17 @@ export interface MarketplaceInstallLocalPluginConfig {
 // this plugin is its HTTP mutation surface).
 type InstalledEntry = InstalledManifestEntry;
 
+/**
+ * [#30324] The person a seeding door names as the owner of the rows its load
+ * creates, or `null` with the reason the door has none (logged, never
+ * invented).
+ */
+interface SeedOwnerOfLoad {
+    userId: string | null;
+    door: string;
+    none?: string;
+}
+
 export class MarketplaceInstallLocalPlugin implements Plugin {
     readonly name = 'com.objectstack.runtime.marketplace-install-local';
     readonly version = '1.0.0';
@@ -1462,7 +1485,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         try {
             // [#30281] No user starts a boot heal: the setting, then this
             // package's declared default locale.
-            const summary = await this.runInlineSeed(ctx, datasets, undefined, { app: converted });
+            const summary = await this.runInlineSeed(ctx, datasets, undefined, { app: converted }, await this.resolveRecordedInstaller(ctx, entry));
             const landed = (summary.inserted ?? 0) + (summary.updated ?? 0);
             if (landed > 0) {
                 entry.withSampleData = true;
@@ -1725,7 +1748,14 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // then the founder's language. No app default rung — the shared
             // list is every installed package's datasets, and no one package's
             // declared default speaks for the union.
-            const s = await this.runInlineSeed(ctx, datasetsNow, organizationId, { userId: options?.userId });
+            // [#30324] The founder owns the rows: the organization's first
+            // admin, the one person this door is handed. With none, the rows
+            // keep no owner, as before.
+            const s = await this.runInlineSeed(ctx, datasetsNow, organizationId, { userId: options?.userId }, {
+                userId: options?.userId ?? null,
+                door: 'per-organization seed replay',
+                none: `the replay of organization ${organizationId} names no founder`,
+            });
             return { inserted: s.inserted, updated: s.updated, skipped: s.skipped, errors: s.errorList };
         };
     };
@@ -2405,6 +2435,26 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     code: UNRUNNABLE_REFUSAL_CODE,
                     message: fieldPatchTargetRefusalMessage(manifestId, patchTargetRefusals),
                     details: { refusals: patchTargetRefusals },
+                },
+            }, UNRUNNABLE_REFUSAL_STATUS);
+        }
+
+        // 2e'. [ADR-0146 D10, second rule] ⭐ THE DISPLAY-PROPERTY WHITELIST,
+        //     beside the target check and before any write: an
+        //     `objectExtensions[].fields` entry naming a field the extended
+        //     object's owner declares replaces that field whole, so it is
+        //     refused when it changes anything outside the whitelist, with the
+        //     prescription naming `fieldPatches`. The save doors' judge
+        //     (`judgeRedeclaredOwnerFields`), this door's body-refusal envelope
+        //     (`VALIDATION_ERROR` / 422), every refusal in `details.refusals`.
+        const redeclaredRefusals = this.redeclaredOwnerFieldRefusalsOf(ctx, converted, manifestId);
+        if (redeclaredRefusals.length > 0) {
+            return c.json({
+                success: false,
+                error: {
+                    code: UNRUNNABLE_REFUSAL_CODE,
+                    message: redeclaredOwnerFieldInstallMessage(manifestId, redeclaredRefusals),
+                    details: { refusals: redeclaredRefusals },
                 },
             }, UNRUNNABLE_REFUSAL_STATUS);
         }
@@ -3599,6 +3649,54 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
+     * [ADR-0146 D10, second rule] Step 2e' of {@link handleInstall}: every
+     * `objectExtensions[].fields` entry the converted body carries — each
+     * `packages[]` entry's under its own id, or the body's own under
+     * `manifestId` — judged by `@objectstack/metadata-protocol`'s
+     * `judgeRedeclaredOwnerFields` against the extended object's owner: a
+     * package of this artifact that declares it, otherwise the installed owner
+     * the registry holds (`getObjectOwner`: its own declaration and package,
+     * never the resolved object, which carries every installed extension's
+     * fields). An extension of an object its own package owns, and a target
+     * neither knows, are not judged.
+     */
+    private redeclaredOwnerFieldRefusalsOf = (
+        ctx: PluginContext,
+        converted: Record<string, any>,
+        manifestId: string,
+    ): RedeclaredOwnerFieldRefusal[] => {
+        const bodies: Array<{ id: string | undefined; body: Record<string, any>; prefix: string }> = Array.isArray(converted.packages)
+            ? converted.packages.flatMap((entry: unknown, index: number) => {
+                if (!isPlainObject(entry) || !isPlainObject(entry.manifest)) return [];
+                const id = manifestIdOf(entry.manifest);
+                return [{ id: typeof id === 'string' ? id : undefined, body: entry.manifest as Record<string, any>, prefix: `packages[${index}].manifest.` }];
+            })
+            : [{ id: manifestId, body: flattenPackageBody(converted), prefix: '' }];
+        if (!bodies.some(({ body }) => Array.isArray(body.objectExtensions))) return [];
+        const delivered = new Map<string, ObjectOwnerDeclaration>();
+        for (const { id, body } of bodies) {
+            const objects = body.objects;
+            const list = Array.isArray(objects) ? objects : isPlainObject(objects) ? Object.entries(objects).map(([name, o]) => (isPlainObject(o) ? { name, ...o } : o)) : [];
+            for (const object of list) {
+                if (isPlainObject(object) && typeof object.name === 'string' && !delivered.has(object.name)) {
+                    delivered.set(object.name, { packageId: id, definition: object });
+                }
+            }
+        }
+        let registry: { getObjectOwner?(fqn: string): { packageId?: string; definition?: unknown } | undefined } | undefined;
+        try { registry = ctx.getService<IObjectQLEngine>('objectql')?.registry as typeof registry; } catch { /* no data engine — only delivered owners are known */ }
+        const ownerOf = (name: string): ObjectOwnerDeclaration | undefined => {
+            const own = delivered.get(name);
+            if (own) return own;
+            const installed = registry?.getObjectOwner?.(name);
+            return installed ? { packageId: installed.packageId, definition: installed.definition } : undefined;
+        };
+        return bodies.flatMap(({ id, body, prefix }) => judgeRedeclaredOwnerFields({
+            packageId: id, objectExtensions: body.objectExtensions, ownerOf, at: prefix,
+        }));
+    };
+
+    /**
      * [ADR-0146 D2, ruling A on #28390; #28410] THE OVERRIDE WRITE GATE at the
      * managed install — the door a package's items enter through as code
      * (`manifest.register`), so the publish doors never see them. The rule is
@@ -4028,6 +4126,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         if (patchTargetRefusals.length > 0) {
             return refuse(UNRUNNABLE_REFUSAL_STATUS, UNRUNNABLE_REFUSAL_CODE,
                 fieldPatchTargetRefusalMessage(manifestId, patchTargetRefusals), { refusals: patchTargetRefusals });
+        }
+        const redeclaredRefusals = this.redeclaredOwnerFieldRefusalsOf(ctx, converted, manifestId);
+        if (redeclaredRefusals.length > 0) {
+            return refuse(UNRUNNABLE_REFUSAL_STATUS, UNRUNNABLE_REFUSAL_CODE,
+                redeclaredOwnerFieldInstallMessage(manifestId, redeclaredRefusals), { refusals: redeclaredRefusals });
         }
 
         // 3. The pair here: declared as the ensure door writes it, writable.
@@ -5244,6 +5347,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                         const s = await this.runInlineSeed(ctx, datasets, organizationId, {
                             userId: opts.userId,
                             app: manifest,
+                        }, {
+                            // [#30324] The person who ran this install (or reseed).
+                            userId: opts.userId ?? null,
+                            door: opts.door ?? 'install',
+                            none: 'the request names no person',
                         });
                         seedSummary = { mode: 'inline', ...s };
                         ctx.logger?.info?.(`[MarketplaceInstallLocal] inline seed for ${appId}${organizationId ? ` (org=${organizationId})` : ''}: inserted=${s.inserted} updated=${s.updated} skipped=${s.skipped} errors=${s.errors}`);
@@ -5256,6 +5364,82 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         }
 
         return { translationsLoaded, seeded: seedSummary };
+    };
+
+    /**
+     * [#30324 · ruling 6670861426] Stamp the person a seeding door names as
+     * `owner_id` / `created_by` on the rows its load created
+     * ({@link stampSeedOwner}), and say what happened: one info line for the
+     * stamp, one for a door with no person (the rows keep no owner, as before
+     * the ruling), one warning per object a write was refused on. Never throws:
+     * the load already landed, and a refused stamp leaves its rows as the seed
+     * wrote them.
+     */
+    private stampLoadOwner = async (
+        ctx: PluginContext,
+        ql: any,
+        results: unknown,
+        owner: SeedOwnerOfLoad,
+        organizationId: string | undefined,
+    ): Promise<void> => {
+        const loaded = (Array.isArray(results) ? results : []) as SeedOwnerStampInput[];
+        const created = loaded.reduce((n, r) => n + (Array.isArray(r?.insertedIds) ? r.insertedIds.length : 0), 0);
+        if (created === 0) return;
+        const where = organizationId ? ` (org=${organizationId})` : '';
+        if (!isStampableOwner(owner.userId)) {
+            ctx.logger?.info?.(
+                `[MarketplaceInstallLocal] ${owner.door}${where}: the ${created} sample row(s) this load created keep no owner `
+                + `— ${owner.none ?? 'no person named'}`,
+            );
+            return;
+        }
+        let stamp: SeedOwnerStampResult;
+        try {
+            stamp = await stampSeedOwner(ql, loaded, owner.userId, { organizationId });
+        } catch (err: any) {
+            ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${owner.door}${where}: the owner stamp of ${created} sample row(s) failed — they keep no owner: ${err?.message ?? err}`);
+            return;
+        }
+        const owned = stamp.objects.filter((o) => o.owner > 0 || o.createdBy > 0);
+        if (owned.length > 0) {
+            ctx.logger?.info?.(
+                `[MarketplaceInstallLocal] ${owner.door}${where}: sample rows owned by ${owner.userId}: `
+                + owned.map((o) => `${o.object}=${Math.max(o.owner, o.createdBy)}`).join(', '),
+            );
+        }
+        for (const o of stamp.objects) {
+            if (o.refused === 0) continue;
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] ${owner.door}${where}: ${o.refused} sample row(s) of '${o.object}' keep the owner the seed `
+                + `wrote — the owner stamp was refused: ${o.error ?? 'no reason given'}`,
+                { object: o.object, ownerUserId: owner.userId, refused: o.refused },
+            );
+        }
+    };
+
+    /**
+     * [#30324] The person a boot heal names as its rows' owner: the installer
+     * the ledger entry records (`installedBy`), when that is a person who can
+     * still sign in — a `sys_user` row a system read finds. No boot request
+     * carries a person, so this is the one the heal has; an entry with none,
+     * or an installer since removed, names nobody (the rows keep no owner, as
+     * before) and says which.
+     */
+    private resolveRecordedInstaller = async (ctx: PluginContext, entry: InstalledEntry): Promise<SeedOwnerOfLoad> => {
+        const door = 'sample-data heal';
+        const installedBy = entry?.installedBy;
+        if (!isStampableOwner(installedBy)) {
+            return { userId: null, door, none: `the install ledger records no installer for ${entry?.manifestId}` };
+        }
+        try {
+            const ql = ctx.getService<IObjectQLEngine>('objectql');
+            const rows: unknown = await ql.find('sys_user', { where: { id: installedBy }, fields: ['id'], limit: 1 }, { context: { isSystem: true } });
+            const found = (Array.isArray(rows) ? rows[0] : (rows as { items?: unknown[] } | null)?.items?.[0]) as { id?: unknown } | undefined;
+            if (found && String(found.id) === installedBy) return { userId: installedBy, door };
+            return { userId: null, door, none: `the recorded installer ${installedBy} of ${entry.manifestId} is no longer a user` };
+        } catch (err: any) {
+            return { userId: null, door, none: `the recorded installer ${installedBy} of ${entry.manifestId} could not be looked up: ${err?.message ?? err}` };
+        }
     };
 
     /**
@@ -5279,6 +5463,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         datasets: any[],
         organizationId?: string,
         localeFrom: { userId?: string; app?: unknown } = {},
+        owner: SeedOwnerOfLoad = { userId: null, door: 'seed', none: 'no person named' },
     ): Promise<{ inserted: number; updated: number; skipped: number; errors: number; errorList: any[]; droppedRefs: number; errorSample?: string }> => {
         const ql: any = ctx.getService('objectql');
         let metadata: any;
@@ -5313,6 +5498,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             },
         });
         const result = await seedLoader.load(request);
+        // [#30324 · ruling 6670861426] The rows this load CREATED get the
+        // person this door names as `owner_id` and `created_by`, then follow
+        // the ordinary permission rules like any record they own.
+        await this.stampLoadOwner(ctx, ql, result?.results, owner, organizationId);
         return {
             inserted: result.summary.totalInserted,
             updated: result.summary.totalUpdated,

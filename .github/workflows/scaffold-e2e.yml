@@ -511,6 +511,7 @@ jobs:
           # and then died at second 3 cost the full 60s and reported "never
           # became healthy" instead of "it is not running, here is why".
           docker run -d --name e2e -p 18080:8080 \
+            -e OS_DATABASE_URL="file:/tmp/e2e.db" \
             -e OS_SECRET_KEY="$(openssl rand -hex 32)" \
             -e OS_AUTH_SECRET="$(openssl rand -hex 32)" \
             e2e-app

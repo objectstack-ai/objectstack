@@ -2870,7 +2870,8 @@ describe('ListView — gantt view whose ViewData is a retired api block', () => 
   //
   // The rows prop is asserted against the props-recording STUB below: the real
   // `object-gantt` renderer forwards no host prop but `schema` (objectui#7222;
-  // pinned in `plugin-gantt/src/ObjectGantt.hostDataProp-7210.test.tsx`).
+  // pinned in the `ObjectGantt.hostDataProp-7210` block of
+  // `plugin-gantt/src/ObjectGantt.harness.test.tsx`).
   let prevObjectGantt: ReturnType<typeof ComponentRegistry.get>;
   let ganttCalls: any[];
 

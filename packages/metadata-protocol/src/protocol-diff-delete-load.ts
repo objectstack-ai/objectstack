@@ -3,8 +3,8 @@
 /**
  * [#29985 codemod] The "Diff, deleteMetaItem, loadMetaFromDb, load reports,
  * findReferencesToMeta" facet of `ObjectStackProtocolImplementation`: the
- * bodies of `diffMetaItem`, `deleteMetaItemUnaudited`, `loadMetaFromDb`,
- * `findReferencesToMeta` moved out of `protocol.ts` whole by
+ * bodies of `diffMetaItem`, `deleteMetaItem`, `deleteMetaItemUnaudited`,
+ * `loadMetaFromDb`, `findReferencesToMeta` moved out of `protocol.ts` whole by
  * `scripts/codemod-split-protocol.mjs`.
  *
  * A MOVE, not a redesign. `ProtocolDiffDeleteLoadFacet` is a stateless facet over the host
@@ -55,6 +55,7 @@ import { collectCompositeKeyHeadHits, collectReferenceHits } from './protocol-re
 import { diffShallow } from './protocol-write-face.js';
 import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
 import type { DeleteMetaItemRequest } from './protocol-door-requests.js';
+import { withRefusalAudit } from './protocol-refusal-audit.js';
 import type { ProtocolHost } from './protocol-host.js';
 
 export class ProtocolDiffDeleteLoadFacet {
@@ -368,6 +369,22 @@ export class ProtocolDiffDeleteLoadFacet {
             toVersion,
             ...served,
         };
+    }
+
+    /** The body of `ObjectStackProtocolImplementation#deleteMetaItem`; the method's docblock there is its contract. */
+    static async deleteMetaItem(host: Pick<ProtocolHost, 'deleteMetaItemUnaudited' | 'recordMetadataAudit'>, request: DeleteMetaItemRequest): Promise<{
+            success: boolean;
+            message?: string;
+            reset?: boolean;
+            seq?: number;
+            /** [ADR-0094] Outcome of the awaited mutation projector, when one is registered. */
+            projectionApplied?: MutationProjectionOutcome;
+        }> {
+        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
+        return withRefusalAudit((entry) => host.recordMetadataAudit(entry), {
+            operation: 'delete', type: request.type, name: request.name, actor: request.actor,
+            source: 'protocol.deleteMetaItem',
+        }, () => host.deleteMetaItemUnaudited(request));
     }
 
     /** [#28355] The body of {@link deleteMetaItem} before its refusal audit; that method's docblock is the contract. */

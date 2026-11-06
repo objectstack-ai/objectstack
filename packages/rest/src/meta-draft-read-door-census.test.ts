@@ -18,7 +18,8 @@
  *
  * It walks the file's AST for every draft switch: a comparison against the
  * literal `'draft'`, a `.previewDrafts` read, and a `.listDrafts` reference.
- * Each is keyed `<route> » <text>` (the registration's `method` and `path`,
+ * [#29814] It also counts the layered read's `withDraft` option, keyed by its
+ * name. Each is keyed `<route> » <text>` (the registration's `method` and `path`,
  * else the named function around it — never a line number, this file is edited
  * several times a day) and must be LEDGERED below as one of:
  *
@@ -98,7 +99,9 @@ const isDraftSite = (n: ts.Node): boolean =>
     (ts.isBinaryExpression(n)
         && (n.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken || n.operatorToken.kind === ts.SyntaxKind.EqualsEqualsToken)
         && [n.left, n.right].some((side) => ts.isStringLiteral(side) && side.text === 'draft'))
-    || (ts.isPropertyAccessExpression(n) && ['previewDrafts', 'listDrafts'].includes(n.name.text));
+    || (ts.isPropertyAccessExpression(n) && ['previewDrafts', 'listDrafts'].includes(n.name.text))
+    // [#29814] The layered read's draft option, `{ withDraft: … }`, keyed by its name.
+    || (ts.isIdentifier(n) && n.text === 'withDraft' && ts.isPropertyAssignment(n.parent) && n.parent.name === n);
 
 const isAdmission = (n: ts.Node): boolean =>
     ts.isCallExpression(n) && n.expression.getText() === 'mayReadPendingDrafts';
@@ -185,6 +188,11 @@ const LEDGER: readonly LedgerRow[] = [
         site: "DELETE ${metaPath}/:type/:name » req.query.state.toLowerCase() === 'draft'",
         disposition: 'write',
         door: 'DELETE /meta/:type/:name?state=draft — DISCARDS a draft; admitted by the write-capability gate first',
+    },
+    {
+        site: 'method serveMetaItemLayered » withDraft',
+        disposition: 'read',
+        door: 'GET /meta/:type/:name/layers (and the deprecated ?layers=) — the pending draft layer',
     },
     {
         site: 'POST ${basePath}/analytics/dataset/query » body.previewDrafts',

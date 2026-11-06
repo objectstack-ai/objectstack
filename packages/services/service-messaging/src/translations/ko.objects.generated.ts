@@ -462,6 +462,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         label: "로캘",
         help: "등록 시 전달된 기기 로캘입니다. 기기에 저장되지만 어떤 푸시도 이 값으로 렌더링되지 않습니다. 푸시는 수신자의 언어(사용자 로캘, 없으면 배포 기본 언어)로 도착합니다."
       },
+      origin: {
+        label: "서버 출처",
+        help: "기기를 등록할 때 콘솔이 로드된 출처입니다(예: https://crm.example.com). 이 기기로 보내는 모든 푸시 알림에 포함되므로, 여러 서버를 저장한 모바일 앱은 이 서버에서 푸시 알림을 엽니다. 출처 없이 등록된 기기에서는 비어 있습니다."
+      },
       name: {
         label: "기기 이름"
       },

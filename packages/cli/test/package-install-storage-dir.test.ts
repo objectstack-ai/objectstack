@@ -43,7 +43,7 @@ async function runInstall(): Promise<string> {
   const capture = (...args: unknown[]) => { lines.push(args.map(String).join(' ')); };
   vi.spyOn(console, 'log').mockImplementation(capture);
   vi.spyOn(console, 'error').mockImplementation(capture);
-  await PackageInstall.run(['com.acme.crm', '--runtime', 'http://runtime.test']);
+  await PackageInstall.run(['com.acme.crm', '--url', 'http://runtime.test']);
   return lines.join('\n');
 }
 

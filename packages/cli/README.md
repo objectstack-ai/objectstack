@@ -139,9 +139,9 @@ Two stored sessions exist, and each command authenticates with one of them:
 | `os environments list` / `show` / `create` / `bind` / `switch` | `-u, --url` (env `OS_CLOUD_URL`); else the URL of the stored session it uses; else `http://localhost:3000` | `-t, --token` (env `OS_TOKEN`) | No `--url`: `~/.objectstack/credentials.json` (the `os login` session), else `~/.objectstack/cloud.json` (the `os cloud login` session). With `--url`: the file that names that server, `credentials.json` first; when neither does, `credentials.json` as before. `cloud.json`'s token is never sent to another URL |
 
 `os package install` is not a cloud command: it installs into a running runtime
-(`-r, --runtime`, env `OS_RUNTIME_URL`, default `http://localhost:3000`) and signs
-in there with `--email` / `--password` (env `OS_RUNTIME_EMAIL` /
-`OS_RUNTIME_PASSWORD`).
+(`-u, --url`, env `OS_RUNTIME_URL`, default `http://localhost:3000`) and
+authenticates there with `-t, --token` (env `OS_RUNTIME_TOKEN`) or `--email` /
+`--password` (env `OS_RUNTIME_EMAIL` / `OS_RUNTIME_PASSWORD`).
 
 ### Plugin Management
 

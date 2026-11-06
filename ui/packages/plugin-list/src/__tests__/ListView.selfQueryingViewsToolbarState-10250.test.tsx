@@ -45,7 +45,8 @@
  *     `schema.filter` / `schema.search` / `schema.searchableFields`, keyed on
  *     the filter's identity, the term, and the field list's serialised value —
  *     `ObjectGantt.reload`'s list. `ObjectGantt` sending the pair is pinned one
- *     package over, in `plugin-gantt/src/ObjectGantt.searchTerm-10250.test.tsx`.
+ *     package over, in the `ObjectGantt.searchTerm-10250` block of
+ *     `plugin-gantt/src/ObjectGantt.harness.test.tsx`.
  *
  * REVERSE VERIFICATION. Put `filter: schema.filter` back on the tree node: the
  * tree FORWARDS and CHANGE cases go red, and so does its STABILITY case, whose

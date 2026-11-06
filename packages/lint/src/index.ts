@@ -139,6 +139,8 @@ export {
   validateFlowApiTriggerSecret,
   FLOW_TRIGGER_UNKNOWN_OBJECT,
   FLOW_INPUT_UNKNOWN_OBJECT,
+  FLOW_INPUT_OBJECT_LESS,
+  FLOW_INPUT_RECORD_READ_AS_LIST,
   FLOW_DRAFT_STATUS_AMBIGUOUS,
   FLOW_TRIGGER_UNKNOWN_EVENT,
   FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
@@ -1098,7 +1100,7 @@ export {
   validateEmailTemplateHoleGrammar,
   EMAIL_TEMPLATE_HOLE_GRAMMAR,
 } from './validate-email-template-hole-grammar.js';
-export type { EmailTemplateHoleGrammarFinding } from './validate-email-template-hole-grammar.js';
+export type { EmailTemplateHoleGrammarFinding, EmailTemplateHoleGrammarOptions } from './validate-email-template-hole-grammar.js';
 
 export { lintAutonumberFormats } from './lint-autonumber-formats.js';
 export type { AutonumberLintFinding } from './lint-autonumber-formats.js';

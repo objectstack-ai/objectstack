@@ -565,7 +565,11 @@ describe('#8013 — by-name: a permission denial is REPORTED, absence still is n
         // accessor for both answers, not a second dialect to special-case.
         expect(denied.body?.success).toBe(false);
         expect(typeof refusal(denied.body).message).toBe('string');
-        expect(refusal(denied.body).message).toContain('finance');
+        // [#30126 row 12] The operation catalog's `permission_denied`, in the
+        // caller's locale (English here: the session names none). It names
+        // no app: the API name is not a person's word, and the caller named it.
+        expect(refusal(denied.body).message).toBe(
+            'You do not have permission to perform this action. Contact your administrator if you need access.');
 
         // Refused means refused: the document did not ride along with the
         // refusal, and neither did the objects it would have exposed.
