@@ -53,10 +53,16 @@
  *     at all, which is byte-identically what the other suites in this package
  *     still mount. Remove the fix's input and the ex-member is admitted again,
  *     writes and all. A pin that cannot go red has measured nothing.
+ *
+ * §8 adds the walled-catalog rule (ADR-0131 D3, D12 items 7–8, D11): under
+ * `isolated` and `group` a route that writes a datasource record admits only
+ * the platform operator, whom this file declares in `OS_PLATFORM_OWNER_EMAIL`.
+ * The write controls of §1 are therefore the operator's key.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ObjectKernel, hashApiKey } from '@objectstack/core';
+import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
 import type { PluginContext } from '@objectstack/core';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import { registerDatasourceAdminRoutes, DATASOURCE_ADMIN_CAPABILITY } from '../admin-routes.js';
@@ -66,6 +72,11 @@ const RAW_MEMBER_KEY = 'osk_15350_member';
 const RAW_EXMEMBER_KEY = 'osk_15350_exmember';
 const RAW_ORGLESS_KEY = 'osk_15350_orgless';
 const RAW_UNENTITLED_KEY = 'osk_15350_unentitled';
+/** The platform operator: declared in `OS_PLATFORM_OWNER_EMAIL` (§8). */
+const RAW_OPERATOR_KEY = 'osk_walled_operator';
+/** An organization's administrator: holds `admin_full_access` in `org_alpha` (§8). */
+const RAW_ORG_ADMIN_KEY = 'osk_walled_org_admin';
+const OPERATOR_EMAIL = 'u_operator@example.com';
 
 const ORG_ALPHA = 'org_alpha';
 const ORG_BETA = 'org_beta';
@@ -118,17 +129,25 @@ function makeQl() {
       { id: 'key_exmember', key: hashApiKey(RAW_EXMEMBER_KEY), user_id: 'u_exmember', active_organization_id: ORG_ALPHA, revoked: false },
       { id: 'key_orgless', key: hashApiKey(RAW_ORGLESS_KEY), user_id: 'u_orgless', revoked: false },
       { id: 'key_unentitled', key: hashApiKey(RAW_UNENTITLED_KEY), user_id: 'u_plain', active_organization_id: ORG_ALPHA, revoked: false },
+      { id: 'key_operator', key: hashApiKey(RAW_OPERATOR_KEY), user_id: 'u_operator', active_organization_id: ORG_ALPHA, revoked: false },
+      { id: 'key_org_admin', key: hashApiKey(RAW_ORG_ADMIN_KEY), user_id: 'u_org_admin', active_organization_id: ORG_ALPHA, revoked: false },
     ],
     sys_member: [
       { user_id: 'u_member', organization_id: ORG_ALPHA },
       { user_id: 'u_exmember', organization_id: ORG_BETA },
       { user_id: 'u_plain', organization_id: ORG_ALPHA },
+      { user_id: 'u_operator', organization_id: ORG_ALPHA },
+      { user_id: 'u_org_admin', organization_id: ORG_ALPHA },
     ],
     sys_user: [
       { id: 'u_member', email: 'u_member@example.com' },
       { id: 'u_exmember', email: 'u_exmember@example.com' },
       { id: 'u_orgless', email: 'u_orgless@example.com' },
       { id: 'u_plain', email: 'u_plain@example.com' },
+      // The platform operator's standing is the deployment's declaration
+      // (`OS_PLATFORM_OWNER_EMAIL`, stubbed for this file) over a VERIFIED row.
+      { id: 'u_operator', email: OPERATOR_EMAIL, email_verified: true },
+      { id: 'u_org_admin', email: 'u_org_admin@example.com', email_verified: true },
     ],
     // The grant, SYMMETRIC across the three subject principals (note 2), and
     // owned by the organization the stamped keys name: an organization-less
@@ -139,6 +158,9 @@ function makeQl() {
       { user_id: 'u_member', permission_set_id: SHARED_SET, permission_set: 'datasource_operator', organization_id: ORG_ALPHA },
       { user_id: 'u_exmember', permission_set_id: SHARED_SET, permission_set: 'datasource_operator', organization_id: ORG_ALPHA },
       { user_id: 'u_orgless', permission_set_id: SHARED_SET, permission_set: 'datasource_operator', organization_id: ORG_ALPHA },
+      // §8: the platform set, held inside one organization. It carries the
+      // capability; under a wall it confers no platform-operator rung.
+      { user_id: 'u_org_admin', permission_set_id: 'ps_admin_full_access', permission_set: 'admin_full_access', organization_id: ORG_ALPHA },
     ],
     sys_permission_set: [
       {
@@ -148,6 +170,12 @@ function makeQl() {
         // resolver parses. Pinning the stored shape keeps the fixture on the
         // real read path rather than a convenient in-memory one.
         system_permissions: JSON.stringify([DATASOURCE_ADMIN_CAPABILITY]),
+        object_permissions: '{}',
+      },
+      {
+        id: 'ps_admin_full_access',
+        name: 'admin_full_access',
+        system_permissions: JSON.stringify(['manage_metadata', DATASOURCE_ADMIN_CAPABILITY]),
         object_permissions: '{}',
       },
     ],
@@ -313,16 +341,22 @@ const listOf = (h: Harness, raw?: string) => call(h, 'GET', '/api/v1/datasources
 const createOf = (h: Harness, raw: string | undefined, name: string) =>
   call(h, 'POST', '/api/v1/datasources', raw, { name, driver: 'sqlite' });
 const removeOf = (h: Harness, raw?: string) => call(h, 'DELETE', '/api/v1/datasources/pg', raw);
+const patchOf = (h: Harness, raw?: string) => call(h, 'PATCH', '/api/v1/datasources/pg', raw, { driver: 'postgres' });
+const migrateOf = (h: Harness, raw?: string) => call(h, 'POST', '/api/v1/datasources/pg/migrate-credential', raw);
 
 let warnSpy: ReturnType<typeof vi.spyOn>;
 let errorSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
   warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
   errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  // The deployment declares one platform operator. Only `u_operator`'s
+  // verified row matches, so every other principal resolves as before.
+  vi.stubEnv('OS_PLATFORM_OWNER_EMAIL', OPERATOR_EMAIL);
 });
 afterEach(() => {
   warnSpy.mockRestore();
   errorSpy.mockRestore();
+  vi.unstubAllEnvs();
 });
 
 const ISOLATED: Wiring = { kind: 'posture', posture: 'isolated' };
@@ -339,16 +373,18 @@ describe('[#15350] §1 — the door can serve, and the door can refuse', () => {
     expect(res.body?.data?.datasources?.map((d: DatasourceRow) => d.name)).toEqual(['pg']);
   });
 
-  it('CONTROL · writes REACH: a CURRENT member\'s POST lands, read back FROM THE STORE', async () => {
+  // Under `isolated` a datasource write is the platform operator's (§8), so
+  // the write controls are the operator's key; the member's writes are §8's.
+  it('CONTROL · writes REACH: the platform operator\'s POST lands, read back FROM THE STORE', async () => {
     const h = mount(ISOLATED);
-    const res = await createOf(h, RAW_MEMBER_KEY, 'ds_member');
+    const res = await createOf(h, RAW_OPERATOR_KEY, 'ds_operator');
     expect(res.status).toBe(201);
-    expect(h.store().filter((r) => r.name === 'ds_member')).toHaveLength(1);
+    expect(h.store().filter((r) => r.name === 'ds_operator')).toHaveLength(1);
   });
 
-  it('CONTROL · deletes REACH: a CURRENT member\'s DELETE removes the row FROM THE STORE', async () => {
+  it('CONTROL · deletes REACH: the platform operator\'s DELETE removes the row FROM THE STORE', async () => {
     const h = mount(ISOLATED);
-    const res = await removeOf(h, RAW_MEMBER_KEY);
+    const res = await removeOf(h, RAW_OPERATOR_KEY);
     expect(res.status).toBe(204);
     expect(h.store().filter((r) => r.name === 'pg')).toHaveLength(0);
   });
@@ -653,5 +689,141 @@ describe('[#15350] §7 — under `single` nothing changes', () => {
     const h = mount(SINGLE);
     expect((await listOf(h)).status).toBe(401);
     expect((await listOf(h, RAW_UNENTITLED_KEY)).status).toBe(403);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §8 — [ADR-0131 D3 · D12 items 7–8 · D11] Under a wall, a datasource WRITE is
+// the platform operator's.
+//
+// A datasource is a `datasource` metadata item in the environment's catalog,
+// which every organization shares under `isolated` and `group`. Each route that
+// writes a datasource record asks the walled-catalog verdict for that type, the
+// verdict the `/meta` write doors ask for the same record. The member holds
+// `manage_platform_settings` and is a current member: the capability gate and
+// the API-key admission both pass it, so only the verdict can refuse it.
+// ---------------------------------------------------------------------------
+
+interface WriteVerb {
+  readonly verb: string;
+  readonly send: (h: Harness, raw?: string) => ReturnType<typeof call>;
+  readonly served: number;
+  readonly method: 'createDatasource' | 'updateDatasource' | 'removeDatasource' | 'migrateCredential';
+  /** Did the write reach the store? Read off the fixture's store, not the answer. */
+  readonly landed: (h: Harness) => boolean;
+}
+
+const WRITE_VERBS: readonly WriteVerb[] = [
+  {
+    verb: 'POST /datasources',
+    send: (h, raw) => createOf(h, raw, 'ds_new'),
+    served: 201,
+    method: 'createDatasource',
+    landed: (h) => h.store().some((r) => r.name === 'ds_new'),
+  },
+  {
+    verb: 'PATCH /datasources/:name',
+    send: patchOf,
+    served: 200,
+    method: 'updateDatasource',
+    landed: (h) => h.store().find((r) => r.name === 'pg')?.driver === 'postgres',
+  },
+  {
+    verb: 'DELETE /datasources/:name',
+    send: removeOf,
+    served: 204,
+    method: 'removeDatasource',
+    landed: (h) => !h.store().some((r) => r.name === 'pg'),
+  },
+  {
+    verb: 'POST /datasources/:name/migrate-credential',
+    send: migrateOf,
+    served: 200,
+    method: 'migrateCredential',
+    landed: (h) => h.service.migrateCredential.mock.calls.length === 1,
+  },
+];
+
+/** What the `/meta` write doors answer for the same record on this posture. */
+const metaDoorRefusal = (posture: 'group' | 'isolated') => {
+  const verdict = walledCatalogWriteVerdict({ type: 'datasource', tenancyPosture: posture });
+  if (verdict.allowed) throw new Error('fixture: the verdict admits an anonymous caller under a wall');
+  return verdict.message;
+};
+
+describe.each(['isolated', 'group'] as const)(
+  '[ADR-0131 D3] §8 — under `%s` every route that writes a datasource record asks the walled-catalog verdict',
+  (posture) => {
+    const WALLED: Wiring = { kind: 'posture', posture };
+    // The requested posture matches the one in force, as on a real walled
+    // deployment: no stored grant then anchors platform standing.
+    beforeEach(() => {
+      vi.stubEnv('OS_TENANCY_POSTURE', posture);
+    });
+
+    it.each(WRITE_VERBS)('$verb: refused for a member holding the capability, and nothing is written', async (v) => {
+      const h = mount(WALLED);
+      const res = await v.send(h, RAW_MEMBER_KEY);
+      expect(res.status).toBe(403);
+      expect(res.body?.error?.code).toBe('PERMISSION_DENIED');
+      expect(res.body?.error?.message).toBe(metaDoorRefusal(posture));
+      expect(h.service[v.method]).not.toHaveBeenCalled();
+      expect(v.landed(h)).toBe(false);
+      expect(h.store()).toEqual(SEED);
+    });
+
+    it.each(WRITE_VERBS)('$verb: refused for an organization\'s `admin_full_access` holder too', async (v) => {
+      const h = mount(WALLED);
+      const res = await v.send(h, RAW_ORG_ADMIN_KEY);
+      expect(res.status).toBe(403);
+      expect(res.body?.error?.code).toBe('PERMISSION_DENIED');
+      expect(res.body?.error?.message).toBe(metaDoorRefusal(posture));
+      expect(h.service[v.method]).not.toHaveBeenCalled();
+      expect(h.store()).toEqual(SEED);
+    });
+
+    it.each(WRITE_VERBS)('$verb: allowed for the platform operator, and the write lands', async (v) => {
+      const h = mount(WALLED);
+      const res = await v.send(h, RAW_OPERATOR_KEY);
+      expect(res.status).toBe(v.served);
+      expect(h.service[v.method]).toHaveBeenCalledTimes(1);
+      expect(v.landed(h)).toBe(true);
+    });
+
+    it('the capability gate still answers first: a caller without it gets the capability refusal', async () => {
+      const h = mount(WALLED);
+      const res = await createOf(h, RAW_UNENTITLED_KEY, 'ds_unentitled');
+      expect(res.status).toBe(403);
+      expect(res.body?.error?.code).toBe('PERMISSION_DENIED');
+      expect(res.body?.error?.message).not.toBe(metaDoorRefusal(posture));
+      expect(res.body?.error?.message).toContain(DATASOURCE_ADMIN_CAPABILITY);
+    });
+
+    it('the routes that write no record are unchanged for the member', async () => {
+      const h = mount(WALLED);
+      expect((await listOf(h, RAW_MEMBER_KEY)).status).toBe(200);
+      expect((await call(h, 'GET', '/api/v1/datasources/pg', RAW_MEMBER_KEY)).status).toBe(200);
+      expect((await call(h, 'GET', '/api/v1/datasources/drivers', RAW_MEMBER_KEY)).status).toBe(200);
+      expect((await call(h, 'POST', '/api/v1/datasources/test', RAW_MEMBER_KEY, { driver: 'sqlite' })).status).toBe(200);
+      expect((await call(h, 'POST', '/api/v1/datasources/pg/test', RAW_MEMBER_KEY)).status).toBe(200);
+      expect((await call(h, 'GET', '/api/v1/datasources/pg/remote-tables', RAW_MEMBER_KEY)).status).toBe(200);
+      expect(
+        (await call(h, 'POST', '/api/v1/datasources/pg/object-draft', RAW_MEMBER_KEY, { table: 'customers' })).status,
+      ).toBe(200);
+      expect(h.store()).toEqual(SEED);
+    });
+  },
+);
+
+describe.each([
+  ['single', { kind: 'posture', posture: 'single' }],
+  ['no tenancy service', { kind: 'unregistered' }],
+] as const)('[ADR-0131 D11] §8b — under %s the verdict is inert', (_label, wiring) => {
+  it.each(WRITE_VERBS)('$verb: the member holding the capability writes, as before', async (v) => {
+    const h = mount(wiring as Wiring);
+    const res = await v.send(h, RAW_MEMBER_KEY);
+    expect(res.status).toBe(v.served);
+    expect(h.service[v.method]).toHaveBeenCalledTimes(1);
+    expect(v.landed(h)).toBe(true);
   });
 });
