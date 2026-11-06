@@ -3245,7 +3245,7 @@ Two modes, chosen by the shape of the argument:
 
 ```bash
 # catalog mode — the TARGET runtime resolves the version from its own catalog
-os package install com.acme.crm --version 1.2.0 --runtime https://app.example.com
+os package install com.acme.crm --version 1.2.0 --url https://app.example.com
 
 # air-gapped mode — the artifact is read locally and sent inline; no catalog, works offline
 os package install ./dist/objectstack.json
@@ -3258,18 +3258,25 @@ catalog id that happens to match a file in the working directory is installed
 from that file instead.
 
 **The credential is the *runtime* identity, not your cloud login.** The target
-runtime authenticates the call with its own session, so `--email` / `--password`
-(or `OS_RUNTIME_EMAIL` / `OS_RUNTIME_PASSWORD`) name an account **on that
-runtime**. A `401` means exactly that, and the command says so; `os cloud login`
+runtime authenticates the call itself: pass a token it issued (`-t, --token`, or
+`OS_RUNTIME_TOKEN`), or `--email` / `--password` (or `OS_RUNTIME_EMAIL` /
+`OS_RUNTIME_PASSWORD`) for an account **on that runtime** — one or the other,
+not both. A `401` means exactly that, and the command says so; `os cloud login`
 credentials do not apply here.
+
+The server and the credential are spelled as in `os package export` and the
+other server-talking commands: `-u, --url` and `-t, --token`. `-r, --runtime`
+is gone with no alias, so a script that passes it is refused as an unknown flag;
+write `-u URL` instead.
 
 **Options:**
 
 | Flag | Env equivalent | Purpose |
 |---|---|---|
 | `package` (positional, required) | — | Package manifest id (`com.acme.crm`) **or** a path to a compiled artifact JSON |
-| `-r, --runtime <url>` | `OS_RUNTIME_URL` | Base URL of the runtime to install **into** (default `http://localhost:3000`) |
+| `-u, --url <url>` | `OS_RUNTIME_URL` | Base URL of the runtime to install **into** (default `http://localhost:3000`) |
 | `-v, --version <semver>` | — | Version to install in catalog mode (default `latest`). Air-gapped mode takes the version from the artifact |
+| `-t, --token <token>` | `OS_RUNTIME_TOKEN` | A token the target runtime issued (an API key); instead of `--email` / `--password` |
 | `--email <email>` | `OS_RUNTIME_EMAIL` | Account email on the target runtime |
 | `--password <password>` | `OS_RUNTIME_PASSWORD` | Account password on the target runtime |
 | `--confirm-global-uniques` | — | Affirm this app's installation-wide `unique` constraints are genuinely platform-wide — see below |
