@@ -64,6 +64,23 @@ describe('planNamespaceRename — the one rename engine (#30794)', () => {
         expect(install.objectRefusal('crm_lead')).toBeUndefined();
     });
 
+    it('a view named by its object follows the object whole — a bare object\'s container included', () => {
+        const rename = planNamespaceRename({
+            sourcePackageId: 'com.example.crm', sourceNamespace: 'crm', targetNamespace: 'acme',
+            items: [...items, { type: 'object', name: 'ticket', body: {} }, { type: 'view', name: 'ticket', body: { object: 'ticket' } }],
+            retryVerb: 'install',
+        });
+        // The prefix swap kept `ticket`, while the container's `object` follows the copy to `acme_ticket`.
+        expect(rename.copyName('view', 'ticket')).toBe('acme_ticket');
+        expect(rename.copyName('views', 'ticket')).toBe('acme_ticket');
+        expect(rename.rewrite('view', 'ticket', { object: 'ticket' })).toEqual({ item: { name: 'acme_ticket', object: 'acme_ticket' } });
+        // A prefixed object's container: the name the swap gave already.
+        expect(rename.copyName('view', 'crm_lead')).toBe('acme_lead');
+        // NEGATIVE CONTROL: a bare name that is no object of the package keeps it, and so does a non-view row.
+        expect(rename.copyName('view', 'board')).toBe('board');
+        expect(rename.copyName('action', 'ticket')).toBe('ticket');
+    });
+
     it('rewrites a body: names, the reference site, a record key, and `name` set to the copy name', () => {
         const rename = planNamespaceRename({
             sourcePackageId: 'com.example.crm', sourceNamespace: 'crm', targetNamespace: 'acme', items, retryVerb: 'install',

@@ -119,10 +119,14 @@ export const OBJECT_TABLE_IDENTIFIER_LIMIT = 63;
 export const METADATA_ITEM_NAME_STORAGE_LIMIT: number =
     (SysMetadataObject.fields as Record<string, { maxLength?: number }>).name?.maxLength ?? 255;
 
+/** A `view` row, in either spelling of the type. */
+function isViewType(type: string): boolean {
+    return (PLURAL_TO_SINGULAR[String(type)] ?? String(type)) === 'view';
+}
+
 /** A `view` row whose name is qualified `<object>.<viewKey>` (`ViewItemNameSchema`). */
 function isQualifiedViewName(type: string, name: unknown): name is string {
-    return (PLURAL_TO_SINGULAR[String(type)] ?? String(type)) === 'view'
-        && typeof name === 'string' && name.includes('.');
+    return isViewType(type) && typeof name === 'string' && name.includes('.');
 }
 
 /** A body's `fields` record keys, when it has one. */
@@ -433,12 +437,24 @@ export function planNamespaceRename(input: NamespaceRenameInput): NamespaceRenam
         return { fields: Object.fromEntries(out) };
     };
 
+    // [#30794] ⭐ A VIEW NAMED BY ITS OBJECT FOLLOWS THE OBJECT, whole. A view
+    // container is named by the object it binds — the unmanaged import names
+    // every container so (`deriveViewContainerObject`), and a stored base
+    // holds the container under that name — so a view whose name IS a copied
+    // object's name takes that object's copy name. For a prefixed object it
+    // is the name the prefix swap gave already; for a bare one (`ticket`,
+    // copied as `dupdst_ticket`) the swap kept `ticket` while the body's
+    // `object` followed the copy, so the copy's container sat under a name
+    // the source's container holds — the shadowing the qualified rule above
+    // closes for `ticket.board`.
     const copyName = (type: string, name: string): string =>
         type === 'object'
             ? (renameMap.get(name) ?? name)
             : isQualifiedViewName(type, name)
                 ? qualifiedViewCopyName(name)
-                : renameName(name);
+                : isViewType(type) && renameMap.has(name)
+                    ? renameMap.get(name)!
+                    : renameName(name);
 
     const nounOf = (type: string): string => {
         const singular = PLURAL_TO_SINGULAR[String(type)] ?? String(type);
