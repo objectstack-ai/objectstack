@@ -153,7 +153,7 @@ describe('[#30892] showcase: an agent reads and attaches a record\'s files over 
     stack.raw(path, {
       method: 'PUT',
       headers: { 'content-type': 'application/pdf', 'x-file-name': 'receipt.pdf', ...headers, ...authOf(token) },
-      body,
+      body: new Uint8Array(body),
     });
 
   const line = (id: string) => ql.findOne('showcase_invoice_line', { where: { id }, ...SYS });
