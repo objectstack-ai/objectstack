@@ -3,10 +3,11 @@
 /**
  * [#29985 codemod] The "Registry hydration, view expansion, write-through,
  * object storage" facet of `ObjectStackProtocolImplementation`: the bodies of
- * `applyObjectRegistryMutation`, `hydrateOverlayIntoRegistry`,
- * `expandRuntimeViewContainer`, `shippedViewContainerOf`,
- * `runtimeViewContainerPackage`, `isShippedByAnotherPackage`,
- * `hydrateExpandedViewItems`, `anotherPackageShips`,
+ * `applyObjectRegistryMutation`, `overlayPackageMismatchError`,
+ * `hydrateOverlayIntoRegistry`, `expandRuntimeViewContainer`,
+ * `shippedViewContainerOf`, `runtimeViewContainerPackage`,
+ * `isShippedByAnotherPackage`, `hydrateExpandedViewItems`,
+ * `reconcileViewExpansions`, `anotherPackageShips`,
  * `applyRegistryWriteThrough`, `restoreArtifactRegistryView`,
  * `ensureObjectStorage`, `dropObjectStorage`, `unboundOwnerPackageRefusal`,
  * `dropStorageRemainingRowsRefusal` moved out of `protocol.ts` whole by
@@ -49,9 +50,12 @@ import {
 } from './protocol-package-bindings.js';
 import type { HydrationOptions, ShippingPackages, UnboundOwnerRefusalState } from './protocol-package-bindings.js';
 import { bundleMemberDiscriminator } from './protocol-bundle-members.js';
+import type { ViewContainerWrite } from './protocol-package-bindings.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 import { clientFacingFailureText } from './protocol-client-failures.js';
+// [#29985 codemod] `ObjectStackProtocolImplementation` here is `ObjectStackProtocolImplementationStatics` (imported AS the class): forwarders to its statics (#30147).
+import { ObjectStackProtocolImplementationStatics as ObjectStackProtocolImplementation } from './protocol.js';
 
 export class ProtocolRegistryHydrationFacet {
     /**
@@ -164,6 +168,42 @@ export class ProtocolRegistryHydrationFacet {
                 `[Protocol] registerObject failed for ${request.name}: ${err?.message ?? err}`,
             );
         }
+    }
+
+    /**
+     * [ADR-0029 D9.9] The mis-bound overlay refusal.
+     *
+     * The overlay-uniqueness index keys on
+     * `(type, name, organization_id, COALESCE(package_id, ''))` (ADR-0005
+     * amendment, #6825), so `sys_metadata` can legitimately hold two active
+     * rows for one `(type, name)` bound to two packages. For every other type
+     * that is fine — two packages really can ship `page/home`. For `object` it
+     * is not representable: `computeFQN` is identity, so the registry holds
+     * exactly one entry per object name and could never serve two. Refusing
+     * the mis-bound row is what keeps the two stores in agreement instead of
+     * letting `sys_metadata` describe a shape the registry cannot hold.
+     */
+    static overlayPackageMismatchError(name: string, rowPackageId: string, ownerPackageId: string,
+        /** [#23514] The state the refusal answers, for a `'sys_metadata'` sentinel owner only. */
+        unboundOwnerState: UnboundOwnerRefusalState = {},): Error {
+        // [#23514] An owner keyed by the sentinel is owned by no package, so
+        // this prescription's "bind it to the owner" has nothing to name.
+        if (ownerPackageId === 'sys_metadata') {
+            return ObjectStackProtocolImplementation.unboundOwnerPackageRefusal(name, rowPackageId, unboundOwnerState);
+        }
+        const err: any = new Error(
+            `Cannot layer object '${name}': the overlay is bound to package `
+            + `'${rowPackageId}', but the object is owned by package '${ownerPackageId}'. `
+            + `An object has exactly one registry entry, so it can carry exactly one overlay layer — bind the `
+            + `customization to '${ownerPackageId}', or have '${rowPackageId}' extend the object instead. `
+            + `See docs/adr/0029-kernel-object-ownership-and-platform-objects-decomposition.md.`,
+        );
+        err.code = 'OBJECT_OVERLAY_PACKAGE_MISMATCH';
+        err.status = 422;
+        err.packageId = rowPackageId;
+        err.ownerPackageId = ownerPackageId;
+        err.docs = 'docs/adr/0029-kernel-object-ownership-and-platform-objects-decomposition.md';
+        return err;
     }
 
     /**
@@ -819,6 +859,97 @@ export class ProtocolRegistryHydrationFacet {
                 ? {}
                 : { reboundFrom: { binding: boundPackageOf(options.reboundFrom.packageId) } }),
         }, options.organizationId);
+    }
+
+    /**
+     * [#23198] THE reconcile of a view container's expansions: after any write
+     * that changes a container's stored row (a publish, a republish, a reset, a
+     * delete), the registry holds exactly the expansion set the stored row now
+     * implies. Both sides call it: the registration
+     * ({@link hydrateExpandedViewItems}, for every hydration of a row) and the
+     * delete's heal ({@link restoreArtifactRegistryView}, whose set is
+     * empty). No other code registers an expansion, reads the record, or
+     * writes it (`protocol.view-expansion-reconcile-call-sites.test.ts`).
+     *
+     * In order:
+     *
+     * 1. Register each expanded view, unless another package ships its name
+     *    ([#21980, #22057], {@link anotherPackageShips}). Such a name is never
+     *    recorded, so no heal ever touches it.
+     * 2. Replace the record of the rows the write addresses with the names
+     *    registered in step 1. The old names come out of the record before any
+     *    heal runs, so a write that lands meanwhile reconciles against the new
+     *    set. A rebind (an orphan adoption, {@link reassignOrphanedMetadata})
+     *    addresses the row under both bindings: the record of the binding it
+     *    left is removed, and its names count as the row's old names.
+     * 3. Heal each old name the new set lacks through the delete's per-name
+     *    walk ({@link restoreArtifactRegistryView}): a packaged view of that
+     *    name is un-shadowed, a MetadataService baseline is re-registered, and
+     *    a name no layer serves is retired.
+     *
+     * Every gate the walk carries applies here too. An organization-scoped
+     * write registers nothing and heals nothing (#6602 / #6780: the bare
+     * entries belong to the environment-wide row). Only a kernel whose registry
+     * takes its stored rows ({@link registryTakesStoredRows}) re-registers a
+     * baseline. A walk that stops on a degraded baseline read
+     * retires nothing, and that name stays registered, unrecorded, until a
+     * restart: there is no retry ([#23149]'s residual, now reached from a
+     * republish as well as a reset).
+     *
+     * Views only, judged on the canonical type: no other type expands, and a
+     * row of another type stored under a container's name must not heal the
+     * container's expansions.
+     */
+    static async reconcileViewExpansions(this: Pick<ProtocolHost, 'anotherPackageShips' | 'engine' | 'restoreArtifactRegistryView' | 'shippingPackagesOf'>, type: string,
+        write: ViewContainerWrite,
+        /** The write's own scope: `null` for an env-wide row. [#6780] */
+        organizationId: string | null,): Promise<void> {
+        if (canonicalMetaType(type) !== 'view') return;
+        if (organizationId !== null && organizationId !== undefined) return;
+        const registry: any = (this.engine as any)?.registry;
+        if (!registry || typeof registry !== 'object') return;
+
+        // 1. The set the stored row implies now. A non-empty expansion comes
+        // only from the hydrator, past its `registerItem` capability probe.
+        const registered = new Set<string>();
+        let shipping: ShippingPackages | undefined;
+        for (const item of 'expansion' in write ? write.expansion : []) {
+            shipping ??= this.shippingPackagesOf(type);
+            if (this.anotherPackageShips(type, String(item.name), item._packageId, shipping)) continue;
+            registry.registerItem(type, item, 'name' as any);
+            registered.add(String(item.name));
+        }
+
+        // 2. The record: the addressed rows' old names out, the new set in.
+        const record = ObjectStackProtocolImplementation.registeredViewExpansions;
+        let containers = record.get(registry);
+        if (containers === undefined) record.set(registry, (containers = new Map()));
+        const rows = containers.get(write.container) ?? new Map<string, ReadonlySet<string>>();
+        const previous = new Set<string>();
+        if ('removed' in write) {
+            for (const names of rows.values()) for (const name of names) previous.add(name);
+            rows.clear();
+        } else {
+            const row = write.binding ?? '';
+            for (const name of rows.get(row) ?? []) previous.add(name);
+            // A rebind: what the row registered under the binding it left is
+            // its own too, and that record row is gone with the binding.
+            if (write.reboundFrom !== undefined) {
+                const left = write.reboundFrom.binding ?? '';
+                for (const name of rows.get(left) ?? []) previous.add(name);
+                rows.delete(left);
+            }
+            if (registered.size > 0) rows.set(row, registered);
+            else rows.delete(row);
+        }
+        if (rows.size > 0) containers.set(write.container, rows);
+        else containers.delete(write.container);
+
+        // 3. Heal what the rows registered before and do not now.
+        for (const name of previous) {
+            if (registered.has(name)) continue;
+            await this.restoreArtifactRegistryView(type, name, organizationId);
+        }
     }
 
     /**

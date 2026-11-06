@@ -25,7 +25,8 @@ metadata:
 
 | Need | Use instead |
 |:-----|:------------|
-| Model objects, fields, permissions, or datasources | **objectstack-data** |
+| Model objects, fields, permissions, or datasources (`rules/datasources.md`) | **objectstack-data** |
+| Pick a driver package | **objectstack-platform** → Driver Selection Guide |
 | Filter, sort, paginate, or aggregate a request | **objectstack-query** |
 | Register a kernel service, or read one from a plugin | **objectstack-platform** |
 | CEL in a route guard or auth predicate | **objectstack-formula** |
@@ -44,16 +45,14 @@ GET    /api/v1/data/{object}          # List records (with filter, sort, paginat
 GET    /api/v1/data/{object}/:id      # Get single record
 POST   /api/v1/data/{object}          # Create record
 PATCH  /api/v1/data/{object}/:id      # Update record
-DELETE /api/v1/data/{object}/:id      # Delete record (hard delete)
+DELETE /api/v1/data/{object}/:id      # Delete record (business-object rows → recycle bin)
 POST   /api/v1/data/{object}/query    # Complex queries + aggregation (QueryAST in body)
 POST   /api/v1/data/{object}/batch    # Per-object batch operations
 POST   /api/v1/batch                  # Cross-object atomic batch
 ```
 
-Data CRUD lives under the `/data` prefix. There is no `/bulk` route and no
-`GET .../aggregate` route — batch writes go through the `batch` endpoints, and
-aggregation goes through `POST /api/v1/data/{object}/query` with
-`groupBy`/`aggregations` in the body.
+There is no `/bulk` route and no `GET .../aggregate` route — batch writes go
+through the `batch` endpoints, aggregation through the `query` one.
 
 > **Key rule:** If your object defines `apiMethods`, only those operations (and
 > what derives from them) are exposed; `[]` means deny-all. The authorable
@@ -69,8 +68,13 @@ GET /api/v1/meta/:type            # List metadata items of a type (object, view,
 GET /api/v1/meta/:type/:name      # Read a single metadata item
 ```
 
-The read-side query params (`?preview=draft`, `?package=`, `?include=content`)
-are **client** contracts — nothing in a stack declares them.
+The list reads a closed query set — `package`, `preview` (`draft`), `object`,
+`include` (`content`, `grants`), `id`, `names`, `locale` — and refuses any other key with
+`400 VALIDATION_ERROR` instead of ignoring it. `?names=a,b,c` (one
+comma-separated value) narrows the list to the named items the caller may see:
+an unknown name is simply absent, an empty value is refused `400`, and the
+`package` list (keyed by id) refuses the key. These are **client** contracts —
+nothing in a stack declares them.
 
 ### Public (anonymous) Form Endpoints
 
@@ -265,8 +269,8 @@ eight extra verbs are never declared in `apiMethods`:
 | `export` | `list` | `GET /data/{object}/export` |
 
 `history` (from `get` ∧ `trackHistory`) gates only. `restore` / `purge` never
-derive — the trash surface is retired. Declaring any derived verb in
-`apiMethods` is stripped at parse with a FROM → TO warning.
+derive: the recycle bin has no restore or purge door yet. Declaring any
+derived verb in `apiMethods` is stripped at parse with a FROM → TO warning.
 
 `POST /data/{object}/import` takes `mapping` as `{ Column: field }` or as
 `FieldMappingEntry[]` (`api/export.zod.ts`); only the entry form carries
@@ -315,8 +319,8 @@ Realtime contracts are pointer-style — read the spec source for exact shapes:
 
 ## Authentication & Authorization
 
-RBAC (`definePermissionSet`) and RLS are objectstack-data's surface, not this
-one; this section is the endpoint's own auth keys.
+RBAC and RLS are objectstack-data's surface; this section is the endpoint's
+own auth keys.
 
 ### Auth Configuration
 
@@ -347,15 +351,6 @@ Provider and login contracts live in
 `LoginRequestSchema` carries `type` (login method), plus optional `email`,
 `username`, `password`, `provider`, and `redirectTo`. Read that file for the
 session and token response shapes before wiring an auth flow.
-
----
-
-## Datasources
-
-`defineDatasource`, `schemaMode`, the `external` write gate and
-`credentialsRef` are objectstack-data → `rules/datasources.md`; driver packages
-and the Turso Cloud/EE caveat are objectstack-platform → **Driver Selection
-Guide**; the `driver` id vocabulary is `data/driver/config-registry.zod.ts`.
 
 ---
 
@@ -413,10 +408,10 @@ keys mean the run produced none — never invent an empty.
    read. Sending neither skips the check; a mismatch answers **409
    `CONCURRENT_UPDATE`**; the quoted-empty entity-tag (`""`) is refused **400
    `VALIDATION_FAILED`**, not treated as omitted.
-2. **Assuming `DELETE` is recoverable.** ObjectStack `DELETE` is a hard
-   delete — there is no recycle bin (the dead `enable.trash` flag was removed
-   in 16.x). For recoverability, use per-field `trackHistory` (audit
-   trail) or a `lifecycle` archive policy instead of custom soft-delete logic.
+2. **Treating `DELETE` as final or as restorable.** A by-id delete keeps a
+   business object's rows in the recycle bin (`sys_recycle_bin`, 30 days by
+   default; not `multi: true` deletes, platform rows or rows deleted before the
+   bin existed); nothing lists or restores it over the API yet. No soft-delete.
 
 ---
 

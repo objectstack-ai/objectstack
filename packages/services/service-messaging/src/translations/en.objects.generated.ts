@@ -214,7 +214,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       channel: {
         label: "Channel",
-        help: "The channel: inbox (notifications shown inside the app, always available), email (once an email service is configured), sms (once an SMS service is configured), or the id of a channel an installed plugin adds. Enter * for all channels. An id no channel uses matches nothing."
+        help: "The channel: inbox (notifications shown inside the app, always available), email (once an email service is configured), sms (once an SMS service is configured), push (once a push service is configured, to the user's registered devices), or the id of a channel an installed plugin adds. Enter * for all channels. An id no channel uses matches nothing."
       },
       enabled: {
         label: "Enabled",

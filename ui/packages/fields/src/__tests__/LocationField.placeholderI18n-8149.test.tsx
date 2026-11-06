@@ -194,7 +194,7 @@ describe('every pack\'s hint is its two nouns in the parser\'s order (objectui#8
 
   it('covers more than one pack (guards the population itself)', () => {
     expect(LANGS.length).toBeGreaterThan(1);
-    expect(LANGS).toEqual(expect.arrayContaining(['en', 'zh']));
+    expect(LANGS).toEqual(expect.arrayContaining(['en', 'zh-Hans', 'zh-Hant']));
   });
 
   it.each(LANGS)('reads as [latitude, longitude] under the parser\'s split in %s', (language) => {

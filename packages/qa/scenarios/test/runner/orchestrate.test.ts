@@ -21,7 +21,7 @@ import { describe, expect, it } from 'vitest';
 
 import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
 import { truthFigures } from '../../src/score/index.js';
-import type { AppHarness, HttpAnswer, PersonaAccount } from '../../src/runner/app.js';
+import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../src/runner/app.js';
 import { stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo } from '../../src/runner/driver.js';
 import { namespacedScenario } from '../../src/runner/namespace.js';
 import { runCard, type ProjectOps } from '../../src/runner/orchestrate.js';
@@ -156,6 +156,19 @@ class FakeApp implements AppHarness {
     for (const c of collections) out[c] = [...(this.platform[c] ?? []), ...(src[c] ?? [])];
     return out;
   }
+  /** Every MCP call the runner made itself (the validation probe), with the key it sent. */
+  toolCalls: Array<{ apiKey: string; tool: string; args: Record<string, unknown> }> = [];
+  /** A broken app: its write door stores the invalid write instead of refusing it. */
+  storesInvalidWrites = false;
+  async callTool(apiKey: string, tool: string, args: Record<string, unknown>): Promise<ToolAnswer> {
+    this.toolCalls.push({ apiKey, tool, args });
+    if (!this.storesInvalidWrites) return { output: JSON.stringify({ error: { code: 'VALIDATION_FAILED', status: 400 } }, null, 2), isError: true };
+    const { objectName, recordId, data } = args as { objectName: string; recordId?: string; data: Record<string, unknown> };
+    const rows = (this.rows[objectName] ??= []);
+    if (recordId !== undefined) Object.assign(rows.find((r) => r.id === recordId)!, data);
+    else rows.push({ id: `probe-${rows.length}`, ...data });
+    return { output: JSON.stringify({ id: recordId ?? `probe-${rows.length - 1}` }), isError: false };
+  }
 }
 
 // ── The scripted model ──────────────────────────────────────────────────────
@@ -179,6 +192,8 @@ class ScriptedDriver implements AgentDriver {
     private readonly ops: ReturnType<typeof fakeOps>,
     private readonly app: () => FakeApp,
     private readonly leak: { question: string; persona: string } | undefined,
+    /** The agent catches a validation operation's bad value itself and writes nothing (#30883 item 2). */
+    private readonly preValidates = false,
   ) {
     this.scenario = namespacedScenario(scenario);
   }
@@ -214,6 +229,9 @@ class ScriptedDriver implements AgentDriver {
       app.audit[op.target ?? `new-${op.id}`] = `u-${op.actingAs}`;
       return turn('Done.', [{ name: `${op.kind}_record`, rawName: 'x', input: { objectName: op.object }, output: '{"ok":true}' }]);
     }
+    if (this.preValidates && op.outcome.kind === 'refused' && op.outcome.code === 'VALIDATION_FAILED') {
+      return turn(`"${String(op.values?.email)}" is not a valid email address, so I have not saved the contact. Could you give me the full address?`);
+    }
     if (op.outcome.kind === 'refused') {
       return turn('That was refused.', [{ name: `${op.kind}_record`, rawName: 'x', input: { objectName: op.object }, output: JSON.stringify({ error: { code: op.outcome.code } }), isError: true }]);
     }
@@ -222,7 +240,7 @@ class ScriptedDriver implements AgentDriver {
 }
 
 function setup<A extends FakeApp = FakeApp>(
-  opts: { degradedBuild?: boolean; leak?: { question: string; persona: string }; bareItems?: boolean; declares?: string; app?: () => A } = {},
+  opts: { degradedBuild?: boolean; leak?: { question: string; persona: string }; bareItems?: boolean; declares?: string; app?: () => A; preValidates?: boolean } = {},
 ) {
   const scenario = load();
   const fresh = opts.app ?? (() => new FakeApp() as A);
@@ -236,7 +254,7 @@ function setup<A extends FakeApp = FakeApp>(
     apps.push(current);
     return boot(dir);
   };
-  const driver = new ScriptedDriver(scenario, ops, getApp, opts.leak);
+  const driver = new ScriptedDriver(scenario, ops, getApp, opts.leak, opts.preValidates);
   return { scenario, ops, driver, apps };
 }
 
@@ -424,6 +442,48 @@ describe('runCard — the acceptance: a degraded build and a leaking answer each
   });
 });
 
+describe('runCard — the validation operation is probed by the runner itself (#30883 item 2, ruled B)', () => {
+  const badEmail = (run: Awaited<ReturnType<typeof runCard>>) => run.modes[0]!.run!.operations.find((o) => o.operation === 'contact_bad_email')!;
+  const failing = (o: { grade?: { checks: Array<{ check: string; pass: boolean }> } }) => o.grade!.checks.filter((c) => !c.pass).map((c) => c.check);
+
+  it('sends the declared write once, after the turn, as the acting persona through its MCP door; a validating app passes it', async () => {
+    const { scenario, ops, driver, apps } = setup();
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    expect(apps[0]!.toolCalls).toEqual([
+      { apiKey: 'key-partner_user', tool: 'create_record', args: { objectName: 'democrm_contact', data: { full_name: 'Gil Ray', email: 'gil at acme' } } },
+    ]);
+    const op = badEmail(run);
+    expect(op.observation!.probe).toEqual({ answer: { kind: 'refused', code: 'VALIDATION_FAILED' }, writes: 0 });
+    expect([op.grade!.pass, op.error]).toEqual([true, undefined]);
+    expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
+  });
+
+  it('an agent that catches the bad value and asks for a correction passes; an app that stores the probe fails on the platform half alone', async () => {
+    const good = setup({ preValidates: true });
+    const op = badEmail(await runCard(good.scenario, good.driver, good.ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false }));
+    expect([op.observation!.answer, op.observation!.writes, op.observation!.withheld, op.grade!.pass]).toEqual([{ kind: 'refused', code: '(no write attempted)' }, 0, true, true]);
+
+    const broken = setup({ preValidates: true, app: () => Object.assign(new FakeApp(), { storesInvalidWrites: true }) });
+    const run = await runCard(broken.scenario, broken.driver, broken.ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    expect(failing(badEmail(run))).toEqual(['platform:refused:VALIDATION_FAILED', 'platform:no-write']);
+    expect(broken.apps[0]!.rows.democrm_contact!.filter((r) => r.email === 'gil at acme')).toHaveLength(1); // the probe's own row
+    expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 4, total: 5, notMeasured: 0 });
+  });
+
+  it('a probe the door never answered leaves the platform half not observed, and the operation says why', async () => {
+    class DownApp extends FakeApp {
+      override async callTool(): Promise<ToolAnswer> {
+        throw new Error('tools/call create_record: 502');
+      }
+    }
+    const { scenario, ops, driver } = setup({ app: () => new DownApp() });
+    const op = badEmail(await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false }));
+    expect(op.error).toBe('probe: tools/call create_record: 502');
+    expect(failing(op)).toEqual(['platform:refused:VALIDATION_FAILED', 'platform:no-write']);
+    expect(op.grade!.checks.find((c) => c.check === 'platform:no-write')).toEqual({ check: 'platform:no-write', pass: false, detail: 'not observed' });
+  });
+});
+
 /** A data door that refuses the seed rows it is told to, as a build whose validation rejects them would. */
 class RefusingApp extends FakeApp {
   constructor(private readonly refuse: ReadonlySet<string>) {
@@ -436,6 +496,28 @@ class RefusingApp extends FakeApp {
     return super.insertRow(object, row);
   }
 }
+
+class ThrowingApp extends RefusingApp {
+  constructor(private readonly throwAt: string) {
+    super(new Set(['democrm_account/ac2']));
+  }
+  override async insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer> {
+    if (`${object}/${String(row.id)}` === this.throwAt) throw new Error('connection reset while seeding');
+    return super.insertRow(object, row);
+  }
+}
+
+describe('runCard — a seed insert that throws keeps the partial tally in the record', () => {
+  it('ac1 and ac3 inserted, ac2 refused, then ct1 throws: the half records exactly that next to its error', async () => {
+    const { scenario, ops, driver } = setup({ app: () => new ThrowingApp('democrm_contact/ct1') });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    const half = run.modes[0]!.run!;
+    expect(half.error).toContain('connection reset while seeding');
+    expect(half.seed).toEqual({ inserted: 2, refused: [{ object: 'democrm_account', id: 'ac2', code: 'VALIDATION_FAILED', message: 'democrm_account ac2 refused' }], handlesAsAdmin: ['u_tia'] });
+    expect(half.questions).toEqual([]);
+    expect(cardScorecard(run).modes[0]!.first.seed).toEqual({ inserted: 2, total: 3, refused: 1 }); // total counts the rows the tally reached
+  });
+});
 
 describe('runCard — a refused seed row makes what reads it not measured, never a fail', () => {
   it('shows ⚠ seed: 1 refused, leaves the questions on that object unasked and unscored, and grades the rest as usual', async () => {

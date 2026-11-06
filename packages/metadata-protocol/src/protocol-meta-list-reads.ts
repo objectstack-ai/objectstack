@@ -18,8 +18,7 @@
  * not move.
  */
 
-import { ITEM_KEY_DISCRIMINATORS, isTenantAuthored } from '@objectstack/metadata-core';
-import { customizationPackageId } from '@objectstack/spec/kernel';
+import { ITEM_KEY_DISCRIMINATORS, isTenantAuthored, pairOf } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { isAggregatedViewContainer } from '@objectstack/spec/ui';
 import {
@@ -194,7 +193,7 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
         // come from the package-agnostic read too. They stand in like the
         // package-less rows: a pair's item of a name the package does not
         // ship is the pair's own, and never listed in the package's list.
-        const pairOfScope = servedOverride && packageId ? customizationPackageId(packageId) : undefined;
+        const pairOfScope = servedOverride && packageId ? pairOf(packageId) : undefined;
         const overrideRows = pairOfScope?.ok
             ? lockRows.filter((row) => row?.package_id === pairOfScope.value)
             : [];
@@ -528,7 +527,7 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
             // [#28409] …and the pair's drafts, as stand-ins, as its active
             // arm previews the pair's rows: the pending edit of the
             // package's declared override previews over its slot.
-            const pairOfDraftScope = servedOverride && packageId ? customizationPackageId(packageId) : undefined;
+            const pairOfDraftScope = servedOverride && packageId ? pairOf(packageId) : undefined;
             const overrideDraftRecords = pairOfDraftScope?.ok
                 ? packageAgnosticDrafts.filter((record) => record?.package_id === pairOfDraftScope.value)
                 : [];
@@ -672,7 +671,7 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
     // address serves beside the package's members
     // ({@link baseServesBundleMember}), as the env-wide list below does.
     if (unseated && servedOverride && packageId && ITEM_KEY_DISCRIMINATORS[request.type] !== undefined) {
-        const pairOfList = customizationPackageId(packageId);
+        const pairOfList = pairOf(packageId);
         const typeShipping = host.shippingPackagesOf(request.type);
         for (const it of items as any[]) {
             if (!(it && typeof it === 'object' && unseated.has(it))) continue;

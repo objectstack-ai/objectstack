@@ -27,6 +27,7 @@
  * alone fails that gate, and re-adding a pack key fails this one.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { builtInLocales } from '../locales/index';
 
 type LocaleCode = keyof typeof builtInLocales;
@@ -51,7 +52,7 @@ const SURVIVING = [
 
 describe('the Field Designer validation-rule labels are retired from the ten packs (objectui#11434)', () => {
   it('no pack defines either retired label', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     const revived: string[] = [];
     for (const lang of LANGS) {
       for (const key of [RETIRED_VALIDATION_RULES_LABEL, RETIRED_ADD_RULE_LABEL]) {

@@ -73,6 +73,7 @@ import { builtInLocales } from '@object-ui/i18n/locales';
 
 import { LocationField } from '../widgets/LocationField';
 import { AddressField } from '../widgets/AddressField';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 
 const locationField = { name: 'site', label: 'Site', type: 'location' } as any;
 const addressField = { name: 'billing_address', type: 'address' } as any;
@@ -141,7 +142,7 @@ describe('the locale channel is live in this run (control for objectui#6888)', (
     // Without this, a blank or English diagnostic below would be a dead
     // provider rather than a missing key, and every negative assertion in this
     // file would pass for the wrong reason.
-    renderIn('zh', <AddressField value={{}} onChange={vi.fn()} field={addressField} />);
+    renderIn('zh-Hans', <AddressField value={{}} onChange={vi.fn()} field={addressField} />);
     expect(screen.getByLabelText('街道地址')).toBeInTheDocument();
     expect(screen.getByLabelText('城市')).toBeInTheDocument();
   });
@@ -182,7 +183,7 @@ describe('the English default is byte-identical after keying (objectui#6888)', (
 
 describe('the residue refusal speaks the reader\'s language (objectui#6888)', () => {
   it.each([
-    ['zh', '未保存：纬度“12abc”不是数字。请输入普通小数（例如 30.2741, 120.1551）。'],
+    ['zh-Hans', '未保存：纬度“12abc”不是数字。请输入普通小数（例如 30.2741, 120.1551）。'],
     ['ja', '保存されていません: 緯度「12abc」は数値ではありません。通常の小数で入力してください（例: 30.2741, 120.1551）。'],
     ['ar', 'لم يتم الحفظ: خط العرض «12abc» ليس رقمًا. أدخل أرقامًا عشرية عادية (مثال: 30.2741, 120.1551).'],
   ])('says the ONE-half refusal in %s', (language, expected) => {
@@ -190,7 +191,7 @@ describe('the residue refusal speaks the reader\'s language (objectui#6888)', ()
   });
 
   it.each([
-    ['zh', '未保存：纬度“12abc”和经度“34xyz”不是数字。请输入普通小数（例如 30.2741, 120.1551）。'],
+    ['zh-Hans', '未保存：纬度“12abc”和经度“34xyz”不是数字。请输入普通小数（例如 30.2741, 120.1551）。'],
     ['ja', '保存されていません: 緯度「12abc」と経度「34xyz」は数値ではありません。通常の小数で入力してください（例: 30.2741, 120.1551）。'],
     ['ar', 'لم يتم الحفظ: خط العرض «12abc» وخط الطول «34xyz» ليسا رقمين. أدخل أرقامًا عشرية عادية (مثال: 30.2741, 120.1551).'],
   ])('says the TWO-half refusal in %s', (language, expected) => {
@@ -198,8 +199,8 @@ describe('the residue refusal speaks the reader\'s language (objectui#6888)', ()
   });
 
   it.each([
-    ['zh', ONE_HALF],
-    ['zh', BOTH_HALVES],
+    ['zh-Hans', ONE_HALF],
+    ['zh-Hans', BOTH_HALVES],
     ['ja', ONE_HALF],
     ['ja', BOTH_HALVES],
     ['ar', ONE_HALF],
@@ -224,7 +225,8 @@ describe('the residue refusal speaks the reader\'s language (objectui#6888)', ()
 /* -------------------------------------------------------------------------- */
 
 describe('arity lives in the pack VALUE, not in a hole (objectui#6888)', () => {
-  const LANGS = ['en', 'zh', 'ja', 'ko', 'de', 'es', 'fr', 'pt', 'ru', 'ar'] as const;
+  // Every pack: the platform locale table's tags (objectstack#30511).
+  const LANGS = PLATFORM_LOCALE_TAGS;
 
   /**
    * One pack's `fields.location` block, READ THROUGH ITS REAL TYPE.
@@ -292,7 +294,7 @@ describe('arity lives in the pack VALUE, not in a hole (objectui#6888)', () => {
 describe('the refusal itself is unchanged by keying it (objectui#6888)', () => {
   it('still refuses the value it announced about, under a translated provider', () => {
     const onChange = vi.fn();
-    const { container } = renderIn('zh', <LocationField value={null} onChange={onChange} field={locationField} />);
+    const { container } = renderIn('zh-Hans', <LocationField value={null} onChange={onChange} field={locationField} />);
     typeInto(container, BOTH_HALVES);
     // objectui#6715's rule, inherited rather than re-decided here.
     expect(onChange).not.toHaveBeenCalled();
@@ -304,7 +306,7 @@ describe('the refusal itself is unchanged by keying it (objectui#6888)', () => {
   it('shares ONE diagnostic element with the other two arms', () => {
     // The reason this card exists: a second `<p>` would have made the mixed
     // languages two separate lines rather than one, and far less confusing.
-    const { container } = renderIn('zh', <LocationField value={null} onChange={vi.fn()} field={locationField} />);
+    const { container } = renderIn('zh-Hans', <LocationField value={null} onChange={vi.fn()} field={locationField} />);
     typeInto(container, 'not a coordinate');
     expect(container.querySelectorAll('p')).toHaveLength(1);
     typeInto(container, BOTH_HALVES);

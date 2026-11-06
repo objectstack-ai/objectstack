@@ -29,7 +29,7 @@
  *  - `multi_shipped` — several packages ship it: listed for the administrator,
  *    never guessed.
  *  - `no_pair` — the one package that ships it has an id no pair can be
- *    formed from (`customizationPackageId` refuses it): listed, not moved.
+ *    formed from (`pairOf` refuses it): listed, not moved.
  *
  * "Ships" counts read-only code packages only, as the write gate does: a
  * writable package's item is edited in place (ADR-0070), and the pair itself
@@ -135,8 +135,8 @@
 import {
     OVERRIDABLE_METADATA_TYPES,
     customizationBasePackageId,
-    customizationPackageId,
 } from '@objectstack/spec/kernel';
+import { pairOf } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { storedRowDocument } from './item-lock.js';
 import { OVERLAY_MEMBER_COLUMN, overlayMemberOfBody, overlayMemberValue } from './migrations/overlay-index.js';
@@ -380,7 +380,7 @@ export function classifyPackagelessRow(
 ): Pick<PackagelessOverlayRow, 'disposition' | 'base' | 'pair' | 'shadowDeclares'> {
     if (shippers.length > 1) return { disposition: 'multi_shipped' };
     const base = shippers[0]!;
-    const pairId = customizationPackageId(base);
+    const pairId = pairOf(base);
     if (!pairId.ok) return { base, disposition: 'no_pair' };
     const pair = pairId.value;
     if (body !== undefined && overrideDeclarationRefusedByShape(type, body)) return { base, pair, disposition: 'cannot_declare' };

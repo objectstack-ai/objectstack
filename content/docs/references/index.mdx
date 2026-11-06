@@ -1,7 +1,7 @@
 ---
 title: Protocol reference — every schema by module
 navTitle: Protocol Reference
-description: Every schema published by @objectstack/spec — 1631 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1635 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -27,14 +27,14 @@ counts are sums of the rows they head. Regenerate with
 | [Identity Protocol](/docs/references/identity) | 5 | 27 | Users and accounts, organizations, positions, SCIM provisioning. |
 | [Integration Protocol](/docs/references/integration) | 1 | 23 | The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances. |
 | [Kernel Protocol](/docs/references/kernel) | 30 | 152 | Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry. |
-| [Marketplace Protocol](/docs/references/marketplace) | 4 | 30 | The package & marketplace format — package identity and versions, listing, publish, review, search, install, template manifests. |
+| [Marketplace Protocol](/docs/references/marketplace) | 5 | 34 | The package & marketplace format — package identity and versions, listing, publish, review, search, install, template manifests. |
 | [QA Protocol](/docs/references/qa) | 1 | 8 | Declarative test suites — scenarios, steps, actions and assertions. |
 | [Security Protocol](/docs/references/security) | 6 | 37 | Permission sets, row-level security, sharing rules, tenancy posture. |
 | [Shared Protocol](/docs/references/shared) | 10 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 39 | 295 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 175 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **211** | **1631** | 14 protocol modules |
+| **Total** | **212** | **1635** | 14 protocol modules |
 
 ---
 
@@ -249,15 +249,16 @@ Plugin lifecycle and manifests, capabilities and security, metadata loading, ser
 
 ## Marketplace Protocol
 
-**Source:** `packages/spec/src/marketplace/` · **Import:** `@objectstack/spec/marketplace` · **4 pages, 30 schemas**
+**Source:** `packages/spec/src/marketplace/` · **Import:** `@objectstack/spec/marketplace` · **5 pages, 34 schemas**
 
 The package & marketplace format — package identity and versions, listing, publish, review, search, install, template manifests.
 
 | File | Schemas |
 | :--- | :--- |
-| [`marketplace.zod.ts`](/docs/references/marketplace/marketplace) | `ArtifactDownloadResponse`, `ArtifactReference`, `ListingStatus`, `MarketplaceCategory`, `MarketplaceInstallRequest`, `MarketplaceInstallResponse`, `MarketplaceListing`, `MarketplaceSearchRequest`, `MarketplaceSearchResponse`, `PackageSubmission`, `PricingModel`, `Publisher`, `PublisherVerification` |
-| [`package.zod.ts`](/docs/references/marketplace/package) | `CreatePackageRequest`, `Package`, `PackageCategory`, `PackageLocale`, `PackagePublisher`, `PackageTranslation`, `PackageTranslations`, `PackageVisibility`, `UpdatePackageRequest` |
+| [`marketplace.zod.ts`](/docs/references/marketplace/marketplace) | `ArtifactDownloadResponse`, `ArtifactReference`, `ListingStatus`, `MarketplaceInstallRequest`, `MarketplaceInstallResponse`, `MarketplaceListing`, `MarketplaceSearchRequest`, `MarketplaceSearchResponse`, `PackageSubmission`, `PricingModel`, `Publisher`, `PublisherVerification` |
+| [`package.zod.ts`](/docs/references/marketplace/package) | `CreatePackageRequest`, `Package`, `PackageLocale`, `PackagePublisher`, `PackageTranslation`, `PackageTranslations`, `PackageVisibility`, `UpdatePackageRequest` |
 | [`package-version.zod.ts`](/docs/references/marketplace/package-version) | `CreatePackageVersionRequest`, `PackageDependency`, `PackageManifest`, `PackageVersion`, `PackageVersionStatus`, `PublishPackageVersionRequest`, `UpdatePackageVersionRequest` |
+| [`taxonomy.zod.ts`](/docs/references/marketplace/taxonomy) | `MarketplaceBusinessFunction`, `MarketplaceBusinessFunctions`, `MarketplaceIndustries`, `MarketplaceIndustry`, `MarketplaceSolutionType`, `PackageMaturity` |
 | [`template-manifest.zod.ts`](/docs/references/marketplace/template-manifest) | `TemplateManifest` |
 
 ---

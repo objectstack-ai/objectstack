@@ -69,7 +69,7 @@ const ELLIPSIS = '…';
 /** The typewriter spelling this pass retired: three ASCII full stops. */
 const ASCII_ELLIPSIS = '...';
 
-const LANGS = ['en', 'zh', 'ja', 'ko', 'de', 'fr', 'es', 'pt', 'ru', 'ar'] as const;
+const LANGS = ['en', 'zh-Hans', 'zh-Hant', 'ja', 'ko', 'de', 'fr', 'es', 'pt-BR', 'ru', 'ar'] as const;
 type Lang = (typeof LANGS)[number];
 
 /** Every string leaf of a pack, as `[dotted.path, value]`. */

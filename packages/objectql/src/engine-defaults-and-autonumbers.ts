@@ -3,11 +3,11 @@
 /**
  * [#29986 codemod] The "Field defaults and autonumbers" section of `ObjectQL`:
  * the bodies of `resolveNowDefault`, `normalizeExpressionDefault`,
- * `resolveOptionDefault`, `applyFieldDefaults`, `defaultFieldEntries`,
- * `applyAutonumbers`, `adoptExplicitAutonumber`, `createWithAutonumberResync`,
- * `isIssuedAutonumberCollision`, `warnAutonumberReadersUnserved`,
- * `seedAutonumber` moved out of `engine.ts` whole by
- * `scripts/codemod-split-engine.mjs`.
+ * `buildHookApi`, `resolveOptionDefault`, `applyFieldDefaults`,
+ * `defaultFieldEntries`, `applyAutonumbers`, `adoptExplicitAutonumber`,
+ * `createWithAutonumberResync`, `isIssuedAutonumberCollision`,
+ * `warnAutonumberReadersUnserved`, `seedAutonumber` moved out of `engine.ts`
+ * whole by `scripts/codemod-split-engine.mjs`.
  *
  * A MOVE, not a redesign. {@link DefaultsAndAutonumbersFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -28,12 +28,15 @@
  * class, and a field a body assigns goes with a SETTER that assigns it on the
  * engine.
  *
- * The module imports `engine.ts` for types only, so the two modules form no
- * evaluation cycle. `index.ts` re-exports nothing from this module.
+ * Values that stayed in `engine.ts` are imported from it (lever (a) of
+ * ruling 6591753301); every use is inside a function body, so the import
+ * cycle is never read at evaluation time. `index.ts` re-exports nothing from
+ * this module.
  */
 
 import { isCurrentUserDefaultToken, isNowDefaultToken, missingFieldValues, parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat } from '@objectstack/spec/data';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
+import type { IDataEngine } from '@objectstack/core';
 import { isUniqueViolationError, keysetWalk, uniqueViolationColumn } from '@objectstack/types';
 import type { KeysetPageQuery } from '@objectstack/types';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -46,6 +49,7 @@ import {
   readStoredAutonumberCounter, recomputeAutonumberReaders,
 } from './engine-top-level.js';
 import type { AutonumberReaders, FormulaPlanEntry, IssuedAutonumber } from './engine-top-level.js';
+import { ScopedContext } from './engine.js';
 import type { ObjectQL } from './engine.js';
 
 /**
@@ -61,6 +65,8 @@ export interface DefaultsAndAutonumbersHost {
   readonly autonumberCounters: ObjectQL['autonumberCounters'];
   readonly autonumberReadersUnservedReported: ObjectQL['autonumberReadersUnservedReported'];
   defaultFieldEntries: ObjectQL['defaultFieldEntries'];
+  /** The engine itself: a moved body reads `this.facade` where the method read a bare `this` (#30020). */
+  readonly facade: ObjectQL;
   find: ObjectQL['find'];
   getSchema: ObjectQL['getSchema'];
   isIssuedAutonumberCollision: ObjectQL['isIssuedAutonumberCollision'];
@@ -187,6 +193,17 @@ export class DefaultsAndAutonumbersFacet {
   static normalizeExpressionDefault(this: Pick<DefaultsAndAutonumbersHost, 'resolveNowDefault'>, fieldType: unknown, value: unknown): unknown {
     if (!(value instanceof Date) || Number.isNaN(value.getTime())) return value;
     return this.resolveNowDefault(fieldType, value);
+  }
+
+  /**
+   * Build a HookContext.api: a ScopedContext that hooks can use to
+   * read/write other objects within the same execution context.
+   * Falls back to a system-elevated empty context when no execCtx
+   * is supplied (e.g. system-triggered hooks).
+   */
+  static buildHookApi(this: Pick<DefaultsAndAutonumbersHost, 'facade'>, execCtx?: ExecutionContext): ScopedContext {
+    const safeCtx: ExecutionContext = execCtx ?? ({ isSystem: true } as any);
+    return new ScopedContext(safeCtx, this.facade as unknown as IDataEngine);
   }
 
   /**

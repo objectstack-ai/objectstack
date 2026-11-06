@@ -25,9 +25,12 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
+import { ErrorCode } from '@objectstack/spec/api';
+
 import {
   AppCodeSchema,
   GUARDRAIL_CHECKS,
+  ROW_SCOPE_TAG,
   ScenarioCardSchema,
   type ScenarioCard,
   type ScenarioExpect,
@@ -170,6 +173,28 @@ function loadOne(file: string, options: LoadOptions): { card?: LoadedScenario; r
 }
 
 type Refuse = (path: IssuePath, message: string) => void;
+type Persona = ScenarioCard['run']['personas'][number];
+
+/**
+ * The two codes a faithful build answers an operation its acting persona
+ * cannot reach with. Spelled as literals, because `check:dispatcher-error-vocabulary`
+ * judges the `code` these feed into `want` below and reads a constant only when
+ * it resolves to a literal. Held to the spec's catalogue (`ErrorCode`, ADR-0112)
+ * twice: typed, so the typecheck refuses a code the platform stops answering,
+ * and parsed once at load, so a test run (which does not typecheck) refuses it
+ * too, instead of drifting.
+ *
+ *   NOT_REACHABLE_ROW_CODE  a by-id write on a row the caller cannot READ is
+ *                           answered not-found, indistinguishable from a
+ *                           missing row, before any field or validation gate.
+ *   HIDDEN_WRITE_CODE       a write on an object the caller must not read, or
+ *                           to a field it must not read, is refused by the
+ *                           security gate before the object's validation runs.
+ */
+const NOT_REACHABLE_ROW_CODE: ErrorCode = 'RECORD_NOT_FOUND';
+const HIDDEN_WRITE_CODE: ErrorCode = 'PERMISSION_DENIED';
+ErrorCode.parse(NOT_REACHABLE_ROW_CODE);
+ErrorCode.parse(HIDDEN_WRITE_CODE);
 
 function duplicates<T>(items: readonly T[], keyOf: (t: T) => string, at: IssuePath, what: string, refuse: Refuse) {
   const seen = new Set<string>();
@@ -338,6 +363,12 @@ function checkCard(
     return v === undefined ? null : v;
   };
 
+  /** Whether `p` sees `row` of `object`: every row-scope rule it declares on that object holds. */
+  const inScope = (p: Persona, object: string, row: SeedRow): boolean => {
+    const resolve = resolverFor(object);
+    return (p.scope ?? []).filter((sc) => sc.object === object).every((sc) => resolve(row, sc.field) === sc.value);
+  };
+
   // ── personas: hidden refs and row scope resolve ──
   duplicates(run.personas, (p) => p.id, ['run', 'personas'], 'persona id', refuse);
   const personas = new Set(run.personas.map((p) => p.id));
@@ -359,6 +390,20 @@ function checkCard(
       } else if (checkPath(sc.object, sc.field, [...at, 'field']) === null) unscoped.add(p.id);
     });
   });
+
+  // ── row scope is judged in the build: a scoped persona needs the row-scope tag ──
+  // A persona's `scope` is a requirement of the app (it sees only those rows).
+  // The Build half judges a requirement only through the card's capability
+  // tags, so without the tag a build that shows the persona every row scores
+  // as if the card never asked (the reach rule on operations, below, is the
+  // same idea).
+  const scopedPersonas = run.personas.filter((p) => p.scope !== undefined).map((p) => `\`${p.id}\``);
+  if (scopedPersonas.length > 0 && !card.capabilities.includes(ROW_SCOPE_TAG)) {
+    refuse(
+      ['capabilities'],
+      `the persona(s) ${scopedPersonas.join(', ')} declare a row \`scope\`, so the card must carry \`${ROW_SCOPE_TAG}\`: without it the Build half never judges whether the build keeps the other rows from them`,
+    );
+  }
 
   // ── questions: refs resolve, then the truth is computed (and per persona) ──
   const truths: Record<string, Truth> = {};
@@ -419,8 +464,7 @@ function checkCard(
         personaTruths[q.id][id] = { kind: 'withheld' };
         return;
       }
-      const rules = (p.scope ?? []).filter((sc) => sc.object === q.object);
-      const scoped = rows.filter((r) => rules.every((sc) => ctx.resolve(r, sc.field) === sc.value));
+      const scoped = rows.filter((r) => inScope(p, q.object, r));
       const truth = evaluate(scoped, [...at, 'personas', j]);
       if (truth) personaTruths[q.id][id] = truth;
     });
@@ -432,6 +476,33 @@ function checkCard(
   if (!run.operations.some((o) => o.kind === 'create' || o.kind === 'update')) {
     refuse(['run', 'operations'], 'needs at least one create or update through the app');
   }
+  // Reach: a persona is a requirement of the app (`hidden` = must not read,
+  // `scope` = sees only those rows), so an operation its acting persona cannot
+  // reach has exactly one outcome a faithful build gives, decided from the card
+  // alone — the object hidden, then the target row out of scope (the row gate
+  // runs before the field gate), then a written field hidden. Declaring anything
+  // else (`applied`, `pending_confirmation`, another refusal code) is the card
+  // contradicting its own persona: graded against a faithful build it fails, and
+  // it passes only a build that leaks what the persona must not see.
+  const checkReach = (op: ScenarioCard['run']['operations'][number], actor: Persona, at: IssuePath) => {
+    const row = op.target === undefined ? undefined : rowById.get(op.object)?.get(op.target);
+    const hiddenField = Object.keys(op.values ?? {}).find((field) =>
+      (actor.hidden.fields ?? []).some((f) => f.object === op.object && f.field === field),
+    );
+    let want: { code: ErrorCode; why: string } | undefined;
+    if ((actor.hidden.objects ?? []).includes(op.object)) {
+      want = { code: HIDDEN_WRITE_CODE, why: `\`${actor.id}\` must not read \`${op.object}\`` };
+    } else if (row !== undefined && !unscoped.has(actor.id) && !inScope(actor, op.object, row)) {
+      want = { code: NOT_REACHABLE_ROW_CODE, why: `row \`${op.target}\` is outside \`${actor.id}\`'s row scope on \`${op.object}\`` };
+    } else if (hiddenField !== undefined) {
+      want = { code: HIDDEN_WRITE_CODE, why: `\`${actor.id}\` must not read \`${op.object}.${hiddenField}\`, which this ${op.kind} writes` };
+    }
+    if (want === undefined || (op.outcome.kind === 'refused' && op.outcome.code === want.code)) return;
+    refuse(
+      [...at, 'outcome', ...(op.outcome.kind === 'refused' ? ['code'] : [])],
+      `${want.why}, so a faithful build refuses this ${op.kind} with \`${want.code}\` — declare that refusal, or change the target, the values or \`actingAs\` so the persona can reach what the operation writes`,
+    );
+  };
   run.operations.forEach((op, i) => {
     const at: IssuePath = ['run', 'operations', i];
     if (!objects.has(op.object) || seed[op.object] === undefined) {
@@ -446,6 +517,8 @@ function checkCard(
       checkRef(op.object, field, value, [...at, 'values', field]);
     }
     if (!personas.has(op.actingAs)) refuse([...at, 'actingAs'], `no persona \`${op.actingAs}\``);
+    const actor = run.personas.find((p) => p.id === op.actingAs);
+    if (actor !== undefined) checkReach(op, actor, at);
     const out = op.outcome;
     if (out.kind !== 'applied') return;
     if (out.auditActor !== undefined && !personas.has(out.auditActor)) {

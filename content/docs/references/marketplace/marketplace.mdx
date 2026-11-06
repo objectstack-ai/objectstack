@@ -56,8 +56,8 @@ no gate refuses a package that declares none, or more than one.
 ## TypeScript Usage
 
 ```typescript
-import { ArtifactDownloadResponseSchema, ArtifactReferenceSchema, ListingStatusSchema, MarketplaceCategorySchema, MarketplaceInstallRequestSchema, MarketplaceInstallResponseSchema, MarketplaceListingSchema, MarketplaceSearchRequestSchema, MarketplaceSearchResponseSchema, PackageSubmissionSchema, PricingModelSchema, PublisherSchema, PublisherVerificationSchema } from '@objectstack/spec/marketplace';
-import type { ArtifactDownloadResponse, ArtifactReference, ListingStatus, MarketplaceCategory, MarketplaceInstallRequest, MarketplaceInstallResponse, MarketplaceListing, MarketplaceSearchRequest, MarketplaceSearchResponse, PackageSubmission, PricingModel, Publisher, PublisherVerification } from '@objectstack/spec/marketplace';
+import { ArtifactDownloadResponseSchema, ArtifactReferenceSchema, ListingStatusSchema, MarketplaceInstallRequestSchema, MarketplaceInstallResponseSchema, MarketplaceListingSchema, MarketplaceSearchRequestSchema, MarketplaceSearchResponseSchema, PackageSubmissionSchema, PricingModelSchema, PublisherSchema, PublisherVerificationSchema } from '@objectstack/spec/marketplace';
+import type { ArtifactDownloadResponse, ArtifactReference, ListingStatus, MarketplaceInstallRequest, MarketplaceInstallResponse, MarketplaceListing, MarketplaceSearchRequest, MarketplaceSearchResponse, PackageSubmission, PricingModel, Publisher, PublisherVerification } from '@objectstack/spec/marketplace';
 
 // Validate data
 const result = ArtifactDownloadResponseSchema.parse(data);
@@ -114,31 +114,6 @@ Marketplace listing status
 * `suspended`
 * `deprecated`
 * `unlisted`
-
-
----
-
-## MarketplaceCategory
-
-Marketplace package category
-
-### Allowed Values
-
-* `crm`
-* `erp`
-* `hr`
-* `finance`
-* `project`
-* `collaboration`
-* `analytics`
-* `integration`
-* `automation`
-* `ai`
-* `security`
-* `developer-tools`
-* `ui-theme`
-* `storage`
-* `other`
 
 
 ---
@@ -204,7 +179,11 @@ Public-facing package listing on the marketplace
 | **name** | `string` | ✅ | Display name |
 | **tagline** | `string` | optional | Short tagline (max 120 chars) |
 | **description** | `string` | optional | Full description (Markdown) |
-| **category** | `Enum<'crm' \| 'erp' \| 'hr' \| 'finance' \| 'project' \| 'collaboration' \| 'analytics' \| 'integration' \| 'automation' \| 'ai' \| 'security' \| 'developer-tools' \| 'ui-theme' \| 'storage' \| 'other'>` | ✅ | Package category |
+| **category** | `never` | optional | [REMOVED] `MarketplaceListing.category` was removed in @objectstack/spec 18 (ADR-0087) — one category had to say both who a package is for and what it is, and the platform and the cloud catalog spelled it from lists that disagreed. Delete the key. Declare `businessFunctions` (1-3 business functions, the primary one first), optionally `industries` (up to 3; absent means cross-industry) and `solutionType` (`app`, `template` or `connector`; absent means `app`). `LEGACY_CATEGORY_MAPPING` in @objectstack/spec/marketplace gives the facets for every old category value. |
+| **businessFunctions** | `Enum<'sales' \| 'marketing' \| 'customer-service' \| 'finance' \| 'hr' \| 'supply-chain' \| 'administration' \| 'project' \| 'legal' \| 'it' \| 'collaboration'>[]` | ✅ | Business functions the package serves: 1-3 distinct values, the first is primary |
+| **industries** | `Enum<'manufacturing' \| 'trade-distribution' \| 'retail' \| 'logistics' \| 'professional-services' \| 'financial-services' \| 'healthcare' \| 'education' \| 'public-sector' \| 'real-estate-construction'>[]` | optional | Industries the package is built for: up to 3 distinct values; absent means cross-industry |
+| **solutionType** | `Enum<'app' \| 'template' \| 'connector'>` | optional (default: `"app"`) | What a marketplace package is: a managed app, an unmanaged template, or a connector |
+| **maturity** | `Enum<'beta' \| 'stable'>` | optional (default: `"stable"`) | Package maturity: beta shows a badge on the listing; absent means stable |
 | **tags** | `string[]` | optional | Search tags |
 | **iconUrl** | `string` | optional | Package icon URL |
 | **screenshots** | `{ url: string; caption?: string }[]` | optional | Screenshots |
@@ -266,7 +245,11 @@ Marketplace search request
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **query** | `string` | optional | Full-text search query |
-| **category** | `Enum<'crm' \| 'erp' \| 'hr' \| 'finance' \| 'project' \| 'collaboration' \| 'analytics' \| 'integration' \| 'automation' \| 'ai' \| 'security' \| 'developer-tools' \| 'ui-theme' \| 'storage' \| 'other'>` | optional | Filter by category |
+| **category** | `never` | optional | [REMOVED] `MarketplaceSearchRequest.category` was removed in @objectstack/spec 18 (ADR-0087) — one category had to say both who a package is for and what it is, and the platform and the cloud catalog spelled it from lists that disagreed. Delete the key. Declare `businessFunctions` (1-3 business functions, the primary one first), optionally `industries` (up to 3; absent means cross-industry) and `solutionType` (`app`, `template` or `connector`; absent means `app`). `LEGACY_CATEGORY_MAPPING` in @objectstack/spec/marketplace gives the facets for every old category value. |
+| **businessFunctions** | `Enum<'sales' \| 'marketing' \| 'customer-service' \| 'finance' \| 'hr' \| 'supply-chain' \| 'administration' \| 'project' \| 'legal' \| 'it' \| 'collaboration'>[]` | optional | Filter: any of these business functions |
+| **industries** | `Enum<'manufacturing' \| 'trade-distribution' \| 'retail' \| 'logistics' \| 'professional-services' \| 'financial-services' \| 'healthcare' \| 'education' \| 'public-sector' \| 'real-estate-construction'>[]` | optional | Filter: any of these industries |
+| **solutionTypes** | `Enum<'app' \| 'template' \| 'connector'>[]` | optional | Filter: any of these solution types |
+| **maturity** | `Enum<'beta' \| 'stable'>` | optional | Filter by maturity |
 | **tags** | `string[]` | optional | Filter by tags |
 | **pricing** | `Enum<'free' \| 'freemium' \| 'paid' \| 'subscription' \| 'usage-based' \| 'contact-sales'>` | optional | Filter by pricing model |
 | **publisherVerification** | `Enum<'unverified' \| 'pending' \| 'verified' \| 'trusted' \| 'partner'>` | optional | Filter by publisher verification level |
@@ -291,7 +274,7 @@ Marketplace search response
 | **total** | `integer` | ✅ | Total matching results |
 | **page** | `integer` | ✅ | Current page number |
 | **pageSize** | `integer` | ✅ | Items per page |
-| **facets** | `{ categories?: object[]; pricing?: object[] }` | optional | Aggregation facets for refining search |
+| **facets** | `{ businessFunctions?: object[]; industries?: object[]; solutionTypes?: object[]; pricing?: object[] }` | optional | Aggregation facets for refining search |
 
 ### Nested Shape: `MarketplaceSearchResponse.items[number]`
 
@@ -307,7 +290,11 @@ Public-facing package listing on the marketplace
 | **name** | `string` | ✅ | Display name |
 | **tagline** | `string` | optional | Short tagline (max 120 chars) |
 | **description** | `string` | optional | Full description (Markdown) |
-| **category** | `Enum<'crm' \| 'erp' \| 'hr' \| 'finance' \| 'project' \| 'collaboration' \| 'analytics' \| …>` | ✅ | Package category |
+| **category** | `never` | optional | [REMOVED] `MarketplaceListing.category` was removed in @objectstack/spec 18 (ADR-0087) — one category had to say both who a package is for and what it is, and the platform and the cloud catalog spelled it from lists that disagreed. Delete the key. Declare `businessFunctions` (1-3 business functions, the primary one first), optionally `industries` (up to 3; absent means cross-industry) and `solutionType` (`app`, `template` or `connector`; absent means `app`). `LEGACY_CATEGORY_MAPPING` in @objectstack/spec/marketplace gives the facets for every old category value. |
+| **businessFunctions** | `Enum<'sales' \| 'marketing' \| 'customer-service' \| 'finance' \| 'hr' \| 'supply-chain' \| …>[]` | ✅ | Business functions the package serves: 1-3 distinct values, the first is primary |
+| **industries** | `Enum<'manufacturing' \| 'trade-distribution' \| 'retail' \| 'logistics' \| …>[]` | optional | Industries the package is built for: up to 3 distinct values; absent means cross-industry |
+| **solutionType** | `Enum<'app' \| 'template' \| 'connector'>` | optional (default: `"app"`) | What a marketplace package is: a managed app, an unmanaged template, or a connector |
+| **maturity** | `Enum<'beta' \| 'stable'>` | optional (default: `"stable"`) | Package maturity: beta shows a badge on the listing; absent means stable |
 | **tags** | `string[]` | optional | Search tags |
 | **iconUrl** | `string` | optional | Package icon URL |
 | **screenshots** | `{ url: string; caption?: string }[]` | optional | Screenshots |
@@ -323,6 +310,16 @@ Public-facing package listing on the marketplace
 | **publishedAt** | `string` | optional | First published timestamp |
 | **updatedAt** | `string` | optional | Last updated timestamp |
 | **translations** | `Record<string, { displayName?: string; description?: string; readme?: string; tagline?: string; … }>` | optional | Locale-keyed overrides for name / tagline / description / screenshot captions |
+
+### Nested Shape: `MarketplaceSearchResponse.facets`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **categories** | `never` | optional | [REMOVED] `MarketplaceSearchResponse.facets.categories` was removed in @objectstack/spec 18 (ADR-0087) — one category had to say both who a package is for and what it is, and the platform and the cloud catalog spelled it from lists that disagreed. Delete the key. Declare `businessFunctions` (1-3 business functions, the primary one first), optionally `industries` (up to 3; absent means cross-industry) and `solutionType` (`app`, `template` or `connector`; absent means `app`). `LEGACY_CATEGORY_MAPPING` in @objectstack/spec/marketplace gives the facets for every old category value. |
+| **businessFunctions** | `{ value: Enum<'sales' \| 'marketing' \| 'customer-service' \| 'finance' \| 'hr' \| 'supply-chain' \| …>; count: integer }[]` | optional |  |
+| **industries** | `{ value: Enum<'manufacturing' \| 'trade-distribution' \| 'retail' \| 'logistics' \| …>; count: integer }[]` | optional |  |
+| **solutionTypes** | `{ value: Enum<'app' \| 'template' \| 'connector'>; count: integer }[]` | optional |  |
+| **pricing** | `{ model: Enum<'free' \| 'freemium' \| 'paid' \| 'subscription' \| 'usage-based' \| 'contact-sales'>; count: integer }[]` | optional |  |
 
 
 ---

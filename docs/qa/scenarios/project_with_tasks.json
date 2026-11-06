@@ -19,9 +19,10 @@
     "records-forms.master-detail-inline-edit",
     "records-forms.roll-up-summary",
     "records-forms.select-options",
-    "ai.ask-data"
+    "ai.ask-data",
+    "access-security.row-scope"
   ],
-  "category": "project",
+  "businessFunctions": ["project"],
   "run": {
     "seed": {
       "project": [
@@ -111,8 +112,8 @@
         "id": "add_task",
         "kind": "create",
         "object": "task",
-        "ask": {"en": "Add a 3-hour 'Launch checklist' task to the Website relaunch."},
-        "values": {"title": "Launch checklist", "project": "p1", "status": "todo", "estimate_hours": 3, "assignee": "u_kim"},
+        "ask": {"en": "Add a 'Launch checklist' task to the Website relaunch."},
+        "values": {"title": "Launch checklist", "project": "p1", "status": "todo", "assignee": "u_kim"},
         "actingAs": "contractor",
         "outcome": {
           "kind": "applied",
@@ -146,8 +147,8 @@
         "id": "task_without_title",
         "kind": "create",
         "object": "task",
-        "ask": {"en": "Add a 2-hour task to the Mobile app, with no title."},
-        "values": {"project": "p2", "status": "todo", "estimate_hours": 2, "assignee": "u_kim"},
+        "ask": {"en": "Add a task to the Mobile app, with no title."},
+        "values": {"project": "p2", "status": "todo", "assignee": "u_kim"},
         "actingAs": "contractor",
         "outcome": {"kind": "refused", "code": "VALIDATION_FAILED"}
       },

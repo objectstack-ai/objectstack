@@ -2358,7 +2358,7 @@ export function registerAuthzMiddleware(
       // (ADR-0139 D6), which the engine composes at its executor boundary
       // from this very service's `canReadObject` / `getReadFilter` of the
       // master. Nothing for a write verb's predicate (ADR-0139 D1).
-      const cbpFilter = this.computeControlledByParentFilter(opCtx.object, opCtx.operation, opCtx.context);
+      const cbpFilter = this.computeControlledByParentFilter(opCtx.object, opCtx.operation, opCtx.context, permissionSets);
       if (cbpFilter) extra.push(cbpFilter);
       // [ADR-0090 D10] AND the delegator's read RLS (and CBP) into the same
       // where — the delegated principal sees only rows BOTH may see. Computed
@@ -2377,7 +2377,7 @@ export function registerAuthzMiddleware(
         // scope `getReadFilter` answers as the ADR-0090 D10 intersection
         // (ADR-0139 D5.1 as amended), so both halves carry one subquery
         // twice — correct rows, measured, and left as it is.
-        const delCbp = this.computeControlledByParentFilter(opCtx.object, opCtx.operation, delegatorContext);
+        const delCbp = this.computeControlledByParentFilter(opCtx.object, opCtx.operation, delegatorContext, delegatorSets);
         if (delCbp) extra.push(delCbp);
       }
       // [#21829] The write doors' rule on the PREDICATE door: a row the

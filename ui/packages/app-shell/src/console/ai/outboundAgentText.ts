@@ -82,6 +82,13 @@ const GATE_TEXT: Record<OutboundAgentTextKey, Record<'zh' | 'en', string>> = {
   },
 };
 
+/**
+ * The pack each gate language reads, by the table tag `getLoadedBuiltInLocales()`
+ * is keyed by (`@objectstack/spec/system` `PLATFORM_LOCALES`): a Chinese
+ * conversation's gate text is the Simplified pack's.
+ */
+const PACK_TAG: Readonly<Record<'zh' | 'en', string>> = { zh: 'zh-Hans', en: 'en' };
+
 /** Read `console.ai.<key>` out of a locale pack, or `undefined` if absent. */
 function packText(pack: unknown, key: OutboundAgentTextKey): string | undefined {
   const ai = (pack as { console?: { ai?: Record<string, unknown> } } | undefined)?.console?.ai;
@@ -115,16 +122,17 @@ export function resolveOutboundAgentText(
 ): string {
   const lang = conversationIsZh ? 'zh' : 'en';
   // The RESIDENT catalogue for that language, not a static import of it
-  // (objectui#7479): `en` is always resident, and `zh` is resident on exactly
-  // the boots where the console is running in Chinese. When it is not — an
+  // (objectui#7479): `en` is always resident, and the Simplified Chinese pack
+  // (`zh-Hans`, the table tag the snapshot is keyed by) is resident on exactly
+  // the boots where the console is running in it. When it is not — an
   // English console answering a Chinese thread — this falls through to
   // {@link GATE_TEXT}, which `outboundAgentText.test.ts` pins BYTE-IDENTICAL to
-  // the `zh` pack's outbound values, so the text that leaves is the same either
-  // way. ⛔ Do not import the `zh` pack back to close that branch: it would put
-  // a second 156 KB catalogue into every page load to re-derive strings
+  // the `zh-Hans` pack's outbound values, so the text that leaves is the same
+  // either way. ⛔ Do not import the pack back to close that branch: it would
+  // put a second 156 KB catalogue into every page load to re-derive strings
   // that are already pinned equal.
   const template =
-    packText(getLoadedBuiltInLocales()[lang], key) ?? GATE_TEXT[key][lang];
+    packText(getLoadedBuiltInLocales()[PACK_TAG[lang]], key) ?? GATE_TEXT[key][lang];
   return interpolate(template, vars);
 }
 

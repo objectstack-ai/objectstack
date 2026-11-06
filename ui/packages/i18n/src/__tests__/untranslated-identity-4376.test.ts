@@ -78,7 +78,7 @@ import { builtInLocales } from '../locales/index';
  * The packs whose script is not Latin. Identity with `en` is decidable evidence
  * of omission here, and only here — see the header on why de/fr/es/pt are out.
  */
-const NON_LATIN = ['zh', 'ja', 'ko', 'ru', 'ar'] as const;
+const NON_LATIN = ['zh-Hans', 'zh-Hant', 'ja', 'ko', 'ru', 'ar'] as const;
 type NonLatin = (typeof NON_LATIN)[number];
 
 /** A run of Latin letters long enough that a non-Latin pack cannot mean it. */
@@ -149,6 +149,8 @@ const LEGITIMATE_IDENTITIES: Record<string, string> = {
   'appManagement.toast.bulkFailureEntry': '{{name}} ({{reason}}) — holes and parentheses only.',
   'collaboration.userStatusTitle': '{{name}} ({{status}}) — holes and parentheses only.',
   'chatbot.build.nextStepQuote': '“{{step}}” — a hole in quote marks; ko quotes with the same curly marks as en (objectui#12724).',
+  'console.assignedWork.row': '{{object}} · {{field}} — two holes and a middle dot, no prose (objectstack#30205).',
+  'console.assignedWork.failure': '{{object}} {{id}}: {{message}} — holes and a colon; zh sets a fullwidth colon, ja/ko/ru/ar keep `: ` (objectstack#30205).',
 };
 
 /** Every string leaf of a pack, as `[dotted.path, value]`. */

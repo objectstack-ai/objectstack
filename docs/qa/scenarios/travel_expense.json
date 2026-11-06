@@ -1,5 +1,5 @@
 {
-  "$comment": "Seed rule (so every truth can be worked by hand): claim i = 1..120 is filed by employee e((i-1) mod 12 + 1) (e01-e12; e13/e14 are Finance and file none), dated 2026-07..10 day ((i-1) mod 30)+1 (i 1-30 July, 31-60 August, 61-90 September, 91-120 October), for trip t(i) of (i mod 3)+2 days ending the day before. Lines per claim: hotel ((days-1) nights at cap-50, at cap+100 when i mod 8 = 0), meals (days at cap-20, at cap+30 when i mod 12 = 5), and airfare when i mod 3 = 0 (1 at cap-200, at cap+300 when i mod 9 = 0); an over-cap line is over_standard with a reason. Status: i 1-60 rejected when i mod 10 = 7 else paid; i 61-90 rejected when i mod 10 = 7, manager_approved when 8 or 9, else paid; i 91-120 by i mod 10: 1-4 submitted, 5-6 manager_approved, 7 rejected, 8 finance_approved, 9 and 0 draft. Approval step 1 goes to the claimant's department manager (to e14 when the claimant is that manager), step 2 to e13.",
+  "$comment": "Seed rule (so every truth can be worked by hand): claim i = 1..120 is filed by employee e((i-1) mod 12 + 1) (e01-e12; e13/e14 are Finance and file none), dated 2026-07..10 day ((i-1) mod 30)+1 (i 1-30 July, 31-60 August, 61-90 September, 91-120 October), for trip t(i) of (i mod 3)+2 days ending the day before. Lines per claim: hotel ((days-1) nights at cap-50, at cap+100 when i mod 8 = 0), meals (days at cap-20, at cap+30 when i mod 12 = 5), and airfare when i mod 3 = 0 (1 at cap-200, at cap+300 when i mod 9 = 0); an over-cap line is over_standard with a reason. Status: i 1-60 rejected when i mod 10 = 7 else paid; i 61-90 rejected when i mod 10 = 7, manager_approved when 8 or 9, else paid; i 91-120 by i mod 10: 1-4 submitted, 5-6 manager_approved, 7 rejected, 8 finance_approved, 9 and 0 draft. Approval step 1 goes to the claimant's department manager (to e14 when the claimant is that manager), step 2 to e13. Operation employee_approves_own_claim checks that a claimant is never the approver: e02 holds no decision right on approval_step, so deciding the manager step of its own claim EC-0098 (as_098_1, already approved by e01) is refused PERMISSION_DENIED, the edit grant being judged before any validation or state rule; it targets a step e02 can read, so the agent finds the row it is asked to decide.",
   "id": "travel_expense",
   "code": "travel",
   "title": "Travel expense: trip requests, claims with lines, grade-based standards and a two-step approval",
@@ -49,11 +49,12 @@
     "automation.record-triggered-flow",
     "access-security.row-level-security",
     "access-security.field-permissions",
+    "access-security.row-scope",
     "dashboards.report",
     "ai.ask-data",
     "ai.agent-actions"
   ],
-  "category": "finance",
+  "businessFunctions": ["finance"],
   "run": {
     "seed": {
       "department": [
@@ -1042,11 +1043,11 @@
         "outcome": {"kind": "pending_confirmation"}
       },
       {
-        "id": "employee_approves_colleague",
+        "id": "employee_approves_own_claim",
         "kind": "update",
         "object": "approval_step",
-        "ask": {"zh": "帮我把同事的报销单 EC-0112 审批通过。", "en": "Approve my colleague's claim EC-0112 for me."},
-        "target": "as_112_1",
+        "ask": {"zh": "帮我把我自己的报销单 EC-0098 的经理审批批了，日期写今天。", "en": "Approve the manager step of my own claim EC-0098 myself, dated today."},
+        "target": "as_098_1",
         "values": {"decision": "approved", "decided_on": "2026-10-31"},
         "actingAs": "employee",
         "outcome": {"kind": "refused", "code": "PERMISSION_DENIED"}

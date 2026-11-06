@@ -128,12 +128,6 @@ describe('#23270 — a stored controlled_by_parent object without exactly one re
       /declares 2 `master_detail` fields \(`quote`, `order`\), and which of them is the master is the owner's choice/,
     ],
     [
-      'an explicit required: false',
-      { quote: md('crm_quote', { required: false }) },
-      'objects[0].sharingModel',
-      /`quote`, declares `required: false`, which the builder refuses rather than forcing/,
-    ],
-    [
       'a required lookup only',
       { quote: { type: 'lookup', label: 'Quote', reference: 'crm_quote', required: true } },
       'objects[0].sharingModel',
@@ -184,6 +178,32 @@ describe('#23270 — a stored controlled_by_parent object without exactly one re
     expect(todo.reason).not.toContain('every read of its rows is denied');
     expect(todo.reason).toContain("Object 'crm_line' declares sharingModel 'controlled_by_parent' with its one required `master_detail`");
     // The listing and the parse refuse ONE set: the stored row still fails the parse, at the same key.
+    expect(cbpIssue(item)?.path).toEqual(['fields']);
+  });
+
+  // [#30905 ruling A] The `master-not-required` arm retired for an explicit
+  // `required: false`: the only `master_detail` so declared is the optional
+  // master, a valid object, so a stored row in that shape is not listed, not
+  // rewritten, and parses.
+  it('the optional master — one master_detail, `required: false` — is NOT listed, not rewritten, and parses', () => {
+    const row = cbpRow('crm_line', { quote: md('crm_quote', { required: false }) });
+    const { item, todos, notices } = storedTodos('object', row);
+    expect(notices.filter((n) => n.conversionId === 'cbp-master-detail-required-defaulted')).toEqual([]);
+    expect(item).toEqual(row);
+    expect(todos).toEqual([]);
+    expect(cbpIssue(row)).toBeUndefined();
+  });
+
+  it('an optional master marked readonly: listed under the same entry, naming it optional', () => {
+    const row = cbpRow('crm_line', { quote: md('crm_quote', { required: false, readonly: true }) });
+    const { item, todos } = storedTodos('object', row);
+    expect(item).toEqual(row);
+    expect(todos).toHaveLength(1);
+    const todo = todos[0]!;
+    expect(todo.conversionId).toBe('cbp-master-relation-tiers-retired');
+    expect(todo.path).toBe('objects[0].fields');
+    expect(todo.reason).toMatch(/Its one optional `master_detail`, `quote`, is marked `readonly` or `system`\./);
+    expect(todo.reason).toContain('declare the master reference as an ordinary field');
     expect(cbpIssue(item)?.path).toEqual(['fields']);
   });
 

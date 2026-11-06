@@ -19,7 +19,7 @@
  * The DOM setup (`vitest.setup.i18n-catalogues.ts`) calls
  * `registerBuiltInLocales()`, which registers every language COMPLETE —
  * namespace included — so a page would never need a fetch, which is the
- * all-ten door's promise and not what a console visitor gets. This file
+ * all-packs door's promise and not what a console visitor gets. This file
  * re-registers each language as its pack ALONE, at module scope: the registry
  * a console that awaited `preloadBootstrapLocale()` holds. A `dom` project
  * isolates each file's module graph, so nothing here reaches another file,
@@ -32,17 +32,19 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { I18nProvider, useI18nContext, useObjectTranslation } from '../provider.js';
 import { BUILT_IN_LANGUAGE_CODES, registerBuiltInLocale } from '../locales/registry.js';
 import enPack from '../locales/en.js';
-import zhPack from '../locales/zh.js';
+import zhHansPack from '../locales/zh-Hans.js';
+import zhHantPack from '../locales/zh-Hant.js';
 import jaPack from '../locales/ja.js';
 import koPack from '../locales/ko.js';
 import dePack from '../locales/de.js';
 import frPack from '../locales/fr.js';
 import esPack from '../locales/es.js';
-import ptPack from '../locales/pt.js';
+import ptBrPack from '../locales/pt-BR.js';
 import ruPack from '../locales/ru.js';
 import arPack from '../locales/ar.js';
 import enNs from '../namespaces/marketplace/en.js';
-import zhNs from '../namespaces/marketplace/zh.js';
+import zhNs from '../namespaces/marketplace/zh-Hans.js';
+import zhHantNs from '../namespaces/marketplace/zh-Hant.js';
 import jaNs from '../namespaces/marketplace/ja.js';
 import {
   isMarketplaceCatalogueLoaded,
@@ -58,8 +60,8 @@ vi.mock('../namespaces/marketplace/ko.js', async (importOriginal) => {
 });
 
 const PACKS: Record<string, Record<string, unknown>> = {
-  en: enPack, zh: zhPack, ja: jaPack, ko: koPack, de: dePack,
-  fr: frPack, es: esPack, pt: ptPack, ru: ruPack, ar: arPack,
+  en: enPack, 'zh-Hans': zhHansPack, 'zh-Hant': zhHantPack, ja: jaPack, ko: koPack, de: dePack,
+  fr: frPack, es: esPack, 'pt-BR': ptBrPack, ru: ruPack, ar: arPack,
 };
 for (const code of BUILT_IN_LANGUAGE_CODES) registerBuiltInLocale(code, PACKS[code]);
 
@@ -114,7 +116,7 @@ const EN_TITLE = enNs.marketplace.title;
 
 describe('marketplace namespace — lazy', () => {
   it('a Chinese page waits, then renders Chinese from its first render', async () => {
-    expect(isMarketplaceCatalogueLoaded('zh')).toBe(false);
+    expect(isMarketplaceCatalogueLoaded('zh-Hans')).toBe(false);
     expect(isMarketplaceCatalogueLoaded('en')).toBe(false);
 
     renderIn('zh-CN');
@@ -128,9 +130,21 @@ describe('marketplace namespace — lazy', () => {
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.filter((entry) => entry !== `zh-CN|${ZH_TITLE}`)).toEqual([]);
     // What it fetched: its own catalogue and the fallback, nothing else.
-    expect(isMarketplaceCatalogueLoaded('zh')).toBe(true);
+    expect(isMarketplaceCatalogueLoaded('zh-Hans')).toBe(true);
     expect(isMarketplaceCatalogueLoaded('en')).toBe(true);
     expect(isMarketplaceCatalogueLoaded('ja')).toBe(false);
+    expect(isMarketplaceCatalogueLoaded('zh-Hant')).toBe(false);
+  });
+
+  it('a Traditional Chinese reader (a stored zh-TW) gets the zh-Hant catalogue, not the Simplified one', async () => {
+    renderIn('zh-TW');
+    const title = zhHantNs.marketplace.title;
+    // Lit control: the two catalogues really differ on the probe key.
+    expect(title).not.toBe(ZH_TITLE);
+    expect(await screen.findByText(title)).toBeTruthy();
+    expect(screen.getByTestId('refresh').textContent).toBe(zhHantNs.marketplace.refresh);
+    expect(seen.filter((entry) => entry !== `zh-TW|${title}`)).toEqual([]);
+    expect(isMarketplaceCatalogueLoaded('zh-Hant')).toBe(true);
   });
 
   it('a language switch waits again for the new language', async () => {

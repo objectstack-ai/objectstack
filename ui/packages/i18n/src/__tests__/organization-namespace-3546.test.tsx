@@ -37,6 +37,7 @@
  * merely reads oddly.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { renderHook } from '@testing-library/react';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -189,15 +190,16 @@ const LANGS = Object.keys(builtInLocales) as LocaleCode[];
  *     page title it labels.
  */
 const COGNATES = [
-  'zh :: organization.settings.logoLabel',
+  'zh-Hans :: organization.settings.logoLabel',
+  'zh-Hant :: organization.settings.logoLabel',
   'fr :: organization.settings.logoLabel',
   'de :: organization.settings.logoLabel',
   'es :: organization.settings.logoLabel',
-  'pt :: organization.settings.logoLabel',
+  'pt-BR :: organization.settings.logoLabel',
   'fr :: organization.settings.slugLabel',
   'de :: organization.settings.slugLabel',
   'es :: organization.settings.slugLabel',
-  'pt :: organization.settings.slugLabel',
+  'pt-BR :: organization.settings.slugLabel',
   'es :: organization.settings.generalTitle',
   'fr :: organization.tabs.invitations',
   'fr :: organization.invitations.title',
@@ -223,7 +225,7 @@ beforeEach(() => {
 
 describe('objectui#3546 slice two — the organization namespace', () => {
   it('covers all ten packs and all ninety keys (guards the loops from emptying)', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     expect(KEYS).toHaveLength(90);
     expect(new Set(KEYS).size).toBe(90);
   });
@@ -248,9 +250,9 @@ describe('objectui#3546 slice two — the organization namespace', () => {
       }
     }
     expect(identical.sort()).toEqual(COGNATES);
-    // 12 permitted pairs out of 810 — i.e. 86 of the 90 keys differ in every
+    // 13 permitted pairs out of 900 — i.e. 86 of the 90 keys differ in every
     // single pack. If that ratio ever collapses the assertion above fires.
-    expect(COGNATES).toHaveLength(12);
+    expect(COGNATES).toHaveLength(13);
   });
 
   it('interpolation placeholders survive translation in every pack', () => {
@@ -319,7 +321,7 @@ describe('objectui#3546 slice two — the organization namespace', () => {
       ['organization.switcher.groupLabel', 'WorkspaceSwitcher'],
     ];
 
-    it.each(['en', 'zh'] as const)('%s resolves every sampled key from the pack', (lang) => {
+    it.each(['en', 'zh-Hans', 'zh-Hant'] as const)('%s resolves every sampled key from the pack', (lang) => {
       const { result } = renderHook(() => useObjectTranslation(), { wrapper: wrapperFor(lang) });
       for (const [key, owner] of SAMPLE) {
         const value = result.current.t(key);

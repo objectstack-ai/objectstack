@@ -483,7 +483,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../../invoked-as.mjs';
-import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, proxyRoute, readSignatureLine, SEAT_SIGNATURE_SHAPE, signatureRefusal, signatureRefusalText } from '../check-half-states.mjs';
+import { EXIT_PREREQUISITE_NOT_MET, LANE_LABEL_ALIASES, PROXY_FLAG, proxyRearmPlan, proxyRoute, readSignatureLine, SEAT_SIGNATURE_SHAPE, signatureRefusal, signatureRefusalText } from '../check-half-states.mjs';
 // The roster's generator marker, IMPORTED so the one generated body this door exempts is named by its own writer.
 import { ROSTER_MARKER } from '../fleet-roster.mjs';
 import { classifyHttp } from '../label-write.mjs';
@@ -876,6 +876,61 @@ export async function readPullRequestTargets(candidates, { repo, api = DEFAULT_A
     rows.push({ action: c.action, issue: c.issue, verdict, why });
   }
   return rows;
+}
+
+/**
+ * A retired lane alias is WRITTEN as the lane that absorbed it. The alias map is
+ * `LANE_LABEL_ALIASES` (`check-half-states.mjs`, the one table every reader of a
+ * card's lane already goes through), so the doors that put a label on a card —
+ * this CLI's `labels_add` / `issue_create` / `pr_create`, `issue-create.mjs` and
+ * `label-write.mjs` — read the same rows and never a copy. ⛔ It rewrites and
+ * never refuses: it is no gate, and a write is never blocked on it.
+ *
+ * Applied at each door, ⛔ never inside `packRequest`: `label-write.mjs` diffs
+ * its read-back against the target it computed, so a rewrite below that target
+ * would read as a stripped label. A duplicate the rewrite itself made
+ * (`domain:engine` beside `domain:server`) collapses to one; a duplicate the
+ * caller wrote is left for the validator to refuse as before. A non-array is
+ * handed back untouched, for the validator to judge.
+ *
+ * @param {unknown} labels
+ * @returns {{ labels: unknown, rewrites: Array<{ from: string, to: string }> }}
+ */
+export function rewriteRetiredLaneLabels(labels) {
+  if (!Array.isArray(labels)) return { labels, rewrites: [] };
+  const out = [];
+  const rewrites = [];
+  const madeByRewrite = new Set();
+  for (const label of labels) {
+    const to = typeof label === 'string' && Object.hasOwn(LANE_LABEL_ALIASES, label) ? LANE_LABEL_ALIASES[label] : label;
+    if (to !== label) rewrites.push({ from: label, to });
+    if (out.includes(to) && (to !== label || madeByRewrite.has(to))) continue;
+    if (to !== label) madeByRewrite.add(to);
+    out.push(to);
+  }
+  return { labels: out, rewrites };
+}
+
+/** The read-back words for one rewrite — every door prints this one spelling. */
+export function retiredLaneRewriteLine({ from, to }) {
+  return `label ${from} → ${to} (retired alias)`;
+}
+
+/** The ops whose `labels` PUT a label on a card. ⛔ `labels_remove` is not one: taking a retired label off must name it. */
+export const RETIRED_LANE_REWRITE_OPS = Object.freeze(['labels_add', 'issue_create', 'pr_create']);
+
+/** An actions file with every adding label list rewritten; each row names its 1-based action and op. */
+export function rewriteRetiredLaneActions(actions) {
+  if (!Array.isArray(actions)) return { actions, rewrites: [] };
+  const rows = [];
+  const out = actions.map((a, i) => {
+    if (!a || typeof a !== 'object' || !RETIRED_LANE_REWRITE_OPS.includes(a.op) || !Array.isArray(a.labels)) return a;
+    const r = rewriteRetiredLaneLabels(a.labels);
+    if (r.rewrites.length === 0) return a;
+    for (const w of r.rewrites) rows.push({ action: i + 1, op: a.op, ...w });
+    return { ...a, labels: r.labels };
+  });
+  return { actions: out, rewrites: rows };
 }
 
 export function packRequest({ repo, session, actions, requestId = null, now = Date.now } = {}) {
@@ -1955,12 +2010,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the run_rerun_failed stroke at the seat: it packs as ONE action carrying run_id alone and travels in ONE dispatch; beside any other action, or with a key that widens it, it is refused before anything is sent; it creates no content, carries no body and names no workflow, so nothing is read back here — a success run is the executor's confirmation; a run that failed at the relay's fence is exit 5 after ONE dispatch, never re-sent": 6,
   "the hierarchy link at the seat: an epic's children pack as sub_issue_add actions carrying the parent and the child by number alone, beside other issue ops in ONE dispatch; a self-link, an id or a replace_parent is refused before anything is sent; neither row creates content, carries a body or names a workflow, so the stroke is paced at rule ①'s gap and nothing is read back here — a success run is the executor's confirmation; a run that failed at the relay's fence is exit 5 after ONE dispatch, never re-sent": 5,
   "the advisory rows at the seat: a report, a draft, an advisory's collaborators, its versions and its state each pack as ONE action in a stroke of its own and travel in ONE dispatch; beside another action, with a malformed id, package or versions entry, a state the relay names no move to or a key that carries content, refused before anything is sent and never echoing a value; the report and the draft create content but carry no body, so nothing is read back — by construction, said where the read-back is decided — and each one's id comes back as an advisory annotation the seat reads and hands on, as does a publish's; the id rows that never publish read nothing back; a run that failed is exit 5 after ONE dispatch, never re-sent": 17,
+  "retired lane aliases at the seat's door: a domain:engine / services / cli / rest label on labels_add, issue_create or pr_create is written as domain:server and said on stderr, a dry run included; a live domain:* label, a non-lane label and labels_remove pass untouched; the rewrite never refuses": 13,
   "advisory_read at the seat: the key pair made in this process per read — its public half in the action, its private half a KeyObject never exported, written or printed, and a key from the file refused; no byte read-back, said where the read-back is decided; the run's notice parts read back exactly, reassembled 1..n once each and opened with that key byte for byte, end to end through the real executor; what does not open is UNVERIFIED (6) with nothing printed; the text reaches this process's stdout on --reveal alone, never stderr or --json": 17,
 });
 // Raised 21 → 22 with the run_rerun_failed seat battery, 22 → 23 with the signature battery, 23 → 24 with the
 // hierarchy link seat battery, 24 → 25 with the pull request body battery, 25 → 26 with the advisory rows' seat
-// battery, 26 → 27 with advisory_read's seat battery: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 27;
+// battery, 26 → 27 with advisory_read's seat battery, 27 → 28 with the retired lane aliases battery: one battery,
+// one row.
+const SELF_TEST_BATTERY_FLOOR = 28;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -3199,6 +3256,36 @@ export async function selfTest() {
       t(`⭐ --route behind a proxy that answers nothing: the process re-execs with ${PROXY_FLAG}, the read gets no answer, and the verdict is exit 3 with the error naming it — never direct`, [routeDeadProxy.status, deadOut?.transport ?? null, (deadOut?.error ?? '').includes('no answer'), routeDeadProxy.stderr.includes(PROXY_FLAG)], [EXIT_PREREQUISITE, null, true, true], routeDeadProxy.stderr.slice(-300));
     }
 
+    // ── retired lane aliases at the seat's door ─────────────────────────────
+    battery("retired lane aliases at the seat's door: a domain:engine / services / cli / rest label on labels_add, issue_create or pr_create is written as domain:server and said on stderr, a dry run included; a live domain:* label, a non-lane label and labels_remove pass untouched; the rewrite never refuses");
+    {
+      const RW = (labels) => rewriteRetiredLaneLabels(labels);
+      t('each of the four retired spellings is written as domain:server, one rewrite row each', ['domain:engine', 'domain:services', 'domain:cli', 'domain:rest'].map((l) => [RW([l]).labels.join(), RW([l]).rewrites.length]), [['domain:server', 1], ['domain:server', 1], ['domain:server', 1], ['domain:server', 1]]);
+      t('the rows read from the ONE alias map, never a copy: every key it names is rewritten to its value', Object.entries(LANE_LABEL_ALIASES).every(([from, to]) => RW([from]).labels[0] === to && RW([from]).rewrites[0].from === from), true);
+      t('control: a live domain:* label passes untouched, no row', [RW(['domain:server', 'domain:spec', 'domain:skills']).labels, RW(['domain:server', 'domain:spec', 'domain:skills']).rewrites], [['domain:server', 'domain:spec', 'domain:skills'], []]);
+      t('control: a non-lane label and a retired-looking prefix pass untouched', RW(['pm:queue', 'domain:engine-core', 'repo:cloud']).labels, ['pm:queue', 'domain:engine-core', 'repo:cloud']);
+      t('a duplicate the rewrite made collapses to one, in either order — so the validator sees no "named twice"', [RW(['domain:engine', 'domain:server']).labels, RW(['domain:server', 'domain:cli', 'pm:queue']).labels, RW(['domain:engine', 'domain:cli']).labels], [['domain:server'], ['domain:server', 'pm:queue'], ['domain:server']]);
+      t('…while a duplicate the caller wrote is left for the validator, as before', RW(['a', 'a']).labels, ['a', 'a']);
+      t('the read-back words name both spellings and why', retiredLaneRewriteLine({ from: 'domain:engine', to: 'domain:server' }), 'label domain:engine → domain:server (retired alias)');
+      const acts = rewriteRetiredLaneActions([
+        { op: 'labels_add', issue: 1, labels: ['domain:engine', 'pm:queue'] },
+        { op: 'labels_remove', issue: 1, labels: ['domain:engine'] },
+        { op: 'issue_create', title: 't', body: 'b', labels: ['domain:rest'] },
+        { op: 'pr_create', title: 't', head: 'h', base: 'main', labels: ['domain:cli'] },
+        { op: 'comment', issue: 1, body: 'domain:engine' },
+      ]);
+      t('labels_add, issue_create and pr_create are rewritten; ⛔ labels_remove keeps the retired name it must take off; a body is never read', acts.actions.map((a) => a.labels ?? a.body), [['domain:server', 'pm:queue'], ['domain:engine'], ['domain:server'], ['domain:server'], 'domain:engine']);
+      t('…each row naming its 1-based action and op', acts.rewrites.map((r) => `${r.action}:${r.op}:${r.from}`), ['1:labels_add:domain:engine', '3:issue_create:domain:rest', '4:pr_create:domain:cli']);
+      t('…and the rewritten stroke still packs through the shared validator', packRequest({ repo: 'objectstack-ai/objectstack', session: SESSION, actions: rewriteRetiredLaneActions([{ op: 'labels_add', issue: 1, labels: ['domain:engine', 'domain:server'] }]).actions }).ok, true);
+      t('a stroke with no alias is handed back as the same objects, nothing rewritten', (() => { const a = [{ op: 'labels_add', issue: 1, labels: ['x'] }]; const r = rewriteRetiredLaneActions(a); return [r.actions[0] === a[0], r.rewrites.length]; })(), [true, 0]);
+      t('the adding ops are exactly three and each carries labels in the table; labels_remove is not one', [[...RETIRED_LANE_REWRITE_OPS], RETIRED_LANE_REWRITE_OPS.every((op) => [...OPS[op].required, ...OPS[op].optional].includes('labels')), RETIRED_LANE_REWRITE_OPS.includes('labels_remove')], [['labels_add', 'issue_create', 'pr_create'], true, false]);
+      writeFileSync(join(dir, 'lane-alias.json'), JSON.stringify([{ op: 'labels_add', issue: 7, labels: ['domain:engine', 'tooling'] }]), 'utf8');
+      const laneEnv = { ...process.env, GITHUB_TOKEN: TOKEN, GH_TOKEN: '', HTTPS_PROXY: '', https_proxy: '', OS_PM_WRITE_PACE_FILE: join(dir, 'lane-pace.jsonl'), [SESSION_ENV]: SESSION, [CONTAINER_SESSION_ENV]: '' };
+      const laneDry = spawnSync(process.execPath, [SELF_PATH, '--repo', 'objectstack-ai/objectstack', '--actions-file', join(dir, 'lane-alias.json'), '--dry-run'], { encoding: 'utf8', env: laneEnv });
+      const laneSent = laneDry.status === EXIT_OK ? JSON.parse(laneDry.stdout).client_payload.actions[0].labels : laneDry.stderr.slice(-300);
+      t('end to end through the CLI: the dry run exits 0, its payload carries domain:server, and stderr says the rewrite', [laneDry.status, laneSent, laneDry.stderr.includes('fleet-write/dispatch: action 1 (labels_add): label domain:engine → domain:server (retired alias)')], [EXIT_OK, ['domain:server', 'tooling'], true]);
+    }
+
     // ── the signature at the seat's door ────────────────────────────────────
     battery("the signature at the seat's door: a comment_edit or issue_patch body opens with the seat's signature line or the file is usage (2), nothing packed; generated, body-less and the other doors' ops are left alone");
     {
@@ -3604,6 +3691,11 @@ export async function main(argv, deps = {}) {
     console.error('fleet-write/dispatch: nothing was sent.');
     return EXIT_USAGE;
   }
+  // A retired lane alias is written as its lane, said once per label on stderr — a dry run included (header of
+  // `rewriteRetiredLaneLabels`): a rewrite, never a refusal.
+  const lanes = rewriteRetiredLaneActions(actions);
+  for (const r of lanes.rewrites) console.error(`fleet-write/dispatch: action ${r.action} (${r.op}): ${retiredLaneRewriteLine(r)}`);
+  actions = lanes.actions;
   // A read's one-time key pair, made HERE, in memory (header, "How the callers"): the public half goes in the action;
   // the private half stays in `armed.keys` and dies with this process. A process re-executed through the proxy below
   // makes its own; this one's is discarded with it.

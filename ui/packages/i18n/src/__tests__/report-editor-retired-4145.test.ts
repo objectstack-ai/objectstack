@@ -42,6 +42,7 @@
  * `all-locales-key-parity`'s "en defines every key the other packs define".
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { builtInLocales } from '../locales/index';
@@ -211,7 +212,7 @@ describe('`report.editor.*` is retired to one key (objectui#4145)', () => {
     expect(new Set(RETIRED_REPORT_EDITOR_KEYS).size).toBe(105);
     expect(RETIRED_REPORT_EDITOR_KEYS).not.toContain(SURVIVOR);
     expect(RETIRED_REPORT_EDITOR_KEYS.length + 1).toBe(106);
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
   });
 
   it('no pack defines any retired key, in any of the ten packs', () => {
@@ -253,7 +254,7 @@ describe('`report.editor.*` is retired to one key (objectui#4145)', () => {
     expect(at(builtInLocales.en, 'report.editor.panelTitle')).toBe('Edit report');
     // A sample across writing systems, so "all ten packs kept the key" cannot be
     // satisfied by ten copies of the English string.
-    expect(at(builtInLocales.zh, 'report.editor.panelTitle')).toBe('编辑报表');
+    expect(at(builtInLocales['zh-Hans'], 'report.editor.panelTitle')).toBe('编辑报表');
     expect(at(builtInLocales.ru, 'report.editor.panelTitle')).toBe('Редактировать отчёт');
     expect(at(builtInLocales.ar, 'report.editor.panelTitle')).toBe('تعديل التقرير');
   });

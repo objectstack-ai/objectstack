@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { normalizeStackInput } from '@objectstack/spec';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { ActionSchema } from '@objectstack/spec/ui';
-import { lintConfig, NAME_JUDGED_ELSEWHERE } from '../src/commands/lint';
+import { lintConfig, NAME_JUDGED_ELSEWHERE, PLATFORM_REQUESTED_BARE_NAMES } from '../src/commands/lint';
 
 const RULE = 'naming/namespace-prefix';
 const prefixIssues = (config: any) => lintConfig(config).filter((i) => i.rule === RULE);
@@ -103,6 +103,21 @@ describe('lint — every package-authored name carries the package namespace (ru
         manifest: { namespace: 'crm' },
         capabilities: [{ name: 'billing.refund' }],
       } as any).map((i) => i.fix)).toEqual(['crm_billing.refund']);
+    });
+
+    it('a name the platform requests by its bare spelling (`guest_portal`, the form doors\' permission set)', () => {
+      expect(PLATFORM_REQUESTED_BARE_NAMES).toEqual({ permissions: ['guest_portal'] });
+      expect(prefixIssues({
+        manifest: { namespace: 'crm' },
+        permissions: [{ name: 'guest_portal', objects: {} }],
+      })).toEqual([]);
+      // Its twins: the same spelling in ANOTHER collection, and a near-miss in
+      // the same one, are still bare.
+      expect(bareIssues({
+        manifest: { namespace: 'crm' },
+        flows: [{ name: 'guest_portal' }],
+        permissions: [{ name: 'guest_portal_plus', objects: {} }],
+      } as any).map((i) => i.fix).sort()).toEqual(['crm_guest_portal', 'crm_guest_portal_plus']);
     });
 
     it('objects — the object prefix is `defineStack`\'s error, not repeated here', () => {

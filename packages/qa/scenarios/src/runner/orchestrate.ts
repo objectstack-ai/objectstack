@@ -7,7 +7,9 @@
  *             `os build`, `os verify` (opt-in proofs from the tags) → score the
  *             artifact → boot, seed, one user + key per persona → the Run half
  *             (every question as every persona it names, every operation as
- *             its persona, each over the app's own MCP) → the iterate change →
+ *             its persona, each over the app's own MCP, and the validation
+ *             operation's declared write re-sent by the runner itself as that
+ *             persona, `observeProbe`) → the iterate change →
  *             rebuild + re-score Build, and (unless disabled) re-run the Run half.
  *   template  scaffold a blank project → boot → install a VERIFIED build of the
  *             same card unmanaged (ADR-0131 D6) → the agent applies the iterate
@@ -26,7 +28,7 @@
  */
 
 import { applyExpectDelta, type LoadedScenario } from '../loader.js';
-import { scenarioNamespace } from '../schema.js';
+import { isWriteValidationOperation, scenarioNamespace } from '../schema.js';
 import {
   gradeCardAnswer,
   gradeCardOperation,
@@ -34,12 +36,13 @@ import {
   type OperationGrade,
   type OperationObservation,
   type PersonaRunGrade,
+  type ProbeObservation,
   type ScenarioArtifactScore,
 } from '../score/index.js';
 import type { AppHarness, PersonaAccount } from './app.js';
 import type { AgentDriver, StepRef } from './driver.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
-import { observeOperation, touchedRowId, type Row } from './observe.js';
+import { observeOperation, observeProbe, probeCall, touchedRowId, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
 import { buildPrompt, iteratePrompt, operationPrompt, personaHandles, questionPrompt, templateIteratePrompt, userHandleFields, verifyArgs } from './prompts.js';
 import type { ParsedTurn } from './transcript.js';
@@ -318,6 +321,27 @@ export function seedDependence(
 }
 
 /** The persona (not a card artifact) a scenario's audit trail names, from the user id the app recorded. */
+/**
+ * A validation operation's declared values as its probe sends them: a value in
+ * a user-handle field (`task.assignee` = `u_kim`) is that handle's user id, the
+ * persona's or the admin's, exactly as {@link seedApp} loads it; every other
+ * value is sent verbatim.
+ */
+export function probeValues(card: Card, op: Operation, accounts: readonly PersonaAccount[], adminId: string): Record<string, unknown> {
+  const handles = personaHandles(card);
+  const userFields = userHandleFields(card);
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(op.values ?? {})) {
+    if (typeof v === 'string' && userFields.has(`${op.object}.${k}`)) {
+      const persona = handles.get(v);
+      out[k] = accounts.find((a) => a.persona === persona)?.userId ?? adminId;
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
 function personaOfUser(userId: string | null, accounts: readonly PersonaAccount[], adminId: string): string | null {
   if (userId === null) return null;
   const hit = accounts.find((a) => a.userId === userId);
@@ -371,6 +395,57 @@ async function buildHalf(
   return half;
 }
 
+/**
+ * Load the card's seed into a booted app, as the admin, in lookup order.
+ *
+ * Row ownership is mapped from the persona handles. A row whose direct scope
+ * field names a persona's handle is owned (`owner_id`, the platform's record
+ * owner) by that persona's user. A user-handle field (`account.owner`,
+ * `userHandleFields`) is itself loaded with a user id — the persona's, or the
+ * admin's for a handle no persona holds (`u_tia`), and every handle is the
+ * admin's when no persona account is passed (the gallery's screenshot boot) —
+ * because a faithful build models it as a user lookup, which refuses the
+ * handle text. Any other scope field names a row or an option and is sent
+ * verbatim.
+ *
+ * The tally is kept in `seed` as each row is loaded, and `seed` is what is
+ * returned: when an insert throws, the caller's tally already holds what was
+ * inserted and refused before it (the record shows the partial seed next to the
+ * half's error).
+ */
+export async function seedApp(
+  scenario: LoadedScenario,
+  app: AppHarness,
+  accounts: readonly PersonaAccount[],
+  seed: RunHalf['seed'] = { inserted: 0, refused: [] },
+): Promise<RunHalf['seed']> {
+  const { card } = scenario;
+  const handles = personaHandles(card);
+  const ownerFields = new Set(card.run.personas.flatMap((p) => (p.scope ?? []).filter((s) => !s.field.includes('.')).map((s) => `${s.object}.${s.field}`)));
+  const userFields = userHandleFields(card);
+  for (const object of seedOrder(scenario)) {
+    for (const row of card.run.seed[object] ?? []) {
+      const body: Record<string, unknown> = { ...row };
+      for (const [k, v] of Object.entries(row)) {
+        if (typeof v !== 'string' || !ownerFields.has(`${object}.${k}`)) continue;
+        const persona = handles.get(v);
+        const acct = persona ? accounts.find((a) => a.persona === persona) : undefined;
+        if (acct) body.owner_id = acct.userId;
+        if (userFields.has(`${object}.${k}`)) {
+          const userId = acct?.userId ?? app.adminUserId();
+          body[k] = userId;
+          body.owner_id = userId;
+          if (!acct) seed.handlesAsAdmin = [...new Set([...(seed.handlesAsAdmin ?? []), v])].sort();
+        }
+      }
+      const r = await app.insertRow(object, body);
+      if (r.ok) seed.inserted++;
+      else seed.refused.push({ object, id: row.id, ...(r.code ? { code: r.code } : {}), ...(r.message ? { message: r.message.slice(0, 300) } : {}) });
+    }
+  }
+  return seed;
+}
+
 /** Seed, personas, every question and every operation, against one booted app. */
 export async function runHalf(
   scenario: LoadedScenario,
@@ -392,37 +467,7 @@ export async function runHalf(
     }
     const adminKey = await app.adminApiKey();
 
-    // Seed, with row ownership mapped from the persona handles. A row whose
-    // direct scope field names a persona's handle is owned (`owner_id`, the
-    // platform's record owner) by that persona's user. A user-handle field
-    // (`account.owner`, `userHandleFields`) is itself loaded with a user id —
-    // the persona's, or the admin's for a handle no persona holds (`u_tia`) —
-    // because a faithful build models it as a user lookup, which refuses the
-    // handle text. Any other scope field names a row or an option and is sent
-    // verbatim.
-    const handles = personaHandles(card);
-    const ownerFields = new Set(card.run.personas.flatMap((p) => (p.scope ?? []).filter((s) => !s.field.includes('.')).map((s) => `${s.object}.${s.field}`)));
-    const userFields = userHandleFields(card);
-    for (const object of seedOrder(scenario)) {
-      for (const row of card.run.seed[object] ?? []) {
-        const body: Record<string, unknown> = { ...row };
-        for (const [k, v] of Object.entries(row)) {
-          if (typeof v !== 'string' || !ownerFields.has(`${object}.${k}`)) continue;
-          const persona = handles.get(v);
-          const acct = persona ? accounts.find((a) => a.persona === persona) : undefined;
-          if (acct) body.owner_id = acct.userId;
-          if (userFields.has(`${object}.${k}`)) {
-            const userId = acct?.userId ?? app.adminUserId();
-            body[k] = userId;
-            body.owner_id = userId;
-            if (!acct) half.seed.handlesAsAdmin = [...new Set([...(half.seed.handlesAsAdmin ?? []), v])].sort();
-          }
-        }
-        const r = await app.insertRow(object, body);
-        if (r.ok) half.seed.inserted++;
-        else half.seed.refused.push({ object, id: row.id, ...(r.code ? { code: r.code } : {}), ...(r.message ? { message: r.message.slice(0, 300) } : {}) });
-      }
-    }
+    await seedApp(scenario, app, accounts, half.seed); // tallied in place, so a throw keeps the partial seed
 
     const keyOf = (persona: string | null) => (persona === null ? adminKey : accounts.find((a) => a.persona === persona)!.apiKey);
     // A refused seed row makes what reads it not measured — never a fail of the app's answer.
@@ -474,7 +519,20 @@ export async function runHalf(
           const id = touchedRowId(op, rowsByObject);
           auditActor = id === undefined ? null : personaOfUser(await app.auditActorUserId(op.object, id), accounts, app.adminUserId());
         }
-        res.observation = observeOperation({ op, turn, before, after, rowsByObject, ...(auditActor !== undefined ? { auditActor } : {}) });
+        // The validation operation's probe: the runner sends the declared write
+        // itself, as the same persona through the same MCP door, after the turn.
+        // A probe that cannot be sent leaves the platform half "not observed".
+        let probe: ProbeObservation | undefined;
+        if (isWriteValidationOperation(card, op.id)) {
+          try {
+            const call = probeCall(op, probeValues(card, op, accounts, app.adminUserId()));
+            const answer = await app.callTool(keyOf(op.actingAs), call.tool, call.args);
+            probe = observeProbe(call, answer, after, (await app.listRows(op.object)).rows as Row[]);
+          } catch (e) {
+            res.error = `probe: ${errText(e)}`;
+          }
+        }
+        res.observation = observeOperation({ op, turn, before, after, rowsByObject, ...(auditActor !== undefined ? { auditActor } : {}), ...(probe ? { probe } : {}) });
         res.grade = gradeCardOperation(scenario, op.id, res.observation);
       } catch (e) {
         res.error = errText(e);
@@ -502,6 +560,13 @@ async function withApp<T>(ops: ProjectOps, dir: string, findings: string[], use:
 
 // ── The modes ───────────────────────────────────────────────────────────────
 
+/**
+ * The directory, under the run's work directory, a mode's project is
+ * scaffolded in (`ProjectOps.scaffold`'s `under`): one per card and mode. The
+ * gallery exporter finds a run's scratch project by it.
+ */
+export const modeDir = (card: { id: string }, mode: 'scratch' | 'template'): string => `${card.id.replace(/_/g, '-')}-${mode}`;
+
 /** Did the build pass — every counted check of the card's `expect`, and no bare item name? */
 export const buildPassed = (b: BuildHalf | undefined): boolean =>
   !!b?.score && b.score.expect.checks.length > 0 && [...b.score.expect.checks, ...b.score.naming].every((c) => c.pass);
@@ -510,7 +575,7 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   const mode: ModeRun = { mode: 'scratch', findings: [] };
   // The project is named after the card's namespace, which is what the scaffolder derives its namespace from.
   const ns = scenarioNamespace(original.card);
-  const { dir, result } = await ops.scaffold(ns, `${original.card.id.replace(/_/g, '-')}-scratch`);
+  const { dir, result } = await ops.scaffold(ns, modeDir(original.card, 'scratch'));
   if (result.exit !== 0) {
     mode.skipped = `scaffold failed: ${result.tail.slice(-500)}`;
     return { mode };
@@ -556,7 +621,7 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
     return mode;
   }
   // The blank host gets a namespace of its own (`templateHostName` says why).
-  const { dir, result } = await ops.scaffold(templateHostName(original.card), `${card.id.replace(/_/g, '-')}-template`);
+  const { dir, result } = await ops.scaffold(templateHostName(original.card), modeDir(card, 'template'));
   if (result.exit !== 0) {
     mode.skipped = `scaffold failed: ${result.tail.slice(-500)}`;
     return mode;

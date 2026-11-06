@@ -1,16 +1,17 @@
 # @object-ui/i18n
 
-Internationalization for Object UI — 10 built-in locales, RTL support, and date/currency formatting.
+Internationalization for Object UI — 11 built-in locales, RTL support, and date/currency formatting.
 
 ## Features
 
-- 🌍 **10 Built-in Locales** - English, Chinese, Japanese, Korean, German, French, Spanish, Portuguese, Russian, Arabic
+- 🌍 **11 Built-in Locales** - English, Simplified Chinese, Traditional Chinese, Spanish, Arabic, French, Portuguese (Brazil), Russian, German, Japanese, Korean
 - 🔄 **RTL Support** - Automatic right-to-left layout for Arabic and other RTL languages
 - 📅 **Date Formatting** - Locale-aware date, datetime, and relative time formatting
 - 💰 **Currency & Number Formatting** - Locale-aware currency and number formatting
 - 🎣 **React Hooks** - `useObjectTranslation` for translations, language switching, and direction
 - 🏗️ **I18nProvider** - Context provider for internationalized applications
-- 🪶 **Lazy catalogues** - only the active locale's catalogue is fetched; the other nine are separate chunks
+- 🗂️ **One pack per platform locale** - the set is the platform locale table (`PLATFORM_LOCALES` in `@objectstack/spec/system`), keyed by its tags (`zh-Hans`, `zh-Hant`, `pt-BR`); the Traditional Chinese pack is generated from the Simplified one
+- 🪶 **Lazy catalogues** - only the active locale's catalogue is fetched; every other one is a separate chunk
 - 🔌 **Extensible** - Add custom locales and translation keys
 - 🎯 **Type-Safe** - Full TypeScript support with exported types
 
@@ -42,7 +43,7 @@ function MyComponent() {
   return (
     <div dir={direction}>
       <h1>{t('common.save')}</h1>
-      <button onClick={() => changeLanguage('zh')}>Chinese</button>
+      <button onClick={() => changeLanguage('zh-Hans')}>Chinese</button>
       <button onClick={() => changeLanguage('ar')}>العربية</button>
     </div>
   );
@@ -79,9 +80,11 @@ An explicit choice outranks browser detection — otherwise a user who picked �
 on a `ja` browser would be handed `ja` back on every reload. A stored value the
 app no longer offers (not a built-in pack, not in `config.resources`) is ignored
 *and purged*, so a stale entry can never lock the UI to a locale with no
-translations. A region-tagged choice such as `zh-CN` is served by its base
-language's built-in pack (`zh`), so it is kept, and kept as written: the
-provider's `language`, `<html lang>` and the stored value all stay `zh-CN`.
+translations. A stored code is read as the platform locale tag it means —
+`zh-CN` and a legacy `zh` are served by the `zh-Hans` pack, `zh-TW` and `zh-HK`
+by `zh-Hant`, a legacy `pt` by `pt-BR`, `fr-CA` by `fr` — so it is kept, and kept
+as written: for a `zh-TW` choice the provider's `language`, `<html lang>` and
+the stored value all stay `zh-TW`.
 
 ```tsx
 import type { ReactNode } from 'react';
@@ -113,7 +116,7 @@ function LanguageBar() {
   return (
     <div dir={direction}>
       {t('common.save')} — {language}
-      <button onClick={() => changeLanguage('zh')}>中文</button>
+      <button onClick={() => changeLanguage('zh-Hans')}>中文</button>
     </div>
   );
 }
@@ -143,8 +146,8 @@ never choose the key yourself (`count === 1 ? 'xOne' : 'x'`): two keys give a
 language two forms, and Russian needs three, Arabic five. A
 `createSafeTranslation` defaults table answers the same way on a provider-less
 host: it reads a family's `_one` / `_other` row for a numeric `count`, then the
-base row. `count-families-11445.test.ts` holds every `{{count}}` value in the
-ten packs to this rule.
+base row. `count-families-11445.test.ts` holds every `{{count}}` value in
+every pack to this rule.
 
 ### createI18n
 
@@ -261,12 +264,12 @@ function WeekHeader() {
 A tag `Intl` refuses (`en_US`) throws the same `RangeError` that formatting a
 date with it would.
 
-### Built-in locales — one is resident, nine are fetched on demand
+### Built-in locales — one is resident, the rest are fetched on demand
 
 The package entry re-exports **`en` only**. It is `fallbackLng`, it is the
 source of the `TranslationKeys` type, and it is the synchronous dictionary the
 app-shell splash renders from before i18n is usable, so it has to be there
-without awaiting anything. The other nine catalogues are separate chunks your
+without awaiting anything. Every other catalogue is a separate chunk your
 bundler emits once each and the browser fetches only when that locale is
 actually used — roughly 400 KB gzipped that a page load no longer pays
 (objectui#7479).
@@ -274,25 +277,40 @@ actually used — roughly 400 KB gzipped that a page load no longer pays
 ```tsx
 import {
   en,                        // resident
-  BUILT_IN_LANGUAGE_CODES,   // all ten codes, no catalogue payload
+  BUILT_IN_LANGUAGE_CODES,   // every platform locale tag, no catalogue payload
   isBuiltInLanguage,
+  resolveBuiltInLanguage,    // the tag a stored or browser code reads as
   loadBuiltInLocale,         // fetch one: Promise<catalogue | null>
   getLoadedBuiltInLocales,   // synchronous snapshot of what is resident
 } from '@object-ui/i18n';
 
-BUILT_IN_LANGUAGE_CODES;            // ['en','zh','ja','ko','de','fr','es','pt','ru','ar']
-await loadBuiltInLocale('zh');      // the zh catalogue, fetched once and memoised
-await loadBuiltInLocale('zh-CN');   // the same zh catalogue — a region tag is served by its base
+BUILT_IN_LANGUAGE_CODES;            // ['en','zh-Hans','zh-Hant','es','ar','fr','pt-BR','ru','de','ja','ko']
+await loadBuiltInLocale('zh-Hans'); // the Simplified catalogue, fetched once and memoised
+await loadBuiltInLocale('zh-CN');   // the same catalogue — `zh-CN` reads as `zh-Hans`
+await loadBuiltInLocale('zh-TW');   // the Traditional catalogue — `zh-TW` reads as `zh-Hant`
 await loadBuiltInLocale('tlh');     // null — not a code this package ships
-isBuiltInLanguage('zh-CN');         // true
-isBuiltInLanguage('xx-YY');         // false — no catalogue for the tag or its base
+resolveBuiltInLanguage('zh');       // 'zh-Hans' — a legacy stored code still resolves
+resolveBuiltInLanguage('fr-CA');    // 'fr' — no alias, so its prefix
+isBuiltInLanguage('xx-YY');         // false — no catalogue for the tag or its prefix
 ```
 
-A code is looked up **exact tag first, then its base language**: `zh-CN` is
-served by the `zh` catalogue, while a catalogue keyed by a full tag would win
-over its base. `isBuiltInLanguage` and `isBuiltInLocaleLoaded` answer by the same
-rule as `loadBuiltInLocale`, and a catalogue is memoised under its own code, so
-`zh` and `zh-CN` share one fetch.
+The catalogues are keyed by the tags of the platform locale table
+(`PLATFORM_LOCALES` in `@objectstack/spec/system`), and a code is read **through
+the table's read aliases first, then each shorter prefix**
+(`platformLocaleTagOf`): `zh`, `zh-CN` and `zh-SG` are `zh-Hans`; `zh-TW`,
+`zh-HK` and `zh-MO` are `zh-Hant`; `pt` is `pt-BR`; `zh-Hant-TW` is `zh-Hant`;
+`fr-CA` is `fr`. The base language alone is never enough — `zh` cannot tell a
+Taiwan reader from a mainland one. `isBuiltInLanguage` and
+`isBuiltInLocaleLoaded` answer by the same rule as `loadBuiltInLocale`, and a
+catalogue is memoised under its tag, so `zh`, `zh-CN` and `zh-Hans` share one
+fetch. `createI18n`'s `fallbackLng` reads the same aliases, so an instance whose
+language is a stored code (`zh-TW`) resolves its keys out of the tag's catalogue.
+
+The `zh-Hant` pack is not hand-written: it is generated from `zh-Hans.ts` by
+`scripts/gen-zh-hant.mjs` (OpenCC `s2twp` with the overrides the
+www.objectos.ai site converts with). Edit `zh-Hans.ts`, then run
+`pnpm --filter @object-ui/i18n gen:zh-hant` and commit both files;
+`src/__tests__/zh-hant-generated.test.ts` fails when they disagree.
 
 `I18nProvider` does this for you: it fetches the catalogue for whatever language
 it boots into, and `changeLanguage()` awaits the new catalogue before switching,
@@ -330,7 +348,7 @@ resolveBootstrapLanguage({ hasLoader: true }); // 'zh' — the same answer, no f
 not take the boot down, and the provider retries on mount.
 `apps/console/src/main.tsx` is the worked example.
 
-#### When you really do want all ten
+#### When you really do want them all
 
 The parity suites do, and so does an app that ships every language resident. The
 door is a separate specifier, so the cost is visible at the import site:
@@ -381,7 +399,7 @@ overwrite nor delete English.
 
 The metadata-admin / Studio surface — the metadata directory, the inspectors,
 package management, the flow designer and their refusal messages — does not
-resolve its strings through the ten packs. Its keys (`engine.*`, `designer.*`,
+resolve its strings through the locale packs. Its keys (`engine.*`, `designer.*`,
 `perm.*`) are a **two-locale** set, `en` and `zh`, read through app-shell's
 `t()` / `tFormat()` / `tOptional()` with the designer's own `{token}`
 placeholders.
@@ -398,14 +416,16 @@ package's **`studio` namespace**,
 - **One lazy namespace, two catalogues.** `en` is resident (it is the fallback);
   `zh` is its own chunk, fetched the first time a Chinese lookup asks for it.
 - **Every other language falls back to `en`.** On an `ar` / `de` / `es` / `fr` /
-  `ja` / `ko` / `pt` / `ru` console these strings render English. No
+  `ja` / `ko` / `pt-BR` / `ru` console these strings render English. A
+  Traditional Chinese (`zh-Hant`, `zh-TW`) console reads the `zh` catalogue by
+  base language, so its Studio strings are Simplified. No
   translation is invented for them; a language gains Studio coverage by adding
   a catalogue to the namespace, not by copying keys into its pack.
 - **Not in the eager console catalogue.** `locales/en.ts` gains no key: the
   namespace's `en` loads with the designer code that reads it.
 - **Outside the pack gates by construction.** Key parity
   ([`src/__tests__/all-locales-key-parity.test.ts`](./src/__tests__/all-locales-key-parity.test.ts))
-  iterates `builtInLocales`, the ten packs; the namespace's catalogues are not
+  iterates `builtInLocales`, the locale packs; the namespace's catalogues are not
   packs and not members of it, so the namespace is outside that test's subject
   rather than an exception to it. Its own parity — every `en` key has a `zh`
   row with the same `{placeholders}` — is held by

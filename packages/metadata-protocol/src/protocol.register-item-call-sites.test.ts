@@ -137,7 +137,8 @@ const SITES: ReadonlyArray<Site & {
     },
     {
         // [#23198] Moved from hydrateExpandedViewItems into the one reconcile, which that hydration calls.
-        member: 'reconcileViewExpansions', args: 'type, item, \'name\' as any',
+        // [#30147] The reconcile's body moved to its facet module by the codemod's members pass; the disposition is unchanged.
+        file: 'protocol-registry-hydration.ts', member: 'reconcileViewExpansions', args: 'type, item, \'name\' as any',
         disposition: 'yes, view only: skips a name another package ships',
         path: 'hydrateExpandedViewItems (from hydrateOverlayIntoRegistry), for each expansion of a stored view container',
         why: 'an expansion: not registered where another package ships its name (#21980), and the by-name read answers it '

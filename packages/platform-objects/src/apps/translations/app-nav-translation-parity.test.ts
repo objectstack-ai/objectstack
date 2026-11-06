@@ -58,8 +58,9 @@ import { en } from './en.js';
 import { zhCN } from './zh-CN.js';
 import { jaJP } from './ja-JP.js';
 import { esES } from './es-ES.js';
+import { zhHant } from './zh-Hant.js';
 
-const LOCALES = { en, 'zh-CN': zhCN, 'ja-JP': jaJP, 'es-ES': esES } as const;
+const LOCALES = { en, 'zh-CN': zhCN, 'ja-JP': jaJP, 'es-ES': esES, 'zh-Hant': zhHant } as const;
 
 /** Every statically declared nav item of an app, depth-first, with its label. */
 function navItems(app: { navigation?: unknown[] }): Array<{ id: string; label?: string }> {
@@ -108,7 +109,7 @@ function navIds(app: { navigation?: unknown[] }): string[] {
 // contribution target in `packages/` and `examples/` returns `setup` ×20,
 // `account` ×1 and `studio` ×0, and the one `account` entry is
 // `CONNECT_AGENT_UI_BUNDLE.navigationContributions[1]` in
-// `packages/mcp/src/connect-ui.ts` (`group: 'grp_account_developer'`), which
+// `packages/mcp/src/connect-ui.ts` (`group: 'grp_account_ai_assistant'`), which
 // `MCPServerPlugin` registers on `kernel:ready` behind `isMcpServerEnabled()`.
 // Worth stating because it is NOT how Setup's arrive: this package owns
 // `SETUP_NAV_CONTRIBUTIONS` itself and `@objectstack/setup` registers it,

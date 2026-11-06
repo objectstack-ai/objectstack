@@ -54,15 +54,19 @@
  *    `config_change` row stored before its writer recorded the settings row,
  *    an auth event that carried no session id, and an `action_invocation` row
  *    of an action invoked with no subject record.
- *    There is no record to judge, and none carries a record's field values
- *    (the per-writer measurement in `audit-log-field-redaction.ts`), so they
- *    are OUTSIDE this gate's class and are served under the ledger's own grant
+ *    There is no record to judge, so they are OUTSIDE this gate's class and
+ *    are served under the ledger's own grant
  *    exactly as before — through a predicate on the ledger's own columns
  *    ({@link ledgerRowAboutNoRecordWhere}), so a broad read is served whole. This is where the ledger differs from the activity
  *    stream, which excludes every row naming no parent: the stream has no
  *    platform producer of such rows, while these have three, and the shipped
  *    `config_changes` list view reads `import` rows (and the older
  *    `config_change` rows) through the data door.
+ *    The field-level redaction does not key on `record_id`: a `config_change`
+ *    row naming a settings store as `object_name` carries that setting's
+ *    `value` (readable for a non-secret key) and `digest`, and both are
+ *    dropped for a reader whose field-level security masks the store's
+ *    `value` (`audit-log-field-redaction.ts`), with or without a `record_id`.
  *  - **A record action that names no record** — a `create` / `read` / `update`
  *    / `delete` row with no `record_id` (the CRUD mirror stamps `null` when it
  *    cannot derive the id): about a record the gate cannot name, so excluded

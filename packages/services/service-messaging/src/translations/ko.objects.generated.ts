@@ -214,7 +214,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       channel: {
         label: "채널",
-        help: "채널: inbox(앱 안에 표시되는 알림, 항상 사용 가능), email(이메일 서비스 구성 후), sms(SMS 서비스 구성 후), 또는 설치된 플러그인이 추가한 채널 ID입니다. 모든 채널은 * 를 입력하세요. 어떤 채널도 쓰지 않는 ID는 어떤 알림과도 일치하지 않습니다."
+        help: "채널: inbox(앱 안에 표시되는 알림, 항상 사용 가능), email(이메일 서비스 구성 후), sms(SMS 서비스 구성 후), push(푸시 서비스 구성 후, 사용자의 등록된 기기로), 또는 설치된 플러그인이 추가한 채널 ID입니다. 모든 채널은 * 를 입력하세요. 어떤 채널도 쓰지 않는 ID는 어떤 알림과도 일치하지 않습니다."
       },
       enabled: {
         label: "사용",

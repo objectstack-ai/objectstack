@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { PLATFORM_ADMIN_USERS_GATE } from './platform-admin-action-gate.js';
 import { INVITATION_ROLE_OPTIONS } from '@objectstack/spec/identity';
 import { INVITE_USER_OUTCOME_MESSAGES } from './invite-outcome-messages.js';
 import { MEMBERSHIP_ROLE_PARAM_HELP } from './membership-role-help.js';
@@ -191,6 +192,8 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_item', 'record_header'],
       type: 'api',
       target: '/api/v1/auth/admin/ban-user',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
       // Platform-admin standing (ADR-0068 D4), then a user not banned yet —
       // see the block header above. A null `banned` reads as not banned.
       visible: 'current_user.isPlatformAdmin == true && has(record.banned) && record.banned != true',
@@ -228,6 +231,8 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_item', 'record_header'],
       type: 'api',
       target: '/api/v1/auth/admin/unban-user',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
       // Platform-admin standing (ADR-0068 D4), then a banned user — see the
       // block header above.
       visible: 'current_user.isPlatformAdmin == true && has(record.banned) && record.banned == true',
@@ -255,6 +260,8 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_item', 'record_header'],
       type: 'api',
       target: '/api/v1/auth/admin/unlock-user',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
       // Platform-admin standing (ADR-0068 D4), then an account that can hold
       // a lock. `unlockUser` clears TWO stages: this row's `locked_until`
       // (the password check) and `sys_two_factor.locked_until` (the second
@@ -294,6 +301,8 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_toolbar'],
       type: 'api',
       target: '/api/v1/auth/admin/create-user',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
       // Platform-admin standing (ADR-0068 D4) — see the block header above —
       // and hidden while cloud-managed (`features.cloudManaged`, hide-when-on):
       // a managed environment's users come from the identity provider.
@@ -407,6 +416,8 @@ export const SysUser = ObjectSchema.create({
       // legacy role scalar), can mint a temporary password, and stamps
       // must_change_password.
       target: '/api/v1/auth/admin/set-user-password',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
       // Platform-admin standing (ADR-0068 D4) — see the block header above —
       // and hidden while cloud-managed (`features.cloudManaged`, hide-when-on).
       // Console only: the server keeps answering it on an `env_native` row, so
@@ -472,6 +483,8 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_item', 'record_header'],
       type: 'api',
       target: '/api/v1/auth/admin/impersonate-user',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
       // Platform-admin standing (ADR-0068 D4) — see the block header above.
       visible: 'current_user.isPlatformAdmin == true',
       requiresFeature: 'admin',
@@ -522,6 +535,8 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_item', 'record_header'],
       type: 'api',
       target: '/api/v1/auth/admin/set-user-manager',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
       recordIdParam: 'userId',
       successMessage: 'Manager updated',
       refreshAfter: true,
@@ -601,6 +616,8 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_toolbar'],
       type: 'api',
       target: '/api/v1/auth/admin/list-platform-admins',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
       visible: 'current_user.isPlatformAdmin == true',
       // A read: the Users list behind the dialog is not reloaded.
       refreshAfter: false,
