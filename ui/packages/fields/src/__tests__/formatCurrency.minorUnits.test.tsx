@@ -7,7 +7,7 @@
  */
 
 /**
- * objectui#4361 — currency formatting overrode each currency's own ISO 4217
+ * objectui#4361 — currency formatting overrode each currency's own CLDR
  * fraction-digit convention.
  *
  * `formatCurrency` picked its width from the VALUE's wholeness alone
@@ -27,8 +27,8 @@
  *  2. **A whole amount** — this half pinned the whole-amount trimming, the
  *     Salesforce convention objectui#4033 pinned and objectui#4332 / PR #4362
  *     re-pinned and this card extended (`KWD 1`, not `KWD 1.000`), until
- *     objectui#11444 retired it: triage ruled the declared width, the ISO 4217
- *     minor unit, the protocol's convention (comment 5946462862). A whole
+ *     objectui#11444 retired it: triage ruled the declared width, the CLDR
+ *     fraction digits, the protocol's convention (comment 5946462862). A whole
  *     amount now takes the currency's width too (`KWD 1.000`, `$1,234.00`),
  *     as the read-only form always showed it. The rows below moved on purpose
  *     and stay as controls: a range `[0, width]` would trim them again, and
@@ -82,7 +82,7 @@ describe('the environment this card is measured in', () => {
 });
 
 describe('formatCurrency — a fractional amount takes the CURRENCY\'s width (objectui#4361)', () => {
-  it('the card\'s two fixtures render as ISO 4217 says they should', () => {
+  it('the card\'s two fixtures render as CLDR says they should', () => {
     // Before: `¥1,234.50` — cents on a currency that has none.
     expect(formatCurrency(1234.5, 'JPY', 'en-US')).toBe('¥1,235');
     // Before: `KWD 1.50` — one digit short of the three a dinar has.

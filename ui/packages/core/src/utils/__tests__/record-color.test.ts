@@ -13,7 +13,8 @@
  * has a different right answer for "neither an option colour nor a literal"
  * (gantt derives a semantic hex, calendar hashes onto its class palette,
  * timeline draws its default marker). The renderer-side fixtures pinning that
- * split are `ObjectGantt.colorFieldLadder-7243.test.tsx`,
+ * split are the `ObjectGantt.colorFieldLadder-7243` block of
+ * `ObjectGantt.harness.test.tsx`,
  * `ObjectCalendar.colorFieldLadder-7243.test.tsx` and
  * `ObjectTimeline.colorFieldLadder-7243.test.tsx`.
  */

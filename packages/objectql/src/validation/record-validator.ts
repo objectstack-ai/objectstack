@@ -1525,7 +1525,7 @@ function validateOne(
     // Maintainer ruling 5791803339 (batch #215 item 1, letter B): `scale` is
     // retired from the `currency` type. `FieldSchema` refuses the key there at
     // parse, with the remedy ruling 5805782503 (batch #218 item 2, letter 乙)
-    // words (delete the key; the currency's ISO 4217 minor unit decides its
+    // words (delete the key; the currency's CLDR fraction digits decide its
     // display), so no authored currency field declares it any more — and this
     // branch stops reading `def.scale` for the type, so a declaration that
     // reaches here anyway (a stored field that predates the refusal, a

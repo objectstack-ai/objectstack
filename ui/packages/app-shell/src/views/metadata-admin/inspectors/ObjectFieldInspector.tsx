@@ -559,7 +559,7 @@ function isNumeric(type: string): boolean {
  * Every numeric type but `currency` (objectui#10221). `scale` is retired from
  * the currency type (ruling B on objectstack-ai/objectstack#19629), and ruling
  * 乙 on objectstack-ai/objectstack#19910 is that a currency's decimal places are
- * the currency's ISO 4217 minor unit, not a setting — so no display face reads
+ * the currency's CLDR fraction digits, not a setting — so no display face reads
  * `scale` on a currency and a control for it would only write a key nothing
  * honours. `precision` stays offered on currency: it is the field-level TOTAL
  * digit count of the stored decimal, not a decimal-places knob, and this

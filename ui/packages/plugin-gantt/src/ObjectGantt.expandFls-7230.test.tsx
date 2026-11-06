@@ -132,7 +132,7 @@ function makeDataSource() {
  * schema arrived. objectui#7225 ask 2 deleted that first query — the object
  * schema now GATES the fetch instead of refining it afterwards, so `reload`
  * fires once, with the schema already in hand, and
- * `ObjectGantt.fetchGate-7225.test.tsx` pins that count at exactly one.
+ * the `ObjectGantt.fetchGate-7225` block of `ObjectGantt.harness.test.tsx` pins that count at exactly one.
  * `toBeGreaterThan(1)` was therefore not a stronger assertion under the gate,
  * it was an unsatisfiable one: it waited for a second query that no longer
  * exists, and the six pins below timed out while the behaviour they grade —

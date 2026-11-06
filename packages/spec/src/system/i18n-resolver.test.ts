@@ -1048,10 +1048,11 @@ describe('locale fallback resolution (BCP-47)', () => {
 
 // The platform locale table's read aliases decide which key serves a request
 // before any base-language or first-variant guess, so a Traditional reader
-// (`zh-TW`, `zh-HK`, `zh-MO`) reaches a `zh-Hant` key and a Simplified one
-// reaches `zh-CN` whatever order the bundle registered them in. Core's
-// `resolveLocale` is `resolveLocaleAmong`; its own suite runs one case list
-// against both resolvers.
+// (`zh-TW`, `zh-HK`, `zh-MO`, or the script-subtag `zh-Hant-TW` a browser
+// sends) reaches a `zh-Hant` key and a Simplified one reaches `zh-CN` whatever
+// order the bundle registered them in. Core's `resolveLocale` is
+// `resolveLocaleAmong`; its own suite runs one case list against both
+// resolvers.
 describe('resolveBundleLocale — the platform table language step', () => {
   const orders: Array<[string, Record<string, unknown>]> = [
     ['Simplified first', { en: {}, 'zh-CN': {}, 'zh-Hant': {} }],
@@ -1060,11 +1061,17 @@ describe('resolveBundleLocale — the platform table language step', () => {
 
   for (const [name, bundle] of orders) {
     describe(name, () => {
-      it.each(['zh-TW', 'zh-HK', 'zh-MO', 'zh-tw', 'zh-Hant'])('%s reaches zh-Hant', (requested) => {
+      it.each([
+        'zh-TW', 'zh-HK', 'zh-MO', 'zh-tw', 'zh-Hant',
+        'zh-Hant-TW', 'zh-Hant-HK', 'zh-Hant-MO', 'ZH-HANT-tw',
+      ])('%s reaches zh-Hant', (requested) => {
         expect(resolveBundleLocale(bundle, requested)).toBe('zh-Hant');
       });
 
-      it.each(['zh-CN', 'zh', 'zh-SG', 'zh-Hans', 'zh-cn'])('%s reaches zh-CN', (requested) => {
+      it.each([
+        'zh-CN', 'zh', 'zh-SG', 'zh-Hans', 'zh-cn',
+        'zh-Hans-CN', 'zh-Hans-SG', 'zh-hans-cn',
+      ])('%s reaches zh-CN', (requested) => {
         expect(resolveBundleLocale(bundle, requested)).toBe('zh-CN');
       });
     });
@@ -1079,6 +1086,24 @@ describe('resolveBundleLocale — the platform table language step', () => {
   it('runs before the base-language step: a bare `zh` key is Simplified', () => {
     expect(resolveBundleLocale({ zh: {}, 'zh-Hant': {} }, 'zh-TW')).toBe('zh-Hant');
     expect(resolveBundleLocale({ 'zh-Hant': {}, zh: {} }, 'zh-CN')).toBe('zh');
+    expect(resolveBundleLocale({ zh: {}, 'zh-Hant': {} }, 'zh-Hant-TW')).toBe('zh-Hant');
+    expect(resolveBundleLocale({ 'zh-Hant': {}, zh: {} }, 'zh-Hans-CN')).toBe('zh');
+    expect(resolveBundleLocale({ en: {}, zh: {}, 'zh-Hant-HK': {} }, 'zh-Hant-TW')).toBe('zh-Hant-HK');
+    expect(resolveBundleLocale({ en: {}, 'zh-Hant-HK': {}, zh: {} }, 'zh-Hant-TW')).toBe('zh-Hant-HK');
+  });
+
+  it('reads a key spelled with a script subtag as the script it names, in either registration order', () => {
+    for (const keys of [['en', 'zh-CN', 'zh-Hant-TW'], ['en', 'zh-Hant-TW', 'zh-CN']]) {
+      const bundle = Object.fromEntries(keys.map((code) => [code, {}]));
+      expect(resolveBundleLocale(bundle, 'zh-TW')).toBe('zh-Hant-TW');
+      expect(resolveBundleLocale(bundle, 'zh-Hant')).toBe('zh-Hant-TW');
+    }
+    for (const keys of [['en', 'zh-Hant', 'zh-Hans-CN'], ['en', 'zh-Hans-CN', 'zh-Hant']]) {
+      const bundle = Object.fromEntries(keys.map((code) => [code, {}]));
+      expect(resolveBundleLocale(bundle, 'zh-CN')).toBe('zh-Hans-CN');
+    }
+    // One script registered: a related language still beats none.
+    expect(resolveBundleLocale({ en: {}, 'zh-CN': {} }, 'zh-Hant-TW')).toBe('zh-CN');
   });
 
   it('keeps the alias-spelled bundles of today: ja → ja-JP, es → es-ES, en → en-US', () => {
@@ -6465,5 +6490,56 @@ describe("label precedence on an overridden item — the pair's translation, the
       expect(out.label).toBe('我们的运营');
       expect(title(out)).toBe('我们的运营');
     });
+  });
+});
+
+describe('bundle locale keys are the bundle\'s OWN keys — an Object.prototype member name is an unknown code', () => {
+  const inherited = ['constructor', 'toString', '__proto__'] as const;
+  const zhBundle: TranslationBundle = {
+    'zh-CN': { objects: { account: { _views: { all_accounts: { label: '全部客户' } } } } } as any,
+  };
+  const view = { name: 'all_accounts', label: 'All Accounts', objectName: 'account' };
+
+  for (const code of inherited) {
+    it(`resolveBundleLocale answers ${code} exactly what it answers an unknown code`, () => {
+      expect(resolveBundleLocale({ en: {} }, code)).toBe(resolveBundleLocale({ en: {} }, 'xx'));
+      expect(resolveBundleLocale({ en: {} }, code)).toBeUndefined();
+      expect(resolveBundleLocale({ en: {}, 'zh-CN': {} }, code)).toBe(resolveBundleLocale({ en: {}, 'zh-CN': {} }, 'xx'));
+    });
+
+    it(`a reader asked for ${code} reads what an unknown code reads — the literal, or the next locale in the chain`, () => {
+      expect(resolveViewLabel(zhBundle, view, { locale: code })).toBe(resolveViewLabel(zhBundle, view, { locale: 'xx' }));
+      expect(resolveViewLabel(zhBundle, view, { locale: code })).toBe('All Accounts');
+      expect(resolveViewLabel(zhBundle, view, { locale: code, fallbackChain: ['zh-CN'] })).toBe('全部客户');
+    });
+  }
+
+  it('a key the bundle only inherits is no locale of it, whatever its prototype holds', () => {
+    const layered = Object.create(zhBundle) as TranslationBundle;
+    expect(resolveBundleLocale(layered, 'zh-CN')).toBe(resolveBundleLocale(layered, 'xx'));
+    expect(resolveViewLabel(layered, view, { locale: 'zh-CN' })).toBe('All Accounts');
+  });
+
+  it('an injected system field read under a prototype-name locale keeps its English default label, as an unknown code does', () => {
+    const doc = { name: 'contract', fields: { created_at: { type: 'datetime', label: 'Created At' } } };
+    const labelUnder = (locale: string): unknown => (translateObject(doc, undefined, { locale }) as any).fields.created_at.label;
+    for (const code of ['constructor', '__proto__']) {
+      expect(labelUnder(code)).toBe(labelUnder('xx'));
+      expect(typeof labelUnder(code)).toBe('string');
+      expect(labelUnder(code)).toBe('Created At');
+    }
+  });
+
+  it('an OWN constructor or __proto__ key still answers — an own-property check, not a deny-list', () => {
+    const parsed = JSON.parse(
+      '{"en":{},"constructor":{"objects":{"account":{"_views":{"all_accounts":{"label":"ctor"}}}}},"__proto__":{}}',
+    ) as TranslationBundle;
+    expect(resolveBundleLocale(parsed, 'constructor')).toBe('constructor');
+    expect(resolveBundleLocale(parsed, '__proto__')).toBe('__proto__');
+    expect(resolveViewLabel(parsed, view, { locale: 'constructor' })).toBe('ctor');
+
+    const bare: Record<string, unknown> = Object.assign(Object.create(null), { en: {}, constructor: {} });
+    expect(resolveBundleLocale(bare, 'constructor')).toBe('constructor');
+    expect(resolveBundleLocale(bare, 'toString')).toBeUndefined();
   });
 });

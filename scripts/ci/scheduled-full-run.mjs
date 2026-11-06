@@ -798,8 +798,9 @@ export function renderBody({
 // ---------------------------------------------------------------------------
 //
 // A PR or queue build carries the FAST SET since #22998 (ci.yml's THE TWO
-// SPEEDS); the dogfood and temporal legs run only on `main`'s
-// push, 4-hourly schedule and dispatch runs. "Tested before a release" is
+// SPEEDS; a queue build adds the three dogfood shards since #30461);
+// `dogfood-verify` and the temporal leg run only on `main`'s push, 4-hourly
+// schedule and dispatch runs. "Tested before a release" is
 // therefore a statement about those runs, and this half makes it a gate:
 // release.yml's `full-battery` job, which `publish` needs, so a refusal here
 // means no deployment is queued at the `release` environment at all.

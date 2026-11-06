@@ -14,6 +14,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   renderPendingSchemaWork,
+  splitRefusedSchemaWork,
   summarizePendingSchemaWork,
   type PendingSchemaWork,
 } from './schema-migrate.js';
@@ -111,5 +112,48 @@ describe('summarizePendingSchemaWork (#3954)', () => {
     expect(summary).toContain('1 column(s) to add');
     expect(summary).toContain('5 temporal column(s) to converge in place');
     expect(summary).toContain('~1,234,625 rows');
+  });
+});
+
+/**
+ * [#30636] A table keyed by `_id` with no `id` column: the plan says what apply
+ * does with it — rebuilt while empty, refused while it holds rows — and a
+ * refusal is never listed as work, additive or in place.
+ */
+describe('the `_id`-keyed table: rebuild and refusal (#30636)', () => {
+  const REFUSAL_TEXT = "Schema sync REFUSED for the existing table 'legacy_items': the driver's own text";
+  const REFUSED: PendingSchemaWork = {
+    table: 'legacy_items', kind: 'refuse_table', columns: ['_id'], rows: 3, refusal: REFUSAL_TEXT,
+  };
+  const REBUILD: PendingSchemaWork = { table: 'empty_items', kind: 'rebuild_table', columns: ['title', 'qty'], rows: 0 };
+
+  it('lists a refused table under its own heading with the driver-rendered refusal, never as work', async () => {
+    await renderPendingSchemaWork([...ADDITIVE, REFUSED]);
+    expect(out()).toContain('Refused (left exactly as it is when you apply)');
+    expect(out()).toContain('legacy_items [refuse_table: _id — 3 row(s)]');
+    expect(out()).toContain(REFUSAL_TEXT);
+    // Not under either work heading: the additive section lists only the two
+    // additive entries, and no in-place heading appears at all.
+    expect(out()).not.toContain('In place');
+    expect(out()).not.toContain('add_columns: _id');
+  });
+
+  it('lists an empty `_id`-keyed table as a rebuild under the in-place heading', async () => {
+    await renderPendingSchemaWork([REBUILD]);
+    expect(out()).toContain('In place (existing rows converged when you apply)');
+    expect(out()).toContain('empty_items [rebuild_table: empty table dropped and recreated, 2 column(s)]');
+    expect(out()).not.toContain('New (additive');
+    expect(out()).not.toContain('Refused');
+  });
+
+  it('counts rebuilds and refusals in the summary, never as temporal columns', async () => {
+    const summary = await summarizePendingSchemaWork([...ADDITIVE, REBUILD, REFUSED]);
+    expect(summary).toBe('1 table(s) to create, 1 column(s) to add, 1 empty table(s) to rebuild, 1 table(s) REFUSED');
+  });
+
+  it('splits what a flush returned into performed work and refused tables', async () => {
+    const { performed, refused } = await splitRefusedSchemaWork([...ADDITIVE, REBUILD, REFUSED]);
+    expect(performed).toEqual([...ADDITIVE, REBUILD]);
+    expect(refused).toEqual([REFUSED]);
   });
 });

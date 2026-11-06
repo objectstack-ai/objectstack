@@ -579,8 +579,8 @@ export { resolveFieldCurrency };
  * `./widgets/number-format.ts`, re-exported here under its long-standing
  * `@object-ui/fields` name: `CurrencyField`'s read-only branch calls the same
  * function `CurrencyCellRenderer` below calls, and the lazily loaded widget
- * cannot import this barrel (objectui#11444). The width (the currency's ISO
- * 4217 minor-unit count, every amount, no whole-amount trimming) and its
+ * cannot import this barrel (objectui#11444). The width (the currency's CLDR
+ * fraction-digit count, every amount, no whole-amount trimming) and its
  * history are documented there.
  */
 export { formatCurrency };
@@ -912,8 +912,8 @@ export function CurrencyCellRenderer({ value, field, dependentValues }: CellRend
   const currency = resolveFieldCurrency(field as any, tenantCurrency, dependentValues);
   const num = Number(safe);
   // `CurrencyField`'s read-only branch makes this same call, so a table cell
-  // and a read-only form show one amount identically: the currency's ISO 4217
-  // minor-unit width, a whole amount included (objectui#11444).
+  // and a read-only form show one amount identically: the currency's CLDR
+  // fraction-digit width, a whole amount included (objectui#11444).
   const formatted = !isNaN(num)
     ? formatCurrency(num, currency, locale)
     : String(safe);

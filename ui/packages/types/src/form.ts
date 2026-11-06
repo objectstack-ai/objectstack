@@ -2071,7 +2071,7 @@ export interface FormField {
    * each resolves an absent `scale` through the spec's `resolveFieldScale`.
    *
    * ⛔ Not on a `currency` field. The `currency` widget does not read it: an
-   * amount's decimal places are its currency's ISO 4217 minor unit. So the
+   * amount's decimal places are its currency's CLDR fraction digits. So the
    * zod face refuses `scale` on an entry of `type: 'currency'`, as the
    * spec's `FieldSchema` refuses it (objectstack-ai/objectstack#19629),
    * keyed on `type` as the spec keys it. A typed literal cannot refuse it,

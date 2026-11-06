@@ -87,7 +87,7 @@ export function PercentField({ value, onChange, field, readonly, error, classNam
    * the opposite convention and its own `scale` alias; the spec warns against
    * conflating the two at the field-face declaration itself. And ⛔ not
    * `CurrencyField`'s width either: a currency's decimal places are the
-   * currency's own ISO 4217 minor-unit count, and that widget reads neither
+   * currency's own CLDR fraction-digit count, and that widget reads neither
    * `precision` nor `scale` for them (objectui#10276).
    *
    * A declared `scale: 0` is a valid declaration (a percent field that edits

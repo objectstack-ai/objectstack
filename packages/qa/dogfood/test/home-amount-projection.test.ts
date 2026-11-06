@@ -18,8 +18,8 @@
 // The second half drives the explicit recompute (`recomputeHomeAmounts`,
 // `os migrate recompute-home-amounts`) over the same cells: a corrected rate,
 // a missing one, a blank code, the same currency, a datetime document date
-// across the organization's timezone boundary, and two organizations with
-// different home currencies.
+// across the organization's timezone boundary, two organizations with
+// different home currencies, and the `--org` filter (ruling 6670707546 item 3).
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { basename } from 'node:path';
@@ -306,6 +306,7 @@ const RC = {
   same: 'rc_same',
   zone: 'rc_zone',
   orgs: 'rc_orgs',
+  orgScope: 'rc_org_scope',
 } as const;
 const quiet = { info: () => {}, warn: () => {} };
 
@@ -453,6 +454,29 @@ for (const cell of CELLS) {
           homes = {};
           engine.setTenancyPostureProvider(() => undefined);
         }
+      });
+
+      it('an organization filter recomputes that organization\'s rows only, under the posture a CLI shell may boot with', async () => {
+        // `single`, no wall: the system context alone would not narrow the driver, so the
+        // filter on each row's own organization_id is what keeps organization A untouched.
+        const orgDriver = engine.getDriverForObject('sys_organization')!;
+        for (const id of ['org_rs_a', 'org_rs_b']) {
+          if (!(await orgDriver.findOne('sys_organization', { where: { id } } as never))) await orgDriver.create('sys_organization', { id, name: id });
+        }
+        for (const [id, org] of [['scope_a', 'org_rs_a'], ['scope_b', 'org_rs_b']] as const) {
+          await engine.getDriverForObject(RC.orgScope)!.create(RC.orgScope, {
+            id, name: id, organization_id: org, currency_code: 'USD', invoice_date: '2026-03-15', amount: 1389,
+          } as never);
+        }
+        const limited = await recomputeHomeAmounts(engine as never, quiet, { object: RC.orgScope, organizationId: 'org_rs_b', apply: true });
+        expect(limited).toMatchObject({ organizationId: 'org_rs_b', scannedRecords: 1, changed: 1, written: 1 });
+        expect(limited.organizations.map((o) => o.organizationId)).toEqual(['org_rs_b']);
+        expect(await stored(RC.orgScope, 'scope_b')).toEqual({ home: 10000, rate: 0.1389 });
+        expect(await stored(RC.orgScope, 'scope_a')).toEqual({ home: null, rate: null });
+
+        const everyOrganization = await run(RC.orgScope, { apply: true });
+        expect(everyOrganization).toMatchObject({ organizationId: null, unchanged: 1, changed: 1, written: 1 });
+        expect(await stored(RC.orgScope, 'scope_a')).toEqual({ home: 10000, rate: 0.1389 });
       });
     },
   );

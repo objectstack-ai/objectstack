@@ -414,7 +414,7 @@ function formatSummaryLabel(
     // (`CurrencyCellRenderer`), the same way the percent arm below takes
     // `formatPercent` — so footer and cell agree by reference, not by a copy
     // of the rule. It reads neither `scale` nor `precision`: the width is the
-    // currency's ISO 4217 minor-unit count, a whole amount included
+    // currency's CLDR fraction-digit count, a whole amount included
     // (`$1,234.00`; objectui#11444 retired the whole-amount trimming), and with
     // no code resolved it is a plain number at two decimals, as the cell
     // renders it.

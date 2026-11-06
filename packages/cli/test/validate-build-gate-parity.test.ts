@@ -262,8 +262,9 @@ const BUILD_ONLY_GATES: Readonly<Record<string, string>> = {
  * Three rows it has held moved to SHARED_NON_REGISTRY_GATES when `compile.ts`
  * gained the call: `findViewContainerNameRefusals` (#20331 → #20393),
  * `findOverrideDeclarationRefusals` (#28410 → #28643) and
- * `findExtensionFieldSuffixRefusals` (#28564 → #28727). It holds one today,
- * `findFieldPatchTargetRefusals` (#28565), whose card did not name the build.
+ * `findExtensionFieldSuffixRefusals` (#28564 → #28727). It holds two today,
+ * `findFieldPatchTargetRefusals` (#28565) and `findRedeclaredOwnerFieldRefusals`
+ * (#30610), whose cards did not name the build.
  */
 const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {
   findFieldPatchTargetRefusals:
@@ -271,6 +272,12 @@ const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {
     'in-stack target lacks, judged by the marketplace install door\'s own `fieldPatchTargetRefusals`. Wired ' +
     'where the rollout card asked for it (`os validate` and the install door); `os build` still emits such an ' +
     'artifact, which the install door then refuses — the build-side gap, reported rather than closed here.',
+  findRedeclaredOwnerFieldRefusals:
+    '[ADR-0146 D10, second rule] An `objectExtensions[].fields` entry re-declaring a field another package of the ' +
+    'artifact declares, beyond the display-property whitelist, judged by the save and install doors\' own ' +
+    '`judgeRedeclaredOwnerFields`. Wired at the three doors its card named (`os validate`, the publish doors, the ' +
+    'install door); `os build` still emits such an artifact, which the install door then refuses — the same ' +
+    'build-side gap as the row above, reported rather than closed here.',
 };
 
 /**

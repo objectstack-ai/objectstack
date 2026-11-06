@@ -275,3 +275,39 @@ describe('MCP tool arguments — undeclared keys are refused (#16913)', () => {
     expect(open).toEqual([]);
   });
 });
+
+// [#30126 row 15] The refusal tells the caller the fix and stops: the sentence
+// on why such a key used to be dropped is for this file's readers, not for an
+// agent mid-call.
+describe('MCP tool arguments — the refusal ends at the fix, with no history sentence', () => {
+  let runtime: MCPServerRuntime;
+  let bridge: StubBridge;
+
+  beforeEach(() => {
+    runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    bridge = makeBridge();
+  });
+
+  it('names the key and the spelling to send, and says nothing about the old behaviour', async () => {
+    const { refused, text } = await callTool(runtime, bridge, 'query_records', {
+      objectName: 'crm_opportunity',
+      sort: '-amount',
+    });
+    expect(refused).toBe(true);
+    expect(text).toContain('`sort` → `orderBy`');
+    expect(text).not.toMatch(/used to be dropped/i);
+    expect(text).not.toMatch(/silently/i);
+  });
+
+  it('holds on every advertised tool, and no refusal ends in a dangling separator', async () => {
+    const json = await rpc(runtime, bridge, 'tools/list');
+    const names: string[] = (json.result?.tools ?? []).map((t: any) => t.name);
+    expect(names.length).toBeGreaterThan(0);
+    const offending: string[] = [];
+    for (const name of names) {
+      const { text } = await callTool(runtime, bridge, name, { ...VALID_ARGS[name], zzUndeclaredProbeKey: 'x' });
+      if (/used to be dropped|silently/i.test(text) || /\s$/.test(text)) offending.push(`${name}: ${JSON.stringify(text)}`);
+    }
+    expect(offending).toEqual([]);
+  });
+});

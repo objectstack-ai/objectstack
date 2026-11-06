@@ -462,6 +462,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Localidade",
         help: "Localidade do dispositivo, conforme informada no registro. Armazenada para o dispositivo; nenhum push é renderizado por ela: um push chega no idioma do destinatário (o idioma do usuário dele e, em seguida, o padrão da implantação)."
       },
+      origin: {
+        label: "Origem do servidor",
+        help: "A origem a partir da qual o console foi carregado ao registrar o dispositivo (por exemplo, https://crm.example.com). Toda notificação push para o dispositivo a inclui, para que um app móvel com vários servidores salvos abra a notificação neste. Vazio para um dispositivo registrado sem ela."
+      },
       name: {
         label: "Nome do dispositivo"
       },

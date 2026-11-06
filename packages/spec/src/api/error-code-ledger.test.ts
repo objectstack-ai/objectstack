@@ -290,6 +290,24 @@ describe('ErrorCode (standard ∪ registered)', () => {
     expect(STANDARD_SYNONYM_WAIVERS.map((w) => w.code)).not.toContain(code);
   });
 
+  it('accepts the package disable door\'s dependent-validation-rule refusal code, registered ahead of its runtime producer', () => {
+    // ADR-0141 Open item 4, ruling A on #30379: the disable door answers 409
+    // while an enabled package's validation rule reads a field the package
+    // adds through `objectExtensions`. The door's scan (#30379) stamps it and
+    // asserts this exact string by value — pinned here too.
+    const code = 'PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE';
+    expect(ErrorCode.parse(code)).toBe(code);
+    expect(ERROR_CODE_LEDGER['@objectstack/runtime'], `${code} registered under runtime`).toContain(code);
+    expect(REGISTERED_ERROR_CODES).toContain(code);
+    // PACKAGE and DISABLE are tokens no standard member carries: not a synonym
+    // of DELETE_RESTRICTED or RESOURCE_CONFLICT, and no waiver.
+    expect(standardSynonymOf(code), `${code} needs no waiver`).toBeUndefined();
+    expect(STANDARD_SYNONYM_WAIVERS.map((w) => w.code)).not.toContain(code);
+    // Control leg: the detector still sees the RESTRICTED token, so the
+    // `undefined` above is a verdict, not a detector that went blind.
+    expect(standardSynonymOf('RESTRICTED_DELETE')).toBe('DELETE_RESTRICTED');
+  });
+
   it('accepts the nine-code batch — every code that ships in dist, door or no door (ruled: the ledger is the published face)', () => {
     // The #16404 ruling (director seat, decision batch #62, 2026-09-07, option
     // D): the published face is this ledger, so a code that ships in `dist` is

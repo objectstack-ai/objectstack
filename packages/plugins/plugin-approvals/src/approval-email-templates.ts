@@ -52,11 +52,15 @@ export const APPROVAL_EMAIL_CHANNELS: readonly string[] = Object.freeze(['inbox'
  * The line that opens the request, per locale the approval catalog carries
  * (`translations/messages.ts`). `{{approvalUrl}}` is the payload member.
  */
-export const APPROVAL_EMAIL_LINK_LINES: Readonly<Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', string>> = {
+export const APPROVAL_EMAIL_LINK_LINES: Readonly<Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES' | 'zh-Hant' | 'ar' | 'fr' | 'pt-BR', string>> = {
   en: 'Open the approval: {{approvalUrl}}',
   'zh-CN': '打开审批：{{approvalUrl}}',
   'ja-JP': '承認を開く: {{approvalUrl}}',
   'es-ES': 'Abrir la aprobación: {{approvalUrl}}',
+  'zh-Hant': '開啟核准：{{approvalUrl}}',
+  ar: 'افتح الموافقة: {{approvalUrl}}',
+  fr: 'Ouvrir l’approbation : {{approvalUrl}}',
+  'pt-BR': 'Abrir a aprovação: {{approvalUrl}}',
 };
 
 /** The e-mail templates: every emailed topic in every catalog locale. */

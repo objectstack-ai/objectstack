@@ -3,6 +3,8 @@
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { FieldType, SelectOptionSchema } from '../data/field.zod';
+import { checkLiteralDefaultValue } from '../data/default-value-shape';
+import { isRuntimeDefaultToken } from '../data/default-value-tokens';
 import { FilterConditionSchema } from '../data/filter.zod';
 import { SortDirectionEnum, SortItemSchema } from '../shared/enums.zod';
 import { VIEW_FILTER_OPERATORS, ViewFilterRuleSchema } from '../ui/view.zod';
@@ -101,6 +103,178 @@ export const BlueprintSummaryOperationsSchema = lazySchema(() => z.object({
 }));
 export type BlueprintSummaryOperations = z.input<typeof BlueprintSummaryOperationsSchema>;
 
+/** What a blueprint field of one type may say in `defaultValue` (see {@link BLUEPRINT_DEFAULT_VALUE_RULES}). */
+type BlueprintDefaultValueRule =
+  /** Admitted: `takes` names the value, `fromOptions` marks a default that must be one of the field's own options. */
+  | { readonly takes: string; readonly fromOptions?: true }
+  /** Refused by name: `because` is the reason the refusal states. */
+  | { readonly because: string };
+
+/**
+ * Which field types a blueprint field may give a `defaultValue`, and what each
+ * one takes (ruling B on cloud#3619). One row per `FieldType` member, so a type
+ * added to the field vocabulary does not compile here until someone decides
+ * whether a blueprint may default it.
+ *
+ * Admitted: the types whose default a design can state as ONE literal that the
+ * built field stores as written. An admitted value is judged by the field
+ * schema's own literal contract (`checkLiteralDefaultValue`, ADR-0104 D1, the
+ * check `FieldSchema` runs on the built field's `defaultValue`), so a value
+ * legal here is legal on the field the applier writes. Every admitted value is a
+ * boolean, a number or a string, which is why the strict mirror can carry the
+ * key as one scalar union.
+ *
+ * Refused, by name, even where `FieldSchema` would take a default:
+ *  - `date` / `datetime`: a literal day is frozen when the blueprint is written.
+ *    "Today" is the runtime token `NOW()`, an instruction the built field
+ *    resolves, not a value; a blueprint default is a literal only.
+ *  - the reference and file types: the value is the id of a record or an
+ *    uploaded file, and none exists while the blueprint is designed (seed data
+ *    is reported, never applied). `current_user` is a runtime token too.
+ *  - `multiselect` / `checkboxes` / `tags`: the stored value is an array, and
+ *    this key carries one scalar.
+ *  - `formula` / `summary` / `autonumber`: computed, so a default is never read
+ *    (`summary` is numeric in the value classes, and still refused).
+ *  - `password` / `secret`, `signature` / `qrcode`, and the structured JSON
+ *    types: no one value is right for every record, or the value is not a
+ *    scalar at all.
+ */
+const BLUEPRINT_DEFAULT_VALUE_RULES: Readonly<Record<FieldType, BlueprintDefaultValueRule>> = {
+  boolean: { takes: 'true or false' },
+  toggle: { takes: 'true or false' },
+  number: { takes: 'a number' },
+  currency: { takes: 'a number' },
+  percent: { takes: 'a number' },
+  rating: { takes: 'a number' },
+  slider: { takes: 'a number' },
+  progress: { takes: 'a number' },
+  text: { takes: 'a string' },
+  textarea: { takes: 'a string' },
+  email: { takes: 'a string' },
+  url: { takes: 'a string' },
+  phone: { takes: 'a string' },
+  markdown: { takes: 'a string' },
+  html: { takes: 'a string' },
+  richtext: { takes: 'a string' },
+  code: { takes: 'a string' },
+  color: { takes: 'a string' },
+  time: { takes: 'a time of day, "HH:MM"' },
+  select: { takes: 'the `value` of one of the field\'s own `options`, never its label', fromOptions: true },
+  radio: { takes: 'the `value` of one of the field\'s own `options`, never its label', fromOptions: true },
+  date: { because: 'a literal date is fixed when the blueprint is written, so every record created later would start on that same day' },
+  datetime: { because: 'a literal date is fixed when the blueprint is written, so every record created later would start on that same day' },
+  lookup: { because: 'its value is the id of a record, and no record exists while the blueprint is designed' },
+  master_detail: { because: 'its value is the id of a record, and no record exists while the blueprint is designed' },
+  tree: { because: 'its value is the id of a record, and no record exists while the blueprint is designed' },
+  user: { because: 'its value is the id of a user record, and no record exists while the blueprint is designed' },
+  image: { because: 'its value is the id of an uploaded file, and no file exists while the blueprint is designed' },
+  file: { because: 'its value is the id of an uploaded file, and no file exists while the blueprint is designed' },
+  avatar: { because: 'its value is the id of an uploaded file, and no file exists while the blueprint is designed' },
+  video: { because: 'its value is the id of an uploaded file, and no file exists while the blueprint is designed' },
+  audio: { because: 'its value is the id of an uploaded file, and no file exists while the blueprint is designed' },
+  multiselect: { because: 'it stores a list of values, and a blueprint default is one value' },
+  checkboxes: { because: 'it stores a list of values, and a blueprint default is one value' },
+  tags: { because: 'it stores a list of values, and a blueprint default is one value' },
+  formula: { because: 'the platform computes its value, so a default is never read' },
+  summary: { because: 'the platform computes its value, so a default is never read' },
+  autonumber: { because: 'the platform computes its value, so a default is never read' },
+  password: { because: 'a default would give every record the same credential' },
+  secret: { because: 'a default would give every record the same credential' },
+  signature: { because: 'its value is made for each record, so one default for every record is never right' },
+  qrcode: { because: 'its value is made for each record, so one default for every record is never right' },
+  json: { because: 'its value is structured data, and a blueprint default is one plain value' },
+  composite: { because: 'its value is structured data, and a blueprint default is one plain value' },
+  repeater: { because: 'its value is structured data, and a blueprint default is one plain value' },
+  record: { because: 'its value is structured data, and a blueprint default is one plain value' },
+  location: { because: 'its value is structured data, and a blueprint default is one plain value' },
+  address: { because: 'its value is structured data, and a blueprint default is one plain value' },
+  vector: { because: 'its value is structured data, and a blueprint default is one plain value' },
+};
+
+/**
+ * The admitted types and what each takes, as one sentence: the rows of
+ * {@link BLUEPRINT_DEFAULT_VALUE_RULES} that admit a default, grouped by the
+ * value they take, in table order. Read by both describes and by the refusal.
+ */
+const BLUEPRINT_DEFAULT_VALUE_ADMITTED = (() => {
+  const groups = new Map<string, string[]>();
+  for (const [type, rule] of Object.entries(BLUEPRINT_DEFAULT_VALUE_RULES) as Array<[string, BlueprintDefaultValueRule]>) {
+    if (!('takes' in rule)) continue;
+    groups.set(rule.takes, [...(groups.get(rule.takes) ?? []), type]);
+  }
+  return [...groups].map(([takes, types]) => `${types.map((t) => `"${t}"`).join(' / ')} → ${takes}`).join('; ');
+})();
+
+/** Which types take a default and what each takes, read by both describes. */
+const DEFAULT_VALUE_TYPE_RULE = `It must fit \`type\`, and only these types take one: ${BLUEPRINT_DEFAULT_VALUE_ADMITTED}. `
+  + 'Every other type is refused by name: a date is fixed at design time, a reference or file names no record yet, a '
+  + 'multi-value field stores a list, a formula / summary / autonumber is computed, and a credential, signature or '
+  + 'structured value has no one value right for every record.';
+
+/**
+ * The boolean-flag rule both describes state (cloud#972 guidance, ruling B on
+ * cloud#3619), with each side's spelling of an unset `required`.
+ */
+const booleanFlagRule = (unsetRequired: string) =>
+  'A yes/no flag (是否完成 / 已付款 / is_active) is a "boolean" field that is never `required` '
+  + `(${unsetRequired}) and carries defaultValue false: a required flag refuses the unchecked switch, and a flag with no `
+  + 'default is empty, not false, on every record created without it, so a filter on false misses those records.';
+
+/**
+ * The refusal of a `defaultValue` that does not fit the field (ruling B on
+ * cloud#3619): a runtime token, a type that takes none, a select / radio that
+ * declares no options, or a value outside the type's literal contract. Each
+ * issue lands on the field's `defaultValue` and names the field and its type.
+ *
+ * It runs on every parse (`when: () => true`): the key's own scalar union
+ * aborts on an array or object, and a refusal that named nothing would leave a
+ * `multiselect` default refused without saying why. Every read below is
+ * guarded for that reason, and a `type` outside `FieldType` is left to that
+ * key's own issue.
+ */
+function refuseUnfitDefaultValue(field: unknown, ctx: z.RefinementCtx): void {
+  if (typeof field !== 'object' || field === null) return;
+  const { name, type, options, defaultValue } = field as Record<string, unknown>;
+  // Absence. The strict mirror's null is stripped before this schema reads it,
+  // and a lenient null is refused by the key's own union.
+  if (defaultValue === undefined || defaultValue === null) return;
+  if (typeof type !== 'string' || !Object.prototype.hasOwnProperty.call(BLUEPRINT_DEFAULT_VALUE_RULES, type)) return;
+  const rule = BLUEPRINT_DEFAULT_VALUE_RULES[type as FieldType];
+  const subject = `Field "${typeof name === 'string' ? name : '<unnamed>'}" (${type})`;
+  const shown = JSON.stringify(defaultValue) ?? String(defaultValue);
+  const refuse = (message: string) => ctx.addIssue({ code: 'custom', path: ['defaultValue'], message });
+
+  // A token is judged before the type. On a type that takes no default, that
+  // type's reason is false of a token (`current_user` names no record, `NOW()`
+  // is not frozen), and an author steered by it writes a record id or a fixed day.
+  if (isRuntimeDefaultToken(defaultValue)) {
+    const instead = 'takes' in rule
+      ? `A "${type}" field's default is ${rule.takes}; write one, or remove defaultValue.`
+      : `A "${type}" field takes no defaultValue in a blueprint (the types that take one: `
+        + `${BLUEPRINT_DEFAULT_VALUE_ADMITTED}). Remove defaultValue from this field.`;
+    refuse(`${subject}: the defaultValue ${shown} is a runtime token, resolved when a record is created rather than `
+      + `stored, and a blueprint default is a literal value the built field stores as written. ${instead}`);
+    return;
+  }
+  if (!('takes' in rule)) {
+    refuse(`${subject}: a "${type}" field takes no defaultValue in a blueprint, because ${rule.because}. The types that `
+      + `take one: ${BLUEPRINT_DEFAULT_VALUE_ADMITTED}. Remove defaultValue from this field.`);
+    return;
+  }
+  const declared = Array.isArray(options) ? options as Array<{ value: string }> : undefined;
+  if (rule.fromOptions && !declared?.length) {
+    refuse(`${subject}: the defaultValue ${shown} must be the \`value\` of one of the field's own \`options\`, and the `
+      + 'field declares none. Declare the options, or remove defaultValue.');
+    return;
+  }
+  const verdict = checkLiteralDefaultValue({ type, options: declared }, defaultValue);
+  if (!verdict.ok) {
+    refuse(`${subject}: the defaultValue ${shown} does not fit the field's type (${verdict.detail ?? 'invalid value'}). `
+      + `A "${type}" field's default is ${rule.takes}, stored as written on every record created without one; write `
+      + 'one, or remove defaultValue.');
+  }
+}
+
 /**
  * A proposed field on a blueprint object. `reference` carries the target
  * object for `lookup` / `master_detail` types — relationships are expressed
@@ -123,7 +297,12 @@ export const BlueprintFieldSchema = lazySchema(() => z.object({
     .describe('REQUIRED when `type` is "summary" (a roll-up of child records: 任务总数 / 报名人数 / 合计金额 / 已完成任务数). Names the child object, the aggregation, and — for a qualified count/sum — the condition. A "summary" field without it materializes runtime-dead.'),
   expression: z.string().optional()
     .describe('REQUIRED when `type` is "formula" — the CEL body the field computes, e.g. "record.quantity * record.unit_price", or "record.order_no + \' · \' + record.customer.name" for a composed title. A formula reads a lookup / master_detail field\'s related record ONE hop through it — `record.<lookup>.<field>`, as `record.customer.name` above; the bare `record.customer` is the stored id, and a second hop (`record.customer.owner.name`) is refused at build. A "formula" field without it materializes runtime-dead: the engine builds its formula plan only from fields that HAVE an expression, so the field reads null everywhere, forever. Same failure shape as a "summary" with no `summaryOperations`. Note `nameField` on the object recommends a formula for numbered entities (invoice/ticket) — that formula needs THIS key, or the record title is blank on every card, lookup chip and breadcrumb.'),
-}));
+  // Ruling B on cloud#3619. The scalar union is the value space every admitted
+  // type draws from; whether THIS field takes a default, and which value, is a
+  // rule across `type` / `options` and this key, so it is the refinement below.
+  defaultValue: z.union([z.boolean(), z.number(), z.string()]).optional()
+    .describe(`The built field's default: the value a new record gets when it is created without one, carried into the object field as its \`defaultValue\` and stored as written. ${DEFAULT_VALUE_TYPE_RULE} ${booleanFlagRule('omit `required` or set it false')} Omit it for a field with no default.`),
+}).superRefine(refuseUnfitDefaultValue, { when: () => true }));
 export type BlueprintField = z.input<typeof BlueprintFieldSchema>;
 
 /** A proposed business object (table) with its fields. */
@@ -425,6 +604,16 @@ const StrictField = z.object({
     .describe('REQUIRED when type is "summary" (a roll-up of child records onto this parent: 任务总数 / 报名人数 / 合计金额 / 已完成任务数); null for every other field type. A "summary" field without it is runtime-dead — it reads 0/empty everywhere.'),
   expression: z.string().nullable()
     .describe('REQUIRED when type is "formula" — the CEL body the field computes, e.g. "record.quantity * record.unit_price", or "record.order_no + \' · \' + record.customer.name" for a composed record title; null for every other field type. A formula reads a lookup / master_detail field\'s related record ONE hop through it — `record.<lookup>.<field>`, as `record.customer.name` above; the bare `record.customer` is the stored id, and a second hop (`record.customer.owner.name`) is refused at build. A "formula" field without it is runtime-dead — it reads null everywhere, forever. This is the formula analogue of summaryOperations: name the type and you must supply the body.'),
+  // ⛔ Must stay in lockstep with the lenient `BlueprintFieldSchema.defaultValue`
+  // (ruling B on cloud#3619). One scalar union, because strict structured
+  // output states a rule per key and cannot read `type` while judging this one:
+  // which of the three a field takes is the lenient field's refinement, run when
+  // `apply_blueprint` parses. So a value legal to generate here can still be
+  // refused there, and it is then refused BY NAME at this key (the VALUE-parity
+  // pin walks every type × arm), never stripped. The field key-parity pin fails
+  // if either side drops the key.
+  defaultValue: z.union([z.boolean(), z.number(), z.string()]).nullable()
+    .describe(`The built field's default, or null for none: the value a new record gets when it is created without one, carried into the object field as its \`defaultValue\` and stored as written. ${DEFAULT_VALUE_TYPE_RULE} Null on every other type. ${booleanFlagRule('`required` null or false')}`),
 });
 
 const StrictObject = z.object({

@@ -59,7 +59,9 @@ const mockClient = vi.hoisted(() => ({
   references: vi.fn(async () => []),
   layered: vi.fn(async (_type: string, name: string) => {
     const eff = server.active.get(name) ?? null;
-    return { code: null, overlay: eff, overlayScope: eff ? 'env' : null, effective: eff, editable: true, deletable: true, resettable: false, lock: 'none' };
+    // objectstack#29793 — the stored draft is the `draft` layer, the pillar's buffer.
+    const draft = server.drafts.get(name) ?? null;
+    return { code: null, overlay: eff, overlayScope: eff ? 'env' : null, effective: eff, draft: draft && (JSON.parse(JSON.stringify(draft)) as Record<string, unknown>), editable: true, deletable: true, resettable: false, lock: 'none' };
   }),
   getDraft: vi.fn(async (type: string, name: string) => {
     const draft = server.drafts.get(name);

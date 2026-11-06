@@ -1,8 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { SqlDriver } from '../src/index.js';
-import { ExistingTableAdoptionRefusal } from './existing-table-refusal.js';
+import { SqlDriver, isInPlaceSchemaWork, isRefusedSchemaWork } from '../src/index.js';
+import { ExistingTableAdoptionRefusal, renderExistingTableAdoptionRefusal } from './existing-table-refusal.js';
 import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
 
 describe('SqlDriver Schema Sync (SQLite)', () => {
@@ -522,6 +522,9 @@ const LEGACY_OBJECT = {
   fields: { title: { type: 'string' }, qty: { type: 'integer' } },
 };
 
+/** [#30636] The tables a flush syncs either side of the refused one. */
+const FLUSH_NEIGHBOURS = ['os30636_alpha_items', 'os30636_omega_items'] as const;
+
 const LEGACY_ROWS = [
   { _id: 'a1', title: 'Bolt' },
   { _id: 'a2', title: 'Nut' },
@@ -546,8 +549,25 @@ function declareRowGuardPins(cell: DialectCell): void {
 
     afterEach(async () => {
       await knex.schema.dropTableIfExists(LEGACY_TABLE).catch(() => {});
+      for (const t of FLUSH_NEIGHBOURS) await knex.schema.dropTableIfExists(t).catch(() => {});
       await driver.disconnect();
     });
+
+    /** The legacy shape the sync cannot adopt additively: keyed by `_id`, no `id`. */
+    const createLegacyTable = async (withRows: boolean) => {
+      await knex.schema.createTable(LEGACY_TABLE, (t: any) => {
+        t.string('_id').primary();
+        t.string('title');
+      });
+      if (withRows) await knex(LEGACY_TABLE).insert(LEGACY_ROWS);
+    };
+
+    /** What `os migrate plan` reads: the deferred sync's preview for these objects. */
+    const planFor = async (objects: Array<{ name: string; fields?: Record<string, any> }>) => {
+      driver.setDeferredDdl(true);
+      await driver.initObjects(objects);
+      return driver.previewDeferredSchemaWork();
+    };
 
     it('refuses a `_id`-keyed table holding rows, naming the table and the column, and changes nothing', async () => {
       await knex.schema.createTable(LEGACY_TABLE, (t: any) => {
@@ -592,6 +612,88 @@ function declareRowGuardPins(cell: DialectCell): void {
       expect(after.columns).not.toContain('_id');
       expect(after.columns).toEqual(expect.arrayContaining(['created_at', 'updated_at', 'title', 'qty']));
       expect(after.rows).toEqual([]);
+    });
+
+    // [#30636] The plan says what apply does with this shape, reading the
+    // renderer the refusal above throws through.
+    it('plans a `_id`-keyed table holding rows as a refusal carrying the refusal text, never `add_columns`', async () => {
+      await createLegacyTable(true);
+      // The text apply throws for this very table, read from the sync itself.
+      const thrown = await driver.syncSchema(LEGACY_TABLE, LEGACY_OBJECT).then(() => null, (e: unknown) => e);
+      expect(thrown).toBeInstanceOf(ExistingTableAdoptionRefusal);
+
+      const plan = await planFor([LEGACY_OBJECT]);
+
+      expect(plan).toEqual([{
+        table: LEGACY_TABLE,
+        kind: 'refuse_table',
+        columns: ['_id'],
+        rows: 2,
+        refusal: renderExistingTableAdoptionRefusal(LEGACY_TABLE, '_id', 2),
+      }]);
+      expect(plan[0]!.refusal).toBe((thrown as Error).message);
+      expect(isRefusedSchemaWork(plan[0]!.kind)).toBe(true);
+      expect(isInPlaceSchemaWork(plan[0]!.kind)).toBe(false);
+    });
+
+    it('plans an empty `_id`-keyed table as a rebuild, and apply performs it', async () => {
+      await createLegacyTable(false);
+
+      const plan = await planFor([LEGACY_OBJECT]);
+      expect(plan).toEqual([{ table: LEGACY_TABLE, kind: 'rebuild_table', columns: ['title', 'qty'], rows: 0 }]);
+      expect(isInPlaceSchemaWork(plan[0]!.kind)).toBe(true);
+      expect(isRefusedSchemaWork(plan[0]!.kind)).toBe(false);
+
+      const performed = await driver.flushDeferredSchemaDdl();
+      expect(performed).toEqual(plan);
+      const after = await snapshot('id');
+      expect(after.columns).toContain('id');
+      expect(after.columns).not.toContain('_id');
+    });
+
+    it('CONTROL: plans an `id`-keyed table holding rows as `add_columns` for the declared column it lacks', async () => {
+      await knex.schema.createTable(LEGACY_TABLE, (t: any) => {
+        t.string('id').primary();
+        t.string('title');
+      });
+      await knex(LEGACY_TABLE).insert(LEGACY_ROWS.map(({ _id, title }) => ({ id: _id, title })));
+
+      expect(await planFor([LEGACY_OBJECT])).toEqual([{ table: LEGACY_TABLE, kind: 'add_columns', columns: ['qty'] }]);
+    });
+
+    // [#30636, scope addition 6667689780] One refused table stops nothing else.
+    it('apply refuses the `_id`-keyed table holding rows, still syncs the tables either side of it, and returns the list', async () => {
+      await createLegacyTable(true);
+      const before = await snapshot('_id');
+      const [alpha, omega] = FLUSH_NEIGHBOURS;
+      // The refused table sits BETWEEN the two good ones in the deferred order.
+      const objects = [
+        { name: alpha, fields: { title: { type: 'string' } } },
+        LEGACY_OBJECT,
+        { name: omega, fields: { title: { type: 'string' } } },
+      ];
+      await planFor(objects);
+
+      const performed = await driver.flushDeferredSchemaDdl();
+
+      expect(performed).toEqual([
+        { table: alpha, kind: 'create_table', columns: ['title'] },
+        {
+          table: LEGACY_TABLE,
+          kind: 'refuse_table',
+          columns: ['_id'],
+          rows: 2,
+          refusal: renderExistingTableAdoptionRefusal(LEGACY_TABLE, '_id', 2),
+        },
+        { table: omega, kind: 'create_table', columns: ['title'] },
+      ].sort((a, b) => a.table.localeCompare(b.table)));
+      // Both neighbours got their DDL; the refused table is exactly as it was.
+      expect(await knex.schema.hasTable(alpha)).toBe(true);
+      expect(await knex.schema.hasTable(omega)).toBe(true);
+      expect(await snapshot('_id')).toEqual(before);
+      // The deferral is disarmed: a later sync is a boot sync again, and still refuses.
+      expect(driver.deferredSchemaObjectCount).toBe(0);
+      await expect(driver.syncSchema(LEGACY_TABLE, LEGACY_OBJECT)).rejects.toBeInstanceOf(ExistingTableAdoptionRefusal);
     });
 
     it('CONTROL: adopts an `id`-keyed table holding rows by adding the declared columns, rows kept', async () => {
