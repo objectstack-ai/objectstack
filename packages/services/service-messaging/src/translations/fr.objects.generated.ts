@@ -214,7 +214,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       channel: {
         label: "Canal",
-        help: "Le canal : inbox (notifications affichées dans l’application, toujours disponible), email (dès qu’un service d’e-mail est configuré), sms (dès qu’un service SMS est configuré), ou l’identifiant d’un canal ajouté par un plugin installé. Saisissez * pour tous les canaux. Un identifiant qu’aucun canal n’utilise ne correspond à rien."
+        help: "Le canal : inbox (notifications affichées dans l’application, toujours disponible), email (dès qu’un service d’e-mail est configuré), sms (dès qu’un service SMS est configuré), push (dès qu’un service push est configuré, vers les appareils enregistrés de l’utilisateur), ou l’identifiant d’un canal ajouté par un plugin installé. Saisissez * pour tous les canaux. Un identifiant qu’aucun canal n’utilise ne correspond à rien."
       },
       enabled: {
         label: "Activé",

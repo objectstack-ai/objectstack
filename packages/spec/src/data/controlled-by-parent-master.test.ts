@@ -6,6 +6,7 @@ import { ZodError } from 'zod';
 // Read through the `@objectstack/spec/data` entry, not the module: the pin is
 // on the PUBLISHED predicate a producer imports (#23272).
 import {
+  controlledByParentMasterOf,
   controlledByParentMasterRefusal,
   isControlledByParentMasterField,
   type ControlledByParentMasterShape,
@@ -55,8 +56,26 @@ const SHAPES: Array<[string, Record<string, unknown>, ControlledByParentMasterSh
     'several-required-masters',
   ],
   ['two master_details, none required', { a: md('work_order'), b: md('account') }, 'several-masters'],
-  ['one master_detail, required: false', { order: md('work_order', { required: false }) }, 'master-not-required'],
-  ['one master_detail, required omitted', { order: md('work_order') }, 'master-not-required'],
+  // [#30905 ruling A · ADR-0055 §1 as amended] The only master_detail,
+  // declared `required: false`, is the optional master: accepted.
+  ['one master_detail, required: false', { order: md('work_order', { required: false }) }, undefined],
+  [
+    'one master_detail, required: false, beside a required lookup',
+    { order: md('work_order', { required: false }), owner_ref: lookup('account', { required: true }) },
+    undefined,
+  ],
+  [
+    'one required master_detail beside a master_detail declared required: false',
+    { order: md('work_order', { required: true }), other: md('account', { required: false }) },
+    undefined,
+  ],
+  [
+    'two master_details, both required: false',
+    { a: md('work_order', { required: false }), b: md('account', { required: false }) },
+    'several-masters',
+  ],
+  ['one master_detail, required: false, readonly: true', { order: md('work_order', { required: false, readonly: true }) }, 'master-not-writable'],
+  ['one master_detail, required: false, system: true', { order: md('work_order', { required: false, system: true }) }, 'master-not-writable'],
   ['a required lookup only', { order: lookup('work_order', { required: true }) }, 'required-lookup-only'],
   ['no relation', { note: { type: 'text', label: 'Note' } }, 'no-master'],
   // [#25092] The one master is writable: `readonly` / `system` on it are refused.
@@ -96,6 +115,27 @@ describe('controlledByParentMasterRefusal — the export and ObjectSchema agree 
     }
   });
 
+  // [#30905 ruling A] The ONE deliberate divergence. The predicate reads the
+  // raw `required`, and an omitted one is neither master; the parse reads the
+  // parsed map, where an omitted `required` is `false`, so it admits the
+  // object as the optional master. The builder sees the omission and forces
+  // `required: true` (the required master); `os lint` reports it at `error`.
+  it('an omitted required on the only master_detail: the predicate refuses it, the parse admits it as optional', () => {
+    const obj = { name: 'work_order_item', label: 'Work Order Item', sharingModel: 'controlled_by_parent', fields: { order: md('work_order') } };
+    const refusal = controlledByParentMasterRefusal(obj.name, obj.sharingModel, obj.fields);
+    expect(refusal?.shape).toBe('master-not-required');
+    expect(refusal?.message).toMatch(/`order` is a `master_detail` that declares no `required` — declare `required: true` \(every row names its master\) or `required: false` \(a row may name none\)/);
+    expect(ObjectSchema.safeParse(obj).success).toBe(true);
+    // Read on the parsed map, the predicate agrees with the parse.
+    const parsed = ObjectSchema.parse(obj);
+    expect(controlledByParentMasterRefusal(parsed.name, parsed.sharingModel, parsed.fields)).toBeUndefined();
+    expect(controlledByParentMasterOf(parsed.fields)).toEqual({ field: 'order', optional: true });
+    // The builder sees the omission and reads it as the required master.
+    const built = ObjectSchema.create(obj as Parameters<typeof ObjectSchema.create>[0]);
+    expect(built.fields.order!.required).toBe(true);
+    expect(controlledByParentMasterOf(built.fields)).toEqual({ field: 'order', optional: false });
+  });
+
   it('answers undefined for any other sharing model, as the parse accepts it', () => {
     for (const sharingModel of ['private', 'public_read', 'public_read_write']) {
       const obj = { name: 'pair', label: 'Pair', sharingModel, fields: { a: md('x', { required: true }), b: md('y', { required: true }) } };
@@ -123,13 +163,37 @@ describe('isControlledByParentMasterField — the field half the refusal counts 
     expect(isControlledByParentMasterField(field)).toBe(expected);
   });
 
-  it('is the count the refusal makes: exactly one counting field, and a writable one, satisfies the rule', () => {
+  it('is the count the refusal makes: one master (the required one, else the only optional one), writable, satisfies the rule', () => {
     for (const [, fields] of SHAPES) {
       const counted = Object.values(fields).filter(isControlledByParentMasterField) as Array<Record<string, unknown>>;
-      const writable = counted.length === 1 && counted[0]!.readonly !== true && counted[0]!.system !== true;
+      const master = controlledByParentMasterOf(fields);
+      // [#30905 ruling A] One required field is the master; with none, the
+      // resolver's optional one is.
+      expect(master?.optional === false).toBe(counted.length === 1);
+      const def = master === undefined ? undefined : (fields[master.field] as Record<string, unknown>);
+      const writable = def !== undefined && def.readonly !== true && def.system !== true;
       const refusal = controlledByParentMasterRefusal('o', 'controlled_by_parent', fields);
       expect(refusal === undefined).toBe(writable);
     }
+  });
+});
+
+describe('controlledByParentMasterOf — the one master, required or optional (#30905 ruling A)', () => {
+  it.each([
+    ['one required master_detail', { order: md('w', { required: true }) }, { field: 'order', optional: false }],
+    ['one master_detail, required: false', { order: md('w', { required: false }) }, { field: 'order', optional: true }],
+    ['a required one beside one declared false', { a: md('w', { required: true }), b: md('x', { required: false }) }, { field: 'a', optional: false }],
+    // The flags are the refusal's to judge: the field is still the master.
+    ['an optional one marked readonly', { order: md('w', { required: false, readonly: true }) }, { field: 'order', optional: true }],
+    ['one master_detail, required omitted (read raw: neither)', { order: md('w') }, undefined],
+    ['one master_detail, required "false" (not a boolean)', { order: md('w', { required: 'false' }) }, undefined],
+    ['two required', { a: md('w', { required: true }), b: md('x', { required: true }) }, undefined],
+    ['two declared false', { a: md('w', { required: false }), b: md('x', { required: false }) }, undefined],
+    ['a required lookup only', { order: lookup('w', { required: true }) }, undefined],
+    ['no field map', undefined, undefined],
+    ['an array', [md('w', { required: false })], undefined],
+  ])('%s', (_label, fields, expected) => {
+    expect(controlledByParentMasterOf(fields)).toEqual(expected);
   });
 });
 

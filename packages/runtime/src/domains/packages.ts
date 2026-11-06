@@ -152,6 +152,9 @@ import { repeatedQueryParamMessage, unknownQueryParamRefusalMessage } from '@obj
 // defect (#6928) this module exists to stop anyone writing again.
 import { parseBooleanParam } from '../query-param.js';
 import { setPackageDisabled } from '../package-state-store.js';
+// [#30962] The host seam for the same state: a store a host registers as the
+// `package-state-store` service replaces the file at every door below.
+import { asPackageStateStore, PACKAGE_STATE_STORE_SERVICE } from '../package-state-host-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
@@ -757,6 +760,99 @@ interface PackageRowRegistryHost {
     registry?: {
         getPackage?(id: string): { manifest?: { type?: unknown; scope?: unknown; dependencies?: unknown } } | undefined;
     };
+}
+
+/**
+ * [#30962] A host's package-state store refused a write (or its lookup
+ * faulted). Raised by {@link writePackageState} only for a HOST store: the
+ * file's own failure is rethrown as it is, so the file default's handling
+ * stays exactly what it was.
+ */
+class HostPackageStateRefusal extends Error {
+    constructor(readonly packageId: string, cause: unknown) {
+        super((cause as Error)?.message ?? String(cause));
+        this.name = 'HostPackageStateRefusal';
+    }
+}
+
+/**
+ * [#30962] Write `packageId`'s disabled flag to this environment's package-state
+ * store: the host's when one is registered as the `package-state-store`
+ * service (`../package-state-host-store.ts`), the file under `OS_HOME`
+ * otherwise. Resolved through the CLASSIFIED lookup, so a host store whose
+ * factory throws refuses the write instead of reading as "no host store" and
+ * landing the write in a file nobody reads.
+ */
+async function writePackageState(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    packageId: string,
+    disabled: boolean,
+): Promise<void> {
+    let host;
+    try {
+        host = asPackageStateStore(await deps.resolveServiceOrLoud(context, PACKAGE_STATE_STORE_SERVICE));
+    } catch (err) {
+        throw new HostPackageStateRefusal(packageId, err);
+    }
+    if (!host) {
+        setPackageDisabled(context?.environmentId, packageId, disabled);
+        return;
+    }
+    try {
+        await host.setPackageDisabled(context?.environmentId, packageId, disabled);
+    } catch (err) {
+        throw new HostPackageStateRefusal(packageId, err);
+    }
+}
+
+/**
+ * [#30962, cloud#3636 ruling acceptance line 1] The enable and disable doors'
+ * answer to a host store that refused: nothing changed in memory (the doors
+ * write BEFORE they switch the package), so the door says so, and that the
+ * same request can be retried, instead of answering a switch the store does
+ * not hold. The standard `SERVICE_UNAVAILABLE`: the store, not the request,
+ * is what failed.
+ */
+function hostPackageStateRefused(
+    deps: DomainHandlerDeps,
+    refusal: HostPackageStateRefusal,
+    verb: 'enabled' | 'disabled',
+): HttpDispatcherResult {
+    return {
+        handled: true,
+        response: deps.error(
+            `Package '${refusal.packageId}' was not ${verb}: the package-state store refused to record it, so `
+            + `nothing changed. Retry once the store accepts writes. (${refusal.message})`,
+            503,
+            { code: 'SERVICE_UNAVAILABLE' },
+        ),
+    };
+}
+
+/**
+ * [#30962] {@link writePackageState} for the doors whose package change has
+ * ALREADY landed when they write (install, delete): the request is not undone
+ * over the state store. A host store's refusal is logged at `error` here, once
+ * per failed write, naming what is not durable; the file's failure is rethrown
+ * to the caller's existing `warn`, unchanged.
+ */
+async function writePackageStateAfterChange(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    packageId: string,
+    disabled: boolean,
+): Promise<void> {
+    try {
+        await writePackageState(deps, context, packageId, disabled);
+    } catch (err) {
+        if (!(err instanceof HostPackageStateRefusal)) throw err;
+        console.error(
+            `[handlePackages] the package-state store refused to record package '${packageId}' as `
+            + `${disabled ? 'disabled' : 'enabled'}: this process serves it that way, but the next boot reads the `
+            + `store and will not. Switch it again once the store accepts writes. (${err.message})`,
+        );
+    }
 }
 
 /**
@@ -2248,12 +2344,14 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // explicit action left there. #18058's «每一次 install 都持久化它返回
             // 的状态» is unchanged; what changed is which state that is.
             //
-            // Same best-effort try/catch as `PATCH /packages/:id/enable` below:
-            // the in-memory install already succeeded, so a state-file failure
-            // must not turn a 201 into a 500.
+            // Best-effort: the in-memory install already succeeded, so a
+            // state-store failure must not turn a 201 into a 500. [#30962] A
+            // host store's refusal is logged at `error` instead
+            // (`writePackageStateAfterChange`); only the enable and disable
+            // doors, which write before they switch, answer it.
             const rowDisabled = pkg?.enabled === false;
             try {
-                setPackageDisabled(_context?.environmentId, pkgId, rowDisabled);
+                await writePackageStateAfterChange(deps, _context, pkgId, rowDisabled);
             } catch (err) {
                 console.warn('[handlePackages] failed to persist enableOnInstall', { id: pkgId, disabled: rowDisabled, error: (err as Error)?.message });
             }
@@ -2280,14 +2378,20 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Enabling package "${id}"`);
             if (walled) return walled;
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
+            // [#30962] The state store FIRST, the registry second: a host store
+            // that refuses leaves the package exactly as it was, and the door
+            // answers the refusal (`hostPackageStateRefused`). The file keeps
+            // its best-effort `warn`, as before.
+            if (!registry.getPackage(id)) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+            try {
+                await writePackageState(deps, _context, id, false);
+            } catch (err) {
+                if (err instanceof HostPackageStateRefusal) return hostPackageStateRefused(deps, err, 'enabled');
+                console.warn('[handlePackages] failed to persist enable state', { id, error: (err as Error)?.message });
+            }
             const pkg = registry.enablePackage(id);
             if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
             await summaryRefreshSettled(qlService);
-            try {
-                setPackageDisabled(_context?.environmentId, id, false);
-            } catch (err) {
-                console.warn('[handlePackages] failed to persist enable state', { id, error: (err as Error)?.message });
-            }
             return { handled: true, response: deps.success(pkg) };
         }
 
@@ -2335,13 +2439,18 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     ),
                 };
             }
-            const pkg = registry.disablePackage(id);
-            if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+            // [#30962] The state store FIRST, the registry second, exactly as
+            // the enable door above: a host store that refuses leaves the
+            // package enabled and served, and the door answers the refusal.
+            if (!registry.getPackage(id)) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
             try {
-                setPackageDisabled(_context?.environmentId, id, true);
+                await writePackageState(deps, _context, id, true);
             } catch (err) {
+                if (err instanceof HostPackageStateRefusal) return hostPackageStateRefused(deps, err, 'disabled');
                 console.warn('[handlePackages] failed to persist disable state', { id, error: (err as Error)?.message });
             }
+            const pkg = registry.disablePackage(id);
+            if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
             return { handled: true, response: deps.success(pkg) };
         }
 
@@ -3492,12 +3601,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // whenever its stored row is gone, even if the running registry
             // refused the withdrawal above.
             //
-            // Same best-effort try/catch as the install and PATCH arms above:
-            // the uninstall itself already happened, so a state-file failure
-            // must not turn it into a 500.
+            // Same best-effort try/catch as the install arm above: the
+            // uninstall itself already happened, so a state-store failure must
+            // not turn it into a 500.
             if (persists ? existed : registryRemoved) {
                 try {
-                    setPackageDisabled(_context?.environmentId, id, false);
+                    await writePackageStateAfterChange(deps, _context, id, false);
                 } catch (err) {
                     console.warn('[handlePackages] failed to clear persisted disable state on delete', { id, error: (err as Error)?.message });
                 }

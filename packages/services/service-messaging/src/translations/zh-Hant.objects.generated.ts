@@ -214,7 +214,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       channel: {
         label: "通道",
-        help: "通道：inbox（應用程式內顯示的通知，一律可用）、email（設定郵件服務後可用）、sms（設定簡訊服務後可用），或已安裝外掛程式新增的通道 ID。輸入 * 代表所有通道。沒有任何通道使用的 ID 不會符合任何通知。"
+        help: "通道：inbox（應用程式內顯示的通知，一律可用）、email（設定郵件服務後可用）、sms（設定簡訊服務後可用）、push（設定推播服務後可用，傳送到使用者已登記的裝置），或已安裝外掛程式新增的通道 ID。輸入 * 代表所有通道。沒有任何通道使用的 ID 不會符合任何通知。"
       },
       enabled: {
         label: "已啟用",

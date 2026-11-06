@@ -4012,6 +4012,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/controlled-by-parent-optional-master.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/controlled-by-parent-sharing.test.ts",
       "verb": "findOne",
       "pinned": 1

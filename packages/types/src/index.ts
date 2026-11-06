@@ -107,6 +107,10 @@ export * from './unique-scope-install-gate.js';
 // this package depends only on `@objectstack/spec`, so a driver (in this
 // repository or out of it) adopting the seam takes no heavier edge.
 export * from './datasource-secret-resolver.js';
+// The service a plugin registers the host's ONE secret crypto provider under
+// (a KMS/Vault-backed `ICryptoProvider`): `os serve` reads it once every plugin
+// has initialized and falls back to `LocalCryptoProvider` when none is there.
+export * from './crypto-provider-service.js';
 // [#20919] The REST door's error CLASSIFICATION half (`mapDataError` through
 // `classifyDataError`), moved here from `@objectstack/rest` beside the
 // primitives it composes, so the bulk-import runner in `@objectstack/core`
