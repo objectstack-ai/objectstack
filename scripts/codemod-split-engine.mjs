@@ -677,6 +677,11 @@ function readMethod(tm, ctx, m) {
         continue;
       }
       if (kind !== SyntaxKind.Identifier) continue;
+      // `typeof this` (its `this` is an identifier in a type query): with the
+      // identity port the value `this` beside it would read `this.facade` and
+      // the type would name the host, so the body stays as the polymorphic
+      // `this` type does.
+      if (ctx.identityPort && node.getText() === 'this' && Node.isTypeQuery(node.getParent())) add('this-type');
       if (node.getText() === 'arguments') {
         const parent = node.getParent();
         const isName = Node.isPropertyAccessExpression(parent) && parent.getNameNode() === node;
@@ -4214,11 +4219,11 @@ function planHandSlots(tm, text, moduleTexts, names) {
       const lineStart = lineStartOf(text, p.getStart());
       const indent = text.slice(lineStart, p.getStart());
       if (!/^ +$/.test(indent)) why('does not open its own line');
+      if (init.getDescendants().some((n) => (Node.isTemplateExpression(n) || Node.isNoSubstitutionTemplateLiteral(n) || Node.isStringLiteral(n)) &&
+        n.getStartLineNumber() !== n.getEndLineNumber())) why('holds a template or string spanning lines, which a re-indent would edit');
       const arrowText = text.slice(init.getStart(), init.getEnd());
       const moved = deindentBy(arrowText, indent);
       if (moved === null) why('has a line not indented as far as the slot, or a blank line holding spaces');
-      if (init.getDescendants().some((n) => (Node.isTemplateExpression(n) || Node.isNoSubstitutionTemplateLiteral(n) || Node.isStringLiteral(n)) &&
-        n.getStartLineNumber() !== n.getEndLineNumber())) why('holds a template or string spanning lines, which a re-indent would edit');
       if (scope.bindings.has(slot)) why(`is named ${slot}, which ${HOST_BASENAME} already binds`);
       if (moduleScope(tm, parse(tm, join(SRC_DIR, stub.module), mod)).bindings.has(slot)) why(`is named ${slot}, which ${stub.module} already binds at module scope`);
       const imports = new Map(); // local -> { specifier, form, imported, value }
@@ -4352,6 +4357,9 @@ function undoHandSlots(tm, text, moduleTexts) {
   const modules = new Map(moduleTexts);
   for (const [file, entry] of perModule) {
     const mod = moduleTexts.get(file);
+    const usedAtHead = usedImportNames(tm, mod);
+    const unread = importDeclsOf(tm, file, mod).flatMap((d) => [...d.bindings.keys()]).filter((k) => !usedAtHead.has(k));
+    if (unread.length > 0) failures.push(`${file}: imports what nothing in it reads: ${unread.join(', ')}`);
     let undone = applyEdits(mod, entry.removals.map((r) => ({ ...r, text: '' })));
     const used = usedImportNames(tm, undone);
     const drops = [];
@@ -4569,6 +4577,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'scoped classes (second pass)': 16,
   'hand-series docblocks (third pass)': 19,
   'named methods onto the split class (fourth pass)': 23,
+  'identity port, computed keys and exported names (fourth pass, #30020)': 18,
+  'hand-series host slots (fifth pass, #30020)': 17,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
 
@@ -4942,6 +4952,185 @@ export function betaPrivate(): number {
   ]);
 }
 
+/**
+ * The identity-port fixture (#30020): the first pass's, with an `Identity`
+ * section the first pass writes (`seed` moves) and keeps the rest of on the
+ * class (each `bare-this` there), and one exported class after `ObjectQL`.
+ */
+const IDENTITY_FIXTURE_ANCHORS = Object.freeze([
+  ['count', 'Lifecycle', 'engine-lifecycle.ts'],
+  ['seed', 'Identity', 'engine-identity.ts'],
+  ['keptSection', 'Kept', null],
+]);
+function identityFixtureSource({ facadeField = false } = {}) {
+  const pad = Array.from({ length: 12 }, (_, i) => `    const p${i} = ${i};`).join('\n');
+  const extra = `
+  protected seed(): number {
+${pad}
+    return this.count;
+  }
+
+  /** Hands the engine on (R1); its object-literal method keeps its own \`this\`. */
+  private identity(n: number): Scoped {
+${pad}
+    const nested = { k: 1, get(): number { return this.k; } };
+    const self = (this as any)._flag ? this : null;
+    return new Scoped(n + this.count + nested.get(), self ?? this);
+  }
+
+  private computed(slot: 'knex' | 'logger'): unknown {
+${pad}
+    const v = this[slot];
+    this[slot] = v as never;
+    return v;
+  }
+
+  protected keyedString(key: string): unknown {
+${pad}
+    return this[key];
+  }
+
+  protected keyedMethod(slot: 'other'): unknown {
+${pad}
+    return this[slot];
+  }
+
+  protected handsToLocal(): number {
+${pad}
+    return namesClass(this) === null ? 0 : 1;
+  }
+
+  protected typedThis(): number {
+${pad}
+    const t: typeof this = this;
+    return t === null ? 0 : 1;
+  }
+
+  protected readsFacade(): unknown {
+${pad}
+    return this.facade;
+  }
+`;
+  const source = `${fixtureSource(extra)}
+export class Scoped {
+  constructor(readonly n: number, readonly q: ObjectQL) {}
+}
+`;
+  return facadeField ? source.replace('  private count = 0;\n', '  private count = 0;\n  private facade = 0;\n') : source;
+}
+
+/**
+ * The fifth pass's fixture (#30020 H2): hand stubs whose host literals hold
+ * a computing slot (`gammaServe`), one that reads the stub's own `this` or a
+ * local, a slot of forwarders only, and one spanning a template.
+ */
+function slotFixtureEngine() {
+  return `import { gammaLocal, gammaOnly, gammaServe, gammaThis, gammaTpl } from './engine-gamma.js';
+import { planOf } from './engine-top-level.js';
+import type { Plan } from './plan-types.js';
+
+export class ObjectQL {
+  private n = 1;
+
+  private gammaServe(x: string): number {
+    // The body lives in \`engine-gamma.ts\` (see \`GammaHost\`).
+    const readN = () => this.n;
+    const host: ThisParameterType<typeof gammaServe> = {
+      get n() { return readN(); },
+      judge: (name, plan) => {
+        try {
+          const p: Plan = planOf(name, plan);
+          return p.ok;
+        } catch {
+          // A plan that does not compile is judged no.
+          return false;
+        }
+      },
+      other: (...a) => this.n + a.length,
+    };
+    return gammaServe.call(host, x);
+  }
+
+  private gammaThis(x: string): number {
+    // The body lives in \`engine-gamma.ts\` (see \`GammaHost\`).
+    const host: ThisParameterType<typeof gammaThis> = {
+      judge: (name) => {
+        return this.n > name.length;
+      },
+    };
+    return gammaThis.call(host, x);
+  }
+
+  private gammaLocal(x: string): number {
+    // The body lives in \`engine-gamma.ts\` (see \`GammaHost\`).
+    const readN = () => this.n;
+    const host: ThisParameterType<typeof gammaLocal> = {
+      judge: (name) => {
+        return readN() > name.length;
+      },
+    };
+    return gammaLocal.call(host, x);
+  }
+
+  private gammaOnly(x: string): number {
+    // The body lives in \`engine-gamma.ts\` (see \`GammaHost\`).
+    const host: ThisParameterType<typeof gammaOnly> = {
+      judge: (...a) => planOf(...a).ok,
+    };
+    return gammaOnly.call(host, x);
+  }
+
+  private gammaTpl(x: string): number {
+    // The body lives in \`engine-gamma.ts\` (see \`GammaHost\`).
+    const host: ThisParameterType<typeof gammaTpl> = {
+      judge: (name) => {
+        return \`a
+b\` === name;
+      },
+    };
+    return gammaTpl.call(host, x);
+  }
+}
+`;
+}
+
+function slotFixtureModules() {
+  return new Map([['engine-gamma.ts', `// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * The gamma bodies.
+ */
+
+import type { ObjectQL } from './engine.js';
+
+export interface GammaHost {
+  readonly n: ObjectQL['n'];
+  judge: (name: string, plan?: unknown) => boolean;
+  other: (...a: unknown[]) => number;
+}
+
+export function gammaServe(this: GammaHost, x: string): number {
+  return this.judge(x) ? this.n : this.other(x);
+}
+
+export function gammaThis(this: GammaHost, x: string): number {
+  return this.judge(x) ? 1 : 0;
+}
+
+export function gammaLocal(this: GammaHost, x: string): number {
+  return this.judge(x) ? 1 : 0;
+}
+
+export function gammaOnly(this: GammaHost, x: string): number {
+  return this.judge(x) ? 1 : 0;
+}
+
+export function gammaTpl(this: GammaHost, x: string): number {
+  return this.judge(x) ? 1 : 0;
+}
+`]]);
+}
+
 async function selfTest() {
   const tm = await loadTsMorph();
   const batterySeen = new Map();
@@ -4956,6 +5145,7 @@ async function selfTest() {
     else { failed += 1; console.error(`  ✗ [${battery}] ${label}${detail ? ` — ${detail}` : ''}`); }
   };
   const refused = (fn) => { try { fn(); return false; } catch (e) { return e instanceof CodemodRefusal; } };
+  const refusalOf = (fn) => { try { fn(); return ''; } catch (e) { if (e instanceof CodemodRefusal) return e.message; throw e; } };
 
   open('stay rules');
   {
@@ -5322,6 +5512,112 @@ async function selfTest() {
       check('a binding the head added that only a staying docblock links, and no moved member reads, fails',
         extraLife.includes('ExtraLinked, FourthShape') && ev.failures.some((f) => f.includes('ExtraLinked') && f.includes('no moved member reads')), ev.failures.join(' | '));
     }
+  }
+
+  open('identity port, computed keys and exported names (fourth pass, #30020)');
+  {
+    const opts = { anchors: IDENTITY_FIXTURE_ANCHORS, pins: FIXTURE_PINS, needles: FIXTURE_NEEDLES, classNeedles: FIXTURE_CLASS_NEEDLES };
+    const source = identityFixtureSource();
+    const split = generate(tm, source, plan(tm, source, opts));
+    const input = split.host;
+    const mods = split.modules;
+    const names = ['computed', 'identity'];
+    check('the first pass keeps the methods that read `this` bare on the class (bare-this)',
+      input.includes('  private identity(n: number): Scoped {\n    const p0') && input.includes("  private computed(slot: 'knex' | 'logger'): unknown {\n    const p0") &&
+      (mods.get('engine-identity.ts') ?? '').includes('static seed('));
+    const planned = planMembers(tm, input, mods, names, opts);
+    check('the plan takes both into their section\'s written module, in class order',
+      [...planned.modules.keys()].join() === 'engine-identity.ts' && planned.records.map((r) => r.name).join() === 'identity,computed',
+      planned.records.map((r) => `${r.name}->${r.module}`).join());
+    const out = generateMembers(tm, input, mods, planned);
+    const again = generateMembers(tm, input, mods, planMembers(tm, input, mods, names, opts));
+    const head = new Map([...mods, ...out.modules]);
+    const v = verifyMembers(tm, input, out.host, mods, head, opts);
+    check('the generated moves prove against their base', v.failures.length === 0 && v.moved.length === 2, v.failures.join(' | '));
+    check('two runs on one input write byte-identical trees',
+      treeHash(new Map([['h', out.host], ...out.modules])) === treeHash(new Map([['h', again.host], ...again.modules])));
+    const idm = out.modules.get('engine-identity.ts') ?? '';
+    const baseIdm = mods.get('engine-identity.ts') ?? '';
+    check('R1: each bare `this` reads `this.facade`, and an object-literal method keeps its own `this`',
+      idm.includes('    const self = (this.facade as any)._flag ? this.facade : null;\n    return new Scoped(n + this.count + nested.get(), self ?? this.facade);') &&
+      idm.includes('    const nested = { k: 1, get(): number { return this.k; } };'), idm.slice(idm.indexOf('static identity'), idm.indexOf('static identity') + 900));
+    check('R1: the body\'s `this` names the identity port beside the members it reads',
+      idm.includes("static identity(this: Pick<IdentityHost, 'count' | 'facade'>, n: number): Scoped {"));
+    check('R1: the host interface gains the identity port under its docblock, and the factory hands the engine',
+      idm.includes(`${FACADE_DOC}\n  readonly facade: ObjectQL;`) && out.host.includes(`\n${FACADE_INSTALL_LINE}\n`) &&
+      !baseIdm.includes(FACADE_DOC) && !input.includes(FACADE_INSTALL_LINE));
+    check('R3: a computed key over field names reads them through the host, the body\'s text unchanged',
+      idm.includes("static computed(this: Pick<IdentityHost, 'knex' | 'logger'>, slot: 'knex' | 'logger'): unknown {\n" +
+        `${Array.from({ length: 12 }, (_, i) => `    const p${i} = ${i};`).join('\n')}\n    const v = this[slot];\n    this[slot] = v as never;`));
+    check('R3: a key the body assigns through gains a setter, in the interface and the factory',
+      idm.includes("  knex: ObjectQL['knex'];") && idm.includes("  logger: ObjectQL['logger'];") &&
+      out.host.includes('      get knex() { return engine.knex; },\n      set knex(v) { engine.knex = v; },'));
+    check('R4: an exported class engine.ts declares is imported from it as a value, and the header says so',
+      idm.includes("import { Scoped } from './engine.js';\nimport type { ObjectQL } from './engine.js';") &&
+      idm.includes(VALUES_CYCLE_PARA) && !idm.includes(TYPES_CYCLE_PARA) && baseIdm.includes(TYPES_CYCLE_PARA));
+    check('a computed key of any string, or over a method name, stays (bare-this)',
+      refused(() => planMembers(tm, input, mods, ['keyedString'], opts)) && refused(() => planMembers(tm, input, mods, ['keyedMethod'], opts)));
+    check('a `this` in a type position stays', refused(() => planMembers(tm, input, mods, ['typedThis'], opts)));
+    check('R4 imports only what engine.ts exports: a staying name it does not export refuses',
+      /widen the generated export lists/.test(refusalOf(() => planMembers(tm, input, mods, ['handsToLocal'], opts))), refusalOf(() => planMembers(tm, input, mods, ['handsToLocal'], opts)));
+    check('a body that already reads `this.facade` refuses, so the undo stays the one inverse (unknown-member)',
+      /unknown-member: facade/.test(refusalOf(() => planMembers(tm, input, mods, ['readsFacade'], opts))));
+    {
+      const taken = identityFixtureSource({ facadeField: true });
+      const tsplit = generate(tm, taken, plan(tm, taken, opts));
+      check('a class that declares `facade` refuses the identity port (facade-taken)',
+        /facade-taken/.test(refusalOf(() => planMembers(tm, tsplit.host, tsplit.modules, ['identity'], opts))));
+    }
+    // A negative control whose edit changed nothing would pass for the wrong reason: it fails the case instead.
+    const fails = (host, edited) => !(host === out.host && edited.every(([f, t]) => t === head.get(f))) &&
+      verifyMembers(tm, input, host, mods, new Map([...head, ...edited]), opts).failures.length > 0;
+    check('a `this.facade` the rewrite did not write fails', fails(out.host, [['engine-identity.ts', idm.replace('n + this.count', 'n + this.facade.count')]]));
+    check('a rewritten site put back to a bare `this` fails', fails(out.host, [['engine-identity.ts', idm.replace('self ?? this.facade', 'self ?? this')]]));
+    check('a factory that does not hand the engine fails', fails(out.host.replace(`\n${FACADE_INSTALL_LINE}`, ''), []));
+    check('an identity port without its docblock fails', fails(out.host, [['engine-identity.ts', idm.replace(`${FACADE_DOC}\n`, '')]]));
+    check('a header left saying "types only" beside a value import fails',
+      fails(out.host, [['engine-identity.ts', idm.replace(VALUES_CYCLE_PARA, TYPES_CYCLE_PARA)]]));
+  }
+
+  open('hand-series host slots (fifth pass, #30020)');
+  {
+    const input = slotFixtureEngine();
+    const mods = slotFixtureModules();
+    const planned = planHandSlots(tm, input, mods, ['gammaServe']);
+    check('the plan names the one computing slot of the stub',
+      planned.records.length === 1 && planned.records[0].slots.map((s) => s.slot).join() === 'judge' && planned.records[0].hostType === 'GammaHost',
+      JSON.stringify(planned.records.map((r) => [r.name, r.slots.map((s) => s.slot)])));
+    const out = generateHandSlots(tm, input, mods, planned);
+    const again = generateHandSlots(tm, input, mods, planHandSlots(tm, input, mods, ['gammaServe']));
+    const head = new Map([...mods, ...out.modules]);
+    const v = verifyHandSlots(tm, input, out.host, mods, head);
+    check('the generated move proves against its base', v.failures.length === 0 && v.moved.length === 1, v.failures.join(' | '));
+    check('two runs on one input write byte-identical trees',
+      treeHash(new Map([['h', out.host], ...out.modules])) === treeHash(new Map([['h', again.host], ...again.modules])));
+    const gamma = out.modules.get('engine-gamma.ts') ?? '';
+    check('the slot names its const, and engine.ts imports it beside the function',
+      out.host.includes('      judge,\n      other: (...a) => this.n + a.length,') &&
+      out.host.includes("import { gammaLocal, gammaOnly, gammaServe, gammaThis, gammaTpl, judge } from './engine-gamma.js';"));
+    check('the hand module holds the arrow one level out, typed as the host member, under the docblock',
+      gamma.endsWith(`\n${handSlotDoc('judge', 'gammaServe', 'gammaServe')}\nexport const judge: GammaHost['judge'] = (name, plan) => {\n  try {\n    const p: Plan = planOf(name, plan);\n    return p.ok;\n  } catch {\n    // A plan that does not compile is judged no.\n    return false;\n  }\n};\n`), gamma.slice(-500));
+    check('the hand module imports what the arrow reads, by statements of its own after its last import',
+      gamma.includes("import type { ObjectQL } from './engine.js';\nimport { planOf } from './engine-top-level.js';\nimport type { Plan } from './plan-types.js';\n"));
+    check('engine.ts drops the import only the slot read and keeps one another stub still reads, and the proof names the drop',
+      out.pruned.join() === 'Plan' && v.pruned.join() === 'Plan' && !out.host.includes("from './plan-types.js'") &&
+      out.host.includes("import { planOf } from './engine-top-level.js';"), `${out.pruned} | ${v.pruned}`);
+    const fails = (host, edited) => !(host === out.host && edited.every(([f, t]) => t === head.get(f))) &&
+      verifyHandSlots(tm, input, host, mods, new Map([...head, ...edited])).failures.length > 0;
+    check('one edited character in the moved arrow fails', fails(out.host, [['engine-gamma.ts', gamma.replace('return false;', 'return true;')]]));
+    check('a moved const whose docblock was edited fails', fails(out.host, [['engine-gamma.ts', gamma.replace('moved here whole', 'moved here wholly')]]));
+    check('an import statement that also binds a name nothing reads fails',
+      fails(out.host, [['engine-gamma.ts', gamma.replace("import { planOf } from './engine-top-level.js';", "import { planOf, unread } from './engine-top-level.js';")]]));
+    check('an engine.ts that kept an import only the slot read fails', fails(`import { planOf } from './engine-top-level.js';\n${out.host}`, []));
+    check('a head that moved nothing fails', verifyHandSlots(tm, input, input, mods, mods).failures.some((f) => f.startsWith('nothing moved')));
+    check('a slot that reads the stub\'s `this` refuses', /reads `this`/.test(refusalOf(() => planHandSlots(tm, input, mods, ['gammaThis']))));
+    check('a slot that reads a local of the stub refuses', /the stub declares/.test(refusalOf(() => planHandSlots(tm, input, mods, ['gammaLocal']))));
+    check('a stub whose slots all forward refuses', /no computing slot/.test(refusalOf(() => planHandSlots(tm, input, mods, ['gammaOnly']))));
+    check('a slot holding a template that spans lines refuses', /spanning lines/.test(refusalOf(() => planHandSlots(tm, input, mods, ['gammaTpl']))));
+    check('a method that is not a hand stub refuses', refused(() => planHandSlots(tm, `${input.replace('    // The body lives in `engine-gamma.ts` (see `GammaHost`).\n    const readN', '    const readN')}`, mods, ['gammaServe'])));
   }
 
   const declared = Object.keys(SELF_TEST_BATTERIES);
