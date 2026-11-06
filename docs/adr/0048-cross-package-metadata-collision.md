@@ -918,7 +918,7 @@ first phase.
 > are phase 2 (#30804, #30805); `defineStack`, the save door and the ADR-0129
 > amendment are phase 3 (#30806).
 
-### P1.1 Why §3.4's premise does not hold for these three types
+### P1.1 Why §3.4's premise does not hold for the data family: `picklist`, `mapping`, `dataset`
 
 §3.4 rests on every caller carrying its package id. These three consumers carry
 none when they resolve the name. Measured on a booted showcase with two packages,
