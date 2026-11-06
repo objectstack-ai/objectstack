@@ -399,6 +399,17 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'conditionalFormatting',
     why: "planned, not yet rendered — a field's cell formatting rules (`[{ condition, style }]`, the list view's own rule element) are validated at parse and their CEL is judged at the authoring doors (it parses, it reads only `value` and `record`), but no renderer styles a cell from them until objectui's cell renderers read them, after the spec publishes. A form control offered today would let an author set a style nothing paints",
   },
+  // cloud#3652 ruling D3 — a field's rename declaration lands spec-first the
+  // same way: `planned` in the liveness ledger, read by no upgrade until the
+  // rename execution card. Offering the key in the field form first would be
+  // the UI half of declared-not-enforced.
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'renamedFrom',
+    why: "planned, not yet read — the earlier keys of a field are validated at parse (each a field key, once, never the field's own key, a key another field still declares, or an old key another field also claims), but no package upgrade carries a column on them until the rename execution lands. It is a package author's declaration about the field's history, written in the package source beside the rename itself; a form control offered today would let an author declare a rename no upgrade performs",
+  },
   // [ADR-0144 D5] A record-mode amount's home-currency projection lands
   // spec-first the same way: declared and judged at parse, written by nothing
   // until the engine's write-time projection lands in the same release (D9).
