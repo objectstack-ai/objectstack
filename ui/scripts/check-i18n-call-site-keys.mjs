@@ -1353,6 +1353,7 @@ function staticTextSegments(node, source) {
  * test (`marketplaceNamespaceBoundary.test.ts` for this one). A namespace is
  * added here or nowhere, so it cannot arrive without its frame.
  */
+/** @type {Readonly<Record<string, readonly string[]>>} */
 export const PACK_NAMESPACE_FRAMES = Object.freeze({
   'packages/i18n/src/namespaces/marketplace/': Object.freeze(['packages/app-shell/src/console/marketplace/']),
 });
@@ -2003,7 +2004,7 @@ function resolveFactoryTable(root, source, argument, parseModule) {
 // ── the analysis ─────────────────────────────────────────────────────────────
 
 /**
- * `families` and `handRolled` are injectable so the synthetic-repo tests can pin
+ * `families`, `handRolled` and `frames` are injectable so the synthetic-repo tests can pin
  * the registry RULES against a registry they control. The real run always uses
  * the module constants, and every CLI path below calls `analyze(root)` with no
  * options at all — so there is no configuration path a call site could quietly
@@ -2012,7 +2013,8 @@ function resolveFactoryTable(root, source, argument, parseModule) {
  *
  * @returns {{ findings: Array, counters: Record<string, number>, enKeyCount: number,
  *   referencedKeys: Set<string>, referencedBranches: Set<string>, dynamicHeads: Set<string>,
- *   dynamicFamilies: Map<string, { tails: Set<string>, sites: Array, multiSubstitution: number }> }}
+ *   dynamicFamilies: Map<string, { tails: Set<string>, sites: Array, multiSubstitution: number }>,
+ *   framedReads: Map<string, number> }}
  */
 export function analyze(
   root,
