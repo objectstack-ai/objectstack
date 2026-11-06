@@ -37,6 +37,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           account_locked: "帳戶已鎖定",
           config_change: "設定變更",
           import: "匯入",
+          export: "匯出",
           platform_admin_standing_change: "平台管理員權限變更",
           action_invocation: "動作呼叫"
         }
