@@ -268,3 +268,90 @@ describe('a successful sign-in is recorded as before', () => {
     expectNoPasswordMaterial(events);
   });
 });
+
+describe('[#30924] an MFA-held sign-in records the hold on its own login row', () => {
+  // ADR-0069 D3: a global MFA requirement, a lapsed grace window, an account
+  // that never enrolled. The sign-in itself succeeds (a session is minted and
+  // the user can still reach `/two-factor/*` to enroll); the session is held.
+  const MFA_POLICY = { mfaRequired: true, mfaGracePeriodDays: 0, plugins: { twoFactor: true } };
+
+  /** Start the account's grace clock a day ago, so the hold applies now. */
+  function lapseGrace(engine: any): void {
+    const row = ((engine.tables.get('sys_user') ?? []) as any[]).find((r) => r.email === EMAIL);
+    if (!row) throw new Error(`no sys_user row for ${EMAIL}`);
+    row.two_factor_enabled = false;
+    row.mfa_required_at = new Date(Date.now() - 86_400_000).toISOString();
+  }
+
+  const getSession = (manager: AuthManager, token: string) =>
+    manager.handleRequest(
+      new Request(`${BASE}/get-session`, {
+        method: 'GET',
+        headers: { authorization: `Bearer ${token}`, 'user-agent': CLIENT_UA },
+      }),
+      { remoteAddress: CLIENT_IP },
+    );
+
+  it('one login event carries reason MFA_REQUIRED and rule mfa_required; no login_failed, no credential', async () => {
+    const { engine, manager, events } = deployment(MFA_POLICY);
+    await signUp(manager);
+    lapseGrace(engine);
+    events.length = 0;
+
+    const res = await signIn(manager, EMAIL, PASSWORD);
+    expect(res.status, await res.clone().text()).toBe(200);
+
+    expect(accountEvents(events), 'a held sign-in is not a refused one').toEqual([]);
+    const logins = events.filter((e) => e.action === 'login');
+    expect(logins).toHaveLength(1);
+    expect(logins[0]!.userId).toBe(userIdFor(engine));
+    expect(logins[0]!.ipAddress).toBe(CLIENT_IP);
+    expect(logins[0]!.context).toEqual({ endpoint: '/sign-in/email', reason: 'MFA_REQUIRED', rule: 'mfa_required' });
+    expectNoPasswordMaterial(events);
+  });
+
+  it('the hold is recorded once per sign-in, never once per session read', async () => {
+    const { engine, manager, events } = deployment(MFA_POLICY);
+    await signUp(manager);
+    lapseGrace(engine);
+    events.length = 0;
+
+    const res = await signIn(manager, EMAIL, PASSWORD);
+    expect(res.status).toBe(200);
+    const { token } = (await res.json()) as { token: string };
+
+    // The gate is computed on every read, and holds every one of them…
+    for (let i = 0; i < 3; i++) {
+      const read = await getSession(manager, token);
+      expect(read.status).toBe(200);
+      expect(((await read.json()) as any)?.user?.authGate?.code).toBe('MFA_REQUIRED');
+    }
+    // …and the sign-in still has exactly the one row.
+    expect(events.map((e) => e.action)).toEqual(['login']);
+  });
+
+  it('control: inside the grace window the session is not held, and the login row is as before', async () => {
+    const { manager, events } = deployment({ ...MFA_POLICY, mfaGracePeriodDays: 7 });
+    await signUp(manager);
+    events.length = 0;
+
+    expect((await signIn(manager, EMAIL, PASSWORD)).status).toBe(200);
+
+    const logins = events.filter((e) => e.action === 'login');
+    expect(logins).toHaveLength(1);
+    expect(logins[0]!.context).toEqual({ endpoint: '/sign-in/email' });
+  });
+
+  it('control: a refused password on a held account is still one login_failed with its own code, and no hold', async () => {
+    const { engine, manager, events } = deployment({ ...MFA_POLICY, lockoutThreshold: 5 });
+    await signUp(manager);
+    lapseGrace(engine);
+    events.length = 0;
+
+    expect((await signIn(manager, EMAIL, WRONG_PASSWORD)).status).not.toBe(200);
+
+    expect(events.map((e) => e.action)).toEqual(['login_failed']);
+    expect(events[0]!.context).toEqual({ endpoint: '/sign-in/email', reason: 'INVALID_EMAIL_OR_PASSWORD' });
+    expectNoPasswordMaterial(events);
+  });
+});

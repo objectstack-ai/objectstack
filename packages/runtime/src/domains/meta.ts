@@ -555,6 +555,23 @@ function metaItemReadGateSources(
         ...(typeof protocol?.packagelessLayeredReadRefusal === 'function'
             ? { packagelessLayeredReadRefusal: (item: { type: string; name: string; member?: string }) => protocol.packagelessLayeredReadRefusal!(item) }
             : {}),
+        // [#30797] The deployment's `errors.permission_denied` override, as
+        // `RestServer.resolveMessageTranslator` hands it: the request's i18n
+        // service's `t`, or `undefined` when there is none. A service that
+        // cannot be resolved answers `undefined` — the refusal's wording must
+        // never turn its 403 into a 500 (a throwing `t` is caught by
+        // `renderOperationMessage` itself).
+        resolveMessageTranslator: async () => {
+            let i18n: { t?: unknown } | null | undefined;
+            try {
+                i18n = await deps.resolveService(context, 'i18n');
+            } catch {
+                return undefined;
+            }
+            if (!i18n || typeof i18n.t !== 'function') return undefined;
+            const t = i18n.t as (key: string, locale: string, params?: Record<string, unknown>) => string;
+            return (key, locale, params) => t.call(i18n, key, locale, params);
+        },
     };
 }
 

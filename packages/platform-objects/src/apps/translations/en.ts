@@ -31,6 +31,7 @@ export const en: TranslationData = {
         grp_account_inbox: { label: 'Inbox' },
         grp_account_security: { label: 'Security' },
         grp_account_developer: { label: 'Developer' },
+        grp_account_ai_assistant: { label: 'AI Assistant' },
         nav_account_profile: { label: 'Profile' },
         nav_account_notifications: { label: 'Notifications' },
         nav_account_approvals: { label: 'Approvals' },
@@ -40,7 +41,7 @@ export const en: TranslationData = {
         nav_account_api_keys: { label: 'API Keys' },
         nav_account_oauth_apps: { label: 'OAuth Applications' },
         // Contributed at RUNTIME by `@objectstack/mcp` into
-        // `grp_account_developer` (`connect-ui.ts`), so `ACCOUNT_APP` declares
+        // `grp_account_ai_assistant` (`connect-ui.ts`), so `ACCOUNT_APP` declares
         // no nav item for it and no static walk in this package can see it —
         // the same shape as the contributed Setup entries below. Its Setup twin
         // carries the identical source string, and BOTH keys are needed: the
@@ -48,7 +49,7 @@ export const en: TranslationData = {
         // app, so `apps.setup.navigation.nav_connect_agent` never answers for
         // the Account door. Its absence rendered the English literal under
         // Account while Setup rendered the translation, for one destination.
-        nav_connect_agent: { label: 'Connect an Agent' },
+        nav_connect_agent: { label: 'Connect an AI Assistant' },
       },
     },
     setup: {
@@ -68,6 +69,7 @@ export const en: TranslationData = {
 
         // Overview
         nav_system_overview: { label: 'System Overview' },
+        nav_connect_agent: { label: 'Connect an AI Assistant' },
 
         // Apps / Marketplace
         nav_packaged_actions: { label: 'Packaged Actions' },
@@ -108,7 +110,6 @@ export const en: TranslationData = {
         // entry opens that object's list view.
         nav_sso_providers: { label: 'SSO Providers' },
         nav_api_keys: { label: 'API Keys' },
-        nav_connect_agent: { label: 'Connect an Agent' },
 
         // Approvals. `nav_approvals_inbox` is the working surface (#7234); the
         // three below it are the engine's raw tables, kept as the admin view.
@@ -286,7 +287,7 @@ export const en: TranslationData = {
         + "organization's private packages and install them here.",
     },
     connect_agent: {
-      label: 'Connect an Agent',
+      label: 'Connect an AI Assistant',
       subtitle:
         'Give any MCP-capable AI client governed access to this system — '
         + "every call runs under the caller's own permissions and row-level security.",

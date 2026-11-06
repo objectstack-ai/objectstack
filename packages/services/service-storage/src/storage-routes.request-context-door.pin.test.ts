@@ -103,6 +103,8 @@ function services(host: Host, ownerReads: OwnerRead[]): Record<string, unknown> 
       { user_id: 'u_ses', organization_id: ORG, role: 'member' },
       { user_id: 'u_held', organization_id: ORG, role: 'member' },
     ],
+    // The keys' owners exist: an API key authenticates only as an owner who exists.
+    sys_user: [{ id: 'u_key' }, { id: 'u_ex' }, { id: 'u_mfa' }],
     sys_file: [
       {
         id: FILE_ID, key: 'files/door.pdf', name: 'door.pdf', mime_type: 'application/pdf', size: 12,

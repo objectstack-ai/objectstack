@@ -364,6 +364,8 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
     // lookup fills.
     // [#29171] `field` 81 → 82: `referenceNameVisible`, a lookup's declared
     // name exposure.
+    // [#30880] `field` 82 → 83: `renamedFrom`, the earlier key(s) a package
+    // upgrade carries a field's column from (cloud#3652 ruling D3).
     // [#28022] `app` 22 → 23: `landing`, the per-audience landing list.
     // [#28404] `app` 23 → 24, `dashboard` 20 → 21, `dataset` 16 → 17, `flow`
     // 22 → 23, `page` 26 → 27, `report` 23 → 24: `overrides`, the ADR-0146 D2
@@ -372,7 +374,7 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
     // gain it, and their counts stay.
     // [#28979] `page` 27 → 28: `apps`, the app scope of a record page.
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
-        agent: 24, app: 24, dashboard: 21, dataset: 17, field: 82, flow: 23,
+        agent: 24, app: 24, dashboard: 21, dataset: 17, field: 83, flow: 23,
         hook: 23, object: 49, page: 28, position: 13, report: 24, skill: 16, tool: 14,
     };
 

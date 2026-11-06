@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
-import { gradeCardAnswer, gradeCardOperation, scoreCardArtifact } from '../../src/score/index.js';
+import { gradeCardAnswer, gradeCardOperation, gradeItemNames, scoreCardArtifact } from '../../src/score/index.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CARD_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/crm_account_with_contacts.json');
@@ -87,5 +87,48 @@ describe('scoreCardArtifact', () => {
       'ai.ask-data': 'unscored',
       'access-security.field-permissions': 'fail',
     });
+  });
+});
+
+describe('the every-item-prefixed rule', () => {
+  it('reports each non-object item named without the card namespace prefix as a failing check of its own', () => {
+    const crm = load();
+    const s = scoreCardArtifact(crm, {
+      objects: [{ name: 'account', fields: { name: { type: 'text' } } }], // objects are not judged here: defineStack refuses a bare one
+      apps: [{ name: 'democrm_app' }],
+      permissions: [{ name: 'sdr', objects: {} }, { name: 'democrm_partner_user', objects: {} }],
+      views: [{ name: 'all_accounts' }],
+    });
+    expect(s.naming).toEqual([
+      { check: 'bare-name:permission:sdr', pass: false, detail: 'a gallery app names every item `democrm_<short>`; this permission is `sdr`' },
+      { check: 'bare-name:view:all_accounts', pass: false, detail: 'a gallery app names every item `democrm_<short>`; this view is `all_accounts`' },
+    ]);
+    // Counted: the two findings are in the total and not in passed.
+    const clean = scoreCardArtifact(crm, { objects: [{ name: 'account', fields: { name: { type: 'text' } } }], apps: [{ name: 'democrm_app' }] });
+    expect(clean.naming).toEqual([]);
+    expect([s.total - clean.total, s.passed - clean.passed]).toEqual([2, 0]);
+  });
+
+  it('judges a multi-package artifact whose collections live only under packages[]', () => {
+    const artifact = {
+      manifest: { id: 'com.example.democrm', namespace: 'democrm' },
+      packages: [
+        { manifest: { id: 'com.example.democrm.core', name: 'core', version: '1.0.0', type: 'app', objects: [{ name: 'democrm_account', fields: {} }] } },
+        {
+          manifest: {
+            id: 'com.example.democrm.ui',
+            name: 'ui',
+            version: '1.0.0',
+            type: 'app',
+            dependencies: { 'com.example.democrm.core': '1.0.0' },
+            dashboards: [
+              { name: 'overview', label: 'Overview', widgets: [] },
+              { name: 'democrm_pipeline', label: 'Pipeline', widgets: [] },
+            ],
+          },
+        },
+      ],
+    };
+    expect(gradeItemNames(artifact, 'democrm').map((c) => c.check)).toEqual(['bare-name:dashboard:overview']);
   });
 });

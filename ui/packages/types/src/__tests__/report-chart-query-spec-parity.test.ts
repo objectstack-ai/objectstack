@@ -19,7 +19,7 @@
  *    spec owns, or a divergence outliving the reason it was granted. Four-way
  *    parity, in the shape `select-option-spec-parity.test.ts` established.
  *  - **Renamed** (`ChartDataSeries`, `ChartDataSeriesSchema`, `SqlQueryAST`,
- *    `DriverQueryConfig`, `SqlDriverInterface`, `DatasourceRegistration`): the
+ *    `DriverQueryConfig`): the
  *    concepts genuinely differ from the spec exports whose names they were
  *    wearing. The risk is picking a new name the spec ALREADY owns — the
  *    `PageComponentSchema` mistake from objectui#3074 — so each new name is
@@ -750,8 +750,6 @@ describe('renamed local dialects do not collide with a spec export (objectui#307
     ['ChartDataSeriesSchema', 'zod twin of ChartDataSeries'],
     ['SqlQueryAST', 'compiled SQL syntax tree, not the spec ObjectQL request'],
     ['DriverQueryConfig', 'high-level query config the SQL AST builder consumes'],
-    ['SqlDriverInterface', "objectui's SQL-oriented client driver abstraction"],
-    ['DatasourceRegistration', 'in-memory datasource registration record'],
     // objectui#3162 batch 8. `JoinNode` was ledgered as "erased to `any` upstream,
     // re-export once objectstack#4171 lands". #4171 landed — and the symbol it was
     // waiting on no longer exists: spec 17.0.0 retired `query.joins` and the whole

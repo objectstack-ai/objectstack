@@ -25,7 +25,7 @@ import {
   type TenancyServiceResolver,
 } from '@objectstack/core';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
-import type { IHttpServer, IDataEngine, IHttpRequest, IAuthService } from '@objectstack/spec/contracts';
+import type { IHttpServer, IDataEngine, IHttpRequest, IAuthService, IEmailService } from '@objectstack/spec/contracts';
 import type { SettingsContext } from './settings-service.types.js';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import { SettingsService } from './settings-service.js';
@@ -38,6 +38,7 @@ import {
   storedSecretReaderOverEngine,
 } from './local-crypto-provider.js';
 import { buildConfigChangeAuditSink } from './config-change-audit.js';
+import { buildDeploymentNoticeDoor } from './deployment-notice.js';
 import { registerLocalizationCurrencyLock, type CurrencyUsageEngine } from './localization-currency-lock.js';
 import { registerLocalizationLocaleOptions, type LocaleListService } from './localization-locale-options.js';
 import { USER_OBJECT, assertUserReferenceResolves, registeredLabel } from './actor-reference.js';
@@ -531,9 +532,50 @@ export class SettingsServicePlugin implements Plugin {
         }
       };
 
+      // [#30120, ruling A3] What a production deployment keeps on its own
+      // disk because nobody set it, served to administrators behind this door
+      // (see `deployment-notice.ts`). Every source is read at the request.
+      const settings = this.service!;
+      const deploymentNotice = buildDeploymentNoticeDoor({
+        sources: {
+          env: () => process.env,
+          emailDeliveryLive: () => {
+            let email: IEmailService | undefined;
+            try {
+              email = ctx.getService<IEmailService>('email');
+            } catch {
+              return undefined;
+            }
+            // The deliverability member is optional: absent or throwing is
+            // not live, as the auth plugin's own reader rules.
+            if (!email || typeof email.isConfigured !== 'function') return email ? false : undefined;
+            try {
+              return email.isConfigured() === true;
+            } catch {
+              return false;
+            }
+          },
+          storageAdapter: async () => {
+            try {
+              if (!ctx.getService('storage')) return undefined;
+            } catch {
+              return undefined;
+            }
+            try {
+              const resolved = await settings.get<string>('storage', 'adapter');
+              return typeof resolved.value === 'string' ? resolved.value : undefined;
+            } catch {
+              return undefined;
+            }
+          },
+        },
+        engine: () => engine,
+      });
+
       registerSettingsRoutes(http, this.service!, {
         basePath: this.opts.basePath,
         contextFromRequest: verifiedContextFromRequest,
+        deploymentNotice,
       });
       ctx.logger?.info?.(
         'SettingsServicePlugin: REST routes registered at ' + (this.opts.basePath ?? '/api/settings'),

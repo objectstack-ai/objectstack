@@ -96,7 +96,10 @@ async function mount(postures: Record<string, Gate[]>) {
     find: async (object: string, q: any) => (
       object === 'sys_api_key' && q?.where?.key === keyHash
         ? [{ id: 'key_1', key: keyHash, user_id: OWNER, revoked: false, scopes: '[]' }]
-        : []
+        // The key's owner exists: an API key authenticates only as an owner who exists.
+        : object === 'sys_user' && q?.where?.id === OWNER
+          ? [{ id: OWNER }]
+          : []
     ),
   });
   const routes = new Map<string, RouteHandler>();

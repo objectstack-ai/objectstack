@@ -36,9 +36,11 @@ question's computed truth; a card that does not load is red in CI.
 | 5 | `run.operations`, `run.guardrails`, `run.agentActions?` | At least two writes, each acting as a persona and declaring its `outcome`; the five guardrail checks; optionally the agent-callable business actions. |
 | 6 | `iterate` | A one-sentence change request plus the `expectDelta` it should add to `expect`. |
 
-Besides the layers a card carries `id` (its basename), `title`, `provenance` (where the
+Besides the layers a card carries `id` (its basename), `code`, `title`, `provenance` (where the
 scenario comes from) and, when a question uses a time window, `asOf`: the fixed "today"
-(`YYYY-MM-DD`) windows are computed against.
+(`YYYY-MM-DD`) windows are computed against. `code` is the app code: 2–8 lowercase letters,
+unique across the library. The app lives in the namespace `demo` + code (`democrm`) wherever
+it is built, scored or exported, and every item it declares carries that prefix.
 
 **Counts.** The default band is 8–10 questions and 4–6 operations. A card below 8 questions
 or 4 operations states why in `run.countsReason`, or it is refused.
@@ -153,7 +155,7 @@ meet this floor:
 
 ## Adding a card
 
-1. Write `<id>.json` here; `id` equals the basename.
+1. Write `<id>.json` here; `id` equals the basename, and `code` is one no other card uses.
 2. Keep it generic — a scenario anyone could write from the domain alone.
 3. Run `pnpm --filter @objectstack/scenarios test`: a refusal names the file and the field
    path. Then pin the card's hand-worked truths, per persona too, in its own
@@ -164,5 +166,5 @@ meet this floor:
 
 `pnpm --filter @objectstack/scenarios run-scenarios` builds, runs and iterates every card here with a local
 Claude Code session, and writes one run record per card. Grading uses `@objectstack/scenarios/score`; no
-API-billed model is used. The runner reads a card's object names relative to the built package's namespace
-(`account` → `<namespace>_account`). Flags and modes: [the package README](../../../packages/qa/scenarios/README.md#running-the-cards--objectstackscenariosrunner).
+API-billed model is used. The runner reads a card's names relative to the card's namespace
+(`account` → `democrm_account`), and a build that names any item without the prefix fails its Build half. Flags and modes: [the package README](../../../packages/qa/scenarios/README.md#running-the-cards--objectstackscenariosrunner).

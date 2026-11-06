@@ -16,7 +16,7 @@
 import { defineFlow } from '@objectstack/spec';
 
 export const EscalateOverdueCasesFlow = defineFlow({
-  name: 'escalate_overdue_cases',
+  name: 'crm_escalate_overdue_cases',
   label: 'Escalate Overdue Cases',
   type: 'schedule',
   status: 'active',
@@ -82,7 +82,7 @@ day, a threshold is never missed.
 
 ```typescript
 {
-  name: 'renewal_alert',
+  name: 'crm_renewal_alert',
   label: 'Renewal Alert',
   type: 'schedule',
   runAs: 'system',              // a sweep has no trigger user — elevate explicitly

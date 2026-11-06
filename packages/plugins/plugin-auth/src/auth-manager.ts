@@ -185,8 +185,13 @@ import {
 import {
   rereadKeyringForUnknownKey,
   verifyMcpAccessToken,
+  verifyMcpAccessTokenClaims,
   type McpAccessTokenHost,
 } from './auth-manager-mcp-access-token.js';
+// [objectstack-ai/cloud#3606, ruling A] `/oauth2/revoke` for an MCP access
+// token: the answer `handleRequest` gives after the provider's, through
+// `answerOAuthTokenRevocation` below.
+import { answerMcpTokenRevocation, type OAuthGrantStore } from './mcp-token-revocation.js';
 // [#25224 cut 10] The request routing — the seam every better-auth request
 // passes through, route ownership and the endpoint path both key on; the
 // methods of the same names below hand each body the members it reads
@@ -1210,42 +1215,113 @@ function ipv6PrefixEqual(a: readonly number[], b: readonly number[], bits: numbe
 }
 
 /**
- * ADR-0069 D5 — does `ip` match `range`? A range is an IPv4 CIDR
- * (`a.b.c.d/n`), an IPv6 CIDR (`2001:db8::/32`: the first `n` of 128 bits),
- * or one exact address. Both sides are read as the address they denote
- * ({@link readMatchedAddress}), so an IPv4-mapped IPv6 address on either side
- * compares as its IPv4 address, and an exact IPv6 entry matches however it is
- * spelled. An address is matched only against a range of its own family: an
- * IPv4 range never admits a pure IPv6 address, nor an IPv6 range an IPv4 one.
+ * ADR-0069 D5 — one allow-list entry read as the range it names: its base
+ * address ({@link readMatchedAddress}) and how many leading bits a client
+ * address must share with it.
+ */
+export type IpRange = { v4: number; bits: number } | { v6: number[]; bits: number };
+
+/**
+ * A prefix length, by family width: one or two decimal digits for IPv4, one to
+ * three for IPv6. ASCII digits only; the value is then held to the width.
+ */
+const PREFIX_LENGTH_DIGITS: Record<32 | 128, RegExp> = { 32: /^[0-9]{1,2}$/, 128: /^[0-9]{1,3}$/ };
+
+/**
+ * ADR-0069 D5 — THE reading of an allow-list entry, for every door that judges
+ * or saves the list: the sign-in gate ({@link ipMatchesRange}), the settings
+ * save check (`allowed-ip-ranges.ts`), the settings binding that applies a
+ * stored or env-pinned list (`auth-plugin.ts`), and the deployment's own
+ * declaration ({@link assertAllowedIpRanges}). One reading, so a list is never
+ * saved under one rule and enforced under another.
  *
- * A CIDR whose prefix is not one the family reads (an IPv6 prefix must be a
- * whole number from 0 to 128) is read as its base address alone, and any
- * other entry that is not an address is compared as text, which an address
- * the server established never equals. The IPv4 prefix keeps its earlier
- * reading (`Number`, 0 to 32).
+ * An entry is an address, IPv4 or IPv6 (an IPv4-mapped IPv6 address is the
+ * IPv4 address it maps, and an IPv6 zone identifier is dropped), optionally
+ * followed by `/` and a prefix length written in decimal digits: one or two,
+ * from 0 to 32, for an IPv4 base; one to three, from 0 to 128, for an IPv6
+ * base. Blanks around the entry are not part of it. Anything else names no
+ * range and reads `null`: a prefix with any other character in it, one out of
+ * the family's range, or nothing after the `/`; a second `/`; a blank inside
+ * the entry; text that is not an address. Bits of the base past the prefix are
+ * not judged (`203.0.113.5/24` is `203.0.113.0/24`).
+ */
+export function parseIpRange(entry: unknown): IpRange | null {
+  if (typeof entry !== 'string') return null;
+  const text = entry.trim();
+  if (!text || /\s/.test(text)) return null;
+  const slash = text.indexOf('/');
+  const base = readMatchedAddress(slash === -1 ? text : text.slice(0, slash));
+  if (!base) return null;
+  const width = 'v4' in base ? 32 : 128;
+  let bits: number = width;
+  if (slash !== -1) {
+    const prefix = text.slice(slash + 1);
+    if (!PREFIX_LENGTH_DIGITS[width].test(prefix)) return null;
+    bits = Number.parseInt(prefix, 10);
+    if (bits > width) return null;
+  }
+  return 'v4' in base ? { v4: base.v4, bits } : { v6: base.v6, bits };
+}
+
+/** The entries of an allow-list that name no range ({@link parseIpRange}), in list order. */
+export function unreadableIpRangeEntries<T>(entries: readonly T[]): T[] {
+  return entries.filter((entry) => parseIpRange(entry) === null);
+}
+
+/**
+ * ADR-0069 D5 — refuse a declared allow-list ({@link AuthManagerOptions.allowedIpRanges})
+ * that is not a list, or that holds an entry naming no range: loudly, at
+ * construction, naming every such entry. An entry is never dropped: the
+ * deployment would boot with a gate that admits nobody the entry was written
+ * for, and say nothing.
+ */
+export function assertAllowedIpRanges(configured: unknown): void {
+  if (configured === undefined || configured === null) return;
+  if (!Array.isArray(configured)) {
+    throw new Error(
+      '[auth] allowedIpRanges must be an array of IP addresses or CIDR ranges, e.g. ["203.0.113.0/24", "2001:db8::/32"].',
+    );
+  }
+  const unreadable = unreadableIpRangeEntries(configured);
+  if (unreadable.length === 0) return;
+  const named = unreadable.map((entry) => JSON.stringify(entry) ?? String(entry)).join(', ');
+  throw new Error(
+    `[auth] invalid allowedIpRanges: ${named} ${unreadable.length === 1 ? 'is' : 'are'} not an IP address or a CIDR ` +
+      'range. Each entry is an address, or an address, "/" and a prefix length in decimal digits: 0 to 32 for IPv4, ' +
+      '0 to 128 for IPv6 (e.g. "192.0.2.7", "203.0.113.0/24", "2001:db8::/32").',
+  );
+}
+
+/**
+ * ADR-0069 D5 — does `ip` match `range`? The range is read by
+ * {@link parseIpRange}: an IPv4 CIDR (`a.b.c.d/n`), an IPv6 CIDR
+ * (`2001:db8::/32`: the first `n` of 128 bits), or one exact address. The
+ * address is read as the address it denotes ({@link readMatchedAddress}), so
+ * an IPv4-mapped IPv6 address on either side compares as its IPv4 address, and
+ * an exact IPv6 entry matches however it is spelled. An address is matched only
+ * against a range of its own family: an IPv4 range never admits a pure IPv6
+ * address, nor an IPv6 range an IPv4 one.
+ *
+ * An entry that names no range matches no address, its own base address
+ * included, so a list holding one admits exactly what its other entries admit.
+ * An `ip` that is not an address matches no entry.
  *
  * One matcher for every door that judges the list: the sign-in gate
  * ({@link AuthManager.isClientIpAllowed}) and the settings save check
  * (`allowed-ip-ranges.ts`) must judge the same address the same way.
  */
 export function ipMatchesRange(ip: string, range: string): boolean {
-  const r = (range || '').trim();
-  if (!r) return false;
+  const parsed = parseIpRange(range);
+  if (!parsed || typeof ip !== 'string') return false;
   const address = readMatchedAddress(ip);
-  const [rawBase, bitsStr] = r.split('/');
-  const base = readMatchedAddress(rawBase!);
-  if (!base || !address) return ip.trim() === rawBase!.trim();
-  if ('v4' in base) {
+  if (!address) return false;
+  if ('v4' in parsed) {
     if (!('v4' in address)) return false;
-    const bits = bitsStr === undefined ? 32 : Number(bitsStr);
-    if (!(bits >= 0 && bits <= 32)) return address.v4 === base.v4; // not an IPv4 prefix → exact base
-    const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
-    return ((address.v4 & mask) >>> 0) === ((base.v4 & mask) >>> 0);
+    const mask = parsed.bits === 0 ? 0 : (~0 << (32 - parsed.bits)) >>> 0;
+    return ((address.v4 & mask) >>> 0) === ((parsed.v4 & mask) >>> 0);
   }
   if (!('v6' in address)) return false;
-  const prefix = bitsStr === undefined ? '128' : bitsStr.trim();
-  const bits = /^\d{1,3}$/.test(prefix) && Number(prefix) <= 128 ? Number(prefix) : 128; // not an IPv6 prefix → exact base
-  return ipv6PrefixEqual(address.v6, base.v6, bits);
+  return ipv6PrefixEqual(address.v6, parsed.v6, parsed.bits);
 }
 
 /**
@@ -1702,6 +1778,16 @@ export class AuthManager {
     // `applyConfigPatch` re-runs it on the merged result.
     assertTrustedAppSchemes(config.trustedAppSchemes);
 
+    // ADR-0069 D5 — the deployment's own allow-list, same boot-loudly
+    // rationale: an entry that names no range is refused here, never dropped
+    // (`assertAllowedIpRanges`). `applyConfigPatch` deliberately does NOT re-run
+    // it: there a refusal keeps the standing list in force instead of the one
+    // the settings binding applies, and the standing list can admit addresses
+    // the stored one does not. A stored or env-pinned entry that names no range
+    // matches no address at the gate instead (`ipMatchesRange`), and the
+    // binding names it.
+    assertAllowedIpRanges(config.allowedIpRanges);
+
     // WebContainer (StackBlitz) compatibility — install a synchronous
     // AsyncLocalStorage polyfill for better-auth's request-state global
     // BEFORE better-auth ever instantiates its own. See the helper for the
@@ -2098,6 +2184,16 @@ export class AuthManager {
    * better-auth itself is created lazily, so changing config before the first
    * request is enough. If an instance already exists, reset it so the next
    * request rebuilds with the new policy.
+   *
+   * An `allowedIpRanges` entry that names no range ({@link parseIpRange}) is
+   * applied as given, not refused as the constructor refuses it: a refusal here
+   * would keep the standing list in force, and that list can admit addresses
+   * the new one does not. The entry matches no address at the gate
+   * ({@link isClientIpAllowed}), so the list admits only what its other
+   * entries admit, and none at all when it has none. This method logs nothing
+   * for it: the settings binding, which applies the stored list through here,
+   * names such an entry at `error`, and a host that patches the list itself is
+   * the one that has to say so.
    */
   applyConfigPatch(
     patch: Partial<AuthManagerOptions>,
@@ -3758,11 +3854,12 @@ export class AuthManager {
    */
   handleRequest(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
     // [#25224 cut 10] The body moved to `auth-manager-request-routing.ts` (see `RequestRoutingHost`).
-    const host: Pick<RequestRoutingHost, 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically'> = {
+    const host: Pick<RequestRoutingHost, 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation'> = {
       betterAuthEndpointPath: (...a) => this.betterAuthEndpointPath(...a),
       getOrCreateAuth: (...a) => this.getOrCreateAuth(...a),
       resolveClientAddress: (...a) => this.resolveClientAddress(...a),
       runSubjectErasureAtomically: (...a) => this.runSubjectErasureAtomically(...a),
+      answerOAuthTokenRevocation: (...a) => this.answerOAuthTokenRevocation(...a),
     };
     return handleRequest.call(host, request, transport);
   }
@@ -4398,9 +4495,18 @@ export class AuthManager {
    * as the 503 it is (`@objectstack/runtime` `oauth-subject-ban.ts`); the
    * token endpoint mints a banned user no token (`oauth-grant-ban-refusal.ts`).
    *
-   * Revocation note: JWT access tokens are not server-tracked, so
-   * revocation takes effect at expiry (≤1h default); refresh tokens ARE
-   * revocable immediately via `/oauth2/revoke`.
+   * Revocation (objectstack-ai/cloud#3606, ruling A): a JWT access token is
+   * not stored, but the consent it was minted under is, and that consent is
+   * read on EVERY call — by (`azp`, `sub`, the `organization_id` claim), one
+   * indexed read through better-auth's own storage adapter
+   * (`mcp-token-revocation.ts` `mcpConsentAdmits`). A token is refused when
+   * its consent is gone, when the consent was created after the token was
+   * issued (revoked, then granted again), when it carries no `azp` to key the
+   * read, and when the read fails (fail closed). So revocation takes effect
+   * on the next request: `/oauth2/revoke` deletes the consent and the
+   * client's refresh family for that user (`answerOAuthTokenRevocation`), and
+   * the Console's `/oauth2/delete-consent` deletes the same row. A server-only
+   * `skip_consent` client has no consent row and is admitted without one.
    *
    * The caller (runtime dispatcher) maps the returned principal through
    * `resolveAuthzContext` — the single shared authorization resolver — so
@@ -4422,6 +4528,27 @@ export class AuthManager {
     token: string,
   ): Promise<{ userId: string; scopes: string[]; clientId?: string; organizationId?: string } | null> {
     // [#25224 cut 9] The body moved to `auth-manager-mcp-access-token.ts` (see `McpAccessTokenHost`).
+    const host: Pick<McpAccessTokenHost, 'getApi' | 'getAuthIssuer' | 'getMcpResourceUrl' | 'isMcpOAuthEnabled' | 'rereadKeyringForUnknownKey' | 'getAuthContext'> = {
+      getApi: (...a) => this.getApi(...a),
+      getAuthIssuer: (...a) => this.getAuthIssuer(...a),
+      getMcpResourceUrl: (...a) => this.getMcpResourceUrl(...a),
+      isMcpOAuthEnabled: (...a) => this.isMcpOAuthEnabled(...a),
+      rereadKeyringForUnknownKey: (...a) => this.rereadKeyringForUnknownKey(...a),
+      getAuthContext: (...a) => this.getAuthContext(...a),
+    };
+    return verifyMcpAccessToken.call(host, token);
+  }
+
+  /**
+   * [objectstack-ai/cloud#3606, ruling A] The `/oauth2/revoke` answer, given
+   * the request (unread) and the provider's response to it — the provider has
+   * already authenticated the client. An MCP access token revoked by the
+   * client it was issued to loses its consent and the client's refresh family
+   * for that user, and is answered 200; another client's token, and an
+   * unknown or invalid token, are answered 200 and change nothing (RFC 7009
+   * §2.1, §2.2). `mcp-token-revocation.ts` carries each branch.
+   */
+  private answerOAuthTokenRevocation(request: Request, vendorResponse: Response): Promise<Response> {
     const host: Pick<McpAccessTokenHost, 'getApi' | 'getAuthIssuer' | 'getMcpResourceUrl' | 'isMcpOAuthEnabled' | 'rereadKeyringForUnknownKey'> = {
       getApi: (...a) => this.getApi(...a),
       getAuthIssuer: (...a) => this.getAuthIssuer(...a),
@@ -4429,7 +4556,22 @@ export class AuthManager {
       isMcpOAuthEnabled: (...a) => this.isMcpOAuthEnabled(...a),
       rereadKeyringForUnknownKey: (...a) => this.rereadKeyringForUnknownKey(...a),
     };
-    return verifyMcpAccessToken.call(host, token);
+    return answerMcpTokenRevocation(
+      {
+        verifyClaims: async (token) => {
+          const principal = (await verifyMcpAccessTokenClaims.call(host, token))?.principal;
+          if (!principal?.clientId) return null;
+          return {
+            clientId: principal.clientId,
+            userId: principal.userId,
+            ...(principal.organizationId ? { organizationId: principal.organizationId } : {}),
+          };
+        },
+        getStore: async () => ((await this.getAuthContext()) as { adapter?: OAuthGrantStore } | undefined)?.adapter,
+      },
+      request,
+      vendorResponse,
+    );
   }
 
   /**
@@ -4936,7 +5078,7 @@ export class AuthManager {
   private resolveActor(
     ctx: any,
     options?: { failedReadThrows?: boolean },
-  ): Promise<{ userId: string; activeOrgId?: string } | null> {
+  ): Promise<{ userId: string; activeOrgId?: string; impersonatedBy?: string } | null> {
     // [#25224 cut 1] The body moved to `auth-manager-actor-guards.ts`; it reads no member of this class.
     return resolveActor(ctx, options);
   }
@@ -5215,12 +5357,13 @@ export class AuthManager {
     // [#25224 cut 4] The body moved to `auth-manager-database-hooks.ts` (see `DatabaseHooksHost`).
     const readConfig = () => this.config;
     const readIdpLocale = () => this.idpLocale;
-    const hookHost: Pick<DatabaseHooksHost, 'audienceLogError' | 'config' | 'idpLocale' | 'isCreatedInThisRequest' | 'linkingContext' | 'settleMembership' | 'settleSelfRegistrationGrant' | 'stampIdentitySource' | 'takeOwnerVerifiedStamp'> = {
+    const hookHost: Pick<DatabaseHooksHost, 'audienceLogError' | 'config' | 'idpLocale' | 'isCreatedInThisRequest' | 'linkingContext' | 'resolveUserAuthGates' | 'settleMembership' | 'settleSelfRegistrationGrant' | 'stampIdentitySource' | 'takeOwnerVerifiedStamp'> = {
       audienceLogError: (...a) => this.audienceLogError(...a),
       get config() { return readConfig(); },
       get idpLocale() { return readIdpLocale(); },
       isCreatedInThisRequest: (...a) => this.isCreatedInThisRequest(...a),
       linkingContext: (...a) => this.linkingContext(...a),
+      resolveUserAuthGates: (...a) => this.resolveUserAuthGates(...a),
       settleMembership: (...a) => this.settleMembership(...a),
       settleSelfRegistrationGrant: (...a) => this.settleSelfRegistrationGrant(...a),
       stampIdentitySource: (...a) => this.stampIdentitySource(...a),

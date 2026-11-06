@@ -11,6 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { sanitizeRowError } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
 import { RestServer } from './rest-server.js';
 
@@ -229,6 +230,27 @@ describe('POST /meta/_migrate-record-currency-codes — the caller\'s organizati
         // Idempotent: a second preview finds nothing left.
         const again = await boot(engine, ADMIN_A).call({ object: 'deal', field: 'amount', code: 'USD' });
         expect(again.body).toMatchObject({ codeless: 0, written: 0 });
+    });
+
+    /**
+     * [#30816] A driver's own throw on one row reaches the tenant admin as the
+     * import row's cleaned sentence (`sanitizeRowError`), never the driver's
+     * SQL, constraint or column names; the other rows are still written.
+     */
+    it('a driver-shaped failure on one row answers the cleaned sentence, not the driver\'s text', async () => {
+        const raw = 'update "deal" set "currency_code" = $1 where "id" = $2 - '
+            + 'value too long for type character varying(3)';
+        vi.mocked(d.driver.update).mockImplementation(async (object: string, id: string, data: Record<string, unknown>) => {
+            if (id === 'a2') throw new Error(raw);
+            const row = { ...d.storeFor(object).get(id), ...data, id };
+            d.storeFor(object).set(id, row);
+            return row;
+        });
+        const answer = await boot(engine, ADMIN_A).call({ object: 'deal', field: 'amount', code: 'USD', apply: true });
+        expect(answer.status).toBe(200);
+        expect(answer.body).toMatchObject({ codeless: 2, written: 1, failures: [{ recordId: 'a2', error: sanitizeRowError(raw) }] });
+        expect(answer.body.failures[0].error).not.toMatch(/update|"deal"|"currency_code"|\$1/);
+        expect(deal('a1')?.currency_code).toBe('USD');
     });
 
     it('`isSystem` with a current organization passes the capability gate and stays in that organization', async () => {

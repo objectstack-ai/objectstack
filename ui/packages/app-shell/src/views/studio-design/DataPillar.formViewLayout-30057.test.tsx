@@ -24,7 +24,10 @@
  *  - a `create` form view beside the default: New and Edit pick between them;
  *  - Preview lays the form out by the same form view;
  *  - a read-only base: the edit is saved into the pair as a declared override
- *    of the base's view (ADR-0146 D2).
+ *    of the base's view (ADR-0146 D2);
+ *  - objectstack#30859: a pending draft served translated (zh-CN) is edited
+ *    and saved as stored, with the author's labels; one whose stored copy the
+ *    layers do not serve installs no buffer and is shown.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -45,6 +48,12 @@ const srv = vi.hoisted(() => ({
   shellObjects: [] as Array<Record<string, unknown>>,
   /** Stored view items by name (the published layer the Studio reads). */
   views: new Map<string, Record<string, unknown>>(),
+  /**
+   * objectstack#30859 — pending view drafts by name: `served` is what the
+   * `?state=draft` read answers (translated for the console's locale), `stored`
+   * the layered read's `draft` layer (as the author wrote it; absent: unserved).
+   */
+  drafts: new Map<string, { served: Record<string, unknown>; stored?: Record<string, unknown> }>(),
 }));
 
 const dealObject = () => ({
@@ -109,9 +118,13 @@ const mockClient = {
   listDrafts: vi.fn(async () => []),
   layered: vi.fn(async (type: string, name: string) => {
     const row = type === 'view' ? srv.views.get(name) : dealObject();
-    return row ? { effective: row, code: row } : null;
+    const stored = type === 'view' ? srv.drafts.get(name)?.stored : undefined;
+    return row ? { effective: row, code: row, ...(stored ? { draft: stored } : {}) } : null;
   }),
-  getDraft: vi.fn(async () => null),
+  getDraft: vi.fn(async (type: string, name: string) => {
+    const pending = type === 'view' ? srv.drafts.get(name) : undefined;
+    return pending ? { item: pending.served, version: 'v7' } : null;
+  }),
   get: vi.fn(async () => null),
   save: vi.fn(async () => ({ ok: true, version: 'v2', state: 'draft' })),
 };
@@ -168,6 +181,7 @@ function customizationOf(): StudioBaseCustomization {
 
 beforeEach(() => {
   srv.views.clear();
+  srv.drafts.clear();
   srv.shellObjects = [];
 });
 
@@ -284,5 +298,51 @@ describe('the Form tab lays out the form the app opens (objectstack#30057)', () 
     expect((body.config as { sections: unknown[] }).sections).toHaveLength(3);
     expect(customization.ensure).toHaveBeenCalledTimes(1);
     expect(saves().some(([ty]) => ty === 'object' || ty === 'object_extension')).toBe(false);
+  });
+});
+
+/** The default view's pending draft as a zh-CN console's `?state=draft` read serves it. */
+const translatedDraft = () => {
+  const item = defaultViewItem();
+  const [basic, money] = item.config.sections;
+  return {
+    ...item,
+    label: '商机表单',
+    config: { ...item.config, sections: [{ ...basic, label: '基本信息' }, { ...money, label: '金额信息' }] },
+  };
+};
+
+describe('a pending form view draft is edited as stored, not as served (objectstack#30859)', () => {
+  it('zh-CN: the canvas and the saved view carry the author’s labels, never the served translation', async () => {
+    serveObject([defaultViewItem()]);
+    srv.drafts.set(`${OBJECT}.form`, { served: translatedDraft(), stored: defaultViewItem() });
+    await openForm();
+
+    await waitFor(() => expect(sectionTitles()).toEqual(['Basic info', 'Money details']));
+    expect(mockClient.layered).toHaveBeenCalledWith('view', `${OBJECT}.form`, { packageId: PKG });
+
+    await userEvent.click(screen.getByTestId('form-designer-add-section-footer'));
+    await waitFor(() => expect(saves().length).toBe(1), { timeout: 4000 });
+    const [type, name, body, opts] = saves()[0];
+    expect([type, name, opts.packageId]).toEqual(['view', `${OBJECT}.form`, PKG]);
+    expect(body.label).toBe('Deal form');
+    expect((body.config as { sections: Array<{ label: string }> }).sections.map((x) => x.label)).toEqual([
+      'Basic info',
+      'Money details',
+      NEW_GROUP,
+    ]);
+    expect(JSON.stringify(body)).not.toMatch(/基本信息|金额信息|商机表单/);
+  });
+
+  it('a pending draft the layers do not serve: no buffer is installed, the refusal is shown, nothing is saved', async () => {
+    serveObject([defaultViewItem()]);
+    srv.drafts.set(`${OBJECT}.form`, { served: translatedDraft() });
+    await openForm();
+
+    expect(await screen.findByTestId('form-view-failure')).toHaveTextContent(
+      t('engine.studio.refusal.draftUnreadable', 'en'),
+    );
+    expect(sectionTitles()).not.toContain('基本信息');
+    expect(saves().some(([ty]) => ty === 'view')).toBe(false);
   });
 });

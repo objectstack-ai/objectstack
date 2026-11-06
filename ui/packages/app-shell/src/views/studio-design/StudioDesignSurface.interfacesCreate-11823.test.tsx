@@ -91,10 +91,12 @@ const mockClient = {
   ),
   layered: vi.fn(async (type: string, name: string) => {
     if (type === 'app') {
-      return { effective: { name: 'acme_app', label: 'Acme', active: true, navigation: NAV } };
+      return { effective: { name: 'acme_app', label: 'Acme', active: true, navigation: NAV }, draft: draftRows[`app:${name}`] ?? null };
     }
     const row = (published[type] ?? []).find((r) => r.name === name);
-    return row ? { effective: row } : { code: null, overlay: null, overlayScope: null, effective: null };
+    // As the server serves an admitted author: the pending draft as stored (objectstack#30859).
+    const draft = draftRows[`${type}:${name}`] ?? null;
+    return row ? { effective: row, draft } : { code: null, overlay: null, overlayScope: null, effective: null, draft };
   }),
   getDraft: vi.fn(async (type: string, name: string) => {
     const body = draftRows[`${type}:${name}`];

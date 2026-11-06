@@ -403,12 +403,38 @@ export const IterateSchema = z.strictObject({
   expectDelta: ExpectDeltaSchema,
 });
 
+// ── The app code and its namespace ──────────────────────────────────────────
+
+/**
+ * The card's app code: 2–8 lowercase letters, no digit, no underscore. The
+ * loader also refuses two cards sharing one (uniqueness is a property of the
+ * library, so it is judged across the directory, never by this schema).
+ */
+export const AppCodeSchema = z
+  .string({ error: (issue) => (issue.input === undefined ? 'a card names its app `code`: 2–8 lowercase letters, e.g. `crm`' : undefined) })
+  .regex(/^[a-z]{2,8}$/, 'must be 2–8 lowercase letters (no digit, no underscore), e.g. `crm`');
+
+/** What every scenario app's namespace starts with. */
+export const SCENARIO_NAMESPACE_PREFIX = 'demo';
+
+/**
+ * The namespace a card's app lives in, wherever it is built, scored or
+ * exported: `demo` + the card's code (`democrm`). Every item the app declares
+ * is named `<namespace>_<short>`, and the card's own names (`account`) are read
+ * relative to it (ruling A on #30292).
+ */
+export function scenarioNamespace(card: { code: string }): string {
+  return `${SCENARIO_NAMESPACE_PREFIX}${card.code}`;
+}
+
 // ── The card ────────────────────────────────────────────────────────────────
 
 export const ScenarioCardSchema = z.strictObject({
   $comment: z.string().optional(),
   /** Equals the file's basename. */
   id: MachineNameSchema,
+  /** The app code; the app's namespace is {@link scenarioNamespace}. */
+  code: AppCodeSchema,
   title: z.string().min(1),
   /** Where the scenario comes from — the open set holds generic scenarios only. */
   provenance: z.string().min(1),

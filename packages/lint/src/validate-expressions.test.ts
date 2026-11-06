@@ -4480,6 +4480,11 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // from the flow's collected names and the root judge's `provable`, and
       // its screen-field name set (Set methods) — never read off metadata.
       'flowBare', 'screenFields',
+      // [#30692] A field group predicate's CEL text and the gate suffix a
+      // `requiresFeature` lowering appends (`withoutLoweredFeatureGate`).
+      // Their keys are String methods, never metadata keys; the predicate is
+      // read off the tabled `fieldGroup` receiver.
+      'loweredSource', 'loweredTail',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });

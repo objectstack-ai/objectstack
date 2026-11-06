@@ -55,6 +55,7 @@ import { SINGLE_OPTION_TYPES, summaryFunctionReadsField } from '@objectstack/spe
 
 import type { ScenarioCard } from '../schema.js';
 import { artifactToEvalGraph } from './scenario-graph.js';
+import { gradeItemNames } from './scenario-naming.js';
 import {
   PLATFORM_OBJECT_PREFIX,
   measureChecks,
@@ -465,7 +466,9 @@ export interface ScenarioArtifactScore {
   shape: ScoreResult;
   tags: TagVerdict[];
   agentActions: CheckResult[];
-  /** Checks passed across `expect`, the scored tags and the agent actions. */
+  /** One failing check per bare non-object item name ({@link gradeItemNames}); empty when no namespace was given. */
+  naming: CheckResult[];
+  /** Checks passed across `expect`, the scored tags, the agent actions and the naming rule. */
   passed: number;
   total: number;
   /** passed / total; `null` when nothing was scored — never a vacuous 1. */
@@ -474,20 +477,25 @@ export interface ScenarioArtifactScore {
   unscored: Array<{ tag: string; reason: string }>;
 }
 
-/** Score one built artifact against one card: shape, capability tags and agent actions. */
-export function scoreScenarioArtifact(artifact: unknown, card: ScenarioArtifactCard): ScenarioArtifactScore {
+/**
+ * Score one built artifact against one card: shape, capability tags and agent
+ * actions, plus — given the app's `namespace` — every bare non-object item name.
+ */
+export function scoreScenarioArtifact(artifact: unknown, card: ScenarioArtifactCard, opts: { namespace?: string } = {}): ScenarioArtifactScore {
   const facts = readArtifactFacts(artifact);
   const expect = scoreGraph(facts.graph, card.expect);
   const shape = scoreGraphShape(facts.graph, deriveShape(card.expect));
   const tags = gradeCapabilityTags(facts, card);
   const agentActions = gradeAgentActions(facts, card.run.agentActions ?? []);
-  const all = [...expect.checks, ...tags.flatMap((t) => t.checks), ...agentActions];
+  const naming = opts.namespace === undefined ? [] : gradeItemNames(artifact, opts.namespace);
+  const all = [...expect.checks, ...tags.flatMap((t) => t.checks), ...agentActions, ...naming];
   const passed = all.filter((c) => c.pass).length;
   return {
     expect,
     shape,
     tags,
     agentActions,
+    naming,
     passed,
     total: all.length,
     score: all.length === 0 ? null : passed / all.length,

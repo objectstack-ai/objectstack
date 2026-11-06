@@ -30,6 +30,7 @@ import { pruneUnregisteredRecordPageObjects, recordPageChildObjects } from './re
 import { stripDiscussionNodes, hasExplicitAttachments, hasExplicitApprovals } from '../utils/pageSchemaIntrospect.js';
 import { ActionConfirmDialog, type ConfirmDialogState } from './ActionConfirmDialog.js';
 import { ActionParamDialog, type ParamDialogState } from './ActionParamDialog.js';
+import { resolveParamDialogCompanion } from './actionDialogCompanion.js';
 import { ActionResultDialog, type ResultDialogState } from './ActionResultDialog.js';
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
@@ -1601,6 +1602,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // The runner's `run`, as `useConsoleActionRuntime` forwards it: a
         // refused run keeps what the user typed (objectui#13161).
         run,
+        // The host-composed panel above the params, picked as
+        // `useConsoleActionRuntime` picks it (objectstack#30205).
+        companion: resolveParamDialogCompanion(objForI18n, action?.name, row),
       });
     });
   }, [objectName, objectDef, objects, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionSubmitText, actionCancelText, language]);

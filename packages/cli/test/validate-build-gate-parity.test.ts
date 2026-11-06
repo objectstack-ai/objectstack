@@ -379,6 +379,12 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
   // anything behind.
   'An advisory about the local dev database, not the stack — says what the artifact leaves behind; judges no metadata and refuses nothing':
     ['readLocalCustomizations', 'localCustomizationNotice'],
+  // `os build`'s next-step line (`utils/next-steps.ts`): a constant string
+  // printed after a successful build, naming `os deploy`. It reads nothing and
+  // refuses nothing; `os validate` writes no artifact, so it has no next step
+  // to name.
+  'The next step after a successful build — a fixed line naming the command that follows; reads and judges nothing':
+    ['BUILD_NEXT_STEP'],
   'Presentation — renders, formats or serialises a verdict something else reached; judges nothing':
     [
       'printHeader',

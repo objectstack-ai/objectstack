@@ -525,7 +525,7 @@
       "source": [
         "packages/spec/src/data/filter.zod.ts#AST_OPERATOR_MAP (AST_OPERATOR_MAP / FieldOperatorsSchema — the operator variant source)",
         "packages/spec/src/data/query.zod.ts#QueryAST (QueryAST keys)",
-        "packages/metadata-protocol/src/protocol.ts#UNSUPPORTED_QUERY_PARAM (supported $-params + UNSUPPORTED_QUERY_PARAM #2926 ⑩, INVALID_FIELD #4134)",
+        "packages/metadata-protocol/src/protocol-data-crud.ts#UNSUPPORTED_QUERY_PARAM (supported $-params + UNSUPPORTED_QUERY_PARAM #2926 ⑩, INVALID_FIELD #4134)",
         "packages/spec/src/data/filter.zod.ts#checkFilterConditionComparands (the request-schema refusal of a scalar list comparand on the POST door, #20116 — the $-object spelling, located at query.where.<field>.$nin)",
         "packages/spec/src/data/data-engine.zod.ts#lowerFoldedTransportValues (the AST/FilterArray spelling on the POST door, refused at query.where when it cannot be lowered)",
         "packages/spec/src/data/data-engine.zod.ts#QueryTransportParamsSchema (`filter` is a declared transport spelling of `where` — why negative[0] no longer probes with it)",

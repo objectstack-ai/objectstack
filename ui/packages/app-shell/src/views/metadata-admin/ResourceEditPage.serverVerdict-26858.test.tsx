@@ -30,6 +30,8 @@ const mockClient = vi.hoisted(() => ({
     overlay: server.draft,
     overlayScope: 'env',
     effective: server.draft,
+    // The pending draft as stored (objectstack#29814).
+    draft: server.draft,
     _diagnostics: { valid: true },
     editable: true,
     deletable: true,
