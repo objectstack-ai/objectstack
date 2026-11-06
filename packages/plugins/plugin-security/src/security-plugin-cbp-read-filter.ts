@@ -45,12 +45,30 @@
  * (below).
  *
  * Nothing re-exports this module, so the published surface does not move.
+ *
+ * ## Since the move
+ *
+ * [ADR-0055 §1 and §2 as amended · #30905 ruling A] The leaf of an OPTIONAL
+ * master grew its null-master arm here, the one chokepoint every read door
+ * composes: `computeControlledByParentFilter` takes the caller's resolved
+ * permission sets (for View All on the detail) and the host hands it
+ * `permissionEvaluator`. A required master's leaf is unchanged.
  */
 
 import type { SecurityPlugin } from './security-plugin.js';
 import { CBP_MAX_CHAIN_DEPTH } from './security-plugin.js';
 import { ReadableIds } from '@objectstack/spec/data';
+import type { PermissionSet } from '@objectstack/spec/security';
 import { RLS_DENY_FILTER } from './rls-compiler.js';
+
+/**
+ * [ADR-0055 §2 as amended · #30905 ruling A] The column an optional master's
+ * null-master arm compares the caller against: the registry's injected
+ * per-record owner, the column `CbpRelation.ownerColumn` reports present —
+ * the one the relation resolver's `OWNER_COLUMN` and the sharing service's
+ * `OWNER_FIELD` name.
+ */
+const CBP_OWNER_COLUMN = 'owner_id';
 
 /**
  * [ADR-0139 D1] The engine verbs whose `where` may carry a `ReadableIds`
@@ -81,6 +99,7 @@ type CbpRelation = NonNullable<ReturnType<SecurityPlugin['resolveCbpRelation']>>
  */
 export interface CbpReadFilterHost {
   readonly logger: SecurityPlugin['logger'];
+  readonly permissionEvaluator: SecurityPlugin['permissionEvaluator'];
   readonly ql: SecurityPlugin['ql'];
   controlledByParentChainRefusal: SecurityPlugin['controlledByParentChainRefusal'];
   resolveCbpRelation: SecurityPlugin['resolveCbpRelation'];
@@ -88,11 +107,17 @@ export interface CbpReadFilterHost {
 
 /** The body of `SecurityPlugin#computeControlledByParentFilter`; the method's docblock there is its contract. */
 export function computeControlledByParentFilter(
-  this: Pick<CbpReadFilterHost, 'controlledByParentChainRefusal' | 'logger' | 'ql' | 'resolveCbpRelation'>,
+  this: Pick<CbpReadFilterHost, 'controlledByParentChainRefusal' | 'logger' | 'permissionEvaluator' | 'ql' | 'resolveCbpRelation'>,
   object: string,
   /** The engine verb the answer is composed onto; a write verb answers `null` (ADR-0139 D1). */
   operation: string,
   context: any,
+  /**
+   * The permission sets resolved for `context`'s principal — read for View
+   * All on the detail, by an optional master's null-master arm and nothing
+   * else (ADR-0055 §2 as amended).
+   */
+  permissionSets: PermissionSet[],
 ): Record<string, unknown> | null {
   if (!this.ql || !context?.userId) return null;
   const schema = typeof this.ql.getSchema === 'function' ? this.ql.getSchema(object) : null;
@@ -128,7 +153,35 @@ export function computeControlledByParentFilter(
     );
     return { [rel.fk]: { $in: [] } };
   }
-  return { [rel.fk]: { $in: ReadableIds.of(rel.master) } };
+  const masterArm = { [rel.fk]: { $in: ReadableIds.of(rel.master) } };
+  // A required master: its rows are read through it and nothing else, the
+  // leaf byte-identical to before ruling A of #30905.
+  if (!rel.optional) return masterArm;
+  // [ADR-0055 §2 as amended · #30905 ruling A] An OPTIONAL master: a row whose
+  // reference is empty belongs to no master, so the master arm never matches
+  // it (`$in` never matches an empty value) and a second arm, OR-ed beside the
+  // master arm and confined to such rows, reads it. The `$or` is this one
+  // layer's answer, ANDed by every caller with the other layers as before — so
+  // it is still under the Layer-0 tenant wall, the detail's own RLS and its
+  // sharing layer. Neither arm reaches the other's rows: the master arm
+  // matches only a non-empty reference, the null-master arm only an empty one.
+  //   - View All on the DETAIL (`viewAllRecords` / `modifyAllRecords`, the
+  //     super-user read bypass on this object) reads every such row. It is
+  //     confined to them: it does not open the master arm, which stays the
+  //     master's own read answer (unchanged).
+  //   - Otherwise the row's owner reads it: `owner_id` equal to the caller.
+  //     A row with no owner (an ADR-0142 queue row) matches nobody, and an
+  //     object that carries no `owner_id` column (`ownership` other than
+  //     `'user'`) has no owner arm, so its such rows are View All's alone.
+  // `{ fk: null }` is the has-no-value predicate (`$eq: null`), the spelling
+  // the sharing service's queue arm and the readable-ids conformance table use.
+  const nullMaster = { [rel.fk]: null };
+  const nullMasterArm = this.permissionEvaluator.hasSuperuserReadBypass(object, permissionSets)
+    ? nullMaster
+    : rel.ownerColumn
+      ? { $and: [nullMaster, { [CBP_OWNER_COLUMN]: context.userId }] }
+      : null;
+  return nullMasterArm ? { $or: [masterArm, nullMasterArm] } : masterArm;
 }
 
 /** The body of `SecurityPlugin#controlledByParentChainRefusal`; the method's docblock there is its contract. */

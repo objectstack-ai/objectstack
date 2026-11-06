@@ -44,6 +44,7 @@ import type {
   ControlledByParentWriteUnresolvedReason,
 } from '@objectstack/spec/contracts';
 import type { FieldMaskingRule } from '@objectstack/spec/data';
+import { controlledByParentMasterOf } from '@objectstack/spec/data';
 import type { PermissionSet } from '@objectstack/spec/security';
 import type {
   AuthzPosture,
@@ -1135,7 +1136,8 @@ const MASTER_DENIAL_LEG_DETAIL: Record<ControlledByParentWriteDenialLeg, string>
 const MASTER_UNRESOLVED_DETAIL: Record<ControlledByParentWriteUnresolvedReason, { condition: string; answer: string }> = {
   master_detail_relation_missing: {
     condition:
-      'the object declares controlled_by_parent without exactly one required master_detail field to derive access from',
+      'the object declares controlled_by_parent without one master_detail field to derive access from (exactly ' +
+      'one declared required: true, or, with none, its only master_detail declared required: false)',
     answer: '422 INVALID_METADATA',
   },
   record_not_found: { condition: 'the record does not exist', answer: '404 RECORD_NOT_FOUND' },
@@ -1144,6 +1146,28 @@ const MASTER_UNRESOLVED_DETAIL: Record<ControlledByParentWriteUnresolvedReason, 
 
 const MASTER_DERIVED = 'Write access to this record derives from its master (controlled_by_parent, ADR-0055)';
 const MASTER_READ_DERIVED = 'Read access to this record derives from its master (controlled_by_parent, ADR-0055)';
+
+/**
+ * [ADR-0055 §1 and §2 as amended · #30905 ruling A] The master reference key
+ * of `record` when `object`'s master is OPTIONAL and that reference is empty —
+ * the record the read leaf's null-master arm reads — else `undefined`. The
+ * master is judged on the registry's schema by the spec's own resolver
+ * (`controlledByParentMasterOf`), the one the security plugin's relation
+ * resolver picks an optional master with. Empty is `null` or absent, what the
+ * arm's `{ fk: null }` matches.
+ */
+function nullMasterReferenceOf(
+  deps: Pick<ExplainEngineDeps, 'ql'>,
+  object: string,
+  record: Record<string, unknown> | null | undefined,
+): string | undefined {
+  if (record == null) return undefined;
+  let schema: any;
+  try { schema = deps.ql?.getSchema?.(object) ?? null; } catch { schema = null; }
+  const master = controlledByParentMasterOf(schema?.fields);
+  if (!master?.optional) return undefined;
+  return record[master.field] == null ? master.field : undefined;
+}
 
 /**
  * [ADR-0055] The record-grained writes whose verdict on a `controlled_by_parent`
@@ -2008,18 +2032,52 @@ async function applyRecordAttribution(
     ? await settle(deps.recordAbsentToCaller(object, recordId, context))
     : undefined;
   const masterReadFault = masterReadOrFault === DEPENDENCY_FAULT;
+  // [ADR-0055 §2 as amended · #30905 ruling A] A record of an OPTIONAL master
+  // whose master reference is empty names no master: the read door reads it
+  // through the null-master arm (its owner, or View All on the object), never
+  // through a master. Read off the registry by the spec's own resolver, the
+  // one the door's relation resolver picks an optional master with, so the
+  // narration names the arm the door answered on; the verdict is still the
+  // door's own read above.
+  const nullMasterFk = masterReadOrFault === true || masterReadOrFault === false
+    ? nullMasterReferenceOf(deps, object, record as Record<string, unknown>)
+    : undefined;
+  const delegatorComposed = context?.onBehalfOf?.userId != null
+    ? " (on this on-behalf-of read, the delegator's read scope is composed in as well)"
+    : '';
   const masterReadRefusal: { outcome: ExplainRecordAttribution['outcome']; detail: string } | undefined =
     masterReadOrFault === true
       ? {
           outcome: 'excluded',
-          detail: `${MASTER_READ_DERIVED}: the read door, asked by this principal, does not return the record, though ` +
-            "every row-level layer above admits it, so its master is outside the principal's read scope" +
-            (context?.onBehalfOf?.userId != null
-              ? " (on this on-behalf-of read, the delegator's read scope is composed in as well)"
-              : '') +
-            '. The record is reported NOT visible, as the read door answers.',
+          detail: nullMasterFk !== undefined
+            ? `${MASTER_READ_DERIVED} when it names one, and it names none: its master reference '${nullMasterFk}' ` +
+              'is empty, so it is read only by its owner and by a holder of View All on the object. The read door, ' +
+              'asked by this principal, does not return it, though every row-level layer above admits it' +
+              (record != null && (record as Record<string, unknown>)[OWNER_FIELD] == null
+                ? ': it has no owner (a queue row), so View All alone reads it'
+                : '') +
+              delegatorComposed +
+              '. The record is reported NOT visible, as the read door answers.'
+            : `${MASTER_READ_DERIVED}: the read door, asked by this principal, does not return the record, though ` +
+              "every row-level layer above admits it, so its master is outside the principal's read scope" +
+              delegatorComposed +
+              '. The record is reported NOT visible, as the read door answers.',
         }
       : undefined;
+  // The same arm, when the door DOES return such a record: which half of the
+  // null-master arm admitted it. Narration only; the layer's outcome is the
+  // one the rest of this pass computes.
+  const masterReadNullArmAdmits: string | undefined = masterReadOrFault === false && nullMasterFk !== undefined
+    ? `${MASTER_READ_DERIVED} when it names one, and it names none: its master reference '${nullMasterFk}' is ` +
+      'empty, and the read door returns it to this principal through the null-master arm — ' +
+      (vamaEffective
+        ? `View All on the object [${vamaSets.join(', ')}]`
+        : ownerIsMe
+          ? 'the principal owns it'
+          : 'its owner or View All on the object') +
+      delegatorComposed +
+      '. No master is consulted for it.'
+    : undefined;
   // One master leg per verb: the write check for a by-id write, the read
   // door's master scope for a read. At most one of the two is ever asked.
   const masterLegRefusal = masterRefusal ?? masterReadRefusal;
@@ -2096,7 +2154,7 @@ async function applyRecordAttribution(
       rules: shareRules,
       // A fault is only ever recorded against an existing record, and the
       // master leg [ADR-0055] is only ever asked of one.
-      detail: sharingFaultDetail ?? masterLegRefusal?.detail ?? (!recordExists
+      detail: sharingFaultDetail ?? masterLegRefusal?.detail ?? masterReadNullArmAdmits ?? (!recordExists
         ? 'Record not found; sharing not evaluated.'
         : owd.effect !== 'private'
           ? 'Baseline is not private — sharing adds nothing beyond it for this record.'

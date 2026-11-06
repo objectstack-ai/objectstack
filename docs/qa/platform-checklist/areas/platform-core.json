@@ -2068,7 +2068,7 @@
         "examples/app-showcase/src/data/extensions/account.extension.ts#AccountExtension (AccountExtension — the shipped fixture, priority 210)",
         "packages/objectql/src/registry.ts#mergeObjectDefinitions (mergeObjectDefinitions — additive fields fold, the spread) + vicinity via engine: packages/objectql/src/engine.ts#registerApp (the objectExtensions loop registering 'extend' contributors — re-pointed #18104: objectExtensions is read off the manifest here, a member access; the loop this item means runs inside registerApp, which this file declares)",
         "packages/spec/src/data/object.zod.ts#ObjectExtensionSchema (ObjectExtensionSchema — what an extension may carry, the #4001 silently-dropped history, 'Fields to add/override', priority wins-on-conflict; defineObjectExtension)",
-        "packages/metadata-protocol/src/protocol.ts#refusal (the NOT_OVERRIDABLE refusal: a packaged item is sealed by its managed package, ADR-0131 D6)",
+        "packages/metadata-protocol/src/protocol-write-gates.ts#refusal (the NOT_OVERRIDABLE refusal: a packaged item is sealed by its managed package, ADR-0131 D6)",
         "packages/plugins/plugin-auth/src/managed-extension-fields.ts + managed-extension-fields.test.ts (the build-time collision gate — better-auth-managed objects ONLY; adopted by ADR-0126 §3 as Regime E prior art, NOT a generic gate)",
         "docs/adr/0126-packaged-metadata-customization-model.md §2-§3 (Regime E: additive contributions at package grain, base never edited, install-grain not per-org)",
         "content/docs/capabilities/integrations.mdx + content/docs/build-without-code.mdx (the E1 docs claim this item grounds)",

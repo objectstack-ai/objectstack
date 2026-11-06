@@ -231,10 +231,14 @@ describe('[#27506] a same-origin api action is dispatched through the action doo
     await expect(stack.signIn(TARGET_EMAIL, TARGET_PASS)).rejects.toThrow(/signIn failed/);
   }, 120_000);
 
-  it('the target still authorizes: a plain member is refused by ban-user\'s own 403; anonymous meets the 401 floor', async () => {
+  it('a plain member is refused 403 at the door by ban_user\'s declared gate (#30771); anonymous meets the 401 floor', async () => {
     const member = await stack.signUp(MEMBER_EMAIL, 'Member-Pass-123');
     const refused = await call({ token: member }, 'POST', '/actions/sys_user/ban_user', { recordId: targetUserId });
     expect(refused.status, refused.text).toBe(403);
+    // The door's own sentence (`requiredPermissions`, ADR-0066 D4), so ban-user
+    // is never called; the target still judges the rung for every caller the
+    // door admits (the admin cases above).
+    expect(String(refused.json?.error?.message)).toContain('requires capability [manage_users]');
     expect(await isBanned()).toBe(false);
 
     const anonymous = await call(null, 'POST', '/actions/sys_user/ban_user', { recordId: targetUserId });
