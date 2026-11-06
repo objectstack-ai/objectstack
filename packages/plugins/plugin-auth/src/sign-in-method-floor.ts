@@ -364,8 +364,8 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
   },
   'pt-BR': {
     emailPassword:
-      'Desativar o e-mail e a senha deixaria sem nenhuma forma de entrar, então todos ficariam bloqueados, inclusive ' +
-      'os administradores. Mantenha ou configure outro método de login, antes ou neste mesmo salvamento: o login com ' +
+      'Desativar o e-mail e a senha deixaria sem nenhuma forma de entrar, então todos ficariam bloqueados, inclusive os ' +
+      'administradores. Mantenha ou configure outro método de login, antes ou neste mesmo salvamento: o login com ' +
       'Google desta página (ID e segredo do cliente), outro provedor social ou OIDC, um provedor de identidade de SSO ' +
       'corporativo ou o login por número de telefone.',
     google:
