@@ -40,9 +40,10 @@
 // until #28367 the agent's forward was refused by name (#28178). Now the
 // forward carries a credential the server mints for that one forward, and the
 // identity mount shows better-auth a request-scoped view of the delegating
-// user: the agent's E call and its confirmed C call are SERVED, and a plain
-// member's agent is refused by the identity route itself (the intersection at
-// the target). ⛔ No session is minted for the agent, and its token never
+// user: the agent's E call and its confirmed C call are SERVED. A plain
+// member's agent no longer reaches the target for `ban_user`: the action
+// declares its gate (#30771), so it is not listed and the door refuses it.
+// ⛔ No session is minted for the agent, and its token never
 // reaches the target.
 //
 // `OS_SCIM_ENABLED=true` precedes the boot because `/admin/*` 501s without
@@ -315,13 +316,28 @@ describe('[#27681, #27900] sys_user identity actions over MCP: what each bucket\
     expect((await userRow(adminUserId))?.name).toBe('Renamed By Session');
   }, 120_000);
 
-  it('the intersection at the target: a plain member\'s agent, confirmed, passes the action door and is refused by the identity route itself; nobody is banned', async () => {
-    const refused = await tool(memberAgent, 'run_action', {
+  it('a plain member\'s agent is not listed ban_user and is refused at the door, scoped or by name; nobody is banned (#30771)', async () => {
+    // `ban_user` declares its gate (`requiredPermissions: ['manage_users']`),
+    // which the member's agent does not hold, so `list_actions` leaves it out.
+    // Before #30771 it was listed, passed the action door and was refused by
+    // the identity route itself.
+    const onUser = await listedOnUser(memberAgent);
+    expect(onUser.map((a) => a.name)).not.toContain('ban_user');
+
+    // With objectName, the tool layer admits a `sys_*` action only where the
+    // listing does, so it answers the system-object refusal.
+    const scoped = await tool(memberAgent, 'run_action', {
       actionName: 'ban_user', objectName: 'sys_user', recordId: agentTargetUserId, params: { banReason: 'member agent' }, confirm: true,
     });
-    expect(refused.isError, refused.text).toBe(true);
-    expect(refused.payload?.error?.status, refused.text).toBe(403);
-    expect(messageOf(refused)).not.toMatch(/OAuth access token|scope/);
+    expect(scoped.isError, scoped.text).toBe(true);
+    expect(messageOf(scoped)).toContain('system object "sys_user" is not exposed via MCP');
+
+    // By name, the runtime resolves it and its capability gate answers 403.
+    const byName = await tool(memberAgent, 'run_action', {
+      actionName: 'ban_user', recordId: agentTargetUserId, params: { banReason: 'member agent' }, confirm: true,
+    });
+    expect(byName.isError, byName.text).toBe(true);
+    expect(messageOf(byName)).toContain('requires capability [manage_users]');
     expect(await isBanned(agentTargetUserId)).toBe(false);
   }, 120_000);
 
