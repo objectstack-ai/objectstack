@@ -36,7 +36,9 @@ import { MCPServerRuntime, setRuntimeObjectView } from './mcp-server-runtime.js'
 import { PACKAGE_VERSION, DEFAULT_SERVER_VERSION } from './package-version.js';
 import type { MCPServerRuntimeConfig, McpMergedMetadataRead } from './mcp-server-runtime.js';
 import type { ToolRegistry } from './types.js';
+import type { ObjectSchemaMaskSecuritySurface } from '@objectstack/metadata-core';
 import {
+  callerObjectView,
   createStdioDataBridge,
   enforceApiExposure,
   GATED_ACTIONS,
@@ -458,6 +460,21 @@ export class MCPServerPlugin implements Plugin {
         return undefined;
       }
     };
+    // [ADR-0106] The `security` service the object-schema mask asks for the
+    // stdio principal's readable fields — resolved at each use, as the
+    // protocol is, and `undefined` on a host that registers none (no
+    // field-level posture there, so the schema is served as declared).
+    const securityReads = (): ObjectSchemaMaskSecuritySurface | undefined => {
+      try {
+        return ctx.getService<ObjectSchemaMaskSecuritySurface>('security') ?? undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    // [ADR-0106 D1/D5] The stdio principal, once this transport has one: the
+    // object resources below serve their schemas to it through the same mask
+    // `list_objects` / `describe_object` do.
+    let schemaPrincipal: (() => Promise<ExecutionContext>) | undefined;
 
     // ── stdio auto-start decision (opt-in, its OWN switch) ──
     // Deliberately stricter than the HTTP-surface default (`isMcpServerEnabled`,
@@ -729,6 +746,7 @@ export class MCPServerPlugin implements Plugin {
           metadataService,
           protocol: protocolReads,
           resolvePrincipal,
+          security: securityReads,
           keyedDigest: storedHashDigest,
         });
       } else {
@@ -791,6 +809,7 @@ export class MCPServerPlugin implements Plugin {
           storedHashDigest(),
         );
       };
+      schemaPrincipal = resolvePrincipal;
       ctx.logger.info(
         `[MCP] stdio transport principal-bound to OS_MCP_STDIO_API_KEY identity ${initial.userId} (RLS/FLS/tenant applied)`,
       );
@@ -801,7 +820,17 @@ export class MCPServerPlugin implements Plugin {
       // `describe_object` answer from (`stdioObjectView`), never the metadata
       // service alone: on a kernel with an `environmentId` that service holds
       // no copy of an object a package registered during the boot.
-      setRuntimeObjectView(this.runtime, stdioObjectView({ metadataService, protocol: protocolReads }));
+      // [ADR-0106 D1/D5] …served to the stdio principal through the
+      // object-schema mask (`callerObjectView`), the view the tools read, so
+      // a resource never names a field the tools withhold. With no principal
+      // (this process starts no stdio transport) the view is the bare one.
+      const objectView = stdioObjectView({ metadataService, protocol: protocolReads });
+      setRuntimeObjectView(
+        this.runtime,
+        schemaPrincipal
+          ? callerObjectView(objectView, { resolvePrincipal: schemaPrincipal, security: securityReads })
+          : objectView,
+      );
       this.runtime.bridgeResources(metadataService, getRecord);
       // Awaited: the prompt bridge reads `skill` metadata to project each
       // skill's instructions onto an MCP prompt (#3905), so the surface must be

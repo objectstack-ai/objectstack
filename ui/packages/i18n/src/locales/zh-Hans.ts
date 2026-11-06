@@ -1974,6 +1974,10 @@ const zh = {
       defaultValueHint: '默认：{{value}}',
       envLockBadge: '环境变量锁定',
       envLockBadgeTitle: '由环境变量固定,无法在界面中编辑。',
+      savedBeneathPin: '此处还保存着一个值。环境变量的值仍然生效；移除该变量后，保存的值会重新生效。',
+      clearSaved: '清除保存的值',
+      clearSavedConfirm: '此处保存的值将被清除，移除环境变量后不会再恢复。环境变量的值仍然生效。',
+      savedCleared: '已清除保存的值',
       deprecatedBadge: '已弃用',
       deprecatedBadgeReplacedBy: '已弃用 → {{replacedBy}}',
       unsupportedSpecifierType: '不支持的设置项类型:{{type}}',
@@ -4041,6 +4045,13 @@ const zh = {
     },
     advanced: {
       title: '高级：脚本与 CI',
+    },
+    unreachable: {
+      claudeWebTitle: 'claude.ai（网页版）：此部署不可用',
+      claudeWebReason: 'claude.ai 从 Anthropic 的服务器发起连接，访问不到 {{address}}：那里只能访问公网 HTTPS 地址。',
+      doubaoCloudTitle: '云端任务：此部署不可用',
+      doubaoCloudReason: '豆包工作的云端任务从它自己的服务器运行，访问不到 {{address}}：那里只能访问公网 HTTPS 地址。',
+      remedy: '把本系统部署到公网 HTTPS 地址（互联网可访问的域名，https://）后即可使用。',
     },
     apiKey: {
       title: 'API 密钥',

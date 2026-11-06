@@ -2258,6 +2258,10 @@ const fr = {
       defaultValueHint: "Par défaut : {{value}}",
       envLockBadge: "Verrouillé par l'env.",
       envLockBadgeTitle: "Fixé par une variable d'environnement — modification impossible depuis l'interface.",
+      savedBeneathPin: "Une valeur est aussi enregistrée ici. La valeur de la variable d'environnement reste en vigueur ; la valeur enregistrée s'appliquera de nouveau si la variable est retirée.",
+      clearSaved: "Effacer la valeur enregistrée",
+      clearSavedConfirm: "La valeur enregistrée ici est effacée : elle ne s'appliquera plus quand la variable d'environnement sera retirée. La valeur de la variable d'environnement reste en vigueur.",
+      savedCleared: "Valeur enregistrée effacée",
       deprecatedBadge: "Obsolète",
       deprecatedBadgeReplacedBy: "Obsolète → {{replacedBy}}",
       unsupportedSpecifierType: "Type de paramètre non pris en charge : {{type}}",
@@ -3904,6 +3908,13 @@ const fr = {
     },
     advanced: {
       title: 'Avancé : scripts et CI',
+    },
+    unreachable: {
+      claudeWebTitle: 'claude.ai (web) : indisponible pour ce déploiement',
+      claudeWebReason: 'claude.ai se connecte depuis les serveurs d’Anthropic, qui ne peuvent pas atteindre {{address}} : seule une adresse HTTPS publique est joignable depuis là-bas.',
+      doubaoCloudTitle: 'Tâches cloud : indisponibles pour ce déploiement',
+      doubaoCloudReason: 'Doubao Work exécute les tâches cloud depuis ses propres serveurs, qui ne peuvent pas atteindre {{address}} : seule une adresse HTTPS publique est joignable depuis là-bas.',
+      remedy: 'Servez ce système à une adresse HTTPS publique (https:// sur un domaine joignable depuis Internet) pour le rendre disponible.',
     },
     apiKey: {
       title: 'Clés API',

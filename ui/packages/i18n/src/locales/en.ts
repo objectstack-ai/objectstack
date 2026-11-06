@@ -2355,6 +2355,14 @@ const en = {
       // page has no control for, `{{type}}` that type.
       envLockBadge: 'Locked by env',
       envLockBadgeTitle: 'Pinned by environment variable — cannot be edited from the UI.',
+      // The clear under a pinned row that has a value stored beneath the pin
+      // (objectstack#30665): it clears the saved value, never "deletes" it, and
+      // says the environment value stays in force. `clearSaved` is the button and
+      // the confirm's title and action; `savedCleared` the toast once it is done.
+      savedBeneathPin: 'A value is also saved here. The environment value stays in force; the saved one returns if the variable is removed.',
+      clearSaved: 'Clear the saved value',
+      clearSavedConfirm: 'The value saved here is cleared, so it does not return when the environment variable is removed. The environment value stays in force.',
+      savedCleared: 'Saved value cleared',
       deprecatedBadge: 'Deprecated',
       deprecatedBadgeReplacedBy: 'Deprecated → {{replacedBy}}',
       unsupportedSpecifierType: 'Unsupported specifier type: {{type}}',
@@ -4638,6 +4646,13 @@ const en = {
     },
     advanced: {
       title: 'Advanced: scripts and CI',
+    },
+    unreachable: {
+      claudeWebTitle: 'claude.ai (web): not available for this deployment',
+      claudeWebReason: 'claude.ai connects from Anthropic\'s servers, and they cannot reach {{address}}: only a public HTTPS address is reachable from there.',
+      doubaoCloudTitle: 'Cloud tasks: not available for this deployment',
+      doubaoCloudReason: 'Doubao Work runs cloud tasks from its own servers, and they cannot reach {{address}}: only a public HTTPS address is reachable from there.',
+      remedy: 'Serve this system at a public HTTPS address (https:// on a domain the internet can reach) to make it available.',
     },
     apiKey: {
       title: 'API keys',

@@ -1873,6 +1873,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "更新日時"
+      },
+      last_used_at: {
+        label: "最終使用日時",
+        help: "この同意のもとでクライアントが検証済みの MCP 呼び出しを最後に行った時間帯の開始時刻。記録がない場合は空です"
       }
     }
   },

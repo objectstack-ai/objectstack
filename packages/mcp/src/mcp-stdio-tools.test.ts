@@ -184,6 +184,7 @@ function makeBridge(): McpDataBridge & { calls: any[][] } {
 const OBJECT_TOOLS = [
   'create_record',
   'delete_record',
+  'delete_records',
   'describe_object',
   'get_record',
   'list_objects',

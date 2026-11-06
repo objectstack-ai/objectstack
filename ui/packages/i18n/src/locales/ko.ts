@@ -2200,6 +2200,10 @@ const ko = {
       defaultValueHint: "기본값: {{value}}",
       envLockBadge: "환경 변수로 잠김",
       envLockBadgeTitle: "환경 변수로 고정되어 UI에서 편집할 수 없습니다.",
+      savedBeneathPin: "여기에도 값이 저장되어 있습니다. 환경 변수 값이 계속 적용되며, 변수를 제거하면 저장된 값이 다시 적용됩니다.",
+      clearSaved: "저장된 값 지우기",
+      clearSavedConfirm: "여기에 저장된 값을 지웁니다. 환경 변수를 제거해도 이 값으로 돌아가지 않습니다. 환경 변수 값은 계속 적용됩니다.",
+      savedCleared: "저장된 값을 지웠습니다",
       deprecatedBadge: "지원 중단됨",
       deprecatedBadgeReplacedBy: "지원 중단됨 → {{replacedBy}}",
       unsupportedSpecifierType: "지원되지 않는 설정 항목 유형: {{type}}",
@@ -3830,6 +3834,13 @@ const ko = {
     },
     advanced: {
       title: '고급: 스크립트 및 CI',
+    },
+    unreachable: {
+      claudeWebTitle: 'claude.ai(웹): 이 배포에서는 사용할 수 없음',
+      claudeWebReason: 'claude.ai는 Anthropic 서버에서 연결하므로 {{address}}에 접근할 수 없습니다. 그곳에서는 공개 HTTPS 주소만 접근할 수 있습니다.',
+      doubaoCloudTitle: '클라우드 작업: 이 배포에서는 사용할 수 없음',
+      doubaoCloudReason: 'Doubao Work의 클라우드 작업은 자체 서버에서 실행되므로 {{address}}에 접근할 수 없습니다. 그곳에서는 공개 HTTPS 주소만 접근할 수 있습니다.',
+      remedy: '이 시스템을 공개 HTTPS 주소(인터넷에서 접근 가능한 도메인의 https://)로 제공하면 사용할 수 있습니다.',
     },
     apiKey: {
       title: 'API 키',

@@ -1974,6 +1974,10 @@ const zhHant = {
       defaultValueHint: '預設：{{value}}',
       envLockBadge: '環境變數鎖定',
       envLockBadgeTitle: '由環境變數固定,無法在介面中編輯。',
+      savedBeneathPin: '此處還儲存著一個值。環境變數的值仍然生效；移除該變數後，儲存的值會重新生效。',
+      clearSaved: '清除儲存的值',
+      clearSavedConfirm: '此處儲存的值將被清除，移除環境變數後不會再恢復。環境變數的值仍然生效。',
+      savedCleared: '已清除儲存的值',
       deprecatedBadge: '已棄用',
       deprecatedBadgeReplacedBy: '已棄用 → {{replacedBy}}',
       unsupportedSpecifierType: '不支援的設定項型別:{{type}}',
@@ -4041,6 +4045,13 @@ const zhHant = {
     },
     advanced: {
       title: '高階：腳本與 CI',
+    },
+    unreachable: {
+      claudeWebTitle: 'claude.ai（網頁版）：此部署不可用',
+      claudeWebReason: 'claude.ai 從 Anthropic 的伺服器發起連線，訪問不到 {{address}}：那裡只能訪問公網 HTTPS 地址。',
+      doubaoCloudTitle: '雲端任務：此部署不可用',
+      doubaoCloudReason: '豆包工作的雲端任務從它自己的伺服器執行，訪問不到 {{address}}：那裡只能訪問公網 HTTPS 地址。',
+      remedy: '把本系統部署到公網 HTTPS 地址（網際網路可訪問的域名，https://）後即可使用。',
     },
     apiKey: {
       title: 'API 金鑰',

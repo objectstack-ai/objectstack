@@ -20,7 +20,11 @@
  *      OAuth is the default story for every client (the deployment is its own
  *      authorization server; you sign in as yourself); the Chinese clients'
  *      steps name the API-key header as the fallback for a client version
- *      without the OAuth flow,
+ *      without the OAuth flow. claude.ai (web) and Doubao Work's cloud tasks
+ *      connect from their vendor's servers, so on an address that is not
+ *      public HTTPS (`deploymentReach.ts`) both are marked not available,
+ *      with the reason and what makes them available; the local clients stay
+ *      as they are,
  *   4. API-key minting for headless callers (CI, machine accounts) via the
  *      existing `POST /api/v1/keys`, in a collapsed "Advanced: scripts and CI"
  *      section at the bottom — no client, so not a peer of the clients.
@@ -62,6 +66,7 @@ import {
   TabsTrigger,
 } from '@object-ui/components';
 import {
+  Ban,
   Bot,
   Check,
   ChevronRight,
@@ -82,6 +87,7 @@ import {
   isConnectClientId,
   type ConnectClientId,
 } from './connectClientPreference.js';
+import { isPublicHttpsAddress } from './deploymentReach.js';
 
 const SERVER_URL = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
 
@@ -154,6 +160,32 @@ function FieldRows({ rows }: { rows: Array<{ label: string; value: string }> }) 
   );
 }
 
+/** The scheme and host a reader recognises (`http://localhost:3000`), not the full MCP path. */
+function addressOf(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * A way in this deployment's address cannot offer: what is not available,
+ * why in one sentence, and what makes it available.
+ */
+function Unavailable({ title, reason, remedy }: { title: string; reason: string; remedy: string }) {
+  return (
+    <div role="note" className="flex gap-2 rounded-md border border-dashed px-3 py-2 text-xs">
+      <Ban className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <div className="space-y-0.5">
+        <div className="font-medium">{title}</div>
+        <p className="text-muted-foreground">{reason}</p>
+        <p className="text-muted-foreground">{remedy}</p>
+      </div>
+    </div>
+  );
+}
+
 /** The `mcpServers` JSON shape most clients import, with the client's own transport spelling. */
 function mcpServersJson(type: string | null, url: string): string {
   const server = type ? { type, url } : { url };
@@ -198,6 +230,10 @@ export function ConnectAgent() {
   }, []);
 
   const skillUrl = mcpUrl ? `${mcpUrl}/skill` : null;
+  // claude.ai (web) and Doubao Work's cloud tasks connect from their vendor's
+  // servers: they reach only a public HTTPS address.
+  const cloudReachable = mcpUrl ? isPublicHttpsAddress(mcpUrl) : false;
+  const shownAddress = mcpUrl ? addressOf(mcpUrl) : '';
 
   const cursorDeeplink = useMemo(() => {
     if (!mcpUrl) return null;
@@ -324,7 +360,15 @@ export function ConnectAgent() {
                 <h4 className="font-medium">claude.ai / Claude Desktop</h4>
                 <p className="text-muted-foreground">{t('connectAgent.claude.body')}</p>
                 <Snippet text={mcpUrl} />
-                <p className="text-xs text-muted-foreground">{t('connectAgent.claude.reachability')}</p>
+                {cloudReachable ? (
+                  <p className="text-xs text-muted-foreground">{t('connectAgent.claude.reachability')}</p>
+                ) : (
+                  <Unavailable
+                    title={t('connectAgent.unreachable.claudeWebTitle')}
+                    reason={t('connectAgent.unreachable.claudeWebReason', { address: shownAddress })}
+                    remedy={t('connectAgent.unreachable.remedy')}
+                  />
+                )}
               </div>
               <div className="min-w-0 space-y-2">
                 <h4 className="font-medium">Claude Code</h4>
@@ -376,6 +420,13 @@ export function ConnectAgent() {
                 ]}
               />
               <p className="text-xs text-muted-foreground">{t('connectAgent.doubao.hint')}</p>
+              {!cloudReachable && (
+                <Unavailable
+                  title={t('connectAgent.unreachable.doubaoCloudTitle')}
+                  reason={t('connectAgent.unreachable.doubaoCloudReason', { address: shownAddress })}
+                  remedy={t('connectAgent.unreachable.remedy')}
+                />
+              )}
             </TabsContent>
 
             <TabsContent value="qwenwork" className="space-y-2 text-sm">

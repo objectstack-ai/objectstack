@@ -2439,6 +2439,10 @@ const ar = {
       defaultValueHint: "الافتراضي: {{value}}",
       envLockBadge: "مقفل بواسطة البيئة",
       envLockBadgeTitle: "مثبّت بواسطة متغير بيئة — لا يمكن تعديله من الواجهة.",
+      savedBeneathPin: "توجد أيضًا قيمة محفوظة هنا. تظل قيمة متغير البيئة سارية، وتعود القيمة المحفوظة إذا أُزيل المتغير.",
+      clearSaved: "مسح القيمة المحفوظة",
+      clearSavedConfirm: "ستُمسح القيمة المحفوظة هنا، فلا تعود عند إزالة متغير البيئة. تظل قيمة متغير البيئة سارية.",
+      savedCleared: "تم مسح القيمة المحفوظة",
       deprecatedBadge: "مهمل",
       deprecatedBadgeReplacedBy: "مهمل ← {{replacedBy}}",
       unsupportedSpecifierType: "نوع إعداد غير مدعوم: {{type}}",
@@ -4136,6 +4140,13 @@ const ar = {
     },
     advanced: {
       title: 'متقدم: البرامج النصية وCI',
+    },
+    unreachable: {
+      claudeWebTitle: 'claude.ai (الويب): غير متاح لهذا النشر',
+      claudeWebReason: 'يتصل claude.ai من خوادم Anthropic، وهي لا تستطيع الوصول إلى {{address}}: لا يمكن الوصول من هناك إلا إلى عنوان HTTPS عام.',
+      doubaoCloudTitle: 'مهام السحابة: غير متاحة لهذا النشر',
+      doubaoCloudReason: 'يشغّل Doubao Work مهام السحابة من خوادمه الخاصة، وهي لا تستطيع الوصول إلى {{address}}: لا يمكن الوصول من هناك إلا إلى عنوان HTTPS عام.',
+      remedy: 'قدّم هذا النظام على عنوان HTTPS عام (https:// على نطاق يمكن الوصول إليه من الإنترنت) ليصبح متاحًا.',
     },
     apiKey: {
       title: 'مفاتيح API',

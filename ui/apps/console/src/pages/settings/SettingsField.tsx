@@ -128,6 +128,63 @@ export interface SettingsFieldProps {
    * not (the first-run checklist) keeps the badges a lower scope would see.
    */
   writeScope?: SpecifierScope;
+  /**
+   * Clears the value stored beneath an env pin (objectstack#30665): the page
+   * writes `null` for this key, the one write the server lets through a pin
+   * (ADR-0007 D6). Offered only where {@link storedBeneathPin} holds, so a
+   * host that does not pass it, or a row with nothing stored, shows nothing.
+   */
+  onClearSaved?: () => void;
+}
+
+/**
+ * Whether a value is stored beneath the env pin at the scope this row writes,
+ * the one a clear would null (objectstack#30665). Read off the server's
+ * `cascadeChain` alone: the namespace read lists the stored cascade beneath an
+ * in-force `env` entry, a secret's entries as the read mask or `null`. Nothing
+ * stored, or stored only at another scope, is no control: a clear here could
+ * not remove it.
+ */
+export function storedBeneathPin(
+  resolved: ResolvedSettingValue | undefined,
+  writeScope: SpecifierScope | undefined,
+): boolean {
+  if (!resolved?.locked || resolved.source !== 'env' || !writeScope) return false;
+  return (resolved.cascadeChain ?? []).some(
+    (entry) => entry.scope === writeScope && entry.value !== null && entry.value !== undefined,
+  );
+}
+
+/**
+ * The line and control under a pinned row that has a value stored beneath the
+ * pin (objectstack#30665). The wording clears the saved value, never deletes
+ * it, and says the environment value stays in force; the clear asks first,
+ * because it writes at once rather than through the page's draft.
+ */
+function ClearSavedBeneathPin({ onClear, disabled }: { onClear: () => void; disabled?: boolean }) {
+  const { t } = useObjectTranslation();
+  return (
+    <div className="flex items-center justify-between gap-3 mt-1" data-testid="settings-saved-beneath-pin">
+      <p className="text-xs text-muted-foreground">{t('console.settingsView.savedBeneathPin')}</p>
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button type="button" variant="outline" size="sm" className="h-7 shrink-0 text-xs" disabled={disabled}>
+            {t('console.settingsView.clearSaved')}
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('console.settingsView.clearSaved')}</AlertDialogTitle>
+            <AlertDialogDescription>{t('console.settingsView.clearSavedConfirm')}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('actionConfirm.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={onClear}>{t('console.settingsView.clearSaved')}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
 }
 
 type SourceBadge =
@@ -519,8 +576,20 @@ function ToggleSwitch({
 }
 
 export function SettingsField(props: SettingsFieldProps) {
-  const { spec, resolved, value, onChange, onAction, locked, saving, labels, error, note, writeScope } =
-    props;
+  const {
+    spec,
+    resolved,
+    value,
+    onChange,
+    onAction,
+    locked,
+    saving,
+    labels,
+    error,
+    note,
+    writeScope,
+    onClearSaved,
+  } = props;
   const id = useId();
   const { t, language } = useObjectTranslation();
   const disabled = Boolean(locked || saving);
@@ -691,6 +760,11 @@ export function SettingsField(props: SettingsFieldProps) {
   // control is a group that names itself from `labelId` instead.
   // A value already cleared in the draft has nothing left to reset.
   const onReset = value === null ? undefined : () => onChange(null);
+  // The clear beneath an env pin, where a value is stored at this row's scope.
+  const clearSaved =
+    onClearSaved && storedBeneathPin(resolved, writeScope) ? (
+      <ClearSavedBeneathPin onClear={onClearSaved} disabled={saving} />
+    ) : null;
   // `data-settings-key` lets the page find this row to focus it when a save is
   // blocked on it (objectui#13239).
   const wrapper = (children: React.ReactNode, labelFor: string | undefined = id) => (
@@ -723,6 +797,7 @@ export function SettingsField(props: SettingsFieldProps) {
           {note}
         </p>
       ) : null}
+      {clearSaved}
     </div>
   );
 
@@ -832,6 +907,7 @@ export function SettingsField(props: SettingsFieldProps) {
             ) : (
               <FieldDescription description={fieldHelp} />
             )}
+            {clearSaved}
           </div>
           <ToggleSwitch
             id={id}

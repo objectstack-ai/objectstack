@@ -2202,6 +2202,10 @@ const ja = {
       defaultValueHint: "デフォルト: {{value}}",
       envLockBadge: "環境変数でロック",
       envLockBadgeTitle: "環境変数で固定されているため、画面から編集できません。",
+      savedBeneathPin: "ここにも値が保存されています。環境変数の値が引き続き有効で、変数を削除すると保存された値が再び適用されます。",
+      clearSaved: "保存された値をクリア",
+      clearSavedConfirm: "ここに保存された値をクリアします。環境変数を削除しても、この値には戻りません。環境変数の値は引き続き有効です。",
+      savedCleared: "保存された値をクリアしました",
       deprecatedBadge: "非推奨",
       deprecatedBadgeReplacedBy: "非推奨 → {{replacedBy}}",
       unsupportedSpecifierType: "サポートされていない設定項目の種類: {{type}}",
@@ -3833,6 +3837,13 @@ const ja = {
     },
     advanced: {
       title: '詳細設定：スクリプトと CI',
+    },
+    unreachable: {
+      claudeWebTitle: 'claude.ai（Web 版）：このデプロイでは利用できません',
+      claudeWebReason: 'claude.ai は Anthropic のサーバーから接続するため、{{address}} には到達できません。到達できるのは公開 HTTPS アドレスだけです。',
+      doubaoCloudTitle: 'クラウドタスク：このデプロイでは利用できません',
+      doubaoCloudReason: 'Doubao Work のクラウドタスクは自社サーバーから実行されるため、{{address}} には到達できません。到達できるのは公開 HTTPS アドレスだけです。',
+      remedy: 'このシステムを公開 HTTPS アドレス（インターネットから到達できるドメインの https://）で提供すると利用できます。',
     },
     apiKey: {
       title: 'API キー',

@@ -1873,6 +1873,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "更新时间"
+      },
+      last_used_at: {
+        label: "最近使用时间",
+        help: "客户端在此同意下最近一次经验证的 MCP 调用所在小时的开始时间；尚无记录时为空"
       }
     }
   },
