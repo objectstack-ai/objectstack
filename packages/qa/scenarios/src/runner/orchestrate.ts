@@ -371,6 +371,57 @@ async function buildHalf(
   return half;
 }
 
+/**
+ * Load the card's seed into a booted app, as the admin, in lookup order.
+ *
+ * Row ownership is mapped from the persona handles. A row whose direct scope
+ * field names a persona's handle is owned (`owner_id`, the platform's record
+ * owner) by that persona's user. A user-handle field (`account.owner`,
+ * `userHandleFields`) is itself loaded with a user id — the persona's, or the
+ * admin's for a handle no persona holds (`u_tia`), and every handle is the
+ * admin's when no persona account is passed (the gallery's screenshot boot) —
+ * because a faithful build models it as a user lookup, which refuses the
+ * handle text. Any other scope field names a row or an option and is sent
+ * verbatim.
+ *
+ * The tally is kept in `seed` as each row is loaded, and `seed` is what is
+ * returned: when an insert throws, the caller's tally already holds what was
+ * inserted and refused before it (the record shows the partial seed next to the
+ * half's error).
+ */
+export async function seedApp(
+  scenario: LoadedScenario,
+  app: AppHarness,
+  accounts: readonly PersonaAccount[],
+  seed: RunHalf['seed'] = { inserted: 0, refused: [] },
+): Promise<RunHalf['seed']> {
+  const { card } = scenario;
+  const handles = personaHandles(card);
+  const ownerFields = new Set(card.run.personas.flatMap((p) => (p.scope ?? []).filter((s) => !s.field.includes('.')).map((s) => `${s.object}.${s.field}`)));
+  const userFields = userHandleFields(card);
+  for (const object of seedOrder(scenario)) {
+    for (const row of card.run.seed[object] ?? []) {
+      const body: Record<string, unknown> = { ...row };
+      for (const [k, v] of Object.entries(row)) {
+        if (typeof v !== 'string' || !ownerFields.has(`${object}.${k}`)) continue;
+        const persona = handles.get(v);
+        const acct = persona ? accounts.find((a) => a.persona === persona) : undefined;
+        if (acct) body.owner_id = acct.userId;
+        if (userFields.has(`${object}.${k}`)) {
+          const userId = acct?.userId ?? app.adminUserId();
+          body[k] = userId;
+          body.owner_id = userId;
+          if (!acct) seed.handlesAsAdmin = [...new Set([...(seed.handlesAsAdmin ?? []), v])].sort();
+        }
+      }
+      const r = await app.insertRow(object, body);
+      if (r.ok) seed.inserted++;
+      else seed.refused.push({ object, id: row.id, ...(r.code ? { code: r.code } : {}), ...(r.message ? { message: r.message.slice(0, 300) } : {}) });
+    }
+  }
+  return seed;
+}
+
 /** Seed, personas, every question and every operation, against one booted app. */
 export async function runHalf(
   scenario: LoadedScenario,
@@ -392,37 +443,7 @@ export async function runHalf(
     }
     const adminKey = await app.adminApiKey();
 
-    // Seed, with row ownership mapped from the persona handles. A row whose
-    // direct scope field names a persona's handle is owned (`owner_id`, the
-    // platform's record owner) by that persona's user. A user-handle field
-    // (`account.owner`, `userHandleFields`) is itself loaded with a user id —
-    // the persona's, or the admin's for a handle no persona holds (`u_tia`) —
-    // because a faithful build models it as a user lookup, which refuses the
-    // handle text. Any other scope field names a row or an option and is sent
-    // verbatim.
-    const handles = personaHandles(card);
-    const ownerFields = new Set(card.run.personas.flatMap((p) => (p.scope ?? []).filter((s) => !s.field.includes('.')).map((s) => `${s.object}.${s.field}`)));
-    const userFields = userHandleFields(card);
-    for (const object of seedOrder(scenario)) {
-      for (const row of card.run.seed[object] ?? []) {
-        const body: Record<string, unknown> = { ...row };
-        for (const [k, v] of Object.entries(row)) {
-          if (typeof v !== 'string' || !ownerFields.has(`${object}.${k}`)) continue;
-          const persona = handles.get(v);
-          const acct = persona ? accounts.find((a) => a.persona === persona) : undefined;
-          if (acct) body.owner_id = acct.userId;
-          if (userFields.has(`${object}.${k}`)) {
-            const userId = acct?.userId ?? app.adminUserId();
-            body[k] = userId;
-            body.owner_id = userId;
-            if (!acct) half.seed.handlesAsAdmin = [...new Set([...(half.seed.handlesAsAdmin ?? []), v])].sort();
-          }
-        }
-        const r = await app.insertRow(object, body);
-        if (r.ok) half.seed.inserted++;
-        else half.seed.refused.push({ object, id: row.id, ...(r.code ? { code: r.code } : {}), ...(r.message ? { message: r.message.slice(0, 300) } : {}) });
-      }
-    }
+    await seedApp(scenario, app, accounts, half.seed); // tallied in place, so a throw keeps the partial seed
 
     const keyOf = (persona: string | null) => (persona === null ? adminKey : accounts.find((a) => a.persona === persona)!.apiKey);
     // A refused seed row makes what reads it not measured — never a fail of the app's answer.
@@ -502,6 +523,13 @@ async function withApp<T>(ops: ProjectOps, dir: string, findings: string[], use:
 
 // ── The modes ───────────────────────────────────────────────────────────────
 
+/**
+ * The directory, under the run's work directory, a mode's project is
+ * scaffolded in (`ProjectOps.scaffold`'s `under`): one per card and mode. The
+ * gallery exporter finds a run's scratch project by it.
+ */
+export const modeDir = (card: { id: string }, mode: 'scratch' | 'template'): string => `${card.id.replace(/_/g, '-')}-${mode}`;
+
 /** Did the build pass — every counted check of the card's `expect`, and no bare item name? */
 export const buildPassed = (b: BuildHalf | undefined): boolean =>
   !!b?.score && b.score.expect.checks.length > 0 && [...b.score.expect.checks, ...b.score.naming].every((c) => c.pass);
@@ -510,7 +538,7 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   const mode: ModeRun = { mode: 'scratch', findings: [] };
   // The project is named after the card's namespace, which is what the scaffolder derives its namespace from.
   const ns = scenarioNamespace(original.card);
-  const { dir, result } = await ops.scaffold(ns, `${original.card.id.replace(/_/g, '-')}-scratch`);
+  const { dir, result } = await ops.scaffold(ns, modeDir(original.card, 'scratch'));
   if (result.exit !== 0) {
     mode.skipped = `scaffold failed: ${result.tail.slice(-500)}`;
     return { mode };
@@ -556,7 +584,7 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
     return mode;
   }
   // The blank host gets a namespace of its own (`templateHostName` says why).
-  const { dir, result } = await ops.scaffold(templateHostName(original.card), `${card.id.replace(/_/g, '-')}-template`);
+  const { dir, result } = await ops.scaffold(templateHostName(original.card), modeDir(card, 'template'));
   if (result.exit !== 0) {
     mode.skipped = `scaffold failed: ${result.tail.slice(-500)}`;
     return mode;
