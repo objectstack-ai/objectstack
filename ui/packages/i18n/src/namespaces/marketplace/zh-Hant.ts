@@ -126,6 +126,21 @@ const zhHant = {
         unmanagedSuccess: '已將 "{{name}}" 的 v{{version}} 複製到本執行環境，成為它自己的中繼資料，位於基礎包 {{base}} 中。副本可編輯，且不再接收升級。',
         unmanagedStrippedLocks: '軟體包鎖定了以下條目。副本可編輯，因此這些鎖未被複制：',
         unmanagedIgnored: '本執行環境不支援非託管安裝，因此 "{{name}}" 以託管方式安裝（以程式碼形式註冊），而不是被複制。請先升級執行環境，然後解除安裝該軟體包，再以非託管副本重新安裝。',
+        // objectstack#30325 — the confirm in front of a local Install: what the
+        // install adds, read from the manifest it installs (MarketplacePackagePage).
+        preview: {
+          title: "安裝 {{name}}？",
+          reinstallTitle: "重新安裝 {{name}}？",
+          intro: "安裝會向此執行環境加入以下內容：",
+          reading: "正在讀取此軟體包將加入的內容…",
+          unreadable: "安裝前無法讀取此軟體包將加入的內容。安裝結果會說明載入了什麼。",
+          objects: "物件",
+          permissionSets: "權限集",
+          sampleRecords: "示例記錄",
+          atMost: "最多 {{count}}",
+          sampleNote: "示例記錄隨應用一起載入，安裝後可在本頁清除。",
+          suggestsEveryone: "安裝後會建議將「{{set}}」授予所有已登入使用者（Everyone 崗位）。在你接受之前不會授予任何權限。",
+        },
       },
       // objectui#12146 — the install dialog opened as an UPDATE of the copy
       // this environment holds (MarketplacePackagePage).

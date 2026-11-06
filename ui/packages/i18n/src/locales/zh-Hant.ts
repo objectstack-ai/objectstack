@@ -1384,6 +1384,7 @@ const zhHant = {
     daysAgo_other: '{{count}}天前',
     // Activity feed actors
     systemActor: '系統',
+    impersonatedActor: '{{admin}} 代{{user}}操作',
     unknownUser: '未知使用者',
     // Record meta footer (audit provenance)。createdBy/updatedBy 後面跟的是
     // 操作者("建立人 Dev Admin · 5 分鐘前");created/updated 是無操作者時的
@@ -4004,6 +4005,30 @@ const zhHant = {
   },
   cloudWorkspaceTimezoneNotice: {
     seeded: '環境時區在建立時已按你的瀏覽器設為 {{zone}}，可在「設定 → 本地化」中修改。',
+  },
+  deploymentNotice: {
+    title: '這臺伺服器把你的資料和金鑰存放在它自己的磁碟上',
+    titleLow: '完成此部署的設定',
+    intro: '沒有人為此生產部署指定這些內容的存放位置。請把下面的設定交給負責執行伺服器的人，這樣更換伺服器時不會丟失任何東西。',
+    finding: {
+      databaseLocalFile: '你的業務資料是這臺伺服器上的一個檔案（{{file}}）。更換伺服器或其磁碟會丟失這些資料。',
+      authSecretGenerated: '登入金鑰是在這臺伺服器上生成的。一旦丟失，所有人都會被登出。',
+      dataKeyFile: '用於加密已儲存密碼和 API 金鑰的金鑰是這臺伺服器上的一個檔案（{{file}}）。一旦丟失，這些內容將無法再讀取。',
+      fileStorageLocal: '上傳的檔案儲存在這臺伺服器的磁碟上。',
+      emailNotConfigured: '尚未設定郵件服務，因此邀請和密碼重置不會通過郵件傳送。',
+    },
+    copy: {
+      button: '複製設定',
+      database: '你的資料庫，例如 postgres://user:pass@db-host:5432/app，或 file:/path/on/a/kept/volume/app.db。目前資料在 {{file}} 中：切換前請先遷移過去。',
+      carryOver: '沿用當前值：{{file}} 的內容',
+      newValue: '一個較長的隨機值，每次重啟都保持不變，例如以下命令的輸出：openssl rand -hex 32',
+    },
+    copied: '已複製',
+    hide: '隱藏',
+    hideNoAuditLog: '此部署沒有審計日誌，因此無法隱藏該提示。',
+    hideFailed: '無法隱藏該提示，請重試。',
+    hiddenLine: '部署提示已隱藏，其所述情況仍然存在。',
+    showAgain: '重新顯示',
   },
   aiApprovals: {
     title: 'AI 審批',
