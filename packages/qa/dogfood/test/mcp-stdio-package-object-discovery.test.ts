@@ -60,7 +60,7 @@
  * or after the boot with `source: 'marketplace'`, the way marketplace install
  * registers a package), and the `MCPServerPlugin` whose `start()` builds the
  * stdio data bridge. The one seam faked is the key row the stdio principal
- * resolves from.
+ * resolves from, and its owner's row.
  *
  * The negative control (red with the fix ablated) is a one-time ablation,
  * cited in the PR, not a permanent case.
@@ -277,7 +277,7 @@ async function boot(
   }
   await beforeStart?.(kernel, engine);
 
-  // The faked seam, and only it: the key row the stdio principal resolves from.
+  // The faked seam, and only it: the key row the stdio principal resolves from, and its owner.
   const ql = new Proxy(engine as any, {
     get(target, prop, receiver) {
       // The use stamp a resolved key takes (`last_used_at`) has no table here.
@@ -288,6 +288,8 @@ async function boot(
       if (prop === 'find') {
         return async (object: string, query?: unknown, options?: unknown) => {
           if (object === 'sys_api_key') return [{ id: 'k1', user_id: 'usr_stdio', revoked: false }];
+          // The key's owner exists: an API key authenticates only as an owner who exists.
+          if (object === 'sys_user') return (query as any)?.where?.id === 'usr_stdio' ? [{ id: 'usr_stdio' }] : [];
           if (object.startsWith('sys_') && object !== 'sys_metadata' && !target.registry.getObject(object)) return [];
           return target.find(object, query, options);
         };
@@ -383,7 +385,8 @@ const DATA_TOOLS: ReadonlyArray<readonly [string, (object: string) => Record<str
   ['aggregate_records', (o) => ({ objectName: o, aggregations: [{ function: 'count', alias: 'n' }] })],
   ['create_record', (o) => ({ objectName: o, data: { name: 'written' } })],
   ['update_record', (o) => ({ objectName: o, recordId: 'r_any', data: { name: 'written' } })],
-  ['delete_record', (o) => ({ objectName: o, recordId: 'r_any' })],
+  // `confirm: true` passes the delete confirmation gate, so the call meets the gates behind it.
+  ['delete_record', (o) => ({ objectName: o, recordId: 'r_any', confirm: true })],
 ];
 
 /** Every engine call a data tool could reach `object`'s store through. */

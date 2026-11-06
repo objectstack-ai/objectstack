@@ -7,7 +7,7 @@
  * `resolveCascadeDeleteObjects`, `registerPublishMaterializer`,
  * `registerUninstallCleanup`, `runUninstallCleanups`,
  * `registerMutationProjector`, `registerAuthoringGate`,
- * `registerCredentialChannel`, `restoreWriteFor`,
+ * `registerCredentialChannel`, `restoreWriteFor`, `objectExtensionItemRefusal`,
  * `registerStoredObjectExtension`, `resyncStoredObjectExtensions`,
  * `onMetadataMutation`, `emitMetadataMutation`, `attachMetadataMutationPubSub`,
  * `detachMetadataMutationPubSub`, `applyRemoteMetadataMutation`,
@@ -37,7 +37,7 @@ import { storedRowDocument } from './item-lock.js';
 import { bumpWriteEpoch } from './meta-overlay-cache.js';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import type { IObjectQLEngine, IPubSub } from '@objectstack/spec/contracts';
-import { isCustomizationPairOf } from '@objectstack/spec/kernel';
+import { isPairOf } from '@objectstack/metadata-core';
 import { overrideWriteRefusalError } from './protocol-packaged-base-refusal.js';
 import { OBJECT_EXTENSION_TYPE, registrableObjectExtension } from './protocol-object-extension-item.js';
 import type { ObjectExtensionRegistry } from './protocol-object-extension-item.js';
@@ -60,6 +60,7 @@ import type {
     MetadataMutationProjector,
 } from './protocol-mutation-events.js';
 import type { MetadataAuthoringGate, MetadataCredentialChannel } from './protocol-authoring-channel.js';
+import { objectExtensionItemRefusal } from './protocol-object-extension-item.js';
 import type { ProtocolHost } from './protocol-host.js';
 
 export class ProtocolClassHeadFacet {
@@ -187,7 +188,7 @@ export class ProtocolClassHeadFacet {
             artifactBacked: boolean,
             source: string,): { intent: 'override-artifact' | 'runtime-only'; deriveRestoredBody: (historyBody: unknown) => Promise<unknown> } {
         const owner = artifactBacked ? host.packagedArtifactOwner({ type: singularType, name }) : undefined;
-        const pairRow = owner !== undefined && isCustomizationPairOf(binding, owner);
+        const pairRow = owner !== undefined && isPairOf(binding, owner);
         const intent: 'override-artifact' | 'runtime-only' = artifactBacked && !pairRow ? 'override-artifact' : 'runtime-only';
         const writeRestored = host.restoredBodyWriter(singularType, name, binding, source);
         const deriveRestoredBody = pairRow
@@ -199,6 +200,27 @@ export class ProtocolClassHeadFacet {
             }
             : writeRestored;
         return { intent, deriveRestoredBody };
+    }
+
+    /**
+     * [#28574, ADR-0146 D10] The save, publish and restore doors' gate for an
+     * `object_extension` body written into `binding` (the RESOLVED package of
+     * the row): {@link objectExtensionItemRefusal}, asked with this engine's
+     * registry and the package's dependency closure
+     * ({@link resolveWritePackageScope}). Any other type answers `undefined`.
+     */
+    static objectExtensionItemRefusal(host: Pick<ProtocolHost, 'engine' | 'resolveWritePackageScope'>, type: string,
+            item: unknown,
+            name: string,
+            binding: string | null | undefined,): Error | undefined {
+        if ((PLURAL_TO_SINGULAR[type] ?? type) !== OBJECT_EXTENSION_TYPE) return undefined;
+        return objectExtensionItemRefusal(OBJECT_EXTENSION_TYPE, {
+            item,
+            name,
+            binding,
+            registry: host.engine?.registry as ObjectExtensionRegistry | undefined,
+            scope: host.resolveWritePackageScope(binding),
+        });
     }
 
     /**

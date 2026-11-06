@@ -25,6 +25,7 @@
  *     so a provider-less host renders what an `en` session renders.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { BUILTIN_AGGREGATES, type BuiltinAggregate } from '@object-ui/core';
 import { builtInLocales } from '../locales';
 import { builtinAggregateLabels } from '../builtinAggregateLabels';
@@ -61,7 +62,7 @@ const ttFrom = (lang: LocaleCode) => (key: string, fallback: string): string => 
 
 describe('report.aggregate.* covers the built-in aggregate vocabulary in every pack (objectui#7258)', () => {
   it('covers all ten built-in packs', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
   });
 
   it.each(LANGS)('%s defines a non-empty label for every built-in aggregate', (lang) => {
@@ -89,7 +90,7 @@ describe('builtinAggregateLabels — the seam between the wire spelling and the 
   });
 
   it('zh: the card`s own strings — a built-in count reads 计数', () => {
-    expect(builtinAggregateLabels(ttFrom('zh'))).toEqual({
+    expect(builtinAggregateLabels(ttFrom('zh-Hans'))).toEqual({
       count: '计数',
       count_distinct: '去重计数',
       sum: '求和',

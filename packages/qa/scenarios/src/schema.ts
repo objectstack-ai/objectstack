@@ -18,6 +18,7 @@
  */
 
 import { ErrorCode } from '@objectstack/spec/api';
+import { MarketplaceBusinessFunctionsSchema } from '@objectstack/spec/marketplace';
 import { z } from 'zod';
 
 /** A machine name: snake_case, the convention for data values in this repo. */
@@ -71,7 +72,7 @@ export const ExpectSchema = z.strictObject({
 });
 export type ScenarioExpect = z.infer<typeof ExpectSchema>;
 
-// ── Layer 3: capabilities + category ────────────────────────────────────────
+// ── Layer 3: capabilities + business functions ────────────────────────────────────────
 
 /**
  * `<area>.<name>`. The AREA half is a closed set read from the tree
@@ -85,24 +86,22 @@ export const CapabilityTagSchema = z
     'must be `<area>.<name>`, e.g. `records-forms.master-detail`',
   );
 
-/** The cloud marketplace taxonomy — a closed enum. */
-export const SCENARIO_CATEGORIES = [
-  'app',
-  'crm',
-  'sales',
-  'marketing',
-  'finance',
-  'hr',
-  'operations',
-  'project',
-  'productivity',
-  'data',
-  'integrations',
-  'devtools',
-  'utility',
-  'other',
-] as const;
-export const CategorySchema = z.enum(SCENARIO_CATEGORIES);
+/**
+ * The tag whose check judges a persona's row `scope` in the build. The loader
+ * requires it on every card with a scoped persona, and the scorer keys its
+ * check by it, so the two can never spell it apart.
+ */
+export const ROW_SCOPE_TAG = 'access-security.row-scope';
+
+/**
+ * A card's business functions — the marketplace taxonomy's business-function
+ * facet, read from `@objectstack/spec/marketplace` and never restated here:
+ * 1-3 distinct values, the primary one first. A card graduates into a
+ * marketplace template, so it is classified the way the template will be
+ * listed. (This used to be a hand copy of the cloud catalog's single-category
+ * list; the taxonomy now lives once, in the spec.)
+ */
+export const BusinessFunctionsSchema = MarketplaceBusinessFunctionsSchema;
 
 // ── Layer 4: run.seed / run.questions / run.personas ────────────────────────
 
@@ -427,6 +426,16 @@ export function scenarioNamespace(card: { code: string }): string {
   return `${SCENARIO_NAMESPACE_PREFIX}${card.code}`;
 }
 
+/**
+ * The permission set a persona signs in with, in an app of `namespace`:
+ * `<namespace>_<persona id>` (`democrm_sdr`). The runner grants it to the
+ * persona's user, the build prompt asks for it by this name, and the scorer
+ * reads its row-level security from it.
+ */
+export function personaPermissionSetName(namespace: string, persona: string): string {
+  return `${namespace}_${persona}`;
+}
+
 // ── The card ────────────────────────────────────────────────────────────────
 
 export const ScenarioCardSchema = z.strictObject({
@@ -443,7 +452,7 @@ export const ScenarioCardSchema = z.strictObject({
   /** The fixed "today" relative windows are computed against (`YYYY-MM-DD`). */
   asOf: z.iso.date().optional(),
   capabilities: z.array(CapabilityTagSchema).min(1),
-  category: CategorySchema,
+  businessFunctions: BusinessFunctionsSchema,
   run: z.strictObject({
     seed: z.record(MachineNameSchema, z.array(SeedRowSchema).min(1)),
     questions: z.array(QuestionSchema).min(5),
@@ -457,3 +466,13 @@ export const ScenarioCardSchema = z.strictObject({
   iterate: IterateSchema,
 });
 export type ScenarioCard = z.infer<typeof ScenarioCardSchema>;
+
+/**
+ * The operation a card's `write_validation` guardrail names (a `refused`
+ * create or update; the loader holds that). The runner probes it with its own
+ * write of the declared values after the agent's turn, and the grader judges
+ * the agent and the probe as two halves (#30883 item 2).
+ */
+export function isWriteValidationOperation(card: Pick<ScenarioCard, 'run'>, operationId: string): boolean {
+  return card.run.guardrails.some((g) => g.check === 'write_validation' && g.operation === operationId);
+}

@@ -94,13 +94,14 @@ import { NotificationBanners } from '@object-ui/components';
 import { builtInLocales } from '@object-ui/i18n/locales';
 import { BUILT_IN_LANGUAGE_CODES, registerBuiltInLocale } from '@object-ui/i18n/locales/registry';
 import en from '@object-ui/i18n/locales/en';
-import zh from '@object-ui/i18n/locales/zh';
+import zhHans from '@object-ui/i18n/locales/zh-Hans';
+import zhHant from '@object-ui/i18n/locales/zh-Hant';
 import ja from '@object-ui/i18n/locales/ja';
 import ko from '@object-ui/i18n/locales/ko';
 import de from '@object-ui/i18n/locales/de';
 import fr from '@object-ui/i18n/locales/fr';
 import es from '@object-ui/i18n/locales/es';
-import pt from '@object-ui/i18n/locales/pt';
+import ptBr from '@object-ui/i18n/locales/pt-BR';
 import ru from '@object-ui/i18n/locales/ru';
 import ar from '@object-ui/i18n/locales/ar';
 import { initRuntimeConfig, resetRuntimeConfigForTesting } from '../../../runtime-config';
@@ -108,7 +109,9 @@ import { MarketplacePage } from '../MarketplacePage';
 import { MarketplacePackagePage } from '../MarketplacePackagePage';
 import { rememberSampleData, resetSampleDataSessionForTesting } from '../sampleDataNotice';
 
-const PACKS: Record<string, Record<string, unknown>> = { en, zh, ja, ko, de, fr, es, pt, ru, ar };
+const PACKS: Record<string, Record<string, unknown>> = {
+  en, 'zh-Hans': zhHans, 'zh-Hant': zhHant, ja, ko, de, fr, es, 'pt-BR': ptBr, ru, ar,
+};
 for (const code of BUILT_IN_LANGUAGE_CODES) registerBuiltInLocale(code, PACKS[code]);
 
 const ENGLISH = builtInLocales.en.marketplace;
@@ -177,7 +180,7 @@ function renderRecording(page: ReactElement, language: string) {
 
 describe('the marketplace pages wait for their strings (objectstack#30588)', () => {
   it('zh-CN: the catalogue page shows the load skeleton, then Chinese, and never English or a raw key', async () => {
-    const zhMarketplace = builtInLocales.zh.marketplace;
+    const zhMarketplace = builtInLocales['zh-Hans'].marketplace;
     const view = renderRecording(<MarketplacePage />, 'zh-CN');
     // The first frame holds no namespace text yet — in no language, and not
     // as a key — only the skeleton.
@@ -252,7 +255,7 @@ describe('the marketplace pages wait for their strings (objectstack#30588)', () 
     }
 
     const view = renderRecording(<Console />, 'zh-CN');
-    expect((await screen.findAllByText(builtInLocales.zh.marketplace.back)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(builtInLocales['zh-Hans'].marketplace.back)).length).toBeGreaterThan(0);
 
     // The switch sends the frame back to its skeleton until the Japanese
     // catalogue lands, which unmounts the page body. That is not a leave.
@@ -261,7 +264,7 @@ describe('the marketplace pages wait for their strings (objectstack#30588)', () 
     });
     expect((await screen.findAllByText(builtInLocales.ja.marketplace.back)).length).toBeGreaterThan(0);
     const beforeLeaving = (await view.shown()).join('\n');
-    for (const pack of [builtInLocales.en, builtInLocales.zh, builtInLocales.ja]) expect(beforeLeaving).not.toContain(banner(pack));
+    for (const pack of [builtInLocales.en, builtInLocales['zh-Hans'], builtInLocales.ja]) expect(beforeLeaving).not.toContain(banner(pack));
 
     // Leaving the page is: the banner follows, in the console's language.
     await act(async () => {

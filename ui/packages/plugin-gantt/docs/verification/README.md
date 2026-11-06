@@ -337,7 +337,7 @@ Two fixes landed here:
    (the browser was `zh-CN`) — now they always match.
 2. **The central locale packs were completed.** `@object-ui/i18n`'s built-in
    `gantt:` namespace ([`en.ts`](../../../i18n/src/locales/en.ts),
-   [`zh.ts`](../../../i18n/src/locales/zh.ts)) was stale — it predated Phases
+   [`zh-Hans.ts`](../../../i18n/src/locales/zh-Hans.ts)) was stale — it predated Phases
    4–6, so apps on `I18nProvider` rendered **raw keys** (e.g.
    `gantt.viewMode.day`, `gantt.toolbar.criticalPath`) for the newer
    toolbar / view-mode / menu strings. The namespace now mirrors the plugin's

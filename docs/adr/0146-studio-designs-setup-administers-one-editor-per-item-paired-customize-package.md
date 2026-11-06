@@ -21,6 +21,9 @@ declaration to any package in the closure is withdrawn, and a dependent's same-n
 [`6549129352`](https://github.com/objectstack-ai/objectstack/issues/28404#issuecomment-6549129352) on #28404, follow-up c);
 [D9](#d9)'s `action` paragraph reads the landed ledger switch; the [Consequences](#consequences) carry the base-upgrade
 displacement cost. The amendment lands as the rewrite did — by the maintainer's hand-merge of the PR cut from #28390.
+· **Amended in place** (2026-11-06, decision D2 on epic [objectstack-ai/cloud#3652](https://github.com/objectstack-ai/cloud/issues/3652), ruling record [`6681380041`](https://github.com/objectstack-ai/cloud/issues/3652#issuecomment-6681380041), maintainer, verbatim: 「修订为允许只提示（推荐）」):
+a base's upgrade plan may report, as advice, each `.custom` override that hides a vendor change; `basedOn` still never gates, and nothing is refused, merged or rebased on the finding ([D2](#d2), [D6](#d6), the [Supersede table](#supersede-table)'s §9 row, [Consequences](#consequences), merge question 2).
+It lands by the maintainer's hand-merge of the PR cut from #30881.
 **Decided by**: the maintainer, 2026-10-30, in the desktop session that re-planned the epic, verbatim and
 untranslated as epic #28236 records them — the direction 「方向定为包级覆盖：代码和 Studio 用同一机制，定制都进 .custom。」; the suffix 「同意 后缀改成 .custom」; the eight questions 「等我拍板的 8 个问题，全部同意」; the extension
 fields 「扩展字段用 __c 后缀，只有 .custom 包能用。」; the item toolbar 「同意新增 2h「Studio 项工具栏」并放在 2a 之前」;
@@ -207,9 +210,17 @@ replaces the base's item **whole** for every read that serves the base's name ([
 item document — not in a manifest list, not in a side table — so it travels with the item through export and git, and
 the `.custom` manifest needs no index of what it overrides (Q2, 「全部同意」: declaration in the item body). `package`
 names the base; `basedOn` records which version of the base **package** — its `manifest.version`, not a history version
-of the item — the author started from (ruling record 6549129352 on #28404, aligned here). **`basedOn` is recorded,
-not judged**: no door compares it with the installed base's version, no upgrade diff is produced, and nothing is
-refused on it (epic #28236, *Not in this epic*: upgrade diff / `basedOn` checking, recorded only). Whole-document
+of the item — the author started from (ruling record 6549129352 on #28404, aligned here). **`basedOn` is recorded and
+never gates** (epic #28236, *Not in this epic*: upgrade diff / `basedOn` checking, recorded only). **One reader is
+admitted, as advice** (amended 2026-11-06, decision D2 on objectstack-ai/cloud#3652): a base's **upgrade plan** — the
+preview of a base upgrade before it runs — may list as advisory findings (a) a `.custom` item whose declared override
+names a base item the upgrade changes between the installed and the new version ("this override hides a vendor
+change"), and (b) an override whose `basedOn` is not the installed base's `manifest.version`. On either finding no door
+refuses, no token is asked, and nothing is merged, rebased or rewritten automatically; the upgrade proceeds as it would
+without it, and re-basing stays the customer's act. The plan carries both findings in an **advisory class** that its
+refusal never reads and that no finding-set token covers, so neither becomes a gate by sharing a response with a
+refusing finding. The finding is not the base-upgrade interception ADR-0141 D3 defers, because it refuses nothing, and [D3](#d3)'s `^<major>`
+reasoning (merge question 1) is unchanged. Whole-document
 replace is ADR-0005's binding principle 3 and ADR-0131 D6's O rule carried over unchanged: no field-level patch, no
 three-way merge — the author who changes one column ships the whole view.
 
@@ -259,7 +270,8 @@ customer pull for in-place customization appears; deferred again here." The pull
 **three of the five** on facts the platform serves: the **badge** (an item of `.custom` is marked "customization"; an
 override is marked "overrides `<base>`" from its declaration), the **customization list** (the per-package read of
 [D8](#d8), and the landing's counts) and **revert** ("Restore package original" = delete the overriding item from
-`.custom`, so the base's document is served again). **Diff-vs-base and the upgrade skip-report stay deferred**, and §9's
+`.custom`, so the base's document is served again). **The advisory upgrade finding above is chartered; a field-level
+diff-vs-base view and the upgrade skip-report as a merge tool stay deferred** (amended 2026-11-06), and §9's
 second bullet — no clone provenance — stands ([D4](#d4)). ADR-0131 D6's sentence that the customer's change is
 "environment-level state beside" the managed item is superseded: the change is an item of a package beside it. Its
 other sentences stand — no door edits a managed definition, environment scope, no per-organization axis.
@@ -390,7 +402,8 @@ Maintainer, verbatim: 「「Edit {app} in Studio」代码包/已安装包一律�
   anything DDL or a stored value depends on stay the vendor's ([D10](#d10)); the customer hides through views and
   permissions, as ADR-0131 D6's table has it.
 - **No code-only type** (`hook`, `job`, `api`, `agent`, `field` on its own, …) gains an override channel.
-- **No clone lineage, no upgrade diff, no `basedOn` judgement** ([D2](#d2), [D4](#d4)).
+- **No clone lineage, no field-level upgrade diff, no gate on `basedOn`** ([D2](#d2), [D4](#d4)) — the upgrade plan's
+  advisory finding ([D2](#d2), amended 2026-11-06) refuses, merges and rebases nothing.
 - **No fields table in the object designer** (#27356 row 14, letter **C**, maintainer 2026-10-30T10:07Z). The Records
   grid's columns and the Form canvas each enumerate every field and open the one field inspector; objectui#5813 and
   objectui#12450 stand. Maintainer, verbatim: 「Studio 的对象设计器，第一栏数据不就是每一个字段吗？表单对应的不也是每一个字段吗」.
@@ -560,7 +573,7 @@ recorded sentences stay in their records; their Status lines carry the dated poi
 | **ADR-0141 D3** (deferred, by name) — the uninstall row | "**Uninstall protection** — refusing to uninstall a package another installed package depends on" · "The uninstall proceeds; the dependent's lookups dangle. Only ADR-0029's extender refusal stands" · "A first customer uninstall that strands a dependent" | For the **paired case** the item is decided: uninstalling a base is refused while its `<base>.custom` exists, naming it ([D3](#d3)). The general item — a dependent that is not the base's own `.custom` — stays deferred with its trigger. | `packages/objectql/src/registry.ts#uninstallPackage` gains the pair check beside the ADR-0029 extender refusal (`packages/objectql/src/registry.ts#PackageUninstallExtendedError` is the shape). Pin: `packages/objectql/src/registry-assert-package-uninstallable.test.ts`. Card N-14. |
 | **ADR-0070 D3** (select-or-create a base first) and **D5** (retire the stopgaps via a migration affordance) — the paired case | D3: "Every authoring surface follows the same contract; none silently defaults into a catch-all:" · D5: "Existing `package_id = null` rows are not broken." · "A small migration (or admin action) can bulk-assign legacy orphans to a default base named for the environment." | For a customer's first customization of an installed base, the base is `<base>.custom`, created by the ensure door without a prompt ([D3](#d3)) — a deterministic, declared, per-base target, not a catch-all; everywhere else D3's prompt stands. A package-less overlay row of a packaged item migrates into that pair as a declared override, not into "a default base named for the environment", and the package-less write then closes ([D11](#d11)); a package-less row no package ships keeps D5's treatment. | `packages/metadata-protocol/src/protocol-write-package-scope.ts#resolveWritePackageScope` (the target package the ensure door hands the write); `packages/metadata-protocol/src/protocol-environment-rows.ts#packagelessAddress` (closes after the migration). Pin: `packages/metadata-protocol/src/protocol.packageless-save-address.test.ts`. Cards N-13, N-16. |
 | **ADR-0029 D7** (shell + slots; contributions) — amended, not superseded | the D7 heading, verbatim: *Shared admin surfaces are "shell + slots"; capability plugins contribute navigation* | The contribution model is unchanged. What D7 did not fix is fixed here: an item another package contributes to a base (a navigation contribution, an extension field, a flow on the base's objects) is drawn **greyed, with its source package named**, when the base is open in Studio ([D3](#d3)). | No gate or pin exists today for the drawing; the Studio one-surface card adds the pin. Card N-19. |
-| **ADR-0126 §7.4** (surface) and **§9** first bullet — moved and lifted in part, not reversed | §7.4: "**Leaning D2 — a Setup page for packaged automation** (final call rides this ADR's merge)" · §9: "The ServiceNow-style overlay layer (badge / customization list / diff-vs-base / revert / upgrade skip-report) — recorded as the mature direction **if** customer pull for in-place customization appears; deferred again here." | The switch moves to the item in Studio and the Setup page retires after the landing counts ([D4](#d4)); badge, customization list and revert are chartered on served facts, diff-vs-base and the skip-report stay deferred ([D2](#d2)). | `packages/runtime/src/domains/activation-gate.ts#refuseUngrantedActivationWrite` is unchanged (the authority stays the door's); the console binds it from Studio (`ui/packages/app-shell/src/views/setup/packagedFlows.ts#activationReading`). Cards N-04, N-15, N-24, N-28. |
+| **ADR-0126 §7.4** (surface) and **§9** first bullet — moved and lifted in part, not reversed | §7.4: "**Leaning D2 — a Setup page for packaged automation** (final call rides this ADR's merge)" · §9: "The ServiceNow-style overlay layer (badge / customization list / diff-vs-base / revert / upgrade skip-report) — recorded as the mature direction **if** customer pull for in-place customization appears; deferred again here." | The switch moves to the item in Studio and the Setup page retires after the landing counts ([D4](#d4)); badge, customization list and revert are chartered on served facts; the upgrade plan's advisory finding is chartered (amended 2026-11-06); a field-level diff-vs-base view and the skip-report as a merge tool stay deferred ([D2](#d2)). | `packages/runtime/src/domains/activation-gate.ts#refuseUngrantedActivationWrite` is unchanged (the authority stays the door's); the console binds it from Studio (`ui/packages/app-shell/src/views/setup/packagedFlows.ts#activationReading`). Cards N-04, N-15, N-24, N-28. |
 
 Two anchors the epic's territory names are **not** superseded clauses and are listed so they are not read as one:
 `packages/spec/src/kernel/namespace-prefix.ts#deriveNamespaceFromPackageId` keeps its rule — an explicitly declared
@@ -597,8 +610,9 @@ is fixed above where it bites.
   future type answers "where is it edited" and "where does a customization live" by rule.
 - **The vendor's upgrade and the customer's changes never meet.** Upgrades rewrite the base; `.custom` is untouched;
   `basedOn` tells a human what the override was taken from. The cost is ADR-0005's and ADR-0131's already: an overridden
-  item shadows the vendor's later change to that one item until the customer re-bases it, and the platform computes no
-  diff to help ([D6](#d6)).
+  item shadows the vendor's later change to that one item until the customer re-bases it. The base's upgrade plan names
+  each override that now hides a change, as advice ([D2](#d2), amended 2026-11-06); re-basing stays the customer's act,
+  and the platform computes no field-level diff and merges nothing ([D6](#d6)).
 - **The clauses of eight records move** — six superseded in part (ADR-0126, 0131, 0005, 0048, 0141, 0070) and two
   amended (ADR-0009, 0029) — each with its gate and pin named ([Supersede table](#supersede-table)); every
   implementation card cites its row and changes exactly that pin. No pin is deleted.
@@ -676,9 +690,12 @@ of Q1's refusal and `action` — were ruled by the maintainer on 2026-10-31 (dec
    the pair after any patch of the base. The major is the reversible middle, and its payoff comes with ADR-0141 D3: when
    a base upgrade is intercepted, the pair's `^<major>` is what stops a major upgrade of the base until the
    customization is revisited.
-2. **`basedOn` is recorded and never judged** — not silent, and nothing to accept here: the epic's *Not in this epic*
+2. **`basedOn` is recorded and never gates** — not silent, and nothing to accept here: the epic's *Not in this epic*
    line rules it, verbatim "upgrade diff / `basedOn` checking (recorded only)". It is listed only so the declaration's
-   contract carries the ruling and no card reads `basedOn` as a gate ([D2](#d2)).
+   contract carries the ruling and no card reads `basedOn` as a gate ([D2](#d2)). One reader is admitted, as advice
+   (amended 2026-11-06, decision D2 on objectstack-ai/cloud#3652): the upgrade plan's finding of [D2](#d2), which lists
+   an override whose base item the upgrade changes or whose `basedOn` is not the installed base version, and refuses
+   nothing.
 3. **The uninstall refusal's shape** is the ADR-0029 extender refusal's family, `409`, from the same door ([D3](#d3)):
    one resource-state conflict for "another package still stands on this one", two causes, one envelope.
 4. **The display-property class is defined by a test, not a list** ([D10](#d10)): a property is admitted when changing
@@ -718,6 +735,12 @@ of Q1's refusal and `action` — were ruled by the maintainer on 2026-10-31 (dec
   names the whole-deployment export `GET /packages/export`, landed for
   [#28914](https://github.com/objectstack-ai/objectstack/issues/28914) by PR [#29755](https://github.com/objectstack-ai/objectstack/pull/29755),
   as composing the per-package exports unchanged, the pair after its base).
+- Card [#30881](https://github.com/objectstack-ai/objectstack/issues/30881) (2026-11-06, the amendment in place that
+  admits the upgrade plan's advisory finding — decision D2 on epic
+  [objectstack-ai/cloud#3652](https://github.com/objectstack-ai/cloud/issues/3652), ruling record
+  [`6681380041`](https://github.com/objectstack-ai/cloud/issues/3652#issuecomment-6681380041)); the finding itself is
+  card [#30886](https://github.com/objectstack-ai/objectstack/issues/30886), on the upgrade plan of
+  [#30884](https://github.com/objectstack-ai/objectstack/issues/30884).
 - [#27356](https://github.com/objectstack-ai/objectstack/issues/27356) rows 12, 13, 14, 19, 20, 21 and their landed
   PRs #27376, #27927, #28076.
 - ADR-0005, ADR-0009, ADR-0010, ADR-0029, ADR-0048 (and its 2026-10-08 addendum), ADR-0070, ADR-0126, ADR-0131,

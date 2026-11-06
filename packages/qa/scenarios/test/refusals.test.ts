@@ -48,7 +48,10 @@ const op = (c: RawCard, id: string) => c.run.operations.find((x: { id: string })
 const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   // ── the three classes the card names ──
   ['an unknown capability area, naming the closed set', (c) => (c.capabilities[0] = 'billing.invoices'), 'capabilities[0]', /unknown capability area `billing`.*records-forms/],
-  ['a category outside the closed enum', (c) => (c.category = 'retail'), 'category', /expected one of/],
+  ['a business function outside the spec facet', (c) => (c.businessFunctions = ['operations']), 'businessFunctions[0]', /expected one of/],
+  ['more business functions than the spec allows', (c) => (c.businessFunctions = ['sales', 'finance', 'hr', 'legal']), 'businessFunctions', /at most 3 business functions/],
+  ['a business function listed twice', (c) => (c.businessFunctions = ['sales', 'sales']), 'businessFunctions', /more than once/],
+  ['the retired single category', (c) => (c.category = 'crm'), 'category', /unknown key `category`/],
   ['a truth kind outside the enum', (c) => (c.run.questions[0].truth.kind = 'median'), 'run.questions[0].truth.kind', /discriminator/],
   // ── shape ──
   ['an unknown key, locating the key itself', (c) => (c.run.questions[0].truth.limit = 5), 'run.questions[0].truth.limit', /unknown key `limit`/],
@@ -79,6 +82,7 @@ const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   ['a persona that hides nothing', (c) => (c.run.personas[1].hidden = {}), 'run.personas[1].hidden', /at least one object or field/],
   ['a row scope on a path that does not resolve', (c) => (c.run.personas[0].scope[1].field = 'account.region'), 'run.personas[0].scope[1].field', /no seed row of `account` carries `region`/],
   ['a question asked as an unknown persona', (c) => (q(c, 'account_count').personas[0] = 'ghost'), 'run.questions[4].personas[0]', /no persona `ghost`/],
+  ['a row scope on a card without the row-scope tag', (c) => (c.capabilities = c.capabilities.filter((t: string) => t !== 'access-security.row-scope')), 'capabilities', /persona\(s\) `sdr` declare a row `scope`, so the card must carry `access-security.row-scope`/],
   // ── unanswerable ──
   ['an unanswerable truth without its reason', (c) => delete q(c, 'acme_revenue').truth.reason, 'run.questions[7].truth.reason', /expected string/],
   // ── seed, operations and outcomes ──
@@ -133,6 +137,14 @@ describe('scenario card refusals', () => {
     expect(r.refusals.map(formatRefusal)).toEqual([]);
   });
 
+  it('a card whose personas scope no rows loads without the row-scope tag (control for the tag rule)', () => {
+    const r = load((c) => {
+      c.capabilities = c.capabilities.filter((t: string) => t !== 'access-security.row-scope');
+      delete c.run.personas[0].scope;
+    });
+    expect(r.refusals.map(formatRefusal)).toEqual([]);
+  });
+
   for (const [name, mutate, path, message] of CASES) {
     it(`refuses ${name}`, () => {
       const r = load(mutate);
@@ -177,12 +189,12 @@ describe('scenario card refusals', () => {
     const first = join(dir, `${base.id}.json`);
     const second = join(dir, 'crm_twin.json');
     writeFileSync(first, JSON.stringify(base));
-    writeFileSync(second, JSON.stringify({ ...base, id: 'crm_twin', category: 'retail' }));
+    writeFileSync(second, JSON.stringify({ ...base, id: 'crm_twin', businessFunctions: ['retail'] }));
     const r = loadScenarios(dir, { areas });
     expect(r.cards).toEqual([]);
     expect(r.refusals.map((x) => [x.file, x.path])).toEqual([
       [first, 'code'],
-      [second, 'category'],
+      [second, 'businessFunctions[0]'],
       [second, 'code'],
     ]);
   });

@@ -38,8 +38,7 @@ and select named `dimensions` + `values`**; the dataset owns the base object,
 allowed joins, intrinsic filter, dimensions, and certified measures. A widget
 **requires `dataset` + `values`**; the closed schema rejects `object` /
 `categoryField` / `valueField` / `aggregate` by name, and one lacking `dataset`
-fails `os validate`. The dataset shape is
-`DatasetSchema` — see `node_modules/@objectstack/spec/src/ui/dataset.zod.ts`.
+fails `os validate`.
 
 A widget's presentation-scope `filter` flows into the query as the runtime
 filter; keep `filter` on the widget when binding a dataset.
@@ -102,8 +101,9 @@ Standardized answers to the recurring ambiguous cases:
   `beforeInsert`/`beforeUpdate` hook writes, then `{ name: 'days_sum', aggregate: 'sum', field: 'days_count' }`.
 - **Breakdown by a multi-value field.** `multiselect`/`checkboxes`/`tags` and
   any `multiple: true` field is refused as a dataset or cube dimension and as
-  `groupBy` (`INVALID_FIELD`; no per-member buckets). One widget per member,
-  filtered `{ tags: { $contains: 'urgent' } }`, or a single-value axis.
+  `groupBy` (`INVALID_FIELD`; no per-member buckets); so is a `formula` (at a
+  dataset's compile, `DATASET_INVALID`). One widget per member, filtered
+  `{ tags: { $contains: 'urgent' } }`, or a single-value axis.
 - **Filter by a parent's attribute** → a **dimension** (guaranteed to join); a
   lookup-path *filter* is not a reliable analytics-path construct.
 - **A dashboard filter driving several charts** → **not** a dataset: `globalFilters`
@@ -228,7 +228,7 @@ no second `filter` is required.
 
 `compareTo` is `{ kind, dimension? }` — the same shape the analytics executor
 reads (`DatasetSelection.compareTo`), so what a widget declares is exactly what
-runs. There is no second widget-side vocabulary.
+runs.
 
 | Key | Value | Behaviour |
 |:--|:--|:--|

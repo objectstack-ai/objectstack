@@ -738,11 +738,12 @@ const RECORD_PAGES: Array<Record<string, any>> = Object.values(
 const SHIPPED_LOCALES = Object.keys(SetupAppTranslations as Record<string, unknown>);
 
 /**
- * A key is a locale code (`en`, `zh-CN`). Deliberately a shape test rather than
- * a membership test against `SHIPPED_LOCALES`: a map carrying a locale the
- * bundle does not ship is still an inline map, and must still be judged.
+ * A key is a locale code (`en`, `zh-CN`, and the platform locale table's
+ * script-subtag tag `zh-Hant`). Deliberately a shape test rather than a
+ * membership test against `SHIPPED_LOCALES`: a map carrying a locale the bundle
+ * does not ship is still an inline map, and must still be judged.
  */
-const LOCALE_KEY = /^[a-z]{2}(-[A-Z]{2})?$/;
+const LOCALE_KEY = /^[a-z]{2}(-[A-Z][a-z]{3})?(-[A-Z]{2})?$/;
 
 /** An inline `I18nLabel` map: every key a locale code, every value a string. */
 const isInlineLocaleMap = (value: unknown): value is Record<string, string> => {

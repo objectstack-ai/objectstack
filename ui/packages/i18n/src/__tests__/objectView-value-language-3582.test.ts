@@ -24,6 +24,7 @@
  * be revisited in the same PR instead of drifting for another release.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { builtInLocales } from '../locales';
 
 // Derived from the map rather than left as `string[]`: `Object.keys` erases
@@ -64,7 +65,8 @@ const EN_STALE_READONLY = 'System view defined in code - duplicate to customize.
 // `LocaleCode[]`, which `entries`/`keys` erase by design. A typo'd pack name is
 // now a compile error rather than a case that silently never runs.
 const NATIVE_SCRIPT: Partial<Record<LocaleCode, RegExp>> = {
-  zh: /\p{Script=Han}/u,
+  'zh-Hans': /\p{Script=Han}/u,
+  'zh-Hant': /\p{Script=Han}/u,
   ja: /\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Han}/u,
   ko: /\p{Script=Hangul}/u,
   ru: /\p{Script=Cyrillic}/u,
@@ -73,7 +75,7 @@ const NATIVE_SCRIPT: Partial<Record<LocaleCode, RegExp>> = {
 
 describe('console.objectView value-language coverage (objectui#3582)', () => {
   it('covers all ten built-in packs', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
   });
 
   it.each(LANGS)('%s defines both keys as non-empty strings', (lang) => {

@@ -10,9 +10,10 @@
  *      active organization (user mode) or supplied via --org (service mode).
  *   2. POST /cloud/packages/:id/versions     — snapshot dist/objectstack.json
  *      into sys_package_version.manifest_json (status=published).
- *   3. (optional) auto-install into a target environment via --env, or the
+ *   3. (optional) auto-install into a target environment via --env, the
  *      environment `os environments switch` recorded in cloud.json for the
- *      control plane being published to.
+ *      control plane being published to, or the organization's only
+ *      environment (`utils/install-target.ts`, resolved before step 1).
  *
  * This is the "upload my local code to my org" path — the single supported
  * way to publish. (The legacy direct-to-environment `os publish` / `os
@@ -31,10 +32,18 @@
 import { readFile } from 'node:fs/promises';
 import { resolve as resolvePath, basename, dirname, isAbsolute } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
-import { PackageSchema } from '@objectstack/spec/marketplace';
+import {
+  CreatePackageRequestSchema,
+  explainSolutionTypeContradiction,
+  LEGACY_CATEGORY_MAPPING,
+  MarketplaceBusinessFunctionSchema,
+  PackageSchema,
+  type MarketplaceSolutionType,
+} from '@objectstack/spec/marketplace';
+import { ManifestSchema, resolveInstallModes } from '@objectstack/spec/kernel';
 import { printHeader, printKV, printSuccess, printError, printStep, printWarning, isExitSignal } from '../../utils/format.js';
-import { DEFAULT_CLOUD_URL, tryReadCloudConfig } from '../../utils/cloud-config.js';
-import { resolveCloudActiveEnvironmentId } from '../../utils/active-environment.js';
+import { DEFAULT_CLOUD_URL, resolveCloudCredential } from '../../utils/cloud-config.js';
+import { installTargetLine, resolveInstallTarget, type InstallTargetResolution } from '../../utils/install-target.js';
 import { readErrorMessage } from '../../utils/response-envelope.js';
 
 /**
@@ -229,6 +238,93 @@ function deriveVersion(artifact: any, fallback: string | undefined): string {
 }
 
 /**
+ * The refusal for a retired `category`, from the manifest or the hidden
+ * `--category` flag, naming the facets that replace it — for the value given
+ * when `LEGACY_CATEGORY_MAPPING` knows it.
+ *
+ * Refused, never dropped: an author who wrote a category meant to classify the
+ * package, and silently publishing it unclassified would hide that. Refused
+ * before any network call, so nothing is half-published.
+ */
+export function retiredCategoryRefusal(source: 'manifest' | 'flag', value: unknown): string {
+  const where = source === 'flag'
+    ? '`--category` was removed'
+    : 'objectstack.manifest.json declares `category`, which was removed';
+  const head = `${where} in @objectstack/spec 18: the marketplace taxonomy is \`businessFunctions\` `
+    + '(1-3 business functions, the primary one first), optional `industries` (up to 3) and `solutionType` '
+    + '(`app`, `template` or `connector`).';
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  const mapping = raw ? LEGACY_CATEGORY_MAPPING[raw] : undefined;
+  const functions = MarketplaceBusinessFunctionSchema.options.join(', ');
+  const fix = 'Delete `category` and declare the facets in objectstack.manifest.json.';
+  if (!mapping) {
+    return `${head} ${fix} Business functions: ${functions}.`;
+  }
+  // `starter` reaches this command from a project scaffolded off the blank
+  // template, which shipped it as its own marker. It never classified the
+  // project, so the template type the catalog maps it to is not the answer here.
+  if (raw === 'starter') {
+    return `${head} "starter" was the blank template's own marker, copied into projects scaffolded from it; `
+      + `it does not classify your package. ${fix} Business functions: ${functions}.`;
+  }
+  const tag = 'tag' in mapping && mapping.tag ? ` Keep "${mapping.tag}" in \`tags\` if it helps search.` : '';
+  if (mapping.kind === 'unlistable') {
+    return `${head} "${raw}" has no replacement: ${mapping.reason}. Delete \`category\`.`;
+  }
+  if (mapping.kind === 'manual') {
+    return `${head} "${raw}" maps to "solutionType": "${mapping.solutionType}", and its business functions are `
+      + `yours to choose (1-3 of: ${functions}). ${fix}${tag}`;
+  }
+  const declared = mapping.businessFunctions.map((f) => `"${f}"`).join(', ');
+  const review = mapping.review ? ' Check them: this old value covered several functions.' : '';
+  return `${head} "${raw}" maps to "businessFunctions": [${declared}], "solutionType": "${mapping.solutionType}".`
+    + `${review} ${fix}${tag}`;
+}
+
+/** The facet keys `objectstack.manifest.json` declares, and the wire key each is sent under. */
+const TAXONOMY_WIRE_KEYS = {
+  businessFunctions: 'business_functions',
+  industries: 'industries',
+  solutionType: 'solution_type',
+  maturity: 'maturity',
+} as const;
+
+/**
+ * Read the marketplace facets off `objectstack.manifest.json` and check them
+ * against the built artifact: each key's own shape (the spec's schema for it),
+ * then the declared `solutionType` against what the artifact ships
+ * (`explainSolutionTypeContradiction`). Returns the body keys to send, or the
+ * refusal. An absent key is not sent, so a re-publish leaves the stored value
+ * alone.
+ */
+export function readPublishTaxonomy(
+  manifest: Record<string, unknown>,
+  artifact: any,
+): { ok: true; body: Record<string, unknown> } | { ok: false; message: string } {
+  const body: Record<string, unknown> = {};
+  for (const [key, wire] of Object.entries(TAXONOMY_WIRE_KEYS)) {
+    if (manifest[key] === undefined) continue;
+    const field = CreatePackageRequestSchema.shape[key as keyof typeof TAXONOMY_WIRE_KEYS];
+    const parsed = field.safeParse(manifest[key]);
+    if (!parsed.success) {
+      const why = parsed.error.issues.map((issue) => issue.message).join('; ');
+      return { ok: false, message: `objectstack.manifest.json \`${key}\` is not valid: ${why}` };
+    }
+    body[wire] = parsed.data;
+  }
+  const solutionType = body.solution_type as MarketplaceSolutionType | undefined;
+  if (solutionType !== undefined) {
+    const modes = ManifestSchema.shape.installModes.safeParse(artifact?.manifest?.installModes);
+    const contradiction = explainSolutionTypeContradiction(solutionType, {
+      installModes: resolveInstallModes(modes.success ? { installModes: modes.data } : undefined),
+      connectorCount: Array.isArray(artifact?.connectors) ? artifact.connectors.length : 0,
+    });
+    if (contradiction !== undefined) return { ok: false, message: contradiction };
+  }
+  return { ok: true, body };
+}
+
+/**
  * Load `objectstack.manifest.json` from `cwd` if it exists. Returns the
  * parsed JSON plus the directory it was loaded from (used to resolve
  * relative `readmePath` / per-locale README paths). Returns `null` when
@@ -352,7 +448,28 @@ async function resolveLocalizedMarkdown(
   return await readFile(path, 'utf-8');
 }
 
+/**
+ * What one successful publish produced — read by `os deploy`, which runs this
+ * command for its publish step and then waits on the result. Set only after
+ * the version POST succeeded; every refusal leaves it undefined.
+ */
+export interface PublishOutcome {
+  manifestId: string;
+  /** `sys_package.id` — the internal id the installation read is keyed by. */
+  packageId: string;
+  version: string;
+  versionId: string | undefined;
+  /** The control plane the publish went to, and the credential it used. */
+  baseUrl: string;
+  token: string;
+  /** The environment the control plane reports installing into, when it installed. */
+  installedInto: string | undefined;
+}
+
 export default class PackagePublish extends Command {
+  /** See {@link PublishOutcome}. */
+  outcome: PublishOutcome | undefined;
+
   static override description =
     'Publish a compiled artifact as a versioned package in your organization (ADR-0006 v4 Phase B)';
 
@@ -398,8 +515,12 @@ export default class PackagePublish extends Command {
     description: Flags.string({
       description: 'Short package description',
     }),
+    // REMOVED with the spec's `category`. Still declared, hidden, so passing
+    // it is answered with the facets that replace it rather than oclif's bare
+    // "Nonexistent flag".
     category: Flags.string({
-      description: 'Marketplace category slug (e.g. crm, hr, devtools)',
+      description: 'REMOVED: declare businessFunctions / industries / solutionType in objectstack.manifest.json',
+      hidden: true,
     }),
     // ⛔ No `default:` here. The package upsert is also the RE-publish path, and
     // the control plane patches an existing package's visibility whenever the
@@ -424,11 +545,14 @@ export default class PackagePublish extends Command {
     env: Flags.string({
       description:
         'Environment id to install the new version into after publish. Defaults to the '
-        + 'environment `os environments switch` recorded for this control plane in cloud.json',
+        + 'environment `os environments switch` recorded for this control plane in cloud.json, '
+        + "then to your organization's only environment",
       env: 'OS_ENVIRONMENT_ID',
     }),
     install: Flags.boolean({
-      description: 'Auto-install the new version into --env after publishing',
+      description:
+        'Install the new version after publishing, into --env or the environment it defaults to. '
+        + 'With no environment to name, the command exits non-zero before publishing anything.',
       default: false,
     }),
     'seed-sample-data': Flags.boolean({
@@ -520,13 +644,31 @@ export default class PackagePublish extends Command {
       printSuccess(`Loaded artifact (${(artifactRaw.length / 1024).toFixed(1)} KB)`);
 
       // Load `objectstack.manifest.json` (optional). Provides declarative
-      // defaults for manifestId / displayName / category / tagline / readme
+      // defaults for manifestId / displayName / the facets / tagline / readme
       // / per-locale translations etc. CLI flags always win over manifest.
       const tplManifest = await tryLoadTemplateManifest(process.cwd());
       if (tplManifest) {
         printStep(`Loaded objectstack.manifest.json`);
       }
       const m = tplManifest?.data ?? {};
+      // The retired `category`, from either source, is refused before
+      // anything else is read or sent — see retiredCategoryRefusal.
+      if (flags.category !== undefined) {
+        printError(retiredCategoryRefusal('flag', flags.category));
+        this.exit(1);
+        return;
+      }
+      if (m.category !== undefined) {
+        printError(retiredCategoryRefusal('manifest', m.category));
+        this.exit(1);
+        return;
+      }
+      const taxonomy = readPublishTaxonomy(m, artifact);
+      if (!taxonomy.ok) {
+        printError(taxonomy.message);
+        this.exit(1);
+        return;
+      }
       for (const warning of uncarriedManifestWarnings(m)) printWarning(warning);
       const baseDir = tplManifest?.baseDir ?? process.cwd();
 
@@ -585,20 +727,41 @@ export default class PackagePublish extends Command {
       // (the *runtime* identity, written by `os login`). Publishing a package
       // and managing a local ObjectOS instance are two distinct identities —
       // see `os cloud login` for the cloud identity.
-      let token = flags.token ?? process.env.OS_TOKEN ?? undefined;
-      let baseUrl = flags.server.replace(/\/+$/, '');
-      const serverFlagWasDefault = !process.env.OS_CLOUD_URL && baseUrl === DEFAULT_CLOUD_URL;
-      if (!token || serverFlagWasDefault) {
-        const stored = await tryReadCloudConfig();
-        if (!token && stored?.token) token = stored.token;
-        if (serverFlagWasDefault && stored?.url) baseUrl = stored.url.replace(/\/+$/, '');
-      }
+      // One resolution, shared with `os deploy` (`resolveCloudCredential`).
+      const { token, baseUrl } = await resolveCloudCredential({ token: flags.token, server: flags.server });
       if (!token) {
         printError(
           'Not logged in to ObjectOS Cloud. Run `os cloud login` first, or pass --token / set $OS_TOKEN.',
         );
         this.exit(1);
         return;
+      }
+
+      // ---- Step 0: where an install goes, decided BEFORE any write ---------
+      // `utils/install-target.ts` owns the order (`--env` / $OS_ENVIRONMENT_ID,
+      // then the active environment recorded in `cloud.json` FOR THIS CONTROL
+      // PLANE, then the organization's only environment) and every refusal.
+      // ⛔ It runs ahead of step 1 on purpose: an `--install` that cannot name
+      // an environment exits non-zero here, before the package row is touched —
+      // a publish that was asked to install and did not must not read as
+      // success. `credentials.json` is never read for this value (the url gate
+      // lives in `utils/active-environment.ts`; this line must not grow a
+      // second one).
+      let installTarget: Extract<InstallTargetResolution, { kind: 'resolved' }> | undefined;
+      if (flags.install) {
+        const resolution = await resolveInstallTarget({
+          subject: '`--install`',
+          explicit: flags.env,
+          baseUrl,
+          token,
+          timeoutMs: flags.timeout,
+        });
+        if (resolution.kind === 'refused') {
+          printError(resolution.message);
+          this.exit(1);
+          return;
+        }
+        installTarget = resolution;
       }
 
       // ---- Step 1: ensure sys_package row ---------------------------------
@@ -636,8 +799,10 @@ export default class PackagePublish extends Command {
       } else if (tagline) {
         pkgBody.description = tagline;
       }
-      const cat = flags.category ?? (typeof m.category === 'string' ? m.category : undefined);
-      if (cat) pkgBody.category = cat;
+      // The marketplace facets (`businessFunctions`, `industries`,
+      // `solutionType`, `maturity`), already checked above. `category` never
+      // reaches this point.
+      Object.assign(pkgBody, taxonomy.body);
       // Listing tags, as the author wrote them. The hosted route owns the
       // shape and the bounds (it trims, de-duplicates and caps them) and
       // answers a 400 that is printed as it is; this command keeps no copy of
@@ -783,38 +948,10 @@ export default class PackagePublish extends Command {
       if (flags.submit) verBody.submit_for_review = true;
       if (flags['auto-approve']) verBody.auto_approve = true;
 
-      // Install target precedence: `--env` (which oclif also fills from
-      // $OS_ENVIRONMENT_ID), then the environment `os environments switch`
-      // recorded in `cloud.json` FOR THIS CONTROL PLANE.
-      //
-      // ⛔ Never `credentials.json`. That file's `activeEnvironmentId` belongs
-      // to whatever server the runtime identity points at — `localhost:3000`
-      // by default — so it can name an environment on a different control
-      // plane than the one this publish is POSTing to. The url gate lives in
-      // `utils/active-environment.ts`; this line must not grow a second one.
-      let installEnvId = flags.env;
-      let installEnvFromActive = false;
-      if (flags.install && !installEnvId) {
-        installEnvId = await resolveCloudActiveEnvironmentId(baseUrl);
-        installEnvFromActive = Boolean(installEnvId);
-      }
-
-      const shouldInstall = flags.install && installEnvId;
-      if (shouldInstall) {
-        verBody.install_env_id = installEnvId;
+      if (installTarget) {
+        verBody.install_env_id = installTarget.environmentId;
         verBody.seed_sample_data = flags['seed-sample-data'];
-        if (installEnvFromActive) {
-          printStep(
-            `Installing into the active environment ${installEnvId} `
-            + '(os environments switch / os environments create --activate)',
-          );
-        }
-      } else if (flags.install && !installEnvId) {
-        printError(
-          '`--install` requires `--env <id>`, $OS_ENVIRONMENT_ID, or an active environment '
-          + '(`os environments switch <id>` or `os environments create --activate` against this '
-          + 'control plane). Skipping auto-install.',
-        );
+        if (installTarget.source !== 'flag') printStep(installTargetLine(installTarget));
       }
 
       const verRes = await this.postJson(
@@ -835,13 +972,25 @@ export default class PackagePublish extends Command {
           console.log('');
           console.log(
             '  Fix the items above on the sys_package row (use --readme / --readme-file,\n' +
-            '  --icon-url, --description, --category) and re-run with --submit or --auto-approve.',
+            '  --icon-url, --description; the facets in objectstack.manifest.json) and re-run with\n' +
+            '  --submit or --auto-approve.',
           );
         }
         this.exit(1);
         return;
       }
       const ver = verRes.body?.data ?? verRes.body;
+      this.outcome = {
+        manifestId,
+        packageId: String(pkg?.id ?? ''),
+        version: String(ver?.version ?? version),
+        versionId: typeof ver?.id === 'string' ? ver.id : undefined,
+        baseUrl,
+        token,
+        installedInto: ver?.installation
+          ? String(ver.installation.environment_id ?? installTarget?.environmentId ?? '')
+          : undefined,
+      };
       const violations = Array.isArray(verRes.body?.violations) ? verRes.body.violations : [];
       const warnings = Array.isArray(ver?.warnings) ? ver.warnings : [];
 
@@ -858,7 +1007,7 @@ export default class PackagePublish extends Command {
       if (ver?.installation) {
         console.log('');
         printSuccess('Installed into environment');
-        printKV('  Environment', String(ver.installation.environment_id ?? flags.env ?? '—'));
+        printKV('  Environment', String(ver.installation.environment_id ?? installTarget?.environmentId ?? '—'));
         printKV('  Installation', String(ver.installation.installation_id ?? '—'));
       }
       printKV('  Server',         baseUrl);

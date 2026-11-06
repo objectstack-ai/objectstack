@@ -128,7 +128,7 @@ Stored as JSON on the parent row — no separate table / FK:
 
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
-| `formula` | Computed from an expression referencing other fields — virtual: not aggregatable, a dataset measure needs a stored field (objectstack-ui → Dashboards → Dataset-Bound Widgets) | `expression` (CEL, `record.` prefixes), `returnType` (`'number' \| 'text' \| 'boolean' \| 'date' \| 'currency'`); `'currency'` carries its own `currencyConfig` |
+| `formula` | Computed from an expression referencing other fields — virtual: neither aggregatable nor a dataset or cube dimension (group key); both need a stored field (objectstack-ui → Dashboards → Dataset-Bound Widgets) | `expression` (CEL, `record.` prefixes), `returnType` (`'number' \| 'text' \| 'boolean' \| 'date' \| 'currency'`); `'currency'` carries its own `currencyConfig` |
 | `summary` | Roll-up aggregation from child records | `summaryOperations` ({ object, field? (omit for `count`), function, relationshipField?, filter? }) |
 | `autonumber` | Auto-incrementing display format ({0000} counter + optional date / {field} tokens, resets per scope) | `format` (shorthand) / `autonumberFormat` (canonical) — e.g., `"CASE-{0000}"`, `"AD{YYYYMMDD}{0000}"` |
 
@@ -201,7 +201,7 @@ import { F } from '@objectstack/spec';
 const total = {
   type: 'formula',
   expression: F`record.amount * record.tax_rate`,
-  returnType: 'number',   // see the Calculated table
+  returnType: 'number',
 };
 ```
 

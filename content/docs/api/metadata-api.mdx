@@ -178,9 +178,37 @@ before.
 
 Enable a disabled package.
 
+The mirror of the disable door's refusal below: the enable is refused
+`409 PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE` while a validation rule it
+would put into service (the package's own, or one on an object it owns) reads a
+field that another, still disabled package adds through `objectExtensions`:
+that field stays withheld, and every write to the object would fail the rule.
+The message names each rule as `package · object · rule (reads FIELD)` and the
+disabled package to enable first, and nothing changes. A rule is judged as the
+object will serve it once the package is enabled: one rule per name, a tenant
+overlay's switch honoured. A rule the enable does not bring into service is not
+counted. `POST /packages` answers the same `409` for an overwrite of a disabled
+package with `enableOnInstall: true`; the overwrite lands and the package stays
+disabled. A boot whose stored state leaves such a rule served (the state records
+only disables) logs one warning naming every rule and the remedies.
+
 ### `PATCH /packages/:id/disable`
 
 Disable a package without uninstalling.
+
+A package that adds fields to another object through `objectExtensions` is
+refused `409 PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE` while a validation
+rule of any enabled package reads one of those fields (declared dependent or
+not, an app's `.custom` pair included, any severity): withheld, the field could
+not be read, and every write to that object would fail the rule. The message
+names each rule as `package · object · rule (reads FIELD)`, and nothing changes.
+A rule is judged as the object serves it: one rule per name, a tenant overlay's
+switch honoured. Switch off or change each named rule first, or disable the
+package that owns it. A formula over the field does not refuse the disable; it
+answers `null`. `POST /packages` answers the same `409` for an overwrite of an
+enabled package with `enableOnInstall: false` that would leave such a package
+disabled; the overwrite lands and the package stays enabled. A fresh install
+with `enableOnInstall: false` lands disabled, as before.
 
 ---
 

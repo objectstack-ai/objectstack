@@ -1933,6 +1933,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.detail.disable': 'Disable',
   'engine.packages.detail.disableTitle': 'Disable "{name}"?',
   'engine.packages.detail.disableDescription': 'The package is taken out of service for every user until it is enabled again. No records are deleted, and you can enable it again at any time.',
+  'engine.packages.detail.disableMayBeRefused': 'The disable is refused while an active validation rule reads a field this package adds; the refusal names each such rule.',
+  'engine.packages.detail.disableRestricted': 'This package cannot be disabled while an active validation rule reads a field it adds. Switch off or change each rule named below first, or keep the package enabled.',
   'engine.packages.detail.export': 'Export',
   'engine.packages.detail.exporting': 'Exporting…',
   'engine.packages.detail.deletePackage': 'Delete package',

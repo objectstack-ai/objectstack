@@ -5,12 +5,14 @@ import { enMetadataForms } from '../apps/translations/en.metadata-forms.generate
 import { zhCNMetadataForms } from '../apps/translations/zh-CN.metadata-forms.generated.js';
 import { jaJPMetadataForms } from '../apps/translations/ja-JP.metadata-forms.generated.js';
 import { esESMetadataForms } from '../apps/translations/es-ES.metadata-forms.generated.js';
+import { zhHantMetadataForms } from '../apps/translations/zh-Hant.metadata-forms.generated.js';
 import { zhCNGeneratedSourceHashes } from '../apps/translations/zh-CN.source-hashes.generated.js';
 import { jaJPGeneratedSourceHashes } from '../apps/translations/ja-JP.source-hashes.generated.js';
 import { esESGeneratedSourceHashes } from '../apps/translations/es-ES.source-hashes.generated.js';
+import { zhHantGeneratedSourceHashes } from '../apps/translations/zh-Hant.source-hashes.generated.js';
 import { withSourceFallback } from '../apps/translations/source-hash.js';
 
-/** The source bundle these three are judged against — `en` is a copy of it. */
+/** The source bundle the translated locales are judged against — `en` is a copy of it. */
 const enSource = { metadataForms: enMetadataForms };
 
 /**
@@ -33,7 +35,7 @@ const enSource = { metadataForms: enMetadataForms };
  * "Only fills newly added keys" is exactly the sticky drift the source-hash
  * mechanism exists for: a leaf filled from the source and then left behind when
  * the source was revised keeps serving a superseded draft, present and in sync
- * by key, forever. The three translated locales therefore pass through
+ * by key, forever. The translated locales therefore pass through
  * `withSourceFallback`, judged by the generated provenance tables. The THIRD
  * argument is `undefined` on purpose — the hand-authored table judges
  * `apps`/`dashboards`/`pages`, and this bundle carries none of those.
@@ -43,4 +45,5 @@ export const MetadataFormsTranslations: TranslationBundle = {
   'zh-CN': withSourceFallback({ metadataForms: zhCNMetadataForms }, enSource, undefined, zhCNGeneratedSourceHashes),
   'ja-JP': withSourceFallback({ metadataForms: jaJPMetadataForms }, enSource, undefined, jaJPGeneratedSourceHashes),
   'es-ES': withSourceFallback({ metadataForms: esESMetadataForms }, enSource, undefined, esESGeneratedSourceHashes),
+  'zh-Hant': withSourceFallback({ metadataForms: zhHantMetadataForms }, enSource, undefined, zhHantGeneratedSourceHashes),
 };

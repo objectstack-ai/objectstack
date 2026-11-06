@@ -1,13 +1,15 @@
 /**
- * Chinese (zh) — the lazy `marketplace` namespace's catalogue.
+ * Simplified Chinese (zh-Hans) — the lazy `marketplace` namespace's catalogue.
  *
- * A PARTIAL pack: the same shape as `../../locales/zh.ts`, holding only
+ * A PARTIAL pack: the same shape as `../../locales/zh-Hans.ts`, holding only
  * the `marketplace` group, which `./index.ts` deep-merges into an i18next
  * instance when a marketplace page mounts. `./index.ts` says what the
  * namespace is, why it is lazy, and which gates read this file.
  *
  * ⛔ Keep the declaration `const zh = { … }` and `export default zh`:
- * the i18n gates under `ui/scripts/` read this file by AST under that name.
+ * the i18n gates under `ui/scripts/` read this file by AST under that name,
+ * and `../../../scripts/gen-zh-hant.mjs` generates `./zh-Hant.ts` from it —
+ * run `pnpm --filter @object-ui/i18n gen:zh-hant` after editing a value here.
  */
 const zh = {
   marketplace: {

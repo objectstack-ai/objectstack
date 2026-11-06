@@ -11,6 +11,17 @@ export type { RuntimeConfig } from './runtime.js';
 export { createStandaloneStack, resolveObjectStackHome, resolveStandaloneDatabase, sqliteFilenameFromUrl } from './standalone-stack.js';
 export type { StandaloneStackConfig, StandaloneStackResult, ResolvedStandaloneDatabase } from './standalone-stack.js';
 
+// [#30962] The host seam for package lifecycle state (module enable/disable):
+// a host whose `OS_HOME` does not outlive its container supplies the store,
+// and every kernel without one keeps the file under `OS_HOME`.
+export {
+  PACKAGE_STATE_STORE_SERVICE,
+  PACKAGE_STATE_STORE_PLUGIN_NAME,
+  PackageStateStorePlugin,
+  createPackageStateStorePlugin,
+} from './package-state-host-store.js';
+export type { PackageStateStore } from './package-state-host-store.js';
+
 // The dev schema self-heal decision (#21733) — public because `@objectstack/cli`
 // is a reader, not a second home: its config-load fallback and its `telemetry`
 // sibling read the SAME answer the standalone stack's `default` datasource does.

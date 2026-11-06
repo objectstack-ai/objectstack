@@ -95,6 +95,18 @@
  *          answers `503 SERVICE_UNAVAILABLE`. Under a wall only the operator
  *          reaches this step (ADR-0131 D12 items 7–8).
  *
+ *          [epic cloud#3652 Q3, #30884] `dryRun: true` answers `200` with the
+ *          package upgrade plan — the installed version (its ledger entry)
+ *          against this one: objects, fields, type changes, declared and
+ *          suspected renames, seed datasets — and the `manifest` service's
+ *          readings of this environment (rows in each touched column, rows a
+ *          customer edited that the seed replay overwrites), after every
+ *          refusal that says the package cannot install at all and before
+ *          any confirmation ceremony or write. Nothing is installed or
+ *          written. A dry run of an `unmanaged` install or of a
+ *          customization pair answers `400 INVALID_REQUEST`, as does a
+ *          `dryRun` that is not a boolean.
+ *
  *   GET   /api/v1/marketplace/install-local
  *          → lists currently installed marketplace packages. Requires an
  *            authenticated principal (anonymous → 401); `installedBy` and
@@ -1800,6 +1812,35 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         }
         const installMode: InstallMode = requestedMode.data;
 
+        // 0'. [epic cloud#3652 Q3, #30884] ⭐ `dryRun: true` answers the
+        //     package upgrade plan and writes nothing (step 2a′ below). Read
+        //     here with the mode, before anything is fetched: a key this door
+        //     cannot read is refused, never read as "install for real", and a
+        //     dry run of an `unmanaged` install (a copy, which follows no
+        //     upgrade, and whose branch below writes) is refused rather than
+        //     run.
+        if (body?.dryRun !== undefined && typeof body.dryRun !== 'boolean') {
+            return c.json({
+                success: false,
+                error: {
+                    code: 'INVALID_REQUEST',
+                    message: `\`dryRun\` must be true or false, received ${JSON.stringify(body.dryRun)}. Nothing was installed or written.`,
+                },
+            }, 400);
+        }
+        const dryRun = body?.dryRun === true;
+        if (dryRun && installMode === 'unmanaged') {
+            return c.json({
+                success: false,
+                error: {
+                    code: 'INVALID_REQUEST',
+                    message: 'A dry run previews a managed install or upgrade; an `unmanaged` install is a copy that follows no '
+                        + 'upgrade, so there is no plan to preview. Omit `dryRun`, or omit `installMode`. Nothing was installed '
+                        + 'or written.',
+                },
+            }, 400);
+        }
+
         // ── Offline path: an inline manifest was supplied (file import). ──
         // Bypass the cloud-fetch entirely; no OS_CLOUD_URL required.
         const inlineManifest = body?.manifest && typeof body.manifest === 'object' ? body.manifest : null;
@@ -2229,6 +2270,19 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }, UNRUNNABLE_REFUSAL_STATUS);
         }
         if (pairBaseId !== null) {
+            // [#30884] The pair's branch registers and writes on its own path;
+            // the upgrade plan previews a package's own data schema, not a
+            // pair's, so a dry run of it is refused rather than run.
+            if (dryRun) {
+                return c.json({
+                    success: false,
+                    error: {
+                        code: 'INVALID_REQUEST',
+                        message: `Package '${manifestId}' is a customization pair over '${pairBaseId}': a dry run previews `
+                            + 'a package install or upgrade, not a pair. Omit `dryRun`. Nothing was installed or written.',
+                    },
+                }, 400);
+            }
             return this.installCustomizationPair(c, ctx, {
                 manifest,
                 manifestId,
@@ -2324,6 +2378,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 },
             }, 409);
         }
+
+        // 2a′. [epic cloud#3652 Q3, #30884] ⭐ THE DRY RUN answers here,
+        //      after every refusal that says this package cannot install at
+        //      all (payload, id, wall, handshake, dependencies, mode, code it
+        //      cannot run, namespace, conflict, datasource holder) and before
+        //      the first confirmation ceremony (2b) and the first write (3):
+        //      the plan is what an installer reads before deciding, so it is
+        //      answered whether or not a ceremony would stop the install.
+        if (dryRun) return this.answerUpgradeDryRun(c, ctx, { manifest, manifestId, version });
 
         // 2b. [ADR-0120 D5e] `isolated`-posture gate on installation-wide
         //     uniques. Runs BEFORE hot-register and before anything is written
@@ -4835,6 +4898,69 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *
      * An engine without that door (not ObjectQL) is handed the body as before.
      */
+    /**
+     * [epic cloud#3652 Q3, #30884] The dry run (`dryRun: true`, step 2a′): the
+     * package upgrade plan of the installed version against this one, with
+     * what only this environment knows, and nothing installed or written.
+     *
+     * Both versions are compared as the registry reads them — each converted
+     * forward ({@link convertPackageBodyForward}), the installed one from its
+     * ledger entry — by the `manifest` service's `planUpgrade`
+     * (`@objectstack/objectql`): the comparison is
+     * `comparePackageVersions` (`@objectstack/metadata-core`), the one
+     * `os diff` reads, and the readings are rows in each column the upgrade
+     * touches and rows a customer edited that the seed replay overwrites.
+     *
+     * A runtime whose `manifest` service answers no `planUpgrade` answers 503:
+     * a preview that could not run is never answered as an empty one. A
+     * ledger entry that will not parse is said so, and the plan is then
+     * against no installed version.
+     */
+    private answerUpgradeDryRun = async (
+        c: any,
+        ctx: PluginContext,
+        args: { manifest: any; manifestId: string; version: string },
+    ): Promise<Response> => {
+        const { manifest, manifestId, version } = args;
+        let service: { planUpgrade?: (installed: unknown, incoming: unknown) => Promise<unknown> } | undefined;
+        try { service = ctx.getService('manifest') as typeof service; } catch { /* no manifest service */ }
+        if (typeof service?.planUpgrade !== 'function') {
+            return c.json({
+                success: false,
+                error: {
+                    code: 'SERVICE_UNAVAILABLE',
+                    message: `A dry run of '${manifestId}' cannot be answered: this runtime's \`manifest\` service does not `
+                        + 'answer `planUpgrade`, which the plan is read from. Nothing was installed or written.',
+                },
+            }, 503);
+        }
+        const ledgerRead = this.ledger.read(manifestId);
+        const installedEntry = ledgerRead.entry;
+        const installed = installedEntry?.manifest ? this.convertPackageBodyForward(ctx, installedEntry.manifest) : undefined;
+        const reading = await service.planUpgrade(installed, this.convertPackageBodyForward(ctx, manifest)) as {
+            plan: unknown;
+            environment: unknown;
+        };
+        return c.json({
+            success: true,
+            data: {
+                dryRun: true,
+                manifestId,
+                version,
+                installedVersion: installedEntry?.version ?? null,
+                ...(ledgerRead.failure ? { installedRecordUnreadable: true } : {}),
+                plan: reading.plan,
+                environment: reading.environment,
+                message: installedEntry
+                    ? `Dry run: the plan of upgrading '${manifestId}' from ${installedEntry.version} to ${version}. Nothing was installed or written.`
+                    : ledgerRead.failure
+                        ? `Dry run: the record of the installed '${manifestId}' could not be read, so the plan lists everything `
+                            + `${version} adds, against no installed version. Nothing was installed or written.`
+                        : `Dry run: '${manifestId}' is not installed here, so the plan lists everything ${version} adds. Nothing was installed or written.`,
+            },
+        }, 200);
+    };
+
     private convertPackageBodyForward = (ctx: PluginContext, manifest: unknown): any => {
         let ql: { convertPackageBodyForward?: (body: unknown) => unknown } | undefined;
         try { ql = ctx.getService('objectql') as typeof ql; } catch { /* no data engine */ }

@@ -2997,3 +2997,74 @@ describe('audit writers — the activity row of an org-less record names the der
     expect(asked).toBe(0);
   });
 });
+
+/**
+ * [#30960] A SCIM connection's write names the connection, and only that write.
+ *
+ * plugin-auth hands every write of a SCIM protocol request to the engine as
+ * `{ isSystem: true, actor: 'svc:scim:CONNECTION_ID' }` with no
+ * `attributedUserId` (pinned at the engine by plugin-auth's
+ * `scim-transaction-scope.test.ts`, which spells the same label), and the
+ * engine surfaces it as `session.actor`. The ledger row then carries the
+ * label on `actor`, the connection id alone as `metadata.scim_connection_id`,
+ * and a null `user_id`: no human acted.
+ */
+describe('audit writers — a SCIM connection is the actor of its writes (#30960)', () => {
+  const SCIM_ACTOR = 'svc:scim:okta-30960';
+
+  it.each([
+    ['the SCIM create', 'afterInsert', 'create', { result: { id: 'u_1', email: 'ann@example.com' } }],
+    [
+      'the deactivation’s ban update',
+      'afterUpdate',
+      'update',
+      { previous: { id: 'u_1', banned: false }, result: { id: 'u_1', banned: true } },
+    ],
+    ['the delete', 'afterDelete', 'delete', { previous: { id: 'su_1', user_name: 'ann' }, result: { id: 'su_1' } }],
+  ])('%s: actor names the connection, metadata carries its id, user_id stays null', async (_label, event, action, rows) => {
+    const { engine, fire, created } = makeEngine(SINGLE_TENANT);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire(event, {
+      object: action === 'delete' ? 'sys_scim_user' : 'sys_user',
+      input: { id: (rows.result as { id: string }).id },
+      ...rows,
+      session: { isSystem: true, actor: SCIM_ACTOR },
+    });
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    expect(audit?.row.action).toBe(action);
+    expect(audit?.row.actor).toBe(SCIM_ACTOR);
+    expect(audit?.row.user_id).toBeNull();
+    expect(JSON.parse(audit?.row.metadata)).toEqual({ scim_connection_id: 'okta-30960' });
+  });
+
+  it('another service principal’s row is unchanged: actor recorded, no metadata', async () => {
+    for (const actor of ['svc:cloud-control', 'svc:flow:mirror_status', 'svc:scim']) {
+      const { engine, fire, created } = makeEngine(SINGLE_TENANT);
+      installAuditWriters(engine as any, 'test.audit');
+      await fire('afterInsert', {
+        object: 'crm_lead',
+        input: { id: 'lead-1' },
+        result: { id: 'lead-1', name: 'Acme' },
+        session: { isSystem: true, actor },
+      });
+      const audit = created.find((c) => c.object === 'sys_audit_log');
+      expect(audit?.row.actor, actor).toBe(actor);
+      expect(audit?.row.metadata, actor).toBeUndefined();
+    }
+  });
+
+  it('a user’s write carries no SCIM key even beside a SCIM label: the user is the actor', async () => {
+    const { engine, fire, created } = makeEngine(SINGLE_TENANT);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: { id: 'lead-1', name: 'Acme' },
+      session: { userId: 'user-7', actor: SCIM_ACTOR },
+    });
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    expect(audit?.row.actor).toBe('user-7');
+    expect(audit?.row.user_id).toBe('user-7');
+    expect(audit?.row.metadata).toBeUndefined();
+  });
+});

@@ -165,7 +165,7 @@ describe('SharedRecordPage — a shared non-chat record renders as read-only row
   });
 
   it('under zh the value words come from the zh pack', async () => {
-    const { zh, en } = builtInLocales;
+    const { 'zh-Hans': zh, en } = builtInLocales;
     // Guard: these are real zh rows, not English copies.
     expect(zh.common.yes).not.toBe(en.common.yes);
     expect(zh.sharedRecord.redactedFields).not.toBe(en.sharedRecord.redactedFields);

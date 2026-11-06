@@ -37,10 +37,20 @@ vi.mock('lucide-react', async (importOriginal) => ({
   Globe: () => <span />,
 }));
 
-import { LocaleSwitcher } from '../LocaleSwitcher';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
+import { LocaleSwitcher, localeLabel } from '../LocaleSwitcher';
 
-/** The eight built-in native names an app shipping only `en`+`zh` must NOT show. */
-const PHANTOM_LABELS = ['日本語', '한국어', 'Deutsch', 'Français', 'Español', 'Português', 'Русский', 'العربية'];
+/**
+ * The eight built-in native names an app shipping only `en`+`zh` must NOT show:
+ * every platform locale table language but English and Chinese, named as the
+ * menu names them (`pt-BR` by `Intl.DisplayNames`, objectstack#30511).
+ */
+const PHANTOM_LABELS = PLATFORM_LOCALE_TAGS
+  .filter((tag) => tag !== 'en' && !tag.startsWith('zh-'))
+  .map(localeLabel);
+
+/** Every built-in pack's menu name: one per platform locale table tag. */
+const BUILT_IN_PACK_LABELS = PLATFORM_LOCALE_TAGS.map(localeLabel);
 
 /** The console's real wiring: app packs arrive through the dynamic loader. */
 function mountConsole(opts: {
@@ -105,19 +115,18 @@ describe('LocaleSwitcher — menu composed from the app locale list', () => {
     }
   });
 
-  it('falls back to the built-in ten when the endpoint fails', async () => {
+  it('falls back to the built-in packs when the endpoint fails', async () => {
     mountConsole({ locales: async () => { throw new Error('ECONNREFUSED'); } });
 
     // No backend is not "this app ships nothing" — the switcher must stay
     // usable, offering everything this renderer can produce on its own.
     await waitFor(() => expect(screen.getByText('English')).toBeInTheDocument());
-    for (const label of PHANTOM_LABELS) {
+    for (const label of BUILT_IN_PACK_LABELS) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
-    expect(screen.getByText('中文')).toBeInTheDocument();
   });
 
-  it('falls back to the built-in ten when the app answers with nothing usable', async () => {
+  it('falls back to the built-in packs when the app answers with nothing usable', async () => {
     mountConsole({ locales: async () => [] });
 
     await waitFor(() => expect(screen.getByText('English')).toBeInTheDocument());
@@ -151,7 +160,7 @@ describe('LocaleSwitcher — menu composed from the app locale list', () => {
     expect(screen.queryByText('日本語')).not.toBeInTheDocument();
   });
 
-  it('offers the built-in ten when no locale endpoint is wired at all', async () => {
+  it('offers the built-in packs when no locale endpoint is wired at all', async () => {
     render(
       <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
         <LocaleSwitcher />
@@ -161,7 +170,7 @@ describe('LocaleSwitcher — menu composed from the app locale list', () => {
     // An app that never wires `loadLocales` keeps exactly today's menu, with
     // no blank frame in front of it.
     expect(screen.getByText('English')).toBeInTheDocument();
-    for (const label of PHANTOM_LABELS) {
+    for (const label of BUILT_IN_PACK_LABELS) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
   });
