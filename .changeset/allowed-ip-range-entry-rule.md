@@ -6,7 +6,7 @@ fix(plugin-auth)!: an allowed IP range that names no range is refused at save an
 
 Clause-②: no (narrowing)
 Metadata-protocol: none
-Skills-docs: updated here — `content/docs/permissions/authentication.mdx` (the `allowed_ip_ranges` row, and a first rule under "Saving, clearing and lockout recovery") and `docs/HARDENING.md` (the Network row); `skills/**` teaches no `allowed_ip_ranges`
+Skills-docs: updated here — `content/docs/permissions/authentication.mdx` (the `allowed_ip_ranges` row, and the first two rules under "Saving, clearing and lockout recovery") and `docs/HARDENING.md` (the Network row); `skills/**` teaches no `allowed_ip_ranges`
 
 <!-- adr-0087: not-required (no-migration-prescription) no metadata an author writes changes and no stored row is rewritten: a value of the `auth.allowed_ip_ranges` setting that is not text, or an entry of it or of the auth plugin's `allowedIpRanges` option that names no range, is refused where it is saved or declared, and matches no address at the sign-in gate -->
 
