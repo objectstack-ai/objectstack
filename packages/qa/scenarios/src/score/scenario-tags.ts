@@ -53,7 +53,7 @@ import { effectiveSharingModel } from '@objectstack/plugin-sharing';
 import { APPROVAL_NODE_TYPE, resolveFlowTriggerKind } from '@objectstack/spec/automation';
 import { SINGLE_OPTION_TYPES, summaryFunctionReadsField } from '@objectstack/spec/data';
 
-import type { ScenarioCard } from '../schema.js';
+import { personaPermissionSetName, ROW_SCOPE_TAG, type ScenarioCard } from '../schema.js';
 import { artifactToEvalGraph } from './scenario-graph.js';
 import { gradeItemNames } from './scenario-naming.js';
 import {
@@ -193,11 +193,51 @@ const flowName = (flow: Bag): string => (typeof flow.name === 'string' ? flow.na
 /** A check's answer: the checks it ran, or why it had nothing in the card to judge. */
 export type TagCheckOutcome = { checks: CheckResult[] } | { unscored: string };
 
+/** What a check knows beyond the card and the artifact. */
+export interface TagCheckContext {
+  /**
+   * The app's namespace (`democrm`): a persona's permission set is
+   * `<namespace>_<persona id>` ({@link personaPermissionSetName}). Absent ⇒
+   * the card's names are read bare, and so is the persona's set (its id).
+   */
+  namespace?: string;
+}
+
 export interface TagCheck {
   /** One sentence: what the check asserts of the artifact. */
   asserts: string;
-  run(facts: ArtifactFacts, card: ScenarioArtifactCard): TagCheckOutcome;
+  run(facts: ArtifactFacts, card: ScenarioArtifactCard, ctx: TagCheckContext): TagCheckOutcome;
 }
+
+/** The permission set the runner grants a persona: see {@link TagCheckContext.namespace}. */
+function personaSetName(ctx: TagCheckContext, persona: string): string {
+  return ctx.namespace === undefined ? persona : personaPermissionSetName(ctx.namespace, persona);
+}
+
+/**
+ * The `rowLevelSecurity` policies of a permission set that apply when its
+ * holder READS `object` (`skills/objectstack-data/rules/security.md` §RLS): not
+ * `enabled: false`, `object` the object or `'*'`, `operation` `select` or
+ * `all`. A policy that lists `positions` applies only to their holders, and a
+ * persona holds none (the runner grants it this one set), so it is left out.
+ */
+function readPolicies(set: Bag | undefined, object: string): Bag[] {
+  const policies = Array.isArray(set?.rowLevelSecurity) ? set.rowLevelSecurity : [];
+  return policies.filter(
+    (r): r is Bag =>
+      isBag(r) &&
+      r.enabled !== false &&
+      (r.object === '*' || (typeof r.object === 'string' && norm(r.object) === norm(object))) &&
+      (r.operation === 'select' || r.operation === 'all') &&
+      !(Array.isArray(r.positions) && r.positions.length > 0),
+  );
+}
+
+/**
+ * A read policy that admits every row: no `using`, or the literal `true`. The
+ * applicable `using` predicates OR-combine, so one such policy undoes the rest.
+ */
+const admitsEveryRow = (r: Bag): boolean => typeof r.using !== 'string' || r.using.trim() === '' || r.using.trim() === 'true';
 
 function uniqueBy<T>(items: readonly T[], key: (t: T) => string): T[] {
   const seen = new Set<string>();
@@ -329,22 +369,43 @@ export const CAPABILITY_TAG_CHECKS: Readonly<Record<string, TagCheck>> = Object.
     },
   },
 
-  'access-security.row-scope': {
-    asserts: "every object a card persona sees only part of keeps its records private (owner-scoped) or derives access from its master",
-    run(f, card) {
-      const scoped = [...new Set(card.run.personas.flatMap((p) => (p.scope ?? []).map((s) => s.object)))];
-      if (scoped.length === 0) return { unscored: "the card's personas scope no rows, so no object has a row scope to keep" };
+  [ROW_SCOPE_TAG]: {
+    asserts:
+      "every object a card persona sees only part of keeps its records private (owner-scoped), derives access from its master, or is narrowed for each such persona by a read policy (`rowLevelSecurity`) on that persona's permission set",
+    run(f, card, ctx) {
+      const scopedBy = new Map<string, string[]>(); // object → the personas scoping it
+      for (const p of card.run.personas) {
+        for (const s of p.scope ?? []) {
+          const personas = scopedBy.get(s.object) ?? [];
+          if (!personas.includes(p.id)) scopedBy.set(s.object, [...personas, p.id]);
+        }
+      }
+      if (scopedBy.size === 0) return { unscored: "the card's personas scope no rows, so no object has a row scope to keep" };
       return {
-        checks: scoped.map((object) => {
+        checks: [...scopedBy].map(([object, personas]) => {
+          const at = `row-scope:${object}->scoped`;
           const def = [...f.objects].find(([name]) => norm(name) === norm(object))?.[1];
+          if (!def) return check(at, false, 'the build has no such object');
+          const model = `sharingModel ${String(def.sharingModel ?? '(undeclared)')}`;
           // `effectiveSharingModel` is plugin-sharing's own reading (ADR-0090
           // D1: an undeclared custom object is private). A detail is public
           // there because the security plugin scopes it through its master.
-          const scopedHere = !!def && (effectiveSharingModel(def) === 'private' || def.sharingModel === 'controlled_by_parent');
+          if (effectiveSharingModel(def) === 'private' || def.sharingModel === 'controlled_by_parent') return check(at, true, model);
+          // Otherwise every persona that sees only part of the object must be
+          // narrowed on its own: the read policies of its permission set AND
+          // into its query (`skills/objectstack-data/rules/security.md` §RLS).
+          const unnarrowed = personas.filter((p) => {
+            const name = personaSetName(ctx, p);
+            const policies = readPolicies(f.permissionSets.find((ps) => ps.name === name), object);
+            return policies.length === 0 || policies.some(admitsEveryRow);
+          });
+          const sets = personas.map((p) => personaSetName(ctx, p)).join(', ');
           return check(
-            `row-scope:${object}->private`,
-            scopedHere,
-            def ? `sharingModel ${String(def.sharingModel ?? '(undeclared)')}` : 'the build has no such object',
+            at,
+            unnarrowed.length === 0,
+            unnarrowed.length === 0
+              ? `${model}; narrowed by a read policy on ${sets}`
+              : `${model}, and no read policy narrows it on ${unnarrowed.map((p) => personaSetName(ctx, p)).join(', ')}`,
           );
         }),
       };
@@ -416,11 +477,11 @@ export interface TagVerdict {
 }
 
 /** Judge every tag of a card against the artifact. */
-export function gradeCapabilityTags(facts: ArtifactFacts, card: ScenarioArtifactCard): TagVerdict[] {
+export function gradeCapabilityTags(facts: ArtifactFacts, card: ScenarioArtifactCard, ctx: TagCheckContext = {}): TagVerdict[] {
   return card.capabilities.map((tag) => {
     const row = Object.prototype.hasOwnProperty.call(CAPABILITY_TAG_CHECKS, tag) ? CAPABILITY_TAG_CHECKS[tag] : undefined;
     if (!row) return { tag, status: 'unscored', checks: [], reason: 'no check in the closed tag table' };
-    const out = row.run(facts, card);
+    const out = row.run(facts, card, ctx);
     if ('unscored' in out) return { tag, status: 'unscored', checks: [], reason: out.unscored };
     // A row that ran no check has proved nothing: that is a failure, never a pass.
     const pass = out.checks.length > 0 && out.checks.every((c) => c.pass);
@@ -485,7 +546,7 @@ export function scoreScenarioArtifact(artifact: unknown, card: ScenarioArtifactC
   const facts = readArtifactFacts(artifact);
   const expect = scoreGraph(facts.graph, card.expect);
   const shape = scoreGraphShape(facts.graph, deriveShape(card.expect));
-  const tags = gradeCapabilityTags(facts, card);
+  const tags = gradeCapabilityTags(facts, card, opts.namespace === undefined ? {} : { namespace: opts.namespace });
   const agentActions = gradeAgentActions(facts, card.run.agentActions ?? []);
   const naming = opts.namespace === undefined ? [] : gradeItemNames(artifact, opts.namespace);
   const all = [...expect.checks, ...tags.flatMap((t) => t.checks), ...agentActions, ...naming];

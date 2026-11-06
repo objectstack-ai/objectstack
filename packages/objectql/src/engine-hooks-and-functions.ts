@@ -6,10 +6,10 @@
  * `ObjectQL`: the bodies of `recordResidualOwner`, `residualOwnerSource`,
  * `getStatus`, `registerHook`, `unregisterHooksByPackage`, `registerFunction`,
  * `resolveFunction`, `resolveFunctionEntry`, `unregisterFunctionsByPackage`,
- * `setDefaultBodyRunner`, `getDefaultBodyRunner`, `setDefaultActionRunner`,
- * `getDefaultActionRunner`, `triggerHooks`, `hasHooksFor`,
- * `opensAfterAbortUnit`, `dispatchUnscopedMultiWriteHooks` moved out of
- * `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
+ * `bindHooks`, `setDefaultBodyRunner`, `getDefaultBodyRunner`,
+ * `setDefaultActionRunner`, `getDefaultActionRunner`, `triggerHooks`,
+ * `hasHooksFor`, `opensAfterAbortUnit`, `dispatchUnscopedMultiWriteHooks` moved
+ * out of `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
  *
  * A MOVE, not a redesign. {@link HooksAndFunctionsFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -42,6 +42,8 @@ import { HookTargetRebindError } from './hook-target-rebind-errors.js';
 import { declaredHookCondition } from './hook-wrappers.js';
 import { CoreServiceName } from '@objectstack/spec/system';
 import { bindHookNotice } from './hook-notice.js';
+import { bindHooksToEngine } from './hook-binder.js';
+import type { BindHooksOptions } from './hook-binder.js';
 import {
   DISPATCHABLE_HOOK_EVENTS, assertDispatchableHookEvent, assertHookScopeNotSelfCancelling,
   assertValidHookExcludeObjects, assertValidHookObject, assertValidUnscopedMultiWriteFlag, hookMatchesObject,
@@ -61,6 +63,8 @@ export interface HooksAndFunctionsHost {
   _defaultBodyRunner: ObjectQL['_defaultBodyRunner'];
   readonly defaultDriver: ObjectQL['defaultDriver'];
   readonly drivers: ObjectQL['drivers'];
+  /** The engine itself: a moved body reads `this.facade` where the method read a bare `this` (#30020). */
+  readonly facade: ObjectQL;
   readonly functions: ObjectQL['functions'];
   getDriver: ObjectQL['getDriver'];
   readonly hooks: ObjectQL['hooks'];
@@ -227,6 +231,33 @@ export class HooksAndFunctionsFacet {
       this.logger.debug('Unregistered functions by package', { packageId, removed });
     }
     return removed;
+  }
+
+  /** The body of `ObjectQL#bindHooks`; the method's docblock there is its contract. */
+  static bindHooks(this: Pick<HooksAndFunctionsHost, '_defaultBodyRunner' | 'facade' | 'logger'>, hooks: any[] | undefined, opts?: {
+    packageId?: string;
+    functions?: Record<string, HookHandler>;
+    bodyRunner?: any;
+    strict?: boolean;
+    warnLegacyHandler?: boolean;
+    metrics?: any;
+    /** Wraps each in-process handler after its name resolves — see {@link BindHooksOptions.wrapHandler}. */
+    wrapHandler?: BindHooksOptions['wrapHandler'];
+  }): void {
+    const merged = { ...(opts ?? {}), logger: this.logger } as any;
+    if (!merged.bodyRunner && this._defaultBodyRunner) {
+      merged.bodyRunner = this._defaultBodyRunner;
+    }
+    if (merged.strict === undefined && (this.facade as any)._strictHookBinding) {
+      merged.strict = true;
+    }
+    if (merged.warnLegacyHandler === undefined && (this.facade as any)._warnLegacyHandler) {
+      merged.warnLegacyHandler = true;
+    }
+    if (!merged.metrics && (this.facade as any)._hookMetricsRecorder) {
+      merged.metrics = (this.facade as any)._hookMetricsRecorder;
+    }
+    bindHooksToEngine(this.facade, hooks, merged);
   }
 
   /** The body of `ObjectQL#setDefaultBodyRunner`; the method's docblock there is its contract. */

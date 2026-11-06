@@ -490,7 +490,18 @@ export const CEILINGS = new Map([
   // request signing, which the built-in providers serve (recipe 6 and the
   // `signed` kind in references/integration-recipes.md). Re-locked AT the
   // measurement, headroom 0 tokens.
-  ['skills/objectstack-automation/SKILL.md', 6449],
+  // 6449 -> 6448 (cards #30731 + #30826): the notify section's option-label
+  // line and the user-target active-member clause, paid by deleting the CRM
+  // Automation Blueprint section (the `src/flows` layout lives in
+  // objectstack-platform's bootstrap reference), the "When to Use" restatement
+  // of the assignment-rules heading and the scaffolded-project validate line
+  // (objectstack-formula's Verify section). Re-locked AT the measurement,
+  // headroom 0 tokens — 6448 at first, then 6444 once the bare-name phase-2
+  // rename (crm_ prefixes, "The third automation family" cut) merged in, then
+  // 6426 after the click-through default's three tokens landed on main and
+  // the "A Flow is a directed graph of nodes" opener was cut (the node tables
+  // and the `nodes` + `edges` FlowSchema line already say it).
+  ['skills/objectstack-automation/SKILL.md', 6426],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -707,7 +718,10 @@ export const CEILINGS = new Map([
   // headroom, ceiling +49, pinned AT the measurement. Standing ruling (2026-10-27, tap A,
   // verbatim and untranslated): 「A:先削重复,余额按实测提高」; recognised path per ruling
   // record 6513306068.
-  ['skills/objectstack-data/rules/field-types.md', 3207],
+  // 3207 -> 3199 (#30824): RE-LOCK at the landed count. The formula row now also says
+  // a formula is no dataset or cube dimension (group key), paid by the Formula example's
+  // remaining `// see the Calculated table` pointer; 12794 bytes -> 3199 tokens, zero headroom.
+  ['skills/objectstack-data/rules/field-types.md', 3199],
   ['skills/objectstack-data/rules/indexing.md', 3241],
   ['skills/objectstack-data/rules/lifecycle.md', 1590],
   ['skills/objectstack-data/rules/naming.md', 773],
@@ -863,7 +877,12 @@ export const CEILINGS = new Map([
   // The file is 25047 bytes -> 6262 tokens, zero headroom, ceiling +41, pinned AT the
   // measurement. Standing ruling (2026-10-27, tap A, verbatim and untranslated):
   // 「A:先削重复,余额按实测提高」; recognised path per ruling record 6513306068.
-  ['skills/objectstack-ui/rules/dashboards.md', 6262],
+  // 6262 -> 6232 (#30824): RE-LOCK at the landed count. The multi-value breakdown bullet
+  // adds a `formula` as a refused dimension and `groupBy` (a dataset dimension over one is
+  // `DATASET_INVALID` at compile); paid by the `compareTo` paragraph's restated "no second
+  // widget-side vocabulary" sentence and the `DatasetSchema` source pointer that
+  // `references/_index.md` already carries; 24926 bytes -> 6232 tokens, zero headroom.
+  ['skills/objectstack-ui/rules/dashboards.md', 6232],
   // 3011 -> 3141 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +132 tokens,
   // of which the row's 2 tokens of headroom absorb 2; the CEILING moves 130.

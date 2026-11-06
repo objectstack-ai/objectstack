@@ -86,15 +86,22 @@ name: Release
 #    or `snapshot_next`)                    act, not one per landing), and
 #                                          publishes the same version commit.
 #                                          Same environment gate.
-#   workflow_dispatch → `snapshot-next`    the `next` snapshot lane (ADR-0125,
-#   WITH `snapshot_next`                   amendment of 2026-11-05). Runs NONE
-#                                          of the stable jobs above. Cuts the
-#                                          newest commit whose full battery is
-#                                          green ON it, versions it in the
-#                                          workspace only, and publishes under
-#                                          `next` alone after the same
-#                                          environment approval. No tag, no
-#                                          Release, never `latest`.
+#   schedule (daily cron)                  the `next` snapshot lane (ADR-0125,
+#   or workflow_dispatch  → `snapshot-next` amendments of 2026-11-05 and
+#   WITH `snapshot_next`                   2026-11-06). Runs NONE of the stable
+#                                          jobs above. Cuts the newest commit
+#                                          whose full battery is green ON it,
+#                                          versions it in the workspace only,
+#                                          and publishes under `next` alone
+#                                          after the same environment approval.
+#                                          The daily tick PROPOSES (it starts
+#                                          the preflight, which queues the
+#                                          prompt); a human still publishes.
+#                                          The scheduled run also cancels
+#                                          yesterday's scheduled proposal that
+#                                          nobody approved (`snapshot-next-
+#                                          supersede`). No tag, no Release,
+#                                          never `latest`.
 #
 # WHY `version-pr` LEFT THE PUSH TRIGGER (#11233, 2026-08-23)
 # ----------------------------------------------------------
@@ -134,11 +141,16 @@ name: Release
 #     dispatch WITH    `refresh_version_pr` → version-pr only, no deployment
 #     dispatch WITH    `snapshot_next`      → the snapshot lane only (end of file)
 #     dispatch WITHOUT either               → the repair lane, exactly as before
-#     schedule                              → version-pr only
+#     schedule, the 6-hourly cron           → version-pr only
+#     schedule, the daily cron              → the snapshot lane only (end of file)
 #     push to main                          → release-integrity (+ publish)
 #
 # Every job carries the half of that split it needs, in its own `if:`. No job
-# infers its lane from another job's presence.
+# infers its lane from another job's presence. `schedule` is split the same way
+# `workflow_dispatch` is, by a fact the event carries: the cron that fired it
+# (`github.event.schedule`), which each scheduled job names (ADR-0125, amendment
+# of 2026-11-06). The two clocks never start each other's jobs, and a cron
+# neither names starts nothing.
 #
 # ⚠️ The two inputs are INDEPENDENT, so `refresh_version_pr` + `force` is a
 # reachable form, and it is refused rather than resolved: `publish`'s guard
@@ -189,27 +201,77 @@ name: Release
 # from `push` and from the repair dispatch ONLY — never from `schedule`, never
 # from a refresh or a snapshot dispatch — and it cannot start without a human
 # approving it. The one other publish, the `next` snapshot, lives in
-# `snapshot-next`: dispatch-only, held at the same environment, no tag at all.
+# `snapshot-next`: proposed by the daily cron or by a dispatch (ADR-0125,
+# amendment of 2026-11-06), held at the same environment, no tag at all. That
+# cron is the second clock under `schedule:` below, and it is the ONE exception
+# to "nothing on `schedule` reaches a publishing lane": it starts the PREFLIGHT,
+# which proposes and may queue the prompt, and the publish behind it still
+# cannot start without a human approving it — no `schedule` can publish. On the
+# days the proposal has nothing new or nothing admissible to propose, the
+# preflight skips quietly (green, nothing queued, no card: `snapshot-next-
+# preflight`'s header lists the five reasons), and the lane's two failures —
+# an unexpected refusal, a publish that failed after the approval — file one
+# card (`snapshot-next-card`), because GitHub mails a scheduled run's failure to
+# the cron's author alone.
 
 on:
   push:
     branches:
       - main
-  # Version-PR bookkeeping only (#11233). GitHub runs `schedule` on the DEFAULT
-  # BRANCH exclusively, which is the ref `version-pr` may ever regenerate from,
-  # so the trigger cannot reach a ref the job is not meant to touch. Six-hourly
-  # is the stale-window budget: #4935 renders changesets that are already
-  # committed on main, so lateness costs nothing that cannot be bought back on
-  # demand with `refresh_version_pr` below.
+  # Two clocks on one `schedule:`. GitHub runs `schedule` on the DEFAULT BRANCH
+  # exclusively, which is the ref `version-pr` may ever regenerate from and the
+  # only ref the snapshot lane cuts from, so neither trigger can reach a ref its
+  # job is not meant to touch. A scheduled run carries the cron that fired it
+  # as `github.event.schedule`, and every scheduled job below names its own in
+  # its `if:` — exactly as fleet-patrols.yml tells its four clocks apart. ⛔ A
+  # cron here and the same string in a job's `if:` are ONE fact spelled twice:
+  # change both in the same edit. `scripts/ci/snapshot-next.mjs --self-test`
+  # (`snapshotWiring`) refuses a cron no job names (a run that does nothing), a
+  # job naming a cron not declared here (a job that never runs), the snapshot
+  # jobs disagreeing with each other, `version-pr` on the snapshot cron, and a
+  # `!=` (a third cron would then start a lane by default).
   #
   # ⚠️ Scheduled runs are queued, not guaranteed on the minute — GitHub delays
   # or drops them under load, and disables them entirely after 60 days of
-  # repository inactivity. Both are acceptable HERE and would not be on a
-  # publishing lane: a refresh that arrives late leaves #4935 stale, which is
-  # visible on the PR and fixable by one dispatch. This is a second reason the
-  # publish lane must never be reachable from `schedule`.
+  # repository inactivity. Both are acceptable on BOTH clocks here and would not
+  # be on a publishing trigger: a refresh that arrives late leaves #4935 stale,
+  # which is visible on the PR and fixable by one dispatch; a snapshot proposal
+  # that arrives late, or not at all, costs one day's reminder, and the publish
+  # behind it still waits for a human. This is a second reason the STABLE
+  # publish lane must never be reachable from `schedule`; the daily cron starts
+  # a preflight, never a publish.
   schedule:
+    # 1. Version-PR bookkeeping (#11233): `version-pr` alone. Six-hourly is the
+    #    stale-window budget: #4935 renders changesets that are already
+    #    committed on main, so lateness costs nothing that cannot be bought back
+    #    on demand with `refresh_version_pr` below.
     - cron: '0 */6 * * *'
+    # 2. The daily `next` snapshot PROPOSAL (ADR-0125, amendment of 2026-11-06;
+    #    ruling record 6677910954, line 1, and the maintainer's 「同意」 of
+    #    2026-11-06 11:32Z on the five landing details, item 1: this hour, every
+    #    day of the week): `snapshot-next-preflight` alone, which on a pass
+    #    queues `snapshot-next` at `environment: release` — a prompt, never a
+    #    publish; the maintainer approves or lets it stand (line 2). The hour,
+    #    argued:
+    #      - what the preflight reads is the full battery's nightly tick (ci.yml
+    #        and lint.yml, `0 0 * * *`): a night whose battery is green ON
+    #        main's tip gives a distance-zero commit the same morning. Measured
+    #        over 2026-10-31..11-06, the later of the two nightly runs finished
+    #        between 00:28Z and 00:52Z (per day: 00:52, 00:51, 00:33, 00:41,
+    #        00:47, 00:34, 00:28), so 01:17Z leaves 25 minutes past the slowest
+    #        finish observed;
+    #      - 01:17Z is 09:17 Beijing (UTC+8), the maintainer's morning: the
+    #        prompt is read the morning it is proposed, not after a night of
+    #        aging;
+    #      - `:17` keeps off the `:00` crowd GitHub queues worst;
+    #      - a battery that runs late costs freshness, never correctness: the
+    #        preflight selects the newest commit whose battery is green ON it,
+    #        so a late nightly leaves it reading the previous green one.
+    #    To move the hour: change it HERE and in the four `if:`s that name it
+    #    (`snapshot-next-preflight`, `snapshot-next`, `snapshot-next-supersede`,
+    #    `snapshot-next-card`); the self-test refuses a mismatch, so a missed
+    #    site cannot land.
+    - cron: '17 1 * * *'
   # The repair lane (ADR-0125 D4). Takes NO version: both lanes audit main the
   # same way. `force` exists for the one case the push lane's predicate cannot
   # see — a publish that died having already shipped the @objectstack/cli canary
@@ -296,8 +358,16 @@ jobs:
     # `schedule` run it is null — and `null` is falsy, which would be the right
     # answer by accident. Say which event we are on, so the guard states the lane
     # split instead of leaning on a context's emptiness.
+    #
+    # The tick is NAMED (ADR-0125, amendment of 2026-11-06): `schedule:` now
+    # fires two crons, and this job runs on the 6-hourly bookkeeping one alone.
+    # Strictly subtractive — a scheduled run used to start this job whatever
+    # fired it, and now only the clock that was always its own does; the daily
+    # snapshot cron starts nothing here. ⛔ The cron string is the one declared
+    # under `schedule:` above, spelled twice on purpose and pinned by
+    # `scripts/ci/snapshot-next.mjs --self-test`.
     if: >-
-      github.event_name == 'schedule' ||
+      (github.event_name == 'schedule' && github.event.schedule == '0 */6 * * *') ||
       (github.event_name == 'workflow_dispatch' && inputs.refresh_version_pr)
     runs-on: ubuntu-latest
     # Run wall of the 23 schedule and dispatch runs among the 400 most recent
@@ -2149,10 +2219,75 @@ jobs:
 
   # ══════════════════════════════════════════════════════════════════════════
   # SNAPSHOT LANE — a maintainer-approved `next` snapshot of main (ADR-0125,
-  # amendment of 2026-11-05; ruling record 6663894403, #29466 letter B).
-  # Dispatch-only, and exclusive: it starts only on a dispatch carrying
-  # `snapshot_next`, and that dispatch runs none of the stable lane's jobs.
+  # amendment of 2026-11-05; ruling record 6663894403, #29466 letter B; and the
+  # amendment of 2026-11-06, ruling record 6677910954, which admits the daily
+  # scheduled start). Two starts, exclusive on both: the daily cron (the second
+  # clock under `schedule:`) and a dispatch carrying `snapshot_next`. Either
+  # starts the preflight alone, and neither runs any of the stable lane's jobs.
   # ══════════════════════════════════════════════════════════════════════════
+  #
+  # THE DAILY PROPOSAL (ruling 6677910954, four lines, in order):
+  #   1. the cron starts EXACTLY the dispatch preflight — the same job, the same
+  #      steps, the same refusals: distance zero, the RC cycle read at the
+  #      commit and at main's tip, the debut rule, the same-commit check, the
+  #      stable lane, the dry run. Nothing is special-cased on the event except
+  #      what the step summary says about who started the run — and how a
+  #      refusal CONCLUDES (quietly on the schedule, loudly on a dispatch: the
+  #      quiet skip, below);
+  #   2. on a pass `snapshot-next` waits at `environment: release` and publishes
+  #      only on the maintainer's approval. ⛔ Prime Directive 15 unchanged: no
+  #      seat dispatches this lane or approves its deployment;
+  #   3. an unapproved run is the system working, not a state to clear. The
+  #      next day's run supersedes it: `snapshot-next-supersede` (below) cancels
+  #      YESTERDAY's scheduled prompt once today's preflight has passed, so one
+  #      proposal is ever waiting and it is the newest. The stable prompt sweep
+  #      (`stale-prompts`) is untouched: it still runs on push and the repair
+  #      dispatch alone, never on either cron, and the supersede never touches
+  #      a stable prompt;
+  #   4. everything else in the 2026-11-05 amendment stands.
+  #
+  # THE FIVE LANDING DETAILS (maintainer 「同意」 2026-11-06 11:32Z; ADR-0125,
+  # amendment of 2026-11-06, which states them):
+  #   1. the hour: `17 1 * * *` (09:17 Beijing), every day — the `schedule:`
+  #      block above argues it;
+  #   2. the supersede: as built (`snapshot-next-supersede`, below);
+  #   3. THE QUIET SKIP. On the SCHEDULE, five refusals are expected of a daily
+  #      proposal and say nothing is wrong, so each is a GREEN run with nothing
+  #      queued and no card — a `::notice::` and a step-summary section only:
+  #        (a) the candidate commit is the commit the current `next` was
+  #            published from (every snapshot records its commit as `gitHead`
+  #            in what it publishes, the way TypeScript's nightly does, and the
+  #            preflight reads it back from npm; before the first snapshot
+  #            nothing is on `next`, so the check passes through);
+  #        (b) an RC cycle (`.changeset/pre.json` `mode: pre`, at the commit or
+  #            at main's tip);
+  #        (c) a fixed-group member not yet on npm — the debut rule, expected
+  #            EVERY DAY until `@objectstack/service-push` debuts through the
+  #            stable lane (a first publish takes `latest`); nobody "fixes" it
+  #            by loosening the preflight;
+  #        (d) `main` has no fully green commit to pick (the red full battery
+  #            already has its own `scheduled-full-run-card`);
+  #        (e) a stable release prompt is waiting at approval, or a stable
+  #            publish is running — read the way `stale-prompts` reads this
+  #            workflow's runs (release-pending-publish.mjs's readers).
+  #      The switch is ONE expression on the preflight job's refusing steps
+  #      (`--quiet-skip` on `schedule` alone); a DISPATCH keeps today's loud
+  #      refusal — a red run with the reason — because a human asked and is
+  #      watching. Everything else that stops the preflight (a NOT MEASURED
+  #      read, a group that is not the publishable set, a dry run that fails, a
+  #      step that died) is UNEXPECTED: red on either start;
+  #   4. THE CARD. A pass needs nothing (GitHub sends the approval request). Two
+  #      cases open, or refresh in place, ONE fixed-title card
+  #      (`snapshot-next-card`, below, through the full-run card's own filer and
+  #      de-dup in scripts/ci/scheduled-full-run.mjs — no second filer): an
+  #      UNEXPECTED refusal, and a publish that FAILED after the approval, a
+  #      half-finished publish included. The card gives the reason, the run
+  #      link and the candidate commit, and says that a partial publish is
+  #      fixed by a fresh complete snapshot with a new timestamp — never a
+  #      republish into it, never a touch of `latest`. A success files nothing;
+  #      a quiet skip files nothing. GitHub mails a scheduled run's failure to
+  #      the cron's author alone, so nothing here relies on that mail;
+  #   5. the text: ADR-0125's amendment of 2026-11-06 states all of this.
   #
   # What it does, and what it never does:
   #   - snapshots the head of the newest green full-battery run on main, at
@@ -2171,31 +2306,61 @@ jobs:
   #
   # Every refusal — not on main, no distance-zero green commit, a release-
   # candidate cycle (`.changeset/pre.json` `mode: pre`), a member with no version
-  # on npm, a dry run that fails — lands in the PREFLIGHT job, which carries no
+  # on npm, the candidate already on `next`, a stable prompt or publish in the
+  # way, a dry run that fails — lands in the PREFLIGHT job, which carries no
   # environment, so no approval prompt ever appears for a snapshot that would be
-  # refused. The publish job re-reads the cycle and the debut rule after the
-  # approval, because an approval can come a day later.
+  # refused. The publish job re-reads the cycle, the debut rule and the
+  # same-commit check after the approval, because an approval can come a day
+  # later (loudly: after the approval no refusal is a quiet skip).
   #
   # ⛔ D3 holds here exactly as for `publish`: if `release` ever has no required
   # reviewers, this lane is void, and it is removed in the same change that
   # reverts `publish` to a dispatch trigger (ADR-0125's amendment says why).
   snapshot-next-preflight:
     name: Snapshot next preflight (battery, RC cycle, debut, dry run)
+    # The two starts. The cron string is the daily clock declared under
+    # `schedule:` (one fact spelled twice; the self-test refuses a mismatch), and
+    # on `schedule` GitHub checks out the default branch — main — exactly as the
+    # dispatch does, which the select step below still verifies by `GITHUB_REF`.
+    # The dispatch arm is unchanged.
     if: >-
-      github.event_name == 'workflow_dispatch' && inputs.snapshot_next &&
-      !inputs.refresh_version_pr
+      (github.event_name == 'schedule' && github.event.schedule == '17 1 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.snapshot_next &&
+       !inputs.refresh_version_pr)
     runs-on: ubuntu-latest
     # Install, the version step and a pack of the whole fixed group; the pack
     # is the long pole.
     timeout-minutes: 40
     permissions:
-      # `actions: read` is the run listings of ci.yml and lint.yml;
-      # `contents: read` is the checkout.
+      # `actions: read` is the run listings of ci.yml and lint.yml, and the
+      # stable-lane read of this workflow's own runs; `contents: read` is the
+      # checkout.
       actions: read
       contents: read
+    env:
+      # The tree the lane's tooling reads and versions: this checkout. The
+      # tooling itself (scripts/ci/snapshot-next.mjs and what it imports) runs
+      # from THIS workflow's commit, copied out of the tree before the select
+      # step moves the tree to the selected commit — see "Take the lane's
+      # tooling" below. Pinned by snapshot-next.mjs's self-test.
+      SNAPSHOT_NEXT_ROOT: ${{ github.workspace }}
     outputs:
       commit: ${{ steps.commit.outputs.commit }}
       commit-short: ${{ steps.commit.outputs.commit-short }}
+      # The verdict (the lane header, "THE QUIET SKIP"). Each refusing step
+      # records at most one pair; the chains read them in step order.
+      #   refusal   the EXPECTED kind (`same-commit`, `rc-cycle`, `debut`,
+      #             `no-green-commit`, `stable-lane`), recorded on BOTH starts:
+      #             on the schedule the step exited 0 (the quiet skip), on a
+      #             dispatch it exited 1 (the loud refusal). The snapshot job,
+      #             the supersede and the card all read it: a non-empty value
+      #             queues nothing, cancels nothing, files nothing — the card's
+      #             first case is a FAILED preflight with an EMPTY `refusal`,
+      #             so an expected refusal on a dispatch never files it.
+      #   reason    the text, on every refusal (expected or not) and on a NOT
+      #             MEASURED read, for the summary and the card.
+      refusal: ${{ steps.commit.outputs.refusal || steps.stable-lane.outputs.refusal || steps.preflight.outputs.refusal || steps.dry-run.outputs.refusal }}
+      reason: ${{ steps.commit.outputs.reason || steps.stable-lane.outputs.reason || steps.preflight.outputs.reason || steps.dry-run.outputs.reason }}
     steps:
       # `fetch-depth: 0`: the commit is found on main's first-parent history,
       # and the reader refuses a shallow clone.
@@ -2210,64 +2375,186 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      # The lane's own tooling, from THIS workflow's commit. The select step
+      # below moves the tree to the selected commit, which is older than
+      # `GITHUB_SHA` by construction and need not carry the modes the later
+      # steps call: the day after a change to snapshot-next.mjs lands, the
+      # selected commit still predates it, and its copy printing usage on
+      # `stable-lane` or ignoring `--quiet-skip` would be a red run and a FALSE
+      # card. So `scripts/` is taken off `GITHUB_SHA` into the runner's temp
+      # dir — outside the tree, so the dry run's clean-tree check is untouched
+      # — before the detach; every snapshot-next.mjs call below runs from that
+      # copy, and `SNAPSHOT_NEXT_ROOT` (job env) names the tree it reads. The
+      # link gives the copy the tree's `node_modules` (the script imports
+      # `semver`): dangling until `Setup workspace` installs, read by nothing
+      # before. Pinned by snapshot-next.mjs's self-test: the take before the
+      # detach, the link, the env, and no call off the tree.
+      - name: Take the lane's tooling from the workflow's own commit
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/lane-tooling"
+          git archive --format=tar "${GITHUB_SHA}" scripts | tar -x -C "${RUNNER_TEMP}/lane-tooling"
+          ln -s "${GITHUB_WORKSPACE}/node_modules" "${RUNNER_TEMP}/lane-tooling/node_modules"
+
       # The newest commit at which both full-battery workflows (CI, Lint & Type
       # Check) have their deciding run ON it, green — then the release gate,
       # asked at that commit with distance zero required, must agree. Both read
       # through `--json`, so no prose line is parsed. Runs off this checkout
       # with no install: scheduled-full-run.mjs imports node builtins only.
+      # On the daily cron, say so first: the summary's opening line names the
+      # clock and tells the reader how to read what follows — a quiet skip is a
+      # green run that queued nothing, and expected daily until the fixed group
+      # has fully debuted (the lane header says why). `GITHUB_ACTOR` on a
+      # scheduled run is the workflow file's last committer, not a proposer, so
+      # it is not printed as one.
+      - name: Note the scheduled start (daily proposal)
+        if: github.event_name == 'schedule'
+        env:
+          SCHEDULE_CRON: ${{ github.event.schedule }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Daily \`next\` snapshot proposal (cron \`${SCHEDULE_CRON}\`, ADR-0125 amendment of 2026-11-06)"
+            echo
+            echo "- started by the schedule, not by a person; a pass queues an approval prompt and publishes nothing by itself"
+            echo "- a QUIET SKIP below (a green run, nothing queued, no card) is an expected daily outcome: the candidate already on \`next\`, an RC cycle, a member not yet on npm (\`@objectstack/service-push\` has not debuted), no fully green commit, or a stable prompt or publish in the way; its reason is in the section that skipped"
+            echo "- a RED run here is UNEXPECTED, and the \`snapshot-next-card\` job files or refreshes the lane's card"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The select step classifies its own refusal (the lane header, "THE QUIET
+      # SKIP", case d): `--snapshot-commit` exits 1 with `commit: null` when no
+      # commit in the window has the full battery green ON it — on the schedule
+      # a quiet skip (exit 0), on a dispatch the loud refusal (exit 1), and BOTH
+      # branches record `refusal=no-green-commit`: it is an expected kind on
+      # either start, and the card files only on a failed preflight whose
+      # `refusal` is empty (the self-test pins each branch on its own). Exit 3
+      # is NOT MEASURED and anything else died, both unexpected and red on
+      # either start, with `reason` alone recorded for the card.
       - name: Select the commit (the newest with the full battery green on it)
         id: commit
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE_CRON: ${{ github.event.schedule }}
         run: |
           set -euo pipefail
           if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "reason=the snapshot lane cuts from main only (got ${GITHUB_REF})" >> "$GITHUB_OUTPUT"
             echo "::error::the snapshot lane cuts from main only (got ${GITHUB_REF})."
             exit 1
           fi
-          node scripts/ci/scheduled-full-run.mjs --snapshot-commit --from "${GITHUB_SHA}" --json > "${RUNNER_TEMP}/snapshot-commit.json"
+          status=0
+          node scripts/ci/scheduled-full-run.mjs --snapshot-commit --from "${GITHUB_SHA}" --json > "${RUNNER_TEMP}/snapshot-commit.json" || status=$?
+          if [ "$status" -ne 0 ]; then
+            if [ "$status" -eq 1 ] && jq -e '.ok == false and .commit == null' "${RUNNER_TEMP}/snapshot-commit.json" > /dev/null 2>&1; then
+              reason="main has no commit with the full battery (CI, Lint & Type Check) green ON it in the first-parent window from ${GITHUB_SHA}; the red battery has its own scheduled-full-run card"
+              if [ "${EVENT_NAME}" = 'schedule' ]; then
+                echo "refusal=no-green-commit" >> "$GITHUB_OUTPUT"
+                echo "reason=${reason}" >> "$GITHUB_OUTPUT"
+                echo "::notice::select: QUIET SKIP (no-green-commit) -- ${reason}. Nothing was queued and no card is filed; the schedule proposes again tomorrow (ADR-0125, amendment of 2026-11-06)."
+                {
+                  echo "### \`next\` snapshot select: QUIET SKIP (\`no-green-commit\`)"
+                  echo
+                  echo "- [no-green-commit] ${reason}"
+                  echo "- an expected daily outcome: nothing queued, no card; the schedule proposes again tomorrow."
+                } >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+              echo "refusal=no-green-commit" >> "$GITHUB_OUTPUT"
+              echo "reason=${reason}" >> "$GITHUB_OUTPUT"
+              echo "::error::snapshot refused -- [no-green-commit] ${reason} (an expected refusal, loud on a dispatch; no card)"
+              exit 1
+            fi
+            echo "reason=the commit selection did not answer (exit ${status}: a NOT MEASURED read of the full battery, or a step that died); see the run log" >> "$GITHUB_OUTPUT"
+            echo "::error::snapshot refused, NOT MEASURED -- the commit selection exited ${status} (its record is printed above)."
+            exit "$status"
+          fi
           commit=$(jq -r '.commit // empty' "${RUNNER_TEMP}/snapshot-commit.json")
           if ! printf '%s' "$commit" | grep -Eqx '[0-9a-f]{40}'; then
+            echo "reason=the selection named no commit ('${commit}')" >> "$GITHUB_OUTPUT"
             echo "::error::the selection named no commit ('${commit}'). Refusing."
             exit 1
           fi
           node scripts/ci/scheduled-full-run.mjs --release-gate --release-commit "$commit" --require-distance-zero --json > "${RUNNER_TEMP}/snapshot-gate.json"
           if ! jq -e --arg c "$commit" '.ok == true and .distanceZero == true and .requireDistanceZero == true and .releaseCommit == $c' "${RUNNER_TEMP}/snapshot-gate.json" > /dev/null; then
             jq . "${RUNNER_TEMP}/snapshot-gate.json"
+            echo "reason=the release gate does not read the full battery green ON ${commit} while the selection did: two readers of one listing disagree" >> "$GITHUB_OUTPUT"
             echo "::error::the release gate does not read the full battery green ON ${commit} (record above). Refusing."
             exit 1
           fi
           git checkout --quiet --detach "$commit"
           echo "commit=${commit}" >> "$GITHUB_OUTPUT"
           echo "commit-short=${commit:0:12}" >> "$GITHUB_OUTPUT"
+          if [ "${EVENT_NAME}" = 'schedule' ]; then
+            started="proposed by the daily schedule (cron \`${SCHEDULE_CRON}\`) at main \`${GITHUB_SHA}\`"
+          else
+            started="dispatched at main \`${GITHUB_SHA}\` by \`${GITHUB_ACTOR}\`"
+          fi
           {
             echo "## \`next\` snapshot of main \`${commit}\`"
             echo
-            echo "- dispatched at main \`${GITHUB_SHA}\` by \`${GITHUB_ACTOR}\`; the snapshot is cut $(jq -r '.offset' "${RUNNER_TEMP}/snapshot-commit.json") first-parent commit(s) behind it"
+            echo "- ${started}; the snapshot is cut $(jq -r '.offset' "${RUNNER_TEMP}/snapshot-commit.json") first-parent commit(s) behind it"
             jq -r '.workflows[] | "- \(.name): run \(.runId) (\(.event)) concluded \(.conclusion) ON the commit (distance \(.distance))"' "${RUNNER_TEMP}/snapshot-gate.json"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # From here on the tree is the selected commit, with its own tooling.
+      # From here on the tree is the selected commit — its own packages, lockfile
+      # and build, read and versioned by the lane's tooling from the workflow's
+      # commit (taken above). Each later step runs only while no step before it
+      # has skipped quietly (a quiet skip exits 0, so the job's own success()
+      # would not stop them).
       - name: Setup workspace
+        if: steps.commit.outputs.refusal == ''
         uses: ./.github/actions/setup-workspace
 
+      # The stable lane (the lane header, "THE QUIET SKIP", case e): a stable
+      # `Publish <version> to npm (awaiting approval)` prompt waiting at the
+      # environment, or a stable publish running, refuses the proposal for the
+      # day — the maintainer is shown one prompt at a time, and no snapshot is
+      # cut beside a stable publish. Read the way `stale-prompts` reads this
+      # workflow's runs (release-pending-publish.mjs `collectWaitingRuns` and
+      # `collectPublishRuns`: the waiting filter PLUS each version commit's push
+      # run, and the in-flight filters). Reads only, through a client that
+      # refuses every non-GET; a read that cannot complete is NOT MEASURED, red
+      # on either start, never "clear". The `--quiet-skip` switch is the
+      # schedule-only expression every refusing step of this job carries
+      # (snapshot-next.mjs QUIET_SKIP_EXPRESSION, pinned by its self-test).
+      - name: Refuse while a stable prompt is waiting or a stable publish is running
+        id: stable-lane
+        if: steps.commit.outputs.refusal == ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node "${RUNNER_TEMP}/lane-tooling/scripts/ci/snapshot-next.mjs" stable-lane --workflow release.yml${{ github.event_name == 'schedule' && ' --quiet-skip' || '' }}
+
       - name: Verify Changesets "fixed" group covers every public package
+        if: steps.commit.outputs.refusal == '' && steps.stable-lane.outputs.refusal == ''
         run: pnpm check:changeset-fixed
 
-      # The RC cycle, the fixed group and the debut rule, read at the selected
-      # commit. The cycle is read a second time at main's tip as this job's
-      # checkout fetched it, before the detach (the detach moves HEAD, never
-      # `refs/remotes/origin/main`): the selected commit is older than main's
-      # tip, and a cycle entered since would own `next`. A refusal here fails
-      # the job, so `snapshot-next` is skipped and no deployment is queued.
-      - name: Refuse during an RC cycle, or before every group member has debuted
-        run: node scripts/ci/snapshot-next.mjs preflight --main-ref refs/remotes/origin/main
+      # The RC cycle, the fixed group, the debut rule and the same-commit check,
+      # read at the selected commit. The cycle is read a second time at main's
+      # tip as this job's checkout fetched it, before the detach (the detach
+      # moves HEAD, never `refs/remotes/origin/main`): the selected commit is
+      # older than main's tip, and a cycle entered since would own `next`. The
+      # same-commit check (`--commit`) reads the anchor package's current `next`
+      # version document on npm for the commit it records (`gitHead`, which the
+      # snapshot job writes with `record-commit`): a candidate equal to it
+      # proposes nothing new. A refusal here either skips quietly (schedule, an
+      # expected kind) or fails the job (a dispatch, or an unexpected kind); in
+      # both `snapshot-next` is skipped and no deployment is queued.
+      - name: Refuse during an RC cycle, before every group member has debuted, or when the candidate is already on next
+        id: preflight
+        if: steps.commit.outputs.refusal == '' && steps.stable-lane.outputs.refusal == ''
+        env:
+          COMMIT: ${{ steps.commit.outputs.commit }}
+        run: node "${RUNNER_TEMP}/lane-tooling/scripts/ci/snapshot-next.mjs" preflight --main-ref refs/remotes/origin/main --commit "$COMMIT"${{ github.event_name == 'schedule' && ' --quiet-skip' || '' }}
 
-      # The dry run: the bare version step, the guard over changesets' publish
-      # plan and over every packed manifest (pnpm substitutes `workspace:*` at
-      # pack time), then the tree put back. Publishes nothing; no token is read.
-      - name: Dry run (version, plan, packed manifests, tag)
-        run: node scripts/ci/snapshot-next.mjs dry-run --main-ref refs/remotes/origin/main
+      # The dry run: the bare version step, the recorded commit, the guard over
+      # changesets' publish plan and over every packed manifest (pnpm
+      # substitutes `workspace:*` at pack time), then the tree put back.
+      # Publishes nothing; no token is read.
+      - name: Dry run (version, recorded commit, plan, packed manifests, tag)
+        id: dry-run
+        if: steps.commit.outputs.refusal == '' && steps.stable-lane.outputs.refusal == '' && steps.preflight.outputs.refusal == ''
+        run: node "${RUNNER_TEMP}/lane-tooling/scripts/ci/snapshot-next.mjs" dry-run --main-ref refs/remotes/origin/main${{ github.event_name == 'schedule' && ' --quiet-skip' || '' }}
 
   snapshot-next:
     # The approval screen (ADR-0125 D2, and the amendment's rule for this lane):
@@ -2281,10 +2568,18 @@ jobs:
     # Held whole until a required reviewer approves (D2, D3): no checkout, no
     # build, no version step, no publish before the click.
     environment: release
+    # The same two starts as the preflight, spelled again here (no job infers
+    # its lane from another's presence): the daily clock, or the dispatch. And
+    # the verdict: a quiet skip is a GREEN preflight that recorded a `refusal`,
+    # so `success()` alone would queue a prompt for a proposal that was refused
+    # — the empty-`refusal` conjunct is what keeps that day's prompt from
+    # appearing (and `success()` is written, not implied: #5343).
     if: >-
       success() &&
-      github.event_name == 'workflow_dispatch' && inputs.snapshot_next &&
-      !inputs.refresh_version_pr
+      needs.snapshot-next-preflight.outputs.refusal == '' &&
+      ((github.event_name == 'schedule' && github.event.schedule == '17 1 * * *') ||
+       (github.event_name == 'workflow_dispatch' && inputs.snapshot_next &&
+        !inputs.refresh_version_pr))
     runs-on: ubuntu-latest
     # Build + Console build about 15 min cold, the guard's pack a few minutes,
     # `changeset publish` about 15, the registry read-back up to 35, then the
@@ -2294,6 +2589,16 @@ jobs:
     # at the environment holds this group, never `release-publish-<ref>`, so it
     # neither hides nor evicts a stable prompt, and none evicts it. Never
     # cancelled in progress: a cancel mid-publish leaves the group half on npm.
+    #
+    # With a daily start this group is held by yesterday's unapproved prompt
+    # when today's job arrives, and today's PENDS behind it — unseen, while the
+    # stale one stays the visible prompt (the 17.4.0 shape the 2026-09-29
+    # amendment measured). ⛔ `cancel-in-progress: true` is NOT the answer: a
+    # snapshot approved at 09:00 Beijing is mid-`changeset publish` when the
+    # 09:17 cron's job arrives, and that setting would cancel it half on npm.
+    # The answer is `snapshot-next-supersede` (below), which cancels only a
+    # scheduled run whose snapshot job is still WAITING at the environment —
+    # no step run, nothing published — and nothing that has started.
     concurrency:
       group: release-snapshot-next-${{ github.ref }}
       cancel-in-progress: false
@@ -2301,6 +2606,15 @@ jobs:
       # Read only: this job pushes no tag and cuts no Release, so it holds no
       # credential that could.
       contents: read
+    env:
+      # The tree the lane's tooling reads, versions and guards: this checkout of
+      # the selected commit. The tooling runs from the workflow's commit (the
+      # take below), as in the preflight job.
+      SNAPSHOT_NEXT_ROOT: ${{ github.workspace }}
+    outputs:
+      # The snapshot version the version step wrote — empty when the job failed
+      # before it. The card reads it to say whether anything may be on npm.
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout the selected commit
         uses: actions/checkout@v7
@@ -2314,11 +2628,27 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      # The lane's own tooling, from THIS workflow's commit (the preflight job's
+      # step of the same name says why): this checkout is the selected commit,
+      # whose scripts/ci/snapshot-next.mjs need not know `--commit`,
+      # `record-commit` or `guard --commit`. `GITHUB_SHA` is on main's history,
+      # which `fetch-depth: 0` fetched; a take that fails is a red job and the
+      # card, never a publish. The build, the publish script and the registry
+      # read-back below stay the selected tree's own: they are what it ships.
+      - name: Take the lane's tooling from the workflow's own commit
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/lane-tooling"
+          git archive --format=tar "${GITHUB_SHA}" scripts | tar -x -C "${RUNNER_TEMP}/lane-tooling"
+          ln -s "${GITHUB_WORKSPACE}/node_modules" "${RUNNER_TEMP}/lane-tooling/node_modules"
+
       # Before anything from the tree is trusted: the checkout is the commit the
       # preflight selected, and that commit is on main.
       - name: Guard the approved snapshot (branch, commit)
         env:
           COMMIT: ${{ needs.snapshot-next-preflight.outputs.commit }}
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE_CRON: ${{ github.event.schedule }}
         run: |
           set -euo pipefail
           if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
@@ -2341,10 +2671,15 @@ jobs:
             echo "::error::${COMMIT} is not on main as fetched just now. Refusing."
             exit 1
           fi
+          if [ "${EVENT_NAME}" = 'schedule' ]; then
+            started="proposed by the daily schedule (cron \`${SCHEDULE_CRON}\`)"
+          else
+            started="dispatched by \`${GITHUB_ACTOR}\`"
+          fi
           {
             echo "## Publishing a \`next\` snapshot of \`${COMMIT}\`"
             echo
-            echo "- started by: \`${GITHUB_ACTOR}\`; authorised by the \`release\` environment approval on this run"
+            echo "- ${started}; authorised by the \`release\` environment approval on this run"
             echo "- dist-tag: \`next\` alone; no tag, no GitHub Release, \`latest\` untouched"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -2355,13 +2690,17 @@ jobs:
         run: pnpm check:changeset-fixed
 
       # Re-read after the approval, which can come a day after the preflight:
-      # the cycle and the debut rule again, and every member's dist-tags as they
-      # stand now — the record `verify` compares `latest` against. The cycle is
-      # read in the selected commit's tree AND at the `refs/remotes/origin/main`
-      # this job's checkout fetched just now (the ancestry guard above reads the
-      # same ref), so a cycle entered during the approval wait refuses here.
-      - name: Refuse during an RC cycle, or before every group member has debuted (after the approval)
-        run: node scripts/ci/snapshot-next.mjs preflight --main-ref refs/remotes/origin/main --record "${RUNNER_TEMP}/snapshot-next-before.json"
+      # the cycle, the debut rule and the same-commit check again, and every
+      # member's dist-tags as they stand now — the record `verify` compares
+      # `latest` against. The cycle is read in the selected commit's tree AND at
+      # the `refs/remotes/origin/main` this job's checkout fetched just now (the
+      # ancestry guard above reads the same ref), so a cycle entered during the
+      # approval wait refuses here. ⛔ No `--quiet-skip` after the approval:
+      # every refusal here is loud, and the card reads the failed job.
+      - name: Refuse during an RC cycle, before every group member has debuted, or when the commit is already on next (after the approval)
+        env:
+          COMMIT: ${{ needs.snapshot-next-preflight.outputs.commit }}
+        run: node "${RUNNER_TEMP}/lane-tooling/scripts/ci/snapshot-next.mjs" preflight --main-ref refs/remotes/origin/main --commit "$COMMIT" --record "${RUNNER_TEMP}/snapshot-next-before.json"
 
       # ⛔ The BARE command, never `pnpm run version`: that chain aborts at
       # sync-protocol-version.mjs on a major below 1, and the snapshot is
@@ -2378,6 +2717,18 @@ jobs:
           fi
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "- version: \`${version}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # The recorded commit (the lane header, "THE QUIET SKIP", case a): every
+      # manifest the snapshot publishes carries `gitHead: <the selected commit>`,
+      # the way TypeScript's nightly records the commit it was cut from, so
+      # tomorrow's preflight can read back from npm which commit `next` carries
+      # and skip a candidate that is the same one. Written into the workspace
+      # after the version step (never committed, like the version step's own
+      # writes); the guard below reads it back from every PACKED manifest.
+      - name: Record the selected commit in every manifest (gitHead, never committed)
+        env:
+          COMMIT: ${{ needs.snapshot-next-preflight.outputs.commit }}
+        run: node "${RUNNER_TEMP}/lane-tooling/scripts/ci/snapshot-next.mjs" record-commit --commit "$COMMIT"
 
       - name: Build
         run: pnpm run build
@@ -2398,10 +2749,13 @@ jobs:
           bash scripts/release-spec-changes.sh --verify
 
       # THE GUARD: every package publishes under `next` alone, at one snapshot
-      # version of the whole group, and every packed manifest resolves inside
-      # the snapshot. Fails the job before anything reaches the registry.
-      - name: Guard the publish (dist-tag, versions, plan, packed manifests)
-        run: node scripts/ci/snapshot-next.mjs guard --pack-dir "${RUNNER_TEMP}/snapshot-next-pack"
+      # version of the whole group, every packed manifest resolves inside the
+      # snapshot, and every packed manifest records the selected commit. Fails
+      # the job before anything reaches the registry.
+      - name: Guard the publish (dist-tag, versions, plan, packed manifests, recorded commit)
+        env:
+          COMMIT: ${{ needs.snapshot-next-preflight.outputs.commit }}
+        run: node "${RUNNER_TEMP}/lane-tooling/scripts/ci/snapshot-next.mjs" guard --pack-dir "${RUNNER_TEMP}/snapshot-next-pack" --commit "$COMMIT"
 
       # The publish: scripts/release-snapshot-publish.sh runs the stable lane's
       # published-dist tooling refusal, then the ruling's command,
@@ -2430,4 +2784,171 @@ jobs:
       - name: Verify the dist-tags (next on the snapshot, latest unmoved)
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: node scripts/ci/snapshot-next.mjs verify --record "${RUNNER_TEMP}/snapshot-next-before.json" --version "$VERSION"
+        run: node "${RUNNER_TEMP}/lane-tooling/scripts/ci/snapshot-next.mjs" verify --record "${RUNNER_TEMP}/snapshot-next-before.json" --version "$VERSION"
+
+  # The daily supersede (ADR-0125, amendment of 2026-11-06; ruling 6677910954,
+  # line 3: "the next day's run supersedes it"). Runs on the daily cron ALONE,
+  # once today's preflight has PASSED — a refused day leaves yesterday's prompt
+  # standing, since there is nothing to replace it with — and cancels
+  # YESTERDAY's scheduled proposal still waiting at the `release` environment,
+  # so one snapshot prompt is ever waiting and it is the newest.
+  #
+  # What is cancelled, exactly (`scripts/ci/snapshot-next.mjs supersede`,
+  # pinned by its --self-test): a WAITING run of this workflow, OLDER than this
+  # run, started by `schedule`, whose `Snapshot next of main <sha> (awaiting
+  # approval)` job is waiting at the `release` environment.
+  #   - ⛔ Never a dispatch run: a dispatch is a human's own act, and nothing
+  #     supersedes it.
+  #   - ⛔ Never a job that has started: an approved snapshot is `in_progress`,
+  #     and a cancel there is the half-published group `cancel-in-progress`
+  #     is forbidden for. Only a job GitHub is still holding at the environment
+  #     — no step run, nothing published — is a candidate.
+  #   - ⛔ Never a run holding a stable `Publish <version> to npm` prompt: that is
+  #     `stale-prompts`' question, and the ruling leaves the stable sweep
+  #     untouched. (A snapshot run never holds one — the stable jobs are
+  #     skipped on this cron — but the refusal is written, not inferred.)
+  #   - Never this run. A read the API would not answer after the retries
+  #     defers to tomorrow (a warning, exit 0): nothing judged, nothing lost.
+  # Not `needs`-ed by `snapshot-next`, so today's prompt queues whether or not
+  # this ran: the moment yesterday's holder is cancelled, today's pending job
+  # takes the group and its prompt becomes the visible one. Confirmed as built
+  # by the maintainer's 「同意」 of 2026-11-06 11:32Z (landing detail 2: before
+  # the new run queues, cancel only an older SCHEDULE-started snapshot run
+  # still waiting at `release`; never a human's dispatch, never a stable
+  # prompt). A QUIET SKIP today (a green preflight with a `refusal` recorded)
+  # leaves yesterday's prompt standing too: there is nothing to replace it with.
+  snapshot-next-supersede:
+    name: Supersede yesterday's scheduled snapshot prompt
+    needs: [snapshot-next-preflight]
+    if: >-
+      success() &&
+      needs.snapshot-next-preflight.outputs.refusal == '' &&
+      (github.event_name == 'schedule' && github.event.schedule == '17 1 * * *')
+    runs-on: ubuntu-latest
+    # The stable sweep's own job reads in about a minute; the install here (for
+    # snapshot-next.mjs's `semver` import) is the long pole.
+    timeout-minutes: 10
+    permissions:
+      # `actions: write` is the cancel (POST .../runs/{id}/cancel); it also
+      # covers the reads (the waiting-runs list, the newest scheduled runs, each
+      # named run, its jobs and its pending deployments).
+      # `contents: read` is the checkout.
+      actions: write
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      # snapshot-next.mjs imports `semver`, so it runs off an installed tree
+      # (the stable sweep's release-pending-publish.mjs imports builtins only
+      # and needs no install).
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+
+      - name: Cancel yesterday's scheduled snapshot prompt still waiting at release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/ci/snapshot-next.mjs supersede --workflow release.yml
+
+  # THE CARD (ADR-0125, amendment of 2026-11-06, landing detail 4). The lane's
+  # one reader of its two failures, because GitHub mails a scheduled run's
+  # failure to the cron's author alone and a scheduled run is on no pull
+  # request. Runs on both starts, under `always()` — its cases ARE upstream
+  # failures, which `success()` never reaches — and files, or refreshes in
+  # place, ONE fixed-title card through the full-run card's own filer and de-dup
+  # (`snapshotCardStep` in scripts/ci/scheduled-full-run-card.mjs, the body and
+  # identity in scripts/ci/scheduled-full-run.mjs, both driven offline by their
+  # self-tests). ⛔ No second filer.
+  #
+  # The two cases, and no other:
+  #   - an UNEXPECTED refusal: the preflight job FAILED and recorded no `refusal`
+  #     kind — a NOT MEASURED read (exit 3), a group that is not the publishable
+  #     set, a dry run that failed, a step that died. A quiet skip is a GREEN
+  #     preflight (no case); an expected refusal on a dispatch is a red
+  #     preflight WITH a `refusal` kind (no case: a human asked, and is reading
+  #     the run);
+  #   - a publish that FAILED after the approval: the snapshot job failed, a
+  #     half-finished publish included. The card says what fixes it — a fresh,
+  #     complete snapshot with a new timestamp — and what never does: a
+  #     republish into the half-published version, or a touch of `latest`.
+  # A success files nothing; a quiet skip files nothing.
+  #
+  # The step reads the step module out of the checkout, so the filer is the
+  # code at this run's commit; `issues: write` is the card and the reads that
+  # find it; `contents: read` the checkout. No `actions:` grant: it cancels
+  # nothing, and nothing here publishes, tags, pushes or moves a dist-tag.
+  snapshot-next-card:
+    name: File or refresh the next snapshot lane's card (unexpected refusal, publish failure)
+    needs: [snapshot-next-preflight, snapshot-next]
+    if: >-
+      always() &&
+      ((github.event_name == 'schedule' && github.event.schedule == '17 1 * * *') ||
+       (github.event_name == 'workflow_dispatch' && inputs.snapshot_next &&
+        !inputs.refresh_version_pr)) &&
+      ((needs.snapshot-next-preflight.result == 'failure' &&
+        needs.snapshot-next-preflight.outputs.refusal == '') ||
+       needs.snapshot-next.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: File or refresh the card
+        id: card
+        uses: actions/github-script@v9
+        env:
+          SNAPSHOT_CARD_PREFLIGHT_RESULT: ${{ needs.snapshot-next-preflight.result }}
+          SNAPSHOT_CARD_PREFLIGHT_REFUSAL: ${{ needs.snapshot-next-preflight.outputs.refusal }}
+          SNAPSHOT_CARD_SNAPSHOT_RESULT: ${{ needs.snapshot-next.result }}
+          SNAPSHOT_CARD_REASON: ${{ needs.snapshot-next-preflight.outputs.reason }}
+          SNAPSHOT_CARD_COMMIT: ${{ needs.snapshot-next-preflight.outputs.commit }}
+          SNAPSHOT_CARD_VERSION: ${{ needs.snapshot-next.outputs.version }}
+        with:
+          # The full-run card's retry posture, for the same reasons it gives
+          # (scheduled-full-run-card.yml): 403 is NOT exempt (a secondary rate
+          # limit answers 403 as well as 429, and this step pages issues);
+          # 400/401/404/422 are this repo's own bug and not improved by asking
+          # again.
+          retries: 3
+          retry-exempt-status-codes: 400,401,404,422
+          script: |
+            // The case judgement, the body and the de-dup live in the step module,
+            // driven offline by its --self-test; this step hands it github/context/core.
+            const { snapshotCardStep } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci/scheduled-full-run-card.mjs`);
+            await snapshotCardStep({ github, context, core });
+
+      - name: Publish the verdict to the run summary
+        # always(): when the step above threw — a refused scan, a rate limit —
+        # the run must still say what it was reacting to.
+        if: always()
+        env:
+          CARD_ACTION: ${{ steps.card.outputs.action }}
+          CARD_NUMBER: ${{ steps.card.outputs.number }}
+          CARD_CASE: ${{ steps.card.outputs.case }}
+          PREFLIGHT_RESULT: ${{ needs.snapshot-next-preflight.result }}
+          SNAPSHOT_RESULT: ${{ needs.snapshot-next.result }}
+        run: |
+          {
+            echo "### \`next\` snapshot lane card (preflight \`${PREFLIGHT_RESULT}\`, snapshot job \`${SNAPSHOT_RESULT}\`)"
+            echo
+            if [ -n "${CARD_ACTION:-}" ]; then
+              echo "- Card: ${CARD_ACTION} #${CARD_NUMBER} (case \`${CARD_CASE:-none}\`)"
+            else
+              echo "- Card: NOT WRITTEN — the filing step did not report an outcome. Read this run's log:"
+              echo "  a bounded issue scan that could not complete REFUSES to file rather than risk a"
+              echo "  duplicate, and that refusal looks exactly like this."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

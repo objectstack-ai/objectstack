@@ -1,6 +1,6 @@
 # ADR-0142: An ownership queue is a platform primitive — a queue entity, membership through the existing recipient kinds, claim through the ownership-transfer gate, and declarative assignment rules evaluated on insert
 
-**Status**: Proposed (2026-10-25) · **Amended** (2026-10-28, ruling [`6457475657`](https://github.com/objectstack-ai/objectstack/issues/25769#issuecomment-6457475657) on #25769, letter A) — D3's `current_user.queues` producer is `@objectstack/plugin-security`, kernel-side, under the reserved key `queues`; see the note in D3 · **Amended** (2026-11-03, ruling records [`6594432222`](https://github.com/objectstack-ai/objectstack/issues/29604#issuecomment-6594432222) and [`6599731698`](https://github.com/objectstack-ai/objectstack/issues/29604#issuecomment-6599731698) on #29604, letter B in both) — D2 tells an empty expansion (a fact) from a failed read behind the queue (a fault): the admission consumers (D3, D4, D5) keep "nobody" on a failed read, the D7 grant recompute refuses it, and the D6 approver slate refuses it with the approval node refusing to open; see the notes in D2, D6 and D7. `docs/adr/**` is Tier H (Prime Directive #14): this record becomes **Accepted** by the
+**Status**: Proposed (2026-10-25) · **Amended** (2026-10-28, ruling [`6457475657`](https://github.com/objectstack-ai/objectstack/issues/25769#issuecomment-6457475657) on #25769, letter A) — D3's `current_user.queues` producer is `@objectstack/plugin-security`, kernel-side, under the reserved key `queues`; see the note in D3 · **Amended** (2026-11-03, ruling records [`6594432222`](https://github.com/objectstack-ai/objectstack/issues/29604#issuecomment-6594432222) and [`6599731698`](https://github.com/objectstack-ai/objectstack/issues/29604#issuecomment-6599731698) on #29604, letter B in both) — D2 tells an empty expansion (a fact) from a failed read behind the queue (a fault): the admission consumers (D3, D4, D5) keep "nobody" on a failed read, the D7 grant recompute refuses it, and the D6 approver slate refuses it with the approval node refusing to open; see the notes in D2, D6 and D7 · **Amended** (2026-11-05, ruling A on [#30066](https://github.com/objectstack-ai/objectstack/issues/30066) (record [`6631036940`](https://github.com/objectstack-ai/objectstack/issues/30066#issuecomment-6631036940), with the execution parameters of [`6670178869`](https://github.com/objectstack-ai/objectstack/issues/30066#issuecomment-6670178869), agreed 「同意」)) — D5 gains its second source: an organization authors its own assignment rules as `sys_assignment_rule` rows, evaluated before the declared rules, and merge question 11 is answered; see the note in D5. `docs/adr/**` is Tier H (Prime Directive #14): this record becomes **Accepted** by the
 maintainer's merge, and ⛔ the one PR under [Execution plan](#execution-plan-after-acceptance) is cut after that merge,
 never before it. Until a published `@objectstack/*` release carries that PR, HotCRM keeps the STOPGAP module this record
 exists to retire. **This record declares; it implements nothing** — no schema, no code, no changeset.
@@ -87,7 +87,9 @@ HotCRM was read from a read-only clone of `objectstack-ai/hotcrm` at `8f52859`; 
    named strategies over the queue's members.** It evaluates once, on insert, after every `beforeInsert` hook and before
    the write, only for a row that still has no owner; a writer-supplied, middleware-stamped or hook-set owner is respected.
    Its reads run under an explicit system context pinned to the row's organization. An empty pool never blocks intake: the
-   row sits in the queue, visibly, and the platform logs once.
+   row sits in the queue, visibly, and the platform logs once. (**Amended** 2026-11-05, ruling A on #30066: an
+   organization also authors its own rules, as `sys_assignment_rule` rows, and they are evaluated before the declared
+   ones; see the note in D5.)
 5. **The two reserved members return only with all of that in place.** The `queue` approver type resolves to the queue's
    members; the `queue` sharing recipient expands to them and is recomputed when membership moves. Each is authorable on
    the day its runtime branch is enforced and pinned — not before (ADR-0049, ADR-0078, Prime Directive #10).
@@ -519,6 +521,38 @@ reports a rule whose queue is declared with no position member at all, and canno
 **What the rule writes.** `owner_id` (when a member was chosen) and `queue` (always, for a queue target). Nothing else:
 no "assigned by" column, no stamp of the rule's name (open item 3).
 
+**Amended** (2026-11-05, ruling A on [#30066](https://github.com/objectstack-ai/objectstack/issues/30066) (record [`6631036940`](https://github.com/objectstack-ai/objectstack/issues/30066#issuecomment-6631036940), with the execution parameters of [`6670178869`](https://github.com/objectstack-ai/objectstack/issues/30066#issuecomment-6670178869), agreed 「同意」)) — **a second source: an organization's own rules.** Merge question 11 deferred
+organization-authored routing; the ruling takes it up on the two-source model `sharing_rule` and `queue` already follow
+(ADR-0131 D6 regime C), and everything above holds for both sources unless a point below says otherwise.
+
+- **Shape.** An organization authors a rule as a `sys_assignment_rule` row, owned by `@objectstack/plugin-sharing` beside
+  `sys_queue` and `sys_sharing_rule`. `organization_id` is NOT NULL and the table sits behind the organization wall: a
+  rule that reaches every organization is a declared one, never a row. One row is **one rule with one entry**, the entry
+  named after the rule: `object_name`, `criteria`, `sort_order`, a recipient (`queue` or `user`, by name or id), an
+  optional `strategy` and `load`, and `active`. The round-robin cursor keeps its key (rule, entry, organization).
+- **One namespace.** A row may not take a declared rule's name (ADR-0131 D4); the save is refused. A row that predates
+  the declaration — a package installed later declares the name — is not evaluated (the declared rule answers for the
+  name), and is reported at `error` at boot and once at `warn` at insert.
+- **Order.** The engine stays first-match. For a row of an organization, that organization's active rows are tried
+  first, ascending by `sort_order` and then by name, and the declared rules after them, as the fallback; across both, the
+  first entry whose `criteria` match decides, and its target stands even when it does not resolve. The other order would
+  let an organization's rule never win: the activation ledger that switches a declared rule off is one row per
+  deployment with no organization column, so an organization cannot switch a package rule off for itself alone. When the
+  organization's rows cannot be read, its row is written as it stood — never routed by the fallback its own rules would
+  have overtaken — and the engine logs at `warn`. Intake is still never refused.
+- **Validated on save.** `criteria` and `load` are compiled by the same two paths the seam evaluates by (the
+  record-interpretation backend and the pushdown compiler of ADR-0058); a row either one cannot compile is refused, as is
+  any entry shape the declared schema refuses (a strategy on a user target, `least_loaded` without `load`, …) and a row
+  with no organization. A `user` target must be an **active member** of the rule's organization — a membership row there
+  and no ban in force — or the save is refused.
+- **A user target at insert, from either source.** The user owns the row only while still an active member of the row's
+  organization. A target that no longer resolves leaves the row ownerless, logs once at `warn` naming the rule, the user
+  and the organization, and never refuses the insert. This tightens a declared rule's user target too: the `os lint`
+  warning above stands, and such a rule now assigns only in an organization where that user is a member.
+- **A lapsed queue target** is handled exactly as the paragraph on the missing queue above says, for both sources.
+- **Out of this record's code.** The Setup page for these rows is the Console's (a separate card); until it lands the
+  generic record list serves them.
+
 ### D6 — Re-admission of the `queue` approver type
 
 The type becomes authorable in the PR that makes **all** of the following true, and not before (ADR-0049's enforce-or-
@@ -771,7 +805,8 @@ objection names the number.
 11. **Assignment rules are declared only; organization-authored rules are deferred.** HotCRM's pull is a package
     declaration; Setup-authored routing is a second door with a criteria builder and the regime-C same-name discipline.
     Deferred by name, with the authored `sys_queue` already in place as the data half a later `sys_assignment_rule` would
-    target.
+    target. **Answered** (2026-11-05, ruling A on #30066): organizations author `sys_assignment_rule` rows, evaluated
+    before the declared rules — see the note in D5.
 12. **`load` is required with `least_loaded`, with no platform default.** "Open" differs per object in the first
     consumer; a default such as "every row" would count closed work and be exactly the silent inert instance ADR-0078
     forbids. Cost: one more line per rule.

@@ -203,55 +203,6 @@
     {
       "file": "packages/objectql/src/engine.ts",
       "class": "ObjectQL",
-      "member": "recomputeSummaries",
-      "card": "#30020",
-      "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "resolveReadableIdsSecurity",
-      "card": "#30020",
-      "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "bindHooks",
-      "card": "#30020",
-      "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "readMigrationFlagRowMemoized",
-      "card": "#30020",
-      "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "createContext",
-      "card": "#30020",
-      "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "ownershipQueueService",
-      "card": "#30020",
-      "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "buildHookApi",
-      "card": "#30020",
-      "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
       "member": "homeAmountServing",
       "card": "#30147",
       "reason": "codemod limit: field-call, it calls a field or accessor as a function (#29986 report)"
@@ -269,13 +220,6 @@
       "member": "projectHomeAmountsOntoPatch",
       "card": "#30147",
       "reason": "codemod limit: gate reading, a parameter default computes (calls this.homeAmountServing)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "serveReferenceNames",
-      "card": "#30020",
-      "reason": "state-owning: gate reading, a hand-series host slot holds a try block; the hand-series host rule is #30020's"
     },
     {
       "file": "packages/objectql/src/engine.ts",

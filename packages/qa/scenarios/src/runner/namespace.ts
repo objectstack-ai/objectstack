@@ -26,7 +26,7 @@
  */
 
 import type { LoadedScenario } from '../loader.js';
-import { scenarioNamespace, type ScenarioCard } from '../schema.js';
+import { personaPermissionSetName, scenarioNamespace, type ScenarioCard } from '../schema.js';
 
 /** The `namespace` a project's `objectstack.config.ts` declares, or `undefined`. */
 export function namespaceOfConfig(source: string): string | undefined {
@@ -54,7 +54,7 @@ export function templateHostName(card: Pick<ScenarioCard, 'code'>): string {
 
 /** The permission set a persona signs in with: `<namespace>_<persona id>` (`democrm_sdr`). */
 export function permissionSetName(card: Pick<ScenarioCard, 'code'>, persona: string): string {
-  return `${scenarioNamespace(card)}_${persona}`;
+  return personaPermissionSetName(scenarioNamespace(card), persona);
 }
 
 /** The card with every item name it states prefixed `<namespace>_` (a name already carrying the prefix is kept). */

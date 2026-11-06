@@ -78,6 +78,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { withoutOperationPrivateKeys } from '@objectstack/core';
 import type { ObjectQL } from './engine.js';
 import { isReadRefusal } from './engine-file-reference-hydration.js';
+import { formulaPlanEntry } from './engine-top-level.js';
 
 /**
  * The `ObjectQL` members {@link serveReferenceNames} reads, every one of them
@@ -263,3 +264,19 @@ async function servableNameField(
     return undefined;
   }
 }
+
+/**
+ * [#30020 codemod] The `formulaReadsReference` slot of the host
+ * `ObjectQL#serveReferenceNames` hands {@link serveReferenceNames}: moved here
+ * whole by `--hand-slots` of `scripts/codemod-split-engine.mjs`, and the slot
+ * names it.
+ */
+export const formulaReadsReference: ReferenceNameVisibleHost['formulaReadsReference'] = (name, def, fields) => {
+  try {
+    const entry = formulaPlanEntry(name, def, fields);
+    return entry.hops !== undefined || entry.hopConflict !== undefined;
+  } catch {
+    // An expression the planner cannot compile is not served by name.
+    return true;
+  }
+};
