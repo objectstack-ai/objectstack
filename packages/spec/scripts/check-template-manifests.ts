@@ -53,6 +53,15 @@ const repoRoot = join(pkgRoot, '..', '..');
  */
 const TEMPLATE_ROOT = join(repoRoot, 'packages/create-objectstack/src/templates');
 
+/**
+ * The first-party marketplace apps (`packages/apps/connector-*`) ship the same
+ * file outside the template tree (#31035), so they are walked too. Each root
+ * must yield at least one manifest: a root that moved must not go quiet.
+ */
+const APPS_ROOT = join(repoRoot, 'packages/apps');
+
+const MANIFEST_ROOTS = [TEMPLATE_ROOT, APPS_ROOT];
+
 const MANIFEST_FILENAME = 'objectstack.manifest.json';
 
 /** The `$schema` these files claim. Verifying the claim is half the point. */
@@ -106,7 +115,7 @@ export function checkManifest(path: string): string[] {
   const problems: string[] = [];
 
   // The gate's authority comes from the FILENAME — every `objectstack.manifest.json`
-  // under the template root is judged against `TemplateManifestSchema`. So a file
+  // under a manifest root is judged against `TemplateManifestSchema`. So a file
   // claiming some other `$schema` is not an exemption, it is a contradiction: one
   // of the two statements is wrong and a reader cannot tell which. Absent is fine
   // (the claim is optional); present and different is not.
@@ -253,19 +262,23 @@ function main(): void {
 
   console.log(`🧪 Parsing every shipped ${MANIFEST_FILENAME} against TemplateManifestSchema...\n`);
 
-  const manifests = findManifests(TEMPLATE_ROOT);
-
-  // Vacuous-green guard. Zero files is far more likely to mean "the templates
-  // moved" than "we ship no templates", and a gate that checked nothing must not
-  // report success.
-  if (manifests.length === 0) {
-    console.error(
-      `✗ No ${MANIFEST_FILENAME} found under ${rel(TEMPLATE_ROOT)}.\n\n` +
-        `  Every bundled template ships one, so this is almost certainly a moved\n` +
-        `  directory rather than an empty one — point TEMPLATE_ROOT at wherever the\n` +
-        `  templates live now. A gate that parses nothing must not report success.\n`,
-    );
-    process.exit(1);
+  const manifests: string[] = [];
+  for (const root of MANIFEST_ROOTS) {
+    const found = findManifests(root);
+    // Vacuous-green guard, per root. Zero files is far more likely to mean "the
+    // templates (or apps) moved" than "we ship none", and a gate that checked
+    // nothing under a root must not report success for it.
+    if (found.length === 0) {
+      console.error(
+        `✗ No ${MANIFEST_FILENAME} found under ${rel(root)}.\n\n` +
+          `  Every bundled template and first-party marketplace app ships one, so this is\n` +
+          `  almost certainly a moved directory rather than an empty one — point\n` +
+          `  MANIFEST_ROOTS at wherever they live now. A gate that parses nothing must not\n` +
+          `  report success.\n`,
+      );
+      process.exit(1);
+    }
+    manifests.push(...found);
   }
 
   let bad = 0;

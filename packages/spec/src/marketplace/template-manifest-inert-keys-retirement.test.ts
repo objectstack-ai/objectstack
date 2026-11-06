@@ -115,9 +115,9 @@ describe('ADR-0087 registration', () => {
 });
 
 // Tree-scoped absence (the retirement playbook's rule: never file-scoped).
-// `check:template-manifests` walks only create-objectstack's templates, so the
-// three connector apps' manifests sit outside it; this walk covers every
-// `objectstack.manifest.json` under `packages/` and `examples/`.
+// `check:template-manifests` walks create-objectstack's templates and
+// `packages/apps`; this walk covers every `objectstack.manifest.json` under
+// `packages/` and `examples/`, so a manifest shipped anywhere else is held too.
 //
 // Radius, declared in `scripts/cross-package-test-inputs.mjs` under
 // `@objectstack/spec`: the `packages/**/*.json` and `examples/**/*.json` rows,
