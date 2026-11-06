@@ -231,11 +231,6 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'betterAuthEn
         return scimRequestScope.run({ scim: true }, runHandler);
       }
     : runHandler;
-  // [#24948] An organization delete is one unit of work on the same terms:
-  // better-auth clears the caller's active organization and deletes the
-  // members and invitations before the organization row, with no
-  // transaction, and the engine's refusal on that last row used to leave the
-  // organization standing with no owner.
   // [objectstack-ai/cloud#3606, ruling A] `/oauth2/revoke` is answered a
   // second time, AFTER the provider: the provider authenticates the client
   // and answers first, unchanged, and the MCP access token it cannot revoke
@@ -244,6 +239,11 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'betterAuthEn
   // the token and the client credentials off the same request.
   const revocationRequest =
     endpointPath === OAUTH_REVOKE_PATH && request.method === 'POST' ? request.clone() : undefined;
+  // [#24948] An organization delete is one unit of work on the same terms:
+  // better-auth clears the caller's active organization and deletes the
+  // members and invitations before the organization row, with no
+  // transaction, and the engine's refusal on that last row used to leave the
+  // organization standing with no owner.
   const providerResponse =
     endpointPath !== undefined &&
     (SESSION_ERASURE_PATHS.has(endpointPath) || endpointPath === ORGANIZATION_DELETE_PATH)
