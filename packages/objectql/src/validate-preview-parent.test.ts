@@ -42,6 +42,10 @@
 //      writes in `engine.ts`, the preview in `engine-validate.ts`).
 //
 // (a), (b) and (e) were red before the fix.
+//
+// A later describe pins the repoint over a stored FK the caller is not served
+// as stored: the preview binds the prior header as unresolved, as the write
+// does, so both give one verdict whatever header the row hung off.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -379,6 +383,49 @@ describe('#22474 — the preview binds the master-detail header the write binds'
         expect(await write(() => engine.update(LINE, patch, { context: alice }))).toEqual(expected);
       }
     });
+  });
+});
+
+describe('a repoint over a stored FK the caller is not served: the preview binds the prior header as the write does', () => {
+  /**
+   * A field-level read rule on the line's `invoice` FK for one caller, shaped
+   * like the security middleware's result mask (`hide` deletes the key). The
+   * write's projection of the stored FK and the preview's stored-row read both
+   * go through the read door, so both meet it.
+   */
+  function hideInvoiceFrom(ql: ObjectQL, userId: string) {
+    ql.registerMiddleware(async (ctx: any, next: () => Promise<void>) => {
+      await next();
+      if (ctx.object !== LINE || ctx.context?.isSystem || ctx.context?.userId !== userId) return;
+      if (!['find', 'findOne'].includes(ctx.operation)) return;
+      const apply = (r: any) => { if (r && typeof r === 'object') delete r.invoice; };
+      if (Array.isArray(ctx.result)) ctx.result.forEach(apply);
+      else apply(ctx.result);
+    });
+  }
+
+  /** The preview's verdict and then the write's, for a line lacking its description that hangs off `stored`. */
+  async function bothVerdicts(stored: string, context: Record<string, unknown>) {
+    const { engine, storeFor } = makeEngine();
+    hideInvoiceFrom(engine, 'frank');
+    storeFor(LINE).set('l1', { id: 'l1', name: 'l', invoice: stored, quantity: 1 });
+    const patch = { invoice: 'h_sent', id: 'l1' };
+    const previewed = await preview(engine, LINE, patch, 'update', context);
+    const written = await write(() => engine.update(LINE, patch, { context } as any));
+    return { previewed, written };
+  }
+
+  it('a caller not served the FK gets one verdict whatever header the line hangs off, in the preview and in the write', async () => {
+    const frank = { userId: 'frank' };
+    for (const stored of ['h_sent', 'h_draft']) {
+      expect(await bothVerdicts(stored, frank)).toEqual({ previewed: REQUIRED, written: REQUIRED });
+    }
+  });
+
+  it('control: a caller served the FK keeps the legacy rest and the repoint refusal, in both', async () => {
+    const alice = { userId: 'alice' };
+    expect(await bothVerdicts('h_sent', alice)).toEqual({ previewed: ADMITTED, written: ADMITTED });
+    expect(await bothVerdicts('h_draft', alice)).toEqual({ previewed: REQUIRED, written: REQUIRED });
   });
 });
 

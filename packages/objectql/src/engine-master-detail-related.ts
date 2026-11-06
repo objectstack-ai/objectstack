@@ -254,6 +254,14 @@ export async function settleMasterDetailLanding<H>(
  * merged with the patch on an update, so the patch's FK wins over the stored
  * one; `storedRows[i]` names the header a repoint leaves.
  *
+ * ⛔ `storedRows[i]` holds only the columns the read door served this caller
+ * as stored, so a stored FK it was not served is absent there. When the patch
+ * names the FK over such a row, the header the row leaves is UNKNOWN to this
+ * caller, and `previousParents[i]` is `null`, the unresolved header — the one
+ * fixed binding the write gives it ({@link priorMasterIdsCallerReads}), so the
+ * pre-check's verdict is the write's and never depends on what the column
+ * holds. A patch that does not name the FK reads no second header.
+ *
  * ## Read under the caller's access, not elevated
  *
  * A header read elevated here would answer a predicate over a row the caller
@@ -296,6 +304,13 @@ export async function resolvePreviewParents(
   const priorIds = storedRows.map((stored) => (rel && stored ? masterIdOf(rel.fk, null, stored) : undefined));
   // The write resolves a second header only for a repoint (`repointsMaster`).
   const repoints = priorIds.map((prior, i) => prior != null && landingIds[i] !== prior);
+  // The patch names the FK over a stored row whose FK this caller was not
+  // served as stored: the prior header is unknown, as the write binds it.
+  const priorUnknown = storedRows.map((stored, i) => {
+    const view = views[i];
+    return rel != null && stored != null && !Object.prototype.hasOwnProperty.call(stored, rel.fk)
+      && view != null && typeof view === 'object' && rel.fk in view;
+  });
   const ids = new Set<string>();
   landingIds.forEach((id) => { if (id != null) ids.add(String(id)); });
   priorIds.forEach((id, i) => { if (repoints[i]) ids.add(String(id)); });
@@ -340,7 +355,7 @@ export async function resolvePreviewParents(
   const headerOf = (id: string | number | undefined) => (id == null ? null : (headers.get(String(id)) ?? null));
   return {
     parents: landingIds.map(headerOf),
-    previousParents: priorIds.map((id, i) => (repoints[i] ? headerOf(id) : undefined)),
+    previousParents: priorIds.map((id, i) => (priorUnknown[i] ? null : repoints[i] ? headerOf(id) : undefined)),
   };
 }
 
