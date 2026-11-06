@@ -81,4 +81,21 @@ describe('oauth-provider plugin schema ↔ platform-objects parity', () => {
       ).toEqual([]);
     });
   }
+
+  // [#30918] The other direction, for the one column ObjectStack adds to a
+  // provider table. `sys_oauth_consent.last_used_at` is written by
+  // plugin-auth's last-use stamp alone (`mcp-client-last-use.ts`), so no
+  // provider field may resolve to it: if a better-auth bump ever declares a
+  // consent field that lands on this column, the provider's own consent
+  // doors (`/oauth2/consent`, `/oauth2/update-consent`) could write it, and
+  // the stamp would no longer be server-only.
+  it('no oauthConsent field resolves to the ObjectStack-owned last_used_at column', () => {
+    const consent = schema.oauthConsent;
+    expect(consent, 'the installed provider declares no oauthConsent model').toBeDefined();
+    const columns = Object.entries(consent.fields).map(([key, field]) => field.fieldName ?? key);
+    expect(columns.length, 'the oauthConsent model resolved no columns, so this check would be vacuous').toBeGreaterThan(0);
+    expect(columns).not.toContain('last_used_at');
+    expect(columns).not.toContain('lastUsedAt');
+    expect(Object.keys((SysOauthConsent as any).fields)).toContain('last_used_at');
+  });
 });

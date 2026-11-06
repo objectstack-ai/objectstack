@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Auth, BetterAuthOptions } from 'better-auth';
-import type { JSONWebKeySet } from 'jose';
+import { decodeJwt, type JSONWebKeySet } from 'jose';
 import type { SCIMIdentityState, SCIMTransactionContext } from '@better-auth/scim';
 // better-auth value imports (betterAuth + plugins) are deferred via dynamic
 // import() in getOrCreateAuth() / buildPluginList() so that disabled plugins
@@ -188,6 +188,9 @@ import {
   verifyMcpAccessTokenClaims,
   type McpAccessTokenHost,
 } from './auth-manager-mcp-access-token.js';
+// [#30918] The coarse last-use stamp a verified MCP call writes on its consent.
+import { McpClientLastUseStamper, mcpClientLastUseStoreFor } from './mcp-client-last-use.js';
+import { runAfterResponse } from './run-after-response.js';
 // [objectstack-ai/cloud#3606, ruling A] `/oauth2/revoke` for an MCP access
 // token: the answer `handleRequest` gives after the provider's, through
 // `answerOAuthTokenRevocation` below.
@@ -4524,6 +4527,14 @@ export class AuthManager {
    * caller vets it on every request by the rule that vets a session's active
    * organization (`vetOrganizationClaim`, `@objectstack/core`), as the
    * `IAuthService` contract states.
+   *
+   * [#30918] A token that verifies also schedules, AFTER the verdict and off
+   * the request's path, the coarse last-use stamp on the consent it was minted
+   * under (`mcp-client-last-use.ts`): at most one write per consent per hour
+   * in each process, from this verified token and the server's clock, and
+   * only on the consent that admitted it (the consent read above, by the same
+   * rule). The stamp reads and writes nothing the verdict depends on, and its
+   * failure is never this method's failure.
    */
   verifyMcpAccessToken(
     token: string,
@@ -4537,7 +4548,66 @@ export class AuthManager {
       rereadKeyringForUnknownKey: (...a) => this.rereadKeyringForUnknownKey(...a),
       getAuthContext: (...a) => this.getAuthContext(...a),
     };
-    return verifyMcpAccessToken.call(host, token);
+    // [#30918] A token that verified is a verified MCP call: its consent's
+    // coarse last-use stamp is settled after the response, never awaited here,
+    // and from the verified token only (`mcp-client-last-use.ts`). The
+    // verifier has just admitted the token by its consent (#30879,
+    // `mcpConsentAdmits`), so a revoked consent refuses the call and stamps
+    // nothing; the stamp picks its consent by the same rule.
+    return verifyMcpAccessToken.call(host, token).then((principal) => {
+      if (principal) this.scheduleMcpClientLastUse(principal, token);
+      return principal;
+    });
+  }
+
+  /** [#30918] The per-manager stamper, built on first use. */
+  private mcpClientLastUse?: McpClientLastUseStamper;
+
+  /**
+   * [#30918] Settle the last-use stamp of the consent `principal`'s token was
+   * minted under, after the response (`run-after-response.ts`). At most one
+   * write per consent per hour in each process, from the verified principal
+   * and the server's clock alone; each distinct failure is reported once per
+   * process at `error`
+   * (`error` when the host logger carries it, else `warn`, called through the
+   * property — see {@link audienceLogError}; `console.error` when the manager
+   * was given no logger, so the report is never silent).
+   */
+  private scheduleMcpClientLastUse(
+    principal: { userId: string; clientId?: string; organizationId?: string },
+    token: string,
+  ): void {
+    if (!principal.clientId) return;
+    // The token has just verified, so its payload is the one the signature
+    // covers: its `iat` is what the verifier admitted the consent against.
+    let issuedAt: number | undefined;
+    try {
+      const iat = decodeJwt(token).iat;
+      issuedAt = typeof iat === 'number' ? iat : undefined;
+    } catch {
+      issuedAt = undefined;
+    }
+    const stamper = (this.mcpClientLastUse ??= new McpClientLastUseStamper(
+      mcpClientLastUseStoreFor(() => this.getDataEngine()),
+      {
+        onNewFailure: (error) => {
+          const message =
+            '[AuthManager] The last-use time of authorized AI assistants could not be recorded: '
+            + 'the authorized-clients reads keep answering the last stamp that landed as if it were current. '
+            + 'Check that schema sync has added sys_oauth_consent.last_used_at and that the data engine is reachable; '
+            + 'each consent is retried once an hour, and each distinct failure is reported once per process.';
+          const meta = { error: error instanceof Error ? error.message : String(error) };
+          if (this.config.logger) this.audienceLogError(message, meta);
+          else console.error(message, meta);
+        },
+      },
+    ));
+    runAfterResponse(
+      () => stamper.record({ ...principal, ...(issuedAt !== undefined ? { issuedAt } : {}) }),
+      () => {
+        // `record` never rejects; its own failure report is above.
+      },
+    );
   }
 
   /**

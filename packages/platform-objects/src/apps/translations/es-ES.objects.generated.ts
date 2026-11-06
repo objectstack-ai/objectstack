@@ -1873,6 +1873,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "Actualizado el"
+      },
+      last_used_at: {
+        label: "Último uso",
+        help: "Inicio de la hora más reciente en la que el cliente hizo una llamada MCP verificada con este consentimiento; vacío si no se ha registrado ninguna"
       }
     }
   },
