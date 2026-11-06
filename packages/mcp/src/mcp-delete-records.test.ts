@@ -71,25 +71,22 @@ const WITHHELD_POSITION = 'pos_finance_controller';
 
 type Row = Record<string, unknown>;
 
-/** The equality / `$in` / `$nin` subset the tool's selections use; anything else is loud. */
+/**
+ * The equality / `$in` / `$nin` subset the tool's selections use. Anything
+ * else is loud: a combinator (`$and`, `$or`, …) is refused rather than read as
+ * a field name, and so is an operator this double does not model.
+ */
 function matches(row: Row, where: Record<string, unknown> | undefined): boolean {
-  for (const [key, cond] of Object.entries(where ?? {})) {
+  return Object.entries(where ?? {}).every(([key, cond]) => {
+    if (key.startsWith('$')) throw new Error(`engine double: combinator ${key} is not modelled`);
     const cell = row[key];
-    if (cond !== null && typeof cond === 'object' && !Array.isArray(cond)) {
-      for (const [op, operand] of Object.entries(cond as Record<string, unknown>)) {
-        if (op === '$in') {
-          if (!(operand as unknown[]).includes(cell)) return false;
-        } else if (op === '$nin') {
-          if ((operand as unknown[]).includes(cell)) return false;
-        } else {
-          throw new Error(`engine double: operator ${op} is not modelled`);
-        }
-      }
-    } else if (cell !== cond) {
-      return false;
-    }
-  }
-  return true;
+    if (cond === null || typeof cond !== 'object' || Array.isArray(cond)) return cell === cond;
+    return Object.entries(cond as Record<string, unknown>).every(([op, operand]) => {
+      if (op === '$in') return (operand as unknown[]).includes(cell);
+      if (op === '$nin') return !(operand as unknown[]).includes(cell);
+      throw new Error(`engine double: operator ${op} is not modelled`);
+    });
+  });
 }
 
 /** objectql's `SummaryRecomputeError`, as a write's caller reads it: by `code`, carrying `written`. */
