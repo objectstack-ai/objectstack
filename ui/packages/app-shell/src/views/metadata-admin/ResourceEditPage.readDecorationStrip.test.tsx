@@ -88,12 +88,22 @@ const READ_DECORATIONS = {
   _draft: true,
 };
 
+/** The pending draft as stored: what the layered read's `draft` layer serves (objectstack#29814). */
+const storedDraft = (extra: Record<string, unknown> = {}) => ({ ...PUBLISHED_PAGE, label: DRAFT_ONLY_LABEL, ...extra });
+
 /** A served draft envelope: `{ type, name, item }` with the item decorated. */
 const draftEnvelope = (extra: Record<string, unknown> = {}) => ({
   type: 'page',
   name: 'home',
-  item: { ...PUBLISHED_PAGE, label: DRAFT_ONLY_LABEL, ...READ_DECORATIONS, ...extra },
+  item: { ...storedDraft(extra), ...READ_DECORATIONS },
 });
+
+/**
+ * The stored draft's extra keys, shared by both doubles below. A page's buffer
+ * is the layers' `draft` (objectstack#30786: its served draft is translated),
+ * so the two reads must describe the same pending draft.
+ */
+const pending = vi.hoisted(() => ({ extra: {} as Record<string, unknown> }));
 
 /**
  * Records what the REAL gate was asked to judge and what it answered.
@@ -109,8 +119,8 @@ const gate = vi.hoisted(() => ({
 const mockClient = vi.hoisted(() => ({
   list: vi.fn(async () => []),
   listDrafts: vi.fn(async () => []),
-  layered: vi.fn(async () => ({ effective: PUBLISHED_PAGE, code: PUBLISHED_PAGE, editable: true })),
-  getDraft: vi.fn(async () => draftEnvelope()),
+  layered: vi.fn(async () => ({ effective: PUBLISHED_PAGE, code: PUBLISHED_PAGE, editable: true, draft: storedDraft(pending.extra) })),
+  getDraft: vi.fn(async () => draftEnvelope(pending.extra)),
   get: vi.fn(async () => null),
   saveDraft: vi.fn(async () => ({})),
 }));
@@ -168,7 +178,8 @@ registerBuiltinInspectors();
 
 beforeEach(() => {
   gate.calls.length = 0;
-  mockClient.getDraft.mockImplementation(async () => draftEnvelope());
+  pending.extra = {};
+  mockClient.getDraft.mockImplementation(async () => draftEnvelope(pending.extra));
 });
 
 afterEach(() => {
@@ -241,7 +252,7 @@ describe('MetadataResourceEditPage — read decorations never reach the edit gat
   });
 
   it('still refuses a genuinely undeclared key riding the same decorated draft', async () => {
-    mockClient.getDraft.mockImplementation(async () => draftEnvelope({ [UNDECLARED_KEY]: 1 }));
+    pending.extra = { [UNDECLARED_KEY]: 1 };
     openEditor();
     const verdict = await awaitMergedVerdict();
 

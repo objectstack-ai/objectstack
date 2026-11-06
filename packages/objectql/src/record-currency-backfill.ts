@@ -87,7 +87,7 @@
  */
 
 import { isSandboxOrigin, isSandboxOwnFault, keysetWalk, mapDataError, sandboxBusinessMessage, type KeysetPageQuery } from '@objectstack/types';
-import { objectNotFoundError, withTransientRetry, type RetryOptions } from '@objectstack/core';
+import { objectNotFoundError, sanitizeRowError, withTransientRetry, type RetryOptions } from '@objectstack/core';
 import { isValueDomainMember } from '@objectstack/spec/shared';
 
 import { isRecordCurrencyBlank, recordCurrencyFieldOf } from './validation/record-currency-code.js';
@@ -449,15 +449,18 @@ async function walkCodelessRows(
  * error the `/data` door answers with a 5xx (a crash, a declared 5xx, the
  * sandbox's own fault) takes that door's withheld sentence, and a sandboxed
  * refusal takes the hook's own sentence, never the `hook '<name>' threw:`
- * debug wrapper. Any other throw keeps its message, as before. The operator's
- * log line above keeps the whole text.
+ * debug wrapper. [#30816] Any other throw is cleaned by the import row's own
+ * sanitizer (`sanitizeRowError`, `@objectstack/core`), so a driver's raw text
+ * (SQL, constraint names, column lists) never reaches the report; a message
+ * with no driver text reads as before. The operator's log line above keeps
+ * the whole text.
  */
 function rowFailureSentence(err: unknown, object: string, message: string): string {
   if (isSandboxOrigin(err) || isSandboxOwnFault(err)) {
     const door = mapDataError(err, object);
     if (door.status >= 500) return String(door.body.error);
   }
-  return sandboxBusinessMessage(err) ?? message;
+  return sandboxBusinessMessage(err) ?? sanitizeRowError(message);
 }
 
 /** Human-readable report body, shared by the CLI's dry-run and apply output. */

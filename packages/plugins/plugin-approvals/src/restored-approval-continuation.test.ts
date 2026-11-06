@@ -948,7 +948,7 @@ describe('ruling A — a decision resumes the run as the person who decided', ()
 
   let data: ReturnType<typeof makeFakeEngine>;
   let service: ApprovalService;
-  let seen: Record<string, { userId?: string; permissions?: string[]; isSystem?: boolean }>;
+  let seen: Record<string, { userId?: string; permissions?: string[]; isSystem?: boolean; impersonatedBy?: string }>;
   let rejectThrowsOnce: boolean;
 
   function boot() {
@@ -963,7 +963,12 @@ describe('ruling A — a decision resumes the run as the person who decided', ()
           throw new Error(DOWNSTREAM_FAILURE);
         }
         const ctx = resolveRunDataContext(context);
-        seen[node.id] = { userId: ctx?.userId, permissions: ctx?.permissions, ...(ctx?.isSystem ? { isSystem: true } : {}) };
+        seen[node.id] = {
+          userId: ctx?.userId, permissions: ctx?.permissions,
+          ...(ctx?.isSystem ? { isSystem: true } : {}),
+          // Present only on a write the audit writer would stamp `impersonated_by`.
+          ...((ctx as any)?.impersonatedBy !== undefined ? { impersonatedBy: (ctx as any).impersonatedBy } : {}),
+        };
         return { success: true };
       },
     } as never);
@@ -1033,6 +1038,45 @@ describe('ruling A — a decision resumes the run as the person who decided', ()
     expect(out.resumed, JSON.stringify(out)).toBe(true);
     expect(out.source).toBe('journal');
     expect(seen.after_reject, 'the replay fell back to the trigger user').toEqual({ userId: 'u1', permissions: ['deal_manager'] });
+  });
+
+  // #30851: an administrator impersonating the decider made THIS decision, so
+  // the decider's segment names them; read off the decision request's context
+  // (the session), never off the input.
+  const IMPERSONATED_DECIDER_CTX = { ...DECIDER_CTX, impersonatedBy: 'adm' } as any;
+
+  it.each(['approve', 'reject'] as const)('%s while impersonated: the nodes after the decision carry the administrator beside the decider', async (decision) => {
+    const automation = boot();
+    const req = await parked(automation);
+    const out = await service.decide(req.id, { decision, actorId: 'u1', comment: decision }, IMPERSONATED_DECIDER_CTX);
+    expect(out.resumed, JSON.stringify(out)).toBe(true);
+    expect(seen[`after_${decision}`]).toEqual({ userId: 'u1', permissions: ['deal_manager'], impersonatedBy: 'adm' });
+  });
+
+  it('CONTROL: an administrator named in the decision INPUT is not the session, and stamps nothing', async () => {
+    const automation = boot();
+    const req = await parked(automation);
+    const out = await service.decide(
+      req.id, { decision: 'approve', actorId: 'u1', comment: 'ok', impersonatedBy: 'forged' } as any, DECIDER_CTX,
+    );
+    expect(out.resumed, JSON.stringify(out)).toBe(true);
+    expect(seen.after_approve).toEqual({ userId: 'u1', permissions: ['deal_manager'] });
+  });
+
+  it('a stranded impersonated decision is replayed with the same administrator beside the decider', async () => {
+    const automation = boot();
+    const req = await parked(automation);
+    rejectThrowsOnce = true;
+    const err = await service.decide(req.id, { decision: 'reject', actorId: 'u1', comment: 'no' }, IMPERSONATED_DECIDER_CTX)
+      .then(() => null, (e: Error) => e);
+    expect(err?.message).toMatch(/^RESUME_FAILED/);
+    const journal = JSON.parse((await rowOf(req.id)).node_config_json).__strandedContinuation;
+    expect(journal).toMatchObject({ decision: 'reject', resumedBy: 'u1', impersonatedBy: 'adm' });
+
+    expect((await automation.restoreConsumedSuspension(req.flow_run_id)).restored).toBe(true);
+    const out = await service.continueRestoredRun(req.id, { requestedBy: 'ops', reason: 'fixed the record' });
+    expect(out.resumed, JSON.stringify(out)).toBe(true);
+    expect(seen.after_reject).toEqual({ userId: 'u1', permissions: ['deal_manager'], impersonatedBy: 'adm' });
   });
 });
 

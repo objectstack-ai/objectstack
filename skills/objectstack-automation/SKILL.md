@@ -292,7 +292,7 @@ write them right the first time:
 
 ## Assignment rules — route a new record to a queue or a person
 
-The third automation family: `assignmentRules` on the stack routes each inserted
+`assignmentRules` on the stack routes each inserted
 row of an `ownership: 'user'` object whose `owner_id` and `queue` are both still
 empty — once, after every `beforeInsert` hook, never on update, never refusing the
 insert (ADR-0142 D5). Entries are ordered; the first whose `criteria` (CEL over
@@ -303,12 +303,12 @@ insert (ADR-0142 D5). Entries are ordered; the first whose `criteria` (CEL over
 import { defineAssignmentRule } from '@objectstack/spec/automation';
 
 export const caseIntake = defineAssignmentRule({
-  name: 'case_intake',
+  name: 'crm_case_intake',
   object: 'crm_case',
   entries: [
     { name: 'urgent', criteria: 'record.priority == "urgent"',
-      assignTo: { type: 'queue', value: 'escalations' } },           // no strategy: parked for a claim
-    { name: 'rest', assignTo: { type: 'queue', value: 'support_intake' },
+      assignTo: { type: 'queue', value: 'crm_escalations' } },       // no strategy: parked for a claim
+    { name: 'rest', assignTo: { type: 'queue', value: 'crm_support_intake' },
       strategy: 'least_loaded', load: 'record.status != "closed"' }, // or 'round_robin'; `load` only with least_loaded
   ],
 });
@@ -316,7 +316,7 @@ export const caseIntake = defineAssignmentRule({
 
 `strategy` is for a queue target only; `assignTo: { type: 'user', value: '<id>' }`
 names one owner. Queues are declared in `queues` (objectstack-data); an approval
-for the same people is `approvers: [{ type: 'queue', value: 'support_intake' }]`
+for the same people is `approvers: [{ type: 'queue', value: 'crm_support_intake' }]`
 ([Approver Types](./references/state-machines-and-approvals.md#approver-types)).
 ⛔ Never a `beforeInsert` hook that picks an owner, nor a round-robin counter field.
 

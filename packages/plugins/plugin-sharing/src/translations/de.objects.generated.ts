@@ -343,5 +343,71 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Nach Warteschlange"
       }
     }
+  },
+  sys_assignment_rule: {
+    label: "Zuweisungsregel",
+    pluralLabel: "Zuweisungsregeln",
+    description: "Sendet jeden neuen Datensatz, der eine Bedingung erfüllt, an eine Warteschlange oder an eine Person.",
+    fields: {
+      organization_id: {
+        label: "Organisation",
+        help: "Die Organisation, zu der diese Regel gehört."
+      },
+      name: {
+        label: "Name",
+        help: "Kennzeichnet die Regel. Nur Kleinbuchstaben, Ziffern und Unterstriche, und nicht der Name einer Regel, die eine installierte App bereitstellt."
+      },
+      label: {
+        label: "Anzeigebezeichnung"
+      },
+      description: {
+        label: "Beschreibung"
+      },
+      object_name: {
+        label: "Objekt",
+        help: "Das Objekt, dessen neue Datensätze diese Regel weiterleitet. Zuweisen lassen sich nur Objekte, deren Datensätze einen Besitzer haben."
+      },
+      criteria: {
+        label: "Bedingung",
+        help: "Welche neuen Datensätze diese Regel übernimmt; leer lassen, um jeden neuen Datensatz zu übernehmen, den keine frühere Regel übernommen hat. Geschrieben als Ausdruck über den Datensatz, zum Beispiel record.priority == \"high\"."
+      },
+      sort_order: {
+        label: "Reihenfolge",
+        help: "Wenn mehrere Ihrer Regeln denselben Datensatz übernehmen könnten, wird die mit der niedrigsten Reihenfolge zuerst versucht. Ihre Regeln werden immer vor den Regeln installierter Apps versucht."
+      },
+      recipient_type: {
+        label: "Zuweisen an",
+        help: "Sendet den Datensatz an eine Warteschlange, aus der ihre Mitglieder ihn übernehmen können, oder direkt an eine Person.",
+        options: {
+          queue: "Warteschlange",
+          user: "Benutzer"
+        }
+      },
+      recipient_id: {
+        label: "Warteschlange oder Benutzer",
+        help: "Die Warteschlange oder die Person, an die der Datensatz geht. Eine Person muss ein aktives Mitglied dieser Organisation sein."
+      },
+      strategy: {
+        label: "Mitglied auswählen",
+        help: "Für eine Warteschlange: gibt den Datensatz direkt einem Mitglied, reihum oder dem Mitglied mit der wenigsten offenen Arbeit. Leer lassen, damit der Datensatz in der Warteschlange bleibt, bis ein Mitglied ihn übernimmt.",
+        options: {
+          round_robin: "Reihum",
+          least_loaded: "Geringste Auslastung"
+        }
+      },
+      load: {
+        label: "Offene Arbeit",
+        help: "Erforderlich bei „Geringste Auslastung“: welche Datensätze als offene Arbeit eines Mitglieds zählen, geschrieben als Ausdruck über den Datensatz, zum Beispiel record.status != \"closed\"."
+      },
+      active: {
+        label: "Aktiv",
+        help: "Ausschalten, damit diese Regel keine neuen Datensätze mehr zuweist, ohne sie zu löschen."
+      }
+    },
+    _views: {
+      by_object: {
+        label: "Nach Objekt"
+      }
+    }
   }
 };

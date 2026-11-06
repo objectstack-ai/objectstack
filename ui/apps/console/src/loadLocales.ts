@@ -40,9 +40,9 @@ let bootPainted: Promise<void> | null = null;
  * page load, so every reader that waits on it is released by the same paint.
  *
  * Shared by the console's two readers whose answer no first-paint surface
- * needs, this one and `WorkspaceTimezonePrompt`'s settings read. It waits on
- * the splash's DOM marker rather than on any one component, because both are
- * mounted beside the routes, under the splash. A tab opened in the background
+ * needs, this one and `FirstRunChecklist`'s settings read. It waits on the
+ * splash's DOM marker rather than on any one component, because neither is
+ * the surface the splash waits for. A tab opened in the background
  * paints no frame, so it resolves when the tab is first shown.
  */
 export function whenBootPainted(): Promise<void> {

@@ -67,6 +67,9 @@ const mockClient = vi.hoisted(() => {
         overlay: eff,
         overlayScope: eff ? 'env' : null,
         effective: eff,
+        // The pending draft as stored: the `draft` layer the server serves an
+        // admitted author (objectstack#29814).
+        draft: server.drafts.get(k(type, name)) ?? null,
         // The PUBLISHED body's verdict — clean.
         ...(eff ? { _diagnostics: { valid: true } } : {}),
         editable: true,
