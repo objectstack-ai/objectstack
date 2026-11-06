@@ -76,6 +76,7 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
     'sys_personal_view',
     'sys_platform_setting',
     'sys_platform_setting_audit',
+    'sys_recycle_bin',
     'sys_scim_connection_binding',
     'sys_scim_connection_credential',
     'sys_scim_group',

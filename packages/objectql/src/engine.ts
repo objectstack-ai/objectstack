@@ -81,6 +81,10 @@ import {
   type SecretHandleSlot,
   type StoredRowsReader,
 } from './engine-secret-internal-fields.js';
+// [#30237, ADR-0148] The recycle bin's write side: the capture body, and the
+// retention seam the host hands over (`RecycleBinCaptureHost`).
+import { openRecycleBinCapture, type RecycleBinCapture } from './recycle-bin/capture.js';
+import type { RecycleBinRetentionSettings } from './recycle-bin/retention.js';
 // [#25522 cut 6] The predicate-write hook dispatch bodies; the methods of the
 // same names below hand each body the members it reads (`HookDispatchHost`).
 import {
@@ -9019,9 +9023,54 @@ export class ObjectQL implements IObjectQLEngine {
     ids: ReadonlyArray<string | number>,
     context?: ExecutionContext,
     depth = 0,
+    onCollected?: (set: CascadeDeleteSet) => Promise<void>,
   ): Promise<void> {
     // [#29986 codemod] The body moved to `engine-cascade-planning.ts`, its docblock with it (see `CascadePlanningHost`).
-    return CascadePlanningFacet.cascadeDeleteRelations.call(cascadePlanningHost.of(this), object, ids, context, depth);
+    return CascadePlanningFacet.cascadeDeleteRelations.call(cascadePlanningHost.of(this), object, ids, context, depth, onCollected);
+  }
+
+  /**
+   * [#30237, ADR-0148 D3] What the host handed over for the recycle bin's
+   * retention: its resolver and the token to call it with. `undefined` until
+   * {@link setRecycleBinRetention}: `OS_RECYCLE_BIN_RETENTION_DAYS`, else 30.
+   */
+  private recycleBinRetention: RecycleBinRetentionSettings | undefined;
+
+  /** [#30237] The recycle bin's once-per-engine notices already given. */
+  private readonly recycleBinNotices = new Set<string>();
+
+  /**
+   * [#30237, ADR-0148 D3] Install the host's retention resolver and the opaque
+   * token it is called with (the one its `resolveFeatures` receives). The
+   * engine asks once per delete operation that enters the bin and stamps the
+   * answer on the entry; `ObjectQLPlugin` calls this from its
+   * `recycleBinRetention` option.
+   */
+  setRecycleBinRetention(settings: RecycleBinRetentionSettings | undefined): void {
+    this.recycleBinRetention = settings;
+  }
+
+  private openRecycleBinCapture(
+    object: string,
+    id: string | number,
+    context: ExecutionContext | undefined,
+  ): RecycleBinCapture | undefined {
+    // [#30237] The body lives in `recycle-bin/capture.ts`, its docblock with it (see `RecycleBinCaptureHost`).
+    const readRegistry = () => this._registry;
+    const readLogger = () => this.logger;
+    const readCascadeDeleteSets = () => this.cascadeDeleteSets;
+    const readRetention = () => this.recycleBinRetention;
+    const readNotices = () => this.recycleBinNotices;
+    const host: ThisParameterType<typeof openRecycleBinCapture> = {
+      get _registry() { return readRegistry(); },
+      get logger() { return readLogger(); },
+      get cascadeDeleteSets() { return readCascadeDeleteSets(); },
+      get recycleBinRetention() { return readRetention(); },
+      get recycleBinNotices() { return readNotices(); },
+      getDriver: (...a) => this.getDriver(...a),
+      buildDriverOptions: (...a) => this.buildDriverOptions(...a),
+    };
+    return openRecycleBinCapture.call(host, object, id, context);
   }
 
   /**
@@ -9689,14 +9738,29 @@ export class ObjectQL implements IObjectQLEngine {
               // A dependent's stale-roll-up refusal stops the walk before this
               // row is removed, so it is not this delete's answer:
               // `cascadeStoppedRefusal` says what it is instead.
+              //
+              // [#30237, ADR-0148 D1] The recycle bin rides the same unit: the
+              // capture opens before the cascade (a retention defect refuses
+              // here, before any write), reads the collected set before the
+              // walk touches it, and writes the one entry after the walk and
+              // before this row goes. A removal that throws takes the entry
+              // with it: the transaction's rollback when one covers the bin,
+              // the capture's compensation otherwise.
               const runByIdDelete = async (writeContext?: ExecutionContext) => {
-                await this.cascadeDeleteRelations(object, [hookContext.input.id as string | number], writeContext)
+                const bin = this.openRecycleBinCapture(object, hookContext.input.id as string | number, writeContext);
+                await this.cascadeDeleteRelations(object, [hookContext.input.id as string | number], writeContext, 0, bin?.onCollected)
                   .catch((e: unknown) => { throw cascadeStoppedRefusal(e, object); });
-                return await driver.delete(
-                  object,
-                  hookContext.input.id as string,
-                  this.buildDriverOptions(object, writeContext, hookContext.input.options as any),
-                );
+                const entry = await bin?.write();
+                try {
+                  return await driver.delete(
+                    object,
+                    hookContext.input.id as string,
+                    this.buildDriverOptions(object, writeContext, hookContext.input.options as any),
+                  );
+                } catch (e) {
+                  await entry?.compensate();
+                  throw e;
+                }
               };
               // WHEN to open one is `planCascadeAtomicity`'s call — see there.
               // `'none'` (nothing references this object) keeps the pre-#7413

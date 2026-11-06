@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest';
 // the predicate into a package that depends on neither side.
 import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { PlatformObjectsPlugin } from './plugin.js';
-import { SysExchangeRate, SysMetadataActivation, SysMigration, SysMigrationJournal, SysSecret, SysTrustedKey } from './system/index.js';
+import { SysExchangeRate, SysMetadataActivation, SysMigration, SysMigrationJournal, SysRecycleBin, SysSecret, SysTrustedKey } from './system/index.js';
 
 /**
  * Hand-rolled fake PluginContext (mirrors the service-plugin tests) — this
@@ -46,7 +46,7 @@ function makeCtx() {
 }
 
 describe('PlatformObjectsPlugin: platform-infrastructure object registration (#4243, #4270)', () => {
-  it('registers SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate and SysTrustedKey through the manifest service', async () => {
+  it('registers SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate, SysTrustedKey and SysRecycleBin through the manifest service', async () => {
     const ctx = makeCtx();
     const manifests: any[] = [];
     ctx.registerService('manifest', { register: (m: any) => manifests.push(m) });
@@ -56,7 +56,7 @@ describe('PlatformObjectsPlugin: platform-infrastructure object registration (#4
     const infra = manifests.find((m) => m.id === 'com.objectstack.platform-objects');
     expect(infra).toBeDefined();
     expect(infra.scope).toBe('system');
-    expect(infra.objects).toEqual([SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate, SysTrustedKey]);
+    expect(infra.objects).toEqual([SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate, SysTrustedKey, SysRecycleBin]);
     expect(infra.objects.map((o: any) => o.name)).toEqual([
       'sys_migration',
       // ADR-0119 D2 (#4617). Registered UNCONDITIONALLY, alongside the flag
@@ -73,8 +73,12 @@ describe('PlatformObjectsPlugin: platform-infrastructure object registration (#4
       // keys, read by `os plugin install` from a one-shot boot that composes
       // this plugin and nothing that would register it otherwise.
       'sys_trusted_key',
+      // [ADR-0148, #30237] The recycle bin. Written by the engine's by-id
+      // delete for any business object, so it registers with the engine's
+      // infrastructure rather than with any one capability plugin.
+      'sys_recycle_bin',
     ]);
-    // ⛔ The five above must NOT acquire the ledger's routing triple. They
+    // ⛔ The six above must NOT acquire the ledger's routing triple. They
     // ride the project database today; moving them is a different question.
     expect(infra.defaultDatasource).toBeUndefined();
   });

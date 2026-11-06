@@ -803,6 +803,11 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   // Exchange rates (`@objectstack/platform-objects`, #27185): an organization's
   // administrators author its own rate table; no parent row anchors a rate.
   { object: 'sys_exchange_rate', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
+  // The recycle bin (`@objectstack/platform-objects`, ADR-0148, #30237): the
+  // engine writes each entry with the organization of the record it holds,
+  // else the deleting context's, so a NULL row has no producer; the record it
+  // names is gone, so no parent row anchors an entry.
+  { object: 'sys_recycle_bin', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
   // A reader's own named list views (`@objectstack/platform-objects`, ruling
   // 6570568131 on #28971): user data on the preference template, each row in
   // its owner's organization; no parent row anchors a view.

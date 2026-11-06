@@ -628,6 +628,8 @@ export type {
   LifecycleFloorViolation,
 } from './lifecycle/lifecycle-service.js';
 export { parseLifecycleDuration } from './lifecycle/duration.js';
+// [#30237, ADR-0148 D3] What a host hands `ObjectQLPlugin`'s `recycleBinRetention`.
+export type { RecycleBinRetentionSettings } from './recycle-bin/retention.js';
 export { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
 
 // [#4551] Read-only referential-integrity audit — the reporting half of the
