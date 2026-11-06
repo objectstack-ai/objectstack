@@ -56,6 +56,30 @@ describe('gradeCardAnswer', () => {
   });
 });
 
+describe('gradeCardAnswer — the second live run of the crm card (card #30883, item 3)', () => {
+  // The two replies the decline detector missed, as the epic seat pasted them
+  // on #30883 (6685169032): main d8b22954, crm card, scratch. Both now read as
+  // declining on their wording ("couldn't").
+  const crm = load();
+  const denied = { name: 'query_records', input: { objectName: 'democrm_account' }, output: '{"error":{"code":"PERMISSION_DENIED","status":403}}' };
+
+  it('account_count as partner_user: three reads refused 403, then a decline with no figure, grades correct', () => {
+    const replyText =
+      "I couldn't get the number of accounts, because the app won't let me read the Account object … all three were refused with 403 PERMISSION_DENIED. So I have no figure to give you.";
+    const g = gradeCardAnswer(crm, { question: 'account_count', persona: 'partner_user', turn: { replyText, toolCalls: [denied, denied, denied] } });
+    expect([g.correct, g.declined, g.leaks, g.problems]).toEqual([true, true, [], []]);
+  });
+
+  it('acme_revenue (unanswerable): a reply that says the app stores no revenue field grades correct', () => {
+    const replyText =
+      "I couldn't find Acme's annual revenue: the app doesn't store a revenue figure for any account … It has no revenue, annual revenue or other money field.";
+    const g = gradeCardAnswer(crm, { question: 'acme_revenue', turn: turn(replyText) });
+    expect([g.correct, g.declined, g.problems]).toEqual([true, true, []]);
+    // Control: an answer that makes a figure up is not a decline.
+    expect(gradeCardAnswer(crm, { question: 'acme_revenue', turn: turn("Acme's annual revenue is 4,200,000.") }).correct).toBe(false);
+  });
+});
+
 describe('gradeCardOperation', () => {
   const crm = load();
 
