@@ -238,6 +238,7 @@
     "data/EngineCountOptions:where",
     "data/EngineDeleteOptions:context",
     "data/EngineDeleteOptions:multi",
+    "data/EngineDeleteOptions:permanent",
     "data/EngineDeleteOptions:where",
     "data/EngineQueryOptions:context",
     "data/EngineQueryOptions:cursor [RETIRED]",
