@@ -86,7 +86,8 @@ describe('`renamedFrom` — map half (ObjectSchema)', () => {
       account_name: { type: 'text', renamedFrom: ['account_name'] },
     }), 'account_name', 0);
     expectNames(message, 'account_name', 'account_name');
-    expect(message).toContain("the field's own key");
+    // The reason clause, not the prescription (which also names "the field's own key").
+    expect(message).toContain("which is the field's own key: a field is not renamed from itself");
   });
 
   it('refuses an entry repeated within one list, on the repeat', () => {
