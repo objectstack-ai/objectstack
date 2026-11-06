@@ -55,6 +55,7 @@ import {
 } from './implicit-account-linking.js';
 import { withSystemReadContext } from './objectql-adapter.js';
 import { emitAuthSessionAuditEvent, loginEventFor, logoutEventFor } from './auth-session-audit.js';
+import { sessionPolicyHoldFor, withSessionPolicyHold } from './session-policy-hold.js';
 import { holdPrincipalSessionExpiry } from './principal-session-mint.js';
 import { canonicalClientAddress } from './client-address-canonical.js';
 import { readRequestClientAddress } from './request-client-address.js';
@@ -75,6 +76,7 @@ export interface DatabaseHooksHost {
   isCreatedInThisRequest: AuthManager['isCreatedInThisRequest'];
   linkingContext: AuthManager['linkingContext'];
   logDurabilityDegradation: AuthManager['logDurabilityDegradation'];
+  resolveUserAuthGates: AuthManager['resolveUserAuthGates'];
   settleMembership: AuthManager['settleMembership'];
   settleSelfRegistrationGrant: AuthManager['settleSelfRegistrationGrant'];
   stampIdentitySource: AuthManager['stampIdentitySource'];
@@ -83,7 +85,7 @@ export interface DatabaseHooksHost {
 
 /** The body of `AuthManager#composeDatabaseHooks`; the method's docblock there is its contract. */
 export function composeDatabaseHooks(
-  this: Pick<DatabaseHooksHost, 'audienceLogError' | 'config' | 'idpLocale' | 'isCreatedInThisRequest' | 'linkingContext' | 'settleMembership' | 'settleSelfRegistrationGrant' | 'stampIdentitySource' | 'takeOwnerVerifiedStamp'>,
+  this: Pick<DatabaseHooksHost, 'audienceLogError' | 'config' | 'idpLocale' | 'isCreatedInThisRequest' | 'linkingContext' | 'resolveUserAuthGates' | 'settleMembership' | 'settleSelfRegistrationGrant' | 'stampIdentitySource' | 'takeOwnerVerifiedStamp'>,
   host?: BetterAuthOptions['databaseHooks'],
 ): BetterAuthOptions['databaseHooks'] {
   // A landed link ends a standing unlink record (implicit-account-linking.ts,
@@ -319,13 +321,26 @@ export function composeDatabaseHooks(
   // better-auth decides. Both emitters are awaited but cannot throw
   // (`emitAuthSessionAuditEvent` swallows), so neither can turn a valid
   // sign-in or sign-out into an error.
+  //
+  // [#30924] A session an authentication policy holds (ADR-0069 D3 enforced
+  // MFA) records that hold on its own `login` row: `context.reason` +
+  // `context.rule` (`session-policy-hold.ts`; why the `login` row and why here
+  // is `auth-session-audit.ts`'s module note). Asked HERE, once per session
+  // created, because the gate itself is computed on every session read; and
+  // only when a sink is registered, so a deployment without the audit plugin
+  // pays no posture read for a row nobody writes. The posture read fails open
+  // (no hold recorded), never failing the sign-in.
   const hostSessionCreateAfter = (host as any)?.session?.create?.after;
   const sessionCreateAfter = async (session: any, ctx: any) => {
     const result = hostSessionCreateAfter ? await hostSessionCreateAfter(session, ctx) : undefined;
-    await emitAuthSessionAuditEvent(
-      this.config.getAuditSink?.(),
-      loginEventFor(session, typeof ctx?.path === 'string' ? ctx.path : undefined),
-    );
+    const sink = this.config.getAuditSink?.();
+    if (sink) {
+      const login = loginEventFor(session, typeof ctx?.path === 'string' ? ctx.path : undefined);
+      const hold = login
+        ? await sessionPolicyHoldFor(session, (userId, options) => this.resolveUserAuthGates(userId, options))
+        : undefined;
+      await emitAuthSessionAuditEvent(sink, withSessionPolicyHold(login, hold));
+    }
     // An external sign-in's staged `locale` claim lands on the user the
     // session names, new or returning (`idp-locale-claim.ts`). Never throws.
     await this.idpLocale.settle(session, ctx);

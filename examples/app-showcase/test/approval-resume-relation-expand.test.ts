@@ -472,12 +472,12 @@ describe('#7381 — approving Invoice Dual Sign-off delivers the cleared notice'
     // One `unanimous` slot each, through the actor ids the flow's own docblock
     // documents. The first must NOT release the run.
     const first = await booted.approvals.decide(
-      request.id, { decision: 'approve', actorId: 'position:finance' }, SYSTEM_CTX,
+      request.id, { decision: 'approve', actorId: 'position:showcase_finance' }, SYSTEM_CTX,
     );
     expect(first.finalized, 'a unanimous step finalized on one of two approvals').toBe(false);
 
     const second = await booted.approvals.decide(
-      request.id, { decision: 'approve', actorId: 'position:legal' }, SYSTEM_CTX,
+      request.id, { decision: 'approve', actorId: 'position:showcase_legal' }, SYSTEM_CTX,
     );
     expect(second.finalized).toBe(true);
     // THE REGRESSION: pre-fix this came back false, with the strand error.
@@ -598,14 +598,14 @@ describe('#7381 — approving Invoice Dual Sign-off delivers the cleared notice'
 
     const request = await pendingRequest(booted.data);
     const first = await booted.approvals.decide(
-      request.id, { decision: 'approve', actorId: 'position:finance' }, SYSTEM_CTX,
+      request.id, { decision: 'approve', actorId: 'position:showcase_finance' }, SYSTEM_CTX,
     );
     expect(first.finalized).toBe(false);
 
     let strand = '';
     try {
       const second = await booted.approvals.decide(
-        request.id, { decision: 'approve', actorId: 'position:legal' }, SYSTEM_CTX,
+        request.id, { decision: 'approve', actorId: 'position:showcase_legal' }, SYSTEM_CTX,
       );
       // Whichever way the service reports it, the run must NOT have resumed.
       expect(second.resumed).not.toBe(true);

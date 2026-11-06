@@ -2424,6 +2424,28 @@ const es = {
       dark: "Oscuro",
       system: "Sistema",
     },
+    // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
+    assignedWork: {
+      title: 'Registros que tiene esta persona',
+      loading: 'Contando los registros que tiene esta persona…',
+      countFailed: 'No se pudieron contar los registros que tiene esta persona: {{message}}',
+      noClient: 'Aquí no se pueden contar los registros que tiene esta persona.',
+      none: 'Esta persona no tiene registros que usted pueda leer.',
+      summary: 'Registros que usted puede leer: {{total}}. En propiedad: {{owned}}, asignados: {{assigned}}.',
+      row: '{{object}} · {{field}}',
+      notTransferable: 'Admite varias personas, así que no se puede traspasar aquí.',
+      truncated: 'No se contaron todos los campos de usuario; esta persona puede tener más.',
+      unreadable: 'No contados porque no puede leerlos: {{objects}}',
+      handoverTo: 'Traspasar a',
+      handoverHint: 'Opcional. El bloqueo no espera al traspaso.',
+      handover: 'Traspasar',
+      handingOver: 'Traspasando…',
+      handoverNext: 'Traspasar el siguiente lote',
+      targetBanned: 'Esa persona está bloqueada. Elija un usuario activo.',
+      transferRefused: 'El traspaso fue rechazado: {{message}}',
+      report: 'Traspasados: {{updated}}, sin mover: {{failed}}, todavía asignados: {{remaining}}.',
+      failure: '{{object}} {{id}}: {{message}}',
+    },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
       managedUsers: {
@@ -2736,6 +2758,8 @@ const es = {
         title: 'Registro de auditoría',
         subtitle: 'Actividad del sistema y cambios de registros, de solo lectura. Lo más reciente primero.',
         openAsList: 'Abrir como lista',
+        openEntryPage: 'Abrir la página de la entrada',
+        openEntryPageHint: 'La página de la entrada muestra todos los cambios del mismo registro, del más reciente al más antiguo.',
         openPresetAsList: 'Abrir {{label}} como lista',
         presets: 'Ajustes predefinidos',
         presetOtherSource: 'Esta vista lee otra fuente de datos.',
@@ -3531,6 +3555,7 @@ const es = {
     // objectui#13461 — the top bar's avatar button, which holds only the avatar.
     accountMenu: 'Menú de la cuenta',
     profile: "Perfil",
+    connectAiAssistant: "Conectar un asistente de IA",
     logout: "Cerrar sesión",
     preferences: "Preferencias",
     theme: "Tema",
@@ -3876,6 +3901,13 @@ const es = {
       title: 'QwenWork',
       body: 'Extensiones → Conectores → + Añadir → Pegar configuración JSON:',
       hint: 'O añádelo a mano como Streamable HTTP con esta URL. Si tu versión no ofrece inicio de sesión en el navegador, añade la cabecera Authorization: Bearer <clave API> (crea una clave abajo).',
+    },
+    client: {
+      title: '¿Qué asistente de IA usas?',
+      hint: 'Elige el tuyo para ver solo sus pasos. Este navegador recuerda tu elección.',
+    },
+    advanced: {
+      title: 'Avanzado: scripts y CI',
     },
     apiKey: {
       title: 'Claves API',

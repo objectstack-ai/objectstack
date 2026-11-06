@@ -2362,6 +2362,28 @@ const de = {
       dark: "Dunkel",
       system: "System",
     },
+    // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
+    assignedWork: {
+      title: 'Datensätze dieser Person',
+      loading: 'Datensätze dieser Person werden gezählt…',
+      countFailed: 'Die Datensätze dieser Person konnten nicht gezählt werden: {{message}}',
+      noClient: 'Die Datensätze dieser Person können hier nicht gezählt werden.',
+      none: 'Diese Person hat keine Datensätze, die Sie lesen können.',
+      summary: 'Datensätze, die Sie lesen können: {{total}}. Besitzer: {{owned}}, zugewiesen: {{assigned}}.',
+      row: '{{object}} · {{field}}',
+      notTransferable: 'Enthält mehrere Personen und kann hier nicht übergeben werden.',
+      truncated: 'Nicht alle Benutzerfelder wurden gezählt; diese Person kann weitere halten.',
+      unreadable: 'Nicht gezählt, weil Sie sie nicht lesen können: {{objects}}',
+      handoverTo: 'Übergeben an',
+      handoverHint: 'Optional. Die Sperre wartet nicht auf die Übergabe.',
+      handover: 'Übergeben',
+      handingOver: 'Wird übergeben…',
+      handoverNext: 'Nächsten Stapel übergeben',
+      targetBanned: 'Diese Person ist gesperrt. Wählen Sie einen aktiven Benutzer.',
+      transferRefused: 'Die Übergabe wurde abgelehnt: {{message}}',
+      report: 'Übergeben: {{updated}}, nicht verschiebbar: {{failed}}, noch gehalten: {{remaining}}.',
+      failure: '{{object}} {{id}}: {{message}}',
+    },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
       managedUsers: {
@@ -2671,6 +2693,8 @@ const de = {
         title: 'Audit-Protokoll',
         subtitle: 'Schreibgeschützte Systemaktivität und Datensatzänderungen. Neueste zuerst.',
         openAsList: 'Als Liste öffnen',
+        openEntryPage: 'Eintragsseite öffnen',
+        openEntryPageHint: 'Die Eintragsseite listet alle Änderungen am selben Datensatz auf, die neueste zuerst.',
         openPresetAsList: '{{label}} als Liste öffnen',
         presets: 'Voreinstellungen',
         presetOtherSource: 'Diese Ansicht liest eine andere Datenquelle.',
@@ -3460,6 +3484,7 @@ const de = {
     // objectui#13461 — the top bar's avatar button, which holds only the avatar.
     accountMenu: 'Kontomenü',
     profile: "Profil",
+    connectAiAssistant: "KI-Assistenten verbinden",
     logout: "Abmelden",
     preferences: "Einstellungen",
     theme: "Design",
@@ -3799,6 +3824,13 @@ const de = {
       title: 'QwenWork',
       body: 'Erweiterungen → Connectors → + Hinzufügen → JSON-Konfiguration einfügen:',
       hint: 'Oder manuell als Streamable HTTP mit dieser URL hinzufügen. Bietet Ihre Version keine Browser-Anmeldung, fügen Sie den Request-Header Authorization: Bearer <API-Schlüssel> hinzu (Schlüssel unten erstellen).',
+    },
+    client: {
+      title: 'Welchen KI-Assistenten verwenden Sie?',
+      hint: 'Wählen Sie Ihren aus, um nur seine Schritte zu sehen. Dieser Browser merkt sich Ihre Wahl.',
+    },
+    advanced: {
+      title: 'Erweitert: Skripte und CI',
     },
     apiKey: {
       title: 'API-Schlüssel',

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#18584] The record projection the `overdue_escalation` loop iterates carries
+ * [#18584] The record projection the `todo_overdue_escalation` loop iterates carries
  * every field its notification template names — `days_overdue` included.
  *
  * The defect this pins was silent: `flows/task.flow.ts` interpolates
@@ -82,7 +82,7 @@ function node(id: string): { type?: string; config?: Record<string, unknown> } {
   };
 
   const found = walk(OverdueEscalationFlow.nodes as AnyNode[] | undefined);
-  if (!found) throw new Error(`#18584 harness: node '${id}' is gone from overdue_escalation`);
+  if (!found) throw new Error(`#18584 harness: node '${id}' is gone from todo_overdue_escalation`);
   return found as { type?: string; config?: Record<string, unknown> };
 }
 

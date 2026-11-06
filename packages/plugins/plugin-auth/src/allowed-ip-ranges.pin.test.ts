@@ -34,7 +34,7 @@
  * `vitest.config.ts`), so the routes and the service are the checkout's.
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { Hono } from 'hono';
 import type { IHttpRequest, IHttpResponse, IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
 import {
@@ -73,6 +73,7 @@ const PLATFORM_ADMIN_SESSION = { user: { id: 'usr_admin', email: 'admin@example.
 interface Rig {
   svc: SettingsService;
   manager: AuthManager;
+  logger: { info: Mock; error: Mock; warn: Mock; debug: Mock };
   save(body: Record<string, unknown>, transport?: Transport): Promise<{ status: number; body: any }>;
   /** `GET /api/v1/auth/admin/client-address` on the plugin's real auth routes. */
   read(transport?: Transport, opts?: { session?: unknown; query?: string }):
@@ -153,7 +154,7 @@ async function boot(
       getApi.mockRestore();
     }
   };
-  return { svc, manager, save, read };
+  return { svc, manager, logger: ctx.logger, save, read };
 }
 
 const stored = async (svc: SettingsService) => (await svc.get('auth', 'allowed_ip_ranges', {})).value ?? null;
@@ -387,6 +388,156 @@ describe('#30398 the address read serves the address the save check judges', () 
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
     expect(res.body.data).toBeUndefined();
     expect(asked).not.toHaveBeenCalled();
+  });
+});
+
+describe('an allowed IP range whose prefix is not decimal digits within its family is refused at every save door and never matches at the gate', () => {
+  // An entry is an address, or an address, `/` and a prefix length of one or
+  // two decimal digits from 0 to 32 (IPv4) or one to three from 0 to 128
+  // (IPv6). Each entry here is neither. The saving address, 10.1.2.3, is one
+  // the list's other entry matches, so only the entry itself can refuse it.
+  const UNREADABLE = ['10.0.0.0/', '10.0.0.0/ 24', '10.0.0.0/0x18', '10.0.0.0/33', '10.0.0.0/8/8', '2001:db8::/', '2001:db8::/129', 'office'];
+  const SAVER = { remoteAddress: '10.1.2.3' };
+
+  it('the console save refuses a list holding one, names it, and stores nothing', async () => {
+    const { svc, save } = await boot();
+    for (const entry of UNREADABLE) {
+      for (const list of [entry, `10.1.2.3\n${entry}`]) {
+        const res = await save({ allowed_ip_ranges: list }, SAVER);
+        expect(res.status, JSON.stringify(list)).toBe(400);
+        expect(res.body.error.code).toBe('SETTINGS_VALIDATION');
+        const field = res.body.error.details.fields.find((f: any) => f.field === 'allowed_ip_ranges');
+        expect(field.code).toBe('invalid_value');
+        expect(field.constraint).toEqual({ invalidEntries: [entry] });
+        expect(field.message).toContain(entry);
+        expect(await stored(svc)).toBeNull();
+      }
+    }
+  });
+
+  it('the console save names the unreadable entry first, whatever address it is saved from', async () => {
+    const { save } = await boot();
+    for (const transport of [{}, { remoteAddress: '198.51.100.1' }]) {
+      const res = await save({ allowed_ip_ranges: '203.0.113.0/24, 10.0.0.0/, 2001:db8::/0x20' }, transport);
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('SETTINGS_VALIDATION');
+      expect(res.body.error.details.fields[0].field).toBe('allowed_ip_ranges');
+      expect(res.body.error.details.fields[0].code).toBe('invalid_value');
+      expect(res.body.error.details.fields[0].constraint).toEqual({ invalidEntries: ['10.0.0.0/', '2001:db8::/0x20'] });
+    }
+  });
+
+  it('an in-process write of a list holding one is refused too', async () => {
+    const { svc } = await boot();
+    const err: any = await svc.set('auth', 'allowed_ip_ranges', '10.0.0.0/', {}).then(() => null, (e) => e);
+    expect(err?.code).toBe('SETTINGS_VALIDATION');
+    expect(err.fields).toEqual([
+      expect.objectContaining({ field: 'allowed_ip_ranges', code: 'invalid_value', constraint: { invalidEntries: ['10.0.0.0/'] } }),
+    ]);
+    expect(await stored(svc)).toBeNull();
+  });
+
+  it("the deployment's own declared allowedIpRanges holding one refuses the boot, naming it", async () => {
+    await expect(boot({ plugin: { allowedIpRanges: ['10.0.0.0/8', '10.0.0.0/'] } })).rejects.toThrow(
+      /allowedIpRanges.*"10\.0\.0\.0\/"/,
+    );
+  });
+
+  it('a list stored before the save check admits no client through the unreadable entry, and the boot names it', async () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(authManifest);
+    // Written before the plugin registers its save check: the shape of a list stored by an earlier release.
+    await svc.set('auth', 'allowed_ip_ranges', '10.0.0.0/\n192.0.2.7', {});
+    const { manager, logger } = await boot({ svc });
+    expect(manager.isClientIpAllowed('10.1.2.3')).toBe(false);
+    expect(manager.isClientIpAllowed('8.8.8.8')).toBe(false);
+    expect(manager.isClientIpAllowed('192.0.2.7')).toBe(true);
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('"10.0.0.0/"'));
+  });
+
+  it('OS_AUTH_ALLOWED_IP_RANGES holding one admits no client through it, and the boot names it', async () => {
+    const { manager, logger } = await boot({ env: { OS_AUTH_ALLOWED_IP_RANGES: '10.0.0.0/, 192.0.2.7' } });
+    expect(manager.isClientIpAllowed('10.1.2.3')).toBe(false);
+    expect(manager.isClientIpAllowed('192.0.2.7')).toBe(true);
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('"10.0.0.0/"'));
+  });
+
+  it('a list of well-formed entries saves and gates as before (preservation)', async () => {
+    const list = '10.0.0.0/8\n10.0.0.0/08, 192.0.2.7/32\n2001:db8::/32\n::1/128\n203.0.113.5\n2001:db8::1';
+    const { svc, manager, logger, save } = await boot();
+    const res = await save({ allowed_ip_ranges: list }, SAVER);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(await stored(svc)).toBe(list);
+    await vi.waitFor(() => expect(manager.isClientIpAllowed('198.51.100.1')).toBe(false));
+    expect(manager.isClientIpAllowed('10.200.0.1')).toBe(true);
+    expect(manager.isClientIpAllowed('192.0.2.7')).toBe(true);
+    expect(manager.isClientIpAllowed('192.0.2.8')).toBe(false);
+    expect(manager.isClientIpAllowed('2001:db8:ffff::1')).toBe(true);
+    expect(manager.isClientIpAllowed('::1')).toBe(true);
+    expect(manager.isClientIpAllowed('203.0.113.5')).toBe(true);
+    expect(logger.error).not.toHaveBeenCalledWith(expect.stringContaining('allowed_ip_ranges'));
+  });
+});
+
+describe('an allowed_ip_ranges value that is not text is refused at every save door, and where it is stored the gate admits nobody through it', () => {
+  // The setting is a textarea: its value is text, one entry per line or
+  // comma-separated. Each value here is not text. The saving address,
+  // 10.1.2.3, is one each of them spells, so only the value's form can refuse it.
+  const NOT_TEXT: unknown[] = [['10.1.2.3'], ['10.0.0.0/8', '10.1.2.3'], [], 167838211, true, { ranges: '10.1.2.3' }];
+  const SAVER = { remoteAddress: '10.1.2.3' };
+
+  it('the console save refuses it and stores nothing', async () => {
+    const { svc, save } = await boot();
+    for (const value of NOT_TEXT) {
+      const res = await save({ allowed_ip_ranges: value }, SAVER);
+      expect(res.status, JSON.stringify(value)).toBe(400);
+      expect(res.body.error.code).toBe('SETTINGS_VALIDATION');
+      const field = res.body.error.details.fields.find((f: any) => f.field === 'allowed_ip_ranges');
+      expect(field.code).toBe('invalid_value');
+      expect(field.constraint).toEqual({ type: 'textarea' });
+      expect(field.message).toContain('not text');
+      expect(await stored(svc)).toBeNull();
+    }
+  });
+
+  it('it is refused whatever address it is saved from', async () => {
+    const { save } = await boot();
+    for (const transport of [{}, { remoteAddress: '198.51.100.1' }]) {
+      const res = await save({ allowed_ip_ranges: ['203.0.113.0/24'] }, transport);
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('SETTINGS_VALIDATION');
+      expect(res.body.error.details.fields[0].code).toBe('invalid_value');
+      expect(res.body.error.details.fields[0].constraint).toEqual({ type: 'textarea' });
+    }
+  });
+
+  it('an in-process write of it is refused too', async () => {
+    const { svc } = await boot();
+    for (const value of NOT_TEXT) {
+      const err: any = await svc.set('auth', 'allowed_ip_ranges', value, {}).then(() => null, (e) => e);
+      expect(err?.code, JSON.stringify(value)).toBe('SETTINGS_VALIDATION');
+      expect(err.fields).toEqual([
+        expect.objectContaining({ field: 'allowed_ip_ranges', code: 'invalid_value', constraint: { type: 'textarea' } }),
+      ]);
+      expect(await stored(svc)).toBeNull();
+    }
+  });
+
+  it('a value stored before the save check admits no client, the boot names it, and saving the list as text replaces it', async () => {
+    for (const value of [['10.1.2.3'], 167838211, { ranges: '10.1.2.3' }]) {
+      const svc = new SettingsService({ env: {} });
+      svc.registerManifest(authManifest);
+      // Written before the plugin registers its save check: the shape of a value stored by an earlier release.
+      await svc.set('auth', 'allowed_ip_ranges', value, {});
+      const { manager, logger, save } = await boot({ svc });
+      expect(manager.isClientIpAllowed('10.1.2.3'), JSON.stringify(value)).toBe(false);
+      expect(manager.isClientIpAllowed('8.8.8.8')).toBe(false);
+      expect(logger.error).toHaveBeenCalledWith(expect.stringMatching(/allowed_ip_ranges.*not text/));
+      const res = await save({ allowed_ip_ranges: '10.1.2.3' }, SAVER);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      await vi.waitFor(() => expect(manager.isClientIpAllowed('10.1.2.3')).toBe(true));
+      expect(manager.isClientIpAllowed('8.8.8.8')).toBe(false);
+    }
   });
 });
 
