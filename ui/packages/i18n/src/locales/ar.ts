@@ -3741,6 +3741,7 @@ const ar = {
     // objectui#13461 — the top bar's avatar button, which holds only the avatar.
     accountMenu: 'قائمة الحساب',
     profile: "الملف الشخصي",
+    connectAiAssistant: "ربط مساعد ذكاء اصطناعي",
     logout: "تسجيل الخروج",
     preferences: "التفضيلات",
     theme: "السمة",
@@ -4104,6 +4105,13 @@ const ar = {
       title: 'QwenWork',
       body: 'الإضافات ← الموصلات ← + إضافة ← لصق إعداد JSON:',
       hint: 'أو أضفه يدويًا كـ Streamable HTTP بهذا العنوان. إذا لم يدعم إصدارك تسجيل الدخول عبر المتصفح، أضف ترويسة الطلب Authorization: Bearer <مفتاح API> (أنشئ مفتاحًا أدناه).',
+    },
+    client: {
+      title: 'أي مساعد ذكاء اصطناعي تستخدم؟',
+      hint: 'اختر مساعدك لترى خطواته فقط. يتذكر هذا المتصفح اختيارك.',
+    },
+    advanced: {
+      title: 'متقدم: البرامج النصية وCI',
     },
     apiKey: {
       title: 'مفاتيح API',
