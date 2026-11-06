@@ -131,7 +131,7 @@ acts for (`actingAs`) and declares its `outcome`, so grading reads it with code 
 
 The `write_validation` operation is graded in two halves. The agent passes when its write is
 refused with the declared code, or when it writes nothing and its reply declines the write or
-asks for a correction (an agent that catches the bad value first). The app passes when the
+asks for a correction (an agent that catches the bad value first). The platform passes when the
 runner's own write of the operation's declared `values`, sent after the agent's turn as the
 same persona through the same MCP door, is refused with that code and stores nothing. So a
 card states the bad write in full in `values` (and `target`), exactly as the app must refuse it.

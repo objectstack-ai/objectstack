@@ -43,10 +43,10 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   skipped).
 - `scenario-operation-grade.ts` — an observed write against `applied` / `refused` /
   `pending_confirmation`; a fact the observation does not carry fails. The operation the
-  card's `write_validation` guardrail names is graded in two halves: the agent's (its write
+  card's `write_validation` guardrail names is graded in two halves: the agent half (its write
   was refused with the declared code, or it wrote nothing and its reply declines the write or
-  asks for a correction) and the probe's (the runner's own write of the declared values was
-  refused with that code and stored nothing).
+  asks for a correction) and the platform half, `platform:` checks (the runner's own write of
+  the declared values, the probe, was refused with that code and stored nothing).
 - `scenario-run-grade.ts` — an answer graded on correct / cited / leaks, per persona against
   that persona's truth; a `withheld` truth is must-not-reveal.
 
@@ -97,8 +97,8 @@ Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scen
   operation the card's `write_validation` guardrail names, the runner then sends the declared write itself
   (`values`, on `target`) as the same persona through the same MCP door (`POST /api/v1/mcp`, its own API key) and
   reads that answer as the **probe**: the app's validation is measured on every run, whether or not the agent sent
-  the bad value, and a careful agent that caught it first is not failed for it. A failed probe is the app's failure,
-  never the agent's.
+  the bad value, and a careful agent that caught it first is not failed for it. A failed probe is the platform's
+  failure, never the agent's.
 - **Namespaces** (`namespace.ts`): every card's app is in the namespace `demo` + the card's `code` (`democrm`): scratch
   mode scaffolds the project under that name, and template mode installs a template declaring it into a host named
   `host<code>` (the unmanaged copy keeps its namespace, and the install refuses one the host owns). The card's names are

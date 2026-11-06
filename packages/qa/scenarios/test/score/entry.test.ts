@@ -70,7 +70,7 @@ describe('gradeCardOperation', () => {
     const refused = { answer: { kind: 'refused', code: 'VALIDATION_FAILED' }, writes: 0 } as const;
     const names = (op: string) => gradeCardOperation(crm, op, refused).checks.map((c) => c.check);
     expect(crm.card.run.guardrails.find((g) => g.check === 'write_validation')?.operation).toBe('contact_bad_email');
-    expect(names('contact_bad_email')).toEqual(['agent:refused:VALIDATION_FAILED-or-withheld', 'no-write', 'probe:refused:VALIDATION_FAILED', 'probe:no-write']);
+    expect(names('contact_bad_email')).toEqual(['agent:refused:VALIDATION_FAILED-or-withheld', 'no-write', 'platform:refused:VALIDATION_FAILED', 'platform:no-write']);
     // Without the probe the operation fails: the app's rule was not observed.
     expect(gradeCardOperation(crm, 'contact_bad_email', refused).pass).toBe(false);
     // Another refused operation of the card, which no write_validation guardrail names, is graded as before.

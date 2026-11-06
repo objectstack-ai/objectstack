@@ -458,19 +458,19 @@ describe('runCard — the validation operation is probed by the runner itself (#
     expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
   });
 
-  it('an agent that catches the bad value and asks for a correction passes; an app that stores the probe fails on the probe half alone', async () => {
+  it('an agent that catches the bad value and asks for a correction passes; an app that stores the probe fails on the platform half alone', async () => {
     const good = setup({ preValidates: true });
     const op = badEmail(await runCard(good.scenario, good.driver, good.ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false }));
     expect([op.observation!.answer, op.observation!.writes, op.observation!.withheld, op.grade!.pass]).toEqual([{ kind: 'refused', code: '(no write attempted)' }, 0, true, true]);
 
     const broken = setup({ preValidates: true, app: () => Object.assign(new FakeApp(), { storesInvalidWrites: true }) });
     const run = await runCard(broken.scenario, broken.driver, broken.ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
-    expect(failing(badEmail(run))).toEqual(['probe:refused:VALIDATION_FAILED', 'probe:no-write']);
+    expect(failing(badEmail(run))).toEqual(['platform:refused:VALIDATION_FAILED', 'platform:no-write']);
     expect(broken.apps[0]!.rows.democrm_contact!.filter((r) => r.email === 'gil at acme')).toHaveLength(1); // the probe's own row
     expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 4, total: 5, notMeasured: 0 });
   });
 
-  it('a probe the door never answered leaves the probe half not observed, and the operation says why', async () => {
+  it('a probe the door never answered leaves the platform half not observed, and the operation says why', async () => {
     class DownApp extends FakeApp {
       override async callTool(): Promise<ToolAnswer> {
         throw new Error('tools/call create_record: 502');
@@ -479,8 +479,8 @@ describe('runCard — the validation operation is probed by the runner itself (#
     const { scenario, ops, driver } = setup({ app: () => new DownApp() });
     const op = badEmail(await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false }));
     expect(op.error).toBe('probe: tools/call create_record: 502');
-    expect(failing(op)).toEqual(['probe:refused:VALIDATION_FAILED', 'probe:no-write']);
-    expect(op.grade!.checks.find((c) => c.check === 'probe:no-write')).toEqual({ check: 'probe:no-write', pass: false, detail: 'not observed' });
+    expect(failing(op)).toEqual(['platform:refused:VALIDATION_FAILED', 'platform:no-write']);
+    expect(op.grade!.checks.find((c) => c.check === 'platform:no-write')).toEqual({ check: 'platform:no-write', pass: false, detail: 'not observed' });
   });
 });
 

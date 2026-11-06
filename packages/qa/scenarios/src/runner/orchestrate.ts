@@ -521,7 +521,7 @@ export async function runHalf(
         }
         // The validation operation's probe: the runner sends the declared write
         // itself, as the same persona through the same MCP door, after the turn.
-        // A probe that cannot be sent leaves the probe half "not observed".
+        // A probe that cannot be sent leaves the platform half "not observed".
         let probe: ProbeObservation | undefined;
         if (isWriteValidationOperation(card, op.id)) {
           try {

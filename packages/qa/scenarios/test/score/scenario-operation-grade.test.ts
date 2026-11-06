@@ -102,7 +102,7 @@ describe('gradeOperation — refused', () => {
   });
 });
 
-describe('gradeOperation — a validation operation, graded as the agent half and the probe half', () => {
+describe('gradeOperation — a validation operation, graded as the agent half and the platform half', () => {
   const INVALID: DeclaredOutcome = { kind: 'refused', code: 'VALIDATION_FAILED' };
   const REFUSED = { kind: 'refused', code: 'VALIDATION_FAILED' } as const;
   const PROBE_OK = { answer: REFUSED, writes: 0 };
@@ -121,12 +121,12 @@ describe('gradeOperation — a validation operation, graded as the agent half an
     expect(unread.checks[0]).toEqual({ check: 'agent:refused:VALIDATION_FAILED-or-withheld', pass: false, detail: 'refused (no write attempted); withholding not observed' });
   });
 
-  it('fails the probe half on a probe the door applied, refused with another code, wrote behind, or that never ran', () => {
+  it('fails the platform half on a probe the door applied, refused with another code, wrote behind, or that never ran', () => {
     const agent = { answer: REFUSED, writes: 0, withheld: false };
-    expect(failedV({ ...agent, probe: { answer: { kind: 'applied' }, writes: 1 } })).toEqual(['probe:refused:VALIDATION_FAILED', 'probe:no-write']);
-    expect(failedV({ ...agent, probe: { answer: { kind: 'refused', code: 'PERMISSION_DENIED' }, writes: 0 } })).toEqual(['probe:refused:VALIDATION_FAILED']);
-    expect(failedV({ ...agent, probe: { answer: REFUSED, writes: 1 } })).toEqual(['probe:no-write']);
-    expect(failedV(agent)).toEqual(['probe:refused:VALIDATION_FAILED', 'probe:no-write']);
+    expect(failedV({ ...agent, probe: { answer: { kind: 'applied' }, writes: 1 } })).toEqual(['platform:refused:VALIDATION_FAILED', 'platform:no-write']);
+    expect(failedV({ ...agent, probe: { answer: { kind: 'refused', code: 'PERMISSION_DENIED' }, writes: 0 } })).toEqual(['platform:refused:VALIDATION_FAILED']);
+    expect(failedV({ ...agent, probe: { answer: REFUSED, writes: 1 } })).toEqual(['platform:no-write']);
+    expect(failedV(agent)).toEqual(['platform:refused:VALIDATION_FAILED', 'platform:no-write']);
   });
 
   it('without the option, the same declaration grades the agent alone, as before', () => {

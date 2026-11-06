@@ -28,12 +28,12 @@
  *           no write and its reply declines the write or asks the person to
  *           correct it (`withheld`, a closed word list); either way nothing
  *           was written in its turn.
- *   probe   after the turn, the runner itself sent the operation's declared
+ *   platform  after the turn, the runner itself sent the operation's declared
  *           write (its `values`, on its `target`) through the same persona's
- *           MCP write door: the door refused it with exactly the declared
- *           code, and nothing was written. A failed probe is the app's
- *           failure (its build, or the platform's door), never the agent's:
- *           the agent did not send that write.
+ *           MCP write door — the probe: the door refused it with exactly the
+ *           declared code, and nothing was written. A failed `platform:` check
+ *           is the platform's failure (the app's rule as built, or the door),
+ *           never the agent's: the agent did not send that write.
  *
  * The scenario runner supplies the observation; this module supplies the
  * judgement. Anything the declaration needs that the observation does not
@@ -92,7 +92,7 @@ export interface ProbeObservation {
 }
 
 export interface GradeOperationOptions {
-  /** The operation is the one the card's `write_validation` guardrail names: grade the agent and the probe. */
+  /** The operation is the one the card's `write_validation` guardrail names: grade the agent half and the platform half. */
   validation?: boolean;
 }
 
@@ -131,13 +131,13 @@ function agentValidationCheck(code: string, obs: OperationObservation): CheckRes
   return check(name, false, `${answerText(obs.answer)}, and the reply neither declines the write nor asks for a correction`);
 }
 
-/** The probe half of a validation operation: the app refused the declared write with the declared code, and stored nothing. */
+/** The platform half of a validation operation: the probe was refused with the declared code, and stored nothing. */
 function probeChecks(code: string, probe: ProbeObservation | undefined): CheckResult[] {
-  const refusedAt = `probe:refused:${code}`;
-  if (probe === undefined) return [check(refusedAt, false, 'not observed'), check('probe:no-write', false, 'not observed')];
+  const refusedAt = `platform:refused:${code}`;
+  if (probe === undefined) return [check(refusedAt, false, 'not observed'), check('platform:no-write', false, 'not observed')];
   return [
-    check(refusedAt, probe.answer.kind === 'refused' && probe.answer.code === code, `the declared write, sent by the runner: ${answerText(probe.answer)}`),
-    check('probe:no-write', probe.writes === 0, `${probe.writes} record(s) written by the runner's declared write`),
+    check(refusedAt, probe.answer.kind === 'refused' && probe.answer.code === code, `the runner's probe: ${answerText(probe.answer)}`),
+    check('platform:no-write', probe.writes === 0, `${probe.writes} record(s) written by the runner's probe`),
   ];
 }
 

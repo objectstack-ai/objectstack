@@ -223,7 +223,7 @@ describe('observeOperation → gradeCardOperation, on the real crm card', () => 
   });
 });
 
-describe('the validation operation (#30883 item 2, ruled B): the agent half and the probe half', () => {
+describe('the validation operation (#30883 item 2, ruled B): the agent half and the platform half', () => {
   // contact_bad_email: as partner_user, create a contact with the email "gil at acme";
   // the card declares refused VALIDATION_FAILED, and its write_validation guardrail names it.
   const crm = load();
@@ -254,21 +254,21 @@ describe('the validation operation (#30883 item 2, ruled B): the agent half and 
       checks: [
         { check: 'agent:refused:VALIDATION_FAILED-or-withheld', pass: true, detail: 'refused VALIDATION_FAILED' },
         { check: 'no-write', pass: true, detail: '0 record(s) written' },
-        { check: 'probe:refused:VALIDATION_FAILED', pass: true, detail: 'the declared write, sent by the runner: refused VALIDATION_FAILED' },
-        { check: 'probe:no-write', pass: true, detail: "0 record(s) written by the runner's declared write" },
+        { check: 'platform:refused:VALIDATION_FAILED', pass: true, detail: "the runner's probe: refused VALIDATION_FAILED" },
+        { check: 'platform:no-write', pass: true, detail: "0 record(s) written by the runner's probe" },
       ],
     });
   });
 
-  it("② the probe's write was stored: fails on the probe half alone — the app's failure, not the agent's", () => {
+  it("② the probe's write was stored: fails on the platform half alone — the platform's failure, not the agent's", () => {
     expect(broken).toEqual({ answer: { kind: 'applied' }, writes: 1 });
     const obs = observe(turnOf(PRE_VALIDATED), broken);
-    expect(failing(obs)).toEqual(['probe:refused:VALIDATION_FAILED', 'probe:no-write']);
-    expect(grade(obs).checks.slice(2).map((c) => c.detail)).toEqual(['the declared write, sent by the runner: applied', "1 record(s) written by the runner's declared write"]);
+    expect(failing(obs)).toEqual(['platform:refused:VALIDATION_FAILED', 'platform:no-write']);
+    expect(grade(obs).checks.slice(2).map((c) => c.detail)).toEqual(["the runner's probe: applied", "1 record(s) written by the runner's probe"]);
     // A door that failed the probe with no code, or with another code, is not the validation refusal either.
     expect(observeProbe(call, { output: 'MCP error -32602', isError: true }, contacts, contacts)).toEqual({ answer: { kind: 'refused', code: uncodedToolError }, writes: 0 });
     const denied = observeProbe(call, { output: '{"error":{"code":"PERMISSION_DENIED","status":403}}', isError: true }, contacts, contacts);
-    expect(failing(observe(turnOf(PRE_VALIDATED), denied))).toEqual(['probe:refused:VALIDATION_FAILED']);
+    expect(failing(observe(turnOf(PRE_VALIDATED), denied))).toEqual(['platform:refused:VALIDATION_FAILED']);
   });
 
   it('③ the agent caught the bad value first — no write, nothing written, a reply asking for a correction: passes', () => {
@@ -285,7 +285,7 @@ describe('the validation operation (#30883 item 2, ruled B): the agent half and 
     }
   });
 
-  it('④ the agent did nothing and said nothing of it: fails on the agent half, while the probe still passes', () => {
+  it('④ the agent did nothing and said nothing of it: fails on the agent half, while the platform half still passes', () => {
     for (const reply of ['', 'Done — Gil Ray is in your contacts.']) {
       const obs = observe(turnOf(reply));
       expect(obs.withheld).toBe(false);
@@ -304,8 +304,8 @@ describe('the validation operation (#30883 item 2, ruled B): the agent half and 
     expect(failing(wrote)).toEqual(['agent:refused:VALIDATION_FAILED-or-withheld', 'no-write']);
     // A probe the runner did not send is not observed, never a pass.
     expect(failing(observeOperation({ op, turn: turnOf(PRE_VALIDATED), before: contacts, after: contacts, rowsByObject: {} }))).toEqual([
-      'probe:refused:VALIDATION_FAILED',
-      'probe:no-write',
+      'platform:refused:VALIDATION_FAILED',
+      'platform:no-write',
     ]);
   });
 
