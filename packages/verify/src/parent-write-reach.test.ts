@@ -20,6 +20,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import { defineStack } from '@objectstack/spec';
+// The harness loads these two inside a function body; paid here, during collection, not in a clocked window.
+import '@objectstack/service-datasource';
+import '@objectstack/service-automation';
 
 import { bootStack, type VerifyStack } from './harness.js';
 import { warmUpBoot } from './boot-warm-up.testkit.js';
