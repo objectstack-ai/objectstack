@@ -166,6 +166,19 @@ function kernelPackageScopeOf(row: PairPackageRow | undefined): string | undefin
 }
 
 /**
+ * [ruling record 6691217245] The kernel scope of `packageId` as `engine`'s
+ * registry holds it ({@link kernelPackageScopeOf}), or `undefined` for a
+ * package that is not a kernel package or is not installed. The door's own
+ * reading, for the callers that land something in a package's pair and must
+ * know beforehand that a kernel package has none (the "new similar" doors).
+ */
+export function kernelPackageScope(engine: unknown, packageId: string): string | undefined {
+    const registry = (engine as { registry?: Partial<PairRegistry> } | null | undefined)?.registry;
+    if (!registry || typeof registry.getPackage !== 'function') return undefined;
+    return kernelPackageScopeOf(registry.getPackage(packageId));
+}
+
+/**
  * The calls in flight, per registry and per pair id — see the module header,
  * "Idempotent, and one pair under concurrency". Keyed weakly by the registry,
  * so a test's throwaway registry takes its entries with it.

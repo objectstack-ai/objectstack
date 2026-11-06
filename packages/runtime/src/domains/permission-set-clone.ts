@@ -74,6 +74,13 @@
  *    grants on; the one check both "new similar" doors ask
  *    (`newSimilarTargetRefusal`, `./new-similar-target.ts`), else refused with
  *    nothing written;
+ *  - **omitted, the source shipped by a kernel package** (scope `system` /
+ *    `cloud`: the platform's own sets, `member_default` among them) — the
+ *    save is environment-wide, as for a source authored in the environment:
+ *    a kernel package has no paired customization package in this version
+ *    (ruling record 6691217245), and the copy is a new set, not a change to
+ *    the kernel's. The notice says why, and that `package` keeps the copy in
+ *    a package the caller names;
  *  - **omitted, the source shipped by a read-only package X** — X's paired
  *    customization package `<X>.custom`, answered by N-13's ensure door
  *    (`ensureCustomizationPackage`, `@objectstack/metadata-protocol`), the
@@ -110,7 +117,7 @@ import { SnakeCaseIdentifierSchema } from '@objectstack/spec/shared';
 import { metaWriteCapabilityVerdict, walledCatalogWriteVerdict } from '@objectstack/metadata-core';
 import { readEffectiveTenancyPosture } from './activation-gate.js';
 import { securityCatalogReaderOf, type SecurityCatalogEntry } from '@objectstack/core';
-import { isWritablePackage, type ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { isWritablePackage, kernelPackageScope, type ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { newSimilarTargetRefusal, newSimilarTargetRefusalAnswer } from './new-similar-target.js';
 import { validationFailure } from '../validation-failure.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -158,6 +165,11 @@ export const PERMISSION_SET_CLONE_NOTICE =
 export interface PermissionSetCloneLanding {
     readonly packageId: string | null;
     readonly created: boolean;
+    /**
+     * The kernel package that shipped the source, when the copy went
+     * environment-wide because that package has no pair; absent otherwise.
+     */
+    readonly kernelSource?: string;
 }
 
 /**
@@ -173,16 +185,17 @@ export interface PermissionSetCloneLanding {
  */
 export const PERMISSION_SET_CLONE_NOTICE_CODES = Object.freeze({
     environmentWide: 'PERMISSION_SET_CLONE_ENVIRONMENT_WIDE',
+    environmentWideKernelSource: 'PERMISSION_SET_CLONE_ENVIRONMENT_WIDE_KERNEL_SOURCE',
     inPackage: 'PERMISSION_SET_CLONE_IN_PACKAGE',
     inCreatedPackage: 'PERMISSION_SET_CLONE_IN_CREATED_PACKAGE',
 } as const);
 
-/** Which of the three notices a landing is told with. */
+/** Which of the four notices a landing is told with. */
 export type PermissionSetCloneLandingKind = keyof typeof PERMISSION_SET_CLONE_NOTICE_CODES;
 
 /** The one place a landing is sorted into its notice variant. */
 export function permissionSetCloneLandingKind(landing: PermissionSetCloneLanding): PermissionSetCloneLandingKind {
-    if (landing.packageId === null) return 'environmentWide';
+    if (landing.packageId === null) return landing.kernelSource !== undefined ? 'environmentWideKernelSource' : 'environmentWide';
     return landing.created ? 'inCreatedPackage' : 'inPackage';
 }
 
@@ -194,6 +207,12 @@ export function permissionSetCloneNotice(landing: PermissionSetCloneLanding): st
     const kind = permissionSetCloneLandingKind(landing);
     if (kind === 'environmentWide') {
         return 'The copy was saved environment-wide, in no package, as the set it was copied from is. '
+            + PERMISSION_SET_CLONE_NOTICE;
+    }
+    if (kind === 'environmentWideKernelSource') {
+        return `The copy was saved environment-wide, in no package: the set it was copied from is shipped by kernel `
+            + `package '${landing.kernelSource}', which has no paired customization package in this version. Name a `
+            + 'writable package with `package` to keep the copy in it instead. '
             + PERMISSION_SET_CLONE_NOTICE;
     }
     return `The copy was saved in package '${landing.packageId}'`
@@ -297,6 +316,11 @@ export async function resolveDefaultCloneLanding(
     const sourcePackageId = source.packageId;
     if (sourcePackageId === undefined) return { packageId: null, created: false };
     if (isWritablePackage(ql, sourcePackageId)) return { packageId: sourcePackageId, created: false };
+    // [ruling record 6691217245] A kernel package has no pair: the copy of
+    // its set is a new set, saved where an environment-authored set's is.
+    if (kernelPackageScope(ql, sourcePackageId) !== undefined) {
+        return { packageId: null, created: false, kernelSource: sourcePackageId };
+    }
     if (typeof protocol.ensureCustomizationPackage !== 'function') {
         throw Object.assign(
             new Error(

@@ -67,7 +67,10 @@ const SYS_ONLY_SET = { name: 'sys_only', label: 'Sys Only', objects: { sys_user:
 /** A set `crm` ships that grants on a platform object only: its package is the one thing out of an island's reach. */
 const CRM_SYS_SET = { name: 'crm_user_reader', label: 'CRM User Reader', objects: { sys_user: { allowRead: true } }, _packageId: 'crm' };
 
-const CATALOG: TestSecurityCatalog = { permissions: [PACKAGED, ENV_SET, OWNED_SET, SYS_ONLY_SET, CRM_SYS_SET] };
+/** [#29594] A set the platform's kernel ships (scope `system`): the commonest lock-and-clone source. */
+const KERNEL = 'com.objectstack.plugin-security';
+const KERNEL_SET = { name: 'member_default', label: 'Member', objects: { account: { allowRead: true } }, _packageId: KERNEL, _lock: 'full' };
+const CATALOG: TestSecurityCatalog = { permissions: [PACKAGED, ENV_SET, OWNED_SET, SYS_ONLY_SET, CRM_SYS_SET, KERNEL_SET] };
 
 /**
  * The package registry the door reads: `crm` is a booted CODE package
@@ -82,6 +85,7 @@ const PACKAGES: Record<string, { manifest: Record<string, unknown> }> = {
     'com.acme.ext': { manifest: { id: 'com.acme.ext', dependencies: { crm: '^1' } } },
     'com.acme.island': { manifest: { id: 'com.acme.island' } },
     'com.vendor.app': { manifest: { id: 'com.vendor.app', scope: 'cloud' } },
+    [KERNEL]: { manifest: { id: KERNEL, namespace: 'sys', version: '18.3.0', scope: 'system' } },
 };
 
 interface Saved { type: string; name: string; item: Record<string, unknown>; parentVersion?: string | null; packageId?: string; inheritedGrantObjects?: readonly string[] }
@@ -238,6 +242,22 @@ describe('the permission-set clone door — success', () => {
         expect((res as any).response.body.data.notice).toBe(permissionSetCloneNotice({ packageId: null, created: false }));
     });
 
+    it('[#29594] a set a kernel package ships copies environment-wide, with no ensure: the kernel has no pair', async () => {
+        const h = boot();
+
+        const res = await clone(h, HOLDER(), KERNEL_SET.name, { name: 'my_member', label: 'My Member' });
+
+        expect(statusOf(res)).toBe(200);
+        expect(h.ensures).toEqual([]);
+        expect(h.saves[0]).not.toHaveProperty('packageId');
+        expect(h.saves[0].item).toEqual({ name: 'my_member', label: 'My Member', objects: KERNEL_SET.objects });
+        const data = (res as any).response.body.data;
+        expect(data.package).toBeNull();
+        expect(data.noticeCode).toBe('PERMISSION_SET_CLONE_ENVIRONMENT_WIDE_KERNEL_SOURCE');
+        expect(data.notice).toBe(permissionSetCloneNotice({ packageId: null, created: false, kernelSource: KERNEL }));
+        expect(data.notice).toContain(`kernel package '${KERNEL}'`);
+    });
+
     it('a set already in a writable package copies into that package, with no ensure', async () => {
         const h = boot();
 
@@ -331,7 +351,7 @@ describe('the permission-set clone door — authority', () => {
 });
 
 describe('[#29727] the clone notice is named by one stable code per landing', () => {
-    // CONTROL: the three sentences, spelled out as they were served before the
+    // CONTROL: the sentences (the fourth since #29594), spelled out as they were served before the
     // codes arrived, so a change to `notice` while adding a code reds here.
     const TAIL =
         'The copy is a new permission set authored in this system, with no link to the set it was copied '
@@ -343,6 +363,13 @@ describe('[#29727] the clone notice is named by one stable code per landing', ()
             landing: { packageId: null, created: false },
             code: 'PERMISSION_SET_CLONE_ENVIRONMENT_WIDE',
             notice: 'The copy was saved environment-wide, in no package, as the set it was copied from is. ' + TAIL,
+        },
+        {
+            landing: { packageId: null, created: false, kernelSource: 'com.objectstack.plugin-security' },
+            code: 'PERMISSION_SET_CLONE_ENVIRONMENT_WIDE_KERNEL_SOURCE',
+            notice: "The copy was saved environment-wide, in no package: the set it was copied from is shipped by kernel "
+                + "package 'com.objectstack.plugin-security', which has no paired customization package in this version. "
+                + 'Name a writable package with `package` to keep the copy in it instead. ' + TAIL,
         },
         {
             landing: { packageId: 'com.acme.base', created: false },
@@ -363,9 +390,9 @@ describe('[#29727] the clone notice is named by one stable code per landing', ()
         expect(permissionSetCloneNotice(landing)).toBe(notice);
     });
 
-    it('the three codes are distinct and the table holds exactly them', () => {
+    it('the four codes are distinct and the table holds exactly them', () => {
         expect(Object.values(PERMISSION_SET_CLONE_NOTICE_CODES).sort()).toEqual(VARIANTS.map((v) => v.code).sort());
-        expect(new Set(VARIANTS.map((v) => permissionSetCloneNotice(v.landing))).size).toBe(3);
+        expect(new Set(VARIANTS.map((v) => permissionSetCloneNotice(v.landing))).size).toBe(4);
     });
 });
 
