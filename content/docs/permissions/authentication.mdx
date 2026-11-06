@@ -1166,6 +1166,43 @@ rows that resolve to a temporary password (all of them under `temporary`, only
 the unreachable ones under `auto`) — reveals the generated passwords once with a
 download, splitting files above 500 rows into batches automatically.
 
+#### SCIM Connection Credentials
+
+With SCIM enabled (`OS_SCIM_ENABLED=true`, or `plugins.scim`), an identity
+provider such as Okta or Entra ID provisions users through
+`/api/v1/auth/scim/v2/*` with a bearer credential the platform issues. Only a
+platform administrator mints or revokes one, through the same gate as the
+routes above; anyone else is refused `403 PERMISSION_DENIED` (`401` when
+signed out).
+
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/admin/scim/mint-credential \
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $ADMIN_SESSION" \
+  -d '{ "connectionId": "okta-prod", "label": "rotation 2026-Q4" }'
+# → { success, data: { credentialId, connectionId, token, expiresAt } }
+```
+
+- `connectionId` (required) names the connection every provisioned resource
+  is scoped to: at most 246 characters, so the connection's audit actor
+  `svc:scim:<connectionId>` fits the audit log's 255. Optional: `label`, `expiresAt` (a future ISO date-time),
+  `provisioningDomainId`, and `organizationId` (the organization that owns the
+  credential row; the Default Organization when omitted).
+- The `token` is shown **once**, in this response only (`Cache-Control:
+  no-store`). Only a keyed one-way digest of it is stored; it is not readable
+  through the data API, the audit log or the logs afterwards. Paste it into the
+  identity provider's SCIM settings as the bearer token.
+- While SCIM is off the mint is refused `503 SERVICE_UNAVAILABLE`: a credential
+  nothing can verify is not issued.
+
+`POST /api/v1/auth/admin/scim/revoke-credential` with `{ "credentialId": "…" }`
+switches that credential off: the identity provider's next SCIM request with it
+is refused `401`. An unknown credential answers `404 RESOURCE_NOT_FOUND`, one
+already revoked `409 RESOURCE_CONFLICT`. Revocation works whether or not SCIM is
+on. To **rotate**, mint a second credential for the same `connectionId`, move
+the identity provider to it, then revoke the old one; both authenticate until
+you do. Each mint and each revoke writes one `sys_audit_log` row naming the
+administrator and the connection, never the credential.
+
 ---
 
 ## Client Integration

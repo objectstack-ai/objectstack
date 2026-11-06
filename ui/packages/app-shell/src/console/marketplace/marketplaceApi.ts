@@ -145,7 +145,8 @@ export type { PluginPermissions } from '@objectstack/spec/kernel';
  */
 export type { PluginRuntime } from '@objectstack/spec/kernel';
 
-import type { MetadataLock, PluginPermissions, PluginRuntime } from '@objectstack/spec/kernel';
+import type { InstallMode, MetadataLock, PluginPermissions, PluginRuntime } from '@objectstack/spec/kernel';
+import { INSTALL_MODES } from '@objectstack/spec/kernel';
 import { isPlainRecord } from '@objectstack/spec/data';
 import type { ProtocolCheckSkipped } from './protocolCheckSkipped.js';
 
@@ -247,19 +248,18 @@ export async function getMarketplacePackage(id: string): Promise<MarketplaceDeta
 }
 
 /**
- * How install-local installs a package (ADR-0131 D6): `managed` registers it
- * as code that receives its upgrades; `unmanaged` copies its metadata once into
- * this runtime as the environment's own, which follows no upgrade.
+ * How a package is installed (ADR-0131 D6): `managed` registers it as code
+ * that receives its upgrades; `unmanaged` copies its metadata once into the
+ * environment as the environment's own, which follows no upgrade.
  *
- * The console's reading of the two values the install door
- * (`POST /api/v1/marketplace/install-local`) takes as `installMode`. Written
- * here, not derived: the `@objectstack/spec` this package resolves declares no
- * install mode.
+ * The spec's `InstallMode`: the values install-local takes as `installMode`
+ * (`POST /api/v1/marketplace/install-local`) and the hosted install takes as
+ * `install_mode` ({@link installPackage}).
  */
-export type LocalInstallMode = 'managed' | 'unmanaged';
+export type LocalInstallMode = InstallMode;
 
-/** Every install mode, in the order the package page lists them. */
-const LOCAL_INSTALL_MODES: readonly LocalInstallMode[] = ['managed', 'unmanaged'];
+/** Every install mode, in the spec's order, which the package page lists. */
+const LOCAL_INSTALL_MODES: readonly LocalInstallMode[] = INSTALL_MODES;
 
 /**
  * The install modes a package version's manifest declares: its `installModes`
@@ -334,8 +334,16 @@ export async function installPackage(input: {
   packageId: string;
   environmentId: string;
   seedSampleData?: boolean;
+  /**
+   * ADR-0131 D6 — sent as `install_mode` only when set; the control plane
+   * judges it against the package's `installModes`. Absent, the request is the
+   * one every install sent before the mode existed, and the control plane's
+   * default stands.
+   */
+  installMode?: LocalInstallMode;
 }): Promise<InstallResponse> {
   const cloudBase = getCloudBase();
+  const withMode = input.installMode ? { install_mode: input.installMode } : {};
 
   // ── In-environment (tenant runtime) path ──────────────────────────────
   // When `getCloudBase()` is non-empty we're a *tenant runtime* (e.g.
@@ -359,6 +367,7 @@ export async function installPackage(input: {
       body: JSON.stringify({
         package_id: input.packageId,
         seed_sample_data: !!input.seedSampleData,
+        ...withMode,
       }),
     }).finally(forgetPackageListReads);
     let payload: any = null;
@@ -368,6 +377,9 @@ export async function installPackage(input: {
       const err = new Error(typeof message === 'string' ? message : `${code}`);
       (err as any).code = code;
       (err as any).status = res.status;
+      // The refusal's facts ride along, as on install-local: the page draws
+      // `DEPENDENCY_MISSING` from them (`dependencyMissing.ts`).
+      if (payload?.error?.details !== undefined) (err as any).details = payload.error.details;
       throw err;
     }
     return (payload?.data ?? payload) as InstallResponse;
@@ -385,6 +397,7 @@ export async function installPackage(input: {
       params: {
         environment_id: input.environmentId,
         seed_sample_data: !!input.seedSampleData,
+        ...withMode,
       },
     }),
   });

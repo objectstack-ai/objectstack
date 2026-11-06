@@ -127,5 +127,8 @@ describe('a tsup-built consumer of @objectstack/scenarios/score', () => {
     expect(resolved.filter((u) => /objectql|plugin-sharing/.test(u))).toEqual([]);
     // Control: the recorder sees the scorer's own runtime imports.
     expect(resolved.some((u) => u.includes('/packages/core/'))).toBe(true);
-  });
+    // Each case spawns a Node child that loads the scorer graph through the
+    // resolve hooks: well past vitest's 5s default on a loaded merge-queue
+    // runner (9.4s measured), so it gets beforeAll's budget, not a retry.
+  }, 120_000);
 });

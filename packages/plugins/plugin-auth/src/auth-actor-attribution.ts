@@ -61,6 +61,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { agentForwardPerformedBy } from './agent-forward-identity-view.js';
+import { scimRequestConnectionId, scimServicePrincipal } from './scim-connection-service.js';
 
 /**
  * The human a better-auth write is credited to, as the session names them.
@@ -212,10 +213,21 @@ function attributedActorOf(resolved: Awaited<ReturnType<AuthActorResolver>>): At
  */
 export async function authSystemWriteContext(): Promise<{
   isSystem: true;
+  actor?: string;
   attributedUserId?: string;
   impersonatedBy?: string;
   performedBy?: { clientId: string };
 }> {
+  // [#30960] A SCIM protocol request is performed by the identity provider's
+  // CONNECTION, which its bearer verified as — no human acted. Its writes are
+  // attributed to that connection as a service principal, on
+  // `ExecutionContext.actor` (`svc:scim:CONNECTION_ID`, see
+  // `scimServicePrincipal`), and `attributedUserId` stays absent, so
+  // `sys_audit_log.user_id` stays null.
+  const scimConnectionId = scimRequestConnectionId();
+  if (scimConnectionId !== undefined) {
+    return { isSystem: true, actor: scimServicePrincipal(scimConnectionId) };
+  }
   const actor = await resolveAttributedActor();
   const attributedUserId = actor?.userId;
   // An impersonation session's write is credited to the impersonated user

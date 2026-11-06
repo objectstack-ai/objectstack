@@ -3875,6 +3875,51 @@ export class AuthPlugin implements Plugin {
     });
 
     // ────────────────────────────────────────────────────────────────────
+    // [#30958] ADR-0134 — admin: mint and revoke the bearer credentials SCIM
+    // connections authenticate with. The SCIM plugin verifies against
+    // `sys_scim_connection_credential` rows, which the data API never creates
+    // or updates (engine-owned, list only), so these two mounts are the
+    // credential lifecycle's only door. Same family as `set-user-manager`: the
+    // shared platform-admin gate runs first, ahead of any body read, and the
+    // store writes are credited to the admin. The minted bearer is answered
+    // once, `no-store`, and kept nowhere; see `scim-connection-admin.ts`.
+    {
+      const scimCredentialDeps = (actor: PlatformAdminActor): import('./scim-connection-admin.js').ScimCredentialAdminDeps => ({
+        getDataEngine: () => this.authManager!.getDataEngine(),
+        isScimEnabled: () => this.authManager!.isScimWired(),
+        mint: (engine, input) => this.authManager!.mintScimConnectionCredential(engine, input),
+        attributed: (fn) => runAttributedToUser(actor, fn),
+        logger: { warn: (m) => ctx.logger.warn(m), error: (m) => ctx.logger.error(m) },
+      });
+      rawApp.post(`${basePath}/admin/scim/mint-credential`, async (c: any) => {
+        try {
+          const actor = await gateAdmin(c);
+          if (actor instanceof Response) return actor;
+          const { runMintScimCredential } = await import('./scim-connection-admin.js');
+          const { status, body, headers } = await runMintScimCredential(scimCredentialDeps(actor), actor, c.req.raw);
+          return c.json(body, status as any, headers);
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ctx.logger.error('[AuthPlugin] admin/scim/mint-credential failed', err);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        }
+      });
+      rawApp.post(`${basePath}/admin/scim/revoke-credential`, async (c: any) => {
+        try {
+          const actor = await gateAdmin(c);
+          if (actor instanceof Response) return actor;
+          const { runRevokeScimCredential } = await import('./scim-connection-admin.js');
+          const { status, body } = await runRevokeScimCredential(scimCredentialDeps(actor), actor, c.req.raw);
+          return c.json(body, status as any);
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ctx.logger.error('[AuthPlugin] admin/scim/revoke-credential failed', err);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        }
+      });
+    }
+
+    // ────────────────────────────────────────────────────────────────────
     // #2766 V1 — admin direct user management. `sys_user` CRUD is suppressed
     // (managedBy better-auth), and until now the only add-a-teammate path was
     // the email-dependent invite flow. These routes let a platform admin

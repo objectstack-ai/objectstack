@@ -6,11 +6,11 @@
  * section of `ObjectQL`: the bodies of `registerHeldFileResolver`,
  * `registerFieldOwnedFileReadAuthorizer`, `registerWriteGateProbe`,
  * `registerWriteWallVerdict`, `registerEffectiveObjectPermissionsResolver`,
- * `registerInsertRecomputeListener`, `composeReadableIdsAtBoundary`,
- * `refuseUncomposableReadableIdsClasses`, `uncomposableReadableIdsParent`,
- * `resolveFormulaRelated`, `serveFormulaField`, `formulaOptionLabels`,
- * `formulaFaultSink` moved out of `engine.ts` whole by
- * `scripts/codemod-split-engine.mjs`.
+ * `registerInsertRecomputeListener`, `resolveReadableIdsSecurity`,
+ * `composeReadableIdsAtBoundary`, `refuseUncomposableReadableIdsClasses`,
+ * `uncomposableReadableIdsParent`, `resolveFormulaRelated`,
+ * `serveFormulaField`, `formulaOptionLabels`, `formulaFaultSink` moved out of
+ * `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
  *
  * A MOVE, not a redesign. {@link SecurityResolversFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -43,10 +43,10 @@ import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { EvalOptionLabels } from '@objectstack/formula';
 import { declaredOptionLabels, readerOptionLabels } from './formula-option-labels.js';
-import { applyFormulaPlan, computeStoredExpressions, planFormulaProjection, planStoredExpressions, undeclaredRelatedFields } from './engine-top-level.js';
+import { SECURITY_SERVICE_SOURCE_SLOT, applyFormulaPlan, computeStoredExpressions, planFormulaProjection, planStoredExpressions, undeclaredRelatedFields } from './engine-top-level.js';
 import type {
   FieldOwnedFileReadAuthorizer, FormulaFaultSink, FormulaPlanEntry, FormulaRelated, HeldFileResolver,
-  ReadableIdsChain, WriteWallVerdict,
+  ReadableIdsChain, ReadableIdsSecurity, ReadableIdsSecurityResolution, WriteWallVerdict,
 } from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
 
@@ -65,6 +65,8 @@ export interface SecurityResolversHost {
   _writeGateProbe: ObjectQL['_writeGateProbe'];
   _writeWallVerdict: ObjectQL['_writeWallVerdict'];
   composeReadableIdsChain: ObjectQL['composeReadableIdsChain'];
+  /** The engine itself: a moved body reads `this.facade` where the method read a bare `this` (#30020). */
+  readonly facade: ObjectQL;
   formulaFaultSink: ObjectQL['formulaFaultSink'];
   readonly formulaHopReads: ObjectQL['formulaHopReads'];
   formulaOptionLabels: ObjectQL['formulaOptionLabels'];
@@ -124,6 +126,42 @@ export class SecurityResolversFacet {
   static registerInsertRecomputeListener(this: Pick<SecurityResolversHost, 'insertRecomputeListeners' | 'logger'>, id: string, fn: (event: { object: string; row: Record<string, unknown>; fields: string[] }) => void | Promise<void>): void {
     this.insertRecomputeListeners.set(id, fn);
     this.logger.debug('Registered insert recompute listener', { id });
+  }
+
+  /**
+   * [ADR-0139 D2] The three resolutions of the `security` service, kept apart
+   * because they are logged apart — and answered alike: only `usable` is
+   * asked anything.
+   *
+   *  - **absent** — no source is in the engine slot, or it answered nothing;
+   *  - **unusable** — the slot holds something that is not a function, the
+   *    source threw (the in-repo kernels throw on a name nothing registered),
+   *    or the service exposes no `getReadFilter`, or neither `canReadObject`
+   *    nor `explain`;
+   *  - **usable** — ask it.
+   */
+  static resolveReadableIdsSecurity(this: Pick<SecurityResolversHost, 'facade'>): ReadableIdsSecurityResolution {
+    // Read from the engine slot at use (see SECURITY_SERVICE_SOURCE_SLOT), never cached.
+    const source = (this.facade as unknown as Record<symbol, unknown>)[SECURITY_SERVICE_SOURCE_SLOT];
+    if (source === undefined || source === null) return { kind: 'absent' };
+    if (typeof source !== 'function') {
+      return { kind: 'unusable', why: `the security-service source slot holds ${Array.isArray(source) ? 'an array' : `a ${typeof source}`}, not a function` };
+    }
+    let svc: unknown;
+    try {
+      svc = source();
+    } catch (e) {
+      return { kind: 'unusable', why: `resolving the "security" service threw (${String((e as Error)?.message ?? e)})` };
+    }
+    if (svc === undefined || svc === null) return { kind: 'absent' };
+    const candidate = svc as Partial<ReadableIdsSecurity>;
+    if (typeof candidate.getReadFilter !== 'function') {
+      return { kind: 'unusable', why: 'the registered "security" service exposes no getReadFilter()' };
+    }
+    if (typeof candidate.canReadObject !== 'function' && typeof candidate.explain !== 'function') {
+      return { kind: 'unusable', why: 'the registered "security" service exposes neither canReadObject() nor explain()' };
+    }
+    return { kind: 'usable', svc: candidate as ReadableIdsSecurity };
   }
 
   /**

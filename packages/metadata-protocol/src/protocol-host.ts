@@ -137,6 +137,7 @@ export interface ProtocolHost {
     readonly isHostCodeDatasource: ObjectStackProtocolImplementation['isHostCodeDatasource'];
     readonly isNestedArtifactField: ObjectStackProtocolImplementation['isNestedArtifactField'];
     readonly isOverlayAllowed: (typeof ObjectStackProtocolImplementation)['isOverlayAllowed'];
+    readonly isPackagedBaseRefusal: (typeof ObjectStackProtocolImplementation)['isPackagedBaseRefusal'];
     readonly isRuntimeCreateAllowed: (typeof ObjectStackProtocolImplementation)['isRuntimeCreateAllowed'];
     readonly isSealedManagedItem: ObjectStackProtocolImplementation['isSealedManagedItem'];
     readonly isStoredEntryOfDeclinedName: ObjectStackProtocolImplementation['isStoredEntryOfDeclinedName'];
@@ -163,6 +164,7 @@ export interface ProtocolHost {
     readonly organizationScopedWriteRefusal: (typeof ObjectStackProtocolImplementation)['organizationScopedWriteRefusal'];
     readonly originGatedRemovalRefusal: ObjectStackProtocolImplementation['originGatedRemovalRefusal'];
     readonly overlaidShippedContainerViewNames: ObjectStackProtocolImplementation['overlaidShippedContainerViewNames'];
+    readonly overlayBaseShippers: ObjectStackProtocolImplementation['overlayBaseShippers'];
     readonly overlayLockLayerAt: ObjectStackProtocolImplementation['overlayLockLayerAt'];
     readonly overlayPackageMismatchError: (typeof ObjectStackProtocolImplementation)['overlayPackageMismatchError'];
     readonly overlayRepos: ObjectStackProtocolImplementation['overlayRepos'];

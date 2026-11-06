@@ -1510,27 +1510,43 @@ describe('ObjectSchema.create() forces a required master_detail under controlled
     expect((obj.fields as Record<string, { required?: boolean }>).parent.required).toBe(true);
   });
 
-  it('REFUSES an explicit required: false, loudly, naming object + field + the fix', () => {
+  it('KEEPS an explicit required: false on the only master_detail — the optional master (#30905 ruling A)', () => {
+    // Reversed, not deleted: this pinned the builder REFUSING the explicit
+    // `false`. ADR-0055 §1 as amended makes it the optional master, so the
+    // builder passes it to the parse as written, and the parse accepts it.
+    const obj = ObjectSchema.create({
+      name: 'cbp_optional',
+      sharingModel: 'controlled_by_parent',
+      fields: {
+        parent: { type: 'master_detail', reference: 'cbp_header', required: false },
+        note: { type: 'text' },
+      },
+    });
+    expect((obj.fields as Record<string, { required?: boolean }>).parent.required).toBe(false);
+  });
+
+  it('still REFUSES an explicit required: false beside another master_detail, loudly, naming object + both fields + the fix', () => {
     let message = '';
     try {
       ObjectSchema.create({
         name: 'cbp_bad',
         sharingModel: 'controlled_by_parent',
         fields: {
-          parent: { type: 'master_detail', reference: 'cbp_header', required: false },
+          header: { type: 'master_detail', reference: 'cbp_header', required: true },
+          parent: { type: 'master_detail', reference: 'cbp_other', required: false },
         },
       });
-      throw new Error('expected ObjectSchema.create to refuse required: false under controlled_by_parent');
+      throw new Error('expected ObjectSchema.create to refuse required: false beside another master_detail');
     } catch (e) {
       message = (e as Error).message;
     }
     expect(message).not.toContain('expected ObjectSchema.create to refuse');
     expect(message).toContain("ObjectSchema.create('cbp_bad')");
-    expect(message).toContain('`parent`');
-    expect(message).toContain('required: false');
+    expect(message).toContain('field `parent` declares `required: false`');
+    expect(message).toContain('beside another `master_detail` (`header`)');
     expect(message).toContain('controlled_by_parent');
     // The message carries the prescription, not just the verdict.
-    expect(message).toContain('Remove `required: false`');
+    expect(message).toContain('Declare every parent other than the master as a `lookup`');
     expect(message).toContain('change its `sharingModel`');
   });
 
@@ -1566,14 +1582,12 @@ describe('ObjectSchema.create() forces a required master_detail under controlled
     expect((explicit.fields as Record<string, { required?: boolean }>).parent.required).toBe(false);
   });
 
-  it('raw .parse()/.safeParse() do NOT force the shape — they refuse it (#23100 ruling B)', () => {
-    // Reversed, not deleted: this pinned the raw parse TOLERATING a
-    // non-required master reference "so metadata at rest keeps loading". The
-    // runtime's tolerance it leaned on (any `master_detail`, then a required
-    // `lookup`) retired with ruling B, so the parse now refuses the shape where
-    // an author is present to act; stored rows still register under their
-    // `[metadata_spec_invalid]` diagnostic. And still UNREWRITTEN: the issue
-    // names the object, it does not repair it.
+  it('raw .parse()/.safeParse() do NOT force the shape — they judge the one master (#23100 ruling B, #30905 ruling A)', () => {
+    // Reversed twice, not deleted. First this pinned the raw parse TOLERATING
+    // a non-required master reference; ruling B (#23100) made it refuse one.
+    // Ruling A (#30905) makes the only `master_detail` declared
+    // `required: false` the optional master, so the stored row is accepted —
+    // and still UNREWRITTEN: the parse forces nothing.
     const atRest = {
       name: 'cbp_stored',
       sharingModel: 'controlled_by_parent',
@@ -1582,11 +1596,24 @@ describe('ObjectSchema.create() forces a required master_detail under controlled
       },
     };
     const result = ObjectSchema.safeParse(atRest);
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
     expect(atRest.fields.parent.required).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues.map((i) => i.path.join('.'))).toEqual(['sharingModel']);
-      expect(result.error.issues[0].message).toMatch(/^Object 'cbp_stored' declares sharingModel 'controlled_by_parent' but no required `master_detail` field\./);
+    if (result.success) expect((result.data.fields as Record<string, { required?: boolean }>).parent.required).toBe(false);
+    // Two `master_detail` fields with none required name no master: refused,
+    // unrewritten, at the shared `sharingModel` path.
+    const two = {
+      name: 'cbp_stored_two',
+      sharingModel: 'controlled_by_parent',
+      fields: {
+        a: { type: 'master_detail', reference: 'cbp_header', required: false },
+        b: { type: 'master_detail', reference: 'cbp_other', required: false },
+      },
+    };
+    const refused = ObjectSchema.safeParse(two);
+    expect(refused.success).toBe(false);
+    if (!refused.success) {
+      expect(refused.error.issues.map((i) => i.path.join('.'))).toEqual(['sharingModel']);
+      expect(refused.error.issues[0].message).toMatch(/^Object 'cbp_stored_two' declares sharingModel 'controlled_by_parent' but no required `master_detail` field, nor a single `master_detail` declared `required: false`\./);
     }
   });
 });
@@ -1621,7 +1648,7 @@ describe('ObjectSchema refuses a controlled_by_parent object without exactly one
     const issues = issuesOf(cbp({ parent: { type: 'lookup', reference: 'cbp_header', required: true } }));
     expect(issues).toHaveLength(1);
     expect(issues[0].path).toBe('sharingModel');
-    expect(issues[0].message).toMatch(/^Object 'cbp_line' declares sharingModel 'controlled_by_parent' but no required `master_detail` field\. ADR-0055 §1:/);
+    expect(issues[0].message).toMatch(/^Object 'cbp_line' declares sharingModel 'controlled_by_parent' but no required `master_detail` field, nor a single `master_detail` declared `required: false`\. ADR-0055 §1:/);
     expect(issues[0].message).toContain("`parent` is a required `lookup`");
     // The builder path refuses it too — the HotCRM shape.
     expect(() => ObjectSchema.create(cbp({ parent: Field.lookup('cbp_header', { label: 'Header', required: true }) }))).toThrow(
@@ -1629,15 +1656,27 @@ describe('ObjectSchema refuses a controlled_by_parent object without exactly one
     );
   });
 
-  it('REFUSES a non-required master_detail as the only relation (the retired second tier) — omitted or false', () => {
-    for (const parent of [
-      { type: 'master_detail', reference: 'cbp_header' },
-      { type: 'master_detail', reference: 'cbp_header', required: false },
-    ]) {
-      const issues = issuesOf(cbp({ parent }));
-      expect(issues.map((i) => i.path)).toEqual(['sharingModel']);
-      expect(issues[0].message).toContain('`parent` is a `master_detail` without `required: true`');
-    }
+  it('ACCEPTS the only master_detail declared required: false — the optional master (#30905 ruling A)', () => {
+    // Reversed, not deleted: this pinned the retired second tier — a
+    // non-required `master_detail` as the only relation — refused, omitted or
+    // false. Ruling A admits the explicit `false` as the optional master. On
+    // the parsed map an omitted `required` IS `false` (the default), so the
+    // raw parse admits that spelling too: the recorded divergence, which the
+    // builder (it forces `true`) and `os lint` (it reports the omission at
+    // `error`) see past.
+    expect(issuesOf(cbp({ parent: { type: 'master_detail', reference: 'cbp_header', required: false } }))).toEqual([]);
+    expect(issuesOf(cbp({ parent: { type: 'master_detail', reference: 'cbp_header' } }))).toEqual([]);
+    // Two of them name no master: still refused, naming both and the fix.
+    const two = issuesOf(cbp({
+      a: { type: 'master_detail', reference: 'master_a', required: false },
+      b: { type: 'master_detail', reference: 'master_b' },
+    }));
+    expect(two.map((i) => i.path)).toEqual(['sharingModel']);
+    expect(two[0].message).toContain('`a`, `b` are `master_detail` fields and none declares `required: true`');
+    // `readonly` / `system` on the optional master: still refused.
+    const flagged = issuesOf(cbp({ parent: { type: 'master_detail', reference: 'cbp_header', required: false, readonly: true } }));
+    expect(flagged.map((i) => i.path)).toEqual(['fields']);
+    expect(flagged[0].message).toContain('with its one optional `master_detail` (declared `required: false`), `parent`, marked `readonly: true`');
   });
 
   it('REFUSES no relation at all, and two required master_details, at the two lint-shared paths', () => {
@@ -1670,7 +1709,14 @@ describe('ObjectSchema refuses a controlled_by_parent object without exactly one
       ],
     });
     expect(() => defineStack(stack({ header: { type: 'master_detail', label: 'H', reference: 'cbpo_header', required: true } }) as never)).not.toThrow();
-    expect(() => defineStack(stack({ header: { type: 'master_detail', label: 'H', reference: 'cbpo_header' } }) as never)).toThrow(
+    // [#30905 ruling A] The optional master reaches defineStack accepted, and
+    // so does an omitted `required` (the parsed map reads it `false`).
+    expect(() => defineStack(stack({ header: { type: 'master_detail', label: 'H', reference: 'cbpo_header', required: false } }) as never)).not.toThrow();
+    expect(() => defineStack(stack({ header: { type: 'master_detail', label: 'H', reference: 'cbpo_header' } }) as never)).not.toThrow();
+    expect(() => defineStack(stack({
+      header: { type: 'master_detail', label: 'H', reference: 'cbpo_header' },
+      other: { type: 'master_detail', label: 'O', reference: 'cbpo_header', required: false },
+    }) as never)).toThrow(
       /objects\.1\.sharingModel: Object 'cbpo_line' declares sharingModel 'controlled_by_parent' but no required `master_detail` field/,
     );
   });

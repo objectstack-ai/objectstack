@@ -112,6 +112,12 @@
       "kind": "mock",
       "axis": "mock-replacement",
       "why": "same absent-module mock as dev-plugin.test.ts — the optional stack is forced unavailable so the tenancy posture is the only thing under test."
+    },
+    {
+      "file": "packages/services/service-datasource/src/__tests__/datasource-update-kept-pool-stores-nothing.test.ts",
+      "kind": "mock",
+      "axis": "mock-replacement",
+      "why": "the suite boots the admin plugin with its own counting driver factory, so the default factory's `memory` arm is unreachable at run time; the mock only answers check:test-source-alias's static reach (#30909) without loading the real driver."
     }
   ],
 
