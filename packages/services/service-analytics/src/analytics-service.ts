@@ -125,7 +125,7 @@ import {
 } from './dimension-labels.js';
 import { evaluateAnalyticsQueryOverRows, lowerPreviewRowFilters } from './preview-evaluator.js';
 import { assertDatasetGroupColumnsDistinct } from './dataset-group-column-door.js';
-import { assertDatasetDateBucketsTemporal } from './dataset-date-bucket-door.js';
+import { assertDatasetDateBucketsTemporal, assertDatasetGroupTargetsStored } from './dataset-date-bucket-door.js';
 // [#25778] The one lookup of a dataset duration measure by name.
 import { durationMeasureIn } from './duration-measure-sql.js';
 import { scopedMeasureFilter, scopedMeasureKey } from './scoped-measure-key.js';
@@ -2967,6 +2967,10 @@ export class AnalyticsService implements IAnalyticsService {
             // nor a datetime, with the refusal the engine gives both live faces
             // for the same keys (after the column refusal above, as there),
             // where the evaluator served one `null` (or `1970`) group.
+            // [#29304] A key of any form over a virtual (`formula`) field
+            // first, as the engine judges it first: the evaluator served one
+            // `null` group holding the total for a plain dimension over one.
+            assertDatasetGroupTargetsStored(aggregateObjectOf(cube), aggregateGroupKeys(q, cube), declaredType);
             assertDatasetDateBucketsTemporal(aggregateObjectOf(cube), aggregateGroupKeys(q, cube), declaredType);
             return evaluateAnalyticsQueryOverRows(
               q,
@@ -5125,16 +5129,20 @@ export function inferredCallerMeasureSql(measure: string, cubeName: string): str
  * `executeAggregate`, so every bucketed query goes to the engine); reached by
  * a host composing `new AnalyticsService({ fallbackService })`, or a
  * `queryCapabilities` override with `objectqlAggregate: false`.
+ *
+ * [#29304] The storage-axis door (`assertDatasetGroupTargetsStored`) runs
+ * first, on the same keys: a key of any form over a virtual (`formula`) field
+ * is refused as the engine refuses it.
  */
 function assertDelegatedDateBucketsTemporal(query: AnalyticsQuery, ctx: StrategyContext): void {
   const cube = ctx.getCube(query.cube!);
   if (!cube) return;
   const object = aggregateObjectOf(cube);
-  assertDatasetDateBucketsTemporal(
-    object,
-    aggregateGroupKeys(query, cube),
-    (field) => (ctx as DatasetScopedStrategyContext).declaredFieldType?.(object, field),
-  );
+  const groupBy = aggregateGroupKeys(query, cube);
+  const declaredType = (field: string) => (ctx as DatasetScopedStrategyContext).declaredFieldType?.(object, field);
+  // [#29304] A key of any form over a virtual field first, as the engine.
+  assertDatasetGroupTargetsStored(object, groupBy, declaredType);
+  assertDatasetDateBucketsTemporal(object, groupBy, declaredType);
 }
 
 /**

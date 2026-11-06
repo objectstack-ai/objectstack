@@ -8,7 +8,7 @@ import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext } from './types.js';
 import { assertDatasetGroupColumnsDistinct } from '../dataset-group-column-door.js';
-import { assertDatasetDateBucketsTemporal } from '../dataset-date-bucket-door.js';
+import { assertDatasetDateBucketsTemporal, assertDatasetGroupTargetsStored } from '../dataset-date-bucket-door.js';
 import {
   declaredDatetimeLowering,
   declaredDateColumn,
@@ -803,6 +803,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // the query is served. A host that names no declared type is not judged,
     // as the engine judges no undeclared field.
     const declaredType = (ctx as DatasetScopedStrategyContext).declaredFieldType;
+    // [#29304] A key of any form over a virtual (`formula`) field first, as
+    // the engine judges it first: the echo printed `GROUP BY calc` for a
+    // column no table stores.
+    assertDatasetGroupTargetsStored(tableName, echoGroupBy, (field) => declaredType?.call(ctx, tableName, field));
     assertDatasetDateBucketsTemporal(tableName, echoGroupBy, (field) => declaredType?.call(ctx, tableName, field));
     const joinClauses: string[] = [];
     // [#21441] The bucket expression the driver itself groups by for its
