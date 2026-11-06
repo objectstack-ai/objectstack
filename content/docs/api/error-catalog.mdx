@@ -328,7 +328,9 @@ unregistered object, or an unreachable datasource on a check that does not read
 as the caller — fails **open** rather than inventing a rejection, and an update that carries back
 a value (or a member of a multi-valued field) the row already stores is not
 judged again, because the update does not add it; on a bulk update that holds
-only when every matched row already stores it.
+only when every matched row already stores it. That comparison reads only stored
+values the caller may read: a column the caller may edit but not read holds no
+stored value for it, so a value written there is judged like any other.
 </Callout>
 
 ### `DUPLICATE_VALUE`

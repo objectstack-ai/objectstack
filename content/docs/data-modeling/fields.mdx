@@ -290,6 +290,8 @@ rejected the same way, before the record's validation rules run. The
 same check runs on bulk updates. An update judges only the references it adds: a
 value the row already stores, carried back unchanged, is not judged again, so a
 deleted user's id left in a `user` field does not block later edits of the record.
+That comparison reads only stored values the caller may read: in a column the
+caller may edit but not read, every value is judged as new.
 
 Clearing a relationship is not a dangling reference: `null`, `""` and `[]` all mean
 "no link". Which of them `deleteBehavior: 'set_null'` writes when the referenced
