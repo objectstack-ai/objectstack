@@ -378,7 +378,7 @@ describe('ObjectGantt', () => {
   // over fetch and persisted a drag through the write config. The view-level
   // `api` data source is retired in @objectstack/spec (objectstack#23082), and
   // ObjectGantt builds no adapter from it: the new meaning is pinned in
-  // `ObjectGantt.retiredApiProvider-12325.test.tsx`.
+  // the `ObjectGantt.retiredApiProvider-12325` block of `ObjectGantt.harness.test.tsx`.
 
   // --- Dependency edit writeback (依赖增删 + 类型选择) -----------------------
   const depData = [
