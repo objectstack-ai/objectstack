@@ -9,6 +9,7 @@ feat(objectql,platform-objects): a by-id delete keeps its rows in the recycle bi
 
 Clause-②: yes (widening)
 Metadata-protocol: added
+Skills-docs: follow-up owed — skills/objectstack-api/SKILL.md :268, :417 (they still teach that there is no recycle bin; not moved in this release)
 
 The recycle bin's write side. A delete is still a physical delete, and no read path changed: the rows are gone from every query the moment the delete commits. What is new is the copy kept beside them. Restoring, purging and emptying the bin, the two grants that govern them and their REST doors are not in this release.
 
@@ -22,5 +23,5 @@ The recycle bin's write side. A delete is still a physical delete, and no read p
   - any delete on a composition that does not register `PlatformObjectsPlugin`, which logs one `info` line saying so.
 - **Forward-only:** records deleted before this release have no entry.
 - **Storage:** every by-id delete of a business record now also writes one `sys_recycle_bin` row holding the deleted rows. The row is reaped once its retention has passed.
-- **`@objectstack/spec`:** `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` lists `sys_recycle_bin`, so a reference to it lints as a real platform object.
+- **`@objectstack/spec`:** `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` lists `sys_recycle_bin`, so a reference to it lints as a real platform object. The comment above `RECYCLE_BIN_OBJECT` now names the object file that builds the table; no exported name, shape or description changed.
 - **`@objectstack/cli`:** the organization-ownership inventory has a row for `sys_recycle_bin` (fate `attribution`).
