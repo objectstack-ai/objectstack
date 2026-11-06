@@ -28,6 +28,7 @@ import {
   assertEngineDeleteDispatch,
   assertEngineFindOnePredicate,
   assertEngineUpdateDispatch,
+  walledCatalogWriteVerdict,
 } from '@objectstack/metadata-core';
 import type { CryptoContext, CryptoHandle, ICryptoProvider, IDataDriver } from '@objectstack/spec/contracts';
 import { DatasourceAdminServicePlugin } from '../datasource-admin-plugin.js';
@@ -36,6 +37,19 @@ import { registerDatasourceAdminRoutes } from '../admin-routes.js';
 import { createDatasourceSecretBinder } from '../datasource-secret-binder.js';
 import type { IDatasourceDriverFactory, DatasourceConnectionSpec } from '../contracts/datasource-driver-factory.js';
 import { ENTITLED_CREDENTIAL, createSessionAuthService, createGrantsEngine } from './entitled-caller.fixture.js';
+// Pay the first transform of the dist-resolved driver at module load, not
+// inside a clocked `it()` (see `scripts/check-test-source-alias.mjs`).
+import '@objectstack/driver-sql';
+// This suite hands the admin plugin its own driver factory, so the default
+// factory's `memory` arm is never called. The mock answers its static reach
+// without loading the in-memory driver (scripts/driver-memory-census.ledger.json).
+vi.mock('@objectstack/driver-memory', () => ({
+  InMemoryDriver: class {
+    constructor() {
+      throw new Error('the in-memory driver is not used by this suite');
+    }
+  },
+}));
 
 type Row = Record<string, unknown>;
 
@@ -118,8 +132,11 @@ function passwordFactory(): IDatasourceDriverFactory & { built: string[] } {
   };
 }
 
-/** One boot over `store`: the real plugins, the real routes, a driver registry of its own. */
-async function boot(store: Store) {
+/**
+ * One boot over `store`: the real plugins, the real routes, a driver registry of its own.
+ * `tenancy` registers a `tenancy` service answering that posture (none by default).
+ */
+async function boot(store: Store, options: { tenancy?: 'single' | 'group' | 'isolated' } = {}) {
   const drivers = new Map<string, IDataDriver>();
   const data = {
     findOne: async (table: string, q: { where: Record<string, unknown> }) => {
@@ -177,6 +194,7 @@ async function boot(store: Store) {
     ['auth', createSessionAuthService()],
     // The routes resolve the caller's grants from `objectql` first.
     ['objectql', createGrantsEngine()],
+    ...(options.tenancy ? [['tenancy', { posture: options.tenancy }] as [string, unknown]] : []),
   ]);
   const logger = { warn: vi.fn(), info: vi.fn(), debug: vi.fn(), error: vi.fn() };
   const ctx: any = {
@@ -310,5 +328,56 @@ describe('PATCH /api/v1/datasources/:name — a new secret that fails to connect
     }
     expect(atRest(store)).toEqual(before);
     expect((await boot(store)).factory.built).toEqual([REAL_PASSWORD]);
+  });
+});
+
+// [ADR-0131 D3 · D12 items 7–8 · D11] Under a walled tenancy posture a datasource
+// write is the platform operator's. The entitled caller holds the capability and
+// is not the operator, so the PATCH is refused before the service runs: the
+// stored record, the bound secret and the serving pool are the ones it found.
+describe.each(['isolated', 'group'] as const)('PATCH /api/v1/datasources/:name under `%s`, by a caller below the platform operator', (posture) => {
+  it('is refused with the walled-catalog verdict, and the stored record and the pool are untouched', async () => {
+    const store = makeStore();
+    // Created before the wall stands, by the same caller: the record a walled
+    // deployment carries from the posture it ran before.
+    await created(store);
+    const before = atRest(store);
+    const walled = await boot(store, { tenancy: posture });
+    // The restart's pool is the only one this boot builds before the PATCH.
+    expect((await walled.send('POST', `/datasources/${CREATE.name}/test`)).body.data).toMatchObject({ ok: true });
+    const builtBefore = [...walled.factory.built];
+
+    const res = await walled.send('PATCH', `/datasources/${CREATE.name}`, {
+      secret: REAL_PASSWORD,
+      config: { ...CREATE.config, host: '10.0.0.9' },
+    });
+    const verdict = walledCatalogWriteVerdict({ type: 'datasource', tenancyPosture: posture });
+    expect(verdict.allowed).toBe(false);
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('PERMISSION_DENIED');
+    expect(res.body.error.message).toBe(verdict.allowed ? undefined : verdict.message);
+
+    expect(atRest(store)).toEqual(before);
+    expect(walled.factory.built).toEqual(builtBefore);
+    expect((await walled.send('POST', `/datasources/${CREATE.name}/test`)).body.data).toMatchObject({ ok: true });
+    expect(walled.factory.built).toEqual(builtBefore);
+  });
+
+  it('control: the same PATCH under `single` rebuilds the pool and stores the new configuration', async () => {
+    const store = makeStore();
+    await created(store);
+    const before = atRest(store);
+    const single = await boot(store, { tenancy: 'single' });
+    expect((await single.send('POST', `/datasources/${CREATE.name}/test`)).body.data).toMatchObject({ ok: true });
+    const builtBefore = single.factory.built.length;
+
+    const res = await single.send('PATCH', `/datasources/${CREATE.name}`, {
+      secret: REAL_PASSWORD,
+      config: { ...CREATE.config, host: '10.0.0.9' },
+    });
+    expect(res.status).toBe(200);
+    expect(atRest(store).record.config.host).toBe('10.0.0.9');
+    expect(atRest(store)).not.toEqual(before);
+    expect(single.factory.built.length).toBe(builtBefore + 1);
   });
 });
