@@ -3,8 +3,8 @@
 /**
  * [#29986 codemod] The "Write preparation and insert" section of `ObjectQL`:
  * the bodies of `staticReadonlyCreateStrip`, `updateByIdExpecting`,
- * `assignment`, `readUpdatePriorRow`, `insertMany` moved out of `engine.ts`
- * whole by `scripts/codemod-split-engine.mjs`.
+ * `ownershipQueueService`, `assignment`, `readUpdatePriorRow`, `insertMany`
+ * moved out of `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
  *
  * A MOVE, not a redesign. {@link InsertFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -33,7 +33,8 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IDataDriver } from '@objectstack/core';
 import { ConcurrentUpdateError } from './concurrent-update-error.js';
-import { ASSIGNMENT_RULE_TYPE, AssignmentRuleEvaluator } from './assignment-rules.js';
+import { ASSIGNMENT_RULE_TYPE, AssignmentRuleEvaluator, OWNERSHIP_QUEUE_SOURCE_SLOT } from './assignment-rules.js';
+import type { AssignmentQueueService } from './assignment-rules.js';
 import type { EvalPermissions } from '@objectstack/formula';
 import { stripReadonlyFields } from './validation/rule-validator.js';
 import type { staticReadonlyInsertSubject } from './validation/rule-validator.js';
@@ -55,6 +56,8 @@ export interface InsertHost {
   assignmentEvaluator: ObjectQL['assignmentEvaluator'];
   buildDriverOptions: ObjectQL['buildDriverOptions'];
   count: ObjectQL['count'];
+  /** The engine itself: a moved body reads `this.facade` where the method read a bare `this` (#30020). */
+  readonly facade: ObjectQL;
   find: ObjectQL['find'];
   getDriver: ObjectQL['getDriver'];
   insert: ObjectQL['insert'];
@@ -178,6 +181,21 @@ export class InsertFacet {
     const affected = await driver.updateMany(object, { object, where: { ...expect, id } } as QueryAST, data, options);
     if (!(Number(affected) > 0)) throw new ConcurrentUpdateError(object, String(id));
     return driver.findOne(object, { object, where: { id }, limit: 1 } as QueryAST, options);
+  }
+
+  /** The registered ownership-queue service, through the plugin's slot — `null` on every other state. */
+  static ownershipQueueService(this: Pick<InsertHost, 'facade'>): AssignmentQueueService | null {
+    const source = (this.facade as unknown as Record<symbol, unknown>)[OWNERSHIP_QUEUE_SOURCE_SLOT];
+    if (typeof source !== 'function') return null;
+    try {
+      const svc = (source as () => unknown)();
+      return svc && typeof (svc as AssignmentQueueService).resolveQueue === 'function'
+        && typeof (svc as AssignmentQueueService).expandMembers === 'function'
+        ? (svc as AssignmentQueueService)
+        : null;
+    } catch {
+      return null;
+    }
   }
 
   /** The body of `ObjectQL#assignment`; the method's docblock there is its contract. */

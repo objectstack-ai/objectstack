@@ -41,6 +41,14 @@
  * the pair install, and registered it as read-only code) is printed as the
  * failure it is, with the way back.
  *
+ * `--dry-run` (epic cloud#3652 Q3, #30884) installs nothing: the runtime
+ * answers the package upgrade plan — the version it has installed against
+ * this one: objects, fields, type changes, declared (`renamedFrom`) and
+ * suspected renames, seed datasets — with the rows each touched column holds
+ * and the rows a customer edited that the seed replay would overwrite, and
+ * the command prints it. A runtime that predates the dry run ignores the key
+ * and installs; the command reads the answer, and says so when that happened.
+ *
  * This complements `os package publish` (which uploads to the CLOUD): the
  * pairing is publish-to-cloud / install-into-runtime. The target runtime
  * authenticates the call itself — pass a token it issued (-t/--token, or
@@ -76,6 +84,86 @@ import { printHeader, printKV, printSuccess, printWarning, printError, printStep
  * withheld, or a runtime that predates the key) prints nothing, and nothing
  * is guessed from the artifact the command sent.
  */
+/** One row count, or the honest "could not be read". */
+function rowsText(rows: unknown, noun: string): string {
+  if (rows === null) return 'its rows could not be read';
+  if (typeof rows !== 'number') return '';
+  return `${rows} row(s) ${noun}`;
+}
+
+/**
+ * [epic cloud#3652 Q3, #30884] The lines a dry run's answer prints: the
+ * package upgrade plan (`data.plan`, `comparePackageVersions`) with the
+ * environment's readings beside each finding (`data.environment`). Printed
+ * from the answer only; a list the answer does not carry prints nothing.
+ */
+export function renderUpgradePlan(data: any): string[] {
+  const plan = data?.plan ?? {};
+  const env = data?.environment ?? {};
+  const lines: string[] = [];
+  const columnRows = new Map<string, unknown>();
+  for (const c of Array.isArray(env.columns) ? env.columns : []) columnRows.set(`${c.object}.${c.field}`, c.rows);
+  const objectRows = new Map<string, unknown>();
+  for (const o of Array.isArray(env.removedObjects) ? env.removedObjects : []) objectRows.set(o.object, o.rows);
+  const list = (value: unknown): any[] => (Array.isArray(value) ? value : []);
+  const held = (object: string, field: string) => {
+    const text = rowsText(columnRows.get(`${object}.${field}`), 'hold a value');
+    return text ? ` — ${text}` : '';
+  };
+
+  const section = (title: string, items: string[]) => {
+    if (items.length === 0) return;
+    lines.push(`  ${title}`);
+    for (const item of items) lines.push(`    ${item}`);
+  };
+  section('Objects', [
+    ...list(plan.objects?.added).map((name: string) => `+ ${name}`),
+    ...list(plan.objects?.removed).map((name: string) => {
+      const text = rowsText(objectRows.get(name), 'in it');
+      return `- ${name}${text ? ` — ${text}; the table is not dropped` : ''}`;
+    }),
+  ]);
+  section('Fields', [
+    ...list(plan.fields?.added).map((f: any) => `+ ${f.object}.${f.field}${f.type ? ` (${f.type})` : ''}${f.required ? ' required' : ''}`),
+    ...list(plan.fields?.removed).map((f: any) => `- ${f.object}.${f.field}${f.type ? ` (${f.type})` : ''}${held(f.object, f.field)}; the column is not dropped`),
+  ]);
+  section('Renames declared by renamedFrom', list(plan.declaredRenames).map((r: any) =>
+    `${r.object}.${r.from} → ${r.to}${held(r.object, r.from)}`));
+  section('Suspected renames (no renamedFrom links them)', list(plan.suspectedRenames).map((r: any) =>
+    `${r.object}.${r.field} → ${list(r.candidates).map((c: any) => c.field).join(' or ')}?${held(r.object, r.field)}; `
+    + 'the new key would install as a new empty column. Declare renamedFrom on the new field and rebuild if it is a rename'));
+  section('Type changes', list(plan.typeChanges).map((t: any) =>
+    `${t.object}.${t.field}: ${t.from} → ${t.to} (${t.category})${t.renamedFrom ? `, renamed from ${t.renamedFrom}` : ''}`
+    + `${held(t.object, t.renamedFrom ?? t.field)}`));
+
+  const overwrites = new Map<string, any>();
+  for (const o of list(env.seeds)) overwrites.set(o.key, o);
+  const seedLine = (d: any, sign: string) => {
+    const o = overwrites.get(d.key);
+    let line = `${sign} ${d.key} (mode ${d.fromMode && d.fromMode !== d.mode ? `${d.fromMode} → ${d.mode}` : d.mode}, ${d.records} record(s))`;
+    if (Array.isArray(d.changed)) line += `: ${d.changed.join(', ')} changed`;
+    if (o) {
+      line += o.editedRows === null
+        ? ' — rows a customer edited could not be read'
+        : ` — ${o.editedRows} row(s) a customer edited would be overwritten${o.editedKeys?.length ? ` (${o.editedKeys.join(', ')})` : ''}`;
+    }
+    return line;
+  };
+  const changedKeys = new Set(list(plan.seeds?.changed).map((d: any) => d.key));
+  section('Seed datasets', [
+    ...list(plan.seeds?.added).map((d: any) => seedLine(d, '+')),
+    ...list(plan.seeds?.removed).map((d: any) => `- ${d.key} (mode ${d.mode}); its rows are not removed`),
+    ...list(plan.seeds?.changed).map((d: any) => seedLine(d, '~')),
+    // An unchanged overwriting dataset still writes over the rows a customer edited.
+    ...list(env.seeds).filter((o: any) => !changedKeys.has(o.key) && o.editedRows !== 0)
+      .map((o: any) => `= ${o.key} (mode ${o.mode}, unchanged)${o.editedRows === null
+        ? ' — rows a customer edited could not be read'
+        : ` — ${o.editedRows} row(s) a customer edited would be overwritten${o.editedKeys?.length ? ` (${o.editedKeys.join(', ')})` : ''}`}`),
+  ]);
+  if (lines.length === 0) lines.push('  No change to objects, fields or seed datasets.');
+  return lines;
+}
+
 function printWithheldMaps(withheldMaps: unknown): void {
   const maps: Array<{ type?: unknown; name?: unknown; path?: unknown }> =
     Array.isArray(withheldMaps) ? withheldMaps : [];
@@ -100,6 +188,7 @@ export default class PackageInstall extends Command {
     '$ os package install ./dist/objectstack.json --install-mode unmanaged   # copy into the environment as its own metadata',
     '$ OS_RUNTIME_EMAIL=admin@local.test OS_RUNTIME_PASSWORD=… os package install com.acme.crm',
     '$ os package install ./dist/objectstack.json --url https://app.example.com --token osk_…',
+    '$ os package install ./dist/objectstack.json --dry-run            # print the upgrade plan, install nothing',
   ];
 
   static override args = {
@@ -175,6 +264,14 @@ export default class PackageInstall extends Command {
       description:
         "Confirm the access findings of this upgrade with the finding-set token the runtime's refusal printed "
         + '(ACCESS_UPGRADE_CONFIRMATION_REQUIRED). It confirms exactly those findings; a changed set is refused again.',
+    }),
+    // [epic cloud#3652 Q3, #30884] The install-local body's `dryRun`.
+    'dry-run': Flags.boolean({
+      description:
+        'Install nothing: print the upgrade plan of the installed version against this one (objects, fields, type '
+        + 'changes, declared and suspected renames, seed datasets), with the rows each touched column holds and the '
+        + 'rows a customer edited that the seed replay would overwrite',
+      default: false,
     }),
   };
 
@@ -274,6 +371,7 @@ export default class PackageInstall extends Command {
       if (flags['confirm-access-upgrade'] !== undefined) body.confirmAccessUpgrade = flags['confirm-access-upgrade'];
       const installMode = flags['install-mode'] as InstallMode | undefined;
       if (installMode !== undefined) body.installMode = installMode;
+      if (flags['dry-run']) body.dryRun = true;
       const res = await this.request(`${runtime}/api/v1/marketplace/install-local`, {
         method: 'POST',
         headers: {
@@ -343,6 +441,30 @@ export default class PackageInstall extends Command {
       }
 
       const data = res.body?.data ?? res.body ?? {};
+
+      // [#30884] The dry run's answer: the plan, and nothing installed.
+      if (data.dryRun === true) {
+        console.log('');
+        printSuccess('Dry run — nothing was installed or written');
+        printKV('  Package',   String(data.manifestId ?? label));
+        printKV('  Version',   `${String(data.version ?? flags.version)}${typeof data.installedVersion === 'string' ? ` (installed: ${data.installedVersion})` : ' (not installed)'}`);
+        printKV('  Runtime',   runtime);
+        console.log('');
+        for (const line of renderUpgradePlan(data)) console.log(line);
+        console.log('');
+        return;
+      }
+      // Asked for a dry run, answered without it: the runtime predates the
+      // key, read no `dryRun`, and INSTALLED. Said out loud, never printed as
+      // a plan — the opposite of what was asked happened.
+      if (flags['dry-run']) {
+        printError(
+          `The runtime at ${runtime} does not support a dry run: it ignored \`--dry-run\` and INSTALLED ${label}. `
+          + 'Upgrade the runtime to preview an upgrade before it is installed.',
+        );
+        this.exit(1);
+        return;
+      }
 
       // [ADR-0146 D3, #30106] A base's paired customization package answers
       // its own shape too: the writable pair its items were written into,

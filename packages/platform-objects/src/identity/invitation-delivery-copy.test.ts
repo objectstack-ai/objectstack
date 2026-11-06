@@ -29,6 +29,7 @@ import { enObjects } from '../apps/translations/en.objects.generated.js';
 import { zhCNObjects } from '../apps/translations/zh-CN.objects.generated.js';
 import { jaJPObjects } from '../apps/translations/ja-JP.objects.generated.js';
 import { esESObjects } from '../apps/translations/es-ES.objects.generated.js';
+import { zhHantObjects } from '../apps/translations/zh-Hant.objects.generated.js';
 import { INVITE_USER_OUTCOME_MESSAGES, RESEND_INVITATION_OUTCOME_MESSAGES } from './invite-outcome-messages.js';
 import { SysInvitation } from './sys-invitation.object.js';
 import { SysMember } from './sys-member.object.js';
@@ -77,6 +78,7 @@ const TRANSLATED = [
   ['zh-CN', zhCNObjects],
   ['ja-JP', jaJPObjects],
   ['es-ES', esESObjects],
+  ['zh-Hant', zhHantObjects],
 ] as const;
 
 /** Any spelling of "sent" a `link_only` copy must not carry. */

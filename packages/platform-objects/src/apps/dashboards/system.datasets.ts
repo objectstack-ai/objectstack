@@ -57,7 +57,7 @@ export const SysAuditLogDataset = defineDataset({
       label: 'User',
       field: 'user_id',
       type: 'lookup',
-      nullLabel: { en: 'System', 'zh-CN': '系统', 'ja-JP': 'システム', 'es-ES': 'Sistema' },
+      nullLabel: { en: 'System', 'zh-CN': '系统', 'ja-JP': 'システム', 'es-ES': 'Sistema', 'zh-Hant': '系統' },
     },
   ],
   measures: [{ name: 'event_count', label: 'Events', aggregate: 'count' }],

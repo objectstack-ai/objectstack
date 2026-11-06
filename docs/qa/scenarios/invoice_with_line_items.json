@@ -21,7 +21,8 @@
     "records-forms.roll-up-summary",
     "records-forms.select-options",
     "ai.ask-data",
-    "access-security.field-permissions"
+    "access-security.field-permissions",
+    "access-security.row-scope"
   ],
   "category": "finance",
   "run": {

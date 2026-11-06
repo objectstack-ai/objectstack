@@ -91,6 +91,7 @@ import {
 import type { LedgerRecordWriteAction } from './audit-log-field-redaction.js';
 import { SIGN_IN_STAMP_EVENT, isSignInStamp } from './sign-in-stamp.js';
 import { IMPERSONATED_BY_KEY, IMPERSONATED_BY_NAME_KEY, impersonatorOf } from './impersonation-attribution.js';
+import { SCIM_CONNECTION_ID_KEY, scimConnectionOf } from './scim-connection-attribution.js';
 import type { MentionGateInput } from './mention-recipient-gate.js';
 // [ADR-0139 E6] The ONE derivation of the two writer-stamped columns the
 // withheld-row rule reads, shared with the before-insert hook and the backfill.
@@ -2105,6 +2106,11 @@ export function installAuditWriters(
     // a strict sys_user lookup); the service principal lands on `actor`.
     const actorLabel: string | null =
       userId ?? (typeof sess.actor === 'string' && sess.actor.trim() ? sess.actor.trim() : null);
+    // [#30960] The SCIM connection an identity provider's provisioning write
+    // was performed by: read off the label `actor` carries
+    // (`svc:scim:CONNECTION_ID`, see `scim-connection-attribution.ts`), so the
+    // association field and the column can never disagree.
+    const scimConnectionId: string | undefined = scimConnectionOf(actorLabel);
     // [commit 1408fe385, honouring #8287's ruling] The audited RECORD'S OWN organization
     // wins; the acting session's active organization is the fallback. ⛔ Do not
     // flip this back to `sess.organizationId ?? recordOrgId`.
@@ -2227,13 +2233,19 @@ export function installAuditWriters(
     // `impersonated_by` follows the same rule: present ONLY on a write made
     // from an impersonation session, beside a `user_id` that stays the
     // impersonated user. No key ⇒ that user acted themselves.
-    if (performedByClientId || impersonatedBy || signInStamp) {
+    //
+    // `scim_connection_id` follows the same rule: present ONLY on a write a
+    // SCIM connection performed, beside the `svc:scim:CONNECTION_ID` actor it
+    // is read from and a `user_id` that stays null. No key ⇒ no SCIM
+    // connection acted.
+    if (performedByClientId || impersonatedBy || signInStamp || scimConnectionId) {
       auditRow.metadata = safeStringify({
         // A sign-in stamp names its event the way a `config_change` row does
         // (`metadata.event`); every other CRUD row still carries no event.
         ...(signInStamp ? { event: SIGN_IN_STAMP_EVENT } : {}),
         ...(performedByClientId ? { performed_by: performedByClientId, on_behalf_of: userId ?? null } : {}),
         ...(impersonatedBy ? { [IMPERSONATED_BY_KEY]: impersonatedBy } : {}),
+        ...(scimConnectionId ? { [SCIM_CONNECTION_ID_KEY]: scimConnectionId } : {}),
       });
     }
 

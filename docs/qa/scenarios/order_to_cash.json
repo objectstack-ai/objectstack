@@ -58,6 +58,7 @@
     "automation.time-relative-trigger",
     "access-security.row-level-security",
     "access-security.field-permissions",
+    "access-security.row-scope",
     "dashboards.report",
     "ai.ask-data",
     "ai.agent-actions"
