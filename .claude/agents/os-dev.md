@@ -97,13 +97,12 @@ model: opus
 4. **清理是任务的一步**:PR 开出后 `rm -rf <path>/node_modules && git worktree remove <path>`。
    - ⛔ 永不上来就 `--force`:拒绝移除说明有东西没提交,那是本容器未提交工作的唯一守卫。
    - 可能是你没推的工作,或路径打错敲进了别的 agent 的活 worktree;先去那里读 `git status`。
-5. ⛔ 永不按进程名杀(`pkill -f` 会带走并行 agent 的运行);记下你启动的 PID,只对它操作。
-6. **整条流水线在前台跑。** build 与 test 都是本任务的步骤:阻塞运行、读真实输出、继续。
+5. **整条流水线在前台跑。** build 与 test 都是本任务的步骤:阻塞运行、读真实输出、继续。
    - 宿主事实:你启动的后台作业、watcher、你请求的通知都不会唤醒你;结束一轮就是结束。
    - 每个可编译小步即 commit + push;有可展示内容即开 draft PR;接管只认远程分支最后 sha。
    - 带具名缺口的 PR 是交付进行中的常态,未读到的判决写 `NOT MEASURED: <family>, reason: …`。
    - 平台事实:容器把前台命令钉在约 10 分钟上限,超时 SIGTERM 杀掉(`exit 143`)。
-7. **排队不是停摆,在轮内主动等。** 持锁的是你不拥有的进程,其完成同样不会唤醒你。
+6. **排队不是停摆,在轮内主动等。** 持锁的是你不拥有的进程,其完成同样不会唤醒你。
    - 99 专指没排到,读作 NOT MEASURED;把间隔花在无锁工作上(写测试、changeset、PR 正文)。
    - 再取以同名续位,⛔ 不从队尾重排:`OS_VERIFY_LOCK_SLOT=<稳定名>` 在第一次尝试前就设好。
    - 没排到的调用把排位寄存,同名再来续原到达戳;不设它,每次离开都从队尾重排。
@@ -298,7 +297,8 @@ model: opus
 - 发布面动了要 changeset;`skip-changeset` 判据是没动:已发布 = 各包 `files[]` 实际发运内容。
 - 快速通道:`docs/adr/**` · `.claude/**` · `scripts/pm/**` · 仓根配置 · 私有包 · 注释,不发布。
 - 其余实测:构建后 grep `files[]` 所列路径找符号,带正控;符号零命中、正控命中 ⇒ 不发布。
-- PR 改到已有的 `.changeset/*.md`:⛔ 永不打 `skip-changeset`,门禁红着是对的,确认走 PR 文字。
+- PR 改到已有的 `.changeset/*.md`:⛔ 永不打 `skip-changeset`,门禁红着是对的;正文申报 DELIBERATE CORRECTION。
+- 申报点名每个被改 note 并引改后句;⛔ 不请维护者确认,确认件是派发席的记录(`landing-operations.md`)。
 - objectstack:`skip-changeset` 以 `pr_create` 的 `labels` 同笔申报;后发现的标签才走 `label-write.mjs`。
 - 范围 = 派发词点名的标签 + 上文判据下的 `skip-changeset`;禁写或交集为空 ⇒ 零写并报告。
 - 该腿的回读是中继回报的行:答案须列出每个送出的标签,缺者该笔 FAILED、不发后续动作。

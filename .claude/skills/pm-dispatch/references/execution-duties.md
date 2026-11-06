@@ -177,7 +177,7 @@
 
 - 你是记录在案的复核人:对 GitHub 核验,⛔ 不对报告的自述核验。
 - 逐项判据展开在 `references/review-checklist.md`,每份报告对着它过。
-- 改到已有 `.changeset/*.md` 的 PR ⛔ 不打 `skip-changeset`;确认取同 head 达档 PASS 或维护者原话。
+- 改到已有 `.changeset/*.md` 的 PR ⛔ 不打 `skip-changeset`;确认件只认派发席自己的记录,见 `landing-operations.md`。
 - 绿色输出≠ 该绿证明了被测风险:拒收断言、全绿方向与时序、pin 翻转、边界后收益。
 - 触 `skills/**` 的 PR 加问整包价值密度:从整包加载的客户 agent 座位读,⛔ 不从作者座位读。
 - 超派发预算或小功能大扩写 ⇒ REWORK,⛔ 不因已经写好了放行。
