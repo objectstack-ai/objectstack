@@ -114,9 +114,8 @@ export const SysAssignmentRule = ObjectSchema.create({
     criteria: Field.textarea({
       label: 'Condition',
       required: false,
-      description:
-        'Which new records this rule takes, written as an expression over the record — for example ' +
-        'record.priority == "high". Leave it empty to take every new record that no earlier rule took.',
+      description: 'Which new records this rule takes; leave it empty to take every new record that no earlier rule took. ' +
+        'Written as an expression over the record — for example record.priority == "high".',
       group: 'Condition',
     }),
 
