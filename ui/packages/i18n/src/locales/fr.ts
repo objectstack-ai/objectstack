@@ -2701,6 +2701,8 @@ const fr = {
         title: 'Journal d’audit',
         subtitle: 'Activité système et modifications d’enregistrements, en lecture seule. Les plus récentes en premier.',
         openAsList: 'Ouvrir en liste',
+        openEntryPage: 'Ouvrir la page de l’entrée',
+        openEntryPageHint: 'La page de l’entrée liste toutes les modifications du même enregistrement, de la plus récente à la plus ancienne.',
         openPresetAsList: 'Ouvrir {{label}} en liste',
         presets: 'Préréglages',
         presetOtherSource: 'Cette vue lit une autre source de données.',

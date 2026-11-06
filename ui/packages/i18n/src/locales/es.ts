@@ -2705,6 +2705,8 @@ const es = {
         title: 'Registro de auditoría',
         subtitle: 'Actividad del sistema y cambios de registros, de solo lectura. Lo más reciente primero.',
         openAsList: 'Abrir como lista',
+        openEntryPage: 'Abrir la página de la entrada',
+        openEntryPageHint: 'La página de la entrada muestra todos los cambios del mismo registro, del más reciente al más antiguo.',
         openPresetAsList: 'Abrir {{label}} como lista',
         presets: 'Ajustes predefinidos',
         presetOtherSource: 'Esta vista lee otra fuente de datos.',

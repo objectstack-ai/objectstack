@@ -2700,6 +2700,8 @@ const pt = {
         title: 'Log de auditoria',
         subtitle: 'Atividade do sistema e alterações de registros, somente leitura. Mais recentes primeiro.',
         openAsList: 'Abrir como lista',
+        openEntryPage: 'Abrir a página da entrada',
+        openEntryPageHint: 'A página da entrada lista todas as alterações do mesmo registro, da mais recente para a mais antiga.',
         openPresetAsList: 'Abrir {{label}} como lista',
         presets: 'Predefinições',
         presetOtherSource: 'Esta visualização lê outra fonte de dados.',

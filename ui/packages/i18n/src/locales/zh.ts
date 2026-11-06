@@ -2733,6 +2733,8 @@ const zh = {
         title: '审计日志',
         subtitle: '只读的系统活动与记录变更，最新的在前。',
         openAsList: '以列表打开',
+        openEntryPage: '打开条目页',
+        openEntryPageHint: '条目页按时间倒序列出同一记录的全部变更。',
         openPresetAsList: '以列表打开 {{label}}',
         presets: '预设',
         presetOtherSource: '此视图读取的是其他数据源。',

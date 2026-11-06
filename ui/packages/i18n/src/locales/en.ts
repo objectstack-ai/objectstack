@@ -3197,6 +3197,8 @@ const en = {
         title: 'Audit Log',
         subtitle: 'Read-only system activity and record changes. Newest first.',
         openAsList: 'Open as list',
+        openEntryPage: 'Open entry page',
+        openEntryPageHint: 'The entry page lists every change to the same record, newest first.',
         openPresetAsList: 'Open {{label}} as list',
         presets: 'Presets',
         presetOtherSource: 'This view reads another data source.',
