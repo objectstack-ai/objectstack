@@ -2170,10 +2170,10 @@ const FLOW_INPUT_UNKNOWN_OBJECT_EXPLANATION: RuleExplanation = {
   covers: 'why an unknown start-input object warns, and when it refuses',
   paragraphs: [
     'A flow input may declare that its value is the id of a record of a named object, with `objectName` on ' +
-      'the variable. The start doors are to load such an input from exactly that name in the caller\'s own ' +
-      'scope before the run exists, so a name no object answers to would refuse every start that supplies ' +
-      'the input. Names match exactly — `app_candidate`, not `candidate`. The declaration is planned: no ' +
-      'door reads it yet, and the property lint says so separately.',
+      'the variable. The start doors load such an input from exactly that name in the caller\'s own ' +
+      'scope before the run exists, so a name no object answers to refuses every start that supplies ' +
+      'the input. Names match exactly — `app_candidate`, not `candidate`. Every door that starts the flow ' +
+      'by name enforces the declaration.',
     'The rule asks whether this stack defines the object. One it does not define may be declared by ' +
       'another installed package, which a build of this stack cannot see, so the finding is a warning and ' +
       'can be ignored when such a package declares the object; a `sys_` name is a platform object and is ' +
