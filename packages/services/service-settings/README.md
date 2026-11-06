@@ -30,8 +30,11 @@ a resolver that layers `OS_* env > Tenant > User > Default`.
 to underscores) takes precedence over any stored value. For example,
 `mail.smtp_host` resolves from `OS_MAIL_SMTP_HOST`, and
 `ai.log_prompts` resolves from `OS_AI_LOG_PROMPTS`.
-Such fields are returned with `source: 'env', locked: true` and writes
-(service or REST) fail with HTTP 409.
+Such fields are returned with `source: 'env', locked: true`. Every write
+(service or REST) but a clear (`null`) fails with HTTP 409. A clear removes
+the value stored beneath the override and changes nothing in force: the key
+still answers the env value, and falls back to its default once the variable
+is removed.
 
 ## Encryption
 
