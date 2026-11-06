@@ -10,7 +10,7 @@
 
 import { isMcpServerEnabled } from '@objectstack/types';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
-import type { MetadataProtocol } from '@objectstack/spec/api';
+import type { ErrorCode, MetadataProtocol } from '@objectstack/spec/api';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import type { AIActionConfirmation, IExternalDatasourceService } from '@objectstack/spec/contracts';
 import {
@@ -36,6 +36,28 @@ import { declaresOptions } from '@objectstack/formula';
 // `POST /automation/:name/runs/:runId/resume` so the two doors answer one
 // engine result identically.
 import { classifyResumeResult } from './automation.js';
+// [ADR-0106 D1/D5] The `/meta` door's object-schema masker and projection —
+// imported, never restated, so `describe_object` and `list_objects` answer a
+// caller the same field set the `/meta` object read answers that caller.
+import { maskObjectSchema, resolveObjectMasker } from './meta.js';
+
+/** Typed as the registered vocabulary, so a misspelling fails to compile. */
+const FIELD_VISIBILITY_UNRESOLVED: ErrorCode = 'FIELD_VISIBILITY_UNRESOLVED';
+
+/**
+ * [ADR-0106 D6 tier 3] The refusal an MCP object-schema read answers when the
+ * caller's field visibility could not be evaluated, or the projection would
+ * leave the object with no field: the code, status and sentence the REST
+ * `/meta` object read answers (`sendFieldVisibilityFault`), thrown so the tool
+ * renders it as a coded tool error. Never the unmasked schema, never an
+ * object with no fields.
+ */
+function fieldVisibilityRefusal(objectName: string): Error & { code: ErrorCode; status: number } {
+    return Object.assign(
+        new Error(`Field visibility for object '${objectName}' could not be evaluated; the object schema is not being served.`),
+        { code: FIELD_VISIBILITY_UNRESOLVED, status: 503 },
+    );
+}
 
 /**
  * The legacy branches matched `/mcp/skill` (exact or `?`-suffixed) BEFORE
@@ -651,13 +673,52 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
     const readServedActions = async (): Promise<any[] | undefined> =>
         (await readMergedItems(await getProtocol(), 'action')) as any[] | undefined;
 
+    /**
+     * [ADR-0106 D1/D5] An object definition as THIS caller is served it: the
+     * `/meta` object door's masker ({@link resolveObjectMasker}, this
+     * request's execution context and security service, its D4 exemptions)
+     * and its projection ({@link maskObjectSchema}), so a field the caller
+     * cannot read does not exist in `describe_object` or `list_objects`
+     * either. An unrestricted caller is handed the definition it was handed
+     * before (the projection returns it by reference). A posture that cannot
+     * be evaluated, or a projection that leaves no field, is refused with the
+     * door's code ({@link fieldVisibilityRefusal}). The masker is resolved
+     * once per bridge, i.e. once per MCP request, and asked per object.
+     *
+     * Only the definitions these tools SERVE go through it. The reads that
+     * judge a call (the action collection, the exposure gates) keep the
+     * definition whole: they serve none of it.
+     */
+    let masker: ReturnType<typeof resolveObjectMasker> | undefined;
+    const servedToCaller = async (def: any): Promise<any> => {
+        const name = String(def?.name ?? '');
+        const masked = await maskObjectSchema(await (masker ??= resolveObjectMasker(deps, context, 'object')), name, def);
+        if (!masked.ok) throw fieldVisibilityRefusal(name);
+        return masked.document;
+    };
+
+    /** {@link readServedObject}, as this caller is served it ({@link servedToCaller}). */
+    const readObjectForCaller = async (name: string): Promise<any> => {
+        const def: any = await readServedObject(name);
+        return def ? await servedToCaller(def) : def;
+    };
+
     const listObjectSummaries = async (): Promise<any[]> => {
         const objs = await readServedObjects();
-        return objs.map((o) => ({
-            name: o.name,
-            label: o.label ?? o.name,
-            fieldCount: o.fields ? Object.keys(o.fields).length : undefined,
-        }));
+        const out: any[] = [];
+        // [ADR-0106 D5(2)] Every listed object as this caller is served it,
+        // so `fieldCount` counts the fields that exist for them. One object
+        // that cannot be projected refuses the listing, as the `/meta`
+        // object list does.
+        for (const listed of objs) {
+            const o = await servedToCaller(listed);
+            out.push({
+                name: o.name,
+                label: o.label ?? o.name,
+                fieldCount: o.fields ? Object.keys(o.fields).length : undefined,
+            });
+        }
+        return out;
     };
 
     return {
@@ -706,8 +767,9 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         // ({@link readMergedObjects}), so every object an agent is listed it
         // can describe, and a name the listing omits (a disabled package's
         // object among them) is "not found" here too.
+        // [ADR-0106 D1/D5] …as this caller is served it ({@link readObjectForCaller}).
         describeObject: async (name: string) => {
-            const def: any = await readServedObject(name);
+            const def: any = await readObjectForCaller(name);
             if (!def) return null;
             const fields = def.fields ?? {};
             return {
@@ -726,8 +788,9 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         // against, from the object `describeObject` reads: the served object,
         // where a picklist-bound field carries its list's resolved `options`,
         // so the served-form predicate is the one that matches.
+        // [ADR-0106 D1] …the same caller's object, so no field it cannot read is named.
         optionFieldsOf: async (name: string): Promise<readonly string[] | null> => {
-            const def: any = await readServedObject(name);
+            const def: any = await readObjectForCaller(name);
             if (!def) return null;
             return Object.entries(def.fields ?? {})
                 .filter(([, f]) => declaresOptions(f))
