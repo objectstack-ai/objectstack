@@ -112,6 +112,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "表示条件",
         helpText: "レコードに対する CEL 述語（例：record.type == 'invoice'）。TRUE の間だけ、入力フォームに見出しを含むグループ全体が表示されます。"
       },
+      "fieldGroups.requiresFeature": {
+        label: "必要な機能",
+        helpText: "このグループに必要なデプロイ機能（例: multiOrgEnabled）。オフのデプロイでは、入力フォームとレコード詳細ページでグループ全体が非表示になります。「表示条件」と併用すると、両方が成り立つときだけ表示されます。フィールドは API から引き続き読み取れます。"
+      },
       fields: {
         label: "フィールド",
         helpText: "このオブジェクトが保存する列を追加"

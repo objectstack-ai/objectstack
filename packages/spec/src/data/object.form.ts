@@ -117,6 +117,7 @@ export const objectForm = defineForm({
               { label: 'Collapsed — collapsible, starts closed', value: 'collapsed' },
             ] },
             { field: 'visibleWhen', label: 'Visible When', type: 'code', language: 'expression', helpText: 'CEL predicate over the record (e.g. record.type == \'invoice\') — the entry form shows the whole group, header included, only while it is TRUE.' },
+            { field: 'requiresFeature', label: 'Requires Feature', helpText: 'Deployment feature the group needs (e.g. multiOrgEnabled): where it is off, the entry form and the record detail page hide the whole group. Combined with Visible When, the group shows only while both hold. The fields stay readable through the API.' },
           ],
         },
       ],
