@@ -3264,7 +3264,6 @@ candidates with how to pass `--env`.
 | `-v, --version <semver>` | — | Version to publish. Default: `artifact.manifest.version`, else `0.0.0-dev.` + a timestamp |
 | `--display-name <name>` | — | Name shown in the Marketplace (default `artifact.manifest.name`) |
 | `--description <text>` | — | Short package description |
-| `--category <slug>` | — | Marketplace category slug (`crm`, `hr`, `devtools`, …) |
 | `--visibility <level>` | — | `org` (installable across your organization) · `private` (explicit grants only) · `marketplace` (public after review). Omitted: not sent, so the control plane decides — an existing package keeps its visibility, a new one gets the control plane's default (`org` on ObjectOS Cloud) |
 | `--org <id>` | `OS_ORG_ID` | `owner_org_id`. Required with a bearer key in service mode; ignored in user mode |
 | `--env <id>` | `OS_ENVIRONMENT_ID` | Environment to install the new version into. Defaults to the environment [`os environments switch`](#cloud-environments) — or `os environments create --activate` — recorded **for this control plane** in `~/.objectstack/cloud.json`, then to your organization's only environment |
@@ -3300,9 +3299,15 @@ and rebuild.
 
 **`objectstack.manifest.json` supplies the listing fields.** When that file is
 present in the working directory, publish reads `manifestId`, `displayName`,
-`description`, `category`, `tags`, `iconUrl`, `homepageUrl`, `license`,
-`readmePath` and a `translations` map from it, so a listing need not be retyped
-as flags on every publish. **CLI flags always win.** `tags` has no flag and is
+`description`, `tags`, `iconUrl`, `homepageUrl`, `license`, `readmePath`, a
+`translations` map and the marketplace facets — `businessFunctions`,
+`industries`, `solutionType` and `maturity` — from it, so a listing need not be
+retyped as flags on every publish. **CLI flags always win.** Each facet is
+checked against the spec's schema before anything is sent, and a declared
+`solutionType` against the built artifact: a `template` needs the `unmanaged`
+install mode, a `connector` a declared connector. The retired `category` — in
+the file, or as `--category` — is refused before any network call, with the
+facets that replace the value it held. `tags` has no flag and is
 sent as written: the control plane judges the list, and a refusal is its 400,
 printed as it is. A top-level `tagline` is used only as the description, when
 neither `--description` nor the file's `description` gives one; otherwise it is

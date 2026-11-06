@@ -225,7 +225,7 @@ describe('objectui#7194 — the copy lives in the locale packs', () => {
       </I18nProvider>,
     );
     const text = arityRefusalOf(container)!.textContent ?? '';
-    expect(text).toContain(builtInLocales.zh.chart.scatterOneMeasure);
+    expect(text).toContain(builtInLocales['zh-Hans'].chart.scatterOneMeasure);
     expect(text).not.toContain(EN_COPY);
     // The keys are data and are not translated.
     const codes = [...arityRefusalOf(container)!.querySelectorAll('code')].map((c) => c.textContent);

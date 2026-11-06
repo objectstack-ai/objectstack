@@ -58,9 +58,15 @@ function stubCloud(refusePackage?: { status: number; body: unknown }): Call[] {
  * schema gains lands in none of these and fails the partition test below.
  */
 const SENT = [
-  'manifestId', 'displayName', 'description', 'category', 'tags', 'iconUrl',
+  'manifestId', 'displayName', 'description', 'tags', 'iconUrl',
   'homepageUrl', 'license', 'translations', 'readmePath',
+  'businessFunctions', 'industries', 'solutionType', 'maturity',
 ] as const;
+/**
+ * Retired keys the schema still declares as tombstones: publish refuses them,
+ * naming the replacement (`test/package-publish-taxonomy.test.ts`).
+ */
+const REFUSED = ['category'] as const;
 /** Scaffold-time extras: read by `create-objectstack` or docs, never a publish key. */
 const SCAFFOLD_ONLY = ['name', 'specVersion', 'namespace', 'skills', 'scaffold'] as const;
 
@@ -290,10 +296,10 @@ describe('os package publish — manifest keys', () => {
   });
 });
 
-describe('every TemplateManifestSchema key is sent, warned about, or scaffold-only', () => {
+describe('every TemplateManifestSchema key is sent, warned about, refused, or scaffold-only', () => {
   it('partitions the schema keys exactly', () => {
     const schemaKeys = Object.keys(TemplateManifestSchema.shape).sort();
-    const classified = [...SENT, ...UNCARRIED_MANIFEST_KEYS, ...SCAFFOLD_ONLY].sort();
+    const classified = [...SENT, ...UNCARRIED_MANIFEST_KEYS, ...REFUSED, ...SCAFFOLD_ONLY].sort();
     expect(classified).toEqual(schemaKeys);
     // No key sits in two buckets.
     expect(new Set(classified).size).toBe(classified.length);

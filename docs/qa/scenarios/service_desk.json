@@ -71,7 +71,7 @@
     "ai.ask-data",
     "ai.agent-actions"
   ],
-  "category": "operations",
+  "businessFunctions": ["customer-service"],
   "run": {
     "seed": {
       "customer": [

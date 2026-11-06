@@ -44,6 +44,7 @@
  * thing answering and the test would describe a binding the console never uses.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { renderHook } from '@testing-library/react';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -193,7 +194,7 @@ beforeEach(() => {
 
 describe('objectui#3546 slice four — the console namespace', () => {
   it('covers all ten packs and all forty-six keys (guards the loops from emptying)', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     expect(KEYS).toHaveLength(46);
     expect(new Set(KEYS).size).toBe(46);
     // 41 measured missing keys + 5 that came from the prefix family. Splitting the
@@ -309,7 +310,7 @@ describe('objectui#3546 slice four — the console namespace', () => {
       }
     });
 
-    it.each(['en', 'zh'] as const)('%s renders every bucket through the real template call', (lang) => {
+    it.each(['en', 'zh-Hans', 'zh-Hant'] as const)('%s renders every bucket through the real template call', (lang) => {
       const { result } = renderHook(() => useObjectTranslation(), { wrapper: wrapperFor(lang) });
       for (const key of ['today', 'yesterday', 'previous7Days', 'previous30Days', 'older']) {
         const full = `console.ai.group.${key}`;
@@ -388,7 +389,7 @@ describe('objectui#3546 slice four — the console namespace', () => {
     ).not.toMatch(/t\('console\.ai\.\w*Message'/);
     // And zh still spells the badge the way the deleted literal did, so the fix
     // changed WHICH source answers a zh-UI reader, not what they read.
-    expect(at(builtInLocales.zh, 'console.ai.planBuilding')).toBe('正在搭建…');
+    expect(at(builtInLocales['zh-Hans'], 'console.ai.planBuilding')).toBe('正在搭建…');
   });
 
   it('the ratchet actually shrank — no console key is still baselined', () => {
@@ -430,7 +431,7 @@ describe('objectui#3546 slice four — the console namespace', () => {
       ['console.shortcuts.newChat', 'KeyboardShortcutsDialog'],
     ];
 
-    it.each(['en', 'zh'] as const)('%s resolves every sampled key from the pack', (lang) => {
+    it.each(['en', 'zh-Hans', 'zh-Hant'] as const)('%s resolves every sampled key from the pack', (lang) => {
       const { result } = renderHook(() => useObjectTranslation(), { wrapper: wrapperFor(lang) });
       for (const [key, owner] of SAMPLE) {
         const value = result.current.t(key);

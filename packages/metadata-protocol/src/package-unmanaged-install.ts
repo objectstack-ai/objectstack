@@ -109,6 +109,7 @@ import { ASSEMBLED_VIEW_ITEMS_KEY, expandViewContainer, isAggregatedViewContaine
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
+import { PLATFORM_RESERVED_NAMESPACES, planNamespaceRename, type NamespaceRename } from './package-namespace-rename.js';
 
 /**
  * Every collection the import copies: manifest key → metadata type. The
@@ -134,14 +135,29 @@ export interface UnmanagedImportItem {
     body: Record<string, unknown>;
     /** The view names a container expands into (empty for every other item). */
     expands: readonly string[];
+    /**
+     * [#30794] The name the PACKAGE declares the item under, when the copy is
+     * renamed into a `targetNamespace` and `name` is its copy name; absent
+     * when the copy keeps the source's names.
+     */
+    sourceName?: string;
 }
 
 /** Everything the import needs from the body, judged. */
 export interface UnmanagedImportPlan {
     sourcePackageId: string;
     sourceVersion?: string;
-    /** The base's namespace — the source's, declared or derived from its id. */
+    /** The base's namespace — the request's `targetNamespace`, else the source's. */
     namespace: string;
+    /** The source's namespace, declared or derived from its id. */
+    sourceNamespace: string;
+    /**
+     * [#30794] The rename into {@link namespace}, when it differs from the
+     * source's — the duplicate's own engine (`package-namespace-rename.ts`).
+     * Every item's `name` and `expands` are already its copy names; the
+     * caller rewrites each body with it after converting it.
+     */
+    rename?: NamespaceRename;
     targetPackageId: string;
     /** The manifest the new base is installed with. */
     baseManifest: Record<string, unknown>;
@@ -345,6 +361,11 @@ export function planUnmanagedImport(
     options: {
         targetPackageId?: string;
         targetName?: string;
+        /**
+         * [#30794] The namespace the copy is renamed into; absent keeps the
+         * source's. Judged here, by the manifest key's own declaration.
+         */
+        targetNamespace?: string;
         isRuntimeCreatable: (type: string) => boolean;
         loadOrderOf: (type: string) => number;
         /**
@@ -432,16 +453,47 @@ export function planUnmanagedImport(
     }
     if (findings.length > 0) throw unmanagedInstallUncopyable(sourcePackageId, findings);
 
-    // The namespace is the SOURCE's (the stage-0 ACCEPT's Q3): every copied
-    // object name carries its prefix, and the base must own that prefix for
-    // the save door's namespace rule to admit them.
-    const namespace = stringKey(manifest, 'namespace') ?? deriveNamespaceFromPackageId(sourcePackageId) ?? undefined;
-    if (namespace === undefined) {
+    // The SOURCE's namespace: every name the package declares carries its
+    // prefix. Without a `targetNamespace` it is the base's too (the stage-0
+    // ACCEPT's Q3): the base must own that prefix for the save door's
+    // namespace rule to admit the copied object names.
+    const sourceNamespace = stringKey(manifest, 'namespace') ?? deriveNamespaceFromPackageId(sourcePackageId) ?? undefined;
+    if (sourceNamespace === undefined) {
         throw invalidRequest(
             `Cannot determine the namespace of package '${sourcePackageId}': it declares none, and none derives `
             + 'from its id. Declare `namespace` on the package — every copied object name carries it.',
         );
     }
+
+    // [#30794] ⭐ RENAME-ON-INSTALL, UNMANAGED ONLY. A `targetNamespace` is the
+    // base's namespace and the prefix every copied object name takes, so it
+    // is parsed by the manifest key's own declaration
+    // (`ManifestSchema.shape.namespace`, never a hand-copied regex) and ⛔
+    // refused, never sanitised — the rule `duplicatePackage` keeps for its
+    // own `targetNamespace`. A platform-reserved namespace is shared by many
+    // packages, so it is refused too. Q3's reason for keeping the source
+    // namespace is that a copy INTO an existing base breaks that base's
+    // namespace on export; a copy into a NEW base under a namespace of its
+    // own breaks nothing, and the renamed copy's names are the copy's own.
+    const targetNamespace = options.targetNamespace;
+    if (targetNamespace !== undefined) {
+        const declared = ManifestSchema.shape.namespace.safeParse(targetNamespace);
+        if (!declared.success) {
+            const rule = declared.error.issues[0]?.message ?? 'See `manifest.namespace`';
+            throw invalidRequest(
+                `Invalid package namespace '${targetNamespace}' on \`targetNamespace\`. ${rule}. It becomes the `
+                + 'copy\'s `manifest.namespace` and the prefix of every copied object name.',
+            );
+        }
+        if (PLATFORM_RESERVED_NAMESPACES.has(targetNamespace)) {
+            throw invalidRequest(
+                `\`targetNamespace\` '${targetNamespace}' is a platform-reserved namespace `
+                + `(${[...PLATFORM_RESERVED_NAMESPACES].map((ns) => `'${ns}'`).join(', ')}), which many packages share, `
+                + 'so it cannot carry one copy\'s names. Name a namespace of the copy\'s own.',
+            );
+        }
+    }
+    const namespace = targetNamespace ?? sourceNamespace;
 
     // The target: a NEW base whose id differs from the source (Q3).
     const targetPackageId = options.targetPackageId ?? `${sourcePackageId}-copy`;
@@ -462,13 +514,56 @@ export function planUnmanagedImport(
     // lock dropped listed in write order (the D6 lock-fork ruling, record
     // 6119681934). After the sort, so the list reads in the order items land.
     const strippedLocks: UnmanagedImportStrippedLock[] = [];
-    const items = enumerateItems(manifest, options.loadOrderOf, namespace).map((item) => {
+    let items = enumerateItems(manifest, options.loadOrderOf, sourceNamespace).map((item) => {
         const { body, stripped } = stripUnmanagedImportLock(
             item.type, item.name, item.body, options.protectionDeclarationOf(item.type),
         );
         if (stripped) strippedLocks.push(stripped);
         return body === item.body ? item : { ...item, body };
     });
+
+    // [#30794] ⭐ THE RENAME RUNS AFTER THE VIEW CONTAINERS ARE EXPANDED, through
+    // the duplicate's own engine. The items above are named as the package
+    // declares them — a container under the object it binds, the names it
+    // expands into listed, each locale's translations under
+    // `<sourceNamespace>_<locale>` — which is the set of rows a stored base
+    // holds, so the engine renames exactly what `duplicatePackage` renames:
+    // a container follows its object, every name it expands into takes its
+    // object's copy name (`<object>.<viewKey>`), and a translation item is
+    // named `<targetNamespace>_<locale>` with the object keys inside it
+    // renamed. Every refusal the names alone can answer is raised here,
+    // before the base exists: an object whose copy name is claimed, and a
+    // copy name the item grammar or the storage identifier limit refuses.
+    // The bodies are rewritten by the caller, after each is converted to
+    // today's protocol — the order the duplicate rewrites in.
+    let rename: NamespaceRename | undefined;
+    if (namespace !== sourceNamespace) {
+        const planned = planNamespaceRename({
+            sourcePackageId,
+            sourceNamespace,
+            targetNamespace: namespace,
+            items: items.map((item) => ({ type: item.type, name: item.name, body: item.body })),
+            retryVerb: 'install',
+        });
+        const refused: UnmanagedImportRenameRefusal[] = [];
+        for (const item of items) {
+            const reason = (item.type === 'object' ? planned.objectRefusal(item.name) : undefined)
+                ?? planned.copyNameRefusal(item.type, item.name);
+            if (reason !== undefined) refused.push({ type: item.type, name: item.name, reason });
+            for (const view of item.expands) {
+                const expanded = planned.copyNameRefusal('view', view);
+                if (expanded !== undefined) refused.push({ type: 'view', name: view, reason: expanded });
+            }
+        }
+        if (refused.length > 0) throw unmanagedInstallRenameRefusal(sourcePackageId, namespace, refused);
+        items = items.map((item) => ({
+            ...item,
+            name: planned.copyName(item.type, item.name),
+            expands: item.expands.map((view) => planned.copyName('view', view)),
+            sourceName: item.name,
+        }));
+        rename = planned;
+    }
     const sourceVersion = stringKey(manifest, 'version');
     const baseManifest: Record<string, unknown> = {
         ...identity,
@@ -480,11 +575,44 @@ export function planUnmanagedImport(
         sourcePackageId,
         ...(sourceVersion !== undefined ? { sourceVersion } : {}),
         namespace,
+        sourceNamespace,
+        ...(rename !== undefined ? { rename } : {}),
         targetPackageId,
         baseManifest,
         items,
         strippedLocks,
     };
+}
+
+/** [#30794] One item the rename into a `targetNamespace` cannot copy, and why. */
+export interface UnmanagedImportRenameRefusal {
+    type: string;
+    name: string;
+    reason: string;
+}
+
+/**
+ * [#30794] The rename refusal: the package cannot be copied into
+ * `targetNamespace` as it declares its names, naming every item. Raised before
+ * the base exists — by the planner for what the names alone answer, and by the
+ * import for a reference collision a converted body meets. `INVALID_REQUEST` /
+ * 400, the code the body's own unwritable names answer
+ * ({@link enumerateItems}).
+ */
+export function unmanagedInstallRenameRefusal(
+    sourcePackageId: string,
+    targetNamespace: string,
+    refused: UnmanagedImportRenameRefusal[],
+): Error {
+    const shown = refused.slice(0, 3).map((r) => r.reason).join(' ');
+    const more = refused.length > 3 ? ` (+${refused.length - 3} more)` : '';
+    return refusal(
+        'INVALID_REQUEST',
+        400,
+        `Package '${sourcePackageId}' cannot be installed unmanaged into namespace '${targetNamespace}': `
+        + `${refused.length} item(s) cannot be renamed. ${shown}${more} Nothing was installed.`,
+        { targetNamespace, refused },
+    );
 }
 
 /** The metadata type a `translations` bundle's locales are copied as. */

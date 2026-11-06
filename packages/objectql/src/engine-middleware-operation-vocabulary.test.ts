@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#7809] The engine's MIDDLEWARE DISPATCH VOCABULARY is fixed, and it contains
-// no destructive lifecycle verb (`purge` / `transfer` / `restore`).
+// [#7809] The engine's MIDDLEWARE DISPATCH VOCABULARY is fixed. Of the
+// destructive lifecycle verbs (`purge` / `transfer` / `restore`) it contains
+// `purge` alone (#30237, the recycle bin), and `purge` never carries an AST.
 //
 // ── Why a pin here, in objectql, for a finding filed against plugin-security ──
 //
@@ -18,10 +19,14 @@
 // the same select-only object is scoped (#7665).
 //
 // The finding's own first question was whether those verbs can reach that path
-// at all. They cannot — not on the AST path, and not on ANY path:
+// at all. They cannot reach the AST path. `transfer` and `restore` reach no
+// path; `purge` reaches the by-id and object-level ones only:
 //
-//   1. `OperationContext['operation']` is the 7-member union pinned below.
-//      No destructive lifecycle verb is a member.
+//   1. `OperationContext['operation']` is the 8-member union pinned below.
+//      Of the destructive lifecycle verbs, `purge` alone is a member (#30237),
+//      and every dispatch of it is built without an `ast`: the permanent by-id
+//      delete (`permanent: true`, refused on any delete that is not by id),
+//      `purge(entryId)` and `empty(object)`.
 //   2. Middleware is invoked from exactly one place — the PRIVATE
 //      `executeWithMiddleware(ctx: OperationContext, …)`. There is no other
 //      caller, and no public seam that hands a middleware a context the engine
@@ -30,12 +35,13 @@
 //      `operation` is a member of that union by construction.
 //
 // So step 3 passing `opCtx.operation` raw is SAFE TODAY — not by accident, but
-// because the vocabulary cannot deliver a verb it fails to handle. This file
-// exists so that stays true by assertion rather than by luck: the day a recycle
-// bin (#3146, parked — `enable.trash` was retired in #2377/ADR-0049, which is
-// why `API_METHOD_DERIVATION` gives `restore`/`purge` a permanent
-// `flag: () => false`) makes one of these verbs dispatchable, this pin goes red
-// and names the two sites that must normalise first.
+// because the vocabulary cannot deliver a verb it fails to handle ON THAT PATH.
+// This file exists so that stays true by assertion rather than by luck. The
+// recycle bin (ADR-0148, #30237) made `purge` dispatchable, and kept it off the
+// AST path, which the AST-set lock below proves; the by-id permanent delete is
+// judged by step 2.7, which normalises `purge -> delete`. The day a destructive
+// verb reaches the AST path, this pin goes red and names the two sites that
+// must normalise first.
 //
 // ⚠️ Note the vocabularies are deliberately DIFFERENT and must not be conflated:
 // `ExplainOperationSchema` (spec/security/explain.zod.ts) is a 7-verb
@@ -119,6 +125,8 @@ const DISPATCHED_OPERATIONS = [
   'delete',
   'count',
   'aggregate',
+  // [#30237] The recycle bin's removal verb: the permanent delete, purge, empty.
+  'purge',
 ] as const;
 
 type Declared = (typeof DISPATCHED_OPERATIONS)[number];
@@ -180,10 +188,13 @@ function readDispatchedUnionFromEngineSource(): string[] {
 /**
  * The verbs #7809 is about. `plugin-security`'s step-2.7 gate normalises these
  * onto `update`/`delete` before deriving row scope; its step-3 AST path and the
- * ADR-0090 D10 delegator half do NOT. Keeping them out of the dispatch
- * vocabulary is what makes that difference unobservable.
+ * ADR-0090 D10 delegator half do NOT. Keeping them off the AST path is what
+ * makes that difference unobservable.
  */
 const DESTRUCTIVE_LIFECYCLE_VERBS = ['purge', 'transfer', 'restore'] as const;
+
+/** [#30237] The one destructive lifecycle verb the engine dispatches, never with an AST. */
+const DISPATCHED_DESTRUCTIVE_VERBS = ['purge'] as const;
 
 const NOTE_SCHEMA = {
   name: 'note',
@@ -202,6 +213,20 @@ const NOTE_SCHEMA = {
  */
 const ROW = { id: 'n1', title: 'x', owner: 'me' };
 
+/**
+ * [#30237] The recycle bin, registered so the probe reaches its three `purge`
+ * dispatches: an entry the driver always has, of a `note`.
+ */
+const BIN_SCHEMA = {
+  name: 'sys_recycle_bin',
+  fields: {
+    id: { type: 'text' },
+    object_name: { type: 'text' },
+    record_id: { type: 'text' },
+  },
+};
+const ENTRY = { id: 'e1', object_name: 'note', record_id: 'n1' };
+
 // `any` on the double itself, matching the sibling read-filter test: this is a
 // deliberately PARTIAL driver (the engine only reaches the members listed), and
 // annotating it `IDataDriver` would demand the whole surface for no assertion.
@@ -214,7 +239,7 @@ function makeDriver(): any {
     supports: {},
     connect: vi.fn().mockResolvedValue(undefined),
     disconnect: vi.fn().mockResolvedValue(undefined),
-    find: vi.fn(async () => [{ ...ROW }]),
+    find: vi.fn(async (object: string) => [object === 'sys_recycle_bin' ? { ...ENTRY } : { ...ROW }]),
     findOne: vi.fn(async () => ({ ...ROW })),
     count: vi.fn(async () => 1),
     aggregate: vi.fn(async () => []),
@@ -229,11 +254,13 @@ function makeDriver(): any {
 interface Seen {
   operation: string;
   hasAst: boolean;
+  /** A scalar `options.where.id`: the live row a by-id write names. */
+  hasId: boolean;
 }
 
 async function makeEngine() {
   vi.mocked((SchemaRegistry as any).getObject).mockImplementation((name: string) =>
-    name === 'note' ? NOTE_SCHEMA : undefined,
+    name === 'note' ? NOTE_SCHEMA : name === 'sys_recycle_bin' ? BIN_SCHEMA : undefined,
   );
   const ql = new ObjectQL();
   ql.registerDriver(makeDriver(), true);
@@ -244,7 +271,8 @@ async function makeEngine() {
   // precisely why that plugin can compare against verbs the union does not
   // contain without TypeScript ever objecting.
   ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
-    seen.push({ operation: opCtx.operation, hasAst: !!opCtx.ast });
+    const id = opCtx.options?.where?.id;
+    seen.push({ operation: opCtx.operation, hasAst: !!opCtx.ast, hasId: typeof id === 'string' || typeof id === 'number' });
     await next();
   });
   return { ql, seen };
@@ -285,6 +313,10 @@ async function driveEveryPublicMethod(ql: ObjectQL): Promise<void> {
   await ql.update('note', { title: 'bulk' }, { multi: true, where: { owner: 'me' }, context: ctx } as any);
   await ql.delete('note', { where: { id: 'n1' }, context: ctx } as any);
   await ql.delete('note', { multi: true, where: { owner: 'me' }, context: ctx } as any);
+  // [#30237] The recycle bin's three `purge` dispatches, in this order.
+  await ql.delete('note', { where: { id: 'n1' }, permanent: true, context: ctx });
+  await ql.purge('e1', { context: ctx });
+  await ql.empty('note', { context: ctx });
 }
 
 describe('[#7809] engine middleware dispatch vocabulary', () => {
@@ -297,7 +329,7 @@ describe('[#7809] engine middleware dispatch vocabulary', () => {
     expect(fromSource.slice().sort()).toEqual([...DISPATCHED_OPERATIONS].sort());
   });
 
-  it('the engine union declares no destructive lifecycle verb', () => {
+  it('the engine union declares `purge` and no other destructive lifecycle verb', () => {
     const fromSource = readDispatchedUnionFromEngineSource();
     const destructive = fromSource.filter((op) =>
       (DESTRUCTIVE_LIFECYCLE_VERBS as readonly string[]).includes(op),
@@ -305,10 +337,10 @@ describe('[#7809] engine middleware dispatch vocabulary', () => {
     // Asserted against the SOURCE list, not against `DISPATCHED_OPERATIONS` —
     // checking this file's own array against this file's own array would prove
     // nothing.
-    expect(destructive).toEqual([]);
+    expect(destructive).toEqual([...DISPATCHED_DESTRUCTIVE_VERBS]);
   });
 
-  it('a real engine driven through every public method dispatches exactly the 7', async () => {
+  it('a real engine driven through every public method dispatches exactly the 8', async () => {
     const { ql, seen } = await makeEngine();
     await driveEveryPublicMethod(ql);
 
@@ -316,7 +348,7 @@ describe('[#7809] engine middleware dispatch vocabulary', () => {
     expect(observed).toEqual([...DISPATCHED_OPERATIONS].sort());
   });
 
-  it('no destructive lifecycle verb reaches a middleware, on any path', async () => {
+  it('of the destructive lifecycle verbs, only `purge` reaches a middleware, and never with an AST', async () => {
     const { ql, seen } = await makeEngine();
     await driveEveryPublicMethod(ql);
 
@@ -324,7 +356,29 @@ describe('[#7809] engine middleware dispatch vocabulary', () => {
     const destructive = seen.filter((s) =>
       (DESTRUCTIVE_LIFECYCLE_VERBS as readonly string[]).includes(s.operation),
     );
-    expect(destructive).toEqual([]);
+    // [#30237] The permanent delete, `purge` and `empty`, in the order driven.
+    // Only the permanent delete names a live row: step 2.7 judges that row
+    // as a delete (`purge -> delete`); `purge` and `empty` are object-level.
+    expect(destructive).toEqual([
+      { operation: 'purge', hasAst: false, hasId: true },
+      { operation: 'purge', hasAst: false, hasId: false },
+      { operation: 'purge', hasAst: false, hasId: false },
+    ]);
+  });
+
+  it('[#30237] `permanent: true` off the by-id path is refused before any middleware runs', async () => {
+    const { ql, seen } = await makeEngine();
+    const ctx: ExecutionContext = { userId: 'u1', isSystem: true };
+
+    // A delete by filter: it would carry its `where` as an AST.
+    await expect(
+      ql.delete('note', { multi: true, where: { owner: 'me' }, permanent: true, context: ctx }),
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    // A by-id delete asked as a predicate one: the bin never takes it.
+    await expect(
+      ql.delete('note', { multi: true, where: { id: 'n1' }, permanent: true, context: ctx }),
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(seen).toEqual([]);
   });
 
   it('every AST-carrying dispatch — the #7809 path — carries a handled operation', async () => {
@@ -355,10 +409,14 @@ describe('[#7809] engine middleware dispatch vocabulary', () => {
     const astOperations = [...new Set(astCarrying.map((s) => s.operation))].sort();
     expect(astOperations).toEqual(['aggregate', 'count', 'delete', 'find', 'findOne', 'update']);
 
-    // The by-id write branches, conversely, must NOT carry an ast.
+    // The by-id write branches, conversely, must NOT carry an ast; nor does
+    // any `purge` (#30237: the permanent delete, `purge`, `empty`).
     expect(seen.filter((s) => !s.hasAst).map((s) => s.operation).sort()).toEqual([
       'delete',
       'insert',
+      'purge',
+      'purge',
+      'purge',
       'update',
     ]);
   });

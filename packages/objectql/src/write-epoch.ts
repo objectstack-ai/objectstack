@@ -137,8 +137,11 @@ export class WriteEpoch implements WriteEpochLike {
  * ⚠️ Read operations are deliberately absent, and adding one would not be a
  * tightening: an epoch that moved on reads would retire every entry on every
  * request, which reads as "the cache never hits" rather than as a failure.
+ *
+ * `purge` [#30237] is a write: the permanent delete removes rows, and purging
+ * or emptying the recycle bin removes entries.
  */
-export const WRITE_EPOCH_OPERATIONS = new Set(['insert', 'update', 'delete']);
+export const WRITE_EPOCH_OPERATIONS = new Set(['insert', 'update', 'delete', 'purge']);
 
 /** True when `operation` is a write the seam counts. */
 export function isWriteEpochOperation(operation: unknown): boolean {

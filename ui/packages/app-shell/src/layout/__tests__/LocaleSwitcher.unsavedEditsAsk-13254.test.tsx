@@ -43,7 +43,7 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
   useAdapter: () => session.adapter,
 }));
 
-import { LocaleSwitcher } from '../LocaleSwitcher';
+import { LocaleSwitcher, localeLabel } from '../LocaleSwitcher';
 import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits';
 
 const QUESTION = 'You have unsaved changes. Are you sure you want to leave?';
@@ -95,6 +95,9 @@ const language = () => screen.getByTestId('language').textContent;
 const draft = () => (screen.getByLabelText('Date format') as HTMLInputElement).value;
 const edit = () => fireEvent.change(screen.getByLabelText('Date format'), { target: { value: EDITED } });
 
+/** The Simplified Chinese entry, as the menu names the `zh-Hans` pack (objectstack#30511). */
+const SIMPLIFIED = localeLabel('zh-Hans');
+
 /** Open the globe menu the way a pointer does, then pick an entry by its native name. */
 function pick(name: string) {
   fireEvent.pointerDown(screen.getByRole('button', { name: /^(Language|语言)$/ }), { button: 0, pointerType: 'mouse' });
@@ -126,7 +129,7 @@ describe('the language menu asks before a switch drops unsaved edits (objectui#1
     mount();
     edit();
 
-    pick('中文');
+    pick(SIMPLIFIED);
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(confirmSpy).toHaveBeenCalledWith(QUESTION);
     // Settle anything a switch would have started before reading what stayed.
@@ -143,10 +146,10 @@ describe('the language menu asks before a switch drops unsaved edits (objectui#1
     edit();
     confirmSpy.mockReturnValue(true);
 
-    pick('中文');
+    pick(SIMPLIFIED);
     expect(confirmSpy).toHaveBeenCalledWith(QUESTION);
-    await waitFor(() => expect(language()).toBe('zh'));
-    await waitFor(() => expect(adapter.row.locale).toBe('zh'));
+    await waitFor(() => expect(language()).toBe('zh-Hans'));
+    await waitFor(() => expect(adapter.row.locale).toBe('zh-Hans'));
     expect(adapter.update).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });
@@ -165,8 +168,8 @@ describe('the language menu asks before a switch drops unsaved edits (objectui#1
     edit();
     confirmSpy.mockReturnValue(true);
 
-    pick('中文');
-    await waitFor(() => expect(language()).toBe('zh'));
+    pick(SIMPLIFIED);
+    await waitFor(() => expect(language()).toBe('zh-Hans'));
     expect(unloadHeldDuringSwitch).toBe(false);
     expect(confirmSpy).toHaveBeenCalledTimes(1);
   });
@@ -194,9 +197,9 @@ describe('CONTROL: nothing registered, nothing asked (objectui#13254)', () => {
   it('a clean page switches at once', async () => {
     mount();
 
-    pick('中文');
+    pick(SIMPLIFIED);
     expect(confirmSpy).not.toHaveBeenCalled();
-    await waitFor(() => expect(language()).toBe('zh'));
-    await waitFor(() => expect(adapter.row.locale).toBe('zh'));
+    await waitFor(() => expect(language()).toBe('zh-Hans'));
+    await waitFor(() => expect(adapter.row.locale).toBe('zh-Hans'));
   });
 });
