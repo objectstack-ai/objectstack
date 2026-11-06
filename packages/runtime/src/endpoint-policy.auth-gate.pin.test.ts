@@ -175,6 +175,8 @@ function servicesPlugin(): Plugin {
                             ? [{ id: 'key_1', key: API_KEY_HASH, user_id: 'u_member', revoked: false, scopes: '[]' }]
                             : [];
                     }
+                    // The key's owner exists: an API key authenticates only as an owner who exists.
+                    if (object === 'sys_user') return options?.where?.id === 'u_member' ? [{ id: 'u_member' }] : [];
                     if (object === 'sys_user_permission_set') {
                         const uid = options?.where?.user_id;
                         return uid in POSTURES

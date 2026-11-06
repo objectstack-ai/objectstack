@@ -7,4 +7,7 @@ export default class Build extends Compile {
 
   /** `os build` is what a deployment runs, so it says what the artifact leaves behind. */
   protected override reportsLocalCustomizations = true;
+
+  /** `os build` is the step before `os deploy`, so it says so (`utils/next-steps.ts`). */
+  protected override printsNextStep = true;
 }

@@ -162,7 +162,10 @@ function dispatcherWithKey(row: Record<string, unknown>) {
     find: vi.fn(async (object: string, q: any) => (
       object === 'sys_api_key' && q?.where?.key === keyHash
         ? [{ id: 'key_1', key: keyHash, prefix: 'osk_dispatch', user_id: 'u_owner', revoked: false, scopes: '[]', ...row }]
-        : []
+        // The key's owner exists: an API key authenticates only as an owner who exists.
+        : object === 'sys_user' && q?.where?.id === 'u_owner'
+          ? [{ id: 'u_owner' }]
+          : []
     )),
     insert: vi.fn(async (_object: string, data: any) => { inserted.push(data); return { id: 'key_new' }; }),
     update: vi.fn(async (_object: string, data: any, options?: any) => {

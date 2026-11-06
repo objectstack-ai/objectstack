@@ -2362,6 +2362,28 @@ const ko = {
       dark: "다크",
       system: "시스템",
     },
+    // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
+    assignedWork: {
+      title: '이 사람이 맡고 있는 레코드',
+      loading: '이 사람이 맡고 있는 레코드를 세는 중…',
+      countFailed: '이 사람이 맡고 있는 레코드를 셀 수 없습니다: {{message}}',
+      noClient: '여기서는 이 사람이 맡고 있는 레코드를 셀 수 없습니다.',
+      none: '이 사람이 맡고 있는, 읽을 수 있는 레코드가 없습니다.',
+      summary: '읽을 수 있는 레코드 중 {{total}}건을 맡고 있습니다: 소유 {{owned}}건, 할당 {{assigned}}건.',
+      row: '{{object}} · {{field}}',
+      notTransferable: '여러 사람을 넣는 필드라 여기서 인계할 수 없습니다.',
+      truncated: '모든 사용자 필드를 세지는 않았습니다. 더 맡고 있을 수 있습니다.',
+      unreadable: '읽기 권한이 없어 세지 않았습니다: {{objects}}',
+      handoverTo: '인계 대상',
+      handoverHint: '선택 사항입니다. 차단은 인계를 기다리지 않습니다.',
+      handover: '인계',
+      handingOver: '인계 중…',
+      handoverNext: '다음 묶음 인계',
+      targetBanned: '그 사람은 차단되었습니다. 활성 사용자를 선택하세요.',
+      transferRefused: '인계가 거부되었습니다: {{message}}',
+      report: '{{updated}}건 인계, {{failed}}건 이동 실패, 아직 {{remaining}}건을 맡고 있습니다.',
+      failure: '{{object}} {{id}}: {{message}}',
+    },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
       managedUsers: {
@@ -2671,6 +2693,8 @@ const ko = {
         title: '감사 로그',
         subtitle: '읽기 전용 시스템 활동 및 레코드 변경 내역입니다. 최신 항목이 먼저 표시됩니다.',
         openAsList: '목록으로 열기',
+        openEntryPage: '항목 페이지 열기',
+        openEntryPageHint: '항목 페이지에는 같은 레코드의 모든 변경 사항이 최신순으로 표시됩니다.',
         openPresetAsList: '{{label}}을(를) 목록으로 열기',
         presets: '프리셋',
         presetOtherSource: '이 뷰는 다른 데이터 소스를 읽습니다.',
