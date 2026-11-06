@@ -6272,7 +6272,7 @@ export class AuthManager {
         where: { id: sessionId },
         fields: ['id', 'created_at', 'last_activity_at', 'revoked_at'],
         context: SYSTEM_CTX,
-      } as any);
+      });
     } catch {
       return 'admitted';
     }
@@ -6285,7 +6285,7 @@ export class AuthManager {
     if (!reason && limits.idleMinutes > 0 && last
       && now - new Date(last).getTime() > limits.idleMinutes * 60_000) reason = 'idle_timeout';
     if (!reason) return 'admitted';
-    await (engine as any).update(
+    await engine.update(
       'sys_session',
       { id: sessionId, expires_at: new Date(now - 1000), revoked_at: new Date(now), revoke_reason: reason },
       { context: SYSTEM_CTX },
