@@ -57,6 +57,7 @@ import {
   groupFilterChips,
   deleteFieldFilterParams,
   URL_FILTER_OPS,
+  URL_TRIPLE_OP_WORD,
   type FilterTriple,
 } from './drillUrlFilters.js';
 import {
@@ -147,6 +148,9 @@ const TRIPLE_OP_TO_SPEC_ALIAS: Record<string, string> = {
   ...Object.fromEntries(
     Object.entries(URL_FILTER_OPS).map(([suffix, symbol]) => [symbol, suffix]),
   ),
+  // objectstack#30743 — negation, text and membership triples carry their
+  // canonical word already, which `normalizeFilterOperator` returns unchanged.
+  ...URL_TRIPLE_OP_WORD,
 };
 
 /**
@@ -171,7 +175,7 @@ const TRIPLE_OP_TO_SPEC_ALIAS: Record<string, string> = {
  * from the persisted view with a debug-level note, never written off-spec:
  * declared = enforced, and a view body that fails the record gate is rejected
  * whole at publish time, which would lose the user's other conditions too.
- * (`parseUrlFilterTriples` only ever emits the five operators bridged above, so
+ * (`parseUrlFilterTriples` only ever emits operators bridged above, so
  * the drop path is defence in depth against the URL contract growing an
  * operator the spec has no word for.)
  */
@@ -675,7 +679,9 @@ export function ObjectDataPage({ dataSource, objects }: any) {
                 unwatched second English spelling that hides a pack miss
                 (objectui#3469 deleted exactly that pattern from this console).
               */}
-              <span className="text-muted-foreground">{textKey ? t(textKey) : text}</span>
+              <span className="text-muted-foreground">
+                {textKey && text !== undefined ? `${t(textKey)} ${text}` : textKey ? t(textKey) : text}
+              </span>
               <button
                 type="button"
                 onClick={() => removeUrlFilter(field)}
