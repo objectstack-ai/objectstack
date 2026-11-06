@@ -34,7 +34,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { resolveStackCollection } from '@objectstack/core';
-import { expandViewContainer } from '@objectstack/spec/ui';
+import { deriveViewContainerObject, expandViewContainer } from '@objectstack/spec/ui';
 
 import type { LoadedScenario } from '../loader.js';
 import { scenarioNamespace } from '../schema.js';
@@ -81,22 +81,23 @@ export function taggedViewKinds(card: Pick<LoadedScenario['card'], 'capabilities
 
 const nameOf = (v: unknown): string | undefined => (typeof v === 'object' && v !== null && typeof (v as { name?: unknown }).name === 'string' ? (v as { name: string }).name : undefined);
 
-/** Every list view the build declares: `{ object, name: '<object>.<key>', type }`, in declaration order. */
+/** Every list view the build declares: `{ object, name: '<object>.<key>', type }`, in declaration order, containers expanded by the spec's own composer. */
 export function declaredListViews(artifact: unknown): Array<{ object: string; name: string; type: string }> {
   const out: Array<{ object: string; name: string; type: string }> = [];
   for (const raw of resolveStackCollection(artifact, 'views')) {
     if (typeof raw !== 'object' || raw === null) continue;
     const item = raw as Record<string, unknown>;
-    const object = typeof item.object === 'string' ? item.object : nameOf(item);
-    if (!object) continue;
     if ('list' in item || 'listViews' in item) {
+      // The platform's one spelling of a container's binding (a built container usually carries no `object` of its own).
+      const object = deriveViewContainerObject(item);
+      if (!object) continue;
       for (const v of expandViewContainer(object, item)) {
         if (v.viewKind !== 'list') continue;
         const type = (v.config as { type?: unknown } | undefined)?.type;
         out.push({ object, name: v.name, type: typeof type === 'string' ? type : 'grid' });
       }
-    } else if (typeof item.type === 'string' && typeof item.name === 'string') {
-      out.push({ object, name: item.name.includes('.') ? item.name : `${object}.${item.name}`, type: item.type });
+    } else if (typeof item.type === 'string' && typeof item.name === 'string' && typeof item.object === 'string') {
+      out.push({ object: item.object, name: item.name.includes('.') ? item.name : `${item.object}.${item.name}`, type: item.type });
     }
   }
   return out;
@@ -240,12 +241,24 @@ export function playwrightBrowser(opts: PlaywrightBrowserOptions = {}): Screensh
         const signIn = await context.request.post(`${baseUrl}/api/v1/auth/sign-in/email`, { data: admin });
         if (!signIn.ok()) throw new Error(`the browser's admin sign-in was refused: ${signIn.status()}`);
         const page = await context.newPage();
+        const visit = async (path: string) => {
+          await page.goto(`${baseUrl}${path}`, { waitUntil: 'load' });
+          // A page that never goes quiet (a stream, a poll) is shot after the budget, not skipped.
+          await page.waitForLoadState('networkidle', { timeout: opts.settleTimeoutMs ?? 30_000 }).catch(() => undefined);
+          await page.waitForTimeout(1_000);
+        };
+        // An administrator's first visit to an app page can open first-run UI over it (measured on
+        // 18.3: a default-currency dialog over the first app page, once per browser session; the
+        // Console's landing page does not take it). So the first shot's page is visited once
+        // unshot, and nothing is shot under that dialog.
+        let warmed = false;
         return {
           async capture(path, file) {
-            await page.goto(`${baseUrl}${path}`, { waitUntil: 'load' });
-            // A page that never goes quiet (a stream, a poll) is shot after the budget, not skipped.
-            await page.waitForLoadState('networkidle', { timeout: opts.settleTimeoutMs ?? 30_000 }).catch(() => undefined);
-            await page.waitForTimeout(1_000);
+            if (!warmed) {
+              await visit(path);
+              warmed = true;
+            }
+            await visit(path);
             await page.screenshot({ path: file });
           },
           close: () => browser.close(),

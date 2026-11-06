@@ -94,6 +94,18 @@ describe('planShots', () => {
     expect(plan.skipped.map((s) => s.kind)).toEqual(['list', 'record', 'dashboard']);
   });
 
+  it('reads a container as `os build` writes it: no `object` of its own, the binding in `list.data.object`', () => {
+    // The shape measured from a create-objectstack 18.3 project's dist/objectstack.json.
+    const built = {
+      list: { label: 'All accounts', type: 'grid', data: { provider: 'object', object: 'demoorder_account' }, columns: [{ field: 'name' }] },
+      listViews: { board: { label: 'By industry', type: 'kanban', data: { provider: 'object', object: 'demoorder_account' }, columns: ['name'], kanban: { groupByField: 'industry' } } },
+    };
+    expect(declaredListViews(orderBuild({ views: [built] }))).toEqual([
+      { object: 'demoorder_account', name: 'demoorder_account.board', type: 'kanban' },
+      { object: 'demoorder_account', name: 'demoorder_account.default', type: 'grid' },
+    ]);
+  });
+
   it('reads a container through the spec composer: the default list is `<object>.default`, a standalone view keeps its name', () => {
     expect(declaredListViews(orderBuild({ views: [{ object: 'demoorder_invoice', list: { type: 'grid' } }, { name: 'demoorder_account.board', object: 'demoorder_account', type: 'kanban' }] }))).toEqual([
       { object: 'demoorder_invoice', name: 'demoorder_invoice.default', type: 'grid' },
