@@ -71,6 +71,8 @@ const mockClient = {
   layered: vi.fn(async (_type: string, _name: string, _opts?: { packageId?: string }) => ({
     effective: PAGE,
     code: PAGE,
+    // The pending draft as stored (objectstack#29814), as `getDraft` below serves it.
+    draft: PAGE,
     editable: true,
   })),
   // A pending draft is what makes the Publish button exist at all.
