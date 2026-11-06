@@ -13,7 +13,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
-import { gradeCardOperation } from '../../src/score/index.js';
+import { gradeCardOperation, type OperationObservation } from '../../src/score/index.js';
+import type { PersonaAccount } from '../../src/runner/app.js';
 import {
   ApiBillingRefusedError,
   assertSubscriptionLogin,
@@ -21,9 +22,20 @@ import {
   RecordedDriver,
   subscriptionOnlyEnv,
 } from '../../src/runner/driver.js';
-import { asksToConfirm, countWrites, lastReadRefusal, noWriteAttempted, observedAnswer, observeOperation, uncodedToolError } from '../../src/runner/observe.js';
+import {
+  asksToConfirm,
+  asksToCorrect,
+  countWrites,
+  lastReadRefusal,
+  noWriteAttempted,
+  observedAnswer,
+  observeOperation,
+  observeProbe,
+  probeCall,
+  uncodedToolError,
+} from '../../src/runner/observe.js';
 import { citationLabels, namespaceOfConfig, namespacedScenario, permissionSetName, templateHostName } from '../../src/runner/namespace.js';
-import { changeSize, hiddenValues, installableManifest, seedDependence, seedOrder, withoutItems } from '../../src/runner/orchestrate.js';
+import { changeSize, hiddenValues, installableManifest, probeValues, seedDependence, seedOrder, withoutItems } from '../../src/runner/orchestrate.js';
 import { buildPrompt, dataContract, iteratePrompt, questionPrompt, templateIteratePrompt, unheldHandles, userHandleFields, verifyArgs, verifyFlags } from '../../src/runner/prompts.js';
 import { parseStreamJson, refusalCodeOf, toolNameOf, type ParsedTurn } from '../../src/runner/transcript.js';
 
@@ -31,8 +43,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const CARD_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/crm_account_with_contacts.json');
 const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
 
-function load(): LoadedScenario {
-  const { card, refusals } = loadScenarioFile(CARD_FILE, { areas: readCapabilityAreas(AREAS_DIR) });
+function load(file = CARD_FILE): LoadedScenario {
+  const { card, refusals } = loadScenarioFile(file, { areas: readCapabilityAreas(AREAS_DIR) });
   if (!card) throw new Error(refusals.map(formatRefusal).join('\n'));
   return card;
 }
@@ -155,6 +167,7 @@ describe('observeOperation → gradeCardOperation, on the real crm card', () => 
       before: seedContacts,
       after: seedContacts,
       rowsByObject: { contact: seedContacts },
+      probe: { answer: { kind: 'refused', code: 'VALIDATION_FAILED' }, writes: 0 },
     });
     expect(gradeCardOperation(crm, 'contact_bad_email', refused).pass).toBe(true);
 
@@ -207,6 +220,108 @@ describe('observeOperation → gradeCardOperation, on the real crm card', () => 
     const obs = observeOperation({ op: op('remove_ben'), turn: turnOf('Deleted.'), before: seedContacts, after, rowsByObject: { contact: after } });
     expect(obs.answer.kind).toBe('applied');
     expect(gradeCardOperation(crm, 'remove_ben', obs).pass).toBe(false);
+  });
+});
+
+describe('the validation operation (#30883 item 2, ruled B): the agent half and the probe half', () => {
+  // contact_bad_email: as partner_user, create a contact with the email "gil at acme";
+  // the card declares refused VALIDATION_FAILED, and its write_validation guardrail names it.
+  const crm = load();
+  const op = crm.card.run.operations.find((o) => o.id === 'contact_bad_email')!;
+  const contacts = crm.card.run.seed.contact!.map((r) => ({ ...r }));
+  const refusedText = JSON.stringify({ error: { code: 'VALIDATION_FAILED', status: 400 } }, null, 2);
+  const call = probeCall(op, op.values!);
+  const validating = observeProbe(call, { output: refusedText, isError: true }, contacts, contacts);
+  const broken = observeProbe(call, { output: '{"id":"p1"}', isError: false }, contacts, [...contacts, { id: 'p1', full_name: 'Gil Ray', email: 'gil at acme' }]);
+  const observe = (turn: ParsedTurn, probe = validating) => observeOperation({ op, turn, before: contacts, after: contacts, rowsByObject: { contact: contacts }, probe });
+  const grade = (obs: OperationObservation) => gradeCardOperation(crm, 'contact_bad_email', obs);
+  const failing = (obs: OperationObservation) => grade(obs).checks.filter((c) => !c.pass).map((c) => c.check);
+  // What the first live run's agent did, as the card reports it: it wrote nothing and asked for the full address.
+  const PRE_VALIDATED = '"gil at acme" is not a valid email address, so I have not created the contact. Could you give me Gil Ray\'s full email address?';
+
+  it('the probe is the declared write as the MCP tool call that makes it', () => {
+    expect(call).toEqual({ tool: 'create_record', args: { objectName: 'contact', data: { full_name: 'Gil Ray', email: 'gil at acme' } } });
+    const update = crm.card.run.operations.find((o) => o.kind === 'update')!;
+    expect(probeCall(update, update.values!)).toEqual({ tool: 'update_record', args: { objectName: 'contact', recordId: update.target, data: update.values } });
+    expect(() => probeCall(crm.card.run.operations.find((o) => o.kind === 'delete')!, {})).toThrow(RangeError);
+  });
+
+  it('① the agent wrote and was refused VALIDATION_FAILED, and so was the probe, nothing written: passes', () => {
+    const turn = turnOf('That was refused.', [{ name: 'create_record', input: { objectName: 'contact' }, output: refusedText, isError: true }]);
+    expect(validating).toEqual({ answer: { kind: 'refused', code: 'VALIDATION_FAILED' }, writes: 0 });
+    expect(grade(observe(turn))).toEqual({
+      pass: true,
+      checks: [
+        { check: 'agent:refused:VALIDATION_FAILED-or-withheld', pass: true, detail: 'refused VALIDATION_FAILED' },
+        { check: 'no-write', pass: true, detail: '0 record(s) written' },
+        { check: 'probe:refused:VALIDATION_FAILED', pass: true, detail: 'the declared write, sent by the runner: refused VALIDATION_FAILED' },
+        { check: 'probe:no-write', pass: true, detail: "0 record(s) written by the runner's declared write" },
+      ],
+    });
+  });
+
+  it("② the probe's write was stored: fails on the probe half alone — the app's failure, not the agent's", () => {
+    expect(broken).toEqual({ answer: { kind: 'applied' }, writes: 1 });
+    const obs = observe(turnOf(PRE_VALIDATED), broken);
+    expect(failing(obs)).toEqual(['probe:refused:VALIDATION_FAILED', 'probe:no-write']);
+    expect(grade(obs).checks.slice(2).map((c) => c.detail)).toEqual(['the declared write, sent by the runner: applied', "1 record(s) written by the runner's declared write"]);
+    // A door that failed the probe with no code, or with another code, is not the validation refusal either.
+    expect(observeProbe(call, { output: 'MCP error -32602', isError: true }, contacts, contacts)).toEqual({ answer: { kind: 'refused', code: uncodedToolError }, writes: 0 });
+    const denied = observeProbe(call, { output: '{"error":{"code":"PERMISSION_DENIED","status":403}}', isError: true }, contacts, contacts);
+    expect(failing(observe(turnOf(PRE_VALIDATED), denied))).toEqual(['probe:refused:VALIDATION_FAILED']);
+  });
+
+  it('③ the agent caught the bad value first — no write, nothing written, a reply asking for a correction: passes', () => {
+    const obs = observe(turnOf(PRE_VALIDATED));
+    expect([obs.answer, obs.writes, obs.withheld]).toEqual([{ kind: 'refused', code: noWriteAttempted }, 0, true]);
+    expect(grade(obs).pass).toBe(true);
+    expect(grade(obs).checks[0]).toEqual({
+      check: 'agent:refused:VALIDATION_FAILED-or-withheld',
+      pass: true,
+      detail: 'withheld: refused (no write attempted), and the reply declines the write or asks for a correction',
+    });
+    for (const reply of ['邮箱“gil at acme”格式不正确,请提供完整的邮箱地址。', "I can't save that contact: the email address is incomplete."]) {
+      expect(grade(observe(turnOf(reply))).pass).toBe(true);
+    }
+  });
+
+  it('④ the agent did nothing and said nothing of it: fails on the agent half, while the probe still passes', () => {
+    for (const reply of ['', 'Done — Gil Ray is in your contacts.']) {
+      const obs = observe(turnOf(reply));
+      expect(obs.withheld).toBe(false);
+      expect(failing(obs)).toEqual(['agent:refused:VALIDATION_FAILED-or-withheld']);
+    }
+    // The withholding wording after a write the door stored is not withheld.
+    const wrote = observeOperation({
+      op,
+      turn: turnOf(PRE_VALIDATED, [{ name: 'create_record', input: { objectName: 'contact' }, output: '{"id":"n1"}' }]),
+      before: contacts,
+      after: [...contacts, { id: 'n1' }],
+      rowsByObject: {},
+      probe: validating,
+    });
+    expect(wrote.withheld).toBe(false);
+    expect(failing(wrote)).toEqual(['agent:refused:VALIDATION_FAILED-or-withheld', 'no-write']);
+    // A probe the runner did not send is not observed, never a pass.
+    expect(failing(observeOperation({ op, turn: turnOf(PRE_VALIDATED), before: contacts, after: contacts, rowsByObject: {} }))).toEqual([
+      'probe:refused:VALIDATION_FAILED',
+      'probe:no-write',
+    ]);
+  });
+
+  it('asksToCorrect reads a correction asked for or a value named invalid, and not a plain report', () => {
+    for (const r of ['Could you provide the full address?', 'What is the correct email?', 'That email is invalid.', 'A title is required.', 'This payment would exceed the open balance.', '请补充任务标题。']) {
+      expect(asksToCorrect(r), r).toBe(true);
+    }
+    for (const r of ['Done.', 'Created the contact Gil Ray.', '']) expect(asksToCorrect(r), r).toBe(false);
+  });
+
+  it('the probe sends a user handle as its user id, as the seed loads it (task_without_title: assignee u_kim)', () => {
+    const project = load(resolve(HERE, '../../../../../docs/qa/scenarios/project_with_tasks.json'));
+    const task = project.card.run.operations.find((o) => o.id === 'task_without_title')!;
+    const contractor: PersonaAccount = { persona: 'contractor', userId: 'u-contractor', email: 'c@x', apiKey: 'k', permissionSet: { name: 'demopm_contractor', assigned: true } };
+    expect(probeValues(project.card, task, [contractor], 'u-admin')).toEqual({ project: 'p2', status: 'todo', assignee: 'u-contractor' });
+    expect(probeValues(project.card, task, [], 'u-admin').assignee).toBe('u-admin');
   });
 });
 

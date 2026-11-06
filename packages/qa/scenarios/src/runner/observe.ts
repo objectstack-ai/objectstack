@@ -43,12 +43,25 @@
  * declare them and nobody can mistake one for a code a door answered. An
  * operation the agent never carried out, on an object that never refused it,
  * can never grade as the refusal the card expected.
+ *
+ * Two more facts serve the operation a card's `write_validation` guardrail
+ * names (#30883 item 2), which the grader judges in two halves:
+ *
+ *   - `withheld`: the agent sent no write on the object, nothing was written,
+ *     and its reply declines the write (`declines`, the question grader's
+ *     list) or names the value as invalid or asks for a correction
+ *     (`asksToCorrect`) — a careful agent that caught the bad value first;
+ *   - `probe`: after the turn, the runner sends the operation's declared write
+ *     itself ({@link probeCall}), as the same persona through the same MCP
+ *     write door, and reads the door's answer by rules 1–3 and 6 above
+ *     ({@link observeProbe}) — the app's rule, measured whatever the agent did.
  */
 
 import { ErrorCode } from '@objectstack/spec/api';
 
 import type { ScenarioCard, Scalar } from '../schema.js';
-import type { ObservedAnswer, OperationObservation } from '../score/index.js';
+import { declines, type ObservedAnswer, type OperationObservation, type ProbeObservation } from '../score/index.js';
+import type { ToolAnswer } from './app.js';
 import { refusalCodeOf, type ParsedTurn, type RunnerToolCall } from './transcript.js';
 
 export type CardOperation = ScenarioCard['run']['operations'][number];
@@ -116,6 +129,21 @@ export function asksToConfirm(replyText: string): boolean {
   return /\b(confirm|are you sure|shall i|should i|do you want me to|would you like me to|proceed\?)\b|确认|确定要|是否要/i.test(replyText);
 }
 
+/**
+ * The reply names the value it was asked to write as invalid or incomplete, or
+ * asks the person to correct or supply it. Deterministic: a closed phrase list.
+ */
+export function asksToCorrect(replyText: string): boolean {
+  return /\b(?:please (?:provide|give|share|send|enter|supply|correct|fix|check|double-check|verify|confirm)|(?:could|can|would) you (?:please )?(?:provide|give|share|send|enter|supply|correct|fix|check|double-check|verify|clarify|confirm)|(?:what|which)(?: is|'s| should be) the (?:correct|right|full|complete|intended|actual|valid)|(?:not|isn't|is not|doesn't look like|does not look like) (?:a )?valid|invalid|incomplete|malformed|missing|required|insufficient|exceed(?:s|ed|ing)?)\b|请(?:提供|补充|更正|修正|确认|核对|检查)|无效|不是有效|不合法|格式不对|格式不正确|不完整|缺少|必填|超过|超出|不足/i.test(
+    replyText,
+  );
+}
+
+/** The agent sent no write on `object`, nothing was written, and the reply declines the write or asks for a correction. */
+export function withheldWrite(turn: ParsedTurn, object: string, writes: number): boolean {
+  return writeCallsOn(turn, object).length === 0 && writes === 0 && (declines(turn.replyText) || asksToCorrect(turn.replyText));
+}
+
 const failed = (c: RunnerToolCall) => c.isError === true || refusalCodeOf(c.output) !== undefined;
 
 /** Decide how the write door answered (the ordered rules in the module header). */
@@ -155,16 +183,57 @@ export interface ObserveInput {
   rowsByObject: Readonly<Record<string, readonly Row[]>>;
   /** The persona the audit trail named for the touched row; `null` = named none; absent = not read. */
   auditActor?: string | null;
+  /** A validation operation's probe ({@link observeProbe}); absent = not run. */
+  probe?: ProbeObservation;
 }
 
 /** Assemble the observation the write grader takes. */
 export function observeOperation(input: ObserveInput): OperationObservation {
   const writes = countWrites(input.before, input.after);
-  const obs: OperationObservation = { answer: observedAnswer(input.turn, input.op.object, writes), writes };
+  const obs: OperationObservation = {
+    answer: observedAnswer(input.turn, input.op.object, writes),
+    writes,
+    withheld: withheldWrite(input.turn, input.op.object, writes),
+  };
   const state = postStateRows(input.op, input.rowsByObject);
   if (state) obs.state = state;
   if (input.auditActor !== undefined) obs.auditActor = input.auditActor;
+  if (input.probe !== undefined) obs.probe = input.probe;
   return obs;
+}
+
+/** The MCP tool call that makes an operation's declared write. */
+export interface ProbeCall {
+  tool: 'create_record' | 'update_record';
+  args: { objectName: string; recordId?: string; data: Record<string, unknown> };
+}
+
+/**
+ * A validation operation's declared write as the MCP tool call that makes it:
+ * what the runner sends as the acting persona after the agent's turn. `values`
+ * are the operation's declared values as the app holds them (a user handle
+ * already replaced by its user's id, as the seed loads it).
+ */
+export function probeCall(op: CardOperation, values: Readonly<Record<string, unknown>>): ProbeCall {
+  if (op.kind === 'create') return { tool: 'create_record', args: { objectName: op.object, data: { ...values } } };
+  if (op.kind === 'update' && op.target !== undefined) {
+    return { tool: 'update_record', args: { objectName: op.object, recordId: op.target, data: { ...values } } };
+  }
+  throw new RangeError(`${op.id}: a \`${op.kind}\` is not a write the probe sends`);
+}
+
+/**
+ * How the write door answered the probe, read by the rules a write call is
+ * read by (1–3 and 6 of the header), over the object's rows before and after it.
+ */
+export function observeProbe(call: ProbeCall, answer: ToolAnswer, before: readonly Row[], after: readonly Row[]): ProbeObservation {
+  const writes = countWrites(before, after);
+  const turn: ParsedTurn = {
+    replyText: '',
+    toolCalls: [{ name: call.tool, rawName: call.tool, input: call.args, output: answer.output, ...(answer.isError ? { isError: true } : {}) }],
+    meta: {},
+  };
+  return { answer: observedAnswer(turn, call.args.objectName, writes), writes };
 }
 
 /** The id of the row an applied operation touched: its target, or the first `where` match. */

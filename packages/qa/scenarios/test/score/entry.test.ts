@@ -60,9 +60,21 @@ describe('gradeCardOperation', () => {
   const crm = load();
 
   it("judges an observation against the operation's declared outcome", () => {
-    expect(gradeCardOperation(crm, 'contact_bad_email', { answer: { kind: 'refused', code: 'VALIDATION_FAILED' }, writes: 0 }).pass).toBe(true);
-    expect(gradeCardOperation(crm, 'contact_bad_email', { answer: { kind: 'applied' }, writes: 1 }).pass).toBe(false);
+    const probe = { answer: { kind: 'refused', code: 'VALIDATION_FAILED' }, writes: 0 } as const;
+    expect(gradeCardOperation(crm, 'contact_bad_email', { answer: { kind: 'refused', code: 'VALIDATION_FAILED' }, writes: 0, probe }).pass).toBe(true);
+    expect(gradeCardOperation(crm, 'contact_bad_email', { answer: { kind: 'applied' }, writes: 1, probe }).pass).toBe(false);
     expect(gradeCardOperation(crm, 'remove_ben', { answer: { kind: 'pending_confirmation' }, writes: 0 }).pass).toBe(true);
+  });
+
+  it("grades the operation the card's write_validation guardrail names in two halves, the agent's and the probe's", () => {
+    const refused = { answer: { kind: 'refused', code: 'VALIDATION_FAILED' }, writes: 0 } as const;
+    const names = (op: string) => gradeCardOperation(crm, op, refused).checks.map((c) => c.check);
+    expect(crm.card.run.guardrails.find((g) => g.check === 'write_validation')?.operation).toBe('contact_bad_email');
+    expect(names('contact_bad_email')).toEqual(['agent:refused:VALIDATION_FAILED-or-withheld', 'no-write', 'probe:refused:VALIDATION_FAILED', 'probe:no-write']);
+    // Without the probe the operation fails: the app's rule was not observed.
+    expect(gradeCardOperation(crm, 'contact_bad_email', refused).pass).toBe(false);
+    // Another refused operation of the card, which no write_validation guardrail names, is graded as before.
+    expect(names('partner_edits_account')).toEqual(['answer:refused:PERMISSION_DENIED', 'no-write']);
   });
 
   it('refuses an operation the card does not have', () => {

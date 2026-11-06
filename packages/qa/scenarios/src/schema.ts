@@ -474,3 +474,13 @@ export const ScenarioCardSchema = z.strictObject({
   iterate: IterateSchema,
 });
 export type ScenarioCard = z.infer<typeof ScenarioCardSchema>;
+
+/**
+ * The operation a card's `write_validation` guardrail names (a `refused`
+ * create or update; the loader holds that). The runner probes it with its own
+ * write of the declared values after the agent's turn, and the grader judges
+ * the agent and the probe as two halves (#30883 item 2).
+ */
+export function isWriteValidationOperation(card: Pick<ScenarioCard, 'run'>, operationId: string): boolean {
+  return card.run.guardrails.some((g) => g.check === 'write_validation' && g.operation === operationId);
+}

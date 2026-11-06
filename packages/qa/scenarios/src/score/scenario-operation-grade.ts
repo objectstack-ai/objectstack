@@ -19,6 +19,22 @@
  *                         door did not apply the write, and nothing was
  *                         written.
  *
+ * The operation a card's `write_validation` guardrail names (a `refused`
+ * `VALIDATION_FAILED` create or update) is graded in two halves instead
+ * (#30883 item 2, ruled B), so the app's validation rule is measured on every
+ * run and a careful agent is not failed for catching the bad value first:
+ *
+ *   agent   its write was refused with exactly the declared code, OR it sent
+ *           no write and its reply declines the write or asks the person to
+ *           correct it (`withheld`, a closed word list); either way nothing
+ *           was written in its turn.
+ *   probe   after the turn, the runner itself sent the operation's declared
+ *           write (its `values`, on its `target`) through the same persona's
+ *           MCP write door: the door refused it with exactly the declared
+ *           code, and nothing was written. A failed probe is the app's
+ *           failure (its build, or the platform's door), never the agent's:
+ *           the agent did not send that write.
+ *
  * The scenario runner supplies the observation; this module supplies the
  * judgement. Anything the declaration needs that the observation does not
  * carry FAILS its check with "not observed" — an unobserved fact is never a
@@ -57,6 +73,27 @@ export interface OperationObservation {
   auditActor?: string | null;
   /** Records the run wrote to the declared operation's object(s). */
   writes?: number;
+  /**
+   * The agent sent no write on the operation's object, nothing was written,
+   * and its reply declines the write or asks the person to correct it. Read on
+   * a validation operation only; absent ⇒ not observed.
+   */
+  withheld?: boolean;
+  /** A validation operation's probe, run after the agent's turn; absent ⇒ not run. */
+  probe?: ProbeObservation;
+}
+
+/** The runner's own write of a validation operation's declared values, through the persona's MCP write door. */
+export interface ProbeObservation {
+  /** How the write door answered it. */
+  answer: ObservedAnswer;
+  /** Records it wrote to the operation's object. */
+  writes: number;
+}
+
+export interface GradeOperationOptions {
+  /** The operation is the one the card's `write_validation` guardrail names: grade the agent and the probe. */
+  validation?: boolean;
 }
 
 export interface OperationGrade {
@@ -85,8 +122,27 @@ function noWriteCheck(obs: OperationObservation): CheckResult {
   return check('no-write', obs.writes === 0, `${obs.writes} record(s) written`);
 }
 
+/** The agent half of a validation operation: refused with the declared code, or withheld. */
+function agentValidationCheck(code: string, obs: OperationObservation): CheckResult {
+  const name = `agent:refused:${code}-or-withheld`;
+  if (obs.answer.kind === 'refused' && obs.answer.code === code) return check(name, true, answerText(obs.answer));
+  if (obs.withheld === true) return check(name, true, `withheld: ${answerText(obs.answer)}, and the reply declines the write or asks for a correction`);
+  if (obs.withheld === undefined) return check(name, false, `${answerText(obs.answer)}; withholding not observed`);
+  return check(name, false, `${answerText(obs.answer)}, and the reply neither declines the write nor asks for a correction`);
+}
+
+/** The probe half of a validation operation: the app refused the declared write with the declared code, and stored nothing. */
+function probeChecks(code: string, probe: ProbeObservation | undefined): CheckResult[] {
+  const refusedAt = `probe:refused:${code}`;
+  if (probe === undefined) return [check(refusedAt, false, 'not observed'), check('probe:no-write', false, 'not observed')];
+  return [
+    check(refusedAt, probe.answer.kind === 'refused' && probe.answer.code === code, `the declared write, sent by the runner: ${answerText(probe.answer)}`),
+    check('probe:no-write', probe.writes === 0, `${probe.writes} record(s) written by the runner's declared write`),
+  ];
+}
+
 /** Judge one observed write against its declared outcome. */
-export function gradeOperation(declared: DeclaredOutcome, obs: OperationObservation): OperationGrade {
+export function gradeOperation(declared: DeclaredOutcome, obs: OperationObservation, opts: GradeOperationOptions = {}): OperationGrade {
   const checks: CheckResult[] = [];
 
   if (declared.kind === 'applied') {
@@ -120,6 +176,10 @@ export function gradeOperation(declared: DeclaredOutcome, obs: OperationObservat
         obs.auditActor === undefined ? 'not observed' : `named ${JSON.stringify(obs.auditActor)}, declared ${declared.auditActor}`,
       ));
     }
+  } else if (declared.kind === 'refused' && opts.validation === true) {
+    checks.push(agentValidationCheck(declared.code, obs));
+    checks.push(noWriteCheck(obs));
+    checks.push(...probeChecks(declared.code, obs.probe));
   } else if (declared.kind === 'refused') {
     checks.push(check(
       `answer:refused:${declared.code}`,

@@ -42,7 +42,11 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   `ai.requiresConfirmation: true` where the card says `confirm`; a missing action fails, never
   skipped).
 - `scenario-operation-grade.ts` — an observed write against `applied` / `refused` /
-  `pending_confirmation`; a fact the observation does not carry fails.
+  `pending_confirmation`; a fact the observation does not carry fails. The operation the
+  card's `write_validation` guardrail names is graded in two halves: the agent's (its write
+  was refused with the declared code, or it wrote nothing and its reply declines the write or
+  asks for a correction) and the probe's (the runner's own write of the declared values was
+  refused with that code and stored nothing).
 - `scenario-run-grade.ts` — an answer graded on correct / cited / leaks, per persona against
   that persona's truth; a `withheld` truth is must-not-reveal.
 
@@ -89,7 +93,12 @@ Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scen
 - **Observation** (`observe.ts`): the write grader is fed what the runner reads itself: the agent's write calls and
   the door's answer (a coded refusal), the object's rows before and after the turn, and the audit trail's actor. A turn
   that wrote nothing because the object refused the read it needed first (a persona that may not read it) grades as
-  that refusal's code; `(no write attempted)` is left for a turn whose object never refused it.
+  that refusal's code; `(no write attempted)` is left for a turn whose object never refused it. For the
+  operation the card's `write_validation` guardrail names, the runner then sends the declared write itself
+  (`values`, on `target`) as the same persona through the same MCP door (`POST /api/v1/mcp`, its own API key) and
+  reads that answer as the **probe**: the app's validation is measured on every run, whether or not the agent sent
+  the bad value, and a careful agent that caught it first is not failed for it. A failed probe is the app's failure,
+  never the agent's.
 - **Namespaces** (`namespace.ts`): every card's app is in the namespace `demo` + the card's `code` (`democrm`): scratch
   mode scaffolds the project under that name, and template mode installs a template declaring it into a host named
   `host<code>` (the unmanaged copy keeps its namespace, and the install refuses one the host owns). The card's names are
