@@ -42,8 +42,9 @@ describe('dogfood: a plain group over a formula field is refused alike on the qu
     it(`${door}: a dimension over the formula → 400 INVALID_FIELD at groupBy.0, with the store-the-value remedy`, async () => {
       const res = await ask(door, 'budget_remaining');
       expect(res.status, JSON.stringify(res.body)).toBe(400);
-      expect(res.body.code).toBe('INVALID_FIELD');
-      const message = String(res.body.message ?? res.body.error);
+      // The ADR-0112 envelope: `{ success: false, error: { code, message, … } }`.
+      expect(res.body.error?.code, JSON.stringify(res.body)).toBe('INVALID_FIELD');
+      const message = String(res.body.error?.message);
       expect(message).toContain(
         `aggregate('${CUBE}'): groupBy.0 groups by 'budget_remaining', but 'budget_remaining' is a formula field`,
       );
@@ -59,6 +60,7 @@ describe('dogfood: a plain group over a formula field is refused alike on the qu
   it('the query and the dry run give one refusal, word for word', async () => {
     const query = await ask('/analytics/query', 'budget_remaining');
     const sql = await ask('/analytics/sql', 'budget_remaining');
-    expect(sql.body).toEqual(query.body);
+    expect(sql.status).toBe(400);
+    expect(sql.body.error).toEqual(query.body.error);
   });
 });
