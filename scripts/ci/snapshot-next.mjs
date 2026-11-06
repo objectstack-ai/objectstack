@@ -62,6 +62,10 @@
 //       cancelled, a warning. `--dry-run` prints the verdict and sends no POST.
 //   node scripts/ci/snapshot-next.mjs --self-test
 //
+//   SNAPSHOT_NEXT_ROOT=DIR  the tree every mode reads and versions, when this
+//       file does not sit in it (header, "Where the tooling runs from"). Unset,
+//       the tree is the repository this file sits in.
+//
 // ## Why each check exists
 //
 // The ruling binds one dist-tag: a snapshot is published under `next` alone and
@@ -131,6 +135,27 @@
 // refused. The hour itself is release.yml's to argue, at its `schedule:` block;
 // nothing here spells it.
 //
+// ## Where the tooling runs from
+//
+// The preflight selects a commit OLDER than main's tip by construction (the
+// newest with the full battery green ON it) and moves the tree to it, and the
+// snapshot job checks that commit out. That tree's copy of this file need not
+// know the modes the workflow calls -- the day after a change to this file
+// lands, the selected commit still predates it, and an older script printing
+// its usage on `stable-lane` or ignoring `--quiet-skip` would be a red run and
+// a false card. So both jobs run the lane's own tooling from the WORKFLOW's
+// commit: before the tree moves, `scripts/` is taken off `GITHUB_SHA` with
+// `git archive` into LANE_TOOLING_DIR (the runner's temp dir, outside the
+// tree, so the dry run's clean-tree check is untouched), the tree's
+// `node_modules` is linked beside it (this file imports `semver`; a dangling
+// link until the install, read by nothing before), and every snapshot-next.mjs
+// call is LANE_TOOLING_CALL with ROOT_ENV (job env, ROOT_ENV_LINE) naming the
+// tree it reads and versions. The build, the publish script and the registry
+// read-back stay the selected tree's own, as they are what it ships. The
+// supersede job reads main's own checkout and takes nothing. `snapshotWiring`
+// pins the take before the detach, the link, the env and that no call runs
+// off the selected tree.
+//
 // ## The quiet skip (schedule), the loud refusal (dispatch), and the card
 //
 // Five refusals are EXPECTED of a daily proposal and say nothing is wrong
@@ -145,7 +170,11 @@
 // `refusal=<kind>` and `reason=` in `$GITHUB_OUTPUT`, and the job's later steps
 // and the snapshot job read that output and do nothing -- a green run, nothing
 // queued, no card. On a DISPATCH the same reading is today's LOUD refusal: a
-// red run with the reason, since a human asked and is watching. The switch is
+// red run with the reason, since a human asked and is watching -- and
+// `refusal=<kind>` is recorded on BOTH starts, so the card, which files on a
+// failed preflight with NO `refusal`, never files for an expected refusal (the
+// select step's shell records `no-green-commit` the same way on both of its
+// branches; `snapshotWiring` pins each branch on its own). The switch is
 // `--quiet-skip`, which release.yml spells on the preflight job's refusing
 // steps as the schedule-only expression QUIET_SKIP_EXPRESSION and never on the
 // post-approval preflight. `proposalVerdict` is the one place the five kinds,
@@ -169,7 +198,7 @@
 // else; `stable-lane` reads and cannot write (its client refuses every non-GET).
 
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
@@ -188,7 +217,15 @@ import { ANCHOR_PACKAGE } from '../release-verify-npm.mjs';
 import { SNAPSHOT_EXPECTED_REFUSALS } from './scheduled-full-run.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = resolve(HERE, '../..');
+// The tree this script reads and versions (header, "Where the tooling runs
+// from"): ROOT_ENV when the lane set it -- the workflow's checkout, while this
+// file runs from the workflow commit's copy in the runner's temp dir -- else the
+// repository this file sits in.
+export const ROOT_ENV = 'SNAPSHOT_NEXT_ROOT';
+export function laneRoot(env = process.env) {
+  return env[ROOT_ENV] ? resolve(env[ROOT_ENV]) : resolve(HERE, '../..');
+}
+const REPO_ROOT = laneRoot();
 const RELEASE_WORKFLOW = resolve(HERE, '../../.github/workflows/release.yml');
 const PUBLISH_SCRIPT = resolve(HERE, '../release-snapshot-publish.sh');
 
@@ -227,9 +264,19 @@ export const SUPERSEDE_CALL = 'node scripts/ci/snapshot-next.mjs supersede --wor
 export const CARD_JOB = 'snapshot-next-card';
 export const CARD_STEP_MODULE = 'scripts/ci/scheduled-full-run-card.mjs';
 export const CARD_STEP = 'snapshotCardStep';
+// Where the lane's tooling runs from (header, "Where the tooling runs from"):
+// the preflight and snapshot jobs take `scripts/` off the WORKFLOW's commit
+// into the runner's temp dir before the tree moves to the selected commit, link
+// the tree's node_modules beside it (this file imports `semver`), and run every
+// snapshot-next.mjs call from there with ROOT_ENV naming the tree.
+export const LANE_TOOLING_DIR = '${RUNNER_TEMP}/lane-tooling';
+export const LANE_TOOLING_TAKE = `git archive --format=tar "\${GITHUB_SHA}" scripts | tar -x -C "${LANE_TOOLING_DIR}"`;
+export const LANE_TOOLING_LINK = `ln -s "\${GITHUB_WORKSPACE}/node_modules" "${LANE_TOOLING_DIR}/node_modules"`;
+export const LANE_TOOLING_CALL = `node "${LANE_TOOLING_DIR}/scripts/ci/snapshot-next.mjs"`;
+export const ROOT_ENV_LINE = `${ROOT_ENV}: \${{ github.workspace }}`;
 // The preflight job's other two refusing calls, and the recorded commit.
-export const STABLE_LANE_CALL = 'node scripts/ci/snapshot-next.mjs stable-lane --workflow release.yml';
-export const RECORD_COMMIT_CALL = 'node scripts/ci/snapshot-next.mjs record-commit --commit "$COMMIT"';
+export const STABLE_LANE_CALL = `${LANE_TOOLING_CALL} stable-lane --workflow release.yml`;
+export const RECORD_COMMIT_CALL = `${LANE_TOOLING_CALL} record-commit --commit "$COMMIT"`;
 // The quiet skip's switch, and how release.yml spells it on the preflight job's
 // refusing steps: present on the schedule, absent on a dispatch, by one
 // expression the runner evaluates before the shell sees the line.
@@ -864,23 +911,31 @@ function restoreTree(root, untrackedBefore) {
   if (left.length > 0) throw new Error(`the tree was not restored: ${left.slice(0, 5).join(', ')}`);
 }
 
-async function dryRun({ root = REPO_ROOT, keep = false, read = readRegistryState, mainRef = MAIN_REF, quietSkip = false } = {}) {
+/**
+ * The dry run's early returns -- a reason recorded for every one, as the catch
+ * path records it, so the card never says "no reason was recorded by the run".
+ * `pre`, `tree`, `hasChangeset` and `env` are injectable for the self-test.
+ */
+export async function dryRun({ root = REPO_ROOT, keep = false, read = readRegistryState, mainRef = MAIN_REF, quietSkip = false, env = process.env, pre: runPreflight = preflight, tree = treeState, hasChangeset = (r) => existsSync(changesetBin(r)) } = {}) {
   console.log(`snapshot-next dry-run: nothing is published, tagged or pushed; no npm token is read.`);
   const head = run('git', ['rev-parse', 'HEAD'], { cwd: root }).stdout.trim();
   console.log(`tree: ${root} at ${head}`);
-  const pre = await preflight({ root, read, mainRef, commit: head });
+  const pre = await runPreflight({ root, read, mainRef, commit: head });
   console.log(`preflight: RC cycle read at the tree and at ${mainRef}; ${pre.members} fixed-group member(s) read on npm; \`next\` on ${pre.next.anchor} is ${pre.next.version ?? 'unset'}${pre.next.commit ? ` (recorded commit ${pre.next.commit})` : ''}; ${pre.refusals.length} refusal(s), ${pre.unread.length} unread.`);
   for (const r of pre.refusals) console.log(`  REFUSED  [${r.kind}] ${r.text}`);
   for (const u of pre.unread) console.log(`  UNREAD   ${u}`);
 
-  const dirty = treeState(root);
+  const stop = (reason, exit) => {
+    console.error(`::error::${reason}`);
+    writeStepOutputs({ reason }, env);
+    return exit;
+  };
+  const dirty = tree(root);
   if (dirty.length > 0) {
-    console.error(`::error::the working tree is not clean (${dirty.length} path(s)); the dry run reads everything the version step moves as its output, so it runs on a clean tree only.`);
-    return EXIT_PREREQUISITE_NOT_MET;
+    return stop(`snapshot dry run NOT MEASURED -- the working tree is not clean (${dirty.length} path(s): ${dirty.slice(0, 3).map((l) => l.trim()).join(', ')}${dirty.length > 3 ? ', ...' : ''}); the dry run reads everything the version step moves as its output, so it runs on a clean tree only.`, EXIT_PREREQUISITE_NOT_MET);
   }
-  if (!existsSync(changesetBin(root))) {
-    console.error('::error::node_modules/.bin/changeset is missing -- run `pnpm install --frozen-lockfile` first.');
-    return EXIT_PREREQUISITE_NOT_MET;
+  if (!hasChangeset(root)) {
+    return stop('snapshot dry run NOT MEASURED -- node_modules/.bin/changeset is missing; run `pnpm install --frozen-lockfile` first.', EXIT_PREREQUISITE_NOT_MET);
   }
   const before = untracked(root);
   const packDir = mkdtempSync(join(tmpdir(), 'snapshot-next-pack-'));
@@ -889,8 +944,7 @@ async function dryRun({ root = REPO_ROOT, keep = false, read = readRegistryState
     console.log(`version: ${VERSION_COMMAND} (bare; never \`pnpm run version\`)`);
     const v = run(changesetBin(root), ['version', '--snapshot', SNAPSHOT_TAG], { cwd: root });
     if (v.status !== 0) {
-      console.error(`::error::\`${VERSION_COMMAND}\` failed (exit ${v.status}): ${(v.stderr || v.stdout).trim().split('\n').slice(-5).join(' / ')}`);
-      return EXIT_FINDINGS;
+      return stop(`snapshot dry run refused -- \`${VERSION_COMMAND}\` failed (exit ${v.status ?? v.error?.code ?? 'none'}): ${(v.stderr || v.stdout || v.error?.message || '').trim().split('\n').slice(-5).join(' / ')}`, EXIT_FINDINGS);
     }
     const recorded = recordCommit({ root, commit: head });
     const moved = treeState(root);
@@ -978,6 +1032,10 @@ export function snapshotWiring(yamlText, publishScriptText) {
   const pre = codeLines(preflightJob);
   const snap = codeLines(snapshotJob);
   const has = (lines, re) => lines.some((line) => re.test(line));
+  // A call of this script's MODE as the lane spells it: from the workflow
+  // commit's copy (header, "Where the tooling runs from"), never off the tree.
+  const tooling = (mode) => new RegExp(`${escapeRe(LANE_TOOLING_CALL)} ${mode}\\b`);
+  const OFF_TREE_CALL = /\bnode scripts\/ci\/snapshot-next\.mjs\b/;
 
   // The approval screen.
   const nameLine = snap.find((line) => /^ {4}name:/.test(line)) ?? '';
@@ -1036,22 +1094,41 @@ export function snapshotWiring(yamlText, publishScriptText) {
     if (script.some((line) => re.test(line))) findings.push(`the publish script carries ${what}: the snapshot lane pushes no tag, cuts no Release, moves no dist-tag and builds no image`);
   }
   const at = (lines, re) => lines.findIndex((line) => re.test(line));
-  const guardAt = at(snap, /node scripts\/ci\/snapshot-next\.mjs guard\b/);
+  const guardAt = at(snap, tooling('guard'));
   const publishAt = at(snap, /bash scripts\/release-snapshot-publish\.sh\b/);
   const versionAt = at(snap, /\bchangeset version --snapshot next\s*$/);
   if (versionAt === -1) findings.push(`\`${SNAPSHOT_JOB}\` never runs the bare \`${VERSION_COMMAND}\``);
   if (guardAt === -1 || publishAt === -1 || guardAt > publishAt || versionAt > guardAt) findings.push(`\`${SNAPSHOT_JOB}\` must run the version step, then \`snapshot-next.mjs guard\`, then the publish`);
   for (const [job, lines] of [[PREFLIGHT_JOB, pre], [SNAPSHOT_JOB, snap]]) {
-    const runs = lines.filter((line) => /node scripts\/ci\/snapshot-next\.mjs (preflight|dry-run)\b/.test(line));
+    const runs = lines.filter((line) => tooling('(preflight|dry-run)').test(line));
     const unmain = runs.filter((line) => !line.includes(` --main-ref ${MAIN_REF}`));
     if (unmain.length) findings.push(`\`${job}\` reads the RC cycle without \`--main-ref ${MAIN_REF}\` (${unmain.map((l) => l.trim()).join(' | ')}): a cycle entered on main after the selected commit would not be seen`);
   }
-  if (at(snap, /node scripts\/ci\/snapshot-next\.mjs preflight\b/) === -1 || at(snap, /node scripts\/ci\/snapshot-next\.mjs preflight\b/) > versionAt) findings.push(`\`${SNAPSHOT_JOB}\` must re-run \`snapshot-next.mjs preflight\` after the approval, before the version step`);
-  if (at(snap, /node scripts\/ci\/snapshot-next\.mjs verify\b/) < publishAt) findings.push(`\`${SNAPSHOT_JOB}\` must run \`snapshot-next.mjs verify\` after the publish`);
+  if (at(snap, tooling('preflight')) === -1 || at(snap, tooling('preflight')) > versionAt) findings.push(`\`${SNAPSHOT_JOB}\` must re-run \`snapshot-next.mjs preflight\` after the approval, before the version step`);
+  if (at(snap, tooling('verify')) < publishAt) findings.push(`\`${SNAPSHOT_JOB}\` must run \`snapshot-next.mjs verify\` after the publish`);
   if (at(pre, /scheduled-full-run\.mjs --snapshot-commit\b/) === -1) findings.push(`\`${PREFLIGHT_JOB}\` never selects the commit with \`scheduled-full-run.mjs --snapshot-commit\``);
   if (at(pre, /scheduled-full-run\.mjs --release-gate\b.*--require-distance-zero\b/) === -1) findings.push(`\`${PREFLIGHT_JOB}\` never runs \`scheduled-full-run.mjs --release-gate\` with \`--require-distance-zero\``);
-  if (at(pre, /node scripts\/ci\/snapshot-next\.mjs preflight\b/) === -1) findings.push(`\`${PREFLIGHT_JOB}\` never runs \`snapshot-next.mjs preflight\``);
-  if (at(pre, /node scripts\/ci\/snapshot-next\.mjs dry-run\b/) === -1) findings.push(`\`${PREFLIGHT_JOB}\` never runs the dry run`);
+  if (at(pre, tooling('preflight')) === -1) findings.push(`\`${PREFLIGHT_JOB}\` never runs \`snapshot-next.mjs preflight\``);
+  if (at(pre, tooling('dry-run')) === -1) findings.push(`\`${PREFLIGHT_JOB}\` never runs the dry run`);
+
+  // Where the tooling runs from (header): both jobs take `scripts/` off the
+  // workflow's commit before the tree moves, link the tree's node_modules
+  // beside it, name the tree in the job env, and call this script from the
+  // copy alone -- the selected commit's copy need not know today's modes.
+  const detachAt = at(pre, /\bgit checkout --quiet --detach\b/);
+  if (detachAt === -1) findings.push(`\`${PREFLIGHT_JOB}\`'s select step never moves the tree to the selected commit (\`git checkout --quiet --detach\`)`);
+  for (const [job, lines, firstUse] of [[PREFLIGHT_JOB, pre, detachAt], [SNAPSHOT_JOB, snap, at(snap, /\buses: \.\/\.github\/actions\/setup-workspace\b/)]]) {
+    const takes = lines.filter((line) => line.includes(LANE_TOOLING_TAKE));
+    const takeAt = at(lines, new RegExp(escapeRe(LANE_TOOLING_TAKE)));
+    if (takes.length !== 1) findings.push(`\`${job}\` must take the lane's tooling off the workflow's commit exactly once, \`${LANE_TOOLING_TAKE}\` (found ${takes.length}): the selected commit's own scripts/ci/snapshot-next.mjs need not know today's modes, and an older copy would be a red run and a false card`);
+    else if (firstUse !== -1 && takeAt > firstUse) findings.push(`\`${job}\` takes the lane's tooling after ${job === PREFLIGHT_JOB ? 'the detach to the selected commit' : 'the workspace install'}: \`GITHUB_SHA\`'s scripts must be taken before the tree is anything but the workflow's commit`);
+    if (!has(lines, new RegExp(escapeRe(LANE_TOOLING_LINK)))) findings.push(`\`${job}\` never links the tree's node_modules beside the lane's tooling (\`${LANE_TOOLING_LINK}\`): snapshot-next.mjs imports \`semver\` and would not load from the copy`);
+    if (!has(lines, new RegExp(`^ {6}${escapeRe(ROOT_ENV_LINE)}\\s*$`))) findings.push(`\`${job}\` does not name the tree in its job env (\`${ROOT_ENV_LINE}\`): the lane's tooling, run from the runner's temp dir, would read and version the copy's own directory instead of the checkout`);
+    const offTree = lines.filter((line) => OFF_TREE_CALL.test(line));
+    if (offTree.length) findings.push(`\`${job}\` runs snapshot-next.mjs off the selected commit's tree (${offTree.map((l) => l.trim()).join(' | ')}): every call is \`${LANE_TOOLING_CALL} <mode>\`, the workflow commit's copy`);
+    const uses = lines.filter((line) => line.includes(LANE_TOOLING_CALL));
+    if (takeAt !== -1 && uses.some((line) => lines.indexOf(line) < takeAt)) findings.push(`\`${job}\` calls the lane's tooling before taking it`);
+  }
   for (const [job, lines] of [[PREFLIGHT_JOB, pre], [SNAPSHOT_JOB, snap]]) {
     for (const [re, what] of FORBIDDEN_IN_SNAPSHOT) {
       if (has(lines, re)) findings.push(`\`${job}\` carries ${what}: the snapshot lane pushes no tag, cuts no Release, moves no dist-tag and builds no image`);
@@ -1130,17 +1207,32 @@ export function snapshotWiring(yamlText, publishScriptText) {
   }
   const stableCalls = pre.filter((line) => line.includes(STABLE_LANE_CALL));
   if (stableCalls.length !== 1) findings.push(`\`${PREFLIGHT_JOB}\` must run \`${STABLE_LANE_CALL}\` exactly once, before any deployment is queued (found ${stableCalls.length})`);
-  if (has(snap, /snapshot-next\.mjs stable-lane\b/)) findings.push(`\`${SNAPSHOT_JOB}\` runs \`stable-lane\` after the approval: the stable lane is a pre-queue question, and the approval is the maintainer's answer`);
-  for (const line of pre.filter((l) => /node scripts\/ci\/snapshot-next\.mjs (preflight|dry-run|stable-lane)\b/.test(l))) {
+  if (has(snap, /snapshot-next\.mjs"? stable-lane\b/)) findings.push(`\`${SNAPSHOT_JOB}\` runs \`stable-lane\` after the approval: the stable lane is a pre-queue question, and the approval is the maintainer's answer`);
+  for (const line of pre.filter((l) => tooling('(preflight|dry-run|stable-lane)').test(l))) {
     if (!line.includes(QUIET_SKIP_EXPRESSION)) findings.push(`\`${PREFLIGHT_JOB}\`'s call \`${line.trim()}\` lacks the schedule-only quiet-skip expression \`${QUIET_SKIP_EXPRESSION}\`: the schedule skips quietly and a dispatch refuses loudly, by ONE spelling`);
   }
   if (pre.some((line) => line.includes(QUIET_SKIP_FLAG) && !line.includes(QUIET_SKIP_EXPRESSION))) findings.push(`\`${PREFLIGHT_JOB}\` spells \`${QUIET_SKIP_FLAG}\` outside the schedule-only expression: a dispatch would skip quietly`);
   if (has(snap, /quiet-skip/)) findings.push(`\`${SNAPSHOT_JOB}\` carries \`${QUIET_SKIP_FLAG}\`: after the approval every refusal is loud`);
-  if (!has(pre, /refusal=no-green-commit/)) findings.push(`\`${PREFLIGHT_JOB}\`'s select step never records \`refusal=no-green-commit\`: a main with no fully green commit would be a red run, not the ruled quiet skip (the red battery has its own scheduled-full-run card)`);
+  // The select step's own refusal, `no-green-commit`, classified in the shell
+  // and so outside `proposalVerdict`: each BRANCH records `refusal=` on its own
+  // -- the schedule branch (exit 0, the quiet skip) and the dispatch branch
+  // (exit 1, the loud refusal) -- since a failed preflight with NO `refusal` is
+  // the card's first case, and an expected refusal must never file it.
+  const RECORDS_NO_GREEN = /echo "refusal=no-green-commit" >> "\$GITHUB_OUTPUT"/;
+  const classifyAt = at(pre, /jq -e '\.ok == false and \.commit == null'/);
+  const branchAt = classifyAt === -1 ? -1 : pre.findIndex((line, i) => i > classifyAt && /^\s*if \[ "\$\{EVENT_NAME\}" = 'schedule' \]; then\s*$/.test(line));
+  const fiAt = branchAt === -1 ? -1 : pre.findIndex((line, i) => i > branchAt && /^\s*fi\s*$/.test(line));
+  const loudExitAt = fiAt === -1 ? -1 : pre.findIndex((line, i) => i > fiAt && /^\s*exit 1\s*$/.test(line));
+  if (classifyAt === -1 || branchAt === -1 || fiAt === -1 || loudExitAt === -1) {
+    findings.push(`\`${PREFLIGHT_JOB}\`'s select step does not classify \`--snapshot-commit\`'s no-green-commit record by event (\`jq -e '.ok == false and .commit == null'\`, then \`if [ "\${EVENT_NAME}" = 'schedule' ]; then ... fi\` and the dispatch branch's \`exit 1\`)`);
+  } else {
+    if (!pre.slice(branchAt + 1, fiAt).some((line) => RECORDS_NO_GREEN.test(line))) findings.push(`\`${PREFLIGHT_JOB}\`'s select step does not record \`refusal=no-green-commit\` on the SCHEDULE branch: a main with no fully green commit would be a red run, not the ruled quiet skip (the red battery has its own scheduled-full-run card)`);
+    if (!pre.slice(fiAt + 1, loudExitAt).some((line) => RECORDS_NO_GREEN.test(line))) findings.push(`\`${PREFLIGHT_JOB}\`'s select step does not record \`refusal=no-green-commit\` on the DISPATCH branch: the loud refusal would read as UNEXPECTED (a failed preflight with an empty \`refusal\`), and the card would file for an expected refusal`);
+  }
   // The same-commit check: `--commit` on both preflights, the commit recorded
   // between the version step and the guard, and the guard reading it back.
   for (const [job, lines] of [[PREFLIGHT_JOB, pre], [SNAPSHOT_JOB, snap]]) {
-    for (const call of lines.filter((line) => /node scripts\/ci\/snapshot-next\.mjs preflight\b/.test(line))) {
+    for (const call of lines.filter((line) => tooling('preflight').test(line))) {
       if (!/ --commit /.test(call)) findings.push(`\`${job}\` runs the preflight without \`--commit\` (\`${call.trim()}\`): the same-commit check would not be read`);
     }
   }
@@ -1499,15 +1591,17 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the stable lane: a waiting stable prompt or a running stable publish refuses, read as the sweep reads': 10,
   'the quiet skip: each expected kind skips on the schedule and refuses loudly on a dispatch; the unexpected stay red': 13,
   'record-commit: gitHead into every manifest, read back by the guard': 4,
+  'dry-run: every early return records its reason': 3,
   'release.yml: the snapshot wiring': 21,
   'release.yml: exclusivity, evaluated job by job': 7,
   'release.yml: two clocks on one schedule': 13,
   'release.yml: the daily supersede job': 9,
-  'release.yml: the quiet skip and the card': 16,
+  'release.yml: the quiet skip and the card': 20,
+  'release.yml: the lane\'s tooling runs from the workflow\'s own commit': 6,
   'supersede: yesterday\'s scheduled prompt is cancelled, nothing else is': 12,
   'release-snapshot-publish.sh, run with a stubbed changeset: npm\'s answer record': 7,
 });
-const SELF_TEST_BATTERY_FLOOR = 21;
+const SELF_TEST_BATTERY_FLOOR = 23;
 
 export async function selfTest() {
   const seen = new Map();
@@ -1908,6 +2002,51 @@ export async function selfTest() {
     return packed(C1).length === 0 && packed(null).length === 1 && packed(C2).length === 1 && /record-commit/.test(packed(null)[0]) && packedManifestProblems({ name: FIXED[0], version: V }, { name: FIXED[0], version: V, fixedNames: FIXED }).problems.length === 0;
   });
 
+  battery('dry-run: every early return records its reason');
+  // A scratch repository stands in for the tree; the preflight is stubbed to a
+  // pass so only the early returns speak. Each writes `reason=` the way the
+  // catch path does, so the card never reads "no reason was recorded".
+  {
+    const box = mkdtempSync(join(tmpdir(), 'snapshot-next-dry-'));
+    const out = join(box, 'out.txt');
+    const tree = join(box, 'tree');
+    mkdirSync(tree);
+    const git = (...args) => run('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], { cwd: tree });
+    git('init', '-q', '-b', 'main');
+    writeFileSync(join(tree, 'a'), '1\n');
+    git('add', 'a');
+    git('commit', '-qm', 'c');
+    const passPre = async () => ({ ok: true, members: 0, refusals: [], unread: [], next: { anchor: 'x', version: null, commit: null } });
+    const drive = (over) => dryRun({ root: tree, pre: passPre, env: { GITHUB_OUTPUT: out }, ...over });
+    const recorded = () => (existsSync(out) ? readFileSync(out, 'utf8') : '');
+    const mutedLog = console.log;
+    const mutedErr = console.error;
+    console.log = () => {};
+    console.error = () => {};
+    try {
+      await t('a dirty tree exits 3 and records the reason', async () => {
+        writeFileSync(join(tree, 'a'), '2\n');
+        const exit = await drive({});
+        git('checkout', '--', 'a');
+        return exit === EXIT_PREREQUISITE_NOT_MET && /^reason=snapshot dry run NOT MEASURED -- the working tree is not clean \(1 path\(s\): M a\)/m.test(recorded());
+      });
+      await t('a missing changeset binary exits 3 and records the reason', async () => {
+        rmSync(out, { force: true });
+        const exit = await drive({ hasChangeset: () => false });
+        return exit === EXIT_PREREQUISITE_NOT_MET && /^reason=snapshot dry run NOT MEASURED -- node_modules\/\.bin\/changeset is missing/m.test(recorded());
+      });
+      await t('a version step that fails exits 1, records the reason, and leaves the tree as it was', async () => {
+        rmSync(out, { force: true });
+        const exit = await drive({ hasChangeset: () => true });
+        return exit === EXIT_FINDINGS && new RegExp(`^reason=snapshot dry run refused -- \`${VERSION_COMMAND}\` failed`, 'm').test(recorded()) && treeState(tree).length === 0;
+      });
+    } finally {
+      console.log = mutedLog;
+      console.error = mutedErr;
+      rmSync(box, { recursive: true, force: true });
+    }
+  }
+
   battery('release.yml: the snapshot wiring');
   const yml = readFileSync(RELEASE_WORKFLOW, 'utf8');
   const sh = readFileSync(PUBLISH_SCRIPT, 'utf8');
@@ -1930,7 +2069,7 @@ export async function selfTest() {
   await t('a publish that keeps git tags is refused', () => firesSh(sh.replace(PUBLISH_LINE_RE, '\nchangeset publish --tag next || publish_status=$?\n'), 'exactly one publish'));
   await t('a git push in the publish script, or in the job, is refused', () => firesSh(sh.replace(PUBLISH_LINE_RE, `\n${PUBLISH_LINE}\ngit push origin --tags\n`), 'git push') && fires(yml.replace(`          ${PUBLISH_SCRIPT_CALL}\n`, `          ${PUBLISH_SCRIPT_CALL}\n          git push origin --tags\n`), 'git push'));
   await t('a publish run inline in the job is refused', () => fires(yml.replace(`          ${PUBLISH_SCRIPT_CALL}\n`, `          ${PUBLISH_SCRIPT_CALL}\n          changeset publish --tag next --no-git-tag\n`), 'runs `changeset publish` itself'));
-  await t('a guard after the publish is refused', () => fires(yml.replace(/node scripts\/ci\/snapshot-next\.mjs guard\b/, 'node scripts/ci/snapshot-next.mjs gaurd'), 'then the publish'));
+  await t('a guard after the publish is refused', () => fires(yml.replace(`${LANE_TOOLING_CALL} guard`, `${LANE_TOOLING_CALL} gaurd`), 'then the publish'));
   await t('a preflight without the distance-zero gate is refused', () => fires(yml.replace(/(--release-commit "\$commit") --require-distance-zero/, '$1'), '--require-distance-zero'));
   await t('a snapshot job reading inputs.force is refused', () => fires(yml.replace(/(\n {2}snapshot-next:[\s\S]*?\n {4}if: >-\n[^\n]*\n)/, '$1      !inputs.force &&\n'), 'inputs.force'));
   await t('a publish script that starts no npm answer record is refused', () => firesSh(sh.replace(/\nNPM_RECORD_DIR="[^\n]*\n/, '\n'), 'answer record') && firesSh(sh.replace(/\nexport npm_config_logs_dir="\$NPM_RECORD_DIR"\n/, '\n'), 'answer record'));
@@ -1941,8 +2080,8 @@ export async function selfTest() {
   });
   await t('a publish script that never prints npm\'s answers is refused', () => firesSh(sh.replace(/\nnode scripts\/release-verify-npm\.mjs --npm-answers \\\n[^\n]*\n/, '\n'), '--npm-answers'));
   await t('a publish whose exit is not kept (the answers would never print on a failure) is refused', () => firesSh(sh.replace(PUBLISH_LINE_RE, `\n${PUBLISH_COMMAND}\n`), 'exactly one publish') && firesSh(sh.replace(/\nexit "\$publish_status"\n/, '\n'), 'exit with the publish'));
-  await t('a preflight in either job without --main-ref is refused', () => fires(yml.replace(/(node scripts\/ci\/snapshot-next\.mjs preflight) --main-ref refs\/remotes\/origin\/main --commit/, '$1 --commit'), '--main-ref') && fires(yml.replace(/(node scripts\/ci\/snapshot-next\.mjs preflight) --main-ref refs\/remotes\/origin\/main( --commit "\$COMMIT" --record)/, '$1$2'), '--main-ref'));
-  await t('a dry run without --main-ref is refused', () => fires(yml.replace(/(snapshot-next\.mjs dry-run) --main-ref refs\/remotes\/origin\/main/, '$1'), '--main-ref'));
+  await t('a preflight in either job without --main-ref is refused', () => fires(yml.replace(`${LANE_TOOLING_CALL} preflight --main-ref refs/remotes/origin/main --commit`, `${LANE_TOOLING_CALL} preflight --commit`), '--main-ref') && fires(yml.replace(`${LANE_TOOLING_CALL} preflight --main-ref refs/remotes/origin/main --commit "$COMMIT" --record`, `${LANE_TOOLING_CALL} preflight --commit "$COMMIT" --record`), '--main-ref'));
+  await t('a dry run without --main-ref is refused', () => fires(yml.replace(/(snapshot-next\.mjs"? dry-run) --main-ref refs\/remotes\/origin\/main/, '$1'), '--main-ref'));
   await t('pnpm run version in the lane is refused', () => fires(yml.replace(/changeset version --snapshot next\s*\n/, 'changeset version --snapshot next\n          pnpm run version\n'), 'pnpm run version'));
 
   battery('release.yml: exclusivity, evaluated job by job');
@@ -2042,12 +2181,33 @@ export async function selfTest() {
   });
   await t('a release.yml without the card job is refused', () => cardAt > 0 && fires(`${yml.slice(0, cardAt)}\n`, `has no \`${CARD_JOB}\``));
   await t('a preflight job without the `refusal` output, or whose output does not read every refusing step, is refused', () => fires(mutPre(/\n {6}refusal: [^\n]*\n/, '\n'), 'has no `refusal` output') && fires(mutPre(/(\n {6}refusal: [^\n]*)\|\| steps\.dry-run\.outputs\.refusal/, '$1'), 'every refusing step'));
-  await t('a preflight call without the schedule-only quiet-skip expression is refused, and a bare --quiet-skip (a dispatch would skip quietly) is refused', () => fires(mutPre(new RegExp(`(snapshot-next\\.mjs preflight[^\\n]*?)${escapeRe(QUIET_SKIP_EXPRESSION)}`), '$1'), 'quiet-skip expression') && fires(mutPre(new RegExp(`(snapshot-next\\.mjs dry-run[^\\n]*?)${escapeRe(QUIET_SKIP_EXPRESSION)}`), '$1 --quiet-skip'), 'outside the schedule-only expression'));
-  await t('⛔ --quiet-skip after the approval is refused', () => fires(mutSnap(/(snapshot-next\.mjs preflight --main-ref refs\/remotes\/origin\/main --commit "\$COMMIT")/, '$1 --quiet-skip'), 'after the approval every refusal is loud'));
-  await t('a preflight job that never reads the stable lane, or reads it twice, is refused; the stable lane after the approval is refused', () => fires(mutPre(new RegExp(`\\n {8}run: ${escapeRe(STABLE_LANE_CALL)}[^\\n]*\\n`), '\n        run: true\n'), 'exactly once') && fires(mutPre(new RegExp(`(\\n {8}run: ${escapeRe(STABLE_LANE_CALL)}[^\\n]*\\n)`), '$1      - run: ' + STABLE_LANE_CALL + '\n'), 'exactly once') && fires(mutSnap(/(\n {8}run: node scripts\/ci\/snapshot-next\.mjs preflight[^\n]*\n)/, '$1      - run: node scripts/ci/snapshot-next.mjs stable-lane --workflow release.yml\n'), 'pre-queue question'));
+  await t('a preflight call without the schedule-only quiet-skip expression is refused, and a bare --quiet-skip (a dispatch would skip quietly) is refused', () => fires(mutPre(new RegExp(`(snapshot-next\\.mjs"? preflight[^\\n]*?)${escapeRe(QUIET_SKIP_EXPRESSION)}`), '$1'), 'quiet-skip expression') && fires(mutPre(new RegExp(`(snapshot-next\\.mjs"? dry-run[^\\n]*?)${escapeRe(QUIET_SKIP_EXPRESSION)}`), '$1 --quiet-skip'), 'outside the schedule-only expression'));
+  await t('⛔ --quiet-skip after the approval is refused', () => fires(mutSnap(/(snapshot-next\.mjs"? preflight --main-ref refs\/remotes\/origin\/main --commit "\$COMMIT")/, '$1 --quiet-skip'), 'after the approval every refusal is loud'));
+  await t('a preflight job that never reads the stable lane, or reads it twice, is refused; the stable lane after the approval is refused', () => fires(mutPre(new RegExp(`\\n {8}run: ${escapeRe(STABLE_LANE_CALL)}[^\\n]*\\n`), '\n        run: true\n'), 'exactly once') && fires(mutPre(new RegExp(`(\\n {8}run: ${escapeRe(STABLE_LANE_CALL)}[^\\n]*\\n)`), '$1      - run: ' + STABLE_LANE_CALL + '\n'), 'exactly once') && fires(mutSnap(new RegExp(`(\\n {8}run: ${escapeRe(LANE_TOOLING_CALL)} preflight[^\\n]*\\n)`), `$1      - run: ${STABLE_LANE_CALL}\n`), 'pre-queue question'));
   await t('a select step that never records refusal=no-green-commit is refused', () => fires(mutPre(/refusal=no-green-commit/g, 'refusal=no-commit'), 'no-green-commit'));
-  await t('a preflight (either job) without --commit is refused: the same-commit check would not be read', () => fires(mutPre(/(snapshot-next\.mjs preflight --main-ref refs\/remotes\/origin\/main) --commit "\$COMMIT"/, '$1'), 'without `--commit`') && fires(mutSnap(/(snapshot-next\.mjs preflight --main-ref refs\/remotes\/origin\/main) --commit "\$COMMIT"/, '$1'), 'without `--commit`'));
-  await t('a snapshot job that never records the commit, records it after the guard, or guards without reading it back, is refused', () => fires(mutSnap(new RegExp(`\\n {8}run: ${escapeRe(RECORD_COMMIT_CALL)}\\n`), '\n        run: true\n'), 'never runs') && fires(mutSnap(new RegExp(`\\n {6}- name: [^\\n]*\\n(?: {8}[^\\n]*\\n)*? {8}run: ${escapeRe(RECORD_COMMIT_CALL)}\\n`), '\n').replace(/(\n {8}run: node scripts\/ci\/snapshot-next\.mjs guard[^\n]*\n)/, `$1      - run: ${RECORD_COMMIT_CALL}\n`), 'before the guard') && fires(mutSnap(/(snapshot-next\.mjs guard --pack-dir "\$\{RUNNER_TEMP\}\/snapshot-next-pack") --commit "\$COMMIT"/, '$1'), 'read the recorded commit back'));
+  // The two branches of the select step's classification, each on its own:
+  // the schedule's echo sits inside `if [ "${EVENT_NAME}" = 'schedule' ]` (16
+  // spaces), the dispatch's right after its `fi` (14 spaces).
+  const SCHEDULE_ECHO = /\n {16}echo "refusal=no-green-commit" >> "\$GITHUB_OUTPUT"\n/;
+  const DISPATCH_ECHO = /(\n {14}fi\n) {14}echo "refusal=no-green-commit" >> "\$GITHUB_OUTPUT"\n/;
+  await t('⭐ the checked-in select step records refusal=no-green-commit on BOTH branches, and the pins tell them apart', () => {
+    const both = SCHEDULE_ECHO.test(yml) && DISPATCH_ECHO.test(yml) && (yml.match(/echo "refusal=no-green-commit" >> "\$GITHUB_OUTPUT"/g) ?? []).length === 2;
+    const f = snapshotWiring(yml, sh);
+    return both && !f.some((x) => x.includes('no-green-commit'));
+  });
+  await t('⛔ a select step whose DISPATCH branch records no refusal (the loud refusal would file the card) is refused by the dispatch-branch pin alone', () => {
+    const cut = mutPre(DISPATCH_ECHO, '$1');
+    const f = cut === yml ? [] : snapshotWiring(cut, sh);
+    return cut !== yml && f.some((x) => x.includes('on the DISPATCH branch')) && !f.some((x) => x.includes('on the SCHEDULE branch'));
+  });
+  await t('a select step whose SCHEDULE branch records no refusal is refused by the schedule-branch pin alone', () => {
+    const cut = mutPre(SCHEDULE_ECHO, '\n');
+    const f = cut === yml ? [] : snapshotWiring(cut, sh);
+    return cut !== yml && f.some((x) => x.includes('on the SCHEDULE branch')) && !f.some((x) => x.includes('on the DISPATCH branch'));
+  });
+  await t('a select step that no longer classifies by event (the schedule test gone) is refused', () => fires(mutPre(/\n {14}if \[ "\$\{EVENT_NAME\}" = 'schedule' \]; then\n/, '\n              if false; then\n'), 'does not classify'));
+  await t('a preflight (either job) without --commit is refused: the same-commit check would not be read', () => fires(mutPre(/(snapshot-next\.mjs"? preflight --main-ref refs\/remotes\/origin\/main) --commit "\$COMMIT"/, '$1'), 'without `--commit`') && fires(mutSnap(/(snapshot-next\.mjs"? preflight --main-ref refs\/remotes\/origin\/main) --commit "\$COMMIT"/, '$1'), 'without `--commit`'));
+  await t('a snapshot job that never records the commit, records it after the guard, or guards without reading it back, is refused', () => fires(mutSnap(new RegExp(`\\n {8}run: ${escapeRe(RECORD_COMMIT_CALL)}\\n`), '\n        run: true\n'), 'never runs') && fires(mutSnap(new RegExp(`\\n {6}- name: [^\\n]*\\n(?: {8}[^\\n]*\\n)*? {8}run: ${escapeRe(RECORD_COMMIT_CALL)}\\n`), '\n').replace(new RegExp(`(\\n {8}run: ${escapeRe(LANE_TOOLING_CALL)} guard[^\\n]*\\n)`), `$1      - run: ${RECORD_COMMIT_CALL}\n`), 'before the guard') && fires(mutSnap(/(snapshot-next\.mjs"? guard --pack-dir "\$\{RUNNER_TEMP\}\/snapshot-next-pack") --commit "\$COMMIT"/, '$1'), 'read the recorded commit back'));
   await t('⛔ a snapshot job, or a supersede, whose if: does not require an empty `refusal` output is refused: a quiet skip is a GREEN preflight', () => fires(mutSnap(/\n {6}needs\.snapshot-next-preflight\.outputs\.refusal == '' &&\n/, '\n'), `\`${SNAPSHOT_JOB}\`'s \`if:\` does not require`) && fires(mutSup(/\n {6}needs\.snapshot-next-preflight\.outputs\.refusal == '' &&\n/, '\n'), `\`${SUPERSEDE_JOB}\`'s \`if:\` does not require`));
   await t('a card job under success() (which never reaches a failed upstream) is refused, and one that lost a case is refused', () => fires(mutCard(/(\n {4}if: >-\n\s*)always\(\) &&/, '$1success() &&'), 'always()') && fires(mutCard(/ \|\|\n\s*needs\.snapshot-next\.result == 'failure'/, ''), 'two cases'));
   await t('a card job needing the preflight alone, or the supersede too, is refused', () => fires(mutCard(/\n {4}needs: \[snapshot-next-preflight, snapshot-next\]\n/, '\n    needs: [snapshot-next-preflight]\n'), 'nothing else') && fires(mutCard(/\n {4}needs: \[snapshot-next-preflight, snapshot-next\]\n/, '\n    needs: [snapshot-next-preflight, snapshot-next, snapshot-next-supersede]\n'), 'nothing else'));
@@ -2055,6 +2215,45 @@ export async function selfTest() {
   await t('a card job that files through anything but snapshotCardStep of the full-run card module is refused (no second filer)', () => fires(mutCard(new RegExp(escapeRe(CARD_STEP_MODULE), 'g'), 'scripts/ci/snapshot-card.mjs'), 'never a second filer') && fires(mutCard(new RegExp(`\\b${CARD_STEP}\\b`, 'g'), 'fileCardStep'), 'never a second filer'));
   await t('a card job that hands the filer no reason, no commit or no snapshot result is refused', () => ['SNAPSHOT_CARD_REASON', 'SNAPSHOT_CARD_COMMIT', 'SNAPSHOT_CARD_SNAPSHOT_RESULT'].every((key) => fires(mutCard(new RegExp(`\\n {10}${key}: [^\\n]*\\n`), '\n'), key)));
   await t('a card job on the bookkeeping cron, or one that lost its dispatch arm, is refused', () => fires(mutCard(new RegExp(`github\\.event\\.schedule == '${escapeRe(snapshotCron)}'`), `github.event.schedule == '${bookkeepingCron}'`), 'snapshot cron') && fires(mutCard(/ \|\|\n\s*\(github\.event_name == 'workflow_dispatch' && inputs\.snapshot_next &&\n\s*!inputs\.refresh_version_pr\)\)/, ')'), 'dispatch arm'));
+
+  battery('release.yml: the lane\'s tooling runs from the workflow\'s own commit');
+  // Header, "Where the tooling runs from": the pins on both jobs, each able to
+  // fail, and the copy itself loading from outside the tree.
+  const inPre = (text, re, to) => {
+    const a = text.indexOf(`\n  ${PREFLIGHT_JOB}:\n`);
+    const b = text.indexOf(`\n  ${SNAPSHOT_JOB}:\n`);
+    return text.slice(0, a) + text.slice(a, b).replace(re, to) + text.slice(b);
+  };
+  await t('laneRoot reads the tree from SNAPSHOT_NEXT_ROOT, else the repository this file sits in', () => laneRoot({ [ROOT_ENV]: join(tmpdir(), 'x', '..', 'y') }) === join(tmpdir(), 'y') && laneRoot({}) === resolve(HERE, '../..') && laneRoot({ [ROOT_ENV]: '' }) === resolve(HERE, '../..'));
+  await t('⭐ the checked-in jobs take scripts/ off GITHUB_SHA once each (before the detach, before the install), link node_modules, name the tree in the job env, and call the copy alone', () => {
+    const preLines = codeLines(jobBlocks(yml).get(PREFLIGHT_JOB));
+    const snapLines = codeLines(jobBlocks(yml).get(SNAPSHOT_JOB));
+    const once = (lines, s) => lines.filter((l) => l.includes(s)).length === 1;
+    const idx = (lines, s) => lines.findIndex((l) => l.includes(s));
+    return [preLines, snapLines].every((lines) => once(lines, LANE_TOOLING_TAKE) && once(lines, LANE_TOOLING_LINK) && lines.some((l) => l.trim() === ROOT_ENV_LINE) && !lines.some((l) => /\bnode scripts\/ci\/snapshot-next\.mjs\b/.test(l)) && lines.filter((l) => l.includes(LANE_TOOLING_CALL)).length >= 3)
+      && idx(preLines, LANE_TOOLING_TAKE) < idx(preLines, 'git checkout --quiet --detach')
+      && idx(snapLines, LANE_TOOLING_TAKE) < idx(snapLines, 'uses: ./.github/actions/setup-workspace')
+      && preLines.filter((l) => l.includes(LANE_TOOLING_CALL)).length === 3 && snapLines.filter((l) => l.includes(LANE_TOOLING_CALL)).length === 4;
+  });
+  await t('⛔ a call off the selected commit\'s tree, in either job, is refused', () => fires(mutPre(`${LANE_TOOLING_CALL} preflight`, 'node scripts/ci/snapshot-next.mjs preflight'), 'off the selected commit') && fires(mutSnap(`${LANE_TOOLING_CALL} record-commit`, 'node scripts/ci/snapshot-next.mjs record-commit'), 'off the selected commit'));
+  await t('a take moved after the detach is refused, and a job that never takes the tooling is refused', () => {
+    const moved = inPre(inPre(yml, new RegExp(`\\n {10}${escapeRe(LANE_TOOLING_TAKE)}\\n`), '\n          true\n'), /(\n {10}git checkout --quiet --detach "\$commit"\n)/, `$1          ${LANE_TOOLING_TAKE}\n`);
+    return fires(moved, 'after the detach') && fires(mutSnap(new RegExp(`\\n {10}${escapeRe(LANE_TOOLING_TAKE)}\\n`), '\n          true\n'), 'exactly once');
+  });
+  await t('a job without the node_modules link, or without SNAPSHOT_NEXT_ROOT in its env, is refused', () => fires(mutPre(new RegExp(`\\n {10}${escapeRe(LANE_TOOLING_LINK)}\\n`), '\n'), 'never links') && fires(mutSnap(new RegExp(`\\n {6}${escapeRe(ROOT_ENV_LINE)}\\n`), '\n'), 'does not name the tree'));
+  await t('⭐ the copy loads from outside the tree (semver through the linked node_modules) and reads the tree from SNAPSHOT_NEXT_ROOT, writing nothing into it', () => {
+    const box = mkdtempSync(join(tmpdir(), 'snapshot-next-tooling-'));
+    try {
+      cpSync(join(REPO_ROOT, 'scripts'), join(box, 'scripts'), { recursive: true });
+      symlinkSync(join(REPO_ROOT, 'node_modules'), join(box, 'node_modules'), 'dir');
+      const tree = join(box, 'tree');
+      mkdirSync(tree);
+      const r = run(process.execPath, [join(box, 'scripts/ci/snapshot-next.mjs'), 'record-commit', '--commit', 'c'.repeat(40)], { cwd: box, env: { ...process.env, [ROOT_ENV]: tree, GITHUB_OUTPUT: '' } });
+      return r.status === EXIT_PREREQUISITE_NOT_MET && /record-commit failed/.test(r.stderr) && r.stderr.includes(join(tree, '.changeset/config.json')) && readdirSync(tree).length === 0;
+    } finally {
+      rmSync(box, { recursive: true, force: true });
+    }
+  });
 
   battery('supersede: yesterday\'s scheduled prompt is cancelled, nothing else is');
   const NOW = '2026-11-06T01:17:40Z';
@@ -2383,7 +2582,8 @@ async function main(argv = process.argv.slice(2)) {
       '       snapshot-next.mjs verify --record FILE --version V\n' +
       '       snapshot-next.mjs dry-run [--main-ref REF] [--keep] [--quiet-skip]\n' +
       '       snapshot-next.mjs supersede --workflow release.yml [--dry-run]\n' +
-      '       snapshot-next.mjs --self-test',
+      '       snapshot-next.mjs --self-test\n' +
+      `       (${ROOT_ENV}=DIR names the tree every mode reads, when this file does not sit in it)`,
   );
   return 1;
 }

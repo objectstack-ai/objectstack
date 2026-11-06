@@ -2337,17 +2337,26 @@ jobs:
       # checkout.
       actions: read
       contents: read
+    env:
+      # The tree the lane's tooling reads and versions: this checkout. The
+      # tooling itself (scripts/ci/snapshot-next.mjs and what it imports) runs
+      # from THIS workflow's commit, copied out of the tree before the select
+      # step moves the tree to the selected commit — see "Take the lane's
+      # tooling" below. Pinned by snapshot-next.mjs's self-test.
+      SNAPSHOT_NEXT_ROOT: ${{ github.workspace }}
     outputs:
       commit: ${{ steps.commit.outputs.commit }}
       commit-short: ${{ steps.commit.outputs.commit-short }}
       # The verdict (the lane header, "THE QUIET SKIP"). Each refusing step
       # records at most one pair; the chains read them in step order.
-      #   refusal   the EXPECTED kind that skipped quietly (`same-commit`,
-      #             `rc-cycle`, `debut`, `no-green-commit`, `stable-lane`) —
-      #             set ONLY on the schedule, where the step exited 0. The
-      #             snapshot job, the supersede and the card all read it: a
-      #             non-empty value queues nothing, cancels nothing, files
-      #             nothing.
+      #   refusal   the EXPECTED kind (`same-commit`, `rc-cycle`, `debut`,
+      #             `no-green-commit`, `stable-lane`), recorded on BOTH starts:
+      #             on the schedule the step exited 0 (the quiet skip), on a
+      #             dispatch it exited 1 (the loud refusal). The snapshot job,
+      #             the supersede and the card all read it: a non-empty value
+      #             queues nothing, cancels nothing, files nothing — the card's
+      #             first case is a FAILED preflight with an EMPTY `refusal`,
+      #             so an expected refusal on a dispatch never files it.
       #   reason    the text, on every refusal (expected or not) and on a NOT
       #             MEASURED read, for the summary and the card.
       refusal: ${{ steps.commit.outputs.refusal || steps.stable-lane.outputs.refusal || steps.preflight.outputs.refusal || steps.dry-run.outputs.refusal }}
@@ -2365,6 +2374,27 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
+
+      # The lane's own tooling, from THIS workflow's commit. The select step
+      # below moves the tree to the selected commit, which is older than
+      # `GITHUB_SHA` by construction and need not carry the modes the later
+      # steps call: the day after a change to snapshot-next.mjs lands, the
+      # selected commit still predates it, and its copy printing usage on
+      # `stable-lane` or ignoring `--quiet-skip` would be a red run and a FALSE
+      # card. So `scripts/` is taken off `GITHUB_SHA` into the runner's temp
+      # dir — outside the tree, so the dry run's clean-tree check is untouched
+      # — before the detach; every snapshot-next.mjs call below runs from that
+      # copy, and `SNAPSHOT_NEXT_ROOT` (job env) names the tree it reads. The
+      # link gives the copy the tree's `node_modules` (the script imports
+      # `semver`): dangling until `Setup workspace` installs, read by nothing
+      # before. Pinned by snapshot-next.mjs's self-test: the take before the
+      # detach, the link, the env, and no call off the tree.
+      - name: Take the lane's tooling from the workflow's own commit
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/lane-tooling"
+          git archive --format=tar "${GITHUB_SHA}" scripts | tar -x -C "${RUNNER_TEMP}/lane-tooling"
+          ln -s "${GITHUB_WORKSPACE}/node_modules" "${RUNNER_TEMP}/lane-tooling/node_modules"
 
       # The newest commit at which both full-battery workflows (CI, Lint & Type
       # Check) have their deciding run ON it, green — then the release gate,
@@ -2394,9 +2424,12 @@ jobs:
       # The select step classifies its own refusal (the lane header, "THE QUIET
       # SKIP", case d): `--snapshot-commit` exits 1 with `commit: null` when no
       # commit in the window has the full battery green ON it — on the schedule
-      # a quiet skip (`refusal=no-green-commit`), on a dispatch the loud refusal;
-      # exit 3 is NOT MEASURED and anything else died, both unexpected and red
-      # on either start, with `reason` recorded for the card.
+      # a quiet skip (exit 0), on a dispatch the loud refusal (exit 1), and BOTH
+      # branches record `refusal=no-green-commit`: it is an expected kind on
+      # either start, and the card files only on a failed preflight whose
+      # `refusal` is empty (the self-test pins each branch on its own). Exit 3
+      # is NOT MEASURED and anything else died, both unexpected and red on
+      # either start, with `reason` alone recorded for the card.
       - name: Select the commit (the newest with the full battery green on it)
         id: commit
         env:
@@ -2427,8 +2460,9 @@ jobs:
                 } >> "$GITHUB_STEP_SUMMARY"
                 exit 0
               fi
+              echo "refusal=no-green-commit" >> "$GITHUB_OUTPUT"
               echo "reason=${reason}" >> "$GITHUB_OUTPUT"
-              echo "::error::snapshot refused -- [no-green-commit] ${reason}"
+              echo "::error::snapshot refused -- [no-green-commit] ${reason} (an expected refusal, loud on a dispatch; no card)"
               exit 1
             fi
             echo "reason=the commit selection did not answer (exit ${status}: a NOT MEASURED read of the full battery, or a step that died); see the run log" >> "$GITHUB_OUTPUT"
@@ -2463,9 +2497,11 @@ jobs:
             jq -r '.workflows[] | "- \(.name): run \(.runId) (\(.event)) concluded \(.conclusion) ON the commit (distance \(.distance))"' "${RUNNER_TEMP}/snapshot-gate.json"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # From here on the tree is the selected commit, with its own tooling. Each
-      # later step runs only while no step before it has skipped quietly (a
-      # quiet skip exits 0, so the job's own success() would not stop them).
+      # From here on the tree is the selected commit — its own packages, lockfile
+      # and build, read and versioned by the lane's tooling from the workflow's
+      # commit (taken above). Each later step runs only while no step before it
+      # has skipped quietly (a quiet skip exits 0, so the job's own success()
+      # would not stop them).
       - name: Setup workspace
         if: steps.commit.outputs.refusal == ''
         uses: ./.github/actions/setup-workspace
@@ -2487,7 +2523,7 @@ jobs:
         if: steps.commit.outputs.refusal == ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/ci/snapshot-next.mjs stable-lane --workflow release.yml${{ github.event_name == 'schedule' && ' --quiet-skip' || '' }}
+        run: node "${RUNNER_TEMP}/lane-tooling/scripts/ci/snapshot-next.mjs" stable-lane --workflow release.yml${{ github.event_name == 'schedule' && ' --quiet-skip' || '' }}
 
       - name: Verify Changesets "fixed" group covers every public package
         if: steps.commit.outputs.refusal == '' && steps.stable-lane.outputs.refusal == ''
@@ -2509,7 +2545,7 @@ jobs:
         if: steps.commit.outputs.refusal == '' && steps.stable-lane.outputs.refusal == ''
         env:
           COMMIT: ${{ steps.commit.outputs.commit }}
-        run: node scripts/ci/snapshot-next.mjs preflight --main-ref refs/remotes/origin/main --commit "$COMMIT"${{ github.event_name == 'schedule' && ' --quiet-skip' || '' }}
+        run: node "${RUNNER_TEMP}/lane-tooling/scripts/ci/snapshot-next.mjs" preflight --main-ref refs/remotes/origin/main --commit "$COMMIT"${{ github.event_name == 'schedule' && ' --quiet-skip' || '' }}
 
       # The dry run: the bare version step, the recorded commit, the guard over
       # changesets' publish plan and over every packed manifest (pnpm
@@ -2518,7 +2554,7 @@ jobs:
       - name: Dry run (version, recorded commit, plan, packed manifests, tag)
         id: dry-run
         if: steps.commit.outputs.refusal == '' && steps.stable-lane.outputs.refusal == '' && steps.preflight.outputs.refusal == ''
-        run: node scripts/ci/snapshot-next.mjs dry-run --main-ref refs/remotes/origin/main${{ github.event_name == 'schedule' && ' --quiet-skip' || '' }}
+        run: node "${RUNNER_TEMP}/lane-tooling/scripts/ci/snapshot-next.mjs" dry-run --main-ref refs/remotes/origin/main${{ github.event_name == 'schedule' && ' --quiet-skip' || '' }}
 
   snapshot-next:
     # The approval screen (ADR-0125 D2, and the amendment's rule for this lane):
@@ -2570,6 +2606,11 @@ jobs:
       # Read only: this job pushes no tag and cuts no Release, so it holds no
       # credential that could.
       contents: read
+    env:
+      # The tree the lane's tooling reads, versions and guards: this checkout of
+      # the selected commit. The tooling runs from the workflow's commit (the
+      # take below), as in the preflight job.
+      SNAPSHOT_NEXT_ROOT: ${{ github.workspace }}
     outputs:
       # The snapshot version the version step wrote — empty when the job failed
       # before it. The card reads it to say whether anything may be on npm.
@@ -2586,6 +2627,20 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
+
+      # The lane's own tooling, from THIS workflow's commit (the preflight job's
+      # step of the same name says why): this checkout is the selected commit,
+      # whose scripts/ci/snapshot-next.mjs need not know `--commit`,
+      # `record-commit` or `guard --commit`. `GITHUB_SHA` is on main's history,
+      # which `fetch-depth: 0` fetched; a take that fails is a red job and the
+      # card, never a publish. The build, the publish script and the registry
+      # read-back below stay the selected tree's own: they are what it ships.
+      - name: Take the lane's tooling from the workflow's own commit
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/lane-tooling"
+          git archive --format=tar "${GITHUB_SHA}" scripts | tar -x -C "${RUNNER_TEMP}/lane-tooling"
+          ln -s "${GITHUB_WORKSPACE}/node_modules" "${RUNNER_TEMP}/lane-tooling/node_modules"
 
       # Before anything from the tree is trusted: the checkout is the commit the
       # preflight selected, and that commit is on main.
@@ -2645,7 +2700,7 @@ jobs:
       - name: Refuse during an RC cycle, before every group member has debuted, or when the commit is already on next (after the approval)
         env:
           COMMIT: ${{ needs.snapshot-next-preflight.outputs.commit }}
-        run: node scripts/ci/snapshot-next.mjs preflight --main-ref refs/remotes/origin/main --commit "$COMMIT" --record "${RUNNER_TEMP}/snapshot-next-before.json"
+        run: node "${RUNNER_TEMP}/lane-tooling/scripts/ci/snapshot-next.mjs" preflight --main-ref refs/remotes/origin/main --commit "$COMMIT" --record "${RUNNER_TEMP}/snapshot-next-before.json"
 
       # ⛔ The BARE command, never `pnpm run version`: that chain aborts at
       # sync-protocol-version.mjs on a major below 1, and the snapshot is
@@ -2673,7 +2728,7 @@ jobs:
       - name: Record the selected commit in every manifest (gitHead, never committed)
         env:
           COMMIT: ${{ needs.snapshot-next-preflight.outputs.commit }}
-        run: node scripts/ci/snapshot-next.mjs record-commit --commit "$COMMIT"
+        run: node "${RUNNER_TEMP}/lane-tooling/scripts/ci/snapshot-next.mjs" record-commit --commit "$COMMIT"
 
       - name: Build
         run: pnpm run build
@@ -2700,7 +2755,7 @@ jobs:
       - name: Guard the publish (dist-tag, versions, plan, packed manifests, recorded commit)
         env:
           COMMIT: ${{ needs.snapshot-next-preflight.outputs.commit }}
-        run: node scripts/ci/snapshot-next.mjs guard --pack-dir "${RUNNER_TEMP}/snapshot-next-pack" --commit "$COMMIT"
+        run: node "${RUNNER_TEMP}/lane-tooling/scripts/ci/snapshot-next.mjs" guard --pack-dir "${RUNNER_TEMP}/snapshot-next-pack" --commit "$COMMIT"
 
       # The publish: scripts/release-snapshot-publish.sh runs the stable lane's
       # published-dist tooling refusal, then the ruling's command,
@@ -2729,7 +2784,7 @@ jobs:
       - name: Verify the dist-tags (next on the snapshot, latest unmoved)
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: node scripts/ci/snapshot-next.mjs verify --record "${RUNNER_TEMP}/snapshot-next-before.json" --version "$VERSION"
+        run: node "${RUNNER_TEMP}/lane-tooling/scripts/ci/snapshot-next.mjs" verify --record "${RUNNER_TEMP}/snapshot-next-before.json" --version "$VERSION"
 
   # The daily supersede (ADR-0125, amendment of 2026-11-06; ruling 6677910954,
   # line 3: "the next day's run supersedes it"). Runs on the daily cron ALONE,
