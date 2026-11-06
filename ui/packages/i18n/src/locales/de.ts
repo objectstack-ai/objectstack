@@ -3808,6 +3808,13 @@ const de = {
     advanced: {
       title: 'Erweitert: Skripte und CI',
     },
+    unreachable: {
+      claudeWebTitle: 'claude.ai (Web): für diese Bereitstellung nicht verfügbar',
+      claudeWebReason: 'claude.ai verbindet sich von den Servern von Anthropic, und diese erreichen {{address}} nicht: Von dort ist nur eine öffentliche HTTPS-Adresse erreichbar.',
+      doubaoCloudTitle: 'Cloud-Aufgaben: für diese Bereitstellung nicht verfügbar',
+      doubaoCloudReason: 'Doubao Work führt Cloud-Aufgaben auf den eigenen Servern aus, und diese erreichen {{address}} nicht: Von dort ist nur eine öffentliche HTTPS-Adresse erreichbar.',
+      remedy: 'Stellen Sie dieses System unter einer öffentlichen HTTPS-Adresse bereit (https:// auf einer aus dem Internet erreichbaren Domain), um es verfügbar zu machen.',
+    },
     apiKey: {
       title: 'API-Schlüssel',
       badge: 'headless',

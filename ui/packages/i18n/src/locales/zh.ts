@@ -4014,6 +4014,13 @@ const zh = {
     advanced: {
       title: '高级：脚本与 CI',
     },
+    unreachable: {
+      claudeWebTitle: 'claude.ai（网页版）：此部署不可用',
+      claudeWebReason: 'claude.ai 从 Anthropic 的服务器发起连接，访问不到 {{address}}：那里只能访问公网 HTTPS 地址。',
+      doubaoCloudTitle: '云端任务：此部署不可用',
+      doubaoCloudReason: '豆包工作的云端任务从它自己的服务器运行，访问不到 {{address}}：那里只能访问公网 HTTPS 地址。',
+      remedy: '把本系统部署到公网 HTTPS 地址（互联网可访问的域名，https://）后即可使用。',
+    },
     apiKey: {
       title: 'API 密钥',
       badge: '无头场景',

@@ -4113,6 +4113,13 @@ const ar = {
     advanced: {
       title: 'متقدم: البرامج النصية وCI',
     },
+    unreachable: {
+      claudeWebTitle: 'claude.ai (الويب): غير متاح لهذا النشر',
+      claudeWebReason: 'يتصل claude.ai من خوادم Anthropic، وهي لا تستطيع الوصول إلى {{address}}: لا يمكن الوصول من هناك إلا إلى عنوان HTTPS عام.',
+      doubaoCloudTitle: 'مهام السحابة: غير متاحة لهذا النشر',
+      doubaoCloudReason: 'يشغّل Doubao Work مهام السحابة من خوادمه الخاصة، وهي لا تستطيع الوصول إلى {{address}}: لا يمكن الوصول من هناك إلا إلى عنوان HTTPS عام.',
+      remedy: 'قدّم هذا النظام على عنوان HTTPS عام (https:// على نطاق يمكن الوصول إليه من الإنترنت) ليصبح متاحًا.',
+    },
     apiKey: {
       title: 'مفاتيح API',
       badge: 'بدون واجهة',
