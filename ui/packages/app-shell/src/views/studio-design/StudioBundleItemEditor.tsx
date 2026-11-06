@@ -331,7 +331,7 @@ export function StudioBundleItemEditor({
       // dataset's measure labels) is translated for this locale.
       const served = extractDraftBody(draftRead.answer);
       const authored =
-        served && readAt ? await readAuthoredDraft(client, type, name, served, { packageId: readAt, member }) : null;
+        served && readAt ? (await readAuthoredDraft(client, type, name, served, { packageId: readAt, member })).buffer : null;
       if (cancelled) return;
       if (authored?.kind === 'unserved') {
         setDraft({});

@@ -2717,7 +2717,7 @@ export function InterfacesPillar({
         // not served installs no nav buffer, as a refused one above.
         const servedAppDraft = extractDraftBody(appDraftRead.answer);
         const authoredApp = servedAppDraft
-          ? await readAuthoredDraft(client, 'app', name, servedAppDraft, { packageId: navReadAt })
+          ? (await readAuthoredDraft(client, 'app', name, servedAppDraft, { packageId: navReadAt })).buffer
           : null;
         if (cancelled) return;
         if (authoredApp?.kind === 'unserved') {
@@ -3064,10 +3064,11 @@ export function InterfacesPillar({
         // or a report is translated for this locale. A draft whose stored copy
         // was not served installs no buffer, as a refused one above.
         const served = extractDraftBody(draftRead.answer);
-        const authored = served
+        const authoredRead = served
           ? await readAuthoredDraft(client, current.type, current.name, served, { packageId: readAt })
           : null;
         if (cancelled) return;
+        const authored = authoredRead?.buffer ?? null;
         if (authored?.kind === 'unserved') {
           setDraft({});
           setDraftFor('');
@@ -3097,8 +3098,16 @@ export function InterfacesPillar({
         // objectui#12688 — with no pending draft the baseline just read IS the
         // dashboard's published layer; with one, it is read below, and only
         // for a dashboard the server serves (so never for an unsaved one).
+        // objectstack#30859 — unless the stored draft was just read at the
+        // leaf's owner: that answer carries the published layer too.
         if (current.type === 'dashboard') {
-          setLeafPublished({ key: leafKeyOf(current), doc: body ? null : baseline, read: !body });
+          const pairedLayers = body && readAt === (current.addedIn ?? packageId) ? authoredRead?.layers : null;
+          if (pairedLayers) {
+            const doc = (pairedLayers.effective ?? pairedLayers.code ?? null) as Record<string, unknown> | null;
+            setLeafPublished({ key: leafKeyOf(current), doc, read: true });
+          } else {
+            setLeafPublished({ key: leafKeyOf(current), doc: body ? null : baseline, read: !body });
+          }
         }
         // Served draft as-is, baseline only without one (objectui#10765): a
         // spread over `effective` resurrects every key the draft deleted.

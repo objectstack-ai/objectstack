@@ -82,9 +82,11 @@ async function serve(input: RequestInfo | URL, init?: RequestInit): Promise<Resp
   if (method === 'PUT') return json(200, { success: true, version: 'v2', state: 'draft' });
   if (seg[0] === 'object' && seg.length === 2) return json(200, { type: 'object', name: seg[1], item: OBJECT_DEF });
   if (seg.length === 3 && seg[2] === 'layers') {
+    // As the server answers an admitted author (objectstack#30859): a pending draft is served as stored, as `draft`, and an item with only a draft still has layers.
     const row = server.active.get(key);
-    return row
-      ? json(200, { code: null, overlay: row, overlayScope: 'env', effective: row })
+    const draft = server.drafts.get(key)?.row ?? null;
+    return row || draft
+      ? json(200, { code: null, overlay: row ?? null, overlayScope: row ? 'env' : null, effective: row ?? null, draft })
       : json(404, { error: { code: 'NOT_FOUND', message: 'absent' } });
   }
   if (seg.length === 2 && url.searchParams.get('state') === 'draft') {

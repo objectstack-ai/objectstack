@@ -175,7 +175,7 @@ export function useFormViewDraft({
         // objectstack#30859 — a pending draft is edited as stored, read at the
         // draft read's address: the served body is translated for this locale.
         const served = extractDraftBody(draftRead.answer);
-        const authored = served ? await readAuthoredDraft(client, 'view', viewId, served, { packageId: readAt }) : null;
+        const authored = served ? (await readAuthoredDraft(client, 'view', viewId, served, { packageId: readAt })).buffer : null;
         if (cancelled) return;
         if (authored?.kind === 'unserved') {
           readAtRef.current = null;

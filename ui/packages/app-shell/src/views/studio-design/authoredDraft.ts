@@ -30,6 +30,17 @@ export interface AuthoredDraftAddress {
   member?: string;
 }
 
+/** {@link readAuthoredDraft}'s answer: the buffer, and the layers it was read from (`null`: none were read). */
+export interface AuthoredDraft {
+  buffer: AuthoredBuffer;
+  /**
+   * The layered read at the draft's address, so an editor that also needs the
+   * published layer there (`effective ?? code`) reads it from this answer
+   * instead of asking `/layers` again.
+   */
+  layers: AuthoredLayers | null;
+}
+
 /**
  * The buffer for a pending draft of `type`/`name` whose `?state=draft` read
  * served `servedDraft` (`extractDraftBody`, never `null` here: with no draft
@@ -41,11 +52,11 @@ export async function readAuthoredDraft(
   name: string,
   servedDraft: Record<string, unknown>,
   at: AuthoredDraftAddress,
-): Promise<AuthoredBuffer> {
-  if (!editsAuthoredLayers(type)) return { kind: 'buffer', body: servedDraft, fromDraft: true };
+): Promise<AuthoredDraft> {
+  if (!editsAuthoredLayers(type)) return { buffer: { kind: 'buffer', body: servedDraft, fromDraft: true }, layers: null };
   const scope: { packageId?: string; member?: string } = {};
   if (at.packageId) scope.packageId = at.packageId;
   if (at.member) scope.member = at.member;
-  const layers = await client.layered<Record<string, unknown>>(type, name, scope);
-  return authoredBuffer(type, layers as AuthoredLayers, servedDraft);
+  const layers = (await client.layered<Record<string, unknown>>(type, name, scope)) as AuthoredLayers;
+  return { buffer: authoredBuffer(type, layers, servedDraft), layers };
 }

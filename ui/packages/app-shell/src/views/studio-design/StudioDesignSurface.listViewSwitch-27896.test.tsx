@@ -80,7 +80,9 @@ const mockClient: Record<string, any> = {
     if (type === 'object') return { effective: OBJECT_DEF(), code: OBJECT_DEF() };
     if (type === 'view') {
       const row = published[name];
-      return row ? { code: null, overlay: row, overlayScope: 'env', effective: row } : { code: null, overlay: null, overlayScope: null, effective: null };
+      // As the server serves an admitted author: the pending draft as stored (objectstack#30859).
+      const draft = drafts[name] ?? null;
+      return row ? { code: null, overlay: row, overlayScope: 'env', effective: row, draft } : { code: null, overlay: null, overlayScope: null, effective: null, draft };
     }
     return { effective: { name } };
   }),

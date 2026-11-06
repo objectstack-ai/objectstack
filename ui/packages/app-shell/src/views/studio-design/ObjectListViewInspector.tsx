@@ -670,8 +670,11 @@ export function useObjectListViewDraft({
         // pending draft is edited as stored, read at the draft read's address:
         // the served body is translated for this locale.
         const served = extractDraftBody(draftResp);
-        const authored = served ? await readAuthoredDraft(client, 'view', viewId, served, { packageId: readAt }) : null;
+        const authoredRead = served
+          ? await readAuthoredDraft(client, 'view', viewId, served, { packageId: readAt })
+          : null;
         if (cancelled) return;
+        const authored = authoredRead?.buffer ?? null;
         if (authored?.kind === 'unserved') {
           readAtRef.current = null;
           setBuffer({ for: '', row: null, dirty: false, hasDraft: true, draftChanges: null, published: undefined });
@@ -706,13 +709,16 @@ export function useObjectListViewDraft({
         // owner here: a layered read naming no package is refused for a name
         // two packages hold. On a read-only base that is the base, whose read
         // serves its declared override (ADR-0146 D8).
+        // objectstack#30859 — the stored draft's read at this same package
+        // already carries that layer, so it is not asked again.
         const layeredAt = { packageId };
+        const draftLayers = readAt === packageId ? (authoredRead?.layers ?? null) : null;
         const lay = objectDraftOnly
           ? null
           : !draft
             ? await client.layered<Row>('view', viewId, layeredAt)
             : marksNeedPublished
-              ? await client.layered<Row>('view', viewId, layeredAt).catch(() => undefined)
+              ? (draftLayers ?? (await client.layered<Row>('view', viewId, layeredAt).catch(() => undefined)))
               : null;
         if (cancelled) return;
         const published = (lay as { effective?: unknown; code?: unknown } | null)?.effective ?? (lay as { code?: unknown } | null)?.code;
