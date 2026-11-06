@@ -28,7 +28,7 @@
 - 可跑读法:本车道 `pm:dispatched` 卡按 `updated_at` 降序一搜,或读最近一条认领评论。
 - 写侧刷新三时刻:派发、收班、暂停或交接前;时间戳恒取自 `scripts/pm/post-stamped.mjs`。
 - 帖与卡正文首行恒为署名 `LANE#N · ACCOUNT · SESSION`;缺即写工具拒发(`post-stamped.mjs` 头注)。
-- PR 正文例外:末个非空行署 `<!-- signed: LANE#N · ACCOUNT · SESSION -->`;issue 靶退 2、未读靶退 3。
+- PR 正文末非空行署 `<!-- signed: LANE#N · ACCOUNT · SESSION -->`,整篇经 `dispatch.mjs` 的 `issue_patch`。
 - 刷新前回执敲门;`--body` 拦截:评论晚于末次戳 ⇒ `--ack-through=ID`;空座欠账无卡号 ⇒ 拒写。
 - 耐久状态只住正文或以 App 写入;正文守中继上限 60,000 字节,超大贴由半状态巡查浮出。
 - 协议升级迁移状态、或巡检发现正文不符时,当场改正文 + 审计评论。
