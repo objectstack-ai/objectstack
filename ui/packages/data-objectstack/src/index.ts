@@ -1163,9 +1163,9 @@ export type AppAccessVerdict = 'granted' | 'denied' | 'not_found' | 'unreachable
 export interface MetaItemAccess {
   readonly verdict: AppAccessVerdict;
   /**
-   * The refusal's own `message`, as the server wrote it — for a dashboard,
-   * `You do not have permission to open the 'NAME' dashboard.` Only on
-   * `denied`, and absent when the server wrote none.
+   * The refusal's own `message`, as the server wrote it, in the caller's
+   * locale — in English, `You do not have permission to perform this action. Contact your administrator if you need access.`
+   * Only on `denied`, and absent when the server wrote none.
    */
   readonly message?: string;
 }
