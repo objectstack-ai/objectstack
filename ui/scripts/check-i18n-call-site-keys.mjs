@@ -120,7 +120,7 @@
  * it, and the rule is the class rather than the instance: the first full run
  * found 24 such sites in four files, every one of them on a key `en` defines.
  *
- * ## Eight failure classes
+ * ## Nine failure classes
  *
  * (The heading said "Five" while the list below held seven — a stale count
  * corrected here rather than left to grow by one more.)
@@ -480,6 +480,24 @@
  *    copy of them, that one ratchet covers both readers — the reason the data
  *    moved to JSON on objectui#6923's ruling instead of being duplicated here
  *    and pinned.
+ *
+ * 9. `namespace-key-outside-frame` (objectstack#30645) — the key EXISTS, but
+ *    only in a lazy pack-shaped namespace, and the call site is outside the
+ *    directories that namespace's frame wraps (`PACK_NAMESPACE_FRAMES`). Every
+ *    other class reads the namespace as part of the `en` pack, which is right
+ *    under the frame and wrong everywhere else: nothing fetches the namespace
+ *    there, so the user reads the raw key. Judged on a literal key (plural
+ *    forms included: a key is namespace-only when every form that resolves is),
+ *    on a `returnObjects` subtree and on a template head, each refused only
+ *    when NO resident leaf answers it. Not judged: a key built by a helper or
+ *    spelled in a table and passed as a variable — the same blind spot class 1
+ *    has. Inside the frame's directories, which files a page OUTSIDE the frame
+ *    imports is the namespace's own boundary test's census, not this gate's.
+ *    The rule reads the frame off the one namespace list, so a second namespace
+ *    is judged the day it is declared. HARD from day one (0 on the tree it
+ *    landed against); the run's `Namespace frames:` line prints, per
+ *    namespace, how many call-site keys its frame reads, and a namespace whose
+ *    frame reads none fails the run as a collapsed scan.
  *
  * ## Dynamic keys: the explicit policy
  *
