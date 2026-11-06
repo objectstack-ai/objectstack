@@ -86,15 +86,22 @@ name: Release
 #    or `snapshot_next`)                    act, not one per landing), and
 #                                          publishes the same version commit.
 #                                          Same environment gate.
-#   workflow_dispatch → `snapshot-next`    the `next` snapshot lane (ADR-0125,
-#   WITH `snapshot_next`                   amendment of 2026-11-05). Runs NONE
-#                                          of the stable jobs above. Cuts the
-#                                          newest commit whose full battery is
-#                                          green ON it, versions it in the
-#                                          workspace only, and publishes under
-#                                          `next` alone after the same
-#                                          environment approval. No tag, no
-#                                          Release, never `latest`.
+#   schedule (daily cron)                  the `next` snapshot lane (ADR-0125,
+#   or workflow_dispatch  → `snapshot-next` amendments of 2026-11-05 and
+#   WITH `snapshot_next`                   2026-11-06). Runs NONE of the stable
+#                                          jobs above. Cuts the newest commit
+#                                          whose full battery is green ON it,
+#                                          versions it in the workspace only,
+#                                          and publishes under `next` alone
+#                                          after the same environment approval.
+#                                          The daily tick PROPOSES (it starts
+#                                          the preflight, which queues the
+#                                          prompt); a human still publishes.
+#                                          The scheduled run also cancels
+#                                          yesterday's scheduled proposal that
+#                                          nobody approved (`snapshot-next-
+#                                          supersede`). No tag, no Release,
+#                                          never `latest`.
 #
 # WHY `version-pr` LEFT THE PUSH TRIGGER (#11233, 2026-08-23)
 # ----------------------------------------------------------
@@ -134,11 +141,16 @@ name: Release
 #     dispatch WITH    `refresh_version_pr` → version-pr only, no deployment
 #     dispatch WITH    `snapshot_next`      → the snapshot lane only (end of file)
 #     dispatch WITHOUT either               → the repair lane, exactly as before
-#     schedule                              → version-pr only
+#     schedule, the 6-hourly cron           → version-pr only
+#     schedule, the daily cron              → the snapshot lane only (end of file)
 #     push to main                          → release-integrity (+ publish)
 #
 # Every job carries the half of that split it needs, in its own `if:`. No job
-# infers its lane from another job's presence.
+# infers its lane from another job's presence. `schedule` is split the same way
+# `workflow_dispatch` is, by a fact the event carries: the cron that fired it
+# (`github.event.schedule`), which each scheduled job names (ADR-0125, amendment
+# of 2026-11-06). The two clocks never start each other's jobs, and a cron
+# neither names starts nothing.
 #
 # ⚠️ The two inputs are INDEPENDENT, so `refresh_version_pr` + `force` is a
 # reachable form, and it is refused rather than resolved: `publish`'s guard
@@ -189,27 +201,68 @@ name: Release
 # from `push` and from the repair dispatch ONLY — never from `schedule`, never
 # from a refresh or a snapshot dispatch — and it cannot start without a human
 # approving it. The one other publish, the `next` snapshot, lives in
-# `snapshot-next`: dispatch-only, held at the same environment, no tag at all.
+# `snapshot-next`: proposed by the daily cron or by a dispatch (ADR-0125,
+# amendment of 2026-11-06), held at the same environment, no tag at all. That
+# cron is the second clock under `schedule:` below; it starts the PREFLIGHT,
+# which proposes, and the publish behind it still cannot start without a human
+# approving it.
 
 on:
   push:
     branches:
       - main
-  # Version-PR bookkeeping only (#11233). GitHub runs `schedule` on the DEFAULT
-  # BRANCH exclusively, which is the ref `version-pr` may ever regenerate from,
-  # so the trigger cannot reach a ref the job is not meant to touch. Six-hourly
-  # is the stale-window budget: #4935 renders changesets that are already
-  # committed on main, so lateness costs nothing that cannot be bought back on
-  # demand with `refresh_version_pr` below.
+  # Two clocks on one `schedule:`. GitHub runs `schedule` on the DEFAULT BRANCH
+  # exclusively, which is the ref `version-pr` may ever regenerate from and the
+  # only ref the snapshot lane cuts from, so neither trigger can reach a ref its
+  # job is not meant to touch. A scheduled run carries the cron that fired it
+  # as `github.event.schedule`, and every scheduled job below names its own in
+  # its `if:` — exactly as fleet-patrols.yml tells its four clocks apart. ⛔ A
+  # cron here and the same string in a job's `if:` are ONE fact spelled twice:
+  # change both in the same edit. `scripts/ci/snapshot-next.mjs --self-test`
+  # (`snapshotWiring`) refuses a cron no job names (a run that does nothing), a
+  # job naming a cron not declared here (a job that never runs), the snapshot
+  # jobs disagreeing with each other, `version-pr` on the snapshot cron, and a
+  # `!=` (a third cron would then start a lane by default).
   #
   # ⚠️ Scheduled runs are queued, not guaranteed on the minute — GitHub delays
   # or drops them under load, and disables them entirely after 60 days of
-  # repository inactivity. Both are acceptable HERE and would not be on a
-  # publishing lane: a refresh that arrives late leaves #4935 stale, which is
-  # visible on the PR and fixable by one dispatch. This is a second reason the
-  # publish lane must never be reachable from `schedule`.
+  # repository inactivity. Both are acceptable on BOTH clocks here and would not
+  # be on a publishing trigger: a refresh that arrives late leaves #4935 stale,
+  # which is visible on the PR and fixable by one dispatch; a snapshot proposal
+  # that arrives late, or not at all, costs one day's reminder, and the publish
+  # behind it still waits for a human. This is a second reason the STABLE
+  # publish lane must never be reachable from `schedule`; the daily cron starts
+  # a preflight, never a publish.
   schedule:
+    # 1. Version-PR bookkeeping (#11233): `version-pr` alone. Six-hourly is the
+    #    stale-window budget: #4935 renders changesets that are already
+    #    committed on main, so lateness costs nothing that cannot be bought back
+    #    on demand with `refresh_version_pr` below.
     - cron: '0 */6 * * *'
+    # 2. The daily `next` snapshot PROPOSAL (ADR-0125, amendment of 2026-11-06;
+    #    ruling record 6677910954, line 1): `snapshot-next-preflight` alone,
+    #    which on a pass queues `snapshot-next` at `environment: release` — a
+    #    prompt, never a publish; the maintainer approves or lets it stand
+    #    (line 2). The hour, argued:
+    #      - what the preflight reads is the full battery's nightly tick (ci.yml
+    #        and lint.yml, `0 0 * * *`): a night whose battery is green ON
+    #        main's tip gives a distance-zero commit the same morning. Measured
+    #        over 2026-10-31..11-06, the later of the two nightly runs finished
+    #        between 00:28Z and 00:52Z (per day: 00:52, 00:51, 00:33, 00:41,
+    #        00:47, 00:34, 00:28), so 01:17Z leaves 25 minutes past the slowest
+    #        finish observed;
+    #      - 01:17Z is 09:17 Beijing (UTC+8), the maintainer's morning: the
+    #        prompt is read the morning it is proposed, not after a night of
+    #        aging;
+    #      - `:17` keeps off the `:00` crowd GitHub queues worst;
+    #      - a battery that runs late costs freshness, never correctness: the
+    #        preflight selects the newest commit whose battery is green ON it,
+    #        so a late nightly leaves it reading the previous green one.
+    #    [#30832 landing detail 1 of 5 — UNCONFIRMED: the hour. Change it HERE
+    #    and in the three `if:`s that name it (`snapshot-next-preflight`,
+    #    `snapshot-next`, `snapshot-next-supersede`); the self-test refuses a
+    #    mismatch, so a missed site cannot land.]
+    - cron: '17 1 * * *'
   # The repair lane (ADR-0125 D4). Takes NO version: both lanes audit main the
   # same way. `force` exists for the one case the push lane's predicate cannot
   # see — a publish that died having already shipped the @objectstack/cli canary
@@ -296,8 +349,16 @@ jobs:
     # `schedule` run it is null — and `null` is falsy, which would be the right
     # answer by accident. Say which event we are on, so the guard states the lane
     # split instead of leaning on a context's emptiness.
+    #
+    # The tick is NAMED (ADR-0125, amendment of 2026-11-06): `schedule:` now
+    # fires two crons, and this job runs on the 6-hourly bookkeeping one alone.
+    # Strictly subtractive — a scheduled run used to start this job whatever
+    # fired it, and now only the clock that was always its own does; the daily
+    # snapshot cron starts nothing here. ⛔ The cron string is the one declared
+    # under `schedule:` above, spelled twice on purpose and pinned by
+    # `scripts/ci/snapshot-next.mjs --self-test`.
     if: >-
-      github.event_name == 'schedule' ||
+      (github.event_name == 'schedule' && github.event.schedule == '0 */6 * * *') ||
       (github.event_name == 'workflow_dispatch' && inputs.refresh_version_pr)
     runs-on: ubuntu-latest
     # Run wall of the 23 schedule and dispatch runs among the 400 most recent
@@ -2149,10 +2210,53 @@ jobs:
 
   # ══════════════════════════════════════════════════════════════════════════
   # SNAPSHOT LANE — a maintainer-approved `next` snapshot of main (ADR-0125,
-  # amendment of 2026-11-05; ruling record 6663894403, #29466 letter B).
-  # Dispatch-only, and exclusive: it starts only on a dispatch carrying
-  # `snapshot_next`, and that dispatch runs none of the stable lane's jobs.
+  # amendment of 2026-11-05; ruling record 6663894403, #29466 letter B; and the
+  # amendment of 2026-11-06, ruling record 6677910954, which admits the daily
+  # scheduled start). Two starts, exclusive on both: the daily cron (the second
+  # clock under `schedule:`) and a dispatch carrying `snapshot_next`. Either
+  # starts the preflight alone, and neither runs any of the stable lane's jobs.
   # ══════════════════════════════════════════════════════════════════════════
+  #
+  # THE DAILY PROPOSAL (ruling 6677910954, four lines, in order):
+  #   1. the cron starts EXACTLY the dispatch preflight — the same job, the same
+  #      steps, the same refusals: distance zero, the RC cycle read at the
+  #      commit and at main's tip, the debut rule, the dry run. Nothing is
+  #      special-cased on the event except what the step summary says about
+  #      who started the run;
+  #   2. on a pass `snapshot-next` waits at `environment: release` and publishes
+  #      only on the maintainer's approval. ⛔ Prime Directive 15 unchanged: no
+  #      seat dispatches this lane or approves its deployment;
+  #   3. an unapproved run is the system working, not a state to clear. The
+  #      next day's run supersedes it: `snapshot-next-supersede` (below) cancels
+  #      YESTERDAY's scheduled prompt once today's preflight has passed, so one
+  #      proposal is ever waiting and it is the newest. The stable prompt sweep
+  #      (`stale-prompts`) is untouched: it still runs on push and the repair
+  #      dispatch alone, never on either cron, and the supersede never touches
+  #      a stable prompt;
+  #   4. everything else in the 2026-11-05 amendment stands.
+  #
+  # ⚠️ A preflight REFUSAL on the daily cron is a RED run, with the reason in the
+  # step summary, and it is EXPECTED EVERY DAY until every member of the fixed
+  # group has debuted on npm — `@objectstack/service-push` has no version there
+  # yet, and the debut rule refuses a snapshot that would give any package its
+  # first publish (a first publish takes `latest`). Nobody "fixes" this red by
+  # loosening the preflight: it clears the day the package debuts through the
+  # stable lane. Each refusal's reason is in the `next snapshot preflight`
+  # section of the run's summary.
+  #   [#30832 landing detail 3 of 5 — UNCONFIRMED: red run vs quiet skip. As
+  #   built, a refusal fails the job (the order's default). The alternative, if
+  #   confirmed, is one change in one place: the three refusing steps of the
+  #   preflight (select, preflight, dry run) exit 0 on `schedule` when the
+  #   refusal is a measured one (snapshot-next.mjs exits EXIT_FINDINGS, not
+  #   EXIT_PREREQUISITE_NOT_MET), set an output `refused=true`, and
+  #   `snapshot-next`'s `if:` reads `needs.snapshot-next-preflight.outputs.refused
+  #   != 'true'`; a NOT MEASURED read stays red on either reading.]
+  #   [#30832 landing detail 4 of 5 — UNCONFIRMED: a real failure, as opposed to
+  #   a refusal, opens a card. NOT BUILT. The place for it is a `failure()` step
+  #   at the end of the preflight, on `schedule` only, filing through a
+  #   dependency-free filer the way `scripts/ci/scheduled-full-run-card.mjs`
+  #   files the nightly's card, keyed on a NOT MEASURED exit (3) so a daily
+  #   debut-rule refusal never files.]
   #
   # What it does, and what it never does:
   #   - snapshots the head of the newest green full-battery run on main, at
@@ -2181,9 +2285,15 @@ jobs:
   # reverts `publish` to a dispatch trigger (ADR-0125's amendment says why).
   snapshot-next-preflight:
     name: Snapshot next preflight (battery, RC cycle, debut, dry run)
+    # The two starts. The cron string is the daily clock declared under
+    # `schedule:` (one fact spelled twice; the self-test refuses a mismatch), and
+    # on `schedule` GitHub checks out the default branch — main — exactly as the
+    # dispatch does, which the select step below still verifies by `GITHUB_REF`.
+    # The dispatch arm is unchanged.
     if: >-
-      github.event_name == 'workflow_dispatch' && inputs.snapshot_next &&
-      !inputs.refresh_version_pr
+      (github.event_name == 'schedule' && github.event.schedule == '17 1 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.snapshot_next &&
+       !inputs.refresh_version_pr)
     runs-on: ubuntu-latest
     # Install, the version step and a pack of the whole fixed group; the pack
     # is the long pole.
@@ -2215,10 +2325,30 @@ jobs:
       # asked at that commit with distance zero required, must agree. Both read
       # through `--json`, so no prose line is parsed. Runs off this checkout
       # with no install: scheduled-full-run.mjs imports node builtins only.
+      # On the daily cron, say so first: the summary's opening line names the
+      # clock and reminds the reader that a refusal below is the expected daily
+      # red until the fixed group has fully debuted (the lane header says why).
+      # `GITHUB_ACTOR` on a scheduled run is the workflow file's last committer,
+      # not a proposer, so it is not printed as one.
+      - name: Note the scheduled start (daily proposal)
+        if: github.event_name == 'schedule'
+        env:
+          SCHEDULE_CRON: ${{ github.event.schedule }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Daily \`next\` snapshot proposal (cron \`${SCHEDULE_CRON}\`, ADR-0125 amendment of 2026-11-06)"
+            echo
+            echo "- started by the schedule, not by a person; a pass queues an approval prompt and publishes nothing by itself"
+            echo "- a refusal below is a red run by design, and it is expected daily until every fixed-group member has debuted on npm (\`@objectstack/service-push\` has not); its reason is in the preflight section"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Select the commit (the newest with the full battery green on it)
         id: commit
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE_CRON: ${{ github.event.schedule }}
         run: |
           set -euo pipefail
           if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
@@ -2240,10 +2370,15 @@ jobs:
           git checkout --quiet --detach "$commit"
           echo "commit=${commit}" >> "$GITHUB_OUTPUT"
           echo "commit-short=${commit:0:12}" >> "$GITHUB_OUTPUT"
+          if [ "${EVENT_NAME}" = 'schedule' ]; then
+            started="proposed by the daily schedule (cron \`${SCHEDULE_CRON}\`) at main \`${GITHUB_SHA}\`"
+          else
+            started="dispatched at main \`${GITHUB_SHA}\` by \`${GITHUB_ACTOR}\`"
+          fi
           {
             echo "## \`next\` snapshot of main \`${commit}\`"
             echo
-            echo "- dispatched at main \`${GITHUB_SHA}\` by \`${GITHUB_ACTOR}\`; the snapshot is cut $(jq -r '.offset' "${RUNNER_TEMP}/snapshot-commit.json") first-parent commit(s) behind it"
+            echo "- ${started}; the snapshot is cut $(jq -r '.offset' "${RUNNER_TEMP}/snapshot-commit.json") first-parent commit(s) behind it"
             jq -r '.workflows[] | "- \(.name): run \(.runId) (\(.event)) concluded \(.conclusion) ON the commit (distance \(.distance))"' "${RUNNER_TEMP}/snapshot-gate.json"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -2281,10 +2416,13 @@ jobs:
     # Held whole until a required reviewer approves (D2, D3): no checkout, no
     # build, no version step, no publish before the click.
     environment: release
+    # The same two starts as the preflight, spelled again here (no job infers
+    # its lane from another's presence): the daily clock, or the dispatch.
     if: >-
       success() &&
-      github.event_name == 'workflow_dispatch' && inputs.snapshot_next &&
-      !inputs.refresh_version_pr
+      ((github.event_name == 'schedule' && github.event.schedule == '17 1 * * *') ||
+       (github.event_name == 'workflow_dispatch' && inputs.snapshot_next &&
+        !inputs.refresh_version_pr))
     runs-on: ubuntu-latest
     # Build + Console build about 15 min cold, the guard's pack a few minutes,
     # `changeset publish` about 15, the registry read-back up to 35, then the
@@ -2294,6 +2432,16 @@ jobs:
     # at the environment holds this group, never `release-publish-<ref>`, so it
     # neither hides nor evicts a stable prompt, and none evicts it. Never
     # cancelled in progress: a cancel mid-publish leaves the group half on npm.
+    #
+    # With a daily start this group is held by yesterday's unapproved prompt
+    # when today's job arrives, and today's PENDS behind it — unseen, while the
+    # stale one stays the visible prompt (the 17.4.0 shape the 2026-09-29
+    # amendment measured). ⛔ `cancel-in-progress: true` is NOT the answer: a
+    # snapshot approved at 09:00 Beijing is mid-`changeset publish` when the
+    # 09:17 cron's job arrives, and that setting would cancel it half on npm.
+    # The answer is `snapshot-next-supersede` (below), which cancels only a
+    # scheduled run whose snapshot job is still WAITING at the environment —
+    # no step run, nothing published — and nothing that has started.
     concurrency:
       group: release-snapshot-next-${{ github.ref }}
       cancel-in-progress: false
@@ -2319,6 +2467,8 @@ jobs:
       - name: Guard the approved snapshot (branch, commit)
         env:
           COMMIT: ${{ needs.snapshot-next-preflight.outputs.commit }}
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE_CRON: ${{ github.event.schedule }}
         run: |
           set -euo pipefail
           if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
@@ -2341,10 +2491,15 @@ jobs:
             echo "::error::${COMMIT} is not on main as fetched just now. Refusing."
             exit 1
           fi
+          if [ "${EVENT_NAME}" = 'schedule' ]; then
+            started="proposed by the daily schedule (cron \`${SCHEDULE_CRON}\`)"
+          else
+            started="dispatched by \`${GITHUB_ACTOR}\`"
+          fi
           {
             echo "## Publishing a \`next\` snapshot of \`${COMMIT}\`"
             echo
-            echo "- started by: \`${GITHUB_ACTOR}\`; authorised by the \`release\` environment approval on this run"
+            echo "- ${started}; authorised by the \`release\` environment approval on this run"
             echo "- dist-tag: \`next\` alone; no tag, no GitHub Release, \`latest\` untouched"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -2431,3 +2586,75 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: node scripts/ci/snapshot-next.mjs verify --record "${RUNNER_TEMP}/snapshot-next-before.json" --version "$VERSION"
+
+  # The daily supersede (ADR-0125, amendment of 2026-11-06; ruling 6677910954,
+  # line 3: "the next day's run supersedes it"). Runs on the daily cron ALONE,
+  # once today's preflight has PASSED — a refused day leaves yesterday's prompt
+  # standing, since there is nothing to replace it with — and cancels
+  # YESTERDAY's scheduled proposal still waiting at the `release` environment,
+  # so one snapshot prompt is ever waiting and it is the newest.
+  #
+  # What is cancelled, exactly (`scripts/ci/snapshot-next.mjs supersede`,
+  # pinned by its --self-test): a WAITING run of this workflow, OLDER than this
+  # run, started by `schedule`, whose `Snapshot next of main <sha> (awaiting
+  # approval)` job is waiting at the `release` environment.
+  #   - ⛔ Never a dispatch run: a dispatch is a human's own act, and nothing
+  #     supersedes it.
+  #   - ⛔ Never a job that has started: an approved snapshot is `in_progress`,
+  #     and a cancel there is the half-published group `cancel-in-progress`
+  #     is forbidden for. Only a job GitHub is still holding at the environment
+  #     — no step run, nothing published — is a candidate.
+  #   - ⛔ Never a run holding a stable `Publish <version> to npm` prompt: that is
+  #     `stale-prompts`' question, and the ruling leaves the stable sweep
+  #     untouched. (A snapshot run never holds one — the stable jobs are
+  #     skipped on this cron — but the refusal is written, not inferred.)
+  #   - Never this run. A read the API would not answer after the retries
+  #     defers to tomorrow (a warning, exit 0): nothing judged, nothing lost.
+  # Not `needs`-ed by `snapshot-next`, so today's prompt queues whether or not
+  # this ran: the moment yesterday's holder is cancelled, today's pending job
+  # takes the group and its prompt becomes the visible one.
+  #   [#30832 landing detail 2 of 5 — UNCONFIRMED: "yesterday's unapproved
+  #   prompt is replaced by the new run, not left waiting". As built, it is
+  #   replaced, by this job. If the confirmed answer is "left waiting", this
+  #   job is deleted whole (nothing else needs it, and the `snapshotWiring` pins
+  #   that require it are the ones named `supersede`); if the answer is "replaced
+  #   by the DISPATCH too", only the `event !== 'schedule'` refusal in
+  #   `judgeSnapshotPrompts` changes.]
+  snapshot-next-supersede:
+    name: Supersede yesterday's scheduled snapshot prompt
+    needs: [snapshot-next-preflight]
+    if: >-
+      success() &&
+      (github.event_name == 'schedule' && github.event.schedule == '17 1 * * *')
+    runs-on: ubuntu-latest
+    # The stable sweep's own job reads in about a minute; the install here (for
+    # snapshot-next.mjs's `semver` import) is the long pole.
+    timeout-minutes: 10
+    permissions:
+      # `actions: write` is the cancel (POST .../runs/{id}/cancel); it also
+      # covers the reads (the waiting-runs list, the newest scheduled runs, each
+      # named run, its jobs and its pending deployments).
+      # `contents: read` is the checkout.
+      actions: write
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      # snapshot-next.mjs imports `semver`, so it runs off an installed tree
+      # (the stable sweep's release-pending-publish.mjs imports builtins only
+      # and needs no install).
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+
+      - name: Cancel yesterday's scheduled snapshot prompt still waiting at release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/ci/snapshot-next.mjs supersede --workflow release.yml

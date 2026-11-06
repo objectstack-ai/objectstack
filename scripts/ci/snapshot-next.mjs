@@ -30,6 +30,18 @@
 //       needs no npm token. Run locally or by the lane before the approval.
 //       It refuses a dirty tree and owns the tree while it runs: the restore
 //       puts every tracked path back to HEAD, so an edit made meanwhile is lost.
+//   node scripts/ci/snapshot-next.mjs supersede --workflow release.yml [--dry-run]
+//       the daily supersede (ADR-0125, amendment of 2026-11-06; ruling record
+//       6677910954, line 3: "the next day's run supersedes it"). Run by the
+//       scheduled start once today's preflight has passed: cancels YESTERDAY's
+//       scheduled snapshot prompt still waiting at the `release` environment --
+//       an OLDER `schedule` run of the workflow whose snapshot job is `waiting`.
+//       Never a dispatch run (a human's own act), never a job that has started
+//       (a cancel there is the half-published group), never a stable `Publish`
+//       prompt (that is `stale-prompts`' question, and the ruling leaves it
+//       untouched), never the calling run. A read the API would not answer
+//       after the retries defers to tomorrow's run: nothing judged, nothing
+//       cancelled, a warning. `--dry-run` prints the verdict and sends no POST.
 //   node scripts/ci/snapshot-next.mjs --self-test
 //
 // ## Why each check exists
@@ -67,20 +79,39 @@
 // A `latest` that moved to the snapshot is an incident for the maintainer, never
 // repaired with a counter-publish (AGENTS.md Prime Directive 15).
 //
+// ## The two starts, and the two clocks (ADR-0125, amendment of 2026-11-06)
+//
+// The preflight starts two ways and is the same preflight on either: a
+// `workflow_dispatch` carrying `snapshot_next` (the proposal by hand, D4), and a
+// daily `schedule` (ruling 6677910954, line 1). release.yml already carried a
+// `schedule:` for the 6-hourly bookkeeping refresh, so the file now fires TWO
+// crons on one `schedule:`, told apart the way fleet-patrols.yml tells its four
+// apart: a `schedule` event carries the cron that fired it (`github.event.schedule`),
+// and every scheduled job's `if:` names its own. That makes a cron under
+// `schedule:` and the same string in a job's `if:` ONE fact spelled several times,
+// and `snapshotWiring` holds them together: a cron no job names (a run that does
+// nothing), a job naming a cron the schedule never fires (a job that never runs),
+// the snapshot jobs disagreeing with each other, `version-pr` on the snapshot
+// cron, and a `!=` (a third cron would then start the lane by default) are each
+// refused. The hour itself is release.yml's to argue, at its `schedule:` block;
+// nothing here spells it.
+//
 // ⛔ Nothing here publishes, tags, pushes or writes a dist-tag. `dry-run` runs the
-// version step and `changeset pack` in the working tree and puts the tree back.
+// version step and `changeset pack` in the working tree and puts the tree back;
+// `supersede` cancels one kind of waiting run and writes nothing else.
 
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import semver from 'semver';
+import { boardReadBudget } from '../board-read.mjs';
 import { EXIT_FINDINGS, EXIT_PREREQUISITE_NOT_MET } from '../import-prerequisite.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 import { listWorkspacePackages } from '../release-github-releases.mjs';
-import { PUBLISH_JOB_NAME } from '../release-pending-publish.mjs';
+import { PUBLISH_JOB_NAME, retryingReads, TransientReadFailure } from '../release-pending-publish.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../..');
@@ -110,12 +141,26 @@ export const SNAPSHOT_VERSION = /^0\.0\.0-next-\d{14}$/;
 // The @changesets/cli major whose publish rule (point 1 of the header) was read.
 export const CHANGESETS_CLI_MAJOR = 3;
 
-// release.yml's names for this lane: the dispatch input and the two job ids.
+// release.yml's names for this lane: the dispatch input and the three job ids.
 export const SNAPSHOT_INPUT = 'snapshot_next';
 export const PREFLIGHT_JOB = 'snapshot-next-preflight';
 export const SNAPSHOT_JOB = 'snapshot-next';
+// The daily supersede (header): the job, and the one call it makes.
+export const SUPERSEDE_JOB = 'snapshot-next-supersede';
+export const SUPERSEDE_CALL = 'node scripts/ci/snapshot-next.mjs supersede --workflow release.yml';
+// The bookkeeping job the OTHER cron starts (#11233), which the snapshot cron never starts.
+export const BOOKKEEPING_JOB = 'version-pr';
+// One daily tick, `M H * * *` -- the ruling binds once a day, never a repeat.
+export const DAILY_CRON = /^\d{1,2} \d{1,2} \* \* \*$/;
+// The approval screen's shape as the jobs API names it, read by `supersede` to
+// find a waiting snapshot prompt; the self-test holds release.yml's `name:` to
+// render inside it and outside PUBLISH_JOB_NAME.
+export const SNAPSHOT_JOB_NAME = /^Snapshot next of main ([0-9a-f]{12}) \(awaiting approval\)$/;
 // The stable lane's jobs that a snapshot dispatch must not start.
 export const STABLE_JOBS = Object.freeze(['release-integrity', 'full-battery', 'publish', 'docker']);
+// Every job the daily snapshot cron must leave skipped: the stable lane, the
+// stable prompt sweep (ruling line 3 leaves it untouched) and the bookkeeping job.
+export const NEVER_ON_SNAPSHOT_SCHEDULE = Object.freeze([...STABLE_JOBS, 'stale-prompts', BOOKKEEPING_JOB]);
 // Main's tip as the job's `fetch-depth: 0` checkout fetched it: the second
 // place `preflight` reads the RC cycle (header, check 2). Both jobs pass it.
 export const MAIN_REF = 'refs/remotes/origin/main';
@@ -751,7 +796,300 @@ export function snapshotWiring(yamlText, publishScriptText) {
       if (has(lines, re)) findings.push(`\`${job}\` carries ${what}: the snapshot lane pushes no tag, cuts no Release, moves no dist-tag and builds no image`);
     }
   }
+
+  // The clocks (header: "The two starts, and the two clocks"). Two crons on one
+  // `schedule:`, each named by the jobs it starts and by no other.
+  const crons = declaredCrons(yamlText);
+  const bookkeeping = blocks.get(BOOKKEEPING_JOB);
+  if (crons.length !== 2) findings.push(`release.yml must declare exactly two crons under \`schedule:\` -- the 6-hourly bookkeeping refresh and the daily snapshot proposal (found ${JSON.stringify(crons)})`);
+  if (!bookkeeping) findings.push(`release.yml has no \`${BOOKKEEPING_JOB}\` job, so the bookkeeping cron has no reader`);
+  const clocks = { [PREFLIGHT_JOB]: guardClock(preflightJob), [SNAPSHOT_JOB]: guardClock(snapshotJob), ...(bookkeeping ? { [BOOKKEEPING_JOB]: guardClock(bookkeeping) } : {}) };
+  for (const [job, clock] of Object.entries(clocks)) {
+    if (clock.unequal.length) findings.push(`\`${job}\`'s \`if:\` compares github.event.schedule with \`!=\` (${clock.unequal.join(', ')}): a third cron would start it by default. Name the cron it runs on.`);
+    if (clock.equal.length !== 1) findings.push(`\`${job}\`'s \`if:\` must name exactly one cron it runs on (found ${clock.equal.length}: ${clock.equal.join(', ') || 'none'})`);
+    for (const cron of clock.equal) {
+      if (!crons.includes(cron)) findings.push(`\`${job}\`'s \`if:\` names cron '${cron}', which \`schedule:\` does not declare: a job whose if: names a cron the schedule never fires never runs`);
+    }
+    if (clock.equal.length && !/github\.event_name == 'schedule'/.test(clock.text)) findings.push(`\`${job}\`'s \`if:\` reads github.event.schedule without saying it is on the \`schedule\` event`);
+  }
+  const snapshotCron = clocks[PREFLIGHT_JOB].equal.length === 1 ? clocks[PREFLIGHT_JOB].equal[0] : null;
+  if (snapshotCron !== null) {
+    if (clocks[SNAPSHOT_JOB].equal[0] !== snapshotCron) findings.push(`\`${SNAPSHOT_JOB}\` names cron '${clocks[SNAPSHOT_JOB].equal[0] ?? ''}' while \`${PREFLIGHT_JOB}\` names '${snapshotCron}': one clock spelled two ways`);
+    if (clocks[BOOKKEEPING_JOB]?.equal[0] === snapshotCron) findings.push(`\`${BOOKKEEPING_JOB}\` runs on the snapshot cron '${snapshotCron}': the bookkeeping refresh keeps its own clock, and the daily proposal starts no other job`);
+    if (!DAILY_CRON.test(snapshotCron)) findings.push(`the snapshot cron '${snapshotCron}' is not one daily tick (\`M H * * *\`): the ruling binds once a day`);
+  }
+  const named = new Set(Object.values(clocks).flatMap((clock) => clock.equal));
+  for (const cron of crons) {
+    if (!named.has(cron)) findings.push(`cron '${cron}' is declared under \`schedule:\` but no scheduled job's \`if:\` names it: a run that does nothing`);
+  }
+  for (const job of [PREFLIGHT_JOB, SNAPSHOT_JOB]) {
+    if (!/inputs\.snapshot_next/.test(clocks[job].text)) findings.push(`\`${job}\`'s \`if:\` lost its dispatch arm (\`inputs.snapshot_next\`): the daily cron proposes, and a dispatch is the same proposal by hand`);
+  }
+
+  // The daily supersede (header; ruling line 3).
+  const supersedeJob = blocks.get(SUPERSEDE_JOB);
+  if (!supersedeJob) {
+    findings.push(`release.yml has no \`${SUPERSEDE_JOB}\` job: yesterday's unapproved scheduled prompt would hold the group, and today's would pend behind it unseen`);
+  } else {
+    const sup = codeLines(supersedeJob);
+    const clock = guardClock(supersedeJob);
+    if (!clock.text.startsWith('success() &&')) findings.push(`\`${SUPERSEDE_JOB}\`'s \`if:\` does not open with \`success() &&\`: a refused preflight must leave yesterday's prompt standing`);
+    if (!/github\.event_name == 'schedule'/.test(clock.text) || clock.equal.length !== 1 || (snapshotCron !== null && clock.equal[0] !== snapshotCron)) findings.push(`\`${SUPERSEDE_JOB}\` must run on the snapshot cron alone (if: ${clock.text || 'none'})`);
+    if (/\binputs\./.test(clock.text)) findings.push(`\`${SUPERSEDE_JOB}\` reads a dispatch input: a dispatch is a human's own act and supersedes nothing`);
+    const supNeeds = (sup.find((line) => /^ {4}needs:/.test(line)) ?? '').replace(/^ {4}needs:\s*/, '').replace(/[[\]]/g, '').split(',').map((s) => s.trim()).filter(Boolean);
+    if (supNeeds.join() !== PREFLIGHT_JOB) findings.push(`\`${SUPERSEDE_JOB}\` must need \`${PREFLIGHT_JOB}\` alone (needs: ${supNeeds.join(', ') || 'none'}): it supersedes only once today's proposal has passed`);
+    if (has(sup, /^ {4}environment:/)) findings.push(`\`${SUPERSEDE_JOB}\` carries an environment: a cancel is never held for an approval`);
+    if (!has(sup, /^ {6}actions:\s*write\s*$/)) findings.push(`\`${SUPERSEDE_JOB}\` must hold \`actions: write\`: the cancel is POST .../runs/{id}/cancel`);
+    if (!has(sup, /^ {6}contents:\s*read\s*$/) || has(sup, /^ {6}contents:\s*write\b/)) findings.push(`\`${SUPERSEDE_JOB}\` must hold \`contents: read\` and nothing more for contents`);
+    const supCalls = sup.filter((line) => line.includes(SUPERSEDE_CALL));
+    if (supCalls.length !== 1) findings.push(`\`${SUPERSEDE_JOB}\` must run \`${SUPERSEDE_CALL}\` exactly once (found ${supCalls.length})`);
+    if (has(sup, /\binputs\.force\b/)) findings.push(`\`${SUPERSEDE_JOB}\` reads \`inputs.force\`: the snapshot lane never reads the repair lane's input`);
+    if (has(sup, /^\s*continue-on-error:\s*true\b/)) findings.push(`\`${SUPERSEDE_JOB}\` sets continue-on-error, so a cancel that did not land cannot conclude failure`);
+    for (const [re, what] of FORBIDDEN_IN_SNAPSHOT) {
+      if (has(sup, re)) findings.push(`\`${SUPERSEDE_JOB}\` carries ${what}: it cancels one kind of waiting run and writes nothing else`);
+    }
+  }
   return findings;
+}
+
+// ---------------------------------------------------------------------------
+// The clocks: release.yml's `schedule:` crons, and the cron a job's `if:` names
+// ---------------------------------------------------------------------------
+
+/**
+ * The cron strings release.yml declares under `on: schedule:`, in order -- a
+ * text reading of the file's own two-space YAML, as `jobBlocks` is.
+ */
+export function declaredCrons(yamlText) {
+  const lines = String(yamlText).split('\n');
+  const on = lines.findIndex((line) => /^on:\s*$/.test(line));
+  if (on === -1) return [];
+  const crons = [];
+  let inSchedule = false;
+  for (const line of lines.slice(on + 1)) {
+    if (/^\S/.test(line)) break;
+    if (/^\s*(#.*)?$/.test(line)) continue;
+    if (/^ {2}\S/.test(line)) {
+      inSchedule = /^ {2}schedule:\s*$/.test(line);
+      continue;
+    }
+    if (!inSchedule) continue;
+    const m = /^ {4}- cron: '([^']+)'\s*(#.*)?$/.exec(line);
+    if (m) crons.push(m[1]);
+  }
+  return crons;
+}
+
+/**
+ * A job's `if:` as one line (a `>-` block folded), and the crons it compares
+ * `github.event.schedule` against, by operator. Comment lines are skipped.
+ */
+export function guardClock(jobLines) {
+  const code = codeLines(jobLines);
+  const ifAt = code.findIndex((line) => /^ {4}if:/.test(line));
+  if (ifAt === -1) return { text: '', equal: [], unequal: [] };
+  const folded = [];
+  for (const line of code.slice(ifAt + 1)) {
+    if (!/^ {6,}\S/.test(line)) break;
+    folded.push(line.trim());
+  }
+  const text = (folded.length ? folded.join(' ') : code[ifAt].replace(/^ {4}if:\s*(>-|\|)?\s*/, '')).replace(/\s+/g, ' ').trim();
+  return {
+    text,
+    equal: [...text.matchAll(/github\.event\.schedule\s*==\s*'([^']+)'/g)].map((m) => m[1]),
+    unequal: [...text.matchAll(/github\.event\.schedule\s*!=\s*'([^']+)'/g)].map((m) => m[1]),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The daily supersede: yesterday's scheduled prompt, and nothing else
+// ---------------------------------------------------------------------------
+
+/**
+ * The supersede's judgment -- pure. Each run is `{ id, event, status, createdAt,
+ * jobs: [{ name, status }], environments: [name] }`. Cancelled: a run OLDER than
+ * the calling one, started by `schedule`, still `waiting` as a run, whose
+ * snapshot job (SNAPSHOT_JOB_NAME) is `waiting` at the `release` environment and
+ * which holds no stable prompt. Every other run is untouched, with its reason.
+ */
+export function judgeSnapshotPrompts({ runs, currentRunId, currentCreatedAt }) {
+  const cancel = [];
+  const untouched = [];
+  const since = Date.parse(currentCreatedAt);
+  for (const run of runs) {
+    const id = String(run.id);
+    const entry = { id, event: run.event };
+    if (id === String(currentRunId)) {
+      untouched.push({ ...entry, reason: 'the calling run' });
+      continue;
+    }
+    // ⛔ Never a stable prompt, whatever else the run holds: that is
+    // `stale-prompts`' question (release-pending-publish.mjs `sweep`), and the
+    // ruling leaves the stable sweep untouched.
+    if (run.jobs.some((j) => PUBLISH_JOB_NAME.test(j.name))) {
+      untouched.push({ ...entry, reason: 'holds a stable publish prompt, which this job never touches (the stable sweep is stale-prompts\' alone)' });
+      continue;
+    }
+    if (run.event !== 'schedule') {
+      untouched.push({ ...entry, reason: `a ${run.event} run: a dispatch is a human's own act, and nothing supersedes it` });
+      continue;
+    }
+    // ⛔ The mid-flight guard: a run whose snapshot job was approved is
+    // `in_progress`, and cancelling THAT is the half-published fixed group the
+    // job's concurrency comment forbids. Only a job GitHub is still holding at
+    // the environment -- no step run -- is ever a candidate.
+    if (run.status !== 'waiting') {
+      untouched.push({ ...entry, reason: `run status ${run.status}, not waiting: its snapshot job has started or finished, and a cancel there could leave the group half on npm` });
+      continue;
+    }
+    const prompts = run.jobs.filter((j) => j.status === 'waiting' && SNAPSHOT_JOB_NAME.test(j.name));
+    if (prompts.length === 0) {
+      untouched.push({ ...entry, reason: 'no snapshot job waiting at an environment' });
+      continue;
+    }
+    if (!run.environments.includes('release')) {
+      untouched.push({ ...entry, reason: 'not waiting on the release environment' });
+      continue;
+    }
+    if (!(Number.isFinite(since) && Date.parse(run.createdAt) < since)) {
+      untouched.push({ ...entry, reason: 'not older than the calling run' });
+      continue;
+    }
+    cancel.push({ ...entry, commit: SNAPSHOT_JOB_NAME.exec(prompts[0].name)[1], createdAt: run.createdAt, reason: 'an earlier proposal nobody approved, superseded by this run' });
+  }
+  return { cancel, untouched };
+}
+
+function githubHttp({ apiUrl, token, dryRun }) {
+  return async (method, path) => {
+    // Structural, not a flag checked later: a dry run cannot reach a write.
+    if (dryRun && method !== 'GET') throw new Error(`--dry-run refuses ${method} ${path}`);
+    const res = await fetch(`${apiUrl}${path}`, {
+      method,
+      headers: {
+        accept: 'application/vnd.github+json',
+        authorization: `Bearer ${token}`,
+        'x-github-api-version': '2022-11-28',
+        'user-agent': 'objectstack-snapshot-next',
+      },
+    });
+    const text = await res.text();
+    let body = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      body = text;
+    }
+    return { status: res.status, body };
+  };
+}
+
+function expectOk(res, what) {
+  if (res.unread) throw new TransientReadFailure(`${what}: ${res.unread.message}`, { cause: res.unread });
+  if (res.status !== 200) throw new Error(`${what} answered HTTP ${res.status}: ${JSON.stringify(res.body).slice(0, 300)}`);
+  return res.body;
+}
+
+/**
+ * The runs the supersede judges, in `judgeSnapshotPrompts`' shape. Two listings,
+ * because the `?status=waiting` filter was measured answering an empty list for
+ * a run another reader saw waiting (release-pending-publish.mjs,
+ * `collectWaitingRuns`): the waiting filter, and the workflow's newest
+ * `schedule` runs on main. Every run either names, and the calling run, is read
+ * directly and only that read's status is judged; a waiting run's jobs and
+ * pending deployments are read too.
+ */
+export async function collectSnapshotRuns({ http, repo, workflow, currentRunId, recent = 50 }) {
+  const listPath = `/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs`;
+  const waiting = expectOk(await http('GET', `${listPath}?status=waiting&per_page=100`), `listing ${workflow}'s waiting runs`);
+  const scheduled = expectOk(await http('GET', `${listPath}?event=schedule&branch=main&per_page=${recent}`), `listing ${workflow}'s scheduled runs`);
+  const ids = new Set([...waiting.workflow_runs.map((r) => String(r.id)), ...scheduled.workflow_runs.map((r) => String(r.id)), String(currentRunId)].filter(Boolean));
+  const runs = [];
+  let current = null;
+  for (const id of ids) {
+    const r = expectOk(await http('GET', `/repos/${repo}/actions/runs/${id}`), `reading run ${id}`);
+    const run = { id: String(r.id), event: r.event, status: r.status, createdAt: r.created_at, jobs: [], environments: [] };
+    if (id === String(currentRunId)) current = run;
+    runs.push(run);
+    if (r.status !== 'waiting') continue;
+    const jobs = expectOk(await http('GET', `/repos/${repo}/actions/runs/${id}/jobs?filter=latest&per_page=100`), `listing run ${id}'s jobs`);
+    run.jobs = jobs.jobs.map((j) => ({ name: j.name, status: j.status }));
+    const pending = expectOk(await http('GET', `/repos/${repo}/actions/runs/${id}/pending_deployments`), `reading run ${id}'s pending deployments`);
+    run.environments = pending.map((p) => p.environment && p.environment.name).filter(Boolean);
+  }
+  return { runs, current, listed: { waiting: waiting.workflow_runs.length, scheduled: scheduled.workflow_runs.length } };
+}
+
+/**
+ * The supersede: read, judge, cancel yesterday's scheduled prompt. Answers the
+ * exit code. `env`, `http`, `sleep`, `log` and `warn` are injectable so the
+ * self-test drives the whole path offline -- the defaults are the live job's.
+ */
+export async function supersede({ workflow, dryRun = false, env = process.env, http = null, sleep, log = console.log, warn = console.error }) {
+  const repo = env.GITHUB_REPOSITORY;
+  if (!repo) throw new Error('GITHUB_REPOSITORY is required');
+  const currentRunId = env.GITHUB_RUN_ID || '';
+  if (!currentRunId) throw new Error('GITHUB_RUN_ID is required: the supersede judges runs OLDER than the calling one');
+  if (!http && !env.GITHUB_TOKEN) throw new Error('GITHUB_TOKEN is required');
+  const raw = http ?? githubHttp({ apiUrl: env.GITHUB_API_URL || 'https://api.github.com', token: env.GITHUB_TOKEN, dryRun });
+  // ONE retry budget for the whole read, as the stable sweep holds one.
+  const reads = retryingReads(raw, boardReadBudget({ sleep }));
+  const summarise = (lines) => {
+    if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+  };
+
+  let read;
+  try {
+    read = await collectSnapshotRuns({ http: reads, repo, workflow, currentRunId });
+  } catch (error) {
+    if (!(error instanceof TransientReadFailure)) throw error;
+    // ⛔ Exit 0 here, and only here: nothing was judged, so nothing was
+    // cancelled, and tomorrow's proposal runs this again from scratch -- the
+    // work is deferred, not lost. A 4xx, a body that does not add up and a
+    // cancel that did not land still fail the job.
+    const why = `${error.message}. Nothing was judged and nothing was cancelled; tomorrow's proposal runs this again and re-reads every waiting run, so the work is deferred, not lost.`;
+    warn(`::warning::the daily supersede of ${workflow} could not read the Actions API this run: ${why}`);
+    summarise([`### Yesterday's scheduled snapshot prompt: NOT READ this run`, '', `- ${why}`]);
+    return 0;
+  }
+  if (!read.current) throw new Error(`run ${currentRunId} (the calling run) was not readable, so "older than this run" cannot be judged`);
+  const verdict = judgeSnapshotPrompts({ runs: read.runs, currentRunId, currentCreatedAt: read.current.createdAt });
+
+  const waiting = read.runs.filter((r) => r.status === 'waiting').length;
+  const lines = [
+    `### Yesterday's scheduled snapshot prompt (${waiting} waiting run(s) of ${workflow})`,
+    '',
+    `- readings: \`?status=waiting\` listed ${read.listed.waiting}, newest \`schedule\` runs listed ${read.listed.scheduled}; ${read.runs.length} run(s) read directly`,
+  ];
+  const failures = [];
+  for (const c of verdict.cancel) {
+    const url = `${env.GITHUB_SERVER_URL || 'https://github.com'}/${repo}/actions/runs/${c.id}`;
+    if (dryRun) {
+      log(`would cancel run ${c.id}: Snapshot next of main ${c.commit} -- ${c.reason}`);
+      lines.push(`- would cancel [${c.id}](${url}): \`Snapshot next of main ${c.commit}\` (${c.createdAt}), ${c.reason}`);
+      continue;
+    }
+    const res = await reads('POST', `/repos/${repo}/actions/runs/${c.id}/cancel`);
+    if (res.status === 202) {
+      log(`::notice::cancelled run ${c.id}: its "Snapshot next of main ${c.commit}" prompt (scheduled ${c.createdAt}) was still waiting, and this run's proposal supersedes it. Nothing was published from it; this run's prompt now holds the group.`);
+      lines.push(`- cancelled [${c.id}](${url}): \`Snapshot next of main ${c.commit}\` (${c.createdAt}), ${c.reason}`);
+    } else if (res.status === 409) {
+      log(`run ${c.id} finished before it could be cancelled (HTTP 409) -- nothing waiting there any more.`);
+      lines.push(`- [${c.id}](${url}) finished before the cancel landed`);
+    } else {
+      failures.push(`cancel of run ${c.id} answered HTTP ${res.status}`);
+    }
+  }
+  for (const u of verdict.untouched) lines.push(`- untouched ${u.id}: ${u.reason}`);
+  if (verdict.cancel.length === 0) lines.push('- nothing to supersede');
+  log(lines.join('\n'));
+  summarise(lines);
+
+  if (failures.length > 0) {
+    for (const f of failures) log(`::error::${f}`);
+    return 1;
+  }
+  return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -771,9 +1109,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'verify: next names the snapshot, latest never moves to it': 4,
   'release.yml: the snapshot wiring': 21,
   'release.yml: exclusivity, evaluated job by job': 7,
+  'release.yml: two clocks on one schedule': 13,
+  'release.yml: the daily supersede job': 9,
+  'supersede: yesterday\'s scheduled prompt is cancelled, nothing else is': 12,
   'release-snapshot-publish.sh, run with a stubbed changeset: npm\'s answer record': 7,
 });
-const SELF_TEST_BATTERY_FLOOR = 13;
+const SELF_TEST_BATTERY_FLOOR = 16;
 
 export async function selfTest() {
   const seen = new Map();
@@ -1006,10 +1347,14 @@ export async function selfTest() {
   // here only, so the lane's own path loads none of it.
   const { jobsStartedBy, declaredDispatchInputs, dispatchRunInputs } = await import('../pm/fleet-write/validate.mjs');
   const declared = declaredDispatchInputs(yml);
-  const started = (text, event, sent) => jobsStartedBy(text, { event, inputs: dispatchRunInputs(declaredDispatchInputs(text), sent) });
-  const touchesSnapshot = (r) => [...r.runs, ...r.mayRun].filter((j) => j === PREFLIGHT_JOB || j === SNAPSHOT_JOB);
+  const started = (text, event, sent, schedule = null) => jobsStartedBy(text, { event, inputs: dispatchRunInputs(declaredDispatchInputs(text), sent), schedule });
+  const touchesSnapshot = (r) => [...r.runs, ...r.mayRun].filter((j) => j === PREFLIGHT_JOB || j === SNAPSHOT_JOB || j === SUPERSEDE_JOB);
+  // The two crons, read off the file and told apart by the job each starts; neither is spelled here.
+  const ymlCrons = declaredCrons(yml);
+  const bookkeepingCron = guardClock(jobBlocks(yml).get(BOOKKEEPING_JOB) ?? []).equal[0] ?? null;
+  const snapshotCron = guardClock(jobBlocks(yml).get(PREFLIGHT_JOB) ?? []).equal[0] ?? null;
   await t('the input is declared, boolean, default false', () => declared?.[SNAPSHOT_INPUT]?.type === 'boolean' && declared[SNAPSHOT_INPUT].default === 'false');
-  await t('push and schedule never reach the snapshot jobs', () => touchesSnapshot(started(yml, 'push', {})).length === 0 && touchesSnapshot(started(yml, 'schedule', {})).length === 0);
+  await t('push and the bookkeeping cron never reach the snapshot jobs', () => bookkeepingCron !== null && touchesSnapshot(started(yml, 'push', {})).length === 0 && touchesSnapshot(started(yml, 'schedule', {}, bookkeepingCron)).length === 0);
   await t('the repair dispatch, the force repair and the refresh never reach them', () => [{}, { force: true }, { refresh_version_pr: true }].every((sent) => touchesSnapshot(started(yml, 'workflow_dispatch', sent)).length === 0));
   await t('⭐ a snapshot dispatch starts the preflight and runs NONE of the stable lane\'s jobs', () => {
     const r = started(yml, 'workflow_dispatch', { [SNAPSHOT_INPUT]: true });
@@ -1026,6 +1371,121 @@ export async function selfTest() {
   await t('⛔ the pin can fail: release-integrity without the snapshot negation starts on a snapshot dispatch', () => {
     const cut = yml.replace(/(\n {2}release-integrity:[\s\S]*?) && !inputs\.snapshot_next\)/, '$1)');
     return cut !== yml && started(cut, 'workflow_dispatch', { [SNAPSHOT_INPUT]: true }).runs.includes('release-integrity');
+  });
+
+  battery('release.yml: two clocks on one schedule');
+  // The checked-in file's clocks are judged by the wiring case above; here the readers, the exclusivity
+  // by cron, and that every clock pin can fail. The crons are the file's own (read, never spelled).
+  const q = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  await t('release.yml declares two distinct crons under schedule:, and the readers find one on version-pr and one on the preflight', () => ymlCrons.length === 2 && ymlCrons[0] !== ymlCrons[1] && bookkeepingCron !== null && snapshotCron !== null && bookkeepingCron !== snapshotCron && ymlCrons.includes(bookkeepingCron) && ymlCrons.includes(snapshotCron));
+  await t('the snapshot cron is one daily tick, and the three snapshot jobs name it alike', () => DAILY_CRON.test(snapshotCron) && [SNAPSHOT_JOB, SUPERSEDE_JOB].every((job) => guardClock(jobBlocks(yml).get(job) ?? []).equal.join() === snapshotCron));
+  await t('declaredCrons reads nothing from a file with no on: block, and guardClock reads a job with no if: as clockless', () => declaredCrons('jobs:\n  a:\n    runs-on: x\n').length === 0 && guardClock(['    runs-on: x']).equal.length === 0);
+  await t('the bookkeeping cron starts version-pr alone, nothing undecided', () => {
+    const r = started(yml, 'schedule', {}, bookkeepingCron);
+    return r.runs.join() === BOOKKEEPING_JOB && r.mayRun.length === 0 && r.unread.length === 0;
+  });
+  await t('⭐ the snapshot cron starts the preflight ALONE: the snapshot job and the supersede may run behind it, and every stable job, stale-prompts and version-pr are skipped', () => {
+    const r = started(yml, 'schedule', {}, snapshotCron);
+    return r.runs.join() === PREFLIGHT_JOB && [...r.mayRun].sort().join() === [SNAPSHOT_JOB, SUPERSEDE_JOB].sort().join() && NEVER_ON_SNAPSHOT_SCHEDULE.every((j) => r.skipped.includes(j)) && r.unread.length === 0;
+  });
+  await t('a schedule run whose cron is not named leaves version-pr and the preflight undecided -- the reader does not guess which clock fired', () => {
+    const r = started(yml, 'schedule', {});
+    return r.runs.length === 0 && r.mayRun.includes(BOOKKEEPING_JOB) && r.mayRun.includes(PREFLIGHT_JOB) && r.unread.length === 0;
+  });
+  await t('a snapshot dispatch starts no supersede: a dispatch is a human\'s own act', () => started(yml, 'workflow_dispatch', { [SNAPSHOT_INPUT]: true }).skipped.includes(SUPERSEDE_JOB));
+  await t('⛔ the pin can fail: version-pr without its cron conjunct starts on the snapshot cron', () => {
+    const cut = yml.replace(new RegExp(`\\(github\\.event_name == 'schedule' && github\\.event\\.schedule == '${q(bookkeepingCron)}'\\)`), "github.event_name == 'schedule'");
+    return cut !== yml && started(cut, 'schedule', {}, snapshotCron).runs.includes(BOOKKEEPING_JOB) && fires(cut, 'no scheduled job');
+  });
+  await t('the snapshot job naming another cron than the preflight is refused (one clock spelled two ways)', () => fires(yml.replace(new RegExp(`(\\n {2}snapshot-next:[\\s\\S]*?github\\.event\\.schedule == )'${q(snapshotCron)}'`), "$1'59 23 * * *'"), 'one clock spelled two ways'));
+  await t('a != on the clock is refused (a third cron would start the lane by default)', () => fires(yml.replace(new RegExp(`(\\n {2}snapshot-next-preflight:[\\s\\S]*?github\\.event\\.schedule) == '${q(snapshotCron)}'`), `$1 != '${bookkeepingCron}'`), '`!=`'));
+  await t('version-pr on the snapshot cron is refused', () => fires(yml.replace(new RegExp(`(\\n {2}version-pr:[\\s\\S]*?github\\.event\\.schedule == )'${q(bookkeepingCron)}'`), `$1'${snapshotCron}'`), 'runs on the snapshot cron'));
+  await t('a cron declared under schedule: that no job names is refused, and a cron a job names that schedule: does not declare is refused', () => fires(yml.replace(/(\n {2}schedule:\n(?:(?: {4}#[^\n]*| {4}- cron: '[^']*')\n)+)/, "$1    - cron: '5 5 * * *'\n"), 'no scheduled job') && fires(yml.replace(`    - cron: '${snapshotCron}'`, "    - cron: '5 5 * * *'"), 'does not declare'));
+  await t('a snapshot cron that is not one daily tick is refused, and a preflight that lost its dispatch arm is refused', () => fires(yml.replaceAll(`'${snapshotCron}'`, "'17 */12 * * *'"), 'not one daily tick') && fires(yml.replace(/(\n {2}snapshot-next-preflight:[\s\S]*?\n {4}if: >-\n[^\n]*\n)[\s\S]*?(\n {4}runs-on:)/, '$1$2'), 'dispatch arm'));
+
+  battery('release.yml: the daily supersede job');
+  const supBlock = jobBlocks(yml).get(SUPERSEDE_JOB);
+  await t('the checked-in supersede job exists, needs the preflight alone, runs on the snapshot cron, and calls the supersede once', () => Array.isArray(supBlock) && guardClock(supBlock).text.startsWith('success() &&') && guardClock(supBlock).equal.join() === snapshotCron && codeLines(supBlock).filter((l) => l.includes(SUPERSEDE_CALL)).length === 1);
+  const supAt = yml.indexOf(`\n  ${SUPERSEDE_JOB}:\n`);
+  await t('a release.yml without the supersede job is refused', () => supAt > 0 && fires(`${yml.slice(0, supAt)}\n`, `has no \`${SUPERSEDE_JOB}\``));
+  const mutSup = (re, to) => yml.slice(0, supAt) + yml.slice(supAt).replace(re, to);
+  await t('an if: under !cancelled() is refused', () => fires(mutSup(/(\n {4}if: >-\n\s*)success\(\) &&/, '$1!cancelled() &&'), 'success() &&'));
+  await t('a supersede that reads a dispatch input is refused', () => fires(mutSup(/(github\.event_name == 'schedule' && github\.event\.schedule == '[^']*')/, '$1 && inputs.snapshot_next'), 'dispatch input'));
+  await t('actions: read instead of write is refused', () => fires(mutSup(/\n {6}actions: write\n/, '\n      actions: read\n'), 'actions: write'));
+  await t('an environment on the supersede is refused', () => fires(mutSup(/(\n {4}runs-on: ubuntu-latest\n)/, '$1    environment: release\n'), 'carries an environment'));
+  await t('a supersede needing the snapshot job too is refused', () => fires(mutSup(/\n {4}needs: \[snapshot-next-preflight\]\n/, '\n    needs: [snapshot-next-preflight, snapshot-next]\n'), 'alone'));
+  await t('a git push, or a second supersede call, in the job is refused', () => fires(mutSup(new RegExp(`(\\n {8}run: ${q(SUPERSEDE_CALL)}\\n)`), '$1      - run: git push origin --tags\n'), 'git push') && fires(mutSup(new RegExp(`(\\n {8}run: ${q(SUPERSEDE_CALL)}\\n)`), `$1      - run: ${SUPERSEDE_CALL}\n`), 'exactly once'));
+  await t('the snapshot job needing the supersede is refused (it needs the preflight alone)', () => fires(yml.replace(/(\n {2}snapshot-next:[\s\S]*?\n {4}needs: )\[snapshot-next-preflight\]/, '$1[snapshot-next-preflight, snapshot-next-supersede]'), 'alone'));
+
+  battery('supersede: yesterday\'s scheduled prompt is cancelled, nothing else is');
+  const NOW = '2026-11-06T01:17:40Z';
+  const YDAY = '2026-11-05T01:17:35Z';
+  const snapJob = (status, sha = '0123456789ab') => ({ name: `Snapshot next of main ${sha} (awaiting approval)`, status });
+  const aRun = (id, over = {}) => ({ id, event: 'schedule', status: 'waiting', createdAt: YDAY, jobs: [snapJob('waiting')], environments: ['release'], ...over });
+  const judgeRuns = (runs) => judgeSnapshotPrompts({ runs, currentRunId: '200', currentCreatedAt: NOW });
+  await t('⭐ yesterday\'s scheduled prompt, waiting at release, is cancelled, naming its commit', () => {
+    const r = judgeRuns([aRun('100')]);
+    return r.cancel.length === 1 && r.cancel[0].id === '100' && r.cancel[0].commit === '0123456789ab' && r.untouched.length === 0;
+  });
+  await t('the calling run is untouched', () => judgeRuns([aRun('200', { createdAt: NOW })]).cancel.length === 0);
+  await t('a dispatch run is untouched: a human\'s own act', () => {
+    const r = judgeRuns([aRun('100', { event: 'workflow_dispatch' })]);
+    return r.cancel.length === 0 && /human/.test(r.untouched[0].reason);
+  });
+  await t('⛔ an approved run (in_progress) is never touched: a cancel there is the half-published group', () => {
+    const r = judgeRuns([aRun('100', { status: 'in_progress', jobs: [snapJob('in_progress')] })]);
+    return r.cancel.length === 0 && /started/.test(r.untouched[0].reason);
+  });
+  await t('⛔ a run holding a stable Publish prompt is never touched, whatever else it holds', () => {
+    const r = judgeRuns([aRun('100', { jobs: [{ name: 'Publish 18.4.0 to npm (awaiting approval)', status: 'waiting' }] })]);
+    return r.cancel.length === 0 && /stable/.test(r.untouched[0].reason) && PUBLISH_JOB_NAME.test('Publish 18.4.0 to npm (awaiting approval)');
+  });
+  await t('a run waiting on another environment, or with no snapshot job waiting, is untouched', () => judgeRuns([aRun('100', { environments: ['staging'] })]).cancel.length === 0 && judgeRuns([aRun('100', { jobs: [snapJob('completed')] })]).cancel.length === 0);
+  await t('a run no older than the calling one is untouched', () => judgeRuns([aRun('300', { createdAt: '2026-11-07T01:17:35Z' })]).cancel.length === 0);
+  await t('two older unapproved proposals are both cancelled (each judged on its own)', () => judgeRuns([aRun('100'), aRun('101', { createdAt: '2026-11-04T01:17:35Z' })]).cancel.length === 2);
+  // The live path, with a stubbed Actions API.
+  const stubHttp = ({ waiting = [], scheduled = [], runs = {}, cancelStatus = 202, fail = null }) => {
+    const seen = [];
+    const http = async (method, path) => {
+      seen.push({ method, path });
+      if (fail && fail.test(path)) return { status: 502, body: 'bad gateway' };
+      if (method === 'POST') return { status: cancelStatus, body: null };
+      if (/\/runs\?status=waiting/.test(path)) return { status: 200, body: { total_count: waiting.length, workflow_runs: waiting.map((id) => ({ id })) } };
+      if (/\/runs\?event=schedule/.test(path)) return { status: 200, body: { workflow_runs: scheduled.map((id) => ({ id })) } };
+      const m = /\/actions\/runs\/(\d+)(\/jobs|\/pending_deployments)?/.exec(path);
+      if (!m || !runs[m[1]]) return { status: 404, body: {} };
+      const r = runs[m[1]];
+      if (m[2] === '/jobs') return { status: 200, body: { jobs: r.jobs } };
+      if (m[2] === '/pending_deployments') return { status: 200, body: r.environments.map((name) => ({ environment: { name } })) };
+      return { status: 200, body: { id: Number(m[1]), event: r.event, status: r.status, created_at: r.createdAt } };
+    };
+    return { seen, http };
+  };
+  const liveEnv = { GITHUB_REPOSITORY: 'o/r', GITHUB_RUN_ID: '200', GITHUB_TOKEN: 't' };
+  const yesterday = { event: 'schedule', status: 'waiting', createdAt: YDAY, jobs: [snapJob('waiting')], environments: ['release'] };
+  const today = { event: 'schedule', status: 'in_progress', createdAt: NOW, jobs: [], environments: [] };
+  const quiet = () => {};
+  const drive = (s, over = {}) => supersede({ workflow: 'release.yml', env: liveEnv, http: s.http, sleep: async () => {}, log: quiet, warn: quiet, ...over });
+  await t('⭐ live: the waiting filter empty, the schedule listing names yesterday\'s run, which is read directly and cancelled with ONE POST, exit 0', async () => {
+    const s = stubHttp({ scheduled: [200, 100], runs: { 100: yesterday, 200: today } });
+    const exit = await drive(s);
+    const posts = s.seen.filter((x) => x.method === 'POST');
+    return exit === 0 && posts.length === 1 && posts[0].path === '/repos/o/r/actions/runs/100/cancel';
+  });
+  await t('live: --dry-run judges the same and sends no POST', async () => {
+    const s = stubHttp({ waiting: [100], runs: { 100: yesterday, 200: today } });
+    return (await drive(s, { dryRun: true })) === 0 && !s.seen.some((x) => x.method === 'POST');
+  });
+  await t('live: a 409 (finished first) is exit 0; any other cancel answer is exit 1', async () => {
+    const a = stubHttp({ waiting: [100], runs: { 100: yesterday, 200: today }, cancelStatus: 409 });
+    const b = stubHttp({ waiting: [100], runs: { 100: yesterday, 200: today }, cancelStatus: 500 });
+    return (await drive(a)) === 0 && (await drive(b)) === 1;
+  });
+  await t('live: a listing still answering 5xx after the retries is deferred -- exit 0, nothing cancelled, a warning', async () => {
+    const s = stubHttp({ waiting: [100], runs: { 100: yesterday, 200: today }, fail: /status=waiting/ });
+    let warned = false;
+    const exit = await drive(s, { warn: (m) => { warned = warned || /could not read/.test(m); } });
+    return exit === 0 && warned && !s.seen.some((x) => x.method === 'POST');
   });
 
   battery('release-snapshot-publish.sh, run with a stubbed changeset: npm\'s answer record');
@@ -1201,11 +1661,25 @@ async function main(argv = process.argv.slice(2)) {
       return EXIT_PREREQUISITE_NOT_MET;
     }
   }
+  if (mode === 'supersede') {
+    const workflow = argValue(argv, '--workflow');
+    if (!workflow) {
+      console.error('::error::supersede needs --workflow FILE (release.yml)');
+      return EXIT_PREREQUISITE_NOT_MET;
+    }
+    try {
+      return await supersede({ workflow, dryRun: argv.includes('--dry-run') });
+    } catch (err) {
+      console.error(`::error::snapshot supersede failed -- ${err.message}`);
+      return 1;
+    }
+  }
   console.error(
     'usage: snapshot-next.mjs preflight [--main-ref REF] [--record FILE]\n' +
       '       snapshot-next.mjs guard [--pack-dir DIR] [--json-out FILE]\n' +
       '       snapshot-next.mjs verify --record FILE --version V\n' +
       '       snapshot-next.mjs dry-run [--main-ref REF] [--keep]\n' +
+      '       snapshot-next.mjs supersede --workflow release.yml [--dry-run]\n' +
       '       snapshot-next.mjs --self-test',
   );
   return 1;
