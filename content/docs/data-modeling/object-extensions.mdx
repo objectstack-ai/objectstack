@@ -110,7 +110,10 @@ export const AccountWordingExtension = defineObjectExtension({
     industry: {
       label: 'Sector',
       inlineHelpText: 'The market the account sells into.',
-      options: { technology: { label: 'Tech' } },   // addressed by the stored value
+      // no `options` here: `industry` takes its options from a shared picklist
+    },
+    type: {
+      options: { customer: { label: 'Client' } },   // addressed by the stored value
     },
   },
 });

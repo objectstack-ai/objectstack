@@ -43,7 +43,7 @@
 import type { SecurityPlugin } from './security-plugin.js';
 // [ADR-0055 §1] The parse's own one-master judgement, asked of an object that
 // reached the registry without the parse (see `resolveCbpRelation`).
-import { controlledByParentMasterRefusal, controlledByParentOwnerMayEdit } from '@objectstack/spec/data';
+import { controlledByParentMasterOf, controlledByParentMasterRefusal, controlledByParentOwnerMayEdit } from '@objectstack/spec/data';
 import { masterGovernsRowWrites, OWD_DELEGATING_ROW_WRITES } from './platform-ownership-policies.js';
 
 /**
@@ -162,7 +162,17 @@ export function resolveCbpRelation(
   // naming a reference — see the docblock. `required === true` is the spec's
   // own type for the key and the lint's reading of it.
   const candidates = entries.filter(([, f]) => f?.type === 'master_detail' && f?.required === true && ref(f));
-  const found = candidates.length === 1 ? candidates[0] : undefined;
+  // [ADR-0055 §1 as amended · #30905 ruling A] With none, the object's ONLY
+  // `master_detail`, declared `required: false`, is its optional master. Which
+  // field that is, is the spec's own resolver's answer (the parse judges the
+  // object with it); the reference is read here as tolerantly as above.
+  const judged = candidates.length === 0
+    ? controlledByParentMasterOf(Object.fromEntries(entries.map(([k, f]) => [String(k), f])))
+    : undefined;
+  const optionalEntry = judged?.optional ? entries.find(([k]) => String(k) === judged.field) : undefined;
+  const found = candidates.length === 1
+    ? candidates[0]
+    : optionalEntry && ref(optionalEntry[1]) ? optionalEntry : undefined;
   // [ADR-0055 §3 amendment] Resolved HERE, on the same schema the relation
   // came from, so the opt-in and the relation can never describe two objects.
   // Judged only for an object whose relation resolves: an opt-in on an object
@@ -196,9 +206,12 @@ export function resolveCbpRelation(
       // reports `true` for is a shape validation provably refuses.
       //
       // `master_detail` + `required` are the resolver's own predicate above
-      // (since #23100 nothing else resolves), so they always hold here; they
-      // stay spelled out so this licence reads as the validator's test it
-      // mirrors and cannot widen if the resolver ever changes.
+      // for a required master; they stay spelled out so this licence reads as
+      // the validator's test it mirrors and cannot widen if the resolver
+      // changes — and it did: an OPTIONAL master (#30905 ruling A) resolves
+      // with `required: false`, so this is `false` there and the master gate
+      // keeps answering an insert that leaves the reference empty (the write
+      // gate is unchanged by that ruling: such an insert is still refused).
       omissionRefusedByValidation:
         def?.type === 'master_detail' && !!def?.required && !def?.readonly && !def?.system,
       // [#25095] From the same def, asked of the parse's own predicate.
@@ -207,6 +220,10 @@ export function resolveCbpRelation(
       // the spec's one reader, and only where the schema carries the column
       // it names — see {@link CbpRelation.ownerMayEdit}.
       ownerMayEdit,
+      // [ADR-0055 §1 and §2 as amended · #30905 ruling A] See
+      // {@link CbpRelation.optional} and {@link CbpRelation.ownerColumn}.
+      optional: candidates.length === 0,
+      ownerColumn: hasOwnerColumn,
     };
   }
   this.cbpRelCache.set(object, rel);
@@ -220,6 +237,11 @@ export function reportCbpMasterUnresolved(
   entries: ReadonlyArray<readonly [string, any]>,
   requiredMasters: readonly string[],
 ): void {
+  // Every `master_detail` not declared `required: true`. The log key keeps
+  // its name; since ruling A of #30905 an OPTIONAL master proper (the only
+  // `master_detail`, declared `required: false`) resolves, so it is never
+  // listed here: what is listed is one that declares no `required`, or one of
+  // several.
   const optionalMasters = entries
     .filter(([, f]) => f?.type === 'master_detail' && f?.required !== true)
     .map(([k]) => String(k));
@@ -232,9 +254,17 @@ export function reportCbpMasterUnresolved(
         'and derives its master from exactly one'
       : [
           'it declares no required master_detail field',
-          ...(optionalMasters.length > 0
-            ? [`master_detail without required: true: ${optionalMasters.join(', ')} (add required: true)`]
-            : []),
+          ...(optionalMasters.length > 1
+            ? [
+                `master_detail without required: true: ${optionalMasters.join(', ')} (add required: true to ` +
+                  'the master and declare every other parent as a lookup)',
+              ]
+            : optionalMasters.length === 1
+              ? [
+                  `master_detail without required: true: ${optionalMasters[0]} (add required: true, or ` +
+                    'required: false for an optional master whose rows may name none)',
+                ]
+              : []),
           ...(requiredLookups.length > 0
             ? [
                 `required lookup: ${requiredLookups.join(', ')} (a lookup derives no access — declare the ` +
@@ -246,8 +276,9 @@ export function reportCbpMasterUnresolved(
     `[security/controlled-by-parent] object "${object}" declares sharingModel 'controlled_by_parent' but ` +
       `resolves no master relation — ${why}. Every read of it is DENIED and every write refused ` +
       '(422 INVALID_METADATA): ADR-0055 §1 derives the master from exactly one master_detail field declared ' +
-      'required: true, and from nothing else. A non-required master_detail and a required lookup no longer ' +
-      'derive access.',
+      'required: true, or, with none, from the only master_detail declared required: false, and from nothing ' +
+      'else. A master_detail that declares no required, one of several without required: true, and a ' +
+      'required lookup derive no access.',
     { object, requiredMasters, optionalMasters, requiredLookups },
   );
 }

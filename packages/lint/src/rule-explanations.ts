@@ -719,8 +719,10 @@ const SECURITY_CBP_NO_RELATION_EXPLANATION: RuleExplanation = {
   paragraphs: [
     'A `controlled_by_parent` object says its access comes from its master. ADR-0055 §1 names that ' +
       'master by exactly one `master_detail` field declared `required: true`, with a `reference` to the ' +
-      'master object, and by nothing else: a `master_detail` without `required: true` and a required ' +
-      '`lookup` derive no access.',
+      'master object, or, as amended, with no such field, by the object\'s ONLY `master_detail` declared ' +
+      '`required: false`, an optional master (a detail row with an empty master reference is read by its ' +
+      'owner and by View All on the detail). Nothing else names it: a `master_detail` that declares no ' +
+      '`required`, one declared `required: false` beside another, and a required `lookup` derive no access.',
     'Both runtime halves refuse an object without one: every read is DENIED, and every write is refused ' +
       'with 422 INVALID_METADATA — as a metadata defect rather than a permission denial — so the object ' +
       'is unusable rather than merely locked down. System objects are judged too, because the runtime ' +
@@ -3309,16 +3311,26 @@ const RELATIONSHIP_MASTER_DETAIL_REQUIRED_EXPLANATION: RuleExplanation = {
       '`masterFK IN (accessible master ids)` — never matches an empty master, so a detail saved ' +
       'without one is readable by nobody and refused on every later write. Record validation never ' +
       'checks a field that is not `required`, and skips `readonly` and `system` fields before its ' +
-      'required check, so on the three shapes reported — `required` absent or false, ' +
+      'required check, so on the three shapes reported — `required` absent, or false beside another ' +
+      '`master_detail`, ' +
       '`required: true` with `readonly: true`, and `required: true` with `system: true` — the ' +
       'security gate (`assertControlledByParentWrite`) is the only thing refusing such an insert.',
+    'One spelling passes: the object\'s ONLY `master_detail`, declared `required: false`, is an ' +
+      'optional master (ADR-0055 §1 as amended). A detail row with an empty master reference is read ' +
+      'by its owner (`owner_id`) and by a holder of View All on the detail, by nobody else; a row ' +
+      'that names a master is read through it as before. (The security gate still refuses a write ' +
+      'that leaves the reference empty.) `readonly` or `system` on it is ' +
+      'still reported. An omitted `required` is reported on every `master_detail`: the spec parse ' +
+      'reads the parsed `false` and admits it as the optional master, while `ObjectSchema.create()` ' +
+      'forces it to `true`, so one source would mean two things. Write `required: true` (every detail ' +
+      'names its master) or `required: false` (a detail may name none).',
     'Every `master_detail` field of such an object is judged, not only the one the runtime resolves ' +
-      'as the master: that is the scope `ObjectSchema.create()` enforces when it forces ' +
-      '`required: true` and refuses an explicit `required: false`. The spec parse also ' +
-      'refuses every shape that leaves the object without exactly one writable required master, so ' +
-      '`os validate`, `os build` and the save door stop there; a shape on a second, non-required ' +
-      '`master_detail` beside the master is this rule\'s report alone. One finding per field, located ' +
-      'at its first defect.',
+      'as the master: that is the scope `ObjectSchema.create()` enforces when it forces an omitted ' +
+      '`required` to `true` and refuses an explicit `required: false` beside another `master_detail`. ' +
+      'The spec parse also refuses every shape that leaves the object without exactly one writable ' +
+      'master, so `os validate`, `os build` and the save door stop there; a shape on a second, ' +
+      'non-required `master_detail` beside the master is this rule\'s report alone. One finding per ' +
+      'field, located at its first defect.',
     DATA_MODEL_SWEEP_REACH,
   ],
 };
