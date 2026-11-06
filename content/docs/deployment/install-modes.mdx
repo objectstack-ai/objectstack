@@ -92,6 +92,7 @@ runtime installs managed. The door judges the mode before it writes anything:
 | A mode the package's `installModes` does not permit | `422 INSTALL_MODE_NOT_PERMITTED`, naming what it permits |
 | `unmanaged` on a deployment whose requested tenancy posture walls organizations (`group`, `isolated`) | `409 UNMANAGED_INSTALL_WALLED_POSTURE`, naming the posture |
 | `managed`, while an unmanaged copy of the package holds its namespace | `409 RESOURCE_CONFLICT`, naming the copy's base |
+| `targetNamespace` on a `managed` install, or with no `installMode` | `400 INVALID_REQUEST`: a managed install is never renamed |
 
 A runtime that predates install modes ignores the field and installs the
 package managed. If you asked for `unmanaged`, the CLI says so and exits `1`.
@@ -144,7 +145,8 @@ delete, and `full` both.
 ## What an unmanaged copy keeps, and what it drops
 
 The package's metadata is copied **once** into a new writable base,
-`<package id>-copy`, which keeps the package's namespace. Every item is written
+`<package id>-copy`, which keeps the package's namespace unless the install
+[names another](#installing-the-copy-under-a-namespace-of-its-own). Every item is written
 through the save door a Studio edit takes, environment-wide, and is served as
 environment-authored metadata: the next save edits it.
 
@@ -214,6 +216,51 @@ dash and reason left off when there is none:
 ```
 
 Read it before you edit: it is why the vendor locked each item.
+
+### Installing the copy under a namespace of its own
+
+An unmanaged install can rename the copy into a namespace you name, so it sits
+beside the package, or beside another copy of it, under names of its own. Send
+`targetNamespace` with `installMode: 'unmanaged'` in the body of
+`POST /api/v1/marketplace/install-local` (the CLI has no flag for it):
+
+```json
+{ "packageId": "com.acme.crm", "versionId": "1.2.0", "installMode": "unmanaged", "targetNamespace": "acme" }
+```
+
+The copy is renamed by the same rules as duplicating a package:
+
+- **Every object takes the new namespace.** `crm_lead` copies as `acme_lead`,
+  and an object whose name lacks the package's prefix takes the new one in
+  front (`ticket` copies as `acme_ticket`).
+- **What names an object follows it.** A lookup's `reference`, a view's
+  `object`, a permission set's `objects` keys and the object part of its
+  `fields` keys, a translation's object keys, a form action's view target.
+  A view item follows its object (`crm_lead.board` copies as
+  `acme_lead.board`), and so does a view container and every view it expands
+  into. A field keeps its key, and a word in free text is renamed only when it
+  is a whole prefixed object name (`crm_lead`, never `x_crm_lead`).
+- **Translations are named `acme_<locale>`**, with the object keys inside them
+  renamed.
+- **An object of another package keeps its name**, and so do its view items.
+
+`targetNamespace` follows the rule for a manifest `namespace`, and the
+platform's shared namespaces `base`, `system` and `sys` are refused. Every
+refusal is answered before the base exists, so nothing is installed:
+
+| The rename | The answer |
+|:---|:---|
+| A `targetNamespace` the namespace rule refuses, or a shared one | `400 INVALID_REQUEST`, naming `targetNamespace` |
+| An object whose copy name another object's copy takes (`ticket` beside `crm_ticket`) | `400 INVALID_REQUEST`, naming the object and the rename that clears it |
+| A copy name that is not a legal item name, longer than an object's table name may be (63 characters), or longer than an item name may be (255) | `400 INVALID_REQUEST`, naming each item |
+| A renamed key that meets a key the item already holds (a permission set granting both `crm_lead` and `acme_lead`) | `400 INVALID_REQUEST`, naming the item and both keys |
+| A renamed name the environment or a managed package already holds | `409 RESOURCE_CONFLICT`, naming each |
+| A `targetNamespace` another package owns | `409 RESOURCE_CONFLICT`, naming it |
+
+The install answer's `installedFrom` gains `namespace`, the package's own,
+beside its id and version, so the answer records the rename it applied: names
+in `installedFrom.namespace` were copied into the copy's `namespace`. Without
+`targetNamespace` the answer is unchanged.
 
 ---
 

@@ -137,10 +137,11 @@ const DISPATCHABLE_HOOK_EVENTS: ReadonlySet<string> = new Set([
  * [#17713] Every verb the engine can put on an {@link OperationContext}, as
  * DATA rather than as a second hand-written list.
  *
- * The type annotation is the weld: `Record<Union, true>` is exhaustive in both
- * directions, so a new engine method that widens `OperationContext['operation']`
+ * The type annotation is the weld: `Record<Union, boolean>` is exhaustive in
+ * both directions, so a new engine method that widens `OperationContext['operation']`
  * fails to compile here until the verb is added, and a verb dropped from the
- * union makes its entry an excess property. `pnpm typecheck` compiles this file
+ * union makes its entry an excess property. The value says whether the verb
+ * names a `before`/`after` hook pair. `pnpm typecheck` compiles this file
  * (it is `src`, not the test layer), so the weld is enforced by the package's
  * own type check and not only by a test.
  *
@@ -148,7 +149,7 @@ const DISPATCHABLE_HOOK_EVENTS: ReadonlySet<string> = new Set([
  * hand-written list of "the events we refuse" would be this card's own defect
  * one layer up: it would go stale the moment a verb is added, and silently.
  */
-const ENGINE_OPERATION_VERBS: Record<OperationContext['operation'], true> = {
+const ENGINE_OPERATION_VERBS: Record<OperationContext['operation'], boolean> = {
   find: true,
   findOne: true,
   insert: true,
@@ -156,15 +157,22 @@ const ENGINE_OPERATION_VERBS: Record<OperationContext['operation'], true> = {
   delete: true,
   count: true,
   aggregate: true,
+  // [#30237] The recycle bin's removal verb names no hook pair. `beforePurge` /
+  // `afterPurge` stay outside the lifecycle namespace, where they were before
+  // the verb existed: inside it they would be refused at registration, a
+  // narrowing of `registerHook` this verb does not make. The permanent delete
+  // still fires `beforeDelete` / `afterDelete`.
+  purge: false,
 };
 
 /**
  * [#17713] The engine's own lifecycle-event NAMESPACE — `before`/`after` × every
- * verb in {@link ENGINE_OPERATION_VERBS}. Fourteen names, of which
- * {@link DISPATCHABLE_HOOK_EVENTS} is the eight the engine actually dispatches.
+ * verb in {@link ENGINE_OPERATION_VERBS} that names a hook pair. Fourteen names,
+ * of which {@link DISPATCHABLE_HOOK_EVENTS} is the eight the engine actually
+ * dispatches.
  */
 const ENGINE_LIFECYCLE_HOOK_EVENTS: ReadonlySet<string> = new Set(
-  Object.keys(ENGINE_OPERATION_VERBS).flatMap((verb) => {
+  Object.keys(ENGINE_OPERATION_VERBS).filter((verb) => ENGINE_OPERATION_VERBS[verb as OperationContext['operation']]).flatMap((verb) => {
     const suffix = `${verb.charAt(0).toUpperCase()}${verb.slice(1)}`;
     return [`before${suffix}`, `after${suffix}`];
   }),
@@ -321,7 +329,7 @@ const ENGINE_UPDATE_OPTION_KEYS: ReadonlySet<string> = new Set([
   ...ENGINE_DRIVER_PASSTHROUGH_KEYS,
 ]);
 const ENGINE_DELETE_OPTION_KEYS: ReadonlySet<string> = new Set([
-  'context', 'where', 'multi',
+  'context', 'where', 'multi', 'permanent',
   ...ENGINE_DRIVER_PASSTHROUGH_KEYS,
 ]);
 // `search` / `searchFields` are READ by `count` and `aggregate` through the
@@ -3659,7 +3667,16 @@ export interface FunctionRegistrationOptions {
  */
 export interface OperationContext {
   object: string;
-  operation: 'find' | 'findOne' | 'insert' | 'update' | 'delete' | 'count' | 'aggregate';
+  /**
+   * The verb the middleware chain authorizes. `purge` [#30237, ADR-0148] is the
+   * recycle bin's removal verb, dispatched on the business object the rows
+   * belong to: a by-id `delete` with `permanent: true` (its `where.id` the live
+   * row's), `purge(entryId)` and `empty(object)` (no id). It never carries an
+   * `ast`, so `@objectstack/plugin-security`'s AST path (step 3), which hands the
+   * verb to the RLS compiler raw, never sees it (#7809,
+   * `engine-middleware-operation-vocabulary.test.ts`).
+   */
+  operation: 'find' | 'findOne' | 'insert' | 'update' | 'delete' | 'count' | 'aggregate' | 'purge';
   ast?: QueryAST;
   data?: any;
   options?: any;
@@ -4928,7 +4945,10 @@ export interface ReadableIdsChain {
 export type UnservableControlledByParentMaster = {
   /** The `controlled_by_parent` detail. */
   readonly detail: string;
-  /** Its one required `master_detail` field. */
+  /**
+   * Its master `master_detail` field: the one required, or (ADR-0055 §1 as
+   * amended) its only `master_detail`, declared `required: false`.
+   */
   readonly field: string;
   /** The object that field names. */
   readonly master: string;

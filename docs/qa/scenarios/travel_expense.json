@@ -49,11 +49,12 @@
     "automation.record-triggered-flow",
     "access-security.row-level-security",
     "access-security.field-permissions",
+    "access-security.row-scope",
     "dashboards.report",
     "ai.ask-data",
     "ai.agent-actions"
   ],
-  "category": "finance",
+  "businessFunctions": ["finance"],
   "run": {
     "seed": {
       "department": [

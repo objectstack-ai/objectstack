@@ -767,6 +767,27 @@ interface CbpRelation {
    * master-edit rule whatever this says.
    */
   ownerMayEdit: boolean;
+  /**
+   * [ADR-0055 §1 and §2 as amended · #30905 ruling A] The master is OPTIONAL:
+   * the object declares no required `master_detail`, and its only one is
+   * declared `required: false` (read `=== false`, as the spec's
+   * `controlledByParentMasterOf` reads it — an omitted `required` on an object
+   * that reached the registry without the parse is not it). A detail row whose
+   * {@link fk} is empty then belongs to no master, and the read leaf
+   * ({@link SecurityPlugin.computeControlledByParentFilter}) admits it through
+   * the owner arm alone. `false` for a required master: its rows are read
+   * through the master and nothing else, exactly as before.
+   */
+  optional: boolean;
+  /**
+   * The registry's schema carries the `owner_id` column — the injected
+   * per-record owner under `ownership: 'user'` (the default), or an author's
+   * own field of that name. The owner arm of an {@link optional} master
+   * compares the caller against it; without it a row with an empty master is
+   * read through View All on the detail alone. Resolved from the same schema
+   * as {@link ownerMayEdit}, which reads it too.
+   */
+  ownerColumn: boolean;
 }
 
 /**
@@ -4600,6 +4621,14 @@ export class SecurityPlugin implements Plugin {
    * tolerance below is why — and ⛔ it must not grow a fallback tier back: a
    * relation the parse refuses must not be one this gate derives access from.
    *
+   * ⚠️ Amended by ruling A of #30905 (ADR-0055 §1 as amended): with no
+   * required one, the object's ONLY `master_detail`, declared
+   * `required: false`, resolves too — an OPTIONAL master
+   * ({@link CbpRelation.optional}), picked by the spec's own resolver
+   * (`controlledByParentMasterOf`, which the parse judges with). An omitted
+   * `required` is not `false` on this unparsed read, so such an object still
+   * resolves `null`, as before.
+   *
    * A `controlled_by_parent` object that resolves no relation is REPORTED, once
    * per object per cache generation ({@link SecurityPlugin.reportCbpMasterUnresolved}),
    * so a stored or raw-registered object that relied on a retired tier is not
@@ -4815,6 +4844,19 @@ export class SecurityPlugin implements Plugin {
    * object matches no row). Returns null when the object is not
    * controlled_by_parent, or when the caller is the system.
    *
+   * [ADR-0055 §1 and §2 as amended · #30905 ruling A] An OPTIONAL master
+   * ({@link CbpRelation.optional}) answers one `$or` of two arms that never
+   * share a row: the master arm above, unchanged, and a null-master arm for
+   * the rows whose reference is empty — every such row for a holder of View
+   * All on the detail (`permissionSets`; it opens nothing of the master arm),
+   * else the caller's own (`owner_id` equal to the caller), else none (an
+   * object without an `owner_id` column, {@link CbpRelation.ownerColumn}).
+   * A queue row (ADR-0142, no owner) is therefore View All's alone. The `$or`
+   * is this layer's answer, so every caller still ANDs it under the tenant
+   * wall and beside the detail's own layers. A required master's leaf is
+   * byte-identical to before. A cycle or a depth refusal still denies the
+   * whole object, null-master rows too: the declared shape is the defect.
+   *
    * [ADR-0055 amendment] The derivation COMPOSES ACROSS A CHAIN — a master
    * that is itself `controlled_by_parent` is scoped by ITS master, at every
    * level — and two guards bound the chain, both fail-CLOSED (`$in: []`, the
@@ -4838,17 +4880,25 @@ export class SecurityPlugin implements Plugin {
     /** The engine verb the answer is composed onto; a write verb answers `null` (ADR-0139 D1). */
     operation: string,
     context: any,
+    /**
+     * The permission sets resolved for `context`'s principal: read for View
+     * All on the detail by an optional master's null-master arm, and by
+     * nothing else (ADR-0055 §2 as amended).
+     */
+    permissionSets: PermissionSet[],
   ): Record<string, unknown> | null {
     // [#25223 cut 4] The body moved to `security-plugin-cbp-read-filter.ts` (see `CbpReadFilterHost`).
     const readLogger = () => this.logger;
+    const readPermissionEvaluator = () => this.permissionEvaluator;
     const readQl = () => this.ql;
-    const host: Pick<CbpReadFilterHost, 'controlledByParentChainRefusal' | 'logger' | 'ql' | 'resolveCbpRelation'> = {
+    const host: Pick<CbpReadFilterHost, 'controlledByParentChainRefusal' | 'logger' | 'permissionEvaluator' | 'ql' | 'resolveCbpRelation'> = {
       controlledByParentChainRefusal: (...a) => this.controlledByParentChainRefusal(...a),
       get logger() { return readLogger(); },
+      get permissionEvaluator() { return readPermissionEvaluator(); },
       get ql() { return readQl(); },
       resolveCbpRelation: (...a) => this.resolveCbpRelation(...a),
     };
-    return computeControlledByParentFilter.call(host, object, operation, context);
+    return computeControlledByParentFilter.call(host, object, operation, context, permissionSets);
   }
 
   /**

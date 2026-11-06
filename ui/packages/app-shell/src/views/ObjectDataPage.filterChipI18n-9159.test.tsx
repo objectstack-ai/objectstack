@@ -187,14 +187,14 @@ afterEach(() => {
 
 describe('the is-null filter chip is translated (objectui#9159)', () => {
   it('renders the zh pack copy, not an English literal', () => {
-    renderAt('zh', EMPTY_BUCKET_SEARCH);
+    renderAt('zh-Hans', EMPTY_BUCKET_SEARCH);
     const rendered = chipOperatorText();
 
     // The rendered copy IS the pack copy. Read from the pack rather than
     // written out here: this card owns whether the chip is TRANSLATED, while
     // the wording of the operator label belongs to the catalogue and to the
     // filter builder that shares this key.
-    expect(rendered).toBe(packLabel('zh'));
+    expect(rendered).toBe(packLabel('zh-Hans'));
     // A key that failed to resolve renders as itself — the exact user-visible
     // symptom the filter-builder operator family's locale-parity pin names.
     expect(rendered).not.toContain('filterBuilder.operators');
@@ -209,14 +209,14 @@ describe('the is-null filter chip is translated (objectui#9159)', () => {
     // `t` at all, if the packs happened to agree.
     renderAt('en', EMPTY_BUCKET_SEARCH);
     expect(chipOperatorText()).toBe(packLabel('en'));
-    expect(packLabel('zh')).not.toBe(packLabel('en'));
+    expect(packLabel('zh-Hans')).not.toBe(packLabel('en'));
   });
 
   it('CONTROL: an equality chip is NOT translated, because its text is the user\'s own comparand', () => {
     // The other half of the split: a comparand has no catalogue entry and must
     // reach the DOM verbatim in every locale. A change that routed every chip
     // through `t` would turn this red.
-    renderAt('zh', `filter[${FIELD}]=alice`);
+    renderAt('zh-Hans', `filter[${FIELD}]=alice`);
     expect(chipOperatorText()).toBe('= alice');
   });
 });
@@ -239,9 +239,9 @@ describe('the is-empty filter chips are translated (objectui#11547)', () => {
     [EMPTY_FILTER.flag, EMPTY_FILTER.labelKey],
     [EMPTY_FILTER.notFlag, EMPTY_FILTER.notLabelKey],
   ])('`[empty]=%s` renders the zh pack copy of `%s`', (flag, key) => {
-    renderAt('zh', `filter[${FIELD}][${EMPTY_FILTER.param}]=${flag}`);
+    renderAt('zh-Hans', `filter[${FIELD}][${EMPTY_FILTER.param}]=${flag}`);
     const rendered = chipOperatorText();
-    expect(rendered).toBe(packLabelOf('zh', key));
+    expect(rendered).toBe(packLabelOf('zh-Hans', key));
     expect(rendered).not.toContain('filterBuilder.operators');
     expect(rendered).not.toContain('true');
     expect(rendered).not.toContain('false');
@@ -250,10 +250,10 @@ describe('the is-empty filter chips are translated (objectui#11547)', () => {
   it('CONTROL: the en pack renders too, the packs differ, and the two directions differ', () => {
     renderAt('en', `filter[${FIELD}][${EMPTY_FILTER.param}]=${EMPTY_FILTER.flag}`);
     expect(chipOperatorText()).toBe(packLabelOf('en', EMPTY_FILTER.labelKey));
-    expect(packLabelOf('zh', EMPTY_FILTER.labelKey)).not.toBe(packLabelOf('en', EMPTY_FILTER.labelKey));
-    expect(packLabelOf('zh', EMPTY_FILTER.notLabelKey)).not.toBe(packLabelOf('zh', EMPTY_FILTER.labelKey));
+    expect(packLabelOf('zh-Hans', EMPTY_FILTER.labelKey)).not.toBe(packLabelOf('en', EMPTY_FILTER.labelKey));
+    expect(packLabelOf('zh-Hans', EMPTY_FILTER.notLabelKey)).not.toBe(packLabelOf('zh-Hans', EMPTY_FILTER.labelKey));
     // And neither is the is-null label: "is empty" is a different question.
-    expect(packLabelOf('zh', EMPTY_FILTER.labelKey)).not.toBe(packLabelOf('zh', NULL_FILTER.labelKey));
+    expect(packLabelOf('zh-Hans', EMPTY_FILTER.labelKey)).not.toBe(packLabelOf('zh-Hans', NULL_FILTER.labelKey));
   });
 });
 
@@ -274,19 +274,19 @@ describe('the membership and negation chips (objectstack#30743)', () => {
     ['nin', 'filterBuilder.operators.not_in'],
   ])('`[%s]` renders the zh label of `%s` beside the members, joined', (suffix, key) => {
     renderAt('zh', `filter[${FIELD}][${suffix}]=alice&filter[${FIELD}][${suffix}]=bob`);
-    expect(chipOperatorText()).toBe(`${packLabelOf('zh', key)} alice, bob`);
+    expect(chipOperatorText()).toBe(`${packLabelOf('zh-Hans', key)} alice, bob`);
   });
 
   it('`[ne]` renders the zh "does not equal" label beside the comparand', () => {
     renderAt('zh', `filter[${FIELD}][ne]=alice`);
     const rendered = chipOperatorText();
-    expect(rendered).toBe(`${packLabelOf('zh', 'filterBuilder.operators.not_equals')} alice`);
+    expect(rendered).toBe(`${packLabelOf('zh-Hans', 'filterBuilder.operators.not_equals')} alice`);
     expect(rendered).not.toContain('filterBuilder.operators');
   });
 
   it('CONTROL: the en pack differs, so the label half really went through `t`', () => {
     renderAt('en', `filter[${FIELD}][in]=alice`);
     expect(chipOperatorText()).toBe(`${packLabelOf('en', 'filterBuilder.operators.in')} alice`);
-    expect(packLabelOf('zh', 'filterBuilder.operators.in')).not.toBe(packLabelOf('en', 'filterBuilder.operators.in'));
+    expect(packLabelOf('zh-Hans', 'filterBuilder.operators.in')).not.toBe(packLabelOf('en', 'filterBuilder.operators.in'));
   });
 });

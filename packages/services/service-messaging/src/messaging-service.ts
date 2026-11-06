@@ -596,6 +596,25 @@ export class MessagingService {
         return [...ids];
     }
 
+    /**
+     * Every channel id this service knows, and whether it is mounted right now:
+     * the channels registered directly, then each lazy provider (#18050), read
+     * per call like {@link getRegisteredChannels}. A provider whose transport is
+     * absent (email with no email service, push with no push service) is known
+     * and answers `configured: false`, so a list built from this can offer the
+     * id while saying the deployment cannot send on it yet. Read by the
+     * preference options door (`preference-options-routes.ts`).
+     */
+    getKnownChannels(): Array<{ id: string; configured: boolean }> {
+        const known: Array<{ id: string; configured: boolean }> = [];
+        for (const id of this.channels.keys()) known.push({ id, configured: true });
+        for (const id of this.channelProviders.keys()) {
+            if (this.channels.has(id)) continue;
+            known.push({ id, configured: this.getChannel(id) !== undefined });
+        }
+        return known;
+    }
+
     /* ------------------------------------------------------------------ */
     /*  Inbox read API (ADR-0030) — backs /api/v1/notifications            */
     /*                                                                     */

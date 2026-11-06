@@ -156,7 +156,7 @@ export async function getReadFilter(
     // sentinel for an unresolvable relation, `$in: []` for a chain the
     // registry walk refuses); a THROW propagates to the catch below, which
     // denies — the same posture as the surrounding layers.
-    const cbpFilter = this.computeControlledByParentFilter(object, 'find', context);
+    const cbpFilter = this.computeControlledByParentFilter(object, 'find', context, permissionSets);
     // [#4467] RLS AND controlled-by-parent AND sharing — the same
     // AND-composition the middlewares achieve by all writing into `ast.where`.
     // Any layer may be absent; `andComposeLayers` returns the others, or null
@@ -231,9 +231,9 @@ export async function computeDelegatedReadFilter(
 
   // Layers 1 to 4 — the security middleware's own four, in its order.
   const filter = await this.computeRlsFilter(permissionSets, object, 'find', context);
-  const cbpFilter = this.computeControlledByParentFilter(object, 'find', context);
+  const cbpFilter = this.computeControlledByParentFilter(object, 'find', context, permissionSets);
   const delFilter = await this.computeRlsFilter(delegatorSets, object, 'find', delegatorContext);
-  const delCbpFilter = this.computeControlledByParentFilter(object, 'find', delegatorContext);
+  const delCbpFilter = this.computeControlledByParentFilter(object, 'find', delegatorContext, delegatorSets);
 
   const securityLayers = andComposeLayers(andComposeLayers(filter, cbpFilter), andComposeLayers(delFilter, delCbpFilter));
   const sharingLayers = andComposeLayers(sharingFilter, delegatorSharingFilter);

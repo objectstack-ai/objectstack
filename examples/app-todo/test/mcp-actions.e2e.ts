@@ -118,19 +118,19 @@ function mcpRequest(body: unknown): Request {
   const actions = JSON.parse(listed.result.content[0].text).actions as any[];
   const actionNames = actions.map((a) => a.name);
   console.log(`   → ${actionNames.length} actions: ${actionNames.join(', ')}`);
-  check(actionNames.includes('complete_task'), 'complete_task (script) is listed');
-  check(!actionNames.includes('defer_task'), 'defer_task (modal/UI-only) is NOT listed');
-  const complete = actions.find((a) => a.name === 'complete_task');
-  check(complete?.requiresRecord === true, 'complete_task is flagged requiresRecord');
-  const del = actions.find((a) => a.name === 'delete_completed');
-  check(del?.requiresConfirmation === true, 'delete_completed (danger) flagged requiresConfirmation');
+  check(actionNames.includes('todo_complete_task'), 'todo_complete_task (script) is listed');
+  check(!actionNames.includes('todo_defer_task'), 'todo_defer_task (modal/UI-only) is NOT listed');
+  const complete = actions.find((a) => a.name === 'todo_complete_task');
+  check(complete?.requiresRecord === true, 'todo_complete_task is flagged requiresRecord');
+  const del = actions.find((a) => a.name === 'todo_delete_completed');
+  check(del?.requiresConfirmation === true, 'todo_delete_completed (danger) flagged requiresConfirmation');
 
   // ── Step 3 — run_action EXECUTES real business logic ──────────────
-  console.log('\n⚡ Step 3 — run_action executes complete_task against a real record');
+  console.log('\n⚡ Step 3 — run_action executes todo_complete_task against a real record');
   const seeded: any = await engine.insert('todo_task', { subject: 'Ship MCP actions', status: 'not_started', priority: 'high' });
   const taskId = seeded?.id ?? seeded?.record?.id;
   check(Boolean(taskId), `seeded a task (${taskId})`);
-  const ran = await callMcp(bridge, toolsCall(3, 'run_action', { actionName: 'complete_task', recordId: taskId }));
+  const ran = await callMcp(bridge, toolsCall(3, 'run_action', { actionName: 'todo_complete_task', recordId: taskId }));
   check(ran.result?.isError !== true, 'run_action returned success (no tool error)');
   const payload = ran.result?.isError ? {} : JSON.parse(ran.result.content[0].text);
   check(payload.ok === true, 'run_action payload reports ok:true');
@@ -145,38 +145,38 @@ function mcpRequest(body: unknown): Request {
 
   // ── Step 5 — capability gate (ADR-0066 D4) end-to-end ─────────────
   console.log('\n🔒 Step 5 — requiredPermissions gate denies, then allows');
-  // Same app, but clone_task now declares a capability requirement.
+  // Same app, but todo_clone_task now declares a capability requirement.
   const gatedObjects = mergedObjects.map((o) =>
     o.name !== 'todo_task'
       ? o
-      : { ...o, actions: o.actions.map((a: any) => (a.name === 'clone_task' ? { ...a, requiredPermissions: ['todo_admin'] } : a)) },
+      : { ...o, actions: o.actions.map((a: any) => (a.name === 'todo_clone_task' ? { ...a, requiredPermissions: ['todo_admin'] } : a)) },
   );
   const denyBridge = bridgeFor({ userId: 'user_2', positions: [], permissions: [], systemPermissions: [] }, gatedObjects);
-  const denied = await callMcp(denyBridge, toolsCall(5, 'run_action', { actionName: 'clone_task', recordId: taskId }));
+  const denied = await callMcp(denyBridge, toolsCall(5, 'run_action', { actionName: 'todo_clone_task', recordId: taskId }));
   check(denied.result?.isError === true, 'run_action denied when the caller lacks the capability');
   check(/requires capability/i.test(denied.result?.content?.[0]?.text ?? ''), 'denial cites the missing capability');
   // …and list_actions hides what the caller may not run.
   const denyList = JSON.parse((await callMcp(denyBridge, toolsCall(6, 'list_actions', {}))).result.content[0].text).actions as any[];
-  check(!denyList.some((a) => a.name === 'clone_task'), 'list_actions hides the gated action from a non-holder');
+  check(!denyList.some((a) => a.name === 'todo_clone_task'), 'list_actions hides the gated action from a non-holder');
 
   const allowBridge = bridgeFor({ userId: 'admin_1', positions: [], permissions: [], systemPermissions: ['todo_admin'] }, gatedObjects);
-  const allowed = await callMcp(allowBridge, toolsCall(7, 'run_action', { actionName: 'clone_task', recordId: taskId }));
+  const allowed = await callMcp(allowBridge, toolsCall(7, 'run_action', { actionName: 'todo_clone_task', recordId: taskId }));
   check(allowed.result?.isError !== true, 'run_action allowed for a holder of the capability');
   const allowList = JSON.parse((await callMcp(allowBridge, toolsCall(8, 'list_actions', {}))).result.content[0].text).actions as any[];
-  check(allowList.some((a) => a.name === 'clone_task'), 'list_actions reveals the gated action to a holder');
+  check(allowList.some((a) => a.name === 'todo_clone_task'), 'list_actions reveals the gated action to a holder');
 
   // ── Step 6 — AI-exposure gate (#2849) end-to-end ───────────────────
   console.log('\n🔒 Step 6 — an action without ai.exposed is hidden and uninvokable');
-  // Same app, but clone_task no longer opts into the AI surface.
+  // Same app, but todo_clone_task no longer opts into the AI surface.
   const unexposedObjects = mergedObjects.map((o) =>
     o.name !== 'todo_task'
       ? o
-      : { ...o, actions: o.actions.map((a: any) => (a.name === 'clone_task' ? (({ ai: _ai, ...rest }: any) => rest)(a) : a)) },
+      : { ...o, actions: o.actions.map((a: any) => (a.name === 'todo_clone_task' ? (({ ai: _ai, ...rest }: any) => rest)(a) : a)) },
   );
   const unexposedBridge = bridgeFor({ userId: 'user_3', positions: [], permissions: [], systemPermissions: ['todo_admin'] }, unexposedObjects);
   const unexposedList = JSON.parse((await callMcp(unexposedBridge, toolsCall(9, 'list_actions', {}))).result.content[0].text).actions as any[];
-  check(!unexposedList.some((a) => a.name === 'clone_task'), 'list_actions hides an action the author did not expose to AI');
-  const unexposedRun = await callMcp(unexposedBridge, toolsCall(10, 'run_action', { actionName: 'clone_task', recordId: taskId }));
+  check(!unexposedList.some((a) => a.name === 'todo_clone_task'), 'list_actions hides an action the author did not expose to AI');
+  const unexposedRun = await callMcp(unexposedBridge, toolsCall(10, 'run_action', { actionName: 'todo_clone_task', recordId: taskId }));
   check(unexposedRun.result?.isError === true, 'run_action refuses the unexposed action (fail-closed)');
   check(/not exposed to AI/i.test(unexposedRun.result?.content?.[0]?.text ?? ''), 'refusal names the AI-exposure gate');
 
@@ -190,14 +190,14 @@ function mcpRequest(body: unknown): Request {
   // JSON-RPC `tools/call`, through both of those layers, into the real gate —
   // and the record afterwards says whether anything ran.
   console.log('\n🔒 Step 7 — ai.requiresConfirmation is ENFORCED, and satisfiable');
-  // Same app, but complete_task now declares the author's gate.
+  // Same app, but todo_complete_task now declares the author's gate.
   const gatedConfirmObjects = mergedObjects.map((o) =>
     o.name !== 'todo_task'
       ? o
       : {
           ...o,
           actions: o.actions.map((a: any) =>
-            a.name === 'complete_task' ? { ...a, ai: { ...(a.ai ?? {}), requiresConfirmation: true } } : a,
+            a.name === 'todo_complete_task' ? { ...a, ai: { ...(a.ai ?? {}), requiresConfirmation: true } } : a,
           ),
         },
   );
@@ -206,7 +206,7 @@ function mcpRequest(body: unknown): Request {
   // The listing tells a client the gate is there (unchanged behaviour).
   const gatedList = JSON.parse((await callMcp(confirmBridge, toolsCall(11, 'list_actions', {}))).result.content[0].text).actions as any[];
   check(
-    gatedList.find((a) => a.name === 'complete_task')?.requiresConfirmation === true,
+    gatedList.find((a) => a.name === 'todo_complete_task')?.requiresConfirmation === true,
     'list_actions still reports requiresConfirmation:true (unchanged)',
   );
 
@@ -214,7 +214,7 @@ function mcpRequest(body: unknown): Request {
   const gatedId = gatedTask?.id ?? gatedTask?.record?.id;
 
   // 7a — WITHOUT the member: refused, with the declared code, and NOTHING ran.
-  const refused = await callMcp(confirmBridge, toolsCall(12, 'run_action', { actionName: 'complete_task', recordId: gatedId }));
+  const refused = await callMcp(confirmBridge, toolsCall(12, 'run_action', { actionName: 'todo_complete_task', recordId: gatedId }));
   check(refused.result?.isError === true, 'run_action WITHOUT confirm is refused');
   let refusedEnvelope: any = {};
   try {
@@ -224,7 +224,7 @@ function mcpRequest(body: unknown): Request {
   }
   check(refusedEnvelope?.error?.code === 'ACTION_CONFIRMATION_REQUIRED', `refusal carries code ACTION_CONFIRMATION_REQUIRED (got ${refusedEnvelope?.error?.code})`);
   check(refusedEnvelope?.error?.status === 428, `refusal carries status 428 (got ${refusedEnvelope?.error?.status})`);
-  check(refusedEnvelope?.error?.details?.actionName === 'complete_task', 'refusal names the action');
+  check(refusedEnvelope?.error?.details?.actionName === 'todo_complete_task', 'refusal names the action');
   check(refusedEnvelope?.error?.details?.confirmationMember === 'confirm', 'refusal names the member to set');
   const afterRefusal: any[] = await engine.find('todo_task', { where: { id: gatedId } });
   check(afterRefusal?.[0]?.status === 'not_started', `nothing ran — status is still '${afterRefusal?.[0]?.status}'`);
@@ -233,16 +233,16 @@ function mcpRequest(body: unknown): Request {
   // This is the leg that proves the member is not stripped: before the door
   // grew it, this call was refused exactly like 7a and the action was
   // permanently un-invokable.
-  const confirmed = await callMcp(confirmBridge, toolsCall(13, 'run_action', { actionName: 'complete_task', recordId: gatedId, confirm: true }));
+  const confirmed = await callMcp(confirmBridge, toolsCall(13, 'run_action', { actionName: 'todo_complete_task', recordId: gatedId, confirm: true }));
   check(confirmed.result?.isError !== true, 'run_action WITH confirm:true succeeds');
   const afterConfirm: any[] = await engine.find('todo_task', { where: { id: gatedId } });
   check(afterConfirm?.[0]?.status === 'completed', `the handler ran — status is now '${afterConfirm?.[0]?.status}'`);
 
-  // 7c — the heuristic must NOT gate: delete_completed is `variant:'danger'`
+  // 7c — the heuristic must NOT gate: todo_delete_completed is `variant:'danger'`
   // and the listing calls it requiresConfirmation, but its author declared
   // nothing, so it stays invokable with no member (this change narrows a
   // published accept set; refusing here would be the regression).
-  const undeclared = await callMcp(confirmBridge, toolsCall(14, 'run_action', { actionName: 'delete_completed' }));
+  const undeclared = await callMcp(confirmBridge, toolsCall(14, 'run_action', { actionName: 'todo_delete_completed' }));
   check(undeclared.result?.isError !== true, 'a destructive-LOOKING action with no declared flag is NOT gated');
 
   console.log('\n────────────────────────────────────────────────────────────────────────────────');

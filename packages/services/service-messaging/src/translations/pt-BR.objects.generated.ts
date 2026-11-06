@@ -214,7 +214,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       channel: {
         label: "Canal",
-        help: "O canal: inbox (notificações exibidas no app, sempre disponível), email (depois que um serviço de e-mail é configurado), sms (depois que um serviço de SMS é configurado) ou o ID de um canal adicionado por um plugin instalado. Digite * para todos os canais. Um ID que nenhum canal usa não corresponde a nada."
+        help: "O canal: inbox (notificações exibidas no app, sempre disponível), email (depois que um serviço de e-mail é configurado), sms (depois que um serviço de SMS é configurado), push (depois que um serviço de push é configurado, para os dispositivos registrados do usuário) ou o ID de um canal adicionado por um plugin instalado. Digite * para todos os canais. Um ID que nenhum canal usa não corresponde a nada."
       },
       enabled: {
         label: "Ativado",

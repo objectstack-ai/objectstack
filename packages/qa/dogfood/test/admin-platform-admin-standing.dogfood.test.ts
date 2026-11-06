@@ -249,6 +249,14 @@ const ADMITTED = [
   'POST /api/v1/auth/admin/sso/register-saml',
   'POST /api/v1/auth/admin/sso/request-domain-verification',
   'POST /api/v1/auth/admin/sso/verify-domain',
+  // #30958 — the SCIM connection credential door: ObjectStack raw mounts whose
+  // FIRST statement is the ADR-0068 gate. SCIM is on at this boot
+  // (`OS_SCIM_ENABLED`), so the mint reaches a 200 and stores a credential;
+  // the revoke of an id that does not exist reaches the handler and answers
+  // 404. Their stored effects (the bearer provisions, is refused once revoked,
+  // and is audited) are pinned in `admin-identity-audit-trail.dogfood.test.ts`.
+  'POST /api/v1/auth/admin/scim/mint-credential',
+  'POST /api/v1/auth/admin/scim/revoke-credential',
 ] as const;
 
 /**
@@ -731,6 +739,10 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
       },
       'POST /api/v1/auth/admin/sso/request-domain-verification': { body: { providerId: 'standing-probe-oidc' } },
       'POST /api/v1/auth/admin/sso/verify-domain': { body: { providerId: 'standing-probe-oidc' } },
+      // #30958. A connection id is the only required field; the revoke names a
+      // credential id that does not exist, so it moves nothing.
+      'POST /api/v1/auth/admin/scim/mint-credential': { body: { connectionId: 'standing-probe-scim' } },
+      'POST /api/v1/auth/admin/scim/revoke-credential': { body: { credentialId: 'standing-probe-credential' } },
       'POST /api/v1/auth/admin/ban-user': { body: { userId: targetUserId, banReason: 'sweep' } },
       'POST /api/v1/auth/admin/unban-user': { body: { userId: targetUserId } },
       'POST /api/v1/auth/admin/impersonate-user': { body: { userId: targetUserId } },

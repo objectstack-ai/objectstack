@@ -157,6 +157,12 @@ Datasources** (stamped `origin: code`, read-only in the UI) and via
 `GET /api/v1/datasources` and `GET /api/v1/meta/datasource`, where an admin can
 run the "Sync objects" wizard.
 
+A datasource created in Setup (`POST /api/v1/datasources`) is a `datasource`
+item of the environment's metadata. Under the `group` and `isolated` tenancy
+postures only the platform operator creates, changes or removes one, or migrates
+its credential; any other caller is refused `403`, naming the posture, whatever
+it holds, as at the `/meta` doors ([tenancy modes](/docs/deployment/tenancy-modes)).
+
 ### When auto-connect fails
 
 An object that binds explicitly via `datasource: '…'` has **no fallback** — it

@@ -7,7 +7,8 @@ import type {
   EnsureCustomizationPackageResponse,
   MetadataProtocol,
 } from '@objectstack/spec/api';
-import { customizationNamespace, customizationPackageId } from '@objectstack/spec/kernel';
+import { customizationNamespace } from '@objectstack/spec/kernel';
+import { pairOf } from '@objectstack/metadata-core';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { IDataEngine, IObjectQLEngine, IntrospectedSchema } from '@objectstack/spec/contracts';
 import {
@@ -369,7 +370,7 @@ export class ExternalDatasourceServicePlugin implements Plugin {
         if (doors.isWritablePackage(basePackageId)) {
           return { packageId: basePackageId, namespace: namespaceOf(base) };
         }
-        const pairId = customizationPackageId(basePackageId);
+        const pairId = pairOf(basePackageId);
         if (!pairId.ok) {
           throw importLandingRefusal(
             `Datasource '${datasource}' is declared by read-only package '${basePackageId}', which has no `

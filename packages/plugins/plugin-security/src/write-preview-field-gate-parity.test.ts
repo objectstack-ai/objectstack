@@ -43,8 +43,17 @@
  *
  * Both controls run on the same harness, so this cannot pass by refusing
  * everything: the same caller with the column `editable` is admitted by both
- * doors, pays exactly ONE related read on each, and DOES receive the rule's
- * verdict.
+ * doors, pays exactly ONE related read for the rule on each (beside the
+ * reference check's id-only reads), and DOES receive the rule's verdict.
+ *
+ * ## …and the caller who cannot read the related row (#29029)
+ *
+ * A write that is not a system write may name, in a lookup, only a record its
+ * caller can read, and that check runs before the record's validation rules
+ * (ruling records 6573561091 and 6663849489). So every caller here reads
+ * `crm_account`, and one block drives the editor who may edit the column but
+ * holds no read on the account: both doors answer the lookup's
+ * `reference_not_found`, never the rule's verdict.
  *
  * ## …and the two PRE-RESOLUTION classes, which are a different shape
  *
@@ -161,7 +170,7 @@ const USER_POSITION = {
 const FLS_LOCKED: PermissionSet = {
   name: 'member_default',
   label: 'Opportunity editor, locked out of the lookup column',
-  objects: { crm_opportunity: { allowRead: true, allowCreate: true, allowEdit: true } },
+  objects: { crm_opportunity: { allowRead: true, allowCreate: true, allowEdit: true }, crm_account: { allowRead: true } },
   fields: { 'crm_opportunity.account': { readable: true, editable: false } },
 } as unknown as PermissionSet;
 
@@ -169,6 +178,14 @@ const FLS_LOCKED: PermissionSet = {
 const FLS_OPEN: PermissionSet = {
   name: 'member_default',
   label: 'Opportunity editor who may repoint the account',
+  objects: { crm_opportunity: { allowRead: true, allowCreate: true, allowEdit: true }, crm_account: { allowRead: true } },
+  fields: { 'crm_opportunity.account': { readable: true, editable: true } },
+} as unknown as PermissionSet;
+
+/** [#29029] The control's grant WITHOUT read on the account: it may not name one. */
+const FLS_OPEN_NO_ACCOUNT_READ: PermissionSet = {
+  name: 'member_default',
+  label: 'Opportunity editor who may repoint the account, and reads no account',
   objects: { crm_opportunity: { allowRead: true, allowCreate: true, allowEdit: true } },
   fields: { 'crm_opportunity.account': { readable: true, editable: true } },
 } as unknown as PermissionSet;
@@ -185,6 +202,7 @@ const FULL_CRUD: PermissionSet = {
     eng_log: { allowRead: true, allowCreate: true, allowEdit: true },
     eng_log_amendable: { allowRead: true, allowCreate: true, allowEdit: true },
     sys_user_position: { allowRead: true, allowCreate: true, allowEdit: true },
+    crm_account: { allowRead: true },
   },
   fields: {
     'eng_log.account': { readable: true, editable: true },
@@ -197,7 +215,7 @@ const FULL_CRUD: PermissionSet = {
 const TASK_EDITOR: PermissionSet = {
   name: 'member_default',
   label: 'Task editor',
-  objects: { crm_task: { allowRead: true, allowCreate: true, allowEdit: true } },
+  objects: { crm_task: { allowRead: true, allowCreate: true, allowEdit: true }, crm_account: { allowRead: true } },
   fields: { 'crm_task.account': { readable: true, editable: true } },
 } as unknown as PermissionSet;
 
@@ -324,8 +342,10 @@ async function boot(sets: PermissionSet[], opts: { orgScoping?: boolean } = {}) 
   // [ADR-0131 D3/D4] The position the assignment rows name, declared in the
   // security catalog the assignment refusal reads.
   engine.registry.registerItem('position', { name: 'sales', label: 'Sales' } as any, 'name' as any, 'test-package');
-  d.storeFor('crm_account').set('acc_p', { id: 'acc_p', name: 'P', type: 'partner' });
-  d.storeFor('crm_account').set('acc_d', { id: 'acc_d', name: 'D', type: 'direct' });
+  // [#29029] In the callers' organization, so a caller with an active
+  // organization reads them under the organization wall too.
+  d.storeFor('crm_account').set('acc_p', { id: 'acc_p', name: 'P', type: 'partner', organization_id: 'org-1' });
+  d.storeFor('crm_account').set('acc_d', { id: 'acc_d', name: 'D', type: 'direct', organization_id: 'org-1' });
 
   const services: Record<string, unknown> = {
     // The `isolated` posture, as the plugin resolves it with no `tenancy`
@@ -369,7 +389,14 @@ async function boot(sets: PermissionSet[], opts: { orgScoping?: boolean } = {}) 
   d.calls.length = 0;
   return {
     engine,
+    /** Every read of the related object, the reference check's included. */
     relatedReads: () => d.calls.filter((c) => c.object === 'crm_account').length,
+    /**
+     * [#29029] The rule's related reads alone: a read that selects a column the
+     * predicate names. The reference check reads `id` only.
+     */
+    ruleReads: () => d.calls.filter((c) => c.object === 'crm_account'
+      && Array.isArray(c.ast?.fields) && c.ast.fields.some((f: string) => f !== 'id')).length,
     reset: () => { d.calls.length = 0; },
   };
 }
@@ -435,20 +462,20 @@ describe('#18682 — the preview answers nobody the FLS write gate refuses', () 
     let h: Awaited<ReturnType<typeof boot>>;
     beforeEach(async () => { h = await boot([FLS_OPEN]); });
 
-    it('insert() reaches the rule and refuses with the rule, after ONE related read', async () => {
+    it('insert() reaches the rule and refuses with the rule, after ONE related read for the rule', async () => {
       const outcome = await attempt(
         () => h.engine.insert('crm_opportunity', { ...PARTNER_PAYLOAD }, { context: CALLER } as any),
       );
       expect(outcome.ok).toBe(false);
       expect(outcome.message).toContain(RULE_MESSAGE);
-      expect(h.relatedReads()).toBe(1);
+      expect(h.ruleReads()).toBe(1);
     });
 
-    it('validate() agrees with it, after ONE related read', async () => {
+    it('validate() agrees with it, after ONE related read for the rule', async () => {
       const preview = await h.engine.validate(
         'crm_opportunity', { ...PARTNER_PAYLOAD }, { mode: 'insert', context: CALLER } as any,
       );
-      expect(h.relatedReads()).toBe(1);
+      expect(h.ruleReads()).toBe(1);
       expect(preview.results?.[0]?.valid).toBe(false);
       expect(JSON.stringify(preview.results?.[0]?.errors ?? [])).toContain(RULE_MESSAGE);
     });
@@ -464,6 +491,39 @@ describe('#18682 — the preview answers nobody the FLS write gate refuses', () 
       )).resolves.toBeTruthy();
     });
   });
+});
+
+/**
+ * [#29029] The editor who may edit the column and reads no account: it may not
+ * name one. Both doors answer the lookup's `reference_not_found`, before the
+ * record's rules, so the rule's verdict never reaches it, for a partner account
+ * and a direct one alike.
+ */
+describe('#29029 — a caller who cannot read the related row cannot name it', () => {
+  let h: Awaited<ReturnType<typeof boot>>;
+  beforeEach(async () => { h = await boot([FLS_OPEN_NO_ACCOUNT_READ]); });
+
+  for (const account of ['acc_p', 'acc_d']) {
+    it(`insert() answers reference_not_found on the lookup naming ${account}, never the rule, and stores nothing`, async () => {
+      const outcome = await attempt(
+        () => h.engine.insert('crm_opportunity', { name: 'A', amount: 50000, account }, { context: CALLER } as any),
+      );
+      expect(outcome.ok).toBe(false);
+      expect(outcome.code).toBe('VALIDATION_FAILED');
+      expect(outcome.message).toMatch(/^account: /);
+      expect(outcome.message).not.toContain(RULE_MESSAGE);
+    });
+
+    it(`validate() agrees with it for ${account}`, async () => {
+      const preview = await h.engine.validate(
+        'crm_opportunity', { name: 'A', amount: 50000, account }, { mode: 'insert', context: CALLER } as any,
+      );
+      expect(preview.results?.[0]?.valid).toBe(false);
+      expect((preview.results?.[0]?.errors ?? []).map((e: any) => ({ field: e.field, code: e.code })))
+        .toEqual([{ field: 'account', code: 'reference_not_found' }]);
+      expect(JSON.stringify(preview.results?.[0]?.errors ?? [])).not.toContain(RULE_MESSAGE);
+    });
+  }
 });
 
 /**
@@ -528,20 +588,20 @@ describe('#18682 — the preview answers nobody the two pre-resolution gates ref
     let h: Awaited<ReturnType<typeof boot>>;
     beforeEach(async () => { h = await boot([FULL_CRUD]); });
 
-    it('insert() reaches the rule and refuses with the rule, after ONE related read', async () => {
+    it('insert() reaches the rule and refuses with the rule, after ONE related read for the rule', async () => {
       const outcome = await attempt(
         () => h.engine.insert('eng_log_amendable', { ...PARTNER_PAYLOAD }, { context: CALLER } as any),
       );
       expect(outcome.ok).toBe(false);
       expect(outcome.message).toContain(RULE_MESSAGE);
-      expect(h.relatedReads()).toBe(1);
+      expect(h.ruleReads()).toBe(1);
     });
 
-    it('validate() agrees with it, after ONE related read', async () => {
+    it('validate() agrees with it, after ONE related read for the rule', async () => {
       const preview = await h.engine.validate(
         'eng_log_amendable', { ...PARTNER_PAYLOAD }, { mode: 'insert', context: CALLER } as any,
       );
-      expect(h.relatedReads()).toBe(1);
+      expect(h.ruleReads()).toBe(1);
       expect(preview.results?.[0]?.valid).toBe(false);
       expect(JSON.stringify(preview.results?.[0]?.errors ?? [])).toContain(RULE_MESSAGE);
     });
@@ -597,20 +657,20 @@ describe('#18682 — the preview answers nobody the two pre-resolution gates ref
     let h: Awaited<ReturnType<typeof boot>>;
     beforeEach(async () => { h = await boot([TENANT_ADMIN]); });
 
-    it('insert() reaches the rule and refuses with the rule, after ONE related read', async () => {
+    it('insert() reaches the rule and refuses with the rule, after ONE related read for the rule', async () => {
       const outcome = await attempt(
         () => h.engine.insert('sys_user_position', { ...RBAC_PARTNER_PAYLOAD }, { context: ADMIN_CALLER } as any),
       );
       expect(outcome.ok).toBe(false);
       expect(outcome.message).toContain(RULE_MESSAGE);
-      expect(h.relatedReads()).toBe(1);
+      expect(h.ruleReads()).toBe(1);
     });
 
-    it('validate() agrees with it, after ONE related read', async () => {
+    it('validate() agrees with it, after ONE related read for the rule', async () => {
       const preview = await h.engine.validate(
         'sys_user_position', { ...RBAC_PARTNER_PAYLOAD }, { mode: 'insert', context: ADMIN_CALLER } as any,
       );
-      expect(h.relatedReads()).toBe(1);
+      expect(h.ruleReads()).toBe(1);
       expect(preview.results?.[0]?.valid).toBe(false);
       expect(JSON.stringify(preview.results?.[0]?.errors ?? [])).toContain(RULE_MESSAGE);
     });
@@ -664,20 +724,20 @@ describe('#18682 — the preview answers nobody the organization wall refuses', 
     let h: Awaited<ReturnType<typeof boot>>;
     beforeEach(async () => { h = await boot([TASK_EDITOR], { orgScoping: true }); });
 
-    it('insert() reaches the rule and refuses with the rule, after ONE related read', async () => {
+    it('insert() reaches the rule and refuses with the rule, after ONE related read for the rule', async () => {
       const outcome = await attempt(
         () => h.engine.insert('crm_task', { ...PARTNER_PAYLOAD }, { context: CALLER } as any),
       );
       expect(outcome.ok).toBe(false);
       expect(outcome.message).toContain(RULE_MESSAGE);
-      expect(h.relatedReads()).toBe(1);
+      expect(h.ruleReads()).toBe(1);
     });
 
-    it('validate() agrees with it, after ONE related read', async () => {
+    it('validate() agrees with it, after ONE related read for the rule', async () => {
       const preview = await h.engine.validate(
         'crm_task', { ...PARTNER_PAYLOAD }, { mode: 'insert', context: CALLER } as any,
       );
-      expect(h.relatedReads()).toBe(1);
+      expect(h.ruleReads()).toBe(1);
       expect(preview.results?.[0]?.valid).toBe(false);
       expect(JSON.stringify(preview.results?.[0]?.errors ?? [])).toContain(RULE_MESSAGE);
     });

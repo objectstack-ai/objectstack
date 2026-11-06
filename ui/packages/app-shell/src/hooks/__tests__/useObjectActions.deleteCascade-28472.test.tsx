@@ -37,7 +37,7 @@ type Pack = {
   console: { objectView: { bulkDeleteConfirm_other: string } };
 };
 const EN = builtInLocales.en as unknown as Pack;
-const ZH = builtInLocales.zh as unknown as Pack;
+const ZH = builtInLocales['zh-Hans'] as unknown as Pack;
 const fill = (template: string, vars: Record<string, string | number>) =>
   template.replace(/\{\{(\w+)\}\}/g, (_m, k: string) => String(vars[k]));
 

@@ -4,7 +4,7 @@ navTitle: Error Code Catalog
 description: Complete reference for all ObjectStack error codes with causes, fixes, and retry strategies
 ---
 
-ObjectStack uses a structured error system of **error categories** and **57 error codes reachable on the wire**, catalogued in full below (that count is pinned by `packages/spec/src/api/error-catalog-docs.test.ts` against the wire face). Every error includes a machine-readable code, HTTP status mapping, and retry guidance.
+ObjectStack uses a structured error system of **error categories** and **58 error codes reachable on the wire**, catalogued in full below (that count is pinned by `packages/spec/src/api/error-catalog-docs.test.ts` against the wire face). Every error includes a machine-readable code, HTTP status mapping, and retry guidance.
 
 This catalog documents the **wire face** — the codes a client can actually receive. That is not quite the
 `StandardErrorCode` enum: the enum also carries in-process spellings the REST door translates at the
@@ -316,15 +316,21 @@ object is rejected with `400 VALIDATION_FAILED`, and the specifics ride in
 }
 ```
 
-The check covers create, update and bulk update. Four cases are deliberately
-*not* rejections: an empty value (`null` / `""` / `[]`) means "no link", a
-`isSystem` write is exempt (seed replay and package install legitimately write
-in an order that only resolves once the batch completes), a target that
-cannot be checked at all — an unregistered object, an unreachable datasource —
-fails **open** rather than inventing a rejection, and an update that carries back
+The check covers create, update and bulk update. A write that is not a system
+write may name, in a `lookup`, `master_detail` or `user` field, only a record
+the caller can read: a record the caller cannot read is answered exactly as one
+that exists nowhere, before the record's validation rules run, and so is one
+whose read by the caller fails. Four cases are deliberately *not* rejections: an
+empty value (`null` / `""` / `[]`) means "no link", a `isSystem` write is exempt
+(seed replay and package install legitimately write in an order that only
+resolves once the batch completes), a target that cannot be checked at all — an
+unregistered object, or an unreachable datasource on a check that does not read
+as the caller — fails **open** rather than inventing a rejection, and an update that carries back
 a value (or a member of a multi-valued field) the row already stores is not
 judged again, because the update does not add it; on a bulk update that holds
-only when every matched row already stores it.
+only when every matched row already stores it. That comparison reads only stored
+values the caller may read: a column the caller may edit but not read holds no
+stored value for it, so a value written there is judged like any other.
 </Callout>
 
 ### `DUPLICATE_VALUE`
@@ -545,6 +551,11 @@ spelling never crosses HTTP.
 **Cause:** The record is locked by another process or user.  
 **Fix:** Wait for the lock to be released, or contact the lock holder.  
 **Retry:** `retry_backoff`
+
+### `PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`
+**Cause:** `PATCH /api/v1/packages/:id/disable` was refused because a validation rule of an enabled package (declared dependent or not, an app's `.custom` pair included, any severity) reads a field this package adds to another object through `objectExtensions`. Disabling it would withhold that field, and every write to the object would then fail the rule. Each rule is judged as the object serves it: one rule per name (the copy a later layer declares wins), with a tenant overlay's switch honoured. The message names each rule as `package · object · rule (reads FIELD)`, one or several, after the layer whose copy is served (`tenant overlay` for a rule the overlay declares itself). Nothing changed. `POST /api/v1/packages` answers the same code for an overwrite of an enabled package with `enableOnInstall: false` that would leave such a package disabled: the overwrite itself lands and the package stays enabled. A fresh install with `enableOnInstall: false` lands disabled, as before. The enable door answers the same code for the mirror order: `PATCH /api/v1/packages/:id/enable` is refused while a rule the enable would put into service (the package's own, or one on an object it owns) reads a field a still-disabled package withholds, the message naming each rule and the disabled package to enable first; `POST /api/v1/packages` with `enableOnInstall: true` on an overwrite of a disabled package answers it too, and the package stays disabled.  
+**Fix:** Switch off or change each named rule first, or disable the package that owns it, then disable this package; or keep it enabled. A formula over the field is no reason to refuse: it answers `null`. On the enable door: enable the named disabled package first, or switch off or change each named rule.  
+**Retry:** `no_retry`
 
 ---
 

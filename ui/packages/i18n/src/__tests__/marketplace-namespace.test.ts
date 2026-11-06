@@ -1,15 +1,16 @@
 /**
  * The `marketplace` namespace (objectstack#30588): its shape, and how it sits
- * beside the ten packs it was cut out of.
+ * beside the packs it was cut out of: one catalogue per platform locale table
+ * tag (objectstack#30511), keyed by the tag as the packs are.
  *
- *   1. LAZY BY CONSTRUCTION. `namespaces/marketplace/index.ts` reaches its ten
- *      catalogues through ten literal `import()`s and nothing else — no static
+ *   1. LAZY BY CONSTRUCTION. `namespaces/marketplace/index.ts` reaches its
+ *      catalogues through one literal `import()` each and nothing else — no static
  *      import, no template-literal specifier — so each is a chunk of its own
  *      and none is in the console's first load.
  *   2. CUT, NOT COPIED. Every catalogue holds only the `marketplace` group and
  *      the probe key the page frame waits on; no pack holds the probe key, and
  *      no leaf is in both a pack and its catalogue.
- *   3. THE ALL-TEN DOOR IS COMPLETE. `locales/index.ts` hands out each language
+ *   3. THE ALL-PACKS DOOR IS COMPLETE. `locales/index.ts` hands out each language
  *      as its pack merged with its catalogue, so the parity suites that walk
  *      `builtInLocales` still walk these keys; the package entry's `en` is the
  *      resident pack alone.
@@ -30,23 +31,25 @@ import { en as entryEn } from '../index.js';
 import { BUILT_IN_LANGUAGE_CODES } from '../locales/registry.js';
 import { builtInLocales } from '../locales/index.js';
 import enPack from '../locales/en.js';
-import zhPack from '../locales/zh.js';
+import zhHansPack from '../locales/zh-Hans.js';
+import zhHantPack from '../locales/zh-Hant.js';
 import jaPack from '../locales/ja.js';
 import koPack from '../locales/ko.js';
 import dePack from '../locales/de.js';
 import frPack from '../locales/fr.js';
 import esPack from '../locales/es.js';
-import ptPack from '../locales/pt.js';
+import ptBrPack from '../locales/pt-BR.js';
 import ruPack from '../locales/ru.js';
 import arPack from '../locales/ar.js';
 import enNs from '../namespaces/marketplace/en.js';
-import zhNs from '../namespaces/marketplace/zh.js';
+import zhHansNs from '../namespaces/marketplace/zh-Hans.js';
+import zhHantNs from '../namespaces/marketplace/zh-Hant.js';
 import jaNs from '../namespaces/marketplace/ja.js';
 import koNs from '../namespaces/marketplace/ko.js';
 import deNs from '../namespaces/marketplace/de.js';
 import frNs from '../namespaces/marketplace/fr.js';
 import esNs from '../namespaces/marketplace/es.js';
-import ptNs from '../namespaces/marketplace/pt.js';
+import ptBrNs from '../namespaces/marketplace/pt-BR.js';
 import ruNs from '../namespaces/marketplace/ru.js';
 import arNs from '../namespaces/marketplace/ar.js';
 import {
@@ -63,12 +66,12 @@ const INDEX_PATH = join(HERE, '..', 'namespaces', 'marketplace', 'index.ts');
 
 type Tree = Record<string, unknown>;
 const PACKS: Record<string, Tree> = {
-  en: enPack, zh: zhPack, ja: jaPack, ko: koPack, de: dePack,
-  fr: frPack, es: esPack, pt: ptPack, ru: ruPack, ar: arPack,
+  en: enPack, 'zh-Hans': zhHansPack, 'zh-Hant': zhHantPack, ja: jaPack, ko: koPack, de: dePack,
+  fr: frPack, es: esPack, 'pt-BR': ptBrPack, ru: ruPack, ar: arPack,
 };
 const CATALOGUES: Record<string, Tree> = {
-  en: enNs, zh: zhNs, ja: jaNs, ko: koNs, de: deNs,
-  fr: frNs, es: esNs, pt: ptNs, ru: ruNs, ar: arNs,
+  en: enNs, 'zh-Hans': zhHansNs, 'zh-Hant': zhHantNs, ja: jaNs, ko: koNs, de: deNs,
+  fr: frNs, es: esNs, 'pt-BR': ptBrNs, ru: ruNs, ar: arNs,
 };
 
 function leaves(node: unknown, prefix = ''): string[] {
@@ -109,12 +112,14 @@ describe('marketplace namespace — lazy by construction', () => {
   });
 
   it('statically imports no catalogue (nothing of it rides in with the page frame)', () => {
-    expect(staticSpecifiers.filter((s) => /^\.\/[a-z]{2}\.js$/.test(s))).toEqual([]);
+    // A catalogue specifier is `./<tag>.js`: a language, or a language and a
+    // script or region subtag (`./zh-Hant.js`, `./pt-BR.js`).
+    expect(staticSpecifiers.filter((s) => /^\.\/[a-z]{2}(?:-[A-Za-z]+)?\.js$/.test(s))).toEqual([]);
     // Lit control: the static imports were read.
     expect(staticSpecifiers).toContain('../../locales/registry.js');
   });
 
-  it('ships the ten built-in languages', () => {
+  it('ships one catalogue per built-in language (the platform locale table)', () => {
     expect([...MARKETPLACE_LANGUAGE_CODES].sort()).toEqual([...BUILT_IN_LANGUAGE_CODES].sort());
   });
 });
@@ -139,7 +144,7 @@ describe('marketplace namespace — cut out of the packs, not copied', () => {
   });
 });
 
-describe('marketplace namespace — the all-ten door hands out complete languages', () => {
+describe('marketplace namespace — the all-packs door hands out complete languages', () => {
   it.each(BUILT_IN_LANGUAGE_CODES.map((code) => [code]))('%s: pack keys and namespace keys are both there', (code) => {
     const complete = (builtInLocales as unknown as Record<string, Tree>)[code];
     const expected = [...leaves(PACKS[code]), ...leaves(CATALOGUES[code])].sort();
@@ -157,10 +162,14 @@ describe('marketplace namespace — the all-ten door hands out complete language
 
 describe('marketplace namespace — language resolution and the loader', () => {
   it.each([
-    ['zh-CN', 'zh'],
-    ['zh', 'zh'],
-    ['zh-TW', 'zh'],
-    ['pt-BR', 'pt'],
+    ['zh-CN', 'zh-Hans'],
+    ['zh', 'zh-Hans'],
+    ['zh-Hans', 'zh-Hans'],
+    ['zh-TW', 'zh-Hant'],
+    ['zh-HK', 'zh-Hant'],
+    ['zh-Hant', 'zh-Hant'],
+    ['pt', 'pt-BR'],
+    ['pt-BR', 'pt-BR'],
     ['ar-EG', 'ar'],
     ['en-US', 'en'],
     ['de', 'de'],

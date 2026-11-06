@@ -3269,11 +3269,14 @@ function createHostSplit(load) {
         for (const stmt of e.sf.statements) {
             if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
             const m = HOST_SPLIT.specifier.exec(stmt.moduleSpecifier.text);
+            // [#30147] A statics-form body's `this` is typed by the forwarder's
+            // interface, which `protocol.ts` itself declares and exports.
+            const fromHost = stmt.moduleSpecifier.text === `./${HOST_SPLIT.host.replace(/\.ts$/, '.js')}`;
             const named = stmt.importClause?.namedBindings;
-            if (!m || !named || !ts.isNamedImports(named)) continue;
+            if ((!m && !fromHost) || !named || !ts.isNamedImports(named)) continue;
             const el = named.elements.find((x) => x.name.text === hostType);
             if (!el) continue;
-            const from = entry(`${HOST_SPLIT.dir}/${m[1]}.ts`);
+            const from = entry(fromHost ? hostRel : `${HOST_SPLIT.dir}/${m[1]}.ts`);
             const exported = (el.propertyName ?? el.name).text;
             return from?.sf.statements.find((s) => ts.isInterfaceDeclaration(s) && s.name.text === exported);
         }
@@ -3309,8 +3312,10 @@ function createHostSplit(load) {
         }
         const hostType = type.typeName.text;
         // The per-member series' host interface is the module's own; ruling E's
-        // may be imported from the module that declares it (`protocol-host.ts`).
-        const iface = viaHostParam
+        // may be imported from the module that declares it (`protocol-host.ts`),
+        // and so may a #30147 receiver-form body's (`this: Pick<ProtocolHost, …>`,
+        // or the statics forwarder's interface, which `protocol.ts` declares).
+        const iface = viaHostParam || bodies.relPath !== hostRel && hostType !== undefined && !bodies.sourceFile?.statements.some((s) => ts.isInterfaceDeclaration(s) && s.name.text === hostType)
             ? hostInterface(bodies.relPath, hostType)
             : bodies.sourceFile?.statements.find((s) => ts.isInterfaceDeclaration(s) && s.name.text === hostType);
         const member = iface?.members.find(
@@ -3318,7 +3323,7 @@ function createHostSplit(load) {
         );
         if (!member) return undefined;
         const body = typedAsHostMember(member.type, name) ? hostMethods()?.get(name)
-            : viaHostParam && typedAsHostStatic(member.type, name) ? hostMethods({ static: true })?.get(name)
+            : typedAsHostStatic(member.type, name) ? hostMethods({ static: true })?.get(name)
             : undefined;
         return body ? { body, bodies: entry(hostRel).bodies } : undefined;
     };
@@ -3346,14 +3351,31 @@ function createHostSplit(load) {
         const hostOfThis = (arg) => !!arg && ts.isCallExpression(arg) && ts.isIdentifier(arg.expression) &&
             arg.expression.text === HOST_SPLIT.hostOf && arg.arguments.length === 1 &&
             arg.arguments[0].kind === ts.SyntaxKind.ThisKeyword;
+        // [#30147] A plain-form stub hands its facet member the method's own
+        // parameters and nothing else (no host: the body reads nothing of the class).
+        const ownParams = () => call.arguments.every((a) => {
+            const id = ts.isSpreadElement(a) ? a.expression : a;
+            return ts.isIdentifier(id) && method.parameters.some((p) => ts.isIdentifier(p.name) && p.name.text === id.text);
+        });
         if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && ts.isIdentifier(callee.name) &&
             callee.name.text !== 'call' && HOST_SPLIT.facet.test(callee.expression.text)) {
             // [#29985] `<X>Facet.fn(protocolHost(this), …)` — the facade form of
             // ruling 6624345766: a facet class's static method takes the host
-            // first; a private static's stub, `<X>Facet.fn(…)`, passes none.
-            if (isStatic ? hostOfThis(first) : !hostOfThis(first)) return undefined;
+            // first; a private static's stub, `<X>Facet.fn(…)`, passes none, and
+            // so does an instance method's plain-form stub (#30147).
+            if (isStatic ? hostOfThis(first) : !hostOfThis(first) && !ownParams()) return undefined;
             facet = callee.expression.text;
             fnName = callee.name.text;
+        } else if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name) && callee.name.text === 'call' &&
+            ts.isPropertyAccessExpression(callee.expression) && ts.isIdentifier(callee.expression.expression) &&
+            ts.isIdentifier(callee.expression.name) && HOST_SPLIT.facet.test(callee.expression.expression.text)) {
+            // [#30147] The receiver forms: `<X>Facet.fn.call(protocolHost(this), …)`
+            // for an instance method, `<X>Facet.fn.call(<Class>Statics, …)` for a
+            // private static; the facet member runs on that receiver as `this`.
+            const onStatics = !!first && ts.isIdentifier(first) && first.text === `${HOST_SPLIT.hostClass}Statics`;
+            if (isStatic ? !onStatics : !hostOfThis(first)) return undefined;
+            facet = callee.expression.expression.text;
+            fnName = callee.expression.name.text;
         } else if (ts.isPropertyAccessExpression(callee)) {
             // `fn.call(host, …)` — the per-member series.
             if (!ts.isIdentifier(callee.name) || callee.name.text !== 'call' || !ts.isIdentifier(callee.expression)) return undefined;
@@ -3817,6 +3839,10 @@ function establishesBenign(expr, ctx) {
         const hop = ctx.functionBodies.split.hostCall(call, ctx.functionBodies);
         if (hop) ({ body, bodies: guardBodies } = hop);
     }
+    // [#30147] A guard whose body moved to its facet (the members pass's receiver
+    // and plain forms) is answered from the facet member its stub delegates to.
+    const movedGuard = body && guardBodies.split ? guardBodies.split.stubTarget(body, guardBodies) : undefined;
+    if (movedGuard) ({ body, bodies: guardBodies } = movedGuard);
     if (!body || !ts.isBlock(body)) return false;
     const exits = [];
     const consulted = new Set();
@@ -5322,6 +5348,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
         'flags: #29985 — a protocol.ts try around a `<X>Facet.fn(protocolHost(this), …)` stub follows the facet\'s static method, and the stub costs no hop': 1,
         'flags: #29985 — a try around a private static whose stub calls `<X>Facet.fn(…)` follows the facet\'s static method': 1,
         'passes: #29985 — negative control: a stub calling a static of a class the facet pattern does not name is not followed': 1,
+        'passes: #30147 — a moved body\'s `host.guard(error)` whose guard moved by the plain form answers on the facet\'s discriminated branch': 1,
+        'flags: #30147 — negative control: a plain-form stub whose facet guard asks no error type still invents the answer': 1,
+        'flags: #30147 — a protocol.ts try around a `<X>Facet.fn.call(protocolHost(this), …)` stub follows the facet member and its `this.x()` host call': 1,
+        'passes: #30147 — negative control: a `.call` stub whose receiver is not `protocolHost(this)` is not followed': 1,
+        'flags: #30147 — a try around a private static whose stub runs on the statics forwarder follows the facet member and its `this.x()` static call': 1,
         'ledger (read seams): a stale entry PASSES and is reported; an unledgered seam still FAILS (#26444)': 1,
         'ledger (read seams): a ledgered file on disk the scan never READ is refused; a deleted one passes (#26444)': 1,
     }),
@@ -5335,7 +5366,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // `undefined` and the comparison fails loudly.
 const SELF_TEST_BATTERY_FLOOR = Object.freeze({
     selfTest: 80,
-    selfTestReadSeams: 73,
+    selfTestReadSeams: 78,
 });
 
 // The roster's TOTAL, checked from BOTH verdict sites. Each entry checks only
@@ -5343,7 +5374,7 @@ const SELF_TEST_BATTERY_FLOOR = Object.freeze({
 // `selfTestReadSeams`'s partition being deleted from the roster wholesale — the
 // deleted partition's own size pin is not evaluated by anyone once its entry
 // stops reaching it. This is the one assertion that survives that deletion.
-const SELF_TEST_BATTERY_TOTAL_FLOOR = 147;
+const SELF_TEST_BATTERY_TOTAL_FLOOR = 152;
 
 /**
  * The floor for ONE partition of the roster, run from that partition's own
@@ -8223,6 +8254,114 @@ function selfTestReadSeams() {
             },
             expectViolation: false,
             expectSeams: 0,
+        },
+        // [#30147] The members pass's receiver forms: a stub that runs its facet
+        // member on the host (`<X>Facet.fn.call(protocolHost(this), …)`), on the
+        // statics forwarder (`.call(<Class>Statics, …)`), or with no receiver
+        // (an instance method's plain form, `<X>Facet.fn(<its own parameters>)`).
+        {
+            name: 'passes: #30147 — a moved body\'s `host.guard(error)` whose guard moved by the plain form answers on the facet\'s discriminated branch',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: FACADE_HOST.replace(`private rethrowUnlessGone(error: unknown): void {
+                if (isMissingTableError(error)) return;
+                throw error;
+            }`, `private rethrowUnlessGone(error: unknown): void {
+                return ProtocolUninstallFacet.rethrowUnlessGone(error);
+            }`),
+                [`${HOST_SPLIT.dir}/protocol-host.ts`]: E1_HOST_MODULE,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: FACET_MODULE.replace('export class ProtocolUninstallFacet {', `export class ProtocolUninstallFacet {
+            static rethrowUnlessGone(error: unknown): void {
+                if (isMissingTableError(error)) return;
+                throw error;
+            }
+            static async listRows(host: Pick<ProtocolHost, 'findRows' | 'rethrowUnlessGone'>, id: string) {
+                try { return await host.findRows(id); }
+                catch (error) { host.rethrowUnlessGone(error); return []; }
+            }`),
+            },
+            expectViolation: false,
+            expectSeams: 1,
+            expectDiscriminatorsUsed: ['isMissingTableError'],
+        },
+        {
+            name: 'flags: #30147 — negative control: a plain-form stub whose facet guard asks no error type still invents the answer',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: FACADE_HOST.replace(`private rethrowUnlessGone(error: unknown): void {
+                if (isMissingTableError(error)) return;
+                throw error;
+            }`, `private rethrowUnlessGone(error: unknown): void {
+                return ProtocolUninstallFacet.rethrowUnlessGone(error);
+            }`),
+                [`${HOST_SPLIT.dir}/protocol-host.ts`]: E1_HOST_MODULE,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: FACET_MODULE.replace('export class ProtocolUninstallFacet {', `export class ProtocolUninstallFacet {
+            static rethrowUnlessGone(error: unknown): void { void error; }
+            static async listRows(host: Pick<ProtocolHost, 'findRows' | 'rethrowUnlessGone'>, id: string) {
+                try { return await host.findRows(id); }
+                catch (error) { host.rethrowUnlessGone(error); return []; }
+            }`),
+            },
+            expectViolation: true,
+            expectSeams: 1,
+        },
+        {
+            name: 'flags: #30147 — a protocol.ts try around a `<X>Facet.fn.call(protocolHost(this), …)` stub follows the facet member and its `this.x()` host call',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: FACADE_HOST
+                    .replace('return ProtocolUninstallFacet.listRowsMoved(protocolHost(this), id);', 'return ProtocolUninstallFacet.listRowsMoved.call(protocolHost(this), id);')
+                    .replace('/*ROLLBACK*/', `
+                    async rollBack(id: string) {
+                        try { return await this.listRowsMoved(id); }
+                        catch { return []; }
+                    }`),
+                [`${HOST_SPLIT.dir}/protocol-host.ts`]: E1_HOST_MODULE,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: FACET_MODULE
+                    .replace("static async listRowsMoved(host: Pick<ProtocolHost, 'findRows'>, id: string) {\n                return await host.findRows(id);",
+                        "static async listRowsMoved(this: Pick<ProtocolHost, 'findRows'>, id: string) {\n                return await this.findRows(id);"),
+            },
+            expectViolation: true,
+            expectSeams: 1,
+        },
+        {
+            name: 'passes: #30147 — negative control: a `.call` stub whose receiver is not `protocolHost(this)` is not followed',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: FACADE_HOST
+                    .replace('return ProtocolUninstallFacet.listRowsMoved(protocolHost(this), id);', 'return ProtocolUninstallFacet.listRowsMoved.call(this.someHost, id);')
+                    .replace('/*ROLLBACK*/', `
+                    async rollBack(id: string) {
+                        try { return await this.listRowsMoved(id); }
+                        catch { return []; }
+                    }`),
+                [`${HOST_SPLIT.dir}/protocol-host.ts`]: E1_HOST_MODULE,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: FACET_MODULE
+                    .replace("static async listRowsMoved(host: Pick<ProtocolHost, 'findRows'>, id: string) {\n                return await host.findRows(id);",
+                        "static async listRowsMoved(this: Pick<ProtocolHost, 'findRows'>, id: string) {\n                return await this.findRows(id);"),
+            },
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        {
+            name: 'flags: #30147 — a try around a private static whose stub runs on the statics forwarder follows the facet member and its `this.x()` static call',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: `
+                    export interface ObjectStackProtocolImplementationStaticsHost {
+                        readonly readStatic: (typeof ObjectStackProtocolImplementation)['readStatic'];
+                    }
+                    export const ObjectStackProtocolImplementationStatics = {} as ObjectStackProtocolImplementationStaticsHost;
+` + FACADE_HOST
+                    .replace('return ProtocolUninstallFacet.readStaticMoved(engine, t);', 'return ProtocolUninstallFacet.readStaticMoved.call(ObjectStackProtocolImplementationStatics, engine, t);')
+                    .replace('/*ROLLBACK*/', `
+                    async rollBack(id: string) {
+                        try { return await ObjectStackProtocolImplementation.readStaticMoved(this.engine, id); }
+                        catch { return []; }
+                    }`),
+                [`${HOST_SPLIT.dir}/protocol-host.ts`]: E1_HOST_MODULE,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: FACET_MODULE
+                    .replace("import type { ProtocolHost } from './protocol-host.js';", "import type { ProtocolHost } from './protocol-host.js';\n        import type { ObjectStackProtocolImplementationStaticsHost } from './protocol.js';")
+                    .replace("static async readStaticMoved(engine: any, t: string) {\n                return await engine.find(t, {});",
+                        "static async readStaticMoved(this: Pick<ObjectStackProtocolImplementationStaticsHost, 'readStatic'>, engine: any, t: string) {\n                return await this.readStatic(engine, t);"),
+            },
+            expectViolation: true,
+            expectSeams: 1,
         },
         {
             name: 'BOUND (#25467 E1): the `host.x()` hop IS a hop — a third hop through the host is still refused',

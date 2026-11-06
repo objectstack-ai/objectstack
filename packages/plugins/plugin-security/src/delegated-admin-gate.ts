@@ -423,6 +423,47 @@ export function isUnreadableAddressedRowRefusal(refusal: unknown): boolean {
   return refusal instanceof UnreadableAddressedRowRefusal;
 }
 
+/** The object a delegation's scope grants read on: the business-unit tree it is drawn over. */
+const DELEGATED_READ_OBJECT = 'sys_business_unit';
+/** The operations that read; the middleware dispatches no other read verb. */
+const DELEGATED_READ_OPERATIONS: ReadonlySet<string> = new Set(['find', 'findOne', 'count', 'aggregate']);
+
+/**
+ * [ADR-0090 D12, ruling of record 6663849489] A delegation's admin scope over
+ * a business-unit subtree also grants read on the units inside that scope, so
+ * delegated administration can name the units it administers (an assignment's
+ * `business_unit_id` is a reference the caller must be able to read).
+ *
+ * The authz middleware asks this only for an operation the caller's sets do
+ * NOT grant, and admits it only on a non-null answer: the `where` scope
+ * `id IN <the covered units>` it then ANDs into the read. Null — the ordinary
+ * refusal stands — unless every condition holds: a read of
+ * `sys_business_unit` carrying a query, on the caller's own behalf (no
+ * on-behalf-of delegator), with the gate composed, and at least one covered
+ * unit ({@link DelegatedAdminGate.scopedBusinessUnitIds}). Nothing wider: no
+ * other object, no write, and no unit outside the scopes the caller holds; a
+ * caller whose sets already grant the read is untouched. A scope that cannot
+ * be resolved admits nothing (fail closed).
+ */
+export async function delegatedUnitReadScope(
+  gate: Pick<DelegatedAdminGate, 'scopedBusinessUnitIds'> | null | undefined,
+  opCtx: { object?: string; operation?: string; ast?: unknown; context?: any },
+  permissionSets: PermissionSet[],
+  delegatorSets: PermissionSet[] | null | undefined,
+): Promise<Record<string, unknown> | null> {
+  if (!gate || delegatorSets) return null;
+  if (opCtx.object !== DELEGATED_READ_OBJECT || !DELEGATED_READ_OPERATIONS.has(String(opCtx.operation)) || !opCtx.ast) {
+    return null;
+  }
+  let ids: ReadonlySet<string>;
+  try {
+    ids = await gate.scopedBusinessUnitIds(permissionSets, opCtx.context);
+  } catch {
+    return null;
+  }
+  return ids.size > 0 ? { id: { $in: [...ids] } } : null;
+}
+
 /**
  * [ADR-0090 D12] A row an administrator's write targets — the delegated walk's
  * and the organization branch's alike — with what the caller may be told about
@@ -653,6 +694,26 @@ export class DelegatedAdminGate {
       for (const bu of userBUs) if (s.subtree.has(bu)) return true;
     }
     return false;
+  }
+
+  /**
+   * [ADR-0090 D12, ruling of record 6663849489] The business units a caller's
+   * delegated scopes cover: the union of the subtrees of every `adminScope`
+   * its resolved sets carry, resolved in the caller's own organization
+   * ({@link callerOrganizationId}), exactly as the write path resolves them.
+   * A delegation's scope also grants read on these units, so delegated
+   * administration can name the units it administers; the authz middleware
+   * admits that read on this answer alone. Any held scope counts, as for
+   * {@link scopesCoverUser}.
+   *
+   * Fail closed: no scope, or a scope that resolves to no unit of the
+   * caller's organization, covers nothing — an empty set.
+   */
+  async scopedBusinessUnitIds(sets: PermissionSet[], callerContext?: any): Promise<ReadonlySet<string>> {
+    const held = await this.resolveHeldScopes(sets, callerOrganizationId(callerContext));
+    const ids = new Set<string>();
+    for (const s of held) for (const id of s.subtree) ids.add(id);
+    return ids;
   }
 
   /**

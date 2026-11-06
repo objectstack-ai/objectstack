@@ -52,6 +52,7 @@ import { evaluateValidationRules, hasParentScopedRequiredWhen, stripReadonlyFiel
 import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
 import { assertRecordCurrencyCodes, RecordCurrencyCodeRequiredError } from './validation/record-currency-code.js';
 import { isHomeAmountRefusal } from './home-amount-projection.js';
+import { referencesCheckedBeforeRules } from './engine-referential-integrity.js';
 import { resolveEngineUpdateDispatch, type EngineUpdateDispatchData } from './engine-update-dispatch.js';
 import {
   droppedFieldEvents,
@@ -574,6 +575,20 @@ export async function validate(
           object, schemaForValidation, mode, row, mode === 'insert' ? row : judgedViews[i], options?.context, storedIds[i],
         );
       }
+      // [#26684] The insert's admit step, run as `insert()` runs it: before
+      // the rules unless this is a system write (#29029,
+      // `referencesCheckedBeforeRules`), the reference check on the ids the caller supplied
+      // (`rawRows`, before the defaults — the write's `suppliedPerRow`), so
+      // a row the write refuses on a dangling or unreadable reference is
+      // refused here with the same finding, and is not counted toward a later
+      // row's parent summary. ⛔ Behind the same write-gate probe as the
+      // related read above: a caller the probe refuses learns nothing about
+      // which ids exist.
+      const previewReferences = mode === 'insert' && mayWrite;
+      const referencesFirst = referencesCheckedBeforeRules(options?.context);
+      if (previewReferences && referencesFirst) {
+        await this.assertReferencesResolve(schemaForValidation, row, rawRows[i], options?.context, messages);
+      }
       warnings.push(...evaluateValidationRules(schemaForValidation as any, row, mode, {
         // [#22445] The stored row, when this row named one: the by-id
         // update's `previous: priorRecord`. Absent, the record is the patch.
@@ -587,15 +602,7 @@ export async function validate(
         related: batchSummaries ? batchSummaries.overlay(previewRelatedForRow(judgedViews[i])) : previewRelatedForRow(judgedViews[i]),
         permissions: previewPermissionsFor(row),
       }));
-      // [#26684] The insert's admit step, run as `insert()` runs it: after
-      // the rules, the reference check on the ids the caller supplied
-      // (`rawRows`, before the defaults — the write's `suppliedPerRow`), so
-      // a row the write refuses on a dangling reference is refused here
-      // with the same finding, and is not counted toward a later row's
-      // parent summary. ⛔ Behind the same write-gate probe as the related
-      // read above: the probe on a `lookup` target is elevated, so a caller
-      // the probe refuses learns nothing about which ids exist.
-      if (mode === 'insert' && mayWrite) {
+      if (previewReferences && !referencesFirst) {
         await this.assertReferencesResolve(schemaForValidation, row, rawRows[i], options?.context, messages);
       }
     } catch (e) {

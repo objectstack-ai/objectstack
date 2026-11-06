@@ -16,7 +16,9 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 import { CreatePackageRequestSchema } from './package.zod';
+import { retiredCategoryGuidance } from './taxonomy.zod';
 
 export const TemplateManifestSchema = lazySchema(() =>
   CreatePackageRequestSchema
@@ -106,6 +108,15 @@ export const TemplateManifestSchema = lazySchema(() =>
       namespace: CreatePackageRequestSchema.shape.namespace.describe(
         'Scaffold-only: the template’s own metadata namespace, rewritten by create-objectstack at scaffold time and read back as the fallback source for the template’s original namespace. NOT the publish namespace — publish reads that off the compiled artifact’s manifest.namespace (ADR-0048 addendum §A.2)'
       ),
+      /**
+       * REMOVED — re-declared only so the refusal names the file an author
+       * writes: the tombstone it inherits from `CreatePackageRequestSchema`
+       * names the publish request. Declare `businessFunctions`, `industries`
+       * and `solutionType` instead (inherited from the create request).
+       * `pnpm --filter @objectstack/spec check:template-manifests` parses every
+       * shipped manifest against this schema, so none can still carry it.
+       */
+      category: retiredKey(retiredCategoryGuidance('TemplateManifest.category')),
       skills: z.array(z.string()).optional()
         .describe('Skill ids exercised by this template (for docs / picker)'),
       preview: z.object({

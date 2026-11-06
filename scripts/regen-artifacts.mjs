@@ -913,6 +913,33 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'serves that day and drop every edit the patch list does not carry, and it needs the network, '
       + 'which a merge must not. A conflict in a vendored component stays a human\'s; never routed.',
   },
+  // objectstack#30511 (ruling F of #29349): the Console's Traditional Chinese pack.
+  {
+    path: 'ui/packages/i18n/src/locales/zh-Hant.ts',
+    gen: 'gen:zh-hant',
+    owner: '@object-ui/i18n',
+    why:
+      'generated WHOLE from `zh-Hans.ts` by `gen:zh-hant`, so "discard both sides and re-run" '
+      + 'loses no human decision. Still not routed: a `REGEN_ARTIFACTS` row needs a `check:` script '
+      + 'as its currency proof, and ruling F of #29349 adds no gate to this phase. The currency proof '
+      + 'is the package test `src/__tests__/zh-hant-generated.test.ts`, which reds a pack that is not '
+      + 'byte-for-byte the generator\'s output wherever the ui unit tests run, and the driver is local '
+      + 'anyway (never the queue\'s merge). The pack is line-aligned with `zh-Hans.ts`, one line per '
+      + 'line, so two branches editing different keys text-merge apart; a conflict is resolved by '
+      + 'taking either side and running `pnpm --filter @object-ui/i18n gen:zh-hant`.',
+  },
+  // objectstack#30511: the marketplace namespace's Traditional Chinese catalogue, same command.
+  {
+    path: 'ui/packages/i18n/src/namespaces/marketplace/zh-Hant.ts',
+    gen: 'gen:zh-hant',
+    owner: '@object-ui/i18n',
+    why:
+      'generated WHOLE from the namespace\'s `zh-Hans.ts` by the same `gen:zh-hant` run that writes '
+      + 'the pack above, and not routed for the same reason: no `check:` script proves its currency. '
+      + 'The proof is the same package test, which walks every generated target. Line-aligned with '
+      + 'its source, so a conflict is resolved by taking either side and running '
+      + '`pnpm --filter @object-ui/i18n gen:zh-hant`.',
+  },
 ]);
 
 /** Marker file (inside the git dir, never the worktree) listing paths the driver deferred. */

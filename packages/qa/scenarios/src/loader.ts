@@ -30,6 +30,7 @@ import { ErrorCode } from '@objectstack/spec/api';
 import {
   AppCodeSchema,
   GUARDRAIL_CHECKS,
+  ROW_SCOPE_TAG,
   ScenarioCardSchema,
   type ScenarioCard,
   type ScenarioExpect,
@@ -389,6 +390,20 @@ function checkCard(
       } else if (checkPath(sc.object, sc.field, [...at, 'field']) === null) unscoped.add(p.id);
     });
   });
+
+  // ── row scope is judged in the build: a scoped persona needs the row-scope tag ──
+  // A persona's `scope` is a requirement of the app (it sees only those rows).
+  // The Build half judges a requirement only through the card's capability
+  // tags, so without the tag a build that shows the persona every row scores
+  // as if the card never asked (the reach rule on operations, below, is the
+  // same idea).
+  const scopedPersonas = run.personas.filter((p) => p.scope !== undefined).map((p) => `\`${p.id}\``);
+  if (scopedPersonas.length > 0 && !card.capabilities.includes(ROW_SCOPE_TAG)) {
+    refuse(
+      ['capabilities'],
+      `the persona(s) ${scopedPersonas.join(', ')} declare a row \`scope\`, so the card must carry \`${ROW_SCOPE_TAG}\`: without it the Build half never judges whether the build keeps the other rows from them`,
+    );
+  }
 
   // ── questions: refs resolve, then the truth is computed (and per persona) ──
   const truths: Record<string, Truth> = {};

@@ -51,7 +51,7 @@
  * {@link ServedOverridesHost} members.
  */
 
-import { customizationPackageId } from '@objectstack/spec/kernel';
+import { pairOf } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { storedRowDocument } from './item-lock.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
@@ -95,7 +95,7 @@ export async function listServedOverrides(
     request: { packageId: string },
 ): Promise<ServedOverrideEntry[]> {
     const base = request.packageId;
-    const pair = customizationPackageId(base);
+    const pair = pairOf(base);
     if (!pair.ok) return [];
     let rows: any[] = [];
     try {

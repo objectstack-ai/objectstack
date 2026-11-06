@@ -1319,6 +1319,18 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`cbp-master-relation-tiers-retired`.',
   },
   {
+    id: 'cbp-optional-master-admitted',
+    order: 119,
+    text:
+      'It then admits an optional master under `controlled_by_parent` (ADR-0055 §1 and §2 as amended, '
+      + 'maintainer ruling A): an object whose only `master_detail` is declared `required: false` derives its '
+      + 'master from it, and a detail row that names no master is read by its owner and by View All on the '
+      + 'detail, never through a master, while a row that names one is read through it as before. The builder '
+      + 'keeps an explicit `required: false` as written and still forces an omitted one to `true`, and the '
+      + 'stored-row listing stops naming the shape. Writes are unchanged: an empty master reference is still '
+      + 'refused with 422. Its D3 record is the semantic entry `cbp-optional-master-admitted`.',
+  },
+  {
     id: 'chart-config-aria-retired',
     order: 31,
     text:
@@ -2337,6 +2349,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'alias spellings convert to guidance so every spelling lands on the prescription; the '
       + 'mechanical conversion strips the four keys from stored sources (pure lossless '
       + 'deletes — none ever had an effect to lose).',
+  },
+  {
+    id: 'marketplace-category-retired',
+    order: 119,
+    text:
+      'It also retires the single marketplace `category` on the package, the publish requests, '
+      + '`objectstack.manifest.json`, the listing and the search request, with both of its defs '
+      + '(`MarketplaceCategorySchema`, `PackageCategorySchema`): one value had to say both who a package '
+      + 'is for and what it is, and the platform and the cloud catalog kept lists that disagreed. The '
+      + 'marketplace taxonomy is now defined once, in `marketplace/taxonomy.zod.ts` — `businessFunctions` '
+      + '(1-3, the primary one first), `industries` (up to 3, optional) and `solutionType` (`app`, '
+      + '`template` or `connector`), with `maturity` (`beta` | `stable`) as a separate flag — and '
+      + '`LEGACY_CATEGORY_MAPPING` says what every old value becomes. Each key is a retiredKey tombstone '
+      + 'with no D2 conversion, because none of these shapes is a stack collection member; the D3 record '
+      + 'is the semantic entry `marketplace-category-retired`.',
   },
   {
     id: 'memory-persistence-placeholder-refused',

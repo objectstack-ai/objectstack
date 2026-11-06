@@ -44,6 +44,7 @@ import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { defaultPermissionSets } from './objects/index.js';
 import { maskFieldValue } from './field-masker.js';
+import { provisionRigUsers } from './__tests__/rig-users.testkit.js';
 
 const SYS = { isSystem: true } as const;
 const ORG_A = 'org_a';
@@ -109,11 +110,30 @@ const PERMISSIONS = [...defaultPermissionSets, QA_IN_SET, ...DELEGATE_SETS, ORG_
 type Posture = 'single' | 'group' | 'isolated';
 const POSTURES: Posture[] = ['single', 'group', 'isolated'];
 
+/** [#29029] Every user this suite's writes name or act as: each gets a `sys_user` row. */
+const RIG_USERS = [
+  'u_delegate', 'u_holder_hidden_delegate', 'u_in_0', 'u_in_1', 'u_in_2', 'u_in_3', 'u_in_4',
+  'u_in_5', 'u_member', 'u_org_admin', 'u_org_admin_columns_hidden', 'u_org_admin_delegate',
+  'u_org_admin_hiding', 'u_org_admin_nb', 'u_org_admin_organization_hidden',
+  'u_org_admin_reads_masked', 'u_other_org', 'u_platform', 'u_position_hidden_delegate',
+  'u_seeded', 'u_set_hidden_delegate', 'u_target', 'u_unit_hidden_delegate',
+  'u_write_only_delegate',
+];
+
+/**
+ * [#29029] The users organization A seats — every rig user but the one of
+ * organization B — as `org_user_ids`, which the runtime fills from
+ * `sys_member`: an organization-A caller's `sys_user` read returns them, as
+ * the shipped sets' `id in current_user.org_user_ids` rule answers in a
+ * deployment.
+ */
+const ORG_A_USERS = RIG_USERS.filter((id) => id !== 'u_other_org');
+
 const CALLERS = {
-  platform: { userId: 'u_platform', positions: [], permissions: ['admin_full_access'], posture: 'PLATFORM_ADMIN', tenantId: ORG_A, accessible_org_ids: [ORG_A] },
-  orgAdmin: { userId: 'u_org_admin', positions: [], permissions: ['organization_admin'], tenantId: ORG_A, accessible_org_ids: [ORG_A] },
-  orgAdminNoBypass: { userId: 'u_org_admin_nb', positions: [], permissions: ['organization_admin_no_bypass'], tenantId: ORG_A, accessible_org_ids: [ORG_A] },
-  member: { userId: 'u_member', positions: [], permissions: ['member_default'], tenantId: ORG_A, accessible_org_ids: [ORG_A] },
+  platform: { userId: 'u_platform', positions: [], permissions: ['admin_full_access'], posture: 'PLATFORM_ADMIN', tenantId: ORG_A, accessible_org_ids: [ORG_A], org_user_ids: ORG_A_USERS },
+  orgAdmin: { userId: 'u_org_admin', positions: [], permissions: ['organization_admin'], tenantId: ORG_A, accessible_org_ids: [ORG_A], org_user_ids: ORG_A_USERS },
+  orgAdminNoBypass: { userId: 'u_org_admin_nb', positions: [], permissions: ['organization_admin_no_bypass'], tenantId: ORG_A, accessible_org_ids: [ORG_A], org_user_ids: ORG_A_USERS },
+  member: { userId: 'u_member', positions: [], permissions: ['member_default'], tenantId: ORG_A, accessible_org_ids: [ORG_A], org_user_ids: ORG_A_USERS },
 } as const;
 type Caller = keyof typeof CALLERS;
 
@@ -171,10 +191,12 @@ async function boot(posture: Posture, options: BootOptions = {}) {
     ],
   } as any);
   await engine.syncSchemas();
-  // `sys_user` registered and unprovisioned, as in the sibling suites: the
-  // engine's `user_id` existence probe stands down and the membership hook is
-  // what judges the holder.
+  // [#29029] `sys_user` is provisioned with a row for every user the writes
+  // name: the engine's `user_id` reference check reads the holder through the
+  // caller's read door and finds it, and the membership hook is what judges
+  // the holder.
   if (!engine.registry.getObject(SysUser.name)) engine.registry.registerObject(SysUser as never, 'qa.org-admin-boundary');
+  await provisionRigUsers(engine, RIG_USERS);
   engines.push(engine);
 
   const services: Record<string, unknown> = {
@@ -328,11 +350,8 @@ describe('[ADR-0090 D12, amended 2026-10-17] the organization administrator assi
       it('the delegable-scope report offers the org admin its in-boundary positions only, and explain admits it for its member', async () => {
         const h = await boot(posture);
         const security = h.plugin as any;
-        // [#26641] Explain answers only for a user a `sys_user` row carries, so
-        // the explained member gets one here (the boot leaves the table
-        // unprovisioned for the write cases above).
-        await h.engine.syncObjectSchema(SysUser.name);
-        await h.engine.insert('sys_user', { id: 'u_target', name: 'Target', email: 'u_target@example.test' }, { context: { isSystem: true } } as any);
+        // [#26641] Explain answers only for a user a `sys_user` row carries;
+        // the boot gives the explained member one (`RIG_USERS`).
         for (const context of [CALLERS.orgAdmin, CALLERS.orgAdminNoBypass]) {
           const sets = await security.resolvePermissionSetsForContext(context);
           const report = await security.delegatedAdminGate.describeDelegableScope(sets, context);
@@ -511,7 +530,7 @@ describe("[ADR-0090 D12; ruling of record 5985885287] an organization administra
 // ── The delegated branch ────────────────────────────────────────────────────
 
 const delegateContext = (userId: string, permissions: string[]) =>
-  ({ userId, positions: [] as string[], permissions, tenantId: ORG_A, accessible_org_ids: [ORG_A] });
+  ({ userId, positions: [] as string[], permissions, tenantId: ORG_A, accessible_org_ids: [ORG_A], org_user_ids: ORG_A_USERS });
 type DelegateContext = ReturnType<typeof delegateContext>;
 
 /** Three principal classes the delegated walk judges, each holding the `a_ops` scope of organization A. */

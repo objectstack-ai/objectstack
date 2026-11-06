@@ -47,7 +47,7 @@ describe('readTemplateNamespace', () => {
         $schema: 'https://schemas.objectstack.dev/template-manifest.json',
         name: 'todo',
         displayName: 'Todo',
-        category: 'productivity',
+        businessFunctions: ['collaboration'],
         skills: ['objectstack-platform'],
       }),
     );

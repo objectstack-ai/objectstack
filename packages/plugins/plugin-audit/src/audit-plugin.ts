@@ -276,8 +276,10 @@ export class AuditPlugin implements Plugin {
       namespace: 'sys',
       objects: [SysAuditLog, SysActivity, SysComment, SysCommentReaction],
       // The ledger row's record page: its fields, and every ledger row about
-      // the same record beside it, so a `config_change` row's digest sits next
-      // to the mirror's row that carries the value (`sys-audit-log.page.ts`).
+      // the same record beside it, so a `config_change` row sits next to the
+      // mirror's rows about the same settings row (`sys-audit-log.page.ts`).
+      // A non-secret key's `config_change` row carries its readable before
+      // and after itself; a secret-valued key's carries only the digest.
       pages: [SysAuditLogDetailPage],
       // ADR-0029 D7 — contribute the one Audit Log entry into the Setup app's
       // `group_diagnostics` slot. The plugin owns sys_audit_log (K2), so the

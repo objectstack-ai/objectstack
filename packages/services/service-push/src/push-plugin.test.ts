@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
-import type { ICloudBindingService } from '@objectstack/spec/contracts';
+import { CLOUD_BINDING_SERVICE, type ICloudBindingService } from '@objectstack/spec/contracts';
 import { PushServicePlugin, PUSH_RELAY_AIR_GAPPED_MESSAGE } from './push-plugin.js';
 import { PushService, type IPushTransport, type PushMessage } from './push-service.js';
 import { envPushCredentialResolver } from './credential.js';
@@ -98,7 +98,7 @@ describe('PushServicePlugin — the hosted relay', () => {
 
     it('bound: lists both vendors and sends one POST carrying the binding credential, which no log line carries', async () => {
         const { ctx, services, lines, fire } = context();
-        services.set('cloud-binding', cloudBinding(() => SECRET));
+        services.set(CLOUD_BINDING_SERVICE, cloudBinding(() => SECRET));
         const calls: Array<{ url: string; headers: Record<string, string> }> = [];
         const relayFetch = (async (url: string, init: RequestInit) => {
             calls.push({ url, headers: init.headers as Record<string, string> });
@@ -122,7 +122,7 @@ describe('PushServicePlugin — the hosted relay', () => {
     it('unbound at kernel:ready: warns once, and the bind takes effect without a restart', async () => {
         const { ctx, services, lines, fire } = context();
         let credential = '';
-        services.set('cloud-binding', cloudBinding(() => credential));
+        services.set(CLOUD_BINDING_SERVICE, cloudBinding(() => credential));
         const plugin = new PushServicePlugin({ config: {} });
         await plugin.init(ctx);
         await plugin.start(ctx);

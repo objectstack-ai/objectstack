@@ -8,9 +8,9 @@
 // are new. `protocol.ts` re-exports what it exported.
 import {
     itemDiscriminator,
+    pairOf,
 } from '@objectstack/metadata-core';
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
-import { customizationPackageId } from '@objectstack/spec/kernel';
 import { isServedOverrideRowOf } from './served-override.js';
 import {
     listSlotNameOf,
@@ -111,7 +111,7 @@ export function servedOverlayRowCandidates(address: {
 }): ServedOverlayRowCandidate[] {
     const base = address.packageId;
     const pair = address.servedOverride === true && typeof base === 'string' && base !== ''
-        ? customizationPackageId(base)
+        ? pairOf(base)
         : undefined;
     const places: ReadonlyArray<Pick<ServedOverlayRowCandidate, 'packageId' | 'overrideOf'>> = base === null
         ? [{ packageId: null }]

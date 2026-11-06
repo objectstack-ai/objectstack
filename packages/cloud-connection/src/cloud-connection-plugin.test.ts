@@ -10,6 +10,7 @@
  */
 
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { CLOUD_BINDING_SERVICE, type ICloudBindingService } from '@objectstack/spec/contracts';
 import { CloudConnectionPlugin, createCloudConnectionPlugin } from './cloud-connection-plugin.js';
 import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
@@ -266,5 +267,66 @@ describe('single-environment mode (host auth, fixed env id)', () => {
         await fireKernelReady();
         const res = await rawApp.routes.get('GET /api/v1/cloud-connection/status')!(makeC('http://localhost:3000/x'));
         expect(res.payload.data.environmentId).toBe('env-from-env-var');
+    });
+});
+
+/**
+ * [#30762] One reading of the control-plane URL. The routes read it through
+ * the `cloud-binding` service the plugin registers, the same answer the push
+ * relay sender reads, so the two cannot disagree on an option. An explicit
+ * empty option is "cloud not configured" for both, and does not fall through
+ * to `OS_CLOUD_URL` or the default.
+ */
+describe('CloudConnectionPlugin — the routes and the binding read the control-plane URL once', () => {
+    const ENV = 'env-123';
+    const services = {
+        'env-registry': { resolveByHostname: async () => ({ environmentId: ENV }) },
+        'kernel-manager': { getOrCreate: async () => ({ getServiceAsync: async () => sessionAuth('user-1') }) },
+    };
+
+    afterEach(() => { vi.unstubAllEnvs(); });
+
+    /** Boot the plugin, drive `GET /installed` once, and answer where it went and what the binding says. */
+    async function readBoth(controlPlaneUrl: string | undefined) {
+        const rawApp = makeRawApp();
+        const { ctx, fireKernelReady } = makeCtx({ rawApp, services });
+        const registered = new Map<string, unknown>();
+        const fetchSpy = vi.fn(async (_url: string) => new Response(JSON.stringify({ success: true, data: { packages: [], total: 0 } }), { status: 200 }));
+        vi.stubGlobal('fetch', fetchSpy);
+        const plugin = new CloudConnectionPlugin({ controlPlaneApiKey: 'svc-key', ...(controlPlaneUrl === undefined ? {} : { controlPlaneUrl }) });
+        await plugin.init({ ...ctx, registerService: (name: string, svc: unknown) => registered.set(name, svc) } as any);
+        await plugin.start(ctx as any);
+        await fireKernelReady();
+        const res = await rawApp.routes.get('GET /api/v1/cloud-connection/installed')!(
+            makeC('https://t1.example.com/api/v1/cloud-connection/installed'),
+        );
+        const binding = registered.get(CLOUD_BINDING_SERVICE) as ICloudBindingService;
+        const called = fetchSpy.mock.calls.map(([url]) => String(url));
+        return { res, binding: binding.controlPlaneUrl(), called };
+    }
+
+    it.each(['', '   '])('an explicit empty option %j is "cloud not configured" for both, over OS_CLOUD_URL', async (option) => {
+        vi.stubEnv('OS_CLOUD_URL', 'https://env.example.com');
+        const { res, binding, called } = await readBoth(option);
+        expect(binding).toBe('');
+        expect(called).toEqual([]);
+        expect(res.payload).toEqual({ success: true, data: { packages: [], total: 0, connected: false } });
+    });
+
+    it('a declined OS_CLOUD_URL under an absent option is "cloud not configured" for both', async () => {
+        vi.stubEnv('OS_CLOUD_URL', 'off');
+        const { binding, called } = await readBoth(undefined);
+        expect(binding).toBe('');
+        expect(called).toEqual([]);
+    });
+
+    it.each([
+        ['the configured URL', 'https://cp.example.com/', 'https://env.example.com', 'https://cp.example.com'],
+        ['OS_CLOUD_URL under an absent option', undefined, 'https://env.example.com/', 'https://env.example.com'],
+    ])('%s: the routes call the URL the binding answers', async (_label, option, env, expected) => {
+        vi.stubEnv('OS_CLOUD_URL', env);
+        const { binding, called } = await readBoth(option);
+        expect(binding).toBe(expected);
+        expect(called).toEqual([`${expected}/api/v1/cloud/environments/${ENV}/packages`]);
     });
 });

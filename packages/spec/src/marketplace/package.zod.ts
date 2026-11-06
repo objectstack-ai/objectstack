@@ -33,6 +33,14 @@ import { lazySchema } from '../shared/lazy-schema';
 // authoring key name the same identity; two independent copies of the pattern
 // are what let them drift apart in the first place.
 import { MANIFEST_ID_PATTERN, manifestIdRefusal } from '../kernel/manifest.zod';
+import { retiredKey } from '../shared/retired-key';
+import {
+  MarketplaceBusinessFunctionsSchema,
+  MarketplaceIndustriesSchema,
+  MarketplaceSolutionTypeSchema,
+  PackageMaturitySchema,
+  retiredCategoryGuidance,
+} from './taxonomy.zod';
 export const PackageVisibilitySchema = lazySchema(() => z
   .enum(['private', 'org', 'marketplace'])
   .describe(
@@ -41,16 +49,10 @@ export const PackageVisibilitySchema = lazySchema(() => z
 
 export type PackageVisibility = z.input<typeof PackageVisibilitySchema>;
 
-/**
- * Category hint for marketplace discovery and filtering.
- * Kept open-ended (z.string()) so third-party packages can declare custom categories.
- */
-export const PackageCategorySchema = lazySchema(() => z
-  .string()
-  .min(1)
-  .describe('Package category for marketplace discovery (e.g. "crm", "hr", "finance", "devtools")'));
-
-export type PackageCategory = z.input<typeof PackageCategorySchema>;
+// `PackageCategorySchema` (an open `category` string) was RETIRED with the
+// listing's closed `MarketplaceCategorySchema`: the marketplace taxonomy is the
+// facets in `./taxonomy.zod.ts`, and every `category` key below is a
+// `retiredKey()` tombstone whose refusal names them (ADR-0087).
 
 /**
  * Provenance tier of a package publisher.
@@ -232,8 +234,38 @@ export const PackageSchema = lazySchema(() => z.object({
    */
   visibility: PackageVisibilitySchema.default('org'),
 
-  /** Primary category for marketplace filtering. */
-  category: PackageCategorySchema.optional(),
+  /**
+   * REMOVED — the single marketplace category. It had to say both who the
+   * package is for and what it is, and the platform and the cloud catalog
+   * kept lists that disagreed. Replaced by {@link businessFunctions},
+   * {@link industries} and {@link solutionType} (the maintainer's taxonomy
+   * ruling, recorded on the card that retired it). Tombstoned rather than
+   * deleted: this object is not strict, so a bare deletion would strip the
+   * key silently. No D2 conversion — a package row is not a stack collection
+   * member; the cloud catalog migrates its stored rows once, reading
+   * `LEGACY_CATEGORY_MAPPING`. The D3 record is `marketplace-category-retired`.
+   */
+  category: retiredKey(retiredCategoryGuidance('Package.category')),
+
+  /**
+   * Business functions the package serves — 1 to 3, the primary one first
+   * (see `./taxonomy.zod.ts`). Optional here; the marketplace requires it at
+   * submission.
+   */
+  businessFunctions: MarketplaceBusinessFunctionsSchema.optional(),
+
+  /** Industries the package is built for — up to 3; absent means cross-industry. */
+  industries: MarketplaceIndustriesSchema.optional(),
+
+  /**
+   * What the package is: `app` (managed), `template` (unmanaged, the
+   * customer's to change) or `connector`. Cross-checked at publish against
+   * the built package (`explainSolutionTypeContradiction`).
+   */
+  solutionType: MarketplaceSolutionTypeSchema.default('app'),
+
+  /** `beta` shows a badge on the listing; a separate flag, never a facet. */
+  maturity: PackageMaturitySchema.default('stable'),
 
   /** Additional tags for search and filtering (e.g. ["salesforce", "sync", "crm"]). */
   tags: z.array(z.string()).optional().describe('Search and filter tags'),
@@ -306,7 +338,16 @@ export const CreatePackageRequestSchema = lazySchema(() => z.object({
   displayName: PackageSchema.shape.displayName,
   description: PackageSchema.shape.description,
   visibility: PackageVisibilitySchema.optional(),
-  category: PackageCategorySchema.optional(),
+  // Retired with `PackageSchema.category` — see that tombstone.
+  category: retiredKey(retiredCategoryGuidance('CreatePackageRequest.category')),
+  // The taxonomy facets and the maturity flag. No `.default()` on a request:
+  // an absent key is "not stated", and the control plane applies the row's
+  // default to a new package (the `visibility` lesson — a request default
+  // rewrites an existing package on every re-publish).
+  businessFunctions: MarketplaceBusinessFunctionsSchema.optional(),
+  industries: MarketplaceIndustriesSchema.optional(),
+  solutionType: MarketplaceSolutionTypeSchema.optional(),
+  maturity: PackageMaturitySchema.optional(),
   tags: z.array(z.string()).optional(),
   iconUrl: z.string().url().optional(),
   homepageUrl: z.string().url().optional(),
@@ -328,7 +369,12 @@ export const UpdatePackageRequestSchema = lazySchema(() => z.object({
   description: PackageSchema.shape.description,
   readme: PackageSchema.shape.readme,
   visibility: PackageVisibilitySchema.optional(),
-  category: PackageCategorySchema.optional(),
+  // Retired with `PackageSchema.category` — see that tombstone.
+  category: retiredKey(retiredCategoryGuidance('UpdatePackageRequest.category')),
+  businessFunctions: MarketplaceBusinessFunctionsSchema.optional(),
+  industries: MarketplaceIndustriesSchema.optional(),
+  solutionType: MarketplaceSolutionTypeSchema.optional(),
+  maturity: PackageMaturitySchema.optional(),
   tags: z.array(z.string()).optional(),
   iconUrl: z.string().url().optional(),
   homepageUrl: z.string().url().optional(),

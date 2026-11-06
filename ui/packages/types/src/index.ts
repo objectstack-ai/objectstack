@@ -820,25 +820,48 @@ export {
 // See `packages/types/src/internal/retired-field-keys.ts` for the registry.
 
 // ============================================================================
-// API and Events - API Integration and Event Handling
+// API and Events — RETIRED (no block stands here any more)
 // ============================================================================
-export type {
-  HTTPMethod,
-  APIRequest,
-  APIConfig,
-  // `UIEventHandler` and `EventableSchema` are GONE from this block, not
-  // emptied out of it: both were RETIRED in objectui#6497 (ADR-0049
-  // enforce-or-remove, director ruling of 2026-09-24, maintainer verbatim
-  // 「同意」). Declared, unmirrored, unextended and unread, they only invited a
-  // handler dialect no runtime dispatches. The supported form is the
-  // declarative `ActionDef` object from `@object-ui/core`; the reasoning is the
-  // tombstone in `./api-types.ts`.
-  DataFetchConfig,
-  DataFetchableSchema,
-  ExpressionContext,
-  ExpressionNodeSchema,
-  APISchema,
-} from './api-types.js';
+// #25921 (batch 9): the whole `./api-types.ts` module is DELETED, with its eight
+// names `HTTPMethod`, `APIRequest`, `APIConfig`, `DataFetchConfig`,
+// `DataFetchableSchema`, `ExpressionContext`, `ExpressionNodeSchema` and
+// `APISchema`: TypeScript-only shapes no renderer, adapter or host read, in this
+// workspace or in hotcrm. No replacement type; the changeset carries the FROM/TO.
+// The `ExpressionContext` an expression runs against is `@object-ui/core`'s class.
+//
+// `UIEventHandler` and `EventableSchema` — RETIRED. This comment is the
+// tombstone (it moved here from the deleted `./api-types.ts`): both were
+// TypeScript interfaces, which erase and leave no runtime residue that could
+// carry a marker of their own.
+//
+// RETIRED under ADR-0049 enforce-or-remove by the director-seat ruling recorded
+// on objectui#6497 (2026-09-24, maintainer verbatim 「同意」): the re-priced
+// option 2 of the three that card offered. ⛔ Not option 1 (mirror the dialect in
+// zod, have component schemas extend it, build a dispatcher for it) and ⛔ not
+// option 3 (leave it on the published surface). The ruling follows objectui#6182
+// (ruled A, 2026-08-25): an authored handler EXPRESSION is not a supported
+// authoring form.
+//
+// What went: both exported interfaces and their barrel re-exports.
+// `UIEventHandler` was an event-handler object: `event`, a `type` of
+// `action | api | script | navigation | dialog | toast | custom`, one config
+// member per type, then `condition`, `preventDefault`, `stopPropagation`,
+// `debounce` and `throttle`. The action entries of its `dialog` member carried a
+// recursive `handler?: UIEventHandler`, which went with it. `EventableSchema` extended
+// `BaseSchema` with an `events` array and nine `on*` keys, each typed
+// `UIEventHandler | string`. Its arm of the (since deleted) `APISchema` union
+// went too. There is no replacement type and no replacement key.
+//
+// Why: declared and inert, an island: no component schema extended
+// `EventableSchema`, neither type had a zod mirror (so `objectui validate` had no
+// path to the dialect), and nothing outside its module and this barrel read
+// either one. Only `tsc` said yes, which invited authors to write a handler
+// dialect that no runtime dispatches.
+//
+// The supported form: an action is the declarative `ActionDef` object that
+// `@object-ui/core`'s `ActionRunner` executes, and a control that runs something
+// is the `action:button` node type (AGENTS.md, commandment #4). Runtime
+// callbacks stay the programmatic face.
 
 // ============================================================================
 // Union Types - Discriminated Unions for All Schemas
@@ -937,29 +960,28 @@ export type {
 // Authoritative report protocol from @objectstack/spec, re-exported under
 // `Spec*` names so they coexist with the legacy presentation `ReportComponentSchema`.
 // See `./spec-report.ts` for the layering rationale.
+//
+// #25921 (batch 10): nine names of this block are DELETED, nothing in this
+// workspace or in hotcrm read them: `SpecReportChart`, `SpecReportChartInput`,
+// `SpecReportChartSchema` and `SpecReportTypeEnum` (import `ReportChartParsed`,
+// `ReportChart`, `ReportChartSchema` and `ReportType` from `@objectstack/spec/ui`),
+// and `SpecReportAggregate`, `QLAggregationFunction`, `mapAggregateToQL`,
+// `JoinedSpecReport` and `isJoinedSpecReport` (no replacement). The changeset
+// carries the FROM/TO.
 // ---------------------------------------------------------------------------
 export type {
   SpecReportInput,
-  SpecReportChart,
-  SpecReportChartInput,
   SpecReportTypeName,
-  SpecReportAggregate,
   SpecReportDateGranularity,
-  QLAggregationFunction,
   LegacyReportPresentationLike,
   JoinedReportBlock,
-  JoinedSpecReport,
 } from './spec-report.js';
 
 export {
   SpecReportSchema,
-  SpecReportChartSchema,
-  SpecReportTypeEnum,
   SpecReport,
-  mapAggregateToQL,
   specReportToPresentation,
   isSpecReport,
-  isJoinedSpecReport,
 } from './spec-report.js';
 
 // Workflow / Flow Designer schemas removed in 9.0 — they backed the retired
