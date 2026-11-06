@@ -47,6 +47,10 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+// The harness loads these two inside a function body; paid at collection, so
+// no clocked window carries their first load (`check:test-source-alias`).
+import '@objectstack/service-datasource';
+import '@objectstack/service-automation';
 import { bootStack } from './harness.js';
 
 const app = {
