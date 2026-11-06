@@ -452,6 +452,29 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       expect(own._json.data.attachmentId).toEqual(expect.any(String));
     });
 
+    it('a row whose binding names another user than its stamped uploader is no link: the one 404 for both, nothing spent', async () => {
+      const grant = await files.createUploadLinkAs('claim', ids.claimB, { attachments: true }, OWNER as never);
+      const token = tokenOf(grant.path);
+      const [id] = token.split('.');
+      const row = await fileRow(id);
+      expect(row.owner_id).toBe(OWNER.userId);
+      // The binding rewritten through the data door, as a `sys_file` edit grant could: the user is now the reviewer.
+      const rewritten = JSON.stringify({ ...JSON.parse(String(row.metadata)), user_id: REVIEWER.userId });
+      await engine.update('sys_file', { id, metadata: rewritten } as never, { context: SYS } as never);
+      const attachmentsBefore = await engine.count('sys_attachment', { where: { parent_id: ids.claimB }, context: SYS } as never);
+      for (const user of [REVIEWER.userId, OWNER.userId]) {
+        const page = await openLink(token, user);
+        expect(page._status).toBe(404);
+        expect(String(page._sent)).toContain('This upload link cannot be used');
+        const put = await useLink(token, Buffer.from('rebound'), {}, user);
+        expect(put._status).toBe(404);
+        expect(put._json.error).toMatchObject({ code: 'RESOURCE_NOT_FOUND', message: UPLOAD_LINK_UNUSABLE_MESSAGE });
+      }
+      // Not spent: the row is still the open, pending link, and the record gained no attachment.
+      expect(await fileRow(id)).toMatchObject({ status: 'pending', name: 'upload-link', owner_id: OWNER.userId });
+      expect(await engine.count('sys_attachment', { where: { parent_id: ids.claimB }, context: SYS } as never)).toBe(attachmentsBefore);
+    });
+
     it('of two concurrent uses exactly one lands', async () => {
       const grant = await files.createUploadLinkAs('claim', ids.claimB, { attachments: true }, OWNER as never);
       const token = tokenOf(grant.path);

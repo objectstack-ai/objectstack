@@ -85,6 +85,14 @@ import {
  * retention, as an abandoned upload is. No published schema, setting or
  * object is added.
  *
+ * The row's `name` (the link's state) and `metadata` (its binding) are not
+ * `readonly` columns, so a link is usable only when the binding's user is the
+ * row's `owner_id` — the uploader column minting writes, which is `readonly`
+ * so no update moves it — and a row rebound to another user answers the one
+ * refusal. The binding's
+ * other columns (the record, the field, the organization) rest on `sys_file`
+ * edit being an administrative grant.
+ *
  * ## What counts the upload
  *
  * The bytes go through the doors' own size verdict (`max_upload_mb`, 413
@@ -678,6 +686,9 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     const deadline = Date.parse(state.expires_at);
     if (!Number.isFinite(deadline) || deadline <= this.now()) refuseUnusableLink();
     if (!nonEmptyString(callerUserId) || state.user_id !== callerUserId) refuseUnusableLink();
+    // The binding's user must be the row's uploader: `owner_id` is readonly,
+    // `metadata` is not.
+    if (row.owner_id !== state.user_id) refuseUnusableLink();
     return { row, state };
   }
 
