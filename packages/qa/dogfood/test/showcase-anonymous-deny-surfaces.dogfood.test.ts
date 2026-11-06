@@ -581,8 +581,18 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
   // ⛔ The case above is left as it was. Narrowing IT to 404 would make this
   // file's anonymity proof fail for reasons belonging to another proof, which
   // is what its own comment warns against.
-  it('[#7867] a member hitting the action with a NONEXISTENT record id gets 404 RECORD_NOT_FOUND', async () => {
-    const r = await stack.apiAs(memberToken, 'POST', ACTION, { params: {} });
+  //
+  // [#30848] `showcase_mark_done` is a declarative update (`operation:
+  // 'update'`), and a declarative update is judged as the write it performs:
+  // a caller who may not update the object is refused before the record is
+  // looked up, as the data door's PATCH refuses it. The member holds no edit
+  // grant on `showcase_task`, so its answer for the ghost id is that refusal,
+  // 403 PERMISSION_DENIED, and no longer the lookup's 404. #7867's proof, that
+  // a ghost id answers the lookup's 404 rather than a 400 from further down
+  // the pipeline, is carried by a caller who passes that refusal: the dev
+  // administrator, who holds the edit grant.
+  it('[#7867] a caller holding the edit grant hitting the action with a NONEXISTENT record id gets 404 RECORD_NOT_FOUND', async () => {
+    const r = await stack.apiAs(adminToken, 'POST', ACTION, { params: {} });
 
     expect(r.status, 'a ghost record id must answer 404, not a 400 from further down the pipeline').toBe(404);
     const body = (await r.json()) as Record<string, unknown>;
@@ -596,32 +606,52 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     expect(String(err.message ?? '')).not.toMatch(/HookConditionError/);
   });
 
-  it('[#7867] …the SAME answer the REST data surface gives for that same id', async () => {
+  it('[#30848] a member with no edit grant hitting the action with a NONEXISTENT record id gets 403 PERMISSION_DENIED', async () => {
+    const r = await stack.apiAs(memberToken, 'POST', ACTION, { params: {} });
+
+    expect(r.status, 'a caller who may not update the object is refused the write before the lookup').toBe(403);
+    const body = (await r.json()) as Record<string, unknown>;
+    const err = (isRecord(body.error) ? body.error : {}) as Record<string, unknown>;
+    expect(err.code).toBe('PERMISSION_DENIED');
+    expect(err.httpStatus).toBe(403);
+    // Still never the 400 shapes #7867 removed.
+    expect(String(err.message ?? '')).not.toMatch(/not bound for this operation/);
+    expect(String(err.message ?? '')).not.toMatch(/HookConditionError/);
+  });
+
+  it('[#7867, #30848] …the SAME answer the REST data surface gives that caller for that same id', async () => {
     // The comparison that made #7867 measurable in the first place: one id, one
     // object, one process, one second — and two surfaces that disagreed
     // (`/actions` → 400, `/data` → 404). Both are asserted here, so they cannot
     // drift apart again without this gate saying so.
     //
-    // The data surface that answers this the way the action does is the record
-    // READ: the action loads its record through the read door, and the member
-    // reads `showcase_task`. A PATCH is not that surface for this caller: an
-    // update by id is judged before the record is looked up, as a delete is, and
-    // the member holds no edit grant on `showcase_task` — so it is refused the
-    // write whatever the id (`update-by-id-refusal-order.dogfood.test.ts`).
+    // The data surface that answers this the way the action does is the
+    // record's UPDATE, the write the action performs: an update by id is
+    // judged before the record is looked up, as a delete is
+    // (`update-by-id-refusal-order.dogfood.test.ts`). For the member, who holds
+    // no edit grant on `showcase_task`, both refuse the write whatever the id;
+    // for the administrator, who holds it, both answer the lookup's not-found.
     const ghostId = ACTION.slice(ACTION.lastIndexOf('/') + 1);
-    const rest = await stack.apiAs(memberToken, 'GET', `/data/showcase_task/${ghostId}`);
 
-    expect(rest.status).toBe(404);
-    const body = (await rest.json()) as Record<string, unknown>;
     // `@objectstack/rest` answers the flat envelope; the dispatcher-mounted
     // `/actions` answers its own wrapper. Different shells, one code — each read
     // in its own shape, with no `??` chain across the two (#5632's rule, which
     // this file already enforces for the 401 bodies).
-    expect(body.code).toBe('RECORD_NOT_FOUND');
+    const memberPatch = await stack.apiAs(memberToken, 'PATCH', `/data/showcase_task/${ghostId}`, { done: true });
+    expect(memberPatch.status).toBe(403);
+    expect(((await memberPatch.json()) as Record<string, unknown>).code).toBe('PERMISSION_DENIED');
+    const memberAction = await stack.apiAs(memberToken, 'POST', ACTION, { params: {} });
+    expect(memberAction.status).toBe(403);
+    const memberActionBody = (await memberAction.json()) as Record<string, unknown>;
+    expect(((isRecord(memberActionBody.error) ? memberActionBody.error : {}) as Record<string, unknown>).code).toBe('PERMISSION_DENIED');
 
-    const patch = await stack.apiAs(memberToken, 'PATCH', `/data/showcase_task/${ghostId}`, { done: true });
-    expect(patch.status).toBe(403);
-    expect(((await patch.json()) as Record<string, unknown>).code).toBe('PERMISSION_DENIED');
+    const adminPatch = await stack.apiAs(adminToken, 'PATCH', `/data/showcase_task/${ghostId}`, { done: true });
+    expect(adminPatch.status).toBe(404);
+    expect(((await adminPatch.json()) as Record<string, unknown>).code).toBe('RECORD_NOT_FOUND');
+    const adminAction = await stack.apiAs(adminToken, 'POST', ACTION, { params: {} });
+    expect(adminAction.status).toBe(404);
+    const adminActionBody = (await adminAction.json()) as Record<string, unknown>;
+    expect(((isRecord(adminActionBody.error) ? adminActionBody.error : {}) as Record<string, unknown>).code).toBe('RECORD_NOT_FOUND');
   });
 
   // ── /automation (dispatcher-mounted; runtime domains/automation.ts) ─────
