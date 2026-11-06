@@ -702,23 +702,6 @@ export type {
   FormatValidation,
   RangeValidation,
   ObjectValidationRule,
-  // Driver Interface (Phase 3.6)
-  SqlDriverInterface,
-  ConnectionConfig,
-  DriverQueryResult,
-  BatchOperation,
-  BatchResult,
-  TransactionContext,
-  CacheManager,
-  ConnectionPool,
-  // Datasource Schema (Phase 3.7)
-  DatasourceRegistration,
-  DatasourceType,
-  DatasourceMetric,
-  DatasourceAlert,
-  DatasourceManager,
-  HealthCheckResult,
-  DatasourceMetrics,
 } from './data-protocol.js';
 
 // ============================================================================

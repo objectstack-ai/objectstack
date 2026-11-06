@@ -44,6 +44,7 @@ import { actionErrorDetail, captureUpdateUndoData, resolveRecordIdParamSeed, res
 import { useActionModal } from './useActionModal.js';
 import { ActionConfirmDialog, type ConfirmDialogState } from '../views/ActionConfirmDialog.js';
 import { ActionParamDialog, type ParamDialogState } from '../views/ActionParamDialog.js';
+import { resolveParamDialogCompanion } from '../views/actionDialogCompanion.js';
 import { ActionResultDialog, type ResultDialogState } from '../views/ActionResultDialog.js';
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from '../views/FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from '../views/FlowRefusalNotice.js';
@@ -370,6 +371,8 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
         // The runner's `run`, so Confirm runs the action from inside the
         // dialog and a refusal keeps what the user typed (objectui#13161).
         run,
+        // The host-composed panel above the params (objectstack#30205).
+        companion: resolveParamDialogCompanion(objForI18n, action?.name, row),
       });
     })(); });
   }, [objectName, objectDef, objects, metadata, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionSubmitText, actionCancelText, language]);

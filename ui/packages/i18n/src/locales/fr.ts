@@ -2420,6 +2420,28 @@ const fr = {
       dark: "Sombre",
       system: "Système",
     },
+    // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
+    assignedWork: {
+      title: 'Enregistrements détenus par cette personne',
+      loading: 'Décompte des enregistrements détenus par cette personne…',
+      countFailed: 'Impossible de compter les enregistrements détenus par cette personne : {{message}}',
+      noClient: 'Les enregistrements détenus par cette personne ne peuvent pas être comptés ici.',
+      none: 'Cette personne ne détient aucun enregistrement que vous pouvez lire.',
+      summary: 'Enregistrements que vous pouvez lire : {{total}}. En propriété : {{owned}}, assignés : {{assigned}}.',
+      row: '{{object}} · {{field}}',
+      notTransferable: 'Ce champ contient plusieurs personnes et ne peut pas être transféré ici.',
+      truncated: 'Tous les champs utilisateur n’ont pas été comptés ; cette personne peut en détenir davantage.',
+      unreadable: 'Non comptés, car vous ne pouvez pas les lire : {{objects}}',
+      handoverTo: 'Transférer à',
+      handoverHint: 'Facultatif. Le bannissement n’attend pas le transfert.',
+      handover: 'Transférer',
+      handingOver: 'Transfert en cours…',
+      handoverNext: 'Transférer le lot suivant',
+      targetBanned: 'Cette personne est bannie. Choisissez un utilisateur actif.',
+      transferRefused: 'Le transfert a été refusé : {{message}}',
+      report: 'Transférés : {{updated}}, non déplacés : {{failed}}, encore détenus : {{remaining}}.',
+      failure: '{{object}} {{id}} : {{message}}',
+    },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
       managedUsers: {
@@ -2732,6 +2754,8 @@ const fr = {
         title: 'Journal d’audit',
         subtitle: 'Activité système et modifications d’enregistrements, en lecture seule. Les plus récentes en premier.',
         openAsList: 'Ouvrir en liste',
+        openEntryPage: 'Ouvrir la page de l’entrée',
+        openEntryPageHint: 'La page de l’entrée liste toutes les modifications du même enregistrement, de la plus récente à la plus ancienne.',
         openPresetAsList: 'Ouvrir {{label}} en liste',
         presets: 'Préréglages',
         presetOtherSource: 'Cette vue lit une autre source de données.',

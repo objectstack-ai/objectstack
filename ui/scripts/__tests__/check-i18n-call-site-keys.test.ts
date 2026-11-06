@@ -17,6 +17,7 @@ import {
   holesOf,
   PACK_HOOK,
   PACK_NAMESPACE_DIRS,
+  PACK_NAMESPACE_FRAMES,
   readVocabulary,
   RESERVED_OPTION_NAMES,
   unresolvableSpellings,
@@ -299,6 +300,120 @@ describe('the pack-shaped namespaces are part of the en pack (objectstack#30588)
     });
     // fixture-address: the finding the gate reports for the fixture page written just above
     expect(findingsOf(root, 'missing-key')).toEqual(['shop.title@packages/x/src/page.tsx:2']);
+  });
+});
+
+describe('a key only a namespace defines is refused outside its frame (objectstack#30645)', () => {
+  const NS_EN = `${PACK_NAMESPACE_DIRS[0]}en.ts`;
+  const FRAME = PACK_NAMESPACE_FRAMES[PACK_NAMESPACE_DIRS[0]][0];
+  const NS_PACK =
+    "const en = { shop: { title: 'Shop', row_one: '{{count}} row', row_other: '{{count}} rows', " +
+    "status: { open: 'Open', closed: 'Closed' } } } as const;\nexport default en;\n";
+  const RESIDENT = "const en = { shop: { kept: 'Kept', tag: { a: 'A' } } } as const;\nexport default en;\n";
+  const page = (body: string) =>
+    `import { useObjectTranslation } from '${I18N_PKG}';\nexport function P({ s }: { s: string }) { const { t } = useObjectTranslation(); return ${body}; }\n`;
+  const outsideFrame = (root: string) => findingsOf(root, 'namespace-key-outside-frame');
+
+  it('every namespace directory is declared with a non-empty frame (one list, read both ways)', () => {
+    expect(Object.keys(PACK_NAMESPACE_FRAMES)).toEqual([...PACK_NAMESPACE_DIRS]);
+    for (const dir of PACK_NAMESPACE_DIRS) expect(PACK_NAMESPACE_FRAMES[dir].length).toBeGreaterThan(0);
+  });
+
+  it('turns red on a namespace-only key spelled outside the frame (the positive control)', () => {
+    const root = repoWith({
+      'packages/i18n/src/locales/en.ts': RESIDENT,
+      [NS_EN]: NS_PACK,
+      'packages/studio/src/page.tsx': page("t('shop.title')"),
+    });
+    // fixture-address: the finding the gate reports for the fixture page written just above
+    expect(outsideFrame(root)).toEqual(['shop.title@packages/studio/src/page.tsx:2']);
+    const finding = analyze(root, { families: [] }).findings.find(
+      (f: { reason: string }) => f.reason === 'namespace-key-outside-frame',
+    );
+    expect(finding?.expected).toBe(PACK_NAMESPACE_DIRS[0]);
+  });
+
+  it('reads the same key inside the frame, and counts it there', () => {
+    const root = repoWith({
+      'packages/i18n/src/locales/en.ts': RESIDENT,
+      [NS_EN]: NS_PACK,
+      [`${FRAME}Page.tsx`]: page("t('shop.title')"),
+    });
+    expect(outsideFrame(root)).toEqual([]);
+    expect(analyze(root, { families: [] }).framedReads.get(PACK_NAMESPACE_DIRS[0])).toBe(1);
+  });
+
+  it('stays silent on a resident key outside the frame', () => {
+    const root = repoWith({
+      'packages/i18n/src/locales/en.ts': RESIDENT,
+      [NS_EN]: NS_PACK,
+      'packages/studio/src/page.tsx': page("t('shop.kept')"),
+    });
+    expect(outsideFrame(root)).toEqual([]);
+    expect(analyze(root, { families: [] }).framedReads.get(PACK_NAMESPACE_DIRS[0])).toBe(0);
+  });
+
+  it('refuses a plural base whose forms live only in the namespace', () => {
+    const root = repoWith({
+      'packages/i18n/src/locales/en.ts': RESIDENT,
+      [NS_EN]: NS_PACK,
+      'packages/studio/src/page.tsx': page("t('shop.row', { count: 2 })"),
+    });
+    // fixture-address: the finding the gate reports for the fixture page written just above
+    expect(outsideFrame(root)).toEqual(['shop.row@packages/studio/src/page.tsx:2']);
+  });
+
+  it('refuses a template head only the namespace answers, and passes one a resident leaf answers', () => {
+    const root = repoWith({
+      'packages/i18n/src/locales/en.ts': RESIDENT,
+      [NS_EN]: NS_PACK,
+      'packages/studio/src/a.tsx': page('t(`shop.status.${s}`)'),
+      'packages/studio/src/b.tsx': page('t(`shop.tag.${s}`)'),
+    });
+    // fixture-address: the finding the gate reports for the fixture page written just above
+    expect(outsideFrame(root)).toEqual(['shop.status.*@packages/studio/src/a.tsx:2']);
+  });
+
+  it('refuses a returnObjects subtree that only the namespace fills', () => {
+    const root = repoWith({
+      'packages/i18n/src/locales/en.ts': RESIDENT,
+      [NS_EN]: NS_PACK,
+      'packages/studio/src/page.tsx': page("t('shop.status', { returnObjects: true })"),
+    });
+    // fixture-address: the finding the gate reports for the fixture page written just above
+    expect(outsideFrame(root)).toEqual(['shop.status.*@packages/studio/src/page.tsx:2']);
+  });
+
+  it('a second namespace inherits the rule from its declaration alone', () => {
+    const SECOND = 'packages/i18n/src/namespaces/billing/';
+    const frames = { ...PACK_NAMESPACE_FRAMES, [SECOND]: ['packages/app-shell/src/console/billing/'] };
+    const root = repoWith({
+      'packages/i18n/src/locales/en.ts': RESIDENT,
+      [`${SECOND}en.ts`]: "const en = { billing: { title: 'Billing' } } as const;\nexport default en;\n",
+      'packages/app-shell/src/console/billing/Page.tsx': page("t('billing.title')"),
+      'packages/studio/src/page.tsx': page("t('billing.title')"),
+    });
+    const result = analyze(root, { families: [], frames });
+    const refused = result.findings
+      .filter((f: { reason: string }) => f.reason === 'namespace-key-outside-frame')
+      .map((f: { detail: string; file: string; expected: string }) => `${f.detail}@${f.file} <- ${f.expected}`);
+    expect(refused).toEqual([`billing.title@packages/studio/src/page.tsx <- ${SECOND}`]);
+    expect(result.framedReads.get(SECOND)).toBe(1);
+  });
+
+  it('refuses a namespace declared without a frame', () => {
+    const root = repoWith({ 'packages/i18n/src/locales/en.ts': RESIDENT });
+    expect(() => analyze(root, { families: [], frames: { 'packages/i18n/src/namespaces/billing/': [] } })).toThrow(
+      /declares no frame/,
+    );
+  });
+
+  it('on this tree: no namespace key is read outside its frame, and every frame reads some', () => {
+    const outside = REPO_ANALYSIS.findings.filter(
+      (f: { reason: string }) => f.reason === 'namespace-key-outside-frame',
+    );
+    expect(outside).toEqual([]);
+    for (const dir of PACK_NAMESPACE_DIRS) expect(REPO_ANALYSIS.framedReads.get(dir)).toBeGreaterThan(0);
   });
 });
 

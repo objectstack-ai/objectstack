@@ -2419,6 +2419,28 @@ const pt = {
       dark: "Escuro",
       system: "Sistema",
     },
+    // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
+    assignedWork: {
+      title: 'Registros desta pessoa',
+      loading: 'Contando os registros desta pessoa…',
+      countFailed: 'Não foi possível contar os registros desta pessoa: {{message}}',
+      noClient: 'Os registros desta pessoa não podem ser contados aqui.',
+      none: 'Esta pessoa não tem registros que você possa ler.',
+      summary: 'Registros que você pode ler: {{total}}. Em propriedade: {{owned}}, atribuídos: {{assigned}}.',
+      row: '{{object}} · {{field}}',
+      notTransferable: 'Aceita várias pessoas, por isso não pode ser transferido aqui.',
+      truncated: 'Nem todos os campos de usuário foram contados; esta pessoa pode ter mais.',
+      unreadable: 'Não contados porque você não pode lê-los: {{objects}}',
+      handoverTo: 'Transferir para',
+      handoverHint: 'Opcional. O banimento não espera pela transferência.',
+      handover: 'Transferir',
+      handingOver: 'Transferindo…',
+      handoverNext: 'Transferir o próximo lote',
+      targetBanned: 'Essa pessoa está banida. Escolha um usuário ativo.',
+      transferRefused: 'A transferência foi recusada: {{message}}',
+      report: 'Transferidos: {{updated}}, não movidos: {{failed}}, ainda com a pessoa: {{remaining}}.',
+      failure: '{{object}} {{id}}: {{message}}',
+    },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
       managedUsers: {
@@ -2731,6 +2753,8 @@ const pt = {
         title: 'Log de auditoria',
         subtitle: 'Atividade do sistema e alterações de registros, somente leitura. Mais recentes primeiro.',
         openAsList: 'Abrir como lista',
+        openEntryPage: 'Abrir a página da entrada',
+        openEntryPageHint: 'A página da entrada lista todas as alterações do mesmo registro, da mais recente para a mais antiga.',
         openPresetAsList: 'Abrir {{label}} como lista',
         presets: 'Predefinições',
         presetOtherSource: 'Esta visualização lê outra fonte de dados.',

@@ -28,6 +28,8 @@
  *  - Paginated table (50/page)
  *  - Row click opens a side drawer with full event details + JSON
  *    diff of old_value → new_value when present
+ *  - The drawer opens the row's own record page (`entryPageHref` below),
+ *    which lists the other ledger rows about the same `record_id`
  *
  * Out of scope (future):
  *  - Cross-tenant filter (single-tenant view assumed)
@@ -37,7 +39,7 @@
  */
 
 import { Suspense, useCallback, useEffect, useId, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import { mergeFilterNodes, toFilterNodeSafely } from '@object-ui/core';
 import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
 import {
@@ -261,6 +263,18 @@ function formatDate(s: string | null | undefined, locale: string): string {
   try { return new Date(s).toLocaleString(locale); } catch { return s; }
 }
 
+/**
+ * The router path of one audit row's own record page: the console's standard
+ * record route for `sys_audit_log` under the list's app segment, where
+ * `RecordDetailView` mounts the page the platform serves for the ledger
+ * (`sys_audit_log_detail`, `plugin-audit`). That page lists every ledger row
+ * with the same `record_id`, so a `config_change` row, which carries only a
+ * digest, leads to the CRUD mirror's rows that hold the value.
+ */
+function entryPageHref(listBase: string, rowId: string): string {
+  return `${listBase}/record/${encodeURIComponent(rowId)}`;
+}
+
 function truncate(s: string | null | undefined, n = 24): string {
   if (!s) return '—';
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
@@ -478,6 +492,14 @@ export function AuditLogPage() {
   const listBase = `/apps/${encodeURIComponent(appName || 'setup')}/${AUDIT_OBJECT}`;
   const viewHref = (key: string) => `${listBase}/view/${encodeURIComponent(key)}`;
   const listHref = activePreset ? viewHref(activePreset.key) : listBase;
+  // The way back the entry page's crumb row draws (`state.from`), so an app
+  // whose navigation does not list `sys_audit_log` still leads back here.
+  const location = useLocation();
+  const pageTitle = t('console.system.auditLog.title', { defaultValue: 'Audit Log' });
+  const entryLinkState = useMemo(
+    () => ({ from: { pathname: `${location.pathname}${location.search}`, label: pageTitle } }),
+    [location.pathname, location.search, pageTitle],
+  );
 
   return (
     <div>
@@ -487,7 +509,7 @@ export function AuditLogPage() {
         one row across the page above the padded body. Below `sm` the header
         hides the subtitle and keeps the icon, title and Refresh. */}
     <ConsolePageHeader
-      title={t('console.system.auditLog.title', { defaultValue: 'Audit Log' })}
+      title={pageTitle}
       subtitle={t('console.system.auditLog.subtitle', {
         defaultValue: 'Read-only system activity and record changes. Newest first.',
       })}
@@ -740,6 +762,24 @@ export function AuditLogPage() {
               {selected?.id ? <span className="font-mono text-xs">{selected.id}</span> : null}
             </SheetDescription>
           </SheetHeader>
+
+          {selected?.id && (
+            <div className="mt-4 space-y-1.5">
+              <Button asChild variant="outline" size="sm">
+                <Link to={entryPageHref(listBase, selected.id)} state={entryLinkState}>
+                  <ExternalLink className="h-4 w-4 mr-1" />
+                  {t('console.system.auditLog.openEntryPage', { defaultValue: 'Open entry page' })}
+                </Link>
+              </Button>
+              {selected.record_id && (
+                <p className="text-xs text-muted-foreground">
+                  {t('console.system.auditLog.openEntryPageHint', {
+                    defaultValue: 'The entry page lists every change to the same record, newest first.',
+                  })}
+                </p>
+              )}
+            </div>
+          )}
 
           {selected && (
             <div className="mt-6 space-y-5">

@@ -304,6 +304,10 @@ function verifier(server: Server): AuthManager {
   // built from plugins assembled at runtime does not name it.
   const api = server.auth.api as unknown as { getJwks: () => Promise<unknown> };
   vi.spyOn(m, 'getApi').mockResolvedValue({ getJwks: async () => await api.getJwks() } as any);
+  // [objectstack-ai/cloud#3606, ruling A] The consent read goes to the running
+  // server's storage adapter, so the token's organization is matched against
+  // the consent row that server stored.
+  vi.spyOn(m, 'getAuthContext').mockImplementation(async () => await server.auth.$context);
   return m;
 }
 
