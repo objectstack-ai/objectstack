@@ -2419,6 +2419,85 @@ function refuseDishonestLookupAutofill(
   }
 }
 
+/** The field-key grammar (`FieldSchema.name`, `FieldNameKeySchema`). */
+const FIELD_KEY_GRAMMAR = /^[a-z_][a-z0-9_]*$/;
+
+/**
+ * [epic cloud#3652 ruling D3 「写进清单 renamedFrom」, under Q3
+ * 「默认拒绝，需显式映射（推荐）」] A field's `renamedFrom` lists the earlier
+ * keys of THAT field, so a package upgrade can carry the old column's data to
+ * it. Each entry must say one unambiguous thing about this object's history,
+ * which only the whole `fields` map can judge. Refused, one located issue per
+ * offending entry at `['fields', <field>, 'renamedFrom', <i>]`, naming the
+ * object, the field and the old key, when the entry:
+ *
+ *  - is the field's own key (a field is not renamed from itself);
+ *  - repeats an earlier entry of the same list;
+ *  - is a key another field of this object still declares (the old name is
+ *    still in use, so it cannot have been renamed away);
+ *  - is an old key an earlier field of this object already claims (two fields
+ *    cannot both inherit one column) — reported on the later claimant, naming
+ *    the first.
+ *
+ * Deliberately minimal (the card's list): the field-key grammar is judged by
+ * `FieldSchema` itself, and entries failing it are skipped here; whether the
+ * old column's type converts to the new field's type depends on the INSTALLED
+ * version, so the upgrade plan judges it, never this parse. Judged at parse,
+ * beside {@link refuseStageFieldWithoutKinds}, so every door — `defineStack`, a
+ * raw `.parse()`, the metadata save door — refuses it; the key is new, so no
+ * metadata at rest carries it.
+ */
+function refuseDishonestRenamedFrom(
+  ownName: unknown,
+  fields: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (fields === null || typeof fields !== 'object') return;
+  const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
+  const fieldMap = fields as Record<string, unknown>;
+  const claimedBy = new Map<string, string>();
+  const prescription =
+    '`renamedFrom` lists the keys this field had in earlier versions of the package: each once, never the '
+    + "field's own key, never a key another field of this object still declares, and never an old key another "
+    + 'field of this object also claims.';
+  for (const [fieldName, fieldDef] of Object.entries(fieldMap)) {
+    const list = (fieldDef as { renamedFrom?: unknown } | null)?.renamedFrom;
+    if (!Array.isArray(list)) continue;
+    const seen = new Set<string>();
+    list.forEach((entry: unknown, i: number) => {
+      if (typeof entry !== 'string' || !FIELD_KEY_GRAMMAR.test(entry)) return;
+      const refuse = (reason: string): void => {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['fields', fieldName, 'renamedFrom', i],
+          message:
+            `Field \`${fieldName}\` on object \`${objectName}\` declares \`renamedFrom\` entry '${entry}', `
+            + `${reason} ${prescription}`,
+        });
+      };
+      if (entry === fieldName) {
+        refuse("which is the field's own key: a field is not renamed from itself.");
+        return;
+      }
+      if (seen.has(entry)) {
+        refuse('which an earlier entry of the same list already names.');
+        return;
+      }
+      seen.add(entry);
+      if (Object.prototype.hasOwnProperty.call(fieldMap, entry)) {
+        refuse(`but object \`${objectName}\` still declares a field \`${entry}\`: that name is still in use, so no field was renamed away from it.`);
+        return;
+      }
+      const firstClaimant = claimedBy.get(entry);
+      if (firstClaimant !== undefined) {
+        refuse(`which field \`${firstClaimant}\` of the same object already claims: one old column cannot be carried to two fields.`);
+        return;
+      }
+      claimedBy.set(entry, fieldName);
+    });
+  }
+}
+
 /**
  * [#23809, maintainer ruling on the card: 「同意」] The field an object's
  * `stageField` names declares a `kind` on EVERY option — `open`, `won` or
@@ -3994,6 +4073,10 @@ const ObjectSchemaBase = strictObject(
   // lifecycle `kind` — the same door: only the object knows which field is
   // its stage.
   refuseStageFieldWithoutKinds(object.name, object.stageField, object.fields, ctx);
+  // [cloud#3652 ruling D3] Each `renamedFrom` entry names one earlier key of
+  // its field — not its own, not a live sibling's, not one another field
+  // claims, once — the same door: only the object holds the field map.
+  refuseDishonestRenamedFrom(object.name, object.fields, ctx);
   // [#22211 ruling A] A read attachment names at least one leaf, and is not a
   // field: its block names may not repeat a declared field name.
   refuseAttachedBlockConflicts(object.attachedOnRead, object.fields, ctx);
