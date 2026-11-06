@@ -15,8 +15,9 @@ import { en } from './translations/en.js';
 import { zhCN } from './translations/zh-CN.js';
 import { jaJP } from './translations/ja-JP.js';
 import { esES } from './translations/es-ES.js';
+import { zhHant } from './translations/zh-Hant.js';
 
-const LOCALES = { en, 'zh-CN': zhCN, 'ja-JP': jaJP, 'es-ES': esES } as const;
+const LOCALES = { en, 'zh-CN': zhCN, 'ja-JP': jaJP, 'es-ES': esES, 'zh-Hant': zhHant } as const;
 
 type NavItem = { id?: string; label?: string };
 

@@ -102,6 +102,39 @@ describe('gradeOperation — refused', () => {
   });
 });
 
+describe('gradeOperation — a validation operation, graded as the agent half and the platform half', () => {
+  const INVALID: DeclaredOutcome = { kind: 'refused', code: 'VALIDATION_FAILED' };
+  const REFUSED = { kind: 'refused', code: 'VALIDATION_FAILED' } as const;
+  const PROBE_OK = { answer: REFUSED, writes: 0 };
+  const failedV = (obs: OperationObservation) => gradeOperation(INVALID, obs, { validation: true }).checks.filter((c) => !c.pass).map((c) => c.check);
+
+  it('passes either way the agent half can pass, with the probe refused and nothing written by either', () => {
+    expect(failedV({ answer: REFUSED, writes: 0, withheld: false, probe: PROBE_OK })).toEqual([]);
+    expect(failedV({ answer: { kind: 'refused', code: '(no write attempted)' }, writes: 0, withheld: true, probe: PROBE_OK })).toEqual([]);
+    expect(failedV({ answer: { kind: 'pending_confirmation' }, writes: 0, withheld: true, probe: PROBE_OK })).toEqual([]);
+  });
+
+  it('fails the agent half on another answer it did not withhold, and when withholding was not observed', () => {
+    expect(failedV({ answer: { kind: 'refused', code: '(no write attempted)' }, writes: 0, withheld: false, probe: PROBE_OK })).toEqual(['agent:refused:VALIDATION_FAILED-or-withheld']);
+    expect(failedV({ answer: { kind: 'applied' }, writes: 1, withheld: false, probe: PROBE_OK })).toEqual(['agent:refused:VALIDATION_FAILED-or-withheld', 'no-write']);
+    const unread = gradeOperation(INVALID, { answer: { kind: 'refused', code: '(no write attempted)' }, writes: 0, probe: PROBE_OK }, { validation: true });
+    expect(unread.checks[0]).toEqual({ check: 'agent:refused:VALIDATION_FAILED-or-withheld', pass: false, detail: 'refused (no write attempted); withholding not observed' });
+  });
+
+  it('fails the platform half on a probe the door applied, refused with another code, wrote behind, or that never ran', () => {
+    const agent = { answer: REFUSED, writes: 0, withheld: false };
+    expect(failedV({ ...agent, probe: { answer: { kind: 'applied' }, writes: 1 } })).toEqual(['platform:refused:VALIDATION_FAILED', 'platform:no-write']);
+    expect(failedV({ ...agent, probe: { answer: { kind: 'refused', code: 'PERMISSION_DENIED' }, writes: 0 } })).toEqual(['platform:refused:VALIDATION_FAILED']);
+    expect(failedV({ ...agent, probe: { answer: REFUSED, writes: 1 } })).toEqual(['platform:no-write']);
+    expect(failedV(agent)).toEqual(['platform:refused:VALIDATION_FAILED', 'platform:no-write']);
+  });
+
+  it('without the option, the same declaration grades the agent alone, as before', () => {
+    expect(gradeOperation(INVALID, { answer: REFUSED, writes: 0 }).checks.map((c) => c.check)).toEqual(['answer:refused:VALIDATION_FAILED', 'no-write']);
+    expect(gradeOperation(INVALID, { answer: { kind: 'refused', code: '(no write attempted)' }, writes: 0, withheld: true }).pass).toBe(false);
+  });
+});
+
 describe('gradeOperation — pending_confirmation', () => {
   const PENDING: DeclaredOutcome = { kind: 'pending_confirmation' };
 

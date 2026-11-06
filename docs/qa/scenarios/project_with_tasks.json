@@ -19,7 +19,8 @@
     "records-forms.master-detail-inline-edit",
     "records-forms.roll-up-summary",
     "records-forms.select-options",
-    "ai.ask-data"
+    "ai.ask-data",
+    "access-security.row-scope"
   ],
   "category": "project",
   "run": {

@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 import { formatRefusal, loadScenarioFile, loadScenarios, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
 import { truthFigures } from '../../src/score/index.js';
-import type { AppHarness, HttpAnswer, PersonaAccount } from '../../src/runner/app.js';
+import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../src/runner/app.js';
 import { RecordingDriver, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo, type Recording } from '../../src/runner/driver.js';
 import { namespacedScenario } from '../../src/runner/namespace.js';
 import { runCard, type CardRun, type ProjectOps } from '../../src/runner/orchestrate.js';
@@ -171,6 +171,10 @@ export class FakeApp implements AppHarness {
     const out: Record<string, unknown[]> = {};
     for (const c of collections) out[c] = [...(src[c] ?? [])];
     return out;
+  }
+  /** The validation probe's door: this double validates, so it refuses every write it is sent. */
+  async callTool(): Promise<ToolAnswer> {
+    return { output: JSON.stringify({ error: { code: 'VALIDATION_FAILED', status: 400 } }), isError: true };
   }
 }
 

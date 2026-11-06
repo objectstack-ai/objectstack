@@ -170,7 +170,7 @@ One of the largest consumers of the flag;
 | 37 | `sys_record_share` reads are **not** self-scoped | Get: tenant-wide share listing without `manage_sharing` | `buildSharingMiddleware` |
 | 38 | Share-link policy `enabled` check bypassed; system callers re-enter under a system context | Get: link **creation** while the policy is off — resolution is **not** bypassed since #14033 (`publicSharing.enabled` is a standing policy held at every redemption): a link minted this way does not resolve until the block is enabled | `createLink`, `revokeLink`, `listLinks` |
 | 39 | Sharing-rule provenance stamp skipped | Lose: the row is not marked as an admin customization — seeder / `defineRule` / boot reconcilers are "the package door" | `bindRuleProvenanceStamp` |
-| 40 | Sharing-rule service write + delete paths return early | Lose: the manage-rules gate on the service surface and the declared-name guard on `sys_sharing_rule` writes (a new row or a rename taking a declared rule's name, 409) — `defineRule` makes that check itself before its own system write, and the other system writers are the platform's machinery (the ownership ceremony, migrations) | `assertCanManageRules`, `bindDeclaredRuleNameGuard` |
+| 40 | Sharing-rule service write + delete paths return early | Lose: the manage-rules gate on the service surface and the declared-name guard on `sys_sharing_rule` writes (a new row or a rename taking a declared rule's name, 409) — `defineRule` makes that check itself before its own system write, and the other system writers are the platform's machinery (the ownership ceremony, migrations); and the object-enforcement guard on the same writes (a rule whose object is not under record-sharing enforcement, 422 `SHARING_NOT_ENABLED`), which `defineRule` likewise makes for its non-system callers | `assertCanManageRules`, `bindDeclaredRuleNameGuard`, `bindRuleObjectEnforcementGuard`, `defineRule` |
 
 ### 4. Approvals, attachments, comments, knowledge
 
@@ -603,6 +603,7 @@ and CI refuses one that differs from what the tree produces.
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts#assertDeploymentAuthority` | 1 | 58 |
 | `packages/plugins/plugin-security/src/system-write-guard.ts#isUserContextWrite` | 1 | 25 |
 | `packages/plugins/plugin-sharing/src/rule-hooks.ts#bindRuleHooks` | 1 | 31 |
+| `packages/plugins/plugin-sharing/src/rule-hooks.ts#bindRuleObjectEnforcementGuard` | 1 | 40 |
 | `packages/plugins/plugin-sharing/src/share-link-service.ts#createLink` | 3 | 38 |
 | `packages/plugins/plugin-sharing/src/share-link-service.ts#listLinks` | 1 | 38 |
 | `packages/plugins/plugin-sharing/src/share-link-service.ts#revokeLink` | 1 | 38 |
@@ -610,6 +611,7 @@ and CI refuses one that differs from what the tree produces.
 | `packages/plugins/plugin-sharing/src/sharing-rule-provenance.ts#bindRuleProvenanceStamp` | 1 | 39 |
 | `packages/plugins/plugin-sharing/src/sharing-rule-service.ts#assertCanManageRules` | 1 | 40 |
 | `packages/plugins/plugin-sharing/src/sharing-rule-service.ts#bindDeclaredRuleNameGuard` | 1 | 40 |
+| `packages/plugins/plugin-sharing/src/sharing-rule-service.ts#defineRule` | 1 | 40 |
 | `packages/plugins/plugin-sharing/src/sharing-service.ts#assertCanManageShares` | 1 | 33 |
 | `packages/plugins/plugin-sharing/src/sharing-service.ts#bypassVerdict` | 1 | 32 |
 | `packages/plugins/plugin-sharing/src/sharing-service.ts#canManageShares` | 1 | 33 |

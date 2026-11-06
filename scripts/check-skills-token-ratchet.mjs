@@ -707,7 +707,10 @@ export const CEILINGS = new Map([
   // headroom, ceiling +49, pinned AT the measurement. Standing ruling (2026-10-27, tap A,
   // verbatim and untranslated): 「A:先削重复,余额按实测提高」; recognised path per ruling
   // record 6513306068.
-  ['skills/objectstack-data/rules/field-types.md', 3207],
+  // 3207 -> 3199 (#30824): RE-LOCK at the landed count. The formula row now also says
+  // a formula is no dataset or cube dimension (group key), paid by the Formula example's
+  // remaining `// see the Calculated table` pointer; 12794 bytes -> 3199 tokens, zero headroom.
+  ['skills/objectstack-data/rules/field-types.md', 3199],
   ['skills/objectstack-data/rules/indexing.md', 3241],
   ['skills/objectstack-data/rules/lifecycle.md', 1590],
   ['skills/objectstack-data/rules/naming.md', 773],
@@ -863,7 +866,12 @@ export const CEILINGS = new Map([
   // The file is 25047 bytes -> 6262 tokens, zero headroom, ceiling +41, pinned AT the
   // measurement. Standing ruling (2026-10-27, tap A, verbatim and untranslated):
   // 「A:先削重复,余额按实测提高」; recognised path per ruling record 6513306068.
-  ['skills/objectstack-ui/rules/dashboards.md', 6262],
+  // 6262 -> 6232 (#30824): RE-LOCK at the landed count. The multi-value breakdown bullet
+  // adds a `formula` as a refused dimension and `groupBy` (a dataset dimension over one is
+  // `DATASET_INVALID` at compile); paid by the `compareTo` paragraph's restated "no second
+  // widget-side vocabulary" sentence and the `DatasetSchema` source pointer that
+  // `references/_index.md` already carries; 24926 bytes -> 6232 tokens, zero headroom.
+  ['skills/objectstack-ui/rules/dashboards.md', 6232],
   // 3011 -> 3141 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +132 tokens,
   // of which the row's 2 tokens of headroom absorb 2; the CEILING moves 130.

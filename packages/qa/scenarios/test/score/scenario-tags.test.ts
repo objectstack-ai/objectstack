@@ -34,8 +34,12 @@ const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas
 
 const MEASURE = 'task_count';
 
-/** The project/tasks golden fixture, completed with every capability the table judges, parsed as `os build` parses it. */
-function richArtifact(): Bag {
+/**
+ * The project/tasks golden fixture, completed with every capability the table
+ * judges, parsed as `os build` parses it; `edit` changes the stack before the
+ * parse, so what it adds is held to the spec's shape.
+ */
+function richArtifact(edit?: (stack: Bag) => void): Bag {
   const fixture = DEFAULT_METADATA_EVAL_CORPUS.find((c) => c.id === 'project_with_tasks')!.fixture;
   const stack = structuredClone(fixture) as Bag;
   stack.objects[1].fields.blocked_by = { type: 'lookup', label: 'Blocked By', reference: 'task' };
@@ -94,6 +98,7 @@ function richArtifact(): Bag {
     { name: 'delete_task', label: 'Delete Task', objectName: 'task', type: 'script', target: 'delete_task', ai: { exposed: true, description: 'Delete one task of a project; irreversible, so ask the user first.', requiresConfirmation: true } },
   ];
   stack.requires = ['automation', 'triggers'];
+  edit?.(stack);
   const parsed = ObjectStackDefinitionSchema.safeParse(normalizeStackInput(stack));
   if (!parsed.success) {
     throw new Error(`rich fixture does not parse: ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`);
@@ -243,6 +248,57 @@ describe('capability tags — discrimination over a rich build', () => {
 
   it('has a degradation for every row of the table', () => {
     expect(Object.keys(TAG_DEGRADATIONS).sort()).toEqual([...ALL_TAGS].sort());
+  });
+});
+
+describe('row scope — a public object narrowed for the persona by a read policy on its permission set', () => {
+  // The faithful build of the first live run (card #30883, corrected in
+  // 6682060124): the object stays `public_read`, and the persona's own
+  // permission set carries a `select` policy whose `using` ANDs into its reads.
+  const ownProjects = { name: 'own_projects', object: 'project', operation: 'select', using: 'owner == current_user.id' };
+  const narrowed = () =>
+    richArtifact((stack) => {
+      stack.objects[0].sharingModel = 'public_read';
+      stack.permissions[0].rowLevelSecurity = [ownProjects];
+    });
+  const rowScope = (a: Bag, namespace?: string) =>
+    gradeCapabilityTags(readArtifactFacts(a), { ...CARD, capabilities: ['access-security.row-scope'] }, namespace === undefined ? {} : { namespace })[0]!;
+
+  it("passes when the persona's set (`<namespace>_<persona>`) carries the policy, and the spec keeps it through the parse", () => {
+    const a = narrowed();
+    expect(a.permissions[0].rowLevelSecurity).toEqual([expect.objectContaining(ownProjects)]);
+    expect(rowScope(a, 'pm')).toEqual({
+      tag: 'access-security.row-scope',
+      status: 'pass',
+      checks: [{ check: 'row-scope:project->scoped', pass: true, detail: 'sharingModel public_read; narrowed by a read policy on pm_contractor' }],
+    });
+  });
+
+  it('a private object passes with no policy at all (control: the sharing model alone still scopes)', () => {
+    expect(rowScope(richArtifact(), 'pm').status).toBe('pass');
+  });
+
+  const breaks: Record<string, (a: Bag) => void> = {
+    'no policy': (a) => { delete a.permissions[0].rowLevelSecurity; },
+    'the policy is disabled': (a) => { a.permissions[0].rowLevelSecurity[0].enabled = false; },
+    'the policy narrows writes only': (a) => { a.permissions[0].rowLevelSecurity[0].operation = 'update'; },
+    'the policy is on another object': (a) => { a.permissions[0].rowLevelSecurity[0].object = 'task'; },
+    'the policy applies only to a position the persona does not hold': (a) => { a.permissions[0].rowLevelSecurity[0].positions = ['manager']; },
+    'a sibling read policy admits every row': (a) => { a.permissions[0].rowLevelSecurity.push({ name: 'all_projects', object: '*', operation: 'all', using: 'true', enabled: true }); },
+    "the policy sits on a set that is not the persona's": (a) => { a.permissions[0].name = 'pm_manager'; },
+  };
+  for (const [name, degrade] of Object.entries(breaks)) {
+    it(`fails when ${name}`, () => {
+      const a = narrowed();
+      degrade(a);
+      const v = rowScope(a, 'pm');
+      expect(v.status).toBe('fail');
+      expect(v.checks[0]!.detail).toMatch(/^sharingModel public_read, and no read policy narrows it on pm_contractor$/);
+    });
+  }
+
+  it('reads the set by the bare persona id when no namespace is given (so `pm_contractor` is not it)', () => {
+    expect(rowScope(narrowed()).status).toBe('fail');
   });
 });
 

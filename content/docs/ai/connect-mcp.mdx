@@ -376,6 +376,13 @@ drive this MCP server. Same word, different layer.
   an action as a code-review-worthy act — that's the real security boundary.
 - An action can also declare `ai.requiresConfirmation`; destructive-looking
   actions (`confirmText`, danger variants) default to requiring it.
+- **`delete_record` needs `confirm: true` on every call.** A record delete over
+  MCP is permanent, so the tool refuses a call without it with `run_action`'s
+  refusal (`428` `ACTION_CONFIRMATION_REQUIRED`, its `details.actionName`
+  naming `delete_record`) and deletes nothing. The agent asks its human, then retries
+  with `confirm: true`; the flag asserts an approval, it does not obtain one.
+  REST `DELETE /api/v1/data/:object/:id` and `update_record` take no
+  confirmation.
 
 ## Verify the connection
 
