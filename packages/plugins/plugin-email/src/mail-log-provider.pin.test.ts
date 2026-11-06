@@ -285,8 +285,10 @@ describe('Setup → Email answers in the caller\'s language (zh-CN)', () => {
     expect(answer.message).toContain('邮件通过 SMTP (smtp.saved.test:587) 投递');
   });
 
-  it('CONTROL — a language with no copy answers in English', async () => {
+  it('CONTROL — a language off the platform locale table answers in English', async () => {
     const h = await boot({});
-    expect((await h.settings.statement('fr-FR'))?.label).toBe('No mail leaves this machine');
+    // The copy carries every platform language (`fr-FR` is French now); Swahili is not on the table.
+    expect((await h.settings.statement('fr-FR'))?.label).toBe('Aucun e-mail ne quitte cette machine');
+    expect((await h.settings.statement('sw-KE'))?.label).toBe('No mail leaves this machine');
   });
 });
