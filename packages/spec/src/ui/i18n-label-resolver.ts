@@ -31,9 +31,9 @@
  * with neither side erroring — the server-rendered column header and the
  * client-rendered one simply differ.
  *
- * The reference is objectui `packages/i18n/src/pickLocalized.ts` (read at
- * `origin/main` `d8d0d66`, blob `30fcb0a8`, last touched by objectui PR #4359 /
- * objectui#3907). Its rule, mirrored here limb for limb:
+ * The reference is `ui/packages/i18n/src/pickLocalized.ts` in this repository
+ * (the blob is pinned in `i18n-label-resolver.test.ts`, last touched by #30910).
+ * Its rule, mirrored here limb for limb:
  *
  * | # | limb | note |
  * |---|---|---|
@@ -42,6 +42,7 @@
  * | 1 | exact tag — `map[locale]` | `zh-CN` matches the key `zh-CN` |
  * | 2 | base language — `map[base]` | `zh-CN` → `zh` |
  * | 3 | first region-qualified sibling sharing the base | `zh` → `zh-CN`; **key insertion order** decides |
+ * | 2–3 | …an entry of the locale's own script first | `zh-Hant` over `{ zh-CN, zh-TW }` → `zh-TW`; see {@link scriptEntryKey} |
  * | 4 | `map.default` | the untagged entry `InlineLocaleMapSchema` admits |
  * | 5 | `map.en` | the platform's source language |
  * | 6 | first string value | insertion order again |
@@ -63,6 +64,11 @@
  *  * the **language** subtag's case does — `ZH-CN` has base `ZH`, which equals
  *    no key of that map on limbs 1, 2 or 3, so the request falls through to
  *    `default` / `en` / any-string and can land in the wrong language entirely.
+ *
+ * The one place case folds is the script preference of limbs 2–3, because it
+ * asks {@link platformLocaleTagOf}, which folds: `zh-hant` prefers a `zh-TW`
+ * key. It only reorders keys the base comparison above already admitted, so
+ * `ZH-HANT` still matches no `zh-*` key at all.
  *
  * BCP-47 says subtags are case-insensitive, so a stricter reading would fold
  * case — but parity with the reference is the ruled acceptance, and a resolver
@@ -138,6 +144,33 @@
  */
 
 import type { I18nLabel } from './i18n.zod';
+import { PLATFORM_LOCALE_TAGS, platformLocaleTagOf } from '../system/platform-locales';
+
+/**
+ * Limbs 2–3's script preference, shared limb for limb with `pickLocalized`'s
+ * `localizedEntryKey`: the key of `map` that means the same platform table
+ * tag as `tag`, or `undefined`.
+ *
+ * It answers only where the platform table splits the base language into more
+ * than one tag (`zh` into `zh-Hans` and `zh-Hant`), and reads both facts off
+ * the table: which tag a code means is {@link platformLocaleTagOf} (`zh-TW`
+ * means `zh-Hant`, `zh-CN` and bare `zh` mean `zh-Hans`). The bare base key
+ * comes first when it means that tag; otherwise the first sibling that does,
+ * in key insertion order. A base the table names once (`pt`, `en`), or a map
+ * with no entry of the locale's script, answers `undefined`, and limbs 2 and
+ * 3 then run exactly as they always did.
+ */
+function scriptEntryKey(map: Record<string, unknown>, tag: string, base: string): string | undefined {
+  const script = platformLocaleTagOf(tag);
+  if (script === undefined) return undefined;
+  const scriptBase = script.split('-')[0];
+  if (PLATFORM_LOCALE_TAGS.filter((t) => t.split('-')[0] === scriptBase).length < 2) return undefined;
+  if (readEntry(map, base) !== undefined && platformLocaleTagOf(base) === script) return base;
+  return Object.keys(map).find(
+    (key) =>
+      key.split('-')[0] === base && readEntry(map, key) !== undefined && platformLocaleTagOf(key) === script,
+  );
+}
 
 /**
  * The locale `pickLocalized` assumes when the caller has none — and the last
@@ -238,6 +271,12 @@ export function resolveI18nLabel(
   // 1 — exact tag.
   const exact = readEntry(map, tag);
   if (exact !== undefined) return exact;
+
+  // 2–3, script first — in a locale whose language the platform table splits
+  // by script, an entry of the locale's own script (`zh-Hant` over
+  // `{ zh-CN, zh-TW }` reads `zh-TW`) before any entry of the other one.
+  const sameScript = scriptEntryKey(map, tag, base);
+  if (sameScript !== undefined) return readEntry(map, sameScript);
 
   // 2 — base language (`zh-CN` → `zh`).
   const baseHit = readEntry(map, base);
