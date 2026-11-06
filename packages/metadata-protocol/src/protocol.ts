@@ -3824,7 +3824,9 @@ export class ObjectStackProtocolImplementation implements
      *         table answers `[]`.
      */
     async listServedOverrides(request: { packageId: string }): Promise<ServedOverrideEntry[]> {
+        const readEngine = () => this.engine;
         const host: ThisParameterType<typeof listServedOverrides> = {
+            get engine() { return readEngine(); },
             findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
             declinesStoredRow: (...a) => this.declinesStoredRow(...a),
             rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
@@ -3849,7 +3851,9 @@ export class ObjectStackProtocolImplementation implements
      *         table answers an empty census.
      */
     async listPackagelessOverlays(): Promise<PackagelessOverlayCensus> {
+        const readEngine = () => this.engine;
         const host: ThisParameterType<typeof listPackagelessOverlays> = {
+            get engine() { return readEngine(); },
             overlayTypes: ObjectStackProtocolImplementation.OVERLAY_ALLOWED_TYPES,
             findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
             rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
@@ -4192,7 +4196,9 @@ export class ObjectStackProtocolImplementation implements
         servedOverride?: boolean;
     }, activeRows?: readonly StoredOverlayRow[]): Promise<{ row: any; overrideOf?: string } | undefined> {
         // [#25467 cut 35] The body moved to `protocol-environment-rows.ts` (see `EnvironmentRowsHost`).
+        const readEngine = () => this.engine;
         const host: ThisParameterType<typeof findServedOverlayRow> = {
+            get engine() { return readEngine(); },
             findEnvironmentRow: (...a) => this.findEnvironmentRow(...a),
         };
         return findServedOverlayRow.call(host, args, activeRows);
@@ -6925,7 +6931,9 @@ export class ObjectStackProtocolImplementation implements
      */
     declinesStoredRow(type: string, name: unknown, row?: ServedOverrideRow): boolean {
         // [#25467 cut 10] The body moved to `protocol-lock-state.ts` (see `LockStateHost`).
+        const readEngine = () => this.engine;
         const host: ThisParameterType<typeof declinesStoredRow> = {
+            get engine() { return readEngine(); },
             isDeclaredCodeDatasource: (...a) => this.isDeclaredCodeDatasource(...a),
             isShippedFlowName: (...a) => this.isShippedFlowName(...a),
             isUnservedSealedOverlay: (...a) => this.isUnservedSealedOverlay(...a),
@@ -7204,7 +7212,9 @@ export class ObjectStackProtocolImplementation implements
         request: { type: string; name: string; packageId?: string | null },
     ): void {
         // [#25467 cut 13] The body moved to `protocol-packaged-base-refusal.ts` (see `PackagedBaseRefusalHost`).
+        const readEngine = () => this.engine;
         const host: ThisParameterType<typeof refusePackagedBaseOverride> = {
+            get engine() { return readEngine(); },
             isSealedManagedItem: (...a) => this.isSealedManagedItem(...a),
             isWritablePackage: (...a) => this.isWritablePackage(...a),
             packagedArtifactOwner: (...a) => this.packagedArtifactOwner(...a),
@@ -7248,7 +7258,9 @@ export class ObjectStackProtocolImplementation implements
      * with the closure a pair not yet ensured will have (`writtenScope`).
      */
     private overrideWriteVerdict(request: OverrideWriteSubject, writtenScope?: WrittenPackageScope): OverrideWriteVerdict {
+        const readEngine = () => this.engine;
         const host: ThisParameterType<typeof overrideWriteVerdict> = {
+            get engine() { return readEngine(); },
             isWritablePackage: (...a) => this.isWritablePackage(...a),
             resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
             shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),

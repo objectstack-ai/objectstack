@@ -43,8 +43,11 @@ import {
     isServedOverrideRowOf,
     resetEnvWritableMetadataTypes,
 } from '@objectstack/metadata-protocol';
-import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
+import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, installedManifestsOf } from '@objectstack/metadata-core';
 import { ObjectQL } from './engine.js';
+
+/** Nothing installed: the pair lookup reads no manifest while `appOf` is the identity. */
+const NOTHING_INSTALLED = installedManifestsOf(undefined);
 
 const BASE = 'com.example.showcase';
 const PAIR = 'com.example.showcase.custom';
@@ -308,7 +311,7 @@ describe('[#28409] the five reads of a name X ships serve X\'s declared `.custom
         await install(protocol, PAIR);
         await saveInto(protocol, PAIR, OVERRIDE_COLUMNS, { overrides: { ...DECLARATION } });
         expect(rowsOf(VIEW).map((r) => [r.package_id, r.state])).toEqual([[PAIR, 'active']]);
-        expect(isServedOverrideRowOf(rowsOf(VIEW)[0] as any, BASE)).toBe(true);
+        expect(isServedOverrideRowOf(rowsOf(VIEW)[0] as any, BASE, NOTHING_INSTALLED)).toBe(true);
 
         const packageless = await read(protocol);
         expect(columnsOf(packageless)).toEqual(OVERRIDE_COLUMNS);

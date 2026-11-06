@@ -3,6 +3,7 @@
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
 import type { IClusterService, IJobService, IPubSub } from '@objectstack/spec/contracts';
+import { installedManifestsOf, type InstalledPackageSource } from '@objectstack/metadata-core';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 import type {
     Connector,
@@ -591,6 +592,22 @@ export function nonHostDeclaringPackageOf(
  * `start()` reconcile keeps every stored entry, so none waits for a pass that
  * never comes.
  */
+/**
+ * The package registry ObjectQL serves, read where it is used, or `undefined`
+ * when no ObjectQL service is registered: the installed manifests the
+ * customization pair lookup reads (`installedManifestsOf`). Without one, no
+ * package is installed, and every package is its own App.
+ */
+function objectqlRegistryOf(ctx: PluginContext): InstalledPackageSource | undefined {
+    try {
+        return ctx.getService<{ registry?: InstalledPackageSource }>('objectql')?.registry;
+    } catch (error) {
+        // `getService` refuses a service no plugin registered: no registry.
+        if (isServiceNotRegisteredError(error)) return undefined;
+        throw error;
+    }
+}
+
 function kernelDispatchesBootPhaseHooks(ctx: PluginContext): boolean {
     let kernel: unknown;
     try {
@@ -5224,6 +5241,7 @@ export class AutomationServicePlugin implements Plugin {
             items,
             ctx.logger,
             engine ? (name) => engine.packagedFlowOwner(name) : undefined,
+            installedManifestsOf(objectqlRegistryOf(ctx)),
         );
     }
 

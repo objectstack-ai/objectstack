@@ -58,8 +58,13 @@ const TENANT_ADMIN = { userId: 'u_tenant', tenantId: 'org_a', systemPermissions:
 /** The platform operator rung. */
 const OPERATOR = { userId: 'u_operator', systemPermissions: ['manage_metadata'], posture: 'PLATFORM_ADMIN' };
 
-/** The base: an installed app the customer cannot author into (a platform scope). */
-const CRM = { id: 'com.acme.crm', name: 'CRM', version: '3.4.1', type: 'app', namespace: 'crm', scope: 'system' };
+/**
+ * The base: an installed app the customer cannot author into — read-only
+ * because the runtime holds it as code, the way an installed app's packages
+ * are held. Not a `system` scope: that is the kernel's, which has no pair in
+ * this version (ruling record 6691217245).
+ */
+const CRM = { id: 'com.acme.crm', name: 'CRM', version: '3.4.1', type: 'app', namespace: 'crm' };
 const PAIR_ID = 'com.acme.crm.custom';
 const ENSURE_PATH = `POST /api/v1/packages/${CRM.id}/ensure-customization`;
 
@@ -126,9 +131,10 @@ function register(d: Door, manifest: Record<string, unknown>, source: 'marketpla
     d.registry.installPackage(manifest as any, source);
 }
 
-/** The base installed as production holds it: an installed app of a platform scope. */
+/** The base installed as production holds it: an installed app, held as code. */
 function withBase(d: Door, base: Record<string, unknown> = CRM): Door {
-    register(d, base);
+    register(d, base, 'code');
+    d.engine.manifests.set(base.id as string, base);
     return d;
 }
 
@@ -239,6 +245,38 @@ describe(`${ENSURE_PATH}: each refusal is worded and leaves nothing`, () => {
         expectRefusal(r, 409, 'RESOURCE_CONFLICT', `Package '${own.id}' is writable: customize it directly`);
     });
 
+    // [ruling record 6691217245] The kernel — the packages of scope `system`
+    // and `cloud` — ships with the runtime and is installed whole: no kernel
+    // object is customizable in this version, so the door ensures no pair for
+    // one. A narrowing: before it, this call created `<kernel id>.custom`.
+    for (const scope of ['system', 'cloud'] as const) {
+        it(`a kernel base (scope '${scope}'): 409, not customizable in this version, nothing created`, async () => {
+            const d = door();
+            const kernel = { id: 'com.objectstack.plugin-auth', name: 'Auth', version: '18.3.0', type: 'plugin', namespace: 'sys', scope };
+            register(d, kernel, 'code');
+            const r = await leavesNothing(d, () => ensure(d, kernel.id));
+            expectRefusal(r, 409, 'RESOURCE_CONFLICT',
+                `Package '${kernel.id}' is a kernel package (scope '${scope}')`,
+                'kernel objects are not customizable in this version',
+                `'${kernel.id}.custom' is not ensured`);
+            expect(d.registry.getPackage(`${kernel.id}.custom`)).toBeUndefined();
+        });
+    }
+
+    it('a kernel pair an earlier version created stays installed: only the ensure call is refused', async () => {
+        const d = door();
+        const kernel = { id: 'com.objectstack.plugin-auth', name: 'Auth', version: '18.3.0', type: 'plugin', namespace: 'sys', scope: 'system' };
+        register(d, kernel, 'code');
+        // The pair today's door would have created for it, as it would have written it.
+        const legacy = { id: `${kernel.id}.custom`, name: 'Auth (custom)', version: '0.1.0', type: 'module', namespace: 'sys_custom', dependencies: { [kernel.id]: '^18' } };
+        expect((await install(d, legacy)).response.status).toBe(201);
+        const before = structuredClone(d.registry.getPackage(legacy.id));
+        const r = await leavesNothing(d, () => ensure(d, kernel.id));
+        expectRefusal(r, 409, 'RESOURCE_CONFLICT', 'A pair an earlier version created stays installed');
+        expect(d.registry.getPackage(legacy.id)).toEqual(before);
+        expect((await read(d, legacy.id)).response.status).toBe(200);
+    });
+
     it('the base is itself a pair: 400, a pair is never paired again', async () => {
         const d = withBase(door());
         expect((await ensure(d, CRM.id)).response.status).toBe(201);
@@ -248,13 +286,13 @@ describe(`${ENSURE_PATH}: each refusal is worded and leaves nothing`, () => {
     });
 
     it('the base declares no namespace: 409', async () => {
-        const d = withBase(door(), { id: 'com.acme.bare', name: 'Bare', version: '1.0.0', type: 'app', scope: 'system' });
+        const d = withBase(door(), { id: 'com.acme.bare', name: 'Bare', version: '1.0.0', type: 'app' });
         const r = await leavesNothing(d, () => ensure(d, 'com.acme.bare'));
         expectRefusal(r, 409, 'RESOURCE_CONFLICT', "package 'com.acme.bare' declares no namespace");
     });
 
     it('the composed namespace fails the manifest grammar: 409, never truncated', async () => {
-        const d = withBase(door(), { id: 'com.acme.long', name: 'Long', version: '1.0.0', type: 'app', namespace: 'abcdefghijklmn', scope: 'system' });
+        const d = withBase(door(), { id: 'com.acme.long', name: 'Long', version: '1.0.0', type: 'app', namespace: 'abcdefghijklmn' });
         const r = await leavesNothing(d, () => ensure(d, 'com.acme.long'));
         expectRefusal(r, 409, 'RESOURCE_CONFLICT', "'abcdefghijklmn_custom' exceeds the 20 characters", 'none is truncated or hashed');
     });

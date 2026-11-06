@@ -58,6 +58,7 @@ import { rowMatchesOverlayWhere } from './protocol-overlay-merge.js';
 import { boundPackageOf } from './protocol-package-bindings.js';
 import type { RowlessExpandedView } from './protocol-stored-overlay-types.js';
 import { type ServedOverrideRow, isServedOverrideRowOf } from './served-override.js';
+import { installedManifestsOfEngine } from './installed-manifests.js';
 import { packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
 
 /** The body of `ObjectStackProtocolImplementation#packagelessLayeredReadRefusal`; the method's docblock there is its contract. */
@@ -399,18 +400,19 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         }
         const memberWhere = overlayMemberWhere(request.type, member);
         const boundTo = (row: StoredOverlayRow): string | undefined => boundPackageOf(row.package_id);
+        const installed = installedManifestsOfEngine(host.engine);
         const orphan = rows
             .filter((row) => rowMatchesOverlayWhere(row, memberWhere))
             .filter((row) => {
                 const owner = boundTo(row);
                 if (owner === undefined || owner === base) return false;
-                if (isServedOverrideRowOf(row, base)) return false;
-                const pair = pairOf(base);
+                if (isServedOverrideRowOf(row, base, installed)) return false;
+                const pair = pairOf(base, installed);
                 if (pair.ok && pair.value === owner) return true;
                 return host.resolveWritePackageScope(owner)?.dependencies.includes(base) === true;
             })
             .sort((a, b) => {
-                const pair = pairOf(base);
+                const pair = pairOf(base, installed);
                 const rank = (row: StoredOverlayRow) => (pair.ok && boundTo(row) === pair.value ? 0 : 1);
                 return rank(a) - rank(b) || String(boundTo(a)).localeCompare(String(boundTo(b)));
             })[0];

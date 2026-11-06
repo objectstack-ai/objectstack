@@ -48,6 +48,7 @@ import {
 import { storedEntryRow } from './protocol-stored-overlay-types.js';
 import { viewIdentityPatch } from './protocol-view-normalization.js';
 import { isServedOverrideRowOf } from './served-override.js';
+import { installedManifestsOfEngine } from './installed-manifests.js';
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItems`; the method's docblock there is its contract. */
 export async function getMetaItems(host: Pick<ProtocolHost, 'readFlattenedMetaItems'>, request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean }) {
@@ -82,6 +83,9 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
         layer: 'effective' | 'per-package' = 'effective',) {
     const { packageId } = request;
     const servedOverride = layer === 'effective';
+    // The registry's installed manifests: a package's declared override is
+    // its App's pair's (`pairOf`, `isServedOverrideRowOf`).
+    const installed = installedManifestsOfEngine(host.engine);
     // [#29871] The per-package layer is each package's own address, and a
     // disable empties none: a disabled package's items stay stored and come
     // back on enable. So this layer keeps them (the package export reads it,
@@ -193,7 +197,7 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
         // come from the package-agnostic read too. They stand in like the
         // package-less rows: a pair's item of a name the package does not
         // ship is the pair's own, and never listed in the package's list.
-        const pairOfScope = servedOverride && packageId ? pairOf(packageId) : undefined;
+        const pairOfScope = servedOverride && packageId ? pairOf(packageId, installed) : undefined;
         const overrideRows = pairOfScope?.ok
             ? lockRows.filter((row) => row?.package_id === pairOfScope.value)
             : [];
@@ -267,7 +271,7 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
                 return host.foldObjectExtendersFromRegistry(
                     request.type, (data as { name?: unknown } | null)?.name, data, onlyExtensionsOf,
                 );
-            }, unseated, { servedOverride });
+            }, unseated, { servedOverride, installed });
 
             // [#13407] Expand any aggregated `defineView` container this
             // READ just merged in, INLINE into this response's own `items`
@@ -356,7 +360,7 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
                         // override before it asks any expansion.
                         if (servedOverride && pkg !== undefined) {
                             const overridden = [...records, ...overrideRows]
-                                .filter((row) => typeof row?.name === 'string' && isServedOverrideRowOf(row, pkg))
+                                .filter((row) => typeof row?.name === 'string' && isServedOverrideRowOf(row, pkg, installed))
                                 .map((row) => row.name as string);
                             if (overridden.length > 0) names = new Set([...names, ...overridden]);
                         }
@@ -527,7 +531,7 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
             // [#28409] …and the pair's drafts, as stand-ins, as its active
             // arm previews the pair's rows: the pending edit of the
             // package's declared override previews over its slot.
-            const pairOfDraftScope = servedOverride && packageId ? pairOf(packageId) : undefined;
+            const pairOfDraftScope = servedOverride && packageId ? pairOf(packageId, installed) : undefined;
             const overrideDraftRecords = pairOfDraftScope?.ok
                 ? packageAgnosticDrafts.filter((record) => record?.package_id === pairOfDraftScope.value)
                 : [];
@@ -562,7 +566,7 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
                 items = mergePackageAwareOverlay(request.type, items, drafts, (data) => {
                     if (data && typeof data === 'object') (data as any)._draft = true;
                     return data;
-                }, unseated, { servedOverride });
+                }, unseated, { servedOverride, installed });
             }
         } catch (error) {
             // [#5532] Same rule as the active-overlay read above. Serving
@@ -671,7 +675,7 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
     // address serves beside the package's members
     // ({@link baseServesBundleMember}), as the env-wide list below does.
     if (unseated && servedOverride && packageId && ITEM_KEY_DISCRIMINATORS[request.type] !== undefined) {
-        const pairOfList = pairOf(packageId);
+        const pairOfList = pairOf(packageId, installed);
         const typeShipping = host.shippingPackagesOf(request.type);
         for (const it of items as any[]) {
             if (!(it && typeof it === 'object' && unseated.has(it))) continue;
@@ -887,7 +891,7 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
         // the lookup falls back to when the item's package ships no
         // artifact of the name.
         if (layer === 'per-package') {
-            a = perPackageLayerEnvelope(request.type, it, itemPackageId, a, lockRowsByName.get(String(itemName)) ?? []);
+            a = perPackageLayerEnvelope(request.type, it, itemPackageId, a, lockRowsByName.get(String(itemName)) ?? [], installed);
         }
         let itemLock: ItemLock | undefined;
         if (typeof itemName === 'string' && (it as any)?._draft !== true) {

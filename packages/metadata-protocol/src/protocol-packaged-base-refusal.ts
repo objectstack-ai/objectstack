@@ -58,7 +58,8 @@ import {
 } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec';
-import { ITEM_KEY_DISCRIMINATORS, isPairOf, itemDiscriminator, pairOf } from '@objectstack/metadata-core';
+import { ITEM_KEY_DISCRIMINATORS, isPairOf, itemDiscriminator, pairOf, type InstalledManifestLookup } from '@objectstack/metadata-core';
+import { installedManifestsOfEngine } from './installed-manifests.js';
 
 /**
  * The `ObjectStackProtocolImplementation` members the functions below read —
@@ -68,6 +69,7 @@ import { ITEM_KEY_DISCRIMINATORS, isPairOf, itemDiscriminator, pairOf } from '@o
  * here too, and naming a member the class does not have is a compile error.
  */
 export interface PackagedBaseRefusalHost {
+    readonly engine: ObjectStackProtocolImplementation['engine'];
     isSealedManagedItem: ObjectStackProtocolImplementation['isSealedManagedItem'];
     isWritablePackage: ObjectStackProtocolImplementation['isWritablePackage'];
     packagedBaseRefusal: ObjectStackProtocolImplementation['packagedBaseRefusal'];
@@ -78,7 +80,7 @@ export interface PackagedBaseRefusalHost {
 
 /** The body of `ObjectStackProtocolImplementation#refusePackagedBaseOverride`; the method's docblock there is its contract. */
 export function refusePackagedBaseOverride(
-    this: Pick<PackagedBaseRefusalHost, 'isSealedManagedItem' | 'isWritablePackage' | 'packagedArtifactOwner'>,
+    this: Pick<PackagedBaseRefusalHost, 'engine' | 'isSealedManagedItem' | 'isWritablePackage' | 'packagedArtifactOwner'>,
     request: { type: string; name: string; packageId?: string | null },
 ): void {
     if (this.isSealedManagedItem(request.type, request.name)) {
@@ -163,11 +165,12 @@ export function refusePackagedBaseOverride(
         // [#28412] A Regime C type the declared override opens (`flow`) names
         // the declaration in place of its clone path, keeping its switch.
         const owner = this.packagedArtifactOwner(request);
-        const declare = sealedDeclareOrRenameClause(request.type, owner, request.packageId);
+        const installed = installedManifestsOfEngine(this.engine);
+        const declare = sealedDeclareOrRenameClause(request.type, owner, request.packageId, installed);
         const err = new Error(
             (declare === undefined ? undefined : regimeCDeclaredSaveSentence(request.type, request.name, declare))
             ?? managedItemSealedSentence(request.type, request.name, 'save')
-                + sealedDeclareOrRenameTail(request.type, owner, request.packageId),
+                + sealedDeclareOrRenameTail(request.type, owner, request.packageId, installed),
         );
         (err as any).code = 'NOT_OVERRIDABLE';
         (err as any).status = 403;
@@ -189,10 +192,15 @@ export function refusePackagedBaseOverride(
  * when the shipping package has no pair id. [#28412] `flow` is open: its
  * sealed sentence names the declaration too, and so, [#30065], does `action`'s.
  */
-function sealedDeclareOrRenameTail(type: string, basePackageId: unknown, writerPackageId: unknown): string {
+function sealedDeclareOrRenameTail(
+    type: string,
+    basePackageId: unknown,
+    writerPackageId: unknown,
+    installed: InstalledManifestLookup,
+): string {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
     if (!isOpenOverrideType(singular) || typeof basePackageId !== 'string') return '';
-    const pair = pairOf(basePackageId);
+    const pair = pairOf(basePackageId, installed);
     if (!pair.ok) return '';
     const writer = typeof writerPackageId === 'string' && writerPackageId.length > 0 ? writerPackageId : undefined;
     if (writer !== undefined && writer !== pair.value) {
@@ -209,10 +217,15 @@ function sealedDeclareOrRenameTail(type: string, basePackageId: unknown, writerP
  * may declare from the pair or rename; any other named package may only
  * rename. `undefined` exactly where the tail is empty.
  */
-function sealedDeclareOrRenameClause(type: string, basePackageId: unknown, writerPackageId: unknown): string | undefined {
+function sealedDeclareOrRenameClause(
+    type: string,
+    basePackageId: unknown,
+    writerPackageId: unknown,
+    installed: InstalledManifestLookup,
+): string | undefined {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
     if (!isOpenOverrideType(singular) || typeof basePackageId !== 'string') return undefined;
-    const pair = pairOf(basePackageId);
+    const pair = pairOf(basePackageId, installed);
     if (!pair.ok) return undefined;
     const writer = typeof writerPackageId === 'string' && writerPackageId.length > 0 ? writerPackageId : undefined;
     if (writer !== undefined && writer !== pair.value) {
@@ -414,7 +427,7 @@ export function overlayPairFixOf(
     host: { readonly engine: ObjectStackProtocolImplementation['engine'] },
     base: string,
 ): OverlayPairFix | null {
-    const pairId = pairOf(base);
+    const pairId = pairOf(base, installedManifestsOfEngine(host.engine));
     if (!pairId.ok) return null; // no pair to name (the census's `no_pair`)
     const pair = pairId.value;
     const registry = (host.engine as { registry?: PairRegistry } | undefined)?.registry;
@@ -674,12 +687,17 @@ function isOpenOverrideType(singular: string): boolean {
  * verdict. [#30065] `action` is open, so a pair's removal of its declared
  * action override is admitted and the base's action is served again.
  */
-export function isPairRowRemoval(type: string, basePackageId: unknown, packageId: unknown): boolean {
+export function isPairRowRemoval(
+    type: string,
+    basePackageId: unknown,
+    packageId: unknown,
+    installed: InstalledManifestLookup,
+): boolean {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
     if (!isOpenOverrideType(singular)) return false;
     if (typeof basePackageId !== 'string') return false;
     if (typeof packageId !== 'string' || packageId.length === 0) return false;
-    const pair = pairOf(basePackageId);
+    const pair = pairOf(basePackageId, installed);
     return pair.ok && pair.value === packageId;
 }
 
@@ -825,6 +843,13 @@ export interface OverrideWriteClosure {
      * answering none of that name, the refusal reads as before.
      */
     readonly baseItemsOf?: (basePackageId: string) => readonly unknown[];
+    /**
+     * The installed manifests the door reads (`installedManifestsOf` over its
+     * registry, or over the manifests an offline door holds): who may declare
+     * an override of a base is the pair of the App that carries the base
+     * (`pairOf`, `isPairOf` in `@objectstack/metadata-core`).
+     */
+    readonly installed: InstalledManifestLookup;
 }
 
 /** [#28834] The item door an `object_extension` is saved through (#28574), as the refusals name it. */
@@ -1071,8 +1096,8 @@ export function judgeOverrideWrite(
                 + 'override is refused (ADR-0146 D9). Remove `overrides` and rename the item.');
         }
         const base = declaration.base;
-        const pair = base === undefined ? undefined : pairOf(base);
-        if (base === undefined || pair === undefined || !pair.ok || !isPairOf(packageId, base)) {
+        const pair = base === undefined ? undefined : pairOf(base, closure.installed);
+        if (base === undefined || pair === undefined || !pair.ok || !isPairOf(packageId, base, closure.installed)) {
             const who = packageId === undefined ? 'a row bound to no package' : `package '${packageId}'`;
             const only = pair?.ok
                 ? `only '${pair.value}' may declare an override of '${base}'`
@@ -1211,7 +1236,7 @@ export function overrideWriteRefusalError(
  * write passes none.
  */
 export function overrideWriteVerdict(
-    this: Pick<PackagedBaseRefusalHost, 'isWritablePackage' | 'resolveWritePackageScope' | 'shippedArtifactsOf'>,
+    this: Pick<PackagedBaseRefusalHost, 'engine' | 'isWritablePackage' | 'resolveWritePackageScope' | 'shippedArtifactsOf'>,
     request: OverrideWriteSubject,
     writtenScope?: WrittenPackageScope,
 ): OverrideWriteVerdict {
@@ -1262,7 +1287,9 @@ export function overrideWriteVerdict(
     const baseItemsOf = (basePackageId: string): unknown[] => this.shippedArtifactsOf(request.type, request.name, undefined, member)
         .filter((a) => overrideWriteMemberOf(request.type, a) === member
             && (a as { _packageId?: unknown } | null | undefined)?._packageId === basePackageId);
-    return judgeOverrideWrite(request, { dependencies, shippers, baseItemOf, baseItemsOf });
+    return judgeOverrideWrite(request, {
+        dependencies, shippers, baseItemOf, baseItemsOf, installed: installedManifestsOfEngine(this.engine),
+    });
 }
 
 

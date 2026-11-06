@@ -39,7 +39,8 @@
  * keeps calling the class method, the REST and runtime published doors among
  * them.
  *
- * The bodies read no field, so the host carries no getter.
+ * One body reads a field, `engine` (the registry the customization pair
+ * lookup reads, `installedManifestsOfEngine`), handed over as a getter.
  *
  * The one module-level declaration of `protocol.ts` the bodies read,
  * `canonicalMetaType`, stays there, where code that did not move reads it too,
@@ -55,6 +56,7 @@ import { canonicalMetaType } from './protocol.js';
 import type { ItemLock } from './item-lock.js';
 import { isOriginGatedType } from './packaged-base-regime.js';
 import { isServedOverrideRowOf, type ServedOverrideRow } from './served-override.js';
+import { installedManifestsOfEngine } from './installed-manifests.js';
 import { servesSealedOverrideRow } from './protocol-package-bindings.js';
 import { isCodeArtifactBody } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
@@ -74,6 +76,7 @@ import type { resolveLockState } from '@objectstack/spec/kernel';
  * here too, and naming a member the class does not have is a compile error.
  */
 export interface LockStateHost {
+    readonly engine: ObjectStackProtocolImplementation['engine'];
     declinesStoredRow: ObjectStackProtocolImplementation['declinesStoredRow'];
     isDeclaredCodeDatasource: ObjectStackProtocolImplementation['isDeclaredCodeDatasource'];
     isSealedManagedItem: ObjectStackProtocolImplementation['isSealedManagedItem'];
@@ -143,14 +146,15 @@ export function isStoredFlowEntryOfShippedName(
 
 /** The body of `ObjectStackProtocolImplementation#declinesStoredRow`; the method's docblock there is its contract. */
 export function declinesStoredRow(
-    this: Pick<LockStateHost, 'isDeclaredCodeDatasource' | 'isShippedFlowName' | 'isUnservedSealedOverlay' | 'packagedArtifactOwner'>,
+    this: Pick<LockStateHost, 'engine' | 'isDeclaredCodeDatasource' | 'isShippedFlowName' | 'isUnservedSealedOverlay' | 'packagedArtifactOwner'>,
     type: string, name: unknown, row?: ServedOverrideRow): boolean {
+    const installed = installedManifestsOfEngine(this.engine);
     if (this.isShippedFlowName(type, name)) {
         // [#28412, ADR-0146 D9 item 1] …except the one row that IS the
         // packaged flow now: the shipping package's declared override, judged
         // on the row's own `package_id` and body by the one served-override
         // predicate. Every other stored row of the name stays declined.
-        return !isServedOverrideRowOf(row, this.packagedArtifactOwner({ type: 'flow', name: name as string }));
+        return !isServedOverrideRowOf(row, this.packagedArtifactOwner({ type: 'flow', name: name as string }), installed);
     }
     if (typeof name !== 'string' || name === '') return false;
     if (this.isDeclaredCodeDatasource(type, name)) return true;
@@ -165,7 +169,7 @@ export function declinesStoredRow(
     // row, so the layered read's `effective` and a by-name read answered by
     // the metadata service see it as the registry's readers do.
     return !((servesSealedOverrideRow(type) || canonicalMetaType(type) === 'action')
-        && isServedOverrideRowOf(row, this.packagedArtifactOwner({ type, name })));
+        && isServedOverrideRowOf(row, this.packagedArtifactOwner({ type, name }), installed));
 }
 
 /** The body of `ObjectStackProtocolImplementation#isUnservedSealedOverlay`; the method's docblock there is its contract. */
