@@ -220,6 +220,34 @@ import { RealtimeAPI } from './realtime-api';
  */
 export type ApiRouteType = keyof ApiRoutes;
 
+/**
+ * [#30205] `security.assignedWork.count`'s answer: per object and user field,
+ * how many records hold the user, as the caller can read them.
+ */
+export interface UserAssignedWorkSummary {
+  userId: string;
+  objects: Array<{ object: string; field: string; count: number; transferable: boolean }>;
+  total: number;
+  truncated: boolean;
+  unreadable: string[];
+}
+
+/** [#30205] `security.assignedWork.transfer`'s answer: what moved, what failed, what remains. */
+export interface UserWorkTransferReport {
+  fromUserId: string;
+  toUserId: string;
+  objects: Array<{
+    object: string;
+    field: string;
+    updated: number;
+    failed: number;
+    failures: Array<{ id: string; code: string; message: string }>;
+  }>;
+  updated: number;
+  failed: number;
+  remaining: number;
+}
+
 export interface ClientConfig {
   baseUrl: string;
   token?: string;
@@ -1911,12 +1939,17 @@ export class ObjectStackClient {
     /**
      * Get all items of a specific metadata type
      * @param type - Metadata type name (e.g., 'object', 'plugin')
-     * @param options - Optional filters (e.g., packageId to scope by package)
+     * @param options - Optional filters: `packageId` scopes the list to one
+     *   package; `names` narrows it to the items of those names, in ONE request
+     *   (sent as `?names=a,b,c`). A name that matches no item is simply absent
+     *   from the answer. An empty `names` array is sent as an empty filter,
+     *   which the server refuses with `400`; leave `names` out to list every item.
      */
-    getItems: async (type: string, options?: { packageId?: string }): Promise<GetMetaItemsResponse> => {
+    getItems: async (type: string, options?: { packageId?: string; names?: readonly string[] }): Promise<GetMetaItemsResponse> => {
         const route = this.getRoute('metadata');
         const params = new URLSearchParams();
         if (options?.packageId) params.set('package', options.packageId);
+        if (options?.names !== undefined) params.set('names', options.names.join(','));
         const qs = params.toString();
         const url = `${this.baseUrl}${route}/${type}${qs ? `?${qs}` : ''}`;
         const res = await this.fetch(url);
@@ -2173,6 +2206,9 @@ export class ObjectStackClient {
      * which is not a dependency of this package, and a second declaration in
      * spec would drift against the CLI that renders the same report. Its two
      * ledger rows carry the same note. ⛔ Do not re-declare it here.
+     * `migrateRecordCurrencyCodes`, added after the ruling, stays unbound for
+     * the same reason (its report type lives in `@objectstack/objectql`) and
+     * answers `unknown`, which the caller narrows.
      */
 
     /**
@@ -2240,6 +2276,50 @@ export class ObjectStackClient {
             }),
         });
         return this.unwrapResponse<any>(res);
+    },
+
+    /**
+     * ADR-0144: write a currency code into the rows of a `record`-mode amount
+     * that hold an amount beside a blank code — the rows stored before the
+     * field was switched to `currencyMode: 'record'`. The server-side form of
+     * `os migrate record-currency-codes`, for an organization admin with no
+     * shell on the deployment's database.
+     *
+     * **Your current organization only.** The server fills the rows of the
+     * caller's current organization and no other; there is no
+     * environment-wide form and no organization parameter (each organization
+     * has its own home currency). `code` is the one you give, never derived.
+     *
+     * **Preview by default.** Without `apply: true` it reports what it would
+     * write and writes nothing; the report is the one the CLI's `--json`
+     * prints (`@objectstack/objectql`'s `RecordCurrencyBackfillReport`:
+     * `scannedRecords` / `codeless` / `written` / the two skip counts,
+     * `sampleRecordIds`, `applied`, `truncated`, `failures`, `organizations`).
+     * `truncated: true` means the walk stopped at its row cap and some rows
+     * were not examined.
+     *
+     * Requires `setup.write` in the current organization (403 otherwise).
+     *
+     * Unbound for the reason `migrateStored` above is (ruling 2C): the
+     * report's named type lives in `@objectstack/objectql`, which this
+     * package does not depend on. ⛔ Do not re-declare it here. Answered as
+     * `unknown`, not `any`: a new `any` return is refused by
+     * `check:exported-any-returns` (`exported-any-returns.json` is
+     * shrink-only), and `unknown` makes the caller narrow, as `getPublished`
+     * does under ruling 1C.
+     */
+    migrateRecordCurrencyCodes: async (opts: { object: string; field: string; code: string; apply?: boolean }) => {
+        const route = this.getRoute('metadata');
+        const res = await this.fetch(`${this.baseUrl}${route}/_migrate-record-currency-codes`, {
+            method: 'POST',
+            body: JSON.stringify({
+                object: opts.object,
+                field: opts.field,
+                code: opts.code,
+                ...(opts.apply === true ? { apply: true } : {}),
+            }),
+        });
+        return this.unwrapResponse<unknown>(res);
     },
 
     /**
@@ -6465,6 +6545,45 @@ export class ObjectStackClient {
               return this.unwrapResponse(res);
           },
       },
+
+      /**
+       * [#30205] A user's open work — what an administrator needs when they ban
+       * someone. Both calls run as the CALLER: the counts are what the caller
+       * can read, and each moved record is an ordinary update under the
+       * caller's permissions (sharing, validation and hooks apply). Neither
+       * touches the ban, which stays `POST /api/v1/auth/admin/ban-user`.
+       */
+      assignedWork: {
+          /**
+           * Per object and user field (the owner field and every app user
+           * field), how many records hold `userId`. Objects the caller cannot
+           * read are named in `unreadable`; `truncated` says more fields exist
+           * than were counted.
+           */
+          count: async (userId: string): Promise<UserAssignedWorkSummary> => {
+              const res = await this.fetch(
+                  `${this.baseUrl}/api/v1/security/users/${encodeURIComponent(userId)}/assigned-work`,
+              );
+              return this.unwrapResponse<UserAssignedWorkSummary>(res);
+          },
+
+          /**
+           * Hand up to 500 of `userId`'s records to the active user `toUserId`
+           * (optionally only on `objects`), and answer what moved, what failed
+           * and how many remain; call again until `remaining` is 0. A banned or
+           * unknown `toUserId` is refused before anything moves.
+           */
+          transfer: async (
+              userId: string,
+              request: { toUserId: string; objects?: string[] },
+          ): Promise<UserWorkTransferReport> => {
+              const res = await this.fetch(
+                  `${this.baseUrl}/api/v1/security/users/${encodeURIComponent(userId)}/assigned-work/transfer`,
+                  { method: 'POST', body: JSON.stringify(request) },
+              );
+              return this.unwrapResponse<UserWorkTransferReport>(res);
+          },
+      },
   };
 
   /**
@@ -8127,9 +8246,11 @@ export class ScopedEnvironmentClient {
       const res = await this.parent._fetch(this.metaUrl(''));
       return this.parent._unwrap<GetMetaTypesResponse>(res);
     },
-    getItems: async (type: string, options?: { packageId?: string }): Promise<GetMetaItemsResponse> => {
+    /** The unscoped surface's `getItems`, `names` included (one `?names=a,b,c` request). */
+    getItems: async (type: string, options?: { packageId?: string; names?: readonly string[] }): Promise<GetMetaItemsResponse> => {
       const params = new URLSearchParams();
       if (options?.packageId) params.set('package', options.packageId);
+      if (options?.names !== undefined) params.set('names', options.names.join(','));
       const qs = params.toString();
       const res = await this.parent._fetch(this.metaUrl(`/${type}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemsResponse>(res);

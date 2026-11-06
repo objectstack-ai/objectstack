@@ -64,6 +64,7 @@ import {
 } from '@objectstack/core';
 import { SETTINGS_SECRET_MASK } from './settings-secret-redaction.js';
 import { USER_OBJECT, assertUserReferenceResolves, registeredLabel } from './actor-reference.js';
+import { settingsActionCopy } from './settings-action-copy.js';
 import {
   firstRejectedDomainMember,
   knownValueDomain,
@@ -901,6 +902,13 @@ export class SettingsService {
   private readonly optionSources = new Map<string, Map<string, SettingsOptionSource>>();
   /** Option-source failures already said, `namespace.key:cause` — see {@link optionSourceAnswer}. */
   private readonly reportedOptionSourceFaults = new Set<string>();
+  /**
+   * Whether a sourced key's `OS_*` verdict is held until the boot seals the
+   * sources — see {@link holdOptionSourceVerdicts}.
+   */
+  private optionSourceVerdictsHeld = false;
+  /** Sourced keys whose `OS_*` override was taken in force while held, `[namespace, key]`. */
+  private readonly heldOptionSourceVerdicts = new Map<string, [string, string]>();
   /** Write predicates by namespace, then key — see {@link registerWritePredicate}. */
   private readonly writePredicates = new Map<
     string,
@@ -1408,7 +1416,7 @@ export class SettingsService {
       const { allowed, judge } = this.optionTableOf(namespace, key, reg.optionTables.get(key) ?? []);
       if (allowed.length > 0) {
         const rejected = judge(value);
-        if (rejected) {
+        if (rejected && !this.holdsOptionSourceVerdict(namespace, key)) {
           this.reportRejectedEnvOverride(reg, namespace, key, envName, rejected.value, {
             what: 'is not a declared option for',
             detail: `Allowed values: ${allowed.join(', ')}.`,
@@ -1572,11 +1580,16 @@ export class SettingsService {
     else console.error(message);
   }
 
-  /** Look up a manifest, or throw `UnknownNamespaceError`. */
-  getManifest(namespace: string): SettingsManifest {
+  /**
+   * Look up a manifest, or throw `UnknownNamespaceError`. A key with a
+   * registered option source carries the source's options, as the namespace
+   * read serves them ({@link servedManifest}); every other key carries its
+   * declared table. `display.locale` is the language the options are named in.
+   */
+  getManifest(namespace: string, display: SettingsDisplayOptions = {}): SettingsManifest {
     const reg = this.registry.get(namespace);
     if (!reg) throw new UnknownNamespaceError(namespace);
-    return reg.manifest;
+    return this.servedManifest(reg, namespace, {}, display);
   }
 
   /**
@@ -1605,10 +1618,16 @@ export class SettingsService {
     }
   }
 
-  /** List all registered manifests, optionally filtered by permission. */
-  listManifests(ctx: SettingsContext = {}): SettingsManifest[] {
+  /**
+   * List all registered manifests, optionally filtered by permission. Each is
+   * served as {@link getManifest} serves it: a sourced key carries the options
+   * the save judges against, not the declared table the source replaces.
+   */
+  listManifests(ctx: SettingsContext = {}, display: SettingsDisplayOptions = {}): SettingsManifest[] {
     const perms = new Set(ctx.permissions ?? []);
-    const all = Array.from(this.registry.values()).map((r) => r.manifest);
+    const all = Array.from(this.registry.entries()).map(([namespace, reg]) =>
+      this.servedManifest(reg, namespace, {}, display),
+    );
     // Empty permissions ⇒ pass-through ONLY for a trusted (non-enforced)
     // in-process caller. An ENFORCED HTTP caller with no capabilities sees only
     // the manifests it may read — never the whole set (Finding-1: an
@@ -1688,6 +1707,59 @@ export class SettingsService {
   }
 
   /**
+   * Hold the `OS_*` verdict on every sourced key until {@link sealOptionSources}.
+   *
+   * A source answers from a list the boot is still filling: the i18n service
+   * reports the locales its plugins and the app's authored translations load,
+   * and the authored ones arrive at `kernel:ready`, so a `kernel:ready` reader
+   * of `localization.locale` can ask before the language its override names
+   * is in the list. Judged then, the override would be reported IGNORED and
+   * the reader would keep the next layer's value, though the boot goes on to
+   * offer that language (AGENTS.md, "Startup registry reads").
+   *
+   * So while held, an override the source (or the declared table it stands
+   * in for) does not admit is taken in force, unreported, and remembered.
+   * The other families (pattern, domain, bounds, format) are judged as ever:
+   * they do not depend on the list. A service nobody holds judges at once,
+   * as it always has.
+   */
+  holdOptionSourceVerdicts(): void {
+    this.optionSourceVerdictsHeld = true;
+  }
+
+  /**
+   * End the hold: the lists the sources read are whole (the plugin calls this
+   * at `kernel:bootstrapped`, after every `kernel:ready` handler). Each key
+   * whose override was taken in force while held is judged again, now for
+   * real: one its source still does not admit is reported IGNORED once, as at
+   * any read, and a change is emitted for its namespace and key so a reader
+   * that applied the held value reads the key again and drops it. One the
+   * source now admits stays in force, and nothing is said. Idempotent.
+   */
+  sealOptionSources(): void {
+    if (!this.optionSourceVerdictsHeld) return;
+    this.optionSourceVerdictsHeld = false;
+    const held = [...this.heldOptionSourceVerdicts.values()];
+    this.heldOptionSourceVerdicts.clear();
+    for (const [namespace, key] of held) {
+      const reg = this.registry.get(namespace);
+      if (!reg) continue;
+      if (this.effectiveEnvOverride(reg, namespace, key) !== null) continue;
+      this.emitChange({ namespace, key, scope: 'global', action: 'set', at: new Date().toISOString() });
+    }
+  }
+
+  /**
+   * Whether this key's option verdict is held (see {@link holdOptionSourceVerdicts}),
+   * remembering the key for {@link sealOptionSources} when it is.
+   */
+  private holdsOptionSourceVerdict(namespace: string, key: string): boolean {
+    if (!this.optionSourceVerdictsHeld || !this.optionSources.get(namespace)?.has(key)) return false;
+    this.heldOptionSourceVerdicts.set(`${namespace}.${key}`, [namespace, key]);
+    return true;
+  }
+
+  /**
    * The source's answer for one key, or `undefined` when no source is
    * registered or it has none. A source that throws is answered `undefined`
    * and said once per cause: the declared table then stands, the same answer a
@@ -1742,9 +1814,13 @@ export class SettingsService {
   }
 
   /**
-   * The manifest a page is served: the registered one, with each sourced
-   * key's `options` replaced by its source's answer for the value in effect.
-   * The registered manifest itself is never changed.
+   * The manifest a reader is served: the registered one, with each sourced
+   * key's `options` replaced by its source's answer. The one resolution every
+   * manifest read goes through: the namespace read passes the values in
+   * effect, so the answer can offer the stored value as stored;
+   * {@link getManifest} and {@link listManifests} pass none, and are served
+   * the options a write is judged against. The registered manifest itself is
+   * never changed.
    */
   private servedManifest(
     reg: RegisteredManifest,
@@ -1887,6 +1963,21 @@ export class SettingsService {
       };
     }
 
+    return this.resolveStored<T>(reg, namespace, key, ctx);
+  }
+
+  /**
+   * The stored cascade of one key, below any env override: what {@link get}
+   * answers when no override is in force, and what a key an override pins
+   * falls back to once the override is removed ({@link resetNamespace} reads
+   * it to find a value stored beneath a pin).
+   */
+  private async resolveStored<T = unknown>(
+    reg: RegisteredManifest,
+    namespace: string,
+    key: string,
+    ctx: SettingsContext,
+  ): Promise<ResolvedSettingValue<T>> {
     const scope = reg.scopes.get(key)!;
     // For 'user' scope we pre-filter by user_id; for 'tenant' and 'global'
     // we load everything for the namespace and pick the right row below.
@@ -2450,7 +2541,12 @@ export class SettingsService {
     };
   }
 
-  /** Persist a single key. Throws SettingsLockedError when env-locked. */
+  /**
+   * Persist a single key. Throws SettingsLockedError when an env override in
+   * force pins the key, unless `value` is a clear (`null` / `undefined`), which
+   * clears the stored value beneath the pin and leaves the env value in force
+   * (see {@link setMany}).
+   */
   async set(
     namespace: string,
     key: string,
@@ -2469,6 +2565,14 @@ export class SettingsService {
    * naming each such key (`invalid_value`, `constraint: { scope: 'user' }`):
    * the row it would store names no owner, and the user rung answers only its
    * owner, so no reader would ever see it while the write reported success.
+   *
+   * A key an env override in force pins refuses every write with
+   * {@link SettingsLockedError} (`locked-by-env`, ADR-0007 D6) but a clear
+   * (`null` / `undefined`): a clear nulls the row stored beneath the pin, so
+   * the key falls back to its default once the override is removed, and
+   * changes nothing in force — the answer still reads the env value with
+   * `locked: true`. It is judged by the row locks and the write predicates
+   * like any other clear.
    *
    * `display` picks the language of a write predicate's refusal and hands it
    * the request the write arrived on, and nothing else (see
@@ -2513,7 +2617,23 @@ export class SettingsService {
       // UI refused with `SETTINGS_LOCKED`, and `get()` reporting `locked: false`
       // to a settings page that would then fail its own save. See
       // `effectiveEnvOverride`.
-      if (this.effectiveEnvOverride(reg, namespace, key)) {
+      //
+      // [#30385] A CLEAR goes through the pin (ADR-0007 D6 keeps refusing every
+      // other write): `null` / `undefined`, the spelling every clear in this
+      // service uses, never a value such as `''` that a key would store. The
+      // pin decides what is in force, and a clear changes nothing there — the
+      // env value still wins, and the answer still reads `locked: true` from
+      // `env`. What it does change is the stored value the key falls back to
+      // once the override is removed, and that value is otherwise reachable by
+      // nothing: the override hides it from every read and refuses every
+      // write, so an operator who pinned a key to recover from a bad stored
+      // value (`OS_AUTH_ALLOWED_IP_RANGES=` for an allow-list that locks them
+      // out) gets the same bad value back the moment the pin is lifted. The
+      // clear then meets every judgment a clear meets without a pin — the
+      // Phase 2 row locks and the platform-rung rule below, the write
+      // predicates — so no lock a row carries is bypassed.
+      const clears = patch[key] === null || typeof patch[key] === 'undefined';
+      if (!clears && this.effectiveEnvOverride(reg, namespace, key)) {
         throw new SettingsLockedError(namespace, key);
       }
 
@@ -2685,7 +2805,7 @@ export class SettingsService {
         updated_at: new Date().toISOString(),
         updated_by: ctx.userId ?? null,
       };
-      const { previousEnc, previous } = await this.upsertRow(rowForKey);
+      const { previousEnc, previous, rowId } = await this.upsertRow(rowForKey);
 
       // The audit's `old_hash`, taken HERE: after the upsert's probe named the
       // previous row, and before the reap below destroys the ciphertext a
@@ -2723,6 +2843,9 @@ export class SettingsService {
               : digest ?? '',
             encrypted: isEncrypted,
             requestId: ctx.requestId,
+            // The stored settings row this write landed on, so the ledger row
+            // names it as its record (see `upsertRow`).
+            recordId: rowId,
           });
         } catch {
           // [#8145] Never fail a write because a ledger is unhappy — the same
@@ -3247,31 +3370,59 @@ export class SettingsService {
 
   /**
    * Clear every persisted row in a namespace so values fall back to
-   * env/defaults. Env-locked keys are untouched (env wins over rows
-   * anyway and refuses writes). Persisted rows are nulled rather than
-   * deleted so the audit trail records the reset per key.
+   * env/defaults. Persisted rows are nulled rather than deleted so the audit
+   * trail records the reset per key.
    *
-   * Returns the number of cleared keys.
+   * A key an env override in force pins is cleared too when a value is stored
+   * beneath the pin, by the clear {@link setMany} lets through a pin (ADR-0007
+   * D6): it changes nothing in force — the env value still answers — and the
+   * key falls back to its default once the override is removed, instead of to
+   * the old stored value.
+   *
+   * Returns the number of cleared keys, pinned ones included.
    */
   async resetNamespace(namespace: string, ctx: SettingsContext = {}): Promise<number> {
+    return (await this.resetNamespaceRows(namespace, ctx)).cleared;
+  }
+
+  /**
+   * {@link resetNamespace}, also answering how many of the namespace's keys an
+   * env override still pins after the reset: those keep their env value, and
+   * the built-in `reset` action says so.
+   */
+  private async resetNamespaceRows(
+    namespace: string,
+    ctx: SettingsContext,
+  ): Promise<{ cleared: number; pinned: number }> {
     const payload = await this.getNamespace(namespace, ctx);
+    const reg = this.registry.get(namespace)!;
     const patch: Record<string, null> = {};
+    let pinned = 0;
     for (const [key, v] of Object.entries(payload.values)) {
-      if (v.source === 'global' || v.source === 'tenant' || v.source === 'user') {
+      // A pinned key answers `env` and hides its stored rows, so whether a
+      // value is stored beneath the pin is read from the cascade below it.
+      if (v.source === 'env') pinned++;
+      const stored = v.source === 'env' ? (await this.resolveStored(reg, namespace, key, ctx)).source : v.source;
+      if (stored === 'global' || stored === 'tenant' || stored === 'user') {
         patch[key] = null;
       }
     }
     const keys = Object.keys(patch);
     if (keys.length > 0) await this.setMany(namespace, patch, ctx);
-    return keys.length;
+    return { cleared: keys.length, pinned };
   }
 
-  /** Invoke a declared action (test connection, rotate, …). */
+  /**
+   * Invoke a declared action (test connection, rotate, …). `display.locale` is
+   * handed to the handler so the answer it composes is written in the caller's
+   * language; it authorizes nothing.
+   */
   async runAction(
     namespace: string,
     actionId: string,
     payload: unknown,
     ctx: SettingsContext = {},
+    display: SettingsDisplayOptions = {},
   ): Promise<SettingsActionResult> {
     const reg = this.registry.get(namespace);
     if (!reg) throw new UnknownNamespaceError(namespace);
@@ -3285,20 +3436,25 @@ export class SettingsService {
       // clears persisted rows (back to env/defaults). Plugins may
       // override it via registerAction for richer behaviour (e.g. the
       // AI plugin re-runs env adapter detection after the clear).
+      //
+      // Both answers are written in the caller's language (`display.locale`,
+      // `settingsActionCopy`), as a handler's own answer is.
+      const copy = settingsActionCopy(display.locale);
       if (actionId === 'reset') {
-        const cleared = await this.resetNamespace(namespace, ctx);
+        const { cleared, pinned } = await this.resetNamespaceRows(namespace, ctx);
+        const answer = cleared > 0 ? copy.resetCleared(cleared) : copy.resetNothing;
         return {
           ok: true,
           severity: 'info',
-          message: cleared > 0
-            ? `Cleared ${cleared} saved value(s); environment/default configuration is back in effect.`
-            : 'No saved values to clear — already using environment/default configuration.',
+          // A key an env override pins keeps its env value through the reset,
+          // so the answer says how many still do.
+          message: pinned > 0 ? answer + copy.resetStillPinned(pinned) : answer,
         };
       }
       return {
         ok: false,
         severity: 'error',
-        message: `No handler registered for action '${actionId}' in '${namespace}'.`,
+        message: copy.noHandler(actionId, namespace),
       };
     }
     const values: Record<string, unknown> = {};
@@ -3306,7 +3462,10 @@ export class SettingsService {
       values[key] = (await this.get(namespace, key, ctx)).value;
     }
     try {
-      return await handler({ namespace, actionId, values, payload, ctx });
+      return await handler({
+        namespace, actionId, values, payload, ctx,
+        ...(display.locale !== undefined ? { locale: display.locale } : {}),
+      });
     } catch (err: any) {
       return {
         ok: false,
@@ -3642,10 +3801,17 @@ export class SettingsService {
    * held BEFORE: `previousEnc` for the secret reaper (#8030), `previous` for
    * the audit's `old_hash` (#26465). Both come off the existence probe the
    * upsert makes anyway, so a write with no previous row costs no extra read.
+   *
+   * `rowId` is the id of the stored row the write landed on: the probed row's
+   * on an update, the engine's insert result's on an insert. The `config_change`
+   * ledger row records it as its `record_id`, so the ledger names the settings
+   * row the way the CRUD mirror's own row about that write does. `null` when the
+   * store hands back no id (the in-memory fallback, a host engine whose insert
+   * returns nothing).
    */
   private async upsertRow(
     row: SettingsRow,
-  ): Promise<{ previousEnc: string | null; previous: SettingsRow | null }> {
+  ): Promise<{ previousEnc: string | null; previous: SettingsRow | null; rowId: string | null }> {
     if (this.engine) {
       const { object, where, data } = this.rowIdentity(row);
       // All three engine calls carry the explicit system opt-in
@@ -3667,7 +3833,7 @@ export class SettingsService {
           data,
           context: SETTINGS_SYSTEM_CONTEXT,
         });
-        return { previousEnc, previous };
+        return { previousEnc, previous, rowId: SettingsService.rowIdOf(previous) };
       }
       // Under the opt-in the engine no longer checks that a user-scope row's
       // `user_id` names a user, so the service keeps that refusal before the
@@ -3686,8 +3852,8 @@ export class SettingsService {
           row.user_id,
         );
       }
-      await this.engine.insert(object, data, { context: SETTINGS_SYSTEM_CONTEXT });
-      return { previousEnc: null, previous: null };
+      const inserted = await this.engine.insert(object, data, { context: SETTINGS_SYSTEM_CONTEXT });
+      return { previousEnc: null, previous: null, rowId: SettingsService.rowIdOf(inserted) };
     }
     const idx = this.memoryIndexOf(row);
     if (idx >= 0) {
@@ -3696,10 +3862,20 @@ export class SettingsService {
       // carry keeps what the row held — above all its lock, which a write the
       // platform rung makes through it must leave in place.
       this.memory[idx] = { ...previous, ...row };
-      return { previousEnc: SettingsService.handleOf(previous.value_enc), previous };
+      return { previousEnc: SettingsService.handleOf(previous.value_enc), previous, rowId: null };
     }
     this.memory.push(row);
-    return { previousEnc: null, previous: null };
+    return { previousEnc: null, previous: null, rowId: null };
+  }
+
+  /**
+   * The stored id of a settings row, as the engine returned or read it; `null`
+   * when there is none. The in-memory fallback's rows carry no id, and nothing
+   * stores them anywhere a ledger row could point at.
+   */
+  private static rowIdOf(row: unknown): string | null {
+    const id = (row as { id?: unknown } | null | undefined)?.id;
+    return typeof id === 'string' && id !== '' ? id : typeof id === 'number' ? String(id) : null;
   }
 
   /**

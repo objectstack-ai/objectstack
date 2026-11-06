@@ -61,6 +61,7 @@ vi.mock('../marketplaceApi', () => ({
   purgeSampleData: async () => ({ ok: true }),
   reseedLocalSampleData: async () => ({ ok: true }),
   purgeLocalSampleData: async () => ({ ok: true }),
+  countLocalSampleData: async () => null,
 }));
 
 // The runtime serves the installed version at once: the wait answers served.

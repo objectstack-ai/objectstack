@@ -1,10 +1,35 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * ISO 4217 / CLDR currency fraction digits — a checked-in snapshot whose KEY
- * SET is the membership list of the `iso_4217_currency` value domain
- * (`shared/value-domain.zod.ts`): a `text` field declaring
+ * CLDR currency fraction digits — NOT ISO 4217 minor units — a checked-in
+ * snapshot whose KEY SET is the membership list of the `iso_4217_currency`
+ * value domain (`shared/value-domain.zod.ts`): a `text` field declaring
  * `valueDomain: 'iso_4217_currency'` accepts exactly these codes.
+ *
+ * ## Where CLDR's digits differ from ISO 4217's minor units
+ *
+ * The digit VALUES are CLDR's `currencyData` counts: the decimal places a
+ * currency is written with in practice. ISO 4217's `CcyMnrUnts` is the minor
+ * unit the standard defines, and for sixteen codes of this table the two
+ * differ — in every case CLDR records `0`, a minor unit that is defined but
+ * no longer used:
+ *
+ * | ISO 4217 minor unit | Codes (CLDR digits: 0) |
+ * |:---|:---|
+ * | 3 | IQD |
+ * | 2 | AFN, ALL, COP, HUF, IDR, IRR, KPW, LAK, LBP, MGA, MMK, PKR, SOS, SYP, YER |
+ *
+ * Measured, not recalled: every entry below compared with SIX's ISO 4217
+ * List One as published 2024-06-25 (the `iso-4217-list-one.xml` that
+ * `currency-codes@2.2.0` ships), cross-read against the `datasets/currency-codes`
+ * `codes-all.csv` mirror of the same list (its active rows): both answer the
+ * same sixteen codes. Two entries have no ISO minor unit to compare (`N.A.`:
+ * XDR and XSU, here 2), and HRK, SLL and ZWL are withdrawn from the current
+ * list, so no current ISO minor unit exists for them either. Every other code
+ * here equals its ISO 4217 minor unit.
+ *
+ * A reader that rounds to these digits rounds to CLDR's count: an IQD amount
+ * is rounded to whole dinars, not to fils.
  *
  * #19992 — the snapshot was generated for the #7918 publish-time rule that
  * compared an authored `currencyConfig.precision` with the currency's fraction
@@ -51,10 +76,13 @@
  */
 
 /**
- * Fraction digits per currency code — every code CLDR 48.0 `currencyData`
- * carries (162 entries; see the provenance block above). 0-digit currencies
- * (JPY, KRW, CLP, ISK, VND, …) have no minor unit at all; 3-digit currencies
- * (BHD, JOD, KWD, LYD, OMR, TND) have a thousandth minor unit (fils/baisa).
+ * CLDR fraction digits per currency code — every code CLDR 48.0
+ * `currencyData` carries (162 entries; see the provenance block above). They
+ * are not ISO 4217 minor units: sixteen codes differ (IQD, and fifteen codes
+ * CLDR writes with 0 digits where ISO 4217 defines 2 — the table above).
+ * 0-digit currencies (JPY, KRW, CLP, ISK, VND, …) are written without
+ * decimals; 3-digit currencies (BHD, JOD, KWD, LYD, OMR, TND) with a
+ * thousandth (fils/baisa).
  */
 export const CURRENCY_FRACTION_DIGITS: Readonly<Record<string, number>> = {
   AED: 2, AFN: 0, ALL: 0, AMD: 2, ANG: 2, AOA: 2, ARS: 2, AUD: 2,

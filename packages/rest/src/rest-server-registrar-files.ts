@@ -75,6 +75,13 @@ export const REST_SERVER_REGISTRAR_FILES = [
     // [#27627] `registerMetaAppBundleRoute`' body, the app metadata bundle. New, not a
     // moved slice, and a `/meta` group — see {@link REST_SERVER_META_ROUTE_FILES}.
     'meta-app-bundle-routes.ts',
+    // [#30205] `registerUserWorkEndpoints`' body, a user's assigned work: the counts and
+    // the hand-over. New, not a moved slice.
+    'user-work-routes.ts',
+    // [#30675] `registerMetaRecordCurrencyBackfillRoute`' body, the record-currency code
+    // backfill door. New, not a moved slice, and a `/meta` group — see
+    // {@link REST_SERVER_META_ROUTE_FILES}.
+    'meta-record-currency-backfill-route.ts',
 ] as const;
 
 /** One file on {@link REST_SERVER_REGISTRAR_FILES}. */
@@ -123,6 +130,10 @@ export const REST_SERVER_META_ROUTE_FILES: readonly RestServerRegistrarFile[] = 
     // moved slice; like the per-item writes it goes through the inner method's per-item
     // registrar, handed over in its scope.
     'meta-app-bundle-routes.ts',
+    // [#30675] The record-currency code backfill, `POST {metaPath}/_migrate-record-currency-codes`.
+    // New, not a moved slice; like the state-machine read it registers on the route
+    // manager itself, by value from a host literal built inside the inner method.
+    'meta-record-currency-backfill-route.ts',
 ];
 
 /**

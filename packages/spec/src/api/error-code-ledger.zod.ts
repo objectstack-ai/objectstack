@@ -493,6 +493,26 @@ export const ERROR_CODE_LEDGER = {
     // direct-mount door of the same route; the two doors now state the same
     // failure the same way. Provenance, not identity (see above).
     'PACKAGE_DELETE_PARTIAL',
+    // [ADR-0141 Open item 4, ruling A on #30379] 409 from the package disable
+    // door (`PATCH /packages/:id/disable`, `domains/packages.ts`): the disable
+    // is refused because a validation rule of a package that stays enabled
+    // (any severity; an app's `.custom` pair, where tenant-written rules live,
+    // included) reads a field this package adds through `objectExtensions`.
+    // Disabling it would withhold that field, and every write to the object
+    // would then fail that rule. The refusal names each package · object ·
+    // rule triple it found, one or several. The remedy: disable or change the
+    // reading rule first, or keep this package enabled. A formula over the
+    // field is no reason to refuse: it answers `null`. Registered AHEAD of its
+    // producer (the `ACTION_CONFIRMATION_REQUIRED` split shape): the door's
+    // scan is #30379's and asserts this string by value. ⛔ NOT a `*_DISABLED`
+    // re-spelling: those name WHICH thing is off, and this names WHY a disable
+    // is refused, and the rule it names is what the operator acts on. Nor a
+    // mirror of `DEPENDENCY_MISSING`: no `manifest.dependencies` entry is
+    // read, so "RESTRICTED" (the standard `DELETE_RESTRICTED` word for a 409
+    // refused over a dependent) carries `BY_VALIDATION_RULE` to say which
+    // dependent. PACKAGE and DISABLE are tokens no standard member carries, so
+    // it needs no waiver.
+    'PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE',
     'PROJECT_MEMBERSHIP_REQUIRED',
     'RECORD_GONE',                // share link resolves but the record was deleted
     'ROUTE_NOT_FOUND',
@@ -1049,6 +1069,21 @@ export const ERROR_CODE_LEDGER = {
     // synonym of any standard member: the manifest is well-formed, and the
     // refusal comes from what the deployment already holds.
     'DEFAULT_RECORD_PAGE_CONFLICT',
+    // [ADR-0148 D2, card #30235] The recycle bin's three restore refusals,
+    // REGISTERED AHEAD OF THEIR PRODUCER: the engine's restore (#30237) stamps
+    // them and asserts these strings by value; the Console (#30239) reads them
+    // in its own language. `status: 409` for all three — the entry is intact
+    // and the live state conflicts with writing it back; a restore refuses
+    // with the reason and never forces a write. The spec spells them once, in
+    // `RECYCLE_BIN_RESTORE_REFUSAL_CODES` (`data/recycle-bin.zod.ts`). RESTORE is
+    // a token no standard member carries, so none needs a waiver.
+    // A unique value of a snapshotted row is held by a live row now.
+    'RESTORE_UNIQUE_VALUE_TAKEN',
+    // A row's master-detail parent is neither live nor in the bin.
+    'RESTORE_PARENT_PURGED',
+    // An object of the entry no longer exists in the registry: its package
+    // was uninstalled.
+    'RESTORE_PACKAGE_UNINSTALLED',
   ],
   '@objectstack/core': [
     // [#23367, ruling A] The API-key lifecycle refusals: three distinct key

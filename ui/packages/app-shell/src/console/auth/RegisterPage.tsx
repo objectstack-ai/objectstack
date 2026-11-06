@@ -30,9 +30,21 @@
  * with `SELF_REGISTRATION_CLOSED` re-reads the preview, so an invitation that
  * went away meanwhile ends the same way, and a live one names the address it
  * was sent to (#27509, `./invitationArrival`).
+ *
+ * Registered from an invitation link, the new account accepts THAT invitation
+ * and enters its organization at the console root, instead of going on to the
+ * accept page and its "Invitation accepted" step (#30125,
+ * `./invitationSignUpJoin`); an address the server refuses goes on to the
+ * accept page, which shows the refusal. A visitor already signed in when the
+ * page opened still goes to `/` and accepts nothing here.
+ *
+ * A language picked while signed out earlier in this page-load is saved as the
+ * new person's own (`saveSignInLanguagePick`), and every way the page leaves
+ * once someone is signed in waits for that save, as the console's sign-in and
+ * register pages do (#30338). No pick, no request and no wait.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import {
   RegisterForm,
@@ -49,6 +61,9 @@ import { decideSignUpOffer, isInvitationRedirect, needsBootstrapProbe } from './
 import { useBootstrapStatus } from './bootstrapStatus.js';
 import { ServerUnreachable } from './LoginPage.js';
 import { InvitationGoneNotice, invitationArrivalCopy, useInvitationArrival } from './invitationArrival.js';
+import { useInvitationSignUpJoin } from './invitationSignUpJoin.js';
+import { resolveRootUrl } from '../organizations/resolveHomeUrl.js';
+import { hasSignInLanguagePick, saveSignInLanguagePick } from '../../hooks/useUserLocale.js';
 
 const RouterLink = ({ href, className, children }: AuthLinkComponentProps) => (
   <Link to={href} className={className}>{children}</Link>
@@ -115,6 +130,34 @@ export function RegisterPage() {
   // #26473 — who invited this visitor, and to what; `null` keeps the generic
   // copy. #27509 — `gone` when the server no longer knows the invitation.
   const invitationArrival = useInvitationArrival(redirect);
+  // #30125 — the sign-up made on this page from an invitation link accepts it.
+  const invitationJoin = useInvitationSignUpJoin(redirect);
+
+  // #30338 — a language picked while signed out in this page-load, saved as
+  // the signed-in person's own when they have none. Every exit below waits for
+  // it: the root entry is a full navigation, which ends the page-load that
+  // knows of the pick, and a write sent beside it races the unload. The ref is
+  // the once-only latch; the state is where the save stands, and the render
+  // that first sees the user already holds, because the pick is still unspent
+  // then. A failed save does not hold the sign-up (the pick still applies
+  // here).
+  const signInPickSaveStartedRef = useRef(false);
+  const [signInPickSave, setSignInPickSave] = useState<'idle' | 'saving' | 'settled'>('idle');
+  const holdForSignInPick =
+    !!user &&
+    (signInPickSave === 'saving' || (signInPickSave === 'idle' && hasSignInLanguagePick()));
+  useEffect(() => {
+    if (!user || signInPickSaveStartedRef.current || !hasSignInLanguagePick()) return;
+    signInPickSaveStartedRef.current = true;
+    setSignInPickSave('saving');
+    void saveSignInLanguagePick(String(user.id)).finally(() => setSignInPickSave('settled'));
+  }, [user]);
+
+  // Entered by a full-page navigation to the root, as the accept page's
+  // "Continue" does: every data scope re-seats on the joined organization.
+  useEffect(() => {
+    if (invitationJoin === 'joined' && !holdForSignInPick) window.location.assign(resolveRootUrl());
+  }, [invitationJoin, holdForSignInPick]);
 
   // Sign-up switched off — bounce a signed-out visitor to /login, keeping
   // `?redirect=`. A signed-in one is moved on below instead, never to /login.
@@ -123,6 +166,16 @@ export function RegisterPage() {
     const search = redirect ? `?redirect=${encodeURIComponent(redirect)}` : '';
     navigate(`/login${search}`, { replace: true });
   }, [signedOut, signUpOffer, navigate, redirect]);
+
+  // #30338 — signed in with a language pick still being saved: hold.
+  if (holdForSignInPick) return <AuthPageLayout>{null}</AuthPageLayout>;
+
+  // #30125 — the invitation sign-up holds while it is accepted and while the
+  // page leaves for the root; refused, it opens the accept page as before.
+  if (user && (invitationJoin === 'joining' || invitationJoin === 'joined')) {
+    return <AuthPageLayout>{null}</AuthPageLayout>;
+  }
+  if (user && invitationJoin === 'refused' && redirect) return <Navigate to={redirect} replace />;
 
   // objectui#11714 — signed in: go where a successful sign-up goes, without
   // waiting for the config or the probe. `<Navigate>` renders nothing.
@@ -243,7 +296,13 @@ export function RegisterPage() {
   return (
     <AuthPageLayout>
       <RegisterForm
-        onSuccess={() => navigate('/')}
+        // An invitation sign-up moves on from the join above (#30125). A
+        // language pick waits for its save, and the signed-in branch above
+        // then goes to `/` (#30338).
+        onSuccess={() => {
+          if (invitationRedirect || signInPickSaveStartedRef.current || hasSignInLanguagePick()) return;
+          navigate('/');
+        }}
         onVerificationRequired={(email) => setPendingEmail(email)}
         loginUrl={loginUrl}
         // #25886 — an invitee is told to register the invited address: the

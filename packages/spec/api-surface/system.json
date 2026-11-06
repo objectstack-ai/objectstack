@@ -897,6 +897,7 @@
     "resolveDocLocale (function)",
     "resolveFlowScreenFieldOptions (function)",
     "resolveFlowScreenTitle (function)",
+    "resolveLocaleAmong (function)",
     "resolveMetadataFormLabels (function)",
     "resolveMetadataFormSchemaTitles (function)",
     "resolveMetadataTypeDescription (function)",

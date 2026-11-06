@@ -68,16 +68,28 @@ const MODULE_FIELDS = [CREDIT, ORDER_TOTAL] as const;
 /** A second, ENABLED module whose formula and rule read the first module's field. */
 const SCORING = 'com.qa.extsuite.scoring';
 const CREDIT_BAND = 'qx_credit_band';
+/** [#30377] A third module whose roll-up, added to the app's object by extension, sums a child the APP owns. */
+const ROLLUP = 'com.qa.extsuite.visits';
+const VISIT = 'qx_visit';
+const VISIT_TOTAL = 'qx_visit_total';
 
-function suiteArtifact(withScoring = false) {
+function suiteArtifact(withScoring = false, withRollup = false) {
     const app = defineStack({
         manifest: { id: APP, name: 'QA Ext Suite', namespace: 'qx', version: '1.0.0', type: 'app' },
         objects: [{
             name: ACCOUNT,
             label: 'Account',
             fields: { name: { name: 'name', type: 'text', label: 'Name' } },
-        }],
-    });
+        }, ...(withRollup ? [{
+            name: VISIT,
+            label: 'Visit',
+            fields: {
+                name: { name: 'name', type: 'text', label: 'Name' },
+                amount: { name: 'amount', type: 'number', label: 'Amount' },
+                account: { name: 'account', type: 'lookup', label: 'Account', reference: ACCOUNT },
+            },
+        }] : [])],
+    } as any);
     const orders = defineStack({
         manifest: {
             id: MODULE, name: 'QA Ext Suite Orders', namespace: 'qx', version: '1.0.0', type: 'module',
@@ -122,7 +134,22 @@ function suiteArtifact(withScoring = false) {
             }],
         }],
     } as any);
-    return composeStacks(withScoring ? [orders, scoring, app] : [orders, app], { manifest: 'preserve' });
+    const rollup = defineStack({
+        manifest: {
+            id: ROLLUP, name: 'QA Ext Suite Visits', namespace: 'qx', version: '1.0.0', type: 'module',
+            dependencies: { [APP]: '^1.0.0' },
+        },
+        objectExtensions: [{
+            extend: ACCOUNT,
+            fields: {
+                [VISIT_TOTAL]: {
+                    name: VISIT_TOTAL, type: 'summary', label: 'Visit total',
+                    summaryOperations: { object: VISIT, field: 'amount', function: 'sum' },
+                },
+            },
+        }],
+    } as any);
+    return composeStacks([orders, ...(withScoring ? [scoring] : []), ...(withRollup ? [rollup] : []), app], { manifest: 'preserve' });
 }
 
 interface Booted {
@@ -130,7 +157,7 @@ interface Booted {
     engine: ObjectQL;
 }
 
-async function bootKernel(root: string, withScoring = false): Promise<Booted> {
+async function bootKernel(root: string, withScoring = false, withRollup = false): Promise<Booted> {
     const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
     const engine = new ObjectQL();
     engine.registerDriver(new SqlDriver({
@@ -140,7 +167,7 @@ async function bootKernel(root: string, withScoring = false): Promise<Booted> {
     }) as any, true);
     await kernel.use(new MetadataPlugin({ watch: false, rootDir: root }));
     await kernel.use(new ObjectQLPlugin({ ql: engine }));
-    await kernel.use(new AppPlugin(suiteArtifact(withScoring), { environmentId: ENVIRONMENT_ID, organizationId: 'org_qa' }));
+    await kernel.use(new AppPlugin(suiteArtifact(withScoring, withRollup), { environmentId: ENVIRONMENT_ID, organizationId: 'org_qa' }));
     const host: Plugin = {
         name: 'qa.extsuite-host',
         dependencies: ['com.objectstack.engine.objectql'],
@@ -398,5 +425,41 @@ describe('an enabled module whose formula and rule read a field a disabled modul
     it('serves the formula over the stored value again once the module is re-enabled', async () => {
         expect((await dispatchAs(booted!.kernel, 'PATCH', `/packages/${MODULE}/enable`)).status).toBe(200);
         expect(await readAccount(booted!.kernel, accountId)).toMatchObject({ name: 'acme', [CREDIT]: 500, [CREDIT_BAND]: 'high' });
+    });
+});
+
+describe('[#30377] a disabled module\'s roll-up over a child the enabled app owns is current again on enable', () => {
+    let root: string;
+    let booted: Booted | undefined;
+
+    beforeAll(async () => {
+        root = mkdtempSync(join(tmpdir(), 'os-suite-ext-rollup-'));
+        writeFileSync(join(root, '.keep'), '');
+        process.env.OS_HOME = mkdtempSync(join(home, 'rollup-'));
+        booted = await bootKernel(root, false, true);
+    }, 60_000);
+    afterAll(async () => {
+        await shutdown(booted);
+        rmSync(root, { recursive: true, force: true });
+    }, 60_000);
+
+    it('recomputes the summary on enable from the child writes made while it was disabled, with no further child write', async () => {
+        const { kernel } = booted!;
+        const acme = idOf(await dispatchAs(kernel, 'POST', `/data/${ACCOUNT}`, { name: 'acme' }));
+        const first = await dispatchAs(kernel, 'POST', `/data/${VISIT}`, { name: 'v1', amount: 10, account: acme });
+        expect(first.status, 'precondition: a visit of the app is written').toBe(201);
+        expect(await readAccount(kernel, acme), 'precondition: the roll-up tracks while the module is enabled').toMatchObject({ [VISIT_TOTAL]: 10 });
+
+        expect((await dispatchAs(kernel, 'PATCH', `/packages/${ROLLUP}/disable`)).status).toBe(200);
+        expect(Object.keys(await readAccount(kernel, acme))).not.toContain(VISIT_TOTAL);
+        // The child belongs to the enabled app: every one of these lands.
+        expect((await dispatchAs(kernel, 'POST', `/data/${VISIT}`, { name: 'v2', amount: 5, account: acme })).status).toBe(201);
+        expect((await dispatchAs(kernel, 'PATCH', `/data/${VISIT}/${idOf(first)}`, { amount: 20 })).status).toBe(200);
+        const beta = idOf(await dispatchAs(kernel, 'POST', `/data/${ACCOUNT}`, { name: 'beta' }));
+        expect((await dispatchAs(kernel, 'POST', `/data/${VISIT}`, { name: 'v3', amount: 7, account: beta })).status).toBe(201);
+
+        expect((await dispatchAs(kernel, 'PATCH', `/packages/${ROLLUP}/enable`)).status).toBe(200);
+        expect(await readAccount(kernel, acme)).toMatchObject({ name: 'acme', [VISIT_TOTAL]: 25 });
+        expect(await readAccount(kernel, beta)).toMatchObject({ name: 'beta', [VISIT_TOTAL]: 7 });
     });
 });

@@ -87,6 +87,10 @@ export {
   ACTIVITY_TYPE_TO_FEED_TYPE,
   UNMAPPED_ACTIVITY_FEED_TYPE,
   activityRowToFeedItem,
+  // The impersonation actor line 「X 代 Y 操作」, shared with the console's
+  // audit-log field history so the two surfaces word it alike.
+  composeImpersonatedActor,
+  IMPERSONATED_ACTOR_FALLBACK,
   // `resetUnknownActivityTypeWarnings` is test-only and stays off the barrel
   // objectui#11195: the refused-read verdict joins the reading for the same
   // reason. `RecordDetailView` reads the same two tables, and a refusal it
@@ -131,15 +135,15 @@ export type { RecordOperation } from './useRecordEditable';
 // The Claim affordance on a record sitting in an ownership queue (objectstack
 // ADR-0142 D4): the server's `queue_claim` answer decides the button, the
 // claim is `{ owner_id: <self> }` through the normal update.
-export { recordSitsInQueue, queueClaimAdmitted, useQueueClaimOffered, claimQueuedRecord, seedQueueClaimDecision } from './queueClaim';
+export { recordSitsInQueue, useQueueClaimOffered, claimQueuedRecord, seedQueueClaimDecision } from './queueClaim';
 export type { QueueClaimOutcome, ClaimWriter } from './queueClaim';
 export { SectionGroup } from './SectionGroup';
 export { HeaderHighlight } from './HeaderHighlight';
-export { InlineFieldInput, extractLookupId, TEXTUAL_REF_FALLBACK_TYPES } from './InlineFieldInput';
+export { InlineFieldInput } from './InlineFieldInput';
 export type { InlineFieldInputProps } from './InlineFieldInput';
 export { InlineEditSaveBar } from './InlineEditSaveBar';
 export type { InlineEditSaveBarProps } from './InlineEditSaveBar';
-export { inferDetailColumns, isWideFieldType, applyAutoSpan, applyDetailAutoLayout } from './autoLayout';
+export { isWideFieldType } from './autoLayout';
 export { useDetailTranslation, DETAIL_DEFAULT_TRANSLATIONS, createSafeTranslationHook } from './useDetailTranslation';
 export { RecordComments } from './RecordComments';
 export { ActivityTimeline } from './ActivityTimeline';
@@ -156,7 +160,6 @@ export { RecordMetaFooter } from './RecordMetaFooter';
 export type { RecordMetaFooterProps } from './RecordMetaFooter';
 export type { DetailViewProps } from './DetailView';
 export type { DetailSectionProps, VirtualScrollOptions } from './DetailSection';
-export type { DetailTabsProps } from './DetailTabs';
 export type { RelatedListProps } from './RelatedList';
 // objectstack#27627 — the order a related list's row read asks, for the record
 // page's payload to ask a compact card's first rows in.
@@ -187,10 +190,7 @@ export {
   buildDefaultHighlights,
   buildDefaultDetails,
   buildDefaultTabs,
-  buildDefaultDiscussion,
-  buildDefaultTimeline,
   detectStatusField,
-  deriveStages,
   deriveHighlightFields,
   deriveFieldGroupDetailSections,
   resolveDetailSections,
@@ -205,11 +205,9 @@ export type {
 // out by its width: the tier a container takes, the page partitioned into its
 // details and panels, and the layout.
 export {
-  RECORD_PAGE_WIDE_MIN_WIDTH,
   RECORD_PAGE_TWO_COLUMN_MIN_WIDTH,
   recordPageTierFor,
   recordPageTierHasRightColumn,
-  recordPageColumnOfTab,
   buildDefaultPageColumns,
   bodyTableIdsOf,
   RECORD_PAGE_TIMELINE_PANEL,
@@ -218,7 +216,6 @@ export {
 export { relatedListEntryNames } from './synth/relatedListEntry';
 export type {
   RecordPageTier,
-  RecordPageColumn,
   DefaultPageColumns,
 } from './synth/recordPageColumns';
 export { useRecordPageTier } from './useRecordPageTier';
@@ -227,11 +224,11 @@ export { RecordPageColumns } from './RecordPageColumns';
 export type { RecordPageColumnsProps } from './RecordPageColumns';
 // objectstack#27055 — the record page v3 face: a host drawing the
 // synthesized default page in its tabbed tier marks it, as the column tiers do.
-export { DefaultRecordPageContext, useDefaultRecordPage } from './defaultRecordPage';
+export { DefaultRecordPageContext } from './defaultRecordPage';
 export { RecordBodyTablesContext } from './relatedListCompact';
 // objectstack#27056 — for the app-shell record drawer's prefetch: it warms
 // the next record's related counts before the reader steps to it.
-export { prefetchRelatedCounts, relatedCountTargetsIn, relatedCountTargetOf } from './useRelatedCounts';
+export { prefetchRelatedCounts, relatedCountTargetsIn } from './useRelatedCounts';
 export type { RelatedCountTarget, RelatedCountsSource } from './useRelatedCounts';
 // objectstack#27055, Target 3 — the timeline as ONE stream: the host hands
 // the record's field changes over through this context.
@@ -246,7 +243,6 @@ export {
   RECORD_TIMELINE_PANEL_MAX_ENTRIES,
   auditEntriesToFeedItems,
   mergeTimelineStream,
-  filterTimelineStream,
 } from './recordTimelineStream';
 export type { AuditEntryLike, TimelineStreamFilter } from './recordTimelineStream';
 // objectstack#27055 — the reader's arrangement of the related cards: the pure
@@ -254,18 +250,13 @@ export type { AuditEntryLike, TimelineStreamFilter } from './recordTimelineStrea
 // workspace-preference store.
 export {
   EMPTY_RELATED_ARRANGEMENT,
-  RELATED_CARD_NEW_BADGE_MS,
-  editRelatedArrangement,
   RELATED_ARRANGEMENT_RECORD_VERSION,
   relatedArrangementFromRecord,
   relatedArrangementToRecord,
-  relatedCardId,
-  relatedDefaultOrderHash,
   resolveRelatedArrangement,
 } from './synth/relatedArrangement';
 export type {
   RelatedArrangement,
-  RelatedArrangementEdit,
   RelatedCardId,
   ResolvedRelatedArrangement,
 } from './synth/relatedArrangement';

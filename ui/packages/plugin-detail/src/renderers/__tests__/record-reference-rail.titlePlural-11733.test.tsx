@@ -131,3 +131,70 @@ describe('record:reference_rail names untitled entries with the plural (objectui
     expect(await screen.findByText('笔记')).toBeInTheDocument();
   });
 });
+
+/**
+ * objectstack#30486 — an untitled card is named by the related object's
+ * SERVED name.
+ *
+ * The rail already reads each related object's schema (for its fields and
+ * declared name field); that read also carries the `label` and `pluralLabel`
+ * the server translated for the session, a `.custom` rename included. Both
+ * names, the card title and the empty line, read them by the served-object-label
+ * rule (`servedObjectPluralLabel`, `@object-ui/core`), and the bundle answers
+ * only for an object served without either — the cases above, whose data
+ * source has no `getObjectSchema` at all.
+ *
+ * Direction, written before the run: with both sites put back to the bundle
+ * alone, the rename cells RED (`Tasks` / `任务清单`, `商机列表`); the
+ * control, an object served without a label, GREEN on both sides.
+ */
+describe('record:reference_rail names untitled entries with the served name (objectstack#30486)', () => {
+  const SERVED: Record<Lang, Record<string, { label?: string; pluralLabel?: string }>> = {
+    en: {
+      showcase_task: { label: 'Work item', pluralLabel: 'Work items' },
+      showcase_opportunity: { label: 'Deal', pluralLabel: 'Deals' },
+    },
+    'zh-CN': {
+      showcase_task: { label: '工作项', pluralLabel: '工作事项' },
+      showcase_opportunity: { label: '交易' },
+    },
+  };
+
+  function mountServed(lang: Lang) {
+    const i18n = createI18n({ defaultLanguage: lang, detectBrowserLanguage: false });
+    expect(i18n.language).toBe(lang);
+    i18n.addResourceBundle(lang, 'translation', BUNDLE[lang], true, true);
+    const dataSource = {
+      ...makeDataSource(),
+      getObjectSchema: vi.fn(async (name: string) => ({ name, fields: {}, ...SERVED[lang][name] })),
+    };
+    return render(
+      <I18nProvider instance={i18n}>
+        <MemoryRouter>
+          <RecordContextProvider objectName="showcase_project" recordId="P-1" dataSource={dataSource as never}>
+            <RecordReferenceRailRenderer schema={RAIL as never} />
+          </RecordContextProvider>
+        </MemoryRouter>
+      </I18nProvider>,
+    );
+  }
+
+  it('en: the card and the empty line draw the served renames', async () => {
+    mountServed('en');
+    expect(await screen.findByText('Work items')).toBeInTheDocument();
+    expect(await emptyLineNames()).toBe('Deals');
+    expect(screen.queryByText('Tasks')).toBeNull();
+  });
+
+  it('zh-CN: the served plural, else the served label, drawn as given', async () => {
+    mountServed('zh-CN');
+    expect(await screen.findByText('工作事项')).toBeInTheDocument();
+    expect(await emptyLineNames()).toBe('交易');
+    expect(screen.queryByText('任务清单')).toBeNull();
+  });
+
+  it('CONTROL: an object served without a label keeps the bundle name', async () => {
+    mountServed('zh-CN');
+    expect(await screen.findByText('笔记')).toBeInTheDocument();
+  });
+});

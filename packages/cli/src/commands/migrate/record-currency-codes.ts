@@ -25,6 +25,13 @@ import { refuseUndeclaredObjects } from '../../utils/migrate-object-scope.js';
 // Type-only, so the heavy engine package is still loaded lazily below.
 import type { RecordCurrencyBackfillEngine } from '@objectstack/objectql';
 
+/** One organization's counts, as the backfill's refusal of an unscoped multi-organization run carries them. */
+interface OrganizationCounts {
+  organizationId: string | null;
+  scannedRecords: number;
+  codeless: number;
+}
+
 /**
  * The `--code` refusal, judged before the occupancy probe, the `--apply`
  * prompt and the boot: a code the code field's `valueDomain` would refuse
@@ -80,6 +87,16 @@ async function confirm(question: string): Promise<boolean> {
  * default (writes no row), `--apply` to write; idempotent, so re-running and
  * reading a clean report is the verification. No `sys_migration` flag is
  * recorded: nothing gates on the run.
+ *
+ * Organizations (ADR-0144 Open item 13, ruling 6670707546 item A): each one
+ * has its own home currency, so `--org <id>` fills one organization's rows.
+ * On a database whose rows belong to more than one organization, a run with
+ * neither `--org` nor `--all-organizations` is refused before any write
+ * (exit 1), and the refusal lists each organization's codeless row count;
+ * `--all-organizations` is the explicit way to write the one code everywhere.
+ * A database whose rows belong to one organization runs as it always did.
+ * The scope, the refusal and the counts are the engine function's; this
+ * command parses the flags and prints.
  */
 export default class MigrateRecordCurrencyCodes extends Command {
   static override description =
@@ -89,7 +106,8 @@ export default class MigrateRecordCurrencyCodes extends Command {
 
   static override examples = [
     '$ os migrate record-currency-codes --object opportunity --field amount --code USD',
-    '$ os migrate record-currency-codes --object opportunity --field amount --code USD --apply',
+    '$ os migrate record-currency-codes --object opportunity --field amount --code USD --org org_emea --apply',
+    '$ os migrate record-currency-codes --object opportunity --field amount --code USD --all-organizations --apply',
     '$ os migrate record-currency-codes --object opportunity --field amount --code USD --apply --yes --json',
   ];
 
@@ -108,6 +126,17 @@ export default class MigrateRecordCurrencyCodes extends Command {
         'The ISO 4217 code to write, uppercase (e.g. USD). Written into every row with an amount and a blank code; ' +
         'a row that holds a code is never touched. A code that is not ISO 4217 is refused before the database is opened',
       required: true,
+    }),
+    org: Flags.string({
+      description:
+        'Fill only this organization\'s rows (its id). Required when the rows belong to more than one organization, ' +
+        'because each organization has its own home currency',
+      exclusive: ['all-organizations'],
+    }),
+    'all-organizations': Flags.boolean({
+      description: 'Write the one code into the codeless rows of every organization, explicitly',
+      default: false,
+      exclusive: ['org'],
     }),
     apply: Flags.boolean({
       description: 'Write the code (default is a read-only dry run)',
@@ -184,10 +213,13 @@ export default class MigrateRecordCurrencyCodes extends Command {
         this.exit(1);
         return;
       }
+      const scope = flags.org !== undefined
+        ? ` in organization ${flags.org}`
+        : flags['all-organizations'] ? ' in EVERY organization' : '';
       const ok = await confirm(
         chalk.bold(
           `\nWrite ${flags.code} as the currency code of every ${flags.object}.${flags.field} amount stored ` +
-            'without one, on this database? [y/N] ',
+            `without one${scope}, on this database? [y/N] `,
         ),
       );
       if (!ok) {
@@ -247,6 +279,8 @@ export default class MigrateRecordCurrencyCodes extends Command {
         field: flags.field,
         code: flags.code,
         apply,
+        organizationId: flags.org,
+        ...(flags['all-organizations'] ? { allOrganizations: true } : {}),
         maxRecords: flags['max-records'],
       });
 
@@ -270,6 +304,13 @@ export default class MigrateRecordCurrencyCodes extends Command {
 
       if (report.failures.length > 0) {
         printError(`${report.failures.length} row(s) could not be written — re-run to finish them.`);
+      } else if (report.truncated) {
+        // The cap cut the walk short: neither "done" nor "nothing to do" is known.
+        printWarning(
+          `Walk incomplete — ${report.scannedRecords} row(s) examined, ${report.codeless} codeless` +
+            (apply ? `, ${report.written} written` : '') +
+            '. Re-run without --max-records (or with a higher one) to finish.',
+        );
       } else if (apply && report.written > 0) {
         printSuccess(
           `Wrote ${report.code} on ${report.written} row(s). ` +
@@ -285,7 +326,30 @@ export default class MigrateRecordCurrencyCodes extends Command {
       if (report.failures.length > 0) this.exit(1);
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
-      if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
+      // The refusal of an unscoped run over several organizations carries each one's counts.
+      const organizations: OrganizationCounts[] | undefined =
+        Array.isArray(error?.organizations) ? error.organizations : undefined;
+      if (flags.json) {
+        await emitJson(
+          { error: error.message, ...errorCodeFields(error), ...(organizations ? { organizations } : {}) },
+          0,
+          { compact: true },
+        );
+        this.exit(1);
+      }
+      if (organizations) {
+        // The refusal follows the boot, so on a SQLite file the journal-mode note follows it too.
+        const refusedNote = describeDriverSqliteFile(stack.driver?.config) !== undefined ? ` ${JOURNAL_MODE_SWITCH_NOTE}` : '';
+        printError(`${error.message}${refusedNote}`);
+        for (const org of organizations) {
+          console.log(`  organization ${org.organizationId ?? '(none)'}: ${org.codeless} codeless row(s) of ${org.scannedRecords} scanned`);
+        }
+        printInfo(
+          'Re-run with --org <id> for each organization, with the code its rows are in, ' +
+            'or with --all-organizations to write this one code into all of them.',
+        );
+        this.exit(1);
+      }
       // `INVALID_FIELD` is the backfill refusing the field before its walk
       // ("Refused before the walk read or wrote any row."; the code was judged
       // before the boot, so it is refused there only if that judge drifts). The boot

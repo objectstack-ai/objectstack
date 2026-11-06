@@ -262,12 +262,20 @@ export function buildConfigChangeAuditSink(
           // principal, or null for an in-process/boot write.
           actor,
           object_name: entry.scope === 'global' ? CONFIG_CHANGE_GLOBAL_OBJECT_NAME : CONFIG_CHANGE_OBJECT_NAME,
-          // A settings write has no single record id: `sys_setting` is keyed on
-          // the composite `(namespace, key, scope, user_id)` and
-          // `sys_platform_setting` on `(namespace, key)`. Null is the honest
-          // answer and the shape `plugin-auth`'s run-level `import` row already
-          // uses; WHICH setting changed is in `metadata` and `new_value`.
-          record_id: null,
+          // The stored settings row the write landed on, as `upsertRow`
+          // reports it: the `sys_setting` row of a tenant or user value, the
+          // `sys_platform_setting` row of a global one, so `object_name` and
+          // `record_id` are one pointer pair. It is the id the CRUD mirror's own
+          // row about the same write carries, so the ledger's record page lists
+          // this row beside that one (`plugin-audit`'s `sys_audit_log` page).
+          // Null only when the store returned no id (the in-memory fallback);
+          // WHICH setting changed is still in `metadata`, unchanged.
+          //
+          // A row that names a record is read under the ledger's parent-record
+          // gate (`plugin-audit`'s `audit-log-read-visibility.ts`): a reader
+          // who cannot read that settings row is not served it, the rule the
+          // mirror's row already follows.
+          record_id: entry.recordId ?? null,
           // The digest, never the value — see the module header. A reset has no
           // new state to describe.
           new_value: isReset

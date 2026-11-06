@@ -16,6 +16,7 @@ import { createSmsChannel } from './sms-channel.js';
 import { createPushChannel } from './push-channel.js';
 import {
     NotificationTemplateStore,
+    TEMPLATE_BUILTINS,
     TEMPLATE_DECLARED_FALLBACK_LOCALE,
     type NotificationTemplateStoreWiring,
 } from './template-renderer.js';
@@ -494,6 +495,9 @@ export class MessagingServicePlugin implements Plugin {
             const templateStoreWiring: NotificationTemplateStoreWiring = {
                 getData,
                 [TEMPLATE_DECLARED_FALLBACK_LOCALE]: getDeclaredFallbackLocale,
+                // [#30509] The code-declared tier producers fill through
+                // `messaging.registerBuiltinTemplates`, read beneath the rows.
+                [TEMPLATE_BUILTINS]: service.builtinTemplates,
             };
             const templateStore = new NotificationTemplateStore(templateStoreWiring);
             ctx.hook('kernel:ready', async () => {
@@ -537,7 +541,7 @@ export class MessagingServicePlugin implements Plugin {
             ctx.hook('kernel:ready', async () => {
                 service.registerChannelProvider('push', lazyChannelMount({
                     resolveTransport: getPush,
-                    create: () => createPushChannel({ getPush, devices: service }),
+                    create: () => createPushChannel({ getPush, devices: service, getData, getDefaultTemplateLocale }),
                     announce: '[messaging] push channel registered (delivers to the recipient\'s enabled sys_user_device rows through the push service)',
                     logger: ctx.logger,
                 }));

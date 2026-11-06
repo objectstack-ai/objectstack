@@ -173,6 +173,7 @@ const serverResolvedTable = () =>
     ],
     object: 'crm_opportunity',
     dimensionFields: { sales_channel: 'sales_channel', competitor_name: 'competitor_name' },
+    drillScopes: { deals: {} },
     drillRawRows: [
       { sales_channel: 'domestic', competitor_name: 'orion' },
       { sales_channel: 'export', competitor_name: 'cabot' },

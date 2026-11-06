@@ -10,9 +10,10 @@
 import { describe, it, expect } from 'vitest';
 import type { UserDevice } from '@objectstack/spec/system';
 import { PushDeliveryDataSchema } from '@objectstack/spec/api';
-import { createPushChannel, deliveryData, truncateUtf8, type PushSenderSurface } from './push-channel.js';
+import { createPushChannel, deliveryData, pushNoticeLine, truncateUtf8, PUSH_NOTICE_LINES, type PushSenderSurface } from './push-channel.js';
 import { MessagingServicePlugin } from './messaging-service-plugin.js';
-import type { MessagingService } from './messaging-service.js';
+import { MessagingService } from './messaging-service.js';
+import { MemoryNotificationOutbox } from './memory-outbox.js';
 import type { Delivery } from './channel.js';
 import {
     assertEngineDeleteDispatch,
@@ -283,5 +284,82 @@ describe('MessagingServicePlugin mounts the push channel while a push service is
         const after = await messaging.emit(emit);
         expect(after.deliveries).toEqual([expect.objectContaining({ channel: 'push', recipient: 'usr_1', ok: true })]);
         expect(sent).toEqual([expect.objectContaining({ vendor: 'apns', token: 'tok-1', title: 'Deal won', data: { notificationId: 'evt_1', route: '/opportunity/9' } })]);
+    });
+});
+
+describe('createPushChannel — the notice line, in the recipient\'s language (#29920, Q4 C)', () => {
+    function userEngine(locale: unknown, opts: { fail?: boolean } = {}) {
+        const reads: Array<{ object: string; query: unknown }> = [];
+        return {
+            reads,
+            engine: {
+                async findOne(object: string, query: unknown) {
+                    reads.push({ object, query });
+                    if (opts.fail) throw new Error('engine down');
+                    return { id: 'usr_1', locale };
+                },
+            } as never,
+        };
+    }
+
+    it('sends the zh-CN line to a recipient whose sys_user.locale is zh-CN', async () => {
+        const { push, sent } = pushDouble();
+        const data = userEngine('zh-CN');
+        const channel = createPushChannel({
+            getPush: () => push,
+            devices: registry([device({ deviceId: 'd1', token: 'tok-a' })]).devices,
+            getData: () => data.engine,
+            getDefaultTemplateLocale: () => 'en-US',
+        });
+        expect((await channel.send(ctx, delivery())).ok).toBe(true);
+        expect(sent[0]!.notice).toBe(PUSH_NOTICE_LINES['zh-CN']);
+        expect(data.reads[0]).toMatchObject({ object: 'sys_user', query: { where: { id: 'usr_1' }, fields: ['locale'] } });
+    });
+
+    it('falls to the deployment default, then English; a failed read never costs the push', async () => {
+        const cases: Array<[unknown, string | undefined, boolean, string]> = [
+            [undefined, 'ja-JP', false, PUSH_NOTICE_LINES['ja-JP']!],
+            ['undefined', undefined, false, PUSH_NOTICE_LINES.en!],
+            ['fr-FR', undefined, false, PUSH_NOTICE_LINES.en!],
+            ['zh-CN', 'es-ES', true, PUSH_NOTICE_LINES['es-ES']!],
+        ];
+        for (const [own, deployment, fail, expected] of cases) {
+            const { push, sent } = pushDouble();
+            const channel = createPushChannel({
+                getPush: () => push,
+                devices: registry([device({ deviceId: 'd1', token: 'tok-a' })]).devices,
+                getData: () => userEngine(own, { fail }).engine,
+                getDefaultTemplateLocale: () => deployment,
+            });
+            expect((await channel.send(ctx, delivery())).ok).toBe(true);
+            expect(sent[0]!.notice).toBe(expected);
+        }
+    });
+
+    it('a locale with no line of its own takes its language\'s line', () => {
+        expect(pushNoticeLine('zh-Hans-CN')).toBe(PUSH_NOTICE_LINES['zh-CN']);
+        expect(pushNoticeLine('es-419')).toBe(PUSH_NOTICE_LINES['es-ES']);
+        expect(pushNoticeLine(undefined)).toBe(PUSH_NOTICE_LINES.en);
+    });
+});
+
+describe('createPushChannel — a push service with no available vendor (an unbound relay)', () => {
+    it('is suppressed at fan-out as transport_not_configured: recorded on the notification, no delivery row to dead-letter', async () => {
+        const outbox = new MemoryNotificationOutbox(1);
+        const inserts: Array<{ object: string; row: Record<string, unknown> }> = [];
+        const engine = {
+            async insert(object: string, row: Record<string, unknown>) { inserts.push({ object, row }); return { id: 'evt_1', ...row }; },
+            async find() { return []; },
+        } as never;
+        const service = new MessagingService({ logger: ctx.logger, outbox, getData: () => engine });
+        const { push, sent } = pushDouble({}, []);
+        service.registerChannel(createPushChannel({ getPush: () => push, devices: registry([device({ deviceId: 'd1', token: 'tok-a' })]).devices }));
+
+        const result = await service.emit({ topic: 'deal.won', audience: ['usr_1'], channels: ['push'], organizationId: 'org_1', payload: { title: 'Deal won' } });
+
+        expect(await outbox.list()).toHaveLength(0);
+        expect(sent).toHaveLength(0);
+        expect(inserts[0]!.row.suppressed_channels).toEqual([{ channel: 'push', reason: 'transport_not_configured' }]);
+        expect(result.suppressed).toEqual([{ channel: 'push', reason: 'transport_not_configured' }]);
     });
 });

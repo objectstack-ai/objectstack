@@ -247,11 +247,23 @@ above declared `multiple: true`), is refused
 Group by a field that stores one value instead. Like the measure check, it
 stays silent when the field's type cannot be resolved.
 
+A dimension over a **virtual** field, a `formula`, is refused under a second
+id. A formula is computed on read and never stored, whatever its `returnType`,
+so no driver has a column to group by: the analytics service refuses a query
+grouped by one with `400 INVALID_FIELD`, and refuses to compile a dataset that
+declares one over its own object with `400 DATASET_INVALID`, whichever members
+the query names. So such a dimension is refused
+(`dimension-virtual-field-refused`) at `datasets[N].dimensions[M].field`; a
+dimension through a relationship path is judged on the object the path
+reaches. Store the value in a field of its own (written by a hook or a flow
+when its source changes) and point the dimension at that field.
+
 Both checks also judge the members of an analytics cube (`analyticsCubes`),
 because an authored cube is queried through the same analytics door. A cube
 dimension whose `sql` column is declared with a structured-JSON type or as a
 multi-value field is refused (`dimension-json-stored-field-refused`) at
-`analyticsCubes[N].dimensions.<key>.sql`. A cube measure is judged exactly as a
+`analyticsCubes[N].dimensions.<key>.sql`, and one whose `sql` column is a
+formula is refused (`dimension-virtual-field-refused`) at the same path. A cube measure is judged exactly as a
 dataset measure is, its `type` being the aggregate: a pair outside the table is
 refused (`measure-aggregate-field-type-refused`, at
 `analyticsCubes[N].measures.<key>.type`). That covers `sum`, `avg`, `min` or
@@ -478,24 +490,30 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | | `os validate` | `os build` | `os lint` | runtime publish |
 |---|---|---|---|---|
 | Protocol schema (Zod) | ✓ | ✓ | — | ✓ |
-| CEL / predicate validation (ADR-0032) | ✓ | ✓ | ✓ | ✓ᶠ |
+| CEL / predicate validation (ADR-0032) | ✓ | ✓ | ✓ | ✓ᶠᵃᶜʰᵒᵛᵖ |
 | List-view navigation modes (ADR-0053) | ✓ | ✓ | ✓ | — |
 | Zod-valid but functionally inert declarations — a `summary` with no operations (ADR-0078), a managed object advertising an API method its affordances refuse (#7521) | ✓ | ✓ | ✓ | ✓ᵒ |
+| Retired object title template — an object that declares `titleFormat`, retired by ADR-0079 for `nameField` (`title-format-retired`, #29007) | ✓ | ✓ | ✓ | ✓ᵒ |
+| Roll-up aggregands — a `summaryOperations` `min` / `max` whose answer is not a number, or a `sum` / `avg` over a child field type the aggregate × field-type table refuses (`rollup/non-numeric-aggregand`) | ✓ | ✓ | ✓ | ✓ᵒ |
 | View container shape | ✓ | ✓ | ✓ | — |
 | Widget-binding integrity (ADR-0021) | ✓ | ✓ | ✓ | ✓ᵈ |
-| Dataset measure `aggregate` × the field's declared type — a pair the spec's compatibility table refuses, e.g. `avg` over a `datetime` field (#16354) | ✓ | ✓ | ✓ | — |
+| Dataset measure `aggregate` × the field's declared type — a pair the spec's compatibility table refuses, e.g. `avg` over a `datetime` field (#16354) | ✓ | ✓ | ✓ | ✓ᵈᵗ |
 | Dashboard action/route references (ADR-0049) | ✓ | ✓ | ✓ | — |
 | Filter placeholder resolvability (#3574) | ✓ | ✓ | ✓ | — |
-| Ordering comparands naming a date-range preset — `last_30_days` in a `>=` position (#8793) | ✓ | ✓ | ✓ | ✓ᵈᵛᵒᵖᶠ |
-| Empty filter combinators — `$and: []`, `$or: []`, `$not: {}` (#5330) | ✓ | ✓ | ✓ | ✓ᶠ |
-| Object & action name references (#3583) | ✓ | ✓ | ✓ | — |
-| Flow reference integrity — node writes, template paths, read-only writes (#3583) | ✓ | ✓ | ✓ | ✓ᶠ |
-| Page-component field bindings (#3583) | ✓ | ✓ | ✓ | — |
-| React page block field bindings — §10 (#4340) | ✓ | ✓ | ✓ | — |
-| Chart bindings outside dashboards (#3583) | ✓ | ✓ | ✓ | — |
-| Navigation vs. granted access (ADR-0090 D6) | ✓ | ✓ | ✓ | — |
+| Ordering comparands naming a date-range preset — `last_30_days` in a `>=` position (#8793) | ✓ | ✓ | ✓ | ✓ᵈᵛᵒᵖᶠʳ |
+| Empty filter combinators — `$and: []`, `$or: []`, `$not: {}` (#5330) | ✓ | ✓ | ✓ | ✓ᶠʳ |
+| Object & action name references (#3583) | ✓ | ✓ | ✓ | ✓ᶠᵈᵗ |
+| Reference integrity — flow node writes, template paths, read-only writes (#3583); at the publish door each write type runs only the members that declare it, and the flow members run on `flow` alone (#9313) | ✓ | ✓ | ✓ | ✓ᶠᵛᵒᵈᵗʳᵖ |
+| List-view field members — a list view's `sort` (a `sortable: false` field, a `formula`, an unknown name: `sort-field-unsortable`), its `searchableFields` (`searchable-field-unknown`) and its field references, columns, filter keys, grouping and the board bindings (`list-view-field-unknown`); the row merges three members, so its codes follow no one rule's order, and the `page` door runs the sort member only (#9313, #15495, #30095) | ✓ | ✓ | ✓ | ✓ᶠᵛᵒᵖ |
+| Page-component field bindings (#3583) | ✓ | ✓ | ✓ | ✓ᶠ |
+| React page block field bindings — §10 (#4340) | ✓ | ✓ | ✓ | ✓ᶠ |
+| Chart bindings outside dashboards (#3583) | ✓ | ✓ | ✓ | ✓ᶠʳᵛᵒ |
+| Navigation vs. granted access (ADR-0090 D6) | ✓ | ✓ | ✓ | ✓ᶠ |
 | SDUI scoped styling (ADR-0065) | ✓ | ✓ | ✓ | — |
 | SDUI component props — every `ComponentPropsMap` verdict: an undeclared prop, a value its props schema rejects, a missing `dataSource.object` binding, and a retired prop (`retiredKey()`) refused with its prescription (#23026, #23147; at the save door #23388) | ✓ | ✓ | ✓ | ✓ᵖ |
+| Page component types inside a spec-reserved namespace — a type the platform does not declare, e.g. `global:serch` (`component-type-unknown`, ADR-0078; at the save door #23388) | ✓ | ✓ | ✓ | ✓ᵖ |
+| Print page blocks — a page that declares `print` holds only printable component types (`print-page-block-unprintable`, #22158) | ✓ | ✓ | ✓ | ✓ᵖ |
+| Page variable declarations — each name once and never blank, a `defaultValue` of its declared type, a `source` naming a component the page holds (#28663, #28725) | ✓ | ✓ | ✓ | ✓ᵖ |
 | JSX / React page source parses (ADR-0080/0081) | ✓ | ✓ | ✓ | — |
 | Approval-node approvers (ADR-0090 D3) | ✓ | ✓ | ✓ | ✓ᶠ |
 | Security posture (ADR-0090 — e.g. every custom object declares `sharingModel`) | ✓ | ✓ | ✓ | ✓ˢᵖᵉᵇᵒ |
@@ -505,16 +523,25 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Declared enforcement that cannot run, **declared on another collection** — sharing-rule conditions (#4698) | ✓ | ✓ | ✓ | — |
 | Row-level-security predicates (#4983) — a permission set's policies, an object's `defaultRowScope`, a membership key's `filter` and a field permission entry's `when` (#25866); at the save door also a membership key nothing owns (#25234) | ✓ | ✓ | ✓ | ✓ᵖᵉᵒ |
 | Membership key declarations — `userField` / `valueField` columns, one key on one object, a key the registered resolver also owns (save door only) (#25234) | ✓ | ✓ | ✓ | ✓ᵒ |
+| Advisory: retired permission residue — the `allowRestore` / `allowPurge` default the parse strips in silence (`permission-retired-lifecycle-residue`, #17425) | ✓ | ✓ | ✓ | ✓ᵖᵉ |
 | Platform-schedule `create_record` organization (#6285) | — | — | — | ✓ᶠ |
 | Public-form anonymous intake on this deployment's tenancy posture — advisory only (#21476) | — | — | — | ✓ᵛ |
 | Public-form file fields — a form open to anonymous intake whose sections declare a `file`, `image`, `avatar`, `video` or `audio` field (#25650) | ✓ | ✓ | ✓ | ✓ᵛ |
+| Form thank-you panel fields — a `thank-you` panel may name only a field the engine generates on insert, on a `views[]` form or a page `object-form` (`thank-you-record-field`, #28005) | ✓ | ✓ | ✓ | ✓ᵛᵖ |
 | Autonumber `{field}` interpolation | ✓ | ✓ | ✓ | ✓ᵒ |
 | Email template HTML hole placements — a hole in a placement the mail renderer's encoding does not suit (#25189) | ✓ | ✓ | ✓ | ✓ᵉ |
+| Email template hole grammar — one whitelisted formatter per hole, a `currency` argument that is an ISO 4217 code or a declared `@path` (`email-template-hole-grammar`, #26799) | ✓ | ✓ | ✓ | ✓ᵉ |
 | View references — form targets, view-key collisions (#2554) | ✓ | ✓ | ✓ | — |
 | Flow authoring anti-patterns (#1874) | ✓ | ✓ | ✓ | ✓ᶠ |
 | Flow trigger readiness — a flow that looks armed and never launches (#5762) | ✓ | ✓ | ✓ | ✓ᶠ |
-| `views[]` and page-component conditional-visibility predicates — CEL syntax, parse budget, bare identifiers, binding-root layer; schema path refs on `views[]` only (ADR-0089 D3b, #7010; page components at the save door #24491) | ✓ | ✓ | ✓ | ✓ᵛᵖ |
-| Advisory: record titles, semantic field pointers (ADR-0085), form-section layout, action placement, seed replay/state safety, capability references, liveness | ✓ | ✓ | ✓ | — |
+| Flow `api` trigger signing — a start node with no signing secret, or a `config.signature` the spec refuses; a withheld secret that is stored reads as present at the save door (`flow-api-trigger-secret-missing`, `flow-api-trigger-signature-unusable`, #20611, #30009) | ✓ | ✓ | ✓ | ✓ᶠ |
+| Flow region shape — a `loop`, `parallel` or `try_catch` region the automation engine refuses to register (`flow-region-shape-invalid`, ADR-0031, #29233) | ✓ | ✓ | ✓ | ✓ᶠ |
+| Advisory: credential literals in a flow — an `http` node's headers or url query, a node's `connectorConfig.input` (`flow-credential-literal`, #20698) | ✓ | ✓ | ✓ | ✓ᶠ |
+| Advisory: credential literals in a connector — its header and environment maps, and a stdio MCP credential route (`connector-credential-literal`, #29424) | ✓ | ✓ | ✓ | ✓ᶜ |
+| `views[]` and page-component conditional-visibility predicates — CEL syntax, parse budget, bare identifiers, binding-root layer; schema path refs on `views[]` only (ADR-0089 D3b, #7010; page components at the save door #24491); an app navigation entry's `visible` at the save door (#28663) | ✓ | ✓ | ✓ | ✓ᵛᵖᵃ |
+| Advisory: record titles, semantic field pointers (ADR-0085), action placement, seed replay/state safety, capability references | ✓ | ✓ | ✓ | — |
+| Advisory: form-section layout | ✓ | ✓ | ✓ | ✓ᵛ |
+| Advisory: liveness | ✓ | ✓ | ✓ | ✓ᵉᵐᵈˢ |
 | Package docs — flatness, prefixes, links (ADR-0046) | ✓ | ✓ | ✓ | — |
 | Undeclared authoring keys — every metadata collection (#3786) and the stack's own top-level keys (#4167) | ✓ | ✓ | — | — |
 | Collection item owner stamps — an item whose body `_packageId` names a package other than the one that ships it: the stack's `manifest.id` (none without a `manifest`); in a `packages[]` artifact each body's own `id`, and `manifest.id` for a top-level item no body declares, except seed `data`, `datasets` and `jobs`, which the boot never files from the top level. The boot and the install refuse the same stamp when they register the item (ADR-0010, ADR-0130 D4) | ✓ | ✓ | — | — |
@@ -525,11 +552,17 @@ orthogonal to both, and no cell here can carry it; it is written out in
 **Every superscript in the `runtime publish` column is one metadata type whose
 writes that rule inspects: `✓ᶠ` `flow`, `✓ᵛ` `view`, `✓ᵈ` `dashboard`, `✓ᵒ`
 `object`, `✓ᵖ` `page`, `✓ˢ` `seed`, `✓ᵇ` `book`, `✓ᵖᵉ` `permission`,
-`✓ᵖᵒ` `position`, `✓ᵃ` `app`, `✓ᵉ` `email_template`** — the two
+`✓ᵖᵒ` `position`, `✓ᵃ` `app`, `✓ᵉ` `email_template`, `✓ᵈᵗ` `dataset`, `✓ʳ` `report`,
+`✓ᵃᶜ` `action`, `✓ʰ` `hook`, `✓ᵐ` `mapping`, `✓ᵈˢ` `datasource`, `✓ᶜ` `connector`** — the two
 `ᵖ`-initial pairs carry a second letter because `page` already holds `ᵖ` on its
-own. Read the codes **longest-first**: `ᵖᵒ` is `position`, never `page`
-followed by `object`, and `ᵖᵉ` is `permission`, never `page` followed by
-`email_template`. A cell lists one superscript per declared type, in the order the rule declares them, and that
+own, `dataset` and `datasource` carry `ᵈᵗ` and `ᵈˢ` because `dashboard` holds `ᵈ`,
+and `action` carries `ᵃᶜ` because `app` holds `ᵃ`, while `connector` takes the bare `ᶜ`. Read the codes **longest-first**: `ᵖᵒ` is `position`, never `page`
+followed by `object`, `ᵖᵉ` is `permission`, never `page` followed by
+`email_template`, `ᵈᵗ` is `dataset`, `ᵈˢ` is `datasource` and `ᵃᶜ` is `action`.
+A row whose rules are members of the reference-integrity suite reads the
+members' own `runtimeTypes` in `packages/lint/src/reference-integrity-suite.ts`,
+and a member that declares none runs on `flow` writes only (the suite's frozen
+default), so its cell reads `✓ᶠ`. A cell lists one superscript per declared type, in the order the rule declares them, and that
 rule's own `runtimeTypes` in `AUTHORING_RULES` is the authority — the set has
 grown a type at a time (#4463 shipped P1 as `flow` and four rule families, #7220
 moved the whole `views[]` visibility-predicate family across in one edit, #7529
@@ -748,9 +781,10 @@ no package provenance (#9612); a provenance it cannot read narrows nothing at al
 A dashboard or report write also keeps the base object of each dataset it binds
 (a widget's `dataset`; a report's `dataset` and each joined block's), because the
 datasets are never narrowed and the dataset query resolves a filter against that
-object whichever package ships it: a filter key the object lacks is refused there
-just as it is on a dataset inside the closure (#30005). No other write type keeps
-it, so a flow or a list view never reaches an outside object through a dataset.
+object whichever package ships it: a filter key that neither the object nor the
+dataset's dimensions name is refused there just as it is on a dataset inside the
+closure (#30005). No other write type keeps it, so a flow or a list view never
+reaches an outside object through a dataset.
 That changes what a rule can **resolve**, never which rules run, and nothing at
 this door walks `packages[]`. Two rules are told the closure is in force. A flow
 whose trigger object is outside it is refused with `flow-trigger-unknown-object`

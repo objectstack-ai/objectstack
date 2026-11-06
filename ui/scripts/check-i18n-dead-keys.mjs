@@ -465,7 +465,13 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { EXCLUDED_TRANSLATORS, analyze, collectEnKeys, collectSourceFiles } from './check-i18n-call-site-keys.mjs';
+import {
+  EXCLUDED_TRANSLATORS,
+  PACK_DEFINITION_DIRS,
+  analyze,
+  collectEnKeys,
+  collectSourceFiles,
+} from './check-i18n-call-site-keys.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -512,8 +518,9 @@ const TEXT_SWEEP_SKIP_DIRS = new Set([
  */
 const PACK_IMPORT_SPECIFIER = '@object-ui/i18n';
 
-/** The locale pack directory — every candidate's DEFINITION lives here, so a
- *  hit inside it is not evidence of a reference and must not count as one. */
+/** The locale pack directory — every candidate's DEFINITION lives here or in
+ *  a pack-shaped namespace (`PACK_DEFINITION_DIRS`, objectstack#30588), so a
+ *  hit inside one is not evidence of a reference and must not count as one. */
 const LOCALES_DIR = 'packages/i18n/src/locales/';
 
 /** Appended to a hit path that only the property-chain probe matched, so the
@@ -624,7 +631,7 @@ function occursAtKeyBoundary(content, key) {
 
 /**
  * Whether the literal dotted string of each `key` in `keys` occurs anywhere in
- * the repo outside `LOCALES_DIR`, OR — for keys of three or more segments —
+ * the repo outside `PACK_DEFINITION_DIRS`, OR — for keys of three or more segments —
  * its property chain does (`propertyChainProbe()`; header section "The
  * property-chain leg").
  *
@@ -641,7 +648,8 @@ function occursAtKeyBoundary(content, key) {
  * @param {object} [options]
  * @param {string | string[]} [options.definitionPrefix] Repo-relative path
  *   prefix (or prefixes) whose hits are NOT evidence, because it is where the
- *   keys are defined. Defaults to `LOCALES_DIR` (the packs). The designer
+ *   keys are defined. Defaults to `PACK_DEFINITION_DIRS` (the packs and the
+ *   pack-shaped namespaces). The designer
  *   corpus passes its table FILE and its namespace homes instead — the whole
  *   table file, not just its two table literals, because that module's header
  *   docblock quotes example keys in prose and a grep cannot tell prose from a
@@ -659,7 +667,7 @@ function occursAtKeyBoundary(content, key) {
  *   absent from the map, or mapped to `[]`, has no textual footprint at all.
  */
 export function textFootprint(root, keys, options = {}) {
-  const { definitionPrefix = LOCALES_DIR, propertyChain = true, keyBoundary = true } = options;
+  const { definitionPrefix = PACK_DEFINITION_DIRS, propertyChain = true, keyBoundary = true } = options;
   const definitionPrefixes = [definitionPrefix].flat();
   const result = new Map(keys.map((key) => [key, []]));
   if (keys.length === 0) return result;

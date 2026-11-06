@@ -32,6 +32,12 @@ import { enObjects } from './en.objects.generated.js';
 import { zhCNObjects } from './zh-CN.objects.generated.js';
 import { jaJPObjects } from './ja-JP.objects.generated.js';
 import { esESObjects } from './es-ES.objects.generated.js';
+import { zhHantObjects } from './zh-Hant.objects.generated.js';
+import { frObjects } from './fr.objects.generated.js';
+import { ptBRObjects } from './pt-BR.objects.generated.js';
+import { ruObjects } from './ru.objects.generated.js';
+import { deObjects } from './de.objects.generated.js';
+import { koObjects } from './ko.objects.generated.js';
 
 /**
  * The objects ADR-0090 P1 renamed that still exist — the exact surface the
@@ -47,6 +53,12 @@ const LOCALES = [
   { name: 'es-ES', objs: esESObjects as Record<string, unknown>, stale: /\brol(es)?\b/i },
   { name: 'zh-CN', objs: zhCNObjects as Record<string, unknown>, stale: /角色/ },
   { name: 'ja-JP', objs: jaJPObjects as Record<string, unknown>, stale: /ロール/ },
+  { name: 'zh-Hant', objs: zhHantObjects as Record<string, unknown>, stale: /角色/ },
+  { name: 'fr', objs: frObjects as Record<string, unknown>, stale: /\brôles?\b/i },
+  { name: 'pt-BR', objs: ptBRObjects as Record<string, unknown>, stale: /\bpap(el|éis)\b/i },
+  { name: 'ru', objs: ruObjects as Record<string, unknown>, stale: /рол(ь|и|ей|ям|ями|ях)(?![а-яё])/i },
+  { name: 'de', objs: deObjects as Record<string, unknown>, stale: /\bRollen?\b/ },
+  { name: 'ko', objs: koObjects as Record<string, unknown>, stale: /역할/ },
 ];
 
 /** Every string leaf under `node`, as `[dottedPath, value]`. */

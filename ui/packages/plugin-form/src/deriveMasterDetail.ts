@@ -252,7 +252,7 @@ function deriveColumn(name: string, d: any, booleanLabel: BooleanValueLabel): Gr
  * is reported, because the grid does not read it.
  *
  * A currency amount's decimal places are its currency's: `GridField`'s
- * `currencyWidth` takes the resolved currency's ISO 4217 minor unit and never
+ * `currencyWidth` takes the resolved currency's CLDR fraction digits and never
  * the column's `scale` (ruling B on objectstack-ai/objectstack#19629, ruling 乙
  * on objectstack-ai/objectstack#19910). `@objectstack/spec` 17.5.0 refuses the
  * key on an `inlineColumns` entry that DECLARES `type: 'currency'`, and its own
@@ -298,7 +298,7 @@ function reportCurrencyColumnScale(
   console.warn(
     `[object-ui] \`scale\` is not valid on a \`currency\` inline grid column — delete the key. ` +
       `Inline grid column '${col.name}' ${how}, so its \`scale: ${String(col.scale)}\` is not read: ` +
-      `the currency's ISO 4217 minor unit (2 for USD, 0 for JPY, 3 for KWD) decides how the cell ` +
+      `the currency's CLDR fraction digits (2 for USD, 0 for JPY, 3 for KWD) decide how the cell ` +
       `displays the amount and the width a computed amount is rounded to.`,
   );
 }

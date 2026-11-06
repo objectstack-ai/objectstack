@@ -8,7 +8,7 @@
  * strings were seeded from @objectstack/platform-objects.)
  *
  *   os i18n extract packages/plugins/plugin-sharing/scripts/i18n-extract.config.ts \
- *     --locales=zh-CN,ja-JP,es-ES --fill=default --objects-only --no-metadata-forms \
+ *     --locales=zh-CN,ja-JP,es-ES,zh-Hant,ar,fr,pt-BR,ru,de,ko --fill=default --objects-only --no-metadata-forms \
  *     --source-hashes \
  *     --out=packages/plugins/plugin-sharing/src/translations
  *
@@ -34,14 +34,29 @@
  * recognised flag spelling out of this whole comment, so a second spelling
  * would keep the opt-in switched on after someone deleted it from the command
  * block — the one place that decides.
+ *
+ * `pages` declares the record page this plugin ships (`sys_queue_detail`).
+ * The command above writes the objects sub-tree only, so the page's one bundle
+ * key, its page-level `label`, is HAND-AUTHORED in `src/translations/pages.ts`
+ * and rides in the `translations` baseline below. Declaring the page here is
+ * what puts its label in the coverage ratchet's population.
  */
 
 import { defineStack, type ObjectStackDefinition } from '@objectstack/spec';
-import { SysRecordShare, SysSharingRule, SysShareLink } from '../src/objects/index.js';
+import { SysRecordShare, SysSharingRule, SysShareLink, SysQueue, SysQueueMember } from '../src/objects/index.js';
 import { enObjects } from '../src/translations/en.objects.generated.js';
 import { zhCNObjects } from '../src/translations/zh-CN.objects.generated.js';
 import { jaJPObjects } from '../src/translations/ja-JP.objects.generated.js';
 import { esESObjects } from '../src/translations/es-ES.objects.generated.js';
+import { zhHantObjects } from '../src/translations/zh-Hant.objects.generated.js';
+import { arObjects } from '../src/translations/ar.objects.generated.js';
+import { frObjects } from '../src/translations/fr.objects.generated.js';
+import { ptBRObjects } from '../src/translations/pt-BR.objects.generated.js';
+import { ruObjects } from '../src/translations/ru.objects.generated.js';
+import { deObjects } from '../src/translations/de.objects.generated.js';
+import { koObjects } from '../src/translations/ko.objects.generated.js';
+import { SysQueueDetailPage } from '../src/sys-queue.page.js';
+import { sharingPageTranslations } from '../src/translations/pages.js';
 
 /**
  * The annotation is load-bearing, not decoration (#10868). `defineStack`
@@ -58,12 +73,20 @@ import { esESObjects } from '../src/translations/es-ES.objects.generated.js';
  * precision: the annotated type is the function's own return type.
  */
 const config: ObjectStackDefinition = defineStack({
-  objects: [SysRecordShare, SysSharingRule, SysShareLink] as any,
+  objects: [SysRecordShare, SysSharingRule, SysShareLink, SysQueue, SysQueueMember] as any,
+  pages: [SysQueueDetailPage],
   translations: [
-    { en: { objects: enObjects } },
-    { 'zh-CN': { objects: zhCNObjects } },
-    { 'ja-JP': { objects: jaJPObjects } },
-    { 'es-ES': { objects: esESObjects } },
+    { en: { objects: enObjects, pages: sharingPageTranslations.en } },
+    { 'zh-CN': { objects: zhCNObjects, pages: sharingPageTranslations['zh-CN'] } },
+    { 'ja-JP': { objects: jaJPObjects, pages: sharingPageTranslations['ja-JP'] } },
+    { 'es-ES': { objects: esESObjects, pages: sharingPageTranslations['es-ES'] } },
+    { 'zh-Hant': { objects: zhHantObjects, pages: sharingPageTranslations['zh-Hant'] } },
+    { 'ar': { objects: arObjects, pages: sharingPageTranslations['ar'] } },
+    { 'fr': { objects: frObjects, pages: sharingPageTranslations['fr'] } },
+    { 'pt-BR': { objects: ptBRObjects, pages: sharingPageTranslations['pt-BR'] } },
+    { 'ru': { objects: ruObjects, pages: sharingPageTranslations['ru'] } },
+    { 'de': { objects: deObjects, pages: sharingPageTranslations['de'] } },
+    { 'ko': { objects: koObjects, pages: sharingPageTranslations['ko'] } },
   ],
 });
 

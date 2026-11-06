@@ -84,7 +84,6 @@
     "@object-ui/plugin-timeline": "workspace:*",
     "@object-ui/plugin-tree": "workspace:*",
     "@object-ui/plugin-view": "workspace:*",
-    "@object-ui/providers": "workspace:*",
     "@object-ui/react": "workspace:*",
     "@object-ui/test-support": "workspace:*",
     "@object-ui/types": "workspace:*",

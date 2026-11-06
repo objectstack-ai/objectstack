@@ -273,7 +273,7 @@ describe('[#20338] one predicate: the draft doors admit exactly who GET /meta/_d
 /**
  * Every draft switch `meta.ts` reads, found by walking its AST: a comparison
  * against the literal `'draft'`, a `.previewDrafts` read, and a `.listDrafts`
- * reference. Each must be LEDGERED below, and each `read` row must be admitted
+ * reference, and [#29814] the layered read's `withDraft` option. Each must be LEDGERED below, and each `read` row must be admitted
  * by `mayReadPendingDrafts` — either inside the switch's own declaration
  * (`const previewDrafts = … && mayReadPendingDrafts(ec)`), or behind an earlier
  * `if (!mayReadPendingDrafts(…))` refusal in an enclosing block (the `_drafts`
@@ -296,6 +296,8 @@ describe('[#20338] census: every draft switch in domains/meta.ts is ledgered, an
         { site: "query.state.toLowerCase() === 'draft'", count: 1, disposition: 'read' },
         // `GET /meta/_drafts` — the probe and the call, behind the 403.
         { site: 'protocol.listDrafts', count: 2, disposition: 'listing' },
+        // [#29814] The layered view's pending draft layer, declared with its admission.
+        { site: 'withDraft', count: 1, disposition: 'read' },
     ];
 
     const isAdmission = (n: ts.Node): boolean =>
@@ -310,7 +312,9 @@ describe('[#20338] census: every draft switch in domains/meta.ts is ledgered, an
         (ts.isBinaryExpression(n)
             && (n.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken || n.operatorToken.kind === ts.SyntaxKind.EqualsEqualsToken)
             && [n.left, n.right].some((side) => ts.isStringLiteral(side) && side.text === 'draft'))
-        || (ts.isPropertyAccessExpression(n) && ['previewDrafts', 'listDrafts'].includes(n.name.text));
+        || (ts.isPropertyAccessExpression(n) && ['previewDrafts', 'listDrafts'].includes(n.name.text))
+        // [#29814] The layered read's draft option, `{ withDraft: … }`, keyed by its name.
+        || (ts.isIdentifier(n) && n.text === 'withDraft' && ts.isPropertyAssignment(n.parent) && n.parent.name === n);
 
     const sites: ts.Node[] = [];
     const visit = (n: ts.Node): void => { if (isDraftSite(n)) sites.push(n); ts.forEachChild(n, visit); };

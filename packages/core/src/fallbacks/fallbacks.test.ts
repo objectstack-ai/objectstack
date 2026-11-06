@@ -2,9 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { createMemoryCache } from './memory-cache';
 import { createMemoryQueue } from './memory-queue';
 import { createMemoryJob } from './memory-job';
-import { createMemoryI18n, resolveLocale } from './memory-i18n';
+import { createMemoryI18n, resolveLocale, resolveOfferedLocale } from './memory-i18n';
 import { CORE_FALLBACK_FACTORIES } from './index';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
+import { resolveBundleLocale } from '@objectstack/spec/system';
 
 describe('CORE_FALLBACK_FACTORIES', () => {
     // [#10746] `job` is deliberately OFF this list — a fallback must not fake
@@ -295,6 +296,93 @@ describe('resolveLocale', () => {
     });
 });
 
+// One case list, run against core's `resolveLocale` (a list) and the spec's
+// `resolveBundleLocale` (a bundle's keys), so the two server resolvers cannot
+// drift. The platform locale table's read aliases decide before any
+// base-language or first-variant guess: a Traditional reader reaches a
+// registered `zh-Hant`, a Simplified one `zh-CN`, in either registration order.
+describe('resolveLocale and resolveBundleLocale — one shared case list', () => {
+    const CASES: Array<[requested: string, available: string[], expected: string | undefined]> = [
+        ['zh-TW', ['en', 'zh-CN', 'zh-Hant'], 'zh-Hant'],
+        ['zh-TW', ['en', 'zh-Hant', 'zh-CN'], 'zh-Hant'],
+        ['zh-HK', ['en', 'zh-CN', 'zh-Hant'], 'zh-Hant'],
+        ['zh-HK', ['en', 'zh-Hant', 'zh-CN'], 'zh-Hant'],
+        ['zh-MO', ['en', 'zh-CN', 'zh-Hant'], 'zh-Hant'],
+        ['zh-MO', ['en', 'zh-Hant', 'zh-CN'], 'zh-Hant'],
+        ['zh-CN', ['en', 'zh-CN', 'zh-Hant'], 'zh-CN'],
+        ['zh-CN', ['en', 'zh-Hant', 'zh-CN'], 'zh-CN'],
+        ['zh', ['en', 'zh-Hant', 'zh-CN'], 'zh-CN'],
+        ['zh-SG', ['en', 'zh-Hant', 'zh-CN'], 'zh-CN'],
+        ['zh-Hans', ['en', 'zh-Hant', 'zh-CN'], 'zh-CN'],
+        ['zh-TW', ['en', 'zh', 'zh-Hant'], 'zh-Hant'],
+        // The script-subtag spellings a browser or OS sends are read aliases too.
+        ['zh-Hant-TW', ['en', 'zh-CN', 'zh-Hant'], 'zh-Hant'],
+        ['zh-Hant-TW', ['en', 'zh-Hant', 'zh-CN'], 'zh-Hant'],
+        ['zh-Hant-HK', ['en', 'zh-CN', 'zh-Hant'], 'zh-Hant'],
+        ['zh-Hant-HK', ['en', 'zh-Hant', 'zh-CN'], 'zh-Hant'],
+        ['zh-Hant-MO', ['en', 'zh-CN', 'zh-Hant'], 'zh-Hant'],
+        ['zh-Hant-MO', ['en', 'zh-Hant', 'zh-CN'], 'zh-Hant'],
+        ['zh-Hans-CN', ['en', 'zh-CN', 'zh-Hant'], 'zh-CN'],
+        ['zh-Hans-CN', ['en', 'zh-Hant', 'zh-CN'], 'zh-CN'],
+        ['zh-Hans-SG', ['en', 'zh-CN', 'zh-Hant'], 'zh-CN'],
+        ['zh-Hans-SG', ['en', 'zh-Hant', 'zh-CN'], 'zh-CN'],
+        ['ZH-HANT-tw', ['en', 'zh-CN', 'zh-Hant'], 'zh-Hant'],
+        ['zh-Hant-TW', ['en', 'zh', 'zh-Hant'], 'zh-Hant'],
+        // ...and so are keys spelled that way: a key counts as the script it names.
+        ['zh-TW', ['en', 'zh-CN', 'zh-Hant-TW'], 'zh-Hant-TW'],
+        ['zh-TW', ['en', 'zh-Hant-TW', 'zh-CN'], 'zh-Hant-TW'],
+        ['zh-Hant', ['en', 'zh-CN', 'zh-Hant-TW'], 'zh-Hant-TW'],
+        ['zh-Hant', ['en', 'zh-Hant-TW', 'zh-CN'], 'zh-Hant-TW'],
+        ['zh-CN', ['en', 'zh-Hant', 'zh-Hans-CN'], 'zh-Hans-CN'],
+        ['zh-CN', ['en', 'zh-Hans-CN', 'zh-Hant'], 'zh-Hans-CN'],
+        ['zh-Hant-TW', ['en', 'zh', 'zh-Hant-HK'], 'zh-Hant-HK'],
+        ['zh-Hant-TW', ['en', 'zh-Hant-HK', 'zh'], 'zh-Hant-HK'],
+        // One script registered: a related language still beats none.
+        ['zh-Hant-TW', ['en', 'zh-CN'], 'zh-CN'],
+        // Today's alias-spelled bundles keep answering.
+        ['ja', ['en', 'zh-CN', 'ja-JP', 'es-ES'], 'ja-JP'],
+        ['es', ['en', 'zh-CN', 'ja-JP', 'es-ES'], 'es-ES'],
+        ['zh-TW', ['en', 'zh-CN', 'ja-JP', 'es-ES'], 'zh-CN'],
+        ['zh-TW', ['en', 'zh'], 'zh'],
+        // A code the table does not know falls back as before.
+        ['es-MX', ['en', 'es-ES'], 'es-ES'],
+        ['en-GB', ['en-US', 'en'], 'en'],
+        ['fr', ['en', 'zh-CN'], undefined],
+        ['zh-TW', [], undefined],
+    ];
+
+    it.each(CASES)('resolveLocale(%s, %j) → %s', (requested, available, expected) => {
+        expect(resolveLocale(requested, available)).toBe(expected);
+    });
+
+    it.each(CASES)('resolveBundleLocale(%j over %j) → %s', (requested, available, expected) => {
+        const bundle = Object.fromEntries(available.map((code) => [code, {}]));
+        expect(resolveBundleLocale(bundle, requested)).toBe(expected);
+    });
+
+    it('a zh-HK reader of the in-memory service gets the zh-Hant bundle', () => {
+        const i18n = createMemoryI18n();
+        i18n.loadTranslations('en', { settings: 'Settings' });
+        i18n.loadTranslations('zh-CN', { settings: '设置' });
+        i18n.loadTranslations('zh-Hant', { settings: '設定' });
+        expect(i18n.t('settings', 'zh-HK')).toBe('設定');
+        expect(i18n.t('settings', 'zh')).toBe('设置');
+    });
+
+    it.each<[order: string, loadOrder: string[]]>([
+        ['Simplified loaded first', ['zh-CN', 'zh-Hant']],
+        ['Traditional loaded first', ['zh-Hant', 'zh-CN']],
+    ])('a script-subtag reader of the in-memory service gets its own script (%s)', (_order, loadOrder) => {
+        const text: Record<string, string> = { 'zh-CN': '设置', 'zh-Hant': '設定' };
+        const i18n = createMemoryI18n();
+        i18n.loadTranslations('en', { settings: 'Settings' });
+        for (const locale of loadOrder) i18n.loadTranslations(locale, { settings: text[locale] });
+        expect(i18n.t('settings', 'zh-Hant-TW')).toBe('設定');
+        expect(i18n.t('settings', 'zh-Hant-HK')).toBe('設定');
+        expect(i18n.t('settings', 'zh-Hans-CN')).toBe('设置');
+    });
+});
+
 describe('createMemoryI18n locale fallback', () => {
     it('should resolve translations via locale fallback (zh → zh-CN)', () => {
         const i18n = createMemoryI18n();
@@ -571,5 +659,44 @@ describe('createMemoryI18n declared fallbackLocale (#15694)', () => {
 
         expect(typeof i18n.setFallbackLocale).toBe('function');
         expect(i18n.getFallbackLocale).toBeUndefined();
+    });
+});
+
+// #30456: the one matcher for "is this locale offered here, and as which code",
+// shared by Setup's default language and the IdP locale claim.
+describe('resolveOfferedLocale', () => {
+    it('answers what resolveLocale answers, on the shared case list too', () => {
+        for (const [requested, available] of [
+            ['zh-TW', ['en', 'zh-CN', 'zh-Hant']],
+            ['zh', ['en', 'zh-Hant', 'zh-CN']],
+            ['zh-HK', ['zh-TW', 'zh-Hant']],
+            ['es-MX', ['en', 'es-ES']],
+            ['fr', ['en', 'zh-CN']],
+        ] as Array<[string, string[]]>) {
+            expect(resolveOfferedLocale(requested, available)).toBe(resolveLocale(requested, available));
+        }
+    });
+
+    it('takes resolveLocale\'s exact and case-insensitive steps first', () => {
+        expect(resolveOfferedLocale('zh-CN', ['en', 'zh-CN'])).toBe('zh-CN');
+        expect(resolveOfferedLocale('zh-cn', ['en', 'zh-CN'])).toBe('zh-CN');
+    });
+
+    it('then the platform table\'s language, so a script or region lands on its own script', () => {
+        // resolveOfferedLocale is resolveLocale: one ladder, so both answer by script.
+        expect(resolveLocale('zh-TW', ['zh-Hans', 'zh-Hant'])).toBe('zh-Hant');
+        expect(resolveOfferedLocale('zh-TW', ['zh-Hans', 'zh-Hant'])).toBe('zh-Hant');
+        expect(resolveOfferedLocale('zh-CN', ['zh-Hant', 'zh-Hans'])).toBe('zh-Hans');
+        expect(resolveOfferedLocale('en-US', ['zh-CN', 'en'])).toBe('en');
+    });
+
+    it('then resolveLocale\'s base-language and variant steps', () => {
+        expect(resolveOfferedLocale('fr-FR', ['en', 'fr'])).toBe('fr');
+        expect(resolveOfferedLocale('fr', ['en', 'fr-FR'])).toBe('fr-FR');
+    });
+
+    it('answers undefined for a language not offered, and for an empty list', () => {
+        expect(resolveOfferedLocale('de-DE', ['en', 'fr'])).toBeUndefined();
+        expect(resolveOfferedLocale('en', [])).toBeUndefined();
     });
 });

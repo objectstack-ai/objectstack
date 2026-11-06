@@ -505,6 +505,48 @@ describe('[#30065] a declared .custom action override is the packaged action, at
         expect((await p.getMetaItemLayered({ type: 'action', name: ACTION })).effective.label).toBe('SHIPPED');
     });
 
+    it('[#30542] an override that moves the action to another object is refused at the save door, by the rule os validate and the install door give it', async () => {
+        const { protocol, engine } = await boot();
+        await install(protocol, PAIR);
+        const moved = actionBody('MOVED', { ...declared, objectName: 'showcase_other' });
+        const refusal = await protocol.saveMetaItem({
+            type: 'action', name: ACTION, item: moved, mode: 'draft', packageId: PAIR,
+        } as any).then(() => undefined, (e: any) => e);
+        expect(refusal).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+        // `os validate` and the install door key the base's action
+        // `<objectName>:<name>`, so the base ships no such item there.
+        expect((protocol as any).overrideWriteVerdict({ type: 'action', name: ACTION, packageId: PAIR, item: moved }))
+            .toMatchObject({ verdict: 'refuse', rule: 'declared_package_ships_no_such_item' });
+        expect(await stored(engine)).toEqual([]);
+        expect(await everyRead(protocol, engine)).toEqual(servedAs('SHIPPED'));
+        // CONTROL: on the base's own object the same declaration is admitted.
+        expect((protocol as any).overrideWriteVerdict({ type: 'action', name: ACTION, packageId: PAIR, item: actionBody('OURS', declared) }))
+            .toMatchObject({ verdict: 'admit' });
+    });
+
+    it('[#30623] the moved override\'s refusal names both objects and tells the author to keep the base action\'s objectName', async () => {
+        const { protocol } = await boot();
+        await install(protocol, PAIR);
+        const moved = actionBody('MOVED', { ...declared, objectName: 'showcase_other' });
+        const refusal = await protocol.saveMetaItem({
+            type: 'action', name: ACTION, item: moved, mode: 'draft', packageId: PAIR,
+        } as any).then(() => undefined, (e: any) => e);
+        expect(refusal).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+        expect(refusal.message).toBe(
+            `'action/${ACTION}' declares an override of '${BASE}' on object 'showcase_other', but '${BASE}' ships its action `
+            + `'${ACTION}' on object 'showcase_task'. An override replaces the base's action on that action's own object: `
+            + `keep the base action's \`objectName: 'showcase_task'\` in the override, or remove \`overrides\` to keep it as `
+            + `'${PAIR}''s own item (ADR-0146 D2).`);
+        // CONTROL: a name the base does not ship at all keeps the name sentence.
+        const unknown = { ...actionBody('NONE', declared), name: 'showcase_task_nope' };
+        expect((protocol as any).overrideWriteVerdict({ type: 'action', name: 'showcase_task_nope', packageId: PAIR, item: unknown }))
+            .toEqual({
+                verdict: 'refuse', rule: 'declared_package_ships_no_such_item',
+                message: `'action/showcase_task_nope' declares an override of '${BASE}', which ships no action named 'showcase_task_nope'. `
+                    + `Remove \`overrides\` to keep it as '${PAIR}''s own item, or correct the name (ADR-0146 D2).`,
+            });
+    });
+
     it('the pair\'s undeclared save is refused, and the remedy names the declaration, never a clone', async () => {
         const { protocol } = await boot();
         await install(protocol, PAIR);

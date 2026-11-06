@@ -127,3 +127,24 @@ describe('client.security.suggestedBindings', () => {
         expect(result).toEqual({ suggestion: { id: 'sug/3', status: 'pending' } });
     });
 });
+
+describe('client.security.assignedWork (#30205)', () => {
+    it('count GETs the user-scoped route, encoding the id, and unwraps the summary', async () => {
+        const summary = { userId: 'u/1', objects: [{ object: 'ticket', field: 'owner_id', count: 3, transferable: true }], total: 3, truncated: false, unreadable: [] };
+        const { client, fetchMock } = createMockClient({ success: true, data: summary });
+        const result = await client.security.assignedWork.count('u/1');
+        expect(String(fetchMock.mock.calls[0][0])).toBe('http://localhost:3000/api/v1/security/users/u%2F1/assigned-work');
+        expect(result).toEqual(summary);
+    });
+
+    it('transfer POSTs the target and the optional object list', async () => {
+        const report = { fromUserId: 'u_1', toUserId: 'u_2', objects: [], updated: 0, failed: 0, remaining: 0 };
+        const { client, fetchMock } = createMockClient({ success: true, data: report });
+        const result = await client.security.assignedWork.transfer('u_1', { toUserId: 'u_2', objects: ['ticket'] });
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe('http://localhost:3000/api/v1/security/users/u_1/assigned-work/transfer');
+        expect(init.method).toBe('POST');
+        expect(JSON.parse(init.body)).toEqual({ toUserId: 'u_2', objects: ['ticket'] });
+        expect(result).toEqual(report);
+    });
+});

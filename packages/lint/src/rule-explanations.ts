@@ -485,11 +485,16 @@ const WIDGET_FILTER_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'renders successfully either way: nothing reports the miss.',
     'Each key is resolved on the object graph against the dataset\'s object — a dotted ' +
       '`relationship.field` path hop by hop, a bare name against the authored and registry-injected ' +
-      'columns — and the verdict names the hop that failed. This rule judges the KEYS; ' +
-      '`filter-token-unknown` judges the values in the same subtree. Not reported: an object this ' +
-      'stack does not define, or one with no readable field map.',
-    'To fix it, filter on a field of the dataset\'s object, or on a `relationship[.relationship].field` ' +
-      'path: every hop must be a relationship field (lookup, master_detail, user or tree; ADR-0021 ' +
+      'columns, then against the dataset\'s dimensions, which the dataset query binds through each ' +
+      'dimension\'s field — and the verdict names the hop that failed. A bare key naming one of the ' +
+      'dataset\'s measures is refused with its own message: a filter compares each row before ' +
+      'aggregation, so the dataset query would compare the measure\'s raw column (or no column at ' +
+      'all, for a count, derived or duration measure), never the aggregated value. ' +
+      'This rule judges the KEYS; `filter-token-unknown` judges the values in the same subtree. ' +
+      'Not reported: an object this stack does not define, or one with no readable field map.',
+    'To fix it, filter on a field of the dataset\'s object, on a dimension of the dataset, or on a ' +
+      '`relationship[.relationship].field` path: every hop must be a relationship field ' +
+      '(lookup, master_detail, user or tree; ADR-0021 ' +
       'derives every join from the object graph), and the prefix must be declared in the dataset\'s ' +
       '`include` (`widget-filter-field-not-included` otherwise). The verdict\'s "Did you mean" names ' +
       'the nearest field of the object the miss landed on.',
@@ -1091,7 +1096,8 @@ const DECLARED_FIELD_DOOR =
   'every driver, before any statement is built. The whole payload is refused, so the correctly named ' +
   'fields beside the bad key never land either. The refusal arrives at run time, on whichever record ' +
   'first exercises the write and far from the line that made the mistake, which is why the rule ' +
-  'reports it at author time, naming the field, the object and the write.';
+  'reports it at author time, naming the field, the object and the write. Declared includes every field ' +
+  'an `objectExtensions` entry of the same artifact adds to the object, which the registry serves.';
 
 /** The cause and the consequence of writing an unprovisioned anchor — the three anchor ids. */
 const UNPROVISIONED_ANCHOR_WRITE: readonly string[] = [
@@ -2164,10 +2170,10 @@ const FLOW_INPUT_UNKNOWN_OBJECT_EXPLANATION: RuleExplanation = {
   covers: 'why an unknown start-input object warns, and when it refuses',
   paragraphs: [
     'A flow input may declare that its value is the id of a record of a named object, with `objectName` on ' +
-      'the variable. The start doors are to load such an input from exactly that name in the caller\'s own ' +
-      'scope before the run exists, so a name no object answers to would refuse every start that supplies ' +
-      'the input. Names match exactly — `app_candidate`, not `candidate`. The declaration is planned: no ' +
-      'door reads it yet, and the property lint says so separately.',
+      'the variable. The start doors load such an input from exactly that name in the caller\'s own ' +
+      'scope before the run exists, so a name no object answers to refuses every start that supplies ' +
+      'the input. Names match exactly — `app_candidate`, not `candidate`. Every door that starts the flow ' +
+      'by name enforces the declaration.',
     'The rule asks whether this stack defines the object. One it does not define may be declared by ' +
       'another installed package, which a build of this stack cannot see, so the finding is a warning and ' +
       'can be ignored when such a package declares the object; a `sys_` name is a platform object and is ' +
@@ -2350,6 +2356,25 @@ const DIMENSION_JSON_STORED_FIELD_REFUSED_EXPLANATION: RuleExplanation = {
       'grouping: a record query on the field\'s object with `where { FIELD: { $contains: VALUE } }` ' +
       'counts or lists the records that hold VALUE, one query per member.',
     JSON_STORED_COLUMN,
+    ANALYTICS_MEMBER_WALK,
+  ],
+};
+
+const DIMENSION_VIRTUAL_FIELD_REFUSED_EXPLANATION: RuleExplanation = {
+  rule: 'dimension-virtual-field-refused',
+  covers: 'why analytics does not group by a formula field',
+  paragraphs: [
+    'A dimension is a GROUP KEY: a dataset dimension compiles to a cube dimension whose `sql` is its ' +
+      '`field`, and a query that selects it groups (or date-buckets) by that column. A virtual field, a ' +
+      '`formula`, is computed on read and never stored, whatever its `returnType`: no driver materialises ' +
+      'a column for it, so there is nothing to group by. Every analytics face refuses such a group with ' +
+      '`400 INVALID_FIELD` at `groupBy.N`, and the dataset compile refuses a dataset declaring one over its ' +
+      'own object with `400 DATASET_INVALID`, so no report, dashboard or query is ever served from it. ' +
+      'Before those refusals the group key reached the driver as a column that does not exist, or an ' +
+      'engine that aggregates in memory put every row into one null group while the answer looked served.',
+    'Denormalise the value: store it in a field of its own on the object (written by a hook or a flow ' +
+      'when its source changes), and point the dimension at that stored field. This rule makes the same ' +
+      'refusal where the author is standing. A dotted path is judged on the leaf\'s own declaration.',
     ANALYTICS_MEMBER_WALK,
   ],
 };
@@ -3898,8 +3923,8 @@ const TRANSLATION_TARGET_UNKNOWN_EXPLANATION: RuleExplanation = {
     'The verdict names the nearest declared name when one is close ("Did you mean"), and the fix ' +
       'line names the remedy only, without listing what is declared; what each key may name follows.',
     'Under `objects.OBJECT` (an object this stack, or a sibling package of the same artifact, ' +
-      'defines): `fields.FIELD` a declared field (a system column, `_id`, `name` and `space` are ' +
-      'never reported); `_views.VIEW` a view\'s `name`, not its label — the runtime keys a nameless ' +
+      'defines): `fields.FIELD` a declared field, fields an `objectExtensions` entry of the same ' +
+      'artifact adds included (a system column, `_id`, `name` and `space` are never reported); `_views.VIEW` a view\'s `name`, not its label — the runtime keys a nameless ' +
       'default `list` `default`, never `list`; `_sections.KEY` a ' +
       '`fieldGroups[].key`, a named form-view section or a named `record:details` section — a ' +
       'section is translatable only through a stable name; `_tabs.TAB` a filter-preset tab that a ' +
@@ -4327,7 +4352,8 @@ const PAGE_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
   covers: 'how a page binding names a field',
   paragraphs: [
     'A page component binds fields by name, and each name must match one of the bound object\'s ' +
-      'declared fields, or a system field, exactly: a misspelt or renamed field resolves to nothing, ' +
+      'declared fields (declared includes fields an `objectExtensions` entry of the same artifact ' +
+      'adds), or a system field, exactly: a misspelt or renamed field resolves to nothing, ' +
       'at the cost the message names.',
     'To fix it, correct the name (the `fix:` line names the nearest declared field when one is ' +
       'close) or add the field to the object. Not judged here: a dotted relationship path ' +
@@ -5570,8 +5596,9 @@ const REPORT_FILTER_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'own.',
     'Each key is judged as `widget-filter-field-unknown` judges a widget filter key — a dotted ' +
       '`relationship.field` path hop by hop, a bare name against the authored and registry-injected ' +
-      'columns — and one more name is accepted: a bare key naming a dimension of the bound dataset, ' +
-      'which the dataset query binds through that dimension. Not reported: a `dataset` that resolves to ' +
+      'columns, then against the dimensions of the bound dataset, which the dataset query binds ' +
+      'through each dimension\'s field; a bare key naming a measure of the dataset is refused with its ' +
+      'own message, as the twin refuses it. Not reported: a `dataset` that resolves to ' +
       'nothing (`chart-dataset-unknown` reports that once), an object this stack does not define, or ' +
       'one with no readable field map.',
     'To fix it, filter on a field of the dataset\'s object, on a dimension of the dataset, or on a ' +
@@ -5729,6 +5756,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [VALIDATION_RULE_JSON_SCHEMA_UNKNOWN_FORMAT_EXPLANATION.rule]: VALIDATION_RULE_JSON_SCHEMA_UNKNOWN_FORMAT_EXPLANATION,
   [MEASURE_AGGREGATE_FIELD_TYPE_REFUSED_EXPLANATION.rule]: MEASURE_AGGREGATE_FIELD_TYPE_REFUSED_EXPLANATION,
   [DIMENSION_JSON_STORED_FIELD_REFUSED_EXPLANATION.rule]: DIMENSION_JSON_STORED_FIELD_REFUSED_EXPLANATION,
+  [DIMENSION_VIRTUAL_FIELD_REFUSED_EXPLANATION.rule]: DIMENSION_VIRTUAL_FIELD_REFUSED_EXPLANATION,
   [MEASURE_DURATION_FIELD_TYPE_REFUSED_EXPLANATION.rule]: MEASURE_DURATION_FIELD_TYPE_REFUSED_EXPLANATION,
   [REACT_CHART_DRILLDOWN_INVALID_EXPLANATION.rule]: REACT_CHART_DRILLDOWN_INVALID_EXPLANATION,
   [REACT_CHART_AGGREGATE_INVALID_EXPLANATION.rule]: REACT_CHART_AGGREGATE_INVALID_EXPLANATION,

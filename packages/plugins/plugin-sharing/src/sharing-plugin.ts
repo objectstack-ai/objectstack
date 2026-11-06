@@ -56,9 +56,12 @@ import {
   SysQueue,
   SysQueueMember,
   SysAssignmentCursor,
+  SysAssignmentRule,
 } from './objects/index.js';
+import { SysQueueDetailPage } from './sys-queue.page.js';
 import { OwnershipQueueService, specsReadBusinessUnits, type OwnershipQueueEngine } from './ownership-queue-service.js';
 import { bindQueueGuards, bindQueueRecipientRecompute, reportShadowedAuthoredQueues } from './queue-hooks.js';
+import { bindAssignmentRuleGuards, reportShadowedAuthoredAssignmentRules } from './assignment-rule-hooks.js';
 import { SysBusinessUnit, SysBusinessUnitMember } from '@objectstack/platform-objects/identity';
 import {
   SharingService,
@@ -646,12 +649,17 @@ export class SharingServicePlugin implements Plugin {
         SysBusinessUnit,
         SysBusinessUnitMember,
         SysShareLink,
-        // [ADR-0142 D1/D5] Authored queues, their members, and the round-robin
-        // cursor the engine's assignment step advances.
+        // [ADR-0142 D1/D5] Authored queues, their members, the round-robin
+        // cursor the engine's assignment step advances, and an organization's
+        // own assignment rules (ruling A on organization-authored routing).
         SysQueue,
         SysQueueMember,
         SysAssignmentCursor,
+        SysAssignmentRule,
       ],
+      // The queue's record page: its fields, and its members listed by the
+      // queue's name with "New" pre-filled (`sys-queue.page.ts`).
+      pages: [SysQueueDetailPage],
       // ADR-0029 D7 — contribute the sharing entries into the Setup app's
       // `group_access_control` slot (priority 200). This plugin owns these
       // objects (K2).
@@ -672,6 +680,7 @@ export class SharingServicePlugin implements Plugin {
             { id: 'nav_record_shares', type: 'object', label: 'Record Shares', objectName: 'sys_record_share', viewName: 'all_shares', icon: 'link', requiresObject: 'sys_record_share', requiredPermissions: ['manage_platform_settings'] },
             { id: 'nav_queues', type: 'object', label: 'Queues', objectName: 'sys_queue', icon: 'inbox', requiresObject: 'sys_queue', requiredPermissions: ['manage_platform_settings'] },
             { id: 'nav_queue_members', type: 'object', label: 'Queue Members', objectName: 'sys_queue_member', icon: 'users', requiresObject: 'sys_queue_member', requiredPermissions: ['manage_platform_settings'] },
+            { id: 'nav_assignment_rules', type: 'object', label: 'Assignment Rules', objectName: 'sys_assignment_rule', icon: 'route', requiresObject: 'sys_assignment_rule', requiredPermissions: ['manage_platform_settings'] },
           ],
         },
       ],
@@ -774,6 +783,20 @@ export class SharingServicePlugin implements Plugin {
         }
       } catch (err: any) {
         ctx.logger.warn('SharingServicePlugin: queue guards not bound', { error: err?.message });
+      }
+
+      // [ADR-0142 D5, ruling A on organization-authored routing] An
+      // organization's own assignment rules: the save guard on the table this
+      // plugin owns (name namespace, object, entry shape, CEL compile, user
+      // target membership), bound regardless of `enforce`, and the boot report
+      // of an authored rule a later declaration shadows.
+      try {
+        if (typeof engine.registerHook === 'function') {
+          bindAssignmentRuleGuards(engine as any);
+          await reportShadowedAuthoredAssignmentRules(engine as any, ctx.logger as any);
+        }
+      } catch (err: any) {
+        ctx.logger.warn('SharingServicePlugin: assignment-rule guard not bound', { error: err?.message });
       }
 
       // [ADR-0057 D12] Maintain sys_user.primary_business_unit_id as a

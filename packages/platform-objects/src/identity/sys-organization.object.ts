@@ -404,9 +404,9 @@ export const SysOrganization = ObjectSchema.create({
       defaultValue: false,
       group: 'Configuration',
       description:
-        'When true, every member of this organization must enroll an authenticator app to access data. ' +
+        'Turn on to require every member of this organization to set up an authenticator app before they can access data. ' +
         'Needs two-factor authentication on for this deployment (OS_AUTH_TWO_FACTOR=true); while it is off, ' +
-        'saving this as true is refused.',
+        'saving this as on is refused.',
     }),
 
     // #14238 — maintainer ruling 2026-09-02, option A (verbatim 「同意」): the
@@ -486,14 +486,15 @@ export const SysOrganization = ObjectSchema.create({
       required: false,
       group: 'Group Structure',
       description:
-        'Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference.',
+        'Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference. Meaningful only where the deployment runs several organizations.',
     }),
 
     sort_order: Field.number({
       label: 'Sort Order',
       required: false,
       group: 'Group Structure',
-      description: 'Display order among sibling organizations. Presentation only.',
+      description:
+        'Display order among sibling organizations. Presentation only. Meaningful only where the deployment runs several organizations.',
     }),
 
     // ── System ───────────────────────────────────────────────────

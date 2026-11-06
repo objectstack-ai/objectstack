@@ -602,6 +602,12 @@ export class RecordChangeTrigger implements FlowTrigger {
             // alias was removed in v16, #3290); it feeds the automation context's
             // driver-layer `tenantId` field unchanged.
             ...(session.organizationId ? { tenantId: session.organizationId } : {}),
+            // The administrator at the keyboard when the triggering write came
+            // from an impersonation session, read off the write's PROVENANCE
+            // (never its session: the session is the impersonated user's), so
+            // the run's own writes name them too. Attribution only — the run
+            // still resolves `userId`'s grants, and no gate reads it.
+            ...impersonatedByOf(ctx),
             // [#28251] The write this run was dispatched inside, for its
             // `save_notice` nodes: the hook face of the write's own listener
             // (`ctx.notice`, bound by the engine on every insert / update
@@ -796,4 +802,15 @@ export class RecordChangeTrigger implements FlowTrigger {
         perWrite.set(cacheKey, pending);
         return pending;
     }
+}
+
+/**
+ * The triggering write's impersonating administrator, as a context fragment:
+ * `{ impersonatedBy }` when the engine stamped `provenance.impersonatedBy` on
+ * the hook, `{}` otherwise — so a run started by a user's own write carries no
+ * key at all.
+ */
+function impersonatedByOf(ctx: { provenance?: { impersonatedBy?: unknown } }): { impersonatedBy?: string } {
+  const by = ctx.provenance?.impersonatedBy;
+  return typeof by === 'string' && by.trim() ? { impersonatedBy: by.trim() } : {};
 }

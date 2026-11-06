@@ -65,8 +65,9 @@ import {
 // and a second copy would be the next place it drifts.
 import { isWritablePackage, READ_ONLY_PACKAGE_SCOPES } from '@objectstack/metadata-protocol';
 // [ADR-0146 D3] The pair-shaped-id predicate the install primitive asks — asked
-// at `POST /packages` too, ahead of both its install limbs.
-import { customizationPairManifestRefusal } from '@objectstack/metadata-protocol';
+// at `POST /packages` too, ahead of both its install limbs; and, the same way,
+// its [ADR-0029 D7] refusal of a runtime-created package's navigation contributions.
+import { customizationPairManifestRefusal, runtimeNavigationContributionsRefusal } from '@objectstack/metadata-protocol';
 // [#28117] The one reader of a manifest's declared dependency ids (ADR-0141),
 // shared with the registry's co-owner gate.
 import { declaredDependencyIds } from '@objectstack/core';
@@ -750,6 +751,19 @@ interface PackageRowRegistryHost {
     registry?: {
         getPackage?(id: string): { manifest?: { type?: unknown; scope?: unknown; dependencies?: unknown } } | undefined;
     };
+}
+
+/**
+ * [#30377] An enable of a disabled package recomputes the roll-up summaries the
+ * package adds to other packages' objects by extension (`ObjectQL`'s
+ * `onPackageEnabled` listener; the child writes made during the disable
+ * recomputed nothing). The enable doors answer once that recompute has
+ * settled, so the first read after the answer serves current values. An
+ * engine without the member (a test double) answers at once, as before.
+ */
+async function summaryRefreshSettled(engine: unknown): Promise<void> {
+    const host = engine as { summaryRefreshSettled?: () => Promise<void> } | null | undefined;
+    if (typeof host?.summaryRefreshSettled === 'function') await host.summaryRefreshSettled();
 }
 
 /**
@@ -1670,6 +1684,17 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     response: deps.error(installBodyRefusal(body, declaredBody.error.issues), 400),
                 };
             }
+            // [#30072] ADR-0029 D7 — a package created here cannot contribute
+            // navigation: neither limb below registers a contribution (only a
+            // code package's `registerApp` does), so the key would be stored,
+            // answered `201` and never shown. The primitive's own predicate,
+            // asked here so the no-protocol fallback is judged too; ⛔ never a
+            // second copy of the rule. After the whole-body verdict, ahead of
+            // the 409: a request-shape refusal never depends on server state.
+            const navRefusal = runtimeNavigationContributionsRefusal(manifest);
+            if (navRefusal !== undefined) {
+                return { handled: true, response: deps.error(navRefusal, 400) };
+            }
             // Every option below is read off the PARSED request, and only when
             // the body arrived in the wrapped form — the one form that declares
             // options. The bare branch has none to read: it refused them above.
@@ -1847,6 +1872,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             if (requestedEnabled === true) {
                 const enabled = registry.enablePackage(pkgId);
                 if (enabled) pkg = enabled;
+                await summaryRefreshSettled(qlService);
             } else if (requestedEnabled === false) {
                 const disabled = registry.disablePackage(pkgId);
                 if (disabled) pkg = disabled;
@@ -1912,6 +1938,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const pkg = registry.enablePackage(id);
             if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+            await summaryRefreshSettled(qlService);
             try {
                 setPackageDisabled(_context?.environmentId, id, false);
             } catch (err) {

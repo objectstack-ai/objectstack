@@ -361,6 +361,12 @@ const DISPOSITIONS: Record<string, Disposition> = {
   // Metadata plane: bodies carry metadata ITEMS. `internal: true` is a field
   // flag on a data object's field, and a metadata item is not a data record.
   'POST /api/v1/meta/_migrate-stored': { kind: 'no-record-echo', why: 'Metadata plane: migration receipt.' },
+  // [#30675] Writes a data object's rows, but answers only the run's report:
+  // counts, a few record ids, and per-row failure sentences — no stored value.
+  'POST /api/v1/meta/_migrate-record-currency-codes': {
+    kind: 'no-record-echo',
+    why: 'Backfill report: counts, sample record ids and failure sentences, never a stored field value.',
+  },
   'PUT /api/v1/meta/:type/:name': { kind: 'no-record-echo', why: 'Metadata plane: metadata item, not a data record.' },
   'DELETE /api/v1/meta/:type/:name': { kind: 'no-record-echo', why: 'Metadata plane: delete receipt.' },
   'POST /api/v1/meta/:type/:name/publish': { kind: 'no-record-echo', why: 'Metadata plane: publish receipt.' },
@@ -397,6 +403,8 @@ const DISPOSITIONS: Record<string, Disposition> = {
   'POST /api/v1/security/suggested-bindings/:id/dismiss': { kind: 'no-record-echo', why: 'Dismissal receipt.' },
   'POST /api/v1/security/suggested-bindings/:id/reopen': { kind: 'no-record-echo', why: 'Re-open receipt.' },
   'POST /api/v1/security/explain': { kind: 'no-record-echo', why: 'Permission explanation verdict.' },
+  // [#30205] The hand-over answers per-field counts and failed row ids, never a record.
+  'POST /api/v1/security/users/:id/assigned-work/transfer': { kind: 'no-record-echo', why: 'Transfer report: per-field counts and failed row ids (id, code, refusal sentence), never a record body.' },
 
   // Import: per-row RECEIPTS (row number, action, id, warnings/errors) plus
   // counts — measured, the written row is never spread into a result.

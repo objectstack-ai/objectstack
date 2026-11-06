@@ -745,3 +745,133 @@ describe('email channel', () => {
         });
     });
 });
+
+// [#30510, cloud#2549 ruling B item ③] An email service is not a transport.
+//
+// plugin-email registers its `email` service on EVERY boot. With no `mail`
+// settings saved it holds the LogTransport, which only logs: a send resolves,
+// writes `sys_email`, and no mail leaves the process. The channel used to read
+// "a service is registered" as "available", so every e-mail notification on
+// such a deployment got a delivery row that dispatched to `success` while
+// nobody was mailed. The deliverability fact belongs to the package that owns
+// the transport (`IEmailService.isConfigured()`, read at call time so it
+// follows a transport the `mail` settings swap in), and this channel asks it.
+//
+// The double mirrors plugin-email's `EmailService` on the one axis that
+// matters here: `isConfigured()` answers from the LIVE transport, and
+// `setTransport()` swaps it the way the `mail` settings change bus does.
+// plugin-email's own suite pins that the real service answers this way
+// (`email-plugin.mail-settings.test.ts`, "isConfigured follows the mail
+// settings"); this file pins that the channel listens.
+describe('email channel — a LogTransport is no transport (#30510)', () => {
+    function liveSwappableEmail(initial: 'log' | 'smtp' = 'log') {
+        const sent: any[] = [];
+        let transport: 'log' | 'smtp' = initial;
+        return {
+            sent,
+            setTransport(next: 'log' | 'smtp') { transport = next; },
+            service: {
+                isConfigured: () => transport !== 'log',
+                async send(input: any) {
+                    sent.push(input);
+                    return { id: 'email_row_1' };
+                },
+            },
+        };
+    }
+
+    it('answers unavailable with the declared reason while the live transport only logs', () => {
+        const data = fakeData();
+        const email = liveSwappableEmail('log');
+        const ch = channel(() => email.service, data);
+        expect(ch.isAvailable?.(silentCtx(), { organizationId: 'org_1' }))
+            .toEqual({ available: false, reason: 'transport_not_configured' });
+    });
+
+    it('send() refuses with that SAME reason and never hands the message to the service — no fake sys_email row', async () => {
+        const data = fakeData();
+        const email = liveSwappableEmail('log');
+        const ch = channel(() => email.service, data);
+
+        const r = await ch.send(silentCtx(), delivery());
+
+        expect(r.ok).toBe(false);
+        expect(r.externalId).toBeUndefined();
+        const probe = ch.isAvailable?.(silentCtx(), {}) as { reason: string };
+        expect(r.error?.startsWith(`${probe.reason}:`)).toBe(true);
+        expect(r.error).toContain('user_1');
+        // The LogTransport would have "sent" it: the service is never called.
+        expect(email.sent).toHaveLength(0);
+        expect(ch.classifyError?.(r.error ?? '')).toBe('permanent');
+    });
+
+    it('flips to available, with no restart, once the mail settings swap a real transport in — and back', async () => {
+        const data = fakeData();
+        const email = liveSwappableEmail('log');
+        const ch = channel(() => email.service, data);
+        expect(ch.isAvailable?.(silentCtx(), {})).toEqual({ available: false, reason: 'transport_not_configured' });
+
+        email.setTransport('smtp');
+        expect(ch.isAvailable?.(silentCtx(), {})).toEqual({ available: true });
+        const r = await ch.send(silentCtx(), delivery());
+        expect(r.ok).toBe(true);
+        expect(email.sent).toHaveLength(1);
+
+        email.setTransport('log');
+        expect(ch.isAvailable?.(silentCtx(), {})).toEqual({ available: false, reason: 'transport_not_configured' });
+    });
+
+    it('THE CONTROL: a service that does not answer isConfigured stays available (absent = unknown, not a LogTransport)', async () => {
+        // `isConfigured` is OPTIONAL on `IEmailService`. Reading its absence as
+        // "no transport" would mute every host-supplied email service that
+        // predates the member, which is a different decision than the ruling's.
+        const data = fakeData();
+        const email = fakeEmail();
+        const ch = channel(() => email.service, data);
+        expect(ch.isAvailable?.(silentCtx(), {})).toEqual({ available: true });
+        const r = await ch.send(silentCtx(), delivery());
+        expect(r.ok).toBe(true);
+        expect(email.sent).toHaveLength(1);
+    });
+
+    it('END TO END: an emit on a log-only deployment writes no delivery row and records the suppression; after the swap it delivers', async () => {
+        const data = fakeData();
+        const email = liveSwappableEmail('log');
+        const outbox = new MemoryNotificationOutbox(1);
+        const service = new MessagingService({
+            logger: { info: () => {}, warn: () => {}, error: () => {} },
+            outbox,
+            getData: () => data,
+        });
+        service.registerChannel(channel(() => email.service, data));
+        const dispatcher = new NotificationDispatcher({
+            nodeId: 'node-test',
+            outbox,
+            channels: service,
+            channelContext: silentCtx(),
+            intervalMs: 10_000,
+        });
+        const emit = () => service.emit({
+            topic: 'deal.won',
+            audience: ['user_1'],
+            channels: ['email'],
+            payload: { title: 'Deal closed', body: 'Acme signed' },
+        });
+
+        const before = await emit();
+        await dispatcher.tick();
+        expect(await outbox.list()).toHaveLength(0);
+        expect(before.enqueued).toBe(0);
+        expect(before.suppressed).toEqual([{ channel: 'email', reason: 'transport_not_configured' }]);
+        expect(email.sent).toHaveLength(0);
+
+        email.setTransport('smtp');
+        const after = await emit();
+        await dispatcher.tick();
+        const rows = await outbox.list();
+        expect(after.suppressed).toEqual([]);
+        expect(rows).toHaveLength(1);
+        expect(rows[0].status).toBe('success');
+        expect(email.sent).toHaveLength(1);
+    });
+});

@@ -337,6 +337,8 @@ import {
     type SecurityExplainRouteHost,
     type SecurityRouteHost,
 } from './security-routes.js';
+// [#30205] A user's assigned work: the per-object counts and the bounded hand-over.
+import { registerUserWorkEndpoints, type UserWorkRouteHost } from './user-work-routes.js';
 // [#23050 slice 7] The discovery and OpenAPI routes' bodies moved to one module — see its header.
 import {
     registerDiscoveryEndpoints,
@@ -381,6 +383,11 @@ import {
 // [#23050 slice 13e] The `/meta` object state-machine read moved to its own module — see its
 // header.
 import { registerMetaObjectStateRoute, type MetaObjectStateRouteHost } from './meta-object-state-routes.js';
+// [ADR-0144, ruling 6670707546 item B] The record-currency code backfill door — see its header.
+import {
+    registerMetaRecordCurrencyBackfillRoute,
+    type MetaRecordCurrencyBackfillRouteHost,
+} from './meta-record-currency-backfill-route.js';
 import { loadExcelJs, type Worksheet } from './xlsx-module.js';
 // [#18386] `?template=true` on the export door: the import template's column
 // rule, request reading and workbook. See the module header.
@@ -3721,6 +3728,9 @@ export class RestServer {
                     ? this.securityServiceProvider(await this.resolveRequestEnvironmentId(environmentId, req))
                     : undefined
             ),
+            // [#30126 row 12] A refusal's `errors.*` override, as the import
+            // runner's messages resolve theirs.
+            resolveMessageTranslator: () => this.resolveMessageTranslator(environmentId, req),
         };
     }
 
@@ -4350,7 +4360,15 @@ export class RestServer {
             ...metaReadGate.metaMemberSelector(req.query),
             ...(environmentId ? { environmentId } : {}),
         };
-        const layered = await p.getMetaItemLayered(layeredRequest);
+        // [#29814] The pending draft layer, asked for only when this caller may
+        // read pending drafts — the admission every draft switch in this file
+        // carries in its own declaration ({@link mayReadPendingDrafts}). A
+        // caller it does not admit is answered the layers without a `draft`
+        // key, byte-identical to a read that never asked for one, so the answer
+        // says nothing about whether a draft exists.
+        const layeredCaller = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
+        const layeredOptions = { withDraft: mayReadPendingDrafts(layeredCaller) };
+        const layered = await p.getMetaItemLayered(layeredRequest, layeredOptions);
         // [#20156 · #20478] THE per-caller gate on every layer, then the mask —
         // the shared chain. The stored-version doors honour the author
         // exemption, so the caller carries this transport's save-door
@@ -4959,6 +4977,7 @@ export class RestServer {
             this.registerAnalyticsEndpoints(bp);
             this.registerSecurityEndpoints(bp);
             this.registerSecurityExplainEndpoints(bp);
+            this.registerUserWorkEndpoints(bp);
             // Data-action routes (e.g. GET /data/:object/export, POST
             // /data/:object/import) use static-literal action segments that
             // MUST be registered BEFORE the greedy GET /data/:object/:id
@@ -5592,6 +5611,20 @@ export class RestServer {
         };
         registerMetaObjectStateRoute.call(objectStateHost, scope);
 
+        // [ADR-0144, ruling 6670707546 item B] The tenant-admin door for the
+        // record-currency code backfill (`POST {metaPath}/_migrate-record-currency-codes`),
+        // in `meta-record-currency-backfill-route.ts`, behind the maintenance switch as
+        // `_migrate-stored` is. A literal `POST` path no `:type` mount captures, so its
+        // place in the order is free; built here, inside the umbrella's swap, so the route
+        // manager it captures is the wrapping registrar. Read that module's header.
+        const recordCurrencyBackfillHost: MetaRecordCurrencyBackfillRouteHost = {
+            routeManager: this.routeManager,
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            get objectQLProvider() { return readObjectQLProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
+        };
+        registerMetaRecordCurrencyBackfillRoute.call(recordCurrencyBackfillHost, scope);
+
         // [#23050 slice 13e] The published read (`GET {metaPath}/:type/:name/published`)
         // moved to `meta-item-history-routes.ts`, beside the history family, and is registered
         // HERE so it keeps its place in the order: after the object state-machine read, the
@@ -6192,6 +6225,35 @@ export class RestServer {
             enforceAuth: (...a) => this.enforceAuth(...a),
         };
         registerSecurityExplainEndpoints.call(host, basePath);
+    }
+
+    /**
+     * [#30205] Register a user's assigned-work routes:
+     *
+     *   GET  {basePath}/security/users/:id/assigned-work
+     *   POST {basePath}/security/users/:id/assigned-work/transfer   body: { toUserId, objects? }
+     *
+     * The first answers, per object and user field, how many records hold the
+     * user (the owner field and every app user field), counted as the caller
+     * can read them. The second hands up to 500 of those records to another
+     * active user per call, each as an ordinary update under the caller's
+     * context, and answers what moved, what failed and how many remain.
+     * Neither touches the ban. `@objectstack/core`'s `user-assigned-work.ts`
+     * holds the rules.
+     */
+    private registerUserWorkEndpoints(basePath: string): void {
+        // [#30205] The body lives in `user-work-routes.ts`. This literal hands it
+        // every member it reads (see `UserWorkRouteHost`); the engine provider
+        // FIELD goes as a getter, read when a handler reads it.
+        const readObjectQLProvider = () => this.objectQLProvider;
+        const host: UserWorkRouteHost = {
+            routeManager: this.routeManager,
+            get objectQLProvider() { return readObjectQLProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            enforceAuth: (...a) => this.enforceAuth(...a),
+        };
+        registerUserWorkEndpoints.call(host, basePath);
     }
 
     /**

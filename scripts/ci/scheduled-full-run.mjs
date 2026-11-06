@@ -5,7 +5,8 @@
 // nothing else can hold (#16467, #22998).
 //
 //   node scripts/ci/scheduled-full-run.mjs --check-concurrency
-//   node scripts/ci/scheduled-full-run.mjs --release-gate --release-commit <sha>
+//   node scripts/ci/scheduled-full-run.mjs --release-gate --release-commit <sha> [--require-distance-zero] [--json]
+//   node scripts/ci/scheduled-full-run.mjs --snapshot-commit --from <sha> [--json]
 //   node scripts/ci/scheduled-full-run.mjs --self-test
 //
 // Half 3 (#22998) is the READER the full battery gained when PR and queue runs
@@ -13,6 +14,13 @@
 // before the `release` environment approval, and the publish lane refuses
 // unless the newest full-battery runs of `CI` and `Lint & Type Check` at or
 // before the version commit concluded `success`. See HALF 3 below.
+//
+// The `next` snapshot lane (ADR-0125, amendment of 2026-11-05) reads the same
+// half with two additions: `--snapshot-commit` names the newest commit whose
+// full battery is green ON it, and `--require-distance-zero` makes the gate
+// refuse a deciding run on any ancestor. `--json` prints the verdict's
+// machine-readable record (distance per workflow) on stdout, so no reader
+// parses the prose lines.
 //
 // ## Why one file holds the first two halves
 //
@@ -798,8 +806,9 @@ export function renderBody({
 // ---------------------------------------------------------------------------
 //
 // A PR or queue build carries the FAST SET since #22998 (ci.yml's THE TWO
-// SPEEDS); the dogfood and temporal legs run only on `main`'s
-// push, 4-hourly schedule and dispatch runs. "Tested before a release" is
+// SPEEDS; a queue build adds the three dogfood shards since #30461);
+// `dogfood-verify` and the temporal leg run only on `main`'s push, 4-hourly
+// schedule and dispatch runs. "Tested before a release" is
 // therefore a statement about those runs, and this half makes it a gate:
 // release.yml's `full-battery` job, which `publish` needs, so a refusal here
 // means no deployment is queued at the `release` environment at all.
@@ -888,13 +897,32 @@ export function selectFullBatteryRun({ history, runs, workflowFile }) {
 }
 
 // Rule 4, over both workflows. `history[0]` is the release commit.
-export function releaseGateVerdict({ history, runsByWorkflow, workflows = RELEASE_GATE_WORKFLOWS }) {
+//
+// Besides the prose `lines` and `refusals`, the verdict carries `chosen` -- one
+// machine-readable row per workflow that has a deciding run (its run id, event,
+// head, DISTANCE and conclusion) -- and `distanceZero`, true exactly when every
+// workflow has a deciding run and each sits ON the release commit. A reader that
+// needs the distance reads those two fields, never the prose: the prose is for
+// a human and may be reworded.
+//
+// `requireDistanceZero` is the `next` snapshot lane's rule (ADR-0125, amendment
+// of 2026-11-05: "green at that commit" holds literally). With it, a deciding
+// run on an ANCESTOR of the release commit refuses too, naming its distance;
+// without it the rule is the stable lane's, unchanged.
+export function releaseGateVerdict({ history, runsByWorkflow, workflows = RELEASE_GATE_WORKFLOWS, requireDistanceZero = false }) {
   const releaseCommit = history?.[0] ?? '';
   if (!releaseCommit) {
-    return { ok: false, lines: [], refusals: ['no first-parent history was read, so no run can be placed at or before the release commit'] };
+    return {
+      ok: false,
+      lines: [],
+      refusals: ['no first-parent history was read, so no run can be placed at or before the release commit'],
+      chosen: [],
+      distanceZero: false,
+    };
   }
   const lines = [];
   const refusals = [];
+  const chosenRows = [];
   for (const { file, name } of workflows) {
     const chosen = selectFullBatteryRun({ history, runs: runsByWorkflow?.[file], workflowFile: file });
     if (!chosen) {
@@ -905,13 +933,58 @@ export function releaseGateVerdict({ history, runsByWorkflow, workflows = RELEAS
       continue;
     }
     const { run, distance } = chosen;
+    chosenRows.push({
+      file,
+      name,
+      runId: run.id,
+      event: run.event,
+      attempt: run.run_attempt ?? 1,
+      headSha: String(run.head_sha),
+      distance,
+      conclusion: run.conclusion,
+    });
     const where = `run ${run.id} (${run.event}, attempt ${run.run_attempt ?? 1}) on ${String(run.head_sha).slice(0, 10)}, ${distance} first-parent commit(s) before the release commit`;
     lines.push(`${name}: ${run.conclusion} -- ${where}`);
     if (run.conclusion !== 'success') {
       refusals.push(`${name}: the newest full-battery run at or before the release commit concluded ${run.conclusion} -- ${where}`);
     }
+    if (requireDistanceZero && distance !== 0) {
+      refusals.push(`${name}: distance zero is required and the deciding run is not on the release commit -- ${where}`);
+    }
   }
-  return { ok: refusals.length === 0, lines, refusals };
+  const distanceZero = chosenRows.length === workflows.length && chosenRows.every((row) => row.distance === 0);
+  return { ok: refusals.length === 0, lines, refusals, chosen: chosenRows, distanceZero };
+}
+
+// The machine-readable record of one verdict: what `--release-gate --json`
+// prints on stdout, and what the snapshot lane reads with `jq`. Built from the
+// verdict's fields alone, so it can never say something the verdict did not.
+export function releaseGateRecord(verdict, { releaseCommit, requireDistanceZero = false } = {}) {
+  return {
+    ok: verdict?.ok === true,
+    releaseCommit: String(releaseCommit ?? ''),
+    requireDistanceZero: requireDistanceZero === true,
+    distanceZero: verdict?.distanceZero === true,
+    workflows: (verdict?.chosen ?? []).map((row) => ({ ...row })),
+    refusals: [...(verdict?.refusals ?? [])],
+  };
+}
+
+// The `next` snapshot lane's commit (ADR-0125, amendment of 2026-11-05): the
+// NEWEST first-parent commit, walking back from `history[0]`, at which every
+// workflow's deciding run is ON that commit and concluded `success` -- the head
+// commit of the newest green full-battery run, at distance zero. It is the same
+// verdict as the release gate's, asked with `requireDistanceZero` at each
+// offset, so the selection and the gate can never disagree about a commit.
+// A newer commit whose battery is red or unread is passed over (it is not a
+// green run); null when no commit in the window qualifies.
+export function selectSnapshotCommit({ history, runsByWorkflow, workflows = RELEASE_GATE_WORKFLOWS }) {
+  const window = history ?? [];
+  for (let offset = 0; offset < window.length; offset += 1) {
+    const verdict = releaseGateVerdict({ history: window.slice(offset), runsByWorkflow, workflows, requireDistanceZero: true });
+    if (verdict.ok && verdict.distanceZero) return { commit: window[offset], offset, verdict };
+  }
+  return null;
 }
 
 // The exit a verdict maps to: 0 pass, EXIT_FINDINGS refuse.
@@ -1052,7 +1125,7 @@ export async function readFullBattery({ repo, token, workflows = RELEASE_GATE_WO
 // The gate, as lines to print and an exit code. Both reads are injectable --
 // `readHistory` (git) and `fetchImpl` / `sleep` (the Actions API) -- so the
 // self-test drives the whole read path offline, refusal text included.
-export async function runReleaseGate({ releaseCommit, repo, token, readHistory = readFirstParentHistory, fetchImpl = fetch, sleep } = {}) {
+export async function runReleaseGate({ releaseCommit, repo, token, readHistory = readFirstParentHistory, fetchImpl = fetch, sleep, requireDistanceZero = false } = {}) {
   const budget = boardReadBudget({ sleep });
   let history;
   let runsByWorkflow;
@@ -1067,25 +1140,94 @@ export async function runReleaseGate({ releaseCommit, repo, token, readHistory =
       verdict: null,
     };
   }
-  const verdict = releaseGateVerdict({ history, runsByWorkflow });
+  const verdict = releaseGateVerdict({ history, runsByWorkflow, requireDistanceZero });
   const lines = verdict.lines.map((line) => `scheduled-full-run --release-gate: ${line}`);
   if (verdict.ok) {
-    lines.push(`scheduled-full-run --release-gate: PASS -- the full battery at or before ${String(releaseCommit).slice(0, 10)} is green in every workflow (${RELEASE_GATE_WORKFLOWS.map((w) => w.name).join(', ')}).`);
+    const at = requireDistanceZero ? 'ON' : 'at or before';
+    lines.push(`scheduled-full-run --release-gate: PASS -- the full battery ${at} ${String(releaseCommit).slice(0, 10)} is green in every workflow (${RELEASE_GATE_WORKFLOWS.map((w) => w.name).join(', ')}).`);
   } else {
     for (const refusal of verdict.refusals) lines.push(`::error::release refused -- ${refusal}`);
   }
   return { exit: releaseGateExit(verdict), lines, verdict };
 }
 
+// The snapshot lane's selection, on the same two reads as the gate (git for
+// the window from `from`, the Actions API for the runs) and the same refusal
+// shape: an unread battery is NOT MEASURED, never "no commit qualifies".
+export async function runSnapshotCommit({ from, repo, token, readHistory = readFirstParentHistory, fetchImpl = fetch, sleep } = {}) {
+  const budget = boardReadBudget({ sleep });
+  let history;
+  let runsByWorkflow;
+  try {
+    if (!repo || !token) throw new Error('GITHUB_REPOSITORY and GITHUB_TOKEN are both required');
+    history = readHistory(from);
+    runsByWorkflow = await readFullBattery({ repo, token, fetchImpl, budget });
+  } catch (error) {
+    return {
+      exit: EXIT_PREREQUISITE_NOT_MET,
+      lines: [`::error::snapshot commit NOT MEASURED -- ${error.message}. Refusing: an unread full battery names no green commit.`],
+      selection: null,
+      record: { ok: false, from: String(from ?? ''), commit: null, offset: null, workflows: [] },
+    };
+  }
+  const selection = selectSnapshotCommit({ history, runsByWorkflow });
+  if (!selection) {
+    return {
+      exit: EXIT_FINDINGS,
+      lines: [
+        `::error::snapshot refused -- no commit in the ${history.length}-commit first-parent window from ${String(from).slice(0, 10)} ` +
+          `has every full-battery workflow (${RELEASE_GATE_WORKFLOWS.map((w) => w.name).join(', ')}) green ON it (distance zero).`,
+      ],
+      selection: null,
+      record: { ok: false, from: String(from), commit: null, offset: null, workflows: [] },
+    };
+  }
+  const { commit, offset, verdict } = selection;
+  return {
+    exit: 0,
+    lines: [
+      ...verdict.lines.map((line) => `scheduled-full-run --snapshot-commit: ${line}`),
+      `scheduled-full-run --snapshot-commit: ${commit} -- the newest commit with the full battery green on it, ${offset} first-parent commit(s) behind ${String(from).slice(0, 10)}.`,
+    ],
+    selection,
+    record: { ok: true, from: String(from), commit, offset, workflows: verdict.chosen.map((row) => ({ ...row })) },
+  };
+}
+
+function argValue(argv, flag) {
+  const at = argv.indexOf(flag);
+  return at === -1 ? '' : String(argv[at + 1] ?? '');
+}
+
+// `--json`: stdout carries the one JSON record and nothing else, and the prose
+// lines go to stderr -- so a reader can hand stdout to `jq` whatever the gate
+// says, and the log still carries every line.
+function emit(lines, record, json) {
+  for (const line of lines) (json ? console.error : console.log)(line);
+  if (json) process.stdout.write(`${JSON.stringify(record)}\n`);
+}
+
 async function releaseGate(argv) {
-  const at = argv.indexOf('--release-commit');
-  const releaseCommit = at === -1 ? '' : String(argv[at + 1] ?? '');
-  const { exit, lines } = await runReleaseGate({
+  const releaseCommit = argValue(argv, '--release-commit');
+  const requireDistanceZero = argv.includes('--require-distance-zero');
+  const json = argv.includes('--json');
+  const { exit, lines, verdict } = await runReleaseGate({
     releaseCommit,
     repo: process.env.GITHUB_REPOSITORY ?? '',
     token: process.env.GITHUB_TOKEN ?? '',
+    requireDistanceZero,
   });
-  for (const line of lines) console.log(line);
+  emit(lines, releaseGateRecord(verdict, { releaseCommit, requireDistanceZero }), json);
+  process.exit(exit);
+}
+
+async function snapshotCommit(argv) {
+  const { exit, lines, record } = await runSnapshotCommit({
+    from: argValue(argv, '--from'),
+    repo: process.env.GITHUB_REPOSITORY ?? '',
+    token: process.env.GITHUB_TOKEN ?? '',
+  });
+  emit(lines, record, argv.includes('--json'));
   process.exit(exit);
 }
 
@@ -1103,8 +1245,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'release gate: the selection rule on synthetic runs': 17,
   'release gate: the read path retries a transient answer, inside one budget per run': 16,
   'release gate: release.yml wiring': 6,
+  'release gate: distance zero and the snapshot commit, machine-readable': 11,
 });
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 8;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 // Returned by `selfTest()` only after its verdict is printed, so a `return`
@@ -2483,6 +2626,145 @@ async function selfTest() {
     if (!releaseGateWiring(cut).some((f) => f.includes('continue-on-error'))) throw new Error('wiring: a continue-on-error gate passed');
   });
 
+  battery('release gate: distance zero and the snapshot commit, machine-readable');
+  // The `next` snapshot lane's reader (ADR-0125, amendment of 2026-11-05): the
+  // distance is a FIELD of the verdict, the gate can require it to be zero, and
+  // the selection names the newest commit whose battery is green ON it. Real
+  // data first, then the synthetic edges, then the CLI's stdout contract.
+  await check(() => {
+    // ⭐ On the recording, the stable gate passes release commit 0524c1619b
+    // with both deciding runs THREE commits back, so the same commit is
+    // refused at distance zero, and the selection walks to 712361b7a8 -- the
+    // head both of those scheduled runs tested.
+    const whole = releaseGateVerdict({ history: recorded.firstParent, runsByWorkflow: recorded.runs, workflows: recordedWorkflows });
+    if (!whole.ok || whole.distanceZero || whole.chosen.map((c) => `${c.runId}@${c.distance}`).join() !== '38222448090@3,38223935346@3') {
+      throw new Error(`distance: the recording must pass 0524c1619b at distance 3 in both workflows, got ${JSON.stringify(whole.chosen)}`);
+    }
+    const strict = releaseGateVerdict({ history: recorded.firstParent, runsByWorkflow: recorded.runs, workflows: recordedWorkflows, requireDistanceZero: true });
+    if (strict.ok || strict.refusals.length !== 2 || !strict.refusals.every((r) => r.includes('distance zero is required'))) {
+      throw new Error(`distance: 0524c1619b must be refused at distance zero for both workflows, got ${strict.refusals.join(' | ')}`);
+    }
+    const picked = selectSnapshotCommit({ history: recorded.firstParent, runsByWorkflow: recorded.runs, workflows: recordedWorkflows });
+    if (picked?.commit !== '712361b7a8709744ccd8a4fe4f37628a90e9d191' || picked.offset !== 3 || !picked.verdict.distanceZero) {
+      throw new Error(`snapshot: expected 712361b7a8 at offset 3, got ${picked?.commit} at ${picked?.offset}`);
+    }
+  });
+  await check(() => {
+    // Both green ON the commit: distance zero, and every row says so.
+    const v = both([run(1, 0, 'success')], [run(2, 0, 'success')]);
+    if (!v.ok || !v.distanceZero || v.chosen.length !== 2 || v.chosen.some((c) => c.distance !== 0 || c.headSha !== H[0])) {
+      throw new Error(`distance: two green runs on the commit must read distance zero, got ${JSON.stringify(v.chosen)}`);
+    }
+  });
+  await check(() => {
+    // One workflow's verdict an ancestor back: the stable rule passes, the
+    // flag is false, and the strict rule refuses naming THAT workflow alone.
+    const runs = { 'ci.yml': [run(1, 1, 'success')], 'lint.yml': [{ ...run(2, 0, 'success'), path: '.github/workflows/lint.yml' }] };
+    const loose = releaseGateVerdict({ history: H, runsByWorkflow: runs });
+    const strict = releaseGateVerdict({ history: H, runsByWorkflow: runs, requireDistanceZero: true });
+    if (!loose.ok || loose.distanceZero) throw new Error('distance: an ancestor verdict must pass the stable rule with distanceZero false');
+    if (strict.ok || strict.refusals.length !== 1 || !strict.refusals[0].startsWith('CI: distance zero is required')) {
+      throw new Error(`distance: the strict rule must refuse CI alone, got ${strict.refusals.join(' | ')}`);
+    }
+  });
+  await check(() => {
+    // A workflow with no deciding run is never distance zero, whatever the other says.
+    const v = both([run(1, 0, 'success')], []);
+    if (v.distanceZero || v.chosen.length !== 1) throw new Error('distance: a missing workflow read as distance zero');
+    if (releaseGateVerdict({ history: [], runsByWorkflow: {} }).distanceZero) throw new Error('distance: an empty history read as distance zero');
+  });
+  await check(() => {
+    // The selection passes over a NEWER red commit to the newest green one.
+    const runs = {
+      'ci.yml': [run(1, 0, 'failure'), run(2, 2, 'success')],
+      'lint.yml': [run(3, 0, 'success'), run(4, 2, 'success')].map((r) => ({ ...r, path: '.github/workflows/lint.yml' })),
+    };
+    const picked = selectSnapshotCommit({ history: H, runsByWorkflow: runs });
+    if (picked?.commit !== H[2] || picked.offset !== 2) throw new Error(`snapshot: expected the green commit 2 back, got ${picked?.commit} at ${picked?.offset}`);
+  });
+  await check(() => {
+    // A commit where only ONE workflow ran is not a full-battery commit: the
+    // selection needs both ON the same commit.
+    const runs = {
+      'ci.yml': [run(1, 0, 'success'), run(2, 1, 'success')],
+      'lint.yml': [run(3, 1, 'success')].map((r) => ({ ...r, path: '.github/workflows/lint.yml' })),
+    };
+    const picked = selectSnapshotCommit({ history: H, runsByWorkflow: runs });
+    if (picked?.commit !== H[1]) throw new Error(`snapshot: expected the commit both workflows ran on, got ${picked?.commit}`);
+  });
+  await check(() => {
+    // A cancelled run on the head carries no verdict there, so the head is
+    // not a distance-zero commit even with a green run one commit back.
+    const runs = {
+      'ci.yml': [run(1, 0, 'cancelled'), run(2, 1, 'success')],
+      'lint.yml': [run(3, 0, 'success'), run(4, 1, 'success')].map((r) => ({ ...r, path: '.github/workflows/lint.yml' })),
+    };
+    const picked = selectSnapshotCommit({ history: H, runsByWorkflow: runs });
+    if (picked?.commit !== H[1]) throw new Error(`snapshot: a cancelled head run was read as a verdict (picked ${picked?.commit})`);
+  });
+  await check(() => {
+    // FIRING CONTROL: nothing green anywhere names no commit.
+    if (selectSnapshotCommit({ history: H, runsByWorkflow: { 'ci.yml': [run(1, 0, 'failure')], 'lint.yml': [] } }) !== null) {
+      throw new Error('snapshot: a window with no green battery named a commit');
+    }
+    if (selectSnapshotCommit({ history: [], runsByWorkflow: {} }) !== null) throw new Error('snapshot: an empty window named a commit');
+  });
+  await check(() => {
+    // The record carries exactly the fields a reader keys on, copied from the verdict.
+    const v = both([run(1, 0, 'success')], [run(2, 0, 'success')]);
+    const r = releaseGateRecord(v, { releaseCommit: H[0], requireDistanceZero: true });
+    const keys = Object.keys(r).join();
+    const row = Object.keys(r.workflows[0]).join();
+    if (keys !== 'ok,releaseCommit,requireDistanceZero,distanceZero,workflows,refusals' || row !== 'file,name,runId,event,attempt,headSha,distance,conclusion') {
+      throw new Error(`record: unexpected shape ${keys} / ${row}`);
+    }
+    if (!r.ok || !r.distanceZero || r.releaseCommit !== H[0] || r.workflows.length !== 2) throw new Error(`record: wrong values ${JSON.stringify(r)}`);
+    const unread = releaseGateRecord(null, { releaseCommit: H[0] });
+    if (unread.ok || unread.distanceZero || unread.workflows.length !== 0) throw new Error('record: an unread verdict did not record a refusal');
+  });
+  await check(async () => {
+    // The live path, offline: the strict gate over a listing on an ANCESTOR
+    // refuses as a verdict (exit 1), and over a listing ON the commit passes.
+    const listing = (headIndex) => async (url) => {
+      const m = /\/actions\/workflows\/([^/]+)\/runs\?branch=main&event=([a-z_]+)/.exec(url);
+      const rows = m[2] === 'schedule' ? [{ ...run(7, headIndex, 'success'), path: `.github/workflows/${m[1]}` }] : [];
+      return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ workflow_runs: rows }) };
+    };
+    const strictOn = (headIndex) => runReleaseGate({ releaseCommit: H[0], repo: 'o/r', token: 't', readHistory: () => H, fetchImpl: listing(headIndex), requireDistanceZero: true });
+    const behind = await strictOn(1);
+    const on = await strictOn(0);
+    if (behind.exit !== EXIT_FINDINGS || behind.verdict?.distanceZero !== false) throw new Error(`gate: the strict gate passed a run one commit back (exit ${behind.exit})`);
+    if (on.exit !== 0 || !on.verdict?.distanceZero || !on.lines.at(-1)?.includes('green in every workflow')) throw new Error(`gate: the strict gate refused runs on the commit (exit ${on.exit})`);
+    const picked = await runSnapshotCommit({ from: H[0], repo: 'o/r', token: 't', readHistory: () => H, fetchImpl: listing(2) });
+    if (picked.exit !== 0 || picked.record.commit !== H[2] || picked.record.offset !== 2 || picked.record.workflows.some((w) => w.distance !== 0)) {
+      throw new Error(`snapshot: the live path named ${picked.record.commit} at ${picked.record.offset} (exit ${picked.exit})`);
+    }
+    const none = await runSnapshotCommit({ from: H[0], repo: 'o/r', token: 't', readHistory: () => H.slice(0, 2), fetchImpl: listing(3) });
+    if (none.exit !== EXIT_FINDINGS || none.record.ok || none.record.commit !== null) throw new Error(`snapshot: a window with no green commit was not refused (exit ${none.exit})`);
+    const unread = await runSnapshotCommit({ from: H[0], repo: 'o/r', token: '', readHistory: () => H, fetchImpl: listing(0) });
+    if (unread.exit !== EXIT_PREREQUISITE_NOT_MET || !unread.lines[0].includes('NOT MEASURED')) throw new Error('snapshot: a missing token was not NOT MEASURED');
+  });
+  await check(() => {
+    // The CLI's `--json` contract: stdout is ONE JSON record and nothing else,
+    // the prose goes to stderr. Driven with no token, so no read happens and
+    // the answer is NOT MEASURED (exit 2) with ok false on stdout.
+    const self = fileURLToPath(import.meta.url);
+    const env = { ...process.env, GITHUB_TOKEN: '', GITHUB_REPOSITORY: 'o/r' };
+    for (const args of [['--release-gate', '--release-commit', H[0], '--require-distance-zero', '--json'], ['--snapshot-commit', '--from', H[0], '--json']]) {
+      const res = spawnSync(process.execPath, [self, ...args], { encoding: 'utf8', env });
+      const lines = res.stdout.split('\n').filter(Boolean);
+      let parsed = null;
+      try {
+        parsed = JSON.parse(lines[0]);
+      } catch {
+        parsed = null;
+      }
+      if (res.status !== EXIT_PREREQUISITE_NOT_MET || lines.length !== 1 || parsed?.ok !== false || !res.stderr.includes('NOT MEASURED')) {
+        throw new Error(`cli: ${args[0]} --json printed ${JSON.stringify(res.stdout)} (exit ${res.status}); stdout must be one JSON record`);
+      }
+    }
+  });
+
   // -- The floor. Evaluated before the verdict, so the success line can only be
   //    printed by a run in which the set of batteries that registered EQUALS
   //    the set declared.
@@ -2570,9 +2852,15 @@ async function main() {
     return;
   }
 
+  if (argv.includes('--snapshot-commit')) {
+    await snapshotCommit(argv);
+    return;
+  }
+
   console.error(
     'usage: scheduled-full-run.mjs --check-concurrency\n' +
-      '       scheduled-full-run.mjs --release-gate --release-commit <sha>\n' +
+      '       scheduled-full-run.mjs --release-gate --release-commit <sha> [--require-distance-zero] [--json]\n' +
+      '       scheduled-full-run.mjs --snapshot-commit --from <sha> [--json]\n' +
       '       scheduled-full-run.mjs --self-test'
   );
   process.exit(1);

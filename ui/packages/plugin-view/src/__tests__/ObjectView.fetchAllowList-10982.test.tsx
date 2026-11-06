@@ -14,7 +14,8 @@
  * (b) `fetchDrawsView` was a deny-list (`grid`, `tree`, `chart`), so every
  * other view type was read on mount and re-read on every data-invalidation
  * event. That included `gantt`, whose registered wrapper hands its component
- * the schema alone (plugin-gantt pins it in `ObjectGantt.hostDataProp-7210`),
+ * the schema alone (plugin-gantt pins it in the `ObjectGantt.hostDataProp-7210`
+ * block of `ObjectGantt.harness.test.tsx`),
  * and the `ViewType` members `generateViewSchema` has no case for (`page`,
  * `list`, `detail`), which fall through to `ObjectGrid`. Nothing drew those
  * rows. The gate is now the allow-list `VIEW_TYPES_DRAWING_FETCHED_ROWS`.

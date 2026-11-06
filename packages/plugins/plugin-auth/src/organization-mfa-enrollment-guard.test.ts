@@ -436,7 +436,7 @@ describe('#30411 the refusal is in the caller\'s language, with the same field-l
 
   it.each([
     ['zh', 'zh-CN'], ['zh-cn', 'zh-CN'], ['zh-Hans-CN', 'zh-CN'], ['ja', 'ja-JP'], ['es-MX', 'es-ES'],
-    ['fr-FR', 'en'], ['', 'en'],
+    ['fr-FR', 'fr'], ['zh-TW', 'zh-Hant'], ['sw-KE', 'en'], ['', 'en'],
   ] as const)('the request locale %j reads the %s copy (exact, then by language, else English)', (asked, served) => {
     expect((organizationMfaWithoutEnrollmentRefusal(asked) as any).message).toBe(ORGANIZATION_MFA_REFUSAL_COPY[served]);
   });
@@ -493,7 +493,9 @@ describe('#30411 an admitted turn-on answers the grace period in force as its sa
     for (const [locale, copy] of Object.entries(ORGANIZATION_MFA_REQUIRED_NOTICE_COPY)) {
       expect(copy(0), locale).toMatch(/\b0\b/);
       expect(copy(0), locale).not.toBe(copy(1));
-      expect(copy(1), locale).toMatch(/\b1\b/);
+      // Arabic writes one day as a word, as its grammar does ("يوم واحد"); every other language as a digit.
+      if (locale === 'ar') expect(copy(1), locale).toContain('يوم واحد');
+      else expect(copy(1), locale).toMatch(/\b1\b/);
       expect(copy(45), locale).toMatch(/\b45\b/);
       expect(copy(45), locale).not.toMatch(/#\d/);
     }

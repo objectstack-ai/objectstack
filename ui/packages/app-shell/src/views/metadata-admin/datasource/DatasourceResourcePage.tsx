@@ -26,12 +26,17 @@
  *    `secret` so they are encrypted into `sys_secret` and never persisted in
  *    `config` metadata. Edit prefills from `GET /datasources/:name` (which
  *    returns `config` + a `hasSecret` flag, never the credential itself).
+ *    A new datasource starts on the `external` schema mode, and the select
+ *    says what the chosen mode does to the database; a text or number box
+ *    shows its default as a placeholder, sent when left empty
+ *    (objectstack#30327, #30331).
  *  - **Test** a connection (saved → `POST …/:name/test`; draft in the editor →
  *    `POST …/test`).
  *  - **Sync objects**: introspect remote tables (`GET …/remote-tables`), pick
  *    which to import, generate an object definition for each (`POST …/object-draft`),
  *    and create it through the normal metadata channel (`MetadataClient.save('object', …)`).
- *    Offered only on a federation source (`offersSync`, objectui#13318). Once
+ *    Offered only on a federation source (`offersSync`, objectui#13318); a
+ *    managed row says why it has none (`explainsNoSync`). Once
  *    an object is created the dialog stays open on the result: it links each
  *    new object and says what is left before people can use it, adding it to
  *    an app and granting access (objectstack#30328).
@@ -264,12 +269,28 @@ interface EditorForm {
   secret: string;
 }
 
-/** The Schema mode select's options, in its order; each label is an `engine.datasource.*` row (objectui#13460). */
+/**
+ * The Schema mode select's options, in its order; each label is an
+ * `engine.datasource.*` row (objectui#13460), and each `hintKey` is the
+ * sentence under the select that says, in business words, what the selected
+ * mode does to the database and when to pick it (objectstack#30327).
+ *
+ * `external` comes first and is what a new datasource starts on: the page
+ * exists to connect a database that already holds tables and sync them in as
+ * objects, and only a federation source offers Sync (`offersSync`). A managed
+ * datasource is ObjectStack's own storage: when an object is stored in it, the
+ * schema sync creates the object's table, or ADDS the object's missing
+ * columns to an existing table of the same name (driver-sql `initObjects`),
+ * which on an existing database changes a customer's tables.
+ */
 const SCHEMA_MODES = [
-  { value: 'managed', labelKey: 'engine.datasource.schemaModeManaged' },
-  { value: 'external', labelKey: 'engine.datasource.schemaModeExternal' },
-  { value: 'validate-only', labelKey: 'engine.datasource.schemaModeValidateOnly' },
+  { value: 'external', labelKey: 'engine.datasource.schemaModeExternal', hintKey: 'engine.datasource.schemaModeExternalHint' },
+  { value: 'managed', labelKey: 'engine.datasource.schemaModeManaged', hintKey: 'engine.datasource.schemaModeManagedHint' },
+  { value: 'validate-only', labelKey: 'engine.datasource.schemaModeValidateOnly', hintKey: 'engine.datasource.schemaModeValidateOnlyHint' },
 ] as const;
+
+/** The `schemaMode` a new datasource starts on (objectstack#30327, see {@link SCHEMA_MODES}). */
+const NEW_DATASOURCE_SCHEMA_MODE = 'external';
 
 /**
  * The platform's primary datasource, the name the server's
@@ -297,17 +318,58 @@ function offersSync(row: DatasourceRow): boolean {
   return row.schemaMode !== undefined && FEDERATION_SCHEMA_MODES.has(row.schemaMode);
 }
 
+/**
+ * Does this row say why it has no "Sync objects"? (objectstack#30327)
+ *
+ * A managed datasource, declared or by default, is ObjectStack's own storage:
+ * it has no remote tables to bring in, and the Sync doors refuse it. The row
+ * says so instead of leaving the button out with no word. The primary
+ * datasource is the platform's own and says nothing.
+ */
+function explainsNoSync(row: DatasourceRow): boolean {
+  if (row.name === PRIMARY_DATASOURCE) return false;
+  return row.schemaMode === undefined || row.schemaMode === 'managed';
+}
+
 const SERVER = ((import.meta as { env?: Record<string, string> }).env?.VITE_SERVER_URL || '').replace(/\/+$/, '');
 
 const isPassword = (p: JsonProp) => p.format === 'password';
 
-/** Build the default config (password props excluded — they live in `secret`). */
+/** Is this prop drawn as a text or number box (not a switch, a select or the credential)? */
+const isTypedBox = (p: JsonProp) => !isPassword(p) && p.type !== 'boolean' && !Array.isArray(p.enum);
+
+/**
+ * Build the default config (password props excluded — they live in `secret`).
+ *
+ * A text or number box starts EMPTY, its default shown as the box's
+ * placeholder instead (objectstack#30331): a default held as the box's value
+ * was taken for a hint, and typing a path into the SQLite Filename box
+ * appended it to `:memory:`. {@link withBoxDefaults} sends that default when
+ * the box is still empty, so a new datasource's request is what it was.
+ * A switch or a select keeps its default as its value: it has no text to
+ * type after.
+ */
 function defaultConfig(driver: DriverEntry | undefined): Record<string, unknown> {
   const props = driver?.configSchema?.properties ?? {};
   const cfg: Record<string, unknown> = {};
   for (const [key, prop] of Object.entries(props)) {
-    if (isPassword(prop)) continue;
+    if (isPassword(prop) || isTypedBox(prop)) continue;
     if (prop.default !== undefined) cfg[key] = prop.default;
+  }
+  return cfg;
+}
+
+/**
+ * A new datasource's config with each still-empty text or number box filled
+ * with its default, the value its placeholder shows (objectstack#30331).
+ * An edit sends the config as it stands: its boxes hold the stored values.
+ */
+function withBoxDefaults(driver: DriverEntry | undefined, config: Record<string, unknown>): Record<string, unknown> {
+  const props = driver?.configSchema?.properties ?? {};
+  const cfg: Record<string, unknown> = { ...config };
+  for (const [key, prop] of Object.entries(props)) {
+    if (!isTypedBox(prop) || prop.default === undefined) continue;
+    if (cfg[key] === undefined || cfg[key] === '') cfg[key] = prop.default;
   }
   return cfg;
 }
@@ -473,6 +535,9 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
     }
   }, [api, drivers]);
 
+  /** The sentence under the Schema mode select for the mode now selected (objectstack#30327). */
+  const selectedModeHint = SCHEMA_MODES.find((m) => m.value === form?.schemaMode)?.hintKey;
+
   const selectedDriver = React.useMemo(
     () => drivers.find((d) => d.id === form?.driver),
     [drivers, form?.driver],
@@ -488,7 +553,7 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       name: '',
       label: '',
       driver: first?.id ?? '',
-      schemaMode: 'managed',
+      schemaMode: NEW_DATASOURCE_SCHEMA_MODE,
       storedSchemaMode: null,
       config: defaultConfig(first),
       secret: '',
@@ -557,7 +622,7 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       label: f.label || undefined,
       driver: f.driver,
       schemaMode: f.schemaMode,
-      config: f.config,
+      config: requestConfig(f),
     };
     if (f.schemaMode !== 'managed' && (f.storedSchemaMode === null || f.storedSchemaMode === 'managed')) {
       body.external = {};
@@ -566,12 +631,16 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
     return body;
   };
 
+  /** The config a request sends: a new datasource's empty boxes take their defaults (`withBoxDefaults`). */
+  const requestConfig = (f: EditorForm) =>
+    f.storedSchemaMode === null ? withBoxDefaults(drivers.find((d) => d.id === f.driver), f.config) : f.config;
+
   const testDraft = async () => {
     if (!form) return;
     setTestingDraft(true);
     setTestMsg(null);
     try {
-      const r = await api('/api/v1/datasources/test', { method: 'POST', body: JSON.stringify({ driver: form.driver, config: form.config, ...(form.secret ? { secret: form.secret } : {}) }) });
+      const r = await api('/api/v1/datasources/test', { method: 'POST', body: JSON.stringify({ driver: form.driver, config: requestConfig(form), ...(form.secret ? { secret: form.secret } : {}) }) });
       const res = r?.result ?? r;
       if (res?.ok === false) setTestMsg({ ok: false, text: res?.error ?? t('engine.datasource.connectionFailed', locale) });
       else if (res?.latencyMs != null) setTestMsg({ ok: true, text: tFormat('engine.datasource.connectionOkLatency', locale, { latency: res.latencyMs }) });
@@ -735,6 +804,8 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
         <Input
           type={isNum ? 'number' : 'text'}
           value={value != null ? String(value) : ''}
+          // A new datasource's default is the placeholder, sent when the box is left empty (objectstack#30331).
+          placeholder={!editing && prop.default !== undefined ? String(prop.default) : undefined}
           onChange={(e) => setConfigValue(key, isNum ? (e.target.value === '' ? undefined : Number(e.target.value)) : e.target.value)}
         />
         {prop.description && <p className="text-[11px] text-muted-foreground">{prop.description}</p>}
@@ -795,6 +866,11 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
                   {ds.statusReason && (ds.status === 'error' || ds.status === 'blocked') && (
                     <div className="mt-0.5 truncate text-[11px] text-muted-foreground" title={ds.statusReason}>
                       {ds.statusReason}
+                    </div>
+                  )}
+                  {explainsNoSync(ds) && (
+                    <div className="mt-0.5 text-[11px] text-muted-foreground" data-testid="datasource-no-sync-note">
+                      {t('engine.datasource.noSyncManaged', locale)}
                     </div>
                   )}
                 </div>
@@ -877,6 +953,9 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
                     {SCHEMA_MODES.map((m) => <SelectItem key={m.value} value={m.value}>{t(m.labelKey, locale)}</SelectItem>)}
                   </SelectContent>
                 </Select>
+                {selectedModeHint && (
+                  <p className="text-[11px] text-muted-foreground" data-testid="datasource-schema-mode-hint">{t(selectedModeHint, locale)}</p>
+                )}
               </div>
 
               {testMsg && (
