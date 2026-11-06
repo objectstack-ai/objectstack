@@ -3856,13 +3856,22 @@ const pt = {
     requiredFields: "Campos obrigatórios: {{fields}}",
   },
   connectAgent: {
+    capabilities: {
+      title: 'O que seu assistente de IA pode fazer aqui',
+      body: 'Depois de conectado, seu assistente de IA pode consultar, criar, alterar e excluir os registros aos quais você tem acesso, e executar as ações deste sistema. Ele sempre age como você: só vê e faz o que as suas próprias permissões permitem.',
+      examplesTitle: 'Pedidos para testar no seu assistente',
+      example1: 'Liste os objetos que eu posso ver.',
+      example2: 'Conte quantos registros cada um desses objetos tem.',
+      example3: 'Quais ações posso executar aqui e o que cada uma faz?',
+      tryFirst: 'Comece pelo primeiro: se o seu assistente responder com os objetos com que você trabalha, a conexão funciona.',
+    },
     disabled: {
-      title: 'O MCP está desativado nesta implantação',
-      body: 'A superfície MCP está desligada (OS_MCP_SERVER_ENABLED=false). Peça ao operador para reativá-la.',
+      title: 'A conexão de assistentes de IA está desligada aqui',
+      body: 'Esta implantação está com a conexão de assistentes de IA desligada (OS_MCP_SERVER_ENABLED=false), então não há nada para conectar. Peça ao operador para religá-la.',
     },
     url: {
-      title: 'Endpoint MCP deste sistema',
-      body: 'Qualquer cliente de IA compatível com MCP conecta-se com esta URL. A identidade é autosserviço: a implantação é seu próprio servidor de autorização OAuth 2.1 — você entra como você mesmo e cada chamada corre sob suas permissões e segurança em nível de linha.',
+      title: 'Endereço de conexão deste sistema',
+      body: 'Seu assistente de IA se conecta com este endereço. Você entra como você mesmo no navegador, então tudo o que ele faz é executado com as suas próprias permissões.',
       downloadSkill: 'Baixar SKILL.md',
       skillHint: 'A skill portátil do agente: ensina qualquer agente compatível a trabalhar com este sistema.',
     },
@@ -3871,7 +3880,7 @@ const pt = {
       reachability: 'claude.ai (web) conecta-se a partir dos servidores da Anthropic — a implantação precisa ser acessível via HTTPS público. Claude Desktop e clientes locais também alcançam implantações de intranet.',
     },
     claudeCode: {
-      body: 'Um comando — o login OAuth abre automaticamente no primeiro uso:',
+      body: 'Um comando — o login pelo navegador abre automaticamente no primeiro uso:',
       plugin: 'Ou instale o plugin oficial (adiciona a skill ObjectStack e o comando guiado /objectstack:connect):',
     },
     cursor: {
@@ -3885,21 +3894,21 @@ const pt = {
     },
     codex: {
       body: 'No app do Codex: Configurações → Servidores MCP → Adicionar servidor e preencha:',
-      hint: 'Salve, reinicie quando solicitado e clique em Authenticate ao lado de objectstack para entrar pelo navegador. Digite /mcp na caixa de mensagem para verificar a conexão. Se a sua versão não oferecer login pelo navegador, adicione o cabeçalho Authorization: Bearer <chave de API> (crie uma chave abaixo).',
+      hint: 'Salve, reinicie quando solicitado e clique em Authenticate ao lado de objectstack para entrar pelo navegador. Digite /mcp na caixa de mensagem para verificar a conexão. Se a sua versão não oferecer login pelo navegador, adicione o cabeçalho Authorization: Bearer <chave de API> (crie uma em “Avançado: scripts e CI”, abaixo).',
     },
     workbuddy: {
       body: 'Conectores → Conector personalizado → Configurar MCP e mescle esta entrada em mcpServers (salva em ~/.workbuddy/mcp.json):',
-      hint: 'Salve e clique em Confiar no conector objectstack; ele só fica ativo depois de confiável. Se a sua versão não mostrar o login, adicione o cabeçalho Authorization: Bearer <chave de API> (crie uma chave abaixo).',
+      hint: 'Salve e clique em Confiar no conector objectstack; ele só fica ativo depois de confiável. Se a sua versão não mostrar o login, adicione o cabeçalho Authorization: Bearer <chave de API> (crie uma em “Avançado: scripts e CI”, abaixo).',
     },
     doubao: {
       title: 'Doubao Work',
       body: 'Habilidades · Conectores → Novo → Novo conector personalizado e preencha:',
-      hint: 'Entre pelo navegador quando solicitado. Se o login não aparecer, adicione o cabeçalho personalizado Authorization: Bearer <chave de API> (crie uma chave abaixo). Tarefas executadas na nuvem exigem uma implantação acessível por HTTPS público.',
+      hint: 'Entre pelo navegador quando solicitado. Se o login não aparecer, adicione o cabeçalho personalizado Authorization: Bearer <chave de API> (crie uma em “Avançado: scripts e CI”, abaixo). Tarefas executadas na nuvem exigem uma implantação acessível por HTTPS público.',
     },
     qwenwork: {
       title: 'QwenWork',
       body: 'Extensões → Conectores → + Adicionar → Colar configuração JSON:',
-      hint: 'Ou adicione manualmente como Streamable HTTP com esta URL. Se a sua versão não oferecer login pelo navegador, adicione o cabeçalho Authorization: Bearer <chave de API> (crie uma chave abaixo).',
+      hint: 'Ou adicione manualmente como Streamable HTTP com esta URL. Se a sua versão não oferecer login pelo navegador, adicione o cabeçalho Authorization: Bearer <chave de API> (crie uma em “Avançado: scripts e CI”, abaixo).',
     },
     client: {
       title: 'Qual assistente de IA você usa?',

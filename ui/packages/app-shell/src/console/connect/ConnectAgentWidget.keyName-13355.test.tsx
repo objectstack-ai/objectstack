@@ -22,7 +22,10 @@
  * endpoint and SKILL.md on top, a picker that shows one client's steps and
  * remembers the choice on this browser, and the key form collapsed. The
  * reachability block holds that claude.ai (web) and Doubao Work's cloud tasks
- * are marked not available on an address that is not public HTTPS.
+ * are marked not available on an address that is not public HTTPS. The
+ * capabilities block holds the page's opening: what a connected assistant can
+ * do and example requests above everything else, and no protocol word in any
+ * pack except where a client's own form or menu names it.
  *
  * `fetch` is stubbed by path; `t` echoes the KEY (with the `name` or
  * `address` option appended when one is passed), as the sibling suites do,
@@ -47,6 +50,7 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 
 import { ConnectAgent } from './ConnectAgentWidget';
 import { isPublicHttpsAddress } from './deploymentReach';
+import { builtInLocales } from '@object-ui/i18n/locales';
 
 const MINTED_KEY = 'osk_test_0123456789';
 
@@ -356,5 +360,84 @@ describe('Connect an Agent marks the cloud-connected ways in as not available on
     pickClient('«connectAgent.doubao.title»');
     await screen.findByText('«connectAgent.doubao.body»');
     expect(notes()).toEqual([]);
+  });
+});
+
+describe('Connect an Agent says what a connected assistant can do, in plain words, before any setup', () => {
+  /**
+   * The `connectAgent.*` strings that may name a protocol: a client's own menu
+   * or form spells it there (Codex's "MCP servers", WorkBuddy's "Configure
+   * MCP", QwenWork's Streamable HTTP transport choice), or the operator's
+   * setting is quoted by name (`OS_MCP_SERVER_ENABLED`).
+   */
+  const CLIENT_FORM_KEYS = new Set(['codex.body', 'workbuddy.body', 'qwenwork.hint', 'disabled.body']);
+  const PROTOCOL_WORDS = /\bMCP\b|OAuth|Streamable HTTP/;
+
+  function flatten(node: unknown, prefix = ''): Array<[string, string]> {
+    if (typeof node === 'string') return [[prefix, node]];
+    if (!node || typeof node !== 'object') return [];
+    return Object.entries(node as Record<string, unknown>).flatMap(([k, v]) =>
+      flatten(v, prefix ? `${prefix}.${k}` : k),
+    );
+  }
+
+  it('§1 opens with what the assistant can do, then example requests to copy, above the address', async () => {
+    await renderPage();
+    const capabilities = screen.getByText('«connectAgent.capabilities.title»');
+    const endpoint = screen.getByText('«connectAgent.url.title»');
+    expect(capabilities.compareDocumentPosition(endpoint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText('«connectAgent.capabilities.body»')).toBeInTheDocument();
+    const examples = ['example1', 'example2', 'example3'].map((n) =>
+      screen.getByText(`«connectAgent.capabilities.${n}»`),
+    );
+    for (const example of examples) {
+      // Each request sits beside its own copy button.
+      expect(example.closest('li')?.querySelector('button')).not.toBeNull();
+      expect(example.compareDocumentPosition(endpoint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    // What to try first is said to everyone: the page cannot tell whether you have connected.
+    expect(screen.getByText('«connectAgent.capabilities.tryFirst»')).toBeInTheDocument();
+  });
+
+  it('§2 every pack says it in its own words: the capability strings are present and not English copies', () => {
+    const en = flatten((builtInLocales.en as Record<string, unknown>).connectAgent);
+    const caps = en.filter(([key]) => key.startsWith('capabilities.'));
+    expect(caps.map(([key]) => key)).toEqual([
+      'capabilities.title',
+      'capabilities.body',
+      'capabilities.examplesTitle',
+      'capabilities.example1',
+      'capabilities.example2',
+      'capabilities.example3',
+      'capabilities.tryFirst',
+    ]);
+    for (const [lang, pack] of Object.entries(builtInLocales)) {
+      const strings = new Map(flatten((pack as Record<string, unknown>).connectAgent));
+      for (const [key, english] of caps) {
+        const text = strings.get(key);
+        expect(text, `${lang} ${key}`).toBeTruthy();
+        if (lang !== 'en') expect(text, `${lang} ${key}`).not.toBe(english);
+      }
+    }
+  });
+
+  it('§3 no protocol word appears in any pack except where a client form names it', () => {
+    const offenders: string[] = [];
+    for (const [lang, pack] of Object.entries(builtInLocales)) {
+      for (const [key, text] of flatten((pack as Record<string, unknown>).connectAgent)) {
+        if (!CLIENT_FORM_KEYS.has(key) && PROTOCOL_WORDS.test(text)) offenders.push(`${lang} ${key}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('§4 the hints that fall back to an API key point to the Advanced section, in every pack', () => {
+    for (const [lang, pack] of Object.entries(builtInLocales)) {
+      const strings = new Map(flatten((pack as Record<string, unknown>).connectAgent));
+      const advanced = String(strings.get('advanced.title'));
+      for (const key of ['codex.hint', 'workbuddy.hint', 'doubao.hint', 'qwenwork.hint']) {
+        expect(strings.get(key), `${lang} ${key}`).toContain(advanced);
+      }
+    }
   });
 });
