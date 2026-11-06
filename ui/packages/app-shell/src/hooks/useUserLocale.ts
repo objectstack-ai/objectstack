@@ -83,9 +83,9 @@ import {
   LOCALE_STORAGE_KEY,
   readStoredLanguage,
   resolveBootstrapLanguage,
-  resolveBuiltInLanguage,
   useObjectTranslation,
 } from '@object-ui/i18n';
+import { resolveLocaleAmong } from '@objectstack/spec/system';
 import { useAdapter, useDataInvalidation, extractWriteErrorMessage } from '@object-ui/react';
 import { ObjectStackAdapter } from '@object-ui/data-objectstack';
 import { useAfterFirstPaint } from './sharedUserFeeds.js';
@@ -373,24 +373,26 @@ const LOCALE_FIELD = 'locale';
  * locales ∩ what this renderer can resolve) — the same list the globe menu and
  * the profile card render, deliberately not a second opinion about what ships.
  *
- * The match order is the server's `resolveLocale` (`packages/core`
- * `fallbacks/memory-i18n.ts`), the one the platform's i18n routes already
- * resolve a requested locale with, so the console and the server agree on
- * which language a stored tag means:
+ * The match order IS the platform's one locale ladder, `resolveLocaleAmong`
+ * (`@objectstack/spec/system`), which the server's `resolveLocale` and every
+ * i18n route run too, so the console and the server agree on which language a
+ * stored tag means:
  *
  *   1. exact tag (`pt-BR` → `pt-BR`; a real `pt-BR` still beats `pt`);
  *   2. the same tag in any case (`zh-cn` → `zh-CN`) — a row written before the
  *      server door folded case is served as stored, never migrated;
- *   3. the first offered code the platform locale table reads as the same
- *      language (`zh-TW` → `zh-Hant`, `zh-HK` → `zh-TW`, `zh` → `zh-CN`,
- *      `pt` → `pt-BR`; objectstack#30511). The table's read aliases are how a
- *      row stored before the table keeps its meaning, and the one step the
- *      server's order lacks: without it a base-language match hands a
- *      Traditional row (`zh-TW`) the first `zh` variant offered, which is the
- *      Simplified pack;
+ *   3. the same platform locale table language, through the table's read
+ *      aliases (`zh-TW` → `zh-Hant`, `zh-HK` → `zh-TW`, `zh` → `zh-CN`,
+ *      `pt` → `pt-BR`): a row stored before the table keeps its meaning, and a
+ *      Traditional row is never handed the first Simplified variant offered;
  *   4. the base language (`zh-CN` → `zh`, `en-GB` → `en`), case-insensitively;
- *   5. the first offered variant of that base language (`es` → `es-MX`,
- *      `zh-Hans-CN` → `zh-CN`), in the order the list offers them.
+ *   5. the first offered variant of that base language (`es` → `es-MX`), in
+ *      the order the list offers them — after step 3, so a variant the table
+ *      reads as the language itself (`es-ES`) is taken first.
+ *
+ * The table's read aliases name the script-subtag spellings too
+ * (`zh-Hant-TW`, `zh-Hans-CN`), so step 3 reads them by script; a code the
+ * table does not name is not guessed at, here as on the server.
  *
  * A match answers the OFFERED spelling, never the stored one: the list is what
  * the provider can switch to.
@@ -404,26 +406,7 @@ export function pickRenderableLocale(
   offerable: readonly string[] | null,
 ): string | null {
   if (!offerable || offerable.length === 0) return null;
-  // 1. Exact.
-  if (offerable.includes(tag)) return tag;
-  // 2. Case-insensitive.
-  const lower = tag.toLowerCase();
-  const caseMatch = offerable.find((code) => code.toLowerCase() === lower);
-  if (caseMatch) return caseMatch;
-  // 3. The same language, as the platform locale table reads both tags.
-  const pack = resolveBuiltInLanguage(tag);
-  if (pack !== null) {
-    const sameLanguage = offerable.find((code) => resolveBuiltInLanguage(code) === pack);
-    if (sameLanguage) return sameLanguage;
-  }
-  // 4. Base language.
-  const base = lower.split('-')[0];
-  if (!base) return null;
-  const baseMatch = offerable.find((code) => code.toLowerCase() === base);
-  if (baseMatch) return baseMatch;
-  // 5. Variant of the base language — first offered wins.
-  const variantMatch = offerable.find((code) => code.split('-')[0].toLowerCase() === base);
-  return variantMatch ?? null;
+  return resolveLocaleAmong(tag, offerable) ?? null;
 }
 
 /**

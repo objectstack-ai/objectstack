@@ -248,9 +248,11 @@ describe('pickRenderableLocale', () => {
 });
 
 /**
- * The console resolves a stored tag in the server's `resolveLocale` order
- * (exact → case → base language → variant), so a legacy mis-cased row and a
- * tag the deployment offers only as a variant no longer render English.
+ * The console resolves a stored tag on the platform's one locale ladder,
+ * `resolveLocaleAmong` (exact → case → platform table language → base
+ * language → variant), the server's `resolveLocale` order, so a legacy
+ * mis-cased row and a tag the deployment offers only as a variant no longer
+ * render English.
  */
 /**
  * objectstack#30511: before the base-language step, the platform locale
@@ -315,7 +317,13 @@ describe('pickRenderableLocale follows the server resolveLocale order', () => {
   });
 
   it('takes the first offered variant when several share a base', () => {
-    expect(pickRenderableLocale('es', ['en', 'es-MX', 'es-ES'])).toBe('es-MX');
+    expect(pickRenderableLocale('es', ['en', 'es-MX', 'es-AR'])).toBe('es-MX');
+  });
+
+  it('takes the variant the platform locale table reads as the language before the first variant', () => {
+    // `es-ES` is a read alias of the table's `es`, so the table step answers
+    // it ahead of the variant step, as the server's ladder does.
+    expect(pickRenderableLocale('es', ['en', 'es-MX', 'es-ES'])).toBe('es-ES');
   });
 
   it('still matches nothing for a language nobody offers', () => {
