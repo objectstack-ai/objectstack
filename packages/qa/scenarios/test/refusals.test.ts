@@ -144,7 +144,9 @@ describe('scenario card refusals', () => {
       { file: second, path: 'code', message: expect.stringMatching(/^duplicate app code `crm`, also the code of crm_account_with_contacts\.json/) },
     ]);
 
-    writeFileSync(second, JSON.stringify({ ...base, id: 'crm_twin', code: 'crmtwin' }));
+    const twin = { ...base, id: 'crm_twin' };
+    twin.code = 'crmtwin';
+    writeFileSync(second, JSON.stringify(twin));
     const ok = loadScenarios(dir, { areas });
     expect(ok.refusals).toEqual([]);
     expect(ok.cards.map((c) => c.card.code)).toEqual(['crm', 'crmtwin']);
