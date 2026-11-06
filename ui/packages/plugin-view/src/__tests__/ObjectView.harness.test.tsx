@@ -101,7 +101,13 @@ vi.mock('@object-ui/plugin-form', async (importOriginal) => ({
  * Puts back, after the calling block's last test, what the block's hooks and
  * tests left behind, so the next block starts from the state its former file
  * started from: registry entries, a swapped-in `localStorage`, both storages'
- * contents, `<html lang>` / `dir`, and the three stand-in slots.
+ * contents, `<html lang>` / `dir`, and the three stand-in slots. Measured
+ * before this existed: the `ObjectView.formLabelsI18nLabel-10993` block left
+ * `lang="zh"` and `dir="ltr"` on `<html>` for every block after it, and every
+ * block after the first started with the previous block's stand-ins
+ * installed. No block here registers a renderer or swaps `localStorage`; the
+ * helper puts those back too, as `ListView.harness.test.tsx`'s does, for the
+ * next block that does.
  *
  * Declared first in the block, so its `beforeAll` runs before the block's own
  * and its `afterAll` after them (Vitest runs after-hooks in reverse order).
