@@ -51,6 +51,7 @@ const result = CurrencyConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | optional | Machine name (snake_case) |
+| **renamedFrom** | `string[]` | optional | Earlier keys of THIS field, written in the field-key grammar (lowercase snake_case), e.g. `renamedFrom: ['company']` on a field now keyed `account_name`. On a package upgrade from a version that has one of these keys and not this one, the platform carries that column's data to this field instead of adding an empty column. A field renamed twice lists both earlier keys. Each entry once; never this field's own key; never a key another field of the same object still declares (that name is still in use); never an old key another field of the same object also claims. Read only at package upgrade: no record read, write or query reads it, and the type of the old column is judged by the upgrade plan, not here. |
 | **label** | `string` | optional | Human readable label |
 | **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| … +35 more>` | ✅ | Field Data Type |
 | **description** | `string` | optional | Tooltip/Help text |
