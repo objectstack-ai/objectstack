@@ -4,6 +4,8 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)
 [![Docs](https://img.shields.io/badge/docs-objectstack.ai-0a0a0a.svg)](https://objectstack.ai/docs)
 
+[Website](https://www.objectos.ai) · [Docs](https://objectstack.ai/docs) · [Cloud](https://cloud.objectos.ai) · [Discussions](https://github.com/objectstack-ai/objectstack/discussions)
+
 > ## The ontology is the software.
 >
 > **One executable business ontology.** AI writes it, the runtime runs it, agents
@@ -30,10 +32,21 @@ image, `os start` and the Console, free and self-hosted ([Ship it](#ship-it)) �
 while [ObjectOS](https://www.objectos.ai) Cloud is the hosted edition and ObjectOS
 Enterprise the self-managed, licensed one.
 
-## Try it in five minutes
+## Quick start
 
-No install at all? Open a live app on
-[StackBlitz](https://stackblitz.com/github/objectstack-ai/hotcrm).
+Every way in, in one table. The [docs home](https://objectstack.ai/docs) links
+here instead of keeping its own copy.
+
+| I want to… | Run | Then |
+| :--- | :--- | :--- |
+| Build a new app with an agent | `npm create objectstack@latest my-app && cd my-app && npx os dev --ui` | Open `http://localhost:3000/_console/`. The walkthrough is [Try it in five minutes](#try-it-in-five-minutes). |
+| Run the platform with no project yet | `npm i -g @objectstack/cli && os start` | Open `http://localhost:3000/_console/`. With no artifact to load, `os start` boots an empty kernel and you install apps from the Console marketplace ([`os start`](https://objectstack.ai/docs/deployment/cli#os-start)). |
+| Run a compiled app in the official image | `docker run -p 8080:8080 -v "$PWD/dist/objectstack.json:/srv/app/objectstack.json:ro" -e OS_DATABASE_URL -e OS_AUTH_SECRET -e OS_SECRET_KEY ghcr.io/objectstack-ai/objectstack:latest` | Export the three variables first. `latest` is for trying it; pin an exact `X.Y.Z` tag in production ([image README](./docker/README.md)). |
+| Ship a scaffolded app with Postgres | `docker build -t my-app . && docker compose up -d` | Run it inside the scaffolded project ([Ship it](#ship-it)). |
+| Look first, install nothing | [Open the CRM example on StackBlitz](https://stackblitz.com/github/objectstack-ai/hotcrm) | It runs in the browser. |
+| Work on the framework itself | `git clone https://github.com/objectstack-ai/objectstack.git` | Then follow [Hack on the framework](#hack-on-the-framework). |
+
+## Try it in five minutes
 
 **1 · Create a project.** The scaffolder installs the AI skills bundle and writes
 an `AGENTS.md`, so your agent starts with the protocol's rules already loaded —
