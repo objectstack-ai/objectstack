@@ -30,6 +30,8 @@
  * door, the REAL install primitive and the REAL uninstall run against it; its
  * write verbs route through the producer's own dispatch predicates.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ImportUnmanagedPackageResponseSchema } from '@objectstack/spec/api';
