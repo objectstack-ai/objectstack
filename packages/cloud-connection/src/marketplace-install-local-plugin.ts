@@ -266,7 +266,13 @@ import { customizationPairManifestRefusal } from '@objectstack/metadata-protocol
 // asked at the managed install exactly as the publish doors ask them.
 import { judgeOverrideWrite, overrideWriteIdentityOf, overrideWriteItemsOf, type OverrideWriteItem, type OverrideWriteRule } from '@objectstack/metadata-protocol';
 // [ADR-0146 D10, #28564] The `__c` extension-field reservation's one judge, step 1c''.
-import { judgeExtensionFieldSuffix } from '@objectstack/metadata-protocol';
+import {
+    judgeExtensionFieldSuffix,
+    judgeRedeclaredOwnerFields,
+    redeclaredOwnerFieldInstallMessage,
+    type ObjectOwnerDeclaration,
+    type RedeclaredOwnerFieldRefusal,
+} from '@objectstack/metadata-protocol';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { unknownQueryParamRefusalMessage } from '@objectstack/rest';
 // [#25366] The code the registry's security-catalog refusal carries, compared
@@ -2409,6 +2415,26 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }, UNRUNNABLE_REFUSAL_STATUS);
         }
 
+        // 2e'. [ADR-0146 D10, second rule] ⭐ THE DISPLAY-PROPERTY WHITELIST,
+        //     beside the target check and before any write: an
+        //     `objectExtensions[].fields` entry naming a field the extended
+        //     object's owner declares replaces that field whole, so it is
+        //     refused when it changes anything outside the whitelist, with the
+        //     prescription naming `fieldPatches`. The save doors' judge
+        //     (`judgeRedeclaredOwnerFields`), this door's body-refusal envelope
+        //     (`VALIDATION_ERROR` / 422), every refusal in `details.refusals`.
+        const redeclaredRefusals = this.redeclaredOwnerFieldRefusalsOf(ctx, converted, manifestId);
+        if (redeclaredRefusals.length > 0) {
+            return c.json({
+                success: false,
+                error: {
+                    code: UNRUNNABLE_REFUSAL_CODE,
+                    message: redeclaredOwnerFieldInstallMessage(manifestId, redeclaredRefusals),
+                    details: { refusals: redeclaredRefusals },
+                },
+            }, UNRUNNABLE_REFUSAL_STATUS);
+        }
+
         // 3. Hot-register FIRST so a malformed inline manifest fails the
         //    install loudly rather than persisting a broken record that
         //    would also fail on every subsequent rehydrate.
@@ -3599,6 +3625,54 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
+     * [ADR-0146 D10, second rule] Step 2e' of {@link handleInstall}: every
+     * `objectExtensions[].fields` entry the converted body carries — each
+     * `packages[]` entry's under its own id, or the body's own under
+     * `manifestId` — judged by `@objectstack/metadata-protocol`'s
+     * `judgeRedeclaredOwnerFields` against the extended object's owner: a
+     * package of this artifact that declares it, otherwise the installed owner
+     * the registry holds (`getObjectOwner`: its own declaration and package,
+     * never the resolved object, which carries every installed extension's
+     * fields). An extension of an object its own package owns, and a target
+     * neither knows, are not judged.
+     */
+    private redeclaredOwnerFieldRefusalsOf = (
+        ctx: PluginContext,
+        converted: Record<string, any>,
+        manifestId: string,
+    ): RedeclaredOwnerFieldRefusal[] => {
+        const bodies: Array<{ id: string | undefined; body: Record<string, any>; prefix: string }> = Array.isArray(converted.packages)
+            ? converted.packages.flatMap((entry: unknown, index: number) => {
+                if (!isPlainObject(entry) || !isPlainObject(entry.manifest)) return [];
+                const id = manifestIdOf(entry.manifest);
+                return [{ id: typeof id === 'string' ? id : undefined, body: entry.manifest as Record<string, any>, prefix: `packages[${index}].manifest.` }];
+            })
+            : [{ id: manifestId, body: flattenPackageBody(converted), prefix: '' }];
+        if (!bodies.some(({ body }) => Array.isArray(body.objectExtensions))) return [];
+        const delivered = new Map<string, ObjectOwnerDeclaration>();
+        for (const { id, body } of bodies) {
+            const objects = body.objects;
+            const list = Array.isArray(objects) ? objects : isPlainObject(objects) ? Object.entries(objects).map(([name, o]) => (isPlainObject(o) ? { name, ...o } : o)) : [];
+            for (const object of list) {
+                if (isPlainObject(object) && typeof object.name === 'string' && !delivered.has(object.name)) {
+                    delivered.set(object.name, { packageId: id, definition: object });
+                }
+            }
+        }
+        let registry: { getObjectOwner?(fqn: string): { packageId?: string; definition?: unknown } | undefined } | undefined;
+        try { registry = ctx.getService<IObjectQLEngine>('objectql')?.registry as typeof registry; } catch { /* no data engine — only delivered owners are known */ }
+        const ownerOf = (name: string): ObjectOwnerDeclaration | undefined => {
+            const own = delivered.get(name);
+            if (own) return own;
+            const installed = registry?.getObjectOwner?.(name);
+            return installed ? { packageId: installed.packageId, definition: installed.definition } : undefined;
+        };
+        return bodies.flatMap(({ id, body, prefix }) => judgeRedeclaredOwnerFields({
+            packageId: id, objectExtensions: body.objectExtensions, ownerOf, at: prefix,
+        }));
+    };
+
+    /**
      * [ADR-0146 D2, ruling A on #28390; #28410] THE OVERRIDE WRITE GATE at the
      * managed install — the door a package's items enter through as code
      * (`manifest.register`), so the publish doors never see them. The rule is
@@ -3717,8 +3791,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // [#30065] …and each shipper's own item, what a declared
                 // action override is judged against.
                 const shipped = new Map<string, unknown>();
+                // [#30623] …and each base's items of this type, what the
+                // ships-no-such-item refusal names an action's object from.
+                const listed = new Map<string, unknown[]>();
                 for (const base of bases) {
-                    const held = (await heldBy(item.type, base)).get(item.identity);
+                    const byIdentity = await heldBy(item.type, base);
+                    listed.set(base, [...byIdentity.values()]);
+                    const held = byIdentity.get(item.identity);
                     if (held !== undefined) {
                         shippers.push(base);
                         shipped.set(base, (delivered.has(base) ? undefined : artifactOf(item, base)) ?? held);
@@ -3726,7 +3805,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 }
                 const verdict = judgeOverrideWrite(
                     { type: item.type, name: item.name, packageId, item: item.item },
-                    { dependencies: closure, shippers, baseItemOf: (base) => shipped.get(base) },
+                    { dependencies: closure, shippers, baseItemOf: (base) => shipped.get(base), baseItemsOf: (base) => listed.get(base) ?? [] },
                 );
                 if (verdict.verdict === 'refuse') {
                     refusals.push({
@@ -4023,6 +4102,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         if (patchTargetRefusals.length > 0) {
             return refuse(UNRUNNABLE_REFUSAL_STATUS, UNRUNNABLE_REFUSAL_CODE,
                 fieldPatchTargetRefusalMessage(manifestId, patchTargetRefusals), { refusals: patchTargetRefusals });
+        }
+        const redeclaredRefusals = this.redeclaredOwnerFieldRefusalsOf(ctx, converted, manifestId);
+        if (redeclaredRefusals.length > 0) {
+            return refuse(UNRUNNABLE_REFUSAL_STATUS, UNRUNNABLE_REFUSAL_CODE,
+                redeclaredOwnerFieldInstallMessage(manifestId, redeclaredRefusals), { refusals: redeclaredRefusals });
         }
 
         // 3. The pair here: declared as the ensure door writes it, writable.

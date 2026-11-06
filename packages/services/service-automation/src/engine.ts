@@ -72,8 +72,10 @@ import { summarizeRun } from './run-summary.js';
 // interpolating it into the log message. See ./thrown-cause-diagnostics.ts.
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 import { defaultEnvCredentialResolver, type CredentialResolver } from './credential-resolver.js';
-// [#22450] The one bundle-locale negotiation rule (exact → case-insensitive →
-// base language → variant expansion), asked about the locales the i18n service
+// [#22450] The one bundle-locale negotiation rule (`resolveLocaleAmong`'s five
+// steps: exact → case-insensitive → platform locale table language, so `zh-TW`
+// reaches `zh-Hant` → base language → variant expansion), asked about the
+// locales the i18n service
 // holds — the same question objectql's `negotiatedMessageLocale` asks it.
 import { resolveBundleLocale, type FlowTerminalMessageKey } from '@objectstack/spec/system';
 // [#25222] The registration-time checks' bodies, and the declarations only

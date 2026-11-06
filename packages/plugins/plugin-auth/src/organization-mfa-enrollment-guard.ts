@@ -74,8 +74,12 @@
  * Both answers are in the caller's language: the locale the request asked for
  * (`Accept-Language`, carried as `ExecutionContext.locale` and handed to every
  * hook as `ctx.session.locale`), matched against the four the copy carries
- * with core's `resolveLocale` — exact, then by language (`zh` reaches
- * `zh-CN`), else English. A write with no caller locale (a system write, a
+ * with core's `resolveLocale`, which is `resolveLocaleAmong`'s five steps
+ * (exact, case-insensitive, platform locale table language, so `zh` reaches
+ * `zh-CN`; base language; first registered variant), else English. The
+ * table step only adds answers for the table's aliases: the copy carries no
+ * `zh-Hant`, so `zh-TW` still reads `zh-CN`. A write with no caller
+ * locale (a system write, a
  * seed) reads English. This is the same path the global switch's refusal takes
  * (`mfa-required-enrollment-predicate.ts`).
  *
@@ -234,7 +238,7 @@ export const ORGANIZATION_MFA_REQUIRED_NOTICE_COPY: Readonly<Record<CopyLocale, 
 
 const COPY_LOCALES = Object.keys(ORGANIZATION_MFA_REFUSAL_COPY);
 
-/** The copy language for a caller's locale: exact, then by language, else English. */
+/** The copy language for a caller's locale: `resolveLocaleAmong`'s five steps, else English. */
 function copyLocaleFor(locale: string | undefined): CopyLocale {
   const picked = typeof locale === 'string' && locale ? resolveLocale(locale, COPY_LOCALES) : undefined;
   return (picked ?? 'en') as CopyLocale;
