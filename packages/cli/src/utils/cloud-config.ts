@@ -112,3 +112,31 @@ export async function deleteCloudConfig(): Promise<void> {
     }
   }
 }
+
+/**
+ * The credential and control plane a cloud WRITE uses — `os package publish`
+ * and `os deploy` alike, so the two cannot aim at different servers.
+ *
+ * Token: the explicit `--token` (oclif fills it from `$OS_CLOUD_API_KEY`),
+ * then `$OS_TOKEN`, then this file's. Server: an explicit `--server` /
+ * `$OS_CLOUD_URL`, then this file's recorded url, then {@link DEFAULT_CLOUD_URL}.
+ * ⛔ `credentials.json` (the runtime identity, `os login`) is never read: a
+ * package published with a runtime-scoped token is the mistake this file's
+ * header exists to make impossible.
+ *
+ * `token` is undefined when no source has one; the caller refuses.
+ */
+export async function resolveCloudCredential(flags: {
+  token?: string;
+  server: string;
+}): Promise<{ token: string | undefined; baseUrl: string }> {
+  let token = flags.token ?? process.env.OS_TOKEN ?? undefined;
+  let baseUrl = flags.server.replace(/\/+$/, '');
+  const serverFlagWasDefault = !process.env.OS_CLOUD_URL && baseUrl === DEFAULT_CLOUD_URL;
+  if (!token || serverFlagWasDefault) {
+    const stored = await tryReadCloudConfig();
+    if (!token && stored?.token) token = stored.token;
+    if (serverFlagWasDefault && stored?.url) baseUrl = stored.url.replace(/\/+$/, '');
+  }
+  return { token, baseUrl };
+}

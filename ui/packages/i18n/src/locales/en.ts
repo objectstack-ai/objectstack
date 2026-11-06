@@ -2922,6 +2922,28 @@ const en = {
       passwordsMore: 'More entries omitted — use the download.',
       passwordsDownload: 'Download CSV',
     },
+    // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
+    assignedWork: {
+      title: 'Records this person holds',
+      loading: 'Counting the records this person holds…',
+      countFailed: 'The records this person holds could not be counted: {{message}}',
+      noClient: 'The records this person holds cannot be counted here.',
+      none: 'This person holds no records you can read.',
+      summary: 'Records you can read: {{total}}, owns {{owned}}, assigned {{assigned}}.',
+      row: '{{object}} · {{field}}',
+      notTransferable: 'Lists several people, so it cannot be handed over here.',
+      truncated: 'Not every user field was counted; this person may hold more.',
+      unreadable: 'Not counted, because you cannot read them: {{objects}}',
+      handoverTo: 'Hand over to',
+      handoverHint: 'Optional. The ban does not wait for the hand-over.',
+      handover: 'Hand over',
+      handingOver: 'Handing over…',
+      handoverNext: 'Hand over the next batch',
+      targetBanned: 'That person is banned. Pick an active user.',
+      transferRefused: 'The hand-over was refused: {{message}}',
+      report: 'Handed over {{updated}}, {{failed}} could not be moved, {{remaining}} still held.',
+      failure: '{{object}} {{id}}: {{message}}',
+    },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
       managedUsers: {
@@ -3236,6 +3258,8 @@ const en = {
         title: 'Audit Log',
         subtitle: 'Read-only system activity and record changes. Newest first.',
         openAsList: 'Open as list',
+        openEntryPage: 'Open entry page',
+        openEntryPageHint: 'The entry page lists every change to the same record, newest first.',
         openPresetAsList: 'Open {{label}} as list',
         presets: 'Presets',
         presetOtherSource: 'This view reads another data source.',
@@ -4272,6 +4296,7 @@ const en = {
     // objectui#13461 — the top bar's avatar button, which holds only the avatar.
     accountMenu: 'Account menu',
     profile: 'Profile',
+    connectAiAssistant: 'Connect an AI Assistant',
     logout: 'Log out',
     preferences: 'Preferences',
     theme: 'Theme',
@@ -4606,6 +4631,13 @@ const en = {
       title: 'QwenWork',
       body: 'Extensions → Connectors → + Add → Paste JSON config:',
       hint: 'Or add it by hand as Streamable HTTP with this URL. If your version offers no browser sign-in, add the request header Authorization: Bearer <API key> (create a key below).',
+    },
+    client: {
+      title: 'Which AI assistant do you use?',
+      hint: 'Choose yours to see only its steps. This browser remembers your choice.',
+    },
+    advanced: {
+      title: 'Advanced: scripts and CI',
     },
     apiKey: {
       title: 'API keys',

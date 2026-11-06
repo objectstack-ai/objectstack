@@ -88,6 +88,7 @@ import { findExtensionFieldSuffixRefusals } from '../utils/extension-field-suffi
 // 3a-vii runs, over the automation engine's own judge.
 import { findFlowCycleRefusals } from '../utils/flow-undeclared-cycle.js';
 import { localCustomizationNotice, readLocalCustomizations } from '../utils/local-customizations.js';
+import { BUILD_NEXT_STEP } from '../utils/next-steps.js';
 
 export default class Compile extends Command {
   static override description = 'Compile ObjectStack configuration to JSON artifact';
@@ -128,6 +129,13 @@ export default class Compile extends Command {
    * which `os dev` runs on every boot and rebuild, keeps it off.
    */
   protected reportsLocalCustomizations = false;
+
+  /**
+   * Whether a successful text-face run ends with the next step
+   * (`BUILD_NEXT_STEP`). On for `os build` only: `os compile` is what `os dev`
+   * runs on every boot and rebuild, where a line per rebuild is noise.
+   */
+  protected printsNextStep = false;
 
   async run(): Promise<void> {
     const { args, flags } = await this.parse(Compile);
@@ -1469,6 +1477,11 @@ export default class Compile extends Command {
           for (const line of notice.slice(1)) console.log(chalk.dim(`      ${line}`));
           console.log('');
         }
+      }
+
+      if (this.printsNextStep) {
+        console.log(chalk.cyan(`  ${BUILD_NEXT_STEP}`));
+        console.log('');
       }
 
     } catch (error: any) {

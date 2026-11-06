@@ -60,6 +60,16 @@
         "must_contain": ["applyOn", "'create'", "sourceField", "targetField"],
         "must_not_contain": ["writeMode: 'insert'"]
       }
+    },
+    {
+      "id": 7,
+      "prompt": "Our integration boots by reading the `account`, `contact` and `lead` object definitions from the runtime's metadata API. Today it sends three requests; our `?name=account,contact,lead` attempt came back 400. Make it one request.",
+      "expected_output": "One `GET /api/v1/meta/object?names=account,contact,lead` — the list door's `?names=` filter takes one comma-separated value and answers only the named items the caller may see; a name that matches no item is simply absent (no 404), and an empty value is refused `400`. Does not spell the filter `?name=`, `?ids=` or `?filter=`: the list reads a closed query set (`package`, `preview`, `object`, `include`, `id`, `names`, `locale`) and refuses any other key with `400 VALIDATION_ERROR` instead of ignoring it, so a misspelt filter never silently answers the whole list.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["?names=", "/api/v1/meta/object", "VALIDATION_ERROR"],
+        "must_not_contain": ["?ids=", "?filter="]
+      }
     }
   ]
 }

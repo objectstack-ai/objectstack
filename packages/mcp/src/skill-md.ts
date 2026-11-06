@@ -323,8 +323,10 @@ create/update payload.
 - **get_record({ objectName, recordId })** — fetch one record by id.
 - **create_record({ objectName, data })** — create a record.
 - **update_record({ objectName, recordId, data })** — change fields on a record.
-- **delete_record({ objectName, recordId })** — delete a record (destructive —
-  confirm with the user first).
+- **delete_record({ objectName, recordId, confirm })** — delete a record,
+  permanently. The server REFUSES a call without \`confirm: true\`
+  (\`ACTION_CONFIRMATION_REQUIRED\`) and nothing is deleted. Ask your human
+  first; the flag asserts an approval, it does not obtain one.
 - **list_actions()** — list the business actions available to you (only those
   the app author exposed to AI and you are permitted to run), with each
   action's declared parameters, whether it operates on a record, and whether

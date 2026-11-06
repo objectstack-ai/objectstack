@@ -313,6 +313,15 @@ const CALLERS: Record<string, Classification> = {
       "ADDRESSED object, whose record is `getData` behind the route's own `get` exposure gate, and the related rows " +
       "are the child's `findData` behind the child's `list` exposure. Pinned by `packages/rest/src/record-page-routes.test.ts`",
   },
+  // [#30379] The package disable door's dependent-rule scan.
+  'packages/runtime/src/domains/packages.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "the package disable door's dependent-rule scan (`readDisableDependentRules`, also asked by the install door's " +
+      '`enableOnInstall: false` arm): a rule\'s `record.REF.FIELD` hop names the object REF points at, only to ask ' +
+      'whether FIELD is one the disable would withhold from it, from the registry\'s DECLARED metadata. It reads no ' +
+      'record of the target and serves none of its fields; the door answers a `409` naming the rule, or proceeds',
+  },
 };
 
 const SCAN_TIMEOUT_MS = 60_000;

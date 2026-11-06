@@ -2874,7 +2874,9 @@ export class SettingsService {
       // previous row, and before the reap below destroys the ciphertext a
       // secret's previous handle points at (#26534). Only an audited write
       // pays for it, and only a secret overwrite pays a read and a decrypt.
-      const oldHash = !this.auditWriter
+      // [#30923] Both ledgers read it: the `config_change` row's before half
+      // carries the same fingerprint (see `auditPrevious`).
+      const oldHash = !this.auditWriter && !this.audit
         ? null
         : isEncrypted
           ? await this.previousSecretAuditDigest(namespace, key, previous)
@@ -2901,9 +2903,12 @@ export class SettingsService {
             // an audit row invisible to RLS readers — see `SettingsAuditSink`.
             tenantId: ctx.tenantId,
             action: isNull ? 'reset' : 'set',
-            valueDigest: isEncrypted
-              ? digest === null ? '<encrypted>' : '<encrypted:' + digest + '>'
-              : digest ?? '',
+            valueDigest: isEncrypted ? SettingsService.maskedSecretDigest(digest) : digest ?? '',
+            // [#30923] The after half, readable — never for a secret-valued
+            // key (`auditReadable`), and never on a reset, which stores nothing.
+            ...(!isNull && SettingsService.auditReadable(isEncrypted, null) ? { value: rawValue } : {}),
+            // [#30923] The before half: what the same stored row held.
+            previous: SettingsService.auditPrevious(previous, isEncrypted, oldHash),
             encrypted: isEncrypted,
             requestId: ctx.requestId,
             // The stored settings row this write landed on, so the ledger row
@@ -3797,6 +3802,65 @@ export class SettingsService {
    */
   private static handleOf(value: unknown): string | null {
     return typeof value === 'string' && value !== '' ? value : null;
+  }
+
+  /**
+   * [#30923] The ONE rule the `config_change` row's values are recorded by:
+   * may this value be written READABLE?
+   *
+   * Never for a secret-valued key — `keyIsSecret` is `encryptedKeys`
+   * membership: the manifest's `encrypted: true`, which `type: 'password'`
+   * forces (see `registerManifest`), the only sensitivity flag a specifier
+   * declares — and never for a value read off a row stored `encrypted: true`
+   * (written while the key was declared secret, whatever its manifest says
+   * now). Such a value is described by its masked fingerprint alone, as
+   * ADR-0007 § Audit & history decides: a placeholder and a checksum, never
+   * the plaintext.
+   */
+  private static auditReadable(keyIsSecret: boolean, row: SettingsRow | null): boolean {
+    return !keyIsSecret && row?.encrypted !== true;
+  }
+
+  /**
+   * A secret's fingerprint as the `config_change` row carries it, on either
+   * half: `<encrypted:` + the keyed digest + `>`, or `<encrypted>` when no
+   * keyed digest can be had (see `secretAuditDigest`).
+   */
+  private static maskedSecretDigest(digest: string | null): string {
+    return digest === null ? '<encrypted>' : '<encrypted:' + digest + '>';
+  }
+
+  /**
+   * [#30923] The before half of the `config_change` row
+   * ({@link SettingsAuditSink}'s `previous`), off the row the upsert probed.
+   *
+   * `null` when that row held nothing: no row (a first write at this rung,
+   * whatever a rung above it or the default answered), or a row an earlier
+   * reset cleared. A value {@link auditReadable} allows is recorded with its
+   * declared SHA-256, the `old_hash` the settings trail records; any other is
+   * its masked fingerprint alone — the keyed digest `old_hash` records for a
+   * secret, or `<encrypted>` where none can be had. That includes a plaintext
+   * row of a key declared secret after it was written: the previous value is
+   * not shown, and an unkeyed hash of it would be the fingerprint the trail
+   * never carries for a secret.
+   */
+  private static auditPrevious(
+    previous: SettingsRow | null,
+    keyIsSecret: boolean,
+    secretDigest: string | null,
+  ): { value?: unknown; digest: string } | null {
+    if (!previous) return null;
+    const held =
+      previous.encrypted === true
+        ? SettingsService.handleOf(previous.value_enc) !== null
+        : previous.value !== null && typeof previous.value !== 'undefined';
+    if (!held) return null;
+    if (SettingsService.auditReadable(keyIsSecret, previous)) {
+      return { value: previous.value, digest: settingAuditDigest(stableStringify(previous.value)) };
+    }
+    // Only a secret key's `old_hash` is keyed; a non-secret key's is an
+    // unkeyed hash and is never put beside a secret.
+    return { digest: SettingsService.maskedSecretDigest(keyIsSecret ? secretDigest : null) };
   }
 
   /**

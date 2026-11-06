@@ -46,7 +46,7 @@ import type { EngineAggregateOptions } from '@objectstack/spec/data';
 import { AggregationNodeSchema } from '@objectstack/spec/data';
 // [#23529] The catalogue's spelling of `PERMISSION_DENIED`, the code whose
 // `details` `errorResultFromThrown` withholds. Imported, never hand-spelled.
-import { StandardErrorCode } from '@objectstack/spec/api';
+import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
 // and the one classification whose arm states the wire code for it.
@@ -64,6 +64,7 @@ import {
 import {
   AI_ACTION_CONFIRMATION_MEMBER,
   type AIActionConfirmation,
+  type ActionConfirmationRequiredDetails,
   type ImportObjectResult,
   type RemoteTable,
 } from '@objectstack/spec/contracts';
@@ -514,6 +515,67 @@ function codedErrorResult(error: ThrownRefusalEnvelope & { details?: unknown }) 
   return {
     content: [{ type: 'text' as const, text: jsonText({ error }) }],
     isError: true as const,
+  };
+}
+
+/**
+ * The code and status the confirmation gate answers with, on `run_action`'s
+ * door (the runtime's `actionConfirmationRefusal`) and on `delete_record`'s
+ * (below). Typed as the registered vocabulary, so a misspelling fails to
+ * compile instead of reaching a client as a code nobody branches on.
+ */
+const ACTION_CONFIRMATION_REQUIRED: ErrorCode = 'ACTION_CONFIRMATION_REQUIRED';
+const ACTION_CONFIRMATION_REQUIRED_HTTP_STATUS = 428;
+
+/** The `details.actionName` a `delete_record` refusal names: the tool the refused call addressed. */
+const DELETE_RECORD_TOOL = 'delete_record';
+
+/**
+ * The confirmation gate on the MCP `delete_record` tool: `run_action`'s gate,
+ * widened by the maintainer's decision to this one tool, for every object.
+ *
+ * A delete over MCP is permanent, and the bridge's checks say whether the
+ * caller MAY delete, never whether a human asked for it. So a call that does
+ * not carry the confirmation member as the boolean `true` is refused with the
+ * refusal `run_action` answers an author-gated action with: the same code,
+ * status, envelope keys and `details` shape (`ActionConfirmationRequiredDetails`),
+ * rendered by the same {@link codedErrorResult}. A client that already handles
+ * that refusal confirms with its human and retries this call unchanged but for
+ * the member.
+ *
+ * The runtime's builder is out of reach (`@objectstack/runtime` and this
+ * package do not depend on each other), so the contract types and the shared
+ * renderer are what hold the two refusals to one shape; the dogfood suite
+ * serves both side by side to one caller.
+ *
+ * What it is NOT, as on `run_action`: `confirm: true` is an unverifiable
+ * caller claim. The gate makes forgetting loud; it does not prove a human.
+ *
+ * Scope, as decided: this tool only. REST `DELETE /api/v1/data/...` (the human
+ * path) and `update_record` stay outside it, no object is exempt, and a future
+ * bulk-delete tool takes the same gate.
+ *
+ * Returns `undefined` when the call may proceed.
+ */
+function recordDeleteConfirmationRefusal(
+  objectName: string,
+  recordId: string,
+  request: AIActionConfirmation,
+): (ThrownRefusalEnvelope & { details: ActionConfirmationRequiredDetails }) | undefined {
+  // Only the boolean `true` attests; absent, `false` and a truthy string do not.
+  if (request[AI_ACTION_CONFIRMATION_MEMBER] === true) return undefined;
+  return {
+    code: ACTION_CONFIRMATION_REQUIRED,
+    message:
+      `delete_record on '${objectName}' record '${recordId}' carries no confirmation — nothing was deleted. `
+      + 'A delete over MCP is permanent: confirm with the human in the loop, then retry this call with '
+      + `'${AI_ACTION_CONFIRMATION_MEMBER}': true on the request.`,
+    status: ACTION_CONFIRMATION_REQUIRED_HTTP_STATUS,
+    details: {
+      actionName: DELETE_RECORD_TOOL,
+      objectName,
+      confirmationMember: AI_ACTION_CONFIRMATION_MEMBER,
+    },
   };
 }
 
@@ -1520,19 +1582,38 @@ export function registerObjectTools(
     server.registerTool(
       note('delete_record'),
       {
-        description: 'Delete a record by id. This is destructive.',
+        description:
+          'Delete a record by id. This is destructive and permanent. A call is REFUSED unless it also sends ' +
+          'confirm: true — ask the human first, then retry; nothing is deleted on a refused call.',
         inputSchema: strictToolInput(
           { surface: 'this delete_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
           {
             objectName: z.string().describe('The object/table name'),
             recordId: z.string().describe('The record id'),
+            // The confirmation member, keyed off the contract's constant as
+            // `run_action` declares it. OPTIONAL in the schema on purpose: a
+            // required member would refuse an unconfirmed call as a bare input
+            // validation error, with no code and no retry details, before the
+            // handler could answer the gate's refusal.
+            [AI_ACTION_CONFIRMATION_MEMBER]: z
+              .boolean()
+              .optional()
+              .describe(
+                'Set to true only when the human in the loop has approved deleting THIS record. Without it '
+                + 'the call is refused and nothing is deleted.',
+              ),
           },
         ),
         annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
       },
-      async ({ objectName, recordId }) => {
+      async (args) => {
+        const { objectName, recordId } = args;
         const bad = guard(objectName);
         if (bad) return errorResult(bad);
+        // The gate, before the bridge: a refused call reaches no bridge, so
+        // nothing is read or deleted whichever bridge serves this server.
+        const unconfirmed = recordDeleteConfirmationRefusal(objectName, recordId, args);
+        if (unconfirmed) return codedErrorResult(unconfirmed);
         try {
           return textResult(await bridge.remove(objectName, recordId));
         } catch (err) {

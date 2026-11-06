@@ -89,9 +89,9 @@ or the `autoStart` option.
 
 `OS_MCP_STDIO_API_KEY` is not optional and has no fallback: a stdio server with
 no resolvable principal **refuses to start** rather than serving data unscoped
-(ADR-0101). Mint a key on the **Connect an Agent** page — under **Account →
-Developer** for any signed-in user, or **Setup → Connect an Agent** for
-platform admins — or `POST /api/v1/keys`.
+(ADR-0101). Mint a key on the **Connect an AI Assistant** page — from the avatar
+menu or **Account → AI Assistant** for any signed-in user, or **Setup → Overview**
+for platform admins — or `POST /api/v1/keys`.
 
 The legacy `MCP_SERVER_*` spellings are still honoured with a deprecation
 warning.
@@ -117,7 +117,7 @@ apply):
 'get_record'           // Fetch one by id
 'create_record'        // Create
 'update_record'        // Update by id
-'delete_record'        // Delete by id (destructive)
+'delete_record'        // Delete by id (destructive; refused without confirm: true)
 
 // Business actions — operate the app, not just its rows
 'list_actions'         // Invokable business actions the caller may run

@@ -152,6 +152,8 @@ function world(opts: { auth: boolean; gateActive?: boolean; sessionApi?: boolean
       { user_id: 'u_key', organization_id: ORG, role: 'member' },
       { user_id: 'u_ses', organization_id: ORG, role: 'admin' },
     ],
+    // The key's owner exists: an API key authenticates only as an owner who exists.
+    sys_user: [{ id: 'u_key' }, { id: 'u_ex' }, { id: 'u_ses' }],
     sys_user_position: [{ user_id: 'u_ses', position: 'sales_rep', organization_id: ORG }],
     sys_user_permission_set: [{ user_id: 'u_key', permission_set: 'contact_reader', organization_id: ORG }],
     sys_permission_set: [

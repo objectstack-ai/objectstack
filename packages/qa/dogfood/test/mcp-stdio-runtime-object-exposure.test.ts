@@ -38,11 +38,11 @@
  * session is the plugin's own server over an in-process transport speaking the
  * JSON-RPC a stdio client speaks (a process cannot give a test its stdin).
  *
- * The one seam faked is the key row the stdio principal resolves from: the
- * engine is wrapped so `sys_api_key` answers one non-revoked key (and takes its
- * use stamp), and any other platform table the principal chain reads that this
- * kernel does not register answers empty. Every other call goes to the real
- * engine.
+ * The one seam faked is the key the stdio principal resolves from: the engine
+ * is wrapped so `sys_api_key` answers one non-revoked key (and takes its use
+ * stamp), `sys_user` answers that key's owner, and any other platform table the
+ * principal chain reads that this kernel does not register answers empty. Every
+ * other call goes to the real engine.
  *
  * The negative control (red with the producer's follow removed) is a one-time
  * ablation, cited in the PR, not a permanent case.
@@ -248,7 +248,7 @@ describe.each(SHAPES)('the MCP stdio door follows a runtime-authored object\'s c
     }
     await kernel.bootstrap();
 
-    // The faked seam, and only it: the key row the stdio principal resolves from.
+    // The faked seam, and only it: the key row the stdio principal resolves from, and its owner.
     const ql = new Proxy(engine as any, {
       get(target, prop, receiver) {
         // The use stamp a resolved key takes (`last_used_at`) has no table here.
@@ -259,6 +259,8 @@ describe.each(SHAPES)('the MCP stdio door follows a runtime-authored object\'s c
         if (prop === 'find') {
           return async (object: string, query?: unknown, options?: unknown) => {
             if (object === 'sys_api_key') return [{ id: 'k1', user_id: 'usr_stdio', revoked: false }];
+            // The key's owner exists: an API key authenticates only as an owner who exists.
+            if (object === 'sys_user') return (query as any)?.where?.id === 'usr_stdio' ? [{ id: 'usr_stdio' }] : [];
             if (object.startsWith('sys_') && object !== 'sys_metadata' && !target.registry.getObject(object)) return [];
             return target.find(object, query, options);
           };
@@ -366,7 +368,8 @@ describe.each(SHAPES)('the MCP stdio door follows a runtime-authored object\'s c
     expect(refusal(await k.call('get_record', { objectName: GATED, recordId: 'any' }))).toEqual(refused);
     expect(refusal(await k.call('create_record', { objectName: GATED, data: { name: 'leak-probe' } }))).toEqual(refused);
     expect(refusal(await k.call('update_record', { objectName: GATED, recordId: 'any', data: { name: 'x' } }))).toEqual(refused);
-    expect(refusal(await k.call('delete_record', { objectName: GATED, recordId: 'any' }))).toEqual(refused);
+    // `confirm: true` passes the delete confirmation gate, so the exposure gate behind it answers.
+    expect(refusal(await k.call('delete_record', { objectName: GATED, recordId: 'any', confirm: true }))).toEqual(refused);
     // Refused before dispatch: the table holds exactly what it held.
     expect(stores.get(GATED)?.size).toBe(2);
 

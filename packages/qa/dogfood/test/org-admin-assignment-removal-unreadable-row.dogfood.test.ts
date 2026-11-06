@@ -108,7 +108,7 @@ describe("behind the organization wall, an organization administrator's assignme
     grantA = await adminGrantOf(ownerA, orgA);
     grantB = await adminGrantOf(ownerB, orgB);
     positionB = idOf(await ql.insert('sys_user_position',
-      { user_id: ownerB, position: 'contributor', organization_id: orgB },
+      { user_id: ownerB, position: 'showcase_contributor', organization_id: orgB },
       { context: { ...SYS, tenantId: orgB } }));
     expect(ownerA && grantA && grantB && positionB, 'every row carries an id').toBeTruthy();
   }, 300_000);

@@ -131,21 +131,5 @@ export function parseStreamJson(stream: string | readonly string[]): ParsedTurn 
   return { replyText: texts.join('\n\n'), toolCalls: calls, meta };
 }
 
-/** A coded refusal inside a tool output: the MCP door's `{ error: { code, status } }` text. */
-export function refusalCodeOf(output: unknown): string | undefined {
-  let v: unknown = output;
-  if (typeof v === 'string') {
-    const start = v.indexOf('{');
-    if (start < 0) return undefined;
-    try {
-      v = JSON.parse(v.slice(start));
-    } catch {
-      return undefined;
-    }
-  }
-  if (!isBag(v)) return undefined;
-  const err = v.error;
-  if (isBag(err) && typeof err.code === 'string') return err.code;
-  if (typeof v.code === 'string' && typeof v.error === 'string') return v.code; // the REST flat envelope
-  return undefined;
-}
+/** A coded refusal inside a tool output: the scorer's reading, re-exported here where the runner reads it. */
+export { refusalCodeOf } from '../score/scenario-run-grade.js';

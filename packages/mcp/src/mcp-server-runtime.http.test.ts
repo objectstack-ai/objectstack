@@ -190,7 +190,7 @@ describe('MCPServerRuntime.handleHttpRequest (Streamable HTTP)', () => {
         jsonrpc: '2.0',
         id: 6,
         method: 'tools/call',
-        params: { name: 'delete_record', arguments: { objectName: 'task', recordId: '1' } },
+        params: { name: 'delete_record', arguments: { objectName: 'task', recordId: '1', confirm: true } },
       },
       bridge,
     );
