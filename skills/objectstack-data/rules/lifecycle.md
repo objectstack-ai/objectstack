@@ -51,7 +51,7 @@ export const ImportTicket = ObjectSchema.create({
   name: 'import_ticket',
   lifecycle: {
     class: 'transient',
-    ttl: { field: 'expires_at', expireAfter: '1d' },
+    ttl: { field: 'expires_at', expireAfter: '1d' },  // reap 1 day after expires_at
   },
   fields: {
     expires_at: Field.datetime({}),
@@ -64,7 +64,7 @@ export const ConsentLog = ObjectSchema.create({
   lifecycle: {
     class: 'audit',
     retention: { maxAge: '90d' },
-    archive: { after: '90d', to: 'archive', keep: '7y' },
+    archive: { after: '90d', to: 'archive', keep: '7y' },  // must: after === maxAge
   },
   fields: {
     subject: Field.text({}),
@@ -119,8 +119,7 @@ lifecycle: {
 - **Archive-then-delete is atomic-ish and safe by default**: an object
   declaring `archive` is never hot-deleted before the copy to the archive
   datasource succeeded. If no datasource is registered under the `archive.to`
-  name, rows are simply retained — a compliance ledger cannot be destroyed
-  by declaring a lifecycle.
+  name, rows are simply retained.
 - **Rotation** physically time-shards the table on SQLite (writes hit the
   current shard, reads go through a view under the object's name, expired
   shards are DROPped). Other dialects enforce the same window with an
@@ -153,10 +152,11 @@ record's state says so; the notice is for what *this* save started.
   import, a nested write) sets nothing.
 - Not a non-empty string ⇒ the write refuses; a refused write answers its
   error, no notice.
-- A hook's message shows untranslated.
+- A hook's message is untranslated.
 - A flow a record create/update trigger starts sets it with a `save_notice`
   node (`config.message`, `{{ }}` renders); refused in any other flow, and
   after an `approval` / `wait`.
-  Its message translates under `flows.<flow>.notices.<node_id>.message`.
+  Its message translates under `flows.<flow>.notices.<node_id>.message`
+  in the saver's locale.
   Refused by name in a `subflow` / `map` child; after one whose child can
   pause, the flow is not armed (`unboundCause: 'notice_after_suspending_subflow'`).

@@ -280,8 +280,8 @@
     },
     {
       "id": 16,
-      "prompt": "When a `deal` record's `status` is saved as `submitted`, route it to the sales manager for approval, and tell the person who clicked Save \"Sent {{ record.name }} to your manager for approval\" on the save toast, in their own language.",
-      "expected_output": "A flow whose start node binds `objectName: 'deal'` with a create/update record trigger (`triggerType: 'record-after-update'` or `'record-after-write'`, condition `previous.status != 'submitted' && record.status == 'submitted'`), then a `save_notice` node (`config.message: 'Sent {{ record.name }} to your manager for approval'`) placed BEFORE the `approval` node: the run is still inside the write there, while a `save_notice` reachable after the `approval` (or a `wait`) is refused at parse. The translation lives under `flows.<flow>.notices.<node_id>.message`, read in the saver's locale. Not a `notify` node to the saver (an inbox message, not the save answer), not a `record:alert` banner (shown whenever the state says so, not for this save), and not in a subflow the trigger flow calls (a child run holds no save, so the node refuses by name).",
+      "prompt": "When a saved `deal` record's `status` is changed to `submitted`, route it to the sales manager for approval, and tell the person who clicked Save \"Sent {{ record.name }} to your manager for approval\" on the save toast, in their own language.",
+      "expected_output": "A flow whose start node binds `objectName: 'deal'` with `triggerType: 'record-after-update'` and the condition `previous.status != 'submitted' && record.status == 'submitted'` (on update `previous` is bound), then a `save_notice` node (`config.message: 'Sent {{ record.name }} to your manager for approval'`) placed BEFORE the approval node (`type: 'approval'`): the run is still inside the write there, while a `save_notice` reachable after the approval (or a `wait`) is refused at parse. The translation lives under `flows.<flow>.notices.<node_id>.message`, read in the saver's locale. Not a `notify` node to the saver (an inbox message, not the save answer), not a page banner component (shown whenever the record's state says so, not for this save), and not in a subflow the trigger flow calls (a child run holds no save, so the node refuses by name).",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -291,7 +291,7 @@
           "type: 'approval'"
         ],
         "must_not_contain": [
-          "record:alert"
+          "type: 'record:alert'"
         ]
       }
     }
