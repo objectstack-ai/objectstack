@@ -556,8 +556,8 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         help: "JSON 序列化的組織中繼資料"
       },
       require_mfa: {
-        label: "強制多因素驗證",
-        help: "開啟後，該組織的每位成員都必須先繫結身分驗證器 App，才能存取資料。需要本部署開啟雙重驗證（OS_AUTH_TWO_FACTOR=true）；雙重驗證關閉時，儲存為開啟會被拒絕。"
+        label: "強制多因素驗證（已停用）",
+        help: "已停用。請在「設定 → 存取原則」中設定本組織的多因素驗證要求。此處原為開啟的值已遷移為「所有人」並清除。"
       },
       timezone: {
         label: "時區",
