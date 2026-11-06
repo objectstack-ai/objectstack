@@ -1,5 +1,5 @@
 /**
- * @object-ui/i18n - Locale index — the explicit ALL TEN door.
+ * @object-ui/i18n - Locale index — the explicit ALL-PACKS door.
  *
  * ⛔ This module is NOT reachable from the package entry any more
  * (objectui#7479). Importing it pulls every catalogue this package ships —
@@ -9,7 +9,7 @@
  *
  * What it is still for, and the only two things it is for:
  *
- *   - the parity / drift suites, which must compare all ten packs at once and
+ *   - the parity / drift suites, which must compare every pack at once and
  *     run in Node, where a megabyte of translations costs nobody anything;
  *   - an app that deliberately wants every catalogue resident, which reaches it
  *     through the published `@object-ui/i18n/locales` subpath — a specifier
@@ -33,25 +33,28 @@
  * loaded), nor as `@object-ui/i18n/locales/en`, the pack module itself.
  */
 import enPack from './en.js';
-import zhPack from './zh.js';
+import zhHansPack from './zh-Hans.js';
+import zhHantPack from './zh-Hant.js';
 import jaPack from './ja.js';
 import koPack from './ko.js';
 import dePack from './de.js';
 import frPack from './fr.js';
 import esPack from './es.js';
-import ptPack from './pt.js';
+import ptBrPack from './pt-BR.js';
 import ruPack from './ru.js';
 import arPack from './ar.js';
 import enMarketplace from '../namespaces/marketplace/en.js';
-import zhMarketplace from '../namespaces/marketplace/zh.js';
+import zhHansMarketplace from '../namespaces/marketplace/zh-Hans.js';
+import zhHantMarketplace from '../namespaces/marketplace/zh-Hant.js';
 import jaMarketplace from '../namespaces/marketplace/ja.js';
 import koMarketplace from '../namespaces/marketplace/ko.js';
 import deMarketplace from '../namespaces/marketplace/de.js';
 import frMarketplace from '../namespaces/marketplace/fr.js';
 import esMarketplace from '../namespaces/marketplace/es.js';
-import ptMarketplace from '../namespaces/marketplace/pt.js';
+import ptBrMarketplace from '../namespaces/marketplace/pt-BR.js';
 import ruMarketplace from '../namespaces/marketplace/ru.js';
 import arMarketplace from '../namespaces/marketplace/ar.js';
+import type { PlatformLocaleTag } from '@objectstack/spec/system';
 
 export type { TranslationKeys } from './en.js';
 
@@ -83,39 +86,67 @@ function complete<P extends object, N extends object>(pack: P, partial: N, label
   return merge(pack as Record<string, unknown>, partial as Record<string, unknown>, '') as P & N;
 }
 
+// Export names are JavaScript identifiers, not pack keys: `zh` is the zh-Hans
+// catalogue, `zhHant` the zh-Hant one and `pt` the pt-BR one. The KEYS — the
+// table tags — are {@link builtInLocales}'.
+//
 // Annotated rather than inferred: the inferred type spells the packs' literal
 // types out inline in the emitted declaration, which outgrew what tsc will
 // serialize (TS7056). Each `typeof` is emitted as a reference.
 export const en: typeof enPack & typeof enMarketplace = complete(enPack, enMarketplace, 'en');
-export const zh: typeof zhPack & typeof zhMarketplace = complete(zhPack, zhMarketplace, 'zh');
+export const zh: typeof zhHansPack & typeof zhHansMarketplace = complete(zhHansPack, zhHansMarketplace, 'zh-Hans');
+export const zhHant: typeof zhHantPack & typeof zhHantMarketplace = complete(zhHantPack, zhHantMarketplace, 'zh-Hant');
 export const ja: typeof jaPack & typeof jaMarketplace = complete(jaPack, jaMarketplace, 'ja');
 export const ko: typeof koPack & typeof koMarketplace = complete(koPack, koMarketplace, 'ko');
 export const de: typeof dePack & typeof deMarketplace = complete(dePack, deMarketplace, 'de');
 export const fr: typeof frPack & typeof frMarketplace = complete(frPack, frMarketplace, 'fr');
 export const es: typeof esPack & typeof esMarketplace = complete(esPack, esMarketplace, 'es');
-export const pt: typeof ptPack & typeof ptMarketplace = complete(ptPack, ptMarketplace, 'pt');
+export const pt: typeof ptBrPack & typeof ptBrMarketplace = complete(ptBrPack, ptBrMarketplace, 'pt-BR');
 export const ru: typeof ruPack & typeof ruMarketplace = complete(ruPack, ruMarketplace, 'ru');
 export const ar: typeof arPack & typeof arMarketplace = complete(arPack, arMarketplace, 'ar');
 
 /**
- * Map of all built-in locales keyed by language code — each one complete (see
- * the header).
+ * Map of all built-in locales, keyed by platform locale table tag
+ * (`PLATFORM_LOCALES` in `@objectstack/spec/system`), in table order — each
+ * one complete (see the header).
+ *
+ * ⛔ Keys are table tags, not the codes stored values carry: there is no `zh`
+ * or `pt` key. A reader holding a stored code (`zh-CN`, `pt`) finds its pack
+ * through `resolveBuiltInLanguage` (`./registry.js`), which reads the table's
+ * read aliases.
+ *
+ * Annotated rather than inferred, for the same TS7056 reason as the exports
+ * above. `satisfies` holds the key set to the table: a tag added to the table
+ * without its pack here (or a pack here the table lacks) is a compile error.
  */
 export const builtInLocales: {
   readonly en: typeof en;
-  readonly zh: typeof zh;
+  readonly 'zh-Hans': typeof zh;
+  readonly 'zh-Hant': typeof zhHant;
+  readonly es: typeof es;
+  readonly ar: typeof ar;
+  readonly fr: typeof fr;
+  readonly 'pt-BR': typeof pt;
+  readonly ru: typeof ru;
+  readonly de: typeof de;
   readonly ja: typeof ja;
   readonly ko: typeof ko;
-  readonly de: typeof de;
-  readonly fr: typeof fr;
-  readonly es: typeof es;
-  readonly pt: typeof pt;
-  readonly ru: typeof ru;
-  readonly ar: typeof ar;
-} = { en, zh, ja, ko, de, fr, es, pt, ru, ar } as const;
+} = {
+  en,
+  'zh-Hans': zh,
+  'zh-Hant': zhHant,
+  es,
+  ar,
+  fr,
+  'pt-BR': pt,
+  ru,
+  de,
+  ja,
+  ko,
+} as const satisfies Record<PlatformLocaleTag, unknown>;
 
 // Direction and the lazy registry live in payload-free modules so the runtime
-// can reach them without reaching the ten packs above. Re-exported here so the
+// can reach them without reaching the packs above. Re-exported here so the
 // historical import path keeps answering.
 export { RTL_LANGUAGES, isRTL } from './rtl.js';
 export {
@@ -125,6 +156,7 @@ export {
   isBuiltInLanguage,
   isBuiltInLocaleLoaded,
   loadBuiltInLocale,
+  resolveBuiltInLanguage,
   type LocaleCatalogue,
 } from './registry.js';
 
@@ -137,19 +169,19 @@ import { registerBuiltInLocale } from './registry.js';
  * ⛔ Deliberately a CALL and not an import-time side effect: this package
  * declares `"sideEffects": false`, and a module that registered on import would
  * make that declaration false for every consumer's bundler. A caller that wants
- * all ten resident says so.
+ * every pack resident says so.
  *
  * Who calls it:
  *
  *   - a test that renders in a non-`en` locale and asserts SYNCHRONOUSLY. One
- *     line at module scope, next to the import that already paid for these ten
+ *     line at module scope, next to the import that already paid for these
  *     modules, is the shape AGENTS.md prescribes for a cost that belongs in the
  *     import phase — ⛔ never a `beforeAll`, which is bounded by `hookTimeout`
  *     and only moves the race;
  *   - an app that deliberately ships every language resident and wants no
  *     fetch at switch time.
  *
- * ⚠️ It is NOT how a normal app boots. Calling it costs the whole ~1.8 MB of
+ * ⚠️ It is NOT how a normal app boots. Calling it costs the whole ~2 MB of
  * catalogues on the page-load path, which is the payload objectui#7479 removed.
  * `preloadBootstrapLocale()` — one catalogue, the active one — is that path.
  */

@@ -30,7 +30,7 @@ import { provisionProductionEnvironment } from '../provisionEnvironment';
 import { builtInLocales } from '@object-ui/i18n/locales';
 
 /** The pack `t` reads from; `null` answers the call site's `defaultValue`. */
-let packLang: 'en' | 'zh' | null = null;
+let packLang: 'en' | 'zh-Hans' | null = null;
 function translate(key: string, options?: Record<string, unknown>): string {
   const fromPack = packLang
     ? key.split('.').reduce<unknown>((n, k) => (n as Record<string, unknown> | undefined)?.[k], builtInLocales[packLang])
@@ -296,7 +296,7 @@ describe('prefills a first organization from the e-mail (objectstack-ai/cloud#35
 
   it.each([
     ['en', 'My Organization', 'my-organization'],
-    ['zh', '我的组织', null],
+    ['zh-Hans', '我的组织', null],
   ] as const)('%s: a public-mailbox user sees the generic default and one click creates it', async (lang, expected, slug) => {
     packLang = lang;
     authState = { user: GMAIL_USER, organizations: [], isOrganizationsLoading: false };
@@ -316,7 +316,7 @@ describe('prefills a first organization from the e-mail (objectstack-ai/cloud#35
   });
 
   it('a public mailbox subdomain (vip.qq.com) and a punycode work label take the generic default', () => {
-    packLang = 'zh';
+    packLang = 'zh-Hans';
     for (const email of ['li@vip.qq.com', 'li@xn--fiqs8s.com']) {
       authState = { user: { ...GMAIL_USER, email }, organizations: [], isOrganizationsLoading: false };
       const { unmount } = render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
@@ -326,7 +326,7 @@ describe('prefills a first organization from the e-mail (objectstack-ai/cloud#35
   });
 
   it('a work-domain user sees the company name in both locales', async () => {
-    for (const lang of ['en', 'zh'] as const) {
+    for (const lang of ['en', 'zh-Hans'] as const) {
       packLang = lang;
       authState = { user: WORK_USER, organizations: [], isOrganizationsLoading: false };
       const { unmount } = render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);

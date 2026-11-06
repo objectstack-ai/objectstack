@@ -587,14 +587,20 @@ describe('this repository', () => {
       expect(row.vacuousMatches.length, `ledger row '${row.glob}' declares nothing any more`).toBeGreaterThan(0);
       expect(row.ruleBearingMatches, `ledger row '${row.glob}' over-claims`).toEqual([]);
     }
-    // Predicate 2, same two properties. Its population is three files today --
+    // Predicate 2, same two properties. Its population is four files today --
     // the vitest config objectui#8337 was filed about, and the declaration twins
-    // `scripts/ui-root.d.mts` and `scripts/workspace-root.d.mts` that package
-    // tests (compiled with `allowJs: false`) need to import those helpers typed
-    // (objectstack#25685, objectui#13472, objectstack#25723) -- and a green here
-    // means all three are DECLARED rather than invisible.
+    // `scripts/ui-root.d.mts`, `scripts/workspace-root.d.mts` and
+    // `packages/i18n/scripts/zh-hant.d.mts` that package tests (compiled with
+    // `allowJs: false`) need to import those modules typed (objectstack#25685,
+    // objectui#13472, objectstack#25723, objectstack#30511) -- and a green here
+    // means all four are DECLARED rather than invisible.
     expect(extensionProbeCollapse(result.reach)).toBeNull();
-    expect(result.unreached).toEqual(['scripts/ui-root.d.mts', 'scripts/workspace-root.d.mts', 'vitest.config.mts']);
+    expect(result.unreached).toEqual([
+      'packages/i18n/scripts/zh-hant.d.mts',
+      'scripts/ui-root.d.mts',
+      'scripts/workspace-root.d.mts',
+      'vitest.config.mts',
+    ]);
     // objectui#8369: this run is only a reading of the tree git tracks if the
     // filter was there and could answer both ways.
     expect(result.git.available).toBe(true);
@@ -648,7 +654,7 @@ describe('this repository', () => {
     for (const row of VACUOUS_GROUPS) {
       expect(row.glob, 'a row must be a glob').toBeTruthy();
       expect(row.reason.length, `row '${row.glob}' needs a reason, not a bare glob`).toBeGreaterThan(40);
-      expect(row.card, `row '${row.glob}' must name the card that owns it`).toMatch(/objectui#\d+/);
+      expect(row.card, `row '${row.glob}' must name the card that owns it`).toMatch(/(objectui|objectstack)#\d+/);
     }
     // Rows are globs on purpose -- a per-path ledger of this population would be
     // over a hundred rows that nobody would ever shrink.
@@ -659,7 +665,7 @@ describe('this repository', () => {
     expect(UNREACHED_GROUPS.length).toBeGreaterThan(0);
     for (const row of UNREACHED_GROUPS) {
       expect(row.reason.length, `row '${row.glob}' needs a reason, not a bare path`).toBeGreaterThan(40);
-      expect(row.card, `row '${row.glob}' must name the card that owns it`).toMatch(/objectui#\d+/);
+      expect(row.card, `row '${row.glob}' must name the card that owns it`).toMatch(/(objectui|objectstack)#\d+/);
       // The asymmetry with VACUOUS_GROUPS, pinned because it is deliberate: a
       // `**/*.mts` row would waive the next `.mts` file, which is the only
       // thing this predicate exists to catch.

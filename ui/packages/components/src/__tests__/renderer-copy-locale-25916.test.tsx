@@ -35,8 +35,11 @@ import type { PageDocumentNode } from '@object-ui/types';
 // Registers the renderers at module scope, NOT inside a `beforeAll`; see
 // object-ui/no-dynamic-import-in-test-hook (objectui#3010/#3021).
 import '../renderers';
+// The page's react runtime chunk, imported here so its cold transform is paid
+// during collection, not inside a case's bounded wait.
+import '@object-ui/react-runtime';
 
-const { zh, en } = builtInLocales;
+const { 'zh-Hans': zh, en } = builtInLocales;
 
 /** No `{{slot}}` and no private-use slot mark survives into the rendered text. */
 const LEAK = /\{\{|[\u{E000}-\u{F8FF}]/u;

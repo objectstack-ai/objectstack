@@ -159,7 +159,7 @@ import { App } from '../App';
 import { loadLanguage } from '../loadLanguage';
 import { loadLocales } from '../loadLocales';
 
-const zh = builtInLocales.zh;
+const zh = builtInLocales['zh-Hans'];
 const TOKEN = 'tok-12034';
 const USER = { id: 'u_12034', email: 'ada@example.com', name: 'Ada' } as unknown as AuthUser;
 const SESSION = { token: TOKEN, expiresAt: new Date(Date.now() + 3_600_000) };

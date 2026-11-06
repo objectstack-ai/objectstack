@@ -38,7 +38,7 @@ import {
 } from '../orgErrorMessage';
 import { builtInLocales } from '@object-ui/i18n/locales';
 
-const zh = builtInLocales.zh;
+const zh = builtInLocales['zh-Hans'];
 
 /**
  * A translator with the real zh pack behind it — the mapping helper's contract

@@ -98,7 +98,7 @@ const KEYS = [
 ] as const;
 
 /** The seven packs that served `en` for all five keys. */
-const PACKS = ['ko', 'de', 'fr', 'es', 'pt', 'ru', 'ar'] as const;
+const PACKS = ['ko', 'de', 'fr', 'es', 'pt-BR', 'ru', 'ar'] as const;
 
 /** The two multi-clause sentences; the only two of the five that quote a name. */
 const SENTENCES = ['savedMappingHint', 'savedMappingPreviewNote'] as const;
@@ -109,7 +109,7 @@ const QUOTED_NAME: Record<(typeof PACKS)[number], string> = {
   de: '„{{name}}“',
   fr: '« {{name}} »',
   es: '"{{name}}"',
-  pt: '"{{name}}"',
+  'pt-BR': '"{{name}}"',
   ru: '«{{name}}»',
   ar: '"{{name}}"',
 };
@@ -131,7 +131,7 @@ describe('objectui#3920 — grid.import saved-mapping keys are translated in all
   it('the ten packs all define the five keys (anti-vacuous guard)', () => {
     // Every assertion below reads these values. A renamed key would otherwise
     // let `not.toBe(en)` pass on `undefined` versus a string and read as green.
-    for (const lang of [...PACKS, 'en', 'zh', 'ja'] as const) {
+    for (const lang of [...PACKS, 'en', 'zh-Hans', 'zh-Hant', 'ja'] as const) {
       for (const key of KEYS) {
         const v = value(lang, key);
         expect(typeof v, `${lang} ${NS}.${key}`).toBe('string');
@@ -158,12 +158,12 @@ describe('objectui#3920 — grid.import saved-mapping keys are translated in all
   it('zh and ja are untouched — they were the two packs that were already right', () => {
     // The control set the card used to rule out "intentionally untranslated".
     // Pinned so a later sweep cannot quietly re-English them.
-    expect(value('zh', 'savedMapping')).toBe('已保存的映射：');
-    expect(value('zh', 'manualMapping')).toBe('— 手动映射列 —');
+    expect(value('zh-Hans', 'savedMapping')).toBe('已保存的映射：');
+    expect(value('zh-Hans', 'manualMapping')).toBe('— 手动映射列 —');
     expect(value('ja', 'savedMapping')).toBe('保存済みマッピング：');
     expect(value('ja', 'manualMapping')).toBe('— 列を手動でマッピング —');
     for (const key of KEYS) {
-      expect(value('zh', key), `zh ${key}`).not.toBe(value('en', key));
+      expect(value('zh-Hans', key), `zh ${key}`).not.toBe(value('en', key));
       expect(value('ja', key), `ja ${key}`).not.toBe(value('en', key));
     }
   });
@@ -191,7 +191,7 @@ describe('objectui#3920 — grid.import saved-mapping keys are translated in all
     // not a substitute for it — it is the local proof that the two values these
     // translations rewrote most heavily did not drop the hole the call site
     // fills (`ImportWizard.tsx` passes `{ name: mapping.label || mapping.name }`).
-    for (const lang of [...PACKS, 'en', 'zh', 'ja'] as const) {
+    for (const lang of [...PACKS, 'en', 'zh-Hans', 'zh-Hant', 'ja'] as const) {
       for (const key of SENTENCES) {
         expect(value(lang, key), `${lang} ${key} lost {{name}}`).toContain('{{name}}');
       }
@@ -242,7 +242,7 @@ describe('objectui#3920 — grid.import saved-mapping keys are translated in all
     // same wizard, and `en` gives both the `— … —` shape. zh and ja kept it when
     // they translated; the seven packs must too, or the option stops reading as
     // "not a real mapping".
-    for (const lang of [...PACKS, 'en', 'zh', 'ja'] as const) {
+    for (const lang of [...PACKS, 'en', 'zh-Hans', 'zh-Hant', 'ja'] as const) {
       const v = value(lang, 'manualMapping');
       expect(v.startsWith('— '), `${lang} manualMapping opening em dash`).toBe(true);
       expect(v.endsWith(' —'), `${lang} manualMapping closing em dash`).toBe(true);
@@ -257,7 +257,7 @@ describe('objectui#3920 — grid.import saved-mapping keys are translated in all
     // and `en` ends both with ":". CJK packs use the fullwidth "：", fr puts a
     // space before the ASCII colon (59 of 61 colons in the pack) — so the check
     // is "same terminator as your own sibling", not "ends with U+003A".
-    for (const lang of [...PACKS, 'en', 'zh', 'ja'] as const) {
+    for (const lang of [...PACKS, 'en', 'zh-Hans', 'zh-Hant', 'ja'] as const) {
       const sibling = at(builtInLocales[lang], `${NS}.mappingTemplate`) as string;
       // The terminator is the colon plus whatever whitespace precedes it — NOT
       // the sibling's last two characters, which in `ko` is the tail of the word
@@ -271,13 +271,13 @@ describe('objectui#3920 — grid.import saved-mapping keys are translated in all
       ).toBe(true);
     }
     expect(value('fr', 'savedMapping')).toBe('Correspondance enregistrée :');
-    expect(value('zh', 'savedMapping').endsWith('：')).toBe(true);
+    expect(value('zh-Hans', 'savedMapping').endsWith('：')).toBe(true);
   });
 
   it('chooseSavedMapping keeps the ellipsis of its sibling chooser', () => {
     // U+2026, not three dots — `chooseTemplate` is the sibling and `en` uses the
     // single character in both.
-    for (const lang of [...PACKS, 'en', 'zh', 'ja'] as const) {
+    for (const lang of [...PACKS, 'en', 'zh-Hans', 'zh-Hant', 'ja'] as const) {
       expect(value(lang, 'chooseSavedMapping').endsWith('…'), `${lang} ellipsis`).toBe(true);
       expect(value(lang, 'chooseSavedMapping').includes('...'), `${lang} used three dots`).toBe(false);
     }
@@ -303,8 +303,8 @@ describe('objectui#3920 — grid.import saved-mapping keys are translated in all
       ['es', 'savedMappingPreviewNote', ['vista previa', 'columnas de origen', 'en el servidor']],
       // pt: `stepMapping` "Mapeamento", `legacyFallbackNotice` "conversão de tipos",
       // `view.readonlyTooltip` "somente leitura", `validateHint` "no servidor".
-      ['pt', 'savedMappingHint', ['mapeamento', 'conversão de tipos', 'somente leitura', 'no servidor']],
-      ['pt', 'savedMappingPreviewNote', ['pré-visualização', 'colunas de origem', 'no servidor']],
+      ['pt-BR', 'savedMappingHint', ['mapeamento', 'conversão de tipos', 'somente leitura', 'no servidor']],
+      ['pt-BR', 'savedMappingPreviewNote', ['pré-visualização', 'colunas de origem', 'no servidor']],
       // ru: `stepMapping` "Сопоставление", `legacyFallbackNotice` "приведение типов",
       // `view.readonlyTooltip` "только для чтения", `validateHint` "на сервере".
       ['ru', 'savedMappingHint', ['опоставление', 'приведение типов', 'только для чтения', 'на сервере']],
@@ -366,7 +366,7 @@ describe('objectui#3920 — grid.import saved-mapping keys are translated in all
       const v = value(lang, 'savedMappingHint');
       expect(v.split(' + ').length - 1, `${lang} hint should join three operations with " + "`).toBe(2);
     }
-    expect(value('zh', 'savedMappingHint')).toContain(' + ');
+    expect(value('zh-Hans', 'savedMappingHint')).toContain(' + ');
     expect(value('ja', 'savedMappingHint')).toContain('＋');
   });
 
@@ -386,7 +386,7 @@ describe('objectui#3920 — grid.import saved-mapping keys are translated in all
 
     // Anti-vacuous guard first, as in this file's opening `it`: `not.toBe(en)`
     // would pass on `undefined` versus a string if the key were ever renamed.
-    for (const lang of [...PACKS, 'en', 'zh', 'ja'] as const) {
+    for (const lang of [...PACKS, 'en', 'zh-Hans', 'zh-Hant', 'ja'] as const) {
       const v = value(lang, 'transform');
       expect(typeof v, `${lang} ${NS}.transform`).toBe('string');
       expect(v.trim().length, `${lang} ${NS}.transform is empty`).toBeGreaterThan(0);
@@ -400,7 +400,7 @@ describe('objectui#3920 — grid.import saved-mapping keys are translated in all
     // en is untouched and zh/ja remain the control set that ruled out the
     // "deliberately untranslated term" reading for this key as well.
     expect(english).toBe('Transform');
-    expect(value('zh', 'transform')).toBe('转换');
+    expect(value('zh-Hans', 'transform')).toBe('转换');
     expect(value('ja', 'transform')).toBe('変換');
 
     // objectui#3938's criterion is about the ROW, not the key: all three
@@ -432,7 +432,7 @@ describe('objectui#3920 — grid.import saved-mapping keys are translated in all
       de: { header: 'Transformation', stem: 'transformation', coercion: 'Typkonvertierung' },
       fr: { header: 'Transformation', stem: 'transformation', coercion: 'conversion de type' },
       es: { header: 'Transformación', stem: 'transformaci', coercion: 'conversión de tipos' },
-      pt: { header: 'Transformação', stem: 'transforma', coercion: 'conversão de tipos' },
+      'pt-BR': { header: 'Transformação', stem: 'transforma', coercion: 'conversão de tipos' },
       ru: { header: 'Преобразование', stem: 'преобразовани', coercion: 'приведение типов' },
       ar: { header: 'التحويل', stem: 'التحويل', coercion: 'تحويل الأنواع' },
     };

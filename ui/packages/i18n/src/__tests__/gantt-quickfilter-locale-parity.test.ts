@@ -17,6 +17,7 @@
  *     once — this asserts the absolute form.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { builtInLocales } from '../locales';
 
 const KEYS = ['all', 'clear', 'empty', 'resultSummary'] as const;
@@ -34,7 +35,7 @@ const quickFilterOf = (lang: LocaleCode) =>
 
 describe('gantt.quickFilter.* locale coverage (objectstack#5427)', () => {
   it('covers all ten built-in packs', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
   });
 
   it.each(LANGS)('%s defines every quick-filter label as a non-empty string', (lang) => {
@@ -72,7 +73,7 @@ describe('gantt.quickFilter.* locale coverage (objectstack#5427)', () => {
     // exact literals that used to be hardcoded in ObjectGantt.tsx instead.
     const REMOVED = ['全部', '清除筛选', '无可选项', '项任务'];
     const leaked = LANGS.filter(
-      (l) => l !== 'zh' && KEYS.some((k) => REMOVED.some((s) => quickFilterOf(l)![k].includes(s))),
+      (l) => l !== 'zh-Hans' && l !== 'zh-Hant' && KEYS.some((k) => REMOVED.some((s) => quickFilterOf(l)![k].includes(s))),
     );
     expect(leaked).toEqual([]);
   });
