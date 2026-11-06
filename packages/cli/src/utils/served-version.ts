@@ -169,7 +169,7 @@ export async function fetchEnvironmentOrigin(target: Pick<ServedVersionTarget, '
 /**
  * One request to the environment itself, so a request-driven rebuild starts
  * (or a failed one retries). Best-effort by design: the answer while it builds
- * is a 503 `kernel_warming`, and nothing about it is read. `/api/v1/discovery`
+ * is a retryable 503 (`SERVICE_UNAVAILABLE`), and nothing about it is read. `/api/v1/discovery`
  * is served by the environment's kernel — unlike `/api/v1/health`, the
  * container liveness probe, which answers without one.
  */

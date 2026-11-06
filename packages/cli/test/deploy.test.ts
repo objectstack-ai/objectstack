@@ -56,8 +56,19 @@ function stubPlane(options: PlaneOptions = {}): Call[] {
     calls.push({ url, method, body });
     const answer = (data: unknown) => ({ ok: true, status: 200, statusText: 'OK', json: async () => ({ success: true, data }) }) as any;
     if (url.startsWith(ENV_ORIGIN)) {
-      // The environment itself: building, so a request-driven 503.
-      return { ok: false, status: 503, statusText: 'Service Unavailable', json: async () => ({ error: { code: 'kernel_warming' } }) } as any;
+      // The environment itself, mid-build: the framework's retryable 503. Cloud's
+      // KernelManager throws a warming error whose own lowercase code is only its
+      // declared code; the transport's ADR-0112 envelope answers SERVICE_UNAVAILABLE
+      // (packages/rest/src/rest-resolve-environment-single-window.test.ts pins the pair).
+      return {
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+        json: async () => ({
+          success: false,
+          error: { code: 'SERVICE_UNAVAILABLE', message: 'The environment is starting up (kernel build in progress). Retry in ~15s.' },
+        }),
+      } as any;
     }
     if (method === 'GET' && url.endsWith('/api/v1/cloud/environments')) {
       const environments = options.environments ?? [{ id: 'env_acme', display_name: 'Acme', status: 'active' }];
