@@ -1963,6 +1963,21 @@ export class SettingsService {
       };
     }
 
+    return this.resolveStored<T>(reg, namespace, key, ctx);
+  }
+
+  /**
+   * The stored cascade of one key, below any env override: what {@link get}
+   * answers when no override is in force, and what a key an override pins
+   * falls back to once the override is removed ({@link resetNamespace} reads
+   * it to find a value stored beneath a pin).
+   */
+  private async resolveStored<T = unknown>(
+    reg: RegisteredManifest,
+    namespace: string,
+    key: string,
+    ctx: SettingsContext,
+  ): Promise<ResolvedSettingValue<T>> {
     const scope = reg.scopes.get(key)!;
     // For 'user' scope we pre-filter by user_id; for 'tenant' and 'global'
     // we load everything for the namespace and pick the right row below.
@@ -3355,23 +3370,46 @@ export class SettingsService {
 
   /**
    * Clear every persisted row in a namespace so values fall back to
-   * env/defaults. Env-locked keys are untouched (env wins over rows
-   * anyway and refuses writes). Persisted rows are nulled rather than
-   * deleted so the audit trail records the reset per key.
+   * env/defaults. Persisted rows are nulled rather than deleted so the audit
+   * trail records the reset per key.
    *
-   * Returns the number of cleared keys.
+   * A key an env override in force pins is cleared too when a value is stored
+   * beneath the pin, by the clear {@link setMany} lets through a pin (ADR-0007
+   * D6): it changes nothing in force — the env value still answers — and the
+   * key falls back to its default once the override is removed, instead of to
+   * the old stored value.
+   *
+   * Returns the number of cleared keys, pinned ones included.
    */
   async resetNamespace(namespace: string, ctx: SettingsContext = {}): Promise<number> {
+    return (await this.resetNamespaceRows(namespace, ctx)).cleared;
+  }
+
+  /**
+   * {@link resetNamespace}, also answering how many of the namespace's keys an
+   * env override still pins after the reset: those keep their env value, and
+   * the built-in `reset` action says so.
+   */
+  private async resetNamespaceRows(
+    namespace: string,
+    ctx: SettingsContext,
+  ): Promise<{ cleared: number; pinned: number }> {
     const payload = await this.getNamespace(namespace, ctx);
+    const reg = this.registry.get(namespace)!;
     const patch: Record<string, null> = {};
+    let pinned = 0;
     for (const [key, v] of Object.entries(payload.values)) {
-      if (v.source === 'global' || v.source === 'tenant' || v.source === 'user') {
+      // A pinned key answers `env` and hides its stored rows, so whether a
+      // value is stored beneath the pin is read from the cascade below it.
+      if (v.source === 'env') pinned++;
+      const stored = v.source === 'env' ? (await this.resolveStored(reg, namespace, key, ctx)).source : v.source;
+      if (stored === 'global' || stored === 'tenant' || stored === 'user') {
         patch[key] = null;
       }
     }
     const keys = Object.keys(patch);
     if (keys.length > 0) await this.setMany(namespace, patch, ctx);
-    return keys.length;
+    return { cleared: keys.length, pinned };
   }
 
   /**
@@ -3403,11 +3441,14 @@ export class SettingsService {
       // `settingsActionCopy`), as a handler's own answer is.
       const copy = settingsActionCopy(display.locale);
       if (actionId === 'reset') {
-        const cleared = await this.resetNamespace(namespace, ctx);
+        const { cleared, pinned } = await this.resetNamespaceRows(namespace, ctx);
+        const answer = cleared > 0 ? copy.resetCleared(cleared) : copy.resetNothing;
         return {
           ok: true,
           severity: 'info',
-          message: cleared > 0 ? copy.resetCleared(cleared) : copy.resetNothing,
+          // A key an env override pins keeps its env value through the reset,
+          // so the answer says how many still do.
+          message: pinned > 0 ? answer + copy.resetStillPinned(pinned) : answer,
         };
       }
       return {

@@ -15721,6 +15721,48 @@ export function h72OffTableMailboxLines(reading, nowMs = Date.now()) {
 }
 
 // ---------------------------------------------------------------------------
+// H76 — an OPEN PR with NO assignee, a `pm:mailbox` PR excepted. Ruling record
+// 6674390671 (letter A): a PR names its owner — the dev's `pr_create` carries
+// the claim's `Account:` as its assignee, and a hand-over (sibling takeover,
+// release, reassignment) re-assigns the PR in the same stroke as the claim
+// change (`references/execution-duties.md` 认领). The same ruling makes this
+// row report-only, ⛔ no gate. A mailbox is a seat's doorbell, never a delivery
+// (`project-forms.md` 〈信箱 PR〉), so it is exempt; its label is
+// `mailbox-open.mjs`'s MAILBOX_LABEL, handed in by the sweep, never spelled
+// here. When the sweep could not load that label the row cannot tell a mailbox
+// from a delivery, so it fires UNJUDGED, never clean (#4690). Drafts are
+// INCLUDED: a dev's PR stays a draft until its seat lands it. Free — it reads
+// the open listing already in hand.
+// ---------------------------------------------------------------------------
+
+/**
+ * H76 — null when clean or out of scope, else the finding sentence.
+ *
+ * @param {object} pr — a `/pulls?state=open` list row.
+ * @param {string} mailboxLabel — `mailbox-open.mjs`'s MAILBOX_LABEL, handed in by the sweep; anything else is unread.
+ */
+export function h76OpenPrWithoutAssignee(pr, mailboxLabel) {
+  if (!pr || pr.state === 'closed') return null;
+  if ((pr.assignees ?? []).length > 0 || pr.assignee) return null;
+  if (typeof mailboxLabel !== 'string' || mailboxLabel === '') {
+    return (
+      `${UNJUDGED_MARKER} open PR with NO assignee, and the mailbox label could not be read this sweep — ` +
+      'whether it is an exempt mailbox PR is UNJUDGED, not settled. Read its labels by hand: a mailbox is ' +
+      'exempt, any other open PR owes its owner as assignee.'
+    );
+  }
+  if (labelNames(pr).includes(mailboxLabel)) return null;
+  return (
+    'open PR with NO assignee. A PR names its owner (ruling record 6674390671): the dev\'s `pr_create` carries ' +
+    'the claim\'s `Account:`, and a hand-over (sibling takeover, release, reassignment) re-assigns the PR in the ' +
+    'same stroke as the claim change. Remedy — WHO and HOW: the seat holding the card this PR names assigns that ' +
+    'card\'s assignee through the relay (`assign` op, the PR number as `issue`); a bot PR with no card takes its ' +
+    'owning lane seat\'s account, or stays unassigned with a note. ⛔ Report-only: nothing is written from this ' +
+    `script. Out of scope: a \`${mailboxLabel}\` PR (a seat's doorbell, never a delivery).`
+  );
+}
+
+// ---------------------------------------------------------------------------
 // H64 (#18069, re-keyed by #18237) — a seat- or dev-signed artefact that names
 // no session.
 //
@@ -19910,6 +19952,11 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // is stopped (not `stall`), and no write on the board repairs a sent comment
   // (not `state`) — the repair is the next bell, spelled from the table.
   H72: 'inventory',
+
+  // H76 is a `state`, H1's band for H1's reason: a live PR half-written — the
+  // owner the ruling makes it name is missing, and the repair is one relay
+  // `assign` on the board. ⛔ Not `stall`: an unowned PR can still land.
+  H76: 'state',
 });
 
 const FAMILY_BAND_RANK = new Map(HALF_STATE_FAMILY_BANDS.map((b) => [b.name, b.rank]));
@@ -23797,6 +23844,22 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     }
   }
 
+  // H76 — an open PR with no assignee, off the listing above, free. The mailbox
+  // label is imported LAZILY for H72's reason (banner above `h72NeedsThread`);
+  // a failed import leaves it unread, and every unowned PR then fires UNJUDGED.
+  {
+    let mailboxLabel = null;
+    try {
+      ({ MAILBOX_LABEL: mailboxLabel } = await import('./mailbox-open.mjs'));
+    } catch {
+      mailboxLabel = null;
+    }
+    for (const pr of seenPrs.values()) {
+      const unowned = h76OpenPrWithoutAssignee(pr, mailboxLabel);
+      if (unowned) findings.push([pr, 'H76', unowned]);
+    }
+  }
+
   // H16 — the only predicate here whose input no listing carries:
   // `mergeable_state` lives on the single-PR endpoint alone. One GET per
   // CANDIDATE (the gathering policy is `h16NeedsDetail`, which answers from
@@ -25309,6 +25372,9 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // through this predicate — lives in record-recognisers.mjs's doorbell battery,
   // because this self-test cannot import that module (H62's banner).
   'H72 mailbox off-table bells': 20,
+  // Registered with the unowned-PR row, pin just under the count: the firing, the assignee/mailbox/closed
+  // exemptions, the unread-label UNJUDGED leg, the text, the band and the wiring.
+  'H76 unowned open PR': 11,
   // Registered with the ruled-card-in-the-box row (#29386), pin just under the
   // count: the firing case, the label / fence / anchoring / id controls each
   // beside its positive twin, the threshold boundary, the governing stamp, the
@@ -28655,6 +28721,26 @@ async function selfTest() {
   b(BATTERY28675, '⛔ H72 summary: a reader that did not load renders NOT MEASURED, never `0 of N`', (() => { const c = saidBy('h72Mailbox', summaryLine({ mailboxReaderReason: 'the doorbell reader did not load (x)', mailboxCandidates: 0 }, 0)); return c.includes('NOT MEASURED — the doorbell reader did not load (x)') && !c.includes('0 of 0'); })(), true);
   b(BATTERY28675, '⭐ H72: the sweep takes the ONE reader and the opener\'s label LAZILY — `mailboxEvents` from record-recognisers.mjs, MAILBOX_LABEL from mailbox-open.mjs — and spells no doorbell key of its own', (() => { const src = readFileSync(fileURLToPath(import.meta.url), 'utf8'); return src.includes("import('./record-recognisers.mjs')") && src.includes("import('./mailbox-open.mjs')") && !/^import [^\n]*from '\.\/(?:record-recognisers|mailbox-open)\.mjs'/mu.test(src) && !src.includes(['MAILBOX_KEYS', '='].join(' ')); })(), true);
   b(BATTERY28675, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY28675) && SELF_TEST_BATTERIES[BATTERY28675] > 0, true);
+
+  // -- H76: an open PR with no assignee (ruling record 6674390671, letter A). The fixture is a relay-opened dev
+  //    draft as the card measured them (26 of 27 open PRs unassigned), offline, never a live read.
+  const BATTERY76 = 'H76 unowned open PR';
+  const MAILBOX76 = 'pm:mailbox';
+  const pr76 = (extra = {}) => ({ number: 30778, state: 'open', draft: true, assignees: [], assignee: null, labels: [{ name: 'skip-changeset' }], user: { login: 'objectstack-fleet[bot]', type: 'Bot' }, ...extra });
+  const row76 = String(h76OpenPrWithoutAssignee(pr76(), MAILBOX76) ?? '');
+  b(BATTERY76, 'H76 fires: an open dev draft with no assignee and no mailbox label', row76.length > 0 && !isUnjudgedFinding(row76), true);
+  b(BATTERY76, 'H76 row: names the ruling, the claim\'s `Account:`, the relay `assign` op, the bot-PR arm and the report-only boundary', ['ruling record 6674390671', 'the claim\'s `Account:`', '`assign` op', 'owning lane seat\'s account', 'Report-only'].every((x) => row76.includes(x)), true);
+  b(BATTERY76, 'H76: a ready (non-draft) PR fires exactly like a draft — drafts are included, not the only population', typeof h76OpenPrWithoutAssignee(pr76({ draft: false }), MAILBOX76), 'string');
+  b(BATTERY76, '⛔ H76: a PR with an assignee is clean — the list field or the legacy single field', [h76OpenPrWithoutAssignee(pr76({ assignees: [{ login: 'os-elon-musk' }] }), MAILBOX76), h76OpenPrWithoutAssignee(pr76({ assignee: { login: 'os-elon-musk' } }), MAILBOX76)].join(), ',');
+  b(BATTERY76, '⛔ H76: an unassigned `pm:mailbox` PR is exempt, and its unlabelled twin is not', [h76OpenPrWithoutAssignee(pr76({ labels: [{ name: MAILBOX76 }, { name: 'pinned' }] }), MAILBOX76), typeof h76OpenPrWithoutAssignee(pr76({ labels: [{ name: 'pinned' }] }), MAILBOX76)].join(), ',string');
+  b(BATTERY76, '⛔ H76: a closed PR and a missing row are silent, never a crash', [h76OpenPrWithoutAssignee(pr76({ state: 'closed' }), MAILBOX76), h76OpenPrWithoutAssignee(undefined, MAILBOX76), h76OpenPrWithoutAssignee(null, MAILBOX76)].join(), ',,');
+  const unread76 = [null, undefined, ''].map((label) => String(h76OpenPrWithoutAssignee(pr76(), label) ?? ''));
+  b(BATTERY76, 'H76: an UNREAD mailbox label fires UNJUDGED, never clean — null, undefined and empty alike', unread76.every((t) => t.startsWith(UNJUDGED_MARKER) && isUnjudgedFinding(t)), true);
+  b(BATTERY76, '⛔ H76: …but an ASSIGNED PR stays clean with the label unread — the label is only the mailbox exemption', h76OpenPrWithoutAssignee(pr76({ assignees: [{ login: 'os-elon-musk' }] }), null), null);
+  b(BATTERY76, 'H76: not a loud finding — it never escalates a sweep', [isLoudFinding(row76), isLoudFinding(unread76[0])].join(), 'false,false');
+  b(BATTERY76, 'H76 band: registered as `state` (H1\'s), and the sweep really pushes it', `${familyBand('H76')}/${familyRegistryCoverage().emitted.includes('H76')}`, 'state/true');
+  b(BATTERY76, 'H76 wiring: every listed open PR is judged with the label taken LAZILY from mailbox-open.mjs, never spelled in the sweep', (() => { const src = readFileSync(fileURLToPath(import.meta.url), 'utf8'); return src.includes("({ MAILBOX_LABEL: mailboxLabel } = await import('./mailbox-open.mjs'));") && src.includes('const unowned = h76OpenPrWithoutAssignee(pr, mailboxLabel);'); })(), true);
+  b(BATTERY76, 'floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY76) && SELF_TEST_BATTERIES[BATTERY76] > 0 && Object.isFrozen(SELF_TEST_BATTERIES), true);
 
   // -- H73 (#29386): a RULED decision card still sitting in the decision box.
   //    Positive controls beside every negative one: the label, the fence, the

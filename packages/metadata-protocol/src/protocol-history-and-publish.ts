@@ -3,7 +3,7 @@
 /**
  * [#29985 codemod] The "History, publish, drafts, publish backfill" facet of
  * `ObjectStackProtocolImplementation`: the bodies of `historyMetaItem`,
- * `publishMetaItemUnaudited`, `promoteDraftForPublish`,
+ * `publishMetaItem`, `publishMetaItemUnaudited`, `promoteDraftForPublish`,
  * `runPublishSideEffects`, `discardPackageDrafts` moved out of `protocol.ts`
  * whole by `scripts/codemod-split-protocol.mjs`.
  *
@@ -44,6 +44,7 @@ import type { PublishMaterializeResult } from './protocol-package-lifecycle-type
 import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
 import { withPendingAudit } from './protocol-audit-entry.js';
 import type { PublishMetaItemRequest } from './protocol-door-requests.js';
+import { withRefusalAudit } from './protocol-refusal-audit.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { SeedAppliedLandedParsed } from '@objectstack/spec/api';
 
@@ -143,6 +144,63 @@ export class ProtocolHistoryAndPublishFacet {
             });
         }
         return { events };
+    }
+
+    /** The body of `ObjectStackProtocolImplementation#publishMetaItem`; the method's docblock there is its contract. */
+    static async publishMetaItem(host: Pick<ProtocolHost, 'publishMetaItemUnaudited' | 'recordMetadataAudit'>, request: PublishMetaItemRequest): Promise<{
+            success: boolean;
+            version: string;
+            seq: number;
+            message?: string;
+            /**
+             * Present when a `seed` draft was published: the result of materializing
+             * its rows. Publishing the metadata ALWAYS succeeds independently — a
+             * seed-load problem is surfaced here, never thrown, so callers (and UIs)
+             * must check `seedApplied.success` instead of assuming data went live.
+             */
+            seedApplied?: {
+                success: boolean;
+                inserted: number;
+                updated: number;
+                error?: string;
+                errors?: unknown[];
+                /** [#30348] Per object, the rows created vs matched — `SeedAppliedLandedSchema`. */
+                landed?: SeedAppliedLandedParsed[];
+            };
+            /**
+             * Present when a publish-time materializer is registered for this type
+             * (ADR-0086 P2 — e.g. `flow`): the result of projecting the published
+             * body into its data-plane representation. Best-effort,
+             * same contract as `seedApplied` — surfaced, never thrown.
+             */
+            materializeApplied?: PublishMaterializeResult;
+            /**
+             * Present when an ADR-0094 mutation projector is registered for this
+             * type: the outcome of the awaited post-persist projection. The
+             * draft→active promotion runs the projector exactly as a direct active
+             * save does, so this is the same receipt `saveMetaItem` returns.
+             *
+             * [#7294] It was ASSIGNED below and missing from this annotation, so
+             * the method's declared type denied a key the wire body carried — the
+             * same declared-≠-returned gap one layer down from the one #7294
+             * closed on the spec side.
+             */
+            projectionApplied?: MutationProjectionOutcome;
+            /**
+             * [#9176] Present ONLY when the #4463 runtime authoring gate raised at
+             * least one non-blocking finding against the draft body this promotion
+             * carried to `active` — an empty array is never emitted, so a clean
+             * publish's response bytes are unchanged (the #4717 discipline, one
+             * door over). Every entry is `warning`/`info` by construction: an
+             * `error` finding refuses the promotion as the 422 instead.
+             */
+            advisories?: RuntimeAuthoringIssue[];
+        }> {
+        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
+        return withRefusalAudit((entry) => host.recordMetadataAudit(entry), {
+            operation: 'publish', type: request.type, name: request.name, actor: request.actor,
+            source: 'protocol.publishMetaItem',
+        }, () => host.publishMetaItemUnaudited(request));
     }
 
     /** [#28355] The body of {@link publishMetaItem} before its refusal audit; that method's docblock is the contract. */

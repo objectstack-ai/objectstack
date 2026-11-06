@@ -553,22 +553,6 @@ function getSnapshot(): number {
 }
 
 /**
- * Subscribe to the related-count store and read the count for a single
- * (object, relField, parentId) triple. Returns `undefined` while the
- * probe is in flight or before the first request.
- */
-export function useRelatedCount(
-  objectName: string | undefined,
-  relField: string | undefined,
-  parentId: string | undefined,
-  filter?: CountScopeFilter,
-): number | undefined {
-  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  if (!objectName) return undefined;
-  return getCount(objectName, relField, parentId, filter);
-}
-
-/**
  * Subscribe to the store's monotonic version. Put it in an effect dependency
  * array to RE-RUN count probes after an invalidation (#2269) — invalidate
  * deletes the cached numbers, and this version bump is what makes the probe
@@ -581,7 +565,7 @@ export function useRelatedCountVersion(): number {
 
 /**
  * Imperative store API for non-React callers (mutation handlers, tests).
- * Prefer `useRelatedCount` in components.
+ * In components, read `RelatedCountStore.get` under `useRelatedCountVersion()`.
  *
  * `fetch`'s last parameter is the CHILD object's field defs. It is optional
  * because a caller that cannot see metadata must still be able to probe — the

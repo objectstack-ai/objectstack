@@ -14,8 +14,6 @@ import { type TenancyPosture } from '@objectstack/spec/security';
 // `DiscoverySchema` "System Identity" field — never a literal again.
 import { resolveDiscoveryVersion } from './discovery-version.js';
 import type { MetadataHostEngine } from './host-engine.js';
-import { omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
-import { staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 import {
     SDUI_MANIFEST_SERVICE,
     type RuntimePendingDeclarations,
@@ -90,7 +88,6 @@ import {
     type EngineCountOptions,
     type EngineQueryOptions,
     type EngineQueryOptionsParsed,
-    type ValidationAdvisoryEvent,
     externalBindingDatasourceRefusal,
 } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
@@ -170,14 +167,12 @@ import {
 // and `getData` serve `sys_metadata` / `sys_metadata_history` rows, whose
 // `metadata` column is the same stored body, through the same redactor.
 import {
-    redactStoredMetadataRow,
     redactStoredMetadataRows,
     storedMetadataBodyGroupingRefusal,
     storedMetadataBodyPredicateRefusal,
     storedMetadataBodyProjection,
     ephemeralStoredHashDigest,
     serveStoredMetadataHashColumnRows,
-    serveStoredMetadataHashColumns,
     storedMetadataHashEvaluateRefusal,
     type StoredHashDigest,
 } from './metadata-redaction.js';
@@ -424,7 +419,6 @@ import { rollBackUnmanagedImport, unmanagedImportCollisions } from './protocol-u
 // [#27762] The own-reference rule for a datasource body's `external.credentialsRef` on the save door.
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
 // [#28355] The `denied` row the four single-item doors leave for a refusal that writes none of its own.
-import { withRefusalAudit } from './protocol-refusal-audit.js';
 // [#28665] The null-master rows a `controlled_by_parent` detail stops serving, counted into the finding that makes its master required.
 // [#29510] `getMetaTypes()`'s named return type and the equality its pin reads.
 import type { MetaTypesListing } from './protocol-meta-types-listing.js';
@@ -518,7 +512,6 @@ export {
     MalformedVersionTokenError,
     canonicalVersionInstant,
 } from './protocol-version-tokens.js';
-import { CLONE_STRIP_FIELDS } from './protocol-write-constants.js';
 export { FLOW_FALLBACK_VERDICT_NOT_REPLAYED } from './protocol-write-constants.js';
 import {
     carryCatalogedErrorCode,
@@ -1201,9 +1194,11 @@ export class ObjectStackProtocolImplementation implements
             applyRemoteMetadataMutation: (...a) => protocol.applyRemoteMetadataMutation(...a),
             applySeedBodies: (...a) => protocol.applySeedBodies(...a),
             artifactLockLayerAt: (...a) => protocol.artifactLockLayerAt(...a),
+            assertExpandTargetsExist: (...a) => protocol.assertExpandTargetsExist(...a),
             assertLockAllowsDelete: (...a) => protocol.assertLockAllowsDelete(...a),
             assertLockAllowsWrite: (...a) => protocol.assertLockAllowsWrite(...a),
             assertObjectRegistered: (...a) => protocol.assertObjectRegistered(...a),
+            assertProjectionFieldsExist: (...a) => protocol.assertProjectionFieldsExist(...a),
             assertRuntimeAuthoringRules: (...a) => protocol.assertRuntimeAuthoringRules(...a),
             assertVersionMatch: (...a) => protocol.assertVersionMatch(...a),
             authoredLockFamily: (...a) => protocol.authoredLockFamily(...a),
@@ -1227,6 +1222,7 @@ export class ObjectStackProtocolImplementation implements
             get credentialChannels() { return protocol.credentialChannels; },
             declinesStoredRow: (...a) => protocol.declinesStoredRow(...a),
             defaultRecordPageSaveRefusal: (...a) => protocol.defaultRecordPageSaveRefusal(...a),
+            deleteMetaItemUnaudited: (...a) => protocol.deleteMetaItemUnaudited(...a),
             detachMetadataMutationPubSub: (...a) => protocol.detachMetadataMutationPubSub(...a),
             diffMetaItem: (...a) => protocol.diffMetaItem(...a),
             disabledActionsOf: (...a) => protocol.disabledActionsOf(...a),
@@ -1313,6 +1309,7 @@ export class ObjectStackProtocolImplementation implements
             probeRecord: (...a) => protocol.probeRecord(...a),
             promoteDraftForPublish: (...a) => protocol.promoteDraftForPublish(...a),
             get publishMaterializers() { return protocol.publishMaterializers; },
+            publishMetaItemUnaudited: (...a) => protocol.publishMetaItemUnaudited(...a),
             publishMetadataMutation: (...a) => protocol.publishMetadataMutation(...a),
             readActiveOverlayRows: (...a) => protocol.readActiveOverlayRows(...a),
             readFlattenedMetaItems: (...a) => protocol.readFlattenedMetaItems(...a),
@@ -1360,6 +1357,7 @@ export class ObjectStackProtocolImplementation implements
             rethrowUnlessMetadataStoreUnprovisioned: (...a) => protocol.rethrowUnlessMetadataStoreUnprovisioned(...a),
             revertCommit: (...a) => protocol.revertCommit(...a),
             rollBackUnmanagedImport: (...a) => protocol.rollBackUnmanagedImport(...a),
+            rollbackMetaItemUnaudited: (...a) => protocol.rollbackMetaItemUnaudited(...a),
             runAuthoringGate: (...a) => protocol.runAuthoringGate(...a),
             runMutationProjector: (...a) => protocol.runMutationProjector(...a),
             runPublishSideEffects: (...a) => protocol.runPublishSideEffects(...a),
@@ -1367,8 +1365,10 @@ export class ObjectStackProtocolImplementation implements
             runtimeViewContainerPackage: (...a) => protocol.runtimeViewContainerPackage(...a),
             saveConflict: (...a) => protocol.saveConflict(...a),
             saveMetaItem: (...a) => protocol.saveMetaItem(...a),
+            saveMetaItemUnaudited: (...a) => protocol.saveMetaItemUnaudited(...a),
             saveWriteBinding: (...a) => protocol.saveWriteBinding(...a),
             seedExternalIdSaveRefusal: (...a) => protocol.seedExternalIdSaveRefusal(...a),
+            servedExpand: (...a) => protocol.servedExpand(...a),
             servedLockState: (...a) => protocol.servedLockState(...a),
             shippedArtifactsOf: (...a) => protocol.shippedArtifactsOf(...a),
             shippingPackagesOf: (...a) => protocol.shippingPackagesOf(...a),
@@ -3814,7 +3814,13 @@ export class ObjectStackProtocolImplementation implements
         return throwMetadataServiceUnavailable(errors);
     }
 
-    async getMetaItems(request: { type: string; packageId?: string; previewDrafts?: boolean }) {
+    /**
+     * The served list of one metadata type. [#29236] `names` narrows it to the
+     * items of those names (`GetMetaItemsRequestSchema.names`): a name that
+     * matches nothing is absent, and the narrowing runs before the serving
+     * decorations, so they are computed for the named items only.
+     */
+    async getMetaItems(request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean }) {
         // [#25467 E1] The body moved to `protocol-meta-list-reads.ts`; it reaches this class through `protocol-host.ts`.
         return getMetaItems(protocolHost(this), request);
     }
@@ -3988,7 +3994,7 @@ export class ObjectStackProtocolImplementation implements
      * `request` arrives already folded by the calling face (#4432).
      */
     private async readFlattenedMetaItems(
-        request: { type: string; packageId?: string; previewDrafts?: boolean },
+        request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean },
         audience: 'served' | 'execution',
         layer: 'effective' | 'per-package' = 'effective',
     ) {
@@ -6236,79 +6242,8 @@ export class ObjectStackProtocolImplementation implements
         id: string;
         record: Record<string, any>;
     }> {
-        this.assertObjectRegistered(request.object); // [#3770]
-        const queryOptions: any = {
-            where: { id: request.id }
-        };
-        if (request.context !== undefined) {
-            queryOptions.context = request.context;
-        }
-
-        // Support fields for single-record retrieval
-        //
-        // [#4226] Gated exactly as on the list path. `GET /data/:object/:id` and
-        // `GET /data/:object` read the same `select`/`expand` against the same
-        // field map, so answering one with a 400 and the other with a silently
-        // widened projection would recreate, one route over, the very split
-        // ("two routes, opposite answers for one input") this issue was filed
-        // about.
-        //
-        // [#26644] …including the empty projection: a blank `?select=` was
-        // falsy and skipped, a comma-only one became `[]` — both answered every
-        // column. Asked on any value present, as the list path asks it.
-        if (request.select != null) {
-            queryOptions.fields = typeof request.select === 'string' || Array.isArray(request.select)
-                ? projectionFieldsValue(request.select, 'select')
-                : request.select;
-            this.assertProjectionFieldsExist(request.object, queryOptions.fields, 'select');
-        }
-        // [#21086] Same read projection as the list path (`findData`): the row's
-        // `type` is read even when `select` named only the body.
-        const bodyProjection = storedMetadataBodyProjection(request.object, queryOptions.fields);
-        if (bodyProjection.addedType) queryOptions.fields = bodyProjection.fields;
-
-        // Support expand for single-record retrieval
-        if (request.expand) {
-            const expandNames = typeof request.expand === 'string'
-                ? request.expand.split(',').map((s: string) => s.trim()).filter(Boolean)
-                : request.expand;
-            this.assertExpandTargetsExist(request.object, expandNames);
-            const expand = {} as Record<string, any>;
-            for (const rel of expandNames) {
-                expand[rel] = { object: rel };
-            }
-            // [#22661] The same exposure judgement as the list path: an entry
-            // whose target does not serve `get` is withheld ({@link servedExpand}).
-            const served = this.servedExpand(request.object, expand, 0);
-            if (Object.keys(served).length > 0) queryOptions.expand = served;
-        }
-
-        // [#29764] The bag `engine.findOne` receives is typed as the engine
-        // declares it. `queryOptions` stays the working bag: the projection
-        // helpers above answer `unknown` (they serve the raw list query too), so
-        // its `fields` has no declared type until it is handed on here. Keys are
-        // copied only when present, so the engine sees the same bag as before.
-        const findOneQuery: EngineQueryOptions = {
-            where: queryOptions.where,
-            ...(queryOptions.context !== undefined ? { context: queryOptions.context } : {}),
-            ...(queryOptions.fields !== undefined ? { fields: queryOptions.fields } : {}),
-            ...(queryOptions.expand !== undefined ? { expand: queryOptions.expand } : {}),
-        };
-        const result = await this.engine.findOne(request.object, findOneQuery);
-        if (result) {
-            return {
-                object: request.object,
-                id: request.id,
-                // [#21207] Same served form as the list path: the content-hash
-                // columns keyed.
-                record: await serveStoredMetadataHashColumns(
-                    request.object,
-                    redactStoredMetadataRow(request.object, result, { dropType: bodyProjection.addedType }),
-                    this.storedHashDigest(),
-                ),
-            };
-        }
-        throw recordNotFoundError(request.object, request.id);
+        // [#29985 codemod] The body moved to `protocol-data-crud.ts`; it reaches this class through `protocol-host.ts`.
+        return ProtocolDataCrudFacet.getData(protocolHost(this), request);
     }
 
     /**
@@ -6375,109 +6310,8 @@ export class ObjectStackProtocolImplementation implements
         sourceId: string;
         record: any;
     }> {
-        // [#3770] This object-existence check used to be open-coded here and
-        // was the ONLY one on the whole data plane; it is now the shared gate
-        // every data entry point runs. Same error envelope as before.
-        this.assertObjectRegistered(request.object);
-        const schema: any = this.engine.registry?.getObject(request.object);
-        // `enable.clone` defaults to true in the spec; treat an absent block /
-        // absent flag as enabled and only block on an explicit `false`.
-        if (schema?.enable?.clone === false) {
-            const err: any = new Error(`Cloning is disabled for object '${request.object}'`);
-            err.code = 'CLONE_DISABLED';
-            err.status = 403;
-            err.object = request.object;
-            throw err;
-        }
-
-        const ctx = request.context;
-        const ctxOpt = ctx !== undefined ? { context: ctx } : undefined;
-
-        const source = await this.engine.findOne(
-            request.object,
-            { where: { id: request.id }, ...ctxOpt },
-        );
-        if (!source) throw recordNotFoundError(request.object, request.id);
-
-        // Copy the source, then strip the columns the engine owns so the insert
-        // path re-derives them rather than carrying the source's values over.
-        const data: Record<string, any> = { ...source };
-        for (const f of CLONE_STRIP_FIELDS) delete data[f];
-        const fields: Record<string, any> = schema?.fields || {};
-        for (const [name, def] of Object.entries(fields)) {
-            if (!def) continue;
-            // Engine-/automation-owned values: injected system/audit columns,
-            // engine-generated autonumbers, and computed formula/summary fields.
-            if ((def as any).system === true
-                || (def as any).type === 'autonumber'
-                || (def as any).type === 'formula'
-                || (def as any).type === 'summary') {
-                delete data[name];
-                continue;
-            }
-            // [#29200] A read-only column the source left EMPTY is not carried
-            // into the insert. Carried, it reached `engine.insert`'s strip as a
-            // present key and was reported in `droppedFields` (and the
-            // `X-ObjectStack-Dropped-Fields` header) although neither the caller
-            // nor the source supplied a value. Leaving it out stores the same
-            // row: the strip would have taken it from a non-system caller, and
-            // the insert's defaults treat an explicit `null` exactly as an
-            // omitted key. A read-only column that HOLDS a value is still
-            // carried, stripped and reported (#15703), and so is one the caller
-            // sets through `overrides`, which are applied below.
-            if ((def as any).readonly && data[name] == null) delete data[name];
-        }
-        // Caller overrides win (new name, cleared unique field, reset status…).
-        if (request.overrides && typeof request.overrides === 'object') {
-            Object.assign(data, request.overrides);
-        }
-
-        // [#3043/#14147] A clone is a create: a non-system caller must not carry
-        // over (or override in) a read-only column — copying the source's
-        // `approval_status` or forging one via `overrides` would mint an approved
-        // record. That strip is `engine.insert`'s since #14147, so the payload
-        // goes over whole and the insert re-derives the field's `defaultValue`,
-        // symmetric with createData. `overrides` are applied ABOVE this line, so
-        // a readonly key smuggled through them is still judged by the strip.
-        //
-        // [#15703] And the verdict is REPORTED, the same listener `createData`
-        // wires: a clone is the one create shape that carries a read-only column
-        // without the caller typing it (the source's `approval_status` travels in
-        // the copy), so the 201 body says which keys the engine dropped instead of
-        // leaving the caller to diff `record` against the source. Maintainer
-        // ruling 2026-09-08 (option 1); `CloneDataResponseSchema` declares the
-        // member in the same change, because that schema is declared AS PRODUCED.
-        const dropped: DroppedFieldsEvent[] = [];
-        // [#22726] A clone is a create: its advisory rule hits are answered as
-        // `warnings`, the same listener `createData` wires.
-        const warnings: ValidationAdvisoryEvent[] = [];
-        const opts: any = {
-            onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
-            onValidationAdvisory: (e: ValidationAdvisoryEvent) => { warnings.push(e); },
-        };
-        if (ctx !== undefined) opts.context = ctx;
-        // [#28782] A copy the engine stored but whose parent roll-up it could
-        // not recompute carries this method's answer on the refusal, as
-        // `createData` does since #28781 (`withEarnedAnswer`).
-        let stale: SummaryRecomputeRefusal | undefined;
-        const result = await this.engine.insert(request.object, data, opts)
-            .catch((e: unknown) => (stale = staleSummaryRefusalOrThrow(e)).written as any);
-        // [#7823] Same ingress strip as `createData` — a clone's 201 body is
-        // the same generic-data-path surface. (The SOURCE row was read through
-        // the engine's find path, which already omits internal fields, so the
-        // copy never carried one in; this guards the INSERT RESULT, which the
-        // engine returns whole by design.)
-        omitInternalFieldsFromWriteResponse(schema, result);
-        const answer = {
-            object: request.object,
-            id: result.id,
-            sourceId: request.id,
-            record: result,
-            ...(dropped.length > 0 ? { droppedFields: dropped } : {}),
-            ...(warnings.length > 0 ? { warnings } : {}),
-        };
-        if (stale) throw withEarnedAnswer(stale, answer);
-        return answer;
+        // [#29985 codemod] The body moved to `protocol-data-crud.ts`; it reaches this class through `protocol-host.ts`.
+        return ProtocolDataCrudFacet.cloneData(protocolHost(this), request);
     }
 
     async updateData(request: { object: string, id: string, data: any, expectedVersion?: string, context?: any }) {
@@ -10923,11 +10757,8 @@ export class ObjectStackProtocolImplementation implements
         version: string;
         seq: number;
     }> {
-        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
-        return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
-            operation: 'save', type: request.type, name: request.name, actor: request.actor,
-            source: request.source ?? 'protocol.saveMetaItem',
-        }, () => this.saveMetaItemUnaudited(request));
+        // [#29985 codemod] The body moved to `protocol-save.ts`; it reaches this class through `protocol-host.ts`.
+        return ProtocolSaveFacet.saveMetaItem(protocolHost(this), request);
     }
 
     /** Docblock and body: {@link ProtocolSaveFacet.saveMetaItemUnaudited} in `protocol-save.ts` [#29985 codemod]. */
@@ -11208,11 +11039,8 @@ export class ObjectStackProtocolImplementation implements
          */
         advisories?: RuntimeAuthoringIssue[];
     }> {
-        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
-        return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
-            operation: 'publish', type: request.type, name: request.name, actor: request.actor,
-            source: 'protocol.publishMetaItem',
-        }, () => this.publishMetaItemUnaudited(request));
+        // [#29985 codemod] The body moved to `protocol-history-and-publish.ts`; it reaches this class through `protocol-host.ts`.
+        return ProtocolHistoryAndPublishFacet.publishMetaItem(protocolHost(this), request);
     }
 
     /** Docblock and body: {@link ProtocolHistoryAndPublishFacet.publishMetaItemUnaudited} in `protocol-history-and-publish.ts` [#29985 codemod]. */
@@ -13386,11 +13214,8 @@ export class ObjectStackProtocolImplementation implements
         restoredFromVersion: number;
         message?: string;
     }> {
-        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
-        return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
-            operation: 'rollback', type: request.type, name: request.name, actor: request.actor,
-            source: 'protocol.rollbackMetaItem',
-        }, () => this.rollbackMetaItemUnaudited(request));
+        // [#29985 codemod] The body moved to `protocol-package-commits.ts`; it reaches this class through `protocol-host.ts`.
+        return ProtocolPackageCommitsFacet.rollbackMetaItem(protocolHost(this), request);
     }
 
     /** Docblock and body: {@link ProtocolPackageCommitsFacet.rollbackMetaItemUnaudited} in `protocol-package-commits.ts` [#29985 codemod]. */
@@ -13483,11 +13308,8 @@ export class ObjectStackProtocolImplementation implements
         /** [ADR-0094] Outcome of the awaited mutation projector, when one is registered. */
         projectionApplied?: MutationProjectionOutcome;
     }> {
-        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
-        return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
-            operation: 'delete', type: request.type, name: request.name, actor: request.actor,
-            source: 'protocol.deleteMetaItem',
-        }, () => this.deleteMetaItemUnaudited(request));
+        // [#29985 codemod] The body moved to `protocol-diff-delete-load.ts`; it reaches this class through `protocol-host.ts`.
+        return ProtocolDiffDeleteLoadFacet.deleteMetaItem(protocolHost(this), request);
     }
 
     /** Docblock and body: {@link ProtocolDiffDeleteLoadFacet.deleteMetaItemUnaudited} in `protocol-diff-delete-load.ts` [#29985 codemod]. */

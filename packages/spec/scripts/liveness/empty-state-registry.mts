@@ -194,6 +194,14 @@ export const EMPTY_STATE_REGISTRY: EmptyStateEntry[] = [
     evidence: 'packages/objectql/src/assignment-rules.ts (the first matching entry of the first matching rule decides; only rows with no owner and no queue are routed)',
   },
   {
+    file: 'packages/plugins/plugin-sharing/src/objects/sys-assignment-rule.object.ts',
+    property: 'criteria',
+    semantics: 'scope',
+    rationale:
+      "[ADR-0142 D5, ruling A on #30066] An organization's own assignment rule (`sys_assignment_rule`): which inserted rows it routes; empty = every row no earlier rule took, the catch-all at the end of the organization's ordered rules. The declared entry's contract above, row for row: it selects work to route and grants nothing by itself — the author names the target, assignment runs only for a row that reaches the engine with no owner and no queue, a user target must be an active member of the organization, and a parked row is readable only by members of the queue named. A missing condition mis-routes among the organization's own targets, never widens a grant.",
+    evidence: 'packages/objectql/src/assignment-rules.ts (authoredRules + assignOne: the organization rules go first, the first matching rule decides); packages/plugins/plugin-sharing/src/assignment-rule-hooks.ts (the save guard)',
+  },
+  {
     file: 'packages/spec/src/automation/flow.zod.ts',
     property: 'errorCode',
     semantics: 'scope',

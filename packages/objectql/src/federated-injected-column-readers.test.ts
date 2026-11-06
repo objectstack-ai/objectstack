@@ -448,6 +448,14 @@ const READERS: Record<string, Row> = {
     disposition: 'not-a-read',
     why: 'keys the sys_assignment_cursor row, a platform table the engine itself reads and writes',
   },
+  'assignment-rules.ts#authoredRules :: organization_id': {
+    disposition: 'not-a-read',
+    why: "keys an organization's sys_assignment_rule rows, a platform table plugin-sharing owns",
+  },
+  'assignment-rules.ts#organizationMemberStanding :: organization_id': {
+    disposition: 'not-a-read',
+    why: 'keys the sys_member row a user target is a member by, a platform table',
+  },
   'assignment-rules.ts#route :: queue': {
     disposition: 'not-a-read',
     why: 'names the queue in a log entry; the row written is the one in hand',
