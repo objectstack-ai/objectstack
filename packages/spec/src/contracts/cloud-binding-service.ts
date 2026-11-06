@@ -39,7 +39,16 @@ export interface ICloudBindingService {
    * The control-plane base URL the binding is made against, without a
    * trailing slash: the configured value, else `OS_CLOUD_URL`, else the
    * ObjectStack-operated default. `''` when the deployment declared that it
-   * has no control plane (`OS_CLOUD_URL=off`, `none`, `local`, `disabled`).
+   * has no control plane (`OS_CLOUD_URL=off`, `none`, `local`, `disabled`,
+   * or an explicitly empty or blank configured value).
    */
   controlPlaneUrl(): string;
 }
+
+/**
+ * Service-registry slot for {@link ICloudBindingService}: the one spelling of
+ * the name. `@objectstack/cloud-connection` registers the binding under it and
+ * a reader (`@objectstack/service-push`'s relay sender) asks for it, so the
+ * registrar and the reader cannot drift apart.
+ */
+export const CLOUD_BINDING_SERVICE = 'cloud-binding';

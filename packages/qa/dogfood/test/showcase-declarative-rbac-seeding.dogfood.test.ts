@@ -33,8 +33,8 @@ describe('showcase: declarative RBAC seeding (ADR-0057 D6 / #2077)', () => {
   it('declared positions are served by the security catalog (was count = 0)', async () => {
     const reader = createSecurityCatalogReader({ registry: ql.registry, metadata: stack.kernel.getService('metadata') });
     const names = (await reader.list('position')).map((e) => e.name);
-    expect(names, 'showcase declares contributor/manager/exec').toEqual(
-      expect.arrayContaining(['contributor', 'manager', 'exec']),
+    expect(names, 'showcase declares showcase_contributor/manager/exec').toEqual(
+      expect.arrayContaining(['showcase_contributor', 'showcase_manager', 'showcase_exec']),
     );
   });
 
@@ -44,9 +44,9 @@ describe('showcase: declarative RBAC seeding (ADR-0057 D6 / #2077)', () => {
 
   it('declared criteria sharing rule is served from the registry, CEL→criteria translated — and no row is written for it', async () => {
     const rules = await servedRules();
-    const inquiry = (rules ?? []).find((r: any) => r.name === 'share_new_inquiries_with_field_ops');
+    const inquiry = (rules ?? []).find((r: any) => r.name === 'showcase_share_new_inquiries_with_field_ops');
     expect(inquiry, 'criteria rule served (was count = 0)').toBeTruthy();
-    expect(inquiry?.id, 'a declared rule\'s id is its name').toBe('share_new_inquiries_with_field_ops');
+    expect(inquiry?.id, 'a declared rule\'s id is its name').toBe('showcase_share_new_inquiries_with_field_ops');
     expect(inquiry?.object_name).toBe('showcase_inquiry');
     expect(inquiry?.recipient_type).toBe('unit_and_subordinates');
     expect(inquiry?.recipient_id).toBe('bu_field_ops');
@@ -79,12 +79,12 @@ describe('showcase: declarative RBAC seeding (ADR-0057 D6 / #2077)', () => {
     // The surviving `position`-recipient demonstration lives on an object under
     // record-sharing enforcement, so its grant is one the gates consult.
     const contacts = (rules ?? []).find(
-      (r: any) => r.name === 'share_key_account_qualified_contacts_with_managers',
+      (r: any) => r.name === 'showcase_share_key_account_qualified_contacts_with_managers',
     );
     expect(contacts, 'position-recipient rule served').toBeTruthy();
     expect(contacts?.object_name).toBe('showcase_contact');
     expect(contacts?.recipient_type).toBe('position');
-    expect(contacts?.recipient_id).toBe('manager');
+    expect(contacts?.recipient_id).toBe('showcase_manager');
     expect(contacts?.criteria).toEqual({ $and: [{ stage: 'qualified' }, { company: 'Northwind' }] });
   });
 });

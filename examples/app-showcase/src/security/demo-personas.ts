@@ -123,7 +123,7 @@ export const PHONE_DEMO_USER = {
 } as const;
 
 /**
- * A second persona holding ONLY `auditor`, which is the position behind the
+ * A second persona holding ONLY `showcase_auditor`, which is the position behind the
  * `finance` group of the per-group (会签) demo. It has to be a *different* user
  * from the admin: with one user in both groups a single decision would satisfy
  * both tallies at once, and "one approval per group" would never be observable.

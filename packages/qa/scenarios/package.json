@@ -3,15 +3,64 @@
   "version": "0.1.0",
   "private": true,
   "license": "Apache-2.0",
-  "description": "Scenario-card schema and loader for the open scenario library under docs/qa/scenarios/. A card states an authoring prompt, the structural expectation a generated app must meet, seed rows, data questions whose truth the loader COMPUTES from a declarative spec over those rows, personas, write operations with their guardrail checks, and one iteration request \u2014 plus the deterministic scorer that judges a built artifact, an observed write or an agent's answer against a loaded card (`@objectstack/scenarios/score`). Not published, no build step, no model calls: a devx instrument, not a protocol (packages/spec carries no obligation for this format).",
+  "description": "Scenario-card schema and loader for the open scenario library under docs/qa/scenarios/. A card states an authoring prompt, the structural expectation a generated app must meet, seed rows, data questions whose truth the loader COMPUTES from a declarative spec over those rows, personas, write operations with their guardrail checks, and one iteration request \u2014 plus the deterministic scorer that judges a built artifact, an observed write or an agent's answer against a loaded card (`@objectstack/scenarios/score`). Not published (a minimal tsup build to `dist/` so a linked consumer's bundled entry can load it under plain Node; `./score` is the narrow scorer, `./score/full` adds the capability-tag checks), no model calls: a devx instrument, not a protocol (packages/spec carries no obligation for this format).",
   "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./score": "./src/score/index.ts",
-    "./runner": "./src/runner/index.ts",
-    "./export": "./src/export/index.ts"
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./score": {
+      "import": {
+        "types": "./dist/score.d.ts",
+        "default": "./dist/score.js"
+      },
+      "require": {
+        "types": "./dist/score.d.cts",
+        "default": "./dist/score.cjs"
+      }
+    },
+    "./score/full": {
+      "import": {
+        "types": "./dist/score-full.d.ts",
+        "default": "./dist/score-full.js"
+      },
+      "require": {
+        "types": "./dist/score-full.d.cts",
+        "default": "./dist/score-full.cjs"
+      }
+    },
+    "./runner": {
+      "import": {
+        "types": "./dist/runner.d.ts",
+        "default": "./dist/runner.js"
+      },
+      "require": {
+        "types": "./dist/runner.d.cts",
+        "default": "./dist/runner.cjs"
+      }
+    },
+    "./export": {
+      "import": {
+        "types": "./dist/export.d.ts",
+        "default": "./dist/export.js"
+      },
+      "require": {
+        "types": "./dist/export.d.cts",
+        "default": "./dist/export.cjs"
+      }
+    }
   },
   "scripts": {
+    "build": "tsup && node ../../../scripts/check-dts-emitted.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "run-scenarios": "tsx src/runner/cli.ts",

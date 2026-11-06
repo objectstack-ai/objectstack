@@ -93,6 +93,12 @@ export default defineStack({
 
 The rule writes `owner_id` (when it chose a member) and `queue` (for a queue target), nothing else. The row's audit columns still record who inserted it; the owner the rule chose is ownership, not attribution.
 
+**A `user` target owns the row only while an active member.** `assignTo: { type: 'user', value: '<id>' }` is honoured when that user has a `sys_member` row in the record's organization and no ban in force — asked again at every insert, not only when the rule was written. A target who has left or is banned when a row arrives leaves it ownerless (`queue` unset), logged once at `warn`; the insert is never refused. Point the rule at a current member, or at a queue.
+
+An organization authors its own assignment rules too. A `sys_assignment_rule` record (Setup → Assignment Rules, for holders of `manage_platform_settings`) is one rule with one entry: `object_name`, an optional `criteria`, `recipient_type` (`queue` or `user`) with `recipient_id`, and for a queue target an optional `strategy` with its `load`; `active: false` switches it off without deleting it. Like `sys_queue`, it shares **one namespace, by name** with the declared rules: a record may not take a declared rule's name, and one found under that name is not evaluated — the declared rule answers for it, logged once. Unlike a `sys_queue` record, which resolves after the declared queues, **the organization's rules are evaluated first** — ascending by `sort_order`, then by `name` — and the stack's `assignmentRules`, in registry order, are the fallback, so an organization routes ahead of an installed app's rule, which it cannot switch off for itself alone (the activation ledger has no organization column). The first match across both sources wins. When the organization's rules cannot be read, its new rows are written as they stood and routed by **no** rule — not by the declared fallback its own rules would have overtaken — logged at `warn`.
+
+The record is validated on save, one `VALIDATION_FAILED` naming every field at fault: a `name` that is not snake_case or that a declared rule holds; an `object_name` that is not registered or carries no `queue` column; the shape a declared entry refuses (a `strategy` on a user target, `least_loaded` without `load`); a `criteria` or `load` the engine cannot compile; a `user` target who is not an active member of the organization. A later patch of only the label, description, order or active flag is not re-judged, so a rule whose target has lapsed can still be switched off, re-ordered or relabelled; a rename, like every other judged column, is judged again.
+
 ### 3. `load` is required with `least_loaded`
 
 `least_loaded` counts each member's **open** rows of the object, and only you know what "open" means for it — `status != "closed"` for cases, `is_converted == false` for leads. So `load` is **required** with `least_loaded` and has no default: a default such as "every row" would count closed work and quietly make the busiest historical owner look the most loaded. `load` on any other strategy is refused, because nothing reads it.
@@ -153,6 +159,7 @@ A queue routes **records** to people. It is not an address for **messages**: a f
 - The object is `ownership: 'user'`, and declares no field of its own named `queue`.
 - The stack loads `@objectstack/plugin-sharing`; otherwise `queues` / `assignmentRules` refuse the boot.
 - A declared queue's members are positions; organizations add users, teams and units through `sys_queue_member`.
+- An organization's own `sys_assignment_rule` records are tried before the stack's rules, lowest `sort_order` first; a `user` target is an active member of the organization.
 - Every `least_loaded` entry has a `load` your filter compiler can lower; no other entry has one.
 - Code that claims a record sends `{ owner_id: <self> }` by id and handles `409` as "someone else took it".
 - Alerts about new work address a team or a position, not the queue.

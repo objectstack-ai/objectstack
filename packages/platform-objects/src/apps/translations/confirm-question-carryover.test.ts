@@ -25,11 +25,13 @@ import { enObjects } from './en.objects.generated.js';
 import { zhCNObjects } from './zh-CN.objects.generated.js';
 import { jaJPObjects } from './ja-JP.objects.generated.js';
 import { esESObjects } from './es-ES.objects.generated.js';
+import { zhHantObjects } from './zh-Hant.objects.generated.js';
 
 const LOCALES = [
   ['zh-CN', zhCNObjects],
   ['ja-JP', jaJPObjects],
   ['es-ES', esESObjects],
+  ['zh-Hant', zhHantObjects],
 ] as const;
 
 /**

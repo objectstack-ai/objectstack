@@ -6,8 +6,8 @@
  * section of `ObjectQL`: the bodies of `invalidateSummaryIndex`,
  * `buildSummaryIndex`, `ensureSummaryIndexes`, `getSummaryDescriptors`,
  * `summaryForeignKeyColumns`, `getOwnedSummaryDescriptors`,
- * `initializeSummaryFields`, `expandRelatedRecords` moved out of `engine.ts`
- * whole by `scripts/codemod-split-engine.mjs`.
+ * `initializeSummaryFields`, `recomputeSummaries`, `expandRelatedRecords` moved
+ * out of `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
  *
  * A MOVE, not a redesign. {@link SummariesAndExpansionFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -42,7 +42,9 @@ import { REFERENCE_VALUE_TYPES, referenceCarrierOf, referenceTargetOf } from '@o
 import type { QueryAST, ServiceObject } from '@objectstack/spec/data';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { summaryEmptySetValue } from './summary-aggregate.js';
+import { withTransientRetry } from '@objectstack/core';
+import type { SummaryRecomputeFailure } from './summary-errors.js';
+import { aggregateSummaryValue, summaryEmptySetValue } from './summary-aggregate.js';
 import type { SummaryDescriptor } from './summary-aggregate.js';
 import { ENGINE_WIRE_ONLY_SLOTS, WIRE_ONLY_CANONICAL_SHAPES } from './engine-top-level.js';
 import { ObjectQLStatics as ObjectQL } from './engine.js';
@@ -60,6 +62,8 @@ export interface SummariesAndExpansionHost {
   buildSummaryIndex: ObjectQLClass['buildSummaryIndex'];
   ensureSummaryIndexes: ObjectQLClass['ensureSummaryIndexes'];
   expandRelatedRecords: ObjectQLClass['expandRelatedRecords'];
+  /** The engine itself: a moved body reads `this.facade` where the method read a bare `this` (#30020). */
+  readonly facade: ObjectQLClass;
   find: ObjectQLClass['find'];
   getOwnedSummaryDescriptors: ObjectQLClass['getOwnedSummaryDescriptors'];
   getSummaryDescriptors: ObjectQLClass['getSummaryDescriptors'];
@@ -69,6 +73,8 @@ export interface SummariesAndExpansionHost {
   summaryIndex: ObjectQLClass['summaryIndex'];
   summaryIndexByParent: ObjectQLClass['summaryIndexByParent'];
   summaryIndexRevision: ObjectQLClass['summaryIndexRevision'];
+  readonly summaryRetryOptions: ObjectQLClass['summaryRetryOptions'];
+  update: ObjectQLClass['update'];
 }
 
 /** The bodies of the "Summary indexes, related-record expansion, file and reference hydration" section of `ObjectQL`: a stateless facet, called by the class's stubs. */
@@ -381,6 +387,101 @@ export class SummariesAndExpansionFacet {
       out[desc.summaryField] = seed;
     }
     return out;
+  }
+
+  /**
+   * Recompute roll-up `summary` fields on parent records after a child write.
+   * For each affected parent (the FK value on the changed/old child record), it
+   * aggregates the child collection and writes the result onto the parent's
+   * summary field. Runs in the caller's execution context — SYSTEM-ELEVATED,
+   * see below — so it joins the same transaction (e.g. the cross-object batch)
+   * when one is open.
+   *
+   * # Why the recompute is system-elevated (#7673)
+   *
+   * A roll-up is ENGINE-DERIVED state on the parent, not a caller write to it.
+   * The permission decision that matters — may this caller write the CHILD —
+   * has already been made by the time we get here; whether
+   * `showcase_project.task_count` may be refreshed is not a question about the
+   * caller's grant on `showcase_project`.
+   *
+   * Passing the caller's own context straight through made it one, and the
+   * ordinary parent/child shape — a child more widely writable than its parent
+   * (tasks, line items, comments, time entries) — broke on it in three
+   * separate ways, all of them fail-open:
+   *
+   *   1. **A granted child write returned 500 after the row was written.** The
+   *      parent update raised `PermissionDeniedError`, which this method
+   *      recorded as a failure and the three call sites then threw as
+   *      `SummaryRecomputeError` — mapped to a 500 by REST, on a write that had
+   *      already COMMITTED. A client that retried created a duplicate row
+   *      (#7673 / #7719, measured on `examples/app-showcase`: a plain member
+   *      holding `showcase_task: create + read` 500'd on every POST and PATCH).
+   *   2. **The aggregate was computed from the caller's VISIBLE subset.** Where
+   *      the caller COULD write the parent, the recompute succeeded and stored
+   *      an RLS-scoped count — a parent column silently rewritten to one
+   *      reader's view of the child collection. A roll-up is a property of the
+   *      parent, never of whoever happened to touch a child.
+   *   3. **An author-declared `readonly: true` roll-up column was stripped.**
+   *      The write-path read-only strip runs on `!context.isSystem`, and the
+   *      recompute's payload is "caller supplied" from its point of view, so
+   *      the summary silently never landed.
+   *
+   * Elevation is a `sudo()`-shaped derivative of the caller's context
+   * (`{ ...execCtx, isSystem: true }`), NOT a bare `{ isSystem: true }`: the
+   * open transaction handle, `tenantId` and `timezone` must survive, or the
+   * recompute leaves the caller's transaction and stops being tenant-scoped.
+   * That makes this the same posture the roll-up's two OTHER writers already
+   * hold — `initializeSummaryFields` runs inside the engine's own insert, and
+   * `backfillSummaryNulls` (#6063) elevates explicitly — so all three writers
+   * of a summary column now agree about who owns it.
+   *
+   * What this does NOT do: it never widens what the caller may read or write.
+   * The parent's own row stays governed by the caller's grants (a direct
+   * `update` of the parent is refused exactly as before), the summary field
+   * stays subject to the parent's FLS on read, and the only value this path can
+   * move is the one the author DECLARED as a function of the child collection.
+   */
+  static async recomputeSummaries(this: Pick<SummariesAndExpansionHost, 'facade' | 'getSummaryDescriptors' | 'logger' | 'summaryRetryOptions' | 'update'>, childObject: string, records: any, previous: any, execCtx?: ExecutionContext): Promise<SummaryRecomputeFailure[]> {
+    const descriptors = this.getSummaryDescriptors(childObject);
+    if (descriptors.length === 0) return [];
+    // The elevation described above. Built once per call, spread from the
+    // caller's context so transaction / tenant / timezone ride along.
+    const systemCtx = { ...(execCtx ?? {}), isSystem: true } as ExecutionContext;
+    const recs = Array.isArray(records) ? records : records ? [records] : [];
+    const prevs = Array.isArray(previous) ? previous : previous ? [previous] : [];
+    const failures: SummaryRecomputeFailure[] = [];
+    for (const desc of descriptors) {
+      const ids = new Set<string>();
+      for (const r of recs) { const v = r?.[desc.fkField]; if (v != null && v !== '') ids.add(String(v)); }
+      for (const p of prevs) { const v = p?.[desc.fkField]; if (v != null && v !== '') ids.add(String(v)); }
+      for (const parentId of ids) {
+        try {
+          // Retry a transient failure (a turso `fetch failed` on the parent
+          // aggregate/update) with backoff — a network blip here used to leave
+          // the parent summary silently stale (framework#3147).
+          await withTransientRetry(async () => {
+            // The aggregate — parent-FK match ANDed with the optional
+            // per-summary filter, empty-set fallback included — is
+            // `aggregateSummaryValue` (#6063). Behaviour unchanged; it simply
+            // lives where the insert-time seed and the one-off NULL backfill
+            // can read the identical computation instead of copying it.
+            const value = await aggregateSummaryValue(this.facade, desc, parentId, systemCtx);
+            await this.update(desc.parentObject, { id: parentId, [desc.summaryField]: value }, { context: systemCtx } as any);
+          }, this.summaryRetryOptions);
+        } catch (err) {
+          // Retries exhausted (or a non-transient failure). Record it so the
+          // caller can surface it — one parent's failure must not abort the
+          // remaining parents' recompute.
+          this.logger.warn('Roll-up summary recompute failed', {
+            childObject, parentObject: desc.parentObject, parentId, field: desc.summaryField,
+            error: (err as any)?.message,
+          });
+          failures.push({ childObject, parentObject: desc.parentObject, parentId, field: desc.summaryField, error: err });
+        }
+      }
+    }
+    return failures;
   }
 
   /**
