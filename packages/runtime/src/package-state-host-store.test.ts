@@ -28,6 +28,8 @@ import { join } from 'node:path';
 import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { resolveThrownHttpError } from '@objectstack/types';
+// Paid during collection, not inside a case's clock: `AppPlugin` loads it lazily.
+import '@objectstack/metadata';
 
 import { AppPlugin } from './app-plugin.js';
 import { HttpDispatcher } from './http-dispatcher.js';
