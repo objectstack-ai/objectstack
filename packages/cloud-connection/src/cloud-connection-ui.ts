@@ -83,8 +83,9 @@ export const CloudConnectionSettingsPage: Page = {
  * `priority` orders contributions within a group, lowest first. The group's
  * other contributors, read where they are declared: Webhooks / HTTP Deliveries
  * (`@objectstack/plugin-webhooks`) and Datasources
- * (`@objectstack/service-datasource`) at 100, Connect an Agent
- * (`@objectstack/mcp`) at 110 — so 200 sorts this entry last.
+ * (`@objectstack/service-datasource`) at 100, Connector Credentials and
+ * Connector Connections (`@objectstack/service-automation`) at 120 — so 200
+ * sorts this entry last.
  *
  * The group's own `requiredPermissions` (`manage_platform_settings`, on
  * `SETUP_APP` in `@objectstack/platform-objects`) applies to the entry, and

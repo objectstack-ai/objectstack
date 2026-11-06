@@ -66,6 +66,7 @@ import { ORGANIZATION_DELETE_PATH } from './organization-delete.js';
 import { clientAddressStateEntries } from './request-client-address.js';
 import { SESSION_ERASURE_PATHS } from './session-tombstone.js';
 import { envelopeVendorAdminRefusal } from './vendor-admin-refusal-envelope.js';
+import { OAUTH_REVOKE_PATH } from './mcp-token-revocation.js';
 
 /**
  * The `AuthManager` members the functions below read — every one of them, and
@@ -83,10 +84,11 @@ export interface RequestRoutingHost {
   getOrCreateAuth: AuthManager['getOrCreateAuth'];
   resolveClientAddress: AuthManager['resolveClientAddress'];
   runSubjectErasureAtomically: AuthManager['runSubjectErasureAtomically'];
+  answerOAuthTokenRevocation: AuthManager['answerOAuthTokenRevocation'];
 }
 
 /** The body of `AuthManager#handleRequest`; the method's docblock there is its contract. */
-export async function handleRequest(this: Pick<RequestRoutingHost, 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically'>, request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
+export async function handleRequest(this: Pick<RequestRoutingHost, 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation'>, request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
   // ADR-0069 D7 — the client address this request's sign-in audit stamps,
   // established ONCE, here, by the same trust rule the D5 allow-list judges
   // with (`resolveClientAddress`). Read before any rewrite below, and carried
@@ -229,16 +231,27 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'betterAuthEn
         return scimRequestScope.run({ scim: true }, runHandler);
       }
     : runHandler;
+  // [objectstack-ai/cloud#3606, ruling A] `/oauth2/revoke` is answered a
+  // second time, AFTER the provider: the provider authenticates the client
+  // and answers first, unchanged, and the MCP access token it cannot revoke
+  // is revoked through its consent (`mcp-token-revocation.ts`). The request is
+  // cloned here, before the vendor reads its body, because the answer reads
+  // the token and the client credentials off the same request.
+  const revocationRequest =
+    endpointPath === OAUTH_REVOKE_PATH && request.method === 'POST' ? request.clone() : undefined;
   // [#24948] An organization delete is one unit of work on the same terms:
   // better-auth clears the caller's active organization and deletes the
   // members and invitations before the organization row, with no
   // transaction, and the engine's refusal on that last row used to leave the
   // organization standing with no owner.
-  const vendorResponse =
+  const providerResponse =
     endpointPath !== undefined &&
     (SESSION_ERASURE_PATHS.has(endpointPath) || endpointPath === ORGANIZATION_DELETE_PATH)
       ? await this.runSubjectErasureAtomically(runRequest)
       : await runRequest();
+  const vendorResponse = revocationRequest
+    ? await this.answerOAuthTokenRevocation(revocationRequest, providerResponse)
+    : providerResponse;
 
   // [#10349] The better-auth-native `/admin/` routes refuse an anonymous
   // caller through the vendor's `adminMiddleware`

@@ -122,7 +122,7 @@ error. **RAW** keys are read as written: a
     severity: 'warning',               // RAW; CLOSED enum info|warning|critical
     channels: ['inbox'],               // RAW; default inbox
     sourceObject: 'task',              // link: PAIR, else dropped; none of the 3 ⇒ the
-    sourceId: { dialect: 'cel', source: 'record.id' }, // trigger record (not on delete), if any
+    sourceId: { dialect: 'cel', source: 'record.id' }, // trigger record (not on delete/before-create), if any
     actionUrl: '/tasks/{{ record.id }}', // overrides the pair
 } }
 ```

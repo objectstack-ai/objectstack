@@ -78,7 +78,7 @@ export default defineStack({
   // takes `input`, RETURNS a value, and a later declarative node persists it
   // (#4396), which is why none of these declares an `effect`.
   //
-  // `computeNextTaskDueDate` is what makes `task_completion`'s recurrence branch
+  // `computeNextTaskDueDate` is what makes `todo_task_completion`'s recurrence branch
   // work: no flow node evaluates a value-producing expression, so the next due
   // date has to be computed before `create_next_task` runs (#7037).
   functions: todoFunctions,

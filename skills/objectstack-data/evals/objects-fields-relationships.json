@@ -115,6 +115,26 @@
           "deleteBehavior: 'cascade'"
         ]
       }
+    },
+    {
+      "id": 7,
+      "prompt": "We installed HotCRM (`hotcrm`, namespace `crm`). Its `crm_account` object's `industry` field should read \"Sector\" instead of \"Industry\" for our users, without touching HotCRM's source.",
+      "expected_output": "An object extension in HotCRM's paired customization package `hotcrm.custom`, registered in that stack's `objectExtensions`: `defineObjectExtension({ extend: 'crm_account', fieldPatches: { industry: { label: 'Sector' } } })`. A patch carries display keys only (`label`, `description`, `inlineHelpText`, `placeholder`); the field's type, values and rules stay HotCRM's, so its upgrades still reach it, and a key the tenant edited keeps the tenant's text. Never redeclare `industry` in `fields`: that takes the field over whole and cuts it off from the owner's upgrades, and an unsuffixed field in a `.custom` extension is refused anyway. An option's label rides the same patch keyed by the option's stored `value` only for a field that declares its own `options`; HotCRM's `industry` takes its options from the `industry` picklist, and a `picklist`-bound field's options are never patchable, so no `options` entry belongs on this patch. A patch naming a field or option value the target lacks is refused at install and by `os validate`.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "hotcrm.custom",
+          "defineObjectExtension",
+          "extend: 'crm_account'",
+          "fieldPatches",
+          "label: 'Sector'"
+        ],
+        "must_not_contain": [
+          "industry: Field.",
+          "overrides:",
+          "name: 'crm_account'"
+        ]
+      }
     }
   ]
 }

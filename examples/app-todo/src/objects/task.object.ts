@@ -167,7 +167,7 @@ export const Task = ObjectSchema.create({
     // `is_overdue` as formulas was one specific consumer — a FILTER naming a
     // virtual field matches nothing, because no driver materialises a column
     // for it. This field has no filter reading it, by construction: its one
-    // consumer is the `overdue_escalation` flow's `notify` message, which
+    // consumer is the `todo_overdue_escalation` flow's `notify` message, which
     // READS the value off a record the `get_record` step already fetched.
     // `ObjectQL.find` evaluates every formula field on the schema when the
     // caller asks for no explicit projection (`planFormulaProjection(schema,

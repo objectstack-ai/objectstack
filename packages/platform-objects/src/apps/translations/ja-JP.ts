@@ -16,6 +16,7 @@ export const jaJP: TranslationData = {
         grp_account_inbox: { label: '受信箱' },
         grp_account_security: { label: 'セキュリティ' },
         grp_account_developer: { label: '開発者' },
+        grp_account_ai_assistant: { label: 'AI アシスタント' },
         nav_account_profile: { label: 'プロフィール' },
         nav_account_notifications: { label: '通知' },
         nav_account_approvals: { label: '承認待ち' },
@@ -25,9 +26,9 @@ export const jaJP: TranslationData = {
         nav_account_api_keys: { label: 'API キー' },
         nav_account_oauth_apps: { label: 'OAuth アプリケーション' },
         // Contributed at runtime by `@objectstack/mcp` into
-        // `grp_account_developer`; the Setup twin's key does not answer for the
+        // `grp_account_ai_assistant`; the Setup twin's key does not answer for the
         // Account app (one `apps.<app>.navigation` namespace per app).
-        nav_connect_agent: { label: 'エージェントを接続' },
+        nav_connect_agent: { label: 'AI アシスタントを接続' },
       },
     },
     setup: {
@@ -49,6 +50,7 @@ export const jaJP: TranslationData = {
         group_advanced: { label: '詳細' },
 
         nav_system_overview: { label: 'システム概要' },
+        nav_connect_agent: { label: 'AI アシスタントを接続' },
 
         nav_users: { label: 'ユーザー' },
         nav_organization: { label: '現在の組織' },
@@ -70,7 +72,6 @@ export const jaJP: TranslationData = {
         // `sys_sso_provider.pluralLabel`.
         nav_sso_providers: { label: 'SSO プロバイダー' },
         nav_api_keys: { label: 'API キー' },
-        nav_connect_agent: { label: 'エージェントを接続' },
 
         nav_approvals_inbox: { label: '承認センター' },
         nav_approval_requests: { label: 'リクエスト' },
@@ -187,7 +188,7 @@ export const jaJP: TranslationData = {
         'このランタイムを ObjectStack コントロールプレーンに接続すると、組織のプライベートパッケージを閲覧してここにインストールできます。',
     },
     connect_agent: {
-      label: 'エージェントを接続',
+      label: 'AI アシスタントを接続',
       subtitle:
         'MCP 対応の AI クライアントにこのシステムへの統制されたアクセスを許可します。すべての呼び出しは、呼び出し元自身の権限と行レベルセキュリティのもとで実行されます。',
     },

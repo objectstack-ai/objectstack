@@ -5125,14 +5125,87 @@ describe('AuthManager', () => {
       expect(ipMatchesRange('203.0.114.5', '::ffff:203.0.113.0/24')).toBe(false);
     });
 
-    it('ipMatchesRange never widens a malformed IPv6 range past its base address', () => {
-      expect(ipMatchesRange('2001:db8::5', '2001:db8::/129')).toBe(false);
-      expect(ipMatchesRange('2001:db8::5', '2001:db8::/')).toBe(false);
-      expect(ipMatchesRange('2001:db8::5', '2001:db8::/3x')).toBe(false);
-      expect(ipMatchesRange('2001:db8::5', '2001:db8:::/32')).toBe(false);
-      expect(ipMatchesRange('2001:db8::5', 'zz01:db8::/32')).toBe(false);
-      // A prefix the family does not read leaves the base address alone, as before.
-      expect(ipMatchesRange('2001:db8::', '2001:db8::/129')).toBe(true);
+    // An entry is an address, or an address, `/` and a prefix length written in
+    // decimal digits: one or two of them, 0 to 32, for IPv4 (an IPv4-mapped base
+    // included); one to three, 0 to 128, for IPv6. Any other entry names no
+    // range, so it matches no address, its own base address included.
+    const UNREADABLE_IPV4_ENTRIES = [
+      '10.0.0.0/', '10.0.0.0/ 8', '10.0.0.0 /8', '10.0.0.0/0x8', '10.0.0.0/+8', '10.0.0.0/-0',
+      '10.0.0.0/8.0', '10.0.0.0/1e1', '10.0.0.0/008', '10.0.0.0/33', '10.0.0.0/8/8', '/8',
+    ];
+    const UNREADABLE_IPV6_ENTRIES = [
+      '2001:db8::/', '2001:db8::/ 32', '2001:db8::/0x20', '2001:db8::/+32', '2001:db8::/0032',
+      '2001:db8::/129', '2001:db8::/32/32', '2001:db8::/3x', '2001:db8:::/32', 'zz01:db8::/32',
+    ];
+
+    it('ipMatchesRange matches no address through an IPv4 entry whose prefix is not 1-2 decimal digits from 0 to 32', () => {
+      for (const entry of UNREADABLE_IPV4_ENTRIES) {
+        for (const client of ['10.0.0.0', '10.1.2.3', '8.8.8.8', '::ffff:10.1.2.3']) {
+          expect(ipMatchesRange(client, entry), `${client} against ${JSON.stringify(entry)}`).toBe(false);
+        }
+      }
+      // An IPv4-mapped base is an IPv4 address, so it takes an IPv4 prefix.
+      expect(ipMatchesRange('203.0.113.0', '::ffff:203.0.113.0/120')).toBe(false);
+    });
+
+    it('ipMatchesRange matches no address through an IPv6 entry whose prefix is not 1-3 decimal digits from 0 to 128', () => {
+      for (const entry of UNREADABLE_IPV6_ENTRIES) {
+        for (const client of ['2001:db8::', '2001:db8::5', '2001:db9::5']) {
+          expect(ipMatchesRange(client, entry), `${client} against ${JSON.stringify(entry)}`).toBe(false);
+        }
+      }
+    });
+
+    it('ipMatchesRange matches no address through an entry that is not an address, even one spelled the same', () => {
+      for (const entry of ['unknown', 'localhost', 'office-network', 'unknown/24']) {
+        expect(ipMatchesRange(entry.split('/')[0]!, entry), JSON.stringify(entry)).toBe(false);
+      }
+    });
+
+    it('ipMatchesRange reads every well-formed entry as it did: an address, or an address and a decimal prefix within its family', () => {
+      expect(ipMatchesRange('10.200.0.1', '10.0.0.0/8')).toBe(true);
+      expect(ipMatchesRange('11.0.0.1', '10.0.0.0/8')).toBe(false);
+      expect(ipMatchesRange('10.200.0.1', '10.0.0.0/08')).toBe(true);
+      expect(ipMatchesRange('192.0.2.7', '192.0.2.7/32')).toBe(true);
+      expect(ipMatchesRange('192.0.2.8', '192.0.2.7/32')).toBe(false);
+      expect(ipMatchesRange('192.0.2.7', '192.0.2.7')).toBe(true);
+      expect(ipMatchesRange('192.0.2.8', '192.0.2.7')).toBe(false);
+      expect(ipMatchesRange('198.51.100.1', '0.0.0.0/0')).toBe(true);
+      // Bits past the prefix are not judged, and the entry's own surrounding blanks are not part of it.
+      expect(ipMatchesRange('203.0.113.200', '203.0.113.5/24')).toBe(true);
+      expect(ipMatchesRange('203.0.113.5', '  203.0.113.0/24  ')).toBe(true);
+      expect(ipMatchesRange('2001:db8::1', '2001:db8::1/128')).toBe(true);
+      expect(ipMatchesRange('2001:db8::2', '2001:db8::1/128')).toBe(false);
+      expect(ipMatchesRange('2001:db8::1', '2001:db8::1')).toBe(true);
+      expect(ipMatchesRange('2001:db8:ffff::1', '2001:db8::/32')).toBe(true);
+      expect(ipMatchesRange('2001:db8::5', '2001:db8::/032')).toBe(true);
+      expect(ipMatchesRange('2001:db9::5', '::/0')).toBe(true);
+      expect(ipMatchesRange('203.0.113.5', '::ffff:203.0.113.0/24')).toBe(true);
+      expect(ipMatchesRange('fe80::1%eth0', 'fe80::/10')).toBe(true);
+    });
+
+    it('isClientIpAllowed admits no client through an entry that names no range, and still through the readable ones', () => {
+      const m = mgr({});
+      m.applyConfigPatch({ allowedIpRanges: ['10.0.0.0/', '2001:db8::/129', '192.0.2.7'] });
+      expect(m.isClientIpAllowed('10.1.2.3')).toBe(false);
+      expect(m.isClientIpAllowed('8.8.8.8')).toBe(false);
+      expect(m.isClientIpAllowed('2001:db8::')).toBe(false);
+      expect(m.isClientIpAllowed('192.0.2.7')).toBe(true);
+    });
+
+    it('refuses at construction a declared allowedIpRanges entry that names no range, naming each one', () => {
+      const declare = (allowedIpRanges: unknown[]) => () =>
+        new AuthManager({ secret: SECRET, baseUrl: 'http://localhost:3000', allowedIpRanges: allowedIpRanges as string[] });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        expect(declare(['10.0.0.0/8', '10.0.0.0/', '2001:db8::/129'])).toThrow(
+          /allowedIpRanges.*"10\.0\.0\.0\/".*"2001:db8::\/129"/,
+        );
+        expect(declare(['10.0.0.0/8', 42])).toThrow(/allowedIpRanges.*42/);
+        expect(declare(['10.0.0.0/8', '2001:db8::/32', '192.0.2.7', '::1/128'])).not.toThrow();
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it('isClientIpAllowed admits an IPv6 client inside an allowed IPv6 range', () => {

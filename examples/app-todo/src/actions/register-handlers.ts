@@ -87,7 +87,7 @@ export function registerTaskActionHandlers(engine: {
   engine.registerAction('todo_task', 'exportTasksToCSV', exportTasksToCSV);
 
   // ─── Param-collecting script actions ───────────────────────────────
-  // `defer_task` / `set_reminder` declare `params`, so the runner collects
+  // `todo_defer_task` / `todo_set_reminder` declare `params`, so the runner collects
   // them in a dialog and these handlers run with the values. They were
   // `type: 'modal'` until #3959 — a modal action has no server dispatch, so
   // the targets named modal pages that did not exist and neither handler had

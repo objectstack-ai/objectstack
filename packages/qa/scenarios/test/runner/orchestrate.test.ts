@@ -437,6 +437,28 @@ class RefusingApp extends FakeApp {
   }
 }
 
+class ThrowingApp extends RefusingApp {
+  constructor(private readonly throwAt: string) {
+    super(new Set(['democrm_account/ac2']));
+  }
+  override async insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer> {
+    if (`${object}/${String(row.id)}` === this.throwAt) throw new Error('connection reset while seeding');
+    return super.insertRow(object, row);
+  }
+}
+
+describe('runCard — a seed insert that throws keeps the partial tally in the record', () => {
+  it('ac1 and ac3 inserted, ac2 refused, then ct1 throws: the half records exactly that next to its error', async () => {
+    const { scenario, ops, driver } = setup({ app: () => new ThrowingApp('democrm_contact/ct1') });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    const half = run.modes[0]!.run!;
+    expect(half.error).toContain('connection reset while seeding');
+    expect(half.seed).toEqual({ inserted: 2, refused: [{ object: 'democrm_account', id: 'ac2', code: 'VALIDATION_FAILED', message: 'democrm_account ac2 refused' }], handlesAsAdmin: ['u_tia'] });
+    expect(half.questions).toEqual([]);
+    expect(cardScorecard(run).modes[0]!.first.seed).toEqual({ inserted: 2, total: 3, refused: 1 }); // total counts the rows the tally reached
+  });
+});
+
 describe('runCard — a refused seed row makes what reads it not measured, never a fail', () => {
   it('shows ⚠ seed: 1 refused, leaves the questions on that object unasked and unscored, and grades the rest as usual', async () => {
     const { scenario, ops, driver } = setup({ app: () => new RefusingApp(new Set(['democrm_contact/ct4'])) });

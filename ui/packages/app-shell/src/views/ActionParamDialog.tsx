@@ -55,6 +55,16 @@
  * every entry is marked, the refusal box is not drawn, since it would only
  * repeat the marks in English; any entry the dialog cannot mark (another
  * code, a param it does not draw) keeps the box, with the server's text.
+ *
+ * ## A host-composed companion above the params (objectstack#30205)
+ *
+ * `ParamDialogState.companion` draws a panel at the top of the scrolling
+ * region. The host picks it from the platform action being run
+ * (`resolveParamDialogCompanion` in `actionDialogCompanion.ts`); no authored
+ * key selects it. Today the one companion is the ban dialog's account of the
+ * user's open work and its optional hand-over (`UserAssignedWorkPanel`). The
+ * companion never gates Confirm: Confirm runs the action whatever the panel
+ * is doing.
  */
 
 import { Suspense, useState, useEffect, useMemo } from 'react';
@@ -96,6 +106,8 @@ import { getLazyFieldWidget, fileIdOf, buildValidationRules, resolveParamWidgetT
 import { useInitialFieldFocus } from '@object-ui/plugin-form';
 import { paramToField, paramDegradesWithoutTarget } from '../utils/paramToField.js';
 import { useActionDialogReturnFocus } from './actionDialogReturnFocus.js';
+import type { ParamDialogCompanion } from './actionDialogCompanion.js';
+import { UserAssignedWorkPanel } from './UserAssignedWorkPanel.js';
 
 export interface ParamDialogState {
   open: boolean;
@@ -138,6 +150,13 @@ export interface ParamDialogState {
    * values on failure. Absent, Confirm resolves and closes at once.
    */
   run?: Parameters<ParamCollectionHandler>[3];
+  /**
+   * A host-composed panel drawn above the params — decided by the host from
+   * the platform action being run (`resolveParamDialogCompanion`), never read
+   * from authored metadata. It informs and offers an optional step of its
+   * own; Confirm stays the action and never waits on it (objectstack#30205).
+   */
+  companion?: ParamDialogCompanion;
 }
 
 /**
@@ -699,6 +718,11 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
           className={cn('-mx-6 grid min-h-0 flex-1 gap-4 overflow-y-auto px-6 py-4', isLongList && 'sm:grid-cols-2')}
           data-testid="action-param-body"
         >
+          {state.companion?.kind === 'user-assigned-work' && (
+            // Keyed by the user: another user is another subject, never a
+            // stale count carried over.
+            <UserAssignedWorkPanel key={state.companion.userId} userId={state.companion.userId} />
+          )}
           {visibleParams.map((rawParam) => {
             const param = {
               ...rawParam,

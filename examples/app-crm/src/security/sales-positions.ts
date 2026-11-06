@@ -10,14 +10,14 @@ import { definePermissionSet } from '@objectstack/spec/security';
  * authorization resolver reads.
  */
 export const SalesRepPosition = definePosition({
-  name: 'sales_rep',
+  name: 'crm_sales_rep',
   label: 'Sales Representative',
   description: 'Front-line sales representative.',
   permissionSets: ['crm_sales_user'],
 });
 
 export const SalesManagerPosition = definePosition({
-  name: 'sales_manager',
+  name: 'crm_sales_manager',
   label: 'Sales Manager',
   description: 'Manages a team of sales reps.',
   permissionSets: ['crm_sales_user'],
@@ -25,12 +25,12 @@ export const SalesManagerPosition = definePosition({
 
 /**
  * Registered in `objectstack.config.ts` (`positions`) and distributing the
- * `crm_sales_user` permission set, alongside `sales_rep` and `sales_manager`.
+ * `crm_sales_user` permission set, alongside `crm_sales_rep` and `crm_sales_manager`.
  * This app models no approval flow; the worked approval flows live in
  * `examples/app-showcase/src/automation/flows/`.
  */
 export const FinanceApproverPosition = definePosition({
-  name: 'finance_approver',
+  name: 'crm_finance_approver',
   label: 'Finance Approver',
   description: 'Finance team member authorised to approve discounts above 30%.',
   permissionSets: ['crm_sales_user'],

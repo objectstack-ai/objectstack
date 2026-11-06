@@ -16,9 +16,9 @@ describe('CRM position bindings', () => {
       .flatMap((p) => (p.permissionSets ?? []).map((s) => `${p.name} -> ${s}`))
       .sort();
     expect(declared).toEqual([
-      'finance_approver -> crm_sales_user',
-      'sales_manager -> crm_sales_user',
-      'sales_rep -> crm_sales_user',
+      'crm_finance_approver -> crm_sales_user',
+      'crm_sales_manager -> crm_sales_user',
+      'crm_sales_rep -> crm_sales_user',
     ]);
   });
 });

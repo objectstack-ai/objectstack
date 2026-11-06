@@ -16,6 +16,7 @@ export const zhCN: TranslationData = {
         grp_account_inbox: { label: '收件箱' },
         grp_account_security: { label: '安全' },
         grp_account_developer: { label: '开发者' },
+        grp_account_ai_assistant: { label: 'AI 助手' },
         nav_account_profile: { label: '个人资料' },
         nav_account_notifications: { label: '通知' },
         nav_account_approvals: { label: '待我审批' },
@@ -25,9 +26,9 @@ export const zhCN: TranslationData = {
         nav_account_api_keys: { label: 'API 密钥' },
         nav_account_oauth_apps: { label: 'OAuth 应用' },
         // Contributed at runtime by `@objectstack/mcp` into
-        // `grp_account_developer`; the Setup twin's key does not answer for the
+        // `grp_account_ai_assistant`; the Setup twin's key does not answer for the
         // Account app (one `apps.<app>.navigation` namespace per app).
-        nav_connect_agent: { label: '连接智能体' },
+        nav_connect_agent: { label: '连接 AI 助手' },
       },
     },
     setup: {
@@ -49,6 +50,7 @@ export const zhCN: TranslationData = {
         group_advanced: { label: '高级' },
 
         nav_system_overview: { label: '系统概览' },
+        nav_connect_agent: { label: '连接 AI 助手' },
 
         nav_users: { label: '用户' },
         nav_organization: { label: '当前组织' },
@@ -70,7 +72,6 @@ export const zhCN: TranslationData = {
         // `sys_sso_provider.pluralLabel`.
         nav_sso_providers: { label: 'SSO 提供方' },
         nav_api_keys: { label: 'API 密钥' },
-        nav_connect_agent: { label: '连接智能体' },
 
         // 审批中心 = the Approvals Inbox component (#7234) — the surface with
         // decision actions. The three below are the engine's raw tables.
@@ -193,7 +194,7 @@ export const zhCN: TranslationData = {
       subtitle: '将此运行时连接到 ObjectStack 控制平面，即可浏览并安装组织的私有包。',
     },
     connect_agent: {
-      label: '连接智能体',
+      label: '连接 AI 助手',
       subtitle: '让任意支持 MCP 的 AI 客户端受控访问本系统——每次调用都在调用者自身的权限与行级安全范围内执行。',
     },
 
