@@ -297,8 +297,8 @@ model: opus
 - 发布面动了要 changeset;`skip-changeset` 判据是没动:已发布 = 各包 `files[]` 实际发运内容。
 - 快速通道:`docs/adr/**` · `.claude/**` · `scripts/pm/**` · 仓根配置 · 私有包 · 注释,不发布。
 - 其余实测:构建后 grep `files[]` 所列路径找符号,带正控;符号零命中、正控命中 ⇒ 不发布。
-- PR 改到已有的 `.changeset/*.md`:⛔ 永不打 `skip-changeset`,门禁红着是对的;正文申报 DELIBERATE CORRECTION。
-- 申报点名每个被改 note 并引改后句;⛔ 不请维护者确认,确认件是派发席的记录(`landing-operations.md`)。
+- 改已有 `.changeset/*.md`:⛔ 永不打 `skip-changeset`,红着是对的;正文申报 DELIBERATE CORRECTION。
+- 逐 note 点名并引改后句;⛔ 不请维护者确认,确认件是派发席记录(`landing-operations.md`)。
 - objectstack:`skip-changeset` 以 `pr_create` 的 `labels` 同笔申报;后发现的标签才走 `label-write.mjs`。
 - 范围 = 派发词点名的标签 + 上文判据下的 `skip-changeset`;禁写或交集为空 ⇒ 零写并报告。
 - 该腿的回读是中继回报的行:答案须列出每个送出的标签,缺者该笔 FAILED、不发后续动作。
