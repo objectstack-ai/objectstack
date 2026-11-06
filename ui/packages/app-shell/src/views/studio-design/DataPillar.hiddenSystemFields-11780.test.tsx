@@ -31,8 +31,9 @@
  *   it was, by the name list the marks do not replace.
  *
  * Every case runs twice: once on an object with no pending draft (the pillar
- * edits `layered().effective`) and once on one with a served draft (the pillar
- * edits the draft body as served, objectui#10765).
+ * edits the layered read's `overlay ?? code`) and once on one with a pending
+ * draft (the pillar edits the stored draft, the layered read's `draft`, as-is:
+ * objectui#10765, objectstack#29793).
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -113,7 +114,13 @@ let servedDraft: unknown = null;
 const mockClient = {
   list: vi.fn(async () => [{ name: 'showcase_account', label: 'Account' }]),
   listDrafts: vi.fn(async () => []),
-  layered: vi.fn(async () => ({ effective: servedObject, code: servedObject })),
+  // objectstack#29793 — the stored draft is served as the `draft` layer too:
+  // the pillar's buffer is that layer, the served draft only says one is pending.
+  layered: vi.fn(async () => ({
+    effective: servedObject,
+    code: servedObject,
+    draft: (servedDraft as { item?: unknown } | null)?.item ?? null,
+  })),
   getDraft: vi.fn(async () => servedDraft),
   save: vi.fn<(type: string, name: string, body: Record<string, unknown>, opts?: unknown) => Promise<unknown>>(
     async () => ({ ok: true }),
