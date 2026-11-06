@@ -218,7 +218,7 @@ Writes fail loudly rather than silently degrading:
 
 | Condition | Thrown | Code |
 | :--- | :--- | :--- |
-| An `OS_*` override is in force for the key | `SettingsLockedError` | `SETTINGS_LOCKED` |
+| An `OS_*` override is in force for the key, and the write is not a clear | `SettingsLockedError` | `SETTINGS_LOCKED` |
 | A row at an upper scope has `locked=true`, or a row at the write's own scope has it and the caller is not the platform | `SettingsLockedError` | `SETTINGS_LOCKED` (`locked-by-<scope>`) |
 | Key not declared by the manifest | `UnknownKeyError` | `SETTINGS_UNKNOWN_KEY` |
 | Namespace has no manifest | `UnknownNamespaceError` | `SETTINGS_UNKNOWN_NAMESPACE` |
