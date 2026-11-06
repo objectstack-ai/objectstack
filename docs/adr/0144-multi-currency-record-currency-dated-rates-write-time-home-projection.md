@@ -538,7 +538,7 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
     (`packages/cli/src/commands/migrate/record-currency-codes.ts#MigrateRecordCurrencyCodes`);
     `os migrate recompute-home-amounts --org <id>` takes the same shape and is never refused without it (ruling
     item 3; `packages/objectql/src/home-amount-recompute.ts#recomputeHomeAmounts`). No organization's
-    `localization.currency` is read, in the refusal or anywhere in the run (D8 rule 4). B is a tenant-admin door,
+    `localization.currency` is read by the backfill, in its refusal or anywhere in its run (D8 rule 4). B is a tenant-admin door,
     card #30675: a REST twin of the command shaped on `POST /meta/_migrate-stored`, calling the same engine function,
     always scoped to the caller's organization, preview unless `apply: true`, behind the maintenance-door switch. Not
     chosen: A alone, since a cloud-managed tenant still reads a remedy it cannot run; B alone, since a self-hosted
