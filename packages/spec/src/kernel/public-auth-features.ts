@@ -30,6 +30,10 @@ import type { z } from 'zod';
  * - `ui/action.zod.ts` — `requiresFeature` sugar on actions/params is lowered
  *   at parse time (see {@link lowerRequiresFeature}) into the canonical
  *   `visible` CEL predicate using {@link featureGatePredicate}.
+ * - `data/object.zod.ts` — the same sugar on an object's field group
+ *   (`fieldGroups[].requiresFeature`) is lowered the same way into the
+ *   group's `visibleWhen`, the section predicate the form and the record
+ *   page both evaluate with the host's `features` root in scope.
  * - plugin-auth drift guard (key-set equivalence with `getPublicConfig()`).
  * - platform-objects completeness guard (`feature-gate-guard.test.ts`) —
  *   every path in `gatedInputs` must resolve to an input whose `visible`
@@ -386,6 +390,12 @@ export function featureGatePredicate(name: PublicAuthFeatureName): string {
   return `features.${name} ${FEATURE_GATE_OPERATORS[PUBLIC_AUTH_FEATURES[name].semantics]}`;
 }
 
+/**
+ * The predicate slots {@link lowerRequiresFeature} lowers into: an action's or
+ * param's `visible`, and an object field group's `visibleWhen`.
+ */
+export type RequiresFeatureSlot = 'visible' | 'visibleWhen';
+
 /** Object shape the lowering transform operates on (post field-level parse). */
 type WithRequiresFeature = {
   requiresFeature?: PublicAuthFeatureName;
@@ -399,7 +409,9 @@ type WithRequiresFeature = {
 
 /**
  * Lower the declarative `requiresFeature: '<flag>'` sugar into the canonical
- * `visible` CEL predicate and strip the sugar key from the output — the same
+ * `visible` CEL predicate (or, on a field group, `visibleWhen` — the `slot`
+ * argument; every rule below reads the same with that slot's name) and strip
+ * the sugar key from the output — the same
  * schema-boundary fold onto one canonical key that ADR-0089 ran for
  * `visibleOn` / `visibility` → `visibleWhen` through 17: persisted artifacts,
  * lint, runtime, and objectui only ever see the canonical envelope.
@@ -435,29 +447,36 @@ type WithRequiresFeature = {
 export function lowerRequiresFeature<T extends WithRequiresFeature>(
   input: T,
   ctx: z.core.$RefinementCtx,
+  /**
+   * The predicate slot the gate lowers into. `visible` on actions and params;
+   * `visibleWhen` on an object's field group, whose section predicate slot is
+   * spelled that way (ADR-0089) — same gate, same composition, same refusals,
+   * each worded with the slot the author actually wrote.
+   */
+  slot: RequiresFeatureSlot = 'visible',
 ): Omit<T, 'requiresFeature'> {
   const { requiresFeature, ...rest } = input;
   if (requiresFeature === undefined) return rest as Omit<T, 'requiresFeature'>;
 
   const gate = featureGatePredicate(requiresFeature);
   // Annotated rather than inferred: `rest` is a generic `Omit<T, …>`, so
-  // `rest.visible` is a deferred indexed access that control flow cannot narrow
+  // `rest[slot]` is a deferred indexed access that control flow cannot narrow
   // — the `=== true` / `=== false` guards below would not strip the boolean arm
   // off it, and the envelope spread at the end would not compile.
-  const existing: WithRequiresFeature['visible'] = rest.visible;
+  const existing: WithRequiresFeature['visible'] = (rest as WithRequiresFeature & { visibleWhen?: WithRequiresFeature['visible'] })[slot];
   // `true` is the explicit spelling of "no gate of my own" — same lowering as an
   // absent key. `false` can never be gated into visibility, so it is refused.
   if (existing === undefined || existing === true) {
-    return { ...rest, visible: { dialect: 'cel', source: gate } } as Omit<T, 'requiresFeature'>;
+    return { ...rest, [slot]: { dialect: 'cel', source: gate } } as Omit<T, 'requiresFeature'>;
   }
   if (existing === false) {
     ctx.addIssue({
       code: 'custom',
       path: ['requiresFeature'],
       message:
-        '`requiresFeature` cannot compose with `visible: false` — the literal already hides this ' +
+        `\`requiresFeature\` cannot compose with \`${slot}: false\` — the literal already hides this ` +
         'unconditionally, so the feature gate can never take effect. Drop `requiresFeature` to keep it ' +
-        'hidden, or drop `visible: false` to let the flag decide.',
+        `hidden, or drop \`${slot}: false\` to let the flag decide.`,
     });
     return rest as Omit<T, 'requiresFeature'>;
   }
@@ -466,7 +485,7 @@ export function lowerRequiresFeature<T extends WithRequiresFeature>(
       code: 'custom',
       path: ['requiresFeature'],
       message:
-        '`requiresFeature` composes only with a CEL `visible` carrying a `source` string; ' +
+        `\`requiresFeature\` composes only with a CEL \`${slot}\` carrying a \`source\` string; ` +
         'this expression is AST-only or non-CEL — write the combined predicate by hand.',
     });
     return rest as Omit<T, 'requiresFeature'>;
@@ -484,19 +503,19 @@ export function lowerRequiresFeature<T extends WithRequiresFeature>(
       // pre-existing strings flagged with the interpolation in). The concrete
       // gate is one `featureGatePredicate` call away for anyone who wants it.
       message:
-        '`requiresFeature` composes only with a CEL `visible` carrying a NON-BLANK `source`; this '
+        `\`requiresFeature\` composes only with a CEL \`${slot}\` carrying a NON-BLANK \`source\`; this `
         + '`source` is blank after trimming, so composing the feature gate onto it would parenthesise '
         + 'nothing — the predicate would read `( ) && ` followed by the gate — which no CEL parse '
         + 'accepts on any scope. The gate would fault at evaluation instead of gating: the element is '
         + 'shown regardless of the flag where the consuming surface is fail-soft and hidden regardless '
         + 'of it where it is fail-closed, so the flag decides nothing — the inert arrival ADR-0078 '
-        + 'rejects. Drop the blank `visible` and `requiresFeature` emits the gate alone, or put the '
+        + `rejects. Drop the blank \`${slot}\` and \`requiresFeature\` emits the gate alone, or put the `
         + 'predicate the gate should compose with in `source`.',
     });
     return rest as Omit<T, 'requiresFeature'>;
   }
   return {
     ...rest,
-    visible: { ...existing, source: `(${existing.source}) && ${gate}` },
+    [slot]: { ...existing, source: `(${existing.source}) && ${gate}` },
   } as Omit<T, 'requiresFeature'>;
 }

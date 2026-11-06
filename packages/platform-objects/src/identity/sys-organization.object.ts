@@ -332,6 +332,22 @@ export const SysOrganization = ObjectSchema.create({
     using: 'id == current_user.organization_id',
   },
 
+  // Declared in the fields' own order, so every field keeps its place. The
+  // System trio (`id`, `created_at`, `updated_at`) stays in no declared group
+  // and renders last, as before. `group_structure` carries the ADR-0105 D6
+  // reporting fields, which order and group organizations against each other
+  // and so do nothing on a deployment that runs one organization: the group is
+  // gated on `multiOrgEnabled` (lowered at parse into its `visibleWhen`), and
+  // the form and the record page both hide it where the flag is off (ruling
+  // 6670372892 on #30210, row 4 A). Presentation only — the fields stay
+  // readable and writable through the API, and their help still says so.
+  fieldGroups: [
+    { key: 'identity', label: 'Identity' },
+    { key: 'branding', label: 'Branding' },
+    { key: 'configuration', label: 'Configuration' },
+    { key: 'group_structure', label: 'Group Structure', requiresFeature: 'multiOrgEnabled' },
+  ],
+
   fields: {
     // ── Identity ─────────────────────────────────────────────────
     // ADR-0092 D4 — with the generic edit affordance open (#15873), every
@@ -360,7 +376,7 @@ export const SysOrganization = ObjectSchema.create({
       description:
         'The organization\'s own name. Change it with Rename Organization at the top of this record. ' +
         'The product name the console shows is a different setting, set in Settings → Branding.',
-      group: 'Identity',
+      group: 'identity',
     }),
 
     slug: Field.text({
@@ -370,7 +386,7 @@ export const SysOrganization = ObjectSchema.create({
       searchable: true,
       maxLength: 255,
       description: 'URL-friendly identifier',
-      group: 'Identity',
+      group: 'identity',
     }),
 
     // ── Branding ─────────────────────────────────────────────────
@@ -378,7 +394,7 @@ export const SysOrganization = ObjectSchema.create({
       label: 'Logo',
       required: false,
       readonly: true,
-      group: 'Branding',
+      group: 'branding',
     }),
 
     // ── Configuration ────────────────────────────────────────────
@@ -389,7 +405,7 @@ export const SysOrganization = ObjectSchema.create({
       required: false,
       readonly: true,
       description: 'JSON-serialized organization metadata',
-      group: 'Configuration',
+      group: 'configuration',
     }),
 
     // ADR-0069 D3 — per-org MFA tightening above the global floor. When true,
@@ -402,7 +418,7 @@ export const SysOrganization = ObjectSchema.create({
       label: 'Require Multi-Factor Auth',
       required: false,
       defaultValue: false,
-      group: 'Configuration',
+      group: 'configuration',
       description:
         'Turn on to require every member of this organization to set up an authenticator app before they can access data. ' +
         'Needs two-factor authentication on for this deployment (OS_AUTH_TWO_FACTOR=true); while it is off, ' +
@@ -458,7 +474,7 @@ export const SysOrganization = ObjectSchema.create({
       valueDomain: 'iana_time_zone',
       description:
         'IANA time zone (e.g. UTC, Asia/Shanghai), kept as the root default for business units without a zone of their own. It does not change any date calculation today: formulas, reports and displayed dates use Settings → Localization → Default timezone.',
-      group: 'Configuration',
+      group: 'configuration',
     }),
 
     // ── Group structure (ADR-0105 D6) ────────────────────────────
@@ -484,7 +500,7 @@ export const SysOrganization = ObjectSchema.create({
     parent_organization_id: Field.lookup('sys_organization', {
       label: 'Parent Organization',
       required: false,
-      group: 'Group Structure',
+      group: 'group_structure',
       description:
         'Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference. Meaningful only where the deployment runs several organizations.',
     }),
@@ -492,7 +508,7 @@ export const SysOrganization = ObjectSchema.create({
     sort_order: Field.number({
       label: 'Sort Order',
       required: false,
-      group: 'Group Structure',
+      group: 'group_structure',
       description:
         'Display order among sibling organizations. Presentation only. Meaningful only where the deployment runs several organizations.',
     }),
