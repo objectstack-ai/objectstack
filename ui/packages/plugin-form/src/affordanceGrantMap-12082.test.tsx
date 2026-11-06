@@ -578,7 +578,8 @@ describe('the census: every affordance reads the map (objectui#12082)', () => {
 // own routes and are rows above), and an affordance that only LEADS to a write
 // — a button that opens a form. The form's submit is a site here, behind the
 // form rows; the opener itself is pinned by its own runtime test
-// (`ObjectView.createGrant-12082.test.tsx` in `@object-ui/plugin-view`).
+// (the `ObjectView.createGrant-12082` block of `ObjectView.harness.test.tsx`
+// in `@object-ui/plugin-view`).
 //
 // One site key can also hide several doors: a component that issues a write
 // its HOST gates (the import wizard, mounted by the console list and by the AI
