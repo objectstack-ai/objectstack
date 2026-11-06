@@ -108,7 +108,7 @@ import { callerMayReadSysFile, readParentDerivedFiles, resolveFileReferences, se
 // [#29460] A `referenceNameVisible` reference's refused targets served by name
 // and id on the expanded read; the method of the same name below hands the body
 // the members it reads (`ReferenceNameVisibleHost`).
-import { serveReferenceNames } from './engine-reference-name-visible.js';
+import { formulaReadsReference, serveReferenceNames } from './engine-reference-name-visible.js';
 // [#25522 cut 12] The driver options every driver call receives, and the tenancy
 // posture and Layer 0 verdict they are scoped by; the methods of the same names
 // below hand each body the members it reads (`DriverOptionsHost`).
@@ -357,7 +357,7 @@ import {
   WRITE_PRECONDITION_OPTION, applyFormulaPlan, applyStoredExpressionsToPatch, assertDispatchableHookEvent,
   assertOrderByIsMaterializable, assertProjectionHasNoDottedPaths, assertValidHookExcludeObjects,
   autonumberFieldNames, callerKeySets, callerSuppliedRow, computeStoredExpressions, declaredDatetimeLowering,
-  droppedFieldEvents, foldEngineOptionAliases, formulaPlanEntry, handBackWithheldInsertReadonly, hydrateWriteFormulas,
+  droppedFieldEvents, foldEngineOptionAliases, handBackWithheldInsertReadonly, hydrateWriteFormulas,
   insertStaticReadonlySubject, lowerWhereFilterArray, masterIdOf, mergeReadContext,
   organizationPredicateDeleteRefusal, planFormulaProjection, planStoredExpressions, recomputeAutonumberReaders,
   rejectUnknownEngineOptions, replacedStoredExpressionFields, rowsWithoutFormulaWidening, settleBulkStoredExpressions,
@@ -4127,15 +4127,7 @@ export class ObjectQL implements IObjectQLEngine {
       get logger() { return readLogger(); },
       find: (...a) => this.find(...a),
       resolveReadableIdsSecurity: (...a) => this.resolveReadableIdsSecurity(...a),
-      formulaReadsReference: (name, def, fields) => {
-        try {
-          const entry = formulaPlanEntry(name, def, fields);
-          return entry.hops !== undefined || entry.hopConflict !== undefined;
-        } catch {
-          // An expression the planner cannot compile is not served by name.
-          return true;
-        }
-      },
+      formulaReadsReference,
     };
     return serveReferenceNames.call(host, objectName, records, fieldName, referenceObject, execCtx);
   }

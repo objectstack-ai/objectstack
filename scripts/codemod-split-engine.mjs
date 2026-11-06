@@ -4080,6 +4080,381 @@ async function mainMembers(tm, argv) {
   return 0;
 }
 
+// ── The fifth pass: a hand stub's computing host slot (#30020 H2) ───────────
+//
+// A hand-series stub (#25467) builds its host as an object literal of
+// one-line forwarders and makes one `.call(host, …)`; the facade gate reads
+// that as a delegation. A slot that COMPUTES instead (a block-bodied arrow: a
+// `try`, a branch) makes the whole stub a body, so the method stays an
+// exception row. `--hand-slots <stubs>` moves every such slot of the named
+// stubs into the stub's own hand module, the one its marker names: the arrow,
+// exactly as it stood, one indentation level out (the slot's own line indent,
+// put back by the undo), becomes an exported `const` of the slot's name typed
+// AS the host interface's member (`ReferenceNameVisibleHost['x']`), so its
+// parameters keep the contextual types the literal gave them; the slot names
+// it (`x,`), and `engine.ts` imports it beside the function it already imports
+// from that module. What the arrow may read is closed: its own parameters and
+// locals, and module-scope names `engine.ts` imports, each imported in the
+// hand module from the same specifier by a statement of its own. A `this`, a
+// local of the stub, a name `engine.ts` declares, a template or string that
+// spans lines, or a line not indented as far as the slot refuses (exit 2).
+//
+// The proof (`--hand-slots --verify --base REF` re-runs it) undoes every slot
+// the head carries moved (a shorthand slot whose hand module exports a const
+// of that name under this pass's docblock): the const back into its slot,
+// re-indented; its docblock, its import statements and the binding in
+// `engine.ts`'s import out. The result must be the base `engine.ts` (the
+// base's import bindings only moved slots read pruned from it) and every hand
+// module byte for byte.
+
+const HAND_SLOTS_CARD = '#30020';
+
+/** The docblock over a moved slot's const in its hand module. */
+const handSlotDoc = (slot, stub, fn) => ['/**', ...wrapComment((
+  `[${HAND_SLOTS_CARD} codemod] The \`${slot}\` slot of the host \`${CLASS_NAME}#${stub}\` hands {@link ${fn}}: ` +
+  `moved here whole by \`--hand-slots\` of \`${SCRIPT}\`, and the slot names it.`).split(' ')), ' */'].join('\n');
+
+/**
+ * A hand stub of `engine.ts`, parsed: its host literal, the function it
+ * calls and the module that declares it; null when the method is not a hand
+ * stub of that shape (const forwarders, ONE host literal, `return fn.call(host, …)`).
+ */
+function handSlotStubOf(tm, cls, text, name) {
+  const { Node } = tm;
+  const found = cls.getMethods().filter((m) => m.getName() === name);
+  if (found.length !== 1) return { why: `${CLASS_NAME} declares ${found.length === 0 ? 'no method' : 'more than one method'} ${name}` };
+  const m = found[0];
+  const body = m.getBody();
+  if (!body) return { why: `${name} has no body` };
+  const line1Start = text.indexOf('\n', body.getStart()) + 1;
+  const hit = HAND_STUB_MARK.exec(text.slice(line1Start, text.indexOf('\n', line1Start)));
+  if (!hit) return { why: `${name} is not a hand-series stub (its body does not open with the hand series' marker)` };
+  const stmts = body.getStatements();
+  const last = stmts.at(-1);
+  const call = last && Node.isReturnStatement(last) ? last.getExpression() : null;
+  const callee = call && Node.isCallExpression(call) ? call.getExpression() : null;
+  if (!callee || !Node.isPropertyAccessExpression(callee) || callee.getName() !== 'call' || !Node.isIdentifier(callee.getExpression())) {
+    return { why: `${name}: the stub does not end in \`return fn.call(host, …)\`` };
+  }
+  const fn = callee.getExpression().getText();
+  const hosts = [];
+  for (const st of stmts.slice(0, -1)) {
+    if (!Node.isVariableStatement(st)) return { why: `${name}: a statement before the call is not a const` };
+    for (const d of st.getDeclarations()) if (Node.isObjectLiteralExpression(d.getInitializer())) hosts.push(d.getInitializer());
+  }
+  if (hosts.length !== 1) return { why: `${name}: the stub builds ${hosts.length} host literals, not one` };
+  return { m, module: hit[1], fn, literal: hosts[0] };
+}
+
+/** The `this` parameter's type name of an exported function in a hand module, or null. */
+function handHostTypeOf(tm, file, text, fn) {
+  const f = parse(tm, join(SRC_DIR, file), text).getFunction(fn);
+  const p = f && f.isExported() ? f.getParameters()[0] : null;
+  const t = p && p.getName() === 'this' ? p.getTypeNode() : null;
+  return t && /^[A-Za-z_$][\w$]*$/.test(t.getText()) ? t.getText() : null;
+}
+
+/** An arrow's text one indentation level out (`indent`), or null when a later line is not that far in. */
+function deindentBy(text, indent) {
+  const lines = text.split('\n');
+  const out = [lines[0]];
+  for (const line of lines.slice(1)) {
+    if (line === '') out.push(line);
+    else if (line.startsWith(indent) && line.trim() !== '') out.push(line.slice(indent.length));
+    else return null;
+  }
+  return out.join('\n');
+}
+const reindentBy = (text, indent) => text.split('\n').map((line, i) => (i === 0 || line === '' ? line : `${indent}${line}`)).join('\n');
+
+/** engine.ts's one-line, sorted value import of a hand module, parsed: `{ start, end, names }`, or null. */
+function handImportOf(text, file) {
+  const specifier = `./${file.replace(/\.ts$/, '.js')}`;
+  const re = new RegExp(`^import \\{ ([A-Za-z_$][\\w$]*(?:, [A-Za-z_$][\\w$]*)*) \\} from '${specifier.replace(/[.]/g, '\\.')}';$`, 'gm');
+  const hits = [...text.matchAll(re)];
+  if (hits.length !== 1) return null;
+  const names = hits[0][1].split(', ');
+  if (names.join() !== [...names].sort().join()) return null;
+  return { start: hits[0].index, end: hits[0].index + hits[0][0].length, names, specifier };
+}
+const handImportText = (names, specifier) => `import { ${[...names].sort().join(', ')} } from '${specifier}';`;
+
+/**
+ * Decide the moves `names` asks for. Refuses (exit 2) on a name that is not a
+ * hand stub, a stub with no computing slot, and every shape the section above
+ * closes out. Pure.
+ */
+function planHandSlots(tm, text, moduleTexts, names) {
+  const { Node, SyntaxKind } = tm;
+  if (!names || names.length === 0) refuse('--hand-slots needs a comma-separated list of hand-series stub names');
+  if (new Set(names).size !== names.length) refuse(`--hand-slots names a stub twice: ${names.join(', ')}`);
+  const sf = parse(tm, HOST_PATH, text);
+  const cls = sf.getClass(CLASS_NAME);
+  if (!cls) refuse(`no class ${CLASS_NAME} in ${HOST_BASENAME}`);
+  const scope = moduleScope(tm, sf);
+  const checker = sf.getProject().getTypeChecker().compilerObject;
+  const ts = tm.ts;
+  const records = [];
+  for (const name of names) {
+    const stub = handSlotStubOf(tm, cls, text, name);
+    if (stub.why) refuse(stub.why);
+    const mod = moduleTexts.get(stub.module);
+    if (mod == null) refuse(`${stub.module}: the hand module ${name}'s marker names is not on disk`);
+    const hostType = handHostTypeOf(tm, stub.module, mod, stub.fn);
+    if (!hostType) refuse(`${stub.module}: exports no function ${stub.fn} whose \`this\` names its host interface`);
+    if (!handImportOf(text, stub.module)) refuse(`${HOST_BASENAME}: its import of ${stub.module} is not one sorted line of values`);
+    const slots = [];
+    for (const p of stub.literal.getProperties()) {
+      if (!Node.isPropertyAssignment(p)) continue;
+      const init = p.getInitializer();
+      if (!Node.isArrowFunction(init) || !Node.isBlock(init.getBody())) continue;
+      const slot = p.getName();
+      if (!Node.isIdentifier(p.getNameNode())) refuse(`${name}: a computing slot has a computed or quoted name`);
+      const why = (msg) => refuse(`${name}: its \`${slot}\` slot ${msg}`);
+      const lineStart = lineStartOf(text, p.getStart());
+      const indent = text.slice(lineStart, p.getStart());
+      if (!/^ +$/.test(indent)) why('does not open its own line');
+      const arrowText = text.slice(init.getStart(), init.getEnd());
+      const moved = deindentBy(arrowText, indent);
+      if (moved === null) why('has a line not indented as far as the slot, or a blank line holding spaces');
+      if (init.getDescendants().some((n) => (Node.isTemplateExpression(n) || Node.isNoSubstitutionTemplateLiteral(n) || Node.isStringLiteral(n)) &&
+        n.getStartLineNumber() !== n.getEndLineNumber())) why('holds a template or string spanning lines, which a re-indent would edit');
+      if (scope.bindings.has(slot)) why(`is named ${slot}, which ${HOST_BASENAME} already binds`);
+      if (moduleScope(tm, parse(tm, join(SRC_DIR, stub.module), mod)).bindings.has(slot)) why(`is named ${slot}, which ${stub.module} already binds at module scope`);
+      const imports = new Map(); // local -> { specifier, form, imported, value }
+      for (const node of init.getDescendants()) {
+        if (node.getKind() === SyntaxKind.ThisKeyword) why('reads `this`');
+        if (node.getKind() !== SyntaxKind.Identifier || isPropertyNameIdentifier(ts, node.compilerNode)) continue;
+        const parent = node.getParent();
+        const symbol = Node.isShorthandPropertyAssignment(parent) && parent.getNameNode() === node
+          ? checker.getShorthandAssignmentValueSymbol(parent.compilerNode) : checker.getSymbolAtLocation(node.compilerNode);
+        for (const decl of symbol?.declarations ?? []) {
+          if (decl.getSourceFile() !== sf.compilerNode) continue;
+          if (decl.pos >= init.compilerNode.pos && decl.end <= init.compilerNode.end) continue;
+          if (ts.isImportSpecifier(decl) || ts.isImportClause(decl) || ts.isNamespaceImport(decl)) {
+            const b = scope.bindings.get(node.getText());
+            const value = !inTypePosition(tm, node, init);
+            const prev = imports.get(node.getText());
+            imports.set(node.getText(), { specifier: b.specifier, form: b.form, imported: b.imported, value: Boolean(prev && prev.value) || (value && !b.typeOnly) });
+            continue;
+          }
+          why(`reads ${node.getText()}, which ${isModuleScopeDecl(ts, decl) ? `${HOST_BASENAME} declares` : 'the stub declares'}`);
+        }
+      }
+      slots.push({ slot, prop: p, init, indent, moved, imports });
+    }
+    if (slots.length === 0) refuse(`${name}: its host literal holds no computing slot (a block-bodied arrow)`);
+    records.push({ name, ...stub, hostType, slots });
+  }
+  return { records };
+}
+
+/** The import statements a hand module gains for a slot's reads: one per specifier it does not import yet. */
+function handSlotImportLines(file, mod, imports, decls) {
+  const bySpecifier = new Map();
+  for (const [local, b] of imports) {
+    const have = decls.find((d) => d.bindings.has(local));
+    if (have) {
+      const e = have.bindings.get(local);
+      if (have.specifier !== b.specifier || e.form !== b.form || e.imported !== b.imported || (b.value && !e.value)) {
+        refuse(`${file}: binds ${local} otherwise than ${HOST_BASENAME} does`);
+      }
+      continue;
+    }
+    if (decls.some((d) => d.specifier === b.specifier)) refuse(`${file}: already imports from ${b.specifier}, and this pass adds whole statements only`);
+    if (!bySpecifier.has(b.specifier)) bySpecifier.set(b.specifier, new Map());
+    bySpecifier.get(b.specifier).set(local, b);
+  }
+  const lines = [];
+  for (const [specifier, bindings] of [...bySpecifier].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    const out = specifierLines(specifier, bindings);
+    if (!out) refuse(`${file}: ${specifier} would be imported in a form this pass does not write`);
+    lines.push(...out);
+  }
+  return lines;
+}
+
+/** Apply a `planHandSlots` plan. Returns `{ host, modules, pruned }`. Pure. */
+function generateHandSlots(tm, text, moduleTexts, planned) {
+  const edits = [];
+  const byModule = new Map();
+  for (const r of planned.records) byModule.set(r.module, [...(byModule.get(r.module) ?? []), r]);
+  const modules = new Map();
+  for (const [file, rs] of [...byModule].sort(([a], [b]) => (a < b ? -1 : 1))) {
+    const mod = moduleTexts.get(file);
+    const decls = importDeclsOf(tm, file, mod);
+    if (decls.length === 0) refuse(`${file}: imports nothing, so there is no import block to add to`);
+    const imports = new Map();
+    for (const r of rs) for (const s of r.slots) for (const [k, v] of s.imports) imports.set(k, v);
+    const lines = handSlotImportLines(file, mod, imports, decls);
+    const at = decls.at(-1).end;
+    let next = mod.slice(0, at) + lines.map((l) => `\n${l}`).join('') + mod.slice(at);
+    if (!next.endsWith('\n')) refuse(`${file}: does not end in a line break`);
+    for (const r of rs) {
+      for (const s of r.slots) {
+        next += `\n${handSlotDoc(s.slot, r.name, r.fn)}\nexport const ${s.slot}: ${r.hostType}['${s.slot}'] = ${s.moved};\n`;
+      }
+    }
+    modules.set(file, next);
+    const imp = handImportOf(text, file);
+    edits.push({ start: imp.start, end: imp.end, text: handImportText([...imp.names, ...rs.flatMap((r) => r.slots.map((s) => s.slot))], imp.specifier) });
+  }
+  for (const r of planned.records) for (const s of r.slots) edits.push({ start: s.prop.getStart(), end: s.prop.getEnd(), text: s.slot });
+  const out = applyOrderedEdits(text, edits);
+  const pruned = pruneHostImports(tm, out, usedImportNames(tm, out));
+  return { host: pruned.text, modules, pruned: pruned.removed };
+}
+
+/**
+ * Undo every moved slot a tree carries, from its texts alone. Returns the
+ * undone `engine.ts` and hand modules, the slots it undid (with the arrow
+ * text, for the prune check), and every way the tree breaks the pass's form.
+ */
+function undoHandSlots(tm, text, moduleTexts) {
+  const { Node } = tm;
+  const failures = [];
+  const moved = [];
+  const sf = parse(tm, HOST_PATH, text);
+  const cls = sf.getClass(CLASS_NAME);
+  if (!cls) return { host: text, modules: moduleTexts, moved, failures: [`no class ${CLASS_NAME} in ${HOST_BASENAME}`] };
+  const hostEdits = [];
+  const perModule = new Map(); // file -> { removals: [{start,end}], slots: [] }
+  for (const s of handStubs(tm, text)) {
+    const stub = handSlotStubOf(tm, cls, text, s.name);
+    if (stub.why) continue;
+    const mod = moduleTexts.get(stub.module);
+    if (mod == null) continue;
+    const msf = parse(tm, join(SRC_DIR, stub.module), mod);
+    for (const p of stub.literal.getProperties()) {
+      if (!Node.isShorthandPropertyAssignment(p)) continue;
+      const slot = p.getName();
+      const doc = handSlotDoc(slot, s.name, stub.fn);
+      const st = msf.getVariableStatement(slot);
+      if (!st || !mod.includes(doc)) continue;
+      const decl = st.getDeclarations()[0];
+      const init = decl?.getInitializer();
+      const lead = mod.slice(lineStartOf(mod, st.getStart(true)) - 1, st.getStart());
+      if (!st.isExported() || st.getDeclarations().length !== 1 || !init || !Node.isArrowFunction(init) || lead !== `\n${doc}\n` || mod[st.getEnd()] !== '\n') {
+        failures.push(`${slot}: ${stub.module} holds it, under this pass's docblock, not as this pass writes it`);
+        continue;
+      }
+      const hostType = handHostTypeOf(tm, stub.module, mod, stub.fn);
+      if (st.getText() !== `export const ${slot}: ${hostType}['${slot}'] = ${init.getText()};`) failures.push(`${slot}: its const is not typed as ${hostType ?? 'the host'}'s member`);
+      const indent = text.slice(lineStartOf(text, p.getStart()), p.getStart());
+      hostEdits.push({ start: p.getStart(), end: p.getEnd(), text: `${slot}: ${reindentBy(init.getText(), indent)}` });
+      const entry = perModule.get(stub.module) ?? { removals: [], slots: [] };
+      entry.removals.push({ start: lineStartOf(mod, st.getStart(true)) - 1, end: st.getEnd() + 1 });
+      entry.slots.push(slot);
+      perModule.set(stub.module, entry);
+      moved.push({ name: s.name, slot, module: stub.module, text: init.getText() });
+    }
+  }
+  const modules = new Map(moduleTexts);
+  for (const [file, entry] of perModule) {
+    const mod = moduleTexts.get(file);
+    let undone = applyEdits(mod, entry.removals.map((r) => ({ ...r, text: '' })));
+    const used = usedImportNames(tm, undone);
+    const drops = [];
+    for (const d of importDeclsOf(tm, file, undone)) {
+      const unused = [...d.bindings.keys()].filter((k) => !used.has(k));
+      if (unused.length === 0) continue;
+      if (unused.length !== d.bindings.size) { failures.push(`${file}: an import statement binds names only moved slots read beside names the rest reads`); continue; }
+      if (undone[d.start - 1] !== '\n') { failures.push(`${file}: an import only moved slots read does not open its own line`); continue; }
+      drops.push({ start: d.start - 1, end: d.end, text: '' });
+    }
+    undone = applyEdits(undone, drops);
+    modules.set(file, undone);
+    const imp = handImportOf(text, file);
+    if (!imp || entry.slots.some((n) => !imp.names.includes(n))) { failures.push(`${HOST_BASENAME}: does not import every moved slot of ${file} in its one import line of it`); continue; }
+    hostEdits.push({ start: imp.start, end: imp.end, text: handImportText(imp.names.filter((n) => !entry.slots.includes(n)), imp.specifier) });
+  }
+  let host = text;
+  try {
+    host = applyOrderedEdits(text, hostEdits);
+  } catch (e) {
+    if (!(e instanceof CodemodRefusal)) throw e;
+    failures.push(`${HOST_BASENAME}: the undo's edits overlap`);
+  }
+  return { host, modules, moved, failures };
+}
+
+/**
+ * The proof: undoing every moved slot in the head lands on the base,
+ * `engine.ts` (its import bindings only moved slots read pruned) and each
+ * hand module byte for byte. A base this pass has already run on is undone
+ * the same way first, so a later run proves only its own slots.
+ */
+function verifyHandSlots(tm, baseText, headText, baseModules, headModules) {
+  const head = undoHandSlots(tm, headText, headModules);
+  const base = undoHandSlots(tm, baseText, baseModules);
+  const failures = [...head.failures, ...base.failures.map((f) => `base: ${f}`)];
+  const { text: prunedBase, removed: pruned } = pruneHostImports(tm, base.host, usedImportNames(tm, headText));
+  const movedText = head.moved.map((m) => m.text).join('\n');
+  for (const n of pruned) if (!new RegExp(`\\b${n.replace(/\$/g, '\\$')}\\b`).test(movedText)) failures.push(`${n}: the head no longer imports it, and no moved slot reads it`);
+  if (head.host !== prunedBase) failures.push(`undoing the moves does NOT rebuild the base ${HOST_BASENAME} (first difference at line ${firstDiffLine(head.host, prunedBase)})`);
+  for (const file of [...new Set([...baseModules.keys(), ...headModules.keys()])].sort()) {
+    const b = base.modules.get(file); const h = head.modules.get(file);
+    if (b == null || h == null) { failures.push(`${file}: only in the ${b == null ? 'head' : 'base'}`); continue; }
+    if (h !== b) failures.push(`undoing the moves does NOT rebuild the base ${file} (first difference at line ${firstDiffLine(h, b)})`);
+  }
+  const baseMoved = new Set(base.moved.map((m) => `${m.name}#${m.slot}`));
+  const moved = head.moved.filter((m) => !baseMoved.has(`${m.name}#${m.slot}`));
+  if (moved.length === 0) failures.push('nothing moved: the head carries no moved slot its base did not');
+  return { failures, moved, pruned, linesBefore: lineCount(baseText), linesAfter: lineCount(headText) };
+}
+
+function planReportHandSlots(planned) {
+  const out = [`# codemod-split-engine --hand-slots (${HAND_SLOTS_CARD}): the hand stubs' computing host slots`, ''];
+  for (const r of planned.records) out.push(`- ${r.name} -> ${r.module}: ${r.slots.map((s) => `${s.slot} (${s.moved.split('\n').length} lines)`).join(', ')}`);
+  return out.join('\n');
+}
+
+function printVerifyHandSlots(v) {
+  for (const f of v.failures) console.error(`  ✗ ${f}`);
+  console.log(`hand slots: ${v.moved.length} moved (${v.moved.map((m) => `${m.name}#${m.slot}`).join(', ') || 'none'}); ${HOST_BASENAME} ${v.linesBefore} -> ${v.linesAfter} lines; ` +
+    `undoing the moves ${v.failures.length > 0 ? 'does NOT' : 'does'} rebuild the base ${HOST_BASENAME} and its hand modules byte-for-byte ` +
+    `once the ${v.pruned.length} import binding(s) only moved slots read are pruned from the base (${v.pruned.join(', ') || 'none'})`);
+}
+
+/** `--hand-slots`: plan, write or re-prove the fifth pass. */
+async function mainHandSlots(tm, argv) {
+  if (argv.includes('--verify')) {
+    const i = argv.indexOf('--base');
+    const ref = i >= 0 ? argv[i + 1] : null;
+    if (!ref) refuse('--hand-slots --verify needs --base <ref>');
+    const baseText = gitShow(ref, `${SRC_REL}/${HOST_BASENAME}`);
+    const baseModules = handModuleTexts(tm, baseText, (f) => { try { return gitShow(ref, `${SRC_REL}/${f}`); } catch { return null; } });
+    const headModules = handModuleTexts(tm, baseText, readSibling);
+    const v = verifyHandSlots(tm, baseText, readFileSync(HOST_PATH, 'utf8'), baseModules, headModules);
+    printVerifyHandSlots(v);
+    return v.failures.length === 0 ? 0 : 1;
+  }
+  const j = argv.indexOf('--hand-slots');
+  const value = argv[j + 1];
+  const names = value && !value.startsWith('--') ? value.split(',').map((s) => s.trim()).filter(Boolean) : [];
+  const input = readFileSync(HOST_PATH, 'utf8');
+  const moduleTexts = handModuleTexts(tm, input, readSibling);
+  const planned = planHandSlots(tm, input, moduleTexts, names);
+  console.log(planReportHandSlots(planned));
+  const out = generateHandSlots(tm, input, moduleTexts, planned);
+  const headModules = new Map([...moduleTexts, ...out.modules]);
+  console.log(`output tree sha256: ${treeHash(new Map([[HOST_BASENAME, out.host], ...headModules]))} (input sha256 ${sha256(input)})`);
+  const v = verifyHandSlots(tm, input, out.host, moduleTexts, headModules);
+  printVerifyHandSlots(v);
+  if (v.failures.length > 0) {
+    console.error('✗ the generated moves fail the undo proof: nothing written. Report the fork; never hand-edit the moves.');
+    return 1;
+  }
+  if (!argv.includes('--write')) {
+    console.log('plan only: nothing written (pass --write to apply).');
+    return 0;
+  }
+  writeFileSync(HOST_PATH, out.host);
+  for (const [file, t] of out.modules) writeFileSync(join(SRC_DIR, file), t);
+  console.log(`✓ wrote ${HOST_BASENAME} and ${out.modules.size} hand module(s) under ${SRC_REL}`);
+  return 0;
+}
+
 // ── Entry ────────────────────────────────────────────────────────────────────
 
 const USAGE = [
@@ -4091,6 +4466,8 @@ const USAGE = [
   '       node scripts/codemod-split-engine.mjs --hand-docs --verify --base REF   re-prove the third pass on disk against engine.ts and its hand modules at REF',
   '       node scripts/codemod-split-engine.mjs --members A,B [--write]   plan (or apply) the fourth pass: move the named ObjectQL methods onto the split class',
   '       node scripts/codemod-split-engine.mjs --members --verify --base REF   re-prove the fourth pass on disk against engine.ts and its modules at REF',
+  '       node scripts/codemod-split-engine.mjs --hand-slots A,B [--write]   plan (or apply) the fifth pass: move the named hand stubs\' computing host slots into their hand modules',
+  '       node scripts/codemod-split-engine.mjs --hand-slots --verify --base REF   re-prove the fifth pass on disk against engine.ts and its hand modules at REF',
   '       node scripts/codemod-split-engine.mjs --self-test',
   '       node scripts/codemod-split-engine.mjs --help',
 ].join('\n');
@@ -4117,6 +4494,7 @@ async function main(argv) {
   if (argv.includes('--scoped')) return mainScoped(tm, argv);
   if (argv.includes('--hand-docs')) return mainHandDocs(tm, argv);
   if (argv.includes('--members')) return mainMembers(tm, argv);
+  if (argv.includes('--hand-slots')) return mainHandSlots(tm, argv);
   if (argv.includes('--verify')) {
     const i = argv.indexOf('--base');
     const ref = i >= 0 ? argv[i + 1] : null;
