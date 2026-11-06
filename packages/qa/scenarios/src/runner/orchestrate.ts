@@ -97,6 +97,8 @@ export interface BuildHalf {
 export interface QuestionResult {
   question: string;
   persona: string | null;
+  /** Why this turn was not asked: it reads a row the seed could not load ({@link seedDependence}). Not measured, never a fail. */
+  notMeasured?: string;
   grade?: PersonaRunGrade;
   turn?: TurnSummary;
   error?: string;
@@ -105,6 +107,8 @@ export interface QuestionResult {
 export interface OperationResult {
   operation: string;
   persona: string;
+  /** Why this operation was not run: it acts on a row the seed could not load ({@link seedDependence}). Not measured, never a fail. */
+  notMeasured?: string;
   observation?: OperationObservation;
   grade?: OperationGrade;
   turn?: TurnSummary;
@@ -241,6 +245,78 @@ export function hiddenValues(scenario: LoadedScenario, personaId: string): Array
   return [...out];
 }
 
+type Card = LoadedScenario['card'];
+type Question = Card['run']['questions'][number];
+type Operation = Card['run']['operations'][number];
+
+/**
+ * What a refused seed row takes out of the Run half, read from what the card
+ * names. The rows out are the refused ones plus, transitively, every seed row
+ * whose declared lookup (`expect.lookups`) names a row that is out — a contact
+ * of a refused account, whether or not the app refused it too. Then:
+ *
+ *   - a question is not measured when its `object` has a row that is out: its
+ *     truth was computed over rows the app does not hold;
+ *   - an operation is not measured when its `target`, a lookup value it writes,
+ *     or a post-state row (`id`, or a lookup value in its `values`) names a row
+ *     that is out.
+ *
+ * Everything else grades as usual. A not-measured turn is not asked and counts
+ * in neither passed nor total.
+ */
+export function seedDependence(
+  card: Card,
+  refused: ReadonlyArray<{ object: string; id: string }>,
+): { out: Map<string, string>; question(q: Question): string | undefined; operation(op: Operation): string | undefined } {
+  /** `object/id` → the refused row it hangs off, as `object id`. */
+  const out = new Map<string, string>(refused.map((r) => [`${r.object}/${r.id}`, `${r.object} ${r.id}`]));
+  const lookups = card.expect.lookups ?? [];
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const l of lookups) {
+      for (const row of card.run.seed[l.object] ?? []) {
+        const parent = out.get(`${l.to}/${String(row[l.field])}`);
+        if (parent !== undefined && !out.has(`${l.object}/${row.id}`)) {
+          out.set(`${l.object}/${row.id}`, parent);
+          grew = true;
+        }
+      }
+    }
+  }
+  const why = (object: string, id: unknown): string | undefined => {
+    const root = typeof id === 'string' ? out.get(`${object}/${id}`) : undefined;
+    if (root === undefined) return undefined;
+    return root === `${object} ${String(id)}` ? `seed: needs ${root}, which the app refused` : `seed: needs ${object} ${String(id)}, a child of ${root}, which the app refused`;
+  };
+  const viaLookups = (object: string, values: Record<string, unknown> | undefined): string | undefined => {
+    for (const l of lookups) {
+      const w = l.object === object && values && l.field in values ? why(l.to, values[l.field]) : undefined;
+      if (w) return w;
+    }
+    return undefined;
+  };
+  return {
+    out,
+    question: (q) => {
+      for (const row of card.run.seed[q.object] ?? []) {
+        const w = why(q.object, row.id);
+        if (w) return w;
+      }
+      return undefined;
+    },
+    operation: (op) => {
+      const direct = (op.target !== undefined ? why(op.object, op.target) : undefined) ?? viaLookups(op.object, op.values);
+      if (direct) return direct;
+      if (op.outcome.kind !== 'applied') return undefined;
+      for (const st of op.outcome.state) {
+        const w = (st.id !== undefined ? why(st.object, st.id) : undefined) ?? viaLookups(st.object, st.values);
+        if (w) return w;
+      }
+      return undefined;
+    },
+  };
+}
+
 /** The persona (not a card artifact) a scenario's audit trail names, from the user id the app recorded. */
 function personaOfUser(userId: string | null, accounts: readonly PersonaAccount[], adminId: string): string | null {
   if (userId === null) return null;
@@ -349,11 +425,18 @@ export async function runHalf(
     }
 
     const keyOf = (persona: string | null) => (persona === null ? adminKey : accounts.find((a) => a.persona === persona)!.apiKey);
+    // A refused seed row makes what reads it not measured — never a fail of the app's answer.
+    const dependence = seedDependence(card, half.seed.refused);
 
     for (const q of card.run.questions) {
+      const notMeasured = dependence.question(q);
       for (const persona of [null, ...(q.personas ?? [])]) {
         if (persona === null && q.personas?.length) continue; // a persona-scoped question is asked as its personas
         const res: QuestionResult = { question: q.id, persona };
+        if (notMeasured) {
+          half.questions.push({ ...res, notMeasured });
+          continue;
+        }
         try {
           const turn = await driver.ask({ ...ref, step: q.id, ...(persona ? { persona } : {}), prompt: questionPrompt(scenario, q.id), mcp: { url: app.mcpUrl, apiKey: keyOf(persona) } });
           res.turn = summarize(turn);
@@ -372,6 +455,11 @@ export async function runHalf(
 
     for (const op of card.run.operations) {
       const res: OperationResult = { operation: op.id, persona: op.actingAs };
+      const notMeasured = dependence.operation(op);
+      if (notMeasured) {
+        half.operations.push({ ...res, notMeasured });
+        continue;
+      }
       try {
         const before = (await app.listRows(op.object)).rows as Row[];
         const turn = await driver.ask({ ...ref, step: op.id, persona: op.actingAs, prompt: operationPrompt(card, op.id), mcp: { url: app.mcpUrl, apiKey: keyOf(op.actingAs) } });

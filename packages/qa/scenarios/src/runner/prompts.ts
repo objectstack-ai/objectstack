@@ -142,10 +142,17 @@ export function dataContract(card: Card): string {
     const userFields = [...userHandleFields(card)];
     if (userFields.length) {
       const unheld = unheldHandles(card);
+      const held = [
+        ...new Set(
+          card.run.personas.flatMap((p) => (p.scope ?? []).filter((sc) => userHandleFields(card).has(`${sc.object}.${sc.field}`)).map((sc) => `\`${String(sc.value)}\` → the \`${p.id}\` user`)),
+        ),
+      ];
       lines.push(
-        `In ${userFields.map((k) => `\`${k}\``).join(' / ')} the handle stands for a user: the runner loads that field with the person’s user id, ` +
-          'not the handle text, so a rule on it matches that user' +
-          (unheld.length ? `; a handle no person below holds (${unheld.map((h) => `\`${h}\``).join(', ')}) is loaded as the admin user.` : '.'),
+        `In ${userFields.map((k) => `\`${k}\``).join(' / ')} the value is a handle that stands for a user, and the handle text is never stored: ` +
+          `the runner loads that field, and the row’s owner (\`owner_id\`), with that user’s id (${[
+            ...held,
+            ...(unheld.length ? [`${unheld.map((h) => `\`${h}\``).join(', ')}, which no person below holds → the admin user the runner signs in as`] : []),
+          ].join('; ')}). Make that field accept a user id; a rule on it matches that user.`,
       );
     }
   }

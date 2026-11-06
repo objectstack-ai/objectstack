@@ -23,7 +23,7 @@ import {
 } from '../../src/runner/driver.js';
 import { asksToConfirm, countWrites, noWriteAttempted, observedAnswer, observeOperation, uncodedToolError } from '../../src/runner/observe.js';
 import { citationLabels, namespaceOfConfig, namespacedScenario, permissionSetName, templateHostName } from '../../src/runner/namespace.js';
-import { changeSize, hiddenValues, installableManifest, seedOrder, withoutItems } from '../../src/runner/orchestrate.js';
+import { changeSize, hiddenValues, installableManifest, seedDependence, seedOrder, withoutItems } from '../../src/runner/orchestrate.js';
 import { buildPrompt, dataContract, iteratePrompt, questionPrompt, templateIteratePrompt, unheldHandles, userHandleFields, verifyArgs, verifyFlags } from '../../src/runner/prompts.js';
 import { parseStreamJson, refusalCodeOf, toolNameOf, type ParsedTurn } from '../../src/runner/transcript.js';
 
@@ -230,12 +230,29 @@ describe('prompts, seed order, template manifest and change size', () => {
     expect([...userHandleFields(card)]).toEqual(['democrm_account.owner']);
     expect(unheldHandles(card)).toEqual(['u_tia']);
     expect(dataContract(card)).toContain(
-      'In `democrm_account.owner` the handle stands for a user: the runner loads that field with the person’s user id, not the handle text, ' +
-        'so a rule on it matches that user; a handle no person below holds (`u_tia`) is loaded as the admin user.',
+      'In `democrm_account.owner` the value is a handle that stands for a user, and the handle text is never stored: the runner loads that field, ' +
+        'and the row’s owner (`owner_id`), with that user’s id (`u_sam` → the `sdr` user; `u_tia`, which no person below holds → the admin user ' +
+        'the runner signs in as). Make that field accept a user id; a rule on it matches that user.',
     );
     // A scope field that names a row (`ticket.assignee` → agent, `customer.id`) or an option (`ticket_comment.visibility`) is not one.
     const desk = loadScenarioFile(resolve(HERE, '../../../../../docs/qa/scenarios/service_desk.json'), { areas: readCapabilityAreas(AREAS_DIR) }).card!;
     expect([...userHandleFields(desk.card)]).toEqual([]);
+  });
+
+  it('a refused seed row takes out its children and what the card names on them, and nothing else', () => {
+    const card = namespacedScenario(crm).card;
+    const dep = seedDependence(card, [{ object: 'democrm_account', id: 'ac1' }]);
+    expect([...dep.out.keys()].sort()).toEqual(['democrm_account/ac1', 'democrm_contact/ct1', 'democrm_contact/ct2']);
+    const op = (id: string) => dep.operation(card.run.operations.find((o) => o.id === id)!);
+    expect(op('partner_edits_account')).toBe('seed: needs democrm_account ac1, which the app refused'); // its target
+    expect(op('remove_ben')).toBe('seed: needs democrm_contact ct2, a child of democrm_account ac1, which the app refused'); // a child
+    expect(op('move_eli')).toBe('seed: needs democrm_account ac1, which the app refused'); // the account it writes
+    expect(op('add_contact')).toBeUndefined();
+    expect(op('contact_bad_email')).toBeUndefined();
+    const q = (id: string) => dep.question(card.run.questions.find((x) => x.id === id)!);
+    expect(q('tech_accounts')).toBe('seed: needs democrm_account ac1, which the app refused');
+    expect(q('unattached_contacts')).toBe('seed: needs democrm_contact ct1, a child of democrm_account ac1, which the app refused');
+    expect(seedDependence(card, []).out.size).toBe(0);
   });
 
   it('chooses verify proofs from the tags, and seeds a lookup target before its referrer', () => {
