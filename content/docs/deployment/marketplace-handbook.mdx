@@ -230,7 +230,8 @@ the detail.
    `PATCH /api/v1/packages/:id/disable` with `422 WRITABLE_PACKAGE_REQUIRED`.
    A disable that would leave a validation rule reading a field the package
    adds is refused with `409 PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`
-   ([below](#disabling-a-module)).
+   ([below](#disabling-a-module)), and so is an enable that would serve a
+   rule reading a field a still-disabled package adds.
    To take an installed app away, uninstall it.
 8. **Upgrading.** You publish a new version; nothing running changes. An
    environment installed through the cloud shows **Update available → v…** and
@@ -320,6 +321,14 @@ its data is kept.
   enabled module with `enableOnInstall: false` that would leave it disabled in
   that state answers the same `409`, and the module stays enabled; a fresh
   install with `enableOnInstall: false` lands disabled, as before.
+- **Enabling a rule over a disabled module's field.** The mirror order is
+  refused too: while the module is disabled, enabling a package whose
+  validation rule reads one of the module's fields (or one on an object that
+  package owns) answers the same `409`, naming each rule and the module to
+  enable first; nothing changes. Enable the module first, or switch the rule
+  off on the customer's copy of the object. A boot that lands in that state
+  anyway (the stored choice records only disables, so a newly shipped rule
+  boots enabled) logs one warning naming every rule and the remedies.
 
 **What your app's own code meets.** A hook of your app that reads or writes a
 module's object through `ctx.api.object('<object>')` runs inside the server,
