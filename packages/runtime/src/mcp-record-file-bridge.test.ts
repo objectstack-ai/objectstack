@@ -15,6 +15,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid during collection, not inside a clocked case: the dispatcher reaches
+// `standalone-stack.ts`, whose function body `import()`s it (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/metadata';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { buildMcpBridge, type McpRecordFileService } from './domains/mcp.js';
 
