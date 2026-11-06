@@ -389,6 +389,33 @@ const dealManagerSet = PermissionSetSchema.parse({
   fields: { 'deal.restricted_note': { readable: true, editable: false } },
 });
 
+describe('a run started by an impersonation session\'s write names the administrator on its writes, until a decider takes over', () => {
+  for (const runAs of ['user', 'system'] as const) {
+    it(`runAs:'${runAs}': every write before the decision carries the administrator; the decider's segment carries none`, async () => {
+      const h = envelopeHarness();
+      h.engine.registerFlow('review', reviewFlow('review', { recorder: true, runAs }) as never);
+      const paused = await h.engine.execute('review', { ...TRIGGER, impersonatedBy: 'usr_admin' } as never);
+      expect(paused.status).toBe('paused');
+
+      const before = h.ctxOf('submit');
+      expect(before.userId, 'the subject stays the impersonated user').toBe('usr_rep');
+      expect(before.impersonatedBy).toBe('usr_admin');
+
+      await h.engine.resume(paused.runId!, decided('approve', 'usr_mgr'));
+      const after = h.ctxOf('after1');
+      expect(after.userId).toBe('usr_mgr');
+      expect('impersonatedBy' in after, 'the decider acted in their own name').toBe(false);
+    });
+  }
+
+  it('CONTROL: a run the user\'s own write started names no administrator', async () => {
+    const h = envelopeHarness();
+    h.engine.registerFlow('review', reviewFlow('review', { recorder: true }) as never);
+    await h.engine.execute('review', { ...TRIGGER } as never);
+    expect('impersonatedBy' in h.ctxOf('submit')).toBe(false);
+  });
+});
+
 describe('on the real stack: attribution after the decision, and the refusal when the decider lacks a right', () => {
   let kernel: ObjectKernel;
   let ql: ObjectQL;

@@ -3,16 +3,22 @@
   "version": "0.1.0",
   "private": true,
   "license": "Apache-2.0",
-  "description": "Scenario-card schema and loader for the open scenario library under docs/qa/scenarios/. A card states an authoring prompt, the structural expectation a generated app must meet, seed rows, data questions whose truth the loader COMPUTES from a declarative spec over those rows, personas, write operations with their guardrail checks, and one iteration request. Not published, no build step, no model calls: a devx instrument, not a protocol (packages/spec carries no obligation for this format).",
+  "description": "Scenario-card schema and loader for the open scenario library under docs/qa/scenarios/. A card states an authoring prompt, the structural expectation a generated app must meet, seed rows, data questions whose truth the loader COMPUTES from a declarative spec over those rows, personas, write operations with their guardrail checks, and one iteration request \u2014 plus the deterministic scorer that judges a built artifact, an observed write or an agent's answer against a loaded card (`@objectstack/scenarios/score`). Not published, no build step, no model calls: a devx instrument, not a protocol (packages/spec carries no obligation for this format).",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./score": "./src/score/index.ts",
+    "./runner": "./src/runner/index.ts"
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "run-scenarios": "tsx src/runner/cli.ts"
   },
   "dependencies": {
+    "@objectstack/core": "workspace:*",
+    "@objectstack/objectql": "workspace:*",
+    "@objectstack/plugin-sharing": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "zod": "^4.6.6"
   },

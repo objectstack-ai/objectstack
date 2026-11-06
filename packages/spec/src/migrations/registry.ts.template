@@ -1627,7 +1627,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     text:
       'It also removes `currencyConfig.precision` (ADR-0049 enforce-or-remove): '
       + 'declared and validated against ISO 4217, read by no renderer or runtime — a currency '
-      + 'amount\'s decimal places are its currency\'s ISO 4217 minor unit, derived from the '
+      + 'amount\'s decimal places are its currency\'s CLDR fraction digits, derived from the '
       + 'currency itself. The D2 conversion `currency-config-precision-removed` strips it from '
       + 'every field\'s `currencyConfig` as a pure lossless delete, which matters most at rest: '
       + 'the schema used to bake `precision: 2` into parse output, so stored object rows and '

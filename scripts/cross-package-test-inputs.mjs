@@ -1365,7 +1365,13 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // suite's verdict while touching nothing in the package. The capability
     // area closed set is the basenames of the checklist's area files, read from
     // the tree by every suite here, so adding or renaming an area does too.
-    globs: ['docs/qa/scenarios/*.json', 'docs/qa/platform-checklist/areas/*.json'],
+    //
+    // `corpus.ts` is the CLI's golden `os lint --eval` corpus, imported by the
+    // scorer's suites under test/score/ (#30291): the golden builds the
+    // discrimination tests degrade are its fixtures, and scenario-cards.test.ts
+    // holds each control card's `expect` equal to what that corpus derives, so
+    // a corpus edit moves this suite's verdict.
+    globs: ['docs/qa/scenarios/*.json', 'docs/qa/platform-checklist/areas/*.json', 'packages/cli/src/lint/corpus.ts'],
     heldBy: {
       // The areas directory is listed (`readdirSync`) and its basenames taken,
       // so the roster holds the directory and no `*.json` name under it.

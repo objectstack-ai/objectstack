@@ -19,6 +19,11 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: /^@objectstack\/spec\/system$/, replacement: path.resolve(__dirname, '../../spec/src/system/index.ts') },
+      // The relay sender parses its request with `PushRelayRequestSchema`
+      // (`@objectstack/spec/api`), and the plugin reads `isControlPlaneDeclined`
+      // from `@objectstack/core`: both from source, for the same reason.
+      { find: /^@objectstack\/spec\/api$/, replacement: path.resolve(__dirname, '../../spec/src/api/index.ts') },
+      { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
     ],
   },
 });

@@ -2,14 +2,17 @@
 //
 // [#28880] The template locale ladder for a call that NAMES a locale is the
 // platform's: the recipient's tag folded against the bundle's locales by
-// `resolveBundleLocale` (exact → case-insensitive → base language → variant
-// expansion), then the stack's declared fallback folded the same way, then
+// `resolveBundleLocale` (exact → case-insensitive → platform locale table
+// language → base language → variant expansion), then the stack's declared
+// fallback folded the same way, then
 // `en-US`, then `TEMPLATE_NOT_FOUND`. Measured on `origin/main` (`b15b634c`)
 // before this file: the service tried the named tag exactly, then `en-US`, so
 // an `en-GB` or `zh-TW` recipient of an `en` + `zh-CN` bundle dead-lettered.
 //
 // Variant expansion picks the first base-language match in ascending tag
-// order, so the answer does not depend on the order the list carries.
+// order, so the answer does not depend on the order the list carries. The
+// table-language step runs first: a `zh-MO` recipient reaches a Traditional
+// row (`zh-HK`, `zh-TW`) before any Simplified one.
 //
 // The folding is the built-in registry loader's bundle read; a replacement
 // loader that offers no locale list keeps the exact ladder (pinned last).
@@ -78,8 +81,15 @@ describe('[#28880] a named recipient locale is folded against the bundle', () =>
   });
 
   it('variant expansion takes the first base-language match in ascending tag order, whatever the list order', async () => {
-    expect(await sentLocale(['zh-TW', 'zh-HK', 'zh-CN'], 'zh-MO')).toBe('zh-CN');
-    expect(await sentLocale(['zh-CN', 'zh-HK', 'zh-TW'], 'zh-MO')).toBe('zh-CN');
+    expect(await sentLocale(['es-MX', 'es-AR', 'en-US'], 'es-CO')).toBe('es-AR');
+    expect(await sentLocale(['en-US', 'es-AR', 'es-MX'], 'es-CO')).toBe('es-AR');
+  });
+
+  it('a Traditional recipient reaches a Traditional row before a Simplified one, whatever the list order', async () => {
+    expect(await sentLocale(['zh-TW', 'zh-HK', 'zh-CN'], 'zh-MO')).toBe('zh-HK');
+    expect(await sentLocale(['zh-CN', 'zh-HK', 'zh-TW'], 'zh-MO')).toBe('zh-HK');
+    expect(await sentLocale(['en-US', 'zh-CN', 'zh-Hant'], 'zh-TW')).toBe('zh-Hant');
+    expect(await sentLocale(['en-US', 'zh-CN', 'zh-Hant'], 'zh')).toBe('zh-CN');
   });
 
   it('an exact hit wins over every fold', async () => {

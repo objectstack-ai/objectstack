@@ -193,3 +193,19 @@ describe('MetadataResourceEditPage — a pending draft is judged by its own serv
     expect(canvasDiagnostics().map((d) => d.message)).not.toContain(REFUSAL.message);
   });
 });
+
+describe('MetadataResourceEditPage — a served refusal reaches the canvas with its rule id (objectstack#30038)', () => {
+  it('the canvas entry carries the draft verdict\'s `code`, the key the flow Problems list words a refusal by', async () => {
+    server.active.set('page/home', PAGE);
+    server.drafts.set('page/home', { ...PAGE, label: 'broken' });
+    renderEditor();
+
+    await waitFor(
+      () =>
+        expect(canvasDiagnostics()).toContainEqual(
+          expect.objectContaining({ path: REFUSAL.path, code: REFUSAL.code, severity: 'error' }),
+        ),
+      { timeout: 8000 },
+    );
+  });
+});

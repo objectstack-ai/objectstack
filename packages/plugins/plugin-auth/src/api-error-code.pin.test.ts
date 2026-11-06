@@ -18,7 +18,13 @@
  *  2. a body destructured, in the same function, from the result of
  *     `judgeHeldSession(...)`: the held-session judge's ADR-0112 envelope,
  *     whose code sits under `error` (`platform-admin-gate.held-session.test.ts`
- *     pins that body's shape).
+ *     pins that body's shape); or
+ *  3. an OAuth 2.0 error response (RFC 6749 §5.2): an object literal with a
+ *     top-level `error` whose value is a string literal, beside an
+ *     `error_description`. That is the dialect the authorization server's own
+ *     endpoints answer in, and `error` is its machine code; a refusal that must
+ *     answer exactly as the provider's own error does (`oauth-grant-ban-refusal.ts`)
+ *     carries no second, ADR-0112 `code` the provider's answer lacks.
  *
  * No body, a literal without `code`, a spread, or an identifier from anywhere
  * else is a site this pin cannot read a code from, so it fails.
@@ -128,7 +134,15 @@ function whyCodeless(site: ts.NewExpression, sf: ts.SourceFile): string | null {
     const carriesCode = body.properties.some(
       (p) => (ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) && propertyName(p.name) === 'code',
     );
-    return carriesCode ? null : 'its body has no top-level `code` property';
+    if (carriesCode) return null;
+    // Shape 3: the OAuth 2.0 error response — a literal `error` code beside an `error_description`.
+    const oauthError = body.properties.some(
+      (p) => ts.isPropertyAssignment(p) && propertyName(p.name) === 'error' && ts.isStringLiteralLike(p.initializer),
+    );
+    const oauthDescription = body.properties.some(
+      (p) => (ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) && propertyName(p.name) === 'error_description',
+    );
+    return oauthError && oauthDescription ? null : 'its body has no top-level `code` property';
   }
   if (ts.isIdentifier(body) && isHeldSessionBody(body, site)) return null;
   return `its body is \`${body.getText(sf)}\`, which this pin cannot read a code from`;
@@ -242,6 +256,16 @@ describe('the classifier, against the shapes it must tell apart', () => {
         throw new APIError('FORBIDDEN', body);
       }`;
     expect(verdicts(fixture)).toEqual([true, true, true, true, true]);
+  });
+
+  it('accepts an OAuth 2.0 error response (a literal `error` beside an `error_description`), and nothing short of it', () => {
+    const fixture = `
+      function a(d: string) { throw new APIError('BAD_REQUEST', { error_description: d, error: 'invalid_grant' }); }
+      function b() { throw new APIError('BAD_REQUEST', { error_description: 'invalid code', error: 'invalid_grant' }); }
+      function c() { throw new APIError('BAD_REQUEST', { error: 'invalid_grant' }); }
+      function d(e: string) { throw new APIError('BAD_REQUEST', { error_description: 'x', error: e }); }
+      function f() { throw new APIError('BAD_REQUEST', { error_description: 'x' }); }`;
+    expect(verdicts(fixture)).toEqual([true, true, false, false, false]);
   });
 
   it('the textual control sees past comments, and counts a member-callee site', () => {

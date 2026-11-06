@@ -33,10 +33,12 @@ nothing else. There is no title or body: the shell reads the notification
 from the server after the tap, by its id. To the relay the payload is
 opaque: it puts it in the vendor message unchanged.
 
-**Declared ahead of its producer.** No push channel delivers yet, so
-nothing sends this request today; each schema here carries a
-`[PLANNED — not yet served]` marker in its `.describe()` until the push
-channel ships.
+**Served.** `@objectstack/service-push` sends this request: its relay
+transport (`RelayPushSender`) builds one delivery per device token, parses
+the request with `PushRelayRequestSchema` before it leaves the
+server, and reads the answer with `PushRelayResponseSchema` and
+`PushRelayErrorResponseSchema`. The relay that receives it is served
+by the cloud's control plane (objectstack-ai/cloud#3519).
 
 <Callout type="info">
 **Source:** `packages/spec/src/api/push-relay.zod.ts`
@@ -56,7 +58,7 @@ const result = PushRelayDeliverySchema.parse(data);
 
 ## PushRelayDelivery
 
-[PLANNED — not yet served] One relay delivery: a device token, its vendor, the ID-only payload and the delivery priority
+One relay delivery: a device token, its vendor, the ID-only payload and the delivery priority
 
 ### Properties
 
@@ -71,15 +73,15 @@ const result = PushRelayDeliverySchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **data** | `{ notificationId: string; route?: string; origin?: string }` | ✅ | The push delivery data: the notification id, its same-server route and the origin of the sending server. The relay puts it in the vendor message unchanged |
-| **text** | `string` | ✅ | One generic visible line the device shows (for example "You have a new notification"), in the device locale. Never the notification title or body |
+| **data** | `{ notificationId: string; route?: string; origin?: string }` | ✅ | The push delivery data: the notification id, its same-server route and the origin of the sending server, and no other key. The relay puts it in the vendor message unchanged |
+| **text** | `string` | ✅ | One generic visible line the device shows (for example "You have a new notification"), in the recipient's language. Never the notification title or body |
 
 
 ---
 
 ## PushRelayError
 
-[PLANNED — not yet served] A push relay error: UNAUTHENTICATED (401, bad or revoked binding), RATE_LIMIT_EXCEEDED or QUOTA_EXCEEDED (429), each with its next step in helpText
+A push relay error: UNAUTHENTICATED (401, bad or revoked binding), RATE_LIMIT_EXCEEDED or QUOTA_EXCEEDED (429), each with its next step in helpText
 
 ### Union Options
 
@@ -141,7 +143,7 @@ This schema accepts one of the following structures:
 | **refusal** | `true` | optional | Producer-declared deliberate refusal — see ApiErrorSchema.refusal. Present only when the producer declared it at throw time; a declared 5xx without it is a fault whose `message` is withheld. Until the withhold arms read the declaration, a declared refusal is still withheld. |
 | **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'server' \| 'external' \| 'maintenance'>` | optional | Error category |
 | **httpStatus** | `429` | ✅ | HTTP status code |
-| **retryable** | `boolean` | optional (default: `false`) | Whether the request can be retried |
+| **retryable** | `true` | optional (default: `true`) | Always true: the same request succeeds once retryAfterSeconds has passed |
 | **retryStrategy** | `Enum<'no_retry' \| 'retry_immediate' \| 'retry_backoff' \| 'retry_after'>` | optional | Recommended retry strategy |
 | **retryAfterSeconds** | `integer` | ✅ | Seconds to wait before sending again |
 | **retryAfter** | `never` | optional | [REMOVED] `EnhancedApiError.retryAfter` was renamed to `retryAfterSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `retryAfterSeconds`; the value (seconds) is unchanged. This is the ADR-0112 error envelope, not the HTTP `Retry-After` response header — that header keeps its RFC 9110 name and is untouched. |
@@ -210,7 +212,7 @@ This schema accepts one of the following structures:
 
 ## PushRelayErrorResponse
 
-[PLANNED — not yet served] The push relay error response: the house error envelope, for 401 (bad or revoked binding) and 429 (rate limit or quota)
+The push relay error response: the house error envelope, for 401 (bad or revoked binding) and 429 (rate limit or quota)
 
 ### Properties
 
@@ -253,7 +255,7 @@ This schema accepts one of the following structures:
 | **refusal** | `true` | optional | Producer-declared deliberate refusal — see ApiErrorSchema.refusal. Present only when the producer declared it at throw time; a declared 5xx without it is a fault whose `message` is withheld. Until the withhold arms read the declaration, a declared refusal is still withheld. |
 | **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| …>` | optional | Error category |
 | **httpStatus** | `429` | ✅ | HTTP status code |
-| **retryable** | `boolean` | optional (default: `false`) | Whether the request can be retried |
+| **retryable** | `true` | optional (default: `true`) | Always true: the same request succeeds once retryAfterSeconds has passed |
 | **retryStrategy** | `Enum<'no_retry' \| 'retry_immediate' \| 'retry_backoff' \| 'retry_after'>` | optional | Recommended retry strategy |
 | **retryAfterSeconds** | `integer` | ✅ | Seconds to wait before sending again |
 | **retryAfter** | `never` | optional | [REMOVED] `EnhancedApiError.retryAfter` was renamed to `retryAfterSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `retryAfterSeconds`; the value (seconds) is unchanged. This is the ADR-0112 error envelope, not the HTTP `Retry-After` response header — that header keeps its RFC 9110 name and is untouched. |
@@ -294,14 +296,14 @@ This schema accepts one of the following structures:
 
 ## PushRelayPayload
 
-[PLANNED — not yet served] The ID-only payload of one relay delivery: the push delivery data and one generic visible line, with no title or body. Opaque to the relay
+The ID-only payload of one relay delivery: the push delivery data and one generic visible line, with no title or body. Opaque to the relay
 
 ### Properties
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **data** | `{ notificationId: string; route?: string; origin?: string }` | ✅ | The push delivery data: the notification id, its same-server route and the origin of the sending server. The relay puts it in the vendor message unchanged |
-| **text** | `string` | ✅ | One generic visible line the device shows (for example "You have a new notification"), in the device locale. Never the notification title or body |
+| **data** | `{ notificationId: string; route?: string; origin?: string }` | ✅ | The push delivery data: the notification id, its same-server route and the origin of the sending server, and no other key. The relay puts it in the vendor message unchanged |
+| **text** | `string` | ✅ | One generic visible line the device shows (for example "You have a new notification"), in the recipient's language. Never the notification title or body |
 
 ### Nested Shape: `PushRelayPayload.data`
 
@@ -328,7 +330,7 @@ Vendor delivery priority: high delivers at once and wakes the device (APNs 10, F
 
 ## PushRelayRequest
 
-[PLANNED — not yet served] The request a server sends the hosted push relay: one delivery per device token. Authenticated by the server cloud binding credential as its bearer token
+The request a server sends the hosted push relay: one delivery per device token. Authenticated by the server cloud binding credential as its bearer token
 
 ### Properties
 
@@ -338,7 +340,7 @@ Vendor delivery priority: high delivers at once and wakes the device (APNs 10, F
 
 ### Nested Shape: `PushRelayRequest.deliveries[number]`
 
-[PLANNED — not yet served] One relay delivery: a device token, its vendor, the ID-only payload and the delivery priority
+One relay delivery: a device token, its vendor, the ID-only payload and the delivery priority
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -352,7 +354,7 @@ Vendor delivery priority: high delivers at once and wakes the device (APNs 10, F
 
 ## PushRelayResponse
 
-[PLANNED — not yet served] The push relay answer: one result per delivery token, ok, invalid or retry
+The push relay answer: one result per delivery token, ok, invalid or retry
 
 ### Properties
 
@@ -362,7 +364,7 @@ Vendor delivery priority: high delivers at once and wakes the device (APNs 10, F
 
 ### Nested Shape: `PushRelayResponse.results[number]`
 
-[PLANNED — not yet served] The relay answer for one delivery: its device token and its outcome
+The relay answer for one delivery: its device token and its outcome
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -374,7 +376,7 @@ Vendor delivery priority: high delivers at once and wakes the device (APNs 10, F
 
 ## PushRelayResult
 
-[PLANNED — not yet served] The relay answer for one delivery: its device token and its outcome
+The relay answer for one delivery: its device token and its outcome
 
 ### Properties
 

@@ -33,6 +33,7 @@ import { flowNodeDisplayName } from './flow-canvas-parts.js';
 import { t, tFormat } from '../i18n.js';
 import { uniqueId } from '../inspectors/unique-id.js';
 import { isBlankExpressionRefusal } from '../inspectors/flow-value-envelope.js';
+import { closureRefusalMessage } from './flow-closure-refusal.js';
 
 /** What a problem points at on the canvas — drives badge placement + reveal. */
 export type FlowProblemTarget =
@@ -73,6 +74,13 @@ export interface ServerDiagnostic {
   message: string;
   /** Defaults to `'error'`. */
   severity?: DiagnosticLevel;
+  /**
+   * The rule id the server raised the entry under (`_diagnostics.errors[].code`),
+   * when it sent one. objectstack#30038 — the one key a renderer may word a
+   * served refusal by (`flow-closure-refusal.ts`); without it the entry's
+   * `message` is shown as sent.
+   */
+  code?: string;
 }
 
 /** Stable `source->target` key matching an edge problem to a rendered edge. */
@@ -282,10 +290,11 @@ export function buildFlowProblems({ nodes, edges, serverDiagnostics, variables, 
     problems.push({
       id: `server:${i}:${targetKey(target)}`,
       level,
-      // The words the node's value cell uses for the same refusal.
+      // The words the node's value cell uses for the same refusal; the closure
+      // refusal in the Console's language (objectstack#30038); else as sent.
       message: isBlankExpressionRefusal(diag.message)
         ? t('engine.inspector.flowNode.kv.expressionNeeded', locale)
-        : diag.message,
+        : (level === 'error' ? closureRefusalMessage(diag, { nodes, variables }, locale) : undefined) ?? diag.message,
       target,
       source: 'server',
       ...(location ? { location } : {}),

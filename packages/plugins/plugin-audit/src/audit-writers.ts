@@ -90,6 +90,7 @@ import {
 } from './activity-field-redaction.js';
 import type { LedgerRecordWriteAction } from './audit-log-field-redaction.js';
 import { SIGN_IN_STAMP_EVENT, isSignInStamp } from './sign-in-stamp.js';
+import { IMPERSONATED_BY_KEY, IMPERSONATED_BY_NAME_KEY, impersonatorOf } from './impersonation-attribution.js';
 import type { MentionGateInput } from './mention-recipient-gate.js';
 // [ADR-0139 E6] The ONE derivation of the two writer-stamped columns the
 // withheld-row rule reads, shared with the before-insert hook and the backfill.
@@ -298,6 +299,14 @@ const SKIP_OBJECTS = new Set<string>([
   // and keep their compliance value, so they stay audited (see #5202).
   'sys_upload_session',          // chunked-upload progress (1 write per chunk)
   'ai_traces',                   // LLM trace telemetry
+  // [ADR-0057 §3.3] The lifecycle sweeper's own clock state (one row per
+  // datastore, `managedBy: 'engine-owned'`), written ONLY by objectql's
+  // `LifecycleService` under SYSTEM_CTX after every completed sweep. Audited,
+  // each sweep would feed `sys_audit_log` and `sys_activity` the very rows the
+  // next sweep archives or reaps: cleanup re-feeding the tables it drains.
+  // Not an act anyone performed; the ruling that created the object forbids
+  // an audit row per sweep.
+  'sys_lifecycle_state',         // sweep watermark (1 write per sweep)
 ]);
 
 /**
@@ -2068,6 +2077,14 @@ export function installAuditWriters(
       (ctx as any).provenance.performedByClientId.trim()
         ? (ctx as any).provenance.performedByClientId.trim()
         : undefined;
+    // The ADMINISTRATOR who made this write from an impersonation session. A
+    // FOURTH channel, for the same reason as the agent's: `session.userId` is
+    // the impersonated user — the session is theirs, the write authorizes as
+    // them and the record stays theirs — so without this the row was
+    // byte-identical to one that user wrote themselves. Stamped from
+    // `provenance`, never from `session`, because no caller-gating hook may
+    // read the administrator as the caller.
+    const impersonatedBy: string | undefined = impersonatorOf((ctx as any).provenance);
     // Principal label for attribution. Prefer the real user id; otherwise fall
     // back to a service/automation principal the host put on the context
     // (`ExecutionContext.actor`, e.g. `svc:<name>`). This is what makes a
@@ -2194,12 +2211,17 @@ export function installAuditWriters(
     // `user_id` column rather than from a second carrier: rule 4 asks for both
     // sides on the row, and one source for one fact is what keeps them from
     // ever disagreeing.
-    if (performedByClientId || signInStamp) {
+    //
+    // `impersonated_by` follows the same rule: present ONLY on a write made
+    // from an impersonation session, beside a `user_id` that stays the
+    // impersonated user. No key ⇒ that user acted themselves.
+    if (performedByClientId || impersonatedBy || signInStamp) {
       auditRow.metadata = safeStringify({
         // A sign-in stamp names its event the way a `config_change` row does
         // (`metadata.event`); every other CRUD row still carries no event.
         ...(signInStamp ? { event: SIGN_IN_STAMP_EVENT } : {}),
         ...(performedByClientId ? { performed_by: performedByClientId, on_behalf_of: userId ?? null } : {}),
+        ...(impersonatedBy ? { [IMPERSONATED_BY_KEY]: impersonatedBy } : {}),
       });
     }
 
@@ -2345,10 +2367,21 @@ export function installAuditWriters(
     // rule, not data this writer persists.
     const actor: ActorSnapshot =
       mirrorsActivity && userId ? await resolveActorSnapshot(api, userId) : NO_ACTOR_SNAPSHOT;
+    // The impersonating administrator's name, off the same memoized read, so
+    // the timeline can say 「X 代 Y 操作」 without a lookup per row. The id is
+    // the fact; the name is a snapshot beside it, like `actor_name`.
+    const impersonator: ActorSnapshot =
+      mirrorsActivity && impersonatedBy ? await resolveActorSnapshot(api, impersonatedBy) : NO_ACTOR_SNAPSHOT;
 
     const activityMetadata = {
       old: oldValue,
       new: newValue,
+      ...(impersonatedBy
+        ? {
+            [IMPERSONATED_BY_KEY]: impersonatedBy,
+            ...(impersonator.name ? { [IMPERSONATED_BY_NAME_KEY]: impersonator.name } : {}),
+          }
+        : {}),
       ...(kind ? { [ACTIVITY_KIND_KEY]: kind.value } : {}),
       [ACTIVITY_TEXT_SOURCES_KEY]: textSources,
       ...(summaryMessage ? { [ACTIVITY_SUMMARY_MESSAGE_KEY]: summaryMessage } : {}),

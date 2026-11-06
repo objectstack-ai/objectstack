@@ -159,7 +159,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Ban User",
-        description: "Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned. The keys work again after the unban.",
+        description: "Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned, as are their OAuth access tokens and token refreshes. The keys work again after the unban.",
         successMessage: "User banned",
         params: {
           banReason: {
@@ -565,11 +565,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_organization_id: {
         label: "Parent Organization",
-        help: "Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference."
+        help: "Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference. Meaningful only where the deployment runs several organizations."
       },
       sort_order: {
         label: "Sort Order",
-        help: "Display order among sibling organizations. Presentation only."
+        help: "Display order among sibling organizations. Presentation only. Meaningful only where the deployment runs several organizations."
       },
       id: {
         label: "Organization ID"

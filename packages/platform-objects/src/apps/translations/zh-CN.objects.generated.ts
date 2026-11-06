@@ -159,7 +159,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "封禁用户",
-        description: "要封禁该用户吗？封禁后会立即登出，在解除封禁前无法再次登录，其 API 密钥也会被拒绝。解除封禁后这些密钥恢复可用。",
+        description: "要封禁该用户吗？封禁后会立即登出，在解除封禁前无法再次登录，其 API 密钥也会被拒绝，OAuth 访问令牌与令牌续期同样被拒绝。解除封禁后这些密钥恢复可用。",
         successMessage: "用户已封禁",
         params: {
           banReason: {
@@ -565,11 +565,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_organization_id: {
         label: "上级组织",
-        help: "用于汇报 / 分组的上级。不授予任何权限——跨组织的可见性来自成员关系，绝不来自此引用。"
+        help: "用于汇报 / 分组的上级。不授予任何权限——跨组织的可见性来自成员关系，绝不来自此引用。仅在部署运行多个组织时有意义。"
       },
       sort_order: {
         label: "排序",
-        help: "在同级组织中的显示顺序。仅用于展示。"
+        help: "在同级组织中的显示顺序。仅用于展示。仅在部署运行多个组织时有意义。"
       },
       id: {
         label: "组织 ID"

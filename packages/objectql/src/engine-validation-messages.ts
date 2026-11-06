@@ -169,8 +169,10 @@ function packagedRuleLookup(
  *
  * ⛔ The rule is NOT re-implemented here. `resolveBundleLocale`
  * (`@objectstack/spec/system`) is the single negotiation rule the document
- * translators already run — exact → case-insensitive → base language →
- * variant expansion, which is the step that reaches `zh-CN` from `zh` — and
+ * translators already run — `resolveLocaleAmong`'s five steps: exact →
+ * case-insensitive → platform locale table language (`platformLocaleTagOf`,
+ * which reaches `zh-CN` from `zh` and `zh-Hant` from `zh-TW`) → base
+ * language → variant expansion (the first registered variant) — and
  * this asks it the same question about a different set of available locales:
  * the translators' set is the bundle's keys, and the service's set is what
  * `getLocales()` reports it holds. A second rule living here is the defect,

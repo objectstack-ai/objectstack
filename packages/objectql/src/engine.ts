@@ -304,7 +304,6 @@ import {
 import {
   externalPredicateWriteRefusal,
   isExternalDriverFloor,
-  unwrapExternalDriverFloor,
 } from './external-driver-floor.js';
 // [#25522 cut 14] The master-detail landing, the preview's parents and the
 // related reads a validation rule makes; the methods of the same names below
@@ -359,13 +358,11 @@ import {
   DISPATCHABLE_HOOK_EVENTS, ENGINE_DELETE_OPTION_KEYS, ENGINE_FIND_OPTION_KEYS, ENGINE_QUERY_SLOTS,
   ENGINE_UPDATE_OPTION_KEYS, ENGINE_WHERE_SLOTS, ENGINE_WIRE_ONLY_SLOTS, SECURITY_SERVICE_SOURCE_SLOT,
   WRITE_PRECONDITION_OPTION, applyFormulaPlan, applyStoredExpressionsToPatch, assertDispatchableHookEvent,
-  assertHookScopeNotSelfCancelling, assertOrderByIsMaterializable, assertProjectionHasNoDottedPaths,
-  assertValidHookExcludeObjects, assertValidHookObject, assertValidUnscopedMultiWriteFlag, autonumberFieldNames,
-  callerKeySets, callerSuppliedRow, computeStoredExpressions, declaredDatetimeLowering, droppedFieldEvents,
-  foldEngineOptionAliases, formulaPlanEntry, handBackWithheldInsertReadonly, hydrateWriteFormulas,
+  assertOrderByIsMaterializable, assertProjectionHasNoDottedPaths, assertValidHookExcludeObjects,
+  autonumberFieldNames, callerKeySets, callerSuppliedRow, computeStoredExpressions, declaredDatetimeLowering,
+  droppedFieldEvents, foldEngineOptionAliases, formulaPlanEntry, handBackWithheldInsertReadonly, hydrateWriteFormulas,
   insertStaticReadonlySubject, lowerWhereFilterArray, masterIdOf, mergeReadContext,
-  organizationPredicateDeleteRefusal, packageBodyCollectionRefusal, packageBodyObjectAndAppOwnerStampRefusal,
-  packageBodySeedDataRefusal, planFormulaProjection, planStoredExpressions, recomputeAutonumberReaders,
+  organizationPredicateDeleteRefusal, planFormulaProjection, planStoredExpressions, recomputeAutonumberReaders,
   rejectUnknownEngineOptions, replacedStoredExpressionFields, rowsWithoutFormulaWidening, settleBulkStoredExpressions,
   shouldSkipStateMachine, staticReadonlyStoredView, storedExpressionsReading, stripComputedWriteFields,
   undeclaredWriteFieldErrors, updateStaticReadonlySubject, withFileOwnerKey, withholdInsertReadonlyFromHooks,
@@ -812,57 +809,8 @@ export class ObjectQL implements IObjectQLEngine {
     /** Stable name from metadata (set by `bindHooksToEngine`). */
     hookName?: string;
   }): void {
-    // Refuse a scope that is statically decidable as meaningless before
-    // anything is registered or reported. Each face is checked on its own
-    // first, so the combined check below can assume well-formed names.
-    // [#5928] An exclusion face that subtracts nothing (`''`) or everything (`'*'`).
-    assertValidHookExcludeObjects(options?.excludeObjects, event);
-    // [commit 708431313] An allow face that names nothing (`''` → global, `[]`/`['']` → never fires).
-    assertValidHookObject(options?.object, event);
-    // [commit 708431313] Two well-formed faces that cancel out (`'account'` minus `'account'`).
-    assertHookScopeNotSelfCancelling(options?.object, options?.excludeObjects, event);
-    // [#9719/#9974] The unscoped-multi-write flag on an event whose dispatch never reads it.
-    assertValidUnscopedMultiWriteFlag(options?.dispatchUnscopedMultiWrite, event);
-    // [#17713] An event inside the engine's OWN lifecycle namespace that the
-    // engine never dispatches — `beforeCount`, `beforeFindOne` and their four
-    // siblings. #3195 warned and registered anyway; the handler then never ran,
-    // which on a read filter is a guardrail the author believes they armed.
-    // Refused at the door, with the per-seam repair named.
-    assertDispatchableHookEvent(event);
-    // [#3195] Guard against enum-vs-dispatch drift for every OTHER unknown
-    // name: a hook on an event the engine never triggers would register
-    // "successfully" and then silently never fire. Warn loudly rather than
-    // swallow it. Still not a hard reject here — a custom driver/plugin may
-    // dispatch its own events via `triggerHooks`, and outside the engine's own
-    // vocabulary that is the likely reading (#17713 keeps it intact).
-    if (!DISPATCHABLE_HOOK_EVENTS.has(event)) {
-      this.logger.warn(
-        `Hook registered for '${event}', which the engine never dispatches — it will never fire. ` +
-          `Dispatchable events: ${[...DISPATCHABLE_HOOK_EVENTS].join(', ')}. ` +
-          `(Read filtering → RLS/permissions; field masking → field metadata; delete guards → beforeDelete.)`,
-        { event, object: options?.object, hookName: options?.hookName },
-      );
-    }
-    if (!this.hooks.has(event)) {
-        this.hooks.set(event, []);
-    }
-    const entries = this.hooks.get(event)!;
-    entries.push({
-      handler,
-      object: options?.object,
-      excludeObjects: options?.excludeObjects,
-      priority: options?.priority ?? 100,
-      packageId: options?.packageId,
-      dispatchUnscopedMultiWrite: options?.dispatchUnscopedMultiWrite,
-      meta: options?.meta,
-      hookName: options?.hookName,
-    });
-    // Sort by priority (lower runs first)
-    entries.sort((a, b) => a.priority - b.priority);
-    // The exclusion face is reported alongside the allow face: a registration's
-    // scope is BOTH halves (#5928), and a log that printed only `object` would
-    // describe a global hook for an entry that is global-minus-twenty-tables.
-    this.logger.debug('Registered hook', { event, object: options?.object, excludeObjects: options?.excludeObjects, priority: options?.priority ?? 100, totalHandlers: entries.length });
+    // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
+    return HooksAndFunctionsFacet.registerHook.call(hooksAndFunctionsHost.of(this), event, handler, options);
   }
 
   /**
@@ -2308,133 +2256,8 @@ export class ObjectQL implements IObjectQLEngine {
    * `@objectstack/metadata-protocol`), so `'authored'` is not accepted.
    */
   registerApp(registeredBody: any, scope?: ArtifactInstallScope, source: Exclude<InstalledPackageSource, 'authored'> = 'code'): void {
-      // The CONVERTED body, for everything below — the package record, the
-      // live manifest, every item it registers (see {@link convertPackageBodyForward}).
-      // [#23972] Refused before anything registers — see the docblock: an
-      // untyped caller handing this door `'authored'` (or any other value)
-      // would record a row whose origin contradicts the read-only verdict
-      // this door's `manifests` entry produces.
-      if (source !== 'code' && source !== 'marketplace') {
-          throw new TypeError(
-              `[ObjectQL] registerApp: source must be 'code' or 'marketplace'; received ${JSON.stringify(source)}. `
-              + `An authored package is installed through the protocol's installPackage, not registered here.`,
-          );
-      }
-      const manifest = this.convertPackageBodyForward(registeredBody);
-      const id = manifest.id || manifest.name;
-      const namespace = manifest.namespace as string | undefined;
-      // Stamped beside `id` on every item below ({@link stampPackage}), so an
-      // item served from this path tells an upgrade's new item from its old one.
-      const version = manifest.version as string | undefined;
-      // [#28697] The owner-stamp refusal for the objects and apps below, which
-      // file through verbs of their own (steps 2-4), asked before anything of
-      // this body registers. See {@link packageBodyObjectAndAppOwnerStampRefusal}.
-      {
-          const refusal = packageBodyObjectAndAppOwnerStampRefusal(manifest, id, {
-              apps: true,
-              selfAsApp: Boolean(manifest.name && manifest.navigation && !manifest.apps?.length),
-          });
-          if (refusal) throw refusal;
-          // …and each nested plugin's objects and plugin-as-app (step 7, which
-          // registers them under this package after everything above), so a
-          // nested plugin's stamp is refused before this body registers too.
-          // `registerPlugin` asks the same of the plugin it is handed.
-          if (Array.isArray(manifest.plugins)) {
-              for (const plugin of manifest.plugins) {
-                  if (!plugin || typeof plugin !== 'object') continue;
-                  const nested = packageBodyObjectAndAppOwnerStampRefusal(plugin, id, {
-                      apps: false,
-                      selfAsApp: Boolean(plugin.name && plugin.navigation),
-                  });
-                  if (nested) throw nested;
-              }
-          }
-          // [#28697] …and every refusal the collection seam (steps 5 and 7)
-          // and the seed step (step 6) can judge from the body alone, so a
-          // body refused there leaves nothing of itself behind either, and a
-          // refused re-register of an installed id leaves that install as it
-          // was. See {@link packageBodyCollectionRefusal}.
-          const collections = packageBodyCollectionRefusal(manifest, id, 'manifest');
-          if (collections) throw collections;
-          const seed = packageBodySeedDataRefusal(manifest, id);
-          if (seed) throw seed;
-          if (Array.isArray(manifest.plugins)) {
-              for (const plugin of manifest.plugins) {
-                  if (!plugin || typeof plugin !== 'object') continue;
-                  const nested = packageBodyCollectionRefusal(plugin, id, 'nested plugin');
-                  if (nested) throw nested;
-              }
-          }
-      }
-      this.invalidateSummaryIndex(); // new objects may add/change summary fields
-      this.logger.debug('Registering package manifest', { id, namespace });
-
-      // [#28697] What remains can only be refused part-way, by the registry's
-      // own verbs (an object another package owns, a field with no `type`, a
-      // picklist value already added, …). Refused, the registry puts back
-      // exactly the entries this registration wrote: a first install leaves no
-      // package record, object, app, item or namespace of itself, and a
-      // re-register of an installed id (an upgrade) leaves the installed
-      // version serving whole. Whatever sat there before — a tenant's object
-      // or overlay this package layers over (ADR-0029 D9 §6.1), another
-      // package's extension of its objects — reads as it did. Never through
-      // uninstall, which refuses an extended object and drops a tenant's
-      // overlay with its owner (D9.7). See {@link SchemaRegistry.restoringOnRefusal}.
-      this._registry.restoringOnRefusal(() => this.registerPackageBody(manifest, id, namespace, version, source, scope));
-
-      // [#28697] Written only once nothing above threw, so a refused body
-      // leaves none of them. Nothing above reads any of them.
-
-      // Store manifest for defaultDatasource lookup
-      if (id) {
-        this.manifests.set(id, manifest);
-      }
-
-      // Index datasource definitions (ADR-0015) so the write gate can read
-      // schemaMode + external.allowWrites. Manifests may carry `datasources`
-      // as an array or a name-keyed map.
-      if (manifest.datasources) {
-        const dsList = Array.isArray(manifest.datasources)
-          ? manifest.datasources
-          : Object.entries(manifest.datasources).map(([name, def]) => ({ name, ...(def as any) }));
-        for (const ds of dsList) {
-          if (ds?.name) this.registerDatasourceDef(ds);
-        }
-      }
-
-      // Register navigation contributions (ADR-0029 D7) — nav items this
-      // package injects into apps owned by other packages (e.g. a capability
-      // plugin adding its menu into the `setup` app). Merged into the target
-      // app's navigation on read by group id + priority, so registration order
-      // does not matter.
-      if (Array.isArray((manifest as any).navigationContributions) && (manifest as any).navigationContributions.length > 0) {
-          for (const contribution of (manifest as any).navigationContributions) {
-              this._registry.registerAppNavContribution(contribution, id);
-          }
-          this.logger.debug('Registered navigation contributions', {
-              from: id,
-              count: (manifest as any).navigationContributions.length,
-          });
-      }
-
-      // Register contributed kinds (owned by no package, so written last).
-      if (manifest.contributes?.kinds) {
-          this.logger.debug('Registering kinds from manifest', { id, kindCount: manifest.contributes.kinds.length });
-          for (const kind of manifest.contributes.kinds) {
-            this._registry.registerKind(kind);
-            // [commit 10485009a] Name the kind by its declared `id`. `contributes.kinds`
-            // items are `{ id, description? }` (`manifest.zod.ts`; `globs` was
-            // retired unread, #11169) and
-            // `registerKind` keys the item on `id` (`registerItem('kind', kind, 'id')`),
-            // so `id` is BOTH the only identifying field the schema declares and the
-            // exact key the item is stored under — a reader of this line can look the
-            // item straight back up. The previous `kind.name || kind.type` reached for
-            // two fields NEITHER shape declares, so every conforming manifest logged
-            // `kind: undefined`. Do not re-add those as a fallback: reading undeclared
-            // aliases here is the consumer-side tolerance Prime Directive #12 rejects.
-            this.logger.debug('Registered Kind', { kind: kind.id, from: id });
-          }
-      }
+    // [#29986 codemod] The body moved to `engine-registration.ts` (see `RegistrationHost`).
+    return RegistrationFacet.registerApp.call(registrationHost.of(this), registeredBody, scope, source);
   }
 
   private registerPackageBody(
@@ -2509,50 +2332,8 @@ export class ObjectQL implements IObjectQLEngine {
    *    so it is loud too rather than folded into the quiet path.
    */
   registerDriver(driver: IDataDriver, isDefault: boolean = false): void {
-    const existing = this.drivers.get(driver.name);
-    if (existing) {
-      // [#27277] The entry may be the floored instance of this very driver.
-      if (unwrapExternalDriverFloor(existing) !== unwrapExternalDriverFloor(driver)) {
-        this.logger.warn(
-          'Driver name collision — KEEPING the already-registered driver and DISCARDING the one just supplied. ' +
-            'Two different driver instances claim one name, so whatever configuration the discarded instance carried ' +
-            '(connection string, pool, capabilities) is NOT in force, while queries routed to this name keep working ' +
-            'against the one that was kept. Fix the caller: give the second datasource a name of its own.',
-          {
-            driverName: driver.name,
-            keptVersion: existing.version,
-            discardedVersion: driver.version,
-          },
-        );
-      } else if (isDefault && this.defaultDriver !== driver.name) {
-        this.logger.warn(
-          'Driver re-registered as DEFAULT but another driver already holds that role — the request is IGNORED and ' +
-            'the existing default stands. Unregister the current default first if the switch was intended.',
-          { driverName: driver.name, currentDefault: this.defaultDriver },
-        );
-      } else {
-        // The by-design round trip documented above — expected on every boot,
-        // so it must not reach the boot-diagnostics warning list.
-        this.logger.debug('Driver already registered — re-registering the same instance is a no-op', {
-          driverName: driver.name,
-        });
-      }
-      return;
-    }
-
-    this.drivers.set(driver.name, driver);
-    this.supplyFileColumnsMovedResolver(driver);
-    this.supplyTenantKeyCertifiedResolver(driver);
-    this.applyExternalDriverFloor(driver.name);
-    this.logger.info('Registered driver', {
-      driverName: driver.name,
-      version: driver.version
-    });
-
-    if (isDefault || this.drivers.size === 1) {
-      this.defaultDriver = driver.name;
-      this.logger.info('Set default driver', { driverName: driver.name });
-    }
+    // [#29986 codemod] The body moved to `engine-registration.ts` (see `RegistrationHost`).
+    return RegistrationFacet.registerDriver.call(registrationHost.of(this), driver, isDefault);
   }
 
   private supplyFileColumnsMovedResolver(driver: IDataDriver): void {
@@ -6189,11 +5970,12 @@ export class ObjectQL implements IObjectQLEngine {
       // An engine-owned producer like the two above, so the post-hook `check`
       // (judged above, on the row as the hooks left it) does not see the owner
       // a rule picks — that owner is the platform's routing, not the caller's
-      // steering. Free for every object no rule names (`rulesFor` is a registry
-      // read).
+      // steering. Free for every object no rule can name (`mayRoute` is a
+      // registry read: a declared rule names the object, or organizations can
+      // author rules and the object carries the queue column they route by).
       {
         const evaluator = this.assignment();
-        if (evaluator.rulesFor(object).length > 0) {
+        if (evaluator.mayRoute(object)) {
           const activeOrg = opCtx.context?.tenantId ? String(opCtx.context.tenantId) : null;
           const candidates = [];
           for (let i = 0; i < rows.length; i++) {
@@ -10560,15 +10342,22 @@ export class ObjectQL implements IObjectQLEngine {
     registrationHost.install((engine) => ({
       get _registry() { return engine._registry; },
       applyExternalDriverFloor: (...a) => engine.applyExternalDriverFloor(...a),
+      convertPackageBodyForward: (...a) => engine.convertPackageBodyForward(...a),
       get datasourceDefs() { return engine.datasourceDefs; },
       get defaultDriver() { return engine.defaultDriver; },
       set defaultDriver(v) { engine.defaultDriver = v; },
       get drivers() { return engine.drivers; },
       haveFileColumnsMoved: (...a) => engine.haveFileColumnsMoved(...a),
+      invalidateSummaryIndex: (...a) => engine.invalidateSummaryIndex(...a),
       get logger() { return engine.logger; },
+      get manifests() { return engine.manifests; },
+      registerDatasourceDef: (...a) => engine.registerDatasourceDef(...a),
       registerMetadataCollections: (...a) => engine.registerMetadataCollections(...a),
+      registerPackageBody: (...a) => engine.registerPackageBody(...a),
       registerPlugin: (...a) => engine.registerPlugin(...a),
       resolveNavObjectNames: (...a) => engine.resolveNavObjectNames(...a),
+      supplyFileColumnsMovedResolver: (...a) => engine.supplyFileColumnsMovedResolver(...a),
+      supplyTenantKeyCertifiedResolver: (...a) => engine.supplyTenantKeyCertifiedResolver(...a),
       get unavailableDatasources() { return engine.unavailableDatasources; },
     }));
     secretsAndRoutingHost.install((engine) => ({

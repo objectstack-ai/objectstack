@@ -30,7 +30,7 @@ revenue:
   # - Store a bare number, never a currency code beside it: it shows in
   #   the tenant default currency (plain if none is set), one fixed on the
   #   field, or each record's code in a declared sibling field, at that
-  #   currency's ISO 4217 decimal places
+  #   currency's CLDR fraction digits
   # - UI shows currency symbol
   # - Validate numeric precision
   # - Format for display ($1,234.56)
@@ -340,7 +340,7 @@ been removed from the spec.
   record's code is judged by its field's `valueDomain: iso_4217_currency`, so
   only ISO 4217 codes pass there
 - No decimal-places setting: an amount's decimal places are its currency's
-  ISO 4217 minor unit. The field-level `precision` is the amount's **total**
+  CLDR fraction digits (not ISO 4217's minor units). The field-level `precision` is the amount's **total**
   digit count (a DECIMAL(18,2) amount declares `precision: 18`), refused on
   write when exceeded, with the amount's written decimals counted in it
 

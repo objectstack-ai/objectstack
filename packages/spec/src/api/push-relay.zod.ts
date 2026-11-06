@@ -35,10 +35,12 @@ import { PushDeliveryDataSchema } from './push-delivery.zod';
  * from the server after the tap, by its id. To the relay the payload is
  * opaque: it puts it in the vendor message unchanged.
  *
- * **Declared ahead of its producer.** No push channel delivers yet, so
- * nothing sends this request today; each schema here carries a
- * `[PLANNED — not yet served]` marker in its `.describe()` until the push
- * channel ships.
+ * **Served.** `@objectstack/service-push` sends this request: its relay
+ * transport (`RelayPushSender`) builds one delivery per device token, parses
+ * the request with {@link PushRelayRequestSchema} before it leaves the
+ * server, and reads the answer with {@link PushRelayResponseSchema} and
+ * {@link PushRelayErrorResponseSchema}. The relay that receives it is served
+ * by the cloud's control plane (objectstack-ai/cloud#3519).
  */
 
 /** Guidance for a notification-content key written into the ID-only payload. */
@@ -56,6 +58,27 @@ export const PushRelayPrioritySchema = z.enum(['high', 'normal'])
   .describe('Vendor delivery priority: high delivers at once and wakes the device (APNs 10, FCM high); normal may wait for the device power state (APNs 5, FCM normal)');
 export type PushRelayPriority = z.input<typeof PushRelayPrioritySchema>;
 
+/**
+ * The push delivery data as the relay payload carries it: the members of
+ * `PushDeliveryDataSchema`, judged strictly. The relay forwards the payload
+ * unchanged, so a key the data does not declare (a notification `title`, say)
+ * is refused here rather than stripped: a stripped key would read as carried.
+ */
+const PushRelayPayloadDataSchema = lazySchema(() => strictObject(
+  {
+    surface: 'the push relay payload data',
+    history: 'Judged strictly from the first relay sender on; before it, no relay payload was produced.',
+    guidance: {
+      title: PAYLOAD_CONTENT_GUIDANCE,
+      body: PAYLOAD_CONTENT_GUIDANCE,
+      subtitle: PAYLOAD_CONTENT_GUIDANCE,
+      message: PAYLOAD_CONTENT_GUIDANCE,
+      content: PAYLOAD_CONTENT_GUIDANCE,
+    },
+  },
+  PushDeliveryDataSchema.shape,
+));
+
 /** The payload of one delivery: the push delivery data and one generic visible line. */
 export const PushRelayPayloadSchema = lazySchema(() => strictObject(
   {
@@ -70,16 +93,16 @@ export const PushRelayPayloadSchema = lazySchema(() => strictObject(
     },
   },
   {
-    data: PushDeliveryDataSchema.describe(
-      'The push delivery data: the notification id, its same-server route and the origin of the sending server. '
-      + 'The relay puts it in the vendor message unchanged',
+    data: PushRelayPayloadDataSchema.describe(
+      'The push delivery data: the notification id, its same-server route and the origin of the sending server, and '
+      + 'no other key. The relay puts it in the vendor message unchanged',
     ),
     text: z.string().min(1).describe(
-      'One generic visible line the device shows (for example "You have a new notification"), in the device locale. '
-      + 'Never the notification title or body',
+      'One generic visible line the device shows (for example "You have a new notification"), in the recipient\'s '
+      + 'language. Never the notification title or body',
     ),
   },
-).describe('[PLANNED — not yet served] The ID-only payload of one relay delivery: the push delivery data and one generic visible line, with no title or body. Opaque to the relay'));
+).describe('The ID-only payload of one relay delivery: the push delivery data and one generic visible line, with no title or body. Opaque to the relay'));
 export type PushRelayPayload = z.input<typeof PushRelayPayloadSchema>;
 
 /** One delivery: a device token, its vendor, the payload and the priority. */
@@ -94,7 +117,7 @@ export const PushRelayDeliverySchema = lazySchema(() => strictObject(
     payload: PushRelayPayloadSchema.describe('The ID-only payload'),
     priority: PushRelayPrioritySchema.describe('Vendor delivery priority'),
   },
-).describe('[PLANNED — not yet served] One relay delivery: a device token, its vendor, the ID-only payload and the delivery priority'));
+).describe('One relay delivery: a device token, its vendor, the ID-only payload and the delivery priority'));
 export type PushRelayDelivery = z.input<typeof PushRelayDeliverySchema>;
 
 /**
@@ -111,7 +134,7 @@ export const PushRelayRequestSchema = lazySchema(() => strictObject(
       'The deliveries, one per device token. The response answers each one, in the same order',
     ),
   },
-).describe('[PLANNED — not yet served] The request a server sends the hosted push relay: one delivery per device token. Authenticated by the server cloud binding credential as its bearer token'));
+).describe('The request a server sends the hosted push relay: one delivery per device token. Authenticated by the server cloud binding credential as its bearer token'));
 export type PushRelayRequest = z.input<typeof PushRelayRequestSchema>;
 
 /**
@@ -132,7 +155,7 @@ export type PushRelayResultStatus = z.input<typeof PushRelayResultStatusSchema>;
 export const PushRelayResultSchema = lazySchema(() => z.object({
   token: z.string().min(1).describe('The device token of the delivery this result answers'),
   status: PushRelayResultStatusSchema.describe('What happened to the delivery'),
-}).describe('[PLANNED — not yet served] The relay answer for one delivery: its device token and its outcome'));
+}).describe('The relay answer for one delivery: its device token and its outcome'));
 export type PushRelayResult = z.input<typeof PushRelayResultSchema>;
 
 /**
@@ -144,7 +167,7 @@ export const PushRelayResponseSchema = lazySchema(() => z.object({
   results: z.array(PushRelayResultSchema).describe(
     'One result per delivery, in the order of the request deliveries',
   ),
-}).describe('[PLANNED — not yet served] The push relay answer: one result per delivery token, ok, invalid or retry'));
+}).describe('The push relay answer: one result per delivery token, ok, invalid or retry'));
 export type PushRelayResponse = z.input<typeof PushRelayResponseSchema>;
 
 /**
@@ -180,6 +203,7 @@ function rateLimitError() {
   return EnhancedApiErrorSchema.extend({
     code: z.literal('RATE_LIMIT_EXCEEDED').describe('The server sent the relay too many requests'),
     httpStatus: z.literal(429).describe('HTTP status code'),
+    retryable: z.literal(true).default(true).describe('Always true: the same request succeeds once retryAfterSeconds has passed'),
     retryAfterSeconds: z.number().int().positive().describe('Seconds to wait before sending again'),
     helpText: z.string().min(1).describe('The next step: send again after retryAfterSeconds'),
   });
@@ -210,7 +234,7 @@ export const PushRelayErrorSchema = lazySchema(() => z.discriminatedUnion('code'
   unauthenticatedError(),
   rateLimitError(),
   quotaError(),
-]).describe('[PLANNED — not yet served] A push relay error: UNAUTHENTICATED (401, bad or revoked binding), RATE_LIMIT_EXCEEDED or QUOTA_EXCEEDED (429), each with its next step in helpText'));
+]).describe('A push relay error: UNAUTHENTICATED (401, bad or revoked binding), RATE_LIMIT_EXCEEDED or QUOTA_EXCEEDED (429), each with its next step in helpText'));
 export type PushRelayError = z.input<typeof PushRelayErrorSchema>;
 /** Post-parse shape of {@link PushRelayError} — defaults applied (ADR-0122). */
 export type PushRelayErrorParsed = z.infer<typeof PushRelayErrorSchema>;
@@ -218,7 +242,7 @@ export type PushRelayErrorParsed = z.infer<typeof PushRelayErrorSchema>;
 /** The relay's error response: the house `ErrorResponseSchema` envelope around a {@link PushRelayErrorSchema}. */
 export const PushRelayErrorResponseSchema = lazySchema(() => ErrorResponseSchema.extend({
   error: PushRelayErrorSchema.describe('Error details'),
-}).describe('[PLANNED — not yet served] The push relay error response: the house error envelope, for 401 (bad or revoked binding) and 429 (rate limit or quota)'));
+}).describe('The push relay error response: the house error envelope, for 401 (bad or revoked binding) and 429 (rate limit or quota)'));
 export type PushRelayErrorResponse = z.input<typeof PushRelayErrorResponseSchema>;
 /** Post-parse shape of {@link PushRelayErrorResponse} — defaults applied (ADR-0122). */
 export type PushRelayErrorResponseParsed = z.infer<typeof PushRelayErrorResponseSchema>;

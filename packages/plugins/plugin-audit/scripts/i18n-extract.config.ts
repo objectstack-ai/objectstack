@@ -34,6 +34,12 @@
  * recognised flag spelling out of this whole comment, so a second spelling
  * would keep the opt-in switched on after someone deleted it from the command
  * block — the one place that decides.
+ *
+ * `pages` declares the record page this plugin ships (`sys_audit_log_detail`).
+ * The command above writes the objects sub-tree only, so the page's one bundle
+ * key, its page-level `label`, is HAND-AUTHORED in `src/translations/pages.ts`
+ * and rides in the `translations` baseline below. Declaring the page here is
+ * what puts its label in the coverage ratchet's population.
  */
 
 import { defineStack, type ObjectStackDefinition } from '@objectstack/spec';
@@ -52,6 +58,8 @@ import { ptBRObjects } from '../src/translations/pt-BR.objects.generated.js';
 import { ruObjects } from '../src/translations/ru.objects.generated.js';
 import { deObjects } from '../src/translations/de.objects.generated.js';
 import { koObjects } from '../src/translations/ko.objects.generated.js';
+import { SysAuditLogDetailPage } from '../src/sys-audit-log.page.js';
+import { auditPageTranslations } from '../src/translations/pages.js';
 
 /**
  * The annotation is load-bearing, not decoration (#10868). `defineStack`
@@ -69,18 +77,19 @@ import { koObjects } from '../src/translations/ko.objects.generated.js';
  */
 const config: ObjectStackDefinition = defineStack({
   objects: [SysAuditLog, SysActivity, SysComment, SysCommentReaction] as any,
+  pages: [SysAuditLogDetailPage],
   translations: [
-    { en: { objects: enObjects } },
-    { 'zh-CN': { objects: zhCNObjects } },
-    { 'ja-JP': { objects: jaJPObjects } },
-    { 'es-ES': { objects: esESObjects } },
-    { 'zh-Hant': { objects: zhHantObjects } },
-    { 'ar': { objects: arObjects } },
-    { 'fr': { objects: frObjects } },
-    { 'pt-BR': { objects: ptBRObjects } },
-    { 'ru': { objects: ruObjects } },
-    { 'de': { objects: deObjects } },
-    { 'ko': { objects: koObjects } },
+    { en: { objects: enObjects, pages: auditPageTranslations.en } },
+    { 'zh-CN': { objects: zhCNObjects, pages: auditPageTranslations['zh-CN'] } },
+    { 'ja-JP': { objects: jaJPObjects, pages: auditPageTranslations['ja-JP'] } },
+    { 'es-ES': { objects: esESObjects, pages: auditPageTranslations['es-ES'] } },
+    { 'zh-Hant': { objects: zhHantObjects, pages: auditPageTranslations['zh-Hant'] } },
+    { 'ar': { objects: arObjects, pages: auditPageTranslations['ar'] } },
+    { 'fr': { objects: frObjects, pages: auditPageTranslations['fr'] } },
+    { 'pt-BR': { objects: ptBRObjects, pages: auditPageTranslations['pt-BR'] } },
+    { 'ru': { objects: ruObjects, pages: auditPageTranslations['ru'] } },
+    { 'de': { objects: deObjects, pages: auditPageTranslations['de'] } },
+    { 'ko': { objects: koObjects, pages: auditPageTranslations['ko'] } },
   ],
 });
 

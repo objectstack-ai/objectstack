@@ -487,7 +487,7 @@ const PLAIN_AMOUNT_DIGITS = 2;
  * With a currency, the amount is `Intl`'s own currency format through
  * `formatDisplayNumber`, the formatter the line grid's currency cells use. So
  * the sign sits where the locale puts it (`$1,234.50`, `1.234,50 $` in de-DE)
- * and the width is the currency's ISO 4217 minor unit, the default `Intl`
+ * and the width is the currency's CLDR fraction digits, the default `Intl`
  * applies to `style: 'currency'`: 2 for USD, 0 for JPY, 3 for KWD. A
  * currency's decimal places are the currency's, not a setting.
  *

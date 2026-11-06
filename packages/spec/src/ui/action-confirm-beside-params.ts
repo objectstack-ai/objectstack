@@ -2,23 +2,28 @@
 
 /**
  * `confirmText` beside a non-empty `params`: TWO sequential dialogs for ONE
- * decision. ONE predicate and ONE refusal, read by the three doors that refuse
+ * decision. ONE predicate and ONE refusal, read by the five doors that refuse
  * the pair: `ActionSchema` and `InlineActionSchema` (`action.zod.ts`), and the
- * page `action:button` row, `ActionButtonPropsSchema` (`component.zod.ts`).
- * Pinned in `action-confirm-params-guard.test.ts`, which asserts the three
+ * page action rows in `component.zod.ts` — `action:button`
+ * (`ActionButtonPropsSchema`), `action:icon` (`ActionIconPropsSchema`) and each
+ * `action:group` / `action:menu` member. Pinned in
+ * `action-confirm-params-guard.test.ts`, which asserts the five doors'
  * messages equal.
  *
  * The console action runner awaits the confirm, THEN the param prompt (objectui
  * `packages/core/src/actions/ActionRunner.ts`), so the first dialog already
  * reads as "the action ran" while nothing has been sent. The `element:button`
  * renderer hands an inline action to that same runner, and the `action:button`
- * block forwards its row's `confirmText` and an array `params` (as
- * `actionParams`) to it too, so the pair opens the same two dialogs on all
- * three doors.
+ * and `action:icon` blocks forward their row's `confirmText` and an array
+ * `params` (as `actionParams`) to it too, as the `action:group` /
+ * `action:menu` containers do for each member, so the pair opens the same two
+ * dialogs on all five doors.
  *
  * An empty `params` collects nothing and opens no second dialog, so it is not
- * the pair. Nor is an object-form `params`: on an `action:button` row an object
- * is the static parameter values, which open no dialog, and the
+ * the pair. Nor is an object-form `params`: on an `action:button` /
+ * `action:icon` row an object is the static parameter values, and on a
+ * `type: 'api'` container member the request payload; neither opens a
+ * dialog, and the
  * `Array.isArray` read below leaves it alone.
  *
  * Lives in its own module, not in `action.zod.ts`, so `component.zod.ts` can
