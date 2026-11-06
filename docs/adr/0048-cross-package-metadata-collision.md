@@ -725,22 +725,23 @@ lets the enterprise-side implementation be scheduled against the opening date.
 > changes.** Phase A2, the publish-time gate (§A.6), stays bound to this
 > precondition: it lands before third-party publishing opens, and the opening
 > waits for it. While publishing is first-party only, first-party namespaces
-> are reserved at switch-on by D2 and D4 — the back-fill awards each published
-> namespace to the publisher of its earliest published version, and the
-> reservation is held by that publisher — so no separate official reserved
+> are reserved at switch-on by D2 and D4 (the D3 whitelist aside, which is
+> never reserved and stays first-party-tier only): the back-fill awards each
+> published namespace to the publisher of its earliest published version, and
+> the reservation is held by that publisher. So no separate official reserved
 > list is needed. Phase A1 is landed: PR #6864 (2026-08-09) carries
 > `namespace` on the publish payload in this repository, read off the
-> artifact's `manifest.namespace`, and objectstack-ai/cloud#1927 is its
-> cloud-side half.
+> artifact's `manifest.namespace`, with its cloud-side receiver in
+> objectstack-ai/cloud#1927 (per #30814).
 
 ### A.6 Phasing
 
 Status legend as in §5.
 
-- **[proposed] Phase A1 — carry the namespace to publish.** `namespace` on
+- **[done] Phase A1 — carry the namespace to publish.** `namespace` on
   `PackageSchema` / `CreatePackageRequestSchema`; `objectstack package publish`
   reads it off the artifact manifest. Open-side, this repo. Prerequisite for
-  everything below.
+  everything below. Landed by PR #6864 (2026-08-09).
 - **[proposed] Phase A2 — the publish-time gate (minimal version A).** §A.2's
   algorithm in the marketplace review pipeline, plus the reservation store.
   Enterprise-side. **This is the item bound by §A.5.**
