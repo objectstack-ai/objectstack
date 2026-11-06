@@ -1148,6 +1148,7 @@ const ko = {
   detail: {
     editInlineHint: "더블클릭하여 편집",
     systemActor: "시스템",
+    impersonatedActor: "{{admin}}님이 {{user}}님 대신 작업",
     unknownUser: "알 수 없음",
     back: "뒤로",
     edit: "편집",

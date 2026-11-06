@@ -428,6 +428,10 @@ export async function returnTypePrecisionPins12038(): Promise<void> {
     // which this package does not depend on. Pinned so a well-meaning sweep
     // does not "fix" it against the ruling.
     expectTypeOf(await client.meta.migrateStored()).toBeAny();
+    // `migrateRecordCurrencyCodes` is unbound for the same reason (its report
+    // type lives in `@objectstack/objectql`), but answers `unknown`, not `any`:
+    // the caller narrows, and `exported-any-returns.json` stays shrink-only.
+    expectTypeOf(await client.meta.migrateRecordCurrencyCodes({ object: 'deal', field: 'amount', code: 'USD' })).toEqualTypeOf<unknown>();
 
     // ── the packages.* eight ──────────────────────────────────────────────
     expectTypeOf(await client.packages.publish('com.acme.crm')).toEqualTypeOf<PackagePublishResult>();

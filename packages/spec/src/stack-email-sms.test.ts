@@ -250,8 +250,9 @@ describe('compose — an identical configuration passes, a different one is name
 // The top-level `push` key is `PushServiceConfigSchema` itself, read by
 // `resolvePushCapabilityArg` (`@objectstack/service-push`) when the stack
 // declares `requires: ['push']`. Authoring accepts both transports and the
-// absence: refusing the not-yet-served relay is the boot's job, which names the
-// missing sender (pinned in the CLI and in `@objectstack/verify`). What
+// absence: refusing the relay where it can never deliver (a deployment that
+// declared no control plane) is the boot's job (pinned in the CLI and in
+// `@objectstack/verify`). What
 // authoring refuses is an inline secret, by key name or inside a
 // `credentialRef`, because the stack is compiled into the published artifact.
 

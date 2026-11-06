@@ -177,9 +177,9 @@ describe('PushRelayErrorResponseSchema', () => {
   });
 });
 
-// Declared ahead of its producer (ADR-0049): no push channel sends this
-// request yet, and each schema says so in its description.
-describe('the push relay wire shape is declared, not yet served', () => {
+// Served (#29920): `@objectstack/service-push` sends this request, so no
+// schema here carries a PLANNED marker any more.
+describe('the push relay wire shape is served', () => {
   it.each([
     ['PushRelayPayloadSchema', PushRelayPayloadSchema],
     ['PushRelayDeliverySchema', PushRelayDeliverySchema],
@@ -188,7 +188,32 @@ describe('the push relay wire shape is declared, not yet served', () => {
     ['PushRelayResponseSchema', PushRelayResponseSchema],
     ['PushRelayErrorSchema', PushRelayErrorSchema],
     ['PushRelayErrorResponseSchema', PushRelayErrorResponseSchema],
-  ] as const)('%s carries the PLANNED marker', (_name, schema) => {
-    expect(schema.description).toMatch(/^\[PLANNED — /);
+  ] as const)('%s carries no PLANNED marker', (_name, schema) => {
+    expect(schema.description).not.toMatch(/PLANNED/);
+  });
+});
+
+// The two carried-in narrowings from the wire's contract review: the payload
+// data is judged strictly (a content key is refused, never stripped), and a
+// rate limit is always retryable.
+describe('the push relay wire narrows where the review asked', () => {
+  it('refuses a key the delivery data does not declare, with the ID-only guidance', () => {
+    const verdict = PushRelayPayloadSchema.safeParse({ data: { notificationId: 'ntf_1', title: 'Deal won' }, text: 'You have a new notification' });
+    expect(verdict.success).toBe(false);
+    expect(verdict.error!.issues[0]!.path).toEqual(['data']);
+    expect(verdict.error!.issues[0]!.message).toMatch(/Unrecognized key.*`title`[\s\S]*ID-only/);
+  });
+
+  it('keeps every declared delivery data member', () => {
+    const data = { notificationId: 'ntf_1', route: '/opportunity/1', origin: 'https://crm.example.com' };
+    expect(PushRelayPayloadSchema.parse({ data, text: 'x' }).data).toEqual(data);
+  });
+
+  it('reads a RATE_LIMIT_EXCEEDED answer as retryable, and refuses one that says it is not', () => {
+    const limit = { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many', httpStatus: 429, retryAfterSeconds: 5, helpText: 'Wait' };
+    expect(PushRelayErrorSchema.parse(limit).retryable).toBe(true);
+    expect(PushRelayErrorSchema.safeParse({ ...limit, retryable: false }).success).toBe(false);
+    const quota = { code: 'QUOTA_EXCEEDED', message: 'Quota', httpStatus: 429, helpText: 'Raise the plan' };
+    expect(PushRelayErrorSchema.parse(quota).retryable).toBe(false);
   });
 });

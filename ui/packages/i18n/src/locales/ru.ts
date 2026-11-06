@@ -1210,6 +1210,7 @@ const ru = {
   detail: {
     editInlineHint: "Дважды щёлкните для редактирования",
     systemActor: "Система",
+    impersonatedActor: "{{admin}} от имени {{user}}",
     unknownUser: "Неизвестно",
     created: "Создано",
     updated: "Обновлено",

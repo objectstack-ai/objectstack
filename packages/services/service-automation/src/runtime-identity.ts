@@ -101,6 +101,14 @@ export interface RunIdentityContext {
    * state that run itself opened (the approvals record lock).
    */
   flowRunId?: string;
+  /**
+   * The administrator who made the write that started this run from an
+   * impersonation session ({@link AutomationContext.impersonatedBy}), carried
+   * as the kernel `ExecutionContext.impersonatedBy` so the audit writer names
+   * them on the run's writes. Attribution only, like {@link flowRunId}: it
+   * neither widens nor narrows what the run may touch.
+   */
+  impersonatedBy?: string;
 }
 
 /**
@@ -330,6 +338,13 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
   // The starter's language rides into every write, on both arms — see
   // RunDataContext.locale.
   const locale = typeof context?.locale === 'string' && context.locale.length > 0 ? context.locale : undefined;
+  // The administrator at the keyboard of the impersonation session whose write
+  // started this run, onto every write the run makes, on both arms — see
+  // RunIdentityContext.impersonatedBy.
+  const impersonatedBy =
+    typeof context?.impersonatedBy === 'string' && context.impersonatedBy.trim()
+      ? context.impersonatedBy.trim()
+      : undefined;
   if (context?.runAs === 'system') {
     // Name the flow as the acting service principal (`svc:flow:<name>`,
     // ADR-0014 D2) — the audit writer falls back to `session.actor` when
@@ -385,6 +400,7 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
       ...(context.userId ? {} : { positions: [], permissions: [] }),
       ...(flowRunId ? { flowRunId } : {}),
       ...(locale ? { locale } : {}),
+      ...(impersonatedBy ? { impersonatedBy } : {}),
     });
   }
   if (!context?.userId) {
@@ -419,6 +435,7 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
   if (context.tenantId) out.tenantId = context.tenantId;
   if (flowRunId) out.flowRunId = flowRunId;
   if (locale) out.locale = locale;
+  if (impersonatedBy) out.impersonatedBy = impersonatedBy;
   return out;
 }
 
