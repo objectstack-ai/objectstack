@@ -148,6 +148,21 @@ const ja = {
       unmanagedSuccess: "「{{name}}」の v{{version}} を、このランタイム自身のメタデータとしてベース {{base}} にコピーしました。コピーは編集でき、アップグレードは受け取りません。",
       unmanagedStrippedLocks: "パッケージはこれらの項目をロックしていました。コピーは編集可能なため、ロックはコピーされていません：",
       unmanagedIgnored: "このランタイムはアンマネージドインストールに対応していないため、「{{name}}」はコピーではなくマネージド（コードとして登録）でインストールされました。ランタイムをアップグレードしてから、パッケージをアンインストールし、アンマネージドコピーとして再度インストールしてください。",
+      // objectstack#30325 — the confirm in front of a local Install: what the
+      // install adds, read from the manifest it installs (MarketplacePackagePage).
+      preview: {
+        title: "{{name}} をインストールしますか？",
+        reinstallTitle: "{{name}} を再インストールしますか？",
+        intro: "インストールすると、このランタイムに次のものが追加されます。",
+        reading: "このパッケージが追加する内容を読み込んでいます…",
+        unreadable: "このパッケージが追加する内容をインストール前に読み取れませんでした。インストール結果に、読み込まれた内容が表示されます。",
+        objects: "オブジェクト",
+        permissionSets: "権限セット",
+        sampleRecords: "サンプルレコード",
+        atMost: "最大 {{count}}",
+        sampleNote: "サンプルレコードはアプリと一緒に読み込まれます。インストール後、このページから削除できます。",
+        suggestsEveryone: "インストール後、サインイン済みの全ユーザー（Everyone ポジション）に「{{set}}」を付与することが提案されます。承認するまで何も付与されません。",
+      },
     },
     // objectui#12146 — the install dialog opened as an UPDATE of the copy
     // this environment holds (MarketplacePackagePage).

@@ -18,6 +18,7 @@ import { ObjectListViewSchema } from '../ui/view.zod';
  */
 import { EvaluatedExpressionInputSchema, TemplateExpressionInputSchema, type EvaluatedExpression, type EvaluatedExpressionInput } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { PUBLIC_AUTH_FEATURE_NAMES, lowerRequiresFeature } from '../kernel/public-auth-features';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { closedObject, strictObject } from '../shared/strict-object';
 import { ProtectionSchema } from '../shared/protection.zod';
@@ -1290,6 +1291,38 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
   ).meta({ title: 'Visible When' }),
 
   /**
+   * Declarative capability gate — the field-group twin of the action-level
+   * `requiresFeature` (`ui/action.zod.ts`). Names a deployment feature flag of
+   * `PUBLIC_AUTH_FEATURES` (`@objectstack/spec/kernel`), the same vocabulary
+   * actions use, so a flag outside it is refused at parse. Lowered at parse
+   * time into this group's `visibleWhen` by `lowerRequiresFeature` — the same
+   * gate an action gets (`features.multiOrgEnabled != false` for a default-on
+   * flag, `== true` for an opt-in one) — and stripped from the output, so a
+   * consumer only ever sees the canonical `visibleWhen`.
+   *
+   * Composition with an authored `visibleWhen`: AND, the author's predicate
+   * first and the gate last — `(<author predicate>) && <gate>` — so the group
+   * shows only where both hold. A non-CEL `visibleWhen` refuses the pair;
+   * write the combined predicate by hand.
+   *
+   * Both renderers bind the host's `features` root when they evaluate a
+   * group's `visibleWhen` (the form's section gate and the record page's
+   * `record:details`), so the lowered gate is enforced on both. Like every
+   * field-group predicate it is presentation only: the fields stay readable
+   * through the API.
+   *
+   * Fault direction: this slot is fail-closed, an action's `visible` is
+   * fail-soft. A `features` scope that does not carry the flag (the console's
+   * `{}` until `/auth/config` resolves, or for good if that fetch fails) makes
+   * the gate fault rather than answer, so the group is HIDDEN there even for a
+   * default-on flag, where the same gate on an action would show it. The group
+   * appears once the host publishes the flag.
+   */
+  requiresFeature: z.enum(PUBLIC_AUTH_FEATURE_NAMES).optional().describe(
+    "Deployment feature flag gating this group, from the same set an action's `requiresFeature` names (e.g. 'multiOrgEnabled'). Lowered at parse time into the group's `visibleWhen` (AND-composed after an authored `visibleWhen`) and stripped from the output; the whole group is hidden where the flag is off. Presentation only: the fields stay readable through the API.",
+  ).meta({ title: 'Requires Feature' }),
+
+  /**
    * [ADR-0085] Collapse behaviour of the group's rendered section, on every
    * surface (form, detail, drawer). One enum, three valid states — replaces
    * the old `defaultExpanded` flag AND the UI-dialect `collapsible`/`collapsed`
@@ -1310,7 +1343,9 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
   collapsible: z.boolean().optional().describe("[DEPRECATED → collapse] Boolean pair with `collapsed`; use the `collapse` enum.").meta({ title: 'Collapsible' }),
   /** @deprecated [ADR-0085 → `collapse`] UI-dialect alias (pair with `collapsible`); mapped onto `collapse` at parse. */
   collapsed: z.boolean().optional().describe("[DEPRECATED → collapse] true → 'collapsed' (collapsible, starts closed) on its own — it needs no `collapsible` and outranks `collapsible: false`; false → 'none', or 'expanded' beside `collapsible: true`. Use the `collapse` enum.").meta({ title: 'Collapsed' }),
-}));
+  // `requiresFeature` → `visibleWhen`, the action precedent's lowering with the
+  // group's slot name; the key never reaches the output.
+}).transform((group, ctx) => lowerRequiresFeature(group, ctx, 'visibleWhen')));
 
 export type ObjectFieldGroup = z.input<typeof ObjectFieldGroupSchema>;
 /** Post-parse shape of {@link ObjectFieldGroup} — defaults applied, transforms run (ADR-0122). */
@@ -2380,6 +2415,85 @@ function refuseDishonestLookupAutofill(
         return;
       }
       seen.add(target);
+    });
+  }
+}
+
+/** The field-key grammar (`FieldSchema.name`, `FieldNameKeySchema`). */
+const FIELD_KEY_GRAMMAR = /^[a-z_][a-z0-9_]*$/;
+
+/**
+ * [epic cloud#3652 ruling D3 「写进清单 renamedFrom」, under Q3
+ * 「默认拒绝，需显式映射（推荐）」] A field's `renamedFrom` lists the earlier
+ * keys of THAT field, so a package upgrade can carry the old column's data to
+ * it. Each entry must say one unambiguous thing about this object's history,
+ * which only the whole `fields` map can judge. Refused, one located issue per
+ * offending entry at `['fields', <field>, 'renamedFrom', <i>]`, naming the
+ * object, the field and the old key, when the entry:
+ *
+ *  - is the field's own key (a field is not renamed from itself);
+ *  - repeats an earlier entry of the same list;
+ *  - is a key another field of this object still declares (the old name is
+ *    still in use, so it cannot have been renamed away);
+ *  - is an old key an earlier field of this object already claims (two fields
+ *    cannot both inherit one column) — reported on the later claimant, naming
+ *    the first.
+ *
+ * Deliberately minimal (the card's list): the field-key grammar is judged by
+ * `FieldSchema` itself, and entries failing it are skipped here; whether the
+ * old column's type converts to the new field's type depends on the INSTALLED
+ * version, so the upgrade plan judges it, never this parse. Judged at parse,
+ * beside {@link refuseStageFieldWithoutKinds}, so every door — `defineStack`, a
+ * raw `.parse()`, the metadata save door — refuses it; the key is new, so no
+ * metadata at rest carries it.
+ */
+function refuseDishonestRenamedFrom(
+  ownName: unknown,
+  fields: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (fields === null || typeof fields !== 'object') return;
+  const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
+  const fieldMap = fields as Record<string, unknown>;
+  const claimedBy = new Map<string, string>();
+  const prescription =
+    '`renamedFrom` lists the keys this field had in earlier versions of the package: each once, never the '
+    + "field's own key, never a key another field of this object still declares, and never an old key another "
+    + 'field of this object also claims.';
+  for (const [fieldName, fieldDef] of Object.entries(fieldMap)) {
+    const list = (fieldDef as { renamedFrom?: unknown } | null)?.renamedFrom;
+    if (!Array.isArray(list)) continue;
+    const seen = new Set<string>();
+    list.forEach((entry: unknown, i: number) => {
+      if (typeof entry !== 'string' || !FIELD_KEY_GRAMMAR.test(entry)) return;
+      const refuse = (reason: string): void => {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['fields', fieldName, 'renamedFrom', i],
+          message:
+            `Field \`${fieldName}\` on object \`${objectName}\` declares \`renamedFrom\` entry '${entry}', `
+            + `${reason} ${prescription}`,
+        });
+      };
+      if (entry === fieldName) {
+        refuse("which is the field's own key: a field is not renamed from itself.");
+        return;
+      }
+      if (seen.has(entry)) {
+        refuse('which an earlier entry of the same list already names.');
+        return;
+      }
+      seen.add(entry);
+      if (Object.prototype.hasOwnProperty.call(fieldMap, entry)) {
+        refuse(`but object \`${objectName}\` still declares a field \`${entry}\`: that name is still in use, so no field was renamed away from it.`);
+        return;
+      }
+      const firstClaimant = claimedBy.get(entry);
+      if (firstClaimant !== undefined) {
+        refuse(`which field \`${firstClaimant}\` of the same object already claims: one old column cannot be carried to two fields.`);
+        return;
+      }
+      claimedBy.set(entry, fieldName);
     });
   }
 }
@@ -3959,6 +4073,10 @@ const ObjectSchemaBase = strictObject(
   // lifecycle `kind` — the same door: only the object knows which field is
   // its stage.
   refuseStageFieldWithoutKinds(object.name, object.stageField, object.fields, ctx);
+  // [cloud#3652 ruling D3] Each `renamedFrom` entry names one earlier key of
+  // its field — not its own, not a live sibling's, not one another field
+  // claims, once — the same door: only the object holds the field map.
+  refuseDishonestRenamedFrom(object.name, object.fields, ctx);
   // [#22211 ruling A] A read attachment names at least one leaf, and is not a
   // field: its block names may not repeat a declared field name.
   refuseAttachedBlockConflicts(object.attachedOnRead, object.fields, ctx);

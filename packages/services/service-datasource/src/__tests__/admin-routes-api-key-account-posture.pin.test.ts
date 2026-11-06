@@ -63,7 +63,10 @@ function mountFamily() {
   engine.find = async (object: string, opts: any) => (
     object === 'sys_api_key'
       ? (opts?.where?.key === keyHash ? [{ id: 'key_1', key: keyHash, user_id: ENTITLED_USER, active_organization_id: ENTITLED_ORGANIZATION, revoked: false, scopes: '[]' }] : [])
-      : grantsFind(object, opts)
+      // The key's owner exists: an API key authenticates only as an owner who exists.
+      : object === 'sys_user'
+        ? (opts?.where?.id === ENTITLED_USER ? [{ id: ENTITLED_USER }] : [])
+        : grantsFind(object, opts)
   );
   const ctx = {
     getService: vi.fn((name: string) => {

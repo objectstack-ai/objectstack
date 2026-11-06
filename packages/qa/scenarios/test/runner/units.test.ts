@@ -22,9 +22,9 @@ import {
   subscriptionOnlyEnv,
 } from '../../src/runner/driver.js';
 import { asksToConfirm, countWrites, noWriteAttempted, observedAnswer, observeOperation, uncodedToolError } from '../../src/runner/observe.js';
-import { citationLabels, namespaceOfConfig, namespacedScenario } from '../../src/runner/namespace.js';
-import { changeSize, hiddenValues, installableManifest, seedOrder } from '../../src/runner/orchestrate.js';
-import { buildPrompt, dataContract, questionPrompt, verifyFlags } from '../../src/runner/prompts.js';
+import { citationLabels, namespaceOfConfig, namespacedScenario, permissionSetName, templateHostName } from '../../src/runner/namespace.js';
+import { changeSize, hiddenValues, installableManifest, seedDependence, seedOrder, withoutItems } from '../../src/runner/orchestrate.js';
+import { buildPrompt, dataContract, iteratePrompt, questionPrompt, templateIteratePrompt, unheldHandles, userHandleFields, verifyArgs, verifyFlags } from '../../src/runner/prompts.js';
 import { parseStreamJson, refusalCodeOf, toolNameOf, type ParsedTurn } from '../../src/runner/transcript.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -195,13 +195,64 @@ describe('prompts, seed order, template manifest and change size', () => {
   const crm = load();
 
   it('the build prompt carries the seed, the persona sets and the handles — never a question or an outcome', () => {
-    const p = buildPrompt(crm.card);
+    const p = buildPrompt(namespacedScenario(crm).card);
     expect(p).toContain('"full_name": "Ana Ruiz"');
-    expect(p).toContain('`sdr` (Sales development representative): must not read the field `contact.email`');
+    expect(p).toContain('`democrm_sdr` for `sdr` (Sales development representative): must not read the field `democrm_contact.email`');
     expect(dataContract(crm.card)).toContain('`u_sam` = `sdr`');
     for (const q of crm.card.run.questions) expect(p).not.toContain(q.ask.en!);
     expect(p).not.toContain('VALIDATION_FAILED');
     expect(questionPrompt(crm, 'tech_accounts')).toMatch(/^How many accounts are in tech\?/);
+  });
+
+  it('every authoring prompt states the every-item-prefixed rule, and the contract names every item prefixed', () => {
+    const card = namespacedScenario(crm).card;
+    const server = { baseUrl: 'http://x', adminEmail: 'a@x', adminPassword: 'p' };
+    for (const p of [buildPrompt(card), iteratePrompt(card), templateIteratePrompt(card, server)]) {
+      expect(p).toContain("Naming: this app's namespace is `democrm`. Name EVERY metadata item you declare `democrm_<name>`");
+      expect(p).toMatch(/not only objects, but also views, apps, .*dashboards.*permission sets/);
+    }
+    const contract = dataContract(card);
+    expect(contract).toContain('- `democrm_delete_contact` on `democrm_contact`');
+    expect(contract).toContain('`democrm_partner_user` for `partner_user`');
+    expect(contract).not.toMatch(/named exactly by the id/);
+  });
+
+  it('both authoring loops name the verify invocation the runner scores with, next to validate and build', () => {
+    const card = namespacedScenario(crm).card;
+    expect(verifyArgs(card)).toEqual(['verify', '--reference-shapes']);
+    for (const p of [buildPrompt(card), iteratePrompt(card)]) {
+      expect(p).toContain('run `npx objectstack validate`, `npx objectstack build` and `npx objectstack verify --reference-shapes` and fix what they report until all three pass');
+    }
+  });
+
+  it('a user-handle field is a scope field the card declares as neither lookup nor select; the contract says it is loaded with a user id', () => {
+    const card = namespacedScenario(crm).card;
+    expect([...userHandleFields(card)]).toEqual(['democrm_account.owner']);
+    expect(unheldHandles(card)).toEqual(['u_tia']);
+    expect(dataContract(card)).toContain(
+      'In `democrm_account.owner` the value is a handle that stands for a user, and the handle text is never stored: the runner loads that field, ' +
+        'and the row’s owner (`owner_id`), with that user’s id (`u_sam` → the `sdr` user; `u_tia`, which no person below holds → the admin user ' +
+        'the runner signs in as). Make that field accept a user id; a rule on it matches that user.',
+    );
+    // A scope field that names a row (`ticket.assignee` → agent, `customer.id`) or an option (`ticket_comment.visibility`) is not one.
+    const desk = loadScenarioFile(resolve(HERE, '../../../../../docs/qa/scenarios/service_desk.json'), { areas: readCapabilityAreas(AREAS_DIR) }).card!;
+    expect([...userHandleFields(desk.card)]).toEqual([]);
+  });
+
+  it('a refused seed row takes out its children and what the card names on them, and nothing else', () => {
+    const card = namespacedScenario(crm).card;
+    const dep = seedDependence(card, [{ object: 'democrm_account', id: 'ac1' }]);
+    expect([...dep.out.keys()].sort()).toEqual(['democrm_account/ac1', 'democrm_contact/ct1', 'democrm_contact/ct2']);
+    const op = (id: string) => dep.operation(card.run.operations.find((o) => o.id === id)!);
+    expect(op('partner_edits_account')).toBe('seed: needs democrm_account ac1, which the app refused'); // its target
+    expect(op('remove_ben')).toBe('seed: needs democrm_contact ct2, a child of democrm_account ac1, which the app refused'); // a child
+    expect(op('move_eli')).toBe('seed: needs democrm_account ac1, which the app refused'); // the account it writes
+    expect(op('add_contact')).toBeUndefined();
+    expect(op('contact_bad_email')).toBeUndefined();
+    const q = (id: string) => dep.question(card.run.questions.find((x) => x.id === id)!);
+    expect(q('tech_accounts')).toBe('seed: needs democrm_account ac1, which the app refused');
+    expect(q('unattached_contacts')).toBe('seed: needs democrm_contact ct1, a child of democrm_account ac1, which the app refused');
+    expect(seedDependence(card, []).out.size).toBe(0);
   });
 
   it('chooses verify proofs from the tags, and seeds a lookup target before its referrer', () => {
@@ -220,6 +271,12 @@ describe('prompts, seed order, template manifest and change size', () => {
     expect(installableManifest({ manifest: { id: 'y', installModes: ['managed', 'unmanaged'] } }).installModesSupplied).toBe(false);
   });
 
+  it("an environment's metadata less what it served before the install is the app alone", () => {
+    const baseline = { apps: [{ name: 'setup' }], permissions: [{ name: 'admin_full_access' }] };
+    const after = { apps: [{ name: 'setup' }, { name: 'democrm_app' }], permissions: [{ name: 'admin_full_access' }, { name: 'democrm_sdr' }], objects: [{ name: 'democrm_account' }] };
+    expect(withoutItems(after, baseline)).toEqual({ apps: [{ name: 'democrm_app' }], permissions: [{ name: 'democrm_sdr' }], objects: [{ name: 'democrm_account' }] });
+  });
+
   it('change size counts items added, removed and changed', () => {
     const before = { objects: [{ name: 'a', fields: { x: 1 } }, { name: 'b' }] };
     const after = { objects: [{ fields: { x: 2 }, name: 'a' }, { name: 'c' }] };
@@ -236,18 +293,37 @@ describe('namespace-relative cards', () => {
     expect(namespaceOfConfig('defineStack({ manifest: { id: "x" } })')).toBeUndefined();
   });
 
-  it('prefixes every object reference and nothing else; identity without a namespace', () => {
-    const n = namespacedScenario(crm, 'ns').card;
-    expect(n.expect.objects).toEqual(['ns_account', 'ns_contact']);
-    expect(n.expect.lookups).toEqual([{ object: 'ns_contact', field: 'account', to: 'ns_account' }]);
-    expect(Object.keys(n.run.seed)).toEqual(['ns_account', 'ns_contact']);
-    expect(n.run.seed.ns_contact![0]!.account).toBe('ac1'); // row ids untouched
-    expect(n.run.personas.find((p) => p.id === 'sdr')!.hidden.fields).toEqual([{ object: 'ns_contact', field: 'email' }]);
-    expect(n.run.personas.find((p) => p.id === 'sdr')!.scope![1]).toEqual({ object: 'ns_contact', field: 'account.owner', value: 'u_sam' });
-    expect(n.run.operations.find((o) => o.id === 'add_contact')!.outcome).toMatchObject({ state: [{ object: 'ns_contact' }] });
-    expect(n.iterate.expectDelta.lookups).toEqual([{ object: 'ns_opportunity', field: 'account', to: 'ns_account' }]);
-    expect(namespacedScenario(crm, 'ns').truths).toBe(crm.truths);
-    expect(namespacedScenario(crm, undefined)).toBe(crm);
-    expect(citationLabels(crm, 'ns')).toEqual({ ns_account: ['account'], ns_contact: ['contact'], ns_opportunity: ['opportunity'] });
+  it('reads every item name the card states against demo + its code; fields, row ids and persona ids untouched', () => {
+    const n = namespacedScenario(crm).card;
+    expect(n.code).toBe('crm');
+    expect(n.expect.objects).toEqual(['democrm_account', 'democrm_contact']);
+    expect(n.expect.lookups).toEqual([{ object: 'democrm_contact', field: 'account', to: 'democrm_account' }]);
+    expect(Object.keys(n.run.seed)).toEqual(['democrm_account', 'democrm_contact']);
+    expect(n.run.seed.democrm_contact![0]!.account).toBe('ac1'); // row ids untouched
+    expect(n.run.personas.map((p) => p.id)).toEqual(['sdr', 'partner_user']);
+    expect(n.run.personas.find((p) => p.id === 'sdr')!.hidden.fields).toEqual([{ object: 'democrm_contact', field: 'email' }]);
+    expect(n.run.personas.find((p) => p.id === 'sdr')!.scope![1]).toEqual({ object: 'democrm_contact', field: 'account.owner', value: 'u_sam' });
+    expect(n.run.operations.find((o) => o.id === 'add_contact')!.outcome).toMatchObject({ state: [{ object: 'democrm_contact' }] });
+    expect(n.run.agentActions!.map((a) => `${a.object}.${a.name}`)).toEqual([
+      'democrm_contact.democrm_create_contact',
+      'democrm_contact.democrm_reassign_contact',
+      'democrm_contact.democrm_delete_contact',
+    ]);
+    expect(n.iterate.expectDelta.lookups).toEqual([{ object: 'democrm_opportunity', field: 'account', to: 'democrm_account' }]);
+    expect(namespacedScenario(crm).truths).toBe(crm.truths);
+    expect(namespacedScenario(namespacedScenario(crm)).card).toEqual(n); // a name already carrying the prefix keeps it
+    expect(citationLabels(crm)).toEqual({ democrm_account: ['account'], democrm_contact: ['contact'], democrm_opportunity: ['opportunity'] });
+    expect(permissionSetName(crm.card, 'sdr')).toBe('democrm_sdr');
+  });
+
+  it('prefixes the expected dashboards and every nav target, not only objects', () => {
+    const card = { ...crm.card, expect: { ...crm.card.expect, dashboards: ['overview'], appNavTargets: ['account', 'overview'] } };
+    const n = namespacedScenario({ ...crm, card }).card;
+    expect(n.expect.dashboards).toEqual(['democrm_overview']);
+    expect(n.expect.appNavTargets).toEqual(['democrm_account', 'democrm_overview']);
+  });
+
+  it("template mode's host is named after the code, never the app's namespace", () => {
+    expect(templateHostName(crm.card)).toBe('hostcrm');
   });
 });

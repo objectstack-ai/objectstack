@@ -37,11 +37,11 @@
 
 - dev 把安全发现只写进终报私有字段 `security_findings`,⛔ 不进 `out_of_scope_findings`。
 - 报告评论里该字段只写 `withheld` 或 `none`。
-- 席位在会话与公告里处理它(第 3 节),⛔ 永不当 `out_of_scope_findings` 立卡。
 
 ## 6. 修复 PR
 
 - 标题、正文与 changeset 只写加固规则,形如 「the door reads in the caller's scope first」。
+- 正文、验证、消融只写规则与计数(红、后复原);未守卫代码做什么只进 `security_findings`。
 - 契约复核记录停在规则层;机制只进复核者本地的 `security-note.md`,⛔ 不提交。
 - 修复要定契约的,交维护者。
 

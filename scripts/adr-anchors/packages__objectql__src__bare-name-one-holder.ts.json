@@ -1,0 +1,8 @@
+{
+  "file": "packages/objectql/src/bare-name-one-holder.ts",
+  "adrs": [
+    "ADR-0048",
+    "ADR-0005"
+  ],
+  "invariant": "ADR-0048 §3.4 retired the per-item cross-package throw because a caller carries its package id; a field's picklist, an import's mappingName and a dashboard's datasetName do not, so with two holders every caller is served the first-registered one. The maintainer's ruling C on #30798 (phase 1, ADR-0048 addendum 2026-11-06) narrows §3.4 for these types: one name, one PACKAGE holder. After the cold boot seals the registry (kernel:bootstrapped), a package declaring a name another installed package or a built-in holds is refused at the package door and the item seam, naming both holders and the namespace-prefixed rename. ⛔ Never judge the environment catalog — an environment item under a package's name is the ADR-0005 overlay — never let OS_METADATA_COLLISION=warn downgrade the refusal, never judge during the boot (a deployment already holding a clash must still boot: the cold-boot switch decides warn or refuse), and never treat a package that already holds the name as a new holder."
+}

@@ -3664,7 +3664,7 @@
       "title": "App and menu-entry keys reach the running app: branding, areas and context selectors render; an entry's viewName, recordId / recordMode, filters, badge, requiresObject and visible each change what the entry does or who sees it; hidden takes an app off the switcher and nothing else — and Studio's menu-entry inspector edits them",
       "since": "v18",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3684,7 +3684,7 @@
       },
       "steps": [
         "write the app through PUT /api/v1/meta/app/APP?mode=draft&package=PKG: branding { primaryColor, accentColor, logo } (a runner-environment note: give logo a same-origin URL such as /_console/vite.svg, which the console build ships from ui/apps/console/public; an external logo URL is blocked by the runner container's egress proxy and never renders), two areas each holding some entries, a contextSelector, and menu entries: an object entry with viewName (the second list view), one with recordId + recordMode 'edit', one with filters, one with badge + badgeVariant, one with requiresObject naming an object that does not exist, and one with a visible predicate false for the member (e.g. 'org_owner' in current_user.positions: the seeded admin holds org_owner, not org_admin, because an organization's owner membership maps to org_owner alone, packages/spec/src/identity/eval-user.zod.ts, so an 'org_admin' predicate is false for both personas and proves nothing). Make this app the package's FIRST app (steps[4]); publish",
-        "as admin and as the member (each in its own context, identity proved with GET /api/v1/auth/get-session), open the app (a fresh organization first shows the 'Set the default currency' prompt over the page; dismiss it with 'Not now', RUNNER environment facts) and read the chrome colours and logo, the areas switcher, the context selector, and click each entry",
+        "as admin and as the member (each in its own context, identity proved with GET /api/v1/auth/get-session), open the app (no dialog opens over it: a fresh organization's first-run checklist is a non-modal card on Home only, RUNNER environment facts) and read the chrome colours and logo, the areas switcher, the context selector, and click each entry",
         "GET /api/v1/meta/app?id=APP as each persona and list the entries each receives",
         "set hidden: true on a second app of the package (through the API) and publish; as the member read the App Switcher, the Home launcher, the avatar menu and GET /api/v1/meta/app?id=SECOND; open its URL directly",
         "open the app in /_console/studio/PKG/interfaces, select each entry and read its inspector. Studio's Interfaces pillar opens only the package's FIRST app (the first app the package lists, else its first app draft) and draws only that app's top-level `navigation`: an entry that lives only inside `areas` has no rail row (ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx, the Interfaces pillar's app load). So the app steps[0] writes must be the package's first, and its top-level navigation must hold at least one entry carrying each key acceptance[5] names; the area entries' runtime effect is read in acceptance[0]–[3], not here"
@@ -3784,6 +3784,12 @@
           "date": "2026-11-04",
           "change": "steps[1] and acceptance[5].verify corrected from QA run #29893 (W5-STUDIO, at 589049b0): a fresh organization's first visit shows the default-currency prompt, and the Studio View picker writes the qualified OBJECT.KEY view name, not the bare key steps[0] writes. Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-06",
+          "change": "steps[1] no longer tells the runner to dismiss the 'Set the default currency' prompt: PR #30868 (#30206) retired that boot-time dialog for a non-modal first-run checklist card on Home, which does not cover the app (RUNNER environment facts). No clause changed. Read at base 0e882086",
+          "ref": "#30876"
         }
       ]
     },

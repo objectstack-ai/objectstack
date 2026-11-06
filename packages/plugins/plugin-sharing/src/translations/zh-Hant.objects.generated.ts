@@ -343,5 +343,71 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "依佇列"
       }
     }
+  },
+  sys_assignment_rule: {
+    label: "指派規則",
+    pluralLabel: "指派規則",
+    description: "將每筆符合條件的新記錄傳送到一個佇列或一個人。",
+    fields: {
+      organization_id: {
+        label: "組織",
+        help: "此規則所屬的組織。"
+      },
+      name: {
+        label: "名稱",
+        help: "識別此規則。只能使用小寫字母、數字和底線，且不能與已安裝應用程式提供的規則同名。"
+      },
+      label: {
+        label: "顯示標籤"
+      },
+      description: {
+        label: "描述"
+      },
+      object_name: {
+        label: "物件",
+        help: "此規則會將其新記錄傳送出去的物件。只有記錄具有擁有者的物件才能被指派。"
+      },
+      criteria: {
+        label: "條件",
+        help: "此規則接收哪些新記錄；留空則接收所有未被先前規則接收的新記錄。以針對記錄的運算式撰寫，例如 record.priority == \"high\"。"
+      },
+      sort_order: {
+        label: "順序",
+        help: "當你的多條規則都可能接收同一筆記錄時，順序值最小的規則會最先嘗試。你的規則一律先於已安裝應用程式提供的規則嘗試。"
+      },
+      recipient_type: {
+        label: "指派給",
+        help: "將記錄傳送到一個佇列（由其成員領取），或直接傳送給某個人。",
+        options: {
+          queue: "佇列",
+          user: "使用者"
+        }
+      },
+      recipient_id: {
+        label: "佇列或使用者",
+        help: "記錄要送往的佇列或人員。人員必須是此組織的有效成員。"
+      },
+      strategy: {
+        label: "選擇成員",
+        help: "針對佇列：直接把記錄交給一名成員，輪流指派或選擇未完成工作最少的成員。留空則記錄會留在佇列中，直到有成員領取。",
+        options: {
+          round_robin: "輪流指派",
+          least_loaded: "負載最少"
+        }
+      },
+      load: {
+        label: "未完成工作",
+        help: "選擇「負載最少」時必填：哪些記錄算作成員的未完成工作，以針對記錄的運算式撰寫，例如 record.status != \"closed\"。"
+      },
+      active: {
+        label: "啟用",
+        help: "關閉後此規則不再指派新記錄，但不會被刪除。"
+      }
+    },
+    _views: {
+      by_object: {
+        label: "依物件"
+      }
+    }
   }
 };

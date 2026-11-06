@@ -22,7 +22,10 @@
  * the capability to the FIRST-registered package and the position to the
  * LAST-registered one. For every other metadata type ADR-0048 §3.4's
  * coexistence stands: a caller there carries its own package, and package-scoped
- * resolution disambiguates. This module is that narrowing, and only it.
+ * resolution disambiguates. This module is that narrowing, and only it — except
+ * the types whose consumers resolve a name without package context, held to one
+ * PACKAGE holder by its sibling `bare-name-one-holder.ts` (ruling C on #30798;
+ * there the environment catalog is never a holder).
  *
  * ## The holders
  *

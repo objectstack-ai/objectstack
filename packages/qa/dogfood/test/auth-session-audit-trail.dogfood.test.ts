@@ -257,3 +257,65 @@ describe('#8144: auth session events reach sys_audit_log', () => {
     }
   }, 120_000);
 });
+
+describe('#30924: a sign-in that enforced MFA holds records the hold on its own login row', () => {
+  // ADR-0069 D3 on a real boot: the `auth.mfa_required` setting on, a lapsed
+  // grace window, an account that never enrolled. The sign-in succeeds (a
+  // session, a token), the session is held, and the sign-in's one `login` row
+  // names the hold. Read back through the engine under a system context: with
+  // the requirement on, the harness admin's own session is held too, so the
+  // data API is not the reader here (the first describe owns that path).
+  const HELD_EMAIL = 'held.30924@example.com';
+  const HELD_PASSWORD = 'Held!Pass30924';
+  let stack: VerifyStack;
+  let ql: any;
+  let heldUserId: string;
+
+  beforeAll(async () => {
+    stack = await bootShowcase({ extraPlugins: [new AuditPlugin()], orgContext: true });
+    ql = await stack.kernel.getServiceAsync<any>('objectql');
+    await stack.signIn();
+    await stack.signUp(HELD_EMAIL, HELD_PASSWORD, 'Held 30924');
+    const [held] = await findRows(ql, 'sys_user', { email: HELD_EMAIL }, 1);
+    heldUserId = String(held.id);
+
+    const settings = await stack.kernel.getServiceAsync<any>('settings');
+    await settings.setMany('auth', { mfa_required: true, mfa_grace_period_days: 0 });
+    await ql.update(
+      'sys_user',
+      { id: heldUserId, two_factor_enabled: false, mfa_required_at: new Date(Date.now() - 86_400_000) },
+      { context: SYSTEM_CTX },
+    );
+  }, 180_000);
+
+  afterAll(async () => {
+    await stack?.stop?.();
+  });
+
+  it('the login row carries reason MFA_REQUIRED and rule mfa_required, and no login_failed is written', async () => {
+    const before = (await findRows(ql, 'sys_audit_log', { action: 'login', user_id: heldUserId })).length;
+    const token = await stack.signIn(HELD_EMAIL, HELD_PASSWORD);
+
+    // The session really is held, so the row below records a hold the
+    // platform applied rather than one it merely claims.
+    const session = await stack.apiAs(token, 'GET', '/auth/get-session');
+    expect(session.status, await session.clone().text()).toBe(200);
+    expect(((await session.json()) as any)?.user?.authGate?.code).toBe('MFA_REQUIRED');
+
+    const rows = await waitForRows(
+      () => findRows(ql, 'sys_audit_log', { action: 'login', user_id: heldUserId }),
+      (found) => found.length > before,
+      'the held sign-in wrote no `login` row',
+    );
+    const held = rows.filter((r: any) => String(r.metadata ?? '').includes('MFA_REQUIRED'));
+    expect(held, 'the held sign-in has exactly one login row naming the hold').toHaveLength(1);
+    const metadata = JSON.parse(String(held[0].metadata));
+    expect(metadata).toMatchObject({ endpoint: '/sign-in/email', reason: 'MFA_REQUIRED', rule: 'mfa_required' });
+    expect(held[0].object_name).toBe('sys_session');
+
+    // A held sign-in is not a refused one, and no row carries the credential.
+    expect(await findRows(ql, 'sys_audit_log', { action: 'login_failed', user_id: heldUserId })).toEqual([]);
+    const mine = await findRows(ql, 'sys_audit_log', { user_id: heldUserId });
+    expect(JSON.stringify(mine)).not.toContain(HELD_PASSWORD);
+  }, 120_000);
+});
