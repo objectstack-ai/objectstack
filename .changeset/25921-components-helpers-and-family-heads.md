@@ -47,7 +47,7 @@ What leaves, and what to write instead:
 - FROM `NativeSelect` TO a plain `select` element, or `Select`.
 - FROM `NativeSelectProps` TO `React.SelectHTMLAttributes<HTMLSelectElement>`, which it extended without adding a key.
 - FROM `ResizableHandleProps` TO `React.ComponentProps<typeof ResizableHandle>`, which it aliased.
-- FROM `useRelatedCount` TO `RelatedCountStore.get` with the same four arguments (object, relationship field, parent id, filter), read in a component that calls `useRelatedCountVersion()`, which re-renders it when the store changes.
+- FROM `useRelatedCount` TO `RelatedCountStore.get` with the same four arguments (object, relationship field, parent id, filter), guarding an absent object name yourself as the hook did (`objectName ? RelatedCountStore.get(objectName, relField, parentId, filter) : undefined`, since `get` takes `objectName: string`), read in a component that calls `useRelatedCountVersion()`, which re-renders it when the store changes.
 - FROM `mountedOperatorValue`, `retypeFilterValue`, `narrowFilterValueToOptions` TO `FilterBuilder`, which applies them to its rows, or `reshapeFilterValue` for the operator half.
 - FROM `CURRENCY_COMPANION_SUFFIX`, `currencyCompanionId`, `currencyCompanionOf`, `pairedCurrencyField` TO `isCurrencyCompanion` and `syncRecordCurrencyRows`, which pair and keep the currency rows.
 - FROM `KbdGroup` TO a `kbd` element with the classes `inline-flex items-center gap-1` around the `Kbd` elements.
