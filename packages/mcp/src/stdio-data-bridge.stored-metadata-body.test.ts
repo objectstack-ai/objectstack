@@ -141,6 +141,8 @@ function fakeEngine(apiKeyOwner = ADMIN) {
       // reader passes `(obj, { where, limit, context })`.
       const context = options?.context ?? query?.context;
       if (object === 'sys_api_key') return [{ id: 'k1', user_id: apiKeyOwner, revoked: false }];
+      // The key's owner exists: an API key authenticates only as an owner who exists.
+      if (object === 'sys_user') return query?.where?.id === apiKeyOwner ? [{ id: apiKeyOwner }] : [];
       if (STORED_METADATA_BODY_OBJECTS.has(object) && context?.userId !== ADMIN) throw permissionDenied(object);
       const rows = (TABLES[object] ?? []).filter((row) => matches(row, query?.where));
       const limited = typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;

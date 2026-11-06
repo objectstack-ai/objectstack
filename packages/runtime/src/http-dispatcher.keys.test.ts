@@ -26,6 +26,9 @@ function makeKernel() {
     // Minimal find for the round-trip via resolveExecutionContext.
     find: async (obj: string, opts: any) => {
       const where = opts?.where ?? {};
+      // The session caller every key here is minted for exists: an API key
+      // authenticates only as an owner who exists.
+      if (obj === 'sys_user') return where.id === 'u1' ? [{ id: 'u1' }] : [];
       if (obj !== 'sys_api_key') return [];
       return rows.filter((r) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
     },

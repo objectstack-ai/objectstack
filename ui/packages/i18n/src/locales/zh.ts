@@ -2455,6 +2455,28 @@ const zh = {
       passwordsMore: '更多条目已省略——请使用下载。',
       passwordsDownload: '下载 CSV',
     },
+    // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
+    assignedWork: {
+      title: '此人手上的记录',
+      loading: '正在统计此人手上的记录…',
+      countFailed: '无法统计此人手上的记录：{{message}}',
+      noClient: '此处无法统计此人手上的记录。',
+      none: '此人手上没有你可读取的记录。',
+      summary: '你可读取的记录中有 {{total}} 条在此人手上：拥有 {{owned}} 条，被指派 {{assigned}} 条。',
+      row: '{{object}} · {{field}}',
+      notTransferable: '该字段可填多人，无法在此交接。',
+      truncated: '并非所有用户字段都已统计，此人手上可能还有更多记录。',
+      unreadable: '以下对象你无权读取，未计入：{{objects}}',
+      handoverTo: '交接给',
+      handoverHint: '可选。封禁不必等交接完成。',
+      handover: '交接',
+      handingOver: '正在交接…',
+      handoverNext: '交接下一批',
+      targetBanned: '此人已被封禁，请选择一位在职用户。',
+      transferRefused: '交接被拒绝：{{message}}',
+      report: '已交接 {{updated}} 条，{{failed}} 条未能移交，仍有 {{remaining}} 条在此人手上。',
+      failure: '{{object}} {{id}}：{{message}}',
+    },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
       managedUsers: {
@@ -2764,6 +2786,8 @@ const zh = {
         title: '审计日志',
         subtitle: '只读的系统活动与记录变更，最新的在前。',
         openAsList: '以列表打开',
+        openEntryPage: '打开条目页',
+        openEntryPageHint: '条目页按时间倒序列出同一记录的全部变更。',
         openPresetAsList: '以列表打开 {{label}}',
         presets: '预设',
         presetOtherSource: '此视图读取的是其他数据源。',

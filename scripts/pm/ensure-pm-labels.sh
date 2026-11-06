@@ -48,7 +48,8 @@
 # into GitHub's autocomplete. Their leftover label OBJECTS may still exist in
 # the repos; deleting those objects is a separate, deliberate PM action. One
 # TRANSITIONAL exception, recorded at its rows in the domain-lane block below:
-# the three lanes that folded into domain:server on 2026-10-22 keep alias rows
+# the three lanes that folded into domain:server on 2026-10-22, and the
+# domain:rest spelling read the same way since 2026-11-06, keep alias rows
 # until their last open card lands.
 # The objectui-repo STREAM labels domain:spec / domain:devx / domain:tooling,
 # retired in objectui only on 2026-10-22 (maintainer ruling 「甲，现在做」), are
@@ -528,17 +529,22 @@ done
 # until they land and open cards are relabelled by triage only after the merge
 # lands, so the objects stay in use for a while and a reader hovering one must
 # learn where it went. The description is the whole point of those rows:
-# create-if-missing is a no-op on objects that exist. The readers that keep
-# seeing every card through the old spellings live in
-# scripts/pm/check-half-states.mjs (LANE_LABEL_ALIASES). The cleanup PR that
-# retires the three objects (zero open cards on each) deletes these three rows
-# and that map together, and the header's rule resumes for them.
+# create-if-missing is a no-op on objects that exist. domain:rest, never a lane
+# of its own and carried by no card, joins them on the maintainer's 2026-11-06
+# 「车道的问题同意」 so its object stops reading as a live lane. The readers that
+# keep seeing every card through the old spellings live in
+# scripts/pm/check-half-states.mjs (LANE_LABEL_ALIASES), and the write doors
+# (issue-create, label-write, fleet-write/dispatch) read that same map to write
+# domain:server in an alias's place. The cleanup PR that retires the objects
+# (zero open cards on each) deletes these rows and that map together, and the
+# header's rule resumes for them.
 for D in server devx spec skills ui; do
   gh label create "domain:$D" -R objectstack-ai/objectstack -c bfd4f2 -d "Domain lane — seat card indexed by label:pm:seat" 2>/dev/null || true
 done
 gh label create domain:engine   -R objectstack-ai/objectstack -c bfd4f2 -d "Retired 2026-10-22, alias of domain:server (engine surface); in-flight cards keep it until they land" 2>/dev/null || true
 gh label create domain:services -R objectstack-ai/objectstack -c bfd4f2 -d "Retired 2026-10-22, alias of domain:server (services surface); in-flight cards keep it until landed" 2>/dev/null || true
 gh label create domain:cli      -R objectstack-ai/objectstack -c bfd4f2 -d "Retired 2026-10-22, alias of domain:server (cli surface); in-flight cards keep it until they land" 2>/dev/null || true
+gh label create domain:rest     -R objectstack-ai/objectstack -c bfd4f2 -d "Retired 2026-11-06, alias of domain:server (rest surface); the relay writes domain:server instead" 2>/dev/null || true
 
 # domain:cloud routes a WHOLE card to the cloud PM (the `repo:cloud` seat): any
 # card that needs cloud code, a cloud producer, a cloud fact or carries a cloud
