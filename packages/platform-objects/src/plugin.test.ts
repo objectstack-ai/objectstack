@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 // why this file's `update` entry sat in the gate's DEBT ledger until #5619 sank
 // the predicate into a package that depends on neither side.
 import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { ObjectSchema, RECYCLE_BIN_ENTRY_FIELDS, RECYCLE_BIN_OBJECT } from '@objectstack/spec/data';
 import { PlatformObjectsPlugin } from './plugin.js';
 import { SysExchangeRate, SysMetadataActivation, SysMigration, SysMigrationJournal, SysRecycleBin, SysSecret, SysTrustedKey } from './system/index.js';
 
@@ -81,6 +82,18 @@ describe('PlatformObjectsPlugin: platform-infrastructure object registration (#4
     // ⛔ The six above must NOT acquire the ledger's routing triple. They
     // ride the project database today; moving them is a different question.
     expect(infra.defaultDatasource).toBeUndefined();
+  });
+
+  // [ADR-0148, #30237] The table and `RecycleBinEntrySchema` share one field
+  // list. The object file spells each entry through its builder (a spread is
+  // unreadable to the source scans), so this is what keeps it the spec's.
+  it("sys_recycle_bin declares exactly the spec's entry fields, plus its tenant column", () => {
+    const { organization_id, ...entryFields } = SysRecycleBin.fields as Record<string, unknown>;
+    // Through the same factory, so both sides carry the parse's defaults.
+    const spec = ObjectSchema.create({ name: RECYCLE_BIN_OBJECT, label: 'Recycle Bin Entry', fields: { ...RECYCLE_BIN_ENTRY_FIELDS } });
+    expect(entryFields).toEqual(spec.fields);
+    expect(organization_id).toMatchObject({ type: 'lookup', reference: 'sys_organization', deleteBehavior: 'cascade' });
+    expect(SysRecycleBin.name).toBe(RECYCLE_BIN_OBJECT);
   });
 
   /**

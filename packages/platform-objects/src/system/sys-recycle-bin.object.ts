@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ObjectSchema, Field, RECYCLE_BIN_ENTRY_FIELDS, RECYCLE_BIN_OBJECT } from '@objectstack/spec/data';
+import { ObjectSchema, Field, RECYCLE_BIN_ENTRY_FIELDS } from '@objectstack/spec/data';
 
 /**
  * sys_recycle_bin — the recycle bin: one entry per delete operation
@@ -16,8 +16,9 @@ import { ObjectSchema, Field, RECYCLE_BIN_ENTRY_FIELDS, RECYCLE_BIN_OBJECT } fro
  * ## Fields
  *
  * Built from `RECYCLE_BIN_ENTRY_FIELDS` (`@objectstack/spec/data`), the one
- * field list the spec's `RecycleBinEntrySchema` shares, so the table and the
- * contract cannot drift. Every field is read-only.
+ * field list the spec's `RecycleBinEntrySchema` shares, key for key, plus the
+ * tenant column below; `plugin.test.ts` pins each entry equal to the spec's,
+ * so the table and the contract cannot drift. Every field is read-only.
  *
  * ## Writers and readers
  *
@@ -56,7 +57,7 @@ import { ObjectSchema, Field, RECYCLE_BIN_ENTRY_FIELDS, RECYCLE_BIN_OBJECT } fro
  * @namespace sys
  */
 export const SysRecycleBin = ObjectSchema.create({
-  name: RECYCLE_BIN_OBJECT,
+  name: 'sys_recycle_bin', // RECYCLE_BIN_OBJECT; a literal, so the source scans can attribute this declaration
   label: 'Recycle Bin Entry',
   pluralLabel: 'Recycle Bin',
   icon: 'trash-2',
@@ -69,7 +70,21 @@ export const SysRecycleBin = ObjectSchema.create({
   highlightFields: ['object_name', 'record_id', 'record_count', 'deleted_by', 'deleted_at', 'purge_after'],
 
   fields: {
-    ...RECYCLE_BIN_ENTRY_FIELDS,
+    // One entry per key of RECYCLE_BIN_ENTRY_FIELDS, each spelled through its
+    // builder rather than spread in: `check:keyed-text-bounds` reads `fields`
+    // from source and refuses an entry it cannot attribute to a column, and it
+    // reads a keyed text column's bound only from a literal `maxLength`, so the
+    // two keyed text columns restate theirs. `plugin.test.ts` pins every entry
+    // equal to the spec's, so the restatement cannot drift.
+    id: Field.text({ ...RECYCLE_BIN_ENTRY_FIELDS.id }),
+    object_name: Field.text({ ...RECYCLE_BIN_ENTRY_FIELDS.object_name, maxLength: 255 }),
+    record_id: Field.text({ ...RECYCLE_BIN_ENTRY_FIELDS.record_id, maxLength: 255 }),
+    record_count: Field.number({ ...RECYCLE_BIN_ENTRY_FIELDS.record_count }),
+    snapshot: Field.json({ ...RECYCLE_BIN_ENTRY_FIELDS.snapshot }),
+    deleted_by: Field.lookup('sys_user', { ...RECYCLE_BIN_ENTRY_FIELDS.deleted_by }),
+    deleted_at: Field.datetime({ ...RECYCLE_BIN_ENTRY_FIELDS.deleted_at }),
+    retention_days: Field.number({ ...RECYCLE_BIN_ENTRY_FIELDS.retention_days }),
+    purge_after: Field.datetime({ ...RECYCLE_BIN_ENTRY_FIELDS.purge_after }),
 
     organization_id: Field.lookup('sys_organization', {
       label: 'Organization',

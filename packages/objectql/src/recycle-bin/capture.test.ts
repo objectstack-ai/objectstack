@@ -81,7 +81,9 @@ function makeDriver(opts: { transactional?: boolean; failDeleteOf?: string } = {
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async syncSchema() {},
     async find(o: string, ast: any) {
-      return Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where)).map((r) => ({ ...r }));
+      const rows = Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
+      const page = typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
+      return page.map((r) => ({ ...r }));
     },
     async findOne(o: string, ast: any) {
       for (const r of storeFor(o).values()) if (matches(r, ast?.where)) return { ...r };
