@@ -41,6 +41,7 @@ import { OBJECTSTACK_MCP_SERVER_NAME } from '@objectstack/mcp';
 // #12620 and #12662 protected against.
 import { describePortSource, parseRequestedPort, formatInvalidPortNotice, portFlagEnv } from '../utils/port-contract.js';
 import { applyCryptoKeyFileChannel } from '../utils/internal-crypto-key-file-channel.js';
+import { startDevDeployKey, type DeployKeyHandle } from '../utils/dev-deploy-key.js';
 // The ONE dev-TLS contract, shared with the `serve` child this command spawns
 // (#16804). ⛔ Nothing about certificates is declared in this file, and ⛔ no
 // certificate is ever generated — the developer brings their own.
@@ -875,6 +876,7 @@ export default class Dev extends Command {
       // per session (`utils/dev-organization-ownership-upgrade.ts`,
       // `upgradeRefusedDevelopmentDatabase` above for what it prints).
       let ownershipUpgrade: 'none' | 'pending' | 'attempted' = 'none';
+      let deployKey: DeployKeyHandle | undefined;
       let upgradedBoot = false;
       const spawnServeChild = (info: { restartIndex: number }) => {
         const child = spawn(
@@ -950,6 +952,13 @@ export default class Dev extends Command {
                 boundProtocol,
               });
             }
+            // ── The deploy key ───────────────────────────────────────────
+            // Last line of the first boot: "press d to deploy" (or to log in,
+            // then deploy). Attached once — a restart re-enters this handler
+            // only through the early return above, and the key outlives every
+            // child. ⛔ Never a save hook: the organization's one cloud
+            // environment is production (cloud ADR-0024).
+            if (!deployKey) deployKey = startDevDeployKey(binPath, (line) => console.log(chalk.cyan(`  ${line}`)));
           }
         });
         return child;
