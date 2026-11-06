@@ -44,7 +44,7 @@
  * not move.
  */
 
-import { customizationPackageId } from '@objectstack/spec/kernel';
+import { pairOf } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import type { StoredOverlayRow } from './item-lock.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
@@ -293,6 +293,6 @@ export function soleShippingPackage(shipped: readonly unknown[]): string | undef
 export function baseAddressServesMember(base: string, bound: string | undefined, baseShipsMember: boolean): boolean {
     if (bound === undefined || bound === base) return true;
     if (baseShipsMember) return false;
-    const pair = customizationPackageId(base);
+    const pair = pairOf(base);
     return pair.ok && pair.value === bound;
 }

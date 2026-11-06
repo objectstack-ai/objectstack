@@ -506,3 +506,64 @@ describe('[#23914] a truncated install body is refused, and nothing is written',
         expect(empty.payload).toEqual(none.payload);
     });
 });
+
+describe('install-local — `targetNamespace` renames an unmanaged copy, and only an unmanaged one (#30794)', () => {
+    /** The import as it answers a renamed copy: the request's namespace, and the source's beside it. */
+    const renamingImporter = async (request: any) => ({
+        sourcePackageId: request.manifest.id,
+        sourceVersion: request.manifest.version,
+        targetPackageId: `${request.manifest.id}-copy`,
+        namespace: request.targetNamespace ?? request.manifest.namespace,
+        ...(request.targetNamespace !== undefined ? { sourceNamespace: request.manifest.namespace } : {}),
+        copiedCount: 1,
+        copied: [{ type: 'object', name: `${request.targetNamespace ?? request.manifest.namespace}_lead` }],
+        strippedLocks: [],
+    });
+
+    it('hands `targetNamespace` to the import, and records the source namespace beside `installedFrom`', async () => {
+        const h = await mount(dir, { importer: renamingImporter });
+        const res = await h.install({ manifest: crm({ installModes: BOTH }), installMode: 'unmanaged', targetNamespace: 'acme' });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+
+        expect(h.importUnmanagedPackage).toHaveBeenCalledTimes(1);
+        expect(h.importUnmanagedPackage!.mock.calls[0]![0]).toMatchObject({ targetNamespace: 'acme', actor: INSTALLER });
+        // The mapping the rename applied: `installedFrom.namespace` → `namespace`.
+        expect(res.payload.data).toMatchObject({
+            installMode: 'unmanaged',
+            namespace: 'acme',
+            installedFrom: { packageId: 'com.example.crm', version: '4.0.0', namespace: 'crm' },
+            copied: [{ type: 'object', name: 'acme_lead' }],
+        });
+        const info = h.logger.info.mock.calls.map((call: any[]) => String(call[0])).join('\n');
+        expect(info).toContain("(namespace 'acme', renamed from 'crm')");
+    });
+
+    it('without it the import is asked as before, and `installedFrom` carries no namespace — the key set unchanged', async () => {
+        const h = await mount(dir, { importer: renamingImporter });
+        const res = await h.install({ manifest: crm({ installModes: BOTH }), installMode: 'unmanaged' });
+        expect(res.status).toBe(200);
+        expect(h.importUnmanagedPackage!.mock.calls[0]![0]).not.toHaveProperty('targetNamespace');
+        expect(res.payload.data.installedFrom).toEqual({ packageId: 'com.example.crm', version: '4.0.0' });
+    });
+
+    for (const installMode of [undefined, 'managed'] as const) {
+        it(`beside a ${installMode ?? 'default (managed)'} install: 400 INVALID_REQUEST — a managed install is never renamed; nothing fetched or written`, async () => {
+            const h = await mount(dir, { importer: renamingImporter });
+            const fetchSpy = vi.fn();
+            vi.stubGlobal('fetch', fetchSpy);
+            const res = await h.install({
+                manifest: crm({ installModes: BOTH }),
+                ...(installMode ? { installMode } : {}),
+                targetNamespace: 'acme',
+            });
+            expect(res.status).toBe(400);
+            expect(res.payload.error.code).toBe('INVALID_REQUEST');
+            expect(res.payload.error.message).toContain('a managed install is never renamed');
+            expect(fetchSpy).not.toHaveBeenCalled();
+            expect(h.importUnmanagedPackage).not.toHaveBeenCalled();
+            expect(h.register).not.toHaveBeenCalled();
+            expect(h.syncSchemas).not.toHaveBeenCalled();
+            expect(h.ledgerHas('com.example.crm')).toBe(false);
+        });
+    }
+});

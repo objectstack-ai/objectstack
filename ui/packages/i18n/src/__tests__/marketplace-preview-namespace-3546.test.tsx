@@ -67,6 +67,7 @@
  * answering and the test would describe a binding the console never uses.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { renderHook } from '@testing-library/react';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -197,7 +198,7 @@ beforeEach(() => {
 
 describe('objectui#3546 slice five — the marketplace and preview namespaces', () => {
   it('covers all ten packs and all forty keys (guards the loops from emptying)', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     expect(KEYS).toHaveLength(40);
     expect(new Set(KEYS).size).toBe(40);
     // 37 measured missing keys + 3 that came from the prefix family. Splitting
@@ -257,12 +258,12 @@ describe('objectui#3546 slice five — the marketplace and preview namespaces', 
     expect(at(builtInLocales.de, 'marketplace.disclosure.hooks')).toBe('Lifecycle-Hooks');
     expect(at(builtInLocales.fr, 'marketplace.disclosure.hooks')).toBe('Hooks de cycle de vie');
     expect(at(builtInLocales.es, 'marketplace.disclosure.runtime.sandbox')).toBe('En sandbox');
-    expect(at(builtInLocales.pt, 'marketplace.disclosure.runtime.sandbox')).toBe('Em sandbox');
+    expect(at(builtInLocales['pt-BR'], 'marketplace.disclosure.runtime.sandbox')).toBe('Em sandbox');
     for (const [lang, key] of [
       ['de', 'marketplace.disclosure.hooks'],
       ['fr', 'marketplace.disclosure.hooks'],
       ['es', 'marketplace.disclosure.runtime.sandbox'],
-      ['pt', 'marketplace.disclosure.runtime.sandbox'],
+      ['pt-BR', 'marketplace.disclosure.runtime.sandbox'],
     ] as const) {
       expect(at(builtInLocales[lang], key)).not.toBe(at(builtInLocales.en, key));
     }
@@ -362,7 +363,7 @@ describe('objectui#3546 slice five — the marketplace and preview namespaces', 
     // punctuation throughout (165 fullwidth commas, 13 fullwidth trailing colons
     // against 6 halfwidth), and preview.changes.loadFailed zh is fullwidth too.
     for (const key of ['marketplace.disclosure.grantsIntro', 'preview.history.loadFailed']) {
-      expect((at(builtInLocales.zh, key) as string).endsWith('：'), `zh ${key} lost the fullwidth colon`).toBe(true);
+      expect((at(builtInLocales['zh-Hans'], key) as string).endsWith('：'), `zh ${key} lost the fullwidth colon`).toBe(true);
     }
     // ko has no fullwidth trailing colon anywhere in the pack (16 halfwidth, 0).
     expect((at(builtInLocales.ko, 'marketplace.disclosure.grantsIntro') as string).endsWith(':')).toBe(true);
@@ -413,7 +414,7 @@ describe('objectui#3546 slice five — the marketplace and preview namespaces', 
       }
     });
 
-    it.each(['en', 'zh'] as const)('%s renders every tier through the real template call', (lang) => {
+    it.each(['en', 'zh-Hans', 'zh-Hant'] as const)('%s renders every tier through the real template call', (lang) => {
       const { result } = renderHook(() => useObjectTranslation(), { wrapper: wrapperFor(lang) });
       for (const tier of ['node', 'sandbox', 'worker']) {
         const full = `marketplace.disclosure.runtime.${tier}`;
@@ -495,7 +496,7 @@ describe('objectui#3546 slice five — the marketplace and preview namespaces', 
     const collapsed = LANGS.filter(
       (l) => at(builtInLocales[l], 'preview.history.revert') === at(builtInLocales[l], 'preview.history.revertAction'),
     );
-    expect(collapsed.sort()).toEqual(['ar', 'zh']);
+    expect(collapsed.sort()).toEqual(['ar', 'zh-Hans', 'zh-Hant']);
     expect(at(builtInLocales.ja, 'preview.history.revert')).toBe('取り消し');
     expect(at(builtInLocales.ja, 'preview.history.revertAction')).toBe('取り消す');
     expect(at(builtInLocales.ko, 'preview.history.revert')).toBe('되돌림');
@@ -514,15 +515,15 @@ describe('objectui#3546 slice five — the marketplace and preview namespaces', 
     // usted — filed as a finding), and the tie-break taken is usted, on the
     // strength of home.pendingDrafts.published ("¡Publicado! Sus cambios…"), the
     // structural twin of preview.unpublishedBar.published.
-    expect(at(builtInLocales.zh, 'marketplace.org.heading')).toBe('你的组织');
-    expect(at(builtInLocales.zh, 'preview.unpublishedBar.message')).toContain('您的用户');
-    expect(at(builtInLocales.zh, 'preview.unpublishedBar.published')).toContain('您的用户');
+    expect(at(builtInLocales['zh-Hans'], 'marketplace.org.heading')).toBe('你的组织');
+    expect(at(builtInLocales['zh-Hans'], 'preview.unpublishedBar.message')).toContain('您的用户');
+    expect(at(builtInLocales['zh-Hans'], 'preview.unpublishedBar.published')).toContain('您的用户');
     expect(at(builtInLocales.es, 'marketplace.org.heading')).toBe('Su organización');
     expect(at(builtInLocales.es, 'preview.unpublishedBar.published')).toContain('sus usuarios');
     expect(at(builtInLocales.es, 'preview.unpublishedBar.message')).toContain('Publíquela');
     // ...and the neighbours that ruling was read off are still what it claims.
-    expect(at(builtInLocales.zh, 'marketplace.subtitle')).toContain('你的');
-    expect(at(builtInLocales.zh, 'preview.draftBar.sampleDataBody')).toContain('您');
+    expect(at(builtInLocales['zh-Hans'], 'marketplace.subtitle')).toContain('你的');
+    expect(at(builtInLocales['zh-Hans'], 'preview.draftBar.sampleDataBody')).toContain('您');
     expect(at(builtInLocales.es, 'home.pendingDrafts.published')).toBe('¡Publicado! Sus cambios están activos.');
   });
 
@@ -611,13 +612,14 @@ describe('objectui#3546 slice five — the marketplace and preview namespaces', 
     // property and not only as ten strings.
     const PHRASE: Record<LocaleCode, string> = {
       en: '{{count}} item(s)',
-      zh: '{{count}} 项',
+      'zh-Hans': '{{count}} 项',
+      'zh-Hant': '{{count}} 項',
       ja: '{{count}} 件',
       ko: '{{count}} 항목',
       de: 'Elemente: {{count}}',
       fr: 'Éléments : {{count}}',
       es: 'Elementos: {{count}}',
-      pt: 'Itens: {{count}}',
+      'pt-BR': 'Itens: {{count}}',
       ru: 'Элементов: {{count}}',
       ar: 'العناصر: {{count}}',
     };
@@ -633,12 +635,13 @@ describe('objectui#3546 slice five — the marketplace and preview namespaces', 
     // packs now OPEN the phrase with that noun, and `ar` takes the definite
     // article a label needs, so there the pack's word is a suffix of it.
     const UNIT: Partial<Record<LocaleCode, string>> = {
-      zh: '项',
+      'zh-Hans': '项',
+      'zh-Hant': '項',
       ja: '件',
       de: 'Elemente',
       fr: 'éléments',
       es: 'elementos',
-      pt: 'itens',
+      'pt-BR': 'itens',
       ru: 'элементов',
       ar: 'عناصر',
     };
@@ -814,7 +817,7 @@ describe('objectui#3546 slice five — the marketplace and preview namespaces', 
       }
     });
 
-    it.each(['en', 'zh'] as const)('%s resolves every sampled key from the pack', (lang) => {
+    it.each(['en', 'zh-Hans', 'zh-Hant'] as const)('%s resolves every sampled key from the pack', (lang) => {
       const { result } = renderHook(() => useObjectTranslation(), { wrapper: wrapperFor(lang) });
       for (const [key, owner] of SAMPLE) {
         const value = result.current.t(key);

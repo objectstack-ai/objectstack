@@ -1,5 +1,9 @@
 /**
- * 中文 (zh) - Chinese language pack for Object UI
+ * 简体中文 (zh-Hans) - Simplified Chinese language pack for Object UI.
+ *
+ * The source of the zh-Hant pack: `scripts/gen-zh-hant.mjs` converts this file
+ * into `./zh-Hant.ts`, so an edit here is followed by `pnpm --filter
+ * @object-ui/i18n gen:zh-hant` in the same change.
  */
 const zh = {
   // objectui#4467 — the impersonation banner (app-shell ImpersonationBanner).
@@ -4395,7 +4399,7 @@ const zh = {
     },
   },
   // The rest of `marketplace.*` is the lazy `marketplace` namespace
-  // (`../namespaces/marketplace/zh.ts`), fetched when a marketplace page
+  // (`../namespaces/marketplace/zh-Hans.ts`), fetched when a marketplace page
   // mounts. What stays here is read by a page outside the marketplace route:
   // Studio's packages page draws a marketplace install's row through
   // `MarketplaceRowActions` and `MarketplaceNotLoaded` (the Not loaded badge

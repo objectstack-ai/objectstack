@@ -50,6 +50,7 @@
  * type is read at the call sites this card converted, not pinned.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { builtInLocales } from '../locales';
 
 type LocaleCode = keyof typeof builtInLocales;
@@ -187,7 +188,7 @@ const NEUTRAL_KEYS: string[] = Object.values(COUNT_NEUTRAL).flat();
 
 describe('a count label is an i18next count family, or names why it needs none (objectui#11445)', () => {
   it('the walk is real — packs, families and count leaves are all non-empty', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     // objectui#11432's 14 families plus objectui#11445's 68 — a floor, so a
     // later family raises it for free and only a lost family is a failure.
     expect(FAMILIES.size).toBeGreaterThanOrEqual(82);

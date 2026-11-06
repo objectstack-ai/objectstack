@@ -20,6 +20,7 @@
  * lower-casing both sides.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { builtInLocales } from '../locales';
 
 /** Each pack's spelling of "manifest" before objectui#10969, plus the English. */
@@ -41,7 +42,7 @@ function placeholderOf(catalogue: unknown): string {
 
 describe('marketplace.searchPlaceholder — no manifest jargon in any pack (objectui#10969)', () => {
   it('covers all ten packs', () => {
-    expect(Object.keys(builtInLocales)).toHaveLength(10);
+    expect(Object.keys(builtInLocales)).toHaveLength(PLATFORM_LOCALE_TAGS.length);
   });
 
   it.each(Object.entries(builtInLocales))('%s: names no manifest', (_code, catalogue) => {
@@ -56,6 +57,6 @@ describe('marketplace.searchPlaceholder — no manifest jargon in any pack (obje
   });
 
   it('zh keeps the wording objectui#10900 chose', () => {
-    expect(placeholderOf(builtInLocales.zh)).toBe('按名称或标识搜索应用…');
+    expect(placeholderOf(builtInLocales['zh-Hans'])).toBe('按名称或标识搜索应用…');
   });
 });

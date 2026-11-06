@@ -63,7 +63,7 @@
     "ai.ask-data",
     "ai.agent-actions"
   ],
-  "category": "sales",
+  "businessFunctions": ["sales", "finance"],
   "run": {
     "seed": {
       "employee": [

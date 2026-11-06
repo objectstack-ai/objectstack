@@ -146,7 +146,7 @@ describe('ApprovalDecisionPanel — a principal holding several slots: the chip 
   });
 
   it('the zh pack draws its own words for the chip, beside its own eligible count', async () => {
-    const zh = builtInLocales.zh.approvalsInbox as Record<string, string>;
+    const zh = builtInLocales['zh-Hans'].approvalsInbox as Record<string, string>;
     const en = builtInLocales.en.approvalsInbox as Record<string, string>;
     // zh selects `other` at every count.
     const zhWords = zh.approverSlots_other.replace('{{count}}', '3');

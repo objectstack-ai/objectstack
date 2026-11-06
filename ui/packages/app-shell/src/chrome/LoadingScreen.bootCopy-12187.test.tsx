@@ -99,7 +99,8 @@ describe('LoadingScreen boot copy (objectui#12187)', () => {
     // not waiting for a re-render that nothing schedules any more.
     expect(first[0].text).toBe(`${PRODUCT}${zh.console.initializing}`);
     // The provider does write it afterwards; the screen no longer depends on that.
-    expect(document.documentElement.lang).toBe('zh');
+    // The table tag a zh-CN browser reads as (objectstack#30511).
+    expect(document.documentElement.lang).toBe('zh-Hans');
   });
 
   it('control: an en browser paints the en line on the first commit', () => {

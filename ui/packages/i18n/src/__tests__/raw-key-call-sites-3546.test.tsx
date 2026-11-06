@@ -28,6 +28,7 @@
  * below that actually pins this fix is a `zh` one.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { renderHook } from '@testing-library/react';
 import React from 'react';
 import { I18nProvider, useObjectTranslation } from '../provider';
@@ -70,7 +71,7 @@ beforeEach(() => {
 
 describe('objectui#3546 slice one — the five raw-key call-site keys', () => {
   it('covers all ten packs (guards the loop from silently emptying)', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     expect(KEYS).toHaveLength(5);
   });
 
@@ -102,7 +103,7 @@ describe('objectui#3546 slice one — the five raw-key call-site keys', () => {
     // reached the user verbatim: the toast literally read
     // `console.objectView.cannotEditMetaView`. Nothing shadowed it, which is
     // why these two are the sites the issue verified on the page.
-    it.each(['en', 'zh'] as const)('%s resolves both meta-view toasts from the pack', (lang) => {
+    it.each(['en', 'zh-Hans', 'zh-Hant'] as const)('%s resolves both meta-view toasts from the pack', (lang) => {
       const { result } = renderHook(() => useObjectTranslation(), { wrapper: wrapperFor(lang) });
       for (const key of [
         'console.objectView.cannotEditMetaView',
@@ -160,7 +161,7 @@ describe('objectui#3546 slice one — the five raw-key call-site keys', () => {
       'detail.back',
     );
 
-    it.each(['en', 'zh'] as const)('%s resolves detail.viewSource from the pack', (lang) => {
+    it.each(['en', 'zh-Hans', 'zh-Hant'] as const)('%s resolves detail.viewSource from the pack', (lang) => {
       const { result } = renderHook(() => useDetailish(), { wrapper: wrapperFor(lang) });
       const value = result.current.t('detail.viewSource');
       expect(value, `${lang} rendered the raw key`).not.toBe('detail.viewSource');
@@ -184,7 +185,7 @@ describe('objectui#3546 slice one — the five raw-key call-site keys', () => {
         return typeof hostValue === 'string' && hostValue !== key ? hostValue : defaults[key] || key;
       };
 
-    it.each(['en', 'zh'] as const)('%s resolves the refresh aria-label from the pack', (lang) => {
+    it.each(['en', 'zh-Hans', 'zh-Hant'] as const)('%s resolves the refresh aria-label from the pack', (lang) => {
       const { result } = renderHook(() => useObjectTranslation(), { wrapper: wrapperFor(lang) });
       const t = perKey(result.current.t, { 'gantt.toolbar.refresh': 'Refresh' });
       expect(t('gantt.toolbar.refresh')).toBe(at(builtInLocales[lang], 'gantt.toolbar.refresh'));

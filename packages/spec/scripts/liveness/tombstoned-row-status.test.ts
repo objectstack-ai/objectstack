@@ -63,6 +63,7 @@ import {
   RouteGenerationConfigSchema,
 } from '../../src/api/rest-server.zod';
 import { SubscriptionSchema } from '../../src/api/realtime.zod';
+import { TemplateManifestSchema } from '../../src/marketplace/template-manifest.zod';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specRoot = resolve(here, '../..');
@@ -81,6 +82,7 @@ const SPEC_ONLY_SCHEMAS: Record<string, unknown> = {
   route_generation: RouteGenerationConfigSchema,
   rest_api: RestApiConfigSchema,
   realtime_subscription: SubscriptionSchema,
+  template_manifest: TemplateManifestSchema,
 };
 
 /** The prefix `retiredKey()` writes onto a tombstone's description. */

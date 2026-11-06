@@ -22,7 +22,7 @@
     "ai.ask-data",
     "access-security.row-scope"
   ],
-  "category": "project",
+  "businessFunctions": ["project"],
   "run": {
     "seed": {
       "project": [

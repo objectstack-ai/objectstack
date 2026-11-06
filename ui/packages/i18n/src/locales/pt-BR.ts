@@ -4269,7 +4269,7 @@ const pt = {
     },
   },
   // The rest of `marketplace.*` is the lazy `marketplace` namespace
-  // (`../namespaces/marketplace/pt.ts`), fetched when a marketplace page
+  // (`../namespaces/marketplace/pt-BR.ts`), fetched when a marketplace page
   // mounts. What stays here is read by a page outside the marketplace route:
   // Studio's packages page draws a marketplace install's row through
   // `MarketplaceRowActions` and `MarketplaceNotLoaded` (the Not loaded badge

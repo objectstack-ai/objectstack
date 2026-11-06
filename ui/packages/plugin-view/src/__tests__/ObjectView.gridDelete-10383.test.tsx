@@ -359,7 +359,7 @@ describe('objectui#10383 — the affordance follows the same gate as the console
  * today's wording.
  */
 describe('objectui#11695 — the row Delete names the row in zh', () => {
-  const ZH = builtInLocales.zh as unknown as {
+  const ZH = builtInLocales['zh-Hans'] as unknown as {
     objectActions: { deleteConfirmTitle: string; deleteConfirmButton: string };
   };
 

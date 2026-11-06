@@ -55,6 +55,7 @@ describe('the ./score entry import graph', () => {
       '@objectstack/core',
       '@objectstack/spec/api',
       '@objectstack/spec/data',
+      '@objectstack/spec/marketplace',
       '@objectstack/spec/meta-spelling',
     ]);
   });

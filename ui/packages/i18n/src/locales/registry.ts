@@ -3,21 +3,39 @@
  *
  * ## What this module is for
  *
- * `locales/index.ts` names all ten packs in ten static `import` statements, so
- * every module that reached ANY of them through the package entry reached all
- * ten. The console measured that: one eagerly loaded chunk carrying ten
- * catalogues of which a viewer reads one, and every new translation key paid
+ * `locales/index.ts` names every pack in a static `import` statement, so every
+ * module that reached ANY of them through the package entry reached all of
+ * them. The console measured that (ten packs at the time): one eagerly loaded
+ * chunk carrying every catalogue of which a viewer reads one, and every new translation key paid
  * for by every visitor in every language (objectui#7399's measurement, and the
  * per-chunk ceiling it ran out of).
  *
  * This module is the entry's replacement door. It holds:
  *
- *   - the ten language CODES, which cost nothing;
+ *   - the language CODES, which cost nothing — the platform locale table's tags
+ *     (`PLATFORM_LOCALE_TAGS` from `@objectstack/spec/system`, ruling F of
+ *     objectstack#29349), not a list of this package's own;
  *   - one static `import` — `en`, and only `en` (see below);
- *   - nine `() => import(...)` loaders, one per catalogue, each its own chunk;
+ *   - one `() => import(...)` loader per other tag, each its own chunk;
  *   - a synchronous registry of what has actually been loaded so far.
  *
- * ## Why `en` is static and the other nine are not
+ * ## The table decides the set, and old codes keep resolving
+ *
+ * A catalogue is keyed by its table tag (`zh-Hans`, `zh-Hant`, `pt-BR`, …), and
+ * the loader map below is TYPED on the table: a tag added to (or removed from)
+ * `PLATFORM_LOCALES` without its catalogue is a compile error here, and
+ * `all-locales-key-parity.test.ts` reads the same table, so a language the
+ * Console lacks is red twice before it ships.
+ *
+ * The codes that stored values already carry (`sys_user.locale`, a cached seed,
+ * an `Accept-Language` answer, an app's `supportedLocales`) are not table tags:
+ * `zh`, `zh-CN`, `zh-TW`, `pt`, `ja-JP`, `en-US`. {@link resolveBuiltInLanguage}
+ * reads every code through the table's read aliases (`platformLocaleTagOf`) —
+ * the whole code first, then each shorter prefix — so `zh-CN` is served by
+ * `zh-Hans`, `zh-TW` and `zh-Hant-TW` by `zh-Hant`, `pt` and `pt-PT` by
+ * `pt-BR`, `de-AT` by `de`. ⛔ No second alias list lives in this package.
+ *
+ * ## Why `en` is static and the others are not
  *
  * ⛔ This is not a shortcut around the ask; it is what makes the ask safe, and
  * the card admits it in as many words ("no `packages/i18n/src/locales/*` module
@@ -29,7 +47,7 @@
  *      define — the four `console.ai.*` outbound messages are exempted from
  *      parity by `all-locales-key-parity.test.ts`, and a plural category no
  *      pack enumerates is resolved the same way — renders through `en`. With no
- *      `en` bundle those render as the RAW KEY, in the UI, in nine languages.
+ *      `en` bundle those render as the RAW KEY, in the UI, in every other language.
  *   2. `@object-ui/app-shell`'s `LoadingScreen` renders BEFORE i18n is usable
  *      and on the server-down path where nothing else loads. It needs a
  *      synchronous dictionary, and leaving it with English literals instead is
@@ -37,19 +55,25 @@
  *   3. A caller of the synchronous, published `createI18n()` that never awaits
  *      anything must still get a usable instance.
  *
- * So `en` is the documented resident fallback and the other nine are fetched on
- * demand. What a `zh` viewer pays is `en` + `zh`, not ten.
+ * So `en` is the documented resident fallback and every other catalogue is
+ * fetched on demand. What a `zh-Hans` viewer pays is `en` + `zh-Hans`, not
+ * every pack.
  *
  * ## The loaders are spelled out, one per line, on purpose
  *
  * ⛔ Never collapse them into `import(`./${lang}.js`)`. A template literal makes
  * the specifier dynamic, and every bundler answers that by emitting EVERY file
- * the pattern could match — which is the ten-catalogue closure again, now
- * spelled in a way that reads lazy. Ten literal specifiers are ten chunks the
- * bundler can name, and `apps/console/vite.config.ts` names them
- * (`i18n-locale-<code>`) so `scripts/check-eager-locale-catalogues.mjs` can
+ * the pattern could match — which is the all-catalogue closure again, now
+ * spelled in a way that reads lazy. One literal specifier per tag is one chunk
+ * the bundler can name, and `apps/console/vite.config.ts` names them
+ * (`i18n-locale-<tag>`) so `scripts/check-eager-locale-catalogues.mjs` can
  * weigh them in the BUILT bundle rather than in this source file.
  */
+import {
+  PLATFORM_LOCALE_TAGS,
+  platformLocaleTagOf,
+  type PlatformLocaleTag,
+} from '@objectstack/spec/system';
 import en from './en.js';
 import type { TranslationKeys } from './en.js';
 
@@ -70,44 +94,48 @@ export type LocaleCatalogue = Readonly<Record<string, unknown>>;
 export const DEFAULT_BUILT_IN_LANGUAGE = 'en';
 
 /**
- * The nine catalogues fetched on demand — one literal specifier each, so each
- * one is a chunk of its own. ⛔ Read the header before touching the spelling.
+ * The catalogues fetched on demand — one literal specifier each, so each one is
+ * a chunk of its own. ⛔ Read the header before touching the spelling.
+ *
+ * Typed on the platform locale table: every table tag but `en` must have a
+ * loader here and nothing else may, so the table and the packs cannot drift
+ * apart without a compile error.
  */
-const LAZY_LOCALE_LOADERS: Readonly<Record<string, () => Promise<{ default: LocaleCatalogue }>>> =
-  Object.freeze({
-    zh: () => import('./zh.js'),
-    ja: () => import('./ja.js'),
-    ko: () => import('./ko.js'),
-    de: () => import('./de.js'),
-    fr: () => import('./fr.js'),
-    es: () => import('./es.js'),
-    pt: () => import('./pt.js'),
-    ru: () => import('./ru.js'),
-    ar: () => import('./ar.js'),
-  });
+const LAZY_LOCALE_LOADERS: Readonly<
+  Record<Exclude<PlatformLocaleTag, typeof DEFAULT_BUILT_IN_LANGUAGE>, () => Promise<{ default: LocaleCatalogue }>>
+> = Object.freeze({
+  'zh-Hans': () => import('./zh-Hans.js'),
+  'zh-Hant': () => import('./zh-Hant.js'),
+  es: () => import('./es.js'),
+  ar: () => import('./ar.js'),
+  fr: () => import('./fr.js'),
+  'pt-BR': () => import('./pt-BR.js'),
+  ru: () => import('./ru.js'),
+  de: () => import('./de.js'),
+  ja: () => import('./ja.js'),
+  ko: () => import('./ko.js'),
+});
 
 /**
- * Every language code this package ships a catalogue for — the ten, in the
- * order `builtInLocales` declared them, and with NO catalogue bytes behind the
+ * Every language code this package ships a catalogue for: the platform locale
+ * table's tags, in table (menu) order, with NO catalogue bytes behind the
  * list. This is what a language switcher enumerates.
  */
-export const BUILT_IN_LANGUAGE_CODES: readonly string[] = Object.freeze([
-  DEFAULT_BUILT_IN_LANGUAGE,
-  ...Object.keys(LAZY_LOCALE_LOADERS),
-]);
+export const BUILT_IN_LANGUAGE_CODES: readonly string[] = Object.freeze([...PLATFORM_LOCALE_TAGS]);
 
 /**
  * Exact-then-base language-tag matching: `tag` itself when `has(tag)`, else
  * its base language (`zh-CN` → `zh`) when `has(base)`, else `null`.
  *
- * The ONE implementation of this order in the package (objectui#11326). The
- * registry asks it which catalogue serves a code, and `I18nProvider` asks it
- * which language a cached seed boots in — each with its own `has`, so the two
- * can never disagree about the ORDER while each keeps its own notion of what
- * exists.
+ * A generic matcher over a caller's own set, for sets that are NOT the platform
+ * locale table: `I18nProvider` asks it which language a cached seed boots in
+ * (over the built-in packs plus `config.resources`), and the `studio` namespace
+ * which of its two catalogues serves a code. The built-in catalogues are
+ * matched by {@link resolveBuiltInLanguage}, which reads the table's read
+ * aliases first.
  *
- * Exact first, so a catalogue keyed by a full tag (a `pt-BR` beside `pt`, a
- * `zh-TW` beside `zh`) is never shadowed by its base language.
+ * Exact first, so a catalogue keyed by a full tag (a `pt-BR` beside `pt`) is
+ * never shadowed by its base language.
  */
 export function matchLanguageTag(tag: string, has: (code: string) => boolean): string | null {
   if (has(tag)) return tag;
@@ -125,29 +153,46 @@ function hasBuiltInCatalogue(code: string): boolean {
 }
 
 /**
- * The code of the built-in catalogue that serves `lang`, or `null` when this
+ * The tag of the built-in catalogue that serves `lang`, or `null` when this
  * package ships none for it.
  *
- * A region-tagged code is served by its base language's catalogue: the
- * platform answers `zh-CN`, a language menu offers `zh-CN`, and the user's
- * stored choice is `zh-CN`, while the catalogue is keyed `zh`. An exact match
- * still wins — see {@link matchLanguageTag}.
+ * `lang` is read through the platform locale table's read aliases
+ * (`platformLocaleTagOf`, case-insensitive): a table tag answers itself and a
+ * stored code answers the tag it means — `zh`, `zh-CN`, `zh-SG` → `zh-Hans`;
+ * `zh-TW`, `zh-HK`, `zh-MO` → `zh-Hant`; `pt` → `pt-BR`; `ja-JP` → `ja`;
+ * `en-US` → `en`. A code the table does not name is retried one subtag shorter
+ * at a time (RFC 4647 lookup), so `zh-Hant-TW` is served by `zh-Hant`,
+ * `zh-Hans-CN` by `zh-Hans`, `de-AT` by `de` and `pt-PT` — through `pt` — by
+ * `pt-BR`. The script subtag is kept until last, which is what tells the two
+ * Chinese scripts apart: a region code cannot (Singapore writes Simplified,
+ * Hong Kong Traditional), so the read aliases name each one.
  */
 export function resolveBuiltInLanguage(lang: string): string | null {
-  return matchLanguageTag(lang, hasBuiltInCatalogue);
+  if (typeof lang !== 'string') return null;
+  let candidate = lang;
+  while (candidate) {
+    const tag = platformLocaleTagOf(candidate);
+    if (tag !== undefined && hasBuiltInCatalogue(tag)) return tag;
+    const cut = candidate.lastIndexOf('-');
+    if (cut <= 0) return null;
+    candidate = candidate.slice(0, cut);
+  }
+  return null;
 }
 
 /**
- * Whether `@object-ui/i18n` ships a catalogue that serves `lang` — exactly, or
- * through its base language (`zh-CN` → `zh`; see {@link resolveBuiltInLanguage}).
+ * Whether `@object-ui/i18n` ships a catalogue that serves `lang` — a table tag,
+ * a read alias of one, or a longer tag one of those prefixes (`zh-CN` →
+ * `zh-Hans`; see {@link resolveBuiltInLanguage}).
  */
 export function isBuiltInLanguage(lang: string): boolean {
   return resolveBuiltInLanguage(lang) !== null;
 }
 
 /**
- * The catalogues loaded so far. `en` is in here from module evaluation; each of
- * the other nine appears once {@link loadBuiltInLocale} has resolved for it.
+ * The catalogues loaded so far, keyed by table tag. `en` is in here from module
+ * evaluation; each other catalogue appears once {@link loadBuiltInLocale} has
+ * resolved for it.
  */
 const loaded: Record<string, LocaleCatalogue> = {
   [DEFAULT_BUILT_IN_LANGUAGE]: en as LocaleCatalogue,
@@ -157,7 +202,9 @@ const loaded: Record<string, LocaleCatalogue> = {
 const inFlight = new Map<string, Promise<LocaleCatalogue | null>>();
 
 /**
- * A synchronous snapshot of the catalogues this process has resolved.
+ * A synchronous snapshot of the catalogues this process has resolved, keyed by
+ * table tag (`zh-Hans`, not `zh-CN`): a reader holding a language code looks it
+ * up as `getLoadedBuiltInLocales()[resolveBuiltInLanguage(code)]`.
  *
  * ⚠️ A SNAPSHOT, not a live view: callers that render from it must re-read it
  * after `loadBuiltInLocale` resolves, or they will keep rendering the answer
@@ -172,7 +219,7 @@ export function getLoadedBuiltInLocales(): Readonly<Record<string, LocaleCatalog
  * holds one.
  *
  * The only caller in this repository is `locales/index.ts`'s
- * {@link registerBuiltInLocales}: that module statically imports all ten, so
+ * {@link registerBuiltInLocales}: that module statically imports every pack, so
  * asking {@link loadBuiltInLocale} to `import()` them again would be an await
  * for modules the evaluator already has. It is also what lets a test that needs
  * a non-`en` locale resident say so in ONE SYNCHRONOUS LINE at module scope —
@@ -190,9 +237,9 @@ export function registerBuiltInLocale(lang: string, catalogue: LocaleCatalogue):
 
 /**
  * Whether the catalogue that serves `lang` is already resident (no fetch
- * needed). Reads the same exact-then-base resolution as
- * {@link loadBuiltInLocale}, so the two agree for a region-tagged code: when
- * `zh` is resident, `zh-CN` needs no fetch either.
+ * needed). Reads the same resolution as {@link loadBuiltInLocale}, so the two
+ * agree for a stored code: when `zh-Hans` is resident, `zh-CN` needs no fetch
+ * either.
  */
 export function isBuiltInLocaleLoaded(lang: string): boolean {
   const code = resolveBuiltInLanguage(lang);
@@ -203,11 +250,11 @@ export function isBuiltInLocaleLoaded(lang: string): boolean {
  * Fetch the built-in catalogue that serves `lang`, or resolve `null` for a code
  * this package has no catalogue for (an app-supplied locale, a typo).
  *
- * A region-tagged code resolves its base language's catalogue (`zh-CN` → the
- * `zh` catalogue) unless a catalogue is keyed by the full tag — see
+ * A stored code resolves the catalogue of the table tag it means (`zh-CN` →
+ * the `zh-Hans` catalogue, `zh-TW` → `zh-Hant`) — see
  * {@link resolveBuiltInLanguage}. The catalogue is fetched and memoised under
- * ITS OWN code, so `zh-CN` and `zh` share one fetch and
- * {@link getLoadedBuiltInLocales} stays keyed by catalogue code, which is how
+ * ITS OWN tag, so `zh-CN`, `zh` and `zh-Hans` share one fetch and
+ * {@link getLoadedBuiltInLocales} stays keyed by table tag, which is how
  * `createI18n` and the app-shell splash read it.
  *
  * Memoised in both directions: a resolved catalogue is returned from the
@@ -224,7 +271,7 @@ export async function loadBuiltInLocale(lang: string): Promise<LocaleCatalogue |
   if (resident) return resident;
 
   const loader = Object.prototype.hasOwnProperty.call(LAZY_LOCALE_LOADERS, code)
-    ? LAZY_LOCALE_LOADERS[code]
+    ? LAZY_LOCALE_LOADERS[code as keyof typeof LAZY_LOCALE_LOADERS]
     : undefined;
   if (!loader) return null;
 

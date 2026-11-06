@@ -18,7 +18,8 @@ import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { TemplateManifestSchema } from '@objectstack/spec/marketplace';
+import { explainSolutionTypeContradiction, TemplateManifestSchema } from '@objectstack/spec/marketplace';
+import { resolveInstallModes } from '@objectstack/spec/kernel';
 import { DeclarativeConnectorEntrySchema } from '@objectstack/spec/integration';
 import stack from '../objectstack.config.js';
 import {
@@ -91,6 +92,16 @@ describe('connector-docusign listing', () => {
 
   it('names the stack manifest id as its package id', () => {
     expect(manifest.manifestId).toBe(stack.manifest!.id);
+  });
+
+  it('is listed as a connector, and the stack declares the connector that makes it one', () => {
+    // `os package publish` runs the same check against the built artifact and
+    // refuses a `connector` that declares none.
+    expect(manifest.solutionType).toBe('connector');
+    expect(explainSolutionTypeContradiction('connector', {
+      installModes: resolveInstallModes(stack.manifest),
+      connectorCount: (stack.connectors ?? []).length,
+    })).toBeUndefined();
   });
 
   it('declares no key the publisher ignores', () => {

@@ -248,8 +248,9 @@ interface Booted {
     engine: ObjectQL;
 }
 
-async function bootKernel(root: string, options: SuiteOptions = {}): Promise<Booted> {
+async function bootKernel(root: string, options: SuiteOptions = {}, beforeBootstrap?: (kernel: ObjectKernel) => void): Promise<Booted> {
     const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+    beforeBootstrap?.(kernel);
     const engine = new ObjectQL();
     engine.registerDriver(new SqlDriver({
         client: 'better-sqlite3',
@@ -645,16 +646,18 @@ describe('[#30379] the disable door refuses while an enabled package\'s validati
         expect((await dispatchAs(kernel, 'PATCH', `/data/${ACCOUNT}/${accountId}`, { name: 'Acme Ltd' })).status).toBe(200);
     });
 
-    it('measures an enable the ruling did not cover: a reading package enabled while the field stays withheld refuses writes (400 VALIDATION_FAILED)', async () => {
-        // The disable door is the one ruled. Enabling the reading package after
-        // the field's package is off is not judged by the enable door, and the
-        // rule then fails closed on every write, naming itself. The enable
-        // door's mirror is #30756, which flips this pin when it lands.
-        const { kernel } = booted!;
-        expect((await dispatchAs(kernel, 'PATCH', `/packages/${RULES}/enable`)).status).toBe(200);
+    it('[#30756] the mirror enable is refused the same way: the reading package stays disabled while the field stays withheld, and writes still land', async () => {
+        // Before #30756 this enable answered 200 and every write to the
+        // account then answered 400 VALIDATION_FAILED, the rule failing closed
+        // on the withheld field. The full enable-door battery is the
+        // `[#30756]` describe below.
+        const { kernel, engine } = booted!;
+        const refused = await dispatchAs(kernel, 'PATCH', `/packages/${RULES}/enable`);
+        expect({ status: refused.status, code: refused.code }).toEqual({ status: 409, code: CODE });
+        expect(String(refused.message)).toContain(`Package '${RULES}' cannot be enabled: 3 active validation rules`);
+        expect(engine.registry.getPackage(RULES)?.enabled).toBe(false);
         const updated = await dispatchAs(kernel, 'PATCH', `/data/${ACCOUNT}/${accountId}`, { name: 'Acme' });
-        expect({ status: updated.status, code: updated.code }).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
-        expect(String(updated.message)).toContain(RULE_NOT_NEGATIVE);
+        expect(updated.status, String(updated.message)).toBe(200);
     });
 });
 
@@ -845,5 +848,287 @@ describe('[#30379 contract review] POST /packages with enableOnInstall: false as
         expect(result.response?.status).toBe(201);
         expect(registry.getPackage(EXTENDER)?.enabled).toBe(false);
         expect(loadDisabledPackageIds(undefined).has(EXTENDER)).toBe(true);
+    });
+});
+
+describe('[#30756] the enable door refuses while a rule it would serve reads a field a disabled package withholds', () => {
+    let root: string;
+    let booted: Booted | undefined;
+    let accountId: string;
+    // The disable door's code (#30724), reused: the refused state is the same one.
+    const CODE = 'PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE';
+    /** A tenant copy of a packaged rule: only its sentence and its switch are the tenant's. */
+    const switchedOff = (name: string) => ({ name, type: 'script', message: 'Switched off by the tenant', condition: 'true', active: false });
+
+    beforeAll(async () => {
+        root = mkdtempSync(join(tmpdir(), 'os-suite-ext-enable-'));
+        writeFileSync(join(root, '.keep'), '');
+        process.env.OS_HOME = mkdtempSync(join(home, 'enable-'));
+        booted = await bootKernel(root, { rules: true });
+        const created = await dispatchAs(booted.kernel, 'POST', `/data/${ACCOUNT}`, { name: 'Acme', [CREDIT]: 500 });
+        expect(created.status, 'precondition: the account is written').toBe(201);
+        accountId = idOf(created);
+    }, 120_000);
+    afterAll(async () => {
+        await shutdown(booted);
+        rmSync(root, { recursive: true, force: true });
+    }, 60_000);
+
+    it('control: with the field\'s package enabled, an enable with no dependent rule proceeds as before', async () => {
+        const { kernel, engine } = booted!;
+        expect((await dispatchAs(kernel, 'PATCH', `/packages/${RULES}/disable`)).status).toBe(200);
+        const enabled = await dispatchAs(kernel, 'PATCH', `/packages/${RULES}/enable`);
+        expect(enabled.status, String(enabled.message)).toBe(200);
+        expect(engine.registry.getPackage(RULES)?.enabled).not.toBe(false);
+        expect(loadDisabledPackageIds(ENVIRONMENT_ID).has(RULES)).toBe(false);
+    });
+
+    it('answers 409 with the code, naming every rule as package · object · rule and the package to enable first, and changes nothing', async () => {
+        const { kernel, engine } = booted!;
+        // The order the disable door allows: the reader off first, then the field's package.
+        expect((await dispatchAs(kernel, 'PATCH', `/packages/${RULES}/disable`)).status).toBe(200);
+        expect((await dispatchAs(kernel, 'PATCH', `/packages/${MODULE}/disable`)).status).toBe(200);
+
+        const refused = await dispatchAs(kernel, 'PATCH', `/packages/${RULES}/enable`);
+        expect({ status: refused.status, code: refused.code }).toEqual({ status: 409, code: CODE });
+        expect(String(refused.message)).toBe(
+            `Package '${RULES}' cannot be enabled: 3 active validation rules the enable would serve read fields that a disabled package adds through objectExtensions, which stay withheld — ${listingOfRules([
+                { packageId: RULES, object: ACCOUNT, rule: RULE_NOT_NEGATIVE, fields: [CREDIT] },
+                { packageId: RULES, object: ACCOUNT, rule: RULE_REVIEW, fields: [CREDIT] },
+                { packageId: RULES, object: VISIT, rule: RULE_VISIT_HOP, fields: [`account.${CREDIT}`] },
+            ])}. Switch off or change those rules first, or enable '${MODULE}' first.`,
+        );
+        expect(refused.details).toBeUndefined();
+
+        // Nothing changed: the row, the served rules, the data plane and the state file.
+        expect(engine.registry.getPackage(RULES)?.enabled).toBe(false);
+        const rules = ((engine.registry.getObject(ACCOUNT) as any)?.validations ?? []).map((v: any) => v?.name);
+        expect(rules).not.toContain(RULE_NOT_NEGATIVE);
+        const written = await dispatchAs(kernel, 'PATCH', `/data/${ACCOUNT}/${accountId}`, { name: 'Acme Ltd' });
+        expect(written.status, String(written.message)).toBe(200);
+        expect(loadDisabledPackageIds(ENVIRONMENT_ID).has(RULES)).toBe(true);
+    });
+
+    it('control: proceeds once every rule it would serve that reads the field is switched off through the tenant overlay', async () => {
+        const { kernel, engine } = booted!;
+        engine.registry.registerObject({
+            name: ACCOUNT, label: 'Account', fields: { name: { name: 'name', type: 'text', label: 'Name' } },
+            validations: [switchedOff(RULE_NOT_NEGATIVE), switchedOff(RULE_REVIEW)], _provenance: 'org',
+        } as any, APP, undefined, 'overlay');
+        engine.registry.registerObject({
+            name: VISIT, label: 'Visit',
+            fields: {
+                name: { name: 'name', type: 'text', label: 'Name' },
+                amount: { name: 'amount', type: 'number', label: 'Amount' },
+                account: { name: 'account', type: 'lookup', label: 'Account', reference: ACCOUNT },
+            },
+            validations: [switchedOff(RULE_VISIT_HOP)], _provenance: 'org',
+        } as any, APP, undefined, 'overlay');
+
+        const enabled = await dispatchAs(kernel, 'PATCH', `/packages/${RULES}/enable`);
+        expect(enabled.status, String(enabled.message)).toBe(200);
+        expect(engine.registry.getPackage(RULES)?.enabled).not.toBe(false);
+        const served = ((engine.registry.getObject(ACCOUNT) as any)?.validations ?? []) as Array<{ name?: string; active?: unknown }>;
+        expect(served.find((r) => r.name === RULE_NOT_NEGATIVE)?.active, 'the packaged rule is served, switched off').toBe(false);
+        const written = await dispatchAs(kernel, 'PATCH', `/data/${ACCOUNT}/${accountId}`, { name: 'Acme' });
+        expect(written.status, String(written.message)).toBe(200);
+        expect(loadDisabledPackageIds(ENVIRONMENT_ID).has(RULES)).toBe(false);
+    });
+});
+
+describe('[#30756] POST /packages with enableOnInstall: true asks the same scan', () => {
+    const OWNER = 'com.qa.inst2.owner';
+    const EXTENDER = 'com.qa.inst2.flags';
+    const READER = 'com.qa.inst2.reader';
+    const THING = 'qy_thing';
+    const FLAG = 'qy_flag';
+    const RULE = 'qy_flag_required';
+    const CODE = 'PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE';
+    /** Each package its own namespace: the two install side by side. */
+    const manifestOf = (id: string) => ({ id, name: id, namespace: id === READER ? 'qr' : 'qy', version: '1.0.0', type: 'module' });
+
+    let previousHome: string | undefined;
+    beforeAll(() => {
+        previousHome = process.env.OS_HOME;
+        process.env.OS_HOME = mkdtempSync(join(home, 'install-enable-'));
+    });
+    afterAll(() => {
+        process.env.OS_HOME = previousHome;
+    });
+
+    /** The extender's field on the owner's object, (optionally) the reader's rule over it, both packages installed and disabled. */
+    async function door(withReader: boolean) {
+        const registry = new SchemaRegistry({ multiTenant: false, collisionPolicy: 'error' } as any);
+        (registry as any).logLevel = 'silent';
+        const kernel: any = {
+            getService: (name: string) => (name === 'objectql' ? Promise.resolve({ registry }) : null),
+            context: { getService: () => null },
+        };
+        const dispatcher = new HttpDispatcher(kernel);
+        const install = (body: unknown) => dispatcher.handlePackages('', 'POST', body, {}, {
+            request: {},
+            executionContext: { userId: 'u_admin', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'] },
+        } as any);
+        for (const id of [EXTENDER, READER]) {
+            const first = await install({ manifest: manifestOf(id) });
+            expect(first.response?.status, `precondition: ${id} installs`).toBe(201);
+        }
+        registry.registerObject({ name: THING, label: 'Thing', fields: { name: { name: 'name', type: 'text', label: 'Name' } } } as any, OWNER);
+        registry.registerObject({ name: THING, fields: { [FLAG]: { name: FLAG, type: 'boolean', label: 'Flag' } } } as any, EXTENDER, undefined, 'extend');
+        if (withReader) {
+            registry.registerObject({
+                name: THING,
+                validations: [{ name: RULE, type: 'script', severity: 'error', message: 'Flag it', condition: `record.${FLAG} == null` }],
+            } as any, READER, undefined, 'extend');
+        }
+        registry.disablePackage(READER);
+        registry.disablePackage(EXTENDER);
+        return { registry, install };
+    }
+
+    it('an overwrite of a disabled package that asks to come back enabled is refused while a rule it would serve reads a withheld field, and the package stays disabled', async () => {
+        const { registry, install } = await door(true);
+        const result = await install({ manifest: manifestOf(READER), overwrite: true, enableOnInstall: true });
+        expect({ status: result.response?.status, code: result.response?.body?.error?.code }).toEqual({ status: 409, code: CODE });
+        expect(String(result.response?.body?.error?.message)).toBe(
+            `Package '${READER}' was installed and stays disabled: \`enableOnInstall: true\` cannot enable it: an active validation rule the enable would serve reads a field that a disabled package adds through objectExtensions, which stays withheld — ${READER} · ${THING} · ${RULE} (reads ${FLAG}). Switch off or change that rule first, or enable '${EXTENDER}' first.`,
+        );
+        expect(registry.getPackage(READER)?.enabled).toBe(false);
+        expect(loadDisabledPackageIds(undefined).has(READER)).toBe(true);
+        expect(((registry.getObject(THING) as any)?.validations ?? []).map((v: any) => v?.name)).not.toContain(RULE);
+    });
+
+    it('control: with no rule reading the field the same overwrite installs it enabled', async () => {
+        const { registry, install } = await door(false);
+        const result = await install({ manifest: manifestOf(READER), overwrite: true, enableOnInstall: true });
+        expect(result.response?.status, String(result.response?.body?.error?.message)).toBe(201);
+        expect(registry.getPackage(READER)?.enabled).toBe(true);
+        expect(loadDisabledPackageIds(undefined).has(READER)).toBe(false);
+    });
+});
+
+describe('[#30756] a boot whose state file leaves an enabled package\'s rule reading a withheld field says so once', () => {
+    /** Boot with the kernel logger's `warn` lines captured, and return them beside the kernel. */
+    async function bootCapturingWarnings(disableModule: boolean) {
+        const root = mkdtempSync(join(tmpdir(), 'os-suite-ext-bootread-'));
+        writeFileSync(join(root, '.keep'), '');
+        process.env.OS_HOME = mkdtempSync(join(home, 'bootread-'));
+        // The state file records the field's package as disabled; the reading
+        // package is not listed, so it boots enabled: no door is passed.
+        if (disableModule) setPackageDisabled(ENVIRONMENT_ID, MODULE, true);
+        const warnings: string[] = [];
+        const booted = await bootKernel(root, { rules: true }, (kernel) => {
+            const logger = (kernel as any).logger;
+            const warn = logger.warn.bind(logger);
+            logger.warn = (message: unknown, ...rest: unknown[]) => { warnings.push(String(message)); return warn(message, ...rest); };
+        });
+        return { root, booted, readerWarnings: () => warnings.filter((w) => w.includes('through objectExtensions')) };
+    }
+
+    it('names every rule, the objects whose writes are refused and the package to enable, once; the remedy then lets writes land', async () => {
+        const { root, booted, readerWarnings } = await bootCapturingWarnings(true);
+        try {
+            const { kernel, engine } = booted;
+            expect(engine.registry.getPackage(MODULE)?.enabled, 'precondition: the state file disabled the field\'s package').toBe(false);
+            expect(engine.registry.getPackage(RULES)?.enabled, 'precondition: the reading package boots enabled').not.toBe(false);
+            expect(readerWarnings()).toEqual([
+                `[AppPlugin] 3 active validation rules read fields that a disabled package adds through objectExtensions, so every write to ${ACCOUNT}, ${VISIT} is refused (400 VALIDATION_FAILED) until this is resolved — ${listingOfRules([
+                    { packageId: RULES, object: ACCOUNT, rule: RULE_NOT_NEGATIVE, fields: [CREDIT] },
+                    { packageId: RULES, object: ACCOUNT, rule: RULE_REVIEW, fields: [CREDIT] },
+                    { packageId: RULES, object: VISIT, rule: RULE_VISIT_HOP, fields: [`account.${CREDIT}`] },
+                ])}. Switch off or change those rules, disable the package that serves them, or enable '${MODULE}'.`,
+            ]);
+            // What the sentence says: the write is refused while the state stands.
+            const refused = await dispatchAs(kernel, 'POST', `/data/${ACCOUNT}`, { name: 'Delta' });
+            expect({ status: refused.status, code: refused.code }).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
+            // One of the remedies it names: the field's package enabled.
+            expect((await dispatchAs(kernel, 'PATCH', `/packages/${MODULE}/enable`)).status).toBe(200);
+            const written = await dispatchAs(kernel, 'POST', `/data/${ACCOUNT}`, { name: 'Delta', [CREDIT]: 10 });
+            expect(written.status, String(written.message)).toBe(201);
+        } finally {
+            await shutdown(booted);
+            rmSync(root, { recursive: true, force: true });
+        }
+    }, 120_000);
+
+    it('control: a boot with nothing disabled says nothing', async () => {
+        const { root, booted, readerWarnings } = await bootCapturingWarnings(false);
+        try {
+            expect(booted.engine.registry.getPackage(MODULE)?.enabled).not.toBe(false);
+            expect(readerWarnings()).toEqual([]);
+        } finally {
+            await shutdown(booted);
+            rmSync(root, { recursive: true, force: true });
+        }
+    }, 120_000);
+});
+
+describe('[#30756] the enable door judges the rules on an object the package owns', () => {
+    const OWNER = 'com.qa.own.owner';
+    const READER = 'com.qa.own.reader';
+    const EXTENDER = 'com.qa.own.flags';
+    const THING = 'qo_thing';
+    const FLAG = 'qo_flag';
+    const RULE = 'qo_flag_required';
+    const CODE = 'PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE';
+    const NAMESPACES: Record<string, string> = { [OWNER]: 'qo', [READER]: 'qr', [EXTENDER]: 'qf' };
+    const manifestOf = (id: string) => ({ id, name: id, namespace: NAMESPACES[id], version: '1.0.0', type: 'module' });
+
+    let previousHome: string | undefined;
+    beforeAll(() => {
+        previousHome = process.env.OS_HOME;
+        process.env.OS_HOME = mkdtempSync(join(home, 'enable-owned-'));
+    });
+    afterAll(() => {
+        process.env.OS_HOME = previousHome;
+    });
+
+    /**
+     * The disabled owner's object, an ENABLED reader's rule on it reading the extender's field, and the extender
+     * disabled unless `extenderEnabled`: the object comes into service only with the owner's enable.
+     */
+    async function door({ extenderEnabled }: { extenderEnabled: boolean }) {
+        const registry = new SchemaRegistry({ multiTenant: false, collisionPolicy: 'error' } as any);
+        (registry as any).logLevel = 'silent';
+        const kernel: any = {
+            getService: (name: string) => (name === 'objectql' ? Promise.resolve({ registry }) : null),
+            context: { getService: () => null },
+        };
+        const dispatcher = new HttpDispatcher(kernel);
+        const context = {
+            request: {},
+            executionContext: { userId: 'u_admin', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'] },
+        } as any;
+        for (const id of [OWNER, READER, EXTENDER]) {
+            const installed = await dispatcher.handlePackages('', 'POST', { manifest: manifestOf(id) }, {}, context);
+            expect(installed.response?.status, `precondition: ${id} installs`).toBe(201);
+        }
+        registry.registerObject({ name: THING, label: 'Thing', fields: { name: { name: 'name', type: 'text', label: 'Name' } } } as any, OWNER);
+        registry.registerObject({ name: THING, fields: { [FLAG]: { name: FLAG, type: 'boolean', label: 'Flag' } } } as any, EXTENDER, undefined, 'extend');
+        registry.registerObject({
+            name: THING,
+            validations: [{ name: RULE, type: 'script', severity: 'error', message: 'Flag it', condition: `record.${FLAG} == null` }],
+        } as any, READER, undefined, 'extend');
+        registry.disablePackage(OWNER);
+        if (!extenderEnabled) registry.disablePackage(EXTENDER);
+        const enable = (id: string) => dispatcher.handlePackages(`/${id}/enable`, 'PATCH', {}, {}, context);
+        return { registry, enable };
+    }
+
+    it('refuses the owner\'s enable while an enabled package\'s rule on its object reads a field a disabled package withholds', async () => {
+        const { registry, enable } = await door({ extenderEnabled: false });
+        const result: any = await enable(OWNER);
+        expect({ status: result.response?.status, code: result.response?.body?.error?.code }).toEqual({ status: 409, code: CODE });
+        expect(String(result.response?.body?.error?.message)).toBe(
+            `Package '${OWNER}' cannot be enabled: an active validation rule the enable would serve reads a field that a disabled package adds through objectExtensions, which stays withheld — ${READER} · ${THING} · ${RULE} (reads ${FLAG}). Switch off or change that rule first, or enable '${EXTENDER}' first.`,
+        );
+        expect(registry.getPackage(OWNER)?.enabled).toBe(false);
+    });
+
+    it('control: with the field\'s package enabled, the owner\'s enable proceeds', async () => {
+        const { registry, enable } = await door({ extenderEnabled: true });
+        const result: any = await enable(OWNER);
+        expect(result.response?.status, String(result.response?.body?.error?.message)).toBe(200);
+        expect(registry.getPackage(OWNER)?.enabled).toBe(true);
     });
 });

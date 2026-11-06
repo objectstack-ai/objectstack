@@ -293,9 +293,11 @@ import type * as M199 from './api/push-relay.zod.js';
 import type * as M200 from './automation/api-trigger-signature.zod.js';
 // [ADR-0148] The recycle bin's spec half: the entry, its snapshot and the retention values -- new module, next free index.
 import type * as M201 from './data/recycle-bin.zod.js';
+// The marketplace taxonomy (business function, industry, solution type) and the maturity flag -- new module, next free index.
+import type * as M202 from './marketplace/taxonomy.zod.js';
 
 // ---------------------------------------------------------------------------
-// 837 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 841 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1143,7 +1145,6 @@ export type Iso_kernel_startupOrchestrator__PluginStartupResultSchema = Assert<E
 // marketplace/marketplace.zod.ts
 export type Iso_marketplace_marketplace__ArtifactDownloadResponseSchema = Assert<Eq< z.input< typeof M50.ArtifactDownloadResponseSchema >, z.infer< typeof M50.ArtifactDownloadResponseSchema > >>;
 export type Iso_marketplace_marketplace__ListingStatusSchema = Assert<Eq< z.input< typeof M50.ListingStatusSchema >, z.infer< typeof M50.ListingStatusSchema > >>;
-export type Iso_marketplace_marketplace__MarketplaceCategorySchema = Assert<Eq< z.input< typeof M50.MarketplaceCategorySchema >, z.infer< typeof M50.MarketplaceCategorySchema > >>;
 export type Iso_marketplace_marketplace__MarketplaceInstallResponseSchema = Assert<Eq< z.input< typeof M50.MarketplaceInstallResponseSchema >, z.infer< typeof M50.MarketplaceInstallResponseSchema > >>;
 export type Iso_marketplace_marketplace__PricingModelSchema = Assert<Eq< z.input< typeof M50.PricingModelSchema >, z.infer< typeof M50.PricingModelSchema > >>;
 export type Iso_marketplace_marketplace__PublisherVerificationSchema = Assert<Eq< z.input< typeof M50.PublisherVerificationSchema >, z.infer< typeof M50.PublisherVerificationSchema > >>;
@@ -1156,13 +1157,20 @@ export type Iso_marketplace_packageVersion__UpdatePackageVersionRequestSchema = 
 
 // marketplace/package.zod.ts
 export type Iso_marketplace_package__CreatePackageRequestSchema = Assert<Eq< z.input< typeof M52.CreatePackageRequestSchema >, z.infer< typeof M52.CreatePackageRequestSchema > >>;
-export type Iso_marketplace_package__PackageCategorySchema = Assert<Eq< z.input< typeof M52.PackageCategorySchema >, z.infer< typeof M52.PackageCategorySchema > >>;
 export type Iso_marketplace_package__PackageLocaleSchema = Assert<Eq< z.input< typeof M52.PackageLocaleSchema >, z.infer< typeof M52.PackageLocaleSchema > >>;
 export type Iso_marketplace_package__PackagePublisherSchema = Assert<Eq< z.input< typeof M52.PackagePublisherSchema >, z.infer< typeof M52.PackagePublisherSchema > >>;
 export type Iso_marketplace_package__PackageTranslationSchema = Assert<Eq< z.input< typeof M52.PackageTranslationSchema >, z.infer< typeof M52.PackageTranslationSchema > >>;
 export type Iso_marketplace_package__PackageTranslationsSchema = Assert<Eq< z.input< typeof M52.PackageTranslationsSchema >, z.infer< typeof M52.PackageTranslationsSchema > >>;
 export type Iso_marketplace_package__PackageVisibilitySchema = Assert<Eq< z.input< typeof M52.PackageVisibilitySchema >, z.infer< typeof M52.PackageVisibilitySchema > >>;
 export type Iso_marketplace_package__UpdatePackageRequestSchema = Assert<Eq< z.input< typeof M52.UpdatePackageRequestSchema >, z.infer< typeof M52.UpdatePackageRequestSchema > >>;
+
+// marketplace/taxonomy.zod.ts
+export type Iso_marketplace_taxonomy__MarketplaceBusinessFunctionSchema = Assert<Eq< z.input< typeof M202.MarketplaceBusinessFunctionSchema >, z.infer< typeof M202.MarketplaceBusinessFunctionSchema > >>;
+export type Iso_marketplace_taxonomy__MarketplaceBusinessFunctionsSchema = Assert<Eq< z.input< typeof M202.MarketplaceBusinessFunctionsSchema >, z.infer< typeof M202.MarketplaceBusinessFunctionsSchema > >>;
+export type Iso_marketplace_taxonomy__MarketplaceIndustriesSchema = Assert<Eq< z.input< typeof M202.MarketplaceIndustriesSchema >, z.infer< typeof M202.MarketplaceIndustriesSchema > >>;
+export type Iso_marketplace_taxonomy__MarketplaceIndustrySchema = Assert<Eq< z.input< typeof M202.MarketplaceIndustrySchema >, z.infer< typeof M202.MarketplaceIndustrySchema > >>;
+export type Iso_marketplace_taxonomy__MarketplaceSolutionTypeSchema = Assert<Eq< z.input< typeof M202.MarketplaceSolutionTypeSchema >, z.infer< typeof M202.MarketplaceSolutionTypeSchema > >>;
+export type Iso_marketplace_taxonomy__PackageMaturitySchema = Assert<Eq< z.input< typeof M202.PackageMaturitySchema >, z.infer< typeof M202.PackageMaturitySchema > >>;
 
 // marketplace/template-manifest.zod.ts
 export type Iso_marketplace_templateManifest__TemplateManifestSchema = Assert<Eq< z.input< typeof M53.TemplateManifestSchema >, z.infer< typeof M53.TemplateManifestSchema > >>;
@@ -1793,7 +1801,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 837 isomorphic pins', () => {
+  it('still declares all 841 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2818,7 +2826,15 @@ describe('ADR-0122 type-alias convention', () => {
     // the entry, its snapshot, a snapshot row, a cleared reference and the two
     // retention value schemas — plain objects, a number and a regex string,
     // no default and no transform (Iso_data_recycleBin__*). +6 added.
-    expect(pins).toHaveLength(837);
+    // 837 -> 841 is the marketplace taxonomy (`marketplace/taxonomy.zod.ts`):
+    // the business-function, industry, solution-type and maturity enums and the
+    // two facet lists — enums and arrays of enums under a refinement, which
+    // changes no type, no default and no transform
+    // (Iso_marketplace_taxonomy__*), +6 added; and the two category defs it
+    // retired, `MarketplaceCategorySchema` and `PackageCategorySchema`, left
+    // their modules whole (RETIRED_DEFS_BY_MAJOR[18]) and took their pins with
+    // them, -2 removed.
+    expect(pins).toHaveLength(841);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

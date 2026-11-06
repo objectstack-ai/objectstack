@@ -246,6 +246,7 @@ A navigation item another installed package contributes to an app the base owns,
 | **manifest** | `Record<string, any>` | ✅ | The package to import: ONE package's assembled body, flattened — its manifest fields beside its metadata collections (`objects`, `views`, …), the shape the install door hands the manifest service. An artifact carrying `packages` is refused: import each package body on its own. |
 | **targetPackageId** | `string` | optional | Id of the NEW writable base the items are written into, in reverse-domain form. It must differ from the source id and name no installed package. Defaults to `<manifest.id>-copy`. |
 | **targetName** | `string` | optional | Display name of the new base. Defaults to the source package's `name`. |
+| **targetNamespace** | `string` | optional | The namespace the copy is renamed into: the new base's `namespace`, and the prefix every copied object name takes in place of the source's, with every reference to a renamed name rewritten (the rename `duplicatePackage` applies). Judged by `manifest.namespace`'s own declaration; a platform-reserved namespace (`base`, `system`, `sys`) is refused. Absent, the copy keeps the source package's namespace. |
 
 
 ---
@@ -259,7 +260,8 @@ A navigation item another installed package contributes to an app the base owns,
 | **sourcePackageId** | `string` | ✅ | The id of the package the items were copied from. |
 | **sourceVersion** | `string` | optional | The version the imported body declared, when it declared one. |
 | **targetPackageId** | `string` | ✅ | The new writable base that owns every copied item. Nothing is registered under the source id. |
-| **namespace** | `string` | ✅ | The base's namespace — the SOURCE package's, kept so every copied object name stays valid. |
+| **namespace** | `string` | ✅ | The base's namespace — the request's `targetNamespace` when it named one, else the SOURCE package's, kept so every copied object name stays valid. |
+| **sourceNamespace** | `string` | optional | The SOURCE package's namespace, present when the copy was renamed into `namespace` — the provenance of every copied name. Absent when the copy kept the source's namespace. |
 | **copiedCount** | `number` | ✅ | How many items were copied. |
 | **copied** | `{ type: string; name: string }[]` | ✅ | Every item that was copied, in the order it was written. |
 | **strippedLocks** | `{ type: string; name: string; lock: Enum<'no-overlay' \| 'no-delete' \| 'full'>; reason?: string }[]` | ✅ | Every protection lock the package shipped on a copied item and the copy does not keep, in the order the items were written. Empty when the package locked nothing. |
