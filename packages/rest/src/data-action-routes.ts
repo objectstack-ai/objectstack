@@ -76,7 +76,7 @@ import { applyDroppedFieldsHeader, handleRouteError, logUnexpectedRouteError, ma
 // [#24348] The shared ADR-0112 nested envelope for the import doors' control
 // opt-out refusal — the flat sibling-`code` dialect the doors' older answers
 // use is ratcheted down by `check:route-envelope`.
-import { sendError as sendEnvelopeError, sendOk } from '@objectstack/types';
+import { resolveThrownHttpError, sendError as sendEnvelopeError, sendOk } from '@objectstack/types';
 // [#26594] The read path's ONE no-row answer, for a row that left the caller's
 // sight between the record read and the projection.
 import { recordNotFoundError } from '@objectstack/core';
@@ -253,6 +253,7 @@ export interface DataActionRouteHost {
     resolveMessageTranslator: RestServer['resolveMessageTranslator'];
     resolveSecurityService: RestServer['resolveSecurityService'];
     resolveI18nService: RestServer['resolveI18nService'];
+    resolveAuditService: RestServer['resolveAuditService'];
     extractLocale: RestServer['extractLocale'];
     answerImportTemplate: RestServer['answerImportTemplate'];
 }
@@ -358,6 +359,90 @@ async function assertImportObjectExists(p: any, objectName: string, environmentI
     const item = envelope?.item;
     if (item !== null && typeof item === 'object') return;
     throw objectNotFoundError(objectName);
+}
+
+/**
+ * [#30955] The export door's half of the ledger's `export` row: the event this
+ * door hands the `audit` slot's `recordDataExport` (plugin-audit's
+ * `data-export-audit.ts`, which owns the row and declares the same shape).
+ * Declared here structurally, so neither package depends on the other — the
+ * action doors' `action-invocation-audit.ts` in `@objectstack/runtime` reaches
+ * the same slot the same way.
+ *
+ * One event per export that cleared every gate and began reading, whether the
+ * stream completed or failed; a refused request is no export and hands none.
+ * `query` is the query AS READ: the writer reduces it to field names and
+ * operators before anything reaches the ledger, and records only that a search
+ * term applied, never the term.
+ */
+interface DataExportAuditEvent {
+    context: unknown;
+    objectName: string;
+    format: string;
+    rowCount: number;
+    limit: number;
+    requestedLimit: number;
+    limitCap: number;
+    truncated: boolean;
+    query: { filter?: unknown; search?: string; searchFields?: string[] };
+    outcome: 'succeeded' | 'failed';
+    status?: number;
+    errorCode?: string;
+}
+
+/** The `audit` slot member this door calls — declared locally, structurally. */
+interface DataExportAuditSurface {
+    recordDataExport(event: DataExportAuditEvent): Promise<void>;
+}
+
+/** What the last `findData` of an export said about the rows past its page. */
+interface ExportPageMarkers {
+    hasMore?: unknown;
+    total?: unknown;
+}
+
+/**
+ * [#30955] Whether rows that matched are missing from the file: it stopped at
+ * its row limit and the last read did not say the result set ended there.
+ * A file that ran out before its limit is complete. At the limit, the read's
+ * own page markers decide — `hasMore` first, then `total` — and a read that
+ * answers neither (a protocol with no page metadata) cannot rule more rows out,
+ * so the file reads as truncated rather than as complete.
+ */
+function exportTruncatedAtLimit(rowCount: number, limit: number, lastPage: ExportPageMarkers | undefined): boolean {
+    if (rowCount < limit) return false;
+    if (lastPage?.hasMore === true) return true;
+    if (lastPage?.hasMore === false) return false;
+    if (typeof lastPage?.total === 'number') return lastPage.total > rowCount;
+    return true;
+}
+
+/**
+ * [#30955] Hand one export to the `audit` slot. Never throws and never changes
+ * the door's answer — it runs after the response is complete, and the writer
+ * reports its own lost rows (`plugin-audit`). A host with no audit plugin has
+ * no ledger at all, so the call is skipped silently, as every other ledger row
+ * is on such a host.
+ */
+async function recordDataExport(
+    host: Pick<DataActionRouteHost, 'resolveAuditService'>,
+    environmentId: string | undefined,
+    req: unknown,
+    event: DataExportAuditEvent,
+): Promise<void> {
+    let sink: Partial<DataExportAuditSurface> | undefined;
+    try {
+        sink = (await host.resolveAuditService(environmentId, req)) as Partial<DataExportAuditSurface> | undefined;
+    } catch {
+        return; // no audit slot on this kernel: no ledger to write to
+    }
+    if (!sink || typeof sink.recordDataExport !== 'function') return;
+    try {
+        await sink.recordDataExport(event);
+    } catch {
+        // The writer never throws by contract; a host's own sink that does
+        // must not turn a served export into a failed request.
+    }
 }
 
 /**
@@ -1158,8 +1243,15 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
         method: 'GET',
         path: `${dataPath}/:object/export`,
         handler: async (req: any, res: any) => {
+            // [#30955] The export this request is running, once it began
+            // reading: the ledger's `export` row is recorded from it after the
+            // stream ends, completed or failed. Unset for every request the
+            // door refuses first, which is no export and records nothing.
+            let exportRun: Omit<DataExportAuditEvent, 'outcome' | 'truncated'> | undefined;
+            // What the export's last read said about the rows past its page.
+            let exportLastPage: ExportPageMarkers | undefined;
+            const environmentId = isScoped ? req.params?.environmentId : undefined;
             try {
-                const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const p = await this.resolveProtocol(environmentId, req);
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
@@ -1500,6 +1592,23 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 let skip = 0;
                 let xlsx: Awaited<ReturnType<typeof createXlsxStream>> | null = null;
 
+                // [#30955] Every gate has passed and the read begins: from here
+                // on this request is an export, and the ledger records it.
+                exportRun = {
+                    context,
+                    objectName,
+                    format,
+                    rowCount: 0,
+                    limit,
+                    requestedLimit,
+                    limitCap: HARD_CAP,
+                    query: {
+                        ...(filter !== undefined ? { filter } : {}),
+                        ...(search ? { search } : {}),
+                        ...(search && searchFields ? { searchFields } : {}),
+                    },
+                };
+
                 while (exported < limit) {
                     const take = Math.min(chunkSize, limit - exported);
                     const findArgs: ServerScopedDataRequest<FindDataRequest> = {
@@ -1532,6 +1641,9 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                         ...(context ? { context } : {}),
                     };
                     const result: any = await p.findData(findArgs);
+                    exportLastPage = result && typeof result === 'object' && !Array.isArray(result)
+                        ? { hasMore: result.hasMore, total: result.total }
+                        : undefined;
                     // `findData` returns `{ object, records, total, hasMore }`;
                     // accept the legacy `data` / `rows` aliases and a bare array
                     // so test doubles and alternate protocols keep working.
@@ -1621,6 +1733,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     }
                     firstChunk = false;
                     exported += rows.length;
+                    exportRun.rowCount = exported;
                     skip += rows.length;
                     if (rows.length < take) break;
                 }
@@ -1663,6 +1776,35 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 // client receives a truncated stream which signals failure.
                 try { handleRouteError(res, error, String(req.params?.object || '')); }
                 catch { try { res.end(); } catch { /* swallow */ } }
+                // [#30955] An export that failed after it began reading is
+                // still an export: rows may already have left in the part of
+                // the stream that was written. Its row carries the status and
+                // machine code the shared resolver reads off the error —
+                // never the error's text, which a driver can fill with a
+                // comparand.
+                if (exportRun) {
+                    const { status, code } = resolveThrownHttpError(error, 500);
+                    await recordDataExport(this, environmentId, req, {
+                        ...exportRun,
+                        truncated: exportTruncatedAtLimit(exportRun.rowCount, exportRun.limit, exportLastPage),
+                        outcome: 'failed',
+                        status,
+                        ...(typeof code === 'string' && code.length > 0 ? { errorCode: code } : {}),
+                    });
+                }
+                return;
+            }
+            // [#30955] The file is complete and the response has ended: the
+            // ledger's `export` row is written now, so its write can neither
+            // delay nor alter the file the caller holds. A lost row is the
+            // writer's to report (`plugin-audit`'s `data-export-audit.ts`),
+            // loudly and once per cause.
+            if (exportRun) {
+                await recordDataExport(this, environmentId, req, {
+                    ...exportRun,
+                    truncated: exportTruncatedAtLimit(exportRun.rowCount, exportRun.limit, exportLastPage),
+                    outcome: 'succeeded',
+                });
             }
         },
         metadata: {

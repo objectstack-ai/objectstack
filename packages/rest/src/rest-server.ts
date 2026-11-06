@@ -2093,6 +2093,12 @@ export class RestServer {
      *  /security/suggested-bindings (D5/D9) and /security/explain (D6)
      *  routes (plugin-security). */
     private securityServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
+    /**
+     * [#30955] `audit` service resolver — the compliance ledger's writers
+     * (plugin-audit). Read by the export door, which hands the slot's
+     * `recordDataExport` one event per export it streams.
+     */
+    private auditServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     /** Sync probe: is a kernel service registered? Single-env path for nav
      *  capability gates (ADR-0057 D10) — resolveExecCtx sets no kernel in
      *  single-kernel deployments, so this prevents the gate failing open. */
@@ -2155,6 +2161,11 @@ export class RestServer {
          * providers would silently re-bind every positional argument after it.
          */
         tenancyServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
+        /**
+         * [#30955] Appended LAST for the #15256 reason above: the `audit` slot
+         * the export door records each export through.
+         */
+        auditServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
     ) {
         this.protocol = protocol;
         this.config = this.normalizeConfig(config);
@@ -2176,6 +2187,7 @@ export class RestServer {
         this.requestEnvResolver = requestEnvResolver;
         this.metadataServiceProvider = metadataServiceProvider;
         this.tenancyServiceProvider = tenancyServiceProvider;
+        this.auditServiceProvider = auditServiceProvider;
     }
 
     /**
@@ -5768,6 +5780,7 @@ export class RestServer {
             resolveMessageTranslator: (...a) => this.resolveMessageTranslator(...a),
             resolveSecurityService: (...a) => this.resolveSecurityService(...a),
             resolveI18nService: (...a) => this.resolveI18nService(...a),
+            resolveAuditService: (...a) => this.resolveAuditService(...a),
             extractLocale: (...a) => this.extractLocale(...a),
             answerImportTemplate: (...a) => this.answerImportTemplate(...a),
         };
@@ -5943,6 +5956,29 @@ export class RestServer {
         try {
             const envId = await this.resolveRequestEnvironmentId(environmentId, req);
             return await this.securityServiceProvider(envId);
+        }
+        catch { return undefined; }
+    }
+
+    /**
+     * [#30955] Resolve the environment's `audit` service — the compliance
+     * ledger's writers, which plugin-audit registers on the kernel that holds
+     * `sys_audit_log`. Asked for the REQUEST's environment, the shared
+     * resolver's answer, exactly as {@link resolveSecurityService} is.
+     *
+     * Returns `undefined` when no audit service is reachable: a deployment
+     * without plugin-audit has no ledger at all, so there is nothing to record
+     * an export in, as for every other ledger row on such a host. Never
+     * throws: recording an export must not change the export's answer.
+     */
+    private async resolveAuditService(
+        environmentId?: string,
+        req?: any,
+    ): Promise<unknown> {
+        if (!this.auditServiceProvider) return undefined;
+        try {
+            const envId = await this.resolveRequestEnvironmentId(environmentId, req);
+            return await this.auditServiceProvider(envId);
         }
         catch { return undefined; }
     }

@@ -241,13 +241,20 @@ export const SysAuditLog = ObjectSchema.create({
       // Which setting changed is also in `metadata`, and the row's page shows
       // the `tenant_id` a global change leaves empty.
       columns: ['created_at', 'action', 'user_id'],
-      // `export` removed (#8147) — retired from the enum, nothing ever wrote it.
       // `import` KEPT deliberately: `plugin-auth`'s admin user-import writes a
       // real run-level row (`admin-import-users.ts`, `action: 'import'` with
       // `record_id: null`), pinned by the W4 case in
       // `packages/qa/dogfood/test/admin-identity-audit-trail.dogfood.test.ts`.
       // This view is the only shipped surface that lists those rows.
-      filter: [{ field: 'action', operator: 'in', value: ['config_change', 'import'] }],
+      //
+      // [#30955] `export` is BACK, writer-first. #8147 took it out of this
+      // filter (and the enum) because nothing wrote it; its writer is now
+      // plugin-audit's `data-export-audit.ts` (`recordDataExport` on the
+      // `audit` slot), called by the REST export door on every export it
+      // streams. Its row has the `import` row's run-level shape (`record_id:
+      // null`, the object in `object_name`), so it is listed here beside it;
+      // the row's page shows the object, the format and the row count.
+      filter: [{ field: 'action', operator: 'in', value: ['config_change', 'import', 'export'] }],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
     },
@@ -288,11 +295,27 @@ export const SysAuditLog = ObjectSchema.create({
 
     // ADR-0087 retirement (#8147, ruling 2026-08-12): `export` and
     // `permission_change` left this enum. Neither had a writer anywhere in the
-    // repo — the only two `sys_audit_log` writers are `audit-writers.ts` (whose
-    // `actionFor` emits create/update/delete and nothing else) and
-    // `plugin-auth`'s admin user-import. A declared action nothing ever writes
-    // is an empty widget and a filter that can never match: 审计面宁窄勿谎.
-    // Permission-object writes are already on the ledger as create/update rows.
+    // repo at the time — the only two `sys_audit_log` writers were
+    // `audit-writers.ts` (whose `actionFor` emits create/update/delete and
+    // nothing else) and `plugin-auth`'s admin user-import. A declared action
+    // nothing ever writes is an empty widget and a filter that can never
+    // match: 审计面宁窄勿谎. Permission-object writes are already on the ledger
+    // as create/update rows, so `permission_change` stays retired.
+    //
+    // [#30955] `export` comes back WRITER-FIRST, the only way a value is
+    // allowed back onto this surface. Its writer is `data-export-audit.ts`
+    // (`createDataExportAuditWriter`, `recordDataExport` on the `audit` slot),
+    // called by the REST export door (`GET /data/:object/export`, in
+    // `@objectstack/rest`'s `data-action-routes.ts`): one run-level row
+    // (`record_id: null`, the exported object in `object_name`) per export
+    // that cleared the door's gates and began reading, for every object, this
+    // ledger included. It records the format, the row count, the row limit and
+    // whether the file was truncated at it, the filter as field names and
+    // operators only, whether a search term applied (never the term) and the
+    // outcome; never an exported value. A request the door refused writes no
+    // row. Its shipped surface is the `config_changes` list view above, beside
+    // the `import` row of the same shape, and the unfiltered `recent` and
+    // `all_events` views.
     //
     // ADR-0087 retirement (#8315, the same ruling carried by triage): `restore`
     // left this enum for the same reason and by the same measurement. It was
@@ -383,6 +406,7 @@ export const SysAuditLog = ObjectSchema.create({
           { label: 'Account Locked', value: 'account_locked' },
           { label: 'Config Change', value: 'config_change' },
           { label: 'Import', value: 'import' },
+          { label: 'Export', value: 'export' },
           { label: 'Platform Admin Standing Change', value: 'platform_admin_standing_change' },
           { label: 'Action Invocation', value: 'action_invocation' },
         ],
