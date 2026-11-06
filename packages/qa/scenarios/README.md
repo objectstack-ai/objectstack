@@ -18,17 +18,28 @@ for (const r of refusals) console.error(formatRefusal(r)); // FILE: FIELD.PATH: 
   seed does not determine.
 - `src/loader.ts` — reads a directory of cards, validates shape and cross-references, and
   returns typed cards or located refusals.
-- `src/score/` — the deterministic scorer, entry `@objectstack/scenarios/score` (below).
+- `src/score/` — the deterministic scorer, entries `@objectstack/scenarios/score` and
+  `@objectstack/scenarios/score/full` (below).
 
-No build step (`exports` points at `src`), and nothing here calls a model or the network.
+Not published. `pnpm --filter @objectstack/scenarios build` (tsup) writes `dist/` as ESM, CJS and
+`.d.ts`, and every `exports` subpath points there, so a consumer that links the framework tree
+and bundles its own entry can load the scorer under plain Node. The suites and `run-scenarios`
+read `src/` directly. Nothing here calls a model or the network.
 
 ## Scoring a run against a card — `@objectstack/scenarios/score`
 
-Every function takes a card the loader returned, so it judges against the loader's computed
-truths and declared outcomes:
+`@objectstack/scenarios/score` is the narrow entry (`src/score/narrow.ts`): the graph-shape
+scorer (`scoreGraphShape`, `artifactToEvalGraph`), the item-name check and the run and
+operation graders. Its import graph reads `@objectstack/core` and `@objectstack/spec` only
+(pinned by `test/build/`). `@objectstack/scenarios/score/full` (`src/score/index.ts`) adds the
+capability-tag checks, which read `@objectstack/objectql` and `@objectstack/plugin-sharing`, and
+the card-level functions below.
+
+Every card-level function takes a card the loader returned, so it judges against the loader's
+computed truths and declared outcomes:
 
 ```ts
-import { gradeCardAnswer, gradeCardOperation, scoreCardArtifact } from '@objectstack/scenarios/score';
+import { gradeCardAnswer, gradeCardOperation, scoreCardArtifact } from '@objectstack/scenarios/score/full';
 
 scoreCardArtifact(card, artifact);                 // a built dist/objectstack.json: expect, tags, agent actions
 gradeCardOperation(card, 'remove_chen', observed); // an observed write against its declared outcome
