@@ -61,12 +61,19 @@ export interface ProtocolHost {
     readonly applyRemoteMetadataMutation: ObjectStackProtocolImplementation['applyRemoteMetadataMutation'];
     readonly applySeedBodies: ObjectStackProtocolImplementation['applySeedBodies'];
     readonly artifactLockLayerAt: ObjectStackProtocolImplementation['artifactLockLayerAt'];
+    readonly assertAggregationFieldsExist: ObjectStackProtocolImplementation['assertAggregationFieldsExist'];
     readonly assertExpandTargetsExist: ObjectStackProtocolImplementation['assertExpandTargetsExist'];
+    readonly assertFilterFieldsExist: ObjectStackProtocolImplementation['assertFilterFieldsExist'];
+    readonly assertGroupByFieldsExist: ObjectStackProtocolImplementation['assertGroupByFieldsExist'];
     readonly assertLockAllowsDelete: ObjectStackProtocolImplementation['assertLockAllowsDelete'];
     readonly assertLockAllowsWrite: ObjectStackProtocolImplementation['assertLockAllowsWrite'];
+    readonly assertNoInternalFieldEvaluated: ObjectStackProtocolImplementation['assertNoInternalFieldEvaluated'];
     readonly assertObjectRegistered: ObjectStackProtocolImplementation['assertObjectRegistered'];
     readonly assertProjectionFieldsExist: ObjectStackProtocolImplementation['assertProjectionFieldsExist'];
+    readonly assertQueryParamsAreFields: ObjectStackProtocolImplementation['assertQueryParamsAreFields'];
     readonly assertRuntimeAuthoringRules: ObjectStackProtocolImplementation['assertRuntimeAuthoringRules'];
+    readonly assertSearchFieldsAreSearchable: ObjectStackProtocolImplementation['assertSearchFieldsAreSearchable'];
+    readonly assertSortFieldsExist: ObjectStackProtocolImplementation['assertSortFieldsExist'];
     readonly assertVersionMatch: ObjectStackProtocolImplementation['assertVersionMatch'];
     readonly authoredLockFamily: ObjectStackProtocolImplementation['authoredLockFamily'];
     readonly authoringChannel: ObjectStackProtocolImplementation['authoringChannel'];
@@ -231,6 +238,7 @@ export interface ProtocolHost {
     readonly saveMetaItem: ObjectStackProtocolImplementation['saveMetaItem'];
     readonly saveMetaItemUnaudited: ObjectStackProtocolImplementation['saveMetaItemUnaudited'];
     readonly saveWriteBinding: ObjectStackProtocolImplementation['saveWriteBinding'];
+    readonly searchAll: ObjectStackProtocolImplementation['searchAll'];
     readonly seedExternalIdSaveRefusal: ObjectStackProtocolImplementation['seedExternalIdSaveRefusal'];
     readonly servedExpand: ObjectStackProtocolImplementation['servedExpand'];
     readonly servedLockState: ObjectStackProtocolImplementation['servedLockState'];
