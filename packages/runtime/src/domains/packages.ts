@@ -2062,6 +2062,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // mode is stored as sent — unchanged by this gate, and not a class
             // this door answers for.)
             const settings = request?.settings;
+            // [#30379 delta review, must-fix 3] Whether this install OVERWRITES a
+            // row that is enabled right now, read before either limb writes. Only
+            // then can `enableOnInstall: false` withhold a field a rule is served
+            // against; a fresh install (or a reinstall after a delete) and an
+            // overwrite of a disabled row withhold nothing served, so they honour
+            // `false` exactly as #18877 rules.
+            const overwritesEnabledRow = (registry.getPackage(pkgId) as { enabled?: unknown } | undefined)?.enabled === true;
             let pkg: any;
             const protocolSvc = await resolveProtocol(deps, _context).catch(() => null);
             try {
@@ -2189,7 +2196,11 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 // the package stays ENABLED (the row, the registry and the
                 // state file below all follow `pkg.enabled`) and the door
                 // answers the refusal instead of a 201 that claims a disable.
-                const dependents = readDisableDependentRules(registry, pkgId);
+                // [delta review, must-fix 3] Asked ONLY on an overwrite of a row
+                // that was enabled before this install: a fresh install, a
+                // reinstall after a delete and an overwrite of a disabled row
+                // withhold nothing served, and land disabled as asked.
+                const dependents = overwritesEnabledRow ? readDisableDependentRules(registry, pkgId) : [];
                 if (dependents.length > 0) {
                     installDisableRefusal = disableDependentRulesMessage(
                         `Package '${pkgId}' was installed and stays enabled: \`enableOnInstall: false\` cannot disable it`,

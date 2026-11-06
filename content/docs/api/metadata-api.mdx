@@ -191,9 +191,10 @@ names each rule as `package · object · rule (reads FIELD)`, and nothing change
 A rule is judged as the object serves it: one rule per name, a tenant overlay's
 switch honoured. Switch off or change each named rule first, or disable the
 package that owns it. A formula over the field does not refuse the disable; it
-answers `null`. `POST /packages` with `enableOnInstall: false` answers the same
-`409` when the install would leave such a package disabled; the install lands
-and the package stays enabled.
+answers `null`. `POST /packages` answers the same `409` for an overwrite of an
+enabled package with `enableOnInstall: false` that would leave such a package
+disabled; the overwrite lands and the package stays enabled. A fresh install
+with `enableOnInstall: false` lands disabled, as before.
 
 ---
 

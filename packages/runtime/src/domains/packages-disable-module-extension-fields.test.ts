@@ -786,8 +786,11 @@ describe('[#30379 contract review] POST /packages with enableOnInstall: false as
         process.env.OS_HOME = previousHome;
     });
 
-    /** A registry with the extender installed and enabled, its field on the owner's object, and (optionally) a rule of another package that reads it. */
-    async function door(withReader: boolean) {
+    /**
+     * A registry with the extender's field on the owner's object and (optionally) a rule of another package that
+     * reads it; the extender is installed and enabled first unless `installed: false` (a fresh install, then).
+     */
+    async function door(withReader: boolean, { installed = true }: { installed?: boolean } = {}) {
         const registry = new SchemaRegistry({ multiTenant: false, collisionPolicy: 'error' } as any);
         (registry as any).logLevel = 'silent';
         const kernel: any = {
@@ -799,8 +802,10 @@ describe('[#30379 contract review] POST /packages with enableOnInstall: false as
             request: {},
             executionContext: { userId: 'u_admin', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'] },
         } as any);
-        const first = await install({ manifest: manifestOf(EXTENDER) });
-        expect(first.response?.status, 'precondition: the extender installs').toBe(201);
+        if (installed) {
+            const first = await install({ manifest: manifestOf(EXTENDER) });
+            expect(first.response?.status, 'precondition: the extender installs').toBe(201);
+        }
         registry.registerObject({ name: THING, label: 'Thing', fields: { name: { name: 'name', type: 'text', label: 'Name' } } } as any, OWNER);
         registry.registerObject({ name: THING, fields: { [FLAG]: { name: FLAG, type: 'boolean', label: 'Flag' } } } as any, EXTENDER, undefined, 'extend');
         if (withReader) {
@@ -822,6 +827,16 @@ describe('[#30379 contract review] POST /packages with enableOnInstall: false as
         expect(registry.getPackage(EXTENDER)?.enabled).toBe(true);
         expect(loadDisabledPackageIds(undefined).has(EXTENDER)).toBe(false);
         expect(Object.keys((registry.getObject(THING) as any)?.fields ?? {})).toContain(FLAG);
+    });
+
+    it('[delta review, must-fix 3] a FRESH install with enableOnInstall: false lands disabled as asked, though a rule names its field', async () => {
+        // No row before the install, so nothing served is withheld: #18877's 「有旗 = 设置」 holds, and the scan is not asked.
+        const { registry, install } = await door(true, { installed: false });
+        expect(registry.getPackage(EXTENDER), 'precondition: no row before the install').toBeUndefined();
+        const result = await install({ manifest: manifestOf(EXTENDER), enableOnInstall: false });
+        expect(result.response?.status, String(result.response?.body?.error?.message)).toBe(201);
+        expect(registry.getPackage(EXTENDER)?.enabled).toBe(false);
+        expect(loadDisabledPackageIds(undefined).has(EXTENDER)).toBe(true);
     });
 
     it('control: with no rule reading the field the same overwrite installs it disabled', async () => {
