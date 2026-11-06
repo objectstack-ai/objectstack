@@ -271,9 +271,9 @@ package — stays covered by the `naming/namespace-prefix` lint in `os lint`.
 > import's `mappingName`, a dashboard's `datasetName` — so with two holders every
 > caller is served the first-registered one, measured on a booted two-package
 > deployment (#30803). Once the cold boot has sealed the registry, a package whose
-> picklist, mapping or dataset bears a name another installed package or a
-> built-in holds is refused at managed install and at package registration,
-> naming both holders and the rename. ⛔ The environment catalog is never a
+> picklist, mapping or dataset bears a name another installed package holds is
+> refused at managed install and at package registration (a built-in's name, at
+> managed install), naming both holders and the rename. ⛔ The environment catalog is never a
 > holder: an environment item under a package's name is the ADR-0005 overlay.
 > The other types the measurement found resolving without a package context —
 > `api`, the object-less `action`, the engine function registry, `email_template`,
@@ -927,7 +927,8 @@ registration that reaches the registry directly). The holders:
 - **an installed package** — including a disabled one, which is still installed
   and still holds its names; a nested plugin declares under its parent package;
 - **a built-in** — none today for these types; the vocabulary keeps the holder so
-  a platform-held name is refused the way the security catalog refuses one.
+  a platform-held name is refused the way the security catalog refuses one, and,
+  as there, only the package door asks it.
 
 ⛔ **Never the environment catalog** — the one difference from N.2. For these
 types an item authored in this environment under a package's name is the ADR-0005
@@ -971,6 +972,9 @@ the doors never refuse.
   unchanged.
 - **A picklist extension** (`picklistExtensions`) adds values to another
   package's list by design; it holds no name.
+- **A paired `.custom` package's declared override** (ADR-0146 D2) is a stored
+  row bound to its pair, never a package holder, so the refusal does not close
+  the override path.
 - **No downgrade.** `OS_METADATA_COLLISION=warn` softens the §3.2 namespace gate
   only.
 
