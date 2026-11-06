@@ -229,7 +229,11 @@ function secretRows() {
     async insert(_object: string, data: Row) { rows.set(String(data.id), data); return data; },
     async find(_object: string, query: { where?: Row; limit?: number }) {
       const hits = [...rows.values()].filter((row) =>
-        Object.entries(query.where ?? {}).every(([k, v]) => row[k] === v));
+        Object.entries(query.where ?? {}).every(([k, v]) => {
+          // Scalar equality only: a combinator or operator is refused, never read as a field name.
+          if (k.startsWith('$')) throw new Error(`secretRows double: no '${k}' support`);
+          return row[k] === v;
+        }));
       return typeof query.limit === 'number' ? hits.slice(0, query.limit) : hits;
     },
   };

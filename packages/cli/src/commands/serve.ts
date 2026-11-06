@@ -6365,11 +6365,11 @@ export function createHostCryptoProvider(local: () => ICryptoProvider): {
  * every declaring plugin before any of them initializes. A plugin registered
  * twice under one `name` boots once (the later one), and is counted once.
  */
-export function refuseTwoCryptoProviderPlugins(plugins: Iterable<unknown>): void {
+export function refuseTwoCryptoProviderPlugins(composed: Iterable<unknown>): void {
   const byName = new Map<string, unknown>();
-  for (const plugin of plugins) {
-    const name = (plugin as { name?: unknown } | null)?.name;
-    if (typeof name === 'string') byName.set(name, plugin);
+  for (const candidate of composed) {
+    const name = (candidate as { name?: unknown } | null)?.name;
+    if (typeof name === 'string') byName.set(name, candidate);
   }
   const declaring = [...byName]
     .filter(([, plugin]) => {
