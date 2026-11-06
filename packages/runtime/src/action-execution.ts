@@ -4947,6 +4947,9 @@ export interface ActionHandlerOwnerRefusal {
     message: string;
 }
 
+/** The one protocol verb {@link collectHandlerOwnerCandidates} reads: the merged listing `GET /api/v1/meta/TYPE` serves. */
+type HandlerOwnerListingRead = Partial<Pick<MetadataProtocol, 'getMetaItems'>>;
+
 /**
  * Every declaration that could own an entry under `entryObjectKey`, as
  * `{ action, objectName }` rows: each source a declaration is resolved from
@@ -4974,8 +4977,8 @@ async function collectHandlerOwnerCandidates(
     args: { ql: any; entryObjectKey: string; routedObjectName: string; routedObject?: any; envId?: string },
 ): Promise<{ rows: Array<{ action: any; objectName: string }>; planeError?: unknown }> {
     const { ql, entryObjectKey, routedObjectName, routedObject, envId } = args;
-    const protocol: any = await deps.resolveService(requestContext, 'protocol', envId);
-    const meta: any = await deps.resolveService(requestContext, 'metadata', envId);
+    const protocol = await deps.resolveService(requestContext, 'protocol', envId) as HandlerOwnerListingRead | undefined;
+    const meta = await deps.resolveService(requestContext, 'metadata', envId);
     let planeError: unknown;
     const fromPlane = async (read: () => Promise<any[] | undefined>): Promise<any[]> => {
         try {
@@ -4987,8 +4990,10 @@ async function collectHandlerOwnerCandidates(
     };
     const mergedListing = async (type: 'object' | 'action'): Promise<any[] | undefined> => {
         if (!protocol || typeof protocol.getMetaItems !== 'function') return undefined;
-        const answer: any = await protocol.getMetaItems({ type });
-        return Array.isArray(answer) ? answer : Array.isArray(answer?.items) ? answer.items : [];
+        const answer: unknown = await protocol.getMetaItems({ type });
+        if (Array.isArray(answer)) return answer;
+        const items = (answer as { items?: unknown } | null | undefined)?.items;
+        return Array.isArray(items) ? items : [];
     };
     const registryListing = (type: 'object' | 'action'): any[] => {
         const registry: any = ql?.registry;
