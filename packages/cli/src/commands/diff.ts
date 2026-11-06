@@ -20,7 +20,7 @@ import {
 
 // ─── Types ──────────────────────────────────────────────────────────
 
-interface DiffEntry {
+export interface DiffEntry {
   type: 'added' | 'removed' | 'modified';
   category: string;
   name: string;
@@ -156,6 +156,38 @@ function diffNamedArrays(
   return entries;
 }
 
+/**
+ * Every change between two folded stacks, in the order the command prints
+ * them: objects with their field-level changes first, then each name-level
+ * category.
+ */
+export function diffStacks(beforeConfig: any, afterConfig: any): DiffEntry[] {
+  const allDiffs: DiffEntry[] = [];
+
+  // Objects (with field-level diff)
+  allDiffs.push(...diffNamedArrays(beforeConfig.objects, afterConfig.objects, 'objects', true));
+
+  // Views, Flows, Agents, Apps (name-level diff)
+  const simpleCats: Array<{ key: string; label: string }> = [
+    { key: 'views', label: 'views' },
+    { key: 'flows', label: 'flows' },
+    { key: 'agents', label: 'agents' },
+    { key: 'apps', label: 'apps' },
+    { key: 'dashboards', label: 'dashboards' },
+    { key: 'actions', label: 'actions' },
+    { key: 'workflows', label: 'workflows' },
+    { key: 'apis', label: 'apis' },
+    { key: 'positions', label: 'positions' },
+  ];
+
+  for (const cat of simpleCats) {
+    allDiffs.push(
+      ...diffNamedArrays(beforeConfig[cat.key], afterConfig[cat.key], cat.label, false),
+    );
+  }
+  return allDiffs;
+}
+
 // ─── Command ────────────────────────────────────────────────────────
 
 export default class Diff extends Command {
@@ -229,29 +261,7 @@ export default class Diff extends Command {
       }
 
       // ── Diff all categories ──
-      const allDiffs: DiffEntry[] = [];
-
-      // Objects (with field-level diff)
-      allDiffs.push(...diffNamedArrays(beforeConfig.objects, afterConfig.objects, 'objects', true));
-
-      // Views, Flows, Agents, Apps (name-level diff)
-      const simpleCats: Array<{ key: string; label: string }> = [
-        { key: 'views', label: 'views' },
-        { key: 'flows', label: 'flows' },
-        { key: 'agents', label: 'agents' },
-        { key: 'apps', label: 'apps' },
-        { key: 'dashboards', label: 'dashboards' },
-        { key: 'actions', label: 'actions' },
-        { key: 'workflows', label: 'workflows' },
-        { key: 'apis', label: 'apis' },
-        { key: 'positions', label: 'positions' },
-      ];
-
-      for (const cat of simpleCats) {
-        allDiffs.push(
-          ...diffNamedArrays(beforeConfig[cat.key], afterConfig[cat.key], cat.label, false),
-        );
-      }
+      const allDiffs = diffStacks(beforeConfig, afterConfig);
 
       // ── Filter ──
       const diffs = flags['breaking-only']
