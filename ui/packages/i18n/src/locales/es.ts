@@ -3909,6 +3909,13 @@ const es = {
     advanced: {
       title: 'Avanzado: scripts y CI',
     },
+    unreachable: {
+      claudeWebTitle: 'claude.ai (web): no disponible para esta implementación',
+      claudeWebReason: 'claude.ai se conecta desde los servidores de Anthropic, y estos no pueden alcanzar {{address}}: desde allí solo se alcanza una dirección HTTPS pública.',
+      doubaoCloudTitle: 'Tareas en la nube: no disponibles para esta implementación',
+      doubaoCloudReason: 'Doubao Work ejecuta las tareas en la nube desde sus propios servidores, y estos no pueden alcanzar {{address}}: desde allí solo se alcanza una dirección HTTPS pública.',
+      remedy: 'Sirve este sistema en una dirección HTTPS pública (https:// en un dominio accesible desde Internet) para que esté disponible.',
+    },
     apiKey: {
       title: 'Claves API',
       badge: 'headless',

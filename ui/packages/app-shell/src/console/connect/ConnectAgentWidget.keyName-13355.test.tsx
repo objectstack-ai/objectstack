@@ -20,11 +20,14 @@
  * The key form lives in the collapsed "Advanced: scripts and CI" section, so
  * those cases open it first. The last block holds the page's shape: the
  * endpoint and SKILL.md on top, a picker that shows one client's steps and
- * remembers the choice on this browser, and the key form collapsed.
+ * remembers the choice on this browser, and the key form collapsed. The
+ * reachability block holds that claude.ai (web) and Doubao Work's cloud tasks
+ * are marked not available on an address that is not public HTTPS.
  *
- * `fetch` is stubbed by path; `t` echoes the KEY (with the `name` option
- * appended when one is passed), as the sibling suites do, so the assertions
- * read which string the widget asked for and with which name.
+ * `fetch` is stubbed by path; `t` echoes the KEY (with the `name` or
+ * `address` option appended when one is passed), as the sibling suites do,
+ * so the assertions read which string the widget asked for and with which
+ * value.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -34,17 +37,22 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useObjectTranslation: () => ({
-    t: (key: string, opts?: { name?: string }) =>
-      opts && typeof opts.name === 'string' ? `«${key}|${opts.name}»` : `«${key}»`,
+    t: (key: string, opts?: { name?: string; address?: string }) => {
+      const arg = opts?.name ?? opts?.address;
+      return typeof arg === 'string' ? `«${key}|${arg}»` : `«${key}»`;
+    },
     language: 'en',
   }),
 }));
 
 import { ConnectAgent } from './ConnectAgentWidget';
+import { isPublicHttpsAddress } from './deploymentReach';
 
 const MINTED_KEY = 'osk_test_0123456789';
 
 let fetchMock: ReturnType<typeof vi.fn>;
+/** The `routes.mcp` discovery answers; a case may point it at another address. */
+let discoveredMcp = '/api/v1/mcp';
 
 /** The bodies of every `POST /api/v1/keys` the widget sent. */
 function keyPosts(): unknown[] {
@@ -55,10 +63,11 @@ function keyPosts(): unknown[] {
 
 beforeEach(() => {
   window.localStorage.clear();
+  discoveredMcp = '/api/v1/mcp';
   fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.includes('/api/v1/discovery')) {
-      return new Response(JSON.stringify({ data: { routes: { mcp: '/api/v1/mcp' } } }), {
+      return new Response(JSON.stringify({ data: { routes: { mcp: discoveredMcp } } }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
@@ -277,5 +286,75 @@ describe('Connect an Agent asks which client the person uses and shows only thos
     await renderPage();
     expect(screen.getByRole('tab', { name: 'Claude' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByText(CLAUDE_CODE)).toBeInTheDocument();
+  });
+});
+
+describe('Connect an Agent marks the cloud-connected ways in as not available on an address that is not public HTTPS', () => {
+  const notes = () => screen.queryAllByRole('note').map((n) => n.textContent ?? '');
+
+  it('§1 classifies the address: http, localhost, single-label and private hosts are not public HTTPS', () => {
+    for (const address of [
+      'http://crm.example.com/api/v1/mcp',
+      'https://localhost:3000/api/v1/mcp',
+      'https://app.localhost/api/v1/mcp',
+      'https://crm/api/v1/mcp',
+      'https://crm.local/api/v1/mcp',
+      'https://10.1.2.3/api/v1/mcp',
+      'https://172.20.0.5/api/v1/mcp',
+      'https://192.168.1.10/api/v1/mcp',
+      'https://127.0.0.1/api/v1/mcp',
+      'https://169.254.1.1/api/v1/mcp',
+      'https://100.64.0.1/api/v1/mcp',
+      'https://[::1]/api/v1/mcp',
+      'https://[fd12:3456::1]/api/v1/mcp',
+      'https://[fe80::1]/api/v1/mcp',
+      'https://[::ffff:10.0.0.1]/api/v1/mcp',
+      'not a url',
+    ]) {
+      expect(isPublicHttpsAddress(address), address).toBe(false);
+    }
+    for (const address of [
+      'https://crm.example.com/api/v1/mcp',
+      'https://crm.example.com:8443/api/v1/mcp',
+      'https://8.8.8.8/api/v1/mcp',
+      'https://172.32.0.1/api/v1/mcp',
+      'https://[2001:db8::1]/api/v1/mcp',
+    ]) {
+      expect(isPublicHttpsAddress(address), address).toBe(true);
+    }
+  });
+
+  it('§2 on an http://localhost address, claude.ai (web) and Doubao cloud tasks say why and what fixes it; local clients unchanged', async () => {
+    discoveredMcp = 'http://localhost:3000/api/v1/mcp';
+    await renderPage();
+    expect(notes()).toEqual([
+      '«connectAgent.unreachable.claudeWebTitle»«connectAgent.unreachable.claudeWebReason|http://localhost:3000»«connectAgent.unreachable.remedy»',
+    ]);
+    expect(screen.queryByText('«connectAgent.claude.reachability»')).not.toBeInTheDocument();
+    // Claude Desktop and Claude Code keep their steps.
+    expect(screen.getByText('«connectAgent.claude.body»')).toBeInTheDocument();
+    expect(screen.getByText(/^claude mcp add --transport http objectstack http:\/\/localhost:3000\/api\/v1\/mcp$/)).toBeInTheDocument();
+
+    pickClient('«connectAgent.doubao.title»');
+    await screen.findByText('«connectAgent.doubao.body»');
+    expect(notes()).toEqual([
+      '«connectAgent.unreachable.doubaoCloudTitle»«connectAgent.unreachable.doubaoCloudReason|http://localhost:3000»«connectAgent.unreachable.remedy»',
+    ]);
+
+    for (const local of ['Codex', 'Cursor']) {
+      pickClient(local);
+      await waitFor(() => expect(screen.getByRole('tab', { name: local })).toHaveAttribute('aria-selected', 'true'));
+      expect(notes()).toEqual([]);
+    }
+  });
+
+  it('§3 on a public HTTPS address nothing is marked', async () => {
+    discoveredMcp = 'https://crm.example.com/api/v1/mcp';
+    await renderPage();
+    expect(notes()).toEqual([]);
+    expect(screen.getByText('«connectAgent.claude.reachability»')).toBeInTheDocument();
+    pickClient('«connectAgent.doubao.title»');
+    await screen.findByText('«connectAgent.doubao.body»');
+    expect(notes()).toEqual([]);
   });
 });

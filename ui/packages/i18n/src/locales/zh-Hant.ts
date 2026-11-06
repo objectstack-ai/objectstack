@@ -4042,6 +4042,13 @@ const zhHant = {
     advanced: {
       title: '高階：腳本與 CI',
     },
+    unreachable: {
+      claudeWebTitle: 'claude.ai（網頁版）：此部署不可用',
+      claudeWebReason: 'claude.ai 從 Anthropic 的伺服器發起連線，訪問不到 {{address}}：那裡只能訪問公網 HTTPS 地址。',
+      doubaoCloudTitle: '雲端任務：此部署不可用',
+      doubaoCloudReason: '豆包工作的雲端任務從它自己的伺服器執行，訪問不到 {{address}}：那裡只能訪問公網 HTTPS 地址。',
+      remedy: '把本系統部署到公網 HTTPS 地址（網際網路可訪問的域名，https://）後即可使用。',
+    },
     apiKey: {
       title: 'API 金鑰',
       badge: '無頭場景',

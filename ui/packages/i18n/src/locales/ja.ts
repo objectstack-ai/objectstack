@@ -3834,6 +3834,13 @@ const ja = {
     advanced: {
       title: '詳細設定：スクリプトと CI',
     },
+    unreachable: {
+      claudeWebTitle: 'claude.ai（Web 版）：このデプロイでは利用できません',
+      claudeWebReason: 'claude.ai は Anthropic のサーバーから接続するため、{{address}} には到達できません。到達できるのは公開 HTTPS アドレスだけです。',
+      doubaoCloudTitle: 'クラウドタスク：このデプロイでは利用できません',
+      doubaoCloudReason: 'Doubao Work のクラウドタスクは自社サーバーから実行されるため、{{address}} には到達できません。到達できるのは公開 HTTPS アドレスだけです。',
+      remedy: 'このシステムを公開 HTTPS アドレス（インターネットから到達できるドメインの https://）で提供すると利用できます。',
+    },
     apiKey: {
       title: 'API キー',
       badge: 'ヘッドレス',
