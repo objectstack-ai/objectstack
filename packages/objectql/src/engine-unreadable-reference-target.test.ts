@@ -512,7 +512,7 @@ describe('a reference a service verb vouches for on its own write: that one valu
   const vouched = (id: string, field = 'duty', object = ITEM, base: Record<string, unknown> = ALICE) =>
     vouchForReference({ ...base }, { object, field, id });
   const insert = (object: string, payload: Record<string, unknown>, context: Record<string, unknown>) =>
-    engine.insert(object, { title: 'new', ...payload }, { context } as any);
+    engine.insert(object, { title: 'new', ...payload }, { context });
   const items = (object = ITEM) => [...storeFor(object).values()];
 
   it('the vouched value lands although the caller cannot read it; its existence is still probed, elevated', async () => {

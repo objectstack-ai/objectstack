@@ -561,7 +561,7 @@ describe('attachFileAs for a member who cannot read sys_file: the verb vouches f
   it('precondition: the member cannot read sys_file, not even the file they own', async () => {
     const { ql } = await bootMember();
     await seedOwnFile(ql);
-    const err = await refusalOf(ql.findOne('sys_file', { where: { id: 'file_alice' }, context: ALICE } as any));
+    const err = await refusalOf(ql.findOne('sys_file', { where: { id: 'file_alice' }, context: ALICE }));
     expect([err.code, err.status]).toEqual(['PERMISSION_DENIED', 403]);
   });
 
@@ -612,7 +612,7 @@ describe('attachFileAs for a member who cannot read sys_file: the verb vouches f
       ql.insert(
         'sys_attachment',
         { parent_object: 'att_case', parent_id: 'case_a', file_id: fileId, file_name: 'direct.eml' },
-        { context: ALICE } as any,
+        { context: ALICE },
       ),
     );
     const envelope = resolveThrownHttpError(err);
