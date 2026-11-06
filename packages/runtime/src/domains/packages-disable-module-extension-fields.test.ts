@@ -51,7 +51,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
 import { MetadataPlugin } from '@objectstack/metadata';
-import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
+import { ObjectQL, ObjectQLPlugin, SchemaRegistry } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { composeStacks, defineStack } from '@objectstack/spec';
 import { resolveThrownHttpError } from '@objectstack/types';
@@ -96,6 +96,14 @@ const RULE_VISIT_HOP = 'qx_visit_account_credit';
 /** The app's paired customization package, where a tenant-written rule lives. */
 const PAIR = `${APP}.custom`;
 const RULE_TENANT = 'qx_credit_tenant_cap';
+/**
+ * [#30379 contract review] A fifth, ENABLED module folded AFTER {@link RULES}
+ * (priority 300) that redeclares two of its rules by name: one copy that no
+ * longer reads the field, one that still does.
+ */
+const OVERRIDE = 'com.qa.extsuite.rules-override';
+/** A rule a tenant overlay declares itself, reading the module's field. */
+const RULE_OVERLAY_OWN = 'qx_credit_overlay_cap';
 
 interface SuiteOptions {
     /** {@link SCORING}: a formula over the module's field. */
@@ -104,9 +112,11 @@ interface SuiteOptions {
     rollup?: boolean;
     /** {@link RULES}: validation rules over the module's field. */
     rules?: boolean;
+    /** {@link OVERRIDE}: two of {@link RULES}' rules redeclared by name, folded later. */
+    override?: boolean;
 }
 
-function suiteArtifact({ scoring = false, rollup = false, rules = false }: SuiteOptions = {}) {
+function suiteArtifact({ scoring = false, rollup = false, rules = false, override = false }: SuiteOptions = {}) {
     const app = defineStack({
         manifest: { id: APP, name: 'QA Ext Suite', namespace: 'qx', version: '1.0.0', type: 'app' },
         objects: [{
@@ -189,6 +199,25 @@ function suiteArtifact({ scoring = false, rollup = false, rules = false }: Suite
             }],
         }],
     } as any);
+    const overrideModule = defineStack({
+        manifest: {
+            id: OVERRIDE, name: 'QA Ext Suite Rules Override', namespace: 'qx', version: '1.0.0', type: 'module',
+            dependencies: { [APP]: '^1.0.0' },
+        },
+        objectExtensions: [{
+            extend: ACCOUNT,
+            priority: 300,
+            validations: [{
+                // Replaces RULES' copy, which reads the field, with one that does not.
+                name: RULE_NOT_NEGATIVE, type: 'script', severity: 'error', message: 'The name is blocked',
+                condition: "record.name == 'blocked'",
+            }, {
+                // Replaces RULES' conditional with a script that still reads it.
+                name: RULE_REVIEW, type: 'script', severity: 'warning', message: 'A very large credit needs review',
+                condition: `record.${CREDIT} > 5000`,
+            }],
+        }],
+    } as any);
     const rollupModule = defineStack({
         manifest: {
             id: ROLLUP, name: 'QA Ext Suite Visits', namespace: 'qx', version: '1.0.0', type: 'module',
@@ -209,6 +238,7 @@ function suiteArtifact({ scoring = false, rollup = false, rules = false }: Suite
         ...(scoring ? [scoringModule] : []),
         ...(rollup ? [rollupModule] : []),
         ...(rules ? [ruleModule] : []),
+        ...(override ? [overrideModule] : []),
         app,
     ], { manifest: 'preserve' });
 }
@@ -579,7 +609,7 @@ describe('[#30379] the disable door refuses while an enabled package\'s validati
         ];
         // The message lists exactly these four, in order; the refusal fixes no
         // `error.details` shape (a machine-readable one is a spec contract first).
-        expect(String(refused.message)).toContain(`Package '${MODULE}' cannot be disabled: 4 validation rules`);
+        expect(String(refused.message)).toContain(`Package '${MODULE}' cannot be disabled: 4 active validation rules read fields`);
         expect(String(refused.message)).toContain(`— ${listingOf(dependents)}. Switch off or change those rules first`);
         expect(refused.details).toBeUndefined();
         // A rule switched off reads nothing, and a formula is no dependent.
@@ -601,7 +631,7 @@ describe('[#30379] the disable door refuses while an enabled package\'s validati
         const narrowed = await dispatchAs(kernel, 'PATCH', `/packages/${MODULE}/disable`);
         expect({ status: narrowed.status, code: narrowed.code }).toEqual({ status: 409, code: CODE });
         expect(String(narrowed.message)).toContain(
-            `a validation rule of an enabled package reads a field it adds through objectExtensions, which the disable would withhold — ${listingOf([{ packageId: PAIR, object: ACCOUNT, rule: RULE_TENANT, fields: [CREDIT] }])}. Switch off or change that rule first`,
+            `an active validation rule reads a field it adds through objectExtensions, which the disable would withhold — ${listingOf([{ packageId: PAIR, object: ACCOUNT, rule: RULE_TENANT, fields: [CREDIT] }])}. Switch off or change that rule first`,
         );
         expect(String(narrowed.message)).not.toContain(RULES);
 
@@ -625,5 +655,180 @@ describe('[#30379] the disable door refuses while an enabled package\'s validati
         const updated = await dispatchAs(kernel, 'PATCH', `/data/${ACCOUNT}/${accountId}`, { name: 'Acme' });
         expect({ status: updated.status, code: updated.code }).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
         expect(String(updated.message)).toContain(RULE_NOT_NEGATIVE);
+    });
+});
+
+/** The listing a dependent-rule refusal's message carries, in its order (package, object, rule). */
+const listingOfRules = (rules: ReadonlyArray<{ packageId: string; object: string; rule: string; fields: string[] }>) =>
+    rules.map((d) => `${d.packageId} · ${d.object} · ${d.rule} (reads ${d.fields.join(', ')})`).join('; ');
+
+describe('[#30379 contract review] the scan judges the rules the served fold serves', () => {
+    let root: string;
+    let booted: Booted | undefined;
+    let accountId: string;
+    const CODE = 'PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE';
+
+    /** The app's object as a tenant saved it from a served read: the module's fields ride along, with the overlay's rules. */
+    const accountOverlay = (validations: unknown[]) => ({
+        name: ACCOUNT,
+        label: 'Account',
+        fields: {
+            name: { name: 'name', type: 'text', label: 'Name' },
+            [CREDIT]: { name: CREDIT, type: 'number', label: 'Credit' },
+            [ORDER_TOTAL]: {
+                name: ORDER_TOTAL, type: 'summary', label: 'Order total',
+                summaryOperations: { object: ORDER, field: 'amount', function: 'sum' },
+            },
+        },
+        validations,
+        _provenance: 'org',
+    });
+    const visitOverlay = (validations: unknown[]) => ({
+        name: VISIT,
+        label: 'Visit',
+        fields: {
+            name: { name: 'name', type: 'text', label: 'Name' },
+            amount: { name: 'amount', type: 'number', label: 'Amount' },
+            account: { name: 'account', type: 'lookup', label: 'Account', reference: ACCOUNT },
+        },
+        validations,
+        _provenance: 'org',
+    });
+    /** A served predicate's CEL source (the loader may wrap it as `{ dialect, source }`). */
+    const sourceOf = (slot: unknown): unknown => (slot && typeof slot === 'object' ? (slot as { source?: unknown }).source : slot);
+    /** A tenant copy of a packaged rule: only its sentence and its switch are the tenant's. */
+    const switchedOff = (name: string, message: string) => ({ name, type: 'script', message, condition: 'true', active: false });
+
+    beforeAll(async () => {
+        root = mkdtempSync(join(tmpdir(), 'os-suite-ext-fold-'));
+        writeFileSync(join(root, '.keep'), '');
+        process.env.OS_HOME = mkdtempSync(join(home, 'fold-'));
+        booted = await bootKernel(root, { rules: true, override: true });
+        const created = await dispatchAs(booted.kernel, 'POST', `/data/${ACCOUNT}`, { name: 'Acme', [CREDIT]: 500 });
+        expect(created.status, 'precondition: the account is written').toBe(201);
+        accountId = idOf(created);
+    }, 120_000);
+    afterAll(async () => {
+        await shutdown(booted);
+        rmSync(root, { recursive: true, force: true });
+    }, 60_000);
+
+    it('a rule a later layer replaced by name is judged once, from the copy that wins, and named after that layer', async () => {
+        const { kernel, engine } = booted!;
+        const served = ((engine.registry.getObject(ACCOUNT) as any)?.validations ?? []) as Array<{ name?: string; condition?: unknown }>;
+        expect(served.filter((r) => r.name === RULE_REVIEW), 'precondition: one served copy per name').toHaveLength(1);
+        expect(sourceOf(served.find((r) => r.name === RULE_NOT_NEGATIVE)?.condition), 'precondition: the override\'s copy wins').toBe("record.name == 'blocked'");
+
+        const refused = await dispatchAs(kernel, 'PATCH', `/packages/${MODULE}/disable`);
+        expect({ status: refused.status, code: refused.code }).toEqual({ status: 409, code: CODE });
+        // RULES' copy of RULE_NOT_NEGATIVE read the field, but the override's
+        // copy is the one served, and it does not. RULE_REVIEW is listed once,
+        // from the override's copy, which still reads it.
+        expect(String(refused.message)).toContain(`cannot be disabled: 2 active validation rules read fields`);
+        expect(String(refused.message)).toContain(`— ${listingOfRules([
+            { packageId: RULES, object: VISIT, rule: RULE_VISIT_HOP, fields: [`account.${CREDIT}`] },
+            { packageId: OVERRIDE, object: ACCOUNT, rule: RULE_REVIEW, fields: [CREDIT] },
+        ])}. Switch off or change those rules first`);
+        expect(String(refused.message)).not.toContain(RULE_NOT_NEGATIVE);
+    });
+
+    it('a tenant overlay\'s switch is honoured, its own rule is named after the overlay, and the disable proceeds once every served reader is off', async () => {
+        const { kernel, engine } = booted!;
+        // The tenant switches the packaged rule off through the overlay (the
+        // one switch a tenant admin has on a read-only module), and adds a rule
+        // of its own that reads the field.
+        engine.registry.registerObject(accountOverlay([
+            switchedOff(RULE_REVIEW, 'Switched off by the tenant'),
+            { name: RULE_OVERLAY_OWN, type: 'script', severity: 'error', message: 'Credit is capped', condition: `record.${CREDIT} > 9000000` },
+        ]) as any, APP, undefined, 'overlay');
+        const served = ((engine.registry.getObject(ACCOUNT) as any)?.validations ?? []) as Array<{ name?: string; active?: unknown; condition?: unknown }>;
+        const review = served.find((r) => r.name === RULE_REVIEW);
+        expect({ active: review?.active, condition: sourceOf(review?.condition) }, 'precondition: the packaged copy runs, switched off')
+            .toEqual({ active: false, condition: `record.${CREDIT} > 5000` });
+
+        const overlayOwn = await dispatchAs(kernel, 'PATCH', `/packages/${MODULE}/disable`);
+        expect({ status: overlayOwn.status, code: overlayOwn.code }).toEqual({ status: 409, code: CODE });
+        expect(String(overlayOwn.message)).toContain(`— ${listingOfRules([
+            { packageId: RULES, object: VISIT, rule: RULE_VISIT_HOP, fields: [`account.${CREDIT}`] },
+            { packageId: `tenant overlay of ${APP}`, object: ACCOUNT, rule: RULE_OVERLAY_OWN, fields: [CREDIT] },
+        ])}. Switch off or change those rules first`);
+        expect(String(overlayOwn.message)).not.toContain(RULE_REVIEW);
+        expect(String(overlayOwn.message)).not.toContain('(no package)');
+
+        // Every served reader switched off through the overlays: the disable proceeds.
+        engine.registry.registerObject(accountOverlay([switchedOff(RULE_REVIEW, 'Switched off by the tenant')]) as any, APP, undefined, 'overlay');
+        engine.registry.registerObject(visitOverlay([switchedOff(RULE_VISIT_HOP, 'Switched off by the tenant')]) as any, APP, undefined, 'overlay');
+        const disabled = await dispatchAs(kernel, 'PATCH', `/packages/${MODULE}/disable`);
+        expect(disabled.status, String(disabled.message)).toBe(200);
+        const fields = await servedFieldNames(kernel);
+        for (const field of MODULE_FIELDS) expect(fields, 'the overlay\'s copies of the module\'s fields are withheld too').not.toContain(field);
+        const written = await dispatchAs(kernel, 'PATCH', `/data/${ACCOUNT}/${accountId}`, { name: 'Acme Ltd' });
+        expect(written.status, String(written.message)).toBe(200);
+    });
+});
+
+describe('[#30379 contract review] POST /packages with enableOnInstall: false asks the same scan', () => {
+    const OWNER = 'com.qa.inst.owner';
+    const EXTENDER = 'com.qa.inst.flags';
+    const READER = 'com.qa.inst.reader';
+    const THING = 'qz_thing';
+    const FLAG = 'qz_flag';
+    const RULE = 'qz_flag_required';
+    const CODE = 'PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE';
+    const manifestOf = (id: string) => ({ id, name: id, namespace: 'qz', version: '1.0.0', type: 'module' });
+
+    let previousHome: string | undefined;
+    beforeAll(() => {
+        previousHome = process.env.OS_HOME;
+        process.env.OS_HOME = mkdtempSync(join(home, 'install-'));
+    });
+    afterAll(() => {
+        process.env.OS_HOME = previousHome;
+    });
+
+    /** A registry with the extender installed and enabled, its field on the owner's object, and (optionally) a rule of another package that reads it. */
+    async function door(withReader: boolean) {
+        const registry = new SchemaRegistry({ multiTenant: false, collisionPolicy: 'error' } as any);
+        (registry as any).logLevel = 'silent';
+        const kernel: any = {
+            getService: (name: string) => (name === 'objectql' ? Promise.resolve({ registry }) : null),
+            context: { getService: () => null },
+        };
+        const dispatcher = new HttpDispatcher(kernel);
+        const install = (body: unknown) => dispatcher.handlePackages('', 'POST', body, {}, {
+            request: {},
+            executionContext: { userId: 'u_admin', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'] },
+        } as any);
+        const first = await install({ manifest: manifestOf(EXTENDER) });
+        expect(first.response?.status, 'precondition: the extender installs').toBe(201);
+        registry.registerObject({ name: THING, label: 'Thing', fields: { name: { name: 'name', type: 'text', label: 'Name' } } } as any, OWNER);
+        registry.registerObject({ name: THING, fields: { [FLAG]: { name: FLAG, type: 'boolean', label: 'Flag' } } } as any, EXTENDER, undefined, 'extend');
+        if (withReader) {
+            registry.registerObject({
+                name: THING,
+                validations: [{ name: RULE, type: 'script', severity: 'error', message: 'Flag it', condition: `record.${FLAG} == null` }],
+            } as any, READER, undefined, 'extend');
+        }
+        return { registry, install };
+    }
+
+    it('an overwrite that asks to come back disabled is refused while a rule reads its field, and the package stays enabled', async () => {
+        const { registry, install } = await door(true);
+        const result = await install({ manifest: manifestOf(EXTENDER), overwrite: true, enableOnInstall: false });
+        expect({ status: result.response?.status, code: result.response?.body?.error?.code }).toEqual({ status: 409, code: CODE });
+        expect(String(result.response?.body?.error?.message)).toContain(
+            `Package '${EXTENDER}' was installed and stays enabled: \`enableOnInstall: false\` cannot disable it: an active validation rule reads a field it adds through objectExtensions, which the disable would withhold — ${READER} · ${THING} · ${RULE} (reads ${FLAG})`,
+        );
+        expect(registry.getPackage(EXTENDER)?.enabled).toBe(true);
+        expect(loadDisabledPackageIds(undefined).has(EXTENDER)).toBe(false);
+        expect(Object.keys((registry.getObject(THING) as any)?.fields ?? {})).toContain(FLAG);
+    });
+
+    it('control: with no rule reading the field the same overwrite installs it disabled', async () => {
+        const { registry, install } = await door(false);
+        const result = await install({ manifest: manifestOf(EXTENDER), overwrite: true, enableOnInstall: false });
+        expect(result.response?.status).toBe(201);
+        expect(registry.getPackage(EXTENDER)?.enabled).toBe(false);
+        expect(loadDisabledPackageIds(undefined).has(EXTENDER)).toBe(true);
     });
 });

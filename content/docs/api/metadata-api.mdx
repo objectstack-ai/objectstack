@@ -188,8 +188,12 @@ rule of any enabled package reads one of those fields (declared dependent or
 not, an app's `.custom` pair included, any severity): withheld, the field could
 not be read, and every write to that object would fail the rule. The message
 names each rule as `package · object · rule (reads FIELD)`, and nothing changes.
-Switch off or change each named rule first, or disable the package that owns it.
-A formula over the field does not refuse the disable; it answers `null`.
+A rule is judged as the object serves it: one rule per name, a tenant overlay's
+switch honoured. Switch off or change each named rule first, or disable the
+package that owns it. A formula over the field does not refuse the disable; it
+answers `null`. `POST /packages` with `enableOnInstall: false` answers the same
+`409` when the install would leave such a package disabled; the install lands
+and the package stays enabled.
 
 ---
 

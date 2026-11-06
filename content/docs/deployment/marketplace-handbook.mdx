@@ -313,9 +313,12 @@ its data is kept.
   `409 PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`, and its message names
   each rule as `package · object · rule (reads FIELD)`; nothing changes.
   Withheld, the field could not be read, and every write to that object would
-  fail the rule. Switch off or change each named rule first, or disable the
-  package that owns it. A formula over the field does not block the disable:
-  it answers `null` while the module is off.
+  fail the rule. Switch off or change each named rule first (a rule the
+  customer switched off on their copy of the object counts as off), or disable
+  the package that owns it. A formula over the field does not block the
+  disable: it answers `null` while the module is off. An install with
+  `enableOnInstall: false` that would leave the module disabled in that state
+  answers the same `409`, and the module stays enabled.
 
 **What your app's own code meets.** A hook of your app that reads or writes a
 module's object through `ctx.api.object('<object>')` runs inside the server,
