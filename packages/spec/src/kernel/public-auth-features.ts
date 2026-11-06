@@ -67,6 +67,16 @@ export type PublicAuthFeatureSurface = 'crud' | 'login' | 'status';
  *   input (a mode that takes a capability away, not one that grants it); gate
  *   with `features.X != true` so a missing/undefined flag keeps the input
  *   visible, exactly as the flag being off does.
+ *
+ * "Keeps the input visible" is the fault direction of the slot the gate lands
+ * in, not of the gate (see {@link RequiresFeatureSlot}). In CEL, reading a key
+ * that `features` does not carry is a runtime fault ("No such key"), not
+ * `null`, so with `features = {}` every gate above faults instead of answering:
+ * - an action's or param's `visible` is fail-soft, so a faulting gate shows
+ *   the input, which is the behavior the list above describes;
+ * - a field group's `visibleWhen` is fail-closed (a faulting section predicate
+ *   hides its group), so the same gate HIDES the group until the host
+ *   publishes the flag, whichever semantics it has.
  */
 export type PublicAuthFeatureSemantics = 'opt-in' | 'default-on' | 'hide-when-on';
 
@@ -389,28 +399,44 @@ const FEATURE_GATE_OPERATORS = {
  * The canonical CEL gate for a flag, per its default semantics:
  * `opt-in` → `features.X == true`; `default-on` → `features.X != false`
  * (so an absent flag — e.g. config not yet fetched — fails open);
- * `hide-when-on` → `features.X != true` (absent fails open too).
+ * `hide-when-on` → `features.X != true` (absent fails open too). "Fails open"
+ * holds on a fail-soft slot only: on a fail-closed one (a field group's
+ * `visibleWhen`) the absent flag's fault hides — see
+ * {@link PublicAuthFeatureSemantics}.
  */
 export function featureGatePredicate(name: PublicAuthFeatureName): string {
   return `features.${name} ${FEATURE_GATE_OPERATORS[PUBLIC_AUTH_FEATURES[name].semantics]}`;
 }
 
 /**
- * The predicate slots {@link lowerRequiresFeature} lowers into: an action's or
- * param's `visible`, and an object field group's `visibleWhen`.
+ * The predicate slots {@link lowerRequiresFeature} lowers into, each with its
+ * own fault direction (what a predicate that faults at evaluation does):
+ * - `visible` (an action or a param): fail-soft, a fault SHOWS the input;
+ * - `visibleWhen` (an object field group): fail-closed, a fault HIDES the
+ *   group (both renderers' section gate).
  */
 export type RequiresFeatureSlot = 'visible' | 'visibleWhen';
 
-/** Object shape the lowering transform operates on (post field-level parse). */
-type WithRequiresFeature = {
-  requiresFeature?: PublicAuthFeatureName;
-  /**
-   * Already normalized by ExpressionInputSchema to the `{dialect, source}`
-   * envelope — except for the literal arm, which surfaces here verbatim on the
-   * surfaces that declare one (`ActionSchema.visible`, commit 97e7e3caa).
-   */
-  visible?: boolean | ({ dialect?: unknown; source?: unknown } & Record<string, unknown>);
-};
+/**
+ * A slot's value after field-level parse: already normalized by
+ * ExpressionInputSchema to the `{dialect, source}` envelope, except for the
+ * literal arm, which surfaces here verbatim on the surfaces that declare one
+ * (`ActionSchema.visible`, commit 97e7e3caa).
+ */
+type SlotPredicate = boolean | ({ dialect?: unknown; source?: unknown } & Record<string, unknown>);
+
+/**
+ * Object shape the lowering transform operates on (post field-level parse),
+ * keyed on the slot it lowers into: it may carry slot `S` and must not carry
+ * the other slot. So lowering an action (which has `visible`) into
+ * `'visibleWhen'`, or a field group (which has `visibleWhen`) into the default
+ * `'visible'`, fails to compile instead of writing the gate into a key the
+ * schema does not read.
+ */
+type WithRequiresFeature<S extends RequiresFeatureSlot> =
+  { requiresFeature?: PublicAuthFeatureName }
+  & { [K in S]?: SlotPredicate }
+  & { [K in Exclude<RequiresFeatureSlot, S>]?: never };
 
 /**
  * Lower the declarative `requiresFeature: '<flag>'` sugar into the canonical
@@ -449,7 +475,10 @@ type WithRequiresFeature = {
  * Designed as a zod `.transform((v, ctx) => lowerRequiresFeature(v, ctx))`
  * appended after the schema's refinements.
  */
-export function lowerRequiresFeature<T extends WithRequiresFeature>(
+export function lowerRequiresFeature<
+  T extends WithRequiresFeature<S>,
+  S extends RequiresFeatureSlot = 'visible',
+>(
   input: T,
   ctx: z.core.$RefinementCtx,
   /**
@@ -458,17 +487,20 @@ export function lowerRequiresFeature<T extends WithRequiresFeature>(
    * spelled that way (ADR-0089) — same gate, same composition, same refusals,
    * each worded with the slot the author actually wrote.
    */
-  slot: RequiresFeatureSlot = 'visible',
+  // `S` is `'visible'` exactly when the argument is omitted (its type default),
+  // so the value default matches it.
+  slot: S = 'visible' as S,
 ): Omit<T, 'requiresFeature'> {
   const { requiresFeature, ...rest } = input;
   if (requiresFeature === undefined) return rest as Omit<T, 'requiresFeature'>;
 
   const gate = featureGatePredicate(requiresFeature);
-  // Annotated rather than inferred: `rest` is a generic `Omit<T, …>`, so
-  // `rest[slot]` is a deferred indexed access that control flow cannot narrow
-  // — the `=== true` / `=== false` guards below would not strip the boolean arm
-  // off it, and the envelope spread at the end would not compile.
-  const existing: WithRequiresFeature['visible'] = (rest as WithRequiresFeature & { visibleWhen?: WithRequiresFeature['visible'] })[slot];
+  // Read through `T`'s slot-keyed half (a widening assignment, not a cast):
+  // `input[slot]` directly is a deferred `T[S]` that control flow cannot
+  // narrow, and resolving it through the whole constraint also meets the
+  // other-slot `never` half, since `S` is not known to be disjoint from it.
+  const slotted: { [K in S]?: SlotPredicate } = input;
+  const existing: SlotPredicate | undefined = slotted[slot];
   // `true` is the explicit spelling of "no gate of my own" — same lowering as an
   // absent key. `false` can never be gated into visibility, so it is refused.
   if (existing === undefined || existing === true) {

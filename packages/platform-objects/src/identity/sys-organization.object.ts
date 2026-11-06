@@ -341,6 +341,10 @@ export const SysOrganization = ObjectSchema.create({
   // the form and the record page both hide it where the flag is off (ruling
   // 6670372892 on #30210, row 4 A). Presentation only — the fields stay
   // readable and writable through the API, and their help still says so.
+  // A group predicate is fail-closed, so the group is also hidden while the
+  // console's `features` is still `{}` (before /auth/config resolves, or if
+  // that fetch fails): on a multi-organization deployment it appears once the
+  // config arrives.
   fieldGroups: [
     { key: 'identity', label: 'Identity' },
     { key: 'branding', label: 'Branding' },

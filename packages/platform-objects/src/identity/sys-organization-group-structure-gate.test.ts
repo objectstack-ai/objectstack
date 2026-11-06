@@ -61,6 +61,24 @@ describe('sys_organization: Parent Organization and Sort Order hide on a single-
     expect(shown).toContain('sort_order');
   });
 
+  // The group slot's fault direction (#30692 review). The console holds
+  // `features = {}` until /auth/config resolves, and keeps it empty if that
+  // fetch fails. Reading a key `features` does not carry is a CEL fault, not
+  // `null`, so the default-on gate does not answer "visible" there the way an
+  // action's fail-soft `visible` does: the section gate is fail-closed, and the
+  // group stays hidden until the flag is published, on every deployment.
+  it('features not yet published: the gate faults and the group is hidden (fail-closed)', () => {
+    const r = celEngine.evaluate(
+      { dialect: 'cel', source: featureGatePredicate('multiOrgEnabled') },
+      { record: {}, extra: { features: {} } },
+    );
+    expect(r.ok).toBe(false);
+    const shown = renderedFields({});
+    expect(shown).not.toContain('parent_organization_id');
+    expect(shown).not.toContain('sort_order');
+    expect(shown).toContain('name');
+  });
+
   it('no other group is gated, and the fields keep their declaration order', () => {
     expect(groups.filter((g) => g.visibleWhen !== undefined).map((g) => g.key)).toEqual(['group_structure']);
     const declared = Object.keys(SysOrganization.fields).filter((name) =>

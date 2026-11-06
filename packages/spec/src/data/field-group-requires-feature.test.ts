@@ -1,8 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, expect, it } from 'vitest';
+import type { z } from 'zod';
 import { ObjectFieldGroupSchema, ObjectSchema } from './object.zod';
-import { featureGatePredicate } from '../kernel/public-auth-features';
+import { featureGatePredicate, lowerRequiresFeature } from '../kernel/public-auth-features';
 
 /**
  * `fieldGroups[].requiresFeature` — the field-group twin of the action-level
@@ -84,5 +85,25 @@ describe('ObjectFieldGroupSchema.requiresFeature', () => {
     expect(basics!.visibleWhen).toBeUndefined();
     expect(tree!.visibleWhen).toEqual({ dialect: 'cel', source: gate });
     expect('requiresFeature' in tree!).toBe(false);
+  });
+});
+
+describe('lowerRequiresFeature: the slot is keyed on the shape', () => {
+  const ctx = { addIssue: () => undefined } as unknown as z.core.$RefinementCtx;
+  type ActionLike = { name: string; requiresFeature?: 'multiOrgEnabled'; visible?: boolean };
+  type GroupLike = { key: string; requiresFeature?: 'multiOrgEnabled'; visibleWhen?: { dialect: 'cel'; source: string } };
+  const action: ActionLike = { name: 'a', requiresFeature: 'multiOrgEnabled' };
+  const group: GroupLike = { key: 'g', requiresFeature: 'multiOrgEnabled' };
+  const gate = featureGatePredicate('multiOrgEnabled');
+
+  it('lowers each shape into its own slot, and a slot the shape does not read fails to compile', () => {
+    expect(lowerRequiresFeature(action, ctx)).toEqual({ name: 'a', visible: { dialect: 'cel', source: gate } });
+    expect(lowerRequiresFeature(group, ctx, 'visibleWhen')).toEqual({ key: 'g', visibleWhen: { dialect: 'cel', source: gate } });
+    // The two calls below are compile-time pins (check:test-typecheck holds
+    // them): each would write the gate into a key its schema never reads.
+    // @ts-expect-error an action's predicate slot is `visible`, not `visibleWhen`
+    lowerRequiresFeature(action, ctx, 'visibleWhen');
+    // @ts-expect-error a field group's predicate slot is `visibleWhen`; the default slot is `visible`
+    lowerRequiresFeature(group, ctx);
   });
 });

@@ -1310,6 +1310,13 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
    * `record:details`), so the lowered gate is enforced on both. Like every
    * field-group predicate it is presentation only: the fields stay readable
    * through the API.
+   *
+   * Fault direction: this slot is fail-closed, an action's `visible` is
+   * fail-soft. A `features` scope that does not carry the flag (the console's
+   * `{}` until `/auth/config` resolves, or for good if that fetch fails) makes
+   * the gate fault rather than answer, so the group is HIDDEN there even for a
+   * default-on flag, where the same gate on an action would show it. The group
+   * appears once the host publishes the flag.
    */
   requiresFeature: z.enum(PUBLIC_AUTH_FEATURE_NAMES).optional().describe(
     "Deployment feature flag gating this group, from the same set an action's `requiresFeature` names (e.g. 'multiOrgEnabled'). Lowered at parse time into the group's `visibleWhen` (AND-composed after an authored `visibleWhen`) and stripped from the output; the whole group is hidden where the flag is off. Presentation only: the fields stay readable through the API.",
