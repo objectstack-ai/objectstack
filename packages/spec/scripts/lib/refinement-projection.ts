@@ -225,6 +225,22 @@ function conjoinPropertyNames(jsonSchema: JsonObject, rule: JsonObject): void {
   jsonSchema.allOf = [...allOf, { propertyNames: rule }];
 }
 
+/**
+ * JSON Schema's own `uniqueItems: true` — the keyword whose meaning IS this
+ * arm's sentence, so nothing is encoded and nothing approximated.
+ *
+ * Nothing to conjoin and nothing to guard: `uniqueItems` is a boolean, zod
+ * never emits it for an array, and `true` is the only value this arm writes,
+ * so writing it twice — or onto a node that already says `true` — states one
+ * rule. It sits beside the node's own `type`, `items`, `minItems` and
+ * `maxItems` rather than in an `allOf`, because unlike `anyOf` it is no
+ * keyword the reference renderer reads as the node's TYPE (`emitRequiredOneOf`
+ * says why that one has to nest).
+ */
+function emitUniqueItems(jsonSchema: JsonObject): void {
+  jsonSchema.uniqueItems = true;
+}
+
 /** Write one declared arm's keywords onto one emitted node. */
 export function emitProjectableRefinement(jsonSchema: JsonObject, declared: ProjectableRefinement): void {
   switch (declared.pattern) {
@@ -242,6 +258,9 @@ export function emitProjectableRefinement(jsonSchema: JsonObject, declared: Proj
       return;
     case 'banned-key-pattern':
       emitBannedKeyPattern(jsonSchema, declared.keyPattern);
+      return;
+    case 'unique-items':
+      emitUniqueItems(jsonSchema);
       return;
   }
 }

@@ -406,12 +406,16 @@ function fieldVisibilityFaultResponse(deps: DomainHandlerDeps, objectName: strin
  * Resolved once per request and asked per object name, so the `/metadata` list
  * read pays one context + service resolution for the whole page.
  *
+ * Exported for the MCP bridge (`domains/mcp.ts`), whose object-schema reads
+ * (`describe_object`, `list_objects`) answer the same caller through this same
+ * masker, so the two doors cannot disagree about which fields exist.
+ *
  * [#20408] `metaType` is the FOLDED type the masker serves, as on `RestServer`:
  * every type but `object` is answered the not-applicable passthrough without
  * resolving anything, so an exit that serves every type (the item read) can
  * resolve its posture unconditionally, before its fetch.
  */
-async function resolveObjectMasker(
+export async function resolveObjectMasker(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
     metaType: string,
@@ -450,7 +454,7 @@ async function resolveObjectMasker(
  * without it — the schema was served with no cache header at all, where
  * `RestServer` answers `private, no-store`.
  */
-async function maskObjectSchema(
+export async function maskObjectSchema(
     masker: (objectName: string) => Promise<ObjectSchemaMaskPosture>,
     objectName: string,
     document: any,

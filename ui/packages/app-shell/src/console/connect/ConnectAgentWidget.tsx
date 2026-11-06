@@ -9,6 +9,14 @@
  * the deployment's default-on MCP surface into a three-minute connect flow
  * for people who don't know what MCP is:
  *
+ *   0. on top, in plain words, what a connected assistant can do (look up,
+ *      create, change and delete the records you may, run actions — always
+ *      as you), a few example requests to paste into the client, and which
+ *      one to try first to see the connection work. The page cannot tell
+ *      whether you have connected (#30894 owns that read), so the hint is
+ *      shown to everyone and never derived from a click. Protocol words
+ *      (MCP, OAuth, Streamable HTTP) appear only where a client's own form
+ *      or menu asks for them,
  *   1. the environment's MCP URL (from `/discovery` → `routes.mcp`) + copy,
  *   2. the portable SKILL.md download (`GET /api/v1/mcp/skill`), beside the
  *      URL, for everyone,
@@ -20,7 +28,11 @@
  *      OAuth is the default story for every client (the deployment is its own
  *      authorization server; you sign in as yourself); the Chinese clients'
  *      steps name the API-key header as the fallback for a client version
- *      without the OAuth flow,
+ *      without the OAuth flow. claude.ai (web) and Doubao Work's cloud tasks
+ *      connect from their vendor's servers, so on an address that is not
+ *      public HTTPS (`deploymentReach.ts`) both are marked not available,
+ *      with the reason and what makes them available; the local clients stay
+ *      as they are,
  *   4. API-key minting for headless callers (CI, machine accounts) via the
  *      existing `POST /api/v1/keys`, in a collapsed "Advanced: scripts and CI"
  *      section at the bottom — no client, so not a peer of the clients.
@@ -62,6 +74,7 @@ import {
   TabsTrigger,
 } from '@object-ui/components';
 import {
+  Ban,
   Bot,
   Check,
   ChevronRight,
@@ -70,6 +83,7 @@ import {
   ExternalLink,
   KeyRound,
   AlertCircle,
+  Sparkles,
 } from 'lucide-react';
 import { TokenStorage } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
@@ -82,6 +96,7 @@ import {
   isConnectClientId,
   type ConnectClientId,
 } from './connectClientPreference.js';
+import { isPublicHttpsAddress } from './deploymentReach.js';
 
 const SERVER_URL = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
 
@@ -154,6 +169,39 @@ function FieldRows({ rows }: { rows: Array<{ label: string; value: string }> }) 
   );
 }
 
+/** The scheme and host a reader recognises (`http://localhost:3000`), not the full MCP path. */
+function addressOf(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * A way in this deployment's address cannot offer: what is not available,
+ * why in one sentence, and what makes it available.
+ */
+function Unavailable({ title, reason, remedy }: { title: string; reason: string; remedy: string }) {
+  return (
+    <div role="note" className="flex gap-2 rounded-md border border-dashed px-3 py-2 text-xs">
+      <Ban className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <div className="space-y-0.5">
+        <div className="font-medium">{title}</div>
+        <p className="text-muted-foreground">{reason}</p>
+        <p className="text-muted-foreground">{remedy}</p>
+      </div>
+    </div>
+  );
+}
+
+/** The example requests the capabilities card offers, in the order shown; the first is the one to try first. */
+const EXAMPLE_REQUEST_KEYS = [
+  'connectAgent.capabilities.example1',
+  'connectAgent.capabilities.example2',
+  'connectAgent.capabilities.example3',
+] as const;
+
 /** The `mcpServers` JSON shape most clients import, with the client's own transport spelling. */
 function mcpServersJson(type: string | null, url: string): string {
   const server = type ? { type, url } : { url };
@@ -198,6 +246,10 @@ export function ConnectAgent() {
   }, []);
 
   const skillUrl = mcpUrl ? `${mcpUrl}/skill` : null;
+  // claude.ai (web) and Doubao Work's cloud tasks connect from their vendor's
+  // servers: they reach only a public HTTPS address.
+  const cloudReachable = mcpUrl ? isPublicHttpsAddress(mcpUrl) : false;
+  const shownAddress = mcpUrl ? addressOf(mcpUrl) : '';
 
   const cursorDeeplink = useMemo(() => {
     if (!mcpUrl) return null;
@@ -271,7 +323,37 @@ export function ConnectAgent() {
 
   return (
     <div className="space-y-4">
-      {/* ── MCP URL + skill download ─────────────────────────────────── */}
+      {/* ── What a connected assistant can do, and what to ask it first ── */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Sparkles className="h-4 w-4" />
+            {t('connectAgent.capabilities.title')}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <p className="text-muted-foreground">{t('connectAgent.capabilities.body')}</p>
+          <div className="space-y-1.5">
+            <h4 className="text-xs font-medium text-muted-foreground">
+              {t('connectAgent.capabilities.examplesTitle')}
+            </h4>
+            <ul className="space-y-1.5">
+              {EXAMPLE_REQUEST_KEYS.map((key) => {
+                const request = t(key);
+                return (
+                  <li key={key} className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 rounded-md bg-muted px-3 py-1.5">{request}</span>
+                    <CopyButton text={request} />
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+          <p className="text-xs text-muted-foreground">{t('connectAgent.capabilities.tryFirst')}</p>
+        </CardContent>
+      </Card>
+
+      {/* ── Connection address + skill download ──────────────────────── */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-base">
@@ -324,7 +406,15 @@ export function ConnectAgent() {
                 <h4 className="font-medium">claude.ai / Claude Desktop</h4>
                 <p className="text-muted-foreground">{t('connectAgent.claude.body')}</p>
                 <Snippet text={mcpUrl} />
-                <p className="text-xs text-muted-foreground">{t('connectAgent.claude.reachability')}</p>
+                {cloudReachable ? (
+                  <p className="text-xs text-muted-foreground">{t('connectAgent.claude.reachability')}</p>
+                ) : (
+                  <Unavailable
+                    title={t('connectAgent.unreachable.claudeWebTitle')}
+                    reason={t('connectAgent.unreachable.claudeWebReason', { address: shownAddress })}
+                    remedy={t('connectAgent.unreachable.remedy')}
+                  />
+                )}
               </div>
               <div className="min-w-0 space-y-2">
                 <h4 className="font-medium">Claude Code</h4>
@@ -376,6 +466,13 @@ export function ConnectAgent() {
                 ]}
               />
               <p className="text-xs text-muted-foreground">{t('connectAgent.doubao.hint')}</p>
+              {!cloudReachable && (
+                <Unavailable
+                  title={t('connectAgent.unreachable.doubaoCloudTitle')}
+                  reason={t('connectAgent.unreachable.doubaoCloudReason', { address: shownAddress })}
+                  remedy={t('connectAgent.unreachable.remedy')}
+                />
+              )}
             </TabsContent>
 
             <TabsContent value="qwenwork" className="space-y-2 text-sm">

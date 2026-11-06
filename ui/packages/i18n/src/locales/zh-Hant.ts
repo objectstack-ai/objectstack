@@ -1974,6 +1974,10 @@ const zhHant = {
       defaultValueHint: '預設：{{value}}',
       envLockBadge: '環境變數鎖定',
       envLockBadgeTitle: '由環境變數固定,無法在介面中編輯。',
+      savedBeneathPin: '此處還儲存著一個值。環境變數的值仍然生效；移除該變數後，儲存的值會重新生效。',
+      clearSaved: '清除儲存的值',
+      clearSavedConfirm: '此處儲存的值將被清除，移除環境變數後不會再恢復。環境變數的值仍然生效。',
+      savedCleared: '已清除儲存的值',
       deprecatedBadge: '已棄用',
       deprecatedBadgeReplacedBy: '已棄用 → {{replacedBy}}',
       unsupportedSpecifierType: '不支援的設定項型別:{{type}}',
@@ -3990,13 +3994,22 @@ const zhHant = {
     requiredFields: '必填項：{{fields}}',
   },
   connectAgent: {
+    capabilities: {
+      title: '連線後，AI 助手能做什麼',
+      body: '連線後，AI 助手可以查詢、新建、修改和刪除你有權操作的記錄，並執行本系統中的操作。它始終以你的身份工作：只能看到和做你自己的權限允許的事。',
+      examplesTitle: '在助手中試試這些請求',
+      example1: '列出我能看到的物件。',
+      example2: '統計這些物件各有多少條記錄。',
+      example3: '我在這裡能執行哪些操作？每個操作是做什麼的？',
+      tryFirst: '先試第一條：如果助手回答出你平時用的物件，就說明連線成功了。',
+    },
     disabled: {
-      title: '此部署已停用 MCP',
-      body: 'MCP 服務已關閉(OS_MCP_SERVER_ENABLED=false),暫無可連線的端點。請聯絡運維人員重新啟用。',
+      title: '此部署已關閉 AI 助手連線',
+      body: '此部署關閉了 AI 助手連線(OS_MCP_SERVER_ENABLED=false),暫時無法連線。請聯絡運維人員重新開啟。',
     },
     url: {
-      title: '本系統的 MCP 端點',
-      body: '任何支援 MCP 的 AI 客戶端都用這個 URL 連線。身份是自助的:部署自身就是 OAuth 2.1 授權伺服器,互動式客戶端只需在瀏覽器登入——以你自己的身份連線,每次呼叫都受你的權限和行級安全約束。',
+      title: '本系統的連線地址',
+      body: '你的 AI 助手用這個地址連線。你在瀏覽器中以自己的身份登入,助手做的每件事都受你自己的權限約束。',
       downloadSkill: '下載 SKILL.md',
       skillHint: '可移植的智慧體技能檔案:教會任何支援技能的智慧體如何使用本系統。',
     },
@@ -4005,7 +4018,7 @@ const zhHant = {
       reachability: 'claude.ai(網頁版)由 Anthropic 伺服器發起連線——部署需公網 HTTPS 可達。Claude Desktop 等本地客戶端可直連內網部署。',
     },
     claudeCode: {
-      body: '一條命令,首次使用時自動彈出 OAuth 登入:',
+      body: '一條命令,首次使用時自動在瀏覽器中開啟登入:',
       plugin: '或安裝官方外掛(附帶 ObjectStack 技能和引導式 /objectstack:connect 命令):',
     },
     cursor: {
@@ -4019,21 +4032,21 @@ const zhHant = {
     },
     codex: {
       body: '在 Codex 客戶端中:設定 → MCP 伺服器 → 新增伺服器,按下表填寫:',
-      hint: '儲存後按提示重啟,在 objectstack 旁點選「Authenticate」並在瀏覽器登入。在輸入框中輸入 /mcp 可檢視是否已連線。如果你的版本不支援瀏覽器登入,請新增請求頭 Authorization: Bearer <API 金鑰>(在下方建立)。',
+      hint: '儲存後按提示重啟,在 objectstack 旁點選「Authenticate」並在瀏覽器登入。在輸入框中輸入 /mcp 可檢視是否已連線。如果你的版本不支援瀏覽器登入,請新增請求頭 Authorization: Bearer <API 金鑰>(在下方「高階：腳本與 CI」中建立)。',
     },
     workbuddy: {
       body: '騰訊 WorkBuddy:聯結器 → 自定義聯結器 → 配置 MCP,把以下條目合併進 mcpServers(配置儲存在 ~/.workbuddy/mcp.json):',
-      hint: '儲存後在 objectstack 聯結器上點選「信任」——未信任前不會生效。如果你的版本沒有彈出登入,請新增請求頭 Authorization: Bearer <API 金鑰>(在下方建立)。',
+      hint: '儲存後在 objectstack 聯結器上點選「信任」——未信任前不會生效。如果你的版本沒有彈出登入,請新增請求頭 Authorization: Bearer <API 金鑰>(在下方「高階：腳本與 CI」中建立)。',
     },
     doubao: {
       title: '豆包工作',
       body: '技能 · 聯結器 → 新建 → 新建自定義聯結器,按下表填寫:',
-      hint: '按提示在瀏覽器登入。若未出現登入,在自定義 Headers 中新增 Authorization: Bearer <API 金鑰>(在下方建立)。雲端執行的任務要求部署可通過公網 HTTPS 訪問。',
+      hint: '按提示在瀏覽器登入。若未出現登入,在自定義 Headers 中新增 Authorization: Bearer <API 金鑰>(在下方「高階：腳本與 CI」中建立)。雲端執行的任務要求部署可通過公網 HTTPS 訪問。',
     },
     qwenwork: {
       title: '千問辦公',
       body: '擴充 → 聯結器 → + 新增 → 貼上 JSON 配置:',
-      hint: '也可手動新增:傳輸型別選 Streamable HTTP 並填寫此 URL。如果你的版本不支援瀏覽器登入,請新增請求頭 Authorization: Bearer <API 金鑰>(在下方建立)。',
+      hint: '也可手動新增:傳輸型別選 Streamable HTTP 並填寫此 URL。如果你的版本不支援瀏覽器登入,請新增請求頭 Authorization: Bearer <API 金鑰>(在下方「高階：腳本與 CI」中建立)。',
     },
     client: {
       title: '你用的是哪個 AI 助手？',
@@ -4041,6 +4054,13 @@ const zhHant = {
     },
     advanced: {
       title: '高階：腳本與 CI',
+    },
+    unreachable: {
+      claudeWebTitle: 'claude.ai（網頁版）：此部署不可用',
+      claudeWebReason: 'claude.ai 從 Anthropic 的伺服器發起連線，訪問不到 {{address}}：那裡只能訪問公網 HTTPS 地址。',
+      doubaoCloudTitle: '雲端任務：此部署不可用',
+      doubaoCloudReason: '豆包工作的雲端任務從它自己的伺服器執行，訪問不到 {{address}}：那裡只能訪問公網 HTTPS 地址。',
+      remedy: '把本系統部署到公網 HTTPS 地址（網際網路可訪問的域名，https://）後即可使用。',
     },
     apiKey: {
       title: 'API 金鑰',

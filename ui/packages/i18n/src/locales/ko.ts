@@ -2200,6 +2200,10 @@ const ko = {
       defaultValueHint: "기본값: {{value}}",
       envLockBadge: "환경 변수로 잠김",
       envLockBadgeTitle: "환경 변수로 고정되어 UI에서 편집할 수 없습니다.",
+      savedBeneathPin: "여기에도 값이 저장되어 있습니다. 환경 변수 값이 계속 적용되며, 변수를 제거하면 저장된 값이 다시 적용됩니다.",
+      clearSaved: "저장된 값 지우기",
+      clearSavedConfirm: "여기에 저장된 값을 지웁니다. 환경 변수를 제거해도 이 값으로 돌아가지 않습니다. 환경 변수 값은 계속 적용됩니다.",
+      savedCleared: "저장된 값을 지웠습니다",
       deprecatedBadge: "지원 중단됨",
       deprecatedBadgeReplacedBy: "지원 중단됨 → {{replacedBy}}",
       unsupportedSpecifierType: "지원되지 않는 설정 항목 유형: {{type}}",
@@ -3779,13 +3783,22 @@ const ko = {
     requiredFields: "필수 항목: {{fields}}",
   },
   connectAgent: {
+    capabilities: {
+      title: '연결된 AI 어시스턴트가 할 수 있는 일',
+      body: '연결하면 AI 어시스턴트는 본인에게 허용된 레코드를 조회, 생성, 수정, 삭제하고 이 시스템의 작업을 실행할 수 있습니다. 항상 본인으로서 동작하므로 본인의 권한이 허용하는 것만 보고 할 수 있습니다.',
+      examplesTitle: '어시스턴트에서 시도해 볼 요청',
+      example1: '내가 볼 수 있는 객체를 나열해 줘.',
+      example2: '각 객체에 레코드가 몇 개씩 있는지 세어 줘.',
+      example3: '여기서 실행할 수 있는 작업은 무엇이고, 각각 무엇을 하나요?',
+      tryFirst: '첫 번째 요청부터 시도해 보세요. 평소 사용하는 객체로 답하면 연결된 것입니다.',
+    },
     disabled: {
-      title: '이 배포에서는 MCP가 비활성화되어 있습니다',
-      body: 'MCP 서비스가 꺼져 있습니다(OS_MCP_SERVER_ENABLED=false). 운영자에게 다시 활성화를 요청하세요.',
+      title: '이 배포에서는 AI 어시스턴트 연결이 꺼져 있습니다',
+      body: '이 배포에서는 AI 어시스턴트 연결이 꺼져 있어(OS_MCP_SERVER_ENABLED=false) 연결할 대상이 없습니다. 운영자에게 다시 켜 달라고 요청하세요.',
     },
     url: {
-      title: '이 시스템의 MCP 엔드포인트',
-      body: 'MCP를 지원하는 모든 AI 클라이언트가 이 URL로 연결합니다. 인증은 셀프서비스입니다. 배포 자체가 OAuth 2.1 인가 서버이므로 브라우저 로그인만 하면 되고, 모든 호출은 본인의 권한과 행 수준 보안 아래 실행됩니다.',
+      title: '이 시스템의 연결 주소',
+      body: 'AI 어시스턴트는 이 주소로 연결합니다. 브라우저에서 본인으로 로그인하므로 어시스턴트가 하는 모든 작업은 본인의 권한 안에서 실행됩니다.',
       downloadSkill: 'SKILL.md 다운로드',
       skillHint: '이식 가능한 에이전트 스킬: 스킬을 지원하는 에이전트에게 이 시스템 사용법을 알려줍니다.',
     },
@@ -3794,7 +3807,7 @@ const ko = {
       reachability: 'claude.ai(웹)는 Anthropic 서버에서 연결하므로 배포가 공용 HTTPS로 접근 가능해야 합니다. Claude Desktop 등 로컬 클라이언트는 인트라넷 배포에도 연결할 수 있습니다.',
     },
     claudeCode: {
-      body: '명령 하나 — 처음 사용할 때 OAuth 로그인이 자동으로 열립니다:',
+      body: '명령 하나 — 처음 사용할 때 브라우저 로그인이 자동으로 열립니다:',
       plugin: '또는 공식 플러그인을 설치하세요(ObjectStack 스킬과 안내형 /objectstack:connect 명령 포함):',
     },
     cursor: {
@@ -3808,21 +3821,21 @@ const ko = {
     },
     codex: {
       body: 'Codex 앱에서 설정 → MCP 서버 → 서버 추가로 이동한 뒤 다음과 같이 입력하세요:',
-      hint: '저장하고 안내에 따라 다시 시작한 뒤 objectstack 옆의 Authenticate를 클릭해 브라우저에서 로그인하세요. 입력창에 /mcp를 입력하면 연결 상태를 확인할 수 있습니다. 브라우저 로그인을 지원하지 않는 버전이라면 헤더 Authorization: Bearer <API 키>를 추가하세요(키는 아래에서 생성).',
+      hint: '저장하고 안내에 따라 다시 시작한 뒤 objectstack 옆의 Authenticate를 클릭해 브라우저에서 로그인하세요. 입력창에 /mcp를 입력하면 연결 상태를 확인할 수 있습니다. 브라우저 로그인을 지원하지 않는 버전이라면 헤더 Authorization: Bearer <API 키>를 추가하세요(키는 아래 「고급: 스크립트 및 CI」에서 생성).',
     },
     workbuddy: {
       body: '커넥터 → 사용자 지정 커넥터 → MCP 구성에서 이 항목을 mcpServers에 병합하세요(~/.workbuddy/mcp.json에 저장됨):',
-      hint: '저장한 뒤 objectstack 커넥터에서 신뢰를 클릭하세요. 신뢰하기 전에는 활성화되지 않습니다. 로그인 창이 뜨지 않으면 요청 헤더 Authorization: Bearer <API 키>를 추가하세요(키는 아래에서 생성).',
+      hint: '저장한 뒤 objectstack 커넥터에서 신뢰를 클릭하세요. 신뢰하기 전에는 활성화되지 않습니다. 로그인 창이 뜨지 않으면 요청 헤더 Authorization: Bearer <API 키>를 추가하세요(키는 아래 「고급: 스크립트 및 CI」에서 생성).',
     },
     doubao: {
       title: 'Doubao Work',
       body: '스킬 · 커넥터 → 새로 만들기 → 사용자 지정 커넥터 만들기에서 다음과 같이 입력하세요:',
-      hint: '안내에 따라 브라우저에서 로그인하세요. 로그인 창이 뜨지 않으면 사용자 지정 헤더 Authorization: Bearer <API 키>를 추가하세요(키는 아래에서 생성). 클라우드에서 실행되는 작업은 공용 HTTPS로 접근 가능한 배포가 필요합니다.',
+      hint: '안내에 따라 브라우저에서 로그인하세요. 로그인 창이 뜨지 않으면 사용자 지정 헤더 Authorization: Bearer <API 키>를 추가하세요(키는 아래 「고급: 스크립트 및 CI」에서 생성). 클라우드에서 실행되는 작업은 공용 HTTPS로 접근 가능한 배포가 필요합니다.',
     },
     qwenwork: {
       title: 'QwenWork',
       body: '확장 → 커넥터 → + 추가 → JSON 구성 붙여넣기:',
-      hint: '직접 추가하려면 Streamable HTTP를 선택하고 이 URL을 입력하세요. 브라우저 로그인을 지원하지 않는 버전이라면 요청 헤더 Authorization: Bearer <API 키>를 추가하세요(키는 아래에서 생성).',
+      hint: '직접 추가하려면 Streamable HTTP를 선택하고 이 URL을 입력하세요. 브라우저 로그인을 지원하지 않는 버전이라면 요청 헤더 Authorization: Bearer <API 키>를 추가하세요(키는 아래 「고급: 스크립트 및 CI」에서 생성).',
     },
     client: {
       title: '어떤 AI 어시스턴트를 사용하시나요?',
@@ -3830,6 +3843,13 @@ const ko = {
     },
     advanced: {
       title: '고급: 스크립트 및 CI',
+    },
+    unreachable: {
+      claudeWebTitle: 'claude.ai(웹): 이 배포에서는 사용할 수 없음',
+      claudeWebReason: 'claude.ai는 Anthropic 서버에서 연결하므로 {{address}}에 접근할 수 없습니다. 그곳에서는 공개 HTTPS 주소만 접근할 수 있습니다.',
+      doubaoCloudTitle: '클라우드 작업: 이 배포에서는 사용할 수 없음',
+      doubaoCloudReason: 'Doubao Work의 클라우드 작업은 자체 서버에서 실행되므로 {{address}}에 접근할 수 없습니다. 그곳에서는 공개 HTTPS 주소만 접근할 수 있습니다.',
+      remedy: '이 시스템을 공개 HTTPS 주소(인터넷에서 접근 가능한 도메인의 https://)로 제공하면 사용할 수 있습니다.',
     },
     apiKey: {
       title: 'API 키',

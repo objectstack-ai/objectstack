@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { UNIQUE_SCALAR_ITEMS, type JsonScalar } from '../shared/refinement-projection';
 import type { InstallMode } from '../kernel/manifest.zod';
 
 /**
@@ -153,9 +154,9 @@ export type PackageMaturity = z.input<typeof PackageMaturitySchema>;
 // ---------------------------------------------------------------------------
 
 /** A list with no repeated value — a facet value counts once. */
-function distinct<T extends z.ZodType>(item: T, key: string) {
+function distinct<T extends z.ZodType<JsonScalar>>(item: T, key: string) {
   return z.array(item).refine(
-    (values) => new Set(values).size === values.length,
+    UNIQUE_SCALAR_ITEMS,
     { message: `\`${key}\` lists a value more than once; list each value once.` },
   );
 }
