@@ -10,8 +10,9 @@
  * field code `reference_user_banned`, on the same terms as
  * `reference_not_found`: only a value the caller supplied, only a value the
  * write ADDS, never a system write. The ban-state read is elevated the way the
- * existence probe is, so a caller who cannot read the user object is refused
- * the same way.
+ * existence probe is. The caller's own read door is asked first, as for every
+ * `lookup` and `user` value (#29029): it asks for the user's id alone, and a
+ * user it does not return answers `reference_not_found`, its ban never read.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -127,7 +128,7 @@ const DAY = 24 * 60 * 60 * 1000;
 describe('[#30205] a new assignment to a banned user is refused', () => {
   let engine: ObjectQL;
   let stores: Map<string, Map<string, Record<string, unknown>>>;
-  let userReads: Array<{ elevated: boolean }>;
+  let userReads: Array<{ elevated: boolean; fields: string[] }>;
 
   beforeEach(async () => {
     engine = new ObjectQL();
@@ -142,14 +143,17 @@ describe('[#30205] a new assignment to a banned user is refused', () => {
     await engine.insert('sys_user', { id: 'u_bob', name: 'Bob', banned: true }, sys);
     await engine.insert('sys_user', { id: 'u_carol', name: 'Carol', banned: true, ban_expires: new Date(Date.now() + DAY).toISOString() }, sys);
     await engine.insert('sys_user', { id: 'u_dave', name: 'Dave', banned: true, ban_expires: new Date(Date.now() - DAY).toISOString() }, sys);
-    // The user object is unreadable to a non-system caller, as it is to a
-    // member without a read grant on it.
+    // [#29029] A non-system caller reads a user's id, as a member does, and
+    // no other column of it: its own read of the ban columns is refused.
     userReads = [];
     engine.registerMiddleware(async (ctx: any, next: () => Promise<void>) => {
       if (ctx.object === 'sys_user' && ['find', 'findOne', 'count'].includes(ctx.operation)) {
         const elevated = ctx.context?.isSystem === true;
-        userReads.push({ elevated });
-        if (!elevated) throw Object.assign(new Error('no read access to sys_user'), { code: 'PERMISSION_DENIED', statusCode: 403 });
+        const fields: string[] = Array.isArray(ctx.ast?.fields) ? ctx.ast.fields.map(String) : [];
+        userReads.push({ elevated, fields });
+        if (!elevated && (fields.length === 0 || fields.some((f) => f !== 'id'))) {
+          throw Object.assign(new Error('no read access to sys_user'), { code: 'PERMISSION_DENIED', statusCode: 403 });
+        }
       }
       await next();
     });
@@ -164,10 +168,27 @@ describe('[#30205] a new assignment to a banned user is refused', () => {
     expect(stores.get('ban_ticket')?.size ?? 0).toBe(0);
   });
 
-  it('the caller cannot read the user object, and is refused all the same: the read is elevated', async () => {
+  it('the caller cannot read the ban columns, and is refused all the same: the ban is read elevated', async () => {
     await refusalOf(() => engine.insert('ban_ticket', { title: 'T', assignee: 'u_bob' }, { context: ALICE } as any));
-    expect(userReads.length).toBeGreaterThan(0);
-    expect(userReads.every((r) => r.elevated)).toBe(true);
+    const own = userReads.filter((r) => !r.elevated);
+    expect(own.length).toBeGreaterThan(0);
+    expect(own.every((r) => r.fields.length === 1 && r.fields[0] === 'id')).toBe(true);
+    expect(userReads.some((r) => r.elevated && r.fields.includes('banned'))).toBe(true);
+  });
+
+  it('[#29029] a user the caller cannot read is reference_not_found, and its ban is not read', async () => {
+    engine.registerMiddleware(async (ctx: any, next: () => Promise<void>) => {
+      if (ctx.object === 'sys_user' && ctx.context?.isSystem !== true) {
+        throw Object.assign(new Error('no read access to sys_user'), { code: 'PERMISSION_DENIED', statusCode: 403 });
+      }
+      await next();
+    });
+    userReads = [];
+    const err = await refusalOf(() => engine.insert('ban_ticket', { title: 'T', assignee: 'u_bob' }, { context: ALICE } as any));
+    expect(err.fields).toHaveLength(1);
+    expect(err.fields[0]).toMatchObject({ field: 'assignee', code: 'reference_not_found', value: 'u_bob' });
+    expect(userReads.some((r) => r.fields.includes('banned'))).toBe(false);
+    expect(stores.get('ban_ticket')?.size ?? 0).toBe(0);
   });
 
   it('a `user` field and a ban with an expiry still ahead are refused too', async () => {

@@ -119,6 +119,13 @@ for (const family of STORED_METADATA_BODY_OBJECTS) {
     let d: ReturnType<typeof makeDriver>;
     let warns: ReturnType<typeof makeRecordingLogger>['warns'];
     const familyReads = () => d.calls.filter((c) => c.object === family).length;
+    /**
+     * [#29029] Reads of the family that ask for more than `id`: a member's
+     * write that names a family row has it checked through its read door,
+     * projected to `id` alone, and that read serves no body.
+     */
+    const familyBodyReads = () => d.calls.filter((c) => c.object === family
+      && !(Array.isArray(c.ast?.fields) && c.ast.fields.length === 1 && c.ast.fields[0] === 'id')).length;
     const faultsOn = (field: string) => warns.filter((w) => w.meta?.object === 'probe_carrier' && w.meta?.field === field);
     const servesNothing = (value: unknown) => {
       const text = JSON.stringify(value);
@@ -200,13 +207,20 @@ for (const family of STORED_METADATA_BODY_OBJECTS) {
       } as any, 'test-package');
       for (const context of [MEMBER, SYSTEM]) {
         const err = await engine.insert('probe_ruled', { meta: 'm1' }, { context }).then(() => undefined, (e) => e);
-        expect(err).toMatchObject({ code: 'VALIDATION_FAILED', fields: [expect.objectContaining({ field: '_record', code: 'rule_violation' })] });
-        // No verdict over the body: the refusal is the unevaluable one, never the rule's own.
+        // No verdict over the body: never the rule's own refusal.
         expect(String(err.message)).not.toBe('probe hit');
-        expect(String(err.message)).toContain(`could not read '${family}'`);
         servesNothing(err.message);
+        if (context === MEMBER) {
+          // [#29029] A member's write names a record its read door does not
+          // return: the reference check answers, before the record's rules.
+          expect(err).toMatchObject({ code: 'VALIDATION_FAILED', fields: [expect.objectContaining({ field: 'meta', code: 'reference_not_found' })] });
+          continue;
+        }
+        // A system write keeps the rules first: the refusal is the unevaluable one.
+        expect(err).toMatchObject({ code: 'VALIDATION_FAILED', fields: [expect.objectContaining({ field: '_record', code: 'rule_violation' })] });
+        expect(String(err.message)).toContain(`could not read '${family}'`);
       }
-      expect(familyReads()).toBe(0);
+      expect(familyBodyReads()).toBe(0);
     });
   });
 }
