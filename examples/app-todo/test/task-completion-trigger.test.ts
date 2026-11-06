@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#6882] `task_completion` is a LIVE record-change flow — binding, gate, and
+ * [#6882] `todo_task_completion` is a LIVE record-change flow — binding, gate, and
  * the silence that hid it.
  *
  * The defect this pins was not a wrong answer; it was **no answer anywhere**.
@@ -109,7 +109,7 @@ function startConfig(flow: unknown): Record<string, unknown> {
   return nodes.find((n) => n?.type === 'start')?.config ?? {};
 }
 
-describe('#6882 — app-todo `task_completion` is armed, not dead', () => {
+describe('#6882 — app-todo `todo_task_completion` is armed, not dead', () => {
   it('declares the two keys the engine actually reads', () => {
     const config = startConfig(TaskCompletionFlow);
 
@@ -140,7 +140,7 @@ describe('#6882 — app-todo `task_completion` is armed, not dead', () => {
   it('BINDS: the flow is wired to afterUpdate on todo_task at runtime', async () => {
     const { automation } = await bootTodoKernel();
 
-    const state = automation.getFlowRuntimeStates().find((s: any) => s.name === 'task_completion');
+    const state = automation.getFlowRuntimeStates().find((s: any) => s.name === 'todo_task_completion');
     expect(state).toBeDefined();
     expect(state!.bound, 'the flow resolved a binding and the trigger accepted it').toBe(true);
     expect(state!.triggerType).toBe('record_change');
@@ -149,7 +149,7 @@ describe('#6882 — app-todo `task_completion` is armed, not dead', () => {
     // And the silent-miss audit has nothing to say about it, because there is
     // nothing left unbound.
     const audit = automation.getTriggerBindingAudit();
-    expect(audit.find((a: any) => a.flowName === 'task_completion')).toBeUndefined();
+    expect(audit.find((a: any) => a.flowName === 'todo_task_completion')).toBeUndefined();
   });
 
   it('REVERSE: drop `triggerType` and the flow vanishes from every audit channel', async () => {
@@ -178,14 +178,14 @@ describe('#6882 — app-todo `task_completion` is armed, not dead', () => {
     // so the assertions above are about the missing key, not about the fixture
     // failing to register.
     expect(
-      automation.getFlowRuntimeStates().find((s: any) => s.name === 'task_completion')!.bound,
+      automation.getFlowRuntimeStates().find((s: any) => s.name === 'todo_task_completion')!.bound,
     ).toBe(true);
   });
 
   it('GATES: only a transition INTO completed fires the flow', async () => {
     const { automation, data } = await bootTodoKernel();
     const ctx = { context: { userId: 'u_todo' } };
-    const runCount = async () => (await automation.listRuns('task_completion')).length;
+    const runCount = async () => (await automation.listRuns('todo_task_completion')).length;
 
     // [#7036] No `completed_date` seed. The CREATE-seed workaround this test
     // used to carry existed only because the completion UPDATE was impossible;
@@ -209,7 +209,7 @@ describe('#6882 — app-todo `task_completion` is armed, not dead', () => {
     // A write that SHOULD fire it.
     await data.update('todo_task', { status: 'completed' }, { where: { id }, ...ctx });
     await sleep(400);
-    const afterTransition = await automation.listRuns('task_completion');
+    const afterTransition = await automation.listRuns('todo_task_completion');
     expect(afterTransition.length, 'the completion transition must launch the flow').toBe(1);
     // It RAN, rather than merely being dispatched: the whole flow reached `end`.
     expect(afterTransition[0].status).toBe('completed');
@@ -392,8 +392,8 @@ describe('#7036 — completing a task is possible for a normal user', () => {
     // a hook missing from that array is dead metadata no matter how correct
     // the hook file is. `task.hook.ts` shipped for exactly that long.
     const hooks = (TodoApp as { hooks?: Array<{ name?: string; object?: string; events?: string[] }> }).hooks ?? [];
-    const registered = hooks.find((h) => h.name === 'task_logic');
-    expect(registered, '`task_logic` must be in defineStack({ hooks })').toBeDefined();
+    const registered = hooks.find((h) => h.name === 'todo_task_logic');
+    expect(registered, '`todo_task_logic` must be in defineStack({ hooks })').toBeDefined();
     expect(registered!.object).toBe('todo_task');
     expect(registered!.events).toContain('beforeUpdate');
   });

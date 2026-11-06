@@ -6,7 +6,7 @@ namespace, so the product splits into modules without renaming a single object.
 
 | package | type | namespace | owns |
 | --- | --- | --- | --- |
-| `com.example.multi.core` | `app` | `crm` | `crm_account`, the `multi_crm` app |
+| `com.example.multi.core` | `app` | `crm` | `crm_account`, the `crm_multi_crm` app |
 | `com.example.multi.orders` | `module` | `crm` | `crm_order` (lookup → `crm_account`) |
 
 ```bash

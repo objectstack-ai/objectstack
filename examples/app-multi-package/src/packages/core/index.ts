@@ -40,7 +40,7 @@ export default defineStack({
 
   apps: [
     {
-      name: 'multi_crm',
+      name: 'crm_multi_crm',
       label: 'Multi-Package CRM',
       description: 'Accounts, plus whatever modules this artifact delivers alongside',
       // The group is a CONTAINER this package owns and modules aim at

@@ -31,10 +31,10 @@ const LEDGER = 'sys_metadata_activation';
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
 
 /** A showcase position (`src/security/positions.ts`) and the set it names. */
-const POSITION = 'auditor';
+const POSITION = 'showcase_auditor';
 const POSITION_SET = 'showcase_auditor';
 /** A second showcase position, held by this file's own holder for the resolver leg. */
-const HELD_POSITION = 'exec';
+const HELD_POSITION = 'showcase_exec';
 const HELD_POSITION_SET = 'showcase_executive';
 const HOLDER_EMAIL = 'exec.holder@example.com';
 /**
@@ -95,7 +95,7 @@ describe('the catalog activation door, on a booted showcase', () => {
 
     it('the resolver over the booted engine stops granting through a switched-off position, and grants again once it is back on', async () => {
         // Its own holder, so the leg depends on nothing a boot seeds later: a
-        // signed-up member, assigned the `exec` position by a system write, which
+        // signed-up member, assigned the `showcase_exec` position by a system write, which
         // under `single` takes the Default Organization (C8 stage 8b).
         await stack.signUp(HOLDER_EMAIL);
         const [user] = await ql.find('sys_user', { where: { email: HOLDER_EMAIL }, limit: 1, context: SYSTEM_CTX });
