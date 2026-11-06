@@ -110,3 +110,27 @@ describe('client.automation descriptors (#3563 PR-5)', () => {
         expect(out.flows[0].bound).toBe(true);
     });
 });
+
+describe('client.meta.migrateRecordCurrencyCodes (ADR-0144 record-currency code backfill)', () => {
+    it('POSTs the three names to the backfill door, a preview unless apply is true', async () => {
+        const report = { object: 'deal', organizationId: 'org_a', codeless: 2, written: 0, applied: false, truncated: false };
+        const { client, fetchMock } = createMockClient(report);
+        const out = await client.meta.migrateRecordCurrencyCodes({ object: 'deal', field: 'amount', code: 'USD' });
+        expect(String(fetchMock.mock.calls[0][0])).toBe('http://localhost:3000/api/v1/meta/_migrate-record-currency-codes');
+        expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+        expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ object: 'deal', field: 'amount', code: 'USD' });
+        // The REST door answers the report BARE; it reaches the caller as it was sent.
+        expect(out).toEqual(report);
+    });
+
+    it('sends apply only when it is true, and never an organization', async () => {
+        const { client, fetchMock } = createMockClient({ applied: true });
+        await client.meta.migrateRecordCurrencyCodes({ object: 'deal', field: 'amount', code: 'USD', apply: true });
+        await client.meta.migrateRecordCurrencyCodes({ object: 'deal', field: 'amount', code: 'USD', apply: false });
+        const bodies = fetchMock.mock.calls.map((c: unknown[]) => JSON.parse(String((c[1] as { body?: unknown })?.body)));
+        expect(bodies).toEqual([
+            { object: 'deal', field: 'amount', code: 'USD', apply: true },
+            { object: 'deal', field: 'amount', code: 'USD' },
+        ]);
+    });
+});

@@ -565,6 +565,8 @@ export type {
     RecordCurrencyBackfillEngine,
     RecordCurrencyBackfillLogger,
     RecordCurrencyBackfillOptions,
+    RecordCurrencyBackfillOrganization,
+    RecordCurrencyBackfillOrganizationsRefusal,
 } from './record-currency-backfill.js';
 // [ADR-0144 D5, D7 parameter 1, Open item 8] The explicit recompute of stored
 // home amounts behind `os migrate recompute-home-amounts`: the write's own

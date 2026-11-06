@@ -383,6 +383,11 @@ import {
 // [#23050 slice 13e] The `/meta` object state-machine read moved to its own module — see its
 // header.
 import { registerMetaObjectStateRoute, type MetaObjectStateRouteHost } from './meta-object-state-routes.js';
+// [ADR-0144, ruling 6670707546 item B] The record-currency code backfill door — see its header.
+import {
+    registerMetaRecordCurrencyBackfillRoute,
+    type MetaRecordCurrencyBackfillRouteHost,
+} from './meta-record-currency-backfill-route.js';
 import { loadExcelJs, type Worksheet } from './xlsx-module.js';
 // [#18386] `?template=true` on the export door: the import template's column
 // rule, request reading and workbook. See the module header.
@@ -5602,6 +5607,20 @@ export class RestServer {
             resolveProtocol: (...a) => this.resolveProtocol(...a),
         };
         registerMetaObjectStateRoute.call(objectStateHost, scope);
+
+        // [ADR-0144, ruling 6670707546 item B] The tenant-admin door for the
+        // record-currency code backfill (`POST {metaPath}/_migrate-record-currency-codes`),
+        // in `meta-record-currency-backfill-route.ts`, behind the maintenance switch as
+        // `_migrate-stored` is. A literal `POST` path no `:type` mount captures, so its
+        // place in the order is free; built here, inside the umbrella's swap, so the route
+        // manager it captures is the wrapping registrar. Read that module's header.
+        const recordCurrencyBackfillHost: MetaRecordCurrencyBackfillRouteHost = {
+            routeManager: this.routeManager,
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            get objectQLProvider() { return readObjectQLProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
+        };
+        registerMetaRecordCurrencyBackfillRoute.call(recordCurrencyBackfillHost, scope);
 
         // [#23050 slice 13e] The published read (`GET {metaPath}/:type/:name/published`)
         // moved to `meta-item-history-routes.ts`, beside the history family, and is registered
