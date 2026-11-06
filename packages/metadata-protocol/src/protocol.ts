@@ -32,7 +32,7 @@ import {
     resetEnvWritableMetadataTypes,
     unboundItemDraftAddress,
 } from './sys-metadata-repository.js';
-import { managedItemSealedSentence, packagedBaseRegimeRow, packagedBaseRegimeSentence } from './packaged-base-regime.js';
+import { managedItemSealedSentence, packagedBaseRegimeSentence } from './packaged-base-regime.js';
 import {
     resolveItemLock,
     resolveItemLockLazily,
@@ -81,7 +81,7 @@ import {
     type EngineQueryOptionsParsed,
     externalBindingDatasourceRefusal,
 } from '@objectstack/spec/data';
-import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
+import { PLURAL_TO_SINGULAR, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
 // [#13331] The cluster fan-out transport type only — the protocol never
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
@@ -127,7 +127,6 @@ import { listServedOverrides, type ServedOverrideEntry } from './protocol-served
 import {
     listPackagelessOverlays,
     migratePackagelessOverlays,
-    packagelessCloseSubject,
     type PackagelessOverlayCensus,
     type PackagelessWriteSubject,
     type PackagelessOverlayMigration,
@@ -307,11 +306,9 @@ import { applyPublishBackfill, planPublishBackfill } from './protocol-publish-ba
 import { discardDraftInItsScope, listDrafts } from './protocol-drafts.js';
 // [#25467 cut 13] The package door's save refusal and the origin-gated removal verdict.
 import {
-    namedBaseCloseSubject,
     namedBaseOverlayWriteRefusal,
     originGatedRemovalRefusal,
     overrideWriteVerdict,
-    packagelessOverlayWriteRefusal,
     refusePackagedBaseOverride,
 } from './protocol-packaged-base-refusal.js';
 import type {
@@ -340,11 +337,6 @@ import { flowSaveReplaysRetired } from './protocol-flow-save-replay.js';
 // [#25467 cut 19] A package write's validation scope: the written package and its declared dependency closure, from the registry.
 import { resolveWritePackageScope } from './protocol-write-package-scope.js';
 // [#28574, ADR-0146 D10] An object extension as an authorable item: the doors' gate, its shape schema, and the body every sync registers.
-import {
-    OBJECT_EXTENSION_TYPE,
-    objectExtensionItemRefusal,
-} from './protocol-object-extension-item.js';
-import type { ObjectExtensionRegistry } from './protocol-object-extension-item.js';
 // [#25467 cut 20] The code-layer read through the `metadata` service: package-scoped, singular/plural fallback, a stored object row's copy not counted as code.
 import { readItemFromMetadataService } from './protocol-metadata-service-read.js';
 // [#25467 cut 21] The boot report of the stored overlay rows no read serves because they overlay sealed managed content.
@@ -502,7 +494,6 @@ import {
     clientFacingFailureCode,
     clientFacingFailureText,
     declaresClientRefusal,
-    metadataReadFailureError,
 } from './protocol-client-failures.js';
 import type { BatchDataLoopOutcome, BatchDataRowResult } from './protocol-client-failures.js';
 export {
@@ -618,6 +609,8 @@ import { ProtocolDataCrudFacet } from './protocol-data-crud.js';
 import { ProtocolSearchAndCacheFacet } from './protocol-search-and-cache.js';
 // [#29985 codemod] Write gates: overlay, code-only, organization, sealed and packaged-base refusals, locks, version tokens, conflict audit: the members below delegate to its facet, `ProtocolWriteGatesFacet`.
 import { ProtocolWriteGatesFacet } from './protocol-write-gates.js';
+// [#29985 codemod] The static tables of the facet above: the class's fields read them (#30147).
+import { ProtocolWriteGatesTables } from './protocol-write-gates-tables.js';
 // [#29985 codemod] Registry hydration, view expansion, write-through, object storage: the members below delegate to its facet, `ProtocolRegistryHydrationFacet`.
 import { ProtocolRegistryHydrationFacet } from './protocol-registry-hydration.js';
 // [#29985 codemod] Save refusals, saveMetaItem, saveConflict, migrateStoredMetadata: the members below delegate to its facet, `ProtocolSaveFacet`.
@@ -664,6 +657,29 @@ export { recordNotFoundError };
  * unchanged.
  */
 export { stripReadDecorations };
+
+// [#29985 codemod] The statics of `ObjectStackProtocolImplementation` its facet modules read (#30147), private ones
+// included, typed as the class declares them (an indexed access on the class). The static
+// block at the end of the class fills `ObjectStackProtocolImplementationStatics` with forwarders: a method is
+// called on the class at call time, a field is read when the body reads it. A facet module
+// imports it AS `ObjectStackProtocolImplementation`, so a moved body reads `ObjectStackProtocolImplementation.x`
+// unedited, and a moved static that reads `this` runs on it. `index.ts` re-exports neither, so
+// neither reaches the package.
+export interface ObjectStackProtocolImplementationStaticsHost {
+    readonly CODE_ONLY_TYPE_REMEDY: (typeof ObjectStackProtocolImplementation)['CODE_ONLY_TYPE_REMEDY'];
+    readonly OVERLAY_ALLOWED_TYPES: (typeof ObjectStackProtocolImplementation)['OVERLAY_ALLOWED_TYPES'];
+    readonly OVERLAY_CAPABLE_TYPES: (typeof ObjectStackProtocolImplementation)['OVERLAY_CAPABLE_TYPES'];
+    readonly RUNTIME_CREATE_ALLOWED_TYPES: (typeof ObjectStackProtocolImplementation)['RUNTIME_CREATE_ALLOWED_TYPES'];
+    readonly STATIC_REGISTRY_TYPES: (typeof ObjectStackProtocolImplementation)['STATIC_REGISTRY_TYPES'];
+    readonly codeOnlySourceHint: (typeof ObjectStackProtocolImplementation)['codeOnlySourceHint'];
+    readonly envWritableTypes: (typeof ObjectStackProtocolImplementation)['envWritableTypes'];
+    readonly organizationScopedWriteRefusal: (typeof ObjectStackProtocolImplementation)['organizationScopedWriteRefusal'];
+    readonly registeredViewExpansions: (typeof ObjectStackProtocolImplementation)['registeredViewExpansions'];
+    readonly registryAllowsOverlay: (typeof ObjectStackProtocolImplementation)['registryAllowsOverlay'];
+    readonly requestedOrganization: (typeof ObjectStackProtocolImplementation)['requestedOrganization'];
+    readonly unboundOwnerPackageRefusal: (typeof ObjectStackProtocolImplementation)['unboundOwnerPackageRefusal'];
+}
+export const ObjectStackProtocolImplementationStatics = {} as ObjectStackProtocolImplementationStaticsHost;
 
 /**
  * Implements the per-domain contracts this class ACTUALLY provides (ADR-0076
@@ -1245,6 +1261,7 @@ export class ObjectStackProtocolImplementation implements
             isHostCodeDatasource: (...a) => protocol.isHostCodeDatasource(...a),
             isNestedArtifactField: (...a) => protocol.isNestedArtifactField(...a),
             isOverlayAllowed: (...a) => ObjectStackProtocolImplementation.isOverlayAllowed(...a),
+            isPackagedBaseRefusal: (err: unknown): err is Error => ObjectStackProtocolImplementation.isPackagedBaseRefusal(err),
             isRuntimeCreateAllowed: (...a) => ObjectStackProtocolImplementation.isRuntimeCreateAllowed(...a),
             isSealedManagedItem: (...a) => protocol.isSealedManagedItem(...a),
             isStoredEntryOfDeclinedName: (...a) => protocol.isStoredEntryOfDeclinedName(...a),
@@ -1271,6 +1288,7 @@ export class ObjectStackProtocolImplementation implements
             organizationScopedWriteRefusal: (...a) => ObjectStackProtocolImplementation.organizationScopedWriteRefusal(...a),
             originGatedRemovalRefusal: (...a) => protocol.originGatedRemovalRefusal(...a),
             overlaidShippedContainerViewNames: (...a) => protocol.overlaidShippedContainerViewNames(...a),
+            overlayBaseShippers: (...a) => protocol.overlayBaseShippers(...a),
             overlayLockLayerAt: (...a) => protocol.overlayLockLayerAt(...a),
             overlayPackageMismatchError: (...a) => ObjectStackProtocolImplementation.overlayPackageMismatchError(...a),
             get overlayRepos() { return protocol.overlayRepos; },
@@ -1998,27 +2016,15 @@ export class ObjectStackProtocolImplementation implements
         return resolveWritePackageScope.call(host, packageId);
     }
 
-    /**
-     * [#28574, ADR-0146 D10] The save, publish and restore doors' gate for an
-     * `object_extension` body written into `binding` (the RESOLVED package of
-     * the row): {@link objectExtensionItemRefusal}, asked with this engine's
-     * registry and the package's dependency closure
-     * ({@link resolveWritePackageScope}). Any other type answers `undefined`.
-     */
+    /** Docblock and body: {@link ProtocolClassHeadFacet.objectExtensionItemRefusal} in `protocol-class-head.ts` [#29985 codemod]. */
     private objectExtensionItemRefusal(
         type: string,
         item: unknown,
         name: string,
         binding: string | null | undefined,
     ): Error | undefined {
-        if ((PLURAL_TO_SINGULAR[type] ?? type) !== OBJECT_EXTENSION_TYPE) return undefined;
-        return objectExtensionItemRefusal(OBJECT_EXTENSION_TYPE, {
-            item,
-            name,
-            binding,
-            registry: this.engine?.registry as ObjectExtensionRegistry | undefined,
-            scope: this.resolveWritePackageScope(binding),
-        });
+        // [#29985 codemod] The body moved to `protocol-class-head.ts`; it reaches this class through `protocol-host.ts`.
+        return ProtocolClassHeadFacet.objectExtensionItemRefusal(protocolHost(this), type, item, name, binding);
     }
 
     /** Docblock and body: {@link ProtocolClassHeadFacet.registerStoredObjectExtension} in `protocol-class-head.ts` [#29985 codemod]. */
@@ -3078,81 +3084,10 @@ export class ObjectStackProtocolImplementation implements
         return getMetaDiagnostics.call(host, request);
     }
 
-    /**
-     * [#5532] Decide what a failed READ against `sys_metadata` means, and
-     * rethrow unless it is the ONE benign reason.
-     *
-     * ## The defect
-     *
-     * Every overlay read in `getMetaItems`/`getMetaItem` used to `catch {}` into
-     * its own empty value — `items` left as-is, `item` left `undefined`, the
-     * draft lookup falling through to the active read. That made a metadata
-     * store the protocol cannot reach **indistinguishable** from an environment
-     * where the item was never customised, and the emptiness then travelled
-     * the whole read chain unremarked:
-     *
-     *   - `getMetaItemCached` turned it into `not found` — an outage answered
-     *     as "that item does not exist", which is the opposite disposition
-     *     (retry the backend vs. create the item / fix the link);
-     *   - the `state='draft'` read turned it into `NO_DRAFT` / 404 — an outage
-     *     answered as "there is no pending edit", which a publish flow reads as
-     *     "nothing to publish";
-     *   - `getMetaItems` turned it into `items: []` — an outage answered as
-     *     "this environment declares none of these", the exact shape #5108 fixed
-     *     one layer down in `DatabaseLoader` and #5089 in `listForIndex`.
-     *
-     * ADR-0110 D3 is the rule: a miss and an outage are different facts with
-     * opposite meanings, and a consumer must never read one as the other.
-     *
-     * ## The one benign reason
-     *
-     * `sys_metadata` has not been provisioned yet. There are then genuinely no
-     * overlay rows, so falling through to the registry / MetadataService IS the
-     * truth, and a first boot must not explode. Classification is by error TYPE
-     * through {@link isMissingTableError} — the same predicate `DatabaseLoader`
-     * (#5108) and this package's own `SysMetadataRepository` (#4867) ask, so a
-     * driver quirk is taught to the platform once. Conservative in the same
-     * direction: an unrecognised error is NOT benign, because a false "benign"
-     * silently mis-answers "does this exist?" while a false "real" costs one
-     * 503 the caller can retry.
-     *
-     * ## [#12536] Not benign is not the same as "the store is down"
-     *
-     * A non-benign failure is classified once more before it is wrapped, by
-     * {@link metadataReadFailureError}: a metadata app's hook may have REFUSED
-     * this read and marked its refusal with `userMessage` (commit 79c46da90), and that is
-     * an application refusal, not a dependency outage. Handing it to the 503
-     * below destroyed the mark at the producer — the two failures left this
-     * guard as the same envelope with the same sentence. The classification
-     * splits them; neither category's wording changes.
-     *
-     * @throws {@link markedApplicationRefusalError} — [#12536] FIRST, when the
-     *         failure carried a producer's `userMessage` mark (commit 79c46da90): the
-     *         author's text verbatim, in its own refusal category, with the
-     *         cause still carried for the operator and nothing else quoted.
-     * @throws {@link metadataStoreUnavailableError} — a 503 carrying the driver
-     *         error as `cause`, for every UNMARKED non-benign failure. Not the
-     *         driver error itself: unwrapped, it has
-     *         no status, so the REST boundary would have to guess from the
-     *         message text — and `mapDataError` guesses `no such table` into
-     *         `404 OBJECT_NOT_FOUND`, i.e. straight back into a miss.
-     * @returns normally ONLY for the benign case, licensing the caller to treat
-     *          the overlay as absent.
-     */
+    /** Docblock and body: {@link ProtocolDiscoveryAndBasesFacet.rethrowUnlessMetadataStoreUnprovisioned} in `protocol-discovery-and-bases.ts` [#29985 codemod]. */
     private rethrowUnlessMetadataStoreUnprovisioned(error: unknown, readObject: string): void {
-        // [commit 4cda78c9b] `readObject` is REQUIRED, deliberately. This helper serves
-        // callers that read four different tables (`sys_metadata`,
-        // `sys_metadata_audit`, `sys_metadata_commit`, `sys_metadata_history`),
-        // so a default would silently answer about the wrong one for three of
-        // them — measured, not hypothetical: the first draft of this repair
-        // hardcoded `sys_metadata` and turned `diffMetaItem`'s genuinely
-        // unprovisioned `sys_metadata_history` into a loud failure. A required
-        // parameter makes the compiler ask the question at every new call site.
-        if (isMissingTableError(error, readObject)) return;
-        // [#12536] CLASSIFY, do not assume. A read can fail because the store
-        // is unreachable OR because a metadata app's hook refused it in its
-        // own words — see {@link metadataReadFailureError}.
-        throw metadataReadFailureError(error);
+        // [#29985 codemod] The body moved to `protocol-discovery-and-bases.ts`; it reads nothing of this class.
+        return ProtocolDiscoveryAndBasesFacet.rethrowUnlessMetadataStoreUnprovisioned(error, readObject);
     }
 
     /**
@@ -6414,16 +6349,7 @@ export class ObjectStackProtocolImplementation implements
      * §"Whitelist enforcement" for the rationale and the per-type rollout
      * checklist.
      */
-    private static readonly OVERLAY_ALLOWED_TYPES: ReadonlySet<string> = (() => {
-        const out = new Set<string>();
-        for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
-            if (!entry.allowEnvironmentOverlay) continue;
-            out.add(entry.type);
-            const plural = SINGULAR_TO_PLURAL[entry.type];
-            if (plural) out.add(plural);
-        }
-        return out;
-    })();
+    private static readonly OVERLAY_ALLOWED_TYPES: ReadonlySet<string> = ProtocolWriteGatesTables.OVERLAY_ALLOWED_TYPES;
 
     /** Docblock and body: {@link ProtocolWriteGatesFacet.envWritableTypes} in `protocol-write-gates.ts` [#29985 codemod]. */
     private static envWritableTypes(): ReadonlySet<string> {
@@ -6459,26 +6385,9 @@ export class ObjectStackProtocolImplementation implements
      * from THIS set is therefore not on its own an answer to "may it be
      * created"; see {@link isRuntimeCreateAllowed} for what absence still buys.
      */
-    private static readonly STATIC_REGISTRY_TYPES: ReadonlySet<string> = (() => {
-        const out = new Set<string>();
-        for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
-            out.add(entry.type);
-            const plural = SINGULAR_TO_PLURAL[entry.type];
-            if (plural) out.add(plural);
-        }
-        return out;
-    })();
+    private static readonly STATIC_REGISTRY_TYPES: ReadonlySet<string> = ProtocolWriteGatesTables.STATIC_REGISTRY_TYPES;
 
-    private static readonly RUNTIME_CREATE_ALLOWED_TYPES: ReadonlySet<string> = (() => {
-        const out = new Set<string>();
-        for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
-            if (!entry.allowRuntimeCreate) continue;
-            out.add(entry.type);
-            const plural = SINGULAR_TO_PLURAL[entry.type];
-            if (plural) out.add(plural);
-        }
-        return out;
-    })();
+    private static readonly RUNTIME_CREATE_ALLOWED_TYPES: ReadonlySet<string> = ProtocolWriteGatesTables.RUNTIME_CREATE_ALLOWED_TYPES;
 
     /**
      * [#6960] Metadata types whose stored overlay row of an item a managed
@@ -6507,121 +6416,30 @@ export class ObjectStackProtocolImplementation implements
      * identically to the singular — the same normalization every sibling set
      * in this class does.
      */
-    private static readonly OVERLAY_CAPABLE_TYPES: ReadonlySet<string> = (() => {
-        const out = new Set<string>();
-        for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
-            if (!entry.supportsOverlay) continue;
-            out.add(entry.type);
-            const plural = SINGULAR_TO_PLURAL[entry.type];
-            if (plural) out.add(plural);
-        }
-        return out;
-    })();
+    private static readonly OVERLAY_CAPABLE_TYPES: ReadonlySet<string> = ProtocolWriteGatesTables.OVERLAY_CAPABLE_TYPES;
 
-    /**
-     * [#6960] Does this type's registry entry carry the removal carve-out
-     * (`supportsOverlay`)? The name predates ADR-0131 D6's seal and no read
-     * consults it: a stored overlay row of a managed item is served or
-     * withheld by {@link declinesStoredRow}, which keys on
-     * `allowEnvironmentOverlay`. Normalizes plural→singular, like every other
-     * predicate here.
-     *
-     * Read ONLY by `deleteMetaItem`'s two-tier authorization (and mirrored by
-     * `SysMetadataRepository`'s delete gate); it never widens a create or an
-     * update. See the call site for the ruling that licenses the asymmetry.
-     */
+    /** Docblock and body: {@link ProtocolWriteGatesFacet.mergesOverlayAtRead} in `protocol-write-gates.ts` [#29985 codemod]. */
     private static mergesOverlayAtRead(type: string): boolean {
-        const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        return this.OVERLAY_CAPABLE_TYPES.has(singular)
-            || this.OVERLAY_CAPABLE_TYPES.has(type);
+        // [#29985 codemod] The body moved to `protocol-write-gates.ts`; it runs on `ObjectStackProtocolImplementationStatics` as `this`.
+        return ProtocolWriteGatesFacet.mergesOverlayAtRead.call(ObjectStackProtocolImplementationStatics, type);
     }
 
-    /**
-     * Does the type's REGISTRY entry open an overlay channel (`allowEnvironmentOverlay`)?
-     * The registry arm of {@link isOverlayAllowed}, without the hatch.
-     * Normalizes plural→singular before consulting the allow-list.
-     *
-     * [ADR-0131 D6] Read alone by {@link isSealedManagedItem}: whether an item a
-     * managed package ships may be overlaid is the registry's answer, and the
-     * `OS_METADATA_WRITABLE` hatch has no say in it.
-     */
+    /** Docblock and body: {@link ProtocolWriteGatesFacet.registryAllowsOverlay} in `protocol-write-gates.ts` [#29985 codemod]. */
     private static registryAllowsOverlay(type: string): boolean {
-        const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        return this.OVERLAY_ALLOWED_TYPES.has(singular)
-            || this.OVERLAY_ALLOWED_TYPES.has(type);
+        // [#29985 codemod] The body moved to `protocol-write-gates.ts`; it runs on `ObjectStackProtocolImplementationStatics` as `this`.
+        return ProtocolWriteGatesFacet.registryAllowsOverlay.call(ObjectStackProtocolImplementationStatics, type);
     }
 
-    /**
-     * The TYPE-level write channel: the registry's overlay opt-in, or the
-     * `OS_METADATA_WRITABLE` hatch naming the type. Normalize plural→singular
-     * before consulting the allow-list.
-     *
-     * [ADR-0131 D6] A type-level answer, so ⛔ never the answer for an item a
-     * managed package ships — that one is {@link isSealedManagedItem}'s, and the
-     * hatch does not reach it. What the hatch still opens through this predicate
-     * is the type's writes of items no managed package ships.
-     */
+    /** Docblock and body: {@link ProtocolWriteGatesFacet.isOverlayAllowed} in `protocol-write-gates.ts` [#29985 codemod]. */
     private static isOverlayAllowed(type: string): boolean {
-        if (this.registryAllowsOverlay(type)) return true;
-        const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        const env = this.envWritableTypes();
-        return env.has(singular) || env.has(type);
+        // [#29985 codemod] The body moved to `protocol-write-gates.ts`; it runs on `ObjectStackProtocolImplementationStatics` as `this`.
+        return ProtocolWriteGatesFacet.isOverlayAllowed.call(ObjectStackProtocolImplementationStatics, type);
     }
 
-    /**
-     * Does this type permit creating brand-new (artifact-free) items?
-     *
-     * ## [#8421] What the second arm means now, and why it did NOT narrow
-     *
-     * The fall-through below used to be the write-side twin of a read-side
-     * rule: "no static registry entry ⇒ plugin-registered ⇒ writable", mirrored
-     * verbatim by `getMetaTypes()`'s synthesised `allowRuntimeCreate: true`.
-     * The maintainer ruling of 2026-08-15 retired that rule's premise —
-     * verbatim, untranslated:
-     *
-     *     暂时不考虑让插件申明新的元数据类型
-     *
-     * ⚠️ `暂时` is load-bearing: a CURRENT posture, deliberately not a
-     * permanent architectural closure (the full record, and what a future
-     * author reintroducing plugin-declared kinds must revisit, is in
-     * {@link getMetaTypes}'s synthesis comment — read that one first).
-     *
-     * The narrowing that ruling bought is enforced ONE layer up, at
-     * {@link refuseUnmintableMetaType}, which runs before this predicate on
-     * every `saveMetaItem` and refuses an out-of-contract type outright. This
-     * arm is therefore no longer an ADVERTISEMENT and must not be narrowed to
-     * match one: by the time it is consulted for such a type, the caller is in
-     * one of the residue paths the refusal deliberately exempts or does not
-     * guard at all —
-     *
-     *  - `deleteMetaItem` / {@link historyMetaItem} / `rollbackMetaItem` /
-     *    `promoteDraftForPublish`: rows minted under an unrecognised type
-     *    BEFORE the refusal shipped are real, and nothing rewrites them on
-     *    upgrade. Returning `false` here would route them off the repository
-     *    path and strand them — turning the accumulation this card was filed
-     *    about into an accumulation nobody can clear, which is the exact
-     *    reasoning that kept `deleteMetaItem` open in the first place;
-     *  - `saveMetaItem` behind the mint door's two exemptions (the compound
-     *    arity, and a namespace the store says already exists).
-     *
-     * So the doors agree where agreement is a claim about creating a NEW
-     * namespace — the listing and the mint door read one predicate for that —
-     * and this arm keeps the clearance path open underneath. Narrowing it would
-     * not close anything; it would only make residue unclearable.
-     */
+    /** Docblock and body: {@link ProtocolWriteGatesFacet.isRuntimeCreateAllowed} in `protocol-write-gates.ts` [#29985 codemod]. */
     private static isRuntimeCreateAllowed(type: string): boolean {
-        const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        if (this.RUNTIME_CREATE_ALLOWED_TYPES.has(singular)
-            || this.RUNTIME_CREATE_ALLOWED_TYPES.has(type)) {
-            return true;
-        }
-        // No static registry entry ⇒ no declared flags to consult. See the doc
-        // above: this is the residue/clearance arm, NOT the read door's twin.
-        if (!this.STATIC_REGISTRY_TYPES.has(singular)
-            && !this.STATIC_REGISTRY_TYPES.has(type)) {
-            return true;
-        }
-        return false;
+        // [#29985 codemod] The body moved to `protocol-write-gates.ts`; it runs on `ObjectStackProtocolImplementationStatics` as `this`.
+        return ProtocolWriteGatesFacet.isRuntimeCreateAllowed.call(ObjectStackProtocolImplementationStatics, type);
     }
 
     /**
@@ -6662,80 +6480,22 @@ export class ObjectStackProtocolImplementation implements
             + '(POST /api/v1/security/_activation/sharing_rule/:name, body {enabled: false}).',
     };
 
-    /**
-     * The prescription half of a code-only refusal (#5086): where the author
-     * is supposed to declare this item instead. Read from the type's own
-     * registry entry (`filePatterns`), so a newly-flagged type carries an
-     * accurate hint the day it is flagged — nothing here to keep in sync,
-     * except the types {@link CODE_ONLY_TYPE_REMEDY} names explicitly.
-     */
+    /** Docblock and body: {@link ProtocolWriteGatesFacet.codeOnlySourceHint} in `protocol-write-gates.ts` [#29985 codemod]. */
     private static codeOnlySourceHint(type: string): string {
-        const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        const named = ObjectStackProtocolImplementation.CODE_ONLY_TYPE_REMEDY[singular];
-        if (named) return named;
-        const entry = DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === singular);
-        const pattern = entry?.filePatterns?.[0];
-        return pattern ? ` Declare it in source (${pattern}) and redeploy.` : '';
+        // [#29985 codemod] The body moved to `protocol-write-gates.ts`; it reads this class's statics through `ObjectStackProtocolImplementationStatics`.
+        return ProtocolWriteGatesFacet.codeOnlySourceHint(type);
     }
 
-    /**
-     * #5086 — a brand-new item of a type the registry declares code-only
-     * (`allowRuntimeCreate: false` AND `allowEnvironmentOverlay: false`).
-     *
-     * Names the type, the flags that produced the verdict, the prescription
-     * and the escape hatch — the same shape the retired-key refusals in this
-     * wave carry, because a refusal an author cannot act on just moves the
-     * confusion one layer down. `NOT_CREATABLE` is the catalogued code
-     * (`packages/spec/src/api/error-code-ledger.zod.ts`).
-     */
+    /** Docblock and body: {@link ProtocolWriteGatesFacet.codeOnlyCreateError} in `protocol-write-gates.ts` [#29985 codemod]. */
     private static codeOnlyCreateError(type: string): Error {
-        const err = new Error(
-            `Metadata type '${type}' is code-only: the metadata-type registry declares `
-            + `allowRuntimeCreate=false and allowEnvironmentOverlay=false, so it cannot be created through the `
-            + `runtime metadata API (PUT /api/v1/meta/${type}/:name) on any kernel.`
-            + ObjectStackProtocolImplementation.codeOnlySourceHint(type)
-            // [ADR-0131 D6] A Regime C type's refusal names its sanctioned paths and
-            // never the hatch, as its regime sentence does (`packaged-base-regime.ts`):
-            // the hatch would re-open the very source the regime closes. It still
-            // opens the type for an operator — the residue repair the delete door
-            // keeps — it is only not prescribed. Under the REST door's 500-character
-            // bound either way (`sharing_rule`: 473).
-            + (packagedBaseRegimeRow(type)?.regime === 'C'
-                ? ''
-                : ` An operator may set OS_METADATA_WRITABLE=${PLURAL_TO_SINGULAR[type] ?? type} to grant a runtime escape hatch. `
-                    + `See docs/adr/0005-metadata-customization-overlay.md.`)
-        );
-        (err as any).code = 'NOT_CREATABLE';
-        (err as any).status = 403;
-        return err;
+        // [#29985 codemod] The body moved to `protocol-write-gates.ts`; it reads this class's statics through `ObjectStackProtocolImplementationStatics`.
+        return ProtocolWriteGatesFacet.codeOnlyCreateError(type);
     }
 
-    /**
-     * #5086 — the artifact-backed half of the same refusal: the name IS
-     * shipped by a code package, so the honest verdict is "you may not
-     * overlay it" rather than "you may not create it".
-     *
-     * [ADR-0131 D6] The package is a managed one and its item is sealed, so the
-     * sentence names the managed package and says the hatch does not open it —
-     * the prescription this sentence used to end with ("an operator may set
-     * OS_METADATA_WRITABLE") would send the operator to a door that no longer
-     * opens. The source remedy stays: it is where a code-only item is declared.
-     */
+    /** Docblock and body: {@link ProtocolWriteGatesFacet.codeOnlyOverrideError} in `protocol-write-gates.ts` [#29985 codemod]. */
     private static codeOnlyOverrideError(type: string, name: string): Error {
-        // [ADR-0131 D6, ADR-0126 §2] A Regime C type's declared item reads its
-        // regime sentence — the one the package door and the repository speak for
-        // the same item — so the refusal names the clone and the switch.
-        const err = new Error(
-            (packagedBaseRegimeRow(type)?.regime === 'C' ? packagedBaseRegimeSentence(type, name, 'save') : undefined) ??
-            `Metadata item '${type}/${name}' is provided by a managed package and its type is `
-            + `code-only (allowRuntimeCreate=false, allowEnvironmentOverlay=false), so it is sealed against `
-            + `runtime edits on any kernel, and OS_METADATA_WRITABLE does not open a managed item.`
-            + ObjectStackProtocolImplementation.codeOnlySourceHint(type)
-            + ` See docs/adr/0131-total-organization-ownership-no-null-organization-id.md.`
-        );
-        (err as any).code = 'NOT_OVERRIDABLE';
-        (err as any).status = 403;
-        return err;
+        // [#29985 codemod] The body moved to `protocol-write-gates.ts`; it reads this class's statics through `ObjectStackProtocolImplementationStatics`.
+        return ProtocolWriteGatesFacet.codeOnlyOverrideError(type, name);
     }
 
     /** Docblock and body: {@link ProtocolWriteGatesFacet.organizationScopedWriteRefusal} in `protocol-write-gates.ts` [#29985 codemod]. */
@@ -6754,10 +6514,10 @@ export class ObjectStackProtocolImplementation implements
         return ProtocolWriteGatesFacet.requestedOrganization(request);
     }
 
-    /** Throw {@link organizationScopedWriteRefusal} for an organization-scoped write request. */
+    /** Docblock and body: {@link ProtocolWriteGatesFacet.refuseOrganizationScopedWrite} in `protocol-write-gates.ts` [#29985 codemod]. */
     private static refuseOrganizationScopedWrite(subject: string, request: unknown): void {
-        const refusal = this.organizationScopedWriteRefusal(subject, this.requestedOrganization(request));
-        if (refusal) throw refusal;
+        // [#29985 codemod] The body moved to `protocol-write-gates.ts`; it runs on `ObjectStackProtocolImplementationStatics` as `this`.
+        return ProtocolWriteGatesFacet.refuseOrganizationScopedWrite.call(ObjectStackProtocolImplementationStatics, subject, request);
     }
 
     /** Docblock and body: {@link ProtocolWriteGatesFacet.isArtifactBacked} in `protocol-write-gates.ts` [#29985 codemod]. */
@@ -6947,23 +6707,8 @@ export class ObjectStackProtocolImplementation implements
      *          refuse this write or removal on the locked-base ground.
      */
     packagedBaseRefusal(request: { type: string; name: string; operation: 'save' | 'delete'; packageId?: string | null }): Error | null {
-        // [#9009] Folded HERE, at the producer of the verdict, so a caller that
-        // arrives with a plural spelling cannot address around the lock.
-        const folded = canonicalizeMetaRequestType(request);
-        try {
-            if (folded.operation === 'delete') this.refusePackagedBaseRemoval(folded);
-            else {
-                this.refusePackagedBaseOverride({
-                    type: folded.type,
-                    name: folded.name,
-                    ...(folded.packageId ? { packageId: folded.packageId } : {}),
-                });
-            }
-        } catch (err) {
-            if (ObjectStackProtocolImplementation.isPackagedBaseRefusal(err)) return err;
-            throw err;
-        }
-        return null;
+        // [#29985 codemod] The body moved to `protocol-write-gates.ts`; it reaches this class through `protocol-host.ts`.
+        return ProtocolWriteGatesFacet.packagedBaseRefusal(protocolHost(this), request);
     }
 
     /**
@@ -7467,105 +7212,22 @@ export class ObjectStackProtocolImplementation implements
         return refusePackagedBaseOverride.call(host, request);
     }
 
-    /**
-     * [ADR-0146 D11, #28576 ruling 2] The package-less write onto a packaged
-     * item, closed where `os migrate packageless-overlays` would move it: the
-     * refusal of a save, a publish, a delete or a rollback that names no
-     * package, of an item of one of the five overlay types that ONE read-only
-     * code package ships ({@link overlayBaseShippers}), whose row the
-     * ceremony's census classifies `movable` and whose move can succeed
-     * (`packagelessCloseSubject` in `protocol-packageless-overlay-migration.ts`,
-     * the census's own classification and the ceremony's own steps).
-     *
-     * `null` — the write stays open, as on `main` — when it names a package
-     * (`?package=<base>.custom` stays open, as does every other package's own
-     * door; [#28905] the write naming the read-only base itself is closed by
-     * {@link namedBaseOverlayWriteRefusal}, not here); when no read-only
-     * package ships the name (environment metadata);
-     * and for every row the ceremony lists and does not move: a name several
-     * packages ship (`multi_shipped`), a base with no pair id (`no_pair`), a
-     * stored row whose `overrides` names another package
-     * (`foreign_declaration`) or whose pair already holds the item
-     * (`shadowed`), and a move that would fail (the ensure door would refuse
-     * the pair, the base records no version, or the override write gate
-     * refuses the declared body — an `email_template` locale the base does not
-     * ship). Each such row keeps a write door after the upgrade: its own.
-     *
-     * The refusal names the base's paired `.custom` and the ceremony; a row
-     * stored before the close stays served until the ceremony moves it, and
-     * its package-less write is refused by the same sentence. Registry reads
-     * first; the one store read (the item's rows) only when the registry has
-     * not left the write open.
-     *
-     * Asked by {@link saveMetaItem} and {@link publishMetaItem} (authoring
-     * writes only: the server-stated rewrites name the row they rewrite),
-     * {@link deleteMetaItem}, and {@link rollbackMetaItem} (whose address is the
-     * restored row's own binding: package-less when that row is). The
-     * sentence is `packagelessOverlayWriteRefusal` in
-     * `protocol-packaged-base-refusal.ts`.
-     *
-     * Not the read envelope's `editable` / `deletable` ({@link packagedBaseRefusal}
-     * keeps its answer): those describe the item, which the pair's write still
-     * changes.
-     */
+    /** Docblock and body: {@link ProtocolWriteGatesFacet.packagelessOverlayWriteRefusal} in `protocol-write-gates.ts` [#29985 codemod]. */
     private async packagelessOverlayWriteRefusal(
         request: PackagelessWriteSubject,
         operation: PackagelessWriteOperation,
     ): Promise<Error | null> {
-        const host: ThisParameterType<typeof packagelessCloseSubject> = {
-            engine: this.engine,
-            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
-            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
-            overlayBaseShippers: (...a) => this.overlayBaseShippers(...a),
-            overrideWriteVerdict: (...a) => this.overrideWriteVerdict(...a),
-        };
-        const closed = await packagelessCloseSubject.call(host, request);
-        return closed ? packagelessOverlayWriteRefusal(request, closed, operation) : null;
+        // [#29985 codemod] The body moved to `protocol-write-gates.ts`; it runs on this class's host (`protocol-host.ts`) as `this`.
+        return ProtocolWriteGatesFacet.packagelessOverlayWriteRefusal.call(protocolHost(this), request, operation);
     }
 
-    /**
-     * [#28905, ADR-0146 D1, D11] The write NAMING the read-only base itself
-     * (`?package=<base>`) onto an item of one of the five overlay types that
-     * base ships: the refusal of a save (draft or active), a publish (both
-     * {@link publishMetaItem} and {@link publishPackageDrafts}, through
-     * {@link promoteDraftForPublish}) or a rollback that would land a row bound
-     * to the base. D1 puts a read-only package's customizations in its paired
-     * `<base>.custom`; such a row is served at the base's address with no
-     * declaration, outside the pair, until [#29392] `os migrate
-     * packageless-overlays` moves it into the pair. Refused with
-     * the fix the package-less close names ({@link packagelessOverlayWriteRefusal},
-     * one spelling): write it into the pair, declaring the override.
-     *
-     * Closed on the package-less close's reading of "packaged" — a READ-ONLY
-     * code package among {@link overlayBaseShippers} — and only where that fix
-     * can be taken (a pair id, the ensure door, a base version, the override
-     * write gate admitting the declared body): `namedBaseCloseSubject` in
-     * `protocol-packaged-base-refusal.ts`. `null` — the write stays open, as on
-     * `main` — for a writable package, a package that does not ship the name,
-     * a body carrying `overrides` (the D2 gate's), any other type, and a fix
-     * that could not be taken.
-     *
-     * ⛔ Not a delete: removing a row bound to the base writes nothing, and it
-     * is one way to clear such a row stored before the close; the ceremony is
-     * the other, moving it into the pair with its declaration. A row stored
-     * before it stays served until one of those, or the pair's declared
-     * override, which is served over it; the sentence names all three.
-     *
-     * Authoring writes only: the server-stated rewrites (`source` set, the
-     * `package-duplicate` write face) name the row they rewrite. Registry
-     * reads only.
-     */
+    /** Docblock and body: {@link ProtocolWriteGatesFacet.namedBaseOverlayWriteRefusal} in `protocol-write-gates.ts` [#29985 codemod]. */
     private namedBaseOverlayWriteRefusal(
         request: NamedBaseWriteSubject,
         operation: NamedBaseWriteOperation,
     ): Error | null {
-        const host: ThisParameterType<typeof namedBaseCloseSubject> = {
-            engine: this.engine,
-            overlayBaseShippers: (...a) => this.overlayBaseShippers(...a),
-            overrideWriteVerdict: (...a) => this.overrideWriteVerdict(...a),
-        };
-        const closed = namedBaseCloseSubject.call(host, request);
-        return closed ? namedBaseOverlayWriteRefusal(request, closed, operation) : null;
+        // [#29985 codemod] The body moved to `protocol-write-gates.ts`; it runs on this class's host (`protocol-host.ts`) as `this`.
+        return ProtocolWriteGatesFacet.namedBaseOverlayWriteRefusal.call(protocolHost(this), request, operation);
     }
 
     /**
@@ -8699,42 +8361,14 @@ export class ObjectStackProtocolImplementation implements
         return classifyObjectContribution.call(host, name, rowPackageId);
     }
 
-    /**
-     * [ADR-0029 D9.9] The mis-bound overlay refusal.
-     *
-     * The overlay-uniqueness index keys on
-     * `(type, name, organization_id, COALESCE(package_id, ''))` (ADR-0005
-     * amendment, #6825), so `sys_metadata` can legitimately hold two active
-     * rows for one `(type, name)` bound to two packages. For every other type
-     * that is fine — two packages really can ship `page/home`. For `object` it
-     * is not representable: `computeFQN` is identity, so the registry holds
-     * exactly one entry per object name and could never serve two. Refusing
-     * the mis-bound row is what keeps the two stores in agreement instead of
-     * letting `sys_metadata` describe a shape the registry cannot hold.
-     */
+    /** Docblock and body: {@link ProtocolRegistryHydrationFacet.overlayPackageMismatchError} in `protocol-registry-hydration.ts` [#29985 codemod]. */
     private static overlayPackageMismatchError(
         name: string, rowPackageId: string, ownerPackageId: string,
         /** [#23514] The state the refusal answers, for a `'sys_metadata'` sentinel owner only. */
         unboundOwnerState: UnboundOwnerRefusalState = {},
     ): Error {
-        // [#23514] An owner keyed by the sentinel is owned by no package, so
-        // this prescription's "bind it to the owner" has nothing to name.
-        if (ownerPackageId === 'sys_metadata') {
-            return ObjectStackProtocolImplementation.unboundOwnerPackageRefusal(name, rowPackageId, unboundOwnerState);
-        }
-        const err: any = new Error(
-            `Cannot layer object '${name}': the overlay is bound to package `
-            + `'${rowPackageId}', but the object is owned by package '${ownerPackageId}'. `
-            + `An object has exactly one registry entry, so it can carry exactly one overlay layer — bind the `
-            + `customization to '${ownerPackageId}', or have '${rowPackageId}' extend the object instead. `
-            + `See docs/adr/0029-kernel-object-ownership-and-platform-objects-decomposition.md.`,
-        );
-        err.code = 'OBJECT_OVERLAY_PACKAGE_MISMATCH';
-        err.status = 422;
-        err.packageId = rowPackageId;
-        err.ownerPackageId = ownerPackageId;
-        err.docs = 'docs/adr/0029-kernel-object-ownership-and-platform-objects-decomposition.md';
-        return err;
+        // [#29985 codemod] The body moved to `protocol-registry-hydration.ts`; it reads this class's statics through `ObjectStackProtocolImplementationStatics`.
+        return ProtocolRegistryHydrationFacet.overlayPackageMismatchError(name, rowPackageId, ownerPackageId, unboundOwnerState);
     }
 
     /** Docblock and body: {@link ProtocolRegistryHydrationFacet.unboundOwnerPackageRefusal} in `protocol-registry-hydration.ts` [#29985 codemod]. */
@@ -8896,97 +8530,15 @@ export class ObjectStackProtocolImplementation implements
         return ProtocolRegistryHydrationFacet.hydrateExpandedViewItems(protocolHost(this), type, data, options);
     }
 
-    /**
-     * [#23198] THE reconcile of a view container's expansions: after any write
-     * that changes a container's stored row (a publish, a republish, a reset, a
-     * delete), the registry holds exactly the expansion set the stored row now
-     * implies. Both sides call it: the registration
-     * ({@link hydrateExpandedViewItems}, for every hydration of a row) and the
-     * delete's heal ({@link restoreArtifactRegistryView}, whose set is
-     * empty). No other code registers an expansion, reads the record, or
-     * writes it (`protocol.view-expansion-reconcile-call-sites.test.ts`).
-     *
-     * In order:
-     *
-     * 1. Register each expanded view, unless another package ships its name
-     *    ([#21980, #22057], {@link anotherPackageShips}). Such a name is never
-     *    recorded, so no heal ever touches it.
-     * 2. Replace the record of the rows the write addresses with the names
-     *    registered in step 1. The old names come out of the record before any
-     *    heal runs, so a write that lands meanwhile reconciles against the new
-     *    set. A rebind (an orphan adoption, {@link reassignOrphanedMetadata})
-     *    addresses the row under both bindings: the record of the binding it
-     *    left is removed, and its names count as the row's old names.
-     * 3. Heal each old name the new set lacks through the delete's per-name
-     *    walk ({@link restoreArtifactRegistryView}): a packaged view of that
-     *    name is un-shadowed, a MetadataService baseline is re-registered, and
-     *    a name no layer serves is retired.
-     *
-     * Every gate the walk carries applies here too. An organization-scoped
-     * write registers nothing and heals nothing (#6602 / #6780: the bare
-     * entries belong to the environment-wide row). Only a kernel whose registry
-     * takes its stored rows ({@link registryTakesStoredRows}) re-registers a
-     * baseline. A walk that stops on a degraded baseline read
-     * retires nothing, and that name stays registered, unrecorded, until a
-     * restart: there is no retry ([#23149]'s residual, now reached from a
-     * republish as well as a reset).
-     *
-     * Views only, judged on the canonical type: no other type expands, and a
-     * row of another type stored under a container's name must not heal the
-     * container's expansions.
-     */
+    /** Docblock and body: {@link ProtocolRegistryHydrationFacet.reconcileViewExpansions} in `protocol-registry-hydration.ts` [#29985 codemod]. */
     private async reconcileViewExpansions(
         type: string,
         write: ViewContainerWrite,
         /** The write's own scope: `null` for an env-wide row. [#6780] */
         organizationId: string | null,
     ): Promise<void> {
-        if (canonicalMetaType(type) !== 'view') return;
-        if (organizationId !== null && organizationId !== undefined) return;
-        const registry: any = (this.engine as any)?.registry;
-        if (!registry || typeof registry !== 'object') return;
-
-        // 1. The set the stored row implies now. A non-empty expansion comes
-        // only from the hydrator, past its `registerItem` capability probe.
-        const registered = new Set<string>();
-        let shipping: ShippingPackages | undefined;
-        for (const item of 'expansion' in write ? write.expansion : []) {
-            shipping ??= this.shippingPackagesOf(type);
-            if (this.anotherPackageShips(type, String(item.name), item._packageId, shipping)) continue;
-            registry.registerItem(type, item, 'name' as any);
-            registered.add(String(item.name));
-        }
-
-        // 2. The record: the addressed rows' old names out, the new set in.
-        const record = ObjectStackProtocolImplementation.registeredViewExpansions;
-        let containers = record.get(registry);
-        if (containers === undefined) record.set(registry, (containers = new Map()));
-        const rows = containers.get(write.container) ?? new Map<string, ReadonlySet<string>>();
-        const previous = new Set<string>();
-        if ('removed' in write) {
-            for (const names of rows.values()) for (const name of names) previous.add(name);
-            rows.clear();
-        } else {
-            const row = write.binding ?? '';
-            for (const name of rows.get(row) ?? []) previous.add(name);
-            // A rebind: what the row registered under the binding it left is
-            // its own too, and that record row is gone with the binding.
-            if (write.reboundFrom !== undefined) {
-                const left = write.reboundFrom.binding ?? '';
-                for (const name of rows.get(left) ?? []) previous.add(name);
-                rows.delete(left);
-            }
-            if (registered.size > 0) rows.set(row, registered);
-            else rows.delete(row);
-        }
-        if (rows.size > 0) containers.set(write.container, rows);
-        else containers.delete(write.container);
-
-        // 3. Heal what the rows registered before and do not now.
-        for (const name of previous) {
-            if (registered.has(name)) continue;
-            await this.restoreArtifactRegistryView(type, name, organizationId);
-        }
+        // [#29985 codemod] The body moved to `protocol-registry-hydration.ts`; it runs on this class's host (`protocol-host.ts`) as `this`.
+        return ProtocolRegistryHydrationFacet.reconcileViewExpansions.call(protocolHost(this), type, write, organizationId);
     }
 
     /**
@@ -12954,6 +12506,24 @@ export class ObjectStackProtocolImplementation implements
             get engine() { return readEngine(); },
         };
         return packageInstallUndo.call(host, manifest);
+    }
+
+    // [#29985 codemod] Fills `ObjectStackProtocolImplementationStatics` (declared above the class) for the facet modules.
+    static {
+        Object.defineProperties(ObjectStackProtocolImplementationStatics, {
+            CODE_ONLY_TYPE_REMEDY: { get: () => ObjectStackProtocolImplementation.CODE_ONLY_TYPE_REMEDY },
+            OVERLAY_ALLOWED_TYPES: { get: () => ObjectStackProtocolImplementation.OVERLAY_ALLOWED_TYPES },
+            OVERLAY_CAPABLE_TYPES: { get: () => ObjectStackProtocolImplementation.OVERLAY_CAPABLE_TYPES },
+            RUNTIME_CREATE_ALLOWED_TYPES: { get: () => ObjectStackProtocolImplementation.RUNTIME_CREATE_ALLOWED_TYPES },
+            STATIC_REGISTRY_TYPES: { get: () => ObjectStackProtocolImplementation.STATIC_REGISTRY_TYPES },
+            codeOnlySourceHint: { value: (...args: Parameters<typeof ObjectStackProtocolImplementation.codeOnlySourceHint>) => ObjectStackProtocolImplementation.codeOnlySourceHint(...args) },
+            envWritableTypes: { value: (...args: Parameters<typeof ObjectStackProtocolImplementation.envWritableTypes>) => ObjectStackProtocolImplementation.envWritableTypes(...args) },
+            organizationScopedWriteRefusal: { value: (...args: Parameters<typeof ObjectStackProtocolImplementation.organizationScopedWriteRefusal>) => ObjectStackProtocolImplementation.organizationScopedWriteRefusal(...args) },
+            registeredViewExpansions: { get: () => ObjectStackProtocolImplementation.registeredViewExpansions },
+            registryAllowsOverlay: { value: (...args: Parameters<typeof ObjectStackProtocolImplementation.registryAllowsOverlay>) => ObjectStackProtocolImplementation.registryAllowsOverlay(...args) },
+            requestedOrganization: { value: (...args: Parameters<typeof ObjectStackProtocolImplementation.requestedOrganization>) => ObjectStackProtocolImplementation.requestedOrganization(...args) },
+            unboundOwnerPackageRefusal: { value: (...args: Parameters<typeof ObjectStackProtocolImplementation.unboundOwnerPackageRefusal>) => ObjectStackProtocolImplementation.unboundOwnerPackageRefusal(...args) },
+        });
     }
 }
 

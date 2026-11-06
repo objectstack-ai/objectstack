@@ -14,12 +14,14 @@ import { enObjects } from './en.objects.generated.js';
 import { zhCNObjects } from './zh-CN.objects.generated.js';
 import { jaJPObjects } from './ja-JP.objects.generated.js';
 import { esESObjects } from './es-ES.objects.generated.js';
+import { zhHantObjects } from './zh-Hant.objects.generated.js';
 
 const LOCALES = [
   { name: 'en', objs: enObjects as Record<string, any>, old: /\bDepartment\b/ },
   { name: 'zh-CN', objs: zhCNObjects as Record<string, any>, old: /部门/ },
   { name: 'ja-JP', objs: jaJPObjects as Record<string, any>, old: /部門/ },
   { name: 'es-ES', objs: esESObjects as Record<string, any>, old: /Departamento/ },
+  { name: 'zh-Hant', objs: zhHantObjects as Record<string, any>, old: /部門/ },
 ];
 const OBJECTS = ['sys_business_unit', 'sys_business_unit_member'];
 

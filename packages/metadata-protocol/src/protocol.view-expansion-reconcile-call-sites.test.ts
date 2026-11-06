@@ -299,9 +299,19 @@ describe('[#23198] the write-through and the heal both end in the one reconcile'
 describe('[#23198] nothing reaches the record or the heal verbs around the reconcile', () => {
     it('only the reconcile reads or writes the record', () => {
         const DECLARATION = '    private static readonly registeredViewExpansions =';
+        // [#30147] The reconcile's moved body reads the record through the statics
+        // forwarder, `protocol.ts`'s read-only getter for it (an interface entry and
+        // one `get`, no `set`): the forwarder carries the reconcile's read, it is no
+        // reader of its own.
+        const FORWARDER = [
+            "    readonly registeredViewExpansions: (typeof ObjectStackProtocolImplementation)['registeredViewExpansions'];",
+            '            registeredViewExpansions: { get: () => ObjectStackProtocolImplementation.registeredViewExpansions },',
+        ];
         const uses = codeMatches(/\bregisteredViewExpansions\b/)
-            .filter(({ scanned, offset }) => !scanned.lines[lineOf(scanned, offset)].startsWith(DECLARATION));
+            .filter(({ scanned, offset }) => !scanned.lines[lineOf(scanned, offset)].startsWith(DECLARATION))
+            .filter(({ scanned, offset }) => !(scanned.file === 'protocol.ts' && FORWARDER.includes(scanned.lines[lineOf(scanned, offset)])));
         expect(uses.map((u) => u.member)).toEqual(['reconcileViewExpansions']);
+        expect(FORWARDER.every((line) => SOURCE.split('\n').includes(line)), 'the forwarder reads the record, read-only').toBe(true);
         expect(SOURCE.split(DECLARATION).length - 1, 'one declaration').toBe(1);
     });
 

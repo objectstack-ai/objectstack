@@ -191,8 +191,8 @@ describe('PlatformObjectsPlugin: a host translation bundle wins over the platfor
 
     await boot(ctx);
 
-    // Two bundles (Setup, MetadataForms) times the four locales each ships.
-    expect(loads.sort()).toEqual(['en', 'en', 'es-ES', 'es-ES', 'ja-JP', 'ja-JP', 'zh-CN', 'zh-CN']);
+    // Two bundles (Setup, MetadataForms) times the five locales each ships.
+    expect(loads.sort()).toEqual(['en', 'en', 'es-ES', 'es-ES', 'ja-JP', 'ja-JP', 'zh-CN', 'zh-CN', 'zh-Hant', 'zh-Hant']);
   });
 
   it('fail-safe: a provider with no getTranslations still gets the platform bundles, and says so', async () => {

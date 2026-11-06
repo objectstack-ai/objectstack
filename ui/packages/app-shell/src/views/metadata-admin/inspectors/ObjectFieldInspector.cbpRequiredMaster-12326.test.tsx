@@ -7,8 +7,12 @@
  *
  * Since `@objectstack/spec` 18 (objectstack#23100, ADR-0055 §1) such an object
  * derives its master from exactly one `master_detail` declared
- * `required: true`; the save door refuses any other value. The installed
- * spec's `ObjectSchema` is the oracle for the object each edit leaves behind.
+ * `required: true`. Since ADR-0055 §1 as amended (objectstack#30905 ruling A)
+ * the spec also reads an object's only `master_detail` that is not required as
+ * an OPTIONAL master, whose rows may name none; the designer keeps writing
+ * `required: true`, so the master it shows is one every row names. The
+ * installed spec's `ObjectSchema` is the oracle for the object each edit
+ * leaves behind.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -18,6 +22,12 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { ObjectSchema } from '@objectstack/spec/data';
 import { t } from '../i18n';
+// The inspector's object picker and CEL authoring load `@objectstack/lint` and
+// `@objectstack/formula` with function-body `import()`s. Warmed here so their
+// first load is paid at collection, not inside a case's bounded wait. Same
+// specifiers, so the source's own dynamic imports resolve from the cache.
+import '@objectstack/lint';
+import '@objectstack/formula';
 
 type Row = Record<string, unknown>;
 
@@ -104,13 +114,19 @@ describe('ObjectFieldInspector — a controlled_by_parent master is required, lo
       },
       'account',
     );
-    expect(ObjectSchema.safeParse(object()).success).toBe(false);
+    // The control leg: as stored, the spec reads this master as optional —
+    // it parses, as `required: false`.
+    const before = ObjectSchema.safeParse(object());
+    expect(before.success).toBe(true);
+    expect((before.data?.fields as Record<string, { required?: boolean }>).account.required).toBe(false);
     expect(requiredBox()).not.toBeChecked();
     expect(requiredBox()).toBeEnabled();
     fireEvent.click(requiredBox());
     expect(field().required).toBe(true);
     expect(requiredBox()).toBeDisabled();
-    expect(ObjectSchema.safeParse(object()).success).toBe(true);
+    const after = ObjectSchema.safeParse(object());
+    expect(after.success).toBe(true);
+    expect((after.data?.fields as Record<string, { required?: boolean }>).account.required).toBe(true);
   });
 
   it('outside controlled_by_parent the box stays free and no reason is shown', () => {

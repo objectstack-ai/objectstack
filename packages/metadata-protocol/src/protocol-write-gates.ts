@@ -3,9 +3,13 @@
 /**
  * [#29985 codemod] The "Write gates: overlay, code-only, organization, sealed
  * and packaged-base refusals, locks, version tokens, conflict audit" facet of
- * `ObjectStackProtocolImplementation`: the bodies of `isArtifactBacked`,
- * `isSealedManagedItem`, `overlayBaseShippers`, `isNestedArtifactField`,
+ * `ObjectStackProtocolImplementation`: the bodies of `mergesOverlayAtRead`,
+ * `registryAllowsOverlay`, `isOverlayAllowed`, `isRuntimeCreateAllowed`,
+ * `codeOnlySourceHint`, `codeOnlyCreateError`, `codeOnlyOverrideError`,
+ * `refuseOrganizationScopedWrite`, `isArtifactBacked`, `isSealedManagedItem`,
+ * `overlayBaseShippers`, `isNestedArtifactField`, `packagedBaseRefusal`,
  * `packagedArtifactOwner`, `storedFlowBindingAgrees`,
+ * `packagelessOverlayWriteRefusal`, `namedBaseOverlayWriteRefusal`,
  * `refusePackagedBaseRemoval`, `shipsBundleName`, `baseServesBundleMember`,
  * `pairOfAddedMember`, `findPairAddedMemberRow`, `registryMemberServedAt`,
  * `recordOptimisticConflictAudit`, `envWritableTypes`,
@@ -35,16 +39,220 @@ import { managedItemSealedSentence } from './packaged-base-regime.js';
 import type { StoredOverlayRow } from './item-lock.js';
 import { itemDiscriminator } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
-import { customizationPackageId } from '@objectstack/spec/kernel';
+import { DEFAULT_METADATA_TYPE_REGISTRY, customizationPackageId } from '@objectstack/spec/kernel';
 import { baseAddressServesMember, readOnlyShippingPackages, shippingPackageIds } from './protocol-environment-rows.js';
 import { canonicalMetaType, canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { boundPackageOf } from './protocol-package-bindings.js';
 import type { ShippingPackages } from './protocol-package-bindings.js';
 import { memberOption } from './protocol-bundle-members.js';
 import type { MetadataAuditEntry } from './protocol-audit-entry.js';
+import { packagedBaseRegimeRow, packagedBaseRegimeSentence } from './packaged-base-regime.js';
+import { packagelessCloseSubject } from './protocol-packageless-overlay-migration.js';
+import type { PackagelessWriteSubject } from './protocol-packageless-overlay-migration.js';
+import {
+    namedBaseCloseSubject,
+    namedBaseOverlayWriteRefusal,
+    packagelessOverlayWriteRefusal,
+} from './protocol-packaged-base-refusal.js';
+import type {
+    NamedBaseWriteOperation,
+    NamedBaseWriteSubject,
+    PackagelessWriteOperation,
+} from './protocol-packaged-base-refusal.js';
 import type { ProtocolHost } from './protocol-host.js';
+// [#29985 codemod] `ObjectStackProtocolImplementation` here is `ObjectStackProtocolImplementationStatics` (imported AS the class): forwarders to its statics (#30147).
+import { ObjectStackProtocolImplementationStatics as ObjectStackProtocolImplementation } from './protocol.js';
+import type { ObjectStackProtocolImplementationStaticsHost } from './protocol.js';
 
 export class ProtocolWriteGatesFacet {
+    /**
+     * [#6960] Does this type's registry entry carry the removal carve-out
+     * (`supportsOverlay`)? The name predates ADR-0131 D6's seal and no read
+     * consults it: a stored overlay row of a managed item is served or
+     * withheld by {@link declinesStoredRow}, which keys on
+     * `allowEnvironmentOverlay`. Normalizes plural→singular, like every other
+     * predicate here.
+     *
+     * Read ONLY by `deleteMetaItem`'s two-tier authorization (and mirrored by
+     * `SysMetadataRepository`'s delete gate); it never widens a create or an
+     * update. See the call site for the ruling that licenses the asymmetry.
+     */
+    static mergesOverlayAtRead(this: Pick<ObjectStackProtocolImplementationStaticsHost, 'OVERLAY_CAPABLE_TYPES'>, type: string): boolean {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        return this.OVERLAY_CAPABLE_TYPES.has(singular)
+            || this.OVERLAY_CAPABLE_TYPES.has(type);
+    }
+
+    /**
+     * Does the type's REGISTRY entry open an overlay channel (`allowEnvironmentOverlay`)?
+     * The registry arm of {@link isOverlayAllowed}, without the hatch.
+     * Normalizes plural→singular before consulting the allow-list.
+     *
+     * [ADR-0131 D6] Read alone by {@link isSealedManagedItem}: whether an item a
+     * managed package ships may be overlaid is the registry's answer, and the
+     * `OS_METADATA_WRITABLE` hatch has no say in it.
+     */
+    static registryAllowsOverlay(this: Pick<ObjectStackProtocolImplementationStaticsHost, 'OVERLAY_ALLOWED_TYPES'>, type: string): boolean {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        return this.OVERLAY_ALLOWED_TYPES.has(singular)
+            || this.OVERLAY_ALLOWED_TYPES.has(type);
+    }
+
+    /**
+     * The TYPE-level write channel: the registry's overlay opt-in, or the
+     * `OS_METADATA_WRITABLE` hatch naming the type. Normalize plural→singular
+     * before consulting the allow-list.
+     *
+     * [ADR-0131 D6] A type-level answer, so ⛔ never the answer for an item a
+     * managed package ships — that one is {@link isSealedManagedItem}'s, and the
+     * hatch does not reach it. What the hatch still opens through this predicate
+     * is the type's writes of items no managed package ships.
+     */
+    static isOverlayAllowed(this: Pick<ObjectStackProtocolImplementationStaticsHost, 'envWritableTypes' | 'registryAllowsOverlay'>, type: string): boolean {
+        if (this.registryAllowsOverlay(type)) return true;
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        const env = this.envWritableTypes();
+        return env.has(singular) || env.has(type);
+    }
+
+    /**
+     * Does this type permit creating brand-new (artifact-free) items?
+     *
+     * ## [#8421] What the second arm means now, and why it did NOT narrow
+     *
+     * The fall-through below used to be the write-side twin of a read-side
+     * rule: "no static registry entry ⇒ plugin-registered ⇒ writable", mirrored
+     * verbatim by `getMetaTypes()`'s synthesised `allowRuntimeCreate: true`.
+     * The maintainer ruling of 2026-08-15 retired that rule's premise —
+     * verbatim, untranslated:
+     *
+     *     暂时不考虑让插件申明新的元数据类型
+     *
+     * ⚠️ `暂时` is load-bearing: a CURRENT posture, deliberately not a
+     * permanent architectural closure (the full record, and what a future
+     * author reintroducing plugin-declared kinds must revisit, is in
+     * {@link getMetaTypes}'s synthesis comment — read that one first).
+     *
+     * The narrowing that ruling bought is enforced ONE layer up, at
+     * {@link refuseUnmintableMetaType}, which runs before this predicate on
+     * every `saveMetaItem` and refuses an out-of-contract type outright. This
+     * arm is therefore no longer an ADVERTISEMENT and must not be narrowed to
+     * match one: by the time it is consulted for such a type, the caller is in
+     * one of the residue paths the refusal deliberately exempts or does not
+     * guard at all —
+     *
+     *  - `deleteMetaItem` / {@link historyMetaItem} / `rollbackMetaItem` /
+     *    `promoteDraftForPublish`: rows minted under an unrecognised type
+     *    BEFORE the refusal shipped are real, and nothing rewrites them on
+     *    upgrade. Returning `false` here would route them off the repository
+     *    path and strand them — turning the accumulation this card was filed
+     *    about into an accumulation nobody can clear, which is the exact
+     *    reasoning that kept `deleteMetaItem` open in the first place;
+     *  - `saveMetaItem` behind the mint door's two exemptions (the compound
+     *    arity, and a namespace the store says already exists).
+     *
+     * So the doors agree where agreement is a claim about creating a NEW
+     * namespace — the listing and the mint door read one predicate for that —
+     * and this arm keeps the clearance path open underneath. Narrowing it would
+     * not close anything; it would only make residue unclearable.
+     */
+    static isRuntimeCreateAllowed(this: Pick<ObjectStackProtocolImplementationStaticsHost, 'RUNTIME_CREATE_ALLOWED_TYPES' | 'STATIC_REGISTRY_TYPES'>, type: string): boolean {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        if (this.RUNTIME_CREATE_ALLOWED_TYPES.has(singular)
+            || this.RUNTIME_CREATE_ALLOWED_TYPES.has(type)) {
+            return true;
+        }
+        // No static registry entry ⇒ no declared flags to consult. See the doc
+        // above: this is the residue/clearance arm, NOT the read door's twin.
+        if (!this.STATIC_REGISTRY_TYPES.has(singular)
+            && !this.STATIC_REGISTRY_TYPES.has(type)) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * The prescription half of a code-only refusal (#5086): where the author
+     * is supposed to declare this item instead. Read from the type's own
+     * registry entry (`filePatterns`), so a newly-flagged type carries an
+     * accurate hint the day it is flagged — nothing here to keep in sync,
+     * except the types {@link CODE_ONLY_TYPE_REMEDY} names explicitly.
+     */
+    static codeOnlySourceHint(type: string): string {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        const named = ObjectStackProtocolImplementation.CODE_ONLY_TYPE_REMEDY[singular];
+        if (named) return named;
+        const entry = DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === singular);
+        const pattern = entry?.filePatterns?.[0];
+        return pattern ? ` Declare it in source (${pattern}) and redeploy.` : '';
+    }
+
+    /**
+     * #5086 — a brand-new item of a type the registry declares code-only
+     * (`allowRuntimeCreate: false` AND `allowEnvironmentOverlay: false`).
+     *
+     * Names the type, the flags that produced the verdict, the prescription
+     * and the escape hatch — the same shape the retired-key refusals in this
+     * wave carry, because a refusal an author cannot act on just moves the
+     * confusion one layer down. `NOT_CREATABLE` is the catalogued code
+     * (`packages/spec/src/api/error-code-ledger.zod.ts`).
+     */
+    static codeOnlyCreateError(type: string): Error {
+        const err = new Error(
+            `Metadata type '${type}' is code-only: the metadata-type registry declares `
+            + `allowRuntimeCreate=false and allowEnvironmentOverlay=false, so it cannot be created through the `
+            + `runtime metadata API (PUT /api/v1/meta/${type}/:name) on any kernel.`
+            + ObjectStackProtocolImplementation.codeOnlySourceHint(type)
+            // [ADR-0131 D6] A Regime C type's refusal names its sanctioned paths and
+            // never the hatch, as its regime sentence does (`packaged-base-regime.ts`):
+            // the hatch would re-open the very source the regime closes. It still
+            // opens the type for an operator — the residue repair the delete door
+            // keeps — it is only not prescribed. Under the REST door's 500-character
+            // bound either way (`sharing_rule`: 473).
+            + (packagedBaseRegimeRow(type)?.regime === 'C'
+                ? ''
+                : ` An operator may set OS_METADATA_WRITABLE=${PLURAL_TO_SINGULAR[type] ?? type} to grant a runtime escape hatch. `
+                    + `See docs/adr/0005-metadata-customization-overlay.md.`)
+        );
+        (err as any).code = 'NOT_CREATABLE';
+        (err as any).status = 403;
+        return err;
+    }
+
+    /**
+     * #5086 — the artifact-backed half of the same refusal: the name IS
+     * shipped by a code package, so the honest verdict is "you may not
+     * overlay it" rather than "you may not create it".
+     *
+     * [ADR-0131 D6] The package is a managed one and its item is sealed, so the
+     * sentence names the managed package and says the hatch does not open it —
+     * the prescription this sentence used to end with ("an operator may set
+     * OS_METADATA_WRITABLE") would send the operator to a door that no longer
+     * opens. The source remedy stays: it is where a code-only item is declared.
+     */
+    static codeOnlyOverrideError(type: string, name: string): Error {
+        // [ADR-0131 D6, ADR-0126 §2] A Regime C type's declared item reads its
+        // regime sentence — the one the package door and the repository speak for
+        // the same item — so the refusal names the clone and the switch.
+        const err = new Error(
+            (packagedBaseRegimeRow(type)?.regime === 'C' ? packagedBaseRegimeSentence(type, name, 'save') : undefined) ??
+            `Metadata item '${type}/${name}' is provided by a managed package and its type is `
+            + `code-only (allowRuntimeCreate=false, allowEnvironmentOverlay=false), so it is sealed against `
+            + `runtime edits on any kernel, and OS_METADATA_WRITABLE does not open a managed item.`
+            + ObjectStackProtocolImplementation.codeOnlySourceHint(type)
+            + ` See docs/adr/0131-total-organization-ownership-no-null-organization-id.md.`
+        );
+        (err as any).code = 'NOT_OVERRIDABLE';
+        (err as any).status = 403;
+        return err;
+    }
+
+    /** Throw {@link organizationScopedWriteRefusal} for an organization-scoped write request. */
+    static refuseOrganizationScopedWrite(this: Pick<ObjectStackProtocolImplementationStaticsHost, 'organizationScopedWriteRefusal' | 'requestedOrganization'>, subject: string, request: unknown): void {
+        const refusal = this.organizationScopedWriteRefusal(subject, this.requestedOrganization(request));
+        if (refusal) throw refusal;
+    }
+
     /**
      * Does an artifact (npm-package-loaded) item exist at `(type, name)`?
      *
@@ -218,6 +426,27 @@ export class ProtocolWriteGatesFacet {
         return Object.prototype.hasOwnProperty.call(fields, name.slice(sep + 1));
     }
 
+    /** The body of `ObjectStackProtocolImplementation#packagedBaseRefusal`; the method's docblock there is its contract. */
+    static packagedBaseRefusal(host: Pick<ProtocolHost, 'isPackagedBaseRefusal' | 'refusePackagedBaseOverride' | 'refusePackagedBaseRemoval'>, request: { type: string; name: string; operation: 'save' | 'delete'; packageId?: string | null }): Error | null {
+        // [#9009] Folded HERE, at the producer of the verdict, so a caller that
+        // arrives with a plural spelling cannot address around the lock.
+        const folded = canonicalizeMetaRequestType(request);
+        try {
+            if (folded.operation === 'delete') host.refusePackagedBaseRemoval(folded);
+            else {
+                host.refusePackagedBaseOverride({
+                    type: folded.type,
+                    name: folded.name,
+                    ...(folded.packageId ? { packageId: folded.packageId } : {}),
+                });
+            }
+        } catch (err) {
+            if (host.isPackagedBaseRefusal(err)) return err;
+            throw err;
+        }
+        return null;
+    }
+
     /** The body of `ObjectStackProtocolImplementation#packagedArtifactOwner`; the method's docblock there is its contract. */
     static packagedArtifactOwner(host: Pick<ProtocolHost, 'lookupArtifactItem'>, request: { type: string; name: string }): string | undefined {
         const folded = canonicalizeMetaRequestType(request);
@@ -254,6 +483,103 @@ export class ProtocolWriteGatesFacet {
             host.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
             return false;
         }
+    }
+
+    /**
+     * [ADR-0146 D11, #28576 ruling 2] The package-less write onto a packaged
+     * item, closed where `os migrate packageless-overlays` would move it: the
+     * refusal of a save, a publish, a delete or a rollback that names no
+     * package, of an item of one of the five overlay types that ONE read-only
+     * code package ships ({@link overlayBaseShippers}), whose row the
+     * ceremony's census classifies `movable` and whose move can succeed
+     * (`packagelessCloseSubject` in `protocol-packageless-overlay-migration.ts`,
+     * the census's own classification and the ceremony's own steps).
+     *
+     * `null` — the write stays open, as on `main` — when it names a package
+     * (`?package=<base>.custom` stays open, as does every other package's own
+     * door; [#28905] the write naming the read-only base itself is closed by
+     * {@link namedBaseOverlayWriteRefusal}, not here); when no read-only
+     * package ships the name (environment metadata);
+     * and for every row the ceremony lists and does not move: a name several
+     * packages ship (`multi_shipped`), a base with no pair id (`no_pair`), a
+     * stored row whose `overrides` names another package
+     * (`foreign_declaration`) or whose pair already holds the item
+     * (`shadowed`), and a move that would fail (the ensure door would refuse
+     * the pair, the base records no version, or the override write gate
+     * refuses the declared body — an `email_template` locale the base does not
+     * ship). Each such row keeps a write door after the upgrade: its own.
+     *
+     * The refusal names the base's paired `.custom` and the ceremony; a row
+     * stored before the close stays served until the ceremony moves it, and
+     * its package-less write is refused by the same sentence. Registry reads
+     * first; the one store read (the item's rows) only when the registry has
+     * not left the write open.
+     *
+     * Asked by {@link saveMetaItem} and {@link publishMetaItem} (authoring
+     * writes only: the server-stated rewrites name the row they rewrite),
+     * {@link deleteMetaItem}, and {@link rollbackMetaItem} (whose address is the
+     * restored row's own binding: package-less when that row is). The
+     * sentence is `packagelessOverlayWriteRefusal` in
+     * `protocol-packaged-base-refusal.ts`.
+     *
+     * Not the read envelope's `editable` / `deletable` ({@link packagedBaseRefusal}
+     * keeps its answer): those describe the item, which the pair's write still
+     * changes.
+     */
+    static async packagelessOverlayWriteRefusal(this: Pick<ProtocolHost, 'engine' | 'findEnvironmentRows' | 'overlayBaseShippers' | 'overrideWriteVerdict' | 'rethrowUnlessMetadataStoreUnprovisioned'>, request: PackagelessWriteSubject,
+        operation: PackagelessWriteOperation,): Promise<Error | null> {
+        const host: ThisParameterType<typeof packagelessCloseSubject> = {
+            engine: this.engine,
+            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+            overlayBaseShippers: (...a) => this.overlayBaseShippers(...a),
+            overrideWriteVerdict: (...a) => this.overrideWriteVerdict(...a),
+        };
+        const closed = await packagelessCloseSubject.call(host, request);
+        return closed ? packagelessOverlayWriteRefusal(request, closed, operation) : null;
+    }
+
+    /**
+     * [#28905, ADR-0146 D1, D11] The write NAMING the read-only base itself
+     * (`?package=<base>`) onto an item of one of the five overlay types that
+     * base ships: the refusal of a save (draft or active), a publish (both
+     * {@link publishMetaItem} and {@link publishPackageDrafts}, through
+     * {@link promoteDraftForPublish}) or a rollback that would land a row bound
+     * to the base. D1 puts a read-only package's customizations in its paired
+     * `<base>.custom`; such a row is served at the base's address with no
+     * declaration, outside the pair, until [#29392] `os migrate
+     * packageless-overlays` moves it into the pair. Refused with
+     * the fix the package-less close names ({@link packagelessOverlayWriteRefusal},
+     * one spelling): write it into the pair, declaring the override.
+     *
+     * Closed on the package-less close's reading of "packaged" — a READ-ONLY
+     * code package among {@link overlayBaseShippers} — and only where that fix
+     * can be taken (a pair id, the ensure door, a base version, the override
+     * write gate admitting the declared body): `namedBaseCloseSubject` in
+     * `protocol-packaged-base-refusal.ts`. `null` — the write stays open, as on
+     * `main` — for a writable package, a package that does not ship the name,
+     * a body carrying `overrides` (the D2 gate's), any other type, and a fix
+     * that could not be taken.
+     *
+     * ⛔ Not a delete: removing a row bound to the base writes nothing, and it
+     * is one way to clear such a row stored before the close; the ceremony is
+     * the other, moving it into the pair with its declaration. A row stored
+     * before it stays served until one of those, or the pair's declared
+     * override, which is served over it; the sentence names all three.
+     *
+     * Authoring writes only: the server-stated rewrites (`source` set, the
+     * `package-duplicate` write face) name the row they rewrite. Registry
+     * reads only.
+     */
+    static namedBaseOverlayWriteRefusal(this: Pick<ProtocolHost, 'engine' | 'overlayBaseShippers' | 'overrideWriteVerdict'>, request: NamedBaseWriteSubject,
+        operation: NamedBaseWriteOperation,): Error | null {
+        const host: ThisParameterType<typeof namedBaseCloseSubject> = {
+            engine: this.engine,
+            overlayBaseShippers: (...a) => this.overlayBaseShippers(...a),
+            overrideWriteVerdict: (...a) => this.overrideWriteVerdict(...a),
+        };
+        const closed = namedBaseCloseSubject.call(host, request);
+        return closed ? namedBaseOverlayWriteRefusal(request, closed, operation) : null;
     }
 
     /**

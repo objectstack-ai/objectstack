@@ -613,6 +613,7 @@
         "$TURBO_ROOT$/packages/services/service-storage/src/storage-route-ledger.ts",
         "$TURBO_ROOT$/packages/services/service-i18n/src/i18n-route-ledger.ts",
         "$TURBO_ROOT$/packages/services/service-settings/src/settings-route-ledger.ts",
+        "$TURBO_ROOT$/packages/services/service-messaging/src/messaging-route-ledger.ts",
         "$TURBO_ROOT$/packages/plugins/plugin-auth/src/personal-view-route-ledger.ts",
         "$TURBO_ROOT$/packages/spec/src/automation/**",
         "$TURBO_ROOT$/packages/spec/src/data/**",
@@ -701,7 +702,7 @@
       ]
     },
     "@objectstack/scenarios#test": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["build"],
       "outputs": [],
       "env": ["OS_TEST_TIERS"],
       "inputs": [

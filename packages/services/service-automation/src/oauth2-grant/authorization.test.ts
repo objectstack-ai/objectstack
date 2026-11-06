@@ -126,15 +126,30 @@ describe('ADR-0143 D5 — a begun connect is taken once', () => {
 });
 
 describe('ADR-0143 D5 — a begun connect is held sealed (the KV trust boundary)', () => {
-    const begun = pending({ verifier: 'dummy-verifier-7Qx', redirectUri: 'https://app.example.com/cb-sealed' });
+    // Every plaintext value the pin below looks for carries a `.`, a character
+    // neither base64url nor the envelope's JSON frame ever emits, so the random
+    // `iv` / `ct` / `tag` can never contain one by chance: only a store that
+    // writes the field itself turns the pin red. (A short value such as `crm`
+    // turns up in random base64url about once in a thousand runs.)
+    const begun = pending({
+        connector: 'connector.sealed-fixture',
+        organizationId: 'org.sealed-fixture',
+        userId: 'usr.sealed-fixture',
+        verifier: 'dummy-verifier.sealed-fixture',
+        redirectUri: 'https://app.example.com/cb-sealed',
+    });
+    const sealedState = 'st.sealed-fixture';
     const keyOf = (state: string) => `connector-oauth2:pending:${createHash('sha256').update(state).digest('hex')}`;
 
     it('the KV holds no verifier, user, organization, instance or redirect URI — only an envelope', async () => {
         const { kv, held } = fakeKv();
-        await kvPendingAuthorizationStore(kv).put('st-sealed', begun);
+        await kvPendingAuthorizationStore(kv).put(sealedState, begun);
         const [, entry] = [...held][0];
         const stored = JSON.stringify(entry.value);
-        for (const plain of [begun.verifier, begun.userId, begun.organizationId, begun.connector, begun.redirectUri, 'st-sealed']) {
+        const plains = [begun.verifier, begun.userId, begun.organizationId, begun.connector, begun.redirectUri, sealedState];
+        for (const plain of plains) expect(plain).toContain('.');
+        expect(stored).not.toContain('.');
+        for (const plain of plains) {
             expect(stored).not.toContain(plain);
         }
         expect(Object.keys(entry.value as object).sort()).toEqual(['ct', 'iv', 'tag', 'v']);

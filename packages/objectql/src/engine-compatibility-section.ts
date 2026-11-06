@@ -4,7 +4,7 @@
  * [#29986 codemod] The "Compatibility / convenience API" section of `ObjectQL`:
  * the bodies of `unregisterObject`, `getObject`, `getDriverByName`,
  * `getDriverForObject`, `dropObjectSchema`, `datasource`, `on`, `close`,
- * `create` moved out of `engine.ts` whole by
+ * `createContext`, `create` moved out of `engine.ts` whole by
  * `scripts/codemod-split-engine.mjs`.
  *
  * A MOVE, not a redesign. {@link CompatibilitySectionFacet} is a stateless facet of `ObjectQL`
@@ -34,8 +34,11 @@
 
 import type { HookContext, ServiceObject } from '@objectstack/spec/data';
 import { StorageNameMapping } from '@objectstack/spec/system';
+import { ExecutionContextSchema } from '@objectstack/spec/kernel';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { carryAppAutomationElevation } from '@objectstack/core';
 import type { IDataDriver } from '@objectstack/core';
-import { ObjectQL } from './engine.js';
+import { ObjectQL, ScopedContext } from './engine.js';
 
 /**
  * The `ObjectQL` members the bodies of {@link CompatibilitySectionFacet} read — every one of
@@ -48,6 +51,8 @@ export interface CompatibilitySectionHost {
   readonly _registry: ObjectQL['_registry'];
   destroy: ObjectQL['destroy'];
   readonly drivers: ObjectQL['drivers'];
+  /** The engine itself: a moved body reads `this.facade` where the method read a bare `this` (#30020). */
+  readonly facade: ObjectQL;
   getDriver: ObjectQL['getDriver'];
   getDriverForObject: ObjectQL['getDriverForObject'];
   getSchema: ObjectQL['getSchema'];
@@ -111,6 +116,18 @@ export class CompatibilitySectionFacet {
   /** The body of `ObjectQL#close`; the method's docblock there is its contract. */
   static async close(this: Pick<CompatibilitySectionHost, 'destroy'>): Promise<void> {
     return this.destroy();
+  }
+
+  /** The body of `ObjectQL#createContext`; the method's docblock there is its contract. */
+  static createContext(this: Pick<CompatibilitySectionHost, 'facade'>, ctx: Partial<ExecutionContext>): ScopedContext {
+    // [#25653] The parse keeps declared keys only, so the app-automation
+    // elevation mark an action body's envelope carries is carried across it:
+    // dropped here, the body's `ctx.api` writes would reach the
+    // identity-assignment refusal unmarked.
+    return new ScopedContext(
+      carryAppAutomationElevation(ctx, ExecutionContextSchema.parse(ctx)),
+      this.facade
+    );
   }
 
   /** The body of `ObjectQL#create`; the method's docblock there is its contract. */

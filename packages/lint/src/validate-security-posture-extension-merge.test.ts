@@ -77,7 +77,6 @@ describe('[#23210] validateSecurityPosture judges a controlled_by_parent object 
 
   it('an extension that demotes the one master is no-relation at the extension, in the words of the declared control', () => {
     for (const demoted of [
-      { type: 'master_detail', reference: 'cbpx_header', required: false },
       { type: 'text' },
       { type: 'lookup', reference: 'cbpx_header', required: true },
     ]) {
@@ -89,6 +88,18 @@ describe('[#23210] validateSecurityPosture judges a controlled_by_parent object 
       expect(control.map((f) => f.path)).toEqual(['objects[2].sharingModel']);
       expect(findings[0].message).toBe(control[0].message);
     }
+  });
+
+  // [#30905 ruling A · ADR-0055 §1 as amended] Declared `required: false`,
+  // the only master_detail is the OPTIONAL master: the merged object resolves,
+  // as the same object declared directly does. Beside a second master_detail
+  // with no `required: true`, it names no master.
+  it('an extension that declares the one master required: false makes it the optional master — silent, as its declared twin', () => {
+    const optional = { type: 'master_detail', reference: 'cbpx_header', required: false };
+    expect(cbpFindings(extending({ header: optional }))).toEqual([]);
+    expect(cbpFindings({ objects: OBJECTS({ header: optional }) })).toEqual([]);
+    const findings = cbpFindings(extending({ header: optional, other: { ...OTHER, required: false } }));
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([[SECURITY_CBP_NO_RELATION, 'objectExtensions[0].fields']]);
   });
 
   it('an extension whose target the stack does not declare is unjudged; the visible twin is reported', () => {
@@ -137,7 +148,9 @@ describe('[#23210] the parse and the lint agree on the merged shape', () => {
   it.each<[string, Record<string, unknown>, string[]]>([
     ['the card\'s stack', CARD_STACK, ['objectExtensions.0.fields']],
     ['a non-master field', extending({ other: { type: 'text' } }), []],
-    ['a demoted master', extending({ header: { type: 'master_detail', reference: 'cbpx_header', required: false } }), ['objectExtensions.0.fields']],
+    // [#30905 ruling A] Declared `required: false`, the one master is the optional master.
+    ['a master made optional', extending({ header: { type: 'master_detail', reference: 'cbpx_header', required: false } }), []],
+    ['a demoted master', extending({ header: { type: 'text' } }), ['objectExtensions.0.fields']],
     ['an unseen target', extending({ other: OTHER }, 'crm_line'), []],
     ['a non-controlled target', { ...CARD_STACK, objects: OBJECTS({ header: HEADER }, 'private') }, []],
     [

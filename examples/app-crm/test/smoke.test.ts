@@ -189,7 +189,7 @@ describe('Pipeline dashboard', () => {
   it('uses `compareTo: { kind: previousPeriod }` for the current-quarter KPI', () => {
     const w: any = byId.get('won_this_quarter');
     // #5011: `compareTo` is the executor's own `{ kind, dimension? }` shape.
-    // `dimension` is omitted deliberately — `opportunity_metrics` dates exactly
+    // `dimension` is omitted deliberately — `crm_opportunity_metrics` dates exactly
     // one dimension, so the executor resolves it (and would error, naming the
     // candidates, if it could not).
     expect(w.compareTo).toEqual({ kind: 'previousPeriod' });
@@ -227,7 +227,7 @@ describe('Pipeline dashboard', () => {
   it('widgets bind to the opportunity dataset', () => {
     // ADR-0021 single-form: widgets reference the semantic dataset, not a raw object.
     for (const w of PipelineDashboard.widgets) {
-      expect((w as any).dataset).toBe('opportunity_metrics');
+      expect((w as any).dataset).toBe('crm_opportunity_metrics');
     }
   });
 
@@ -253,7 +253,7 @@ describe('Pipeline dashboard schema validation', () => {
   it('passes the DashboardSchema zod parser end-to-end', async () => {
     const { DashboardSchema } = await import('@objectstack/spec/ui');
     const parsed = DashboardSchema.parse(PipelineDashboard);
-    expect(parsed.name).toBe('pipeline_dashboard');
+    expect(parsed.name).toBe('crm_pipeline_dashboard');
     expect(parsed.widgets).toHaveLength(6);
   });
 });

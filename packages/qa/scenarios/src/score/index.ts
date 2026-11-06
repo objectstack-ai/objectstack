@@ -1,10 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `@objectstack/scenarios/score` — score a LOADED card against what a run
- * produced: a built artifact (`dist/objectstack.json`), an observed write, or
- * an agent's answer. The entry the scenario runner calls; private, like the
- * rest of this package.
+ * `@objectstack/scenarios/score/full` — score a LOADED card against what a
+ * run produced: a built artifact (`dist/objectstack.json`), an observed write,
+ * or an agent's answer. The entry the scenario runner calls; private, like the
+ * rest of this package. The narrow `@objectstack/scenarios/score` is
+ * `./narrow.ts`: everything here except the capability-tag checks and the
+ * card-level functions below.
  *
  * Every function takes a {@link LoadedScenario} (what `loadScenarios` /
  * `loadScenarioFile` return), so the card it judges against has already passed
@@ -15,7 +17,7 @@
  */
 
 import type { LoadedScenario } from '../loader.js';
-import { scenarioNamespace } from '../schema.js';
+import { isWriteValidationOperation, scenarioNamespace } from '../schema.js';
 import { gradeOperation, type OperationGrade, type OperationObservation } from './scenario-operation-grade.js';
 import { gradePersonaRun, type HiddenScope, type PersonaRunGrade, type RunTranscript } from './scenario-run-grade.js';
 import { scoreScenarioArtifact, type ScenarioArtifactScore } from './scenario-tags.js';
@@ -36,11 +38,15 @@ export function scoreCardArtifact(scenario: LoadedScenario, artifact: unknown): 
   return scoreScenarioArtifact(artifact, scenario.card, { namespace: scenarioNamespace(scenario.card) });
 }
 
-/** Judge one observed write against the outcome the card declares for operation `operationId`. */
+/**
+ * Judge one observed write against the outcome the card declares for operation
+ * `operationId` — the one its `write_validation` guardrail names in two halves,
+ * the agent's and the runner's probe.
+ */
 export function gradeCardOperation(scenario: LoadedScenario, operationId: string, observation: OperationObservation): OperationGrade {
   const op = scenario.card.run.operations.find((o) => o.id === operationId);
   if (!op) throw new RangeError(`${scenario.card.id}: no operation \`${operationId}\``);
-  return gradeOperation(op.outcome, observation);
+  return gradeOperation(op.outcome, observation, { validation: isWriteValidationOperation(scenario.card, operationId) });
 }
 
 export interface CardAnswer {

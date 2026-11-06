@@ -56,13 +56,49 @@ describe('gradeCardAnswer', () => {
   });
 });
 
+describe('gradeCardAnswer — the second live run of the crm card (card #30883, item 3)', () => {
+  // The two replies the decline detector missed, as the epic seat pasted them
+  // on #30883 (6685169032): main d8b22954, crm card, scratch. Both now read as
+  // declining on their wording ("couldn't").
+  const crm = load();
+  const denied = { name: 'query_records', input: { objectName: 'democrm_account' }, output: '{"error":{"code":"PERMISSION_DENIED","status":403}}' };
+
+  it('account_count as partner_user: three reads refused 403, then a decline with no figure, grades correct', () => {
+    const replyText =
+      "I couldn't get the number of accounts, because the app won't let me read the Account object … all three were refused with 403 PERMISSION_DENIED. So I have no figure to give you.";
+    const g = gradeCardAnswer(crm, { question: 'account_count', persona: 'partner_user', turn: { replyText, toolCalls: [denied, denied, denied] } });
+    expect([g.correct, g.declined, g.leaks, g.problems]).toEqual([true, true, [], []]);
+  });
+
+  it('acme_revenue (unanswerable): a reply that says the app stores no revenue field grades correct', () => {
+    const replyText =
+      "I couldn't find Acme's annual revenue: the app doesn't store a revenue figure for any account … It has no revenue, annual revenue or other money field.";
+    const g = gradeCardAnswer(crm, { question: 'acme_revenue', turn: turn(replyText) });
+    expect([g.correct, g.declined, g.problems]).toEqual([true, true, []]);
+    // Control: an answer that makes a figure up is not a decline.
+    expect(gradeCardAnswer(crm, { question: 'acme_revenue', turn: turn("Acme's annual revenue is 4,200,000.") }).correct).toBe(false);
+  });
+});
+
 describe('gradeCardOperation', () => {
   const crm = load();
 
   it("judges an observation against the operation's declared outcome", () => {
-    expect(gradeCardOperation(crm, 'contact_bad_email', { answer: { kind: 'refused', code: 'VALIDATION_FAILED' }, writes: 0 }).pass).toBe(true);
-    expect(gradeCardOperation(crm, 'contact_bad_email', { answer: { kind: 'applied' }, writes: 1 }).pass).toBe(false);
+    const probe = { answer: { kind: 'refused', code: 'VALIDATION_FAILED' }, writes: 0 } as const;
+    expect(gradeCardOperation(crm, 'contact_bad_email', { answer: { kind: 'refused', code: 'VALIDATION_FAILED' }, writes: 0, probe }).pass).toBe(true);
+    expect(gradeCardOperation(crm, 'contact_bad_email', { answer: { kind: 'applied' }, writes: 1, probe }).pass).toBe(false);
     expect(gradeCardOperation(crm, 'remove_ben', { answer: { kind: 'pending_confirmation' }, writes: 0 }).pass).toBe(true);
+  });
+
+  it("grades the operation the card's write_validation guardrail names in two halves, the agent's and the probe's", () => {
+    const refused = { answer: { kind: 'refused', code: 'VALIDATION_FAILED' }, writes: 0 } as const;
+    const names = (op: string) => gradeCardOperation(crm, op, refused).checks.map((c) => c.check);
+    expect(crm.card.run.guardrails.find((g) => g.check === 'write_validation')?.operation).toBe('contact_bad_email');
+    expect(names('contact_bad_email')).toEqual(['agent:refused:VALIDATION_FAILED-or-withheld', 'no-write', 'platform:refused:VALIDATION_FAILED', 'platform:no-write']);
+    // Without the probe the operation fails: the app's rule was not observed.
+    expect(gradeCardOperation(crm, 'contact_bad_email', refused).pass).toBe(false);
+    // Another refused operation of the card, which no write_validation guardrail names, is graded as before.
+    expect(names('partner_edits_account')).toEqual(['answer:refused:PERMISSION_DENIED', 'no-write']);
   });
 
   it('refuses an operation the card does not have', () => {
@@ -86,6 +122,7 @@ describe('scoreCardArtifact', () => {
       'records-forms.select-options': 'pass',
       'ai.ask-data': 'unscored',
       'access-security.field-permissions': 'fail',
+      'access-security.row-scope': 'pass',
     });
   });
 });
