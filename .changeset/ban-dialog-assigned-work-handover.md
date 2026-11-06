@@ -5,7 +5,7 @@
 
 feat(app-shell): the ban dialog says how many records the user holds, and offers one optional hand-over
 
-Clause-②: no
+Clause-②: yes (widening) — 19 new `console.assignedWork.*` keys ship in every published `@object-ui/i18n` language pack, which publishes every key it carries.
 Metadata-protocol: none
 
 Banning a user (the platform's `ban_user` action on `sys_user`) opens a dialog that now shows, above the ban reason, the records that person holds and lets the administrator hand them to someone else before confirming the ban.
