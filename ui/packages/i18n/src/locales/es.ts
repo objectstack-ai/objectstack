@@ -3878,6 +3878,13 @@ const es = {
       body: 'Extensiones → Conectores → + Añadir → Pegar configuración JSON:',
       hint: 'O añádelo a mano como Streamable HTTP con esta URL. Si tu versión no ofrece inicio de sesión en el navegador, añade la cabecera Authorization: Bearer <clave API> (crea una clave abajo).',
     },
+    client: {
+      title: '¿Qué asistente de IA usas?',
+      hint: 'Elige el tuyo para ver solo sus pasos. Este navegador recuerda tu elección.',
+    },
+    advanced: {
+      title: 'Avanzado: scripts y CI',
+    },
     apiKey: {
       title: 'Claves API',
       badge: 'headless',

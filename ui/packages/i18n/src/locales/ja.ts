@@ -3803,6 +3803,13 @@ const ja = {
       body: '拡張 → コネクタ → + 追加 → JSON 設定を貼り付け:',
       hint: '手動で追加する場合は Streamable HTTP を選び、この URL を入力します。ブラウザでのサインインに対応していないバージョンでは、リクエストヘッダー Authorization: Bearer <API キー> を追加してください(キーは下で作成)。',
     },
+    client: {
+      title: 'どの AI アシスタントを使っていますか？',
+      hint: 'お使いのアシスタントを選ぶと、その手順だけが表示されます。選択はこのブラウザーに保存されます。',
+    },
+    advanced: {
+      title: '詳細設定：スクリプトと CI',
+    },
     apiKey: {
       title: 'API キー',
       badge: 'ヘッドレス',

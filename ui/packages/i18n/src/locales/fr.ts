@@ -3874,6 +3874,13 @@ const fr = {
       body: 'Extensions → Connecteurs → + Ajouter → Coller la configuration JSON :',
       hint: 'Ou ajoutez-le à la main en Streamable HTTP avec cette URL. Si votre version ne propose pas de connexion par navigateur, ajoutez l’en-tête Authorization: Bearer <clé API> (créez une clé ci-dessous).',
     },
+    client: {
+      title: 'Quel assistant IA utilisez-vous ?',
+      hint: 'Choisissez le vôtre pour n’afficher que ses étapes. Ce navigateur mémorise votre choix.',
+    },
+    advanced: {
+      title: 'Avancé : scripts et CI',
+    },
     apiKey: {
       title: 'Clés API',
       badge: 'headless',
