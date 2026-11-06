@@ -47,19 +47,31 @@
         "types": "./dist/runner.d.cts",
         "default": "./dist/runner.cjs"
       }
+    },
+    "./export": {
+      "import": {
+        "types": "./dist/export.d.ts",
+        "default": "./dist/export.js"
+      },
+      "require": {
+        "types": "./dist/export.d.cts",
+        "default": "./dist/export.cjs"
+      }
     }
   },
   "scripts": {
     "build": "tsup && node ../../../scripts/check-dts-emitted.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "run-scenarios": "tsx src/runner/cli.ts"
+    "run-scenarios": "tsx src/runner/cli.ts",
+    "export-gallery": "tsx src/export/cli.ts"
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-sharing": "workspace:*",
     "@objectstack/spec": "workspace:*",
+    "playwright-core": "1.63.0",
     "zod": "^4.6.6"
   },
   "devDependencies": {

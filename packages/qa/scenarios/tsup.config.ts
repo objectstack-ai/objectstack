@@ -18,7 +18,8 @@ import { dropSourcesContent } from '../../../scripts/tsup-drop-sources-content.m
  * `@objectstack/plugin-sharing`. `splitting: false` keeps each entry one file,
  * so an entry's external imports are exactly the ones its own graph reaches.
  *
- * Dependencies stay external (tsup's default for `dependencies`); the source
+ * Dependencies stay external (tsup's default for `dependencies`; `export`'s
+ * `playwright-core` included, which it loads with a dynamic `import()`); the source
  * suites and `run-scenarios` keep reading `src/` and never this output.
  */
 export default defineConfig({
@@ -27,6 +28,7 @@ export default defineConfig({
     score: 'src/score/narrow.ts',
     'score-full': 'src/score/index.ts',
     runner: 'src/runner/index.ts',
+    export: 'src/export/index.ts',
   },
   tsconfig: 'tsconfig.build.json',
   splitting: false,
