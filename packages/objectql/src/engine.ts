@@ -10617,7 +10617,7 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
   /**
    * [#25653] Set on the api an app-authored hook is handed
    * ({@link APP_AUTHORED_HOOK_API}) and kept by every api derived from it
-   * ({@link derive}); read by {@link sudo}.
+   * ({@link derive}); read by {@link sudo} and {@link object}.
    */
   private appAuthored = false;
 
@@ -10628,7 +10628,16 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
     return child;
   }
 
-  /** Get a repository scoped to this context */
+  /**
+   * Get a repository scoped to this context.
+   *
+   * [ADR-0148 D3, ruling A recorded in 6691358077] On an app-authored hook's
+   * api ({@link APP_AUTHORED_HOOK_API}) and every api derived from it, the
+   * repository's `delete(…, { permanent })` is refused (`400
+   * VALIDATION_ERROR`, `param: 'permanent'`): app-authored code cannot purge,
+   * so its deletes enter the recycle bin, under any `runAs`. Platform code's
+   * api is not app-authored, and keeps the engine's permanent delete.
+   */
   object(name: string): ObjectRepository {
     // [#30052 codemod] The body moved to `engine-scoped-context.ts` (see `ScopedContextHost`).
     return ScopedContextFacet.object.call(scopedContextHost.of(this), name);

@@ -15,6 +15,7 @@
 import { describe, it, expect } from 'vitest';
 import { RECYCLE_BIN_ENTRY_FIELDS } from '@objectstack/spec/data';
 import { ObjectQL } from '../engine.js';
+import { bindHooksToEngine } from '../hook-binder.js';
 
 type Row = Record<string, unknown>;
 
@@ -410,5 +411,132 @@ describe('empty(object)', () => {
     const { engine, dispatches } = await makeEngine();
     await expect(engine.empty(object, SYSTEM)).rejects.toMatchObject({ code: 'VALIDATION_ERROR', status: 400, param });
     expect(dispatches).toEqual([]);
+  });
+});
+
+/**
+ * [ADR-0148 D3, ruling A recorded in 6691358077] A hook bound from metadata
+ * (through the hook binder) is app-authored code, and so is its in-process
+ * `handler`: its `ctx.api` refuses a permanent delete as a sandboxed body's
+ * does, with the same code and sentence, under the caller and under
+ * `runAs: 'system'`, by id and in bulk, on every api derived from it. Its
+ * ordinary delete still enters the bin; platform code keeps the permanent
+ * delete.
+ */
+describe("an app-authored hook handler's permanent delete (ruling A)", () => {
+  const RULE_SENTENCE =
+    'A hook handler cannot delete a record permanently: app-authored code cannot purge; its deletes enter the recycle bin.';
+
+  /**
+   * Bind one hook through the binder, on `account`'s `beforeInsert`, whose
+   * handler runs `use(ctx.api)` and keeps what it answered or threw; then fire
+   * it once with an insert by `ORG1_USER`.
+   */
+  async function runHandler(
+    engine: ObjectQL,
+    runAs: 'inherit' | 'user' | 'system',
+    use: (api: any) => Promise<unknown>,
+  ): Promise<{ value?: unknown; error?: any }> {
+    const seen: { value?: unknown; error?: any } = {};
+    const bound = bindHooksToEngine(engine, [{
+      name: 'purge_on_create',
+      object: 'account',
+      events: ['beforeInsert'],
+      runAs,
+      handler: async (ctx: any) => {
+        try { seen.value = await use(ctx.api); } catch (e) { seen.error = e; }
+      },
+    } as any], { packageId: 'app_under_test' });
+    expect(bound).toMatchObject({ registered: 1, errors: [] });
+    await engine.insert('account', { id: 'acc_trigger', name: 'Trigger', organization_id: 'org_1' }, ORG1_USER);
+    return seen;
+  }
+
+  const lonerDispatches = (dispatches: Dispatch[]) => dispatches.filter((d) => d.object === 'loner');
+
+  for (const runAs of ['inherit', 'user', 'system'] as const) {
+    for (const [shape, options] of [
+      ['by id', { where: { id: 'l1' }, permanent: true }],
+      ['in bulk', { where: { name: 'one' }, multi: true, permanent: true }],
+    ] as const) {
+      it(`runAs '${runAs}': \`delete(…, { permanent: true })\` ${shape} is refused 400 naming the rule; nothing is removed`, async () => {
+        const { engine, driver, dispatches } = await makeEngine();
+        driver.seed('loner', { id: 'l1', name: 'one' });
+
+        const { error } = await runHandler(engine, runAs, (api) => api.object('loner').delete(options));
+
+        expect(error).toMatchObject({ code: 'VALIDATION_ERROR', status: 400, param: 'permanent', object: 'loner' });
+        expect(String(error?.message).startsWith(RULE_SENTENCE)).toBe(true);
+        expect(lonerDispatches(dispatches)).toEqual([]);
+        expect(driver.rowsOf('loner').map((r: Row) => r.id)).toEqual(['l1']);
+        expect(entriesOf(driver)).toHaveLength(0);
+      });
+    }
+  }
+
+  for (const [derivation, use] of [
+    ['`sudo()`', (api: any) => api.sudo().object('loner').delete({ where: { id: 'l1' }, permanent: true })],
+    ['`transaction(cb)`', (api: any) => api.transaction((trx: any) => trx.object('loner').delete({ where: { id: 'l1' }, permanent: true }))],
+  ] as const) {
+    it(`is refused the same way on the api ${derivation} derives`, async () => {
+      const { engine, driver, dispatches } = await makeEngine();
+      driver.seed('loner', { id: 'l1', name: 'one' });
+
+      const { error } = await runHandler(engine, 'inherit', use);
+
+      expect(error).toMatchObject({ code: 'VALIDATION_ERROR', status: 400, param: 'permanent', object: 'loner' });
+      expect(String(error?.message).startsWith(RULE_SENTENCE)).toBe(true);
+      expect(lonerDispatches(dispatches)).toEqual([]);
+      expect(driver.rowsOf('loner').map((r: Row) => r.id)).toEqual(['l1']);
+    });
+  }
+
+  it('judges the options it forwards: a `permanent` that answers differently on a second read is read once', async () => {
+    const { engine, driver, dispatches } = await makeEngine();
+    driver.seed('loner', { id: 'l1', name: 'one' });
+    let reads = 0;
+    const options = { where: { id: 'l1' }, get permanent() { reads += 1; return reads > 1; } };
+
+    const { error } = await runHandler(engine, 'system', (api) => api.object('loner').delete(options));
+
+    expect(error).toBeUndefined();
+    expect(reads).toBe(1);
+    expect(lonerDispatches(dispatches).map((d) => d.operation)).toEqual(['delete']);
+    expect(entriesOf(driver).map((e) => e.record_id)).toEqual(['l1']);
+  });
+
+  for (const runAs of ['inherit', 'system'] as const) {
+    for (const [label, options] of [
+      ['no `permanent` key', { where: { id: 'l1' } }],
+      ['`permanent: false`', { where: { id: 'l1' }, permanent: false }],
+    ] as const) {
+      it(`runAs '${runAs}': the handler's delete with ${label} is the ordinary delete, which enters the bin`, async () => {
+        const { engine, driver, dispatches } = await makeEngine();
+        driver.seed('loner', { id: 'l1', name: 'one' });
+
+        const { error } = await runHandler(engine, runAs, (api) => api.object('loner').delete(options));
+
+        expect(error).toBeUndefined();
+        expect(lonerDispatches(dispatches).map((d) => d.operation)).toEqual(['delete']);
+        expect(driver.rowsOf('loner')).toEqual([]);
+        expect(entriesOf(driver).map((e) => e.record_id)).toEqual(['l1']);
+      });
+    }
+  }
+
+  it("platform code keeps the permanent delete: a hook registered in code, and the engine's own context", async () => {
+    const { engine, driver, dispatches } = await makeEngine();
+    driver.seed('loner', { id: 'l1', name: 'one' });
+    driver.seed('loner', { id: 'l2', name: 'two' });
+    engine.registerHook('beforeInsert', async (ctx: any) => {
+      await ctx.api.object('loner').delete({ where: { id: 'l1' }, permanent: true });
+    }, { object: 'account' });
+
+    await engine.insert('account', { id: 'acc_trigger', name: 'Trigger', organization_id: 'org_1' }, ORG1_USER);
+    await engine.createContext({ isSystem: true }).object('loner').delete({ where: { id: 'l2' }, permanent: true });
+
+    expect(lonerDispatches(dispatches).map((d) => d.operation)).toEqual(['purge', 'purge']);
+    expect(driver.rowsOf('loner')).toEqual([]);
+    expect(entriesOf(driver)).toHaveLength(0);
   });
 });
