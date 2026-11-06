@@ -877,8 +877,8 @@ function refusalKey(said: ExprValidationError): string {
  *   - CI, `main` push run 42192379976, job `Test Core (4/8)` (127808107135), a
  *     contended shard: 5034, `Test timed out in 5000ms.` A synchronous body
  *     runs to its end before vitest judges it, so 5034 is the whole run.
- *     Seven other `Test Core` jobs sampled from the same three days: 429 to
- *     3065.
+ *     The six other `Test Core` jobs sampled from the same three days: 429
+ *     to 3065.
  *   - Local, 4 vCPU, this file alone: 757 to 830 before the cut, 534 to 645
  *     after it. Pinned to one CPU shared with two busy loops: 2542 to 3063
  *     before, 1961 to 2137 after.
