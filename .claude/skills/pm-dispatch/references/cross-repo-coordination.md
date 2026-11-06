@@ -11,7 +11,7 @@
 - 车道可分席(席号 `· seat N`,或域×仓):忙时一车道开多席,闲时收归一席;每席独立座位贴。
 - 认领评论带 `Seat: domain:X#N` 行申报席号(缺省席 1);同席认领互斥,他席认领不触发自退。
 - 拆分触发预登记:单轮逼近 fire 周期,或某仓在全序下持续断粮 ⇒ 按仓拆回多席。
-- seam 卡单一归属:归修复落地仓的席,双仓皆动 objectstack 侧主导;涉 cloud 者归 cloud PM(下文)。
+- seam 卡单一归属:归修复落地仓的席,双仓皆动 objectstack 侧主导;涉 cloud 者归 cloud PM(域表)。
 - `scripts/pm/**` 等住 objectstack 的全板工具链单写手恒为 objectstack 侧席,他侧上游立卡回链。
 - 工装只答被告知的仓,缺 `--repo`/`PM_SWEEP_REPO` 即答 objectstack;⛔ 不答手上那张卡的仓。
 - 规则 1:issue 住在修复落地的仓,分诊时按判据严格执行。
