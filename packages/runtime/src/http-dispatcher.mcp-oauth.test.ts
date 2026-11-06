@@ -55,6 +55,8 @@ function makeHarness(opts: HarnessOptions = {}) {
       if (object === 'sys_api_key' && q?.where?.key === apiKeyHash) {
         return [{ id: 'k1', key: apiKeyHash, user_id: 'keyUser', revoked: false }];
       }
+      // The key's owner exists: an API key authenticates only as an owner who exists.
+      if (object === 'sys_user' && q?.where?.id === 'keyUser') return [{ id: 'keyUser' }];
       return [];
     },
     update: async () => ({}),

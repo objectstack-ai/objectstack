@@ -1109,22 +1109,29 @@ export function labelNames(issue) {
  * Lane labels retired INTO another lane, read as that lane everywhere this
  * sweep compares a card's `domain:*` label with a seat's (maintainer ruling
  * 2026-10-22, letter 乙: `domain:engine`, `domain:services` and `domain:cli`
- * fold into `domain:server`). The transition is designed to interrupt nothing:
+ * fold into `domain:server`; `domain:rest`, never a lane of its own, is read
+ * the same way by the maintainer's 2026-11-06 「车道的问题同意」). The
+ * transition is designed to interrupt nothing:
  * in-flight cards keep their old label until they land, open cards are
  * relabelled in batches by triage after the merge lands, and seat posts are
- * retitled at each seat's next round — so for a while one lane is spelled four
+ * retitled at each seat's next round — so for a while one lane is spelled five
  * ways on the board. Every lane comparison below goes through
  * {@link canonicalLane}, which is what lets a `domain:server` seat count a
  * `domain:engine` queue card as its own, a seat still titled `domain:cli` see
  * a claim on a `domain:server` card, and the census count a card carrying both
  * spellings once. ⛔ An alias map, never a vocabulary: it says nothing about
  * which labels EXIST (that is `scripts/pm/ensure-pm-labels.sh`), and the
- * cleanup PR that retires the three label objects deletes these rows with them.
+ * cleanup PR that retires the label objects deletes these rows with them. The
+ * write doors (`issue-create.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`)
+ * read this same map to WRITE `domain:server` in an alias's place
+ * (`rewriteRetiredLaneLabels`, `fleet-write/dispatch.mjs`): a rewrite, never a
+ * refusal.
  */
 export const LANE_LABEL_ALIASES = Object.freeze({
   'domain:engine': 'domain:server',
   'domain:services': 'domain:server',
   'domain:cli': 'domain:server',
+  'domain:rest': 'domain:server',
 });
 
 /**
@@ -32036,12 +32043,13 @@ async function selfTest() {
   b(BATTERY_SERVER, 'alias: `domain:engine` reads as `domain:server`', canonicalLane('domain:engine'), 'domain:server');
   b(BATTERY_SERVER, 'alias: `domain:services` reads as `domain:server`', canonicalLane('domain:services'), 'domain:server');
   b(BATTERY_SERVER, 'alias: `domain:cli` reads as `domain:server`', canonicalLane('domain:cli'), 'domain:server');
+  b(BATTERY_SERVER, 'alias: `domain:rest` reads as `domain:server`', canonicalLane('domain:rest'), 'domain:server');
   b(BATTERY_SERVER, 'alias control: `domain:server` is its own canonical form', canonicalLane('domain:server'), 'domain:server');
   b(BATTERY_SERVER, 'alias control: a lane the map does not name passes through untouched', canonicalLane('domain:spec'), 'domain:spec');
   b(BATTERY_SERVER, 'alias control: a non-lane label passes through untouched', canonicalLane('pm:queue'), 'pm:queue');
   b(BATTERY_SERVER, 'alias control: a non-string is handed back, never thrown on', canonicalLane(undefined), undefined);
   b(BATTERY_SERVER, 'alias map: frozen', Object.isFrozen(LANE_LABEL_ALIASES), true);
-  b(BATTERY_SERVER, 'alias map: it names exactly the three retired lanes', Object.keys(LANE_LABEL_ALIASES).sort().join(), 'domain:cli,domain:engine,domain:services');
+  b(BATTERY_SERVER, 'alias map: it names exactly the four retired lane spellings', Object.keys(LANE_LABEL_ALIASES).sort().join(), 'domain:cli,domain:engine,domain:rest,domain:services');
   b(BATTERY_SERVER, 'alias map: every value is the one surviving lane', Object.values(LANE_LABEL_ALIASES).every((v) => v === 'domain:server'), true);
   // The seat title: a post not yet retitled is the merged lane's seat, number intact.
   b(BATTERY_SERVER, 'seat title: a `domain:engine · seat 2` post reads as `domain:server`, seat 2', [seatLane(seat38('[PM seat] domain:engine · seat 2 — 🟢 os-b')).lane, seatLane(seat38('[PM seat] domain:engine · seat 2 — 🟢 os-b')).seat].join(), 'domain:server,2');
