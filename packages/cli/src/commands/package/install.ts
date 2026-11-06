@@ -188,7 +188,10 @@ export default class PackageInstall extends Command {
     // identities, and picking one silently would install as whichever the
     // command happened to prefer.
     if (flags.token && (flags.email || flags.password)) {
-      printError('Pass either --token or --email/--password, not both (OS_RUNTIME_TOKEN counts as --token).');
+      printError(
+        'Pass either --token or --email/--password, not both '
+        + '(OS_RUNTIME_TOKEN counts as --token; OS_RUNTIME_EMAIL/OS_RUNTIME_PASSWORD count as --email/--password).',
+      );
       this.exit(1);
       return;
     }
