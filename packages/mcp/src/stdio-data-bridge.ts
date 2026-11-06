@@ -160,6 +160,7 @@ import {
   isObjectSchemaMaskingEnabled,
   relateObjectSchemaMaskPosture,
   resolveObjectSchemaMaskPosture,
+  type ObjectSchemaMaskPosture,
   type ObjectSchemaMaskSecuritySurface,
 } from '@objectstack/metadata-core';
 
@@ -513,7 +514,7 @@ export function callerObjectView(view: McpObjectView, deps: CallerObjectViewDeps
     const enabled = isObjectSchemaMaskingEnabled();
     return async (def) => {
       const objectName = String(def?.name ?? '');
-      let posture;
+      let posture: ObjectSchemaMaskPosture;
       try {
         posture = await resolveObjectSchemaMaskPosture({
           objectName,

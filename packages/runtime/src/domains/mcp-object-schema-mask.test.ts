@@ -34,7 +34,12 @@ import {
     securityDoubleFor,
     type ObjectSchemaMaskCase,
 } from '@objectstack/metadata-core/testing';
-import { OBJECT_SCHEMA_MASK_DISABLE_ENV } from '@objectstack/metadata-core';
+import {
+    OBJECT_SCHEMA_MASK_DISABLE_ENV,
+    SysMetadataAuditObject,
+    SysMetadataHistoryObject,
+    SysMetadataObject,
+} from '@objectstack/metadata-core';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -177,11 +182,13 @@ describe('[ADR-0106] HTTP MCP bridge and the /metadata object door agree — the
 
     beforeAll(async () => {
         engine = new ObjectQL();
-        engine.registerDriver(
-            new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as any),
-            true,
-        );
+        const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as any);
+        // The protocol's object read merges the stored metadata overlay, so the store is provisioned.
+        const storeObjects = [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject] as any[];
+        await driver.initObjects(storeObjects);
+        engine.registerDriver(driver as any, true);
         await engine.init();
+        for (const o of storeObjects) engine.registry.registerObject(o, '@objectstack/platform-objects');
         engine.registerApp({
             id: 'com.objectstack.qa.mcp-object-schema-mask',
             name: 'MCP object schema mask',
