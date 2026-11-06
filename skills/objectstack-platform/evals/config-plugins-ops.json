@@ -287,6 +287,23 @@
           "OS_DEV_CRYPTO_KEY"
         ]
       }
+    },
+    {
+      "id": 17,
+      "prompt": "I edited an object in my app locally. How do I see my change on my ObjectOS Cloud environment?",
+      "expected_output": "Run `os deploy` from the project (`npm run deploy` in a scaffolded project, or press `d` in `os dev`). It builds, publishes `<manifest.version>-dev.<timestamp>`, installs it into your organization's only environment (or `--env <id>`, or the one `os environments switch` recorded) and waits until the environment serves it; `--no-wait` returns once the install is recorded. `os package publish` is for publishing a release version, not for this loop. On exit 1, a refusal before any write published nothing (log in with `os cloud login`, or pass `--env`); `could not build` is the environment's build failing while it keeps serving the previous build; a timeout means the install is recorded, so deploy again with a longer `--wait-timeout` or check the build in the ObjectOS Cloud console.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "os deploy",
+          "--env",
+          "--no-wait",
+          "--wait-timeout"
+        ],
+        "must_not_contain": [
+          "os push"
+        ]
+      }
     }
   ]
 }
