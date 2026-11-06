@@ -86,7 +86,7 @@
  * `sys_migration` flag (the `summary-nulls` reasoning: a flag nothing reads).
  */
 
-import { keysetWalk, type KeysetPageQuery } from '@objectstack/types';
+import { isSandboxOrigin, isSandboxOwnFault, keysetWalk, mapDataError, sandboxBusinessMessage, type KeysetPageQuery } from '@objectstack/types';
 import { objectNotFoundError, withTransientRetry, type RetryOptions } from '@objectstack/core';
 import { isValueDomainMember } from '@objectstack/spec/shared';
 
@@ -430,7 +430,7 @@ async function walkCodelessRows(
         // what is still codeless.
         const message = (err as any)?.message ?? String(err);
         logger.warn(`[record-currency-backfill] ${object} record ${String(id)}: ${message}`);
-        report.failures.push({ recordId: String(id), error: message });
+        report.failures.push({ recordId: String(id), error: rowFailureSentence(err, object, message) });
       }
     }
   }
@@ -439,6 +439,25 @@ async function walkCodelessRows(
     a.organizationId === b.organizationId ? 0 : a.organizationId === null ? 1 : b.organizationId === null ? -1 : a.organizationId < b.organizationId ? -1 : 1,
   );
   return report;
+}
+
+/**
+ * [#30675] The sentence a failed row's report entry carries. The report is now
+ * also a REST answer (`POST /meta/_migrate-record-currency-codes`), so a
+ * sandboxed hook's throw is read as the write doors read it — the import row's
+ * rule (`toFailedResult`, `@objectstack/core`'s import runner): a sandboxed
+ * error the `/data` door answers with a 5xx (a crash, a declared 5xx, the
+ * sandbox's own fault) takes that door's withheld sentence, and a sandboxed
+ * refusal takes the hook's own sentence, never the `hook '<name>' threw:`
+ * debug wrapper. Any other throw keeps its message, as before. The operator's
+ * log line above keeps the whole text.
+ */
+function rowFailureSentence(err: unknown, object: string, message: string): string {
+  if (isSandboxOrigin(err) || isSandboxOwnFault(err)) {
+    const door = mapDataError(err, object);
+    if (door.status >= 500) return String(door.body.error);
+  }
+  return sandboxBusinessMessage(err) ?? message;
 }
 
 /** Human-readable report body, shared by the CLI's dry-run and apply output. */

@@ -435,3 +435,57 @@ describe('backfillRecordCurrencyCodes — one organization at a time', () => {
     expect(formatRecordCurrencyBackfillReport(report).some((l) => l.includes('organization'))).toBe(false);
   });
 });
+
+/**
+ * [#30675] The report is also a REST answer (`POST /meta/_migrate-record-currency-codes`),
+ * so a failed row's entry reads a sandboxed hook's throw as the write doors read
+ * it: the hook's own sentence for a refusal, the door's withheld sentence for a
+ * crash, never the `hook '<name>' threw:` debug wrapper. The operator's log line
+ * keeps the whole text.
+ */
+describe('a failed row reads a sandboxed hook as the write doors do', () => {
+  const SENTENCE = 'Locked rows cannot be changed here.';
+  const sandboxed = (inner: string) => Object.assign(
+    Object.assign(new Error(`hook 'guard' threw: Error: ${inner}`), { name: 'SandboxError' }),
+    { innerMessage: inner },
+  );
+  const run = async (thrown: () => Error) => {
+    const warned: string[] = [];
+    const stub = {
+      getObject: () => ({
+        fields: {
+          amount: { type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } },
+          currency_code: { type: 'text', valueDomain: 'iso_4217_currency' },
+        },
+      }),
+      find: async () => [{ id: 'r1', amount: 5 }],
+      update: async () => { throw thrown(); },
+    };
+    const report = await backfillRecordCurrencyCodes(stub, { info: () => {}, warn: (m: string) => warned.push(m) }, {
+      object: 'deal', field: 'amount', code: 'USD', apply: true, retry: { maxRetries: 1 },
+    });
+    return { report, warned };
+  };
+
+  it("a refusal: the hook's own sentence, the wrapper only in the log", async () => {
+    const { report, warned } = await run(() => sandboxed(SENTENCE));
+    expect(report.failures).toEqual([{ recordId: 'r1', error: SENTENCE }]);
+    expect(warned.join('\n')).toContain(`hook 'guard' threw: Error: ${SENTENCE}`);
+  });
+
+  it("a crash and the sandbox's own fault: the door's withheld sentence, no native text", async () => {
+    for (const thrown of [
+      () => sandboxed('TypeError: __crash_words__'),
+      () => Object.assign(new Error("hook 'guard' exceeded CPU budget of 50ms"), { name: 'SandboxError' }),
+    ]) {
+      const { report } = await run(thrown);
+      expect(report.failures).toHaveLength(1);
+      expect(report.failures[0]!.error).not.toMatch(/__crash_words__|budget|threw:/);
+    }
+  });
+
+  it('CONTROL: any other throw keeps its message, as before', async () => {
+    const { report } = await run(() => new Error('driver refused this row'));
+    expect(report.failures).toEqual([{ recordId: 'r1', error: 'driver refused this row' }]);
+  });
+});
