@@ -355,8 +355,12 @@ export const SysUser = ObjectSchema.create({
         // field-backed: the grant object lives in plugin-security, whose
         // metadata the console need not have loaded on this list, and an
         // unresolvable field-backed param makes the dialog refuse the whole
-        // action. The grant column is a text field anyway (its picker is a
-        // widget hint params do not inherit), so nothing is lost.
+        // action. The value is a permission set's NAME, a `text` value like
+        // the grant column it lands in, and `widget: 'permission-ref'` draws
+        // the grant column's own picker (ADR-0131 D4): a searchable list of
+        // the security catalog's sets, each shown by its label, that submits
+        // the chosen set's name. So the administrator picks what Setup shows
+        // and never types a machine name.
         // The route writes the grant under the administrator's OWN context in
         // the same transaction as the account: the delegated-administration
         // gate and the catalog name check judge it as they judge Setup's
@@ -364,6 +368,7 @@ export const SysUser = ObjectSchema.create({
         {
           name: 'permissionSet',
           type: 'text',
+          widget: 'permission-ref',
           label: 'Permission Set',
           required: false,
           helpText: 'Optional. Grants this permission set to the new user, so they can open their apps on first sign-in.',

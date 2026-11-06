@@ -16,6 +16,9 @@
  *       back with it — no user is left without the access that was asked for.
  *   G3  a caller without the authority to create users is refused 403, and
  *       nothing is written.
+ *   G4  a set's LABEL sent where its name belongs (what an administrator who
+ *       typed what Setup shows would send) is refused 400 with one line naming
+ *       the set to pick, and no user is created.
  *
  * Harness: the admin identity routes 501 unless better-auth's `admin` plugin
  * is on; `OS_SCIM_ENABLED` is the one env knob that reaches it (see
@@ -85,8 +88,28 @@ describe('#25338: Create User grants a permission set through the delegated-admi
     expect(res.status, await res.clone().text()).toBe(400);
     const body = await res.json();
     expect(body.error.code).toBe('VALIDATION_FAILED');
+    expect(body.error.message).toBe(
+      "The permission set was not assigned, so no user was created. There is no permission set named 'no_such_set_25338': choose one from the list.",
+    );
     expect(await findRows(ql, 'sys_user', { email })).toHaveLength(0);
     expect(await findRows(ql, 'sys_user_permission_set', { permission_set: 'no_such_set_25338' })).toHaveLength(0);
+  }, 120_000);
+
+  it('G4 a set\'s label sent as its name: 400 naming the set to pick, and no user is created', async () => {
+    const email = 'labelled.30117@example.com';
+    const res = await stack.apiAs(adminToken, 'POST', '/auth/admin/create-user', {
+      email,
+      password: 'Labelled!Pass123',
+      permissionSet: 'Showcase Contributor',
+    });
+    expect(res.status, await res.clone().text()).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe('VALIDATION_FAILED');
+    expect(body.error.message).toBe(
+      "The permission set was not assigned, so no user was created. 'Showcase Contributor' is the label of the "
+        + `permission set named '${GRANTED_SET}': choose it from the list, or enter '${GRANTED_SET}'.`,
+    );
+    expect(await findRows(ql, 'sys_user', { email })).toHaveLength(0);
   }, 120_000);
 
   it('G3 a caller without authority: 403, and nothing is written', async () => {
