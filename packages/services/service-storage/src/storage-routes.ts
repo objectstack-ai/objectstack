@@ -1646,16 +1646,45 @@ export function registerStorageFamily(
   // [#30892] GET / PUT /storage/upload-links/:token — a single-use upload link
   //
   // Minted for a signed-in user by `createUploadLinkAs` (the MCP door's
-  // `create_upload_link` tool) and opened by that person, often on a phone
-  // with no session: the token IS the credential, as on the `_local/raw`
-  // routes, so neither route reads a session. The GET answers the picker
+  // `create_upload_link` tool) and opened by that same user, signed in: the
+  // token AND the request's own session are both required. No session answers
+  // 401 `AUTH_REQUIRED`, as every other storage door does, so this is not an
+  // anonymous door (ADR-0138 D2); a session naming another user answers the
+  // one unusable-link refusal and spends nothing. The GET answers the picker
   // page, the PUT spends the link on the body. What a link is bound to, who
   // the upload acts as, and how one use is enforced are the service's
   // (`record-file-access.ts`); these doors read no query parameter, carry
   // the bytes, and answer.
   // ---------------------------------------------------------------------------
+
+  // The signed-in user a link request carries, or `null` once the 401 is sent.
+  // No resolver wired (a kernel without an auth service) fails CLOSED here,
+  // unlike the bare-kernel upload doors: a link is minted for a user, so a
+  // request whose user cannot be read can never be that user. A resolver that
+  // throws fails closed too.
+  const uploadLinkCaller = async (req: IHttpRequest, res: IHttpResponse): Promise<string | null> => {
+    let session: StorageUploadSession | null | undefined = null;
+    if (opts.resolveSession) {
+      try {
+        session = await opts.resolveSession(req);
+      } catch {
+        session = null;
+      }
+    }
+    if (session?.userId) return String(session.userId);
+    sendError(
+      res,
+      401,
+      'AUTH_REQUIRED',
+      'Sign in as the person this upload link was made for, then open the link again.',
+    );
+    return null;
+  };
+
   mountFamilyRoute('get', `${basePath}/${UPLOAD_LINK_SEGMENT}/:token`, async (req: IHttpRequest, res: IHttpResponse) => {
     try {
+      const caller = await uploadLinkCaller(req, res);
+      if (caller === null) return;
       const door = getUploadLinkDoor?.();
       if (!door) {
         sendUnusableUploadLinkPage(res, UPLOAD_LINK_UNUSABLE_STATUS);
@@ -1663,7 +1692,7 @@ export function registerStorageFamily(
       }
       let view: UploadLinkView;
       try {
-        view = await door.inspectUploadLink(String(req.params.token ?? ''));
+        view = await door.inspectUploadLink(String(req.params.token ?? ''), caller);
       } catch (err) {
         if (isUnusableUploadLink(err)) {
           sendUnusableUploadLinkPage(res, UPLOAD_LINK_UNUSABLE_STATUS);
@@ -1680,6 +1709,8 @@ export function registerStorageFamily(
 
   mountFamilyRoute('put', `${basePath}/${UPLOAD_LINK_SEGMENT}/:token`, async (req: IHttpRequest, res: IHttpResponse) => {
     try {
+      const caller = await uploadLinkCaller(req, res);
+      if (caller === null) return;
       const door = getUploadLinkDoor?.();
       if (!door) {
         sendError(res, UPLOAD_LINK_UNUSABLE_STATUS, UPLOAD_LINK_UNUSABLE_CODE, UPLOAD_LINK_UNUSABLE_MESSAGE);
@@ -1705,11 +1736,15 @@ export function registerStorageFamily(
         sendError(res, 400, 'INVALID_REQUEST', 'Binary body required: the file bytes, as the request body');
         return;
       }
-      const outcome = await door.consumeUploadLink(String(req.params.token ?? ''), {
-        filename: uploadLinkFilename(req.headers?.['x-file-name']),
-        mimeType: uploadLinkMimeType(req.headers?.['content-type']),
-        data,
-      });
+      const outcome = await door.consumeUploadLink(
+        String(req.params.token ?? ''),
+        {
+          filename: uploadLinkFilename(req.headers?.['x-file-name']),
+          mimeType: uploadLinkMimeType(req.headers?.['content-type']),
+          data,
+        },
+        caller,
+      );
       sendOk(res, {
         fileId: outcome.fileId,
         size: outcome.size,

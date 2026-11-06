@@ -216,12 +216,17 @@ export interface ICallerRecordFileService {
   ): Promise<UploadLinkGrant>;
 }
 
-/** The two verbs the upload-link HTTP doors call. */
+/**
+ * The two verbs the upload-link HTTP doors call. `callerUserId` is the user
+ * the request's own session names: a link is usable only by the user it was
+ * minted for, signed in, so the token alone opens nothing. Another user gets
+ * the one unusable-link refusal, and the link is not spent.
+ */
 export interface UploadLinkDoor {
   /** The link's view, or the one unusable-link refusal. Writes nothing. */
-  inspectUploadLink(token: string): Promise<UploadLinkView>;
+  inspectUploadLink(token: string, callerUserId: string): Promise<UploadLinkView>;
   /** Spend the link on `upload`, landing it where the link is bound. */
-  consumeUploadLink(token: string, upload: UploadLinkUpload): Promise<UploadLinkOutcome>;
+  consumeUploadLink(token: string, upload: UploadLinkUpload, callerUserId: string): Promise<UploadLinkOutcome>;
 }
 
 /** The data-engine surface these verbs use: the reads and writes every engine has, plus its schema read. */
@@ -653,10 +658,16 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     };
   }
 
-  /** The open, unexpired link a token names, with its row — or the one refusal. */
+  /**
+   * The open, unexpired link a token names, minted for `callerUserId`, with
+   * its row — or the one refusal. A link minted for someone else answers
+   * exactly as an unknown one does, so a signed-in stranger holding the token
+   * learns nothing and spends nothing.
+   */
   private async openLink(
     store: StorageMetadataStore,
     token: string,
+    callerUserId: string,
   ): Promise<{ row: FileRecord; state: UploadLinkState }> {
     const parsed = parseToken(token);
     if (!parsed) refuseUnusableLink();
@@ -666,19 +677,20 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     if (!sameDigest(state.secret_sha256, sha256Hex(parsed.secret))) refuseUnusableLink();
     const deadline = Date.parse(state.expires_at);
     if (!Number.isFinite(deadline) || deadline <= this.now()) refuseUnusableLink();
+    if (!nonEmptyString(callerUserId) || state.user_id !== callerUserId) refuseUnusableLink();
     return { row, state };
   }
 
-  async inspectUploadLink(token: string): Promise<UploadLinkView> {
-    const { state } = await this.openLink(new StorageMetadataStore(this.engineOrRefuse()), token);
+  async inspectUploadLink(token: string, callerUserId: string): Promise<UploadLinkView> {
+    const { state } = await this.openLink(new StorageMetadataStore(this.engineOrRefuse()), token, callerUserId);
     return { expiresAt: state.expires_at, target: state.target };
   }
 
-  async consumeUploadLink(token: string, upload: UploadLinkUpload): Promise<UploadLinkOutcome> {
+  async consumeUploadLink(token: string, upload: UploadLinkUpload, callerUserId: string): Promise<UploadLinkOutcome> {
     const engine = this.engineOrRefuse();
     const storage = this.storageOrRefuse();
     const store = new StorageMetadataStore(engine);
-    const { row, state } = await this.openLink(store, token);
+    const { row, state } = await this.openLink(store, token, callerUserId);
 
     if (!nonEmptyString(upload.filename)) refuse('VALIDATION_ERROR', 400, 'The upload names no file.');
     if (!Buffer.isBuffer(upload.data)) refuse('VALIDATION_ERROR', 400, 'The upload carries no bytes.');

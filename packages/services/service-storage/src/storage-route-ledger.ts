@@ -115,10 +115,10 @@ export const STORAGE_ROUTE_LEDGER: readonly StorageRouteLedgerEntry[] = [
     note: 'stable 302 to the same signed URL. This is the value objectql stamps into file/image field payloads (engine.ts buildFileValue), followed verbatim by <img src>/<a href> — a browser URL, not an SDK call. The SDK resolves via the /url sibling above.' },
 
   // ── single-use upload link (#30892) ───────────────────────────────────────
-  { route: 'GET /api/v1/storage/upload-links/:token', family: 'upload-link', disposition: 'public',
-    note: 'the page an upload link opens: a file picker that PUTs to the same address. Minted for a signed-in user by createUploadLinkAs (the MCP create_upload_link tool) and opened by that person, often on a phone with no session, so the token is the credential. A used, expired or unknown token answers one 404 page; a usable one names no record, field or user. HTML, not the JSON envelope: a browser page, never an SDK call.' },
-  { route: 'PUT /api/v1/storage/upload-links/:token', family: 'upload-link', disposition: 'public',
-    note: 'spends the link on the request body: one conditional write turns it from open to used, then the file lands where the link is bound, written as the minting user (re-resolved now). Answers { success: true, data: { fileId, size, field | attachmentId } }; a used, expired or unknown token answers 404 RESOURCE_NOT_FOUND, the same for all three.' },
+  { route: 'GET /api/v1/storage/upload-links/:token', family: 'upload-link', disposition: 'server-only',
+    note: 'the page an upload link opens: a file picker that PUTs to the same address. Minted for a signed-in user by createUploadLinkAs (the MCP create_upload_link tool) and usable only by that user, signed in: no session answers 401 AUTH_REQUIRED (JSON), and a used, expired or unknown token, or another user\'s link, answers one 404 page. A usable one names no record, field or user. HTML, not the JSON envelope: a browser page, never an SDK call.' },
+  { route: 'PUT /api/v1/storage/upload-links/:token', family: 'upload-link', disposition: 'server-only',
+    note: 'spends the link on the request body, for the signed-in user it was minted for (no session: 401 AUTH_REQUIRED): one conditional write turns it from open to used, then the file lands where the link is bound, written as that user (re-resolved now). Answers { success: true, data: { fileId, size, field | attachmentId } }; a used, expired or unknown token, or another user\'s link, answers 404 RESOURCE_NOT_FOUND, the same for all.' },
 
   // ── local-driver loopback (LocalStorageAdapter presign targets) ───────────
   { route: 'PUT /api/v1/storage/_local/raw/:token', family: 'local-driver', disposition: 'server-only',

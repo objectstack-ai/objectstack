@@ -297,12 +297,12 @@ export class FileAttachmentService
     return this.recordFilesOrRefuse().createUploadLinkAs(object, recordId, target, context);
   }
 
-  async inspectUploadLink(token: string): Promise<UploadLinkView> {
-    return this.recordFilesOrRefuse().inspectUploadLink(token);
+  async inspectUploadLink(token: string, callerUserId: string): Promise<UploadLinkView> {
+    return this.recordFilesOrRefuse().inspectUploadLink(token, callerUserId);
   }
 
-  async consumeUploadLink(token: string, upload: UploadLinkUpload): Promise<UploadLinkOutcome> {
-    return this.recordFilesOrRefuse().consumeUploadLink(token, upload);
+  async consumeUploadLink(token: string, upload: UploadLinkUpload, callerUserId: string): Promise<UploadLinkOutcome> {
+    return this.recordFilesOrRefuse().consumeUploadLink(token, upload, callerUserId);
   }
 
   async attachFile(input: AttachFileInput): Promise<AttachedFile> {

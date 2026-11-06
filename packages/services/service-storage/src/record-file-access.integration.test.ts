@@ -199,7 +199,7 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
     if (rootDir) await fs.rm(rootDir, { recursive: true, force: true });
   });
 
-  /** Call a storage route with no session: the link is the credential. */
+  /** Call a storage route; a session is whatever `x-test-user` the request carries. */
   const call = async (method: string, path: string, req: Record<string, unknown> = {}): Promise<Res> => {
     const res: any = {
       _status: 200, _json: null, _sent: undefined, _headers: {},
@@ -214,11 +214,14 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
     return res;
   };
   const tokenOf = (path: string) => path.slice(path.lastIndexOf('/') + 1);
-  const openLink = (token: string) => call('GET', `${BASE}/upload-links/:token`, { params: { token } });
-  const useLink = (token: string, bytes: Buffer, headers: Record<string, string> = {}) =>
+  /** The session a link request carries: the minting owner's unless named, none for `null`. */
+  const sessionOf = (user: string | null): Record<string, string> => (user === null ? {} : { 'x-test-user': user });
+  const openLink = (token: string, user: string | null = OWNER.userId) =>
+    call('GET', `${BASE}/upload-links/:token`, { params: { token }, headers: sessionOf(user) });
+  const useLink = (token: string, bytes: Buffer, headers: Record<string, string> = {}, user: string | null = OWNER.userId) =>
     call('PUT', `${BASE}/upload-links/:token`, {
       params: { token },
-      headers: { 'content-type': 'application/pdf', 'x-file-name': encodeURIComponent('scan 1.pdf'), ...headers },
+      headers: { 'content-type': 'application/pdf', 'x-file-name': encodeURIComponent('scan 1.pdf'), ...headers, ...sessionOf(user) },
       rawBody: async () => bytes,
     });
 
@@ -373,7 +376,7 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       const grant = await files.createUploadLinkAs('claim', ids.claimB, { field: 'policy' }, OWNER as never);
       // Nothing the request says moves the binding: no record, field or user is read from it.
       const res = await useLink(tokenOf(grant.path), Buffer.from('bound bytes'), {
-        'x-object': 'claim', 'x-record-id': ids.claimA, 'x-field': 'photos', 'x-test-user': OUTSIDER.userId,
+        'x-object': 'claim', 'x-record-id': ids.claimA, 'x-field': 'photos', 'x-user-id': OUTSIDER.userId,
       });
       expect(res._status, JSON.stringify(res._json)).toBe(200);
       expect(res._json).toEqual({ success: true, data: { fileId: expect.any(String), size: 11, field: 'policy' } });
@@ -415,6 +418,38 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       }
       // The used link's row is gone; the field holds the first upload only.
       expect(await fileRow(id)).toBeUndefined();
+    });
+
+    it('needs the minting user signed in: no session answers 401 AUTH_REQUIRED on the page and the PUT, and spends nothing', async () => {
+      const grant = await files.createUploadLinkAs('claim', ids.claimB, { field: 'policy' }, OWNER as never);
+      const token = tokenOf(grant.path);
+      const before = (await claim(ids.claimB)).policy;
+      const page = await openLink(token, null);
+      expect(page._status).toBe(401);
+      expect(page._json.error).toMatchObject({ code: 'AUTH_REQUIRED' });
+      expect(page._sent).toBeUndefined();
+      const put = await useLink(token, Buffer.from('anonymous'), {}, null);
+      expect(put._status).toBe(401);
+      expect(put._json.error).toMatchObject({ code: 'AUTH_REQUIRED' });
+      expect((await claim(ids.claimB)).policy).toBe(before);
+      // Still open: the owner, signed in, uses it once.
+      expect((await useLink(token, Buffer.from('owner, signed in')))._status).toBe(200);
+    });
+
+    it('another signed-in user gets the one unusable-link 404 and spends nothing; the minting user then uses it', async () => {
+      const grant = await files.createUploadLinkAs('claim', ids.claimB, { attachments: true }, OWNER as never);
+      const token = tokenOf(grant.path);
+      for (const user of [REVIEWER.userId, OUTSIDER.userId]) {
+        const page = await openLink(token, user);
+        expect(page._status).toBe(404);
+        expect(String(page._sent)).toContain('This upload link cannot be used');
+        const put = await useLink(token, Buffer.from('not mine'), {}, user);
+        expect(put._status).toBe(404);
+        expect(put._json.error).toMatchObject({ code: 'RESOURCE_NOT_FOUND', message: UPLOAD_LINK_UNUSABLE_MESSAGE });
+      }
+      const own = await useLink(token, Buffer.from('mine'));
+      expect(own._status, JSON.stringify(own._json)).toBe(200);
+      expect(own._json.data.attachmentId).toEqual(expect.any(String));
     });
 
     it('of two concurrent uses exactly one lands', async () => {

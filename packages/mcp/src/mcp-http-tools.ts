@@ -1931,9 +1931,10 @@ export function registerFileTools(
       {
         description:
           'Create a link through which the user uploads one file onto a record: into a file field (field) or ' +
-          'as an attachment (attachments: true). Give the link to the user to open; it works once, for this ' +
-          'record and field only, and expires (see expiresAt). The upload is stored as the user, so they must be ' +
-          'able to edit the record (and the field).',
+          'as an attachment (attachments: true). Give the link to the user to open in a browser where they are ' +
+          'signed in to this deployment as themselves; it works only for them, once, for this record and field ' +
+          'only, and expires (see expiresAt). The upload is stored as the user, so they must be able to edit the ' +
+          'record (and the field).',
         inputSchema: strictToolInput(
           {
             surface: 'this create_upload_link call',
@@ -1974,7 +1975,8 @@ export function registerFileTools(
             recordId,
             ...(field !== undefined ? { field } : { attachments: true }),
             instructions:
-              'Give this link to the user to open in a browser and pick the file. It works once, until expiresAt.',
+              'Give this link to the user to open in a browser where they are signed in to this deployment, and ' +
+              'pick the file. It works only for them, once, until expiresAt.',
           });
         } catch (err) {
           return errorResultWithCode(err);

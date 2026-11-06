@@ -187,9 +187,10 @@ const READ_FILE_TOOL_LINES = `- **read_file({ objectName, recordId, field?, file
 /** [#30892] `create_upload_link`'s entry, rendered where `registerFileTools` registers it (`data:write`). */
 const UPLOAD_LINK_TOOL_LINES = `- **create_upload_link({ objectName, recordId, field? | attachments: true })** —
   a link through which the user uploads one file onto a record: into a file
-  field, or as an attachment. Give the link to the user; it works once, for
-  that record and field only, and expires at \`expiresAt\`. The upload is
-  stored as the user, so they must be able to edit the record.
+  field, or as an attachment. Give the link to the user to open where they
+  are signed in to this deployment; it works only for them, once, for that
+  record and field only, and expires at \`expiresAt\`. The upload is stored
+  as the user, so they must be able to edit the record.
 `;
 
 /** The file pair's entries for a host whose bridge carries them, each for the grant that registers it. */

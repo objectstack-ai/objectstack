@@ -8,17 +8,19 @@ import { UPLOAD_LINK_UNUSABLE_MESSAGE } from './upload-link-wire.js';
 /**
  * [#30892] The page an upload link opens: one file picker that sends the
  * chosen file back to the same link. Opened by the person the link was made
- * for — on a phone, often — so it is a page, not an API.
+ * for, signed in (the route refuses any other request before this page is
+ * built), so it is a page, not an API.
  *
  * What it does not do, by design:
  *
- *  - It names no record, field, user or organization. The link's holder is
- *    the person who asked for it, but a link travels (a forwarded message, a
- *    screenshot), so the page says only that a file is wanted and until when.
+ *  - It names no record, field, user or organization. Only the user the link
+ *    was made for can open it, but the page still says only that a file is
+ *    wanted and until when: what the link is for is the agent's to say.
  *  - It loads nothing. Script and style are inline, admitted by a per-response
  *    nonce in the Content-Security-Policy; every other source is `'none'`,
  *    and the one request it makes is the `PUT` to its own address
- *    (`connect-src 'self'`). No form posts, no framing, no base URL.
+ *    (`connect-src 'self'`), carrying the session cookie the route asks for
+ *    (`credentials: 'same-origin'`). No form posts, no framing, no base URL.
  *  - It is never cached, never indexed and never sends a referrer, so the
  *    token in its address stays in the address bar.
  *
@@ -77,7 +79,7 @@ const UPLOAD_SCRIPT = [
   'button.addEventListener("click",function(){',
   'var file=input.files&&input.files[0];if(!file)return;',
   'button.disabled=true;input.disabled=true;status.textContent="Uploading\\u2026";',
-  'fetch(location.pathname,{method:"PUT",credentials:"omit",cache:"no-store",',
+  'fetch(location.pathname,{method:"PUT",credentials:"same-origin",cache:"no-store",',
   'headers:{"content-type":file.type||"application/octet-stream","x-file-name":encodeURIComponent(file.name)},body:file})',
   '.then(function(r){return r.json().catch(function(){return null;}).then(function(b){return{ok:r.ok,body:b};});})',
   '.then(function(r){',

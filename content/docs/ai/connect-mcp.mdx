@@ -281,10 +281,12 @@ record means no file**, refused with the same `RECORD_NOT_FOUND`.
 - **`create_upload_link({ objectName, recordId, field? | attachments: true })`**
   needs a record the caller may edit (and, for a field, a field they may
   write). It answers a link and its expiry (ten minutes). The user opens the
-  link in a browser, on a phone too, picks one file, and it lands on exactly
-  that record and field, or as an attachment of that record. The link works
-  once: a second use, an expired link and an unknown link all get the same
-  answer. The upload is stored as the user who asked for the link, with their
+  link in a browser where they are signed in to this deployment, picks one
+  file, and it lands on exactly that record and field, or as an attachment of
+  that record. On a phone, they sign in there first. The link works only for
+  the user it was made for, and only once: without a session it answers
+  `401`, and a second use, an expired link, an unknown link and another user's
+  link all get the same `404`. The upload is stored as that user, with their
   access checked again when the file arrives, and it meets the storage
   service's maximum upload size before the link is spent. Sending a file's
   bytes through the MCP protocol itself is not supported yet.

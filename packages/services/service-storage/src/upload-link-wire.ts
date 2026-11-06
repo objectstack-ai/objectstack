@@ -13,10 +13,11 @@ import type { StandardErrorCode } from '@objectstack/spec/api';
 export const UPLOAD_LINK_SEGMENT = 'upload-links';
 
 /**
- * The one answer a link that cannot be used gets — used, expired or unknown
- * alike, so the answer says nothing about which.
+ * The one answer a link that cannot be used gets — used, expired, unknown, or
+ * minted for another user than the signed-in caller, alike, so the answer says
+ * nothing about which.
  */
 export const UPLOAD_LINK_UNUSABLE_STATUS = 404;
 export const UPLOAD_LINK_UNUSABLE_CODE: StandardErrorCode = 'RESOURCE_NOT_FOUND';
 export const UPLOAD_LINK_UNUSABLE_MESSAGE =
-  'This upload link cannot be used: it was used already, it has expired, or it does not exist. Ask for a new link.';
+  'This upload link cannot be used: it was used already, it has expired, it was made for someone else, or it does not exist. Ask for a new link.';

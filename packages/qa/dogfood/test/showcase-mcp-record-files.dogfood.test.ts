@@ -14,7 +14,9 @@
 // bearer reaches `/api/v1/mcp`, the bridge reads the record through
 // `get_record`'s door under the showcase's own owner RLS and
 // `controlled_by_parent` derivation, the storage plugin answers, and the link
-// is spent through the real `PUT /api/v1/storage/upload-links/:token`.
+// is spent through the real `PUT /api/v1/storage/upload-links/:token` by the
+// user it was minted for, signed in (the link is not an anonymous door: no
+// session answers 401, as every other storage door does).
 //
 // The records: `showcase_invoice` (owner RLS on `created_by`, `enable.files`,
 // so it holds attachments) and `showcase_invoice_line` (`controlled_by_parent`,
@@ -42,7 +44,8 @@ const MIB = 1024 * 1024;
 const READ_CAP = 10 * MIB;
 /** `UPLOAD_LINK_TTL_SECONDS` in `@objectstack/service-storage`. */
 const LINK_TTL_MS = 600_000;
-const UNUSABLE = 'This upload link cannot be used: it was used already, it has expired, or it does not exist. Ask for a new link.';
+const UNUSABLE =
+  'This upload link cannot be used: it was used already, it has expired, it was made for someone else, or it does not exist. Ask for a new link.';
 
 // The member's set: CRUD on the invoice graph, so a request reaches the RLS
 // layer, plus an OWNER policy on the master invoice. The line carries no RLS of
@@ -141,9 +144,17 @@ describe('[#30892] showcase: an agent reads and attaches a record\'s files over 
     return { path: toPath(json.url), answer: json };
   }
 
-  /** Spend a link: an anonymous PUT of `body`, as a browser page or `curl -T` sends it. */
-  const put = (path: string, body: Buffer, headers: Record<string, string> = {}) =>
-    stack.raw(path, { method: 'PUT', headers: { 'content-type': 'application/pdf', 'x-file-name': 'receipt.pdf', ...headers }, body });
+  /** The credential a link request carries: the member's unless named, none for `null`. */
+  const authOf = (token: string | null): Record<string, string> => (token === null ? {} : { Authorization: `Bearer ${token}` });
+  /** Open a link's page, signed in as `token`'s user. */
+  const open = (path: string, token: string | null = memberToken) => stack.raw(path, { headers: authOf(token) });
+  /** Spend a link: a PUT of `body`, signed in as `token`'s user, as the page's script or `curl -T` sends it. */
+  const put = (path: string, body: Buffer, headers: Record<string, string> = {}, token: string | null = memberToken) =>
+    stack.raw(path, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/pdf', 'x-file-name': 'receipt.pdf', ...headers, ...authOf(token) },
+      body,
+    });
 
   const line = (id: string) => ql.findOne('showcase_invoice_line', { where: { id }, ...SYS });
   /** The file id a line's `receipt` holds; a read expands a file reference to its file. */
@@ -217,7 +228,7 @@ describe('[#30892] showcase: an agent reads and attaches a record\'s files over 
 
       // The page a person opens: no cache, no referrer, a CSP, and nothing
       // about the record or the user on it.
-      const page = await stack.raw(path);
+      const page = await open(path);
       expect(page.status).toBe(200);
       expect(page.headers.get('cache-control')).toContain('no-store');
       expect(page.headers.get('referrer-policy')).toBe('no-referrer');
@@ -255,12 +266,31 @@ describe('[#30892] showcase: an agent reads and attaches a record\'s files over 
       const again = await put(path, minimalPdf('Replaced'));
       expect(again.status).toBe(404);
       expect(((await again.json()) as any).error).toMatchObject({ code: 'RESOURCE_NOT_FOUND', message: UNUSABLE });
-      expect((await stack.raw(path)).status).toBe(404);
+      expect((await open(path)).status).toBe(404);
       // An unknown token answers exactly the same.
       const unknown = await put('/api/v1/storage/upload-links/00000000-0000-4000-8000-000000000000.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', pdf);
       expect(unknown.status).toBe(404);
       expect(((await unknown.json()) as any).error).toMatchObject({ code: 'RESOURCE_NOT_FOUND', message: UNUSABLE });
       fileId = (await receiptOf(memberLine))!;
+    });
+
+    it('works only for the member, signed in: anonymous is 401, another signed-in user the same 404, and neither spends it', async () => {
+      const { path } = await mint({ objectName: 'showcase_invoice_line', recordId: memberLine, field: 'receipt' });
+      const held = await receiptOf(memberLine);
+      for (const res of [await open(path, null), await put(path, minimalPdf('Anonymous'), {}, null)]) {
+        expect(res.status).toBe(401);
+        expect(((await res.json()) as any).error.code).toBe('AUTH_REQUIRED');
+      }
+      expect((await open(path, adminToken)).status).toBe(404);
+      const stranger = await put(path, minimalPdf('Not yours'), {}, adminToken);
+      expect(stranger.status).toBe(404);
+      expect(((await stranger.json()) as any).error).toMatchObject({ code: 'RESOURCE_NOT_FOUND', message: UNUSABLE });
+      expect(await receiptOf(memberLine)).toBe(held);
+      // Still open: the member spends it.
+      const own = await put(path, pdf);
+      expect(own.status).toBe(200);
+      fileId = ((await own.json()) as any).data.fileId;
+      expect(await receiptOf(memberLine)).toBe(fileId);
     });
 
     it('expires: past ten minutes the page and the upload answer the same 404, and nothing lands', async () => {
@@ -269,7 +299,7 @@ describe('[#30892] showcase: an agent reads and attaches a record\'s files over 
       const now = Date.now();
       const spy = vi.spyOn(Date, 'now').mockReturnValue(now + LINK_TTL_MS + 1_000);
       try {
-        expect((await stack.raw(path)).status).toBe(404);
+        expect((await open(path)).status).toBe(404);
         const late = await put(path, minimalPdf('Late'));
         expect(late.status).toBe(404);
         expect(((await late.json()) as any).error).toMatchObject({ code: 'RESOURCE_NOT_FOUND', message: UNUSABLE });
@@ -330,7 +360,7 @@ describe('[#30892] showcase: an agent reads and attaches a record\'s files over 
 
     it('access follows the record: the admin\'s invoice is refused, and its attachment cannot be read through the member\'s own invoice', async () => {
       const { path } = await mint({ objectName: 'showcase_invoice', recordId: adminInvoice, attachments: true }, adminToken);
-      const res = await put(path, Buffer.from('admin only'), { 'content-type': 'text/plain', 'x-file-name': 'admin.txt' });
+      const res = await put(path, Buffer.from('admin only'), { 'content-type': 'text/plain', 'x-file-name': 'admin.txt' }, adminToken);
       expect(res.status).toBe(200);
       adminAttachmentId = ((await res.json()) as any).data.attachmentId;
 
