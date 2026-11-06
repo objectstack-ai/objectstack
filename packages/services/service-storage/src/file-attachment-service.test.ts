@@ -551,12 +551,16 @@ describe('attachFileAs for a member who cannot read sys_file: the verb vouches f
     return booted;
   }
 
-  it('precondition: the member cannot read sys_file, not even the file they own', async () => {
-    const { ql } = await bootMember();
-    await ql.insert('sys_file', {
+  /** A committed file the member owns, written by the system as the upload doors write one. */
+  const seedOwnFile = (ql: ObjectQL) =>
+    ql.insert('sys_file', {
       id: 'file_alice', key: 'attachments/file_alice/n.txt', name: 'n.txt', mime_type: 'text/plain', size: 1,
       scope: 'attachments', acl: 'private', status: 'committed', owner_id: 'usr_alice', organization_id: 'org_a',
     }, SYS);
+
+  it('precondition: the member cannot read sys_file, not even the file they own', async () => {
+    const { ql } = await bootMember();
+    await seedOwnFile(ql);
     const err = await refusalOf(ql.findOne('sys_file', { where: { id: 'file_alice' }, context: ALICE } as any));
     expect([err.code, err.status]).toEqual(['PERMISSION_DENIED', 403]);
   });
@@ -602,19 +606,35 @@ describe('attachFileAs for a member who cannot read sys_file: the verb vouches f
     await expectNothingLeft(ql, storage);
   });
 
-  it('control: the member’s own insert of sys_attachment through the data engine, naming a file they cannot read, is refused reference_not_found — the very file the verb attached included', async () => {
-    const { ql, attachments } = await bootMember();
-    const out = await asCaller(attachments).attachFileAs(input(), ALICE as never);
+  /** What the member's own `sys_attachment` insert through the data engine answers. */
+  async function directInsertRefusal(ql: ObjectQL, fileId: string) {
     const err = await refusalOf(
       ql.insert(
         'sys_attachment',
-        { parent_object: 'att_case', parent_id: 'case_a', file_id: out.fileId, file_name: 'again.eml' },
+        { parent_object: 'att_case', parent_id: 'case_a', file_id: fileId, file_name: 'direct.eml' },
         { context: ALICE } as any,
       ),
     );
     const envelope = resolveThrownHttpError(err);
-    expect([envelope.code, envelope.status]).toEqual(['VALIDATION_FAILED', 400]);
-    expect(((err as any).fields ?? []).map((f: any) => [f.field, f.code])).toEqual([['file_id', 'reference_not_found']]);
+    return {
+      code: envelope.code,
+      status: envelope.status,
+      fields: ((err as any).fields ?? []).map((f: any) => [f.field, f.code]),
+    };
+  }
+  const REFERENCE_NOT_FOUND = { code: 'VALIDATION_FAILED', status: 400, fields: [['file_id', 'reference_not_found']] };
+
+  it('control: the member’s own insert of sys_attachment through the data engine, naming a file they cannot read, is refused reference_not_found', async () => {
+    const { ql } = await bootMember();
+    await seedOwnFile(ql);
+    expect(await directInsertRefusal(ql, 'file_alice')).toEqual(REFERENCE_NOT_FOUND);
+    expect(await rows(ql, 'sys_attachment')).toEqual([]);
+  });
+
+  it('the vouch is the verb’s call alone: after attachFileAs, the member’s own insert naming the same file is refused reference_not_found', async () => {
+    const { ql, attachments } = await bootMember();
+    const out = await asCaller(attachments).attachFileAs(input(), ALICE as never);
+    expect(await directInsertRefusal(ql, out.fileId)).toEqual(REFERENCE_NOT_FOUND);
     expect(await rows(ql, 'sys_attachment')).toHaveLength(1);
   });
 });
