@@ -1963,6 +1963,21 @@ export class SettingsService {
       };
     }
 
+    return this.resolveStored<T>(reg, namespace, key, ctx);
+  }
+
+  /**
+   * The stored cascade of one key, below any env override: what {@link get}
+   * answers when no override is in force, and what a key an override pins
+   * falls back to once the override is removed ({@link resetNamespace} reads
+   * it to find a value stored beneath a pin).
+   */
+  private async resolveStored<T = unknown>(
+    reg: RegisteredManifest,
+    namespace: string,
+    key: string,
+    ctx: SettingsContext,
+  ): Promise<ResolvedSettingValue<T>> {
     const scope = reg.scopes.get(key)!;
     // For 'user' scope we pre-filter by user_id; for 'tenant' and 'global'
     // we load everything for the namespace and pick the right row below.
@@ -2526,7 +2541,12 @@ export class SettingsService {
     };
   }
 
-  /** Persist a single key. Throws SettingsLockedError when env-locked. */
+  /**
+   * Persist a single key. Throws SettingsLockedError when an env override in
+   * force pins the key, unless `value` is a clear (`null` / `undefined`), which
+   * clears the stored value beneath the pin and leaves the env value in force
+   * (see {@link setMany}).
+   */
   async set(
     namespace: string,
     key: string,
@@ -2545,6 +2565,14 @@ export class SettingsService {
    * naming each such key (`invalid_value`, `constraint: { scope: 'user' }`):
    * the row it would store names no owner, and the user rung answers only its
    * owner, so no reader would ever see it while the write reported success.
+   *
+   * A key an env override in force pins refuses every write with
+   * {@link SettingsLockedError} (`locked-by-env`, ADR-0007 D6) but a clear
+   * (`null` / `undefined`): a clear nulls the row stored beneath the pin, so
+   * the key falls back to its default once the override is removed, and
+   * changes nothing in force — the answer still reads the env value with
+   * `locked: true`. It is judged by the row locks and the write predicates
+   * like any other clear.
    *
    * `display` picks the language of a write predicate's refusal and hands it
    * the request the write arrived on, and nothing else (see
@@ -2589,7 +2617,23 @@ export class SettingsService {
       // UI refused with `SETTINGS_LOCKED`, and `get()` reporting `locked: false`
       // to a settings page that would then fail its own save. See
       // `effectiveEnvOverride`.
-      if (this.effectiveEnvOverride(reg, namespace, key)) {
+      //
+      // [#30385] A CLEAR goes through the pin (ADR-0007 D6 keeps refusing every
+      // other write): `null` / `undefined`, the spelling every clear in this
+      // service uses, never a value such as `''` that a key would store. The
+      // pin decides what is in force, and a clear changes nothing there — the
+      // env value still wins, and the answer still reads `locked: true` from
+      // `env`. What it does change is the stored value the key falls back to
+      // once the override is removed, and that value is otherwise reachable by
+      // nothing: the override hides it from every read and refuses every
+      // write, so an operator who pinned a key to recover from a bad stored
+      // value (`OS_AUTH_ALLOWED_IP_RANGES=` for an allow-list that locks them
+      // out) gets the same bad value back the moment the pin is lifted. The
+      // clear then meets every judgment a clear meets without a pin — the
+      // Phase 2 row locks and the platform-rung rule below, the write
+      // predicates — so no lock a row carries is bypassed.
+      const clears = patch[key] === null || typeof patch[key] === 'undefined';
+      if (!clears && this.effectiveEnvOverride(reg, namespace, key)) {
         throw new SettingsLockedError(namespace, key);
       }
 
@@ -3326,23 +3370,46 @@ export class SettingsService {
 
   /**
    * Clear every persisted row in a namespace so values fall back to
-   * env/defaults. Env-locked keys are untouched (env wins over rows
-   * anyway and refuses writes). Persisted rows are nulled rather than
-   * deleted so the audit trail records the reset per key.
+   * env/defaults. Persisted rows are nulled rather than deleted so the audit
+   * trail records the reset per key.
    *
-   * Returns the number of cleared keys.
+   * A key an env override in force pins is cleared too when a value is stored
+   * beneath the pin, by the clear {@link setMany} lets through a pin (ADR-0007
+   * D6): it changes nothing in force — the env value still answers — and the
+   * key falls back to its default once the override is removed, instead of to
+   * the old stored value.
+   *
+   * Returns the number of cleared keys, pinned ones included.
    */
   async resetNamespace(namespace: string, ctx: SettingsContext = {}): Promise<number> {
+    return (await this.resetNamespaceRows(namespace, ctx)).cleared;
+  }
+
+  /**
+   * {@link resetNamespace}, also answering how many of the namespace's keys an
+   * env override still pins after the reset: those keep their env value, and
+   * the built-in `reset` action says so.
+   */
+  private async resetNamespaceRows(
+    namespace: string,
+    ctx: SettingsContext,
+  ): Promise<{ cleared: number; pinned: number }> {
     const payload = await this.getNamespace(namespace, ctx);
+    const reg = this.registry.get(namespace)!;
     const patch: Record<string, null> = {};
+    let pinned = 0;
     for (const [key, v] of Object.entries(payload.values)) {
-      if (v.source === 'global' || v.source === 'tenant' || v.source === 'user') {
+      // A pinned key answers `env` and hides its stored rows, so whether a
+      // value is stored beneath the pin is read from the cascade below it.
+      if (v.source === 'env') pinned++;
+      const stored = v.source === 'env' ? (await this.resolveStored(reg, namespace, key, ctx)).source : v.source;
+      if (stored === 'global' || stored === 'tenant' || stored === 'user') {
         patch[key] = null;
       }
     }
     const keys = Object.keys(patch);
     if (keys.length > 0) await this.setMany(namespace, patch, ctx);
-    return keys.length;
+    return { cleared: keys.length, pinned };
   }
 
   /**
@@ -3374,11 +3441,14 @@ export class SettingsService {
       // `settingsActionCopy`), as a handler's own answer is.
       const copy = settingsActionCopy(display.locale);
       if (actionId === 'reset') {
-        const cleared = await this.resetNamespace(namespace, ctx);
+        const { cleared, pinned } = await this.resetNamespaceRows(namespace, ctx);
+        const answer = cleared > 0 ? copy.resetCleared(cleared) : copy.resetNothing;
         return {
           ok: true,
           severity: 'info',
-          message: cleared > 0 ? copy.resetCleared(cleared) : copy.resetNothing,
+          // A key an env override pins keeps its env value through the reset,
+          // so the answer says how many still do.
+          message: pinned > 0 ? answer + copy.resetStillPinned(pinned) : answer,
         };
       }
       return {

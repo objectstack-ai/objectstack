@@ -27,12 +27,26 @@
 import { describe, it, expect } from 'vitest';
 import { enObjects } from './en.objects.generated.js';
 import { esESObjects } from './es-ES.objects.generated.js';
+import { zhHantObjects } from './zh-Hant.objects.generated.js';
+import { arObjects } from './ar.objects.generated.js';
+import { frObjects } from './fr.objects.generated.js';
+import { ptBRObjects } from './pt-BR.objects.generated.js';
+import { ruObjects } from './ru.objects.generated.js';
+import { deObjects } from './de.objects.generated.js';
+import { koObjects } from './ko.objects.generated.js';
 import { zhCNObjects } from './zh-CN.objects.generated.js';
 import { jaJPObjects } from './ja-JP.objects.generated.js';
 
 const LOCALES: Array<[string, Record<string, unknown>]> = [
   ['en', enObjects as Record<string, unknown>],
   ['es-ES', esESObjects as Record<string, unknown>],
+  ['zh-Hant', zhHantObjects as Record<string, unknown>],
+  ['ar', arObjects as Record<string, unknown>],
+  ['fr', frObjects as Record<string, unknown>],
+  ['pt-BR', ptBRObjects as Record<string, unknown>],
+  ['ru', ruObjects as Record<string, unknown>],
+  ['de', deObjects as Record<string, unknown>],
+  ['ko', koObjects as Record<string, unknown>],
   ['zh-CN', zhCNObjects as Record<string, unknown>],
   ['ja-JP', jaJPObjects as Record<string, unknown>],
 ];

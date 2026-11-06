@@ -2639,6 +2639,277 @@ describe('LifecycleService timers', () => {
 });
 
 /**
+ * [#29918] The sweep's watermark: one engine-owned row (`sys_lifecycle_state`,
+ * id `lifecycle`) holding when the scheduled sweep last completed, so a kernel
+ * that reboots onto an existing store reads one row at the initial delay
+ * instead of re-sweeping. Every door the sweep can reach is counted, so "only
+ * the read" is a statement count, not an inference.
+ */
+describe('LifecycleService sweep watermark (#29918)', () => {
+  const INTERVAL = 5_000;
+  const DELAY = 1_000;
+
+  function watermarkEngine(opts: {
+    row?: Record<string, unknown> | null;
+    fresh?: boolean;
+    registered?: boolean;
+    findOneImpl?: () => Promise<Record<string, unknown> | null>;
+    deleteImpl?: (object: string, options: any) => any;
+    auditImpl?: () => Promise<unknown>;
+  } = {}) {
+    const captured = captureEngine(
+      [{ name: 'sys_job_run', lifecycle: { class: 'telemetry', retention: { maxAge: '30d' } } }],
+      { deleteImpl: opts.deleteImpl },
+    );
+    const { engine } = captured;
+    const reads: Array<{ object: string; where: unknown; context: unknown }> = [];
+    const inserts: Array<{ object: string; data: Record<string, unknown>; context: unknown }> = [];
+    const updates: Array<{ object: string; data: Record<string, unknown>; context: unknown }> = [];
+    const audits: unknown[] = [];
+    const settingsReads: string[] = [];
+    let stored: Record<string, unknown> | null = opts.row ?? null;
+    engine.registry.getObject = (name: string) =>
+      name === 'sys_lifecycle_state' && opts.registered !== false ? { name } : undefined;
+    engine.wasDatastoreCreatedFromEmpty = () => opts.fresh === true;
+    engine.findOne = async (object: string, options: any) => {
+      reads.push({ object, where: options?.where, context: options?.context });
+      return opts.findOneImpl ? opts.findOneImpl() : stored;
+    };
+    engine.insert = async (object: string, data: any, options: any) => {
+      inserts.push({ object, data, context: options?.context });
+      stored = { ...data };
+      return data;
+    };
+    engine.update = async (object: string, data: any, options: any) => {
+      updates.push({ object, data, context: options?.context });
+      stored = { ...(stored ?? {}), ...data };
+      return data;
+    };
+    engine.inspectDanglingReferences = async (options: unknown) => {
+      audits.push(options);
+      if (opts.auditImpl) return opts.auditImpl();
+      return { findings: [], scannedObjects: [], unreadableObjects: [] };
+    };
+    const getSettings = () => ({
+      async get(namespace: string, key: string) {
+        settingsReads.push(`${namespace}.${key}`);
+        return { value: undefined };
+      },
+    });
+    /** Every statement the sweep (and the watermark) could issue, by door. */
+    const statements = () =>
+      captured.deletes.length + reads.length + inserts.length + updates.length + audits.length + settingsReads.length;
+    return { ...captured, reads, inserts, updates, audits, settingsReads, getSettings, statements, row: () => stored };
+  }
+
+  const iso = (ms: number) => new Date(ms).toISOString();
+
+  async function bootAndReachInitialDelay(
+    harness: ReturnType<typeof watermarkEngine>,
+    extra: Partial<ConstructorParameters<typeof LifecycleService>[0]> = {},
+  ) {
+    const svc = service(harness.engine, {
+      initialDelayMs: DELAY,
+      sweepIntervalMs: INTERVAL,
+      getSettings: harness.getSettings,
+      ...extra,
+    });
+    svc.start();
+    await vi.advanceTimersByTimeAsync(DELAY);
+    return svc;
+  }
+
+  it('a reboot whose watermark is younger than the interval issues only the watermark read at the initial delay', async () => {
+    vi.useFakeTimers();
+    try {
+      const harness = watermarkEngine({ row: { id: 'lifecycle', last_swept_at: iso(FIXED_NOW - (INTERVAL - 1)) } });
+      const svc = await bootAndReachInitialDelay(harness);
+
+      expect(harness.reads).toEqual([
+        { object: 'sys_lifecycle_state', where: { id: 'lifecycle' }, context: expect.objectContaining({ isSystem: true }) },
+      ]);
+      // Zero statements beyond the read: no reap, no settings, no audit, no write.
+      expect(harness.statements()).toBe(1);
+      expect(harness.deletes).toHaveLength(0);
+
+      // The next sweep is due on the interval, and it advances the watermark.
+      await vi.advanceTimersByTimeAsync(INTERVAL);
+      expect(harness.deletes).toHaveLength(1);
+      expect(harness.audits).toHaveLength(1);
+      expect(harness.updates).toEqual([
+        {
+          object: 'sys_lifecycle_state',
+          data: expect.objectContaining({ id: 'lifecycle', last_swept_at: iso(FIXED_NOW) }),
+          context: expect.objectContaining({ isSystem: true }),
+        },
+      ]);
+      expect(harness.inserts).toHaveLength(0);
+      svc.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a watermark one interval old or older sweeps at the initial delay and advances it', async () => {
+    vi.useFakeTimers();
+    try {
+      for (const age of [INTERVAL, INTERVAL * 10]) {
+        const harness = watermarkEngine({ row: { id: 'lifecycle', last_swept_at: iso(FIXED_NOW - age) } });
+        const svc = await bootAndReachInitialDelay(harness);
+        expect(harness.deletes).toHaveLength(1);
+        expect(harness.audits).toHaveLength(1);
+        // The boot read said the row exists, so the advance is one update, no second read.
+        expect(harness.reads).toHaveLength(1);
+        expect(harness.inserts).toHaveLength(0);
+        expect(harness.updates).toHaveLength(1);
+        expect(harness.row()).toMatchObject({ id: 'lifecycle', last_swept_at: iso(FIXED_NOW) });
+        svc.stop();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('no watermark row on an existing store sweeps at the initial delay and writes it', async () => {
+    vi.useFakeTimers();
+    try {
+      const harness = watermarkEngine({ row: null });
+      const svc = await bootAndReachInitialDelay(harness);
+      expect(harness.deletes).toHaveLength(1);
+      expect(harness.audits).toHaveLength(1);
+      expect(harness.reads).toHaveLength(1);
+      expect(harness.updates).toHaveLength(0);
+      expect(harness.inserts).toEqual([
+        {
+          object: 'sys_lifecycle_state',
+          data: expect.objectContaining({ id: 'lifecycle', last_swept_at: iso(FIXED_NOW) }),
+          context: expect.objectContaining({ isSystem: true }),
+        },
+      ]);
+      svc.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a store this boot created still defers the first sweep, seeds the watermark without reading it, and sweeps one interval later', async () => {
+    vi.useFakeTimers();
+    try {
+      const harness = watermarkEngine({ fresh: true });
+      const svc = await bootAndReachInitialDelay(harness);
+      expect(harness.deletes).toHaveLength(0);
+      expect(harness.audits).toHaveLength(0);
+      expect(harness.settingsReads).toEqual([]);
+      expect(harness.reads).toHaveLength(0);
+      expect(harness.inserts).toEqual([
+        {
+          object: 'sys_lifecycle_state',
+          data: expect.objectContaining({ id: 'lifecycle', last_swept_at: iso(FIXED_NOW) }),
+          context: expect.objectContaining({ isSystem: true }),
+        },
+      ]);
+
+      await vi.advanceTimersByTimeAsync(INTERVAL);
+      expect(harness.deletes).toHaveLength(1);
+      expect(harness.updates).toHaveLength(1);
+      svc.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a sweep that fails a policy, or whose audit throws, leaves the watermark unchanged', async () => {
+    const before = { id: 'lifecycle', last_swept_at: iso(FIXED_NOW - INTERVAL * 10) };
+    const reapFails = watermarkEngine({
+      row: { ...before },
+      deleteImpl: () => {
+        throw new Error('driver refused the delete');
+      },
+    });
+    const failed = await service(reapFails.engine, { sweepIntervalMs: INTERVAL }).sweep();
+    expect(failed.errors.length).toBeGreaterThan(0);
+    expect(reapFails.inserts).toHaveLength(0);
+    expect(reapFails.updates).toHaveLength(0);
+    expect(reapFails.row()).toEqual(before);
+
+    const auditFails = watermarkEngine({
+      row: { ...before },
+      auditImpl: async () => {
+        throw new Error('audit could not read');
+      },
+    });
+    const partial = await service(auditFails.engine, { sweepIntervalMs: INTERVAL }).sweep();
+    expect(partial.errors).toEqual([]);
+    expect(auditFails.deletes).toHaveLength(1);
+    expect(auditFails.inserts).toHaveLength(0);
+    expect(auditFails.updates).toHaveLength(0);
+    expect(auditFails.row()).toEqual(before);
+  });
+
+  it('a watermark read that fails sweeps at the initial delay and says so at warn', async () => {
+    vi.useFakeTimers();
+    try {
+      const warns: string[] = [];
+      const harness = watermarkEngine({
+        findOneImpl: async () => {
+          throw new Error('connection refused');
+        },
+      });
+      const svc = await bootAndReachInitialDelay(harness, {
+        logger: { info: () => {}, warn: (m: string) => warns.push(m), debug: () => {} },
+      });
+      expect(harness.deletes).toHaveLength(1);
+      expect(harness.audits).toHaveLength(1);
+      expect(warns.filter((m) => m.includes('watermark could not be read'))).toHaveLength(1);
+      svc.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('an engine that does not register sys_lifecycle_state is never asked for it, and sweeps at the initial delay', async () => {
+    vi.useFakeTimers();
+    try {
+      const harness = watermarkEngine({ registered: false, row: { id: 'lifecycle', last_swept_at: iso(FIXED_NOW) } });
+      const svc = await bootAndReachInitialDelay(harness);
+      expect(harness.deletes).toHaveLength(1);
+      expect(harness.reads).toHaveLength(0);
+      expect(harness.inserts).toHaveLength(0);
+      expect(harness.updates).toHaveLength(0);
+      svc.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a direct sweep() sweeps whatever the watermark says, and advances it', async () => {
+    const harness = watermarkEngine({ row: { id: 'lifecycle', last_swept_at: iso(FIXED_NOW) } });
+    await service(harness.engine, { sweepIntervalMs: INTERVAL }).sweep();
+    expect(harness.deletes).toHaveLength(1);
+    expect(harness.audits).toHaveLength(1);
+    // Unknown presence on a direct call: one read to decide, then the update.
+    expect(harness.reads).toHaveLength(1);
+    expect(harness.updates).toHaveLength(1);
+  });
+
+  it('OS_LIFECYCLE_DISABLED still arms nothing: no watermark read, no write', async () => {
+    vi.useFakeTimers();
+    process.env.OS_LIFECYCLE_DISABLED = '1';
+    try {
+      const harness = watermarkEngine({ row: null });
+      const svc = service(harness.engine, { initialDelayMs: DELAY, sweepIntervalMs: INTERVAL });
+      svc.start();
+      await vi.advanceTimersByTimeAsync(INTERVAL * 4);
+      expect(harness.statements()).toBe(0);
+      svc.stop();
+    } finally {
+      delete process.env.OS_LIFECYCLE_DISABLED;
+      vi.useRealTimers();
+    }
+  });
+});
+
+/**
  * [#4551] The read-only referential-integrity audit rides this sweep's clock.
  *
  * It is here — rather than on a clock of its own — so an operator does not have

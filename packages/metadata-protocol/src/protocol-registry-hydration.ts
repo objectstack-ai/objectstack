@@ -1431,9 +1431,10 @@ export class ProtocolRegistryHydrationFacet {
      * success.
      *
      * [#30635] …and to the CALLER: a refused sync returns one `warning`
-     * advisory ({@link objectStorageSyncRefusedNotice}) that both doors running
-     * this sync put on the 2xx they answer (`saveMetaItem` in publish mode and
-     * `publishMetaItem`, through `runPublishSideEffects`). A sync that ran, or
+     * advisory ({@link objectStorageSyncRefusedNotice}) that every door running
+     * this sync puts on the 2xx it answers (`saveMetaItem` in publish mode, and
+     * through `runPublishSideEffects` `publishMetaItem` and, on the object's
+     * `published[]` element, [#30693] `publishPackageDrafts`). A sync that ran, or
      * a type with no storage, returns `undefined`, so a clean answer is
      * unchanged.
      */

@@ -95,7 +95,9 @@ function actionPackageOf(prefix: string, bindTo?: string) {
                 actions: [
                     { name: 'ping', label: 'Ping', type: 'script', target: 'qa_ping' },
                     { name: 'mark_done', label: 'Mark done', type: 'script', operation: 'update', patch: { name: 'done' } },
-                    { name: 'admin_ping', label: 'Admin ping', type: 'script', target: 'qa_ping', requiredPermissions: ['manage_metadata'] },
+                    // Its own handler key: a handler `ping` also dispatches to
+                    // would gate `ping` by this declaration's permissions too.
+                    { name: 'admin_ping', label: 'Admin ping', type: 'script', target: 'qa_admin_ping', requiredPermissions: ['manage_metadata'] },
                 ],
             }],
             actions: [
@@ -175,6 +177,7 @@ async function bootKernel(
     await engine.syncSchemas();
     const pings = vi.fn(async () => ({ pong: true }));
     engine.registerAction(pkg.object, 'qa_ping', pings);
+    engine.registerAction(pkg.object, 'qa_admin_ping', vi.fn(async () => ({ pong: 'admin' })));
     const globalPings = vi.fn(async () => ({ pong: 'package' }));
     engine.registerAction(GLOBAL_ACTION_OBJECT_KEY, pkg.globalHandler, globalPings);
     const authoredPings = vi.fn(async () => ({ pong: 'authored' }));

@@ -323,6 +323,29 @@ describe('audit writers — operational plumbing is excluded (#5193, ADR-0057 D5
     }
   });
 
+  it('writes NO audit/activity row for the lifecycle sweeper\'s watermark, first insert or hourly update (ADR-0057 §3.3)', async () => {
+    // `LifecycleService` inserts the `sys_lifecycle_state` row after its first
+    // completed sweep and updates it after every one since. Audited, each
+    // sweep fed the ledger a row the next sweep archives: cleanup re-feeding
+    // the table it drains.
+    const { engine, fire, created } = makeEngine({ ...SCHEMA, sys_lifecycle_state: ['id', 'last_swept_at'] });
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', {
+      object: 'sys_lifecycle_state',
+      input: { id: 'lifecycle', last_swept_at: '2026-11-06T00:00:00.000Z' },
+      result: { id: 'lifecycle', last_swept_at: '2026-11-06T00:00:00.000Z' },
+      session: { isSystem: true },
+    });
+    await fire('afterUpdate', {
+      object: 'sys_lifecycle_state',
+      input: { id: 'lifecycle', last_swept_at: '2026-11-06T01:00:00.000Z' },
+      previous: { id: 'lifecycle', last_swept_at: '2026-11-06T00:00:00.000Z' },
+      result: { id: 'lifecycle', last_swept_at: '2026-11-06T01:00:00.000Z' },
+      session: { isSystem: true },
+    });
+    expect(created).toEqual([]);
+  });
+
   it('pays no before-phase snapshot read — for the skipped object OR the business one (#6656)', async () => {
     // [#6656] This case used to assert the saving for `sys_job_queue` only,
     // with `crm_lead` as the CONTROL that still paid — because #5860 could

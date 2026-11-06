@@ -1663,11 +1663,607 @@ function generatedModulesOnDisk() {
   return out;
 }
 
+// ── The members pass: one member of the landed facade (#30518) ──────────────
+//
+// The first pass runs on an unsplit `protocol.ts` only, and `main` has been
+// split since #29985 (48914fdc), so it refuses its own output; and since the
+// facet modules have been edited by hand after the split, `--verify` against
+// the split's base no longer re-proves. A method a stay rule held when `main`
+// was split (a return type since spelled, #30054) is moved by THIS pass
+// instead, on the split file: `--members a,b` names the methods, and each goes
+// exactly as the first pass would have taken it (`plan`'s stay rules, which
+// read the split file as they read an unsplit one; any reason refuses, and the
+// pass names what it moves, never decides it). The stub, the host entries,
+// the facet member and the docblock rule are the first pass's (`planMove`,
+// `insertHostEntries`, `liftFunction`, docblock ownership), and the member goes
+// into the facet of its section, in class order. Only instance methods move:
+// a private static's facet stub is not a hand-series stub `plan` recognises.
+//
+// What it grows, and the hand edits it accepts (the rule #30572 sets for the
+// `engine.ts` pass's `--members`): the receiving module's header gains the
+// name in its generated first paragraph, re-wrapped, and every paragraph a
+// hand wrote after it is left as it stands; the module's import block gains
+// the bindings the moved body reads, each from where `protocol.ts` imports it,
+// by element (into a declaration of that specifier and kind, keeping its own
+// layout) or as a new declaration, and every import a hand wrote stays where it
+// is. Hand-written facet members and top-level declarations stay too. It
+// refuses (exit 2) a module whose first paragraph is not the generated one, a
+// facet `protocol.ts` does not already import (it never starts a facet), a
+// body that reads a top-level name of `protocol.ts` the generated export list
+// does not already export (it never widens it), and a binding the module
+// already holds under another source or kind.
+//
+// The proof (`--members --verify --base REF` re-runs it) is the undo against
+// the pre-move tree, not the split's base: from the head alone each moved body
+// (rewrites and re-indentation undone) and owned docblock goes back onto its
+// stub; each receiving module loses the moved members (with the one blank line
+// the move wrote), their names in its header, and the import bindings nothing
+// in it reads any more, element by element; the factory and the interface lose
+// the entries the base host did not carry (the one fact read off the base, as
+// the first pass's proof reads it). The result must be the base `protocol.ts`
+// (its import bindings only moved bodies read pruned, as the first pass prunes
+// them), `protocol-host.ts` and receiving modules byte for byte, every other
+// section module unchanged, each facet member its base method's text as the
+// first pass would lift it, and `host-split.mjs`'s `checkMove` must pass on the
+// unlifted pair: two independent proofs of each move.
+
+const MEMBERS_CARD = '#30518';
+
+const lineStartOf = (text, pos) => text.lastIndexOf('\n', pos - 1) + 1;
+
+/** Apply non-overlapping `{ start, end, text }` edits; insertions at one offset land in the order given. */
+function applyEdits(text, edits) {
+  const sorted = edits.map((e, i) => ({ ...e, i })).sort((a, b) => b.start - a.start || b.end - a.end || b.i - a.i);
+  let out = text;
+  let floor = Infinity;
+  for (const e of sorted) {
+    if (e.end > floor) refuse('overlapping edits');
+    out = out.slice(0, e.start) + e.text + out.slice(e.end);
+    floor = e.start;
+  }
+  return out;
+}
+
+/** The lifted stub: the E1 stub, calling the member's facet. */
+const facetStubBody = (name, moduleFile, m) => stubBody(name, moduleFile, m)
+  .replace(`        return ${name}(`, `        return ${facetNameOf(moduleFile)}.${name}(`);
+
+/** A facet member's text, from its line start: its docblock (owned, or the one-liner) and the lifted body. */
+function facetMemberText(ts, fnText, ownedDoc) {
+  const nl = fnText.indexOf('\n');
+  return `    ${ownedDoc ?? fnText.slice(0, nl)}\n${liftFunction(ts, fnText.slice(nl + 1).replace(/\n$/, ''))}`;
+}
+
+const FILE_LEAD = '// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.\n\n/**\n';
+
+/** The words of a facet module's generated first paragraph (`facetModuleText`). */
+const headerWords = (title, names) => [MARK, 'The', ...`"${title}"`.split(' '), 'facet', 'of', `\`${CLASS_NAME}\`:`, 'the', 'bodies', 'of',
+  ...names.map((n, i) => `\`${n}\`${i === names.length - 1 ? '' : ','}`), 'moved', 'out', 'of', '`protocol.ts`', 'whole', 'by', '`scripts/codemod-split-protocol.mjs`.'];
+
+/**
+ * The names a facet module's generated first paragraph lists, read back, and
+ * the paragraph's region; null unless that paragraph is exactly the one the
+ * first pass writes for them. The paragraphs after it are not read.
+ */
+function headerNamesOf(text, title) {
+  if (!text.startsWith(FILE_LEAD)) return null;
+  const start = FILE_LEAD.length;
+  const end = text.indexOf('\n *\n', start);
+  if (end < 0) return null;
+  const prose = text.slice(start, end).split('\n').map((l) => l.replace(/^ \*( |$)/, '')).join(' ');
+  const i = prose.indexOf(' the bodies of ');
+  const j = prose.lastIndexOf(' moved out of ');
+  if (i < 0 || j < i) return null;
+  const names = [...prose.slice(i, j).matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+  return wrapComment(headerWords(title, names)).join('\n') === text.slice(start, end) ? { start, end, names } : null;
+}
+
+/** A facet module's facet class and its members, each `{ name, node, start (its docblock's line start), end, staticMethod }`. */
+function facetOf(ts, file, text) {
+  const sf = parseSourceFile(join(SRC_DIR, file), text);
+  const facet = facetNameOf(file);
+  const cls = sf.statements.find((st) => ts.isClassDeclaration(st) && st.name?.text === facet && hasModifier(ts, st, ts.SyntaxKind.ExportKeyword));
+  if (!cls) return null;
+  const members = cls.members.map((m) => {
+    const docs = m.jsDoc ?? [];
+    return {
+      name: m.name && ts.isIdentifier(m.name) ? m.name.text : null,
+      node: m,
+      start: lineStartOf(text, docs.length ? docs[0].getStart(sf) : m.getStart(sf)),
+      end: m.getEnd(),
+      staticMethod: ts.isMethodDeclaration(m) && hasModifier(ts, m, ts.SyntaxKind.StaticKeyword) && Boolean(m.body),
+    };
+  });
+  return { sf, cls, members };
+}
+
+/** The keys a facet member's host parameter `Pick`s, or null when it is not `host: Pick<ProtocolHost, …>`. */
+function picksOf(text, member) {
+  const p = member.node.parameters?.[0];
+  if (!p) return null;
+  const m = /^host: Pick<ProtocolHost, (.+)>$/s.exec(text.slice(p.getStart(member.node.getSourceFile()), p.getEnd()));
+  return m ? m[1].split('|').map((q) => q.trim().slice(1, -1)) : null;
+}
+
+/** A module's import declarations, each with its named elements and the names it binds. */
+function importDeclsOf(ts, file, text) {
+  const sf = parseSourceFile(join(SRC_DIR, file), text);
+  const decls = [];
+  const locals = new Set();
+  for (const st of sf.statements) {
+    if (!ts.isImportDeclaration(st)) {
+      const names = [];
+      if (ts.isVariableStatement(st)) for (const d of st.declarationList.declarations) collectBindingNames(ts, d.name, names);
+      else if (st.name && ts.isIdentifier(st.name)) names.push(st.name.text);
+      for (const n of names) locals.add(n);
+      continue;
+    }
+    const clause = st.importClause;
+    const nb = clause?.namedBindings;
+    decls.push({
+      st, sf,
+      specifier: st.moduleSpecifier.text,
+      start: st.getStart(sf),
+      end: st.getEnd(),
+      typeOnly: Boolean(clause?.isTypeOnly),
+      defaultName: clause?.name?.text ?? null,
+      nsName: nb && ts.isNamespaceImport(nb) ? nb.name.text : null,
+      nb: nb && ts.isNamedImports(nb) ? nb : null,
+      named: nb && ts.isNamedImports(nb) ? nb.elements.map((e) => ({
+        local: e.name.text, imported: (e.propertyName ?? e.name).text, typeOnly: Boolean(e.isTypeOnly), start: e.getStart(sf), end: e.getEnd(), text: e.getText(sf),
+      })) : [],
+    });
+  }
+  return { decls, locals };
+}
+
+/**
+ * Give a facet module the import bindings `wanted` (local -> `{ specifier,
+ * form, imported, value }`) it does not hold. A binding it already holds from
+ * that specifier, under that name and of a kind that serves the use, is left
+ * as it is; any other holder of the name refuses. A named binding goes into
+ * the first declaration of its specifier and kind, as one more element in that
+ * declaration's own layout (sorted in when its elements are sorted, last
+ * otherwise; one line stays one line within 120 columns), else into a new
+ * declaration: before `ProtocolHost`'s import, or, for `./protocol.js`, after
+ * the last import. New declarations go in `order` (`protocol.ts`'s import
+ * order), a specifier's values before its types, as the first pass writes
+ * them. Pure.
+ */
+function addModuleImports(ts, file, text, wanted, order = () => 0) {
+  const { decls, locals } = importDeclsOf(ts, file, text);
+  const edits = [];
+  const fresh = new Map(); // `${specifier}\0${value}` -> [local]
+  for (const [local, w] of [...wanted].sort(byName)) {
+    const held = decls.flatMap((d) => [
+      ...(d.defaultName === local ? [{ form: 'default', imported: 'default', value: !d.typeOnly, d }] : []),
+      ...(d.nsName === local ? [{ form: 'namespace', imported: '*', value: !d.typeOnly, d }] : []),
+      ...d.named.filter((e) => e.local === local).map((e) => ({ form: 'named', imported: e.imported, value: !d.typeOnly && !e.typeOnly, d })),
+    ]);
+    if (locals.has(local)) refuse(`${file}: ${local}, which the moved body imports, is declared in the module itself`);
+    if (held.length > 1) refuse(`${file}: binds ${local} more than once`);
+    if (held.length === 1) {
+      const h = held[0];
+      if (h.d.specifier !== w.specifier || h.form !== w.form || (w.form === 'named' && h.imported !== w.imported)) {
+        refuse(`${file}: binds ${local} from ${h.d.specifier}, and the moved body reads it from ${w.specifier}`);
+      }
+      if (w.value && !h.value) refuse(`${file}: imports ${local} as a type only, and the moved body reads it as a value`);
+      continue;
+    }
+    if (w.form !== 'named') refuse(`${file}: ${local} would be a ${w.form} import, which this pass does not write`);
+    const key = `${w.specifier}\0${w.value}`;
+    fresh.set(key, [...(fresh.get(key) ?? []), { local, imported: w.imported }]);
+  }
+  const host = decls.find((d) => d.specifier === './protocol-host.js');
+  const last = decls.at(-1);
+  if (!last) refuse(`${file}: has no import declaration`);
+  const ranked = [...fresh].map(([key, adds]) => { const [specifier, v] = key.split('\0'); return { specifier, value: v === 'true', adds }; })
+    .sort((a, b) => order(a.specifier) - order(b.specifier) || Number(b.value) - Number(a.value) || (a.specifier < b.specifier ? -1 : a.specifier > b.specifier ? 1 : 0));
+  for (const { specifier, value, adds } of ranked) {
+    const spell = (a) => (a.imported === a.local ? a.local : `${a.imported} as ${a.local}`);
+    const d = decls.find((x) => x.specifier === specifier && x.nb && !x.defaultName && x.typeOnly === !value && x.named.every((e) => !e.typeOnly));
+    if (d) {
+      const els = d.named;
+      const sorted = els.map((e) => e.local).join() === els.map((e) => e.local).sort().join();
+      const multi = d.nb.getText(d.sf).includes('\n');
+      const lineOf = (e) => text.slice(lineStartOf(text, e.start), text.indexOf('\n', e.end));
+      const canonicalMulti = multi && els.every((e) => lineOf(e) === `    ${e.text},`);
+      const at = (a) => (sorted ? els.findIndex((e) => e.local > a.local) : -1);
+      if (multi && canonicalMulti) {
+        for (const a of adds) {
+          const k = at(a);
+          const pos = k < 0 ? text.indexOf('\n', els.at(-1).end) + 1 : lineStartOf(text, els[k].start);
+          edits.push({ start: pos, end: pos, text: `    ${spell(a)},\n` });
+        }
+        continue;
+      }
+      if (!multi) {
+        const grown = d.st.getText(d.sf).length + adds.reduce((n, a) => n + spell(a).length + 2, 0);
+        if (grown <= 120) {
+          for (const a of adds) {
+            const k = at(a);
+            if (k < 0) edits.push({ start: els.at(-1).end, end: els.at(-1).end, text: `, ${spell(a)}` });
+            else edits.push({ start: els[k].start, end: els[k].start, text: `${spell(a)}, ` });
+          }
+          continue;
+        }
+      }
+    }
+    const statement = namedStatement(value ? 'import' : 'import type', adds.map(spell).sort(), ` from '${specifier}';`);
+    if (specifier !== './protocol.js' && host) edits.push({ start: host.start, end: host.start, text: `${statement}\n` });
+    else edits.push({ start: last.end, end: last.end, text: `\n${statement}` });
+  }
+  return applyEdits(text, edits);
+}
+
+/**
+ * Drop the import bindings nothing in a module reads, each by itself: a
+ * declaration left with none goes whole (with its line break), a named
+ * element goes with its separator (its own line, in a one-per-line list), and
+ * every other byte stays. The inverse of `addModuleImports` on a module whose
+ * own imports are all read. Pure.
+ */
+function pruneModuleImports(ts, file, text) {
+  const used = usedImportNames(ts, text);
+  const { decls } = importDeclsOf(ts, file, text);
+  const edits = [];
+  for (const d of decls) {
+    const names = [d.defaultName, d.nsName, ...d.named.map((e) => e.local)].filter(Boolean);
+    const unread = names.filter((n) => !used.has(n));
+    if (unread.length === 0) continue;
+    if (unread.length === names.length) {
+      edits.push({ start: d.start, end: text[d.end] === '\n' ? d.end + 1 : d.end, text: '' });
+      continue;
+    }
+    if (d.defaultName && unread.includes(d.defaultName)) refuse(`${file}: a default import binding would be pruned alone`);
+    const multi = d.nb.getText(d.sf).includes('\n');
+    d.named.forEach((e, i) => {
+      if (used.has(e.local)) return;
+      const ls = lineStartOf(text, e.start);
+      const le = text.indexOf('\n', e.end);
+      if (multi && text.slice(ls, le) === `    ${e.text},`) edits.push({ start: ls, end: le + 1, text: '' });
+      else if (i < d.named.length - 1) edits.push({ start: e.start, end: d.named[i + 1].start, text: '' });
+      else edits.push({ start: d.named[i - 1].end, end: e.end, text: '' });
+    });
+  }
+  return applyEdits(text, edits);
+}
+
+/** Each named method's class position (instance or static), for ordering facet members and header names. */
+function classPositions(ts, cls) {
+  const pos = new Map();
+  for (const m of cls.members) if (ts.isMethodDeclaration(m) && m.name && ts.isIdentifier(m.name) && !pos.has(m.name.text)) pos.set(m.name.text, m.getStart());
+  return pos;
+}
+
+/**
+ * Plan and apply the moves `names` asks for on a split `protocol.ts`.
+ * Returns `{ host, hostModule, modules, records, pruned }` (`modules`: the
+ * receiving modules' new texts). Refuses (exit 2) on a name the class does not
+ * declare as one instance method with a body, one already moved, one any stay
+ * rule holds, and every shape the section above says this pass does not grow.
+ * Pure.
+ */
+function generateMembers(T, text, hostText, moduleTexts, names, { anchors = SECTION_ANCHORS, pins = PATH_READER_PINS, needles = PATH_READER_NEEDLES } = {}) {
+  const { ts } = T;
+  globalTs = ts;
+  if (!names || names.length === 0) refuse(`--members needs a comma-separated list of ${CLASS_NAME} method names`);
+  if (new Set(names).size !== names.length) refuse(`--members names a method twice: ${names.join(', ')}`);
+  if (!text.includes(MARK)) refuse(`${HOST_BASENAME} carries no ${MARK} stub: run the first pass on an unsplit file`);
+  const planned = plan(T, text, hostText, { anchors, pins, needles });
+  const { sf, cls, ctx } = planned;
+  const records = [];
+  for (const name of names) {
+    const found = cls.members.filter((m) => ts.isMethodDeclaration(m) && m.body && m.name && ts.isIdentifier(m.name) && m.name.text === name && !hasModifier(ts, m, ts.SyntaxKind.StaticKeyword));
+    if (found.length !== 1) refuse(`--members names ${name}, which ${CLASS_NAME} declares as ${found.length === 0 ? 'no instance method with a body' : 'more than one method'}`);
+    const r = planned.records.find((x) => x.node === found[0]);
+    if (r.reasons.some((x) => x.startsWith('already-moved'))) refuse(`${name} is already moved: its body is a stub`);
+    if (r.reasons.length > 0) refuse(`${name} stays on the class, as the first pass would keep it: ${r.reasons.map((x) => `${x} (${STAY_REASONS[x.split(':')[0]] ?? x})`).join('; ')}`);
+    records.push(r);
+  }
+  records.sort((a, b) => a.node.getStart(sf) - b.node.getStart(sf));
+  const pos = classPositions(ts, cls);
+
+  // protocol.ts: each body becomes its lifted stub, a private docblock its link.
+  const edits = [];
+  const entries = new Map();
+  const modules = new Map();
+  for (const r of records) {
+    const facet = facetNameOf(r.module);
+    const b = ctx.scope.bindings.get(facet);
+    if (!b || b.kind !== 'import' || b.specifier !== `./${r.module.replace(/\.ts$/, '.js')}`) refuse(`${r.module}: ${HOST_BASENAME} does not import its facet ${facet} (this pass never starts a facet)`);
+    for (const [n] of r.moduleRefs) {
+      if (n !== CLASS_NAME && !ctx.scope.exported.has(n)) refuse(`${r.name} reads ${n}, a top-level name of ${HOST_BASENAME} it does not export: this pass does not widen the generated export list`);
+    }
+    edits.push({ start: r.stub.start, end: r.stub.end, text: facetStubBody(r.name, r.module, r.node) });
+    r.ownedDoc = null;
+    if (isPrivateMember(ts, r.node)) {
+      const span = movableDocSpan(ts, sf, r.node);
+      if (span) { r.ownedDoc = span.text; edits.push({ start: span.start, end: span.end, text: docStubOf(facet, r.name, r.module) }); }
+    }
+    for (const [member, entry] of r.hostEntries) {
+      const prev = entries.get(member);
+      if (!prev || (entry.factory.includes('\n') && !prev.factory.includes('\n'))) entries.set(member, entry);
+    }
+    modules.set(r.module, [...(modules.get(r.module) ?? []), r]);
+  }
+  const inserted = T.hs.insertHostEntries(hostText, applyEdits(text, edits), new Map([...entries].sort(byName)));
+  const pruned = pruneImports(ts, inserted.protocol, usedImportNames(ts, inserted.protocol));
+
+  // The receiving modules: the members in class order, the header's names, the imports.
+  const moduleOut = new Map();
+  for (const [file, movers] of modules) {
+    const mod = moduleTexts.get(file);
+    if (mod == null || !mod.includes(MARK)) refuse(`${file} is not on disk as a facet module the first pass wrote: this pass adds to a written facet, never starts one`);
+    const facet = facetOf(ts, file, mod);
+    if (!facet || facet.members.length === 0) refuse(`${file}: no exported facet class ${facetNameOf(file)} with members`);
+    const header = headerNamesOf(mod, movers[0].section);
+    if (!header) refuse(`${file}: its header's first paragraph is not the one the first pass writes`);
+    const modEdits = [];
+    for (const r of movers) {
+      const at = r.node.getStart(sf);
+      const next = facet.members.find((m) => m.name && pos.has(m.name) && pos.get(m.name) > at);
+      const t = facetMemberText(ts, r.fnText, r.ownedDoc);
+      if (next) modEdits.push({ start: next.start, end: next.start, text: `${t}\n\n` });
+      else modEdits.push({ start: facet.members.at(-1).end, end: facet.members.at(-1).end, text: `\n\n${t}` });
+    }
+    const listed = [...header.names];
+    for (const r of movers) {
+      const k = listed.findIndex((n) => (pos.get(n) ?? Infinity) > r.node.getStart(sf));
+      listed.splice(k < 0 ? listed.length : k, 0, r.name);
+    }
+    modEdits.push({ start: header.start, end: header.end, text: wrapComment(headerWords(movers[0].section, listed)).join('\n') });
+    const wanted = new Map();
+    const want = (local, w) => {
+      const prev = wanted.get(local);
+      wanted.set(local, { ...w, value: Boolean(prev && prev.value) || w.value });
+    };
+    for (const r of movers) {
+      for (const [local, use] of r.imports) {
+        const b = ctx.scope.bindings.get(local);
+        if (!b || b.kind !== 'import') refuse(`import binding ${local} not found`);
+        want(local, { specifier: b.specifier, form: b.form, imported: b.imported, value: use.value && !b.typeOnly });
+      }
+      for (const [n, use] of r.moduleRefs) want(n, { specifier: './protocol.js', form: 'named', imported: n, value: use.value });
+      want('ProtocolHost', { specifier: './protocol-host.js', form: 'named', imported: 'ProtocolHost', value: false });
+    }
+    const order = (s) => (ctx.scope.importOrder.has(s) ? ctx.scope.importOrder.get(s) : Number.MAX_SAFE_INTEGER);
+    moduleOut.set(file, addModuleImports(ts, file, applyEdits(mod, modEdits), wanted, order));
+  }
+  return { host: pruned.text, hostModule: inserted.host, modules: moduleOut, records, pruned: pruned.removed };
+}
+
+/**
+ * Undo the moves out of one receiving module, from its head text alone: drop
+ * each moved facet member with the blank line the move wrote, its name from
+ * the header's first paragraph, and the import bindings nothing reads any
+ * more. Returns the text, or null (after `fail`) when the head is not a module
+ * this pass can read.
+ */
+function undoMembersModule(ts, file, text, names, title, fail) {
+  let out = text;
+  for (const name of names) {
+    const facet = facetOf(ts, file, out);
+    const i = facet ? facet.members.findIndex((m) => m.name === name && m.staticMethod) : -1;
+    if (i < 0) { fail(`${file}: holds no static facet member ${name}`); return null; }
+    const ms = facet.members;
+    if (ms.length === 1) { fail(`${file}: ${name} is its only member (this pass never starts a facet)`); return null; }
+    if (i < ms.length - 1) {
+      if (out.slice(ms[i].end, ms[i + 1].start) !== '\n\n') { fail(`${file}: ${name} is not followed by exactly one blank line`); return null; }
+      out = out.slice(0, ms[i].start) + out.slice(ms[i + 1].start);
+    } else {
+      if (out.slice(ms[i - 1].end, ms[i].start) !== '\n\n') { fail(`${file}: ${name} is not preceded by exactly one blank line`); return null; }
+      out = out.slice(0, ms[i - 1].end) + out.slice(ms[i].end);
+    }
+  }
+  const header = headerNamesOf(out, title);
+  if (!header) { fail(`${file}: its header's first paragraph is not the one the first pass writes`); return null; }
+  for (const n of names) if (!header.names.includes(n)) fail(`${file}: its header does not list ${n}`);
+  out = out.slice(0, header.start) + wrapComment(headerWords(title, header.names.filter((n) => !names.includes(n)))).join('\n') + out.slice(header.end);
+  return pruneModuleImports(ts, file, out);
+}
+
+/**
+ * Prove this pass's moves against the pre-move tree, from the texts alone (it
+ * shares no state with `generateMembers`). `base` / `head`: `{ text, host,
+ * modules }` (`protocol.ts`, `protocol-host.ts`, the section modules by file).
+ * Returns `{ failures, moved, checks, pruned, linesBefore, linesAfter }`.
+ */
+function verifyMembers(T, base, head, { anchors = SECTION_ANCHORS, pins = PATH_READER_PINS, needles = PATH_READER_NEEDLES } = {}) {
+  const { ts, hs } = T;
+  globalTs = ts;
+  const failures = [];
+  const fail = (msg) => failures.push(msg);
+  const moved = [];
+  const checks = [];
+  const baseSf = parseSourceFile(HOST_PATH, base.text);
+  const headSf = parseSourceFile(HOST_PATH, head.text);
+  const baseCls = hs.classOf(baseSf, CLASS_NAME);
+  const headCls = hs.classOf(headSf, CLASS_NAME);
+  const done = (pruned = []) => ({ failures, moved: moved.map((mv) => mv.name), checks, pruned, linesBefore: lineCount(base.text), linesAfter: lineCount(head.text) });
+  if (!baseCls || !headCls) { fail(`no class ${CLASS_NAME} at base or head`); return done(); }
+  const marker = new RegExp(`^\\{\\s*// ${MARK.replace(/[[\]]/g, '\\$&')} The body moved to \`(protocol-[a-z0-9-]+\\.ts)\``);
+  const key = (m) => `${hasModifier(ts, m, ts.SyntaxKind.StaticKeyword) ? 'static ' : ''}${m.name && ts.isIdentifier(m.name) ? m.name.text : ts.SyntaxKind[m.kind]}`;
+  const methodsOf = (cls) => new Map(cls.members.filter((m) => ts.isMethodDeclaration(m) && m.body).map((m) => [key(m), m]));
+  const baseMethods = methodsOf(baseCls);
+  const headMethods = methodsOf(headCls);
+  if ([...baseMethods.keys()].join() !== [...headMethods.keys()].join()) fail(`${CLASS_NAME} does not declare the same methods in the same order at base and head`);
+  for (const [k, hm] of headMethods) {
+    const bm = baseMethods.get(k);
+    if (!bm) continue;
+    const hHit = marker.exec(hm.body.getText(headSf));
+    const bHit = marker.exec(bm.body.getText(baseSf));
+    if (bHit && !hHit) fail(`${k}: a stub at base is a body at head`);
+    if (!hHit || bHit) continue;
+    if (k.startsWith('static ')) { fail(`${k}: a static's body moved (this pass moves instance methods only)`); continue; }
+    moved.push({ name: hm.name.text, hm, bm, file: hHit[1] });
+  }
+  if (moved.length === 0) fail('nothing moved: the head carries no stub its base did not');
+
+  const basePlan = plan(T, base.text, base.host, { anchors, pins, needles });
+  const headPrivateStatics = new Set([...hs.memberTable(headCls).statics].filter(([, s]) => s.private).map(([n]) => n));
+  for (const mv of moved) {
+    const { name, hm, bm, file } = mv;
+    const r = basePlan.records.find((x) => x.node.name?.text === name && !x.isStatic);
+    if (!r) { fail(`${name}: no record of it at base`); continue; }
+    if (r.reasons.length > 0) fail(`${name}: a stay rule holds it at base (${r.reasons.join('; ')})`);
+    if (r.module !== file) { fail(`${name}: its stub names ${file}, and its section's module is ${r.module ?? 'none'}`); continue; }
+    mv.title = r.section;
+    if (hm.body.getText(headSf) !== facetStubBody(name, file, bm)) fail(`${name}: the stub is not the first pass's lifted stub`);
+    const facet = facetNameOf(file);
+    const span = isPrivateMember(ts, bm) ? movableDocSpan(ts, baseSf, bm) : null;
+    mv.ownedDoc = span ? span.text : null;
+    const sig = (sf, m, doc) => {
+      const s = sf.text.slice(m.getFullStart(), m.body.getStart(sf));
+      return doc ? s.replace(doc, docStubOf(facet, name, file)) : s;
+    };
+    if (sig(headSf, hm) !== sig(baseSf, bm, mv.ownedDoc)) fail(`${name}: its docblock, modifiers or signature changed (beyond docblock ownership)`);
+    const modText = head.modules.get(file);
+    const fo = modText && modText.includes(MARK) ? facetOf(ts, file, modText) : null;
+    const fm = fo?.members.find((m) => m.name === name && m.staticMethod);
+    if (!fm) { fail(`${name}: ${file} at head holds no facet member ${name}`); continue; }
+    mv.fm = fm;
+    mv.modText = modText;
+    if (r.reasons.length === 0 && modText.slice(fm.start, fm.end) !== facetMemberText(ts, r.fnText, mv.ownedDoc)) {
+      fail(`${name}: the facet member is not its base method's text as the first pass lifts it (docblock, parameters, return type, body)`);
+    }
+    const fnText = unliftMethod(ts, modText.slice(fm.node.getStart(fo.sf), fm.end));
+    const fnBody = fnText === null ? null : functionBodyOf(ts, fnText);
+    if (fnBody === null) { fail(`${name}: ${facet}.${name} does not unlift`); continue; }
+    mv.restored = undoBody(ts, fnBody, headPrivateStatics);
+    if (mv.restored !== base.text.slice(bm.body.getStart(baseSf), bm.body.getEnd())) fail(`${name}: its moved body, rewrites and re-indentation undone, is not the base body`);
+    mv.picks = picksOf(modText, fm) ?? [];
+    // `host-split.mjs`'s own check, on the unlifted pair.
+    const callee = hm.body.statements.at(-1)?.expression?.expression;
+    const headDoc = mv.ownedDoc ? movableDocSpan(ts, headSf, hm) : null;
+    const headA = callee && ts.isPropertyAccessExpression(callee)
+      ? applyEdits(head.text, [
+        { start: callee.getStart(headSf), end: callee.name.getStart(headSf), text: '' },
+        ...(headDoc ? [{ start: headDoc.start, end: headDoc.end, text: mv.ownedDoc }] : []),
+      ])
+      : head.text;
+    const c = hs.checkMove({ baseSource: base.text, headSource: headA, moduleSource: `${fnText}\n`, moduleFile: file, member: name, className: CLASS_NAME });
+    checks.push({ name, ok: c.ok, counts: c.counts });
+    for (const p of c.problems) fail(`host-split check ${name}: ${p}`);
+  }
+
+  // The modules: each receiving one undoes to its base; every other is its base.
+  const touched = new Map();
+  for (const mv of moved) if (mv.fm) touched.set(mv.file, [...(touched.get(mv.file) ?? []), mv]);
+  for (const file of new Set([...base.modules.keys(), ...head.modules.keys()])) {
+    const b = base.modules.get(file) ?? null;
+    const h = head.modules.get(file) ?? null;
+    if (!touched.has(file)) {
+      if (b !== h) fail(`${file}: changed, and no member this pass moved is in it`);
+      continue;
+    }
+    if (b === null || !b.includes(MARK)) { fail(`${file}: not a facet module at base (this pass never starts a facet)`); continue; }
+    const mvs = touched.get(file);
+    const u = undoMembersModule(ts, file, h, mvs.map((mv) => mv.name), mvs[0].title, fail);
+    if (u !== null && u !== b) fail(`undoing the moves out of ${file} does not rebuild its base (first difference at line ${firstDiff(u, b)})`);
+  }
+
+  // protocol.ts: each body and owned docblock back; the factory loses the entries the base did not carry.
+  const edits = [];
+  for (const mv of moved) {
+    if (!mv.fm || mv.restored === undefined) continue;
+    edits.push({ start: mv.hm.body.getStart(headSf), end: mv.hm.body.getEnd(), text: mv.restored });
+    if (mv.ownedDoc) {
+      const span = movableDocSpan(ts, headSf, mv.hm);
+      if (span) edits.push({ start: span.start, end: span.end, text: mv.ownedDoc });
+    }
+  }
+  let rebuilt = applyEdits(head.text, edits);
+  const baseFactory = hostBlockKeys(base.text, FACTORY_OPEN, FACTORY_CLOSE, factoryKey);
+  const baseIface = hostBlockKeys(base.host, IFACE_OPEN, IFACE_CLOSE, ifaceKey);
+  if (!baseFactory || !baseIface) fail('the base carries no host factory or no ProtocolHost interface');
+  else {
+    const f = dropHostGroups(rebuilt, FACTORY_OPEN, FACTORY_CLOSE, factoryKey, baseFactory.keys, (l) => /^ {12}set /.test(l));
+    if (f.missing) fail(`${HOST_BASENAME} at head carries no host factory`);
+    rebuilt = f.text;
+    const i = dropHostGroups(head.host, IFACE_OPEN, IFACE_CLOSE, ifaceKey, baseIface.keys, () => false);
+    if (i.missing) fail(`${HOST_MODULE_BASENAME} at head carries no ProtocolHost interface`);
+    if (i.text !== base.host) fail(`undoing the moves does not rebuild the base ${HOST_MODULE_BASENAME} (first difference at line ${firstDiff(i.text, base.host)})`);
+    if (JSON.stringify([...f.dropped].sort()) !== JSON.stringify([...i.dropped].sort())) fail(`the factory and the interface gained different entries: factory ${f.dropped.join(', ')}; interface ${i.dropped.join(', ')}`);
+    const picked = new Set(moved.flatMap((mv) => mv.picks ?? []));
+    for (const k of i.dropped) if (!picked.has(k)) fail(`${HOST_MODULE_BASENAME} gained ${k}, which no moved body's host type names`);
+  }
+  const prune = pruneImports(ts, base.text, usedImportNames(ts, head.text));
+  const movedText = `${moved.map((mv) => mv.restored ?? '').join('\n')}\n${moved.map((mv) => mv.ownedDoc ?? '').join('\n')}`;
+  for (const n of prune.removed) {
+    if (!new RegExp(`\\b${n.replace(/\$/g, '\\$')}\\b`).test(movedText)) fail(`${HOST_BASENAME} lost the import binding ${n}, which no moved body reads`);
+  }
+  if (rebuilt !== prune.text) {
+    const at = firstDiff(rebuilt, prune.text);
+    fail(`undoing the moves does not rebuild the base ${HOST_BASENAME} (its unread imports pruned): first difference at line ${at}` +
+      `\n    rebuilt: ${JSON.stringify(rebuilt.split('\n')[at - 1] ?? '<end>')}\n    base:    ${JSON.stringify(prune.text.split('\n')[at - 1] ?? '<end>')}`);
+  }
+  return done(prune.removed);
+}
+
+function printVerifyMembers(v) {
+  for (const f of v.failures) console.error(`  ✗ ${f}`);
+  console.log(`undo proof (${MEMBERS_CARD}): ${v.moved.length} moved method(s) (${v.moved.join(', ') || 'none'}); ` +
+    `host-split check: ${v.checks.filter((c) => c.ok).length}/${v.checks.length} pass; ${HOST_BASENAME} ${v.linesBefore} -> ${v.linesAfter} lines; ` +
+    `undoing the moves ${v.failures.length > 0 ? 'does NOT' : 'does'} rebuild the base ${HOST_BASENAME}, ${HOST_MODULE_BASENAME} and section modules byte-for-byte ` +
+    `once the ${v.pruned.length} import binding(s) only moved bodies read are pruned from the base (${v.pruned.join(', ') || 'none'})`);
+}
+
+function generatedModulesAt(ref) {
+  const out = new Map();
+  for (const [, , file] of SECTION_ANCHORS) {
+    if (!file) continue;
+    try {
+      out.set(file, execFileSync('git', ['show', `${ref}:${SRC_REL}/${file}`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'ignore'] }));
+    } catch { /* absent at the ref */ }
+  }
+  return out;
+}
+
+async function mainMembers(T, argv) {
+  if (argv.includes('--verify')) {
+    const i = argv.indexOf('--base');
+    const ref = i >= 0 ? argv[i + 1] : null;
+    if (!ref) refuse('--members --verify needs --base <ref>');
+    const v = verifyMembers(T,
+      { text: gitShow(ref, `${SRC_REL}/${HOST_BASENAME}`), host: gitShow(ref, `${SRC_REL}/${HOST_MODULE_BASENAME}`), modules: generatedModulesAt(ref) },
+      { text: readFileSync(HOST_PATH, 'utf8'), host: readFileSync(HOST_MODULE_PATH, 'utf8'), modules: generatedModulesOnDisk() });
+    printVerifyMembers(v);
+    return v.failures.length === 0 ? 0 : 1;
+  }
+  const j = argv.indexOf('--members');
+  const value = argv[j + 1];
+  const names = value && !value.startsWith('--') ? value.split(',').map((s) => s.trim()).filter(Boolean) : [];
+  const base = { text: readFileSync(HOST_PATH, 'utf8'), host: readFileSync(HOST_MODULE_PATH, 'utf8'), modules: generatedModulesOnDisk() };
+  const out = generateMembers(T, base.text, base.host, base.modules, names);
+  console.log(`# codemod-split-protocol --members (${MEMBERS_CARD}): named methods onto the landed facade`);
+  for (const r of out.records) console.log(`- ${r.name} -> ${facetNameOf(r.module)} (${r.module}): ${r.bodyLines} body lines${r.ownedDoc ? ', its docblock with it' : ''}`);
+  const head = { text: out.host, host: out.hostModule, modules: new Map([...base.modules, ...out.modules]) };
+  console.log(`output tree sha256: ${treeHash(new Map([[HOST_BASENAME, out.host], [HOST_MODULE_BASENAME, out.hostModule], ...out.modules]))}`);
+  const v = verifyMembers(T, base, head);
+  printVerifyMembers(v);
+  if (v.failures.length > 0) {
+    console.error('✗ the moves fail their proof: nothing written. Report the fork; never hand-edit the move.');
+    return 1;
+  }
+  if (!argv.includes('--write')) {
+    console.log('plan only: nothing written (pass --write to apply).');
+    return 0;
+  }
+  writeFileSync(HOST_PATH, out.host);
+  writeFileSync(HOST_MODULE_PATH, out.hostModule);
+  for (const [file, text] of out.modules) writeFileSync(join(SRC_DIR, file), text);
+  console.log(`✓ wrote ${HOST_BASENAME}, ${HOST_MODULE_BASENAME} and ${out.modules.size} facet module(s) under ${SRC_REL}`);
+  return 0;
+}
+
 // ── Entry ────────────────────────────────────────────────────────────────────
 
 const USAGE = [
   'usage: node scripts/codemod-split-protocol.mjs [--write]   plan (or apply) the split of an UNSPLIT protocol.ts',
   '       node scripts/codemod-split-protocol.mjs --verify --base REF   re-prove a split on disk against protocol.ts at REF',
+  '       node scripts/codemod-split-protocol.mjs --members A,B [--write]   plan (or apply) moving named methods onto the landed facade (#30518)',
+  '       node scripts/codemod-split-protocol.mjs --members --verify --base REF   re-prove those moves on disk against the tree at REF',
   '       node scripts/codemod-split-protocol.mjs --self-test',
   '       node scripts/codemod-split-protocol.mjs --help',
 ].join('\n');
@@ -1689,12 +2285,14 @@ async function main(argv) {
     }
     return 0;
   }
-  const known = new Set(['--write', '--verify', '--base']);
+  const known = new Set(['--write', '--verify', '--base', '--members']);
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--base') { i += 1; continue; }
+    if (argv[i] === '--members' && argv[i + 1] !== undefined && !argv[i + 1].startsWith('--')) { i += 1; continue; }
     if (!known.has(argv[i])) refuse(`unknown argument ${JSON.stringify(argv[i])}\n${USAGE}`);
   }
   const T = await loadTools();
+  if (argv.includes('--members')) return mainMembers(T, argv);
   if (argv.includes('--verify')) {
     const i = argv.indexOf('--base');
     const ref = i >= 0 ? argv[i + 1] : null;
@@ -1753,6 +2351,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'refusals': 6,
   'import prune': 4,
   'facade layer': 10,
+  'members pass': 8,
+  'members proof': 12,
+  'members refusals': 10,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
 
@@ -2027,6 +2628,115 @@ async function selfTest() {
     const again = lift(T, generate(T, input, FIXTURE_HOST, fixturePlan(T, input)), fixturePlan(T, input));
     check('two lifts of one input write byte-identical trees',
       treeHash(new Map([['h', again.host], ...again.modules])) === treeHash(new Map([['h', lifted.host], ...lifted.modules])));
+  }
+
+  // The members pass (#30518): the fixture split by the first pass is the
+  // landed facade; three methods the first pass held for an inferred return
+  // type get theirs spelled, and its facet module is edited by hand the ways
+  // `main`'s were (a header paragraph, an import, a top-level declaration and
+  // a facet member nobody moved).
+  {
+    const pad = Array.from({ length: 6 }, (_, i) => `        const p${i} = ${i};`).join('\n');
+    const extra = `
+    public laterReader(n: number) {
+${pad}
+        return laterOnly(n) + docLinked(n) + this.engine.z;
+    }
+
+    public readsLocal() {
+${pad}
+        return LOCAL + this.engine.w;
+    }
+`;
+    const src = fixtureSource(extra)
+      .replace("import type { Shape } from './types.js';\n", "import type { Shape } from './types.js';\nimport { laterOnly } from './later.js';\n")
+      .replace('    private tiny(): number {', `    public engineReader() {\n${pad}\n        return this.engine.y;\n    }\n\n    private tiny(): number {`);
+    const firstPlan = fixturePlan(T, src);
+    const landed = lift(T, generate(T, src, FIXTURE_HOST, firstPlan), firstPlan);
+    const spelled = landed.host
+      .replace('    public engineReader() {', '    public engineReader(): number {')
+      .replace('    public laterReader(n: number) {', '    public laterReader(n: number): number {')
+      .replace('    public readsLocal() {', '    public readsLocal(): number {');
+    const handFacet = (landed.modules.get('protocol-first.ts') ?? '')
+      .replace('\n *\n * A MOVE, not a redesign.', '\n *\n * [#1] A paragraph a hand wrote after the split.\n *\n * A MOVE, not a redesign.')
+      .replace("import type { ProtocolHost } from './protocol-host.js';\n", "import { handHelper } from './hand.js';\nimport type { ProtocolHost } from './protocol-host.js';\n\nconst HAND_LOCAL = 1;\n")
+      .replace(/\n}\n$/, '\n\n    /** A member a hand wrote here. */\n    static handWritten(): number {\n        return handHelper() + HAND_LOCAL;\n    }\n}\n');
+    const base = { text: spelled, host: landed.hostModule, modules: new Map([['protocol-first.ts', handFacet]]) };
+    const opts = { anchors: FIXTURE_ANCHORS, pins: FIXTURE_PINS, needles: FIXTURE_NEEDLES };
+    const gen = (names, b = base) => generateMembers(T, b.text, b.host, b.modules, names, opts);
+    const out = gen(['laterReader', 'engineReader']);
+    const head = { text: out.host, host: out.hostModule, modules: new Map([...base.modules, ...out.modules]) };
+    const facetText = head.modules.get('protocol-first.ts');
+    const vm = (h) => verifyMembers(T, base, h, opts);
+    const withHead = (patch) => ({ ...head, ...patch });
+    const withFacet = (text) => withHead({ modules: new Map([['protocol-first.ts', text]]) });
+
+    open('members pass');
+    {
+      const v = vm(head);
+      check('the moves prove against the landed facade by their undo', v.failures.length === 0 && v.moved.join() === 'engineReader,laterReader' && v.checks.every((c) => c.ok),
+        [...v.failures, `moved ${v.moved.join()}`].join(' | '));
+      check('each stub delegates to its facet, signature and docblock unchanged',
+        out.host.includes('    public engineReader(): number {\n        // [#29985 codemod] The body moved to `protocol-first.ts`; it reaches this class through `protocol-host.ts`.\n        return ProtocolFirstFacet.engineReader(protocolHost(this));\n    }'), out.host);
+      check('a member goes in class order among the facet\'s members: before the next one, or last',
+        facetText.indexOf('static engineReader(') < facetText.indexOf('static tiny(')
+        && facetText.indexOf('static laterReader(') > facetText.indexOf('static handWritten('), facetText);
+      check('the header\'s first paragraph lists the names in class order; a hand-written paragraph stays',
+        /`engineReader`,\s*(\n \*\s*)?`tiny`/.test(facetText) && facetText.includes(' * [#1] A paragraph a hand wrote after the split.'), facetText.slice(0, 900));
+      check('an import binding the body reads joins the declaration of its specifier, in that declaration\'s layout',
+        facetText.includes("import { docLinked, onlyMoved } from './moved-only.js';"), facetText.split('\n').filter((l) => l.startsWith('import')).join(' | '));
+      check('an import binding of a new specifier is a new declaration ahead of ProtocolHost\'s; a hand-written import stays',
+        facetText.includes("import { handHelper } from './hand.js';\nimport { laterOnly } from './later.js';\nimport type { ProtocolHost } from './protocol-host.js';"));
+      check('protocol.ts drops the import only the moved body read, keeps one a staying docblock links',
+        !/\blaterOnly\b/.test(out.host) && out.host.includes("import { docLinked } from './moved-only.js';") && out.pruned.join() === 'laterOnly', out.pruned.join());
+      const again = gen(['engineReader', 'laterReader']);
+      check('two runs (names in any order) write byte-identical trees',
+        treeHash(new Map([['h', again.host], ['p', again.hostModule], ...again.modules])) === treeHash(new Map([['h', out.host], ['p', out.hostModule], ...out.modules])));
+    }
+
+    open('members proof');
+    {
+      // A mutation that does not land would make its case vacuous: each must change the head.
+      const same = (a, b) => a.text === b.text && a.host === b.host && a.modules.size === b.modules.size
+        && [...a.modules].every(([f, t]) => b.modules.get(f) === t);
+      const fails = (label, h) => {
+        const v = vm(h);
+        check(label, (h === base || !same(h, head)) && v.failures.length > 0, same(h, head) ? 'the mutation did not land' : 'proved');
+      };
+      fails('one edited character in a moved body fails', withFacet(facetText.replace('return laterOnly(n) + docLinked(n) + host.engine.z;', 'return laterOnly(n) + docLinked(n) - host.engine.z;')));
+      fails('one edited character in a hand-written facet member fails', withFacet(facetText.replace('return handHelper() + HAND_LOCAL;', 'return handHelper() - HAND_LOCAL;')));
+      fails('a second blank line after a moved member fails', withFacet(facetText.replace(/(\n {4}\/\*\* The body of `ObjectStackProtocolImplementation#engineReader`)/, '\n$1')));
+      fails('a header that does not list a moved name fails', withFacet(facetText.replace('`engineReader`, ', '')));
+      fails('a changed module no moved member is in fails', withHead({ modules: new Map([...head.modules, ['protocol-other.ts', '// not at base\n']]) }));
+      fails('an edited host interface entry fails', withHead({ host: out.hostModule.replace("readonly flag: ObjectStackProtocolImplementation['flag']", "flag: ObjectStackProtocolImplementation['flag']") }));
+      fails('a host entry no moved body\'s Pick names fails', withHead({
+        host: out.hostModule.replace("    readonly engine:", "    readonly zzz: ObjectStackProtocolImplementation['zzz'];\n    readonly engine:"),
+        text: out.host.replace('            get engine()', '            zzz: (...a) => protocol.zzz(...a),\n            get engine()'),
+      }));
+      fails('a stub calling another facet fails', withHead({ text: out.host.replace('return ProtocolFirstFacet.engineReader(', 'return OtherFacet.engineReader(') }));
+      fails('an edited docblock on a moved public member fails', withHead({ text: out.host.replace('    public engineReader(): number {', '    /** Hand. */\n    public engineReader(): number {') }));
+      fails('an edit elsewhere in protocol.ts fails', withHead({ text: out.host.replace('const LOCAL = 1;', 'const LOCAL = 2;') }));
+      fails('a head that drops an import no moved body reads fails', withHead({ text: out.host.replace("import { already } from './protocol-already.js';\n", '') }));
+      fails('a proof over no moved method fails', base);
+    }
+
+    open('members refusals');
+    {
+      const refuses = (label, fn) => check(label, refused(fn));
+      refuses('an empty list refuses', () => gen([]));
+      refuses('a name given twice refuses', () => gen(['engineReader', 'engineReader']));
+      refuses('a name the class does not declare refuses', () => gen(['nothingLikeThis']));
+      refuses('a member already moved refuses', () => gen(['movable']));
+      refuses('a member a stay rule holds refuses (closed-set)', () => gen(['bareThis']));
+      refuses('a static refuses (only instance methods move)', () => gen(['secret']));
+      refuses('an unsplit protocol.ts refuses (that is the first pass\'s)', () => generateMembers(T, src, FIXTURE_HOST, new Map(), ['engineReader'], opts));
+      refuses('a body that reads an unexported top-level name refuses (the export list is not widened)', () => gen(['readsLocal']));
+      const handHeader = handFacet.replace(' facet of', ' facet, edited by hand, of');
+      check('a hand-edited first header paragraph refuses', handHeader !== handFacet
+        && refused(() => gen(['engineReader'], { ...base, modules: new Map([['protocol-first.ts', handHeader]]) })));
+      refuses('a module that declares a name the body imports refuses',
+        () => gen(['laterReader'], { ...base, modules: new Map([['protocol-first.ts', handFacet.replace('const HAND_LOCAL = 1;', 'const HAND_LOCAL = 1;\nconst laterOnly = (n: number): number => n;')]]) }));
+    }
   }
 
   open('determinism');

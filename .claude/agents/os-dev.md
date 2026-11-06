@@ -35,7 +35,7 @@ model: opus
    - 同批 agents 共用一个 scratchpad 目录,自然命名的文件会被彼此静默覆盖。
 2. **卡 assignee 归 PM。** 派发原子对已把它设好;共享身份下该字段答不了是谁。
    - 你的身份位是认领评论里的分支;仓 CLAUDE.md 的 claim-first 已由 PM 的认领满足。
-   - 恒不写卡的 assignee(空也开工,报 `summary`);PR ⛔ 不带 `assignees`(中继虽收),席位交棒才派。
+   - 恒不写卡的 assignee(空也开工,报 `summary`);PR 派认领 `Account:`(`pr_create` 带),交棒归席位。
    - 发现与他人在途工作重复,停下报 `blocked`。
    - PR 上不是你设置的状态属于另一个 actor:⛔ 永不去纠正;疑问进报告,挡住报 blocked。
    - 回退他人的操作(尤其 ready 翻转)永不轮到你;把意外写进 `summary`。
@@ -52,6 +52,7 @@ model: opus
    - 其余 ⛔ 不立卡:只读推断、观察、休眠、零拉动、死代码、未演练漂移、抛光、命名。
    - 它们进 PR `## Acceptance notes`;报告 `out_of_scope_findings` 逐条 `class:`+`reach:`+证据,或 `carrier:`。
    - `carrier:` = 卡号或人,⛔ 非下个 PR;涉 cloud 写 `carrier: cloud`;无则 `none`;皆无只进该节。
+   - 前提实为平台缺陷 ⇒ 停手报 `carrier: objectstack` 附证据,⛔ 不在应用仓绕行。
    - 同族发现 ⛔ 不开单点卡,报告点名并入该族收口卡;收口卡定义住 pm-dispatch 报告契约。
    - dev ⛔ 不查重、不扫 open issues、不拉板,只附 3–5 个查重词;查询与命中数由立卡席写。
    - GitHub 写一律经 `scripts/pm/` 写工具;云容器里经 `fleet-write` 中继落为 `objectstack-fleet[bot]`。
@@ -59,7 +60,7 @@ model: opus
    - 写工具自读所需变量;⛔ 永不打印环境变量的值,转录是 AGENTS.md 禁落令牌的日志行。
    - 拼法不限于 `env`、`printenv`、`set`、`export -p`、`echo $VAR`、`cat /proc/*/environ`。
    - 判存在只用不印值形式 `[ -n "${X+x}" ] && echo set`;已印出 ⇒ `deviations` 只点名变量名。
-   - 写预算三笔:`git push`、`pr_create`(draft,含 labels、⛔ 无 assignees)、`os-dev-report` 评论。
+   - 写预算三笔:`git push`、`pr_create`(draft,含 labels 与 assignees)、`os-dev-report` 评论。
    - 卡与线程只走 payload 档(公开仓单卡网页内嵌 JSON,拼写住 platform-readings)或单卡 REST 读。
    - 三类发现进报告交席位代立,不 `POST /issues`、⛔ 不静默弃报;PM 去重读数当既有事实用。
    - PR 正文 dev 只写一次,在开 PR 那一笔,⛔ 不 `PATCH`;事后要改的报告点名改法,席位代写。
@@ -102,7 +103,6 @@ model: opus
    - 每个可编译小步即 commit + push;有可展示内容即开 draft PR;接管只认远程分支最后 sha。
    - 带具名缺口的 PR 是交付进行中的常态,未读到的判决写 `NOT MEASURED: <family>, reason: …`。
    - 平台事实:容器把前台命令钉在约 10 分钟上限,超时 SIGTERM 杀掉(`exit 143`)。
-   - 上限划定前台里放什么:重活走规则 1 的锁;仓级扫描归 CI(见本地验证范围节)。
 7. **排队不是停摆,在轮内主动等。** 持锁的是你不拥有的进程,其完成同样不会唤醒你。
    - 99 专指没排到,读作 NOT MEASURED;把间隔花在无锁工作上(写测试、changeset、PR 正文)。
    - 再取以同名续位,⛔ 不从队尾重排:`OS_VERIFY_LOCK_SLOT=<稳定名>` 在第一次尝试前就设好。

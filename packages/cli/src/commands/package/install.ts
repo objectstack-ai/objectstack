@@ -43,9 +43,16 @@
  *
  * This complements `os package publish` (which uploads to the CLOUD): the
  * pairing is publish-to-cloud / install-into-runtime. The target runtime
- * authenticates the call with its own better-auth session — pass
- * --email/--password (or OS_RUNTIME_EMAIL/OS_RUNTIME_PASSWORD) for an
- * account on the TARGET runtime, not your cloud login.
+ * authenticates the call itself — pass a token it issued (-t/--token, or
+ * OS_RUNTIME_TOKEN), or --email/--password (or OS_RUNTIME_EMAIL /
+ * OS_RUNTIME_PASSWORD) for an account on the TARGET runtime, not your cloud
+ * login.
+ *
+ * [#30126 row 13, ruling A] The server and the credential are spelled as
+ * `os package export` and the other server-talking commands spell them:
+ * `-u/--url` and `-t/--token`. `-r/--runtime` is retired with no alias — the
+ * startup rule keeps no window for an old spelling — so `os package install
+ * -r URL` is refused by the parser as an unknown flag and the fix is `-u URL`.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -88,10 +95,11 @@ export default class PackageInstall extends Command {
 
   static override examples = [
     '$ os package install com.acme.crm',
-    '$ os package install com.acme.crm --version 1.2.0 --runtime http://localhost:3000',
+    '$ os package install com.acme.crm --version 1.2.0 --url http://localhost:3000',
     '$ os package install ./dist/objectstack.json                     # air-gapped, no catalog',
     '$ os package install ./dist/objectstack.json --install-mode unmanaged   # copy into the environment as its own metadata',
     '$ OS_RUNTIME_EMAIL=admin@local.test OS_RUNTIME_PASSWORD=… os package install com.acme.crm',
+    '$ os package install ./dist/objectstack.json --url https://app.example.com --token osk_…',
   ];
 
   static override args = {
@@ -102,11 +110,16 @@ export default class PackageInstall extends Command {
   };
 
   static override flags = {
-    runtime: Flags.string({
-      char: 'r',
-      description: 'Target runtime base URL (the instance to install INTO)',
+    url: Flags.string({
+      char: 'u',
+      description: 'Server URL of the runtime to install INTO',
       env: 'OS_RUNTIME_URL',
       default: 'http://localhost:3000',
+    }),
+    token: Flags.string({
+      char: 't',
+      description: 'Authentication token issued by the target runtime (an API key); instead of --email/--password',
+      env: 'OS_RUNTIME_TOKEN',
     }),
     version: Flags.string({
       char: 'v',
@@ -169,7 +182,16 @@ export default class PackageInstall extends Command {
     const { args, flags } = await this.parse(PackageInstall);
 
     printHeader('Install Package');
-    const runtime = flags.runtime.replace(/\/+$/, '');
+    const runtime = flags.url.replace(/\/+$/, '');
+
+    // One credential per call: a token and a password sign-in name two
+    // identities, and picking one silently would install as whichever the
+    // command happened to prefer.
+    if (flags.token && (flags.email || flags.password)) {
+      printError('Pass either --token or --email/--password, not both (OS_RUNTIME_TOKEN counts as --token).');
+      this.exit(1);
+      return;
+    }
 
     try {
       // ---- Resolve the source: inline artifact file vs catalog id ---------
@@ -218,7 +240,9 @@ export default class PackageInstall extends Command {
 
       // ---- Authenticate against the TARGET runtime ------------------------
       let cookie: string | undefined;
-      if (flags.email && flags.password) {
+      if (flags.token) {
+        printStep(`Authenticating to ${runtime} with a token`);
+      } else if (flags.email && flags.password) {
         printStep(`Signing in to ${runtime} as ${flags.email}...`);
         // `Origin` is required: better-auth's CSRF check 403s origin-less
         // non-browser POSTs to the sign-in route.
@@ -252,6 +276,7 @@ export default class PackageInstall extends Command {
         headers: {
           'Content-Type': 'application/json',
           ...(cookie ? { Cookie: cookie } : {}),
+          ...(flags.token ? { Authorization: `Bearer ${flags.token}` } : {}),
         },
         body: JSON.stringify(body),
       }, flags.timeout);
@@ -290,8 +315,9 @@ export default class PackageInstall extends Command {
         }
         if (res.status === 401) {
           printError(
-            'The runtime rejected the call as unauthenticated. Pass --email/--password ' +
-            '(or set OS_RUNTIME_EMAIL/OS_RUNTIME_PASSWORD) for an account on the target runtime.',
+            'The runtime rejected the call as unauthenticated. Pass --token (or OS_RUNTIME_TOKEN) with a ' +
+            'token the target runtime issued, or --email/--password (or OS_RUNTIME_EMAIL/OS_RUNTIME_PASSWORD) ' +
+            'for an account on the target runtime.',
           );
         } else if (res.status === 404) {
           printError(

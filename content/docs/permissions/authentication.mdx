@@ -669,7 +669,7 @@ These rules apply to `allowed_ip_ranges`.
   API save, `PUT /api/settings/auth`, which **Setup → Authentication** calls, so any
   HTTP client gets the same answer. The message names your address, says the list
   would refuse your own next sign-in, and asks you to add your address or its range,
-  or to save from an address the list matches. It ends with the recovery step below.
+  or to save from an address the list matches. It ends with the recovery steps below.
   It is written in your language (English, Chinese, Japanese or Spanish). The field
   error in `details.fields` also carries your address as `constraint.clientAddress`.
   If the server cannot establish your address at all, any non-empty list is refused,
@@ -688,15 +688,24 @@ These rules apply to `allowed_ip_ranges`.
   the gate goes back to the list the deployment itself declares (`allowedIpRanges` in
   its auth configuration, for example set by an `auth:configure` handler), or to no
   restriction when it declares none. A clear is never refused.
-- **If you are already locked out**, start the server with
-  `OS_AUTH_ALLOWED_IP_RANGES` set to an empty value (`OS_AUTH_ALLOWED_IP_RANGES=`).
-  Environment variables are read at startup, so a restart is needed. An empty value
-  is not the same as an unset variable: any value that is set, the empty string
-  included, is an env override in force. It wins over the stored list, and an empty
-  list means no restriction. While the variable is set, the stored list is kept but
-  not used, and the field is locked: a save to it is refused with
-  `409 SETTINGS_LOCKED`. Remove the variable, and the stored list applies again at
-  the next restart.
+- **If you are already locked out**, recover in four steps:
+  1. Start the server with `OS_AUTH_ALLOWED_IP_RANGES` set to an empty value
+     (`OS_AUTH_ALLOWED_IP_RANGES=`). Environment variables are read at startup, so a
+     restart is needed. An empty value is not the same as an unset variable: any
+     value that is set, the empty string included, is an env override in force. It
+     wins over the stored list, and an empty list means no restriction.
+  2. Sign in.
+  3. Clear the stored list: send `PUT /api/settings/auth` with
+     `{ "allowed_ip_ranges": null }`. While the variable is set the field is locked,
+     so **Setup → Authentication** shows it read-only and any other save to it is
+     refused with `409 SETTINGS_LOCKED`; a clear (`null`) is the one write the lock
+     lets through. It clears the stored value and changes nothing in force: the
+     answer still reads the empty value from the environment.
+  4. Remove the variable and restart. With the stored list cleared, nothing brings
+     it back: the gate applies the list the deployment declares, or no restriction.
+
+  Removing the variable without step 3 brings the stored list back at the next
+  restart, and locks you out again.
 
 ---
 

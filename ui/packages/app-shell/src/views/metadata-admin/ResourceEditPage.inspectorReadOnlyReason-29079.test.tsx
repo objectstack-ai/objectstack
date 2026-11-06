@@ -340,7 +340,9 @@ describe('the panel shown with nothing selected names the read-only cause too (o
   );
 
   it('a writable object: the Properties panel is live and carries no reason', async () => {
-    layered = { effective: OBJECT, code: null, overlay: null, editable: true, deletable: true };
+    // The stored row carries the object: an object editor edits `overlay ?? code`,
+    // never the governed `effective` (objectstack#29793).
+    layered = { effective: OBJECT, code: null, overlay: OBJECT, editable: true, deletable: true };
     await openUnselected('object', 'task');
     const label = await screen.findByDisplayValue('Task');
     await waitFor(() => expect(label).toBeEnabled());

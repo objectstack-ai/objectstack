@@ -26,6 +26,9 @@ import {
   summarizePendingSchemaWork,
   groupByCategory,
   SKIPPED_SCHEMA_SYNC_NOTE,
+  describeRefusedSchemaWork,
+  splitRefusedSchemaWork,
+  addRefusedTableLimits,
 } from '../../utils/schema-migrate.js';
 import type { ManagedDriftEntry } from '@objectstack/driver-sql';
 import { exitOneShotCommand } from '../../utils/one-shot-exit.js';
@@ -347,6 +350,8 @@ export default class MigrateApply extends Command {
       // the --json document, `notApplied`, PARTIAL and the exit code never read
       // it. Empty for a driver that declares nothing, which reads as it always has.
       const limits = flags.json ? new Map<ManagedDriftEntry, string>() : collectDriftApplyLimits(stack, drift);
+      // [#30636] …and every entry on a table the sync refuses (withheld below).
+      if (!flags.json) await addRefusedTableLimits(limits, drift, pending);
       // [#24958] Each drop gate below reads at most once per run: the listing
       // and the gate share that read, so they cannot answer differently.
       const gateReads = new DropGateReads();
@@ -680,8 +685,22 @@ export default class MigrateApply extends Command {
       // marker when it created the database from empty — the half this
       // deferred boot's birth plugin could not run — so the first `os serve`
       // admits it. A database that was not empty gets none.
-      const created = await stack.flushSchemaDdl();
-      const { applied, skipped } = await stack.applyMigrationEntries(drift, { allowDestructive });
+      // [#30636] A table the sync refused (`refuse_table`: keyed by `_id`, no
+      // `id`, holding rows) comes back beside the work performed, never in a
+      // throw: every other table still got its DDL. It is not performed work,
+      // so it is never counted in `created`; it is named, and the run is PARTIAL.
+      const { performed: created, refused } = await splitRefusedSchemaWork(await stack.flushSchemaDdl());
+      // …and no drift entry on a refused table reaches the driver either: its
+      // `_id` column reads as an orphaned column, and with --allow-destructive
+      // the driver would drop it from the table the sync just left alone.
+      // Those entries are reported as skipped, never as attempted.
+      const refusedTables = new Set(refused.map((p) => p.table));
+      const onRefused = drift.filter((d) => refusedTables.has(d.table));
+      const { applied, skipped: driverSkipped } = await stack.applyMigrationEntries(
+        onRefused.length === 0 ? drift : drift.filter((d) => !refusedTables.has(d.table)),
+        { allowDestructive },
+      );
+      const skipped = [...driverSkipped, ...onRefused];
 
       // ── [#23848] NAME WHAT THE DRIVER DID NOT APPLY ──────────────────
       //
@@ -701,9 +720,9 @@ export default class MigrateApply extends Command {
       // applies (`manual_column_type_change` and its siblings) have always
       // been skipped on every dialect, and still are.
       const held = new Set<ManagedDriftEntry>(deferred);
-      const notApplied = skipped.filter((d) => !held.has(d));
+      const notApplied = driverSkipped.filter((d) => !held.has(d));
       const unappliedDestructive = notApplied.filter((d) => d.category === 'destructive');
-      const partial = unappliedDestructive.length > 0;
+      const partial = unappliedDestructive.length > 0 || refused.length > 0;
 
       if (flags.json) {
         await emitJson({
@@ -712,6 +731,7 @@ export default class MigrateApply extends Command {
           applied,
           skipped,
           notApplied,
+          ...(refused.length > 0 ? { refused } : {}),
           ...(partial ? { message: 'partial' } : {}),
           ...compositionPayload,
           duration: timer.elapsed(),
@@ -729,7 +749,7 @@ export default class MigrateApply extends Command {
       // rest are named as drift it could not apply either. [#24958] While a
       // gate holds a drop, no re-run is offered: the lines before the prompt
       // name each gate's command.
-      const heldBackEntries = skipped.filter((d) => held.has(d));
+      const heldBackEntries = driverSkipped.filter((d) => held.has(d));
       const heldBack = heldBackEntries.filter((d) => !neverReRunnable(d)).length;
       const heldBackNotReRunnable = heldBackEntries.length - heldBack;
       if (heldBack > 0) {
@@ -752,11 +772,30 @@ export default class MigrateApply extends Command {
       }
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');
-      if (partial) {
-        printError(
-          `PARTIAL apply: ${unappliedDestructive.length} destructive change(s) confirmed with --allow-destructive were `
-          + 'NOT applied (named above), so this database still differs from its metadata.',
+      // [#30636] Each refused table, with the refusal's own text, and the drift
+      // on it this run withheld.
+      for (const p of refused) {
+        printError(`REFUSED ${describeRefusedSchemaWork(p)}`);
+        if (p.refusal) console.log(chalk.dim(`      ${p.refusal}`));
+      }
+      if (onRefused.length > 0) {
+        printWarning(
+          `${onRefused.length} change(s) on the refused table(s) were NOT applied: a refused table is left exactly as it is.`,
         );
+      }
+      if (partial) {
+        if (unappliedDestructive.length > 0) {
+          printError(
+            `PARTIAL apply: ${unappliedDestructive.length} destructive change(s) confirmed with --allow-destructive were `
+            + 'NOT applied (named above), so this database still differs from its metadata.',
+          );
+        }
+        if (refused.length > 0) {
+          printError(
+            `PARTIAL apply: schema sync REFUSED ${refused.length} existing table(s) (named above) and left them exactly `
+            + 'as they were; every other table got its DDL.',
+          );
+        }
         this.exit(1);
       }
     } catch (error: any) {

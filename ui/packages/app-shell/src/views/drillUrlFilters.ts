@@ -20,11 +20,22 @@
  *                                                     / `[field, 'is_not_null', true]`
  *   - is empty      `filter[field][empty]=true|false`  → `[field, 'is_empty', true]`
  *                                                     / `[field, 'is_not_empty', true]`
+ *   - boolean       `filter[field][bool]=true|false`   → `[field, '=', true | false]`
+ *   - negation / text `filter[field][ne|contains|notcontains|startswith|endswith|icontains]=v`
+ *                                                     → `[field, '!=' | 'contains' | … , v]`
+ *   - membership    `filter[field][in|nin]=a&filter[field][in|nin]=b`
+ *                                                     → `[field, 'in' | 'nin', ['a', 'b']]`
  * A date-bucket drill emits `gte` + `lt` to scope a list to a time bucket; an
  * EMPTY-bucket drill emits `[null]=true` (objectui#9159), a widget filter
  * asking for "this field is set" emits `[null]=false` (objectui#9508), and a
  * widget filter saying "is empty" / "is not empty" emits `[empty]=true|false`
- * (objectui#11547).
+ * (objectui#11547). A boolean bucket emits `[bool]`, and a measure scope or a
+ * widget filter using `$in`, `$nin`, `$ne` or a text operator emits its own
+ * suffix (objectstack#30743).
+ *
+ * The triple each of the last three rows reads back is the node
+ * `convertFiltersToAST` lowers the same condition to, operator AND comparand
+ * type, so the list asks the server the question the drill drawer asked.
  */
 
 /** Filter triple shape shared with view metadata: [field, operator, value]. */
@@ -234,6 +245,105 @@ export const EMPTY_FILTER = {
 } as const;
 
 /**
+ * A BOOLEAN comparand (objectstack#30743): what a drill on a yes/no bucket
+ * carries, `{ is_active: true }`.
+ *
+ * ## Why it is its own param and not `filter[field]=true`
+ *
+ * The route carries text, so the equality arm reads `filter[is_active]=true`
+ * back as the STRING `'true'`: `[is_active, '=', 'true']`, a different
+ * comparison from the drawer's `[is_active, '=', true]` (measured). That arm
+ * cannot learn to read `'true'` as a boolean either, because a text field may
+ * hold the word "true" and `filter[name]=true` has always meant that string.
+ * So a boolean gets a slot whose only two spellings are the two booleans,
+ * {@link NULL_FILTER}'s posture: anything else in it is dropped like an
+ * unknown suffix, never read as a string.
+ *
+ * Unlike that pair, the value here IS the comparand, so the triple's operator
+ * is plain equality and the comparand is the boolean itself.
+ */
+export const BOOLEAN_FILTER = {
+  /** URL param suffix: `filter[<field>][bool]`. */
+  param: 'bool',
+  /** The ONLY param value that reads back as `true`. */
+  flag: 'true',
+  /** The ONLY param value that reads back as `false`. */
+  notFlag: 'false',
+} as const;
+
+/**
+ * Operators whose param carries ONE text comparand beside the range bounds
+ * (objectstack#30743): URL suffix → the ObjectQL AST operator the triple
+ * carries, which is exactly what `convertFiltersToAST` lowers the matching
+ * producer key in {@link COMPARE_OP_PARAM} to.
+ *
+ * ⚠️ Kept OUT of {@link URL_FILTER_OPS}: that map's key list is pinned
+ * (`drillEmptyBucketNavHost-9085.test.ts`) and it is the RANGE vocabulary a
+ * date bucket reads. Prototype-free for the reason that map gives: the suffix
+ * comes from the address bar.
+ */
+export const URL_COMPARE_OPS: Record<string, string> = Object.assign(Object.create(null), {
+  ne: '!=',
+  contains: 'contains',
+  notcontains: 'notcontains',
+  startswith: 'startswith',
+  endswith: 'endswith',
+  icontains: 'icontains',
+});
+
+/** ObjectQL producer key → URL param suffix (WRITE side) for {@link URL_COMPARE_OPS}. */
+export const COMPARE_OP_PARAM: Record<string, string> = {
+  $ne: 'ne',
+  $contains: 'contains',
+  $notContains: 'notcontains',
+  $startsWith: 'startswith',
+  $endsWith: 'endswith',
+  $icontains: 'icontains',
+};
+
+/**
+ * Membership operators (objectstack#30743): URL suffix → AST operator. The
+ * param is REPEATED, one member per occurrence, and the read side gathers
+ * every occurrence on one field into ONE triple whose comparand is the list:
+ * `filter[status][in]=paid&filter[status][in]=sent` → `[status, 'in',
+ * ['paid', 'sent']]`. Repetition rather than a delimiter, because no
+ * character is safe to reserve inside a member: a status may well contain a
+ * comma.
+ */
+export const URL_LIST_OPS: Record<string, string> = Object.assign(Object.create(null), {
+  in: 'in',
+  nin: 'nin',
+});
+
+/** ObjectQL producer key → URL param suffix (WRITE side) for {@link URL_LIST_OPS}. */
+export const LIST_OP_PARAM: Record<string, string> = { $in: 'in', $nin: 'nin' };
+
+/**
+ * The canonical `ViewFilterRule` operator word for each AST operator the two
+ * maps above read back (objectstack#30743). Two readers, one table:
+ *
+ *   - the chip's operator label is `filterBuilder.operators.<word>`, the filter
+ *     builder's existing keys, present and translated in all ten packs;
+ *   - "Save as view" folds a triple to a spec rule through this word, so the
+ *     saved view keeps the condition the list showed.
+ */
+export const URL_TRIPLE_OP_WORD: Record<string, string> = Object.assign(Object.create(null), {
+  '!=': 'not_equals',
+  contains: 'contains',
+  notcontains: 'not_contains',
+  startswith: 'starts_with',
+  endswith: 'ends_with',
+  icontains: 'icontains',
+  in: 'in',
+  nin: 'not_in',
+});
+
+/** A comparand the route can carry as one param value and read back as itself, up to text. */
+function isUrlComparand(v: unknown): v is string | number {
+  return (typeof v === 'string' && v !== '') || (typeof v === 'number' && Number.isFinite(v));
+}
+
+/**
  * The ONE grammar for a key in this family, so the two arms below cannot drift
  * apart on what a field name is: `filter[<field>]`, with an OPTIONAL
  * `[<suffix>]`. The field slot excludes both brackets, so a suffix can never be
@@ -250,9 +360,17 @@ const FILTER_KEY = /^filter\[([^[\]]+)\](?:\[([^[\]]+)\])?$/;
  * EMPTY_FILTER}, the is-empty pair) search params into ObjectQL triples. An
  * unknown operator suffix is ignored (never silently downgraded to equality),
  * and so is an unknown value in either flag slot.
+ *
+ * `filter[<field>][bool]=true|false` ({@link BOOLEAN_FILTER}), the negation
+ * and text suffixes ({@link URL_COMPARE_OPS}) and the repeated membership
+ * suffixes ({@link URL_LIST_OPS}) are read too (objectstack#30743). A
+ * membership triple sits where its FIRST occurrence sat, holding every
+ * occurrence's value in URL order.
  */
 export function parseUrlFilterTriples(searchParams: URLSearchParams): FilterTriple[] {
   const out: FilterTriple[] = [];
+  /** `field` + suffix → the members of that membership triple, so repeats join it. */
+  const lists = new Map<string, unknown[]>();
   searchParams.forEach((value, key) => {
     if (value === '') return;
     const m = FILTER_KEY.exec(key);
@@ -278,7 +396,28 @@ export function parseUrlFilterTriples(searchParams: URLSearchParams): FilterTrip
       else if (value === EMPTY_FILTER.notFlag) out.push([field, EMPTY_FILTER.notOp, true]);
       return;
     }
-    const op = URL_FILTER_OPS[suffix];
+    if (suffix === BOOLEAN_FILTER.param) {
+      // objectstack#30743 — the value IS the comparand, and only the two
+      // boolean spellings are one; anything else is dropped, never read as text.
+      if (value === BOOLEAN_FILTER.flag) out.push([field, '=', true]);
+      else if (value === BOOLEAN_FILTER.notFlag) out.push([field, '=', false]);
+      return;
+    }
+    const listOp = URL_LIST_OPS[suffix];
+    if (listOp) {
+      // objectstack#30743 — one member per occurrence, gathered into one triple.
+      // The key cannot collide across fields: a field name excludes `]`.
+      const slot = `${field}]${suffix}`;
+      const members = lists.get(slot);
+      if (members) members.push(value);
+      else {
+        const fresh: unknown[] = [value];
+        lists.set(slot, fresh);
+        out.push([field, listOp, fresh]);
+      }
+      return;
+    }
+    const op = URL_FILTER_OPS[suffix] ?? URL_COMPARE_OPS[suffix];
     if (op) out.push([field, op, value]);
   });
   return out;
@@ -326,7 +465,10 @@ export function parseUrlEqualityFilterTriples(searchParams: URLSearchParams): Fi
  * and `{ $exists: true }` (objectui#9508) — becomes `filter[field][null]` with
  * the direction as its value; `{ $empty: true | false }` ({@link EMPTY_FILTER},
  * objectui#11547) becomes `filter[field][empty]` the same way; a plain value
- * becomes `filter[field]`.
+ * becomes `filter[field]`. A boolean value becomes `filter[field][bool]`
+ * ({@link BOOLEAN_FILTER}); `$ne` and the text operators ({@link
+ * COMPARE_OP_PARAM}) become their own suffix; `$in` / `$nin` ({@link
+ * LIST_OP_PARAM}) become one repeated param per member (objectstack#30743).
  * `null`/`undefined` values and objects with no recognized operator are skipped
  * (drill degrades to a superset) rather than stringified to
  * `"[object Object]"`.
@@ -428,11 +570,40 @@ function collectFilterParams(filter: Record<string, unknown>, params: URLSearchP
         const bound = ops[op];
         if (bound != null) params.set(`filter[${field}][${suffix}]`, String(bound));
       }
-      continue; // handled (flag / range ops) or skipped — never String(object)
+      // objectstack#30743 — negation and the text operators: one comparand
+      // each, written only when it is one the route reads back as itself (a
+      // boolean `$ne` would read back as a string, so it writes nothing).
+      for (const [op, suffix] of Object.entries(COMPARE_OP_PARAM)) {
+        const comparand = ops[op];
+        if (isUrlComparand(comparand)) params.set(`filter[${field}][${suffix}]`, String(comparand));
+      }
+      // objectstack#30743 — membership, one repeated param per member. The
+      // whole list or nothing: a member the route cannot carry (or an empty
+      // list, which no param can say) skips the condition, because writing the
+      // rest would change the set. A later source REPLACES an earlier one's
+      // list on the same field, the `set` posture of every other param here.
+      for (const [op, suffix] of Object.entries(LIST_OP_PARAM)) {
+        const members = ops[op];
+        if (!Array.isArray(members) || members.length === 0 || !members.every(isUrlComparand)) continue;
+        const name = `filter[${field}][${suffix}]`;
+        params.delete(name);
+        for (const member of members) params.append(name, String(member));
+      }
+      continue; // handled (flag / range / compare / list ops) or skipped — never String(object)
     }
-    // Arrays reach here as `$in`-style comparands this dialect cannot spell;
-    // skipping keeps the promise above (never `String(array)`).
+    // A bare array is not membership (`convertFiltersToAST` refuses it), and
+    // `$in` arrives as an operator object above; skipping keeps the promise
+    // above (never `String(array)`).
     if (Array.isArray(value)) continue;
+    if (typeof value === 'boolean') {
+      // objectstack#30743 — `filter[field]=true` reads back as the STRING
+      // 'true'; the boolean slot reads back as the boolean.
+      params.set(
+        `filter[${field}][${BOOLEAN_FILTER.param}]`,
+        value ? BOOLEAN_FILTER.flag : BOOLEAN_FILTER.notFlag,
+      );
+      continue;
+    }
     params.set(`filter[${field}]`, String(value));
   }
 }
@@ -469,7 +640,13 @@ export interface FilterChip {
   field: string;
   /** Finished, language-neutral text (a comparand, a pair of range bounds). */
   text?: string;
-  /** i18n key whose translation IS this chip's text. Mutually exclusive with `text`. */
+  /**
+   * i18n key whose translation is this chip's operator PROSE. Alone, it IS the
+   * chip's text (the emptiness pairs, which take no comparand). Beside `text`,
+   * it is the operator label drawn before the comparand: a negation, text or
+   * membership chip (objectstack#30743), whose operator is prose and whose
+   * comparand is still the user's own.
+   */
   textKey?: string;
 }
 
@@ -492,7 +669,11 @@ export interface FilterChip {
  * The "is empty" pair ({@link EMPTY_FILTER}, objectui#11547) gets the same two
  * arms, checked after these.
  *
- * These arms are the only ones that yield `textKey` rather than `text`, for the
+ * A negation, text or membership triple (objectstack#30743) yields BOTH: the
+ * operator's label as `textKey` and its comparand as `text`, the members of a
+ * list joined with a comma.
+ *
+ * The emptiness arms are the only ones that yield `textKey` rather than `text`, for the
  * reason on {@link FilterChip}. The keys are the filter builder's existing
  * operator keys, already present and already translated in all ten packs, and
  * already policed by that family's locale-parity pin — ⛔ not strings forked for
@@ -529,6 +710,19 @@ export function groupFilterChips(triples: FilterTriple[]): FilterChip[] {
     }
     const gte = list.find(([, op]) => op === '>=' || op === '>');
     const lt = list.find(([, op]) => op === '<' || op === '<=');
+    // objectstack#30743 — a negation, text or membership operator is prose,
+    // drawn through the filter builder's own label beside the user's comparand.
+    // After the range arm's inputs are read, so a field that also carries a
+    // range bound keeps the range chip it had.
+    const word = gte || lt ? undefined : URL_TRIPLE_OP_WORD[String(list[0][1])];
+    if (word) {
+      const comparand = list[0][2];
+      return {
+        field,
+        textKey: `filterBuilder.operators.${word}`,
+        text: Array.isArray(comparand) ? comparand.map(String).join(', ') : String(comparand),
+      };
+    }
     const text =
       gte || lt
         ? `${gte ? String(gte[2]) : '…'} → ${lt ? String(lt[2]) : '…'}`

@@ -19,7 +19,7 @@ export const entry: SemanticMigration = {
     + '`type: \'number\'`, and a column over a field of any other type, keep `scale`',
   replacement: 'no `scale` on the column. DELETE the key — that is the whole migration: the column '
     + 'renders as a currency column, and a currency amount\'s decimal places are its currency\'s. '
-    + 'The currency\'s ISO 4217 minor unit decides how the cell displays the amount and the width a '
+    + 'The currency\'s CLDR fraction digits decide how the cell displays the amount and the width a '
     + 'computed amount is rounded to. ⛔ Nothing replaces the key: do not re-declare its value under '
     + 'any other key, and do not add `type: \'number\'` to keep it on a currency amount.',
   reason: 'The refusal of `scale` on a currency inline grid column (entry '
