@@ -417,7 +417,7 @@ const result = AutomationApiErrorCode.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +360 more>` | ✅ | The inner refusal's code in its WIRE spelling - the ADR-0112 member a record save of the same write answers in `error.code` (e.g. `UNIQUE_VIOLATION`); the closed set `ApiErrorSchema.code` parses against |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +361 more>` | ✅ | The inner refusal's code in its WIRE spelling - the ADR-0112 member a record save of the same write answers in `error.code` (e.g. `UNIQUE_VIOLATION`); the closed set `ApiErrorSchema.code` parses against |
 | **message** | `string` | ✅ | The inner refusal's own diagnostic text, verbatim, without the node and operation prefixes the run's failure text adds |
 
 ### Allowed Values: `FlowInnerRefusal.code`
@@ -671,6 +671,7 @@ const result = AutomationApiErrorCode.parse(data);
 * `OS_PROTOCOL_INCOMPATIBLE`
 * `PACKAGE_DELETE_FAILED`
 * `PACKAGE_DELETE_PARTIAL`
+* `PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`
 * `PACKAGE_MANIFEST_INVALID`
 * `PACKAGE_PUBLISH_FAILED`
 * `PASSWORD_ALREADY_SET`
