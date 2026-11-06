@@ -423,16 +423,20 @@ function cbpMasterReferenceFinding(
   if (!missingRequired && flags.length === 0) return undefined;
 
   const subject = `master_detail "${objectName}.${fieldName}" → ${parent}`;
-  const requirement = eitherSpelling
-    ? 'must declare required: true (or required: false for an optional master)'
-    : 'must be required';
   // [#22161] One verdict per shape, ending in the one shared consequence; the
   // derivation (why the record is unreadable, why the flags skip the check)
-  // is `os explain` text.
-  const message = missingRequired
+  // is `os explain` text. [#30905] The sole master_detail's omitted
+  // `required` names its two spellings instead: the consequence is the
+  // required one's only, and which one is meant is the author's to write.
+  const message = eitherSpelling
     ? flags.length === 0
-      ? `${subject} ${requirement}: ${CBP_ORPHAN_CONSEQUENCE}`
-      : `${subject} ${requirement} and not be marked ${flags.join(' or ')}: ${CBP_ORPHAN_CONSEQUENCE}`
+      ? `${subject} declares no required: write true (every detail names its master) or false (an optional master)`
+      : `${subject} declares no required and is marked ${flags.join(' or ')}: write required: true or false, ` +
+        'and drop the flag'
+    : missingRequired
+    ? flags.length === 0
+      ? `${subject} must be required: ${CBP_ORPHAN_CONSEQUENCE}`
+      : `${subject} must be required and not marked ${flags.join(' or ')}: ${CBP_ORPHAN_CONSEQUENCE}`
     : optionalMaster
       ? `${subject} is the optional master and is marked ${flags.join(' and ')}, which no detail ` +
         'write supplies: the master reference must be writable'

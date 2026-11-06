@@ -417,8 +417,8 @@ function cbpMasterCandidates(obj: AnyRec): CbpRelation[] {
     type: 'master_detail',
     master: refOf(f) as string,
   });
-  const required = fields.filter((f) => isControlledByParentMasterField(f) && refOf(f)).map(relationOf);
-  if (required.length > 0) return required;
+  const requiredMasters = fields.filter((f) => isControlledByParentMasterField(f) && refOf(f)).map(relationOf);
+  if (requiredMasters.length > 0) return requiredMasters;
   // [ADR-0055 §1 as amended · #30905 ruling A] With no required one, the
   // object's only `master_detail` declared `required: false` is its optional
   // master — the spec's resolver says which, so the parse and this linter
@@ -659,9 +659,8 @@ function pushCbpNoRelation(findings: SecurityFinding[], objName: string, path: s
     // the object is unusable rather than locked down are this id's
     // `os explain` entry.
     message:
-      `declares sharingModel 'controlled_by_parent' but no master_detail field to derive access from ` +
-      `(one declared required: true, or its only one declared required: false), so every read is ` +
-      `denied and every write refused (422 INVALID_METADATA)`,
+      `declares sharingModel 'controlled_by_parent' but no master_detail field it can derive access ` +
+      `from, so every read is denied and every write refused (422 INVALID_METADATA)`,
     // [#22161] One remedy line; that an object with no master decides its
     // own baseline, and what each value means, is this id's `os explain`
     // entry.

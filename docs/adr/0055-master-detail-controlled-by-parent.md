@@ -5,6 +5,7 @@
 · **Amended** (2026-10-22, #24932, ruling B `6303721609` and Q1 C / Q2 A `6329027469`) — **§2's chosen mechanism (b) is retired for `controlled_by_parent`, and the set-size limit with it**: the read derivation (`packages/plugins/plugin-security/src/security-plugin.ts#computeControlledByParentFilter`) answers ADR-0139's `ReadableIds` leaf over the master, the engine composes it from this plugin's own `canReadObject` / `getReadFilter` of the master, and the driver compiles one statement with the master inside a subquery — the seventh consumer of that leaf, in the end-state form. No master id set is pre-resolved any more. The 2026-10-10 line above reads as of its date. What still stands: §1 (the one required `master_detail`), §3 (the write gate), the cycle guard and the depth bound (now the engine's own cut, judged first over the registry), and the RLS compiler's `rlsMembership` IN-form, which serves `current_user.<key>` memberships and never served this derivation. The limit that replaces the set-size ceiling is ADR-0139 D5's two master shapes, which the boot refuses (#25144).
 · **Amended** (2026-10-26, #25760, ruling `6398566164`) — **§3 gains one per-object opt-in**: `sharing.controlledByParent.ownerMayEdit: true` lets the OWNER of a detail row (its `owner_id`) pass the write gate on a by-id `update` of that row with **read** access to the master; every other caller, and every insert, delete, predicate update and on-behalf-of write, keeps the master-**edit** rule. The default is unchanged. See **"Amendment (2026-10-26, #25760): the owner of a detail row may update it with read on the master, by opt-in"** at the end.
 · **Amended** (2026-10-27, #26591 / PR #26658) — **the 2026-10-26 amendment's Lint bullet is narrowed in place**: the lint prescribes the opt-in only for an `owner_id`-keyed `update` / `all` policy on a `controlled_by_parent` detail that carries `owner_id` and has not opted in; any other caller-keyed update policy is flagged in both states with the `owner_id` remedy, never the opt-in. The gate, the spec and the lint are unchanged by this note. See the note under **Lint** in "What the opt-in does, exactly".
+· **Amended** (2026-11-06, #30905, maintainer ruling 「A」) — **§1 admits an optional master and §2 gains a null-master arm**: a `controlled_by_parent` object whose only `master_detail` is declared `required: false` derives an OPTIONAL master. A detail row that names its master is read through it, unchanged; a row whose master reference is empty is read by its owner (`owner_id`) and by View All on the detail, through a second arm OR-ed with the master arm inside the one read chokepoint, `computeControlledByParentFilter`. §3 (the write gate) is unchanged by this note: a write that leaves the reference empty is still refused. See **"Amendment (2026-11-06, #30905): an optional master, and the null-master row its owner reads"** at the end.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove), [ADR-0054](./0054-runtime-proof-for-authorable-surface.md) (prove-it-runs)
 **Surfaced by**: an audit of master-detail permission semantics — `OWDModel.controlled_by_parent` is **declared but unenforced** (zero runtime consumers; not reachable through the object's `sharingModel` enum; the RLS compiler is relationship-blind). This is *false compliance* (ADR-0049) and *unproven liveness* (ADR-0054).
@@ -36,6 +37,7 @@ A **master-detail detail** record today is access-controlled entirely on its own
 
 - Add `controlled_by_parent` to the **authorable** `object.sharingModel` enum (converging it with `OWDModel`; resolves the inconsistency).
 - An object with `sharingModel: 'controlled_by_parent'` **must declare exactly one required `master_detail` field**; its `reference` identifies the master object and its field key is the master FK. Validation error otherwise (fail closed — an unsatisfiable "controlled by parent" must not silently fall open).
+  ⚠️ **Amended 2026-11-06 (#30905, ruling A):** or, with no required one, its **only** `master_detail` declared `required: false` — an **optional** master, whose rows may name none. Every other refusal stands (two masters, a required `lookup` only, a `readonly` / `system` master). See the amendment at the end.
 - The author writes **no RLS policy** for this — "controlled by parent" is *derived automatically* from the relationship (Salesforce-like OWD), which is the whole point.
 
 ### 2. Read mechanism — pre-resolved accessible-master-id set (chosen)
@@ -46,6 +48,8 @@ For a `controlled_by_parent` object, the security layer, per request:
 3. the detail's derived policy `"<masterFieldKey> IN (current_user.cbp_<object>_<field>)"` compiles via the **existing IN-form** and AND-s onto the read (step 1 in Context). An **empty** set fails closed (the compiler already returns `null` → deny) — correct: no accessible master ⇒ no detail.
 
 This composes with the detail's own tenant/owner RLS (all AND-ed) and flows to analytics via `getReadFilter` unchanged.
+
+⚠️ **Amended 2026-11-06 (#30905, ruling A):** for an **optional** master (§1 as amended), the derivation is one `$or` of two arms that never share a row — the master arm (now ADR-0139's leaf, per the 2026-10-22 amendment) and a **null-master** arm for rows whose master reference is empty, read by the row's owner and by View All on the detail. The `$or` is the cbp layer's own answer, so it is still AND-ed under the tenant wall and beside the detail's own layers. A required master's derivation is unchanged. See the amendment at the end.
 
 **Why this mechanism (trade-offs):**
 
@@ -190,3 +194,39 @@ The ruling names **update**. So the leg does not reach: an **insert** (no row to
 ### What is unchanged
 
 §1 (one required `master_detail`, no author-written derivation), §2 (read derived from the master), the chain walk, the cycle guard and the depth bound all stand. Every detail that does not declare the opt-in behaves byte-for-byte as before this amendment.
+
+---
+
+## Amendment (2026-11-06, #30905): an optional master, and the null-master row its owner reads
+
+**Ruling.** objectstack-ai/objectstack#30905, maintainer ruling 「A」 (2026-11-06): `controlled_by_parent` admits an optional master, and a detail row with no master is visible only to its owner — the Salesforce reading of a contact with no account, a private contact. Rejected with it: a membership key collecting its object's own id, one-hop RLS traversal, and no platform change. The ruling lands in three serial changes; this amendment records the first (spec, lint, the read). The write gate (§3) and the docs follow in their own changes, and this record is amended again for §3 then.
+
+### The gap this closes
+
+"A rep sees the contacts of the accounts they own; a contact need not have an account" had no declarative form. §1 required the master reference on every row, the parse and `ObjectSchema.create()` refused a `master_detail` declared `required: false`, a `lookup` derives no access, and RLS cannot read the master's owner. The one working route was a copied owner field kept in step by hooks.
+
+### What changes, exactly
+
+- **Spec (§1).** The object's **only** `master_detail`, declared `required: false`, is its master when it declares no required one — an **optional** master. The parse's one-master rule (`packages/spec/src/data/controlled-by-parent-master.ts#controlledByParentMasterRefusal`) judges the master through `controlledByParentMasterOf`, exported beside it, which answers the field and whether it is optional; `isControlledByParentMasterField` keeps meaning the REQUIRED master. `ObjectSchema.create()` keeps an explicit `required: false` on the only `master_detail` as written; beside another `master_detail` it still refuses it, since that field is a second parent, not the master. Every other refusal stands: two masters, a required `lookup` only, and a `readonly` / `system` master (required or optional).
+- **An omitted `required` keeps meaning required where the omission is visible.** The builder forces it to `true` and the stored-row conversion `cbp-master-detail-required-defaulted` converts it to `true`, both unchanged. The **parse** cannot see it: `required` defaults to `false` on the parsed field map, so a raw parse (and `defineStack` over a plain object literal) admits an omitted `required` on the only `master_detail` as the optional master. `os lint`'s `relationship/master-detail-required` reports the omission at `error`, naming both spellings. Whether the parse should tell the two spellings apart is the maintainer's open question on #30905 (letters A, B and C); this amendment records option A, the one the code implements, and decides nothing further.
+- **Compatibility.** No accepted stored object changes meaning. A stored row the v18 upgrade listed under `cbp-master-relation-tiers-retired` as `master-not-required` because it declared `required: false` is a valid optional-master detail now and is no longer listed; the semantic migration entry `cbp-optional-master-admitted` records it.
+- **Read (§2).** `packages/plugins/plugin-security/src/security-plugin-cbp-read-filter.ts#computeControlledByParentFilter` answers an optional master with `{ $or: [ { fk: { $in: ReadableIds.of(master) } }, nullMasterArm ] }`. The null-master arm is `{ fk: null }` for a holder of View All on the detail (`viewAllRecords` or `modifyAllRecords`, the super-user read bypass on the detail), else `{ $and: [ { fk: null }, { owner_id: <caller> } ] }` when the detail carries the `owner_id` column, else nothing. The function is the one chokepoint: the data middleware, `getReadFilter` (analytics, and the engine's `ReadableIds` composer behind the parent gates of attachments, comments, activity and approvals, and behind a chain's next level) and the delegated read compose it, each with the permission sets of the context it is asked for, so every read door follows. A required master's leaf is byte-identical to before.
+- **Explain.** `security/explain` narrates the null-master arm on a record read: which arm returned the row, or, for a row the read door withholds, that it names no master and who reads it instead (`packages/plugins/plugin-security/src/explain-engine.ts`).
+
+### The rules the read keeps
+
+- A row that names a master is never read through the null-master arm, and a row that names none never through the master arm (`$in` never matches an empty reference).
+- View All on the detail admits the null-master rows and nothing more: it does not open the master arm, which stays the master's own read answer.
+- A null-master row with no owner (an ADR-0142 queue row), or on an object with no `owner_id` column (`ownership` other than `'user'`), is read by View All alone until it is claimed.
+- In a chain, an intermediate row whose own master is empty is read by its owner, and the next level's master arm sees exactly that: its leaf is composed with the intermediate level's own read scope, the `$or` included.
+- A caller who reads another master does not read the null-master rows they do not own.
+
+### Fail-closed boundaries
+
+- An omitted `required` on an object that reached the registry without the parse resolves no master (the runtime reads `required === false`, not its absence), so every read is denied, as before.
+- A cycle or a depth refusal of the chain still denies the whole object, the null-master rows included: the declared chain is the defect.
+- The write gate is unchanged: an insert or update that leaves the master reference empty is refused (`MasterReferenceMissingError`, 422), so no null-master row can be written through the platform until §3 is amended.
+
+### What is unchanged
+
+§3, the chain walk, the cycle guard and the depth bound; every `controlled_by_parent` object with a required master, byte for byte; the owner opt-in of the 2026-10-26 amendment.
