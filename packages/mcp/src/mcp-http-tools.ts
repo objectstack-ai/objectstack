@@ -318,6 +318,18 @@ export interface McpActionBridge {
     input: { objectName?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
   ): Promise<unknown>;
   /**
+   * [#30771] The capability refusal `runAction` would throw for an action on
+   * `objectName` that {@link listActions} leaves out because the caller lacks
+   * its declared `requiredPermissions` — `{ code, status, message }`, the same
+   * values the by-name call throws. `undefined` for anything else (not
+   * declared, not exposed to AI), so `run_action`'s scoped `sys_*` pre-screen
+   * keeps its system-object refusal there. Runs nothing.
+   *
+   * OPTIONAL: a bridge without it keeps the system-object refusal for every
+   * `sys_*` action its listing leaves out, as before.
+   */
+  capabilityRefusal?(name: string, objectName: string): Promise<ThrownRefusalEnvelope | undefined>;
+  /**
    * [#15705] Continue a run that `runAction` answered with `status: 'paused'`
    * and a `screen`, submitting that screen's field values as `values`.
    *
@@ -1788,7 +1800,15 @@ export function registerActionTools(
           const admitted = listed.some(
             (a) => a.name === actionName && a.objectName === objectName && isListableAction(a),
           );
-          if (!admitted) return errorResult(systemObjectActionRefusal(actionName, objectName));
+          if (!admitted) {
+            // [#30771] An exposed action the caller's declared gate refuses is
+            // left out of the listing too: answer that gate's refusal, the one
+            // the by-name call gets, not the system-object sentence. Nothing
+            // runs either way.
+            const refusal = await bridge.capabilityRefusal?.(actionName, objectName);
+            if (refusal) return errorResultWithCode(Object.assign(new Error(refusal.message), refusal));
+            return errorResult(systemObjectActionRefusal(actionName, objectName));
+          }
         }
         const result = await bridge.runAction(actionName, {
           objectName,

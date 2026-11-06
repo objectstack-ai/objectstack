@@ -3,7 +3,8 @@
 /**
  * [#29985 codemod] The "Discovery, types, diagnostics, packaged bases,
  * credential carry-forward" facet of `ObjectStackProtocolImplementation`: the
- * bodies of `getProjectId`, `getMetaTypes`, `getPackagedObjectBase`,
+ * bodies of `getProjectId`, `getMetaTypes`,
+ * `rethrowUnlessMetadataStoreUnprovisioned`, `getPackagedObjectBase`,
  * `getPackagedDashboardBase`, `getPackagedViewBase`, `getPackagedReportBase`,
  * `packagedArtifactBase`, `objectRegistrationRefusal`,
  * `restoreTranslatedObjectEchoes`, `restoreInjectedColumnEchoes`,
@@ -55,6 +56,8 @@ import {
     toJsonSchemaSafe,
 } from './protocol-meta-type-schema.js';
 import type { SaveMetaItemRequest } from './protocol-door-requests.js';
+import { isMissingTableError } from '@objectstack/metadata/errors';
+import { metadataReadFailureError } from './protocol-client-failures.js';
 import type { ProtocolHost } from './protocol-host.js';
 import { servedOverrideBaseOf } from './served-override.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
@@ -231,6 +234,83 @@ export class ProtocolDiscoveryAndBasesFacet {
         const exact: Equal<typeof listing, MetaTypesListing> = true;
         void exact;
         return listing;
+    }
+
+    /**
+     * [#5532] Decide what a failed READ against `sys_metadata` means, and
+     * rethrow unless it is the ONE benign reason.
+     *
+     * ## The defect
+     *
+     * Every overlay read in `getMetaItems`/`getMetaItem` used to `catch {}` into
+     * its own empty value — `items` left as-is, `item` left `undefined`, the
+     * draft lookup falling through to the active read. That made a metadata
+     * store the protocol cannot reach **indistinguishable** from an environment
+     * where the item was never customised, and the emptiness then travelled
+     * the whole read chain unremarked:
+     *
+     *   - `getMetaItemCached` turned it into `not found` — an outage answered
+     *     as "that item does not exist", which is the opposite disposition
+     *     (retry the backend vs. create the item / fix the link);
+     *   - the `state='draft'` read turned it into `NO_DRAFT` / 404 — an outage
+     *     answered as "there is no pending edit", which a publish flow reads as
+     *     "nothing to publish";
+     *   - `getMetaItems` turned it into `items: []` — an outage answered as
+     *     "this environment declares none of these", the exact shape #5108 fixed
+     *     one layer down in `DatabaseLoader` and #5089 in `listForIndex`.
+     *
+     * ADR-0110 D3 is the rule: a miss and an outage are different facts with
+     * opposite meanings, and a consumer must never read one as the other.
+     *
+     * ## The one benign reason
+     *
+     * `sys_metadata` has not been provisioned yet. There are then genuinely no
+     * overlay rows, so falling through to the registry / MetadataService IS the
+     * truth, and a first boot must not explode. Classification is by error TYPE
+     * through {@link isMissingTableError} — the same predicate `DatabaseLoader`
+     * (#5108) and this package's own `SysMetadataRepository` (#4867) ask, so a
+     * driver quirk is taught to the platform once. Conservative in the same
+     * direction: an unrecognised error is NOT benign, because a false "benign"
+     * silently mis-answers "does this exist?" while a false "real" costs one
+     * 503 the caller can retry.
+     *
+     * ## [#12536] Not benign is not the same as "the store is down"
+     *
+     * A non-benign failure is classified once more before it is wrapped, by
+     * {@link metadataReadFailureError}: a metadata app's hook may have REFUSED
+     * this read and marked its refusal with `userMessage` (commit 79c46da90), and that is
+     * an application refusal, not a dependency outage. Handing it to the 503
+     * below destroyed the mark at the producer — the two failures left this
+     * guard as the same envelope with the same sentence. The classification
+     * splits them; neither category's wording changes.
+     *
+     * @throws {@link markedApplicationRefusalError} — [#12536] FIRST, when the
+     *         failure carried a producer's `userMessage` mark (commit 79c46da90): the
+     *         author's text verbatim, in its own refusal category, with the
+     *         cause still carried for the operator and nothing else quoted.
+     * @throws {@link metadataStoreUnavailableError} — a 503 carrying the driver
+     *         error as `cause`, for every UNMARKED non-benign failure. Not the
+     *         driver error itself: unwrapped, it has
+     *         no status, so the REST boundary would have to guess from the
+     *         message text — and `mapDataError` guesses `no such table` into
+     *         `404 OBJECT_NOT_FOUND`, i.e. straight back into a miss.
+     * @returns normally ONLY for the benign case, licensing the caller to treat
+     *          the overlay as absent.
+     */
+    static rethrowUnlessMetadataStoreUnprovisioned(error: unknown, readObject: string): void {
+        // [commit 4cda78c9b] `readObject` is REQUIRED, deliberately. This helper serves
+        // callers that read four different tables (`sys_metadata`,
+        // `sys_metadata_audit`, `sys_metadata_commit`, `sys_metadata_history`),
+        // so a default would silently answer about the wrong one for three of
+        // them — measured, not hypothetical: the first draft of this repair
+        // hardcoded `sys_metadata` and turned `diffMetaItem`'s genuinely
+        // unprovisioned `sys_metadata_history` into a loud failure. A required
+        // parameter makes the compiler ask the question at every new call site.
+        if (isMissingTableError(error, readObject)) return;
+        // [#12536] CLASSIFY, do not assume. A read can fail because the store
+        // is unreachable OR because a metadata app's hook refused it in its
+        // own words — see {@link metadataReadFailureError}.
+        throw metadataReadFailureError(error);
     }
 
     /** The body of `ObjectStackProtocolImplementation#getPackagedObjectBase`; the method's docblock there is its contract. */

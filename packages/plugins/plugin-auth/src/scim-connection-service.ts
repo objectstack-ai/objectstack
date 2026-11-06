@@ -74,13 +74,92 @@ import { AsyncLocalStorage } from 'node:async_hooks';
  * locally (#3653). Core flows never had native DB transactions before (the
  * adapter factory's default is the sequential as-is fallback), so this keeps
  * them at their historical posture rather than weakening anything.
+ *
+ * The store also carries the request's ATTRIBUTION slot — see
+ * {@link ScimRequestScope.connectionId}.
  */
-export const scimRequestScope = new AsyncLocalStorage<{ scim: true }>();
+export const scimRequestScope = new AsyncLocalStorage<ScimRequestScope>();
+
+/**
+ * One SCIM protocol request's scope: opened empty by `handleRequest`, its
+ * `connectionId` filled in once by the bearer verifier.
+ */
+export interface ScimRequestScope {
+  scim: true;
+  /**
+   * The SCIM connection this request's bearer verified as — the IdP that is
+   * acting. Recorded by {@link recordScimRequestConnection} from inside the
+   * `verifyBearerToken` callback; read by {@link scimRequestConnectionId} when
+   * the adapter builds each write's context (`authSystemWriteContext`), so
+   * every provisioning write of the request — the `sys_user` create, the
+   * deactivation's ban update, `sys_member`, `sys_scim_*` — is attributed to
+   * the connection.
+   *
+   * Why a MUTABLE slot on a store `handleRequest` already opened, and not a
+   * new store: the verifier runs in a continuation the endpoint handler does
+   * not descend from (the `enterWith` note above, measured). A store the
+   * verifier opened or entered never reaches the writes. The object opened
+   * here, though, is the store of BOTH frames — the verifier's and the
+   * handler's — because both run inside the one `run(...)`; writing a field
+   * on it is seen by every later read in the request. Each request gets its
+   * own object from its own `run(...)`, so two concurrent requests on two
+   * connections never see each other's slot (pinned by
+   * `scim-transaction-scope.test.ts`, the attribution block).
+   *
+   * Only the connection id is kept. The bearer, its digest and the credential
+   * row are never placed here, so no write context can carry them.
+   */
+  connectionId?: string;
+}
 
 /** Is the current async chain inside an authenticated SCIM protocol request? */
 export function inScimRequestScope(): boolean {
   return scimRequestScope.getStore()?.scim === true;
 }
+
+/**
+ * Record the connection a SCIM bearer verified as on the current request's
+ * scope, and hand the verification back unchanged.
+ *
+ * A no-op outside a SCIM request scope, on a failed verification (`null`), and
+ * once a connection is already recorded: the first verified connection of a
+ * request is the one its writes are attributed to, so a later call cannot
+ * re-attribute writes already in flight.
+ */
+export function recordScimRequestConnection<T extends ScimBearerVerification | null>(verification: T): T {
+  const scope = scimRequestScope.getStore();
+  if (scope?.scim === true && verification && scope.connectionId === undefined) {
+    scope.connectionId = verification.connection.id;
+  }
+  return verification;
+}
+
+/** The connection the current SCIM request's bearer verified as, or `undefined`. */
+export function scimRequestConnectionId(): string | undefined {
+  const scope = scimRequestScope.getStore();
+  return scope?.scim === true ? scope.connectionId : undefined;
+}
+
+/**
+ * The service-principal label of a SCIM connection, as it lands on
+ * `ExecutionContext.actor` and from there on `sys_audit_log.actor`.
+ *
+ * `svc:scim:CONNECTION_ID` — the incumbent `svc:<name>` shape
+ * (`ExecutionContext.actor`, ADR-0014 D2) with the kind segment first, the way
+ * an automation run is `svc:flow:FLOW_NAME`. The connection id is the
+ * identifier and not a display name: it is immutable, it scopes every resource
+ * the connection provisions, it is what `sys_scim_connection_binding` and
+ * `sys_scim_connection_credential` are keyed by, and the credential row holds
+ * no connection name to use instead (its `label` names one credential, which a
+ * rotation replaces). The audit writer also records the id on its own, as
+ * `metadata.scim_connection_id` (ADR-0118 D5's association field).
+ */
+export function scimServicePrincipal(connectionId: string): string {
+  return `${SCIM_SERVICE_PRINCIPAL_PREFIX}${connectionId}`;
+}
+
+/** The `ExecutionContext.actor` prefix every SCIM connection's label starts with. */
+export const SCIM_SERVICE_PRINCIPAL_PREFIX = 'svc:scim:';
 
 /** The ObjectStack-owned credential store (see platform-objects/identity). */
 export const SCIM_CREDENTIAL_OBJECT = 'sys_scim_connection_credential';
@@ -240,4 +319,49 @@ export async function verifyScimBearerToken(
     scopes: SCIM_ALL_SCOPES,
     ...(expiresAt ? { expiresAt } : {}),
   };
+}
+
+/** Minimal engine surface {@link revokeScimConnectionCredential} needs. */
+interface RevocationEngine {
+  findOne(
+    object: string,
+    query: { where: Record<string, unknown>; fields?: string[] },
+    options?: { context?: { isSystem?: boolean } },
+  ): Promise<Record<string, unknown> | null>;
+  update(object: string, data: Record<string, unknown>, options?: { context?: { isSystem?: boolean } }): Promise<unknown>;
+}
+
+/** What {@link revokeScimConnectionCredential} found and did. */
+export type ScimCredentialRevocation =
+  | { outcome: 'revoked'; credentialId: string; connectionId: string }
+  | { outcome: 'already_revoked'; credentialId: string; connectionId: string }
+  | { outcome: 'not_found' };
+
+/**
+ * Revoke one credential (#30958): switch its row's `active` off — the switch
+ * {@link verifyScimBearerToken} refuses on — so its bearer is refused from the
+ * next SCIM request on. The row is kept (its digest is one-way; the audit
+ * trail and the staged-rotation history point at it). Rotation is a second
+ * {@link mintScimConnectionCredential} for the same `connectionId` followed by
+ * this. A row already inactive is reported as such and not written again.
+ */
+export async function revokeScimConnectionCredential(
+  engine: RevocationEngine,
+  credentialId: string,
+): Promise<ScimCredentialRevocation> {
+  const row = await engine.findOne(
+    SCIM_CREDENTIAL_OBJECT,
+    { where: { id: credentialId }, fields: ['id', 'connection_id', 'active'] },
+    CREDENTIAL_PROBE_CONTEXT,
+  );
+  if (!row) return { outcome: 'not_found' };
+  const connectionId = String((row as { connection_id?: unknown }).connection_id ?? '');
+  const id = String((row as { id?: unknown }).id);
+  // Read `active` the way the verifier does: anything not affirmatively active is off.
+  const active = (row as { active?: unknown }).active;
+  if (active === false || active === 0 || active == null) return { outcome: 'already_revoked', credentialId: id, connectionId };
+  // The system context is spelled at the call, not only inherited from the
+  // caller's wrapped engine, so the write says what it is wherever it is read.
+  await engine.update(SCIM_CREDENTIAL_OBJECT, { id, active: false }, { context: { isSystem: true } });
+  return { outcome: 'revoked', credentialId: id, connectionId };
 }

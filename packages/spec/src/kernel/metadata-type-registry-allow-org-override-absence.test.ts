@@ -55,7 +55,9 @@ describe('tree-scoped absence: no TypeScript source in the declared radius reads
    * name was about a third of the walk's parsing.
    */
   const NEW_READERS = [
-    'packages/metadata-protocol/src/protocol.ts',
+    // [#30147] The protocol's reader is `OVERLAY_ALLOWED_TYPES`'s initializer,
+    // which moved whole from `protocol.ts` to this leaf module.
+    'packages/metadata-protocol/src/protocol-write-gates-tables.ts',
     'packages/metadata-protocol/src/sys-metadata-repository.ts',
     'packages/spec/src/kernel/metadata-plugin.zod.ts',
   ];

@@ -918,6 +918,23 @@ export function buildMcpBridge(
             }
             return out;
         },
+        // [#30771] Why the scoped `run_action` pre-screen (`@objectstack/mcp`)
+        // finds a `sys_*` action missing from this caller's listing when the
+        // reason is the caller's capability: an action its author exposed whose
+        // declared gate refuses this caller answers the gate's own refusal, the
+        // one `runAction` throws by name. Anything else (not declared there, not
+        // exposed) answers `undefined`, so the tool keeps its system-object
+        // sentence. Reads the declarations `listActions` reads, runs nothing.
+        capabilityRefusal: async (name: string, objectName: string) => {
+            const declarations = await actionExec.collectActionDeclarations(
+                deps, await getMeta(), await readServedObjects(), await readServedActions(),
+            );
+            const found = declarations.find((d) => d.objectName === objectName && d.action?.name === name);
+            if (!found) return undefined;
+            if (actionExec.systemObjectActionExposureError(deps, found.action, objectName)) return undefined;
+            if (actionExec.actionAiExposureError(deps, found.action)) return undefined;
+            return actionExec.actionPermissionRefusal(deps, found.action, ec, objectName) ?? undefined;
+        },
         // [#15942] `confirm` rides through UNTOUCHED. The bridge forwards the
         // whole request object, so widening the type here is the whole change:
         // the MCP door grew the member in the same change that enforces it, and

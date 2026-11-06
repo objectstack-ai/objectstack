@@ -1,6 +1,6 @@
 # ADR-0050: Form layout vs presentation — split the overloaded `FormView.type`
 
-**Status**: Proposed (2026-06-15) · **Amended** (2026-10-20, letter B′ on [#24692](https://github.com/objectstack-ai/objectstack/issues/24692), ruling record [`6281834942`](https://github.com/objectstack-ai/objectstack/issues/24692#issuecomment-6281834942), maintainer 「同意」) — the list add-record open mode is no longer declared on `addRecord`; see the note under Decision 2.
+**Status**: Accepted (2026-10-28, letter A′ on #27032, ruling record 6464210455) — cutover card #27155 (spec) + #27159 (renderer); the 2026-10-20 amendment stands · **Amended** (2026-10-20, letter B′ on [#24692](https://github.com/objectstack-ai/objectstack/issues/24692), ruling record [`6281834942`](https://github.com/objectstack-ai/objectstack/issues/24692#issuecomment-6281834942), maintainer 「同意」) — the list add-record open mode is no longer declared on `addRecord`; see the note under Decision 2.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0014](./0014-record-form-field-type.md) (record form field type), [ADR-0017](./0017-object-has-many-view.md) (object-bound views), [ADR-0049](./0049-no-unenforced-security-properties.md) (declared ≠ enforced discipline)
 **Consumers**: `@objectstack/spec` (`ui/view.zod.ts` `FormViewSchema`), `@object-ui/plugin-form` (`ObjectForm` + `TabbedForm`/`WizardForm`/`SplitForm`/`DrawerForm`/`ModalForm`), `@object-ui/app-shell` (`RecordFormPage`, `AppContent`, `useActionModal`), examples + templates form views.

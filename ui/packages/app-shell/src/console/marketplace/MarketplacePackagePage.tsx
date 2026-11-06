@@ -373,13 +373,14 @@ function MarketplacePackagePageBody() {
   // ADR-0131 D6 — what the package permits is its manifest's `installModes`,
   // so the page reads the manifest the install door reads: the same path and
   // the same version (`latest`, the one `installLocal` installs when it names
-  // none). Only where install-local is the page's install door (the cloud
-  // install routes take no mode) and only for a viewer the page serves.
+  // none). Where an install door takes a mode — install-local, or the hosted
+  // environment's cloud-connection install, which hands it to the control
+  // plane to judge — and only for a viewer the page serves.
   useEffect(() => {
     if (!packageId) return;
     if (!marketplaceEnabled) return;
     if (!isAdmin) return;
-    if (!getRuntimeConfig().features.installLocal) return;
+    if (!getRuntimeConfig().features.installLocal && !getCloudBase()) return;
     let cancelled = false;
     (async () => {
       try {
@@ -403,6 +404,13 @@ function MarketplacePackagePageBody() {
   const requestedInstallMode: LocalInstallMode | undefined = !declaredModes
     ? undefined
     : declaredModes.length === 1 ? declaredModes[0] : (chosenMode || undefined);
+  // The hosted install (a cloud base, no install-local door) sends the same
+  // resolved mode, except where the package permits nothing beyond `managed`:
+  // that request stays the one every hosted install sent before the mode.
+  const hostedModeDoor = !getRuntimeConfig().features.installLocal && !!getCloudBase();
+  const hostedInstallMode: LocalInstallMode | undefined = hostedModeDoor && declaredModes?.some((m) => m !== 'managed')
+    ? requestedInstallMode
+    : undefined;
 
   // Seed cloud-install state so the primary CTA renders as "Installed" on
   // first paint instead of inviting another install.
@@ -592,8 +600,32 @@ function MarketplacePackagePageBody() {
     setDeploy({ phase: 'served', manifestId, version, updatedTo, app: filterActiveApps(wait.apps)[0] ?? null });
   };
 
+  /**
+   * The text for a refused install, on either install door: the refusal drawn
+   * from its facts, or the console's sentence for a code it explains, else the
+   * envelope's own message. The install-mode refusals
+   * (`INSTALL_MODE_NOT_PERMITTED`, `UNMANAGED_INSTALL_WALLED_POSTURE`,
+   * `RESOURCE_CONFLICT`) take no branch: each message names its own remedy,
+   * and the page has nothing to add to it.
+   */
+  const installRefusalText = (e: unknown): string => {
+    // ADR-0141 D2 — an unsatisfied declared dependency, drawn from the
+    // refusal's facts in the reader's locale; without facts the envelope's
+    // message stands.
+    const dependencyMissing = dependencyMissingText(e);
+    if (dependencyMissing) return dependencyMissing;
+    const msg = (e as { message?: string } | null | undefined)?.message ?? String(e);
+    if (errorCodeIs(e, 'MANIFEST_CONFLICT')) return t('marketplace.install.localManifestConflict', { message: msg });
+    if (errorCodeIs(e, 'UNAUTHENTICATED')) return t('marketplace.install.localUnauthorized');
+    if (errorCodeIs(e, 'MARKETPLACE_UNAVAILABLE')) return t('marketplace.install.localMarketplaceUnavailable');
+    return msg;
+  };
+
   const doInstall = async () => {
     if (!packageId || !selectedEnv) return;
+    // ADR-0131 D6 — an install, never an update of the managed copy this
+    // environment holds, sends the mode the package page resolved.
+    const installMode = dialogUpdate ? undefined : hostedInstallMode;
     setInstalling(true);
     setInstallResult(null);
     try {
@@ -605,7 +637,25 @@ function MarketplacePackagePageBody() {
         packageId,
         environmentId: selectedEnv,
         seedSampleData: dialogUpdate ? false : seedSampleData,
+        ...(installMode ? { installMode } : {}),
       });
+      const name = data?.package ? localizePackage(data.package as any, language).displayName : packageId;
+      // An unmanaged copy (ADR-0131 D6) is the environment's own base, not a
+      // package installation: the Installed state does not flip, and no app is
+      // waited for under the package's id.
+      if (installResp?.installMode === 'unmanaged') {
+        try {
+          await refreshMetadata('app');
+        } catch {
+          // Non-fatal: the copy is written; the app list refreshes on next navigation.
+        }
+        setInstallResult({
+          ok: true,
+          message: t('marketplace.install.unmanagedSuccess', { version: installResp.version, name, base: installResp.targetPackageId }),
+        });
+        emitMetadataRefresh();
+        return;
+      }
       // The version an update reports moving to: the install answer's own, else
       // the one the dialog named.
       const updatedTo = dialogUpdate ? (installResp?.installation?.version ?? dialogUpdate.to) : null;
@@ -628,7 +678,12 @@ function MarketplacePackagePageBody() {
           if (info) setCloudInstall(info);
         }
       } catch { /* non-fatal */ }
-      if (installLandsInThisEnvironment(selectedEnv) && data) {
+      if (installMode === 'unmanaged') {
+        // Asked for a copy, answered without one: an environment that forwards
+        // no mode installed the package MANAGED. Said out loud, since the
+        // opposite of what was asked happened.
+        setInstallResult({ ok: false, message: t('marketplace.install.unmanagedIgnored', { name }) });
+      } else if (installLandsInThisEnvironment(selectedEnv) && data) {
         // objectui#12087 — the runtime answers this install while it still
         // serves the PRE-install kernel, so nothing is refreshed yet: the wait
         // below refreshes once the package's app is served. Not awaited, and
@@ -648,7 +703,7 @@ function MarketplacePackagePageBody() {
         });
       }
     } catch (e: any) {
-      setInstallResult({ ok: false, message: e?.message ?? String(e) });
+      setInstallResult({ ok: false, message: installRefusalText(e) });
     } finally {
       setInstalling(false);
     }
@@ -748,26 +803,7 @@ function MarketplacePackagePageBody() {
           });
       emitMetadataRefresh();
     } catch (e: any) {
-      // A refusal shows the envelope's own message. The install-mode refusals
-      // (`INSTALL_MODE_NOT_PERMITTED`, `UNMANAGED_INSTALL_WALLED_POSTURE`,
-      // `RESOURCE_CONFLICT`) take no branch below: each message names its own
-      // remedy, and the page has nothing to add to it.
-      const code = e?.code;
-      let msg = e?.message ?? String(e);
-      // ADR-0141 D2 — an unsatisfied declared dependency, drawn from the
-      // refusal's facts in the reader's locale; without facts the envelope's
-      // message stands.
-      const dependencyMissing = dependencyMissingText(e);
-      if (dependencyMissing) {
-        msg = dependencyMissing;
-      } else if (errorCodeIs(e, 'MANIFEST_CONFLICT')) {
-        msg = t('marketplace.install.localManifestConflict', { message: msg });
-      } else if (errorCodeIs(e, 'UNAUTHENTICATED')) {
-        msg = t('marketplace.install.localUnauthorized');
-      } else if (errorCodeIs(e, 'MARKETPLACE_UNAVAILABLE')) {
-        msg = t('marketplace.install.localMarketplaceUnavailable');
-      }
-      setLocalResult({ ok: false, message: msg });
+      setLocalResult({ ok: false, message: installRefusalText(e) });
     } finally {
       setInstallingLocal(false);
     }
@@ -1372,7 +1408,10 @@ function MarketplacePackagePageBody() {
 
   // ADR-0131 D6 — where the package permits more than one mode, the install
   // waits for the operator's pick.
-  const installModeUnpicked = supportsLocal && !!offeredInstallModes && !chosenMode;
+  // On the hosted path the choice belongs to an install, not to the update of a
+  // copy this environment already holds.
+  const modeChoiceShown = supportsLocal || (hostedModeDoor && !cloudInstalledVersion);
+  const installModeUnpicked = modeChoiceShown && !!offeredInstallModes && !chosenMode;
   const primaryDisabled = !latestVersion || installingLocal || installing || installModeUnpicked || (!supportsLocal && !!cloudInstalledVersion && !cloudUpdateAvailable);
   // The reason Install is disabled, when the missing pick is what disables it:
   // the console's convention for a disabled control (`DeclaredActionsBar`'s
@@ -1431,7 +1470,7 @@ function MarketplacePackagePageBody() {
   // only `unmanaged` draws no choice, but says what its install does before
   // the click, since that install is a copy rather than the registration every
   // install was before the key existed.
-  const installModeChoice = supportsLocal && offeredInstallModes ? (
+  const installModeChoice = modeChoiceShown && offeredInstallModes ? (
     <div className="mt-4 max-w-2xl space-y-2" data-testid="install-mode-choice">
       <p id="install-mode-label" className="text-sm font-medium">{t('marketplace.install.mode.label')}</p>
       <RadioGroup
@@ -1441,7 +1480,7 @@ function MarketplacePackagePageBody() {
           setModePick(mode && packageId ? { packageId, mode } : null);
         }}
         aria-labelledby="install-mode-label"
-        disabled={installingLocal}
+        disabled={installingLocal || installing}
         className="gap-3"
       >
         {offeredInstallModes.map((mode) => (
@@ -1459,7 +1498,7 @@ function MarketplacePackagePageBody() {
         ))}
       </RadioGroup>
     </div>
-  ) : supportsLocal && declaredModes?.length === 1 && declaredModes[0] === 'unmanaged' ? (
+  ) : modeChoiceShown && declaredModes?.length === 1 && declaredModes[0] === 'unmanaged' ? (
     <p className="mt-3 max-w-2xl text-sm text-muted-foreground" data-testid="install-mode-sole">
       <span className="font-medium text-foreground">{t('marketplace.install.mode.unmanaged')}</span>
       {': '}

@@ -26,6 +26,15 @@
  * external TypeScript consumer that imported either name gets a compile error
  * naming the symbol, and the changeset is what it reads.
  *
+ * ## The declaring module is gone (#25921, batch 9)
+ *
+ * Both names were declared in `../api-types.ts`. That whole module was DELETED
+ * by #25921 batch 9 (its eight surviving names had no reader either), and the
+ * tombstone moved into the barrel where its export block stood. So the pin's
+ * module legs now assert the FILE is gone, and every text check reads the
+ * barrel. Its assertions about `UIEventHandler` / `EventableSchema` staying
+ * unexported are unchanged; only the file they read moved.
+ *
  * ## Three instruments, and why the obvious fourth is absent
  *
  *   - `tsc` sees the `@ts-expect-error` legs. They are the only half that tells
@@ -33,9 +42,9 @@
  *     TypeScript-only refusal, and they mean nothing unless `type-check` runs
  *     (vitest strips types). This package compiles every `*.test.ts` file
  *     through `tsconfig.test.json`, which is what makes them real.
- *   - vitest reads the declaring module and the barrel as TEXT, so a
- *     re-introduced interface or re-export reddens even in a run that never
- *     type-checks.
+ *   - vitest reads the barrel as TEXT (and checks the deleted declaring module
+ *     stays deleted), so a re-introduced interface or re-export reddens even in
+ *     a run that never type-checks.
  *   - vitest scans the whole TRACKED tree for both spellings, with a lit
  *     control on the same probe.
  *   - ⛔ A runtime `name in module` leg is deliberately absent: both names were
@@ -44,7 +53,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -52,72 +61,74 @@ import { fileURLToPath } from 'node:url';
 /** Rooted at THIS file, never at `process.cwd()` — the two differ per invocation. */
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../../..');
-const DECLARATION_PATH = resolve(HERE, '..', 'api-types.ts');
+/** The declaring module of both names, DELETED whole by #25921 batch 9. */
+const RETIRED_DECLARATION_PATH = resolve(HERE, '..', 'api-types.ts');
 const BARREL_PATH = resolve(HERE, '..', 'index.ts');
 
-/* ── The type face: both symbols are gone from the module AND from the barrel ── */
+/* ── The type face: both symbols are gone from the published barrel ── */
+// (The declaring-module legs went with `../api-types.ts` itself; the file's
+// absence is asserted at runtime below, where a missing module cannot be
+// mistaken for a satisfied directive.)
 
-// @ts-expect-error objectui#6497 — `UIEventHandler` is RETIRED from `../api-types`. No replacement type; see the tombstone in that file.
-type _HandlerRetiredFromTheDeclaringModule = import('../api-types').UIEventHandler;
-
-// @ts-expect-error objectui#6497 — `EventableSchema` is RETIRED from `../api-types`. No replacement type; see the tombstone in that file.
-type _EventableRetiredFromTheDeclaringModule = import('../api-types').EventableSchema;
-
-// @ts-expect-error objectui#6497 — and `UIEventHandler` is RETIRED from the published barrel, the face an external consumer imports.
+// @ts-expect-error objectui#6497 — `UIEventHandler` is RETIRED from the published barrel, the face an external consumer imports.
 type _HandlerRetiredFromThePublishedBarrel = import('../index').UIEventHandler;
 
-// @ts-expect-error objectui#6497 — and `EventableSchema` is RETIRED from the published barrel, the face an external consumer imports.
+// @ts-expect-error objectui#6497 — `EventableSchema` is RETIRED from the published barrel, the face an external consumer imports.
 type _EventableRetiredFromThePublishedBarrel = import('../index').EventableSchema;
 
 /**
- * ⭐ THE LIT CONTROLS for the four directives above, on the same instrument.
+ * ⭐ THE LIT CONTROLS for the two directives above, on the same instrument.
  *
  * `@ts-expect-error` fails loudly when the line below it compiles (TS2578,
  * "unused directive"), so the directives cannot rot into silence. What they
- * cannot rule out on their own is a module that stopped resolving ANYTHING — an
- * emptied `../api-types` or a moved barrel would satisfy all four. These resolve
- * siblings the ruling left alone, through the exact same import forms, with no
- * directive.
+ * cannot rule out on their own is a barrel that stopped resolving ANYTHING — a
+ * moved or emptied `../index` would satisfy both. These resolve names the
+ * ruling left alone, through the exact same import form, with no directive.
  */
-type _SiblingStillResolvesFromTheModule = import('../api-types').DataFetchableSchema;
-type _SiblingStillResolvesFromTheBarrel = import('../index').ExpressionNodeSchema;
-type _UnionStillResolvesFromTheBarrel = import('../index').APISchema;
+type _SiblingStillResolvesFromTheBarrel = import('../index').BaseSchema;
+type _UnionStillResolvesFromTheBarrel = import('../index').AnySchema;
 
 /** Consumed so the controls are not unused type aliases. */
 type _ControlsAreReferenced = [
-  _SiblingStillResolvesFromTheModule['type'],
   _SiblingStillResolvesFromTheBarrel['type'],
   _UnionStillResolvesFromTheBarrel['type'],
 ];
 
 describe('objectui#6497 — the event-handler dialect stays retired (type face)', () => {
-  it('the DECLARING module no longer declares either interface', () => {
-    const source = readFileSync(DECLARATION_PATH, 'utf8');
+  it('the DECLARING module is gone, and the barrel declares neither interface', () => {
+    // #25921 batch 9 deleted `../api-types.ts` whole. ⭐ LIT CONTROL on the
+    // same probe: the barrel, resolved the same way, exists.
+    expect(existsSync(RETIRED_DECLARATION_PATH)).toBe(false);
+    expect(existsSync(BARREL_PATH)).toBe(true);
 
-    expect(/^export interface UIEventHandler\b/m.test(source)).toBe(false);
-    expect(/^export interface EventableSchema\b/m.test(source)).toBe(false);
+    const source = readFileSync(BARREL_PATH, 'utf8');
 
-    // ⭐ LIT CONTROL — the same matcher shape, one sibling over, still fires.
-    // Without it both absences above would also be satisfied by a truncated
-    // read or a matcher that can never match.
-    expect(/^export interface DataFetchableSchema\b/m.test(source)).toBe(true);
+    expect(/^export (?:interface|type) UIEventHandler\b/m.test(source)).toBe(false);
+    expect(/^export (?:interface|type) EventableSchema\b/m.test(source)).toBe(false);
 
-    // The tombstone stays: it records the ruling, what went and the supported
-    // form. A retirement whose reasoning is deleted is re-litigated by the next
-    // sweep.
+    // ⭐ LIT CONTROL — the same matcher shape still fires on a declaration the
+    // barrel does carry. Without it both absences above would also be satisfied
+    // by a truncated read or a matcher that can never match.
+    expect(/^export (?:interface|type) AnySchema\b/m.test(source)).toBe(true);
+
+    // The tombstone stays (moved here from the deleted module): it records the
+    // ruling, what went and the supported form. A retirement whose reasoning is
+    // deleted is re-litigated by the next sweep.
     expect(source).toContain('`UIEventHandler` and `EventableSchema` — RETIRED');
   });
 
-  it('`APISchema` no longer carries an `EventableSchema` arm', () => {
-    const source = readFileSync(DECLARATION_PATH, 'utf8');
-    const union = /^export type APISchema =([^;]*);/m.exec(source);
+  it('the barrel\'s schema union carries no `EventableSchema` arm', () => {
+    // The arm once sat on `APISchema`, deleted with its module (#25921 batch 9);
+    // `AnySchema` is the union the barrel still declares.
+    const source = readFileSync(BARREL_PATH, 'utf8');
+    const union = /^export type AnySchema =([^;]*);/m.exec(source);
 
     // The union is still declared (a missing union would make the next two
-    // assertions vacuous), it no longer names the retired arm, and it still
+    // assertions vacuous), it does not name the retired arm, and it still
     // names a surviving arm — the lit control on the same extracted text.
     expect(union).not.toBeNull();
     expect(union![1]).not.toMatch(/\bEventableSchema\b/);
-    expect(union![1]).toMatch(/\bDataFetchableSchema\b/);
+    expect(union![1]).toMatch(/\bBaseSchema\b/);
   });
 
   it('the published BARREL no longer re-exports either symbol', () => {
@@ -129,10 +140,9 @@ describe('objectui#6497 — the event-handler dialect stays retired (type face)'
     expect(/^\s*UIEventHandler,\s*$/m.test(barrel)).toBe(false);
     expect(/^\s*EventableSchema,\s*$/m.test(barrel)).toBe(false);
 
-    // ⭐ LIT CONTROL — the identical matcher finds siblings that ARE still
-    // re-exported from the same block.
-    expect(/^\s*DataFetchableSchema,\s*$/m.test(barrel)).toBe(true);
-    expect(/^\s*APISchema,\s*$/m.test(barrel)).toBe(true);
+    // ⭐ LIT CONTROL — the identical matcher finds a name that IS still
+    // re-exported (the block these two sat in went whole, #25921 batch 9).
+    expect(/^\s*BaseSchema,\s*$/m.test(barrel)).toBe(true);
   });
 });
 
@@ -143,16 +153,16 @@ describe('objectui#6497 — nothing in this TRACKED tree carries either symbol',
    *
    *  - `*CHANGELOG.md` and `.changeset/` — the published RECORD of retirements,
    *    including this one, which must keep naming what it removed.
-   *  - `api-types.ts` and `index.ts` — the two files the retirement EDITED. Each
-   *    carries a tombstone comment naming both symbols on purpose; that they no
-   *    longer DECLARE or RE-EXPORT them is asserted above by matchers shaped for
-   *    a declaration and an export-list entry.
+   *  - `index.ts` — the barrel, which carries the tombstone comment naming both
+   *    symbols on purpose (moved there when #25921 batch 9 deleted
+   *    `api-types.ts`, the other file the retirement edited); that it does not
+   *    DECLARE or RE-EXPORT them is asserted above by matchers shaped for a
+   *    declaration and an export-list entry.
    *  - this pin, which must write both spellings to probe for them.
    */
   const EXCLUDED = [
     ':!*CHANGELOG.md',
     ':!.changeset/',
-    ':!packages/types/src/api-types.ts',
     ':!packages/types/src/index.ts',
     ':!packages/types/src/__tests__/eventable-schema-retired-6497.test.ts',
   ];

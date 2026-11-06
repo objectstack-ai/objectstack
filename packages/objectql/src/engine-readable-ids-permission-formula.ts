@@ -64,7 +64,7 @@
  * stays on the class, the contract, and its function keeps the placeholder.
  */
 
-import { ReadableIds, RLS_DENY_FILTER, isControlledByParentMasterField, markFilterSubtreeProvenance } from '@objectstack/spec/data';
+import { ReadableIds, RLS_DENY_FILTER, controlledByParentMasterOf, markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import type { FilterCondition } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { toEvalPermissions, type EvalError, type EvalPermissions } from '@objectstack/formula';
@@ -215,10 +215,13 @@ export function findUnservableControlledByParentMasters(
   const found: UnservableControlledByParentMaster[] = [];
   for (const object of this._registry.getAllObjects() as Array<{ name?: string; sharingModel?: unknown; fields?: Record<string, unknown> }>) {
     if (object?.sharingModel !== 'controlled_by_parent' || typeof object.name !== 'string') continue;
-    const masters = Object.entries(object.fields ?? {}).filter(([, f]) => isControlledByParentMasterField(f));
-    if (masters.length !== 1) continue;
-    const [field, def] = masters[0];
-    const master = (def as { reference?: unknown }).reference;
+    // [ADR-0055 §1 as amended · #30905 ruling A] The one master, required or
+    // optional: an optional master's rows that name one are read through the
+    // same leaf over it.
+    const relation = controlledByParentMasterOf(object.fields);
+    if (!relation) continue;
+    const field = relation.field;
+    const master = (object.fields?.[field] as { reference?: unknown } | undefined)?.reference;
     if (typeof master !== 'string' || !this._registry.getObject(master)) continue;
     const uncomposable = this.uncomposableReadableIdsParent(object.name, master);
     if (uncomposable) found.push({ detail: object.name, field, master, ...uncomposable });

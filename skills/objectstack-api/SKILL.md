@@ -45,7 +45,7 @@ GET    /api/v1/data/{object}          # List records (with filter, sort, paginat
 GET    /api/v1/data/{object}/:id      # Get single record
 POST   /api/v1/data/{object}          # Create record
 PATCH  /api/v1/data/{object}/:id      # Update record
-DELETE /api/v1/data/{object}/:id      # Delete record (hard delete)
+DELETE /api/v1/data/{object}/:id      # Delete record (business-object rows → recycle bin)
 POST   /api/v1/data/{object}/query    # Complex queries + aggregation (QueryAST in body)
 POST   /api/v1/data/{object}/batch    # Per-object batch operations
 POST   /api/v1/batch                  # Cross-object atomic batch
@@ -269,8 +269,8 @@ eight extra verbs are never declared in `apiMethods`:
 | `export` | `list` | `GET /data/{object}/export` |
 
 `history` (from `get` ∧ `trackHistory`) gates only. `restore` / `purge` never
-derive — the trash surface is retired. Declaring any derived verb in
-`apiMethods` is stripped at parse with a FROM → TO warning.
+derive: the recycle bin has no restore or purge door yet. Declaring any
+derived verb in `apiMethods` is stripped at parse with a FROM → TO warning.
 
 `POST /data/{object}/import` takes `mapping` as `{ Column: field }` or as
 `FieldMappingEntry[]` (`api/export.zod.ts`); only the entry form carries
@@ -408,10 +408,10 @@ keys mean the run produced none — never invent an empty.
    read. Sending neither skips the check; a mismatch answers **409
    `CONCURRENT_UPDATE`**; the quoted-empty entity-tag (`""`) is refused **400
    `VALIDATION_FAILED`**, not treated as omitted.
-2. **Assuming `DELETE` is recoverable.** ObjectStack `DELETE` is a hard
-   delete — there is no recycle bin.
-   For recoverability, use per-field `trackHistory` (audit
-   trail) or a `lifecycle` archive policy instead of custom soft-delete logic.
+2. **Treating `DELETE` as final or as restorable.** A by-id delete keeps a
+   business object's rows in the recycle bin (`sys_recycle_bin`, 30 days by
+   default; not `multi: true` deletes, platform rows or rows deleted before the
+   bin existed); nothing lists or restores it over the API yet. No soft-delete.
 
 ---
 

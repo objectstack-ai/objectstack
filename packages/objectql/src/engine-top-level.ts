@@ -4928,7 +4928,10 @@ export interface ReadableIdsChain {
 export type UnservableControlledByParentMaster = {
   /** The `controlled_by_parent` detail. */
   readonly detail: string;
-  /** Its one required `master_detail` field. */
+  /**
+   * Its master `master_detail` field: the one required, or (ADR-0055 §1 as
+   * amended) its only `master_detail`, declared `required: false`.
+   */
   readonly field: string;
   /** The object that field names. */
   readonly master: string;

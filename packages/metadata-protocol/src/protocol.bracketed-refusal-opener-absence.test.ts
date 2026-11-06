@@ -50,6 +50,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import {
   PLATFORM_SCHEDULE_CREATE_RECORD_ORG_MISSING,
@@ -70,7 +72,13 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * site before this pin noticed.
  */
 const PRODUCERS: Readonly<Record<string, number>> = {
-  'protocol.ts': 5,
+  // [#30147] 3: three of its throw sites moved to the two modules below.
+  'protocol.ts': 3,
+  // [#30147] The write gates' and the registry hydration's refusals, moved out
+  // of `protocol.ts` by the codemod's members pass into modules it had split
+  // out before; the floor is each module's `new Error(` count after that move.
+  'protocol-write-gates.ts': 4,
+  'protocol-registry-hydration.ts': 4,
   // The bulk data writes, moved out of `protocol.ts` whole: their throw sites
   // are still this family's, so the scan follows them. The floor is the
   // module's own `new Error(` count when it was split out.

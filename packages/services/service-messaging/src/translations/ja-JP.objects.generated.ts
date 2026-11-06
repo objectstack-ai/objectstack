@@ -214,7 +214,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       channel: {
         label: "Channel",
-        help: "チャネル:inbox(アプリ内の通知、常に利用可能)、email(メールサービスの設定後)、sms(SMS サービスの設定後)、またはインストール済みプラグインが追加したチャネルの ID。すべてのチャネルを対象にするには * を入力します。どのチャネルも使用しない ID は何にも一致しません。"
+        help: "チャネル:inbox(アプリ内の通知、常に利用可能)、email(メールサービスの設定後)、sms(SMS サービスの設定後)、push(プッシュサービスの設定後、ユーザーの登録済みデバイスへ)、またはインストール済みプラグインが追加したチャネルの ID。すべてのチャネルを対象にするには * を入力します。どのチャネルも使用しない ID は何にも一致しません。"
       },
       enabled: {
         label: "Enabled",
