@@ -1,0 +1,34 @@
+{
+  "number": 30832,
+  "kind": "issue",
+  "title": "ci(release): start the `next` snapshot preflight on a daily schedule, stopping at the maintainer approval (ADR-0125 amendment + release.yml)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T05:43:31Z",
+  "updated_at": "2026-11-06T07:12:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30832",
+  "body": "domain:devx#2 · marchtian · session_017ihL2ebbZkr2QAEG1x7UC8\n\nBlocked-by: #30799\n\nFiling gate ③, a task the maintainer directed: on #29466's snapshot lane, the maintainer chose option A on a decision card at 2026-11-06T05:41Z, a daily scheduled preflight that stops at the approval (ruling record 6677910954). ⛔ Not a claim.\n\nRuling-ref: 6677910954\n\n**Business reason.** `main` lands about a hundred PRs a day, so a fix is ready for app repos every day. Today the lane waits for a human to dispatch it. With a daily start, the only human act left is the one click that matters, the approval at `environment: release`.\n\n**Reader who acts.** The `domain:devx` seat. One Tier H PR touching `docs/adr/0125-release-approval-gate-replaces-the-typed-version.md` and `.github/workflows/release.yml`, plus whatever pins and self-tests read them. This card waits on the lane PR #30799.\n\n## What the change does (bound by the ruling)\n\n- A `schedule` trigger starts the snapshot lane's preflight once a day: the commit at distance zero, the RC-cycle read (selected commit and main's tip), the debut rule, and the dry run, all exactly as a `snapshot_next` dispatch.\n- When the preflight passes, the snapshot job waits at `environment: release`, and it publishes only on the maintainer's approval. ⛔ Prime Directive 15 is unchanged: no seat dispatches the lane or approves its deployment.\n- An unapproved run is not an error and is not swept. The next day's run supersedes it.\n- The `schedule` event runs no stable job. `release-integrity`, the full-battery gate, `publish`, `version-pr`, `docker` and `stale-prompts` read the schedule the way they read `snapshot_next`, by strictly subtractive `if:` edits.\n- Everything else in the 2026-11-05 amendment stands: `next` only, never `latest`, no debut, workspace only, no tag, no Release, no Version Packages PR touch.\n\n## Acceptance\n\n- ADR-0125 gains a short amendment (or a dated note on the 2026-11-05 amendment, in the house shape) that admits the scheduled start. It quotes the sentence it replaces (\"no `schedule` and no `push` can start it\") and names the ruling. The ADR part is drafted on Fable at xhigh, and the PR gets a complete Fable review before merge (maintainer rule, 2026-10-25).\n- `release.yml` has the `schedule` trigger. The cron hour is chosen after the nightly full battery, and the choice is argued in a comment.\n- A preflight refusal on the scheduled run is visible: a red run with its reason in the summary. A refusal is expected while `@objectstack/service-push` has no npm version.\n- The self-tests pin it: a scheduled run starts only the snapshot jobs, and a stable dispatch or push never does.\n- The release-channels row in `docs/releases-maintenance.md` says the snapshot is proposed daily by schedule and published on approval.\n- Tier H hand-off after ACCEPT, contract review PASS and the Fable review.\n\nDedupe (open AND closed): `is:issue \"snapshot_next schedule\"` → 1 hit (#30591), `is:issue \"daily next snapshot\"` → 40 hits, `is:issue \"snapshot schedule next\"` → 243 hits. None but #30591/#30590 is about the snapshot lane, and neither schedules it."
+}

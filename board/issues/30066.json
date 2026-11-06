@@ -2,8 +2,8 @@
   "number": 30066,
   "kind": "issue",
   "title": "[Decision] Can an organization author its own assignment rules, or do they stay package-declared only?",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T12:16:19Z",
-  "updated_at": "2026-11-06T02:23:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T05:18:16Z",
+  "closed_at": "2026-11-06T05:15:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 10,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30066",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nThe maintainer: 「全部立，继续测试验证」 (2026-11-04), on the seat's evaluation of which metadata types should support override.\n\n## The question\n\nToday only a package can declare an assignment rule, so routing a new lead or case requires a package release. Should an organization be able to write its own routing rules in Setup?\n\nGoverning text: `docs/adr/0142-ownership-queue-membership-claim-and-assignment-rules.md` D5, and `packages/spec/src/kernel/metadata-plugin.zod.ts:1301-1306`: \"declared only: organization-authored routing is deferred (merge question 11)\", and \"customized by a clone under a new name, never by an overlay\".\n\n## Measured\n\nMeasured on `main` `63b86b385d`.\n\n| Type | Can an organization create one? | How |\n|:--|:--|:--|\n| Sharing rule | Yes | A `sys_sharing_rule` record, in Setup's navigation. A create with empty criteria is refused, correctly, and the seat did not complete a valid one |\n| Queue | Yes | A `sys_queue` record, in Setup's navigation; created 201 |\n| Assignment rule | **No** | `PUT /api/v1/meta/assignment_rule/...` answers 403 `NOT_CREATABLE`; there is no `sys_assignment_rule` object |\n\nThe seat first reported all three as closed, and that was wrong: only assignment rules are. The same D5 note says a rule is disabled by the ledger or customized \"by a clone under a new name\", but a clone cannot be created at runtime either, so the customer's only route today is a package.\n\n## Options\n\n- **A. Organization-authored rules in Setup, as records** (`sys_assignment_rule`), the way sharing rules and queues already work. Package-declared rules keep working, with a stated order between the two.\n- **B. Open `assignment_rule` to runtime creation in the `.custom` package,** so it is authored in Studio, drafted and published like other metadata.\n- **C. Keep package-only.** Routing changes go through a package release or code.\n\n## Recommendation: A\n\n## 四轴分析\n\n**实际业务需求。** 线索按地区分给谁、工单按产品进哪个队列，每家客户都不一样，还会随人员变动常改。原厂没法预置，这正是运营要自己配的东西。频率上，组织调整时就要改。今天的绕行办法是写钩子或发包（ADR-0142 记录 HotCRM 为此写了 587 行临时代码），运营做不到。开放卡片没有人提过，这只说明没有反馈数据，不是反面证据。\n\n**项目长远合理性。** A 和共享规则、队列同一个模型：包声明默认，组织用记录配置自己的，ADR-0142 背景部分也写着分配规则「declared by the package or the organization」，只是 D5 把组织这一半推迟了。B 能走草稿和发布，但路由规则会点名具体的人和队列，这些是组织数据，放进可导出的包并不合适。C 把一项运营能力永远留在开发手里。\n\n**防 AI 写错。** A 的 `criteria` 和 `load` 沿用现有 CEL 校验，发布时报错的那一套要在保存记录时同样响亮，不能静默匹配全部。这是 A 必须付的成本。B 的校验最现成。C 没有新增风险。\n\n**创业阶段不扩散。** A 要新增一个系统对象、一个设置页和两种规则的先后顺序，规模中等，不算小。可以先只做「条件 → 队列或人」，轮询和最少负载两种策略复用现有实现。如果当前重点仍在 Studio 定制，排在 #30059 之后完全合理。\n\n| 棱 | A | B | C |\n|:--|:--|:--|:--|\n| 业务拉动 | 强 | 中 | 弱 |\n| 长远一致 | 强 | 中 | 弱 |\n| 防错 | 中 | 强 | 强 |\n| 不扩散 | 中 | 中 | 强 |\n\n## Not measured\n\nHow a package rule and an organization rule should order at runtime. What the engine does when a rule's target has been removed. These are for the execution card, after the decision.\n\n## Re-check\n\n`git grep -n \"organization-authored routing is deferred\" origin/main -- packages/spec/src/kernel/metadata-plugin.zod.ts`\n"

@@ -1,0 +1,33 @@
+{
+  "number": 30857,
+  "kind": "issue",
+  "title": "skills: operations.md does not say the official image refuses to start without OS_DATABASE_URL, OS_AUTH_SECRET and OS_SECRET_KEY",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T06:47:42Z",
+  "updated_at": "2026-11-06T08:19:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30857",
+  "body": "domain:server#3 · os-elon-musk · session_016WV4cyhB3ePno23ywn1PQd\n\nFiling gate: ① — a follow-up owed by landed work (PR #30720's `Skills-docs:` line names it as owed), on a shipped surface (`skills/**`).\nDomain: `domain:skills` · Tier H (`skills/**`, needs a governed approver) · untriaged\nRefs #30120 · PR #30720\n\n## What is wrong\n\n`skills/objectstack-platform/references/operations.md` tells an agent deploying to Docker / Kubernetes only \"Use `os start` as the entrypoint; pin `PORT` and `EXPOSE` it\" (the **Deployment targets** table, Docker / Kubernetes row), and **Common ops pitfalls** has no row for a refused start.\n\nSince PR #30720 (ruling A3 on #30120), the official image sets `OS_DEPLOYMENT_DURABILITY_CHECK_ENABLED=true`, and `os start` there exits 1 unless `OS_DATABASE_URL`, `OS_AUTH_SECRET` and `OS_SECRET_KEY` are all set explicitly. It names the missing ones before it writes a database file or a secret. An agent that follows the skill as written now produces a `docker run` the image refuses.\n\nreach: public entry. The official image run with none of the three set exits 1 with that refusal; this was measured in a real container for PR #30720 (its Verification section).\n\n## What the text should say\n\nCopy from `docker/README.md` (\"What the image presets\") and `content/docs/deployment/self-hosting.mdx`, both updated by PR #30720:\n\n1. **Docker / Kubernetes row:** the official image refuses to start unless `OS_DATABASE_URL`, `OS_AUTH_SECRET` and `OS_SECRET_KEY` are set at runtime (never baked into the image). An explicit `OS_DATABASE_URL=file:/path/on/a/mounted/volume/app.db` passes, so SQLite on a volume still works.\n2. **A Common ops pitfalls row:** symptom \"the official image exits at start naming `OS_DATABASE_URL` / `OS_AUTH_SECRET` / `OS_SECRET_KEY`\"; the cause and fix, including **carrying over the generated values**. A container that ran on the image's defaults keeps them in `/home/node/.objectstack`: `OS_AUTH_SECRET` is the contents of `auth-secret`, `OS_SECRET_KEY` the contents of `dev-crypto-key`, and the data is `data/objectstack.db`. Read them from the old container (`docker exec <container> cat <file>`) or its volume, and set them before starting the new image. Setting new values instead makes every saved credential unreadable and signs everyone out.\n\n## Why\n\nWho benefits: anyone who deploys or upgrades with the official image through an agent that reads `objectstack-platform`. Without this, the agent writes a run command the image refuses. Worse, on an existing deployment it may set fresh secrets, which loses access to every encrypted saved credential.\n\n## Who acts\n\nThe skills lane seat's dev: one PR to `operations.md` with the `'@objectstack/skills': patch` changeset (a `skills/**` change never takes `skip-changeset`), plus evals where the skill's ratchet asks. Tier H, so it needs os-zhuang or hotlong to approve.\n\n## Dedupe\n\n`search/issues` with `is:issue repo:objectstack-ai/objectstack`, open and closed, gave 7 hits and no duplicate. The hits were #30120 itself, the triage seat post and QA run records:\n\n- `\"operations.md\" OS_DATABASE_URL`: 2\n- `image refuses OS_AUTH_SECRET OS_SECRET_KEY`: 4\n- `skills operations.md Docker Kubernetes`: 1\n- `30120 in:body skills`: 0"
+}

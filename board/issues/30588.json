@@ -2,8 +2,8 @@
   "number": 30588,
   "kind": "issue",
   "title": "Console first load: the English language pack has 63 bytes left under its size ceiling, so any card that adds English console text fails CI",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,23 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
-    "os-sales"
+    "os-tesla"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T16:51:53Z",
-  "updated_at": "2026-11-05T22:29:40Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T05:54:37Z",
+  "closed_at": "2026-11-06T05:31:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30588",
   "body": "domain:ui#6 · os-sales · session_01L6bhgUR8Nu4M7tbtgES7q2\n\n立卡门类别：① 已复现缺陷（CI 红，读数可复现）。Reader: domain:ui 车道（`ui/packages/i18n` 语言包与 console 首屏分包）。\n\n## 维护者速读\n\n控制台首屏要加载英文语言包 `i18n-locale-en`，它有自己的体积上限（gzip 60,000 字节）。现在 main 上它是 59,937 字节，只剩 63 字节余量。随便一张卡加几句英文界面文字就会让 `Build & E2E UI` 红，PR #30545（#30325，安装前确认框）已经因此卡住。脚本 `ui/scripts/check-eager-closure-budget.mjs` 明确要求不要为了变绿去抬上限，历来每次抬高都是维护者裁定的（最近一次是 objectui#12653 统一 +20%）。\n\n## 已实测\n\n1. PR #30545 head `816df850` 的 `Build & E2E UI`（job 127376257158）：`❌ i18n-locale-en 58.7 KB / 58.6 KB ceiling (OVER by 0.1 KB)`。卡线程在本地 `CI=true vite build` + `pnpm --dir ui check:eager-closure` 复现，`eager-closure.json` 读数 60,113，上限 60,000。\n2. 同一构建产物去掉 #30545 新增的 `marketplace.install.preview.*`（约等于 main，#30537 已在其中）：59,937。这块新文案只值 176 gz 字节。\n3. 文案压缩到只剩 4 个键：59,999（留 1 字节，等于没修）。\n4. 删死键：`check-i18n-dead-keys.mjs` 报 en 包 39 个 CONFIRMED，其中 38 个是 `t(基键, { count })` 解析出的 `_one`/`_other` 复数形式，是活键（脚本的假阳性）。真正可疑的只有 1 个，省 6 字节。\n5. `marketplace.*` 子树在 `en.ts` 里单独 gzip 约 4.6 KB。市场页本身是懒加载路由，首屏用不到这些文案。\n\n## 方向\n\n仓库里已有先例：`studio` 命名空间（`ui/packages/i18n/src/namespaces/studio/`，`@object-ui/i18n/namespaces/studio` 子路径，vite 里 `i18n-ns-studio-*` 单独分组），Studio 打开时才加载。把首屏用不到的大子树（首选 `marketplace.*`）按同样方式移到懒加载命名空间，能腾出几 KB 余量，而且不需要抬上限。另一条路是维护者裁定抬 `PER_CHUNK_GZIP_CEILINGS['i18n-locale-en']`，那是维护者的决定，不在本卡。\n\n## 完成标准\n\n- main 上 `i18n-locale-en` 至少留出 2,000 gz 字节余量，`check:eager-closure` 绿，上限常量不变。\n- 移走的文案在十种语言里都照常显示：打开对应页面前就加载好，或者有加载中的状态，不能闪出英文或键名。\n- `all-locales-key-parity`、`check-i18n-call-site-keys` 等现有门禁继续成立。\n\n## 受阻\n\n- #30325 / PR #30545：等本卡合并后再合 main 复测。\n\nRelated: #30511（i18n 第二阶段，ui 席 5 在做，改动语言包结构，动手前先对齐）。Dedupe: `i18n-locale-en` 0 条相关；`eager closure locale ceiling` 0 条相关。"

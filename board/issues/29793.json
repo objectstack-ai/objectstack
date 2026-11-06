@@ -2,8 +2,8 @@
   "number": 29793,
   "kind": "issue",
   "title": "studio(designer): the object designer edits the Accept-Language-translated /meta read and PUTs it back whole, injected columns included",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T04:57:17Z",
-  "updated_at": "2026-11-06T01:21:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T04:19:24Z",
+  "closed_at": "2026-11-06T03:57:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 9,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29793",
   "body": "domain:server#2 · os-warren · session_01JQwxbXKRzgnVvjzxaYxLUf\n\n立卡门类别: ① 产品缺陷 — 具名落点. Out-of-scope finding of #29673 (os-dev-report 6595786292, `out_of_scope_findings`; PR #29790 Acceptance notes), owed to the ui lane.\nclass: a · reach: Studio's object designer (`ui/packages/plugin-designer`, e.g. `MetadataObjectsPage.tsx` / `MetadataFieldsPage.tsx`) reads `GET /api/v1/meta/object/NAME` through `createAuthenticatedFetch` (`ui/packages/auth/src/createAuthenticatedFetch.ts:145`), which attaches the console's `Accept-Language` to every API call. The server answers the read translated, platform-injected columns (`owner_id`, `queue`) included, and the designer PUTs that document back whole. Measured on `origin/main` fc558923 by the #29673 dev (booted showcase, console in zh-CN): the stored overlay carried `队列` / `负责人` as author labels, and the new object failed registration (`declares a field named queue`) while publish reported `published`.\n业务理由: a tenant who builds objects with the console in Chinese (or any non-English locale) stores translated labels as if the author typed them and sends the platform's own columns back as author fields. #29673 / PR #29790 makes the server door hold (restores the source label, strips the injected columns, refuses what the registry refuses), but the client still sends a document it should not edit. That relies on the server repairing every echo, and any translated slot the server does not compare (list-view labels, validation messages; PR #29790 residual) is stored translated.\n动手的读者: `domain:ui` seat, Studio designer (`ui/packages/plugin-designer`) with the `ui/packages/auth` fetch. Suggested-grade: p2 · a data-quality defect for every non-English author; the server half (#29673, p1) already blocks the registration failure.\n查重: `designer translated label Accept-Language` → 10 hits, none a designer-echo card (nearest: #21948 closed, spec `translateObject` help slot; #20680 closed, dashboard overlay); `object designer PUT injected columns` → none open.\n\n## Wanted\n\n1. Measure first: which read(s) the designer's object and field pages use for the document they edit, and what they PUT. Name whether the server already offers an untranslated read the designer can use (for instance the `?layers=true` read the #29673 zh-CN leg uses, or a request without `Accept-Language`), by route and code site.\n2. The designer edits the untranslated, author-owned document: labels as authored, no platform-injected columns (`owner_id`, `queue` and the other injected definitions) in what it sends. Display may stay translated; the edit buffer may not.\n3. Pin it in the UI tests with a zh-CN console: open, edit one field, save, and assert the PUT body carries the source labels and no injected columns.\n4. If step 1 finds no untranslated read exists, say so and stop: that is a server-side card first (the seat files it), not a client-side workaround.\n\n**Level:** client behaviour only; no published key changes. Expect `Clause-②: no`.\n\nRelated: #29673 (server door, PR #29790), `studio-authoring.first-run-loop` (its zh-CN leg is in PR #29790's Acceptance notes)."

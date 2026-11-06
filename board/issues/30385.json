@@ -14,16 +14,13 @@
     "bug",
     "domain:server",
     "pm:blocking",
-    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [
-    "os-bill"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T08:45:26Z",
-  "updated_at": "2026-11-06T02:23:19Z",
+  "updated_at": "2026-11-06T02:24:06Z",
   "closed_at": "2026-11-06T02:22:21Z",
   "closed_by": {
     "login": "objectstack-fleet[bot]",

@@ -2,8 +2,8 @@
   "number": 30466,
   "kind": "issue",
   "title": "skills + ADR-0029 D9.2: 'an extension can add but never remove' no longer holds for pluralLabel after PR #30459",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -21,9 +20,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T12:37:15Z",
-  "updated_at": "2026-11-05T23:44:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T03:25:26Z",
+  "closed_at": "2026-11-06T03:24:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

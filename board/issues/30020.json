@@ -12,19 +12,21 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2",
     "tech-debt"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T06:37:00Z",
-  "updated_at": "2026-11-04T11:23:52Z",
+  "updated_at": "2026-11-06T05:43:26Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30020",
   "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\nFiling gate: ruling 6624345766 on #29465 item (4). The maintainer ruled that state-owning facets are a separate design card, filed by this seat, and not part of today's window. ⛔ Not a claim. No grade: triage sets it.\nRuling-ref: 6624345766\nBusiness reason: today's facade splits of `protocol.ts` (#29985) and `engine.ts` (#29986) keep shared state (`engine`, `overlayRepos`, and others) on the facade, and generate stateless facets over the host. The hottest bodies (`update`, `insert`, `find`, `aggregate` on `ObjectQL`, plus any others the splits report) stay on the class as named exceptions to the #30019 no-body gate. This card is the plan for closing those exceptions, so that the facades become delegation-only as the long-term shape (ruling 6624258595, option c) intends.\nReader who acts: `domain:server`, `packages/metadata-protocol` and `packages/objectql`, after #29985 and #29986 land.\nDedupe (open and closed): `state-owning facet`, `facade state`, `29465`. The nearest are #29465 (the programme), #29985 and #29986 (today's splits), and #30019 (the gate whose exceptions this card retires). **New.**\n\n## What to design\n\n- **A state-ownership rule.** Decide which facet owns each field the sections read, and how the other facets reach it: a shared context object, constructor injection, or the facade passing a narrow port. The 190 hand-series stubs that build local `.call(host, …)` objects need the same rule.\n- **The proof.** Bodies have to be rewritten here, so byte-identity no longer holds. Use an undo proof instead: undoing the rewrite rebuilds today's body. Keep the public-surface `.d.ts` bar of 6624345766 and the suites and gates at base counts.\n- **Order.** One exception per PR, or one facet per PR. Each PR removes its rows from the #30019 allow-list.\n\nDone when every exception row on #30019 has been retired, or each remaining one has its own ruling."

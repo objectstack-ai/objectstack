@@ -2,7 +2,7 @@
   "number": 30755,
   "kind": "pull_request",
   "title": "docs(spec): name a currency amount's decimal places as its CLDR fraction digits, not its ISO 4217 minor unit",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T00:45:55Z",
-  "updated_at": "2026-11-06T02:00:36Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-06T02:30:42Z",
+  "closed_at": "2026-11-06T02:30:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-06T02:30:39Z",
   "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/30755",

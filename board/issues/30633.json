@@ -2,8 +2,8 @@
   "number": 30633,
   "kind": "issue",
   "title": "Flow lint: a start input that declares `objectName` should be warned when the declaration can never be judged or never be satisfied (`global`, or a single id the flow also reads as a list)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T19:17:06Z",
-  "updated_at": "2026-11-06T02:17:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T03:35:15Z",
+  "closed_at": "2026-11-06T03:33:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30633",
   "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ① authoring defects with named locations, from the contract review of PR #30628 (#29425 A server half), record 6666908076, ④ items 2–3 (should-fix, non-blocking), read by the seat in the cited files. ⛔ Not a claim. Suggested grade: p3. Same family as the existing lint id `flow-input-unknown-object` (`packages/lint/src/validate-flow-trigger-readiness.ts`).\nDedupe: `flow-input-unknown-object global`, `objectName global flow input`, `declared record input $in list`. Nearest: #29425 (the runtime rule), #29442 (the key). **New.**\n\n## What happens\n\nOnce PR #30628 lands, a flow start input that declares `objectName` is loaded in the caller's scope at every door that starts the flow by name. Two declarations the schema accepts can never work as written, and nothing tells the author:\n\n1. **`objectName: 'global'`** passes the key's pattern, but the loader treats the object-less key as nothing to load, so the start runs with the value unjudged. The schema docblock's own stance is that a declaration that loads nothing is refused rather than shipped as documentation.\n2. **A declared single id that the flow's definition also reads as a list** (for example `filter: { id: { $in: '{input}' } }`) means no value satisfies both readings: every start is refused 400. This is a loud failure, not a hole, but the author only finds out at run time.\n\n## Expected\n\n- `os validate` (the flow trigger-readiness lint, beside `flow-input-unknown-object`) warns on both: `objectName` naming the object-less placeholder, and a declared single-record input that a node reads as a list. Either a warning or a schema refusal for (1); the reader decides which, smallest change first.\n- A pin per case, and the existing `flow-input-unknown-object` cases stay as they are.\n\nReader: `domain:server` (`packages/lint`, possibly `packages/spec/src/automation/flow.zod.ts` superRefine for (1), which puts it on the contract-review face). Serial: after PR #30628."

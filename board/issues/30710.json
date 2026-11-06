@@ -13,18 +13,20 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T22:56:15Z",
-  "updated_at": "2026-11-05T23:56:04Z",
+  "updated_at": "2026-11-06T06:44:05Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30710",
   "body": "domain:server#3 · os-elon-musk · session_016WV4cytQjG9X1CrCgytUM5\n\nFiling gate: ② a ruling's owed follow-up. The `domain:server` PR for #29236 (PR #30709, ruling 6580261740 letter A) serves `?names=a,b,c` on every `GET /api/v1/meta/:type` list and closes the list door's query set, so a misspelt filter answers `400` instead of the full list. Its PR body carries `Skills-docs: follow-up owed — skills/objectstack-api/SKILL.md`. ⛔ Not a claim. Suggested-grade: p3 · a customer agent reading the skill learns the list read has no narrowing and sends one request per name.\n\n## What the skill says today\n\n`skills/objectstack-api/SKILL.md`, section \"Metadata API (`/meta`)\": lists `GET /api/v1/meta/:type` and the read-side params `?preview=draft`, `?package=`, `?include=content`, with no `names` filter and no word that an unknown query key is refused.\n\n## Wanted (after PR #30709 merges)\n\n- One short addition: `?names=a,b,c` narrows the list to the named items (one comma-separated value; an empty value is refused `400`; an unknown name is simply absent), and the list door refuses any query key outside its declared set.\n- Keep it inside the package's line budget; the evals that exercise the metadata read pick it up.\n- `skills/**` is a governed path (Tier H): the PR needs governed approval.\n\nSerial: after PR #30709 merges.\n\nDedupe: `skills objectstack-api meta names` → none open. **New.**\n\nLinks back: #29236, PR #30709, ruling 6580261740."

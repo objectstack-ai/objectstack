@@ -1,0 +1,37 @@
+{
+  "number": 30867,
+  "kind": "pull_request",
+  "title": "fix(objectql): the record-currency backfill cleans a driver's raw text out of a failed row, as the import door does",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T07:19:06Z",
+  "updated_at": "2026-11-06T08:11:14Z",
+  "closed_at": "2026-11-06T08:11:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-06T08:11:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30867",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DX44Uu3BZcP1g6vzpMCUtzN)_\n\ndomain:server#1 · os-elon-musk · session_016WV4d1GEfMtjCJfYePyAPD\n\nFixes #30816\n\nClause-②: no\nMetadata-protocol: none\n\nClaim: comment 6678760289 (branch `claude/project-thread-x3bsoc`).\n\n## 维护者速读\n\n- 改了什么：记录币种回填（`POST /api/v1/meta/_migrate-record-currency-codes` 与 `os migrate record-currency-codes`）报告里失败行的错误文字，非沙箱钩子的报错现在先经导入入口同一个清洗函数 `sanitizeRowError` 再返回。\n- 为什么改：回填报告自 #30809 起经 REST 返回给持 `setup.write` 的租户管理员，数据库驱动的原始报错（SQL 语句、约束名、列名）会原样外露；导入入口早已清洗同类报错。\n- 风险与回滚：只改一行取值，沙箱钩子分支不动；不含驱动文字的报错照旧原样；运维日志行仍保留完整原文。单一提交可整体回滚。\n- 先看：`packages/objectql/src/record-currency-backfill.ts`（`rowFailureSentence` 的最后一行）、`packages/rest/src/meta-record-currency-backfill-route.test.ts`（REST 钉）。\n- 两分钟验证：`pnpm --filter @objectstack/objectql exec vitest run src/record-currency-backfill.test.ts`，预期 21/21 通过。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `rowFailureSentence` (`@objectstack/objectql`): a row whose write threw anything other than a sandboxed hook's error now reads `sanitizeRowError(message)`, the import row's rule from `@objectstack/core`, instead of the raw message. The sandboxed arm (the door's withheld sentence for a crash, the hook's own sentence for a refusal) is unchanged. The operator's `logger.warn` line still carries the whole text.\n- No new export and no new dependency edge: `sanitizeRowError` is already public (`packages/core/src/index.ts` re-exports `./utils/import-runner.js` with `export *`; `@objectstack/rest` tests already import it from `@objectstack/core`), and `@objectstack/objectql` already depends on `@objectstack/core`. So the card's premise that core does not export it does not hold, and `Clause-②` re-derives to `no` instead of the claim's expected `yes (widening)`. ⛔ No second copy of the sanitizer's rules.\n- The CLI report changes in the same way, because it prints the same `failures[].error` through `formatRecordCurrencyBackfillReport`. The operator loses nothing: the CLI routes `logger.warn` to its warning line (stderr under `--json`), which keeps the raw driver text.\n\n## Why\n\nSince #30809 the backfill report is also the REST answer of `POST /meta/_migrate-record-currency-codes`, read by a tenant admin holding `setup.write`. A driver's error kept its SQL statement, constraint name and column list verbatim in that answer, while the import door cleans the same class. Contract review 6677255440, should-fix 1.\n\n## Tests\n\n- `packages/objectql/src/record-currency-backfill.test.ts`: three driver-shaped throws (an `update ... - REASON` statement, a SQLite UNIQUE failure, an `insert ... - FOREIGN_KEY_REASON` statement) each read `sanitizeRowError(raw)` in the report and none of the driver's names; the printed report line reads the same sentence; the warning line keeps the raw text. The existing CONTROL (a plain message with no driver text) still reads as before.\n- `packages/rest/src/meta-record-currency-backfill-route.test.ts`: on the real `RestServer` route over a real `ObjectQL` engine, the driver throws a driver-shaped error for one row of the caller's organization; the answer is 200, the other row is written, and the failed row carries `sanitizeRowError(raw)` with no SQL, column or placeholder text.\n- Found while writing the REST pin: a unique violation never reaches `rowFailureSentence` raw, because the engine already rewrites it into its own duplicate-record sentence. The REST pin therefore uses a value-too-long driver error.\n\n<details><summary>Ablation (restored, blob equal to HEAD, git diff HEAD empty)</summary>\n\n- Mutation `?? sanitizeRowError(message);` to `?? (message || 'ABLATED_30816');` via `scripts/ablation-replace.mjs`, objectql rebuilt, `ablation-dist-preflight` found the marker in 2 built files (the REST suite reads objectql's `dist/`).\n- objectql: 1 failed / 20 passed (the driver-shaped case). REST: 1 failed / 12 passed (the new pin).\n- Restore leg: blob `5fd2c441` equals HEAD, `git diff HEAD` empty, objectql rebuilt, preflight `--absent` green, both files green again (21/21, 13/13).\n- The mutate leg's objectql build exited 1 after emitting JS (the marker reached dist); the restore build exited 0.\n\n</details>\n\n## Acceptance notes\n\n- `sanitizeRowError` keeps the trailing reason of a `... - REASON` driver message when the reason is not itself SQL, so a reason such as `value too long for type character varying(3)` is still shown. That is the import door's existing reading, applied here unchanged.\n\n## Verification\n\nAll on head `9e4afd8b`:\n- `pnpm --filter @objectstack/objectql typecheck` and `test`: 558 files, 11160 tests passed.\n- `pnpm --filter @objectstack/rest typecheck` and `test`: 393 files, 7456 passed, 332 skipped.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 61 families derived; `--ran` reconciliation: 60 run with exit 0, 1 NOT MEASURED (`pnpm check:dual-build-cjs-loads`, exit 3, PREREQUISITE NOT MET: the whole tree has no `dist/`; CI runs it on a full build).\n- `pnpm lint`: exit 0.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4d1GEfMtjCJfYePyAPD)_\n"
+}

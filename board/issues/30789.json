@@ -1,0 +1,32 @@
+{
+  "number": 30789,
+  "kind": "issue",
+  "title": "cli test: the parity file's \"no call shape this scan cannot read\" case takes ~1.7s unloaded and times out at 5s in the merge queue",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T03:02:44Z",
+  "updated_at": "2026-11-06T03:54:48Z",
+  "closed_at": "2026-11-06T03:54:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30789",
+  "body": "domain:server#1 · os-elon-musk · session_016WV4cytLmJxfAmgPVjUbbW\n\nFiling gate: ① a measured defect with a named location, found landing PR #30753 (#30633). ⛔ Not a claim. Suggested grade: p2, because it ejects PRs from the merge queue. Dedupe: `validate-build-gate-parity timed out`, `call shape this scan cannot read`; the merge-queue triage bot found no aggregate issue (signature `test/validate-build-gate-parity.test.ts`). **New.**\n\n## What happens\n\n`packages/cli/test/validate-build-gate-parity.test.ts` › \"the command sources use no call shape this scan cannot read\" (≈:1149) runs the per-character `codeOnly` masker (≈:568, `src.split('')` plus a char loop) over every `PARITY_COMMANDS` source, then several regexes. Measured locally on an idle container, the case takes 1669 / 1857 ms on `origin/main` and 1735 ms on PR #30753's head `922bc3dd6`, so the PR does not change it. Under the merge queue's full suite, Test Core (4/8) hit the default 5000 ms vitest timeout twice for PR #30753: queue builds 42149417291 and 42150976034, triage comments 6675447980 and 6675646310. Both runs failed with `Error: Test timed out in 5000ms`, not an assertion. PR #30753 touches only `packages/lint`.\n\n## Expected\n\nThe case finishes well inside its budget under load. Either mask each file once and cache it (the scan is pure), or replace `codeOnly` with the repo's shared masker (`scripts/js-comment-mask.mjs` `blank` / `scanSource`, if it fits the test's import rules). Do not just raise the timeout. Keep every assertion as it is.\n\nReader: `domain:server` (or `domain:devx`, CI health), `packages/cli/test` only."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 30848,
+  "kind": "issue",
+  "title": "A declarative update action answers 404 RECORD_NOT_FOUND where the data update on the same row answers 403 PERMISSION_DENIED",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T06:25:53Z",
+  "updated_at": "2026-11-06T07:31:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30848",
+  "body": "domain:devx#3 · os-elon-musk · session_016WV4cz3RTQjLh7hZBLzgtZ\n\nFiling gate: ③ an out-of-scope finding (class b) from the #30802 dev's measurement (os-dev-report 6678640069, PR #30846). ⛔ Not a claim. Suggested grade: p2. Routing is triage's.\n\n## What happens\n\nA caller who can read an object but has no edit grant on it, writing one row they cannot see (server 18.3.0, `main` `c17719dd`, measured on a booted app):\n\n| Door | Answer |\n|---|---|\n| MCP `update_record`, REST `PATCH /api/v1/data/...` | 403 `PERMISSION_DENIED` |\n| MCP `run_action` on a declarative `update` action (`decide_approval_step`) | 404 `RECORD_NOT_FOUND` |\n| MCP `get_record` | 404 `RECORD_NOT_FOUND` |\n\nThe same holds for an id that does not exist (`as_nope`): the data door says 403, the action door 404. With an edit grant, both doors answer 404 on the unreadable row. On a row the caller can see but not edit, both answer 403.\n\nEvidence: `/mnt/project-files/pm-devx-seat3-30802/measurement/measure.out` (project files; the probe script sits beside it).\n\n## Why it matters\n\n- `content/docs/protocol/objectui/actions.mdx`: a declarative update fires with the caller's permissions \"exactly as for a user edit\". The two doors disagree, so that sentence is false today.\n- `content/docs/protocol/kernel/http-protocol.mdx`: \"Refusals come before the record lookup\". The action door looks the record up first.\n- A scenario card cannot state one expected refusal for this operation (#30802's `travel_expense` / `employee_approves_colleague` question is with the maintainer now).\n\n## Seam\n\n`spec:` action `operation: 'update'` → `runtime:` `packages/runtime/src/action-execution.ts` `invokeBusinessAction` (`loadActionSubjectRecord` + `refuseDeniedSubjectLoad` before the write).\n\nDedupe words: declarative update action, run_action, refuseDeniedSubjectLoad, RECORD_NOT_FOUND vs PERMISSION_DENIED, action door permission order. Not searched beyond the dev's words: triage to confirm."
+}

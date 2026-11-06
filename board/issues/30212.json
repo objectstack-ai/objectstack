@@ -2,8 +2,8 @@
   "number": 30212,
   "kind": "issue",
   "title": "Setup small fixes: impersonation landing, account email lifetime, sender name, agent sets in pickers",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T02:07:16Z",
-  "updated_at": "2026-11-06T02:05:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T03:37:52Z",
+  "closed_at": "2026-11-06T03:27:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 15,
+  "comments": 17,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30212",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFrom a real-user walkthrough of Setup, filed on the maintainer's word: 「以上都同意，立卡」 (2026-11-05). Measured on `main` `b7075d9908`, with the console in dev mode, unless a line says otherwise. Test app scaffolded with `create-objectstack@18.3.0`.\n\n## Items\n\n| # | Observed | Suggestion |\n|:--|:--|:--|\n| 1 | Impersonating from a Setup page lands the administrator on 「你没有访问此应用的权限」, because the impersonated user has no Setup access. The banner and ending it work well | Go to the home page |\n| 2 | Accounts created by bulk import receive a set-password link valid for 60 minutes, while invitations last days. A new employee who reads the mail later has to ask the administrator | Align with the invitation lifetime (the seat suggests 48 hours) |\n| 3 | The mail sender name defaults to `ObjectStack` while the subject and body use the configured product name | Follow the brand name until one is set |\n| 4 | The permission set picker on a person offers MCP AI 助手 sets | Hide agent sets when assigning to a person |\n\nRow 2 changes how long a credential-setting link lives, so the dev should confirm the lifetime with the security seat rather than assume it."

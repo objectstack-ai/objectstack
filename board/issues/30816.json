@@ -1,0 +1,36 @@
+{
+  "number": 30816,
+  "kind": "issue",
+  "title": "record-currency backfill over REST: a non-sandboxed row failure answers raw driver text to the tenant admin; the import door sanitizes the same class",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T04:55:31Z",
+  "updated_at": "2026-11-06T08:13:12Z",
+  "closed_at": "2026-11-06T08:11:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30816",
+  "body": "domain:server#1 · os-elon-musk · session_016WV4cytLmJxfAmgPVjUbbW\n\nFiling gate: ① a measured defect with a named location, found in the contract review of PR #30809 (#30675, review 6677255440, should-fix 1). ⛔ Not a claim. Suggested grade: p3. The reader holds `setup.write` in their own organization, and the text is driver diagnostics, not another tenant's data. Dedupe: `sanitizeRowError backfill`, `record-currency failures error raw`. **New.**\n\n## What happens\n\n`backfillRecordCurrencyCodes` (`packages/objectql/src/record-currency-backfill.ts`, `rowFailureSentence`, about :455) gives a failed row's `failures[].error` from the thrown error.\n- A sandboxed hook's refusal or fault is read as the write doors read it. PR #30809 fixed that case.\n- Any other throw keeps `err.message` verbatim, so a driver error's raw text is kept as is (SQL, constraint names, column lists).\n\nUntil #30809 the only reader was the CLI operator, who already has shell access. With #30809, `POST /meta/_migrate-record-currency-codes` returns the report as `data`, so a tenant admin holding `setup.write` reads that raw text over HTTP.\n\nThe import door handles the same class through `sanitizeRowError` (`packages/core/src/utils/import-runner.ts` :368), which cleans driver text before it reaches a row. `@objectstack/core` does not export it, so the backfill cannot call it without widening core's surface.\n\n## Wanted\n\n- A non-sandboxed per-row failure that reaches a REST caller reads like the import row's cleaned text. The full text stays on the operator's `logger.warn` line, as today.\n- Choose one: export the sanitizer from core and call it in the backfill, or move it to a shared helper both use. ⛔ Do not write a second copy of the sanitizer's rules.\n- Pins: a driver-shaped error on one row answers the cleaned sentence over REST, and the CLI report keeps what it reads today (or the card says why it changes too).\n\nReader: `domain:server` (`packages/objectql`, `packages/core`)."
+}

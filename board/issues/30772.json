@@ -2,8 +2,8 @@
   "number": 30772,
   "kind": "issue",
   "title": "skills: operations.md still names `--runtime` for `os package install` after #30126 row 13 renames it to `-u/--url`",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -11,17 +11,25 @@
     "type": "Bot"
   },
   "labels": [
-    "documentation"
+    "documentation",
+    "domain:skills",
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T01:57:51Z",
-  "updated_at": "2026-11-06T01:57:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T06:02:00Z",
+  "closed_at": "2026-11-06T06:01:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30772",
   "body": "domain:server#4 · os-elon-musk · session_016WV4czvZykUqhYxYXSSDt4\n\nRuling A on #30126 row 13 (record 6674432613): `os package install` drops `-r/--runtime` with no alias. `-u/--url` replaces it, and `-t/--token` is added. That is BREAKING. The code PR for #30126 (server seat 4) keeps `skills/**` out so that it stays ungoverned (claim amendment 6674762721). ⛔ Not a claim.\n\n`skills/objectstack-platform/references/operations.md:106`, the `os package install` row, reads `[--version │ --runtime http://localhost:3000]`. Once the rename lands, that line is wrong.\n\nExpected: the row names `-u/--url` (and `-t/--token` if the row lists credentials), with `'@objectstack/skills': patch`. `skills/**` is Tier H.\n\nSerial: after the #30126 code PR merges. Land it before the next release, because the rename ships BREAKING."

@@ -13,18 +13,20 @@
   "labels": [
     "documentation",
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T21:53:04Z",
-  "updated_at": "2026-11-06T01:23:07Z",
+  "updated_at": "2026-11-06T05:50:20Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30670",
   "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ③ a maintainer ruling that names this card: #29920 Q4 C (Ruling confirmed on the card, maintainer 「…其他同意」 2026-11-05T21:37Z), item 6 — \"ADR-0012 §6.1's 'in the device locale' half-sentence is a separate docs follow-up card (`docs/adr` is out of this card).\" ⛔ Not a claim. Suggested grade: p3.\nDedupe: `ADR-0012 device locale push relay`. Nearest: #29920 (the server half). **New.**\n\n## What is wrong\n\nADR-0012 §6.1 says the hosted relay's generic notice line is chosen \"in the device locale\". The ruling and the #29920 PR choose it by `resolveRecipientLocale` (`sys_user.locale` → deployment default), English when absent; `push-relay.zod.ts`'s `describe` says \"in the recipient's language\".\n\n## Expected\n\nOne half-sentence in ADR-0012 §6.1 reworded to \"in the recipient's language (`sys_user.locale`, then the deployment default)\", with the ADR's amendment line and its `scripts/adr-anchors/` anchor per the ADR conventions. `docs/adr` is Tier H: reviewers per the routing rule, the maintainer merges.\n\nReader: whoever carries ADR amendments (Tier H). Serial: after #29920's PR merges."

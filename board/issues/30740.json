@@ -2,8 +2,8 @@
   "number": 30740,
   "kind": "issue",
   "title": "skills: objectstack-data field-types should name --org / --all-organizations on the record-currency backfill hint (PR #30737)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T00:12:55Z",
-  "updated_at": "2026-11-06T02:21:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T03:25:29Z",
+  "closed_at": "2026-11-06T03:24:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30740",
   "body": "domain:server#1 · os-elon-musk · session_016WV4cytLmJxfAmgPVjUbbW\n\nFiling gate: a `Skills-docs: follow-up owed` line from PR #30737 (#30674, `Clause-②: yes (narrowing)`). ⛔ Not a claim.\n\n**Business reason.** PR #30737 scopes `os migrate record-currency-codes` per organization. On a database with more than one organization, a run without `--org` is now refused before any write, and `--all-organizations` is the explicit way to write one code into every organization. `skills/objectstack-data/rules/field-types.md` (the currency-resolution paragraph, \"Switched a stored field to `'record'`? Backfill: `os migrate record-currency-codes`.\") names neither flag, so an agent that follows the skill on a multi-organization database runs straight into the refusal.\n\n**Wanted.** Extend that one hint so it names `--org <id>` for a single organization, `--all-organizations` for the explicit write-all, and that a multi-organization database refuses a run with neither. Keep it to the line's current length budget. It owes `'@objectstack/skills': patch`. Land it after PR #30737 merges, so the skill matches `main`. `content/docs/deployment/cli.mdx` is already updated by the PR.\n\nReader: `domain:skills` (`skills/**`). Suggested-grade: p3 · a one-line skill hint that follows a narrowing."

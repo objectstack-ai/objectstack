@@ -2,8 +2,8 @@
   "number": 30765,
   "kind": "issue",
   "title": "Governance: a platform defect is fixed in the platform, not worked around in an app repo; claims name the carrier, devs stop on a platform premise, and a check flags PRs whose cross-repo premise closed after they opened",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:skills",
     "enhancement",
-    "pm:dispatched",
     "priority:p2",
     "repo:cloud"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T01:36:54Z",
-  "updated_at": "2026-11-06T02:04:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T03:28:19Z",
+  "closed_at": "2026-11-06T03:27:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30765",
   "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **③ a task on the maintainer's word.**\n- The maintainer's question in the `repo:cloud#3` seat session (2026-11-06), verbatim: 「以后如何避免类似的问题？平台的问题应该在平台处理」.\n- On the seat's three-part proposal they selected, verbatim: 「三条都立卡（推荐）」.\n\n**Owner.** The skills seat owns governance text (`.claude/skills/pm-dispatch/**`, `.claude/agents/os-dev.md`). Both are a governed face: `.claude/**` is Tier S. The check script lives in `scripts/pm/`. Triage routes this card.\n\n## 维护者速读\n\n这次的教训：cloud#3595 在 cloud 另写了一套绕行，起因是平台入口在托管环境上返回 501（objectstack#30192），而这个 501 是平台缺陷，16 分钟后就在平台修好了。PR 却一直按旧前提挂着，+3,018 行。现有规程只要求「协议错了改 spec、不在运行时加兜底」，没有规定「平台缺陷必须在平台修」，也没有人负责回头检查前提过期。本卡补三条：\n- 认领时写明由哪个仓修；\n- 开发发现前提是平台缺陷就停；\n- 一个机械检查：PR 引用的别仓前提卡已关闭时，自动标出来。\n\n## The case (evidence)\n\n- objectstack-ai/cloud#3595 was opened 2026-11-05T01:54Z. Its body says it builds a cloud-only path because \"the environment's HTTP door answered 501 (objectstack#30192)\". That path is a new `/_admin/environments/:id/member-access` route, a control-plane column with `/observed` reporting, and control-plane prompt/decision routes.\n- objectstack-ai/objectstack#30192 closed at 02:10Z through PR #30195, which fixed the kernel door. Its merge commit `1a3ea0c0` is cloud `main`'s pin.\n- The kernel already owns the capability: ADR-0090 D5 (packages suggest, admins confirm), `confirmAudienceBindingSuggestion`, and the Setup page.\n- The same seat filed the kernel card and wrote the cloud workaround. No rule asked either side to choose one carrier, and nothing re-checked the premise. Seat review note: cloud PR #3595 comment 6674352813.\n- Today's rules cover only the metadata half: fix the producer or the spec, never a runtime fallback (cloud `AGENTS.md` lines 50–57; pm-dispatch's anchoring rule \"`domain:*` = the domain of the package the fix lands in\"). They do not cover a platform defect hit from an app repo.\n\n## Asked\n\n1. **pm-dispatch: name the carrier at claim.** The claim states where the failing behaviour's code lives. When it lives in the platform (objectstack packages, kernel, runtime, rest, ui):\n   - the fix is a platform card in the owning `domain:*` lane;\n   - the app-repo card goes `pm:blocked` with `Blocked-by:` that card;\n   - the app repo adds only what is genuinely app-side. For cloud that means the control plane, the cloud console, and the hosted install.\n\n   A workaround in the app repo needs a recorded maintainer ruling, plus a removal card filed in the same stroke. The ACCEPT checks the same thing: does the diff re-implement a platform capability?\n2. **os-dev: stop on a platform premise.** When a card's premise turns out to be a platform defect, the dev stops and reports `carrier: objectstack` with the evidence. It does not code around it in the app repo. This sits beside the existing `carrier:` field for out-of-scope findings (`os-dev.md` ~:53).\n3. **A premise-freshness check.** This is a `check-half-states` row or a standalone `scripts/pm/` reader. It flags an open PR, in any fleet repo, whose body cites a cross-repo issue as its premise (\"because objectstack#N …\", \"blocked by\", \"answers 501 (#N)\") when that issue closed after the PR was opened. The flag means: re-measure before ACCEPT or human hand-off. Pin it with a battery case built on the #3595 / #30192 timeline. ⛔ It reports and writes nothing.\n\n## Acceptance\n\n- The rule text exists in `.claude/skills/pm-dispatch/` and `.claude/agents/os-dev.md`, short and in the house style.\n- The check carries a self-test battery, including the #3595 / #30192 case, and is wired where the seat's half-state readers run.\n- The cloud half, a one-line pointer in cloud `AGENTS.md` (Tier H), is a separate cloud card blocked on this one.\n\nDedupe (2026-11-06): `repo:objectstack-ai/objectstack carrier platform defect cloud workaround is:issue` → 88 hits, none a rule on carrier choice. `premise closed issue PR stale is:issue` → broad, and no premise-freshness reader among the hits. `fix belongs in platform not cloud is:issue` → broad, no governance card.\n\nSuggested-grade: p2 · one recurrence cost a +3,018-line PR on the governed review route."

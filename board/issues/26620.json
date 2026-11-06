@@ -1,7 +1,7 @@
 {
   "number": 26620,
   "kind": "issue",
-  "title": "[PM seat] domain:ui · seat 4 — 🟢 os-sales · 由 os-sales 账户的项目负责",
+  "title": "[PM seat] domain:ui · seat 4 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -19,12 +19,12 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T10:42:48Z",
-  "updated_at": "2026-11-05T13:43:34Z",
+  "updated_at": "2026-11-06T04:22:44Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 16,
+  "comments": 17,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26620",
-  "body": "domain:ui#4 · os-sales · session_01L6bhgVfPeFZkN1FP93imKU\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 4**. Seat 1 is #25966, seat 2 is #25995, seat 3 is #27561, seat 5 is #26945, seat 6 is #30423.\n\n<sub>Refreshed 2026-11-05T13:39Z at seating.</sub>\n\n## Current PM — 🟢 os-sales\n\n- **Holder:** `os-sales` · `session_01L6bhgVfPeFZkN1FP93imKU` · project \"Objectstack security ui\" (thread \"ui 席 7\"), seated at this refresh.\n- **Mailbox:** PR #30501.\n- **Patrol:** `trig_01RhTtM6AQamSBUtiR2eBKNN` · `52 * * * *`.\n- **Pointer:** posture, ledger and round reports live in the project. Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#4` + `head:claude/` PRs.\n\n## Ledger\n\n- Inherited from the previous holder's clock-out brief 6658524722 (`os-support-ai`, `session_01WGufzinedUGSXteN45poyo`): nothing in flight, no stay-behind. The previous revision of this body is the archive.\n- Out of scope: every `pm:epic` subtree.\n\n## Hot-file serial queue\n\n- None held by this seat. ⛔ Re-derive from the live `Claim:` comments of every `domain:ui` seat and each open PR's file list before any dispatch.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Sibling seats in the same project: `domain:ui#5` (#26945), `domain:ui#6` (#30423), `domain:ui#1` (#25966). Each seat tells the others the card number before claiming; the earlier claim stamp wins.\n- Concurrency (maintainer): up to 5 active cards per seat.\n- Standing constraints: changesets for ui cards go to the root `.changeset/`; no PR on the objectui repository; cloud-touching cards go whole to the `repo:cloud` lane; `ui/.github/**` and the root `ci.yml` stay ⛔ out of bounds for ui cards.\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n"
+  "body": "domain:ui#4 · os-sales · session_01L6bhgVfPeFZkN1FP93imKU\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 4**. Seat 1 is #25966, seat 2 is #25995, seat 3 is #27561, seat 5 is #26945, seat 6 is #30423.\n\n<sub>Refreshed 2026-11-06T04:22Z at sign-off.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Last holder:** `os-sales` · `session_01L6bhgVfPeFZkN1FP93imKU`, signed off in 6676806962.\n- **Mailbox:** none (PR #30501 is closed). **Patrol:** none (deleted).\n- **Pointer:** Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#4` + `head:claude/` PRs.\n\n## Ledger\n\n- In flight at sign-off went back to the queue for the next ui seat: #30205, Release 6676437604, `pm:blocked` on PR #30640. PR #30652 is a draft with the seat's review closed.\n- Stay-behind: none.\n- Out of scope: every `pm:epic` subtree.\n\n## Hot-file serial queue\n\n- None held by this seat. ⛔ Re-derive from the live `Claim:` comments of every `domain:ui` seat and each open PR's file list before any dispatch.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Standing constraints: changesets for ui cards go to the root `.changeset/`. There is no PR on the objectui repository. Cloud-touching cards go whole to the `repo:cloud` lane. `ui/.github/**` and the root `ci.yml` stay ⛔ out of bounds for ui cards.\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n"
 }

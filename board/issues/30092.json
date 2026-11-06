@@ -2,8 +2,8 @@
   "number": 30092,
   "kind": "issue",
   "title": "skills(objectstack-platform): the skill names the `push` key and capability but never teaches the push block's shape (transport, apns / fcm, credentialRef)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,9 +21,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T13:13:54Z",
-  "updated_at": "2026-11-06T01:53:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T05:40:08Z",
+  "closed_at": "2026-11-06T05:39:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

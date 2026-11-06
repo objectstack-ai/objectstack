@@ -1,0 +1,35 @@
+{
+  "number": 30788,
+  "kind": "pull_request",
+  "title": "fix(runtime)!: an action that dispatches to a handler another declared action owns also answers with that owner's permission and activation gates",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T02:57:30Z",
+  "updated_at": "2026-11-06T03:39:59Z",
+  "closed_at": "2026-11-06T03:39:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-06T03:39:57Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30788",
+  "body": "Clause-②: no (narrowing) — the REST `POST /api/v1/actions/:object/:action` door and the MCP `run_action` tool refuse a `script` action whose dispatch reaches a handler that a different declared action's own dispatch reaches, when the caller lacks that action's `requiredPermissions` (403 `PERMISSION_DENIED`) or that action is switched off (409 `ACTION_DISABLED`), and while the metadata store cannot be read they refuse 503 `SERVICE_UNAVAILABLE` a call reaching a handler built from another stored declaration; both doors answered such a call with the handler's result before. Nothing is widened, and no schema or authorable key moves.\nMetadata-protocol: semantic\n\n## 维护者速读\n\n- 改了什么:动作分发命中的处理器若属于另一个已声明动作,REST `/actions` 与 MCP `run_action` 两个入口都会同时套用那个动作的 `requiredPermissions`(403)与启停开关(409),与被调用动作自身的门取并集,只收窄不放宽。\n- 为什么改:加固规则——一个处理器只有一套门;任何声明经由它运行时,都要过拥有它的那个动作的权限与启停开关。\n- 风险与回滚:只影响「两个声明共用一个处理器」的调用;仓内发运代码未见此形态,唯一命中的是一个测试夹具(已改为各用各的处理器键)。回滚即还原本 PR 的两个 runtime 源文件。\n- 先看:`packages/runtime/src/action-execution.ts` 的 `actionHandlerOwnerRefusal`(归属判定与元数据面不可读分支);`packages/runtime/src/domains/actions.ts` 与 `invokeBusinessAction` 中的两处调用点。\n- 两分钟验证:`pnpm --filter @objectstack/runtime exec vitest run --maxWorkers=2 src/domains/action-handler-owner-gates.test.ts`,预期 17 条全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nThe hardening rule: **an action that dispatches to a handler another declared action owns also answers with that owner's permission and activation gates.**\n\n- `actionHandlerOwnerRefusal` (`packages/runtime/src/action-execution.ts`) is the one gate, called by both doors right after their own ADR-0066 D4 capability gate and ADR-0126 activation consult, ahead of the param contract, the subject-record load and dispatch.\n- Ownership is read at the handler **entry** the dispatch actually reaches (`object:key`, one snapshot of `listRegisteredActions()`, in `executeRegisteredAction`'s own rotation). A declared `script` action owns the entry its own dispatch reaches. A declaration is one identity (its owning object key and its name), so the same declaration seen object-embedded and as a standalone copy is not a second owner, and same-named actions on two objects stay independent while each object has its own handler.\n- Owner permissions are judged before owner switches, the doors' own order. REST answers the refusal on its envelope; MCP throws it with `code` and `status`.\n- The owners are read from the engine's in-memory copies (registered objects and standalone action items) and from the metadata plane's listings. When the plane cannot be read, a handler a package or code registered is still judged from the engine's copies, and an action's own stored handler still runs; only a handler the authored-action binding built for another stored declaration is refused 503.\n- `content/docs/ui/actions.mdx` states the rule beside the existing flow-target precedent (a `flow` action inherits its target flow's `requiredPermissions`).\n- One fixture in `actions-disabled-package.test.ts` declared two actions with one handler key and different gates; the gated one now has its own key, so the file pins what it pinned before.\n\n## Tests\n\n`packages/runtime/src/domains/action-handler-owner-gates.test.ts`, organised per door:\n\n- REST: 403 when the caller lacks the owner's `requiredPermissions` (target-bound owner, body owner registered under its name, object-less owner under the global key, metadata-plane owner); 409 when the owner is switched off, even for a caller holding its permissions; 503 when the plane is unreadable and the reached handler was built for another plane declaration. Every refusal asserts `status` + `code` and that the owner's handler never ran.\n- MCP `run_action`: the 403 and 409 legs, asserting the thrown `code` + `status` and that the handler never ran.\n- Controls: a plain action with its own handler; the owner invoked directly (403 for a member, 200 with the permission); a caller holding the owner's permissions (200, owner's handler runs once); one declaration carried twice; a same-named action on another object; an action's own plane-built handler, and a package handler, with the plane unreadable.\n\n## Acceptance notes\n\n- The UI gate is unchanged: a button still reads only its own action's `requiredPermissions`, so a button whose handler belongs to a gated action can be shown to a user the server then refuses.\n- Fixture authors who give two actions one handler key now get one gate across both; the doc bullet says to give each action its own handler key unless the two should share one gate.\n\n## Verification\n\nHead `8f94aaf619f381a499d8755bea6abd821f682a62` (branch merged with `origin/main` at `06cccd32e1`).\n\n- Premise: the new test file run against the base sources fails 6 of its 13 legs then present, every one a refusal leg, and passes with the change.\n- Targeted at head: 5 runtime files (the new file, `action-activation-dispatch`, `actions-disabled-package`, `dispatcher-unique-violation-wire-code`, `sandbox-unreadable-rejection-door`) — 91/91. `pnpm --filter @objectstack/runtime typecheck` exit 0; `pnpm check:type-check-debt` exit 0 (0 raw errors above the ledger).\n- Full `@objectstack/runtime` suite at `9b2ba60b94` (the head before a type-only follow-up): 545/545 files, 8726 passed, 19 skipped.\n- Ablation (`scripts/ablation-replace.mjs`, each restored blob-equal, tree clean afterwards): owner-permission refusal → 6 legs red; owner-switch refusal → both 409 legs red; unreadable-plane refusal → the 503 leg red; REST call site → 7 legs red; MCP call site → both MCP refusal legs red.\n- `node scripts/pm/dispatch-gates.mjs --ran`: 90 derived, 90 run, 0 NOT-MEASURED, all exit 0.\n- Dogfood battery at head, closure built first, under the verify lock: 421 files passed, 3 skipped (424); 3513 tests passed, 36 skipped (3549); exit 0. No dogfood file is touched by this change.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgVfjk2i8T2D4RmxsKg)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgVfjk2i8T2D4RmxsKg\n\n<!-- signed: security#1 · os-sales · session_01L6bhgVfjk2i8T2D4RmxsKg -->\n"
+}

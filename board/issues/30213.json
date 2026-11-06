@@ -2,8 +2,8 @@
   "number": 30213,
   "kind": "issue",
   "title": "[Decision] Actions taken while impersonating a user are recorded only under that user",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T02:07:47Z",
-  "updated_at": "2026-11-05T21:48:25Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T06:40:33Z",
+  "closed_at": "2026-11-06T05:59:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30213",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nThe maintainer, verbatim: 「S2：管理员模拟员工时做的修改，事后查不出是谁做的，这个要立决策卡，评估开发方案」 (2026-11-05). Business explanation is in the session; this card holds the options.\n\n## The question\n\nWhen an administrator impersonates an employee and changes data, how should the record show who really did it?\n\nGoverning text:\n- `packages/platform-objects/src/identity/sys-user.object.ts:476`: the impersonation confirm says \"actions will be logged\".\n- Banner: 「您正在以 {{user}} 的身份操作 —— 所有操作都会记录为该用户。」\n- ADR-0090 D10 rule 4 (dual attribution) and ADR-0118 D1/D5 (`actor` keeps two values; \"which non-user acted\" is answered by an added attribution field).\n\n## Measured\n\nOn `main` `b7075d9908`, a ticket created in an impersonation session:\n\n| Where | Records |\n|:--|:--|\n| `sys_audit_log` row | `user_id` and `actor` both the impersonated user; `ip_address` and `metadata` empty |\n| `sys_activity` | 王工 |\n| Record | `created_by` the impersonated user |\n| Sign-in rows | The session event does name the administrator (`plugin-audit/src/auth-event-audit.ts`) |\n\nSo an investigation can see that an impersonation session existed, and cannot see which writes came from it. No administrator appears on the write.\n\nExisting shapes to build on, read at `dfafae8132`:\n- `audit-writers.ts` writes `metadata: { performed_by, on_behalf_of }` for a delegated agent write, present only on such writes.\n- `ExecutionContext.attributedUserId` is the precedent for an attribution-only field, which the authorization path never reads.\n- `service-print/src/print-routes.ts:176` refuses a print in an impersonation session, so reading `impersonatedBy` from the session already has a consumer.\n- `rest-server.ts:3072` notes that impersonation resolves to the impersonated user at the session level.\n\n## Options and development cost\n\nThe seat's estimates come from reading the code; nothing was prototyped.\n\n- **A. Record the administrator on each write, in the existing metadata shape.** Add an attribution-only context field filled from `session.impersonatedBy`. The audit writer adds `metadata.impersonated_by`, and `sys_activity` carries the same. The audit log and the record timeline show 「Dev Admin 代王工操作」. `user_id`, `created_by` and permissions are unchanged. No schema change. Small to medium: spec, REST context, audit writers, console display. Limit: a metadata text column cannot be filtered well, so \"everything this administrator did while impersonating\" needs the session window or a scan.\n- **B. A first-class `impersonated_by` column on `sys_audit_log` and `sys_activity`.** Same display as A, plus a real filter. Medium: adds schema, migration and an index on both tables, and old rows stay empty. It is a second attribution shape next to `performed_by`.\n- **C. Make impersonation read-only.** Refuse writes in an impersonation session, as the print door already refuses. Attribution stops being a question. Small on the server, and one choke point must cover every write path. Support loses the ability to reproduce and fix a problem as the user, which is the common reason to impersonate. Needs a console state explaining the refusal.\n- **D. Only correct the wording.** The confirm says plainly that writes are recorded as the user. Almost no cost, and the gap stays.\n\n## Recommendation: A\n\n四轴（中文）：\n\n- **实际业务需求：** 客户投诉、内部追责和合规审计都要回答「这是本人还是管理员做的」。管理员替员工排查和修数据又是模拟功能的日常用途，所以 C 会砍掉主要价值。A 和 B 都能回答问题。需要「按管理员查全部代操作」的频率更低，可以先靠模拟会话的时间窗定位。\n- **项目长远合理性：** A 沿用代理写入已有的双重归属形状，全平台只有一种写法；B 多一种形状，但查询更好。将来审计查询确实需要时，可以从 A 升到 B，那时再加列和回填。\n- **防 AI 写代码犯错：** 归属字段只用于记录、不参与授权，沿用 `attributedUserId` 的不变量，AI 不会误把它当主体。C 要覆盖所有写入口，漏一个就是静默缺口。\n- **创业阶段不扩散：** A 不加列、不加迁移，只是把已有事实写下来。\n\n**A's sub-points to confirm:**\n- Should the timeline show the administrator to everyone who can read the record, or only to administrators? The seat suggests everyone, because the record's owner has a reason to know.\n- The empty `ip_address` on record writes is a related gap. The seat suggests filling it in the same change if it is cheap, and not letting it hold up the rest.\n\nBlocks nothing."

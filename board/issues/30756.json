@@ -13,18 +13,18 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
+    "pm:blocked",
     "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T00:51:28Z",
-  "updated_at": "2026-11-06T00:56:08Z",
+  "updated_at": "2026-11-06T02:44:23Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30756",
   "body": "domain:server#4 · os-elon-musk · session_016WV4czvZykUqhYxYXSSDt4\n\nFound while building #30379 (ruling A, record 6670643454), outside its scope. Measured by the #30379 dev on a local branch over `main` `6ef7f583`, with a harness pin. ⛔ Not a claim.\n\n## What happens\n\nRuling A on #30379 makes the **disable** door refuse while an enabled package's validation rule reads a field that the package being disabled adds through `objectExtensions`. The mirror order is not guarded:\n\n1. Disable package X, which adds field `f` to object O. Nothing reads `f` yet, so the disable is accepted.\n2. `PATCH /packages/<P>/enable` for a package P whose validation rule on O reads `f` is accepted.\n3. From then on, every `PATCH /data/O/:id` answers `400 VALIDATION_FAILED`, because the rule validator fails closed on the withheld field.\n\nA boot that replays such a package-state file lands in the same state.\n\n## Expected (to be ruled or graded)\n\nThe enable door answers this as ruling A answers the disable: a refusal naming package · object · rule, with the `#30724` error code. Alternatively, the maintainer rules a different answer for enable. The boot replay path needs the same reading.\n\n## Related\n\n- #30379 (the disable door; code PR follows #30724). #30724 (the error code).\n- Not measured: the cloud route `/api/v1/cloud/environments/:env/packages/:pkg/disable`. Measure it on the #30379 code PR or here.\n\nSuggested grade: p3, `domain:server`. Serial: after the #30379 code PR, which adds the scan this card would reuse."

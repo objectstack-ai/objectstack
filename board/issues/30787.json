@@ -1,0 +1,36 @@
+{
+  "number": 30787,
+  "kind": "pull_request",
+  "title": "docs(adr): record ruling 6670707546 under ADR-0144 Open item 13",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T02:57:14Z",
+  "updated_at": "2026-11-06T06:01:06Z",
+  "closed_at": "2026-11-06T06:01:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-06T06:01:04Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30787",
+  "body": "Fixes #30676\n\nClause-②: no\nMetadata-protocol: none\n\nClaim: 6675374172 · Branch: `claude/issue-30676-adr-0144-item-13-note` · Ruling-ref: 6670707546 · Seat: domain:server#1 · Session: `session_016WV4cytLmJxfAmgPVjUbbW`\n\n## 维护者速读\n\n- 改了什么：ADR-0144 开放项 13 下加一条 2026-11-06 注记，记下裁决 6670707546（C = A + B）。A 已由 PR #30737（`e2bcd5c1`，卡 #30674）落地：回填按组织走，`backfillRecordCurrencyCodes` 带 `organizationId`，CLI `--org` 与 `--all-organizations` 互斥，多组织库不带范围时在任何写入前拒跑并列出各组织无码行数；B 是租户管理员 REST 入口（卡 #30675）。四个未选方案各一行写明缘由。过渡态明写为过渡态：B 落地前，云租户的回填由平台运维应请求带 `--org` 代跑。项 13 在 B 半边继续开放。\n- 为什么改：ADR 每有裁决就要修订（Prime Directive #13）。此前项 13 只记到 2026-10-30 的裁决 B，读者会把运维代跑当成答案。\n- 风险与回滚：纯文字，一个文件 +25 行，无代码、无 changeset（`docs/adr/**` 快速通道，`skip-changeset`）。回滚即撤 PR。Tier H。\n- 先看：ADR-0144 开放项 13 末尾的新注记（本 PR 唯一 hunk），对照裁决评论 6670707546 的 Ruling 与 Not chosen 两段。\n- 两分钟验证：`pnpm check:adr-symbol-anchors` 退出 0，输出含「3157 anchors across 150 records resolve」——注记里的 `file#symbol` 锚全部在 `origin/main` 上解析。\n- 需要您做的：席位 ACCEPT 后，由 os-zhuang 或 hotlong 批准（Tier H，`docs/adr/**`）。\n\n## What changes\n\nOne dated `*Note (2026-11-06):*` appended to ADR-0144 Open item 13, in the record's existing note form:\n\n- the ruling, letter C (A now, B as its own card), linked the way the record's other notes link theirs;\n- A's tree evidence from PR #30737 (`e2bcd5c1`), cited by symbol: `packages/objectql/src/record-currency-backfill.ts#backfillRecordCurrencyCodes`, `#resolveScope`, `#organizationsRefusal`, `#walkCodelessRows`; `packages/cli/src/commands/migrate/record-currency-codes.ts#MigrateRecordCurrencyCodes` for the exclusive `--org` / `--all-organizations` pair and the refusal's remedy; ruling item 3's `packages/objectql/src/home-amount-recompute.ts#recomputeHomeAmounts`;\n- B in one sentence, card #30675;\n- not chosen, one line each with the reason: A alone, B alone, D (operations for good), deriving the code from `localization.currency`;\n- the interim, worded as an interim, and the item left open on its B half until #30675 lands.\n\nNot touched: `skills/objectstack-data/rules/field-types.md` (the card's third task is #30740's, per unblock note 6675290331); the record's Status, Provenance and Evidence lines (its earlier Open-item notes amend none of them either); `docs/adr/README.md` (the index gate reports it current).\n\n## Tests\n\nNone owed: a `docs/adr/**`-only diff, no package built or tested for its own sake. Gates below.\n\n## Acceptance notes\n\n- The note's claims about the merged behaviour were read on `origin/main` at `1371b9d8` (the branch point), which contains `e2bcd5c1`: `resolveScope` refuses the option pair and a blank organization (`VALIDATION_ERROR`) and an organization on an object with no organization column (`INVALID_FIELD`); `organizationsRefusal` is the multi-organization refusal carrying per-organization counts; `walkCodelessRows` runs under `{ isSystem: true, tenantId }` and filters on `organization_id`; the oclif flags declare `exclusive`. The note does not restate the `INVALID_FIELD` code, keeping to the ruling's own text.\n- The objectql continuation anchors sit on one line with their path anchor, as the symbol-anchor grammar requires; that line is long, as the record's other anchor lines already are (its longest is 470 characters, and no line-length lint governs `docs/adr/**`).\n- `skip-changeset` rides the create: `docs/adr/**` publishes nothing from any released package.\n- Out of scope, noted and not filed: nothing found.\n\n## Verification\n\nPre-push: `check:commit-card-trailers` printed \"1 commit message(s) on this push carry no card relation and no model identifier in the trailer pair.\"\n\n<details><summary>Derived gates (dispatch-gates --commands, reconciled with --ran) at head ff701a6e</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 21 families at `ff701a6e` (1 path, +25/-0, under the human-merge threshold). Each ran as a plain command from the worktree with its exit code captured before any pipe into `ran.list`, and `--ran` reconciled the record:\n\n```\nRun reconciliation — 21 derived, 20 run, 1 NOT-MEASURED, 0 UNRUN.\n✓ dispatch-gates --ran: 21 derived famil(ies) accounted for — 20 run, 1 NOT-MEASURED (1 DERIVED from a recorded exit 3).\n```\n\n- 20 families exit 0, among them `check:adr-anchors`, `check:adr-index` (\"docs/adr/README.md is current\"), `check:adr-symbol-anchors` (\"3157 anchors across 150 records resolve\", the note's six among them), `check:adr-links` (991 destinations resolve), `check:nul-bytes`, `check:doc-authoring`, `check:pm-governed-merges`, `check:pm-prior-rulings`, `check:closing-keyword-parity`.\n- NOT MEASURED: `pnpm --filter @objectstack/lint run check:doc-formula-expressions`, exit 3 PREREQUISITE NOT MET: `@objectstack/formula` and `@objectstack/lint` are not built in this worktree. Their closure is `@objectstack/spec`, `sdui-parser`, `formula` and `lint`, and this session's worktree guard refuses the `bash scripts/pm/os-verify-lock.sh` invocation, so that build was not taken unlocked on the shared container. The lint workflow runs the family on the PR; the seat reads its check-run. The diff is one `docs/adr/**` file carrying no formula expression.\n- Eight families first exited 3 for a missing `node_modules` and were rerun green after `pnpm install`; the recorded reading is the rerun.\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (`packages/spec` untouched.)\n- [x] 2. Every name I added uses the casing for its kind. (No names added.)\n- [x] 3. No formatter ran.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. Publishes nothing, so `skip-changeset`; both declaration lines are filled in above.\n- [x] 6. `packages/spec` touched: n/a.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English; the 维护者速读 block is the required Chinese section.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cytLmJxfAmgPVjUbbW)_\n"
+}

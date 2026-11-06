@@ -1,0 +1,35 @@
+{
+  "number": 30779,
+  "kind": "pull_request",
+  "title": "fix(plugin-email): point an expired import set-password link at a new one first",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T02:31:49Z",
+  "updated_at": "2026-11-06T03:27:35Z",
+  "closed_at": "2026-11-06T03:27:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-06T03:27:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30779",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DEFP2CVzjybJuYd1HRmm6yb)_\n\ndomain:server#4 · os-elon-musk · session_016WV4cyRC88C4E1MFT2bqMu\n\nFixes #30212\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:批量导入账号收到的「设置密码」邮件,末句从「链接失效请联系管理员」改为先指引自助:到登录页点「忘记密码？」输入本人邮箱取新链接,仍不行再联系管理员。四种语言,HTML 与纯文本两版。\n- **为什么改**:裁决 E(6674421054):链接保持 60 分钟不变,只改末句;自助重取链接的路径今天已可用,邮件却只让员工去找管理员。\n- **风险与回滚**:只改邮件文案,不碰链接时效、不碰 plugin-auth、无新 spec 键;回滚即撤本 PR。\n- **先看**:`packages/plugins/plugin-email/src/templates/auth-templates.ts` 里 `auth.account_invitation` 四个语言行的末句。\n- **两分钟验证**:对照 console 登录页的「忘记密码？」文案(`auth.login.forgotPasswordText`),确认邮件里的叫法与四种语言的按钮一致。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\n- `auth.account_invitation` (the mail the identity import sends with the first set-password link), last line, in en-US, zh-CN, ja-JP and es-ES, HTML and text bodies. It now reads, in English: `If the link has expired, get a new one from the sign-in page: choose \"Forgot password?\" and enter {{user.email}}. If that does not work, contact {{inviter.name}}.` It used to read `If the link has expired, contact {{inviter.name}}.`\n- The entry is named as the console's sign-in page labels it in each locale (`auth.login.forgotPasswordText` in `ui/packages/i18n/src/locales/{en,zh,ja,es}.ts`): `Forgot password?`, `忘记密码？`, `パスワードをお忘れですか？`, `¿Olvidaste tu contraseña?`.\n- No new template variable: `{{user.email}}` is already declared and required.\n\n## Why\n\nRuling E on #30212 row 2 (6674421054): the bulk-import set-password link keeps its 60-minute lifetime, and the mail's last line points first at getting a new link, then at the administrator.\n\n## Tests\n\n- New pin in `auth-account-invitation-template.test.ts` (`[#30212] … points an expired link at a new one first`): per locale, the HTML body carries the new line as its own paragraph, the text body ends on it, the old administrator-only line is gone, and the account's address comes before the administrator. Red on `origin/main` `b3098661`: 4 failed / 28 passed; green on the head.\n- `builtin-auth-render-identity.test.ts`: the eight `auth.account_invitation` body digests (4 locales × HTML/text) re-pinned from the registry render; every other row's digest and every subject is unchanged.\n- `pnpm --filter @objectstack/plugin-email test` + `typecheck` under the verify lock: 48 files / 809 tests passed, `check:test-typecheck` OK.\n\n## Acceptance notes\n\n- **The promised path exists for an imported account.** An expired link goes through better-auth's `GET /reset-password/:token` to the console `ResetPasswordPage.tsx` without a token, which shows \"This reset link is invalid or has expired.\" with a **Request a new link** button into `/forgot-password` (L88-L101). The import mints its link with `requestPasswordReset` (`admin-import-users.ts` ~L824), the same flow forgot-password runs, so a new request works the same way for that account.\n- **No invite fork.** `auth.account_invitation` is sent only from the import branch of the reset-mail callback (`auth-manager-auth-instance.ts` ~L513, when an `invitation` marker is present). Organization invitations use `auth.invitation`, which this PR does not touch.\n- **Out of scope, unchanged:** the 60-minute lifetime (`resetPasswordTokenExpiresIn`), `packages/plugins/plugin-auth/**`, `packages/spec/**`, `ui/**`.\n- **Changeset:** `'@objectstack/plugin-email': patch`, with both declaration lines.\n\n## Verification\n\n- `dispatch-gates --commands` at `bc6db17e`: 58 derived, each exit code written to a file before any pipe; `--ran`: 57 run exit 0, 1 NOT MEASURED (`pnpm check:dual-build-cjs-loads` exit 3, PREREQUISITE NOT MET: needs every package built; left to CI).\n- `check-commit-card-trailers --range origin/main..HEAD`: OK.\n- `eslint --no-inline-config` on the three changed source files: 0 errors.\n- CI check-runs: read on the PR.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cyRC88C4E1MFT2bqMu\n"
+}

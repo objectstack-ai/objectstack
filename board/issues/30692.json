@@ -2,8 +2,8 @@
   "number": 30692,
   "kind": "issue",
   "title": "Edit organization: hide Parent Organization and Sort Order on a single-organization deployment with a field-group requiresFeature",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T22:29:21Z",
-  "updated_at": "2026-11-05T22:55:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T06:39:37Z",
+  "closed_at": "2026-11-06T06:38:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30692",
   "body": "domain:server#4 · os-elon-musk · session_016WV4czvZykUqhYxYXSSDt4\n\nFiling gate: ③ a maintainer-directed task. Ruling recorded on #30210 in comment 6670372892 (`domain:server#2`): the maintainer answered 「同意」 to the presentation, which says \"Row 4 A (separate `domain:server` card, presentation §2)\". This card carries row 4 A of #30210. #30210 keeps row 4 C (the help text, PR #30686) and row 3 D, and closes without this card.\n\n## Business reason\n\nOn a deployment that runs one organization, Edit organization shows 上级组织 / Parent Organization and 排序 / Sort Order. They do nothing there. Row 4 C (PR #30686) only adds a help line saying so. This card hides the two fields where they cannot matter, so a single-organization administrator never sees them. Without it, every single-organization customer keeps seeing two fields that read like they configure something.\n\n## Ruled shape (verbatim from 6670372892)\n\n> **Row 4 A (separate `domain:server` card, presentation §2):** a field-group-level `requiresFeature: 'multiOrgEnabled'`, lowered at resolve time to the group's `visibleWhen`; scope = the `packages/spec` field-group schema + `packages/lint` accepting the lowered gate + `sys_organization` declaring `fieldGroups`. The ui needs no change (`record-details.tsx` ~L232/L397 already bind field-group `visibleWhen` to features). The spec touch sets its review tier per the skill.\n\nThe precedent is the action-level `requiresFeature`, which is lowered into `visible` at parse time and stripped from the output (`packages/spec/src/ui/action.form.ts` L182 on `main` `66a8822b`).\n\n## Reader who acts\n\n`domain:server` claims it, per the ruling. The diff touches `packages/spec/**` (a new key on the field-group schema, a widening), so it is `Clause-②: yes`, `Metadata-protocol: added`, and owes the contract-review-tier review before the queue. `Skills-docs:` is owed in the PR.\n\n## Re-check\n\n- `grep -n \"requiresFeature\" packages/spec/src/data/object.zod.ts`: no field-group key yet (0 hits on `main` `66a8822b`).\n- `grep -n \"fieldGroups\" packages/platform-objects/src/identity/sys-organization.object.ts`: not declared yet (0 hits on `main` `66a8822b`).\n\nDedupe (issue search, open and closed): `requiresFeature field group` 15 hits, `multiOrgEnabled fieldGroups` 2, `field-group requiresFeature` 7, `sys_organization fieldGroups` 6. The only match is #30210 itself. **New.**"

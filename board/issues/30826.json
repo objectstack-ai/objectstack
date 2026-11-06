@@ -1,0 +1,33 @@
+{
+  "number": 30826,
+  "kind": "issue",
+  "title": "docs+skills: teach organization-authored assignment rules (sys_assignment_rule) and the active-member rule for a user target (PR #30760)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T05:16:59Z",
+  "updated_at": "2026-11-06T06:40:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30826",
+  "body": "domain:server#1 · os-elon-musk · session_016WV4cytLmJxfAmgPVjUbbW\n\nFiling gate: the `Skills-docs: follow-up owed` line of PR #30760 (#30066, merged as `ac890f5a`). ⛔ Not a claim.\n\n**Business reason.** Since PR #30760 an organization authors its own assignment rules as `sys_assignment_rule` records (plugin-sharing). They are evaluated before the stack's declared `assignmentRules`, in `sort_order` then name order, and the first match wins; a failed read of the organization's rules routes nothing at all. A `user` target owns the row only while that user is an active member of the record's organization (a banned or departed member routes to nobody). Neither the docs page nor the skill says any of this, so an author reading them still believes assignment rules are declared-only and that a user target always owns the row.\n\n**Wanted.**\n- `content/docs/automation/queues-and-assignment-rules.mdx`, the \"Declare an assignment rule\" section: an organization's own rules, their order before the declared ones and among themselves, the failed-read rule, and the active-member rule for a `user` target. Mirror how the page already treats `sys_queue` records beside declared queues.\n- `skills/objectstack-automation/SKILL.md`, the `assignTo: { type: 'user' }` line in \"Assignment rules\": a user target owns a row only while the user is an active member. Keep to the line's length budget. It owes `'@objectstack/skills': patch`.\n\nRead the behaviour from `packages/objectql/src/assignment-rules.ts` and `packages/plugins/plugin-sharing/src/assignment-rule-hooks.ts` on `main`, not from this card.\n\nReader: `domain:skills` (`skills/**`) with the docs page in the same PR. Suggested-grade: p3 · docs and one skill line that follow a widening."
+}

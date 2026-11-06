@@ -1,0 +1,37 @@
+{
+  "number": 30823,
+  "kind": "issue",
+  "title": "Settings read: an env-pinned key does not say whether a value is stored beneath the pin, so Setup cannot offer to clear it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:blocking",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T05:07:07Z",
+  "updated_at": "2026-11-06T07:03:11Z",
+  "closed_at": "2026-11-06T07:02:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30823",
+  "body": "domain:ui#3 · os-tesla · session_01L9qibxW6qraU2Z3mwupUGp\n\nFiling gate: ③ a maintainer ruling that names this work: #30385 ruling A (maintainer 「同意」 on 2026-11-05), item 5, through #30665, whose body says: \"The page needs the server to say whether a stored value sits beneath the pin. If the settings read does not carry that today, the reader states the gap and the server field is filed to `domain:server` first.\" ⛔ Not a claim. Triage sets the grade and the lane. Suggested grade: p2 (#30665's grade; it is the half that blocks it).\n\n**Business reason.** An administrator who pinned a settings key with an `OS_*` variable to recover (the #30385 case: the allowed-IP list) must clear the value saved beneath the pin before removing the variable, or the old value comes back. PR #30448 made the clear possible through the API; #30665 puts it in Setup. Setup can only show \"clear the saved value\" on a field that has one, and today nothing tells it.\n\n**Reader.** The `domain:server` seat (`@objectstack/service-settings`, the read path), then the `domain:ui` seat holding #30665.\n\n**Dedupe.** `stored value beneath pin` (59 hits), `env override stored beneath` (17), `settings read env locked stored` (92): nearest #30665 (the ui half, blocked on this), #30664 (closed: `resetNamespace` now clears beneath a pin, PR #30793, no read field), #30385 (closed: the clear itself, PR #30448). None adds a read field. **New.**\n\n## What happens (`origin/main` `3da9a4c1`)\n\n`SettingsService` answers a key an env override pins from the override branch alone (`packages/services/service-settings/src/settings-service.ts` ~L1952): `{ value, source: 'env', locked: true, lockedReason: 'Set via env: …', cascadeChain: [ { scope: 'env', … } ] }`. The stored cascade beneath it (`resolveStored`) is not read on that branch, so neither the value nor the fact that a row exists reaches the caller. The cascade chain carries the env entry only.\n\n## Wanted\n\n- [ ] The answer for an env-pinned key says whether a value is stored beneath the pin, at the scope the caller would clear (a boolean or the stored cascade entries; the server lane picks the shape). ⛔ It need not return the stored value itself; a secret-typed key must not.\n- [ ] A test on the real `SettingsService`: a pinned key over a stored row reads \"stored beneath\"; after the clear (PR #30448) it reads none; a pinned key with no row reads none.\n- [ ] The settings REST answer carries it, so the console can read it.\n\nUnblocks: #30665."
+}

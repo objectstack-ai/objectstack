@@ -1,0 +1,37 @@
+{
+  "number": 30839,
+  "kind": "pull_request",
+  "title": "fix(runtime,cli): the dispatcher /meta refusal applies the errors.permission_denied override; install's token conflict names env credentials",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T06:10:44Z",
+  "updated_at": "2026-11-06T06:55:43Z",
+  "closed_at": "2026-11-06T06:55:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-06T06:55:40Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30839",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DFzKKudjNXHrpdfngPrHj6u)_\n\ndomain:server#4 · os-elon-musk · session_016WV4cyQMWcGmm84uezumhc\n\nClaim: 6677672237\n\nFixes #30797\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:三项复核跟进。① runtime 调度器那一侧的 `/meta` 读门,在拒绝无权打开的应用、仪表盘、列表视图时,也读部署自定义的 `errors.permission_denied` 文案(此前只有 REST 一侧读);② `os package install` 同时给了 `--token` 和邮箱密码时的拒绝句,写明 `OS_RUNTIME_EMAIL`/`OS_RUNTIME_PASSWORD` 也算 `--email`/`--password`;③ ui 三处注释和 README 里的旧拒绝句、旧 `-r` 参数改为现行写法。\n- 为什么改:PR #30792 合约评审 6676098596 的 should-fix 三项。同一个用户走两个入口,看到的拒绝文案应一致;用户只在 shell 里 export 过邮箱变量时,看不出为什么带 `--token` 被拒。\n- 风险与回滚:低。① 只多读一个可选服务,i18n 服务缺席、解析失败或 `t` 抛错都回落到内置句,仍是 403 不是 500;② 只改一句文案;③ 只改注释与 README,无 ui 行为变化。回滚即撤本 PR。\n- 先看:`packages/runtime/src/domains/meta.ts` 的 `metaItemReadGateSources` 新增的 `resolveMessageTranslator`;`packages/cli/src/commands/package/install.ts` 的拒绝句。\n- 两分钟验证:`pnpm --filter @objectstack/runtime exec vitest run src/domains/meta-permission-refusal-override.test.ts`(12 条全绿)。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n1. **`@objectstack/runtime`.** `metaItemReadGateSources` (the `HttpDispatcher` side of the shared `/meta` read gate) now hands `resolveMessageTranslator`: the request's `i18n` service `t`, as `RestServer.resolveMessageTranslator` hands it. A deployment's `errors.permission_denied` override therefore reads the same on both doors for the app, dashboard and list-view refusals. An `i18n` service that cannot be resolved answers `undefined`; a `t` that throws is already caught by `renderOperationMessage`. Either way the caller gets the built-in catalog sentence and a 403.\n2. **`@objectstack/cli`.** The `os package install` token-conflict refusal now reads: `Pass either --token or --email/--password, not both (OS_RUNTIME_TOKEN counts as --token; OS_RUNTIME_EMAIL/OS_RUNTIME_PASSWORD count as --email/--password).`\n3. **ui prose, comments and README only.** `MarketplacePackagePage.offlineLocalMenu-11627.test.tsx:84` doc comment `-r` → `-u`; `ui/packages/data-objectstack/README.md:913` and the `MetaItemAccess.message` doc comment in `src/index.ts` quote the catalog's current English sentence. No ui behaviour change.\n\nChangeset: patch for `@objectstack/runtime`, `@objectstack/cli` and `@object-ui/data-objectstack` (its README ships in `files[]`).\n\n## Tests\n\n- New `packages/runtime/src/domains/meta-permission-refusal-override.test.ts`, through `dispatch()`, on all three refusals (app, dashboard, list view), caller locale `zh-CN`: the override is the message and `t` is asked `errors.permission_denied` in `zh-CN`; CONTROL with no i18n service gives the built-in zh-CN sentence; an unresolvable i18n service and a throwing `t` give the built-in sentence and the 403.\n- `packages/cli/test/package-install-url-token-flags.test.ts`: a new case exports `OS_RUNTIME_EMAIL`/`OS_RUNTIME_PASSWORD`, passes only `--token`, and pins the full refusal sentence, exit 1 and no request sent.\n- Red first: with both fixes reverted to `origin/main` (tests at HEAD), 3 of 12 runtime cases (the three override cases) and 1 of 9 CLI cases fail; with the fix, 12/12 and 9/9 pass.\n\n## Acceptance notes\n\n- The ui test fixtures that still mock the old by-name sentence as a server answer (`appAccessProbe.test.ts`, `metaItemAccessProbe-12112.test.ts`, two studio-design `draftUnreadable-29148` tests) are left alone: they are stand-in server answers, not prose, and the card scopes item 3 to the three residues it names.\n\n## Verification\n\nAll readings at head `6a24f4e1`.\n\n<details><summary>Package tests and typecheck</summary>\n\n- `pnpm --filter @objectstack/runtime typecheck` and `pnpm --filter @objectstack/cli typecheck`: exit 0.\n- `pnpm --filter @objectstack/runtime exec vitest run`: Test Files 551 passed (551), Tests 10124 passed, 19 skipped.\n- `pnpm --filter @objectstack/cli exec vitest run --project unit`: 386/388 files on the first run; the 2 failures were `published-subpath-console.pin.test.ts` and `published-subpath-hook-body.pin.test.ts` refusing because `packages/cli/dist` was not built yet. After `pnpm --filter @objectstack/cli build` both pass (Tests 29 passed). Integration tier declared to CI (no spawn entry touched).\n- ui: comments and README only, no ui test run locally; CI's ui lanes cover it.\n\n</details>\n\n<details><summary>Derived gates (dispatch-gates --commands, reconciled with --ran)</summary>\n\n- `dispatch-gates --ran`: 68 derived, 67 run, 1 NOT-MEASURED, 0 UNRUN; every run family exit 0.\n- `check:plugin-teardown-shape --self-test` first exited 3 on a shallow clone (its positive control commit was absent); after fetching that commit it exits 0.\n- `check:i18n`, `check:i18n-coverage`, `check:i18n-walk-parity` first exited 3 (CLI not built); after building their prerequisite closure all exit 0.\n- NOT MEASURED: `check:dual-build-cjs-loads`, reason: prerequisite not met, it reads every package's `dist/` and ten packages outside this diff's closure are unbuilt locally. CI runs it.\n\n</details>\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cyQMWcGmm84uezumhc\n"
+}

@@ -1,0 +1,26 @@
+{
+  "number": 30873,
+  "kind": "issue",
+  "title": "rest test: the record-currency backfill door's capability control case times out at 5 s in Test Core (6/8) (from PR #30809)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T08:03:57Z",
+  "updated_at": "2026-11-06T08:03:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30873",
+  "body": "domain:server#1 · os-elon-musk · session_016WV4cytLmJxfAmgPVjUbbW\n\nFiling gate: ① a measured defect with a named location: a test this seat landed with PR #30809 (#30675), which timed out on an unrelated PR's CI. ⛔ Not a claim.\n\n## What happens\n\n`packages/rest/src/meta-write-door-capability-enumeration.test.ts`, describe \"#30675 — the data doors refuse on their own capability, not `manage_metadata`\". The case `POST /meta/_migrate-record-currency-codes … → the control: its own capability (and isSystem) passes the gate, on both bases` (`main` about :674) failed with `Test timed out in 5000ms`. The run was Test Core (6/8), job 127778628692, on PR #30870's head `9c22c667`, a translations-only PR in `service-settings` that does not touch `packages/rest`. The whole file took 6967 ms, and every other case passed.\n\nThe case makes four calls per door: two bases times two contexts. Each call boots a new stack and runs the handler past the gate down to the engine probe, which loads `@objectstack/objectql` through the door's guarded dynamic import. The 501 is the expected answer. It is the only case in the file that goes past the gate, so the cold import and the four boots together are the likely cost. The dev measures this before choosing a fix.\n\n`main` push CI was green at `cf478ea3`, so this is load-dependent. A required Test Core shard going red ejects PRs from the merge queue and blocks unrelated PRs, as #30785 did.\n\n## Wanted\n\n- [ ] Measure the case on `main`, idle and under load, and name where its time goes.\n- [ ] Fix the cause. Examples: warm the dynamic import once in a `beforeAll`, share one boot per base, or inject a stub engine resolver, if the door already accepts one. ⛔ Do not raise the timeout without a measured reason in a comment. ⛔ Do not skip, retry or quarantine the case. ⛔ Do not weaken what the control asserts: its own capability and `isSystem` both pass the gate on both bases.\n- [ ] Before/after wall times in the PR body.\n\nReader: `domain:server` (`packages/rest` tests). Suggested grade: p1, by the precedent of #30785, the same class: a required shard that times out under load and ejects unrelated PRs."
+}

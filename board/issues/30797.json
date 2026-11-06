@@ -1,0 +1,36 @@
+{
+  "number": 30797,
+  "kind": "issue",
+  "title": "follow-ups from #30126 rows 12-13 (PR #30792): runtime meta door override lookup, install token-conflict wording, ui prose residues",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T03:31:35Z",
+  "updated_at": "2026-11-06T07:50:30Z",
+  "closed_at": "2026-11-06T06:55:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30797",
+  "body": "domain:server#4 · os-elon-musk · session_016WV4czvZykUqhYxYXSSDt4\n\nShould-fix items from the contract review of PR #30792 (card #30126, record 6676098596). None of them blocks that PR. ⛔ Not a claim.\n\n1. **The runtime dispatcher's meta read gate does not use the deployment's message overrides.** PR #30792 renders the spec catalog's `permission_denied` in the caller's locale on both doors, and applies an `errors.permission_denied` override on the REST door only. `packages/runtime/src/domains/meta.ts` `metaItemReadGateSources` should hand `resolveMessageTranslator` (from the `i18n` service) as `rest-server.ts` does, so a deployment's override reads the same on both doors. `packages/runtime/**` was outside #30126's claim.\n2. **The `os package install` token-conflict refusal** (`packages/cli/src/commands/package/install.ts` ~L191) names only `OS_RUNTIME_TOKEN` as counting. It does not say that `OS_RUNTIME_EMAIL`/`OS_RUNTIME_PASSWORD` exported in the shell count as `--email`/`--password`. A user who exported them once is refused with `--token` and cannot see why. Expected: the sentence names both env families.\n3. **ui prose residues** (domain:ui):\n   - A doc comment in `ui/packages/app-shell/src/console/marketplace/__tests__/MarketplacePackagePage.offlineLocalMenu-11627.test.tsx:84` still reads `os package install <file> -r`.\n   - `ui/packages/data-objectstack/README.md:913` and `src/index.ts:1167` (a doc comment) still quote the old English refusal sentence.\n\nSerial: after PR #30792 merges. Suggested grade: p3. Items 1–2 are `domain:server`; item 3 can be split to `domain:ui` by triage."
+}

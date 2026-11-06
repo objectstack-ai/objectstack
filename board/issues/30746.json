@@ -2,7 +2,7 @@
   "number": 30746,
   "kind": "pull_request",
   "title": "feat(scenarios): a local scenario runner builds, runs and iterates every card with a local Claude Code session",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T00:27:09Z",
-  "updated_at": "2026-11-06T02:17:10Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-06T03:16:16Z",
+  "closed_at": "2026-11-06T03:16:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-06T03:16:13Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/30746",
