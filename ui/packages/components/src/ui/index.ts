@@ -35,6 +35,7 @@ export {
 export * from './button';
 export * from './calendar';
 export * from './card';
+export { Carousel, type CarouselApi } from './carousel';
 export * from './checkbox';
 export * from './collapsible';
 export {
@@ -81,6 +82,7 @@ export {
 export * from './hover-card';
 export * from './input';
 export * from './label';
+export { Menubar } from './menubar';
 export { Pagination } from './pagination';
 export * from './popover';
 export * from './progress';
