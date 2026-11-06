@@ -21,6 +21,8 @@
 //     there; a given target is judged by the shared new-similar check; an
 //     environment-authored source is unchanged.
 
+// Pays `@objectstack/metadata`'s first load at collection, never inside a clocked case.
+import '@objectstack/metadata';
 import { describe, it, expect } from 'vitest';
 
 import { HttpDispatcher } from '../http-dispatcher.js';

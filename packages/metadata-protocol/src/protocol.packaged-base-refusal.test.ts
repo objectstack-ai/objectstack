@@ -26,6 +26,8 @@
  * provenance). `@objectstack/objectql` cannot be imported here: it depends on
  * this package.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch, installedManifestsOf } from '@objectstack/metadata-core';
 import { DEFAULT_METADATA_TYPE_REGISTRY, OVERRIDE_TYPE_CLASSIFICATION } from '@objectstack/spec/kernel';
