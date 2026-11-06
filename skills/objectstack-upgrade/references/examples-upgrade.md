@@ -70,7 +70,7 @@ _N sites, M conversions. Ported into sources from `os migrate meta --out`._
 
 | Item | Site | Options | Recommendation | Blocking? |
 |:--|:--|:--|:--|:--|
-| `agent.tools` → which skill | `src/ai/support-bot.ts:12` | `case_management` · new skill | `case_management` | no — parses without it |
+| `agent.tools` → which skill | `src/ai/support-bot.ts:12` | `crm_case_management` · new skill | `crm_case_management` | no — parses without it |
 
 ## 4 · Pending, per deployment
 
