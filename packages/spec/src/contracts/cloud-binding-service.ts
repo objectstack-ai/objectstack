@@ -43,3 +43,11 @@ export interface ICloudBindingService {
    */
   controlPlaneUrl(): string;
 }
+
+/**
+ * Service-registry slot for {@link ICloudBindingService}: the one spelling of
+ * the name. `@objectstack/cloud-connection` registers the binding under it and
+ * a reader (`@objectstack/service-push`'s relay sender) asks for it, so the
+ * registrar and the reader cannot drift apart.
+ */
+export const CLOUD_BINDING_SERVICE = 'cloud-binding';
