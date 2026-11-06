@@ -44,6 +44,7 @@ import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js'
 import { SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
+import { provisionRigUsers } from './__tests__/rig-users.testkit.js';
 
 const MEMBER_DEFAULT = { name: 'member_default', label: 'Member', objects: {} } as unknown as PermissionSet;
 const QA_ADMIN = {
@@ -64,6 +65,12 @@ const GRANTS = 'sys_user_permission_set';
 const T0 = '2026-11-01T00:00:00.000Z';
 const T1 = '2026-12-01T00:00:00.000Z';
 const T2 = '2027-01-01T00:00:00.000Z';
+
+/** [#29029] Every user this suite's writes name or act as: each gets a `sys_user` row. */
+const RIG_USERS = [
+  'u_admin', 'u_b1', 'u_b2', 'u_eq', 'u_from', 'u_g_from', 'u_g_m1', 'u_g_m2', 'u_g_move',
+  'u_g_until', 'u_inv', 'u_legacy', 'u_none', 'u_ok', 'u_until',
+];
 
 const engines: ObjectQL[] = [];
 afterEach(async () => {
@@ -93,6 +100,9 @@ async function boot() {
   for (const o of [SysUser, SysMember]) {
     if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as never, 'qa.authz-read-set');
   }
+  // [#29029] Each grant's holder is a user the writer reads, so the window
+  // order is what is measured.
+  await provisionRigUsers(engine, RIG_USERS);
   engines.push(engine);
 
   const services: Record<string, unknown> = {

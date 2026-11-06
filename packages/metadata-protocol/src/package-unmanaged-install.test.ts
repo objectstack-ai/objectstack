@@ -30,6 +30,8 @@
  * door, the REAL install primitive and the REAL uninstall run against it; its
  * write verbs route through the producer's own dispatch predicates.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ImportUnmanagedPackageResponseSchema } from '@objectstack/spec/api';
@@ -874,5 +876,300 @@ describe('importUnmanagedPackage — the verb', () => {
         expect(table('sys_metadata').filter((r) => r.package_id === 'com.example.crm-copy')).toEqual([]);
         // The object the copy created had its table made, then dropped by the rollback.
         expect(ddl).toEqual(expect.arrayContaining(['sync crm_lead', 'drop crm_lead']));
+    });
+});
+
+/**
+ * [#30794] Rename-on-install: a `targetNamespace` copies the package under a
+ * namespace of its own, through the duplicate's own rename engine
+ * (`package-namespace-rename.ts`), after the view containers are expanded.
+ */
+function renamableBody(extra: Record<string, unknown> = {}): Record<string, unknown> {
+    return crmBody({
+        objects: [
+            {
+                name: 'crm_account',
+                label: 'Account',
+                sharingModel: 'private',
+                description: 'Every crm_lead belongs to one.',
+                fields: { title: { type: 'text', label: 'Title' } },
+            },
+            {
+                name: 'crm_lead',
+                label: 'Lead',
+                sharingModel: 'private',
+                fields: {
+                    title: { type: 'text', label: 'Title' },
+                    account: { type: 'lookup', label: 'Account', reference: 'crm_account' },
+                },
+            },
+        ],
+        views: [
+            {
+                name: 'crm_lead_open',
+                label: 'Open leads',
+                object: 'crm_lead',
+                viewKind: 'list',
+                columns: [{ field: 'title', label: 'Title' }],
+            },
+            // A container: named by the object it binds, expanding into `crm_account.<key>` names.
+            { object: 'crm_account', list: { label: 'All', columns: [{ field: 'title' }] } },
+        ],
+        translations: [{ 'zh-CN': { objects: { crm_lead: { label: '线索' }, crm_account: { label: '客户' } } } }],
+        ...extra,
+    });
+}
+
+describe('planUnmanagedImport — `targetNamespace`, the rename-on-install (#30794)', () => {
+    it('renames every object, view item, container and its expansion, and translation into the target namespace', () => {
+        const p = plan(renamableBody(), { targetNamespace: 'acme' });
+        expect(p.namespace).toBe('acme');
+        expect(p.sourceNamespace).toBe('crm');
+        expect(p.baseManifest).toMatchObject({ namespace: 'acme' });
+        expect(p.items.map((i) => `${i.type}/${i.sourceName} -> ${i.name}`)).toEqual([
+            'object/crm_account -> acme_account',
+            'object/crm_lead -> acme_lead',
+            'view/crm_lead_open -> acme_lead_open',
+            'view/crm_account -> acme_account',
+            'translation/crm_zh_cn -> acme_zh_cn',
+        ]);
+        // The translation item is named for the target namespace, as an import into it names it.
+        expect(p.items.find((i) => i.type === 'translation')!.name).toBe(unmanagedTranslationItemName('acme', 'zh-CN'));
+        // The container's expansion takes its object's copy name: what the save door expands the renamed container into.
+        const container = p.items.find((i) => i.type === 'view' && i.name === 'acme_account')!;
+        expect(container.expands.length).toBeGreaterThan(0);
+        expect(container.expands.every((name) => name.startsWith('acme_account.'))).toBe(true);
+        // Bodies are rewritten by the verb after conversion; the plan carries the engine for it.
+        expect(p.rename?.objectRenames).toEqual(new Map([['crm_account', 'acme_account'], ['crm_lead', 'acme_lead']]));
+    });
+
+    it('absent, the copy keeps the source namespace exactly as before; the source\'s own namespace named is no rename', () => {
+        for (const extra of [{}, { targetNamespace: 'crm' }]) {
+            const p = plan(renamableBody(), extra);
+            expect(p.namespace).toBe('crm');
+            expect(p.sourceNamespace).toBe('crm');
+            expect(p).not.toHaveProperty('rename');
+            expect(p.items.every((i) => i.sourceName === undefined)).toBe(true);
+            expect(p.items.map((i) => i.name)).toEqual(['crm_account', 'crm_lead', 'crm_lead_open', 'crm_account', 'crm_zh_cn']);
+        }
+    });
+
+    it('refuses a value the namespace declaration refuses — 400, naming `targetNamespace`, never sanitised', () => {
+        for (const targetNamespace of ['Acme', 'a', 'my-ns', '1acme', 'acme_namespace_too_long']) {
+            const err = (() => { try { plan(renamableBody(), { targetNamespace }); } catch (e) { return e as any; } })();
+            const envelope = resolveThrownHttpError(err);
+            expect([envelope.status, envelope.code]).toEqual([400, 'VALIDATION_ERROR']);
+            expect(err.message).toContain(`Invalid package namespace '${targetNamespace}' on \`targetNamespace\``);
+        }
+    });
+
+    it('refuses a platform-reserved namespace — `base`, `system`, `sys` — 400', () => {
+        for (const targetNamespace of ['base', 'system', 'sys']) {
+            const err = (() => { try { plan(renamableBody(), { targetNamespace }); } catch (e) { return e as any; } })();
+            const envelope = resolveThrownHttpError(err);
+            expect([envelope.status, envelope.code]).toEqual([400, 'VALIDATION_ERROR']);
+            expect(err.message).toContain(`\`targetNamespace\` '${targetNamespace}' is a platform-reserved namespace`);
+        }
+    });
+
+    it('refuses an object whose copy name another object\'s copy claims — INVALID_REQUEST / 400, naming it', () => {
+        // `lead` lacks the prefix, so its copy is `acme_lead`, which `crm_lead`'s copy already takes.
+        const body = renamableBody();
+        (body.objects as unknown[]).push({ name: 'lead', label: 'Bare', sharingModel: 'private', fields: {} });
+        const err = (() => { try { plan(body, { targetNamespace: 'acme' }); } catch (e) { return e as any; } })();
+        const envelope = resolveThrownHttpError(err);
+        expect([envelope.status, envelope.code]).toEqual([400, 'INVALID_REQUEST']);
+        expect(err.details.targetNamespace).toBe('acme');
+        expect(err.details.refused.map((r: any) => `${r.type}/${r.name}`)).toEqual(['object/lead']);
+        expect(err.details.refused[0].reason).toContain("'acme_lead' is already the copy name of object 'crm_lead'");
+        expect(err.details.refused[0].reason).toContain('then install again');
+    });
+
+    it('refuses an object whose copy name exceeds the storage identifier limit of its table — naming it', () => {
+        // 59 characters under `crm`; 75 under the 19-character `acme_long_namespace`.
+        const long = `crm_${'x'.repeat(55)}`;
+        const body = renamableBody();
+        (body.objects as unknown[]).push({ name: long, label: 'Long', sharingModel: 'private', fields: {} });
+        expect(plan(body).items.some((i) => i.name === long)).toBe(true);
+        const err = (() => { try { plan(body, { targetNamespace: 'acme_long_namespace' }); } catch (e) { return e as any; } })();
+        const envelope = resolveThrownHttpError(err);
+        expect([envelope.status, envelope.code]).toEqual([400, 'INVALID_REQUEST']);
+        expect(err.details.refused.map((r: any) => `${r.type}/${r.name}`)).toEqual([`object/${long}`]);
+        expect(err.details.refused[0].reason).toContain('63-character storage identifier limit');
+    });
+
+    it('refuses an item whose copy name exceeds the column that stores an item name — naming it', () => {
+        const key = 'k'.repeat(240);
+        const body = renamableBody({
+            views: [{ name: `crm_lead.${key}`, label: 'Long', object: 'crm_lead', viewKind: 'list', columns: [{ field: 'title' }] }],
+        });
+        expect(`crm_lead.${key}`.length).toBeLessThanOrEqual(255);
+        const err = (() => { try { plan(body, { targetNamespace: 'acme_long_namespace' }); } catch (e) { return e as any; } })();
+        const envelope = resolveThrownHttpError(err);
+        expect([envelope.status, envelope.code]).toEqual([400, 'INVALID_REQUEST']);
+        expect(err.details.refused.map((r: any) => `${r.type}/${r.name}`)).toEqual([`view/crm_lead.${key}`]);
+        expect(err.details.refused[0].reason).toContain('255-character limit of the column that stores an item name');
+    });
+
+    it('refuses a container whose expanded copy name exceeds that column — naming the expanded view', () => {
+        const key = 'k'.repeat(240);
+        const body = renamableBody({
+            views: [{ object: 'crm_lead', listViews: { [key]: { label: 'Long', columns: [{ field: 'title' }] } } }],
+        });
+        const container = plan(body).items.find((i) => i.type === 'view')!;
+        expect(container.expands).toContain(`crm_lead.${key}`);
+        const err = (() => { try { plan(body, { targetNamespace: 'acme_long_namespace' }); } catch (e) { return e as any; } })();
+        expect(err.details.refused.map((r: any) => `${r.type}/${r.name}`)).toEqual([`view/crm_lead.${key}`]);
+    });
+});
+
+describe('importUnmanagedPackage — `targetNamespace` (#30794)', () => {
+    it('copies under the target namespace: every name, every reference, the base, and the source namespace on the answer', async () => {
+        const { protocol, table, packages } = makeProtocol();
+        const result = await protocol.importUnmanagedPackage({ manifest: renamableBody(), targetNamespace: 'acme' });
+
+        expect(ImportUnmanagedPackageResponseSchema.parse(result)).toEqual(result);
+        expect(result).toMatchObject({ namespace: 'acme', sourceNamespace: 'crm', targetPackageId: 'com.example.crm-copy' });
+        const active = table('sys_metadata').filter((r) => r.state === 'active');
+        expect(active.map((r) => `${r.type}/${r.name}@${r.package_id}`).sort()).toEqual([
+            'object/acme_account@com.example.crm-copy',
+            'object/acme_lead@com.example.crm-copy',
+            'translation/acme_zh_cn@com.example.crm-copy',
+            'view/acme_account@com.example.crm-copy',
+            'view/acme_lead_open@com.example.crm-copy',
+        ]);
+        const body = (type: string, name: string) => JSON.parse(active.find((r) => r.type === type && r.name === name)!.metadata);
+        expect(body('object', 'acme_lead').fields.account.reference).toBe('acme_account');
+        // Free text names the renamed object as a whole identifier.
+        expect(body('object', 'acme_account').description).toBe('Every acme_lead belongs to one.');
+        expect(body('view', 'acme_lead_open')).toMatchObject({ name: 'acme_lead_open', object: 'acme_lead' });
+        // The translation's object keys follow the renamed objects.
+        expect(body('translation', 'acme_zh_cn')).toMatchObject({
+            name: 'acme_zh_cn', locale: 'zh-CN', objects: { acme_lead: { label: '线索' }, acme_account: { label: '客户' } },
+        });
+        expect(packages.get('com.example.crm-copy')?.manifest).toMatchObject({ namespace: 'acme' });
+        // Nothing is left under a source name.
+        expect(active.some((r) => String(r.name).startsWith('crm_'))).toBe(false);
+    });
+
+    it('the copy kept under the source namespace answers no `sourceNamespace` — the answer\'s key set unchanged', async () => {
+        const { protocol } = makeProtocol();
+        const result = await protocol.importUnmanagedPackage({ manifest: renamableBody() });
+        expect(result.namespace).toBe('crm');
+        expect(result).not.toHaveProperty('sourceNamespace');
+    });
+
+    it('judges collisions on the RENAMED names: a row holding the copy name refuses (409); the source name does not', async () => {
+        const held = { id: 'held', type: 'object', organization_id: null, package_id: 'com.example.studio', state: 'active', metadata: '{}' };
+        {
+            const { protocol, table, packages } = makeProtocol();
+            table('sys_metadata').push({ ...held, name: 'acme_lead' });
+            const err = await refusalOf(() => protocol.importUnmanagedPackage({ manifest: renamableBody(), targetNamespace: 'acme' }));
+            expect([resolveThrownHttpError(err).status, resolveThrownHttpError(err).code]).toEqual([409, 'RESOURCE_CONFLICT']);
+            expect(err.details.collisions).toEqual([
+                { type: 'object', name: 'acme_lead', heldBy: "an environment item of package 'com.example.studio'" },
+            ]);
+            expect(packages.size).toBe(0);
+        }
+        {
+            // CONTROL: the source's own name, held, is no collision of the renamed copy.
+            const { protocol, table } = makeProtocol();
+            table('sys_metadata').push({ ...held, name: 'crm_lead' });
+            const result = await protocol.importUnmanagedPackage({ manifest: renamableBody(), targetNamespace: 'acme' });
+            expect(result.copied).toContainEqual({ type: 'object', name: 'acme_lead' });
+        }
+    });
+
+    it('refuses an existing target base whose namespace differs from `targetNamespace` — 409, nothing written', async () => {
+        const { protocol, engine, writes } = makeProtocol();
+        engine.registry.installPackage({ id: 'com.example.mine', name: 'Mine', namespace: 'mine' }, 'code');
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({
+            manifest: renamableBody(), targetPackageId: 'com.example.mine', targetNamespace: 'acme',
+        }));
+        expect([resolveThrownHttpError(err).status, resolveThrownHttpError(err).code]).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(err.details).toEqual({ targetPackageId: 'com.example.mine' });
+        expect(writes).toEqual([]);
+    });
+
+    it('refuses a target namespace another package owns — 409, naming `targetNamespace`, nothing written', async () => {
+        const { protocol, writes, packages } = makeProtocol({ owners: { acme: ['com.example.acme'] } });
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({ manifest: renamableBody(), targetNamespace: 'acme' }));
+        expect([resolveThrownHttpError(err).status, resolveThrownHttpError(err).code]).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(err.details).toEqual({ namespace: 'acme', owners: ['com.example.acme'] });
+        expect(err.message).toContain('named by `targetNamespace`');
+        expect(packages.size).toBe(0);
+        expect(writes).toEqual([]);
+    });
+
+    it('admits the copy beside the package that owns the SOURCE namespace — a managed install of it included', async () => {
+        const { protocol } = makeProtocol({ owners: { crm: ['com.example.crm'] } });
+        const result = await protocol.importUnmanagedPackage({ manifest: renamableBody(), targetNamespace: 'acme' });
+        expect(result).toMatchObject({ namespace: 'acme', sourceNamespace: 'crm' });
+    });
+
+    it('refuses a reference collision the converted body meets — INVALID_REQUEST / 400, before any write', async () => {
+        const { protocol, writes, packages } = makeProtocol();
+        // The source set already grants on `acme_lead` (an object outside the package), and `crm_lead` moves onto it.
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({
+            manifest: renamableBody({
+                permissions: [{ name: 'crm_ops', label: 'Ops', objects: { crm_lead: { allowRead: true }, acme_lead: { allowRead: true } } }],
+            }),
+            targetNamespace: 'acme',
+        }));
+        const envelope = resolveThrownHttpError(err);
+        expect([envelope.status, envelope.code]).toEqual([400, 'INVALID_REQUEST']);
+        expect(err.details.refused.map((r: any) => `${r.type}/${r.name}`)).toEqual(['permission/crm_ops']);
+        expect(err.details.refused[0].reason).toContain("its `objects` key 'crm_lead' follows the copied object to 'acme_lead'");
+        expect(writes).toEqual([]);
+        expect(packages.size).toBe(0);
+    });
+
+    it('refuses a `targetNamespace` its published declaration refuses (not a string) — 400, nothing written', async () => {
+        const { protocol, writes } = makeProtocol();
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({ manifest: renamableBody(), targetNamespace: 7 }));
+        expect([resolveThrownHttpError(err).status, resolveThrownHttpError(err).code]).toEqual([400, 'VALIDATION_ERROR']);
+        expect(writes).toEqual([]);
+    });
+});
+
+describe('the rename parity — one package, one `targetNamespace`, two doors, identical items (#30794)', () => {
+    /** Every active row of one package: `type/name` → its stored body. */
+    const itemsOf = (table: (name: string) => Row[], packageId: string) => Object.fromEntries(
+        table('sys_metadata')
+            .filter((r) => r.package_id === packageId && r.state === 'active')
+            .map((r) => [`${r.type}/${r.name}`, typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata])
+            .sort(([a], [b]) => String(a).localeCompare(String(b))),
+    );
+
+    it('duplicatePackage of the package\'s base and the unmanaged import into the same namespace store the same items', async () => {
+        const body = renamableBody({
+            actions: [{ name: 'crm_new_lead', label: 'New lead', type: 'form', objectName: 'crm_lead', target: 'crm_lead.entry' }],
+        });
+
+        // Door 1: the package as a base (an unmanaged copy keeping its names), then duplicated into `acme`.
+        const viaDuplicate = makeProtocol();
+        await viaDuplicate.protocol.importUnmanagedPackage({ manifest: body, targetPackageId: 'com.example.crm-base' });
+        const duplicated = await viaDuplicate.protocol.duplicatePackage({
+            sourcePackageId: 'com.example.crm-base', targetPackageId: 'com.example.acme', targetNamespace: 'acme',
+        });
+        expect(duplicated.failed).toEqual([]);
+
+        // Door 2: the same package imported straight into `acme`.
+        const viaImport = makeProtocol();
+        await viaImport.protocol.importUnmanagedPackage({ manifest: body, targetPackageId: 'com.example.acme', targetNamespace: 'acme' });
+
+        const duplicatedItems = itemsOf(viaDuplicate.table, 'com.example.acme');
+        const importedItems = itemsOf(viaImport.table, 'com.example.acme');
+        expect(Object.keys(importedItems)).toEqual([
+            'action/acme_new_lead',
+            'object/acme_account',
+            'object/acme_lead',
+            'translation/acme_zh_cn',
+            'view/acme_account',
+            'view/acme_lead_open',
+        ]);
+        expect(importedItems).toEqual(duplicatedItems);
+        expect(viaImport.packages.get('com.example.acme')?.manifest.namespace)
+            .toBe(viaDuplicate.packages.get('com.example.acme')?.manifest.namespace);
     });
 });

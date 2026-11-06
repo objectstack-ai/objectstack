@@ -20,6 +20,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import { defineStack } from '@objectstack/spec';
+// The harness loads these two inside a function body; paid here, during collection, not in a clocked window.
+import '@objectstack/service-datasource';
+import '@objectstack/service-automation';
 
 import { bootStack, type VerifyStack } from './harness.js';
 import { warmUpBoot } from './boot-warm-up.testkit.js';
@@ -48,6 +51,8 @@ const manager = {
     pwr_account: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true, viewAllRecords: true, modifyAllRecords: true },
     // Edit and create a contract, never delete one.
     pwr_contract: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: false },
+    // Every person: a contract's signer names a record its writer reads (#29029).
+    pwr_person: { allowRead: true, viewAllRecords: true },
     pwr_quote: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true },
     pwr_quote_line: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true },
   },
@@ -75,7 +80,7 @@ const source = {
       sharingModel: 'controlled_by_parent',
       fields: {
         account: { type: 'master_detail', required: true, label: 'Account', reference: 'pwr_account' },
-        // A second required reference, to an object the personas hold no grant on.
+        // A second required reference, outside the master chain, to an object the personas only read.
         signer: { type: 'lookup', label: 'Signer', reference: 'pwr_person', required: true },
         title: { type: 'text', label: 'Title' },
       },

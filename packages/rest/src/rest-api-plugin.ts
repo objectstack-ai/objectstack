@@ -537,6 +537,17 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // default permission set.
             const securityServiceProvider = environmentScopedProvider<ISecurityService>('security');
 
+            // [#30955] Audit service resolver — used by the data export door,
+            // which records every export it streams as a run-level `export` row
+            // through the slot's `recordDataExport` (plugin-audit). Returns
+            // undefined when plugin-audit is not mounted: no ledger, no row.
+            // Environment-scoped like the seams above: plugin-audit's writers
+            // write the ledger of the kernel they are registered on, so an
+            // environment's exports are recorded in that environment's ledger.
+            // `unknown`, deliberately: the slot's members are read structurally
+            // by the one door that calls it (`data-action-routes.ts`).
+            const auditServiceProvider = environmentScopedProvider<unknown>('audit');
+
             // Auth service resolver — used by RestServer.resolveExecCtx after
             // the request's environment kernel (and the default environment's)
             // answered no `auth`. [#30192] Environment-scoped: identity is
@@ -577,7 +588,7 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // `RouteManager` in the first place.
             let restServer: RestServer | undefined;
             try {
-                restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultEnvironmentIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider, sharingServiceProvider, /* retired saved-report slot (#20102) */ undefined, approvalsServiceProvider, sharingRulesServiceProvider, i18nServiceProvider, analyticsServiceProvider, settingsServiceProvider, serviceExistsProvider, securityServiceProvider, requestEnvResolver, metadataServiceProvider, tenancyServiceProvider);
+                restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultEnvironmentIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider, sharingServiceProvider, /* retired saved-report slot (#20102) */ undefined, approvalsServiceProvider, sharingRulesServiceProvider, i18nServiceProvider, analyticsServiceProvider, settingsServiceProvider, serviceExistsProvider, securityServiceProvider, requestEnvResolver, metadataServiceProvider, tenancyServiceProvider, auditServiceProvider);
                 restServer.registerRoutes();
 
                 ctx.logger.info('REST API successfully registered');

@@ -56,6 +56,11 @@ delegate holds. In the permission set editor (Studio's **All metadata** area), t
 block lists the five, marks which ones the set already grants, and adds the
 missing ones to the set in one click.
 
+The scope itself grants read on the business units inside its subtree, and on
+no unit outside it, so a delegate can pick the units it administers without a
+`sys_business_unit` grant. A `sys_business_unit` read grant the delegate holds
+reads as that grant says, as before.
+
 ## What the runtime gate enforces
 
 Writes to the governed tables (`sys_user_position`, `sys_user_permission_set`,

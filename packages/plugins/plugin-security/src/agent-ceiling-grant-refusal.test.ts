@@ -30,6 +30,7 @@ import { SysUser } from '@objectstack/platform-objects/identity';
 
 import { SecurityPlugin } from './security-plugin.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
+import { provisionRigUsers } from './__tests__/rig-users.testkit.js';
 import {
   AGENT_CEILING_GRANT_HOOK_PACKAGE,
   isAgentCeilingPermissionSet,
@@ -91,11 +92,12 @@ async function boot() {
     objects: [SysUserPermissionSet],
   } as any);
   await engine.syncSchemas();
-  // `sys_user` registered and unprovisioned, as in the sibling grant suites: the
-  // engine's `user_id` existence probe stands down, and no `sys_member` object
-  // is registered, so the holder-membership refusal stands down too. What is
-  // measured here is the set the row names, alone.
+  // `sys_user` registered, and no `sys_member` object, so the holder-membership
+  // refusal stands down. [#29029] Each grant's holder is a user the writer
+  // reads, as in the sibling grant suites. What is measured here is the set
+  // the row names, alone.
   if (!engine.registry.getObject(SysUser.name)) engine.registry.registerObject(SysUser as never, 'qa.agent-ceiling');
+  await provisionRigUsers(engine, ['u_person', 'u_person_2', 'u_platform']);
   engines.push(engine);
 
   const services: Record<string, unknown> = {

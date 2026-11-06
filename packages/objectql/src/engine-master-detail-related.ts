@@ -354,11 +354,19 @@ export async function resolvePreviewParents(
  * The VALUES are read as SYSTEM: a validation rule's output is a pass/fail the
  * SYSTEM enforces, not data handed to the caller — categorically unlike an
  * access-control rule, which is why RLS predicates are excluded from this
- * capability altogether. Reading the columns as the acting user instead made
- * the rule unauthorable for exactly the persona it exists to constrain. What
- * bounds that elevation is the PROJECTION: only the columns the predicate
- * names, intersected with the related object's declared fields. ⛔ Never the
- * whole row.
+ * capability altogether. What bounds that elevation is the PROJECTION: only
+ * the columns the predicate names, intersected with the related object's
+ * declared fields. ⛔ Never the whole row.
+ *
+ * ⛔ No caller writes a row naming a related row it cannot read (#29029,
+ * ruling records 6573561091 and 6663849489). A non-system write may name, in
+ * a `master_detail`, `lookup` or `user` field, only a row the caller's own
+ * read door returns, and that reference check runs BEFORE the rules
+ * (`assertReferencesResolve`), so a rule never answers for a reference the
+ * caller supplied and cannot read: the write answers `reference_not_found`.
+ * The elevated value read therefore serves a related row the caller can read,
+ * a value the row already stores (#29062), a `tree` parent, and a system
+ * caller.
  *
  * Which ROWS a caller that is not SYSTEM may have read is a different
  * question, answered before any value is read:
@@ -375,8 +383,9 @@ export async function resolvePreviewParents(
  *    stored values, as the write judges it.
  *  - On a related object no organization wall scopes, the own read of the
  *    caller bounds the rows, and any other id is `unreadable`, stored or not.
- *  - ⛔ A plain `lookup` to a walled object keeps the tenant-kept elevated read
- *    alone: no ruling extends the header rule to it.
+ *  - A plain `lookup` to a walled object keeps the tenant-kept elevated read
+ *    alone HERE: a value the caller supplies and cannot read was already
+ *    refused by the reference check before this read is judged (above).
  *
  * A SYSTEM caller (seed replay, boot) asks no read door: the elevated read
  * alone, as before.
@@ -592,10 +601,12 @@ export async function resolveOneHopRelated(
       // A validation rule's output is a pass/fail the SYSTEM enforces, not
       // data handed to the caller — categorically unlike an access-control
       // rule, which is why RLS predicates are excluded from this capability
-      // altogether. Reading as the acting user instead made the rule
-      // unauthorable for exactly the persona it exists to constrain: a member
-      // with CRUD on the child and no read on the parent faulted on every
-      // write, so a legitimate business rule could not ship.
+      // altogether. [#29029] A reference the caller supplies and cannot read
+      // never reaches a rule: the write's reference check refuses it first
+      // (`reference_not_found`), so no caller writes a row naming a related
+      // row it cannot read. What this read still serves without a read door
+      // is a row the caller can read, a value the row already stores, and a
+      // system caller.
       //
       // What bounds the elevation is the PROJECTION: only the
       // columns this predicate names, intersected with the related object's
@@ -604,11 +615,12 @@ export async function resolveOneHopRelated(
       // The accepted cost, recorded so nobody widens it by accident: a caller
       // can INFER a value they cannot see by observing which writes refuse —
       // a column hidden from them on a row they may read, or a column of a
-      // row a plain `lookup` names on a walled object. The value itself never
-      // appears — not in the row handed to CEL beyond the predicate's own use
-      // of it, and not in the refusal text, which names the field and the
-      // rule and never the value. [#22892] ⛔ Never what a master-detail
-      // header the caller cannot read holds: the door below answers first.
+      // row a plain `lookup` the row already stores names on a walled object.
+      // The value itself never appears — not in the row handed to CEL beyond
+      // the predicate's own use of it, and not in the refusal text, which
+      // names the field and the rule and never the value. [#22892] ⛔ Never
+      // what a master-detail header the caller cannot read holds: the door
+      // below answers first.
       //
       // ⛔ No organization wall scopes a related object with no tenant column
       // (e.g. `sys_user`), `tenancy.enabled: false` or `external`, so for a

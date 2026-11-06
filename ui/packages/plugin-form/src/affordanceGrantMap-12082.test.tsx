@@ -744,6 +744,9 @@ const WRITE_SITES: Record<string, WriteSite> = {
     outOfFamily("the caller's OWN sys_personal_view row (Rename), offered behind perms.can(sys_personal_view, update) in ObjectView; the server keeps the rows owner-scoped and fixes the owner; no record the caller browses is written"),
   'packages/app-shell/src/views/personalViews.ts :: usePersonalViews > update :: update':
     outOfFamily("the caller's OWN sys_personal_view row (保存, the list written back into the open personal view), offered behind the same perms.can(sys_personal_view, update) read as Rename in ObjectView; the server keeps the rows owner-scoped and fixes the owner; no record the caller browses is written"),
+  // Connect an Agent's key list (objectstack-ai/objectstack#30894): Revoke marks one of the caller's own keys revoked.
+  'packages/app-shell/src/console/connect/AuthorizedAccessList.tsx :: AuthorizedAccessList > revoke :: update':
+    outOfFamily("the caller's OWN sys_api_key row (Revoke on Connect an Agent's key list, whose read is filtered on user_id = the caller and offers Revoke only on an active key); the write sets revoked: true and the server's CRUD step asks the grant; no record the caller browses is written"),
   // ── core ──
   'packages/core/src/actions/TransactionManager.ts :: TransactionManager > executeBatch :: batch':
     door('the action engine\'s transaction executor runs the operations its caller hands it'),

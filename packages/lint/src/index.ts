@@ -371,6 +371,20 @@ export {
 } from './validate-security-posture.js';
 export type { SecurityFinding, SecuritySeverity } from './validate-security-posture.js';
 
+// A roll-up summary a permission set reads over child data the same set cannot
+// read: the roll-up aggregates the whole child collection and answers only to
+// the parent field's own permissions, so the author is told where they
+// configure the set.
+export {
+  validateRollupSourceVisibility,
+  SECURITY_ROLLUP_SOURCE_UNREADABLE,
+  SECURITY_ROLLUP_SOURCE_ROW_SCOPED,
+} from './validate-rollup-source-visibility.js';
+export type {
+  RollupSourceVisibilityFinding,
+  RollupSourceVisibilitySeverity,
+} from './validate-rollup-source-visibility.js';
+
 export {
   validateOrgAxisRedLines,
   ORG_AXIS_PERMISSION_INHERITANCE,

@@ -656,6 +656,7 @@ QueryAST-aligned options for DataEngine.delete operations
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
 | **multi** | `boolean` | optional (default: `false`) |  |
+| **permanent** | `boolean` | optional | Delete for good: the rows skip the recycle bin and cannot be restored. Authorized as the `purge` operation, not `delete`. By-id deletes only. |
 
 ### Nested Shape: `EngineDeleteOptions.context`
 
