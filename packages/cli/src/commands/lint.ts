@@ -17,6 +17,7 @@ import { scoreMetadata } from '../lint/score.js';
 import { checkHookBodyLowering } from '../lint/hook-body-lowering.js';
 import { lowerCallables } from '../utils/lower-callables.js';
 import { authoringRuleUnionStack } from '../utils/stack-collections.js';
+import { carriesPackageNamespace } from '../utils/project-namespace.js';
 import { checkDependencyRanges } from '../utils/dependency-range-check.js';
 import {
   artifactPackages,
@@ -214,7 +215,9 @@ function getViewLabel(view: any, viewPath: string): { label?: unknown; path: str
  * A name carries the namespace when it IS the namespace (the namespace-named
  * app, ADR-0019), starts with `<ns>_`, or starts with the platform-reserved
  * `sys_` — the exemption the object rule (`validateObjectNamespacePrefix`)
- * grants. An item that declares `overrides` (ADR-0146 D2) replaces the base
+ * grants; `carriesPackageNamespace` is that one predicate, shared with
+ * `os generate` so a scaffold is never written in a spelling this rule
+ * reports. An item that declares `overrides` (ADR-0146 D2) replaces the base
  * package's item OF THE SAME NAME, so its name is the base's and is not
  * judged. A package that declares no namespace has nothing to prefix with and
  * is not judged: the object rule's posture, which does not invent a prefix on
@@ -273,7 +276,7 @@ function namespacePrefixIssues(stack: any, pathPrefix = ''): LintIssue[] {
       const name = item?.name;
       if (typeof name !== 'string' || !name) continue;
 
-      if (ns && !isOverrideDeclaration(item) && !carriesNamespace(name, ns)) {
+      if (ns && !isOverrideDeclaration(item) && !carriesPackageNamespace(name, ns)) {
         const renamed = `${ns}_${name}`;
         issues.push({
           severity: 'warning',
@@ -394,11 +397,6 @@ const DUPLICATE_KEYED_TYPES: Readonly<Record<string, { registryKey?: (item: any,
   reports: {},
   datasets: {},
 };
-
-/** True when `name` carries the namespace: it is the namespace, starts with `<ns>_`, or is platform-reserved `sys_`. */
-function carriesNamespace(name: string, ns: string): boolean {
-  return name === ns || name.startsWith(`${ns}_`) || name.startsWith('sys_');
-}
 
 /** True when the item declares that it replaces the base package's same-named item (ADR-0146 D2). */
 function isOverrideDeclaration(item: any): boolean {

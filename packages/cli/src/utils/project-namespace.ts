@@ -65,3 +65,31 @@ export async function readProjectNamespace(cwd: string = process.cwd()): Promise
     };
   }
 }
+
+/**
+ * Whether a package-authored metadata name carries the package's namespace
+ * (ruling C on #30798): it IS the namespace (the namespace-named app,
+ * ADR-0019), starts with `<namespace>_`, or starts with the platform-reserved
+ * `sys_` — the exemption the object rule (`validateObjectNamespacePrefix`)
+ * grants.
+ *
+ * ONE predicate for the two places the CLI asks it: `os lint`'s
+ * `naming/namespace-prefix` judges a name with it, and `os generate` decides
+ * with it whether the name it writes needs the prefix, so a scaffold is never
+ * written in a spelling the lint then reports.
+ */
+export function carriesPackageNamespace(name: string, namespace: string): boolean {
+  return name === namespace || name.startsWith(`${namespace}_`) || name.startsWith('sys_');
+}
+
+/**
+ * The non-object metadata name `os generate` writes: `shortName` as derived
+ * when it already carries the namespace ({@link carriesPackageNamespace}) or
+ * the project declares none, `${namespace}_${shortName}` otherwise. Never
+ * doubled: `os g flow crm_onboard` under namespace `crm` writes
+ * `crm_onboard_flow`.
+ */
+export function namespacedItemName(shortName: string, namespace: string | undefined): string {
+  if (!namespace || carriesPackageNamespace(shortName, namespace)) return shortName;
+  return `${namespace}_${shortName}`;
+}
