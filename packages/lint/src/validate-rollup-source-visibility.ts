@@ -226,12 +226,16 @@ function summaryDescriptors(stack: AnyRec): SummaryDescriptor[] {
 const ROLLUP_SEMANTICS =
   'a roll-up aggregates the whole child collection and follows only the parent field\'s own permissions';
 
-/** `"invoice.total" summarizes "invoice_line.amount"` / `"project.task_count" counts "task" records`. */
-function rollupPhrase(d: SummaryDescriptor): string {
+/**
+ * `"invoice.total" summarizes "invoice_line.amount"` / `"invoice.line_count" counts "invoice_line" records`;
+ * with `everyRow`, `… over every "invoice_line" row` / `… counts every "invoice_line" row`.
+ */
+function rollupPhrase(d: SummaryDescriptor, everyRow = false): string {
   const column = `"${d.parent}.${d.field}"`;
-  return d.childField
-    ? `${column} summarizes "${d.child}.${d.childField}"`
-    : `${column} counts "${d.child}" records`;
+  if (d.childField) {
+    return `${column} summarizes "${d.child}.${d.childField}"` + (everyRow ? ` over every "${d.child}" row` : '');
+  }
+  return everyRow ? `${column} counts every "${d.child}" row` : `${column} counts "${d.child}" records`;
 }
 
 function hintFor(set: AnyRec, d: SummaryDescriptor): string {
@@ -305,7 +309,7 @@ export function validateRollupSourceVisibility(stack: AnyRec): RollupSourceVisib
         where,
         path,
         message:
-          `${rollupPhrase(d)} over every "${d.child}" row, while ${by} narrows the rows permission set ` +
+          `${rollupPhrase(d, true)}, while ${by} narrows the rows permission set ` +
           `"${setName}" reads${forHolders}; ${ROLLUP_SEMANTICS}`,
         hint,
       });
