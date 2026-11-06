@@ -53,13 +53,12 @@ import {
     customizationBasePackageId,
     DEFAULT_METADATA_TYPE_REGISTRY,
     getOverrideTypeClassification,
-    isCustomizationPairOf,
     OverrideDeclarationSchema,
     type OverrideClassificationBasis,
 } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec';
-import { ITEM_KEY_DISCRIMINATORS, itemDiscriminator, pairOf } from '@objectstack/metadata-core';
+import { ITEM_KEY_DISCRIMINATORS, isPairOf, itemDiscriminator, pairOf } from '@objectstack/metadata-core';
 
 /**
  * The `ObjectStackProtocolImplementation` members the functions below read —
@@ -1010,9 +1009,10 @@ function articleFor(type: string): 'a' | 'an' {
  * `<base>.custom` declares an override; a dependent's same-named item has one
  * fix, rename; a dependent carrying `overrides` is refused).
  *
- * The type list and the pair predicate are N-08's (`@objectstack/spec/kernel`:
- * `OVERRIDE_TYPE_CLASSIFICATION`, `isCustomizationPairOf`), read, never
- * re-derived. `basedOn` is recorded and never judged.
+ * The type list is N-08's (`@objectstack/spec/kernel`:
+ * `OVERRIDE_TYPE_CLASSIFICATION`) and the pair predicate is the lookup's
+ * (`isPairOf`, `@objectstack/metadata-core`), read, never re-derived.
+ * `basedOn` is recorded and never judged.
  *
  * Order: a declaration is judged on its type first (D10 `object`, D6 and the
  * other excluded types, then D9's `flow` and `action`), then on who declares
@@ -1072,7 +1072,7 @@ export function judgeOverrideWrite(
         }
         const base = declaration.base;
         const pair = base === undefined ? undefined : pairOf(base);
-        if (base === undefined || pair === undefined || !pair.ok || !isCustomizationPairOf(packageId, base)) {
+        if (base === undefined || pair === undefined || !pair.ok || !isPairOf(packageId, base)) {
             const who = packageId === undefined ? 'a row bound to no package' : `package '${packageId}'`;
             const only = pair?.ok
                 ? `only '${pair.value}' may declare an override of '${base}'`
