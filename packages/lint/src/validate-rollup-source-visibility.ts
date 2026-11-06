@@ -6,8 +6,8 @@
  *
  * | Rule                                         | Severity | Arm                                   |
  * |----------------------------------------------|----------|---------------------------------------|
- * | security-rollup-source-unreadable            | warning  | the set hides the aggregated child field (`readable: false`), or grants no read on the child object |
- * | security-rollup-source-row-scoped            | info     | the set reads the child, but a row-level policy narrows WHICH child rows it reads |
+ * | security-rollup-source-unreadable            | warning  | the set cannot read the child object, the aggregated child field, or a child field the roll-up's `filter` tests |
+ * | security-rollup-source-row-scoped            | info     | the set reads all of those, but a row-level policy narrows WHICH child rows it reads |
  *
  * ## The rule it tells the author about
  *
@@ -27,30 +27,51 @@
  * Advisory on purpose: the pair is legal and is often meant (an order total
  * visible to staff who may not see line costs). The remedy, when it is not
  * meant, is the parent field's own mask — `fields["invoice.total"]:
- * { readable: false }` on the set — which is what the hint names.
+ * { readable: false }` on the set — which is what the hint names, together with
+ * its reach: the field merge (`getFieldPermissions`) lets only DECLARING sets
+ * vote, so that entry hides the column from every holder of the set, and a
+ * co-held set with no entry for it casts no vote that would restore it.
+ *
+ * ## "Can read", as the runtime decides it
+ *
+ * Three gates decide whether a set reads an object or a field, and the rule
+ * folds all three, on both sides of the roll-up:
+ *
+ *  - the object grant: the set's own entry for the object, otherwise its `'*'`
+ *    entry, which covers a `private` object only when it carries View All /
+ *    Modify All ({@link grantFor}, `resolveObjectPermission`);
+ *  - the field entry: `readable: false` hides the field, unless the set's
+ *    View All / Modify All on the object votes every field readable
+ *    (ADR-0066 D2 ⑧ as amended). No entry ⇒ readable, as the merge does with an
+ *    absent key ({@link fieldHidden});
+ *  - the capability gate (ADR-0066 D3): an object's `requiredPermissions` —
+ *    the `string[]` form, or the `read` bucket of the per-operation map
+ *    (`requiredCapsForOperation(…, 'find')`) — refuses the read
+ *    (`objectReadAdmission`, step 4), and a field's `requiredPermissions` hides
+ *    the field (`foldFieldRequiredPermissions`), unless the set's
+ *    `systemPermissions` hold EVERY listed capability. View All / Modify All
+ *    lifts neither: the object gate runs whatever the grants, and the field fold
+ *    runs after the super-user vote ({@link missingCapabilities}).
  *
  * ## What is judged, per (permission set × summary field)
  *
- * Judged only when the set can read the summary column at all:
+ * Judged only when the set can read the summary column at all: it reads the
+ * parent object (grant and capability gate) and the summary field (entry and
+ * capability gate). A set that cannot see the column learns nothing from it.
  *
- *  1. it grants read on the parent object — its own entry for the object,
- *     otherwise its `'*'` entry ({@link grantFor}); and
- *  2. its own field entry does not hide the column (`readable: false`), or its
- *     super-user bypass on the parent makes that mask inert. A set with NO
- *     entry for the column passes through as readable, which is what the field
- *     merge does with an absent key.
+ * Then, over the child object `summaryOperations.object` names, in order, one
+ * finding per pair:
  *
- * Then, over the child object `summaryOperations.object` names:
- *
- *  - a set holding View All / Modify All on the child reads every row and
- *    every field of it — nothing to report;
- *  - no read grant on the child ⇒ `security-rollup-source-unreadable`;
- *  - `readable: false` on `summaryOperations.field` ⇒ the same id. A `count`
- *    reads no value, so its `field` is never judged (R13's reading);
- *  - otherwise, a row-level policy that scopes the set's reads of the child ⇒
- *    `security-rollup-source-row-scoped` (see below).
- *
- * One finding per pair: an unreadable object subsumes its fields and its rows.
+ *  1. the set cannot read the child object ⇒ `security-rollup-source-unreadable`;
+ *  2. it cannot read `summaryOperations.field` ⇒ the same id. A `count` reads no
+ *     value, so its `field` is never judged (R13's reading);
+ *  3. it cannot read a child field `summaryOperations.filter` tests ⇒ the same
+ *     id: a filtered count or sum over a predicate on a field tells its reader
+ *     something about that field. Each top-level field key of the filter is
+ *     judged, in every authored shape ({@link walkFilterFieldKeys}); a dotted
+ *     key reads through a lookup into another object and is not judged;
+ *  4. otherwise, a row-level policy that scopes the set's reads of the child ⇒
+ *     `security-rollup-source-row-scoped` (see below).
  *
  * ## Row scoping — what is decidable statically, and what is not
  *
@@ -65,6 +86,14 @@
  *    the caller's held sets carry no read-class policy for the object
  *    (`object-default-row-scope.ts`), judged here against this set alone.
  *
+ * A set holding View All / Modify All on the child skips both only where the
+ * child's posture lets the read filter short-circuit business row security
+ * (`security-plugin-rls-filter.ts`, `posturePermits`): a `private` child, a
+ * child with tenancy off (`tenancy.enabled: false` or
+ * `systemFields.tenant: false`), or an auth-managed one
+ * (`managedBy: 'better-auth'`). On any other child the bypass bit narrows
+ * nothing away, so the set's policies still apply and are judged.
+ *
  * Both are about the policy's PRESENCE, never its predicate: whether a given
  * `using` admits every row the roll-up reads is a question about data, so the
  * arm stays a note. A policy's `positions` domain narrows it to some holders,
@@ -77,7 +106,8 @@
  * A child object this stack does not define (another package's, or one that
  * arrives later — R13's "The child object" section) is not judged: its posture
  * cannot be read. Each set is judged on its own — a holder of two sets reads
- * what their union grants — so a finding describes what the set itself grants.
+ * what their union grants, capabilities included — so a finding describes what
+ * the set itself grants.
  *
  * Pure `(stack) => Finding[]`, registered `input: 'parsed'`; every key it
  * reads is one the spec declares, so the normalized stack `os lint` hands it
@@ -85,6 +115,7 @@
  */
 
 import { objectPermissionGrants, type EffectiveObjectPermission } from '@objectstack/spec/security';
+import { walkFilterFieldKeys } from './filter-walk.js';
 import { objectsAsServed, recordsOf } from './object-graph.js';
 import { holdsSuperuserBypass } from './validate-security-posture.js';
 
@@ -111,25 +142,49 @@ const isRec = (v: unknown): v is AnyRec => !!v && typeof v === 'object' && !Arra
 
 const nonBlank = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
 
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter(nonBlank) : []);
+
 /** The RLS operations a read is matched against (`RLSCompiler.getApplicablePolicies`). */
 const READ_CLASS_RLS_OPERATIONS: ReadonlySet<string> = new Set(['select', 'all']);
 
+/** One object as the rule reads it: its posture, and its fields by name. */
+interface ObjectView {
+  name: string;
+  def: AnyRec;
+  isPrivate: boolean;
+  fields: Map<string, AnyRec>;
+}
+
 /** One `summary` field whose child object this stack defines. */
 interface SummaryDescriptor {
-  parent: string;
-  parentPrivate: boolean;
+  parent: ObjectView;
   field: string;
-  child: string;
-  childObject: AnyRec;
-  childPrivate: boolean;
+  child: ObjectView;
   /** The aggregated child field; absent on a `count`, which reads no value. */
   childField?: string;
+  /** The child fields `summaryOperations.filter` tests, top-level keys only, without `childField`. */
+  filterFields: string[];
 }
 
 /** `access.default: 'private'` — the posture the `'*'` wildcard does not cover (ADR-0066 D2). */
 function isPrivatePosture(obj: AnyRec): boolean {
   const access = obj.access;
   return isRec(access) && access.default === 'private';
+}
+
+/**
+ * The posture on which a super-user's read skips business row security
+ * (`posturePermits` in plugin-security's `security-plugin-rls-filter.ts`):
+ * private access, tenancy off, or an auth-managed table.
+ */
+function postureSkipsRowSecurityForSuperuser(obj: ObjectView): boolean {
+  const { def } = obj;
+  return (
+    obj.isPrivate ||
+    (isRec(def.tenancy) && def.tenancy.enabled === false) ||
+    (isRec(def.systemFields) && def.systemFields.tenant === false) ||
+    def.managedBy === 'better-auth'
+  );
 }
 
 /**
@@ -162,6 +217,58 @@ function fieldHidden(set: AnyRec, objectName: string, fieldName: string): boolea
   return !holdsSuperuserBypass(set as { objects?: Record<string, unknown> }, objectName, 'view');
 }
 
+/**
+ * [ADR-0066 D3] The capabilities in `required` the set's own
+ * `systemPermissions` do not hold — empty when the gate passes. An AND-gate:
+ * every listed capability must be held (`getSystemPermissions`, then
+ * `caps.every(held.has)`). The super-user bits do not enter it.
+ */
+function missingCapabilities(set: AnyRec, required: readonly string[]): string[] {
+  if (required.length === 0) return [];
+  const held = new Set(strings(set.systemPermissions));
+  return [...new Set(required)].filter((c) => !held.has(c));
+}
+
+/**
+ * The capabilities an object read requires: the `string[]` form gates every
+ * operation; the per-operation map gates a read through its `read` bucket
+ * (`normalizeRequiredPermissions` + `requiredCapsForOperation(…, 'find')`).
+ */
+function objectReadCapabilities(obj: ObjectView): string[] {
+  const rp = obj.def.requiredPermissions;
+  if (Array.isArray(rp)) return strings(rp);
+  if (isRec(rp)) return strings(rp.read);
+  return [];
+}
+
+/** A field's `requiredPermissions` (`fieldRequiredPermissions` in the object's security meta). */
+function fieldCapabilities(obj: ObjectView, fieldName: string): string[] {
+  return strings(obj.fields.get(fieldName)?.requiredPermissions);
+}
+
+/** Why the set cannot read something, or `undefined` when it can. */
+type Unreadable = { cause: 'grant' } | { cause: 'hidden' } | { cause: 'capability'; missing: string[] };
+
+function objectUnreadable(set: AnyRec, obj: ObjectView): Unreadable | undefined {
+  if (!objectPermissionGrants(grantFor(set, obj.name, obj.isPrivate), 'allowRead')) return { cause: 'grant' };
+  const missing = missingCapabilities(set, objectReadCapabilities(obj));
+  return missing.length > 0 ? { cause: 'capability', missing } : undefined;
+}
+
+function fieldUnreadable(set: AnyRec, obj: ObjectView, fieldName: string): Unreadable | undefined {
+  if (fieldHidden(set, obj.name, fieldName)) return { cause: 'hidden' };
+  const missing = missingCapabilities(set, fieldCapabilities(obj, fieldName));
+  return missing.length > 0 ? { cause: 'capability', missing } : undefined;
+}
+
+/** `` without capability "a"`` / `` without capabilities "a" and "b"``, or `''`. */
+function withoutPhrase(u: Unreadable): string {
+  if (u.cause !== 'capability') return '';
+  const quoted = u.missing.map((c) => `"${c}"`);
+  if (quoted.length === 1) return ` without capability ${quoted[0]}`;
+  return ` without capabilities ${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`;
+}
+
 /** The read-class row policy the set's reads of `child` meet, if any (see the docblock's "Row scoping"). */
 function readScopingPolicy(
   set: AnyRec,
@@ -170,7 +277,7 @@ function readScopingPolicy(
   const applicable = recordsOf(set.rowLevelSecurity).filter(
     (p) =>
       p.enabled !== false &&
-      (p.object === d.child || p.object === '*') &&
+      (p.object === d.child.name || p.object === '*') &&
       READ_CLASS_RLS_OPERATIONS.has(String(p.operation ?? '')),
   );
   const positionsOf = (p: AnyRec) =>
@@ -180,7 +287,7 @@ function readScopingPolicy(
     return { kind: 'policy', name: nonBlank(scoping.name) ? scoping.name : '(unnamed)', positions: positionsOf(scoping) };
   }
   if (applicable.length > 0) return undefined; // a held read-class policy displaces the object's default
-  const scope = d.childObject.defaultRowScope;
+  const scope = d.child.def.defaultRowScope;
   if (
     isRec(scope) &&
     scope.enabled !== false &&
@@ -192,31 +299,47 @@ function readScopingPolicy(
   return undefined;
 }
 
+function objectView(obj: AnyRec & { name: string }): ObjectView {
+  const fields = new Map<string, AnyRec>();
+  for (const f of recordsOf(obj.fields)) {
+    if (nonBlank(f.name) && !fields.has(f.name)) fields.set(f.name, f);
+  }
+  return { name: obj.name, def: obj, isPrivate: isPrivatePosture(obj), fields };
+}
+
+/** The top-level child field keys a roll-up's `filter` tests, in authored order, de-duplicated. */
+function filterFieldKeys(filter: unknown): string[] {
+  const out = new Set<string>();
+  if (filter === undefined || filter === null) return [];
+  walkFilterFieldKeys(filter, 'filter', ({ field }) => {
+    if (nonBlank(field) && !field.includes('.')) out.add(field);
+  });
+  return [...out];
+}
+
 function summaryDescriptors(stack: AnyRec): SummaryDescriptor[] {
   const served = objectsAsServed(stack).objects;
-  const byName = new Map<string, AnyRec>();
+  const byName = new Map<string, ObjectView>();
   for (const o of served) {
-    if (nonBlank(o.name) && !byName.has(o.name)) byName.set(o.name, o);
+    if (nonBlank(o.name) && !byName.has(o.name)) byName.set(o.name, objectView(o as AnyRec & { name: string }));
   }
   const out: SummaryDescriptor[] = [];
-  for (const obj of served) {
-    if (!nonBlank(obj.name)) continue;
-    for (const { name, ...def } of recordsOf(obj.fields)) {
-      if (def.type !== 'summary' || !nonBlank(name)) continue;
+  for (const parent of byName.values()) {
+    for (const [name, def] of parent.fields) {
+      if (def.type !== 'summary') continue;
       const ops = isRec(def.summaryOperations) ? def.summaryOperations : undefined;
-      const child = ops?.object;
-      if (!nonBlank(child)) continue;
-      const childObject = byName.get(child);
-      if (!childObject) continue; // not this stack's object — not judged
+      const childName = ops?.object;
+      if (!nonBlank(childName)) continue;
+      const child = byName.get(childName);
+      if (!child) continue; // not this stack's object — not judged
       const fn = String(ops?.function ?? '');
+      const childField = fn !== 'count' && nonBlank(ops?.field) ? ops.field : undefined;
       out.push({
-        parent: obj.name,
-        parentPrivate: isPrivatePosture(obj),
+        parent,
         field: name,
         child,
-        childObject,
-        childPrivate: isPrivatePosture(childObject),
-        childField: fn !== 'count' && nonBlank(ops?.field) ? ops.field : undefined,
+        childField,
+        filterFields: filterFieldKeys(ops?.filter).filter((f) => f !== childField),
       });
     }
   }
@@ -228,25 +351,41 @@ const ROLLUP_SEMANTICS =
 
 /**
  * `"invoice.total" summarizes "invoice_line.amount"` / `"invoice.line_count" counts "invoice_line" records`;
- * with `everyRow`, `… over every "invoice_line" row` / `… counts every "invoice_line" row`.
+ * with `everyRow`, `… over every "invoice_line" row` / `… counts every "invoice_line" row`;
+ * with `filteredOn`, `… over rows filtered on "invoice_line.band"` / `… records filtered on "invoice_line.band"`.
  */
-function rollupPhrase(d: SummaryDescriptor, everyRow = false): string {
-  const column = `"${d.parent}.${d.field}"`;
+function rollupPhrase(d: SummaryDescriptor, opts: { everyRow?: boolean; filteredOn?: string } = {}): string {
+  const column = `"${d.parent.name}.${d.field}"`;
+  const child = d.child.name;
+  const filtered = opts.filteredOn ? ` filtered on "${child}.${opts.filteredOn}"` : '';
   if (d.childField) {
-    return `${column} summarizes "${d.child}.${d.childField}"` + (everyRow ? ` over every "${d.child}" row` : '');
+    const rows = opts.everyRow ? ` over every "${child}" row` : opts.filteredOn ? ` over rows${filtered}` : '';
+    return `${column} summarizes "${child}.${d.childField}"${rows}`;
   }
-  return everyRow ? `${column} counts every "${d.child}" row` : `${column} counts "${d.child}" records`;
+  return opts.everyRow ? `${column} counts every "${child}" row` : `${column} counts "${child}" records${filtered}`;
 }
 
+/**
+ * The remedy, with its reach: in the field merge only DECLARING sets vote, so
+ * `readable: false` on this set hides the column from every holder of the set,
+ * and only an entry with `readable: true` (or View All / Modify All on the
+ * parent) in a co-held set restores it.
+ */
 function hintFor(set: AnyRec, d: SummaryDescriptor): string {
-  const column = `${d.parent}.${d.field}`;
-  if (holdsSuperuserBypass(set as { objects?: Record<string, unknown> }, d.parent, 'view')) {
+  const column = `${d.parent.name}.${d.field}`;
+  const entry = `fields["${column}"]: { readable: false }`;
+  const reach =
+    `That hides "${column}" from every holder of the set, and a co-held set with no entry for it does not ` +
+    `restore it (View All or Modify All on "${d.parent.name}" does); to keep it for some holders, declare ` +
+    `fields["${column}"]: { readable: true } in the sets they hold`;
+  if (holdsSuperuserBypass(set as { objects?: Record<string, unknown> }, d.parent.name, 'view')) {
     return (
-      `"${column}" cannot be hidden from this set while it holds View All or Modify All on "${d.parent}"; ` +
-      `remove that bit and set fields["${column}"]: { readable: false } if its value should not be visible`
+      `If its value should not be visible to this set, first remove View All and Modify All on ` +
+      `"${d.parent.name}" from it, since ${entry} does not hide a field from a set holding either, then set ` +
+      `${entry} on it. ${reach}`
     );
   }
-  return `Hide "${column}" for this set with fields["${column}"]: { readable: false } if its value should not be visible`;
+  return `If its value should not be visible to this set, set ${entry} on it. ${reach}`;
 }
 
 export function validateRollupSourceVisibility(stack: AnyRec): RollupSourceVisibilityFinding[] {
@@ -258,60 +397,75 @@ export function validateRollupSourceVisibility(stack: AnyRec): RollupSourceVisib
   recordsOf(stack.permissions).forEach((set, i) => {
     const setName = nonBlank(set.name) ? set.name : `(permission set ${i})`;
     for (const d of summaries) {
-      // Can the set read the summary column at all?
-      if (!objectPermissionGrants(grantFor(set, d.parent, d.parentPrivate), 'allowRead')) continue;
-      if (fieldHidden(set, d.parent, d.field)) continue;
+      // Can the set see the summary column at all? If not, it learns nothing from it.
+      if (objectUnreadable(set, d.parent) || fieldUnreadable(set, d.parent, d.field)) continue;
 
-      // A super-user bypass on the child reads every row and every field of it.
-      if (holdsSuperuserBypass(set as { objects?: Record<string, unknown> }, d.child, 'view')) continue;
+      const column = `${d.parent.name}.${d.field}`;
+      const unreadable = (message: string): RollupSourceVisibilityFinding => ({
+        severity: 'warning',
+        rule: SECURITY_ROLLUP_SOURCE_UNREADABLE,
+        where: `permission set "${setName}" · summary field "${column}"`,
+        path: `permissions[${i}].fields["${column}"]`,
+        message: `${message}; ${ROLLUP_SEMANTICS}`,
+        hint: hintFor(set, d),
+      });
 
-      const column = `${d.parent}.${d.field}`;
-      const where = `permission set "${setName}" · summary field "${column}"`;
-      const path = `permissions[${i}].fields["${column}"]`;
-      const hint = hintFor(set, d);
-
-      if (!objectPermissionGrants(grantFor(set, d.child, d.childPrivate), 'allowRead')) {
-        findings.push({
-          severity: 'warning',
-          rule: SECURITY_ROLLUP_SOURCE_UNREADABLE,
-          where,
-          path,
-          message:
-            `${rollupPhrase(d)}, and permission set "${setName}" cannot read object "${d.child}"; ` +
-            ROLLUP_SEMANTICS,
-          hint,
-        });
+      const objectGate = objectUnreadable(set, d.child);
+      if (objectGate) {
+        findings.push(
+          unreadable(
+            `${rollupPhrase(d)}, and permission set "${setName}" cannot read object "${d.child.name}"` +
+              withoutPhrase(objectGate),
+          ),
+        );
         continue;
       }
 
-      if (d.childField && fieldHidden(set, d.child, d.childField)) {
-        findings.push({
-          severity: 'warning',
-          rule: SECURITY_ROLLUP_SOURCE_UNREADABLE,
-          where,
-          path,
-          message: `${rollupPhrase(d)}, which permission set "${setName}" cannot read; ${ROLLUP_SEMANTICS}`,
-          hint,
-        });
+      const valueGate = d.childField ? fieldUnreadable(set, d.child, d.childField) : undefined;
+      if (valueGate) {
+        findings.push(
+          unreadable(`${rollupPhrase(d)}, which permission set "${setName}" cannot read${withoutPhrase(valueGate)}`),
+        );
         continue;
       }
 
+      let filterFinding: RollupSourceVisibilityFinding | undefined;
+      for (const f of d.filterFields) {
+        const gate = fieldUnreadable(set, d.child, f);
+        if (!gate) continue;
+        filterFinding = unreadable(
+          `${rollupPhrase(d, { filteredOn: f })}, which permission set "${setName}" cannot read${withoutPhrase(gate)}`,
+        );
+        break;
+      }
+      if (filterFinding) {
+        findings.push(filterFinding);
+        continue;
+      }
+
+      // A super-user read skips business row security only where the child's posture permits it.
+      if (
+        postureSkipsRowSecurityForSuperuser(d.child) &&
+        holdsSuperuserBypass(set as { objects?: Record<string, unknown> }, d.child.name, 'view')
+      ) {
+        continue;
+      }
       const scoping = readScopingPolicy(set, d);
       if (!scoping) continue;
       const by =
         scoping.kind === 'policy'
           ? `row-level policy "${scoping.name}"`
-          : `the default row scope${scoping.name ? ` "${scoping.name}"` : ''} of object "${d.child}"`;
+          : `the default row scope${scoping.name ? ` "${scoping.name}"` : ''} of object "${d.child.name}"`;
       const forHolders = scoping.positions.length > 0 ? ` (for holders of ${scoping.positions.join(', ')})` : '';
       findings.push({
         severity: 'info',
         rule: SECURITY_ROLLUP_SOURCE_ROW_SCOPED,
-        where,
-        path,
+        where: `permission set "${setName}" · summary field "${column}"`,
+        path: `permissions[${i}].fields["${column}"]`,
         message:
-          `${rollupPhrase(d, true)}, while ${by} narrows the rows permission set ` +
+          `${rollupPhrase(d, { everyRow: true })}, while ${by} narrows the rows permission set ` +
           `"${setName}" reads${forHolders}; ${ROLLUP_SEMANTICS}`,
-        hint,
+        hint: hintFor(set, d),
       });
     }
   });

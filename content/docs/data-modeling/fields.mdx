@@ -371,12 +371,17 @@ decision that governs the write is the one on the **child**. The parent's own
 row is unaffected — a user still needs edit access to change any other field on
 it — and the summary column stays subject to the parent's field-level security
 on read.
-So a permission set that cannot read the aggregated child field, cannot read the
-child object, or reads only some child rows still reads the roll-up; `os lint`,
-`os validate` and `os build` warn about each such set
-(`security-rollup-source-unreadable`, and the `security-rollup-source-row-scoped`
-note — see [the one gate, four doors](/docs/deployment/validating-metadata#the-one-gate-four-doors)),
-so hide the summary field for that set if its value should not be visible.
+So a permission set that cannot read the aggregated child field, a child field
+the roll-up's `filter` tests, or the child object (whether through its object
+grant, its field entries or a `requiredPermissions` capability it does not hold),
+or that reads only some child rows, still reads the roll-up; `os lint`,
+`os validate` and `os build` tell you about each such set
+(the `security-rollup-source-unreadable` warning, and the `security-rollup-source-row-scoped`
+note — see [the one gate, four doors](/docs/deployment/validating-metadata#the-one-gate-four-doors)).
+If the value should not be visible, set `readable: false` on the summary field in
+that set: it hides the field from every holder of the set, and another set they
+hold with no entry for the field does not restore it, so declare `readable: true`
+on the field in the sets whose holders should keep it.
 
 A child validation rule can read a parent summary one hop through its
 reference, for example "each supplier has at most one primary contact" as a

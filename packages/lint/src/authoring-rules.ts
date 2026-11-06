@@ -2566,10 +2566,13 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     source: 'packages/lint/src/validate-rollup-source-visibility.ts',
     surfaces: CLI_ONLY,
     surfaceReason:
-      'Advisory-tier rule over permission-set × object pairs: it cannot refuse a write, and a crossing ' +
-      'to the runtime door would carry its findings back in every `permission` and `object` save ' +
-      'response that Studio\'s designer renders. Which advisory rules cross is a UX decision with its ' +
-      'own ruling (the RUNTIME_OBJECT_ADVISORY_VOLUME fence), never a bare `runtimeTypes` edit.',
+      'Advisory-tier rule over permission-set × summary-field pairs: it cannot refuse a write. CLI-only ' +
+      'because the crossing it would take is unmeasured: nothing yet measures, per write, what a ' +
+      '`permission` save hands this rule (the set, and the parent and child objects it judges the set ' +
+      'against), which is the measurement #17936 took before `validateRetiredPermissionResidue` crossed on ' +
+      '`permission` writes. Crossing on `permission` writes is therefore a separate decision with that ' +
+      'precedent; crossing on `object` writes as well would fall under the RUNTIME_OBJECT_ADVISORY_VOLUME ' +
+      'fence. Never a bare `runtimeTypes` edit.',
     run: (stack) => validateRollupSourceVisibility(stack),
   },
   // #4983 — the sibling surface of the rule above, and ADR-0056 D4's gate,
