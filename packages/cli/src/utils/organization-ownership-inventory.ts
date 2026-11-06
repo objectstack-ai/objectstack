@@ -805,8 +805,10 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   { object: 'sys_exchange_rate', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
   // The recycle bin (`@objectstack/platform-objects`, ADR-0148, #30237): the
   // engine writes each entry with the organization of the record it holds,
-  // else the deleting context's, so a NULL row has no producer; the record it
-  // names is gone, so no parent row anchors an entry.
+  // else the deleting context's. A NULL row comes only from a delete with
+  // neither (a tenancy-disabled object deleted by a context with no active
+  // organization). The record an entry names is gone, so no parent row
+  // anchors an entry.
   { object: 'sys_recycle_bin', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
   // A reader's own named list views (`@objectstack/platform-objects`, ruling
   // 6570568131 on #28971): user data on the preference template, each row in

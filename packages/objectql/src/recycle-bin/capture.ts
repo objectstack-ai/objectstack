@@ -28,11 +28,14 @@
  *
  * ## Which deletes enter the bin (v1, seat ruling on #30237 Q6)
  *
- * A by-id delete of a business object (a name outside `sys_`) that is the
- * ROOT of its cascade. Not: a delete by predicate (`multi: true`, a lifecycle
- * reap), a child the cascade deletes (it is a row of its root's entry), and a
- * `sys_*` object. A `sys_*` row the cascade reaches is left out of the
- * snapshot too.
+ * A by-id delete of a business object that is the ROOT of its cascade. A
+ * business object is a name outside the platform namespaces `sys_`, `cloud_`
+ * and `ai_` (`hasPlatformObjectPrefix`, the tenancy census's population; seat
+ * ruling on the contract review's question 7). Not: a delete by predicate
+ * (`multi: true`, which every lifecycle reap is, even though it addresses each
+ * reaped row by id), a child the cascade deletes (it is a row of its root's
+ * entry), and a platform object. A platform row the cascade reaches is left
+ * out of the snapshot too.
  *
  * ## Why raw, and not `engine.insert`
  *
@@ -51,6 +54,7 @@ import {
   type RecycleBinSnapshotRow,
 } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { hasPlatformObjectPrefix } from '@objectstack/spec/system';
 import type { Logger } from '@objectstack/core';
 import { redactBoundStatement } from '@objectstack/types';
 import { cascadeMemberKey, cascadeSetHas, type CascadeDeleteSet } from '../engine-top-level.js';
@@ -61,11 +65,12 @@ import { recycleBinPurgeAfter, resolveRecycleBinRetentionDays, type RecycleBinRe
 
 /**
  * Does a delete of `object` enter the bin at all? The v1 reach: every object
- * outside the `sys_` namespace. The by-id and root-of-cascade conditions are
- * the caller's ({@link openRecycleBinCapture}).
+ * outside the platform namespaces (`sys_`, `cloud_`, `ai_`). The by-id,
+ * not-a-predicate and root-of-cascade conditions are the caller's
+ * ({@link openRecycleBinCapture}).
  */
 export function recycleBinTakesObject(object: string): boolean {
-  return !object.startsWith('sys_');
+  return !hasPlatformObjectPrefix(object);
 }
 
 /** The notice that the composition registers no bin, given once per engine. */
@@ -308,14 +313,20 @@ export class RecycleBinCapture {
  * the delete does not enter the bin. Throws the retention refusal when the
  * host's resolver or `OS_RECYCLE_BIN_RETENTION_DAYS` holds a defect, before
  * the delete has written anything.
+ *
+ * `predicate` is the caller's own `multi: true`. The engine routes a delete by
+ * its id, not by that flag (#5574, #11009), so a predicate delete that names
+ * one row by id, as the lifecycle sweep's per-row reap does, arrives here on
+ * the by-id path and is told apart only by the flag it was asked with.
  */
 export function openRecycleBinCapture(
   this: RecycleBinCaptureHost,
   object: string,
   id: string | number,
   context: ExecutionContext | undefined,
+  predicate: boolean,
 ): RecycleBinCapture | undefined {
-  if (!recycleBinTakesObject(object)) return undefined;
+  if (predicate || !recycleBinTakesObject(object)) return undefined;
   // A child the cascade deletes is a row of its root's entry, never an entry.
   const inherited = this.cascadeDeleteSets.getStore();
   if (inherited && cascadeSetHas(inherited.members, object, id)) return undefined;

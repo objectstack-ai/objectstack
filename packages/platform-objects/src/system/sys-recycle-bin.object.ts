@@ -26,7 +26,10 @@ import { ObjectSchema, Field, RECYCLE_BIN_ENTRY_FIELDS } from '@objectstack/spec
  * writers. The entry is written raw through this object's driver, inside the
  * delete's own unit of work (`@objectstack/objectql`, `recycle-bin/capture.ts`),
  * never through `engine.insert`, so no insert hook, audit mirror or activity
- * row fires for the bookkeeping of a delete the audit already records.
+ * row fires for the bookkeeping of a delete the audit already records. The
+ * later writes the engine makes through its own paths (the sweep's reap, the
+ * `set_null` of `deleted_by`, an organization delete's cascade) are kept out
+ * of the ledger by `@objectstack/plugin-audit`'s `SKIP_OBJECTS`.
  *
  * ⛔ No generic data-API method (`apiEnabled: false`, `apiMethods: []`): the
  * snapshot holds every field of the deleted rows, so a listing must apply the

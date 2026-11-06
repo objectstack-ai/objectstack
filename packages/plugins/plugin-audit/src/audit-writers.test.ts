@@ -525,6 +525,69 @@ describe('audit writers — chunked upload sessions are excluded (#5202, ADR-005
   });
 });
 
+describe('audit writers — recycle-bin entries are excluded (ADR-0148 D4, ADR-0057 §3.3)', () => {
+  // An entry as the engine writes it: `snapshot` holds every declared column of
+  // the deleted rows, `internal: true` ones included. Nothing here may reach
+  // the ledger through the generic writer.
+  const SCHEMA = {
+    sys_audit_log: SINGLE_TENANT.sys_audit_log,
+    sys_activity: SINGLE_TENANT.sys_activity,
+    sys_recycle_bin: ['id', 'object_name', 'record_id', 'record_count', 'snapshot', 'deleted_by', 'deleted_at', 'retention_days', 'purge_after', 'organization_id'],
+    crm_lead: ['id', 'name'],
+  };
+  const entry = (deletedBy: string | null) => ({
+    id: 'rb-1',
+    object_name: 'crm_lead',
+    record_id: 'lead-1',
+    record_count: 1,
+    snapshot: { rows: [{ object: 'crm_lead', id: 'lead-1', values: { id: 'lead-1', name: 'Acme', scoring_notes: 'internal only' } }], clearedReferences: [] },
+    deleted_by: deletedBy,
+    deleted_at: '2026-11-06T00:00:00.000Z',
+    retention_days: 30,
+    purge_after: '2026-12-06T00:00:00.000Z',
+    organization_id: 'org-1',
+  });
+
+  it('writes NO audit/activity row for the lifecycle reap of an entry', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterDelete', {
+      object: 'sys_recycle_bin',
+      input: { id: 'rb-1' },
+      previous: entry('user-1'),
+      result: { id: 'rb-1' },
+      session: { isSystem: true },
+    });
+    expect(created).toEqual([]);
+  });
+
+  it("writes NO audit/activity row when a user's delete clears an entry's deleted_by", async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterUpdate', {
+      object: 'sys_recycle_bin',
+      input: { id: 'rb-1', deleted_by: null },
+      previous: entry('user-1'),
+      result: entry(null),
+      session: { userId: 'user-admin' },
+    });
+    expect(created).toEqual([]);
+  });
+
+  it('still audits the business delete the entry was taken for (the skip stays narrow)', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterDelete', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      previous: { id: 'lead-1', name: 'Acme' },
+      result: { id: 'lead-1' },
+      session: { userId: 'user-1' },
+    });
+    expect(created.map((c) => c.object)).toEqual(['sys_audit_log', 'sys_activity']);
+  });
+});
+
 describe('audit writers — declarative trackHistory activity (ADR-0052 §5b)', () => {
   // crm_opportunity with a tracked select field (Stage) carrying option labels.
   const SCHEMA = {

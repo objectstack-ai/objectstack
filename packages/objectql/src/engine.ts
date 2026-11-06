@@ -9054,6 +9054,7 @@ export class ObjectQL implements IObjectQLEngine {
     object: string,
     id: string | number,
     context: ExecutionContext | undefined,
+    predicate: boolean,
   ): RecycleBinCapture | undefined {
     // [#30237] The body lives in `recycle-bin/capture.ts`, its docblock with it (see `RecycleBinCaptureHost`).
     const readRegistry = () => this._registry;
@@ -9070,7 +9071,7 @@ export class ObjectQL implements IObjectQLEngine {
       getDriver: (...a) => this.getDriver(...a),
       buildDriverOptions: (...a) => this.buildDriverOptions(...a),
     };
-    return openRecycleBinCapture.call(host, object, id, context);
+    return openRecycleBinCapture.call(host, object, id, context, predicate);
   }
 
   /**
@@ -9745,9 +9746,10 @@ export class ObjectQL implements IObjectQLEngine {
               // walk touches it, and writes the one entry after the walk and
               // before this row goes. A removal that throws takes the entry
               // with it: the transaction's rollback when one covers the bin,
-              // the capture's compensation otherwise.
+              // the capture's compensation otherwise. A caller's `multi: true`
+              // opens none, even here: the lifecycle sweep reaps by id with it.
               const runByIdDelete = async (writeContext?: ExecutionContext) => {
-                const bin = this.openRecycleBinCapture(object, hookContext.input.id as string | number, writeContext);
+                const bin = this.openRecycleBinCapture(object, hookContext.input.id as string | number, writeContext, options?.multi === true);
                 await this.cascadeDeleteRelations(object, [hookContext.input.id as string | number], writeContext, 0, bin?.onCollected)
                   .catch((e: unknown) => { throw cascadeStoppedRefusal(e, object); });
                 const entry = await bin?.write();

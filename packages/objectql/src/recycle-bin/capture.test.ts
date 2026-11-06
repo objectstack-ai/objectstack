@@ -199,8 +199,19 @@ const task = {
     watchers: { name: 'watchers', type: 'lookup' as const, reference: 'account', multiple: true },
   },
 };
-/** A system object: never enters the bin. */
+/** Platform objects, one per namespace: never enter the bin. */
 const sysThing = { name: 'sys_thing', label: 'Thing', fields: { id: text('id'), name: text('name') } };
+const cloudThing = { name: 'cloud_thing', label: 'Cloud Thing', fields: { id: text('id'), name: text('name') } };
+const aiThing = { name: 'ai_thing', label: 'AI Thing', fields: { id: text('id'), name: text('name') } };
+/** The organization the bin's tenant column cascades from (ruling Q4). */
+const organization = { name: 'sys_organization', label: 'Organization', fields: { id: text('id'), name: text('name') } };
+/** A business object that declares its own retention (ADR-0057's authoring surface). */
+const ephemeral = {
+  name: 'ephemeral',
+  label: 'Ephemeral',
+  fields: { id: text('id'), expires_at: { name: 'expires_at', type: 'datetime' as const } },
+  lifecycle: { class: 'transient', ttl: { field: 'expires_at', expireAfter: '0h' } },
+};
 /** Nothing references it: the plain, non-cascading delete. */
 const loner = { name: 'loner', label: 'Loner', fields: { id: text('id'), name: text('name') } };
 
@@ -210,7 +221,7 @@ async function makeEngine(options: { withBin?: boolean; transactional?: boolean;
   const driver = makeDriver(options);
   engine.registerDriver(driver, true);
   await engine.init();
-  const objects: any[] = [account, contact, note, task, sysThing, loner];
+  const objects: any[] = [account, contact, note, task, sysThing, cloudThing, aiThing, organization, ephemeral, loner];
   if (options.withBin !== false) objects.push(bin);
   for (const o of objects) engine.registry.registerObject(o as any, '__test__');
   return { engine, driver, rec };
@@ -329,11 +340,37 @@ describe('deletes that do not enter the bin (v1 reach, seat ruling Q6)', () => {
     expect(entriesOf(driver)).toHaveLength(0);
   });
 
-  it('a sys_* object writes no entry', async () => {
+  it('a by-id delete that its caller asked as a predicate (`multi: true`) writes no entry', async () => {
     const { engine, driver } = await makeEngine();
-    driver.seed('sys_thing', { id: 's1', name: 'x' });
-    await engine.delete('sys_thing', { where: { id: 's1' } } as any);
-    expect(driver.rowsOf('sys_thing')).toHaveLength(0);
+    driver.seed('loner', { id: 'l1', name: 'x' });
+    await engine.delete('loner', { where: { id: 'l1' }, multi: true, ...USER } as any);
+    expect(driver.rowsOf('loner')).toHaveLength(0);
+    expect(entriesOf(driver)).toHaveLength(0);
+  });
+
+  it("the lifecycle sweep's reap of a business object writes no entry", async () => {
+    const { engine, driver } = await makeEngine();
+    driver.seed('ephemeral', { id: 'e_due', expires_at: '2026-11-01T00:00:00.000Z' });
+    driver.seed('ephemeral', { id: 'e_kept', expires_at: '2026-12-01T00:00:00.000Z' });
+    const lifecycle = new LifecycleService({
+      getEngine: () => engine as any,
+      logger: { info: () => {}, warn: () => {}, debug: () => {}, error: () => {} } as any,
+      now: () => Date.parse('2026-11-06T00:00:00.000Z'),
+      initialDelayMs: 1,
+      sweepIntervalMs: 10,
+    });
+    const report = await lifecycle.sweep();
+    expect(report.errors).toEqual([]);
+    // The reap ran: the due row is gone, by id, through the engine.
+    expect(driver.rowsOf('ephemeral').map((r: Row) => r.id)).toEqual(['e_kept']);
+    expect(entriesOf(driver)).toHaveLength(0);
+  });
+
+  it.each(['sys_thing', 'cloud_thing', 'ai_thing'])('a platform object (%s) writes no entry', async (object) => {
+    const { engine, driver } = await makeEngine();
+    driver.seed(object, { id: 's1', name: 'x' });
+    await engine.delete(object, { where: { id: 's1' }, ...USER } as any);
+    expect(driver.rowsOf(object)).toHaveLength(0);
     expect(entriesOf(driver)).toHaveLength(0);
   });
 
@@ -414,6 +451,24 @@ describe('the TTL sweep reaps an entry once its stamped deadline has passed (D3)
     expect(report.errors).toEqual([]);
     expect(entriesOf(driver).map((e) => e.id)).toEqual(['kept']);
     expect(asked).toBe(0);
+  });
+});
+
+describe("an organization's delete takes its entries with it (ruling Q4)", () => {
+  it('removes the entries of that organization, is not refused by them, and leaves other organizations\' entries', async () => {
+    const { engine, driver } = await makeEngine();
+    driver.seed('sys_organization', { id: 'org_1', name: 'One' });
+    driver.seed('sys_organization', { id: 'org_2', name: 'Two' });
+    driver.seed('loner', { id: 'l1', name: 'one' });
+    driver.seed('loner', { id: 'l2', name: 'two' });
+    await engine.delete('loner', { where: { id: 'l1' }, context: { userId: 'u_alice', tenantId: 'org_1' } } as any);
+    await engine.delete('loner', { where: { id: 'l2' }, context: { userId: 'u_bob', tenantId: 'org_2' } } as any);
+    expect(entriesOf(driver).map((e) => e.organization_id).sort()).toEqual(['org_1', 'org_2']);
+
+    await expect(engine.delete('sys_organization', { where: { id: 'org_1' }, ...USER } as any)).resolves.toBeTruthy();
+
+    expect(driver.rowsOf('sys_organization').map((r: Row) => r.id)).toEqual(['org_2']);
+    expect(entriesOf(driver).map((e) => e.organization_id)).toEqual(['org_2']);
   });
 });
 
