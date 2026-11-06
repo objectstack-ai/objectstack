@@ -10,19 +10,20 @@
  * console's locale, so a save of the buffer stored the translation as the
  * author's text. The buffer is the layered read's stored `draft` layer instead,
  * read at the address the draft read was asked at, through the one reading in
- * `authoredObjectBuffer.ts` (`authoredBuffer`). A served draft whose stored copy
- * the layers do not serve is `unserved`: the editor installs no buffer.
+ * `@object-ui/data-objectstack` (`authoredBuffer`). A served draft whose
+ * stored copy the layers do not serve is `unserved`: the editor installs no
+ * buffer.
  *
  * Any other type's served draft is the stored row and stays the buffer.
  */
 
-import type { MetadataClient } from '@object-ui/data-objectstack';
 import {
   authoredBuffer,
   editsAuthoredLayers,
   type AuthoredBuffer,
   type AuthoredLayers,
-} from '../metadata-admin/authoredObjectBuffer.js';
+  type MetadataClient,
+} from '@object-ui/data-objectstack';
 
 /** Where the draft read was asked: the package (and bundle member) the layered read must name. */
 export interface AuthoredDraftAddress {
