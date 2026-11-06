@@ -16,8 +16,10 @@ import { describe, it, expect, vi } from 'vitest';
 import type { IDataEngine } from '@objectstack/core';
 import {
   runWithAuthActorScope,
+  runAttributedToUser,
   setAuthActorResolver,
   resolveAttributedUserId,
+  resolveAttributedActor,
   authSystemWriteContext,
 } from './auth-actor-attribution';
 import { withSystemContext } from './objectql-adapter';
@@ -204,3 +206,68 @@ describe('withSystemContext carries attribution on WRITES only (#4586)', () => {
     });
   });
 });
+
+// The real-pipeline pin (an impersonated `/update-user` on better-auth) lives
+// with the impersonation harness, in `admin-impersonate-endpoint.test.ts`.
+describe('an impersonation session names its administrator on identity writes (#30851)', () => {
+  it('the context carries the administrator beside the impersonated user, attribution only', async () => {
+    const ctx = await runWithAuthActorScope(async () => {
+      setAuthActorResolver(async () => ({ userId: 'usr_target', impersonatedBy: 'usr_admin' }));
+      return authSystemWriteContext();
+    });
+    expect(ctx).toEqual({ isSystem: true, attributedUserId: 'usr_target', impersonatedBy: 'usr_admin' });
+    expect(ctx).not.toHaveProperty('userId');
+  });
+
+  it('CONTROL: a session that is not an impersonation carries no administrator', async () => {
+    for (const answer of ['usr_target', { userId: 'usr_target' }, { userId: 'usr_target', impersonatedBy: null }, { userId: 'usr_target', impersonatedBy: '  ' }]) {
+      const ctx = await runWithAuthActorScope(async () => {
+        setAuthActorResolver(async () => answer);
+        return authSystemWriteContext();
+      });
+      expect(ctx, JSON.stringify(answer)).toEqual({ isSystem: true, attributedUserId: 'usr_target' });
+    }
+  });
+
+  it('CONTROL: an administrator with no user beside it attributes nothing', async () => {
+    const actor = await runWithAuthActorScope(async () => {
+      setAuthActorResolver(async () => ({ userId: null, impersonatedBy: 'usr_admin' }));
+      return resolveAttributedActor();
+    });
+    expect(actor).toBeUndefined();
+  });
+
+  it('withSystemContext stamps it on insert / update / delete, never on reads', async () => {
+    const engine = {
+      insert: vi.fn().mockResolvedValue({ id: '1' }),
+      update: vi.fn().mockResolvedValue({ id: '1' }),
+      delete: vi.fn().mockResolvedValue(undefined),
+      find: vi.fn().mockResolvedValue([]),
+      findOne: vi.fn().mockResolvedValue({ id: '1' }),
+      count: vi.fn().mockResolvedValue(0),
+    } as unknown as IDataEngine;
+    await runWithAuthActorScope(async () => {
+      setAuthActorResolver(async () => ({ userId: 'usr_target', impersonatedBy: 'usr_admin' }));
+      const e = withSystemContext(engine);
+      await e.insert('sys_user', { id: 'u1' } as any);
+      await e.update('sys_user', { id: 'u1' } as any);
+      await e.delete('sys_user', { where: { id: 'u1' } } as any);
+      await e.find('sys_user', { where: {} } as any);
+    });
+    const expected = { context: { attributedUserId: 'usr_target', impersonatedBy: 'usr_admin', isSystem: true } };
+    expect(engine.insert).toHaveBeenCalledWith('sys_user', { id: 'u1' }, expected);
+    expect(engine.update).toHaveBeenCalledWith('sys_user', { id: 'u1' }, expected);
+    expect(engine.delete).toHaveBeenCalledWith('sys_user', expect.objectContaining(expected));
+    expect(engine.find).toHaveBeenCalledWith('sys_user', expect.objectContaining({ context: { isSystem: true } }));
+  });
+
+  it('a framework route that gated the admitted actor carries the administrator it names', async () => {
+    const impersonated = await runAttributedToUser({ id: 'usr_target', impersonatedBy: 'usr_admin' }, () => authSystemWriteContext());
+    expect(impersonated).toEqual({ isSystem: true, attributedUserId: 'usr_target', impersonatedBy: 'usr_admin' });
+    const plain = await runAttributedToUser({ id: 'usr_admin' }, () => authSystemWriteContext());
+    expect(plain).toEqual({ isSystem: true, attributedUserId: 'usr_admin' });
+    const bare = await runAttributedToUser('usr_admin', () => authSystemWriteContext());
+    expect(bare).toEqual({ isSystem: true, attributedUserId: 'usr_admin' });
+  });
+});
+

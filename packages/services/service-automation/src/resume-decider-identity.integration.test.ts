@@ -416,6 +416,93 @@ describe('a run started by an impersonation session\'s write names the administr
   });
 });
 
+/** A human decision made from an impersonation session, as `ApprovalService.decide` hands it over. */
+const decidedImpersonated = (branchLabel: 'approve' | 'reject', resumedBy: string, impersonatedBy: string): ResumeSignal => ({
+  ...decided(branchLabel, resumedBy),
+  impersonatedBy,
+});
+
+describe("the decider's segment names exactly the DECISION's impersonating administrator, never the trigger's", () => {
+  for (const runAs of ['user', 'system'] as const) {
+    it(`runAs:'${runAs}': (a) the trigger user deciding in their own name drops the trigger-time stamp`, async () => {
+      const h = envelopeHarness();
+      h.engine.registerFlow('review', reviewFlow('review', { recorder: true, runAs }) as never);
+      const paused = await h.engine.execute('review', { ...TRIGGER, impersonatedBy: 'usr_admin' } as never);
+      expect(h.ctxOf('submit').impersonatedBy, 'premise: the trigger carried the administrator').toBe('usr_admin');
+
+      await h.engine.resume(paused.runId!, decided('approve', 'usr_rep'));
+      const after = h.ctxOf('after1');
+      expect(after.userId, 'the decider is the run user, so the identity is unchanged').toBe('usr_rep');
+      expect('impersonatedBy' in after, 'the decider acted in their own name').toBe(false);
+    });
+
+    it(`runAs:'${runAs}': (b) a decider deciding while impersonated stamps the decision's administrator`, async () => {
+      const h = envelopeHarness();
+      h.engine.registerFlow('review', reviewFlow('review', { recorder: true, runAs }) as never);
+      const paused = await h.engine.execute('review', { ...TRIGGER, impersonatedBy: 'usr_admin' } as never);
+
+      await h.engine.resume(paused.runId!, decidedImpersonated('approve', 'usr_mgr', 'usr_admin2'));
+      const after = h.ctxOf('after1');
+      expect(after.userId, 'the subject stays the decider').toBe('usr_mgr');
+      expect(after.impersonatedBy, "the decision's administrator, not the trigger's").toBe('usr_admin2');
+    });
+  }
+
+  it('(b) the trigger user deciding while impersonated takes the stamp on an unstamped run', async () => {
+    const h = envelopeHarness();
+    h.engine.registerFlow('review', reviewFlow('review', { recorder: true }) as never);
+    const paused = await h.engine.execute('review', { ...TRIGGER } as never);
+
+    await h.engine.resume(paused.runId!, decidedImpersonated('approve', 'usr_rep', 'usr_admin'));
+    const after = h.ctxOf('after1');
+    expect(after.userId).toBe('usr_rep');
+    expect(after.impersonatedBy).toBe('usr_admin');
+  });
+
+  it("(c) a plain decider on a plain run carries none, and a later plain decision drops the first decision's stamp", async () => {
+    const h = envelopeHarness();
+    h.engine.registerFlow('review', reviewFlow('review', { recorder: true }) as never);
+    const paused = await h.engine.execute('review', { ...TRIGGER } as never);
+
+    const first = await h.engine.resume(paused.runId!, decided('approve', 'usr_mgr'));
+    expect('impersonatedBy' in h.ctxOf('after1')).toBe(false);
+    expect(first.status).toBe('paused');
+
+    const h2 = envelopeHarness();
+    h2.engine.registerFlow('review', reviewFlow('review', { recorder: true }) as never);
+    const p2 = await h2.engine.execute('review', { ...TRIGGER } as never);
+    const mid = await h2.engine.resume(p2.runId!, decidedImpersonated('approve', 'usr_mgr', 'usr_admin'));
+    expect(h2.ctxOf('after1').impersonatedBy).toBe('usr_admin');
+    await h2.engine.resume(mid.runId ?? p2.runId!, decided('approve', 'usr_dir'));
+    const after2 = h2.ctxOf('after2');
+    expect(after2.userId).toBe('usr_dir');
+    expect('impersonatedBy' in after2, "the second decider acted in their own name").toBe(false);
+  });
+
+  it('CONTROL: a signal WITHOUT the owning service\'s marker cannot name an administrator', async () => {
+    const h = envelopeHarness();
+    h.engine.registerFlow('review', reviewFlow('review', { recorder: true, gate: 'open_gate' }) as never);
+    const paused = await h.engine.execute('review', { ...TRIGGER } as never);
+
+    // The shape a JSON body could produce: no symbol, so neither key is honoured.
+    await h.engine.resume(paused.runId!, { branchLabel: 'approve', output: { decision: 'approve' }, resumedBy: 'usr_mgr', impersonatedBy: 'usr_admin' });
+    const after = h.ctxOf('after1');
+    expect(after.userId).toBe('usr_rep');
+    expect('impersonatedBy' in after).toBe(false);
+  });
+
+  it('CONTROL: an administrator named with no decider beside it changes nothing', async () => {
+    const h = envelopeHarness();
+    h.engine.registerFlow('review', reviewFlow('review', { recorder: true }) as never);
+    const paused = await h.engine.execute('review', { ...TRIGGER, impersonatedBy: 'usr_admin' } as never);
+
+    await h.engine.resume(paused.runId!, { branchLabel: 'approve', output: { decision: 'approve' }, impersonatedBy: 'usr_admin2', [RESUME_AUTHORITY_SERVICE]: true });
+    const after = h.ctxOf('after1');
+    expect(after.userId, 'no human decided: the run keeps its identity').toBe('usr_rep');
+    expect(after.impersonatedBy, 'and its own stamp').toBe('usr_admin');
+  });
+});
+
 describe('on the real stack: attribution after the decision, and the refusal when the decider lacks a right', () => {
   let kernel: ObjectKernel;
   let ql: ObjectQL;
