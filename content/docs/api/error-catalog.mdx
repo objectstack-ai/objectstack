@@ -546,6 +546,11 @@ spelling never crosses HTTP.
 **Fix:** Wait for the lock to be released, or contact the lock holder.  
 **Retry:** `retry_backoff`
 
+### `PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`
+**Cause:** `PATCH /api/v1/packages/:id/disable` was refused because a validation rule of an enabled package (declared dependent or not, an app's `.custom` pair included, any severity) reads a field this package adds to another object through `objectExtensions`. Disabling it would withhold that field, and every write to the object would then fail the rule. The message names each rule as `package · object · rule (reads FIELD)`, one or several. Nothing changed.  
+**Fix:** Switch off or change each named rule first, or disable the package that owns it, then disable this package; or keep it enabled. A formula over the field is no reason to refuse: it answers `null`.  
+**Retry:** `no_retry`
+
 ---
 
 ## Request Errors (405/428)
