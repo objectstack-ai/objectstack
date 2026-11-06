@@ -96,10 +96,10 @@ Port resolution is the same for `os dev` and `os start` (both spawn `os serve`):
 | `os register` | Register the local stack as a deployable target |
 | `os cloud login` / `logout` / `whoami` | Cloud auth subcommands (these three only — there are no `os cloud logs/metrics/status`) |
 | `os deploy` (or `npm run deploy`, or `d` in `os dev`) | See an edit on your org's ObjectOS Cloud environment: build, publish `<manifest.version>-dev.<timestamp>`, install, wait until served. Environment: `--env <id>`, else the one `os environments switch` recorded (kept across `os cloud login`), else your organization's only one. `--no-wait`; `--wait-timeout <seconds>` (600) |
-| `os package publish [dist/objectstack.json] [--env … --install --visibility org]` | Upload the compiled artifact as a **release** version to the cloud catalog (ADR-0008 P3). Listing file, README, review and every screen the customer's administrator meets: [Marketplace handbook](https://objectstack.ai/docs/deployment/marketplace-handbook) |
+| `os package publish [dist/objectstack.json] [--env … --install --visibility org]` | Upload the compiled artifact as a versioned package to the cloud catalog (ADR-0008 P3). Listing file, README, review and every screen the customer's administrator meets: [Marketplace handbook](https://objectstack.ai/docs/deployment/marketplace-handbook) |
 | `os package install <manifest-id │ ./dist/objectstack.json> [--version │ -u/--url http://localhost:3000]` | Install a package into a **running** runtime. Catalog mode (by manifest id) or air-gapped local-artifact mode. Auths as a **target runtime** user (`-t/--token` or `--email/--password`; env `OS_RUNTIME_TOKEN` or `OS_RUNTIME_EMAIL`/`OS_RUNTIME_PASSWORD`), not the cloud login |
 
-**`os deploy` exit 1:** a refusal before any write publishes nothing: log in (`os cloud login`), pick an environment (`--env`), or fix the local build or `manifest.version`. `could not build …: <reason>`: the environment's build failed, it keeps serving the previous one; fix and deploy again. `Timed out after …`: the install is recorded and a failing build reads as pending for minutes; deploy again with a longer `--wait-timeout`, or see the build in the ObjectOS Cloud console.
+**`os deploy` exit 1:** a refusal before any write publishes nothing: log in (`os cloud login`), pick an environment (`--env`; none: create one in the ObjectOS Cloud console), or fix the local build or `manifest.version`. `could not build …: <reason>`: the environment's build failed, it keeps serving the previous one; fix and deploy again. `Timed out after …`: the install is recorded and a failing build reads as pending for minutes; deploy again with a longer `--wait-timeout`, or see the build in the ObjectOS Cloud console.
 
 > **Cloud connection & marketplace (`@objectstack/cloud-connection`, ADR-0008/0009):**
 > the open runtime-side cloud client; its `MarketplaceInstallLocalPlugin` serves the
@@ -155,7 +155,7 @@ the other imports: [Using Plugins](./plugin-development.md#using-plugins).
 | Edge (Cloudflare Workers, Vercel Edge) | `driver-turso` (**cloud / EE only**) | `@objectstack/hono` | Cold-start friendly; LiteKernel only |
 | Serverless (Lambda, Vercel functions) | `driver-sql` (`pg` with pooler) / `driver-mongodb` | `@objectstack/hono` | Mind cold-start: prefer LiteKernel |
 | Browser / WebContainer | `driver-sqlite-wasm` | none (in-process) | Playground, demos |
-| Docker / Kubernetes | any | any | Use `os start` as the entrypoint; pin `PORT` and `EXPOSE` it (see [Ports & networking](#ports--networking)). The official image (`ghcr.io/objectstack-ai/objectstack`) refuses to start unless `OS_DATABASE_URL`, `OS_AUTH_SECRET` and `OS_SECRET_KEY` are set at runtime, never baked in; an explicit `OS_DATABASE_URL=file:/path/on/a/mounted/volume/app.db` passes, so SQLite on a volume still works |
+| Docker / Kubernetes | any | any | Use `os start` as the entrypoint; pin `PORT` and `EXPOSE` it (see [Ports & networking](#ports--networking)). The official image (`ghcr.io/objectstack-ai/objectstack`): its required variables (pitfalls below) set at runtime, never baked in; an explicit `OS_DATABASE_URL=file:/path/on/a/mounted/volume/app.db` passes, so SQLite on a volume still works |
 
 ## Health & observability
 

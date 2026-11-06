@@ -1058,8 +1058,9 @@ export const CEILINGS = new Map([
   // deleting restatement in the same file (the `os dev` row's platform-admin
   // sentence, homed in the Setup / Studio pitfall; the `os validate` row's
   // gate summary and the "Both run the same gates:" lead-in, homed in Verify
-  // your work); the remainder, +179 measured, raises the row, pinned at the
-  // measurement. Maintainer ruling 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
+  // your work; the Docker row's list of the image's three variables, homed in
+  // the image pitfall row); the remainder, +179 measured, raises the row,
+  // pinned at the measurement. Maintainer ruling 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
   // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
   ['skills/objectstack-platform/references/operations.md', 3287],
   ['skills/objectstack-platform/references/plugin-development.md', 3137],

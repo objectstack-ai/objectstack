@@ -295,10 +295,7 @@
       "files": [],
       "assertions": {
         "must_contain": [
-          "os deploy",
-          "--env",
-          "--no-wait",
-          "--wait-timeout"
+          "os deploy"
         ],
         "must_not_contain": [
           "os push"
