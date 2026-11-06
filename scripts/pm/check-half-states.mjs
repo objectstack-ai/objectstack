@@ -8342,6 +8342,66 @@ export function h74QueuedWithoutTriageAudit(issue, commentBodies, parent) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// H75 — an OPEN PR whose body states a CROSS-REPO issue as its premise, when
+// that issue CLOSED after the PR opened. Maintainer word, 2026-11-06, verbatim:
+// 「平台的问题应该在平台处理」. Measured: an app-repo PR opened 01:54Z to build a
+// workaround because a platform door "answered 501", citing the platform card;
+// that card closed 02:10Z, fixed at its source, and the PR sat on the governed
+// review route on the stale premise with nothing re-reading it.
+//
+// The anchors are the filing card's three spellings, never imagined ones
+// (`PROSE_BLOCKER_ANCHORS`'s rule). Only CROSS-REPO refs are targets: a local
+// premise is the same board's business and H19's. Targets ride H19's resolver
+// and cache, capped per PR like H4's prose candidates. ⛔ Report-only (triage:
+// 「新增门禁默认否」): the remedy is a re-measure before ACCEPT or hand-off.
+// ---------------------------------------------------------------------------
+
+/** The premise spellings H75 reads a line for: "because …", "blocked by/on …", "answers 501 (…)". */
+export const H75_PREMISE_ANCHOR = /\bbecause\b|\bblocked (?:by|on)\b|\banswer(?:s|ed)? [1-5]\d\d\b/iu;
+
+/** Every distinct CROSS-REPO ref on a premise-anchored line of a PR body, at most `H4_PROSE_CANDIDATE_CAP`. */
+export function h75PremiseTargets(pr, ownerRepo = OWNER_REPO) {
+  const out = new Map();
+  for (const raw of String(pr?.body ?? '').split(/\r?\n/)) {
+    const line = undecorateProseLine(raw);
+    if (!H75_PREMISE_ANCHOR.test(line)) continue;
+    for (const m of line.matchAll(PROSE_REF_SCAN)) {
+      if (!m[1] || /^pr$/iu.test(m[1])) continue;
+      const target = blockerTargetKey({ repo: m[1], number: m[2] }, ownerRepo);
+      if (!target.local && Number.isFinite(target.number)) out.set(target.key, target);
+    }
+  }
+  return [...out.values()].slice(0, H4_PROSE_CANDIDATE_CAP);
+}
+
+/**
+ * H75 — null when clean, else the finding sentence. A target closed BEFORE the
+ * PR opened is clean (the author wrote against a known state); an unresolved
+ * one fires UNJUDGED, never clean (#4690).
+ */
+export function h75PremiseClosedSinceOpened(pr, resolutions) {
+  const opened = Date.parse(pr?.created_at ?? '');
+  if (!Number.isFinite(opened) || !Array.isArray(resolutions)) return null;
+  const stale = resolutions.filter((r) => r?.state === 'closed' && Date.parse(r.closedAt ?? '') > opened);
+  if (stale.length) {
+    return (
+      `open PR whose body states ${stale.map((r) => `\`${r.key}\` (closed ${r.closedAt})`).join(', ')} as its ` +
+      `premise, and that issue CLOSED after this PR opened (${pr.created_at}). The reason this PR exists may be ` +
+      'gone, fixed at its source: re-measure the premise before ACCEPT or human hand-off, and when the platform ' +
+      'fixed it, withdraw the app-side workaround rather than land it. Report-only: ⛔ never a label, comment or ' +
+      'body written from this script.'
+    );
+  }
+  const unread = resolutions.filter((r) => r?.state === 'unresolved');
+  if (!unread.length) return null;
+  return (
+    `${UNJUDGED_MARKER} open PR whose body states ${unread.map((r) => `\`${r.key}\` (${r.detail})`).join(', ')} ` +
+    'as a cross-repo premise that could NOT be read this sweep — whether it closed after this PR opened is ' +
+    'UNJUDGED, not settled. Read it by hand before ACCEPT: an unreadable premise is not a live one.'
+  );
+}
+
 /**
  * The newest `Claim:` comment on a thread, WITH its timestamp — and
  * deliberately not `governingClaim`, which is the same read narrowed to claims
@@ -19633,6 +19693,9 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // ⛔ Not `inventory`: it alarms about one card.
   H74: 'state',
 
+  // H75 is a `stall`, H19's band for H19's reason: the PR's premise outlived itself and nothing re-reads it.
+  H75: 'stall',
+
   // H63 is a `state`, and the other three bands are refused on their own
   // criteria. ⛔ Not `gate`: that band exists for the row that can tell a
   // STRIPPED gate from an ungated card — an ABSENCE reading as a green light —
@@ -24642,6 +24705,14 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   stats.crossRepoProbed = repoReadCache.size;
   stats.crossRepoUnreadable = [...repoReadCache.values()].filter((v) => v === false).length;
 
+  // H75 — premise freshness over the open PRs listed above, on H19's resolver and cache (drafts included).
+  for (const pr of seenPrs.values()) {
+    const resolutions = [];
+    for (const target of h75PremiseTargets(pr)) resolutions.push(await resolveBlockerTarget(target));
+    const stale = h75PremiseClosedSinceOpened(pr, resolutions);
+    if (stale) findings.push([pr, 'H75', stale]);
+  }
+
   // -- H40 — the dangling-reference patrol (#13634) --------------------------
   //
   // Runs LAST, deliberately. It is the only pass here whose cost is a budget
@@ -25248,6 +25319,9 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // channel, every exemption beside a non-exempt twin, the population edges,
   // the three thread states, the text, the summary pair and the band.
   'H74 first-touch audit': 46,
+  // Registered with the premise-freshness row, pin just under the count: the measured timeline firing, its
+  // before-open / open / local / unanchored controls, the UNJUDGED leg, the cap, the text and the band.
+  'H75 premise freshness': 15,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
@@ -28710,6 +28784,33 @@ async function selfTest() {
   b(BATTERY74, 'H74 band: registered as `state` (H13\'s), and the sweep really pushes it', `${familyBand('H74')}/${familyRegistryCoverage().emitted.includes('H74')}`, 'state/true');
   b(BATTERY74, 'H74: not a loud finding — it never escalates a sweep', isLoudFinding(row74([])), false);
   b(BATTERY74, 'floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY74) && SELF_TEST_BATTERIES[BATTERY74] > 0 && Object.isFrozen(SELF_TEST_BATTERIES), true);
+
+  // -- H75: an open PR whose cross-repo premise closed after it opened. The fixture is the measured timeline
+  //    (cloud PR opened 2026-11-05T01:54Z; the platform card it cites closed 02:10Z), offline, never a live read.
+  const BATTERY75 = 'H75 premise freshness';
+  const CLOUD75 = 'objectstack-ai/cloud';
+  const pr75 = (body, extra = {}) => ({ number: 3595, created_at: '2026-11-05T01:54:00Z', body, ...extra });
+  const BODY75 = "Builds a cloud-only path because the environment's HTTP door answered 501 (objectstack#30192).";
+  const res75 = (state, closedAt = null, extra = {}) => [{ ...blockerTargetKey({ repo: 'objectstack', number: 30192 }, CLOUD75), state, closedAt, detail: null, ...extra }];
+  const keys75 = (body, repo = CLOUD75) => h75PremiseTargets(pr75(body), repo).map((t) => t.key).join();
+  b(BATTERY75, 'H75 targets: the measured body names the platform card in full owner/repo form', keys75(BODY75), 'objectstack-ai/objectstack#30192');
+  b(BATTERY75, 'H75 targets: "blocked by" and "because" anchor a line too, decorated or not', [keys75('Blocked by `objectstack#7`.'), keys75('**Because** objectstack-ai/objectstack#8 refuses.')].join(), 'objectstack-ai/objectstack#7,objectstack-ai/objectstack#8');
+  b(BATTERY75, '⛔ H75 targets: a LOCAL ref is not a cross-repo premise, bare or repo-qualified', [keys75('because #30192 answered 501'), keys75('because objectstack#30192 answered 501', 'objectstack-ai/objectstack')].join(), ',');
+  b(BATTERY75, '⛔ H75 targets: a cross-repo ref on an UNANCHORED line is no premise', keys75('Follow-up to objectstack#30192.'), '');
+  b(BATTERY75, 'H75 targets: the per-PR cap bounds requests', h75PremiseTargets(pr75(`because ${[1, 2, 3, 4, 5, 6, 7].map((n) => `objectstack#${n}`).join(' ')}`), CLOUD75).length, H4_PROSE_CANDIDATE_CAP);
+  const fired75 = String(h75PremiseClosedSinceOpened(pr75(BODY75), res75('closed', '2026-11-05T02:10:00Z')) ?? '');
+  b(BATTERY75, 'H75 fires: the premise closed sixteen minutes after the PR opened', fired75.length > 0, true);
+  b(BATTERY75, 'H75 row: names the target, both stamps, the re-measure and the report-only boundary', ['`objectstack-ai/objectstack#30192` (closed 2026-11-05T02:10:00Z)', '(2026-11-05T01:54:00Z)', 're-measure the premise before ACCEPT', 'never a label, comment or body written'].every((x) => fired75.includes(x)), true);
+  b(BATTERY75, '⛔ H75: a premise that closed BEFORE the PR opened is clean', h75PremiseClosedSinceOpened(pr75(BODY75), res75('closed', '2026-11-05T01:50:00Z')), null);
+  b(BATTERY75, '⛔ H75: a premise still OPEN is clean', h75PremiseClosedSinceOpened(pr75(BODY75), res75('open')), null);
+  const unread75 = String(h75PremiseClosedSinceOpened(pr75(BODY75), res75('unresolved', null, { detail: 'HTTP 404' })) ?? '');
+  b(BATTERY75, 'H75: an UNRESOLVED premise fires UNJUDGED, never clean', unread75.startsWith(UNJUDGED_MARKER) && isUnjudgedFinding(unread75) && unread75.includes('(HTTP 404)'), true);
+  b(BATTERY75, 'H75: a closed premise leads even beside an unresolved one', String(h75PremiseClosedSinceOpened(pr75(BODY75), [...res75('closed', '2026-11-05T02:10:00Z'), ...res75('unresolved')])).startsWith('open PR whose body'), true);
+  b(BATTERY75, '⛔ H75: no targets, an unreadable open stamp or a missing row is silent, never a crash', [h75PremiseClosedSinceOpened(pr75(BODY75), []), h75PremiseClosedSinceOpened(pr75(BODY75, { created_at: undefined }), res75('closed', '2026-11-05T02:10:00Z')), h75PremiseClosedSinceOpened(undefined, undefined), h75PremiseTargets(undefined).length].join(), ',,,0');
+  b(BATTERY75, 'H75: not a loud finding — it never escalates a sweep', isLoudFinding(fired75), false);
+  b(BATTERY75, 'H75 band: registered as `stall` (H19\'s), and the sweep really pushes it', `${familyBand('H75')}/${familyRegistryCoverage().emitted.includes('H75')}`, 'stall/true');
+  b(BATTERY75, 'H75 wiring: the sweep resolves targets through H19\'s ONE resolver, never a fetch of its own', readFileSync(fileURLToPath(import.meta.url), 'utf8').includes('for (const target of h75PremiseTargets(pr)) resolutions.push(await resolveBlockerTarget(target));'), true);
+  b(BATTERY75, 'floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY75) && SELF_TEST_BATTERIES[BATTERY75] > 0 && Object.isFrozen(SELF_TEST_BATTERIES), true);
 
   // -- H64 — a seat- or dev-signed artefact that names no session (#18069,
   //    re-keyed by #18237) ---------------------------------------------------

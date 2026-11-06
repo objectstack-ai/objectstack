@@ -60,7 +60,7 @@ import { AGGREGATE_ANSWER_KIND, presentAsNumber } from '@objectstack/core';
 // boolean-aggregand cast, and the one column-class predicate both read — the
 // operand rule `driver-sql`'s own `aggregate()` applies, defined once in core.
 import { aggregandColumnClass, aggregandOperandSql } from '@objectstack/core';
-import { emptyGroupValueFor } from '@objectstack/spec/data';
+import { emptyGroupValueFor, isVirtualSearchField } from '@objectstack/spec/data';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 
 /**
@@ -838,6 +838,21 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // decline above is: the query routes on, and the service refuses a
     // duration measure no native statement serves, with the reason.
     if (this.durationMeasureOnUnknownDialectIn(query, ctx)) return false;
+    // ── [#29304] DECLINE a grouped dimension over a VIRTUAL field ──────────
+    //
+    // A `formula` is computed on read: no table stores a column for it, so the
+    // `GROUP BY calc` this strategy compiles reached the database as a column
+    // that does not exist and answered `DATABASE_ERROR` / 500, where the engine
+    // refuses the same group key `INVALID_FIELD` / 400 at its position with the
+    // store-the-value remedy (`@objectstack/objectql`'s
+    // `assertGroupByTargetsAreStored`). The mechanism of the declines above:
+    // what this strategy cannot serve as the engine would, the engine serves —
+    // here, refuses — so the query routes to the ObjectQL strategy and every
+    // composition answers one refusal. Only a GROUPED member is judged: a
+    // `dimensions` entry (a bucketed `timeDimensions` entry already declines
+    // above). A stored dimension, and a query that groups by no virtual field,
+    // stay here. See {@link groupsByVirtualField}.
+    if (this.groupsByVirtualField(query, ctx)) return false;
     const caps = ctx.queryCapabilities(query.cube);
     return caps.nativeSql && typeof ctx.executeRawSql === 'function';
   }
@@ -859,6 +874,35 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       ? [...scoped]
       : [this.extractObjectName(cube), ...Object.keys(cube.joins ?? {}).map((alias) => cube.joins?.[alias]?.name ?? alias)];
     return objects.some((object) => findReadableIdsLeaf(ctx.getReadScope!(object)) !== null);
+  }
+
+  /**
+   * [#29304] Does a `dimensions` entry of this query resolve to a column the
+   * host declares VIRTUAL (the spec's `isVirtualSearchField`: `formula`)? See
+   * the decline at {@link canHandle}. Each member resolves to the (object,
+   * column) {@link resolveStorageTarget} gives the compiler — the object a
+   * relationship path's last hop reaches for a dotted one — and is asked of the
+   * host's `declaredFieldType`. An expression `sql`, a member that does not
+   * resolve, and a host that wired no field types are not judged: "cannot
+   * answer, do not block", the tiering every such hook here takes.
+   */
+  private groupsByVirtualField(query: AnalyticsQuery, ctx: StrategyContext): boolean {
+    const declared = (ctx as DatasetScopedStrategyContext).declaredFieldType;
+    if (typeof declared !== 'function') return false;
+    const cube = query.cube ? ctx.getCube(query.cube) : undefined;
+    if (!cube) return false;
+    const baseTable = this.extractObjectName(cube);
+    const referenceOf = relationshipReferenceOf(ctx);
+    return (query.dimensions ?? []).some((member) => {
+      let target: { object: string; field: string };
+      try {
+        target = this.resolveStorageTarget(cube, member, baseTable, referenceOf);
+      } catch {
+        return false;
+      }
+      const type = declared.call(ctx, target.object, target.field);
+      return type !== undefined && isVirtualSearchField({ type } as never);
+    });
   }
 
   /**

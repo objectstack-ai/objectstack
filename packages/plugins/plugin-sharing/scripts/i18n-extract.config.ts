@@ -8,7 +8,7 @@
  * strings were seeded from @objectstack/platform-objects.)
  *
  *   os i18n extract packages/plugins/plugin-sharing/scripts/i18n-extract.config.ts \
- *     --locales=zh-CN,ja-JP,es-ES --fill=default --objects-only --no-metadata-forms \
+ *     --locales=zh-CN,ja-JP,es-ES,zh-Hant,ar,fr,pt-BR,ru,de,ko --fill=default --objects-only --no-metadata-forms \
  *     --source-hashes \
  *     --out=packages/plugins/plugin-sharing/src/translations
  *
@@ -48,6 +48,13 @@ import { enObjects } from '../src/translations/en.objects.generated.js';
 import { zhCNObjects } from '../src/translations/zh-CN.objects.generated.js';
 import { jaJPObjects } from '../src/translations/ja-JP.objects.generated.js';
 import { esESObjects } from '../src/translations/es-ES.objects.generated.js';
+import { zhHantObjects } from '../src/translations/zh-Hant.objects.generated.js';
+import { arObjects } from '../src/translations/ar.objects.generated.js';
+import { frObjects } from '../src/translations/fr.objects.generated.js';
+import { ptBRObjects } from '../src/translations/pt-BR.objects.generated.js';
+import { ruObjects } from '../src/translations/ru.objects.generated.js';
+import { deObjects } from '../src/translations/de.objects.generated.js';
+import { koObjects } from '../src/translations/ko.objects.generated.js';
 import { SysQueueDetailPage } from '../src/sys-queue.page.js';
 import { sharingPageTranslations } from '../src/translations/pages.js';
 
@@ -73,6 +80,13 @@ const config: ObjectStackDefinition = defineStack({
     { 'zh-CN': { objects: zhCNObjects, pages: sharingPageTranslations['zh-CN'] } },
     { 'ja-JP': { objects: jaJPObjects, pages: sharingPageTranslations['ja-JP'] } },
     { 'es-ES': { objects: esESObjects, pages: sharingPageTranslations['es-ES'] } },
+    { 'zh-Hant': { objects: zhHantObjects, pages: sharingPageTranslations['zh-Hant'] } },
+    { 'ar': { objects: arObjects, pages: sharingPageTranslations['ar'] } },
+    { 'fr': { objects: frObjects, pages: sharingPageTranslations['fr'] } },
+    { 'pt-BR': { objects: ptBRObjects, pages: sharingPageTranslations['pt-BR'] } },
+    { 'ru': { objects: ruObjects, pages: sharingPageTranslations['ru'] } },
+    { 'de': { objects: deObjects, pages: sharingPageTranslations['de'] } },
+    { 'ko': { objects: koObjects, pages: sharingPageTranslations['ko'] } },
   ],
 });
 
