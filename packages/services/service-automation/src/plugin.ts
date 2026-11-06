@@ -582,6 +582,23 @@ export function nonHostDeclaringPackageOf(
 }
 
 /**
+ * The package registry ObjectQL serves, read where it is used, or `undefined`
+ * when the host serves no ObjectQL: the installed manifests the customization
+ * pair lookup reads (`installedManifestsOf`). Without one, no package is
+ * installed, and every package is its own App. Absent is read the way this
+ * plugin's other optional `objectql` reads it (`flowHistoryReader`, the
+ * suspended-run store): a `getService` that throws is no service, whichever
+ * kernel spelled the refusal.
+ */
+function objectqlRegistryOf(ctx: PluginContext): InstalledPackageSource | undefined {
+    try {
+        return ctx.getService<{ registry?: InstalledPackageSource }>('objectql')?.registry;
+    } catch {
+        return undefined;
+    }
+}
+
+/**
  * [#28713] Whether the kernel this plugin runs on dispatches its boot-phase
  * hooks (`kernel:bootstrapped` among them) once every plugin has started —
  * the kernel's own `dispatchesBootPhaseHooks()`. Only then may the `start()`
@@ -592,22 +609,6 @@ export function nonHostDeclaringPackageOf(
  * `start()` reconcile keeps every stored entry, so none waits for a pass that
  * never comes.
  */
-/**
- * The package registry ObjectQL serves, read where it is used, or `undefined`
- * when no ObjectQL service is registered: the installed manifests the
- * customization pair lookup reads (`installedManifestsOf`). Without one, no
- * package is installed, and every package is its own App.
- */
-function objectqlRegistryOf(ctx: PluginContext): InstalledPackageSource | undefined {
-    try {
-        return ctx.getService<{ registry?: InstalledPackageSource }>('objectql')?.registry;
-    } catch (error) {
-        // `getService` refuses a service no plugin registered: no registry.
-        if (isServiceNotRegisteredError(error)) return undefined;
-        throw error;
-    }
-}
-
 function kernelDispatchesBootPhaseHooks(ctx: PluginContext): boolean {
     let kernel: unknown;
     try {
