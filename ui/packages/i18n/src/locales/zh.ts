@@ -4002,6 +4002,30 @@ const zh = {
   cloudWorkspaceTimezoneNotice: {
     seeded: '环境时区在创建时已按你的浏览器设为 {{zone}}，可在「设置 → 本地化」中修改。',
   },
+  deploymentNotice: {
+    title: '这台服务器把你的数据和密钥存放在它自己的磁盘上',
+    titleLow: '完成此部署的设置',
+    intro: '没有人为此生产部署指定这些内容的存放位置。请把下面的设置交给负责运行服务器的人，这样更换服务器时不会丢失任何东西。',
+    finding: {
+      databaseLocalFile: '你的业务数据是这台服务器上的一个文件（{{file}}）。更换服务器或其磁盘会丢失这些数据。',
+      authSecretGenerated: '登录密钥是在这台服务器上生成的。一旦丢失，所有人都会被登出。',
+      dataKeyFile: '用于加密已保存密码和 API 密钥的密钥是这台服务器上的一个文件（{{file}}）。一旦丢失，这些内容将无法再读取。',
+      fileStorageLocal: '上传的文件保存在这台服务器的磁盘上。',
+      emailNotConfigured: '尚未设置邮件服务，因此邀请和密码重置不会通过邮件发送。',
+    },
+    copy: {
+      button: '复制设置',
+      database: '你的数据库，例如 postgres://user:pass@db-host:5432/app，或 file:/path/on/a/kept/volume/app.db。目前数据在 {{file}} 中：切换前请先迁移过去。',
+      carryOver: '沿用当前值：{{file}} 的内容',
+      newValue: '一个较长的随机值，每次重启都保持不变，例如以下命令的输出：openssl rand -hex 32',
+    },
+    copied: '已复制',
+    hide: '隐藏',
+    hideNoAuditLog: '此部署没有审计日志，因此无法隐藏该提示。',
+    hideFailed: '无法隐藏该提示，请重试。',
+    hiddenLine: '部署提示已隐藏，其所述情况仍然存在。',
+    showAgain: '重新显示',
+  },
   aiApprovals: {
     title: 'AI 审批',
     description: 'AI 智能体提出的操作，需要人工审核后才会执行。',

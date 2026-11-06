@@ -242,3 +242,24 @@ describe('[#10826] SettingsService.getMany', () => {
     expect((await svc.get('localization', 'timezone', ctx)).value).toBe('America/New_York');
   });
 });
+
+describe('[#30823] getNamespace lists a pinned key\'s stored rows from the same grouped load', () => {
+  it('a pin over a global row lists that row beneath its env entry, at no more finds than the read without the pin', async () => {
+    const { svc, engine } = await makeService();
+    const ctx = { userId: 'u1' };
+    engine.find.mockClear();
+    await svc.getNamespace('localization', ctx);
+    const unpinnedFinds = engine.find.mock.calls.length;
+
+    process.env.OS_LOCALIZATION_TIMEZONE = 'Asia/Tokyo';
+    engine.find.mockClear();
+    const ns = await svc.getNamespace('localization', ctx);
+    expect(engine.find).toHaveBeenCalledTimes(unpinnedFinds);
+    expect(ns.values.timezone).toMatchObject({ value: 'Asia/Tokyo', source: 'env', locked: true });
+    expect(ns.values.timezone.cascadeChain).toEqual([
+      expect.objectContaining({ scope: 'env', value: 'Asia/Tokyo', effective: true }),
+      { scope: 'global', value: 'America/New_York', locked: false, lockedReason: undefined },
+      { scope: 'default', value: 'UTC' },
+    ]);
+  });
+});

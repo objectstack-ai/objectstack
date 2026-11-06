@@ -321,6 +321,44 @@ export default class Start extends Command {
     // (`utils/internal-auth-secret-channel.ts`).
     const operatorAuthSecret = flags['auth-secret']
       ?? readEnvWithDeprecation('OS_AUTH_SECRET', ['AUTH_SECRET', 'BETTER_AUTH_SECRET'], { silent: true });
+
+    // ── The official image's durability check (ruling A3, record 6634240777) ──
+    // The image (`docker/Dockerfile`) sets `OS_DEPLOYMENT_DURABILITY_CHECK_ENABLED`,
+    // because a container's disk is the thing that gets replaced: a SQLite file
+    // in its writable layer and secrets minted there are lost with it. Under the
+    // signal this command refuses unless the database and both secrets are set
+    // explicitly, and names the missing ones. Asked HERE, after the database is
+    // resolved and before anything is generated: the refusal writes no secret
+    // and opens no database. ⛔ Not keyed on `NODE_ENV`: this command forces
+    // `production` when it is unset (below), so the zero-config trial is itself
+    // production mode and a mode-keyed refusal would end it.
+    const durabilityCheck = readDurabilityCheckSignal(process.env);
+    if (durabilityCheck === 'invalid') {
+      printError(
+        `${DURABILITY_CHECK_ENV}="${process.env[DURABILITY_CHECK_ENV]}" is not a switch value — set it to true or false.`,
+      );
+      process.exit(1);
+    }
+    if (durabilityCheck === 'on') {
+      const missing = missingDurableVariables({
+        databaseSource: resolvedDb.source,
+        authSecretSet: operatorAuthSecret !== undefined && operatorAuthSecret.trim().length > 0,
+        secretKeySet: (process.env.OS_SECRET_KEY ?? '').trim().length > 0,
+      });
+      if (missing.length > 0) {
+        const keyFile = await persistedDataKeyFile({
+          env: process.env, cwd, hasProjectConfig, homeFlag: flags.home,
+        });
+        process.stderr.write(`${formatDurabilityRefusal(missing, {
+          authSecretFile: path.join(homeDir, 'auth-secret'),
+          dataKeyFile: keyFile,
+          defaultDatabaseFile: sqliteFileOf(resolvedDb.url),
+          exists: (p) => fs.existsSync(p),
+        })}\n`);
+        process.exit(1);
+      }
+    }
+
     const persistedAuthSecret = operatorAuthSecret === undefined ? readOrCreateAuthSecret(homeDir) : undefined;
     const authSecret = persistedAuthSecret ? persistedAuthSecret.secret : operatorAuthSecret;
 
@@ -503,6 +541,26 @@ export default class Start extends Command {
     });
     if (keyFileNotice) console.log(chalk.yellow(`  ⚠ ${keyFileNotice}`));
 
+    // ── What a production boot keeps on this machine's disk (ruling A3) ────
+    // Every `os start` outside the image keeps booting, and says so: one block
+    // for the deployer, naming the database file and the two secrets nobody set,
+    // with what is lost if this disk is not kept. The same facts go to the
+    // `serve` child on the CLI's internal channel, where the settings service
+    // serves them to administrators as the Console's deployment notice (the
+    // data key's file it reads from its own channel, which the line above set).
+    const { KEY_FILE_CHANNEL_ENV } = await import('@objectstack/service-settings');
+    const dataKeyFile = localEnv[KEY_FILE_CHANNEL_ENV];
+    const findings: DeploymentBootFindings | undefined = localEnv.NODE_ENV === 'production'
+      ? {
+        ...(isDefaultedDatabase(resolvedDb.source) ? { databaseFile: sqliteFileOf(databaseUrl) ?? databaseUrl } : {}),
+        ...(persistedAuthSecret ? { authSecretFile: persistedAuthSecret.file ?? null } : {}),
+        ...(dataKeyFile ? { dataKeyFile } : {}),
+      }
+      : undefined;
+    writeDeploymentFindingsChannel(localEnv, findings);
+    const durabilityBlock = findings ? formatDurabilityBootBlock(findings) : undefined;
+    if (durabilityBlock) console.log(chalk.yellow(durabilityBlock));
+
     const binPath = process.argv[1];
 
     // ── The serve child's lifecycle: `os dev`'s mechanism, not a copy (#21114)
@@ -624,4 +682,224 @@ function readOrCreateAuthSecret(homeDir: string): { secret: string; file?: strin
     // best-effort persist; secret is still returned for this process
   }
   return { secret };
+}
+
+// ── Deployment durability (ruling A3, record 6634240777) ─────────────────────
+//
+// Two audiences, one set of facts. The official image refuses to start unless
+// the database and both secrets are set explicitly; every other `os start`
+// boots and prints a block for the deployer; and the same facts reach the
+// `serve` child, whose settings service serves them to administrators as the
+// Console's deployment notice. The facts are this command's own decisions: it
+// resolved the database, it generated the auth secret, and it opted the data
+// key into a persisted file. Nothing below reads `NODE_ENV` to decide the
+// refusal — see the comment at the call site.
+
+/**
+ * The official image's signal (`docker/Dockerfile` sets it to `true`): under
+ * it `os start` refuses to boot unless `OS_DATABASE_URL`, `OS_AUTH_SECRET` and
+ * `OS_SECRET_KEY` are set explicitly. Default off, so a local `os start` keeps
+ * its zero-config boot.
+ */
+export const DURABILITY_CHECK_ENV = 'OS_DEPLOYMENT_DURABILITY_CHECK_ENABLED';
+
+/**
+ * The CLI's INTERNAL channel to its `serve` child: the boot facts the
+ * administrator notice states, as JSON ({@link DeploymentBootFindings}). Same
+ * naming and ownership rule as `OS_INTERNAL_AUTH_SECRET_FILE`
+ * (`utils/internal-auth-secret-channel.ts`): set by this command alone, deleted
+ * when it has nothing to say, so an inherited copy never speaks for this run,
+ * and not an operator setting. The reader is `@objectstack/service-settings`
+ * (`deployment-notice.ts`), which spells the same name: the settings package
+ * publishes no constant for it, and the end-to-end pin
+ * (`test/start-deployment-durability.integration.test.ts`) reads the notice a
+ * real `os start` serves, so a renamed side fails there.
+ */
+export const INTERNAL_DEPLOYMENT_FINDINGS_ENV = 'OS_INTERNAL_DEPLOYMENT_FINDINGS';
+
+/** What a production boot keeps on this machine's disk because nobody set it. */
+export interface DeploymentBootFindings {
+  /** The database is a SQLite file no setting chose: the path, or the URL when it names no file. */
+  databaseFile?: string;
+  /** The auth secret was generated: the file it is kept in, `null` when only this process holds it. */
+  authSecretFile?: string | null;
+  /** The data key is read from (and on a first boot minted into) this file: `OS_SECRET_KEY` is unset. */
+  dataKeyFile?: string;
+}
+
+/** A variable the image requires, in the order the refusal names them. */
+export type DurableVariable = 'OS_DATABASE_URL' | 'OS_AUTH_SECRET' | 'OS_SECRET_KEY';
+
+/**
+ * Read {@link DURABILITY_CHECK_ENV}. `invalid` for a value that is neither a
+ * yes nor a no: a typo must not quietly switch a safety check off.
+ */
+export function readDurabilityCheckSignal(env: NodeJS.ProcessEnv): 'on' | 'off' | 'invalid' {
+  const raw = env[DURABILITY_CHECK_ENV];
+  if (raw === undefined || raw.trim() === '') return 'off';
+  const v = raw.trim().toLowerCase();
+  if (v === 'true' || v === '1') return 'on';
+  if (v === 'false' || v === '0') return 'off';
+  return 'invalid';
+}
+
+/**
+ * Whether the database was chosen by nobody: the unified default file, or the
+ * legacy file read for compatibility. A URL from `--database`, the environment
+ * (`OS_DATABASE_URL` and its legacy names) or the project's declared default
+ * datasource is a choice, an explicit `file:` URL included.
+ */
+export function isDefaultedDatabase(source: ResolvedProjectDatabaseUrl['source']): boolean {
+  return source === 'unified-default' || source === 'legacy-file';
+}
+
+/** The variables the image requires that this boot did not get. */
+export function missingDurableVariables(facts: {
+  databaseSource: ResolvedProjectDatabaseUrl['source'];
+  authSecretSet: boolean;
+  secretKeySet: boolean;
+}): DurableVariable[] {
+  const missing: DurableVariable[] = [];
+  if (isDefaultedDatabase(facts.databaseSource)) missing.push('OS_DATABASE_URL');
+  if (!facts.authSecretSet) missing.push('OS_AUTH_SECRET');
+  if (!facts.secretKeySet) missing.push('OS_SECRET_KEY');
+  return missing;
+}
+
+/** The file a `file:` SQLite URL names, or `undefined` for any other URL. */
+export function sqliteFileOf(url: string): string | undefined {
+  if (!url.startsWith('file:')) return undefined;
+  const rest = url.slice('file:'.length).replace(/^\/\/(?=\/)/, '');
+  return rest.length > 0 ? rest : undefined;
+}
+
+function joinNames(names: readonly string[]): string {
+  if (names.length <= 1) return names.join('');
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+/**
+ * The image's refusal: which variables are missing, what is lost without
+ * them, how to set them, and how a deployment that already ran on values the
+ * image generated carries those values over first.
+ */
+export function formatDurabilityRefusal(
+  missing: readonly DurableVariable[],
+  where: {
+    /** Where this command keeps a generated auth secret. */
+    authSecretFile: string;
+    /** Where the data key file is (`undefined` when an env key would answer). */
+    dataKeyFile?: string;
+    /** The default SQLite file, when the database fell back to it. */
+    defaultDatabaseFile?: string;
+    exists: (file: string) => boolean;
+  },
+): string {
+  const set = new Set(missing);
+  const found = (file: string): string => (where.exists(file) ? ' (present in this container)' : '');
+  const lines: string[] = [
+    `✗ This image does not start without its database and secrets set explicitly: ${joinNames(missing)} ${missing.length === 1 ? 'is' : 'are'} not set.`,
+    '  Without them the data would be a SQLite file inside the container, and the sign-in secret and the key that',
+    '  encrypts saved passwords and API keys would be generated on its disk. Replacing the container loses all of it.',
+    '',
+    '  Set them when you run the container:',
+  ];
+  if (set.has('OS_DATABASE_URL')) {
+    lines.push(
+      '    OS_DATABASE_URL  your database, e.g. postgres://user:pass@db-host:5432/app',
+      '                     (or file:/path/on/a/mounted/volume/app.db to keep SQLite on a volume)',
+    );
+  }
+  if (set.has('OS_AUTH_SECRET')) {
+    lines.push('    OS_AUTH_SECRET   a long random value, the same on every restart, e.g. $(openssl rand -hex 32)');
+  }
+  if (set.has('OS_SECRET_KEY')) {
+    lines.push('    OS_SECRET_KEY    32 random bytes, the same on every restart, e.g. $(openssl rand -hex 32)');
+  }
+  lines.push(
+    '',
+    '  Already running on values this image generated? Carry them over before you set new ones, or every saved',
+    '  credential becomes unreadable and everyone is signed out. Read them from the old container',
+    '  (docker exec <container> cat <file>) or from its volume:',
+  );
+  if (set.has('OS_AUTH_SECRET')) {
+    lines.push(`    OS_AUTH_SECRET   the contents of ${where.authSecretFile}${found(where.authSecretFile)}`);
+  }
+  if (set.has('OS_SECRET_KEY') && where.dataKeyFile) {
+    lines.push(`    OS_SECRET_KEY    the contents of ${where.dataKeyFile}${found(where.dataKeyFile)}`);
+  }
+  if (set.has('OS_DATABASE_URL') && where.defaultDatabaseFile) {
+    lines.push(
+      `    OS_DATABASE_URL  file:${where.defaultDatabaseFile}${found(where.defaultDatabaseFile)}, if your data is that file on a kept volume`,
+    );
+  }
+  return lines.join('\n');
+}
+
+/**
+ * The deployer's block for a production boot outside the image, or
+ * `undefined` when this boot keeps nothing on its disk by default.
+ */
+export function formatDurabilityBootBlock(findings: DeploymentBootFindings): string | undefined {
+  const rows: string[] = [];
+  const vars: DurableVariable[] = [];
+  if (findings.databaseFile !== undefined) {
+    rows.push(`      · Database: a SQLite file, ${findings.databaseFile} (OS_DATABASE_URL is not set)`);
+    vars.push('OS_DATABASE_URL');
+  }
+  if (findings.authSecretFile !== undefined) {
+    rows.push(
+      findings.authSecretFile
+        ? `      · Sign-in secret: generated and kept in ${findings.authSecretFile} (OS_AUTH_SECRET is not set)`
+        : '      · Sign-in secret: generated for this process only (OS_AUTH_SECRET is not set)',
+    );
+    vars.push('OS_AUTH_SECRET');
+  }
+  if (findings.dataKeyFile !== undefined) {
+    rows.push(
+      `      · Data key, which encrypts saved passwords and API keys: kept in ${findings.dataKeyFile} (OS_SECRET_KEY is not set)`,
+    );
+    vars.push('OS_SECRET_KEY');
+  }
+  if (rows.length === 0) return undefined;
+  return [
+    '  ⚠ Production mode, and this server keeps these on its own disk:',
+    ...rows,
+    '    If this disk is not kept (a container replaced, a machine rebuilt), they are lost: the data, every',
+    '    sign-in and every saved credential.',
+    `    To move them off this disk, set ${joinNames(vars)}, carrying the current values over from the files above.`,
+    '    Administrators see this notice in the Console too.',
+  ].join('\n');
+}
+
+/**
+ * Write {@link INTERNAL_DEPLOYMENT_FINDINGS_ENV} into the child env: the
+ * findings as JSON when there are any, otherwise no variable at all.
+ */
+export function writeDeploymentFindingsChannel(
+  env: NodeJS.ProcessEnv,
+  findings: DeploymentBootFindings | undefined,
+): void {
+  if (findings && Object.keys(findings).length > 0) {
+    env[INTERNAL_DEPLOYMENT_FINDINGS_ENV] = JSON.stringify(findings);
+  } else {
+    delete env[INTERNAL_DEPLOYMENT_FINDINGS_ENV];
+  }
+}
+
+/**
+ * The data key file a boot of this command would read, through the ONE
+ * resolution the child is handed (`applyCryptoKeyFileChannel`), applied to a
+ * scratch env so nothing of the real child env is touched.
+ */
+async function persistedDataKeyFile(opts: {
+  env: NodeJS.ProcessEnv;
+  cwd: string;
+  hasProjectConfig: boolean;
+  homeFlag?: string;
+}): Promise<string | undefined> {
+  const { KEY_FILE_CHANNEL_ENV } = await import('@objectstack/service-settings');
+  const scratch: NodeJS.ProcessEnv = {};
+  await applyCryptoKeyFileChannel(scratch, opts);
+  return scratch[KEY_FILE_CHANNEL_ENV];
 }
