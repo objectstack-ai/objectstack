@@ -9,7 +9,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -18,9 +18,9 @@ import { exportGallery, scratchProjectDir, type ExportOptions } from '../../src/
 import { NO_GENERIC_MARKER, type GenericGuard } from '../../src/export/generic.js';
 import { GalleryIndexSchema, parseIndex } from '../../src/export/manifest.js';
 import { judgeRecord } from '../../src/export/pass.js';
-import { readRunRecords, ScenarioRunRecordSchema, type ScenarioRunRecord } from '../../src/export/record.js';
+import { readRunRecords, redactWorkDir, ScenarioRunRecordSchema, type ScenarioRunRecord } from '../../src/export/record.js';
 import type { CaptureScreenshots } from '../../src/export/screenshots.js';
-import { main, parseExportArgs } from '../../src/export/cli.js';
+import { main, parseExportArgs, renderSummary } from '../../src/export/cli.js';
 import type { Recording } from '../../src/runner/driver.js';
 import { CARD_ID, loadAllCards, loadCrm, runCrm, tempDir, writeRecord, type FixtureRun } from './fixture.js';
 
@@ -271,6 +271,23 @@ describe('exportGallery — one passing, generic app', () => {
     expect(tree(out)).toEqual(before);
   });
 
+  it('⛔ a runs directory with no scenario record, over an index that lists apps, is a wrong --runs: it refuses and removes nothing', async () => {
+    const { out, opts } = await setup();
+    await exportGallery(opts());
+    const before = tree(out);
+    const empty = tempDir('empty-runs');
+    writeFileSync(join(empty, 'checklist-run.json'), JSON.stringify({ runner: 'platform-checklist', results: [] }));
+    await expect(exportGallery(opts({ runsDir: empty }))).rejects.toThrow(/holds no scenario run record, and .* lists 1 app\(s\), so nothing is touched/);
+    expect(tree(out)).toEqual(before);
+    // Through the CLI: the export rejects, so the process exits non-zero.
+    await expect(main(['--runs', empty, '--out', out, '--no-screenshots'])).rejects.toThrow(/holds no scenario run record/);
+    expect(tree(out)).toEqual(before);
+    // With no previous index there is nothing to lose: an empty runs directory writes an empty index.
+    const fresh = tempDir('out-fresh');
+    expect((await exportGallery(opts({ runsDir: empty, outDir: fresh }))).exported).toEqual([]);
+    expect(parseIndex(readFileSync(join(fresh, 'index.json'), 'utf8')).apps).toEqual([]);
+  });
+
   it('refuses the whole export on an unreadable scenario-runner record, and ignores other JSON', async () => {
     const { runs, opts } = await setup();
     writeFileSync(join(runs, 'checklist-run.json'), JSON.stringify({ runner: 'platform-checklist', results: [] }));
@@ -278,6 +295,49 @@ describe('exportGallery — one passing, generic app', () => {
     expect(s.ignoredFiles.map((f) => f.slice(f.lastIndexOf('/') + 1))).toEqual(['checklist-run.json']);
     writeFileSync(join(runs, '2026-11-07-scenario-x.json'), JSON.stringify({ runner: 'scenario-runner', app: 'x' }));
     await expect(exportGallery(opts())).rejects.toThrow(/not a readable scenario run record/);
+  });
+});
+
+describe('⛔ no local path: every work directory that names the run is redacted', () => {
+  /** Every file under `dir`, relative path → its text. */
+  function texts(dir: string): Record<string, string> {
+    const out: Record<string, string> = {};
+    const walk = (d: string) => {
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        const p = join(d, e.name);
+        if (e.isDirectory()) walk(p);
+        else out[relative(dir, p)] = readFileSync(p, 'utf8');
+      }
+    };
+    walk(dir);
+    return out;
+  }
+
+  it('under --work, a record from another machine: neither its evidenceDir nor --work appears anywhere in --out', async () => {
+    const fx = await runCrm();
+    const other = '/srv/ci-runner-7/scenario-work';
+    // The record as the machine that ran it wrote it: every string that named its work directory names `other`.
+    const moved = JSON.parse(JSON.stringify(fx.record).split(fx.work).join(other)) as Record<string, unknown>;
+    expect(moved.evidenceDir).toBe(other);
+    expect(JSON.stringify(moved).split(other).length - 1).toBeGreaterThan(1); // the build tails name it too
+    const { out, opts } = await setup({ ...fx, record: moved });
+    const s = await exportGallery(opts({ workDir: fx.work }));
+    expect(s.exported.map((e) => e.id)).toEqual([CARD_ID]);
+
+    const files = texts(out);
+    for (const name of ['run-record.json', 'scorecard.json', 'scorecard.md', 'transcript.json', 'transcript.md', 'README.md']) expect(Object.keys(files)).toContain(`apps/${CARD_ID}/${name}`);
+    for (const [name, text] of Object.entries(files)) {
+      for (const dir of [other, fx.work, realpathSync(fx.work)]) expect(text.includes(dir), `${name} names ${dir}`).toBe(false);
+    }
+    expect(JSON.parse(files[`apps/${CARD_ID}/run-record.json`]!).evidenceDir).toBe('$WORK');
+  });
+
+  it('a directory is replaced only whole: `/tmp` never rewrites `/tmpfoo`, and the longer of two nested directories wins', () => {
+    expect(redactWorkDir({ a: ['/tmp', '/tmp/x', 'ran in /tmp.', '"/tmp"', '/tmpfoo', '/tmp.d/x', '/var/tmp/y', 'x/tmp'] }, '/tmp/')).toEqual({
+      a: ['$WORK', '$WORK/x', 'ran in $WORK.', '"$WORK"', '/tmpfoo', '/tmp.d/x', '/var/tmp/y', 'x/tmp'],
+    });
+    expect(redactWorkDir('/w/inner/p and /w/q', ['/w', '/w/inner'])).toBe('$WORK/p and $WORK/q');
+    expect(redactWorkDir('/a/b', ['/', ''])).toBe('/a/b');
   });
 });
 
@@ -339,6 +399,32 @@ describe('exportGallery — screenshots', () => {
     const index = parseIndex(readFileSync(join(out, 'index.json'), 'utf8'));
     expect(index.apps[0]!.screenshots).toEqual([{ kind: 'list', path: `apps/${CARD_ID}/screenshots/list.png`, object: 'democrm_account' }]);
     expect(readFileSync(join(out, 'apps', CARD_ID, 'README.md'), 'utf8')).toContain('no dashboard screenshot: the build declares no dashboard');
+  });
+
+  it('⛔ an export without screenshots never replaces one that had them: the old directory and entry are kept, and the summary says so', async () => {
+    const { out, runs, opts } = await setup();
+    const shoot: CaptureScreenshots = async (input) => {
+      mkdirSync(join(input.dir, 'screenshots'), { recursive: true });
+      writeFileSync(join(input.dir, 'screenshots', 'list.png'), 'png');
+      return { shots: [{ kind: 'list', file: 'screenshots/list.png', path: '/_console/apps/democrm_crm/democrm_account', object: 'democrm_account' }], skipped: [] };
+    };
+    await exportGallery(opts({ screenshots: shoot }));
+    const before = tree(out);
+    const s = await exportGallery(opts({ screenshots: false }));
+    expect(s.exported).toEqual([]);
+    expect(s.removed).toEqual([]);
+    expect(s.kept).toEqual([{ id: CARD_ID, why: expect.stringContaining('the previous export has 1: it is kept as it was') }]);
+    expect(s.indexChanged).toBe(false);
+    expect(tree(out)).toEqual(before);
+    expect(renderSummary(s)).toContain(`kept     ${CARD_ID} · ${s.kept[0]!.why}`);
+    expect(renderSummary(s).slice(-1)[0]).toBe('index.json unchanged · 0 exported, 0 refused, 0 removed, 1 kept');
+    // It keeps nothing that no longer passes: a newer failing record still removes the app.
+    const later = await runCrm({ date: '2026-12-01', iterateRun: false });
+    writeRecord(runs, later.record);
+    const t = await exportGallery(opts({ screenshots: false, recordings: [later.recording] }));
+    expect(t.kept).toEqual([]);
+    expect(t.removed.map((r) => r.id)).toEqual([CARD_ID]);
+    expect(existsSync(join(out, 'apps', CARD_ID))).toBe(false);
   });
 
   it('a screenshot step that fails refuses the app instead of exporting it without its proof', async () => {

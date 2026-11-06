@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
-import { captureScreenshots, declaredListViews, planShots, taggedViewKinds, type ScreenshotBrowser } from '../../src/export/screenshots.js';
+import { captureScreenshots, CONSOLE_NOT_FOUND, declaredListViews, pageRefusal, planShots, taggedViewKinds, type CaptureOutcome, type PageReading, type ScreenshotBrowser } from '../../src/export/screenshots.js';
 import { AREAS_DIR, CARDS_DIR, FakeApp, tempDir } from './fixture.js';
 
 function load(id: string): LoadedScenario {
@@ -114,16 +114,36 @@ describe('planShots', () => {
   });
 });
 
+describe('pageRefusal — what counts as the page the shot shows', () => {
+  it('a 2xx, or a 304 revalidation, with no not-found view is the page', () => {
+    for (const status of [200, 204, 304]) expect(pageRefusal({ status, notFound: [] })).toBeUndefined();
+  });
+
+  it('no response, any other status, or one of the Console’s not-found views refuses it', () => {
+    expect(pageRefusal({ status: null, notFound: [] })).toBe('the navigation answered no response');
+    for (const status of [301, 401, 403, 404, 500, 502]) expect(pageRefusal({ status, notFound: [] })).toBe(`the navigation answered HTTP ${status}`);
+    expect(pageRefusal({ status: 200, notFound: ['object-not-found', '"Page not found"'] })).toBe('the Console drew its not-found view (object-not-found, "Page not found")');
+  });
+
+  it('the not-found views it looks for are the Console’s own', () => {
+    expect(CONSOLE_NOT_FOUND.testIds).toEqual(['object-not-found', 'object-package-disabled', 'record-page-not-found', 'form-not-found']);
+    expect(CONSOLE_NOT_FOUND.titles).toEqual(['Page not found']);
+  });
+});
+
 describe('captureScreenshots — boot, seed, shoot, stop', () => {
-  function doubles(app: FakeApp) {
+  /** `pages`: what the browser reads at a path (default a 200 with no not-found view); the double writes the file either way, as a real browser would have nothing to stop it. */
+  function doubles(app: FakeApp, pages: Record<string, PageReading> = {}) {
     const events: string[] = [];
     const browser: ScreenshotBrowser = {
       async open(baseUrl, admin) {
         events.push(`open ${baseUrl} as ${admin.email}`);
         return {
-          async capture(path, file) {
+          async capture(path, file): Promise<CaptureOutcome> {
             events.push(`shoot ${path}`);
             writeFileSync(file, 'png');
+            const refusal = pageRefusal(pages[path] ?? { status: 200, notFound: [] });
+            return refusal === undefined ? { shown: true } : { shown: false, reason: refusal };
           },
           async close() {
             events.push('close');
@@ -177,8 +197,28 @@ describe('captureScreenshots — boot, seed, shoot, stop', () => {
   it('a browser that writes no file is an error, and the app is still stopped', async () => {
     const app = new FakeApp();
     const { events, deps } = doubles(app);
-    deps.browser = { open: async () => ({ capture: async () => {}, close: async () => void events.push('close') }) };
+    deps.browser = { open: async () => ({ capture: async () => ({ shown: true }), close: async () => void events.push('close') }) };
     await expect(captureScreenshots({ scenario: orderCard(), projectDir: '/p', artifact: orderBuild(), dir: tempDir('shots') }, deps)).rejects.toThrow(/the browser wrote no screenshot for list/);
+    expect(events.slice(-2)).toEqual(['close', 'stop']);
+  });
+
+  it('⛔ a page the Console did not show is no proof: a non-2xx or a not-found view is skipped with its reason, and its file is gone', async () => {
+    const app = new FakeApp();
+    const base = '/_console/apps/demoorder_order_to_cash';
+    const { events, deps } = doubles(app, {
+      [`${base}/demoorder_account`]: { status: 500, notFound: [] },
+      [`${base}/demoorder_account/record/a01`]: { status: 200, notFound: ['record-page-not-found'] },
+    });
+    const dir = tempDir('shots');
+    const r = await captureScreenshots({ scenario: orderCard(), projectDir: '/p', artifact: orderBuild(), dir }, deps);
+    expect(r.shots.map((s) => s.kind)).toEqual(['dashboard']);
+    expect(r.skipped).toEqual([
+      { kind: 'list', reason: `the Console did not show ${base}/demoorder_account: the navigation answered HTTP 500` },
+      { kind: 'record', reason: `the Console did not show ${base}/demoorder_account/record/a01: the Console drew its not-found view (record-page-not-found)` },
+    ]);
+    expect(existsSync(join(dir, 'screenshots/list.png'))).toBe(false);
+    expect(existsSync(join(dir, 'screenshots/record.png'))).toBe(false);
+    expect(existsSync(join(dir, 'screenshots/dashboard.png'))).toBe(true);
     expect(events.slice(-2)).toEqual(['close', 'stop']);
   });
 

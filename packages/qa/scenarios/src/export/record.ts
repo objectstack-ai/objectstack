@@ -123,11 +123,33 @@ export function readRunRecords(runsDir: string): ReadRecordsResult {
   return { newest, ignored };
 }
 
-/** Every string in `value` with the run's local work directory replaced by `$WORK`: a local path is not gallery content. */
-export function redactWorkDir<T>(value: T, workDir: string): T {
-  if (workDir.replace(/\/+$/, '') === '') return value; // `/` names no run of its own
+/**
+ * A work directory is only that directory where it is not part of a longer
+ * name: not preceded by a path-name character or `/` (`/x/tmp` is not `/tmp`),
+ * and not followed by one (`/tmpfoo`) — a `.` that ends a sentence does not
+ * lengthen it, a `.` that starts a suffix (`/tmp.d`) does.
+ */
+const BEFORE = '(?<![A-Za-z0-9._~/-])';
+const AFTER = '(?![A-Za-z0-9_~-]|\\.[A-Za-z0-9._~-])';
+
+/**
+ * Every string in `value` with each of the run's local work directories
+ * replaced by `$WORK`: a local path is not gallery content.
+ *
+ * More than one directory can name the same run. The record carries the
+ * directory of the machine that ran it (`evidenceDir`, and every build tail and
+ * error text that names it), and `--work` names where the projects are read on
+ * this one. Each is replaced, longest first so one that contains another is
+ * replaced whole, and only at a path-name boundary, so `/tmp` never rewrites
+ * `/tmpfoo`. `/` (or an empty string) names no run of its own and is skipped.
+ */
+export function redactWorkDir<T>(value: T, workDirs: string | readonly string[]): T {
+  const dirs = [...new Set((typeof workDirs === 'string' ? [workDirs] : workDirs).map((d) => d.replace(/\/+$/, '')).filter((d) => d !== ''))].sort((x, y) => y.length - x.length);
+  if (dirs.length === 0) return value;
+  const escape = (d: string) => d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`${BEFORE}(?:${dirs.map(escape).join('|')})${AFTER}`, 'g');
   const walk = (v: unknown): unknown => {
-    if (typeof v === 'string') return v.split(workDir).join('$WORK');
+    if (typeof v === 'string') return v.replace(re, '$$WORK');
     if (Array.isArray(v)) return v.map(walk);
     if (typeof v === 'object' && v !== null) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
     return v;

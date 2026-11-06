@@ -11,7 +11,12 @@
  *                        file a `--driver recorded:F` run replayed); repeatable
  *   --cards DIR          the card directory (default: the repo's docs/qa/scenarios)
  *   --work DIR           read the projects here, not at each record's `evidenceDir`
- *   --no-screenshots     export without screenshots (no app is booted)
+ *                        (both directories are redacted to `$WORK` in the output)
+ *   --no-screenshots     export without screenshots (no app is booted); an app
+ *                        whose previous export had screenshots is kept as it was
+ *
+ * A runs directory with no scenario record, over an index that lists apps,
+ * exits non-zero and touches nothing (a wrong `--runs`, never "every app gone").
  *   --chromium PATH      the Chromium executable for the screenshots
  *
  * It writes only under `--out`; it pushes nothing anywhere. ⛔ It exports only
@@ -70,9 +75,10 @@ export function renderSummary(s: ExportSummary): string[] {
   for (const e of s.exported) lines.push(`exported ${e.id} · ${e.screenshots.length} screenshot(s)${e.skippedShots.map((k) => ` · no ${k.kind}: ${k.reason}`).join('')}`);
   for (const r of s.refused) lines.push(`refused  ${r.id} · ${r.reasons.join(' · ')}`);
   for (const r of s.removed) lines.push(`removed  ${r.id} · ${r.why}`);
+  for (const k of s.kept) lines.push(`kept     ${k.id} · ${k.why}`);
   for (const u of s.unowned) lines.push(`left     apps/${u} · not in the previous index, so not the exporter's`);
   for (const f of s.ignoredFiles) lines.push(`ignored  ${f} · not a scenario-runner record`);
-  lines.push(`index.json ${s.indexChanged ? 'written' : 'unchanged'} · ${s.exported.length} exported, ${s.refused.length} refused, ${s.removed.length} removed`);
+  lines.push(`index.json ${s.indexChanged ? 'written' : 'unchanged'} · ${s.exported.length} exported, ${s.refused.length} refused, ${s.removed.length} removed, ${s.kept.length} kept`);
   return lines;
 }
 
@@ -103,7 +109,7 @@ export async function main(argv: readonly string[], deps: ExportCliDeps = {}): P
     ...(args.work ? { workDir: resolve(args.work) } : {}),
     screenshots,
   });
-  for (const line of renderSummary(summary)) (line.startsWith('refused') || line.startsWith('removed') ? console.error : console.log)(line);
+  for (const line of renderSummary(summary)) (/^(refused|removed|kept) /.test(line) ? console.error : console.log)(line);
   return 0;
 }
 

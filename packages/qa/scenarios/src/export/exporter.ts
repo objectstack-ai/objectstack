@@ -20,7 +20,7 @@
  *
  *   apps/<id>/README.md               what the app is, its scorecard, the files
  *   apps/<id>/source/…                the authored metadata source (`source.ts`)
- *   apps/<id>/run-record.json         the run record, the work directory redacted
+ *   apps/<id>/run-record.json         the run record, the work directories redacted (`workDirsOf`)
  *   apps/<id>/scorecard.json|.md      the per-half scorecard
  *   apps/<id>/transcript.json|.md     the per-persona 问数 transcript
  *   apps/<id>/screenshots/<kind>.png  list, kanban/calendar, record, dashboard
@@ -31,10 +31,16 @@
  * is gone or not generic, its project is gone — is deleted and leaves the
  * index; the summary names why. A directory under `apps/` the index never
  * listed is not the exporter's and is left alone (and named). Nothing is
- * deleted when the previous index does not validate.
+ * touched when the previous index does not validate, or when the runs
+ * directory holds no scenario record while the index lists apps (a wrong
+ * `--runs`, never "every app gone").
+ *
+ * An export without screenshots (`screenshots: false`) never replaces an app
+ * whose previous export had them: the old directory and entry are kept, and
+ * the summary says so (`kept`). It still removes an app that no longer passes.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import type { LoadedScenario } from '../loader.js';
@@ -95,6 +101,11 @@ export interface ExportSummary {
   refused: Array<{ id: string; reasons: string[] }>;
   /** Apps the previous index listed that this export deleted. */
   removed: Array<{ id: string; why: string }>;
+  /**
+   * Apps that would have exported, kept as the previous export left them
+   * instead: an export without screenshots never replaces one that had them.
+   */
+  kept: Array<{ id: string; why: string }>;
   /** Directories under `apps/` the exporter does not own, left as they were. */
   unowned: string[];
   /** JSON files in the runs directory that are not scenario-runner records. */
@@ -155,6 +166,25 @@ function writeTree(dir: string, files: Iterable<[string, string | Buffer]>): voi
   }
 }
 
+/**
+ * Every absolute directory that names this run's work directory: the record's
+ * own `evidenceDir` (the machine that ran it — every build tail and error text
+ * names it), `--work` when the projects are read elsewhere, and the real path
+ * of each that exists here (a symbolic-linked temp directory). Each is redacted
+ * from everything the gallery receives.
+ */
+export function workDirsOf(recordEvidenceDir: string, workDir: string | undefined): string[] {
+  const dirs = [recordEvidenceDir, ...(workDir !== undefined ? [workDir] : [])];
+  for (const d of [...dirs]) {
+    try {
+      dirs.push(realpathSync(d));
+    } catch {
+      // not on this machine: the record's directory, moved off it
+    }
+  }
+  return [...new Set(dirs)];
+}
+
 export async function exportGallery(opts: ExportOptions): Promise<ExportSummary> {
   const isGeneric = opts.isGeneric ?? NO_GENERIC_MARKER;
   const appsDir = join(opts.outDir, 'apps');
@@ -171,10 +201,17 @@ export async function exportGallery(opts: ExportOptions): Promise<ExportSummary>
     }
   }
   const { newest, ignored } = readRunRecords(opts.runsDir);
+  // An empty or wrong `--runs` would otherwise read as "every app lost its record" and delete the gallery.
+  if (newest.size === 0 && (previous?.apps.length ?? 0) > 0) {
+    throw new Error(
+      `${opts.runsDir} holds no scenario run record, and ${indexFile} lists ${previous!.apps.length} app(s), so nothing is touched: a runs directory with no record is read as a wrong --runs, never as every app gone`,
+    );
+  }
+  const previousById = new Map((previous?.apps ?? []).map((a) => [a.id, a]));
   const turns = mergeRecordings(opts.recordings);
   const cards = new Map(opts.cards.map((s) => [s.card.id, s]));
 
-  const summary: ExportSummary = { exported: [], refused: [], removed: [], unowned: [], ignoredFiles: ignored, indexChanged: false };
+  const summary: ExportSummary = { exported: [], refused: [], removed: [], kept: [], unowned: [], ignoredFiles: ignored, indexChanged: false };
   const entries: GalleryApp[] = [];
   mkdirSync(appsDir, { recursive: true });
 
@@ -184,6 +221,14 @@ export async function exportGallery(opts: ExportOptions): Promise<ExportSummary>
     rmSync(staging, { recursive: true, force: true });
     try {
       const done = await exportOne(id, rf, cards.get(id), staging, isGeneric, turns, opts);
+      const old = previousById.get(id);
+      if (opts.screenshots === false && old && old.screenshots.length > 0 && existsSync(join(appsDir, id))) {
+        // It still passes, but this export has no screenshots: the old directory and entry stand, shots and all.
+        rmSync(staging, { recursive: true, force: true });
+        entries.push(old);
+        summary.kept.push({ id, why: `exported without screenshots, and the previous export has ${old.screenshots.length}: it is kept as it was, and not replaced by an entry with none` });
+        continue;
+      }
       rmSync(join(appsDir, id), { recursive: true, force: true });
       renameSync(staging, join(appsDir, id));
       entries.push(done.entry);
@@ -194,7 +239,7 @@ export async function exportGallery(opts: ExportOptions): Promise<ExportSummary>
     }
   }
 
-  const exported = new Set(entries.map((e) => e.id));
+  const exported = new Set(entries.map((e) => e.id)); // written or kept
   const refusedWhy = new Map(summary.refused.map((r) => [r.id, r.reasons.join('; ')]));
   for (const old of previous?.apps ?? []) {
     if (exported.has(old.id)) continue;
@@ -237,7 +282,8 @@ async function exportOne(
   if (artifact === undefined) throw new Refused([`${projectDir} holds no dist/objectstack.json`]);
   const source = readAuthoredSource(projectDir);
   const frameworkVersion = projectFrameworkVersion(projectDir);
-  const transcript = redactWorkDir(buildTranscript(scenario, record, turns), workDir);
+  const redact = <T,>(v: T): T => redactWorkDir(v, workDirsOf(record.evidenceDir, opts.workDir));
+  const transcript = redact(buildTranscript(scenario, record, turns));
 
   let shots: PlannedShot[] = [];
   let skipped: SkippedShot[] = [];
@@ -247,7 +293,7 @@ async function exportOne(
     skipped = taken.skipped;
   }
 
-  const scorecard = redactWorkDir(record.scorecard as unknown as CardScorecard, workDir);
+  const scorecard = redact(record.scorecard as unknown as CardScorecard);
   const entry: GalleryApp = {
     id,
     code: card.code,
@@ -267,12 +313,12 @@ async function exportOne(
 
   writeTree(join(staging, APP_LAYOUT.source), source.files);
   writeTree(staging, [
-    [APP_LAYOUT.runRecord, json(redactWorkDir(rf.raw, workDir))],
+    [APP_LAYOUT.runRecord, json(redact(rf.raw))],
     [APP_LAYOUT.scorecardJson, json(scorecard)],
     [APP_LAYOUT.scorecardMd, `${renderScorecard(scorecard)}\n`],
     [APP_LAYOUT.transcriptJson, json(transcript)],
     [APP_LAYOUT.transcriptMd, renderTranscript(transcript, card.title)],
-    [APP_LAYOUT.readme, appReadme(scenario, entry, judgement, scorecard, shots, skipped)],
+    [APP_LAYOUT.readme, redact(appReadme(scenario, entry, judgement, scorecard, shots, skipped))],
   ]);
   return { entry, shots, skipped };
 }

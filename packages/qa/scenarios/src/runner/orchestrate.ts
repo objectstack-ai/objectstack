@@ -383,10 +383,19 @@ async function buildHalf(
  * because a faithful build models it as a user lookup, which refuses the
  * handle text. Any other scope field names a row or an option and is sent
  * verbatim.
+ *
+ * The tally is kept in `seed` as each row is loaded, and `seed` is what is
+ * returned: when an insert throws, the caller's tally already holds what was
+ * inserted and refused before it (the record shows the partial seed next to the
+ * half's error).
  */
-export async function seedApp(scenario: LoadedScenario, app: AppHarness, accounts: readonly PersonaAccount[]): Promise<RunHalf['seed']> {
+export async function seedApp(
+  scenario: LoadedScenario,
+  app: AppHarness,
+  accounts: readonly PersonaAccount[],
+  seed: RunHalf['seed'] = { inserted: 0, refused: [] },
+): Promise<RunHalf['seed']> {
   const { card } = scenario;
-  const seed: RunHalf['seed'] = { inserted: 0, refused: [] };
   const handles = personaHandles(card);
   const ownerFields = new Set(card.run.personas.flatMap((p) => (p.scope ?? []).filter((s) => !s.field.includes('.')).map((s) => `${s.object}.${s.field}`)));
   const userFields = userHandleFields(card);
@@ -434,7 +443,7 @@ export async function runHalf(
     }
     const adminKey = await app.adminApiKey();
 
-    half.seed = await seedApp(scenario, app, accounts);
+    await seedApp(scenario, app, accounts, half.seed); // tallied in place, so a throw keeps the partial seed
 
     const keyOf = (persona: string | null) => (persona === null ? adminKey : accounts.find((a) => a.persona === persona)!.apiKey);
     // A refused seed row makes what reads it not measured — never a fail of the app's answer.

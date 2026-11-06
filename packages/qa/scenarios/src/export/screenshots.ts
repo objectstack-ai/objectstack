@@ -24,13 +24,19 @@
  *   - `dashboard`: a dashboard the card expects, else the build's first —
  *     `apps/<app>/dashboard/<name>`; skipped when the build declares none.
  *
+ * A page the Console did not show is never proof: a navigation that answers
+ * no response or a status outside 2xx (304, a revalidation, is the page), or a page that draws one of the
+ * Console's own not-found views ({@link CONSOLE_NOT_FOUND}), refuses that shot
+ * ({@link pageRefusal}). It is reported as a skipped shot with the reason, and
+ * no file of it is kept.
+ *
  * The browser is a seam ({@link ScreenshotBrowser}): {@link playwrightBrowser}
  * drives Chromium through `playwright-core`; the exporter's tests pass a
  * double. The exporter runs this step only when asked (`--no-screenshots`
  * skips it), so everything else is testable without a browser.
  */
 
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { resolveStackCollection } from '@objectstack/core';
@@ -148,10 +154,44 @@ export function planShots(original: LoadedScenario, artifact: unknown): ShotPlan
 
 // ── Capture ─────────────────────────────────────────────────────────────────
 
+/**
+ * The Console's own "nothing here" views, as a page shows them: the
+ * `data-testid`s of the object, record and form not-found states, and the
+ * title the app router's catch-all route draws (in the `en-US` locale the
+ * browser runs in). Read from the Console source (`ui/packages/app-shell`,
+ * `ui/apps/console`); a Console that drew a new one under another name would
+ * pass this check, so the HTTP status is checked first and alone suffices for
+ * a server error.
+ */
+export const CONSOLE_NOT_FOUND = {
+  testIds: ['object-not-found', 'object-package-disabled', 'record-page-not-found', 'form-not-found'],
+  titles: ['Page not found'],
+} as const;
+
+/** What a page showed, as {@link pageRefusal} judges it. */
+export interface PageReading {
+  /** The navigation's HTTP status; `null` when the navigation answered no response. */
+  status: number | null;
+  /** Which of {@link CONSOLE_NOT_FOUND}'s test ids and titles the page draws. */
+  notFound: string[];
+}
+
+/** Why a page is not a screenshot of the app, or `undefined` when it is one. */
+export function pageRefusal(page: PageReading): string | undefined {
+  if (page.status === null) return 'the navigation answered no response';
+  // 304: the browser revalidated a page it holds (each shot's page is visited twice), which is the page shown.
+  if ((page.status < 200 || page.status > 299) && page.status !== 304) return `the navigation answered HTTP ${page.status}`;
+  if (page.notFound.length > 0) return `the Console drew its not-found view (${page.notFound.join(', ')})`;
+  return undefined;
+}
+
+/** A capture's outcome: the page was shot, or it was not the app and nothing of it is proof. */
+export type CaptureOutcome = { shown: true } | { shown: false; reason: string };
+
 /** One signed-in browser page against a booted app. */
 export interface ScreenshotSession {
-  /** Open `path` under the app's origin and write a PNG to `file`. */
-  capture(path: string, file: string): Promise<void>;
+  /** Open `path` under the app's origin; when the page is the app ({@link pageRefusal}), write a PNG to `file`. */
+  capture(path: string, file: string): Promise<CaptureOutcome>;
   close(): Promise<void>;
 }
 
@@ -203,10 +243,16 @@ export async function captureScreenshots(input: CaptureInput, deps: CaptureDeps)
     }
     const session = await deps.browser.open(booted.url, deps.admin);
     try {
-      for (const shot of shots) {
+      for (const shot of [...shots]) {
         const file = join(input.dir, shot.file);
         mkdirSync(dirname(file), { recursive: true });
-        await session.capture(shot.path, file);
+        const outcome = await session.capture(shot.path, file);
+        if (!outcome.shown) {
+          rmSync(file, { force: true });
+          shots.splice(shots.indexOf(shot), 1);
+          skipped.push({ kind: shot.kind, reason: `the Console did not show ${shot.path}: ${outcome.reason}` });
+          continue;
+        }
         if (!existsSync(file)) throw new Error(`the browser wrote no screenshot for ${shot.kind} (${shot.path})`);
       }
     } finally {
@@ -241,11 +287,15 @@ export function playwrightBrowser(opts: PlaywrightBrowserOptions = {}): Screensh
         const signIn = await context.request.post(`${baseUrl}/api/v1/auth/sign-in/email`, { data: admin });
         if (!signIn.ok()) throw new Error(`the browser's admin sign-in was refused: ${signIn.status()}`);
         const page = await context.newPage();
-        const visit = async (path: string) => {
-          await page.goto(`${baseUrl}${path}`, { waitUntil: 'load' });
+        const visit = async (path: string): Promise<PageReading> => {
+          const response = await page.goto(`${baseUrl}${path}`, { waitUntil: 'load' });
           // A page that never goes quiet (a stream, a poll) is shot after the budget, not skipped.
           await page.waitForLoadState('networkidle', { timeout: opts.settleTimeoutMs ?? 30_000 }).catch(() => undefined);
           await page.waitForTimeout(1_000);
+          const notFound: string[] = [];
+          for (const id of CONSOLE_NOT_FOUND.testIds) if ((await page.locator(`[data-testid="${id}"]`).count()) > 0) notFound.push(id);
+          for (const title of CONSOLE_NOT_FOUND.titles) if ((await page.getByText(title, { exact: true }).count()) > 0) notFound.push(`"${title}"`);
+          return { status: response ? response.status() : null, notFound };
         };
         // An administrator's first visit to an app page can open first-run UI over it (measured on
         // 18.3: a default-currency dialog over the first app page, once per browser session; the
@@ -258,8 +308,10 @@ export function playwrightBrowser(opts: PlaywrightBrowserOptions = {}): Screensh
               await visit(path);
               warmed = true;
             }
-            await visit(path);
+            const refusal = pageRefusal(await visit(path));
+            if (refusal !== undefined) return { shown: false, reason: refusal };
             await page.screenshot({ path: file });
+            return { shown: true };
           },
           close: () => browser.close(),
         };
