@@ -13,6 +13,7 @@
 // guard and the code field's `valueDomain` judge each one.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { sanitizeRowError } from '@objectstack/core';
 import { ObjectQL } from './engine.js';
 import {
   backfillRecordCurrencyCodes,
@@ -484,8 +485,28 @@ describe('a failed row reads a sandboxed hook as the write doors do', () => {
     }
   });
 
-  it('CONTROL: any other throw keeps its message, as before', async () => {
+  it('CONTROL: a throw with no driver text keeps its message, as before', async () => {
     const { report } = await run(() => new Error('driver refused this row'));
     expect(report.failures).toEqual([{ recordId: 'r1', error: 'driver refused this row' }]);
+  });
+
+  /**
+   * [#30816] A driver's own throw carries its SQL, constraint and column names.
+   * The row reads the import row's cleaned sentence (`sanitizeRowError`, the
+   * one rule both doors call), the CLI's printed report reads the same, and
+   * the operator's log line keeps the whole text.
+   */
+  it('a driver-shaped throw: the import row\'s cleaned sentence, the raw text only in the log', async () => {
+    for (const raw of [
+      `update "deal" set "currency_code" = $1 where "id" = $2 - value too long for type character varying(3)`,
+      'SQLITE_CONSTRAINT: UNIQUE constraint failed: deal.currency_code',
+      `insert into "deal" ("id") values ($1) - insert or update on table "deal" violates foreign key constraint "deal_owner_fkey"`,
+    ]) {
+      const { report, warned } = await run(() => new Error(raw));
+      expect(report.failures, raw).toEqual([{ recordId: 'r1', error: sanitizeRowError(raw) }]);
+      expect(report.failures[0]!.error, raw).not.toMatch(/"deal"|\$1|currency_code|_fkey/);
+      expect(formatRecordCurrencyBackfillReport(report).join('\n'), raw).toContain(`  • r1: ${sanitizeRowError(raw)}`);
+      expect(warned.join('\n'), raw).toContain(raw);
+    }
   });
 });
