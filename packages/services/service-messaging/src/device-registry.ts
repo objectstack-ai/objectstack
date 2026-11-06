@@ -186,6 +186,7 @@ export class DeviceRegistry {
             platform: request.platform,
             app_id: request.appId ?? null,
             locale: request.locale ?? null,
+            origin: request.origin ?? null,
             name: request.name ?? null,
             enabled: true,
             invalidated_at: null,
@@ -296,6 +297,7 @@ function toUserDevice(row: DeviceRow): UserDevice {
     };
     if (row.app_id) device.appId = String(row.app_id);
     if (row.locale) device.locale = String(row.locale);
+    if (row.origin) device.origin = String(row.origin);
     if (row.name) device.name = String(row.name);
     const invalidatedAt = iso(row.invalidated_at);
     if (!enabled && invalidatedAt) device.invalidatedAt = invalidatedAt;

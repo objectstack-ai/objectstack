@@ -905,21 +905,32 @@ function MetadataResourceEditPageImpl({
   // warnings stay server-sourced. Mirrors the read-only banner's source
   // selection, flattened to a path-keyed, severity-tagged list.
   const previewDiagnostics = React.useMemo<
-    Array<{ path?: string; message: string; severity: 'error' | 'warning' }>
+    Array<{ path?: string; message: string; severity: 'error' | 'warning'; code?: string }>
   >(() => {
     // objectstack#26707 — the verdict on the body on screen: the pending
     // draft's (which carries what its publish would refuse) while one is held.
     const diag = serverDiagnostics;
+    // objectstack#30038 — a served error keeps its rule id (`code`), so the
+    // flow Problems list can word a refusal it knows in the Console's language.
     const errs = (hasClientValidator(type, draftMode)
       ? withServerOnlyErrors(displayIssues, diag?.errors)
       : (diag?.errors ?? [])
-    ).map((i) => ({ path: i.path, message: translateSchemaIssue(i, locale) }));
+    ).map((i) => ({
+      path: i.path,
+      message: translateSchemaIssue(i, locale),
+      code: 'code' in i && typeof i.code === 'string' && i.code ? i.code : undefined,
+    }));
     const warns = (diag?.warnings ?? []).map((i) => ({
       path: i.path,
       message: translateValidationMessage(i.message, locale),
     }));
     return [
-      ...errs.map((e) => ({ path: e.path || undefined, message: e.message, severity: 'error' as const })),
+      ...errs.map((e) => ({
+        path: e.path || undefined,
+        message: e.message,
+        severity: 'error' as const,
+        ...(e.code ? { code: e.code } : {}),
+      })),
       ...warns.map((w) => ({ path: w.path || undefined, message: w.message, severity: 'warning' as const })),
     ];
   }, [serverDiagnostics, displayIssues, type, locale, draftMode]);

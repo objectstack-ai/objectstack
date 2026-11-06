@@ -121,6 +121,17 @@ export const UserDevice = ObjectSchema.create({
                 + 'arrives in the recipient\'s language (their user locale, then the deployment default).',
         }),
 
+        origin: Field.text({
+            label: 'Server Origin',
+            required: false,
+            // No maxLength: spec's origin pattern (`system/push-server-origin.ts`)
+            // bounds the shape, not the length, so an unbounded column stores
+            // every origin the registration accepts.
+            description: 'The origin the Console was loaded from when it registered the device (for example '
+                + 'https://crm.example.com). Every push to the device carries it, so a mobile shell with several saved '
+                + 'servers opens the push on this one. Empty for a device registered without one.',
+        }),
+
         name: Field.text({
             label: 'Device Name',
             required: false,

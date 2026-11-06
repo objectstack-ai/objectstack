@@ -31,9 +31,7 @@ These top-level schema fields are passed as raw strings:
   types that declare them** (see "Rule: Bindable Text Keys"); read raw
   everywhere else. **Do not "move them to `props`"** to make an expression work
   on a type that does not declare them: under `props` they are evaluated and
-  then discarded, so the component paints an empty frame instead. On an
-  undeclared type, resolve the value in the host before handing the schema to
-  `SchemaRenderer`, or carry it on a `text` node's `content`.
+  then discarded, so the component paints an empty frame instead.
 - `className` — always a static Tailwind class string
 - `id` — always a static string
 - `type` — component type identifier
@@ -95,10 +93,9 @@ declaration rather than keeping its own copy.
 ```
 
 On any other component type these four keys are read **raw**: the expression
-reaches the screen as literal text. There is no way to opt a type in from
-metadata — a new type/key pair is a change to the spec's declaration, not
-something the renderer infers. Until then, resolve the value in the host, or
-use a `text` node's `content`, which every type evaluates.
+reaches the screen as literal text. Resolve the value in the host before
+handing the schema to `SchemaRenderer`, or use a `text` node's `content`,
+which every type evaluates.
 
 ## Rule: Keys Live on the Node, Not in a `props` Envelope
 
@@ -247,8 +244,7 @@ nothing thrown, a console warning each (`[ObjectUI] DataTable data:`; the
 dev-build `props`-bag warning). **Do not read
 that empty table as "the provider has no data."** The route this skill teaches
 is the last row — the host resolves the array and puts it on the node — for the
-reason given under "Rule: Keys Live on the Node": the third row works today,
-but its channel is an open contract question, not a taught surface.
+reason given under "Rule: Keys Live on the Node".
 
 ## Rule: Actions Are Node Types, Not An Event Bag
 
@@ -307,7 +303,11 @@ form-supported type (`select`, `lookup`, `date`, `file`, `image`, `richtext`,
 ```
 
 - Inline params: `name` + `type` + widget config (`options`, `multiple`,
-  `accept`, `maxSize`, `defaultValue`, `placeholder`, `helpText`).
+  `accept`, `maxSize`, `defaultValue`, `placeholder`, `helpText`, `widget`).
+  `widget` names a registered field widget that draws the param instead of
+  its `type` widget (`'permission-ref'` on a `text` param is the
+  permission-set picker); an unregistered name keeps the `type` widget, and
+  the selection bar's bulk dialog ignores it. The server validates by `type`.
 - Field-backed params: `field` (+ `objectOverride`) inherits label, type,
   options, lookup config, `multiple`/`accept`/`maxSize` from the object field;
   inline properties override.

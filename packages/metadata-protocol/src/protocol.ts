@@ -4613,6 +4613,18 @@ export class ObjectStackProtocolImplementation implements
      *         layer's MetadataService read reporting `degraded` with nothing
      *         in the registry to answer instead, carrying the failing loaders'
      *         messages on `cause`.
+     *
+     * [#29814] `opts.withDraft` adds the `draft` layer
+     * (`GetMetaItemLayeredResponseSchema.draft`): the pending draft row the
+     * strict `state: 'draft'` read of {@link getMetaItem} serves, at that
+     * read's address, AS STORED — converted like the `overlay` layer and
+     * credential-redacted like every layer, never governed, translated or
+     * stamped — or `null` when no draft is pending. Without the option the
+     * answer carries no `draft` key ("not served"). Only a door that has
+     * admitted its caller to pending drafts (`mayReadPendingDrafts` in
+     * `@objectstack/rest`, and its runtime twin) asks for it; every other
+     * reader of this method reads no draft. A failed draft read throws, as
+     * the overlay read does, for the same [#5707] reason.
      */
     async getMetaItemLayered(request: {
         type: string;
@@ -4620,13 +4632,15 @@ export class ObjectStackProtocolImplementation implements
         packageId?: string;
         /** [#26699] The bundle member whose layers to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string;
-    }): Promise<{
+    }, opts: { withDraft?: boolean } = {}): Promise<{
         type: string;
         name: string;
         code: unknown | null;
         overlay: unknown | null;
         overlayScope: 'env' | null;
         effective: unknown | null;
+        /** [#29814] The pending draft row as stored, only when `opts.withDraft` asked; `null` for none. */
+        draft?: unknown | null;
         /**
          * Load-time validation result for the effective payload — same
          * shape attached to getMetaItems/getMetaItem by
@@ -4657,7 +4671,7 @@ export class ObjectStackProtocolImplementation implements
         resettable: boolean;
     }> {
         // [#25467 E1] The body moved to `protocol-meta-layered-reads.ts`; it reaches this class through `protocol-host.ts`.
-        return getMetaItemLayered(protocolHost(this), request);
+        return getMetaItemLayered(protocolHost(this), request, opts);
     }
 
     /**
@@ -12458,13 +12472,14 @@ export class ObjectStackProtocolImplementation implements
             // discipline every advisory-carrying door follows: an advisory-free
             // element's bytes are unchanged, and absence means "nothing to
             // report", never "the gate did not run".
-            published.push({
+            const element: (typeof published)[number] = {
                 // [#21207] Each element's version token is keyed, like the
                 // single-item doors' (`receiptVersion`); `p.version` stays the
                 // stored hash for everything internal.
                 type: p.d.type, name: p.d.name, version: await this.receiptVersion(p.version),
-                ...(p.advisories.length > 0 ? { advisories: p.advisories } : {}),
-            });
+                ...(p.advisories.length > 0 ? { advisories: [...p.advisories] } : {}),
+            };
+            published.push(element);
             try {
                 const eff = await this.runPublishSideEffects({
                     singularType: p.singularType,
@@ -12474,6 +12489,16 @@ export class ObjectStackProtocolImplementation implements
                     ...(request.actor ? { actor: request.actor } : {}),
                     skipSeedApply: true,
                 });
+                // [#30693] A refused object-storage sync rides THIS element's
+                // `advisories`, the same `object-storage-sync-refused` warning
+                // `publishMetaItem` and a publish-mode save answer (#30635).
+                // The metadata is live and the element stays published; before
+                // this, only the server log said the table was not created or
+                // altered. Appended after the gate's findings, still
+                // omitted-when-empty: a clean sync adds no key.
+                if (eff.storageRefused) {
+                    element.advisories = [...(element.advisories ?? []), eff.storageRefused];
+                }
                 if (eff.materializeApplied) {
                     materialize.any = true;
                     materialize.inserted += eff.materializeApplied.inserted;
