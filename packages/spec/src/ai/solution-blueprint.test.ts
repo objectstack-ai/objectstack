@@ -1260,6 +1260,21 @@ describe('blueprint widget `aggregate` and calendar view `startDateField`', () =
     }
   });
 
+  it('no aggregate describe promises a default when it is unset; both read the one refusal rule', () => {
+    // Ruling B on cloud#3607: a reader may refuse a widget that names a
+    // `measure` and leaves `aggregate` unset, so neither side may tell the
+    // design model that a default stands in for it.
+    const widgetShape = (root: any) => root.shape.dashboards.unwrap().element.shape.widgets.unwrap().element.shape;
+    const [lenient, strict]: string[] = [SolutionBlueprintSchema, SolutionBlueprintStrictSchema]
+      .map((root) => widgetShape(root).aggregate.description);
+    for (const text of [lenient, strict]) {
+      expect(text).not.toMatch(/reader's own default|default of its own|falls back/i);
+      expect(text).toMatch(/may refuse it/);
+    }
+    // The strict mirror's null stays legal for a count widget, and says so.
+    expect(strict).toMatch(/null on a count widget/);
+  });
+
   it('accepts startDateField on a calendar view on both sides', () => {
     expect(SolutionBlueprintStrictSchema.parse(strictView({ startDateField: 'interview_date' })).views?.[0].startDateField)
       .toBe('interview_date');

@@ -36,7 +36,7 @@ import type { Flow } from '@objectstack/spec/automation';
  * `config.organization`. See the file header.
  */
 export const TaskReminderFlow: Flow = {
-  name: 'task_reminder',
+  name: 'todo_task_reminder',
   label: 'Task Reminder Notification',
   description: 'Automated flow to send reminders for tasks approaching their due date',
   type: 'schedule',
@@ -150,7 +150,7 @@ export const TaskReminderFlow: Flow = {
  * `config.organization`. See the file header.
  */
 export const OverdueEscalationFlow: Flow = {
-  name: 'overdue_escalation',
+  name: 'todo_overdue_escalation',
   label: 'Overdue Task Escalation',
   description: 'Escalates tasks that have been overdue for more than 3 days',
   type: 'schedule',
@@ -163,7 +163,7 @@ export const OverdueEscalationFlow: Flow = {
   ],
 
   nodes: [
-    // No `objectName` here either: see `task_reminder`'s start node.
+    // No `objectName` here either: see `todo_task_reminder`'s start node.
     { id: 'start', type: 'start', label: 'Start (Daily 9 AM)', config: { schedule: '0 9 * * *' } },
     {
       id: 'get_overdue_tasks', type: 'get_record', label: 'Get Severely Overdue Tasks',
@@ -175,7 +175,7 @@ export const OverdueEscalationFlow: Flow = {
       },
     },
     {
-      // #19206 — same repair as `task_reminder` above, and this is the flow
+      // #19206 — same repair as `todo_task_reminder` above, and this is the flow
       // where the omission was MEASURED: with the per-item steps wired as
       // ordinary nodes AFTER a body-less `loop`, `currentTask` was never
       // bound, and the run died at `update_priority` with "refusing to run -
@@ -262,7 +262,7 @@ export const OverdueEscalationFlow: Flow = {
 
 /** Task Completion Flow */
 export const TaskCompletionFlow: Flow = {
-  name: 'task_completion',
+  name: 'todo_task_completion',
   label: 'Task Completion Process',
   description: 'Flow triggered when a task is marked as complete',
   type: 'record_change',
@@ -441,7 +441,7 @@ export const TaskCompletionFlow: Flow = {
 
 /** Quick Add Task Flow — screen flow for quickly adding tasks */
 export const QuickAddTaskFlow: Flow = {
-  name: 'quick_add_task',
+  name: 'todo_quick_add_task',
   label: 'Quick Add Task',
   description: 'Screen flow for quickly creating a new task',
   type: 'screen',

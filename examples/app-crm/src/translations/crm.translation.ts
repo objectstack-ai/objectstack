@@ -333,7 +333,7 @@ export const CrmTranslationBundle = defineTranslationBundle({
       },
     },
     dashboards: {
-      pipeline_dashboard: {
+      crm_pipeline_dashboard: {
         label: '销售漏斗',
         description: '销售漏斗一览，并与之前的周期对比。',
         widgets: {
@@ -366,7 +366,7 @@ export const CrmTranslationBundle = defineTranslationBundle({
     },
     // The names a dashboard draws under its tiles and on its chart axes.
     datasets: {
-      opportunity_metrics: {
+      crm_opportunity_metrics: {
         label: '商机指标',
         description: '销售漏斗的商机数与金额。',
         dimensions: {
@@ -411,9 +411,9 @@ export const CrmTranslationBundle = defineTranslationBundle({
     // The security catalog: what an admin assigns a person to, and what
     // Setup lists under it.
     positions: {
-      sales_rep: { label: '销售代表', description: '一线销售代表。' },
-      sales_manager: { label: '销售经理', description: '管理一支销售代表团队。' },
-      finance_approver: { label: '财务审批人', description: '有权审批 30% 以上折扣的财务团队成员。' },
+      crm_sales_rep: { label: '销售代表', description: '一线销售代表。' },
+      crm_sales_manager: { label: '销售经理', description: '管理一支销售代表团队。' },
+      crm_finance_approver: { label: '财务审批人', description: '有权审批 30% 以上折扣的财务团队成员。' },
     },
     permissions: {
       crm_sales_user: { label: 'CRM 销售用户' },
