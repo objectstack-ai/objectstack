@@ -139,12 +139,21 @@ describe("a defineStack-built push block reaches the PushServicePlugin serve con
     ['no push key', {}],
     ['push: {}', { push: {} }],
     ["push: { transport: 'relay' }", { push: { transport: 'relay' as const } }],
-  ])('%s is refused at boot, naming the missing relay sender and the direct transport', (_name, extra) => {
+  ])('%s reaches the plugin as the relay; under OS_CLOUD_URL=off it is refused at boot, naming the air gap and the direct transport', (_name, extra) => {
     const stack = defineStack({ manifest, requires: ['push'], ...extra });
     const boot = () => argumentFor('push', stack, {});
-    expect(boot).toThrow(servicePush.PUSH_RELAY_NOT_SERVED_MESSAGE);
-    expect(boot).toThrow(/its sender has not shipped/);
-    expect(boot).toThrow(/transport: 'direct'/);
+    const saved = process.env.OS_CLOUD_URL;
+    try {
+      delete process.env.OS_CLOUD_URL;
+      expect(boot()).toEqual({ config: { transport: 'relay' } });
+      process.env.OS_CLOUD_URL = 'off';
+      expect(boot).toThrow(servicePush.PUSH_RELAY_AIR_GAPPED_MESSAGE);
+      expect(boot).toThrow(/declared it has no control plane/);
+      expect(boot).toThrow(/transport: 'direct'/);
+    } finally {
+      if (saved === undefined) delete process.env.OS_CLOUD_URL;
+      else process.env.OS_CLOUD_URL = saved;
+    }
   });
 
   it('an inline secret in a configuration defineStack never built is refused at boot, by name, value not echoed', () => {

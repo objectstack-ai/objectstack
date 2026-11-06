@@ -14,10 +14,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ObjectKernel } from './kernel.js';
 import { LiteKernel } from './lite-kernel.js';
-import { isCloudManaged, resetCloudManagedForTesting, resolveControlPlaneApiKey } from './stack-auth.js';
+import { isCloudManaged, isControlPlaneDeclined, resetCloudManagedForTesting, resolveControlPlaneApiKey } from './stack-auth.js';
 import type { Plugin } from './types.js';
 
-const ENV_VARS = ['OS_CLOUD_MANAGED', 'OS_CLOUD_API_KEY', 'NODE_ENV'] as const;
+const ENV_VARS = ['OS_CLOUD_MANAGED', 'OS_CLOUD_API_KEY', 'OS_CLOUD_URL', 'NODE_ENV'] as const;
 const saved = Object.fromEntries(ENV_VARS.map((k) => [k, process.env[k]]));
 beforeEach(() => {
   for (const k of ENV_VARS) delete process.env[k];
@@ -115,6 +115,19 @@ describe('resolveControlPlaneApiKey — the one derivation of "a control plane i
     expect(resolveControlPlaneApiKey()).toBe('env-key');
     expect(resolveControlPlaneApiKey(' cfg-key ')).toBe('cfg-key');
     expect(resolveControlPlaneApiKey('')).toBe('');
+  });
+});
+
+describe('isControlPlaneDeclined — the one reader of the "no control plane" spellings (#29920)', () => {
+  it('answers the four documented spellings, any case, from the argument or OS_CLOUD_URL; empty and a URL are not one', () => {
+    for (const spelling of ['off', 'none', 'local', 'disabled', ' OFF ']) expect(isControlPlaneDeclined(spelling)).toBe(true);
+    expect(isControlPlaneDeclined('')).toBe(false);
+    expect(isControlPlaneDeclined('https://cloud.example.com')).toBe(false);
+    expect(isControlPlaneDeclined()).toBe(false);
+    process.env.OS_CLOUD_URL = 'off';
+    expect(isControlPlaneDeclined()).toBe(true);
+    // The host's explicit argument is asked about itself, not the environment.
+    expect(isControlPlaneDeclined('https://cloud.example.com')).toBe(false);
   });
 });
 

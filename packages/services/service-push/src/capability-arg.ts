@@ -3,7 +3,7 @@
 /**
  * What `PushServicePlugin` is constructed with on a served boot: the stack
  * definition's `push` key, parsed by `PushServiceConfigSchema` — and refused,
- * before the kernel boots, when this package cannot deliver through it.
+ * before the kernel boots, when this package can never deliver through it.
  *
  * ## Why this lives here, and not in `@objectstack/cli` or `@objectstack/core`
  *
@@ -23,10 +23,13 @@
  * operator meets the refusal as the `push` capability failing to start, with
  * the reason, before any service is registered:
  *
- *  - **The relay transport**, which is also what an absent `push` key and an
- *    empty one read as. Its sender has not shipped, so nothing would deliver
- *    through it; booting would mount the `push` channel and every push would
- *    look sent. ({@link PUSH_RELAY_NOT_SERVED_MESSAGE}.)
+ *  - **The relay transport on a deployment that declared it has no control
+ *    plane** (`OS_CLOUD_URL=off`, …), the relay being also what an absent
+ *    `push` key and an empty one read as. The relay is hosted by the cloud, so
+ *    nothing could ever deliver through it there; booting would mount the
+ *    `push` channel and every push would look sent.
+ *    ({@link PUSH_RELAY_AIR_GAPPED_MESSAGE}.) Anywhere else the relay boots,
+ *    bound or not: an unbound server binds while it runs.
  *  - **A configuration the schema refuses**, an inline secret first among
  *    them. `defineStack` refuses it at authoring, but a compiled artifact or a
  *    plain config object reaches the boot without passing it, so the boot
@@ -38,8 +41,9 @@
  * transport reads when it first signs.
  */
 
+import { isControlPlaneDeclined } from '@objectstack/core';
 import { PushServiceConfigSchema, type PushServiceConfigParsed } from '@objectstack/spec/system';
-import { PUSH_RELAY_NOT_SERVED_MESSAGE } from './push-plugin.js';
+import { PUSH_RELAY_AIR_GAPPED_MESSAGE } from './push-plugin.js';
 
 /** Constructor options for `PushServicePlugin`, as the capability loop builds them. */
 export interface PushCapabilityArg {
@@ -48,8 +52,9 @@ export interface PushCapabilityArg {
 
 /**
  * Resolve `PushServicePlugin` constructor options from the stack definition's
- * `push` key. Throws on a relay configuration (absent and `{}` included) and on
- * any configuration `PushServiceConfigSchema` refuses.
+ * `push` key. Throws on a relay configuration (absent and `{}` included) when
+ * the deployment declared it has no control plane, and on any configuration
+ * `PushServiceConfigSchema` refuses.
  */
 export function resolvePushCapabilityArg(cfgPush: unknown = {}): PushCapabilityArg {
   const raw = cfgPush ?? {};
@@ -63,9 +68,9 @@ export function resolvePushCapabilityArg(cfgPush: unknown = {}): PushCapabilityA
     );
   }
   const config = verdict.data;
-  if (config.transport !== 'direct') {
+  if (config.transport === 'relay' && isControlPlaneDeclined()) {
     throw new Error(
-      `${PUSH_RELAY_NOT_SERVED_MESSAGE} On objectstack serve this is the stack definition's push key, and an absent `
+      `${PUSH_RELAY_AIR_GAPPED_MESSAGE} On objectstack serve this is the stack definition's push key, and an absent `
       + 'key reads as the relay too.',
     );
   }
