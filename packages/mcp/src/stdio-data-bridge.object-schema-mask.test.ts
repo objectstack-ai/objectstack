@@ -48,7 +48,7 @@ const OBJECT = FLS_CONTRACT_OBJECT.name;
 const account = () => JSON.parse(JSON.stringify(FLS_CONTRACT_OBJECT));
 
 /** Does `name` occur in `text` as an identifier token? */
-const mentions = (text: string, name: string) => (text.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []).includes(name);
+const mentions = (text: string, name: string) => (text.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? ([] as string[])).includes(name);
 
 interface ToolAnswer {
   isError: boolean;

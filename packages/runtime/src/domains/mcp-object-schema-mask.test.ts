@@ -165,7 +165,6 @@ describe('[ADR-0106] HTTP MCP bridge object-schema reads — the shared case tab
 describe('[ADR-0106] HTTP MCP bridge and the /metadata object door agree — the real security layer', () => {
     const OBJ = 'mcp_fls_ledger';
     const DENIED = 'secret_margin';
-    const SYS_CTX = { isSystem: true, userId: 'usr_system' };
     let engine: ObjectQL;
     let services: Record<string, any>;
     let allFields: string[];
@@ -266,7 +265,7 @@ describe('[ADR-0106] HTTP MCP bridge and the /metadata object door agree — the
         } as any, 'GET');
         // The answer, or the refusal it raised — whichever the door gave.
         const describe: any = await bridge.describeObject(OBJ).catch((error: unknown) => error);
-        return { bridge, describe, meta: { status: meta.response.status, item: meta.response.body?.data?.item } };
+        return { bridge, describe, meta: { status: meta.response?.status, item: meta.response?.body?.data?.item } };
     }
 
     it('precondition: the denied field is declared and stored', () => {
