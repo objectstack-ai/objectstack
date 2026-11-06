@@ -20,6 +20,9 @@ import {
   // `single` in force). The WIRING fact stays here -- see
   // `resolveAdmissionTenancyPosture` below.
   classifyAdmissionTenancyPosture,
+  // [ADR-0131 D3] The posture a `tenancy` service answers, read the same way
+  // on a host whose synchronous lookup is the only one it has.
+  effectiveTenancyPosture,
   type TenancyPostureSource,
   // ADR-0069 — the authentication-policy gate's ONE decision, called at this
   // family's door on the posture the shared resolver decided for whichever
@@ -33,6 +36,9 @@ import {
   apiKeyLifecyclePolicySourceOf,
   isApiKeyLifecycleRefusalError,
 } from '@objectstack/core';
+// [ADR-0131 D3 · D12 items 7–8 · D11] The walled refusal every door that writes
+// the environment's metadata asks, the `/meta` write doors among them.
+import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import type { ErrorCode } from '@objectstack/spec/api';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
@@ -122,6 +128,11 @@ const SERVICE_ERROR_CODE: Record<ServiceName, ErrorCode> = {
  * handler body runs. See `requireDatasourceAdmin` inside the registrar for how
  * both decisions are reached, why they have to be made here rather than
  * inherited from a seam, and why the capability is neither minted nor split.
+ *
+ * Under the walled tenancy postures the four routes that write a datasource
+ * record (create, update, remove, migrate-credential) admit only the platform
+ * operator as well, by the walled-catalog verdict the `/meta` write doors ask
+ * (see `DATASOURCE_ADMIN_CAPABILITY`).
  *
  * The catalog route is included on purpose. It needs no service and reveals no
  * deployment data, but the family's own route ledger dispositions it
@@ -293,16 +304,42 @@ function buildGetSession(ctx: PluginContext): ((headers: Headers) => Promise<unk
  * held at the same line for the reason the authentication floor gave: a family
  * whose floor has one hole has to be read route by route.
  *
- * ⚠️ Not a platform-admin gate. `admin_full_access` carries
+ * ⚠️ The capability is not a platform-admin gate. `admin_full_access` carries
  * `manage_platform_settings` in its `systemPermissions`
  * (`plugin-security/src/objects/default-permission-sets.ts`), so every platform
  * admin holds it already and needs no bypass; a deployment can equally grant it
- * to an operator set that is not a full admin. There is deliberately no
- * `isPlatformAdmin` / posture arm here — that would be a SECOND policy beside
- * the capability, and the sibling gate in `@objectstack/rest`'s
- * `package-routes.ts` reads the held set only, for the same reason.
+ * to an operator set that is not a full admin. The capability gate reads the
+ * held set only and grants no admission of its own.
+ *
+ * ## [ADR-0131 D3 · D12 items 7–8 · D11] Under a wall, a datasource write is the platform operator's
+ *
+ * A datasource is a `datasource` metadata item: a record of the environment's
+ * metadata catalog, which carries no organization column and is the same
+ * record `PUT /meta/datasource/:name` writes. Under the walled tenancy postures
+ * (`isolated`, `group`) every organization shares that catalog, and a write to
+ * it is admitted only for the platform operator rung and the engine's own
+ * writes. So every route of this family that writes a datasource record —
+ * create, update, remove and the credential migration — asks
+ * `walledCatalogWriteVerdict` (`@objectstack/metadata-core`) for the type
+ * `datasource` after the capability gate, the verdict the `/meta` write doors
+ * ask for the same record, and answers its refusal `403 PERMISSION_DENIED`
+ * with the verdict's sentence. The verdict is asked, never restated here: it is
+ * inert under `single` and when no `tenancy` service is registered, so on
+ * those deployments the capability gate decides alone, as before.
+ *
+ * The routes that write no record do not ask it: the list, the read, the
+ * driver catalog, the draft probe (`POST /test`), the saved-datasource probe
+ * (`POST /:name/test`), the remote-table listing and the object draft. None of
+ * them persists a datasource, and the object draft hands back a definition the
+ * caller saves through the `/meta` doors, which ask the verdict themselves.
  */
 export const DATASOURCE_ADMIN_CAPABILITY = 'manage_platform_settings';
+
+/**
+ * The metadata type a datasource record is stored as, named to the walled
+ * verdict by every route that writes one (see {@link DATASOURCE_ADMIN_CAPABILITY}).
+ */
+const DATASOURCE_METADATA_TYPE = 'datasource';
 
 export function registerDatasourceAdminRoutes(
   server: IHttpServer,
@@ -479,9 +516,48 @@ export function registerDatasourceAdminRoutes(
     );
   };
 
-  const requireDatasourceAdmin = async (req: any, res: any): Promise<boolean> => {
+  /**
+   * [ADR-0131 D3 · D12 items 7–8 · D11] The EFFECTIVE tenancy posture the walled
+   * verdict judges a datasource write on.
+   *
+   * On a host whose kernel has the async accessor it IS the admission posture
+   * the floor already resolved (`resolveAdmissionTenancyPosture`), so one read
+   * of the `tenancy` service decides both. A host without that accessor
+   * (`KernelBase`-shaped) skips the admission read entirely; it registers no
+   * service factories, so its synchronous lookup can only fail for a service
+   * that is not registered, and that failure reads as the no-`tenancy`
+   * composition (`undefined`, inert as `single` is). A registered `tenancy`
+   * service on such a host is read and judged.
+   */
+  const walledVerdictTenancyPosture = (
+    admissionPosture: TenancyPosture | undefined,
+  ): TenancyPosture | undefined => {
+    const kernel = ctx.getKernel?.() as { getServiceAsync?: unknown } | undefined;
+    if (kernel && typeof kernel.getServiceAsync === 'function') return admissionPosture;
+    try {
+      return effectiveTenancyPosture(ctx.getService<TenancyPostureSource>('tenancy'));
+    } catch {
+      return undefined;
+    }
+  };
+
+  /**
+   * `options.catalogWrite` names the metadata type a route writes. A route that
+   * writes a datasource record passes it, and the floor then asks the walled
+   * verdict after the capability gate (see {@link DATASOURCE_ADMIN_CAPABILITY}),
+   * before `resolve()` and before any handler body, like every refusal above.
+   */
+  const requireDatasourceAdmin = async (
+    req: any,
+    res: any,
+    options: { catalogWrite?: string } = {},
+  ): Promise<boolean> => {
     let userId: string | undefined;
     let systemPermissions: string[] = [];
+    // The caller's ADR-0095 posture rung and the deployment's admission
+    // posture, off the same resolution as the identity, for the walled verdict.
+    let callerPosture: unknown;
+    let admissionPosture: TenancyPosture | undefined;
     // [#23287] The resolved context, kept so the ADR-0069 gate is asked about
     // the SAME principal the floor admitted: its `authGate` is the posture the
     // shared resolver decided for whichever credential admitted it — the
@@ -515,6 +591,7 @@ export function registerDatasourceAdminRoutes(
         // `resolveAdmissionTenancyPosture` above for the classification and for
         // why a quiet `catch` at this seam is the defect, not the fix.
         const tenancyPosture = await resolveAdmissionTenancyPosture();
+        admissionPosture = tenancyPosture;
         // [#23287, ruling C′ item 3] Read per request like the two above. A
         // lookup that faults is a kernel with no posture to ask.
         let authService: IAuthService | undefined;
@@ -540,6 +617,7 @@ export function registerDatasourceAdminRoutes(
         // gate read, so this family gates on the platform's capability
         // resolution rather than a second reading of `sys_*`.
         systemPermissions = Array.isArray(authz.systemPermissions) ? authz.systemPermissions : [];
+        callerPosture = authz.posture;
       }
     } catch (err) {
       // [commit 6a180e42d] "grants that could not be READ are not grants" was the exact
@@ -556,6 +634,7 @@ export function registerDatasourceAdminRoutes(
       userId = undefined;
       systemPermissions = [];
       gateSubject = undefined;
+      callerPosture = undefined;
     }
     // ADR-0069 — a session the authentication policy HOLDS (an expired
     // password, enforced MFA not yet enrolled) is gated out of every protected
@@ -597,6 +676,21 @@ export function registerDatasourceAdminRoutes(
         `Managing datasources requires the \`${DATASOURCE_ADMIN_CAPABILITY}\` capability.`,
       );
       return true;
+    }
+    // [ADR-0131 D3 · D12 items 7–8 · D11] A route that writes a datasource
+    // record asks the walled verdict for that type, as the `/meta` write doors
+    // do for the same record. `isSystem` is not passed: inbound HTTP never
+    // carries it, so the verdict's engine admission is unreachable here.
+    if (options.catalogWrite !== undefined) {
+      const walled = walledCatalogWriteVerdict({
+        type: options.catalogWrite,
+        tenancyPosture: walledVerdictTenancyPosture(admissionPosture),
+        callerPosture,
+      });
+      if (!walled.allowed) {
+        sendError(res, 403, 'PERMISSION_DENIED', walled.message);
+        return true;
+      }
     }
     return false;
   };
@@ -812,7 +906,7 @@ export function registerDatasourceAdminRoutes(
   // plainly. Genuine refusals — an unknown name, a throwing store — still take
   // the `badRequest` arm below.
   server.post(`${root}/:name/migrate-credential`, async (req: any, res: any) => {
-    if (await requireDatasourceAdmin(req, res)) return;
+    if (await requireDatasourceAdmin(req, res, { catalogWrite: DATASOURCE_METADATA_TYPE })) return;
     const svc = resolve(res, 'datasource-admin', 'migrateCredential');
     if (!svc) return;
     try {
@@ -854,7 +948,7 @@ export function registerDatasourceAdminRoutes(
 
   // Create a runtime datasource.
   server.post(root, async (req: any, res: any) => {
-    if (await requireDatasourceAdmin(req, res)) return;
+    if (await requireDatasourceAdmin(req, res, { catalogWrite: DATASOURCE_METADATA_TYPE })) return;
     const svc = resolve(res, 'datasource-admin', 'createDatasource');
     if (!svc) return;
     const { draft, secret } = splitSecret(req.body);
@@ -868,7 +962,7 @@ export function registerDatasourceAdminRoutes(
 
   // Patch a runtime datasource.
   server.patch(`${root}/:name`, async (req: any, res: any) => {
-    if (await requireDatasourceAdmin(req, res)) return;
+    if (await requireDatasourceAdmin(req, res, { catalogWrite: DATASOURCE_METADATA_TYPE })) return;
     const svc = resolve(res, 'datasource-admin', 'updateDatasource');
     if (!svc) return;
     const { draft, secret } = splitSecret(req.body);
@@ -882,7 +976,7 @@ export function registerDatasourceAdminRoutes(
 
   // Remove a runtime datasource.
   server.delete(`${root}/:name`, async (req: any, res: any) => {
-    if (await requireDatasourceAdmin(req, res)) return;
+    if (await requireDatasourceAdmin(req, res, { catalogWrite: DATASOURCE_METADATA_TYPE })) return;
     const svc = resolve(res, 'datasource-admin', 'removeDatasource');
     if (!svc) return;
     try {

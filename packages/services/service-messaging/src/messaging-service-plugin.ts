@@ -1,9 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { randomUUID } from 'node:crypto';
-import type { Plugin, PluginContext } from '@objectstack/core';
+import type { Plugin, PluginContext, RequestAuthService, TenancyPostureSource } from '@objectstack/core';
 import { resolveLocalizationContext } from '@objectstack/core';
-import type { IDataEngine } from '@objectstack/spec/contracts';
+import type { IDataEngine, IHttpServer } from '@objectstack/spec/contracts';
+import { PREFERENCE_OPTIONS_ROUTE, registerPreferenceOptionsRoutes } from './preference-options-routes.js';
+import type { PreferenceOptionsEngine } from './preference-options.js';
 import { MessagingService } from './messaging-service.js';
 import type { MessagingChannel } from './channel.js';
 import { createInboxChannel } from './inbox-channel.js';
@@ -548,6 +550,15 @@ export class MessagingServicePlugin implements Plugin {
             });
         }
 
+        // [#30208 row 6, ruling E on #30527] The preference options door
+        // (`preference-options-routes.ts`): the topics and channels a
+        // preference or template can name, for the console's pick-or-type
+        // inputs. Mounted at `kernel:ready`, when the HTTP server is
+        // registered; every source it lists is read per request.
+        if (typeof ctx.hook === 'function') {
+            ctx.hook('kernel:ready', async () => this.mountPreferenceOptionsDoor(ctx, service, getData));
+        }
+
         // Reliable delivery (P1): wire the outbox + dispatcher once the engine
         // is resolvable. Until then `emit()` runs inline best-effort.
         if (this.options.reliableDelivery && typeof ctx.hook === 'function') {
@@ -622,6 +633,52 @@ export class MessagingServicePlugin implements Plugin {
         ctx.logger.info(
             `[messaging] service registered with channels: ${service.getRegisteredChannels().join(', ') || '(none)'}`,
         );
+    }
+
+    /**
+     * Mount `GET /api/v1/messaging/preference-options` on the kernel's HTTP
+     * server. A kernel with no HTTP server says so once and mounts nothing:
+     * the fields stay plain text boxes, and the in-process service is unchanged.
+     */
+    private mountPreferenceOptionsDoor(
+        ctx: PluginContext,
+        service: MessagingService,
+        getData: () => IDataEngine | undefined,
+    ): void {
+        const optional = <T>(name: string): T | undefined => {
+            try {
+                return ctx.getService<T>(name) ?? undefined;
+            } catch {
+                return undefined;
+            }
+        };
+        const http = optional<IHttpServer>('http-server');
+        if (!http) {
+            ctx.logger.warn(
+                `[messaging] no HTTP server is registered, so the preference options list (GET ${PREFERENCE_OPTIONS_ROUTE}) ` +
+                    'is not mounted: the console draws notification topic and channel as plain text boxes.',
+            );
+            return;
+        }
+        const kernel = ctx.getKernel?.() as
+            | { getServiceAsync?: <T>(name: string) => Promise<T> }
+            | undefined;
+        registerPreferenceOptionsRoutes(http, {
+            getEngine: () => optional<unknown>('objectql'),
+            getAuth: () => optional<RequestAuthService>('auth'),
+            tenancy: kernel && typeof kernel.getServiceAsync === 'function'
+                ? () => kernel.getServiceAsync!<TenancyPostureSource>('tenancy')
+                : undefined,
+            knownChannels: () => service.getKnownChannels(),
+            getData: () => getData() as unknown as PreferenceOptionsEngine | undefined,
+            readFlows: async () => {
+                const protocol = optional<{ getMetaItems?(q: { type: string }): Promise<unknown> }>('protocol');
+                if (!protocol || typeof protocol.getMetaItems !== 'function') return undefined;
+                const raw = await protocol.getMetaItems({ type: 'flow' });
+                return Array.isArray(raw) ? raw : ((raw as { items?: unknown[] } | null)?.items ?? []);
+            },
+        });
+        ctx.logger.info(`[messaging] preference options list mounted at GET ${PREFERENCE_OPTIONS_ROUTE}`);
     }
 
     /**

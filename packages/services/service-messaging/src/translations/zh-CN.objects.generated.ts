@@ -214,7 +214,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       channel: {
         label: "通道",
-        help: "通道:inbox(站内收件箱,始终可用)、email(配置邮件服务后可用)、sms(配置短信服务后可用),或已安装插件添加的通道 ID。填 * 表示所有通道。没有任何通道使用的 ID 不会匹配任何通知。"
+        help: "通道:inbox(站内收件箱,始终可用)、email(配置邮件服务后可用)、sms(配置短信服务后可用)、push(配置推送服务后可用,发送到用户已登记的设备),或已安装插件添加的通道 ID。填 * 表示所有通道。没有任何通道使用的 ID 不会匹配任何通知。"
       },
       enabled: {
         label: "启用",

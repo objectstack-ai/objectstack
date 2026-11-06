@@ -1745,6 +1745,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.packages.detail.disable': '禁用',
   'engine.packages.detail.disableTitle': '禁用「{name}」？',
   'engine.packages.detail.disableDescription': '在重新启用之前，此软件包将对所有用户停止服务。不会删除任何记录，您可以随时重新启用。',
+  'engine.packages.detail.disableMayBeRefused': '如果有生效中的验证规则读取此软件包添加的字段，禁用会被拒绝，拒绝信息会逐条列出这些规则。',
+  'engine.packages.detail.disableRestricted': '有生效中的验证规则读取此软件包添加的字段，因此暂时无法禁用。请先停用或修改下方列出的每条规则，或保持此软件包启用。',
   'engine.packages.detail.export': '导出',
   'engine.packages.detail.exporting': '导出中…',
   'engine.packages.detail.deletePackage': '删除软件包',
