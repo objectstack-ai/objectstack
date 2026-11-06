@@ -34,7 +34,12 @@ import type {
 import { packageScopedRowWhere } from './sys-metadata-repository.js';
 import type { SysMetadataRepository } from './sys-metadata-repository.js';
 import { ConflictError, assertProtocolCompat } from '@objectstack/metadata-core';
-import { planUnmanagedImport, unmanagedInstallPostureRefusal } from './package-unmanaged-install.js';
+import {
+    planUnmanagedImport,
+    unmanagedInstallPostureRefusal,
+    unmanagedInstallRenameRefusal,
+    type UnmanagedImportRenameRefusal,
+} from './package-unmanaged-install.js';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import {
     DEFAULT_METADATA_TYPE_REGISTRY,
@@ -42,7 +47,7 @@ import {
     deriveNamespaceFromPackageId,
     manifestIdRefusal,
 } from '@objectstack/spec/kernel';
-import { REFERENCE_SITES } from './reference-sites.js';
+import { planNamespaceRename } from './package-namespace-rename.js';
 import { extensionFieldSuffixRefusalError, judgeExtensionFieldSuffix } from './protocol-extension-field-suffix.js';
 import { customizationPairManifestRefusal } from './protocol-customization-package.js';
 import {
@@ -269,307 +274,31 @@ export class ProtocolPackageCommitsFacet {
         // [#21911] The explicit system opt-in — see findServedOverlayRow.
         const rows = (await host.findEnvironmentRows('sys_metadata', { where, context: { isSystem: true } })) as any[];
 
-        // Rows other than objects and qualified view items (each below) are
-        // renamed by the source-prefix swap alone; a name without the prefix
-        // keeps it (the docblock re-namespaces OBJECT names).
-        const renameName = (name: string): string =>
-            sourceNs && typeof name === 'string' && name.startsWith(`${sourceNs}_`)
-                ? `${targetNs}_${name.slice(sourceNs.length + 1)}`
-                : name;
-
-        // ⭐ EVERY OBJECT GETS A NAME IN THE TARGET NAMESPACE (ADR-0070 D4, read
-        // with ADR-0129 D2). An object name IS its table name and its registry
-        // key, so a copy that keeps the source's name is a second claim on the
-        // source's object: before PR #23510 it stored a target row the registry
-        // refused, over the source's table, and after it the copy failed with
-        // the ADR-0029 D9.9 ownership prescription, which names no way out for
-        // a duplicate. ADR-0129 D2 says what the name is: every object a
-        // package defines is `${namespace}_${shortName}`, and the prefix rule's
-        // own prescription for a name that lacks the prefix
-        // (`validateObjectNamespacePrefix`) is "rename it to
-        // `${namespace}_${name}`". The copy is a NEW object, so that rename
-        // costs nothing here — while renaming the SOURCE object would move its
-        // table. A prefixed name swaps the source prefix for the target's;
-        // a name WITHOUT the source prefix (a direct-publish save stored
-        // before that door read the prefix rule — #24547 — or a package that
-        // had no namespace) takes the target prefix in front of its whole name.
-        //
-        // ⛔ REFUSED, NEVER RE-INVENTED: when that name is already claimed — by
-        // the copy of a prefixed sibling (`ticket` and `iojn_ticket` both name
-        // `iojn2_ticket`) or by an object the source package holds — the object
-        // is reported in `failed[]` before anything is written for it, at its
-        // own name, with the rename that clears it. A second invented name
-        // (a numeric suffix, a third prefix) would be a name nobody wrote.
-        const objectNames = new Set<string>(
-            rows.filter((row) => row?.type === 'object' && typeof row.name === 'string').map((row) => row.name as string),
-        );
-        const renameMap = new Map<string, string>();
-        const prefixed: string[] = [];
-        const unprefixed: string[] = [];
-        for (const name of objectNames) {
-            if (sourceNs && name.startsWith(`${sourceNs}_`)) prefixed.push(name);
-            else unprefixed.push(name);
-        }
-        for (const name of prefixed) {
-            const nn = renameName(name);
-            if (nn !== name) renameMap.set(name, nn);
-        }
-        // Every name a prefixed object's copy takes (itself, when the target
-        // namespace IS the source's), and every name the source holds.
-        const claimedBy = new Map<string, string>(prefixed.map((name) => [renameName(name), name]));
-        const refusedObjects = new Map<string, string>();
-        for (const name of unprefixed) {
-            const nn = `${targetNs}_${name}`;
-            const holder = claimedBy.get(nn) ?? (objectNames.has(nn) ? nn : undefined);
-            if (holder !== undefined) {
-                const lacks = sourceNs
-                    ? `lacks the '${sourceNs}_' prefix of package '${request.sourcePackageId}' (ADR-0129 D2: `
-                        + 'every object a package defines carries its namespace as a name prefix)'
-                    : `carries no namespace prefix (package '${request.sourcePackageId}' declares no namespace)`;
-                const taken = holder === nn
-                    ? `'${nn}' is an object package '${request.sourcePackageId}' already holds`
-                    : `'${nn}' is already the copy name of object '${holder}'`;
-                refusedObjects.set(
-                    name,
-                    `Object '${name}' is not copied: its name ${lacks}, so its copy is named '${nn}' in `
-                        + `namespace '${targetNs}', and ${taken}. Rename '${name}' on the source to `
-                        + `${sourceNs ? `a '${sourceNs}_' name` : 'a name'} no other object in the package uses, `
-                        + 'then duplicate again.',
-                );
-                continue;
-            }
-            renameMap.set(name, nn);
-            claimedBy.set(nn, name);
-        }
-
-        // Longest-first, identifier-boundary rewrite so `iojn_task` never corrupts
-        // `iojn_task_log`, and `iojn_x` inside `record.iojn_x`/`iojn_x.view` matches.
-        // Prefixed names only: a prefixed name is distinctive enough to find in
-        // free text, a bare one is not (below).
-        //
-        // ⭐ THE BOUNDARY HOLDS ON BOTH SIDES. With the right side alone, a
-        // name that merely ENDS in an object's name was rewritten inside it:
-        // the field `x_iojn_task` came out `x_iojn2_task` — its `name` and every
-        // value naming it — while its `fields` key stayed, so the copy's key
-        // and `name` disagreed. `x_iojn_task` is another identifier, never the
-        // object: `renameName` swaps the source prefix only at the START of a
-        // name, and this rewrite now matches only a whole identifier too.
-        //
-        // ⭐ A PREFIXED NAME THAT IS ALSO A FIELD KEY IS NOT DISTINCTIVE. When a
-        // package object declares a field keyed like a prefixed package object
-        // (`fields.iojn_customer` beside the object `iojn_customer`), a free-text
-        // value spelled that way may name the field — a list view's `columns`,
-        // a form's `sections[].fields` — and the field keeps its key. Renaming
-        // it as the object copied a column or form field the copy does not
-        // have. Such a name is treated as a bare name is: rewritten only at an
-        // object-reference property (below), never in free text.
-        const fieldKeys = new Set<string>();
-        for (const row of rows) {
-            if (row?.type !== 'object') continue;
-            let body: any;
-            try {
-                body = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
-            } catch {
-                continue; // the copy loop reports an unparseable row at its own name
-            }
-            const fields = body?.fields;
-            if (fields && typeof fields === 'object' && !Array.isArray(fields)) {
-                for (const key of Object.keys(fields)) fieldKeys.add(key);
-            }
-        }
-        const olds = prefixed
-            .filter((name) => renameMap.has(name) && !fieldKeys.has(name))
-            .sort((a, b) => b.length - a.length);
-        const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const re = olds.length
-            ? new RegExp(`(?<![A-Za-z0-9_])(${olds.map(esc).join('|')})(?![A-Za-z0-9_])`, 'g')
-            : null;
-        // ⭐ A VIEW ITEM'S NAME FOLLOWS ITS OBJECT. A view row's qualified name
-        // is `<object>.<viewKey>` (`ViewItemNameSchema`,
-        // `packages/spec/src/ui/view.zod.ts`: "the object can be recovered from
-        // the prefix, so the registry key never collides across objects"), so
-        // its object part takes exactly the rename its `object` property takes
-        // — `renameMap`, whole — and its view key is left as stored:
-        // `ticket.board` copies as `iojn2_ticket.board` beside the body's
-        // `object: 'iojn2_ticket'`. The source-prefix swap (`renameName`)
-        // reached a prefixed object's items only: a bare object's item kept
-        // `ticket.board`, a name the source's item still holds, so a by-name
-        // read naming no package served the source and the copy was shadowed.
-        // The swap also moved an item of an object OUTSIDE the package that
-        // carries the source prefix (`iojn_ext.board` → `iojn2_ext.board`)
-        // while its `object` stayed `iojn_ext`. An object this copy does not
-        // rename keeps its items' names.
-        //
-        // A value that IS such a name, whole, follows the item: a form action's
-        // `target` (`<object>.<viewKey>`) kept `ticket.entry`, so the copy's
-        // button opened the SOURCE's form, on the source's object. Whole values
-        // only, and only names of the view items this copy renames — a bare
-        // object's name is never rewritten inside free text (below).
-        const isQualifiedViewRow = (row: any): boolean =>
-            (PLURAL_TO_SINGULAR[String(row?.type)] ?? String(row?.type)) === 'view'
-            && typeof row?.name === 'string' && row.name.includes('.');
-        const viewItemRenames = new Map<string, string>();
-        for (const row of rows) {
-            if (!isQualifiedViewRow(row)) continue;
-            const dot = (row.name as string).indexOf('.');
-            const renamed = renameMap.get((row.name as string).slice(0, dot));
-            if (renamed !== undefined) viewItemRenames.set(row.name, `${renamed}${(row.name as string).slice(dot)}`);
-        }
-        // ⭐ AT AN OBJECT-REFERENCE PROPERTY, A NAME IS REWRITTEN WHOLE — the
-        // only place a BARE name is rewritten. Measured: putting `ticket` in the
-        // free-text rewrite above turns "A support ticket raised by a customer"
-        // into "A support iojn2_ticket raised …", and the same match renames the
-        // value of a lookup FIELD called `ticket` (`fields.ticket.name`). So a
-        // value is rewritten only where it sits under a property that names an
-        // object — the derived site index (`REFERENCE_SITES`, target `object`:
-        // `reference`, `object`, `objectName`, `objects`, …), read by property
-        // wherever it occurs in any item, because flow node configs (`config.
-        // objectName`) are declared by node descriptors the index does not
-        // walk — and only when it equals a renamed name exactly, in the four
-        // shapes a name arrives in there: a string, an array element, a record
-        // KEY (`permission.objects` is keyed by object name) or a `.name`. The
-        // record key holds for prefixed names too: a copied permission set
-        // otherwise kept `objects.<source object>`, a grant on the SOURCE.
-        //
-        // ⛔ REFUSED, NEVER MERGED: at a reference site, a renamed name can
-        // meet a name the item already holds there — the source also names
-        // the object the copy is about to be called (`dupdst_customer`, an
-        // object outside the package or not yet created) beside its own
-        // (`dupsrc_customer`). Two record KEYS that land on one key keep only
-        // the last entry: a permission set's `objects` dropped a grant (and
-        // the copied object could gain edit and delete its source never gave
-        // it), a translation's `objects` dropped a label. Two array ELEMENTS
-        // that land on one name bind it twice: a hook's handler ran twice per
-        // event on the copied object. So every such meeting is recorded in
-        // `collisions` — the path, the name that moved, the name it met — and
-        // the call site refuses the item in `failed[]` before anything is
-        // written for it. `renameMap` is one-to-one, so a meeting is always a
-        // renamed name and a name this copy does not rename; an element the
-        // source itself repeats is copied as stored.
-        const objectReferenceProperties = new Set(
-            (REFERENCE_SITES.byTarget.get('object') ?? []).map((site) => site.property),
-        );
-        type ReferenceCollision = { at: string; shape: 'key' | 'entry'; moved: string; met: string };
-        const deepRewrite = (v: any, collisions: ReferenceCollision[], atReference = false, at = ''): any => {
-            if (typeof v === 'string') {
-                const whole = atReference ? renameMap.get(v) : undefined;
-                if (whole !== undefined) return whole;
-                const viewItem = viewItemRenames.get(v);
-                if (viewItem !== undefined) return viewItem;
-                return re ? v.replace(re, (m) => renameMap.get(m) ?? m) : v;
-            }
-            if (Array.isArray(v)) {
-                const out = v.map((element, i) => deepRewrite(element, collisions, atReference, `${at}[${i}]`));
-                if (atReference) {
-                    const firstAt = new Map<string, number>();
-                    out.forEach((element, i) => {
-                        if (typeof element !== 'string') return;
-                        const j = firstAt.get(element);
-                        if (j === undefined) {
-                            firstAt.set(element, i);
-                        } else if (v[j] !== v[i]) {
-                            collisions.push({ at, shape: 'entry', moved: v[i] !== element ? v[i] : v[j], met: element });
-                        }
-                    });
+        // [#30794] ⭐ ONE RENAME ENGINE, TWO CALLERS. Every rule that names the
+        // copy — the object renames and the refusal of a claimed name, the
+        // whole-identifier free-text rewrite, a view item following its
+        // object, a name rewritten whole at an object-reference property, a
+        // record entry's `name` following its key, a permission set's field
+        // rules following the renamed objects, and the refusal of every
+        // collision those rewrites meet — lives in `package-namespace-rename.ts`,
+        // which the unmanaged import's `targetNamespace` calls too. This door
+        // hands it the source's rows, parsed; an unparseable row is left to the
+        // copy loop, which reports it at its own name.
+        const rename = planNamespaceRename({
+            sourcePackageId: request.sourcePackageId,
+            sourceNamespace: sourceNs,
+            targetNamespace: targetNs,
+            items: rows.map((row) => {
+                let body: unknown;
+                try {
+                    body = typeof row?.metadata === 'string' ? JSON.parse(row.metadata) : row?.metadata;
+                } catch {
+                    body = undefined;
                 }
-                return out;
-            }
-            if (v && typeof v === 'object') {
-                const o: any = {};
-                const from = new Map<string, string>();
-                for (const [k, val] of Object.entries(v)) {
-                    const key = atReference ? (renameMap.get(k) ?? k) : k;
-                    const other = from.get(key);
-                    if (other !== undefined) {
-                        collisions.push({ at, shape: 'key', moved: key === k ? other : k, met: key });
-                    }
-                    from.set(key, k);
-                    const entry = deepRewrite(
-                        val, collisions,
-                        objectReferenceProperties.has(k) || (atReference && k === 'name'),
-                        at ? `${at}.${k}` : k,
-                    );
-                    // ⭐ A RECORD ENTRY'S `name` FOLLOWS ITS KEY. An entry that
-                    // echoes its key in `name` (an object's field: `fields`
-                    // keyed by field name) is ONE identity spelled twice, so
-                    // the name takes the key's rename decision. Outside a
-                    // reference site a key is never renamed, while the
-                    // free-text rewrite above renamed a `name` equal to a
-                    // prefixed object's: the field `iojn_customer` was copied
-                    // as `fields.iojn_customer.name: 'iojn2_customer'`. The
-                    // data plane addresses the column by the key, the save
-                    // door's FLS lint reads the `name`, so a copied permission
-                    // set's rule on that field was refused at the copy.
-                    if (typeof (val as any)?.name === 'string' && (val as any).name === k
-                        && entry && typeof entry === 'object' && !Array.isArray(entry)) {
-                        entry.name = key;
-                    }
-                    o[key] = entry;
-                }
-                return o;
-            }
-            return v;
-        };
-        const describeCollision = (c: ReferenceCollision): string =>
-            `its \`${c.at}\` ${c.shape} '${c.moved}' follows the copied object to '${c.met}', `
-            + `${c.shape === 'key' ? 'a key' : 'an entry'} it already holds there, which this copy does not rename. `
-            + (c.shape === 'key'
-                ? 'A record keeps one entry per key, so the copy would drop one of the two. '
-                : `The copy would name '${c.met}' twice. `)
-            + `Remove '${c.moved}' or '${c.met}' on the source, then duplicate again.`;
-        // ⭐ A COPIED PERMISSION SET'S FIELD RULES FOLLOW THE RENAMED OBJECTS.
-        // `PermissionSetSchema.fields` is a record keyed `<entity_name>.<field_name>`
-        // (`packages/spec/src/security/permission.zod.ts`), and the security
-        // plugin reads a set's rules for an object by the key prefix
-        // `<object>.` (`PermissionEvaluator.getFieldPermissions`). Left as
-        // stored, the copy's rules govern the SOURCE's object and the
-        // duplicate's object gets none: a field the source set hides is
-        // readable on the copy for whoever holds the copied set.
-        //
-        // `deepRewrite` cannot carry it: the derived site index reads
-        // `permission.fields` as a site naming `field` items (its property
-        // spells that type), never an object, and has no arm for a composite
-        // key — and widening the index would also change the "Used by" answer
-        // it feeds (`findReferencesToMeta`). So this step is keyed on the
-        // declared shape — the `fields` record of a copied `permission` item —
-        // never on a property name, which would also catch an object's own
-        // `fields` (keyed by field name).
-        //
-        // The split: object and field names are both `^[a-z_][a-z0-9_]*$`, so
-        // a key's object part is everything before its FIRST `.`. It is
-        // rewritten only when it equals a renamed object name exactly, and the
-        // field part is never read — `dupsrc_customer.dupsrc_customer` becomes
-        // `dupdst_customer.dupsrc_customer`. A key naming an object outside the
-        // package keeps its name.
-        //
-        // ⛔ REFUSED, NEVER MERGED: when a renamed key equals a key the set
-        // already holds (the source also governs an object, outside the
-        // package, named like the copy), keeping either rule would silently
-        // drop the other, so the set is reported in `failed[]` with both keys.
-        // `Object.fromEntries` defines own properties, so no key can land on
-        // the prototype.
-        const rewriteFieldRuleKeys = (fields: Record<string, unknown>): { fields: Record<string, unknown> } | { collision: string } => {
-            const out = new Map<string, unknown>();
-            const from = new Map<string, string>();
-            for (const [key, rule] of Object.entries(fields)) {
-                const dot = key.indexOf('.');
-                const renamed = dot > 0 ? renameMap.get(key.slice(0, dot)) : undefined;
-                const next = renamed === undefined ? key : `${renamed}${key.slice(dot)}`;
-                const other = from.get(next);
-                if (other !== undefined) {
-                    const moved = next === key ? other : key;
-                    return {
-                        collision: `its field rule '${moved}' follows object '${moved.slice(0, moved.indexOf('.'))}' `
-                            + `to '${next}', a key the set already holds for object `
-                            + `'${next.slice(0, next.indexOf('.'))}', which this copy does not rename. `
-                            + `Remove '${moved}' or '${next}' on the source, then duplicate again.`,
-                    };
-                }
-                out.set(next, rule);
-                from.set(next, key);
-            }
-            return { fields: Object.fromEntries(out) };
-        };
+                return { type: row?.type, name: row?.name, body };
+            }),
+            retryVerb: 'duplicate',
+        });
 
         // [ADR-0146 D10, #28564] ⭐ THE `__c` RESERVATION, JUDGED AGAINST THE
         // TARGET, before the copy's first mutation (the package record below):
@@ -592,7 +321,7 @@ export class ProtocolPackageCommitsFacet {
                     continue;
                 }
                 if (body && typeof body === 'object' && !Array.isArray(body)) {
-                    copiedObjects[row.name] = { ...(body as Record<string, unknown>), name: renameMap.get(row.name) ?? row.name };
+                    copiedObjects[row.name] = { ...(body as Record<string, unknown>), name: rename.copyName(row.type, row.name) };
                 }
             }
             const suffixRefusals = judgeExtensionFieldSuffix({ packageId: request.targetPackageId, objects: copiedObjects });
@@ -662,16 +391,12 @@ export class ProtocolPackageCommitsFacet {
         const canonicalizeFlow = host.resolveFlowCanonicalizer();
 
         for (const row of rows) {
-            const refusal = row?.type === 'object' ? refusedObjects.get(row.name) : undefined;
+            const refusal = row?.type === 'object' ? rename.objectRefusal(row.name) : undefined;
             if (refusal !== undefined) {
                 failed.push({ type: row.type, name: row.name, error: refusal });
                 continue;
             }
-            const newName = row?.type === 'object'
-                ? (renameMap.get(row.name) ?? row.name)
-                : isQualifiedViewRow(row)
-                    ? (viewItemRenames.get(row.name) ?? row.name)
-                    : renameName(row.name);
+            const newName = rename.copyName(row.type, row.name);
             const rawType = String(row.type);
             const singular = PLURAL_TO_SINGULAR[rawType] ?? rawType;
             let body: unknown;
@@ -734,23 +459,17 @@ export class ProtocolPackageCommitsFacet {
                     continue;
                 }
             }
-            const collisions: ReferenceCollision[] = [];
-            const rewritten = deepRewrite(item, collisions);
-            if (collisions.length > 0) {
-                const noun = singular === 'permission'
-                    ? 'Permission set'
-                    : `${singular.charAt(0).toUpperCase()}${singular.slice(1)}`;
-                const more = collisions.length - 1;
-                failed.push({
-                    type: row.type,
-                    name: row.name,
-                    error: `${noun} '${row.name}' is not copied: ${describeCollision(collisions[0]!)}`
-                        + (more > 0 ? ` It has ${more} more such collision${more === 1 ? '' : 's'}.` : ''),
-                });
+            // The engine names the copy: every renamed name rewritten, `name`
+            // set to `newName`, a permission set's field rules following the
+            // renamed objects — or the collision that refuses the item, before
+            // anything is written for it.
+            const outcome = rename.rewrite(row.type, row.name, item);
+            if ('refusal' in outcome) {
+                failed.push({ type: row.type, name: row.name, error: outcome.refusal });
                 continue;
             }
+            const rewritten: any = outcome.item;
             if (rewritten && typeof rewritten === 'object' && !Array.isArray(rewritten)) {
-                rewritten.name = newName;
                 // [ADR-0086 D3] A permission set that declares its SOURCE
                 // package as its owner is copied declaring the target, the
                 // package the copy is saved into: the save door refuses a
@@ -761,19 +480,6 @@ export class ProtocolPackageCommitsFacet {
                 // binding is reported in `failed[]` with the door's remedy.
                 if (singular === 'permission' && rewritten.packageId === request.sourcePackageId) {
                     rewritten.packageId = request.targetPackageId;
-                }
-                if (singular === 'permission' && rewritten.fields
-                    && typeof rewritten.fields === 'object' && !Array.isArray(rewritten.fields)) {
-                    const result = rewriteFieldRuleKeys(rewritten.fields);
-                    if ('collision' in result) {
-                        failed.push({
-                            type: row.type,
-                            name: row.name,
-                            error: `Permission set '${row.name}' is not copied: ${result.collision}`,
-                        });
-                        continue;
-                    }
-                    rewritten.fields = result.fields;
                 }
             }
             try {
@@ -871,6 +577,9 @@ export class ProtocolPackageCommitsFacet {
         const plan = planUnmanagedImport(declared.data.manifest, {
             ...(declared.data.targetPackageId !== undefined ? { targetPackageId: declared.data.targetPackageId } : {}),
             ...(declared.data.targetName !== undefined ? { targetName: declared.data.targetName } : {}),
+            // [#30794] Rename-on-install: judged by the plan, applied by the
+            // duplicate's own engine (`package-namespace-rename.ts`).
+            ...(declared.data.targetNamespace !== undefined ? { targetNamespace: declared.data.targetNamespace } : {}),
             // The save door's own predicate — registry-only, the hatch unread.
             isRuntimeCreatable: (type) => host.isRuntimeCreateAllowed(type),
             // The save door's own schema, asked which types declare the
@@ -879,7 +588,7 @@ export class ProtocolPackageCommitsFacet {
             loadOrderOf: (type) =>
                 DEFAULT_METADATA_TYPE_REGISTRY.find((entry) => entry.type === type)?.loadOrder ?? Number.MAX_SAFE_INTEGER,
         });
-        const { sourcePackageId, targetPackageId, namespace } = plan;
+        const { sourcePackageId, targetPackageId, namespace, rename } = plan;
 
         // 5. The handshake `installPackage` asks too — asked here so a refusal
         //    precedes the base.
@@ -896,34 +605,58 @@ export class ProtocolPackageCommitsFacet {
         }
         const owners: unknown = registry?.getNamespaceOwners?.(namespace);
         if (Array.isArray(owners) && owners.length > 0) {
+            const named = owners.map((o) => `'${String(o)}'`).join(', ');
             throw Object.assign(new Error(
-                `The namespace '${namespace}' of package '${sourcePackageId}' is already owned by `
-                + `${owners.map((o) => `'${String(o)}'`).join(', ')}. The unmanaged copy keeps the source namespace, `
-                + 'so it cannot sit beside a package that owns it — a managed install of this same package '
-                + 'included. Uninstall that package first, or keep the managed install.',
+                rename
+                    // [#30794] The namespace the request named is someone else's.
+                    ? `The namespace '${namespace}' named by \`targetNamespace\` is already owned by ${named}, so the `
+                        + `unmanaged copy of '${sourcePackageId}' cannot take it. Name another \`targetNamespace\`, or `
+                        + 'uninstall that package first.'
+                    : `The namespace '${namespace}' of package '${sourcePackageId}' is already owned by `
+                        + `${named}. The unmanaged copy keeps the source namespace, `
+                        + 'so it cannot sit beside a package that owns it — a managed install of this same package '
+                        + 'included. Uninstall that package first, keep the managed install, or install the copy '
+                        + 'under a namespace of its own with `targetNamespace`.',
             ), { code: 'RESOURCE_CONFLICT', status: 409, details: { namespace, owners } });
         }
 
         // 7. Today's protocol, item by item — the conversion a managed install
         //    applies to an artifact, so an older package imports as it installs.
+        //    Converted under the name the package declares it, as the duplicate
+        //    converts a source row; then, when the copy is renamed, rewritten by
+        //    the duplicate's own engine — after the conversion, as the duplicate
+        //    rewrites — every refusal it meets raised before the base exists.
         const canonicalizeFlow = plan.items.some((i) => i.type === 'flow') ? host.resolveFlowCanonicalizer() : undefined;
         const prepared: Array<{ type: string; name: string; item: unknown }> = [];
         const unconvertible: string[] = [];
+        const unrenamable: UnmanagedImportRenameRefusal[] = [];
         for (const planned of plan.items) {
+            const declaredName = planned.sourceName ?? planned.name;
+            let converted: unknown;
             try {
                 if (planned.type !== 'flow') {
-                    prepared.push({ type: planned.type, name: planned.name, item: host.convertStoredItem(planned.type, planned.body) });
+                    converted = host.convertStoredItem(planned.type, planned.body);
                 } else if (!canonicalizeFlow) {
                     // No engine in this process: the body as declared, exactly as
                     // `duplicatePackage` copies it; the save door still judges it.
-                    prepared.push({ type: planned.type, name: planned.name, item: planned.body });
+                    converted = planned.body;
                 } else {
-                    const result = canonicalizeFlow(planned.name, planned.body);
-                    prepared.push({ type: planned.type, name: planned.name, item: result.storable });
+                    converted = canonicalizeFlow(declaredName, planned.body).storable;
                 }
             } catch (e: any) {
-                unconvertible.push(`${planned.type} '${planned.name}': ${e?.message ?? String(e)}`);
+                unconvertible.push(`${planned.type} '${declaredName}': ${e?.message ?? String(e)}`);
+                continue;
             }
+            if (rename === undefined) {
+                prepared.push({ type: planned.type, name: planned.name, item: converted });
+                continue;
+            }
+            const outcome = rename.rewrite(planned.type, declaredName, converted);
+            if ('refusal' in outcome) {
+                unrenamable.push({ type: planned.type, name: declaredName, reason: outcome.refusal });
+                continue;
+            }
+            prepared.push({ type: planned.type, name: planned.name, item: outcome.item });
         }
         if (unconvertible.length > 0) {
             throw Object.assign(new Error(
@@ -933,6 +666,7 @@ export class ProtocolPackageCommitsFacet {
                 + 'this protocol, then install again.',
             ), { code: 'INVALID_METADATA', status: 422 });
         }
+        if (unrenamable.length > 0) throw unmanagedInstallRenameRefusal(sourcePackageId, namespace, unrenamable);
         // 8. Every name the copy would take, against the environment and the
         //    managed packages — the save door would refuse or overlay them.
         const collisions = await host.unmanagedImportCollisions(plan.items);
@@ -940,8 +674,12 @@ export class ProtocolPackageCommitsFacet {
             throw Object.assign(new Error(
                 `Package '${sourcePackageId}' cannot be installed unmanaged: ${collisions.length} of its names are already `
                 + `taken — ${collisions.slice(0, 3).map((c) => `${c.type} '${c.name}' (${c.heldBy})`).join('; ')}`
-                + `${collisions.length > 3 ? ` (+${collisions.length - 3} more)` : ''}. The copy keeps every name `
-                + 'the package declares, so remove or rename the items that hold them, then install again.',
+                + `${collisions.length > 3 ? ` (+${collisions.length - 3} more)` : ''}. `
+                + (rename
+                    ? `The copy takes every name the package declares, renamed into namespace '${namespace}', so remove `
+                        + 'or rename the items that hold them, or name another `targetNamespace`, then install again.'
+                    : 'The copy keeps every name the package declares, so remove or rename the items that hold them, '
+                        + 'or install it under a namespace of its own with `targetNamespace`, then install again.'),
             ), { code: 'RESOURCE_CONFLICT', status: 409, details: { collisions } });
         }
 
@@ -978,6 +716,8 @@ export class ProtocolPackageCommitsFacet {
             ...(plan.sourceVersion !== undefined ? { sourceVersion: plan.sourceVersion } : {}),
             targetPackageId,
             namespace,
+            // [#30794] The provenance of every renamed name.
+            ...(rename !== undefined ? { sourceNamespace: plan.sourceNamespace } : {}),
             copiedCount: copied.length,
             copied,
             // Planned before the base existed; every item was written, so every
