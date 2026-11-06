@@ -497,8 +497,11 @@ export const CEILINGS = new Map([
   // of the assignment-rules heading and the scaffolded-project validate line
   // (objectstack-formula's Verify section). Re-locked AT the measurement,
   // headroom 0 tokens — 6448 at first, then 6444 once the bare-name phase-2
-  // rename (crm_ prefixes, "The third automation family" cut) merged in.
-  ['skills/objectstack-automation/SKILL.md', 6444],
+  // rename (crm_ prefixes, "The third automation family" cut) merged in, then
+  // 6426 after the click-through default's three tokens landed on main and
+  // the "A Flow is a directed graph of nodes" opener was cut (the node tables
+  // and the `nodes` + `edges` FlowSchema line already say it).
+  ['skills/objectstack-automation/SKILL.md', 6426],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:

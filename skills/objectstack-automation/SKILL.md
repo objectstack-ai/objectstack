@@ -35,8 +35,6 @@ record-change triggers, vendor integrations and their callbacks, and
 
 ## Flows — Visual Logic Orchestration
 
-A **Flow** is a directed graph of nodes — the primary automation building block.
-
 ### Flow Types
 
 | Type | When to Use |
