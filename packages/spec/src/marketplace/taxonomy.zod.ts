@@ -173,6 +173,8 @@ export const MarketplaceBusinessFunctionsSchema = lazySchema(() =>
     .describe(`Business functions the package serves: 1-${MAX_BUSINESS_FUNCTIONS} distinct values, the first is primary`),
 );
 
+export type MarketplaceBusinessFunctions = z.input<typeof MarketplaceBusinessFunctionsSchema>;
+
 /**
  * `industries` — up to {@link MAX_INDUSTRIES} distinct industries. Absent, and
  * equally an empty list, means cross-industry.
@@ -182,6 +184,8 @@ export const MarketplaceIndustriesSchema = lazySchema(() =>
     .max(MAX_INDUSTRIES, `\`industries\` lists at most ${MAX_INDUSTRIES} industries; omit the key for a cross-industry package.`)
     .describe(`Industries the package is built for: up to ${MAX_INDUSTRIES} distinct values; absent means cross-industry`),
 );
+
+export type MarketplaceIndustries = z.input<typeof MarketplaceIndustriesSchema>;
 
 // ---------------------------------------------------------------------------
 // The publish-time cross-check of `solutionType`

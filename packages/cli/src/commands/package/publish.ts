@@ -259,6 +259,13 @@ export function retiredCategoryRefusal(source: 'manifest' | 'flag', value: unkno
   if (!mapping) {
     return `${head} ${fix} Business functions: ${functions}.`;
   }
+  // `starter` reaches this command from a project scaffolded off the blank
+  // template, which shipped it as its own marker. It never classified the
+  // project, so the template type the catalog maps it to is not the answer here.
+  if (raw === 'starter') {
+    return `${head} "starter" was the blank template's own marker, copied into projects scaffolded from it; `
+      + `it does not classify your package. ${fix} Business functions: ${functions}.`;
+  }
   const tag = 'tag' in mapping && mapping.tag ? ` Keep "${mapping.tag}" in \`tags\` if it helps search.` : '';
   if (mapping.kind === 'unlistable') {
     return `${head} "${raw}" has no replacement: ${mapping.reason}. Delete \`category\`.`;
