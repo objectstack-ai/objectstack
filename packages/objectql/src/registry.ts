@@ -72,6 +72,21 @@ import {
   securityCatalogTypeLabel,
   type SecurityCatalogHolder,
 } from './security-catalog-namespace.js';
+// One name, one package holder for the bare-name types whose consumers resolve
+// without package context — the rule, the holders, the cold boot (module doc).
+import {
+  BUILT_IN_BARE_NAMES,
+  bareNameHolderKey,
+  bareNameTypeLabel,
+  BARE_NAME_ONE_HOLDER_TYPES,
+  declaredBareNames,
+  describeBareNameHolder,
+  isBareNameOneHolderType,
+  suggestedBareNameRename,
+  type BareNameColdBootMode,
+  type BareNameHolder,
+  type BareNameOneHolderType,
+} from './bare-name-one-holder.js';
 // One default record page per object per deployment — the holders and the one
 // place a manifest's default record pages are read from (module doc).
 import {
@@ -2751,6 +2766,137 @@ export class SecurityCatalogNameConflictError extends Error {
   }
 }
 
+/** One second holder {@link BareNameConflictError} refused (or a cold boot reported). */
+export interface BareNameConflict {
+  /** The covered type, as the registry keys it. */
+  readonly type: BareNameOneHolderType;
+  /** The name both holders claim. */
+  readonly name: string;
+  /** The package whose registration this refusal stopped (at a cold boot: the later of the two, by id). */
+  readonly incomingPackageId: string;
+  /** Who already holds the name. */
+  readonly existingHolder: BareNameHolder;
+  /** The rename that clears it — the incoming package's namespace prefixed — when it has one. */
+  readonly rename?: string;
+}
+
+/** One conflict's line, the same at every door. */
+function bareNameConflictLine(c: BareNameConflict): string {
+  return (
+    `package "${c.incomingPackageId}" declares the ${bareNameTypeLabel(c.type)} "${c.name}", ` +
+    `already held by ${describeBareNameHolder(c.existingHolder)}` +
+    (c.rename ? ` — rename it to "${c.rename}" in "${c.incomingPackageId}"` : '')
+  );
+}
+
+/**
+ * Why a second holder is refused, in one sentence a reader can act on — shared
+ * by the doors' refusal and the cold boot's warning.
+ */
+const BARE_NAME_REASON =
+  'Picklists, mappings and datasets each hold one name per deployment: a field names its picklist, an ' +
+  'import its mapping and a dashboard its dataset by the bare name, with no package to tell two definitions ' +
+  'apart, so with two holders every caller is served the same one, chosen by registration order.';
+
+/** The cold-boot warning for the names two installed packages already hold (`bare-name-one-holder.ts`). */
+export function bareNameColdBootWarning(conflicts: readonly BareNameConflict[]): string {
+  return (
+    `Bare-name conflict at boot: ${conflicts.length === 1 ? 'a second holder' : `${conflicts.length} second holders`} ` +
+    `among the installed packages — ${conflicts.map(bareNameConflictLine).join('; ')}. ${BARE_NAME_REASON} ` +
+    `The boot continues and keeps serving the first-registered holder; a further package declaring the ` +
+    `name is refused at install. Rename the item in one package (its namespace prefixed, as above), or ` +
+    `uninstall one of the two packages. See ADR-0048.`
+  );
+}
+
+/**
+ * Raised when a package registers a picklist, mapping or dataset whose name
+ * another package (or the platform) already holds — at managed install, at
+ * package registration, or, under `BARE_NAME_COLD_BOOT_MODE = 'refuse'`, at
+ * the cold boot (`bare-name-one-holder.ts` states the rule, the holders, the
+ * cold boot, and what it deliberately does not judge).
+ *
+ * {@link SecurityCatalogNameConflictError}'s sibling, in its shape and for its
+ * reason: the ADR-0112 envelope (`code` + `status: 422`) so a wire door answers
+ * `422`, never the `500` fallback, and the code the namespace gate registers —
+ * the condition is the same one, "a name in a deployment-wide namespace is
+ * already taken", and so is the remedy: rename, or uninstall the other holder.
+ *
+ * Every conflict the registration carries is listed — `conflicts` — and each
+ * names both holders and, when the incoming package declares a namespace, the
+ * rename that clears it. The top-level fields repeat the first.
+ */
+export class BareNameConflictError extends Error {
+  readonly code = NAMESPACE_CONFLICT_CODE;
+  readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads. */
+  readonly httpStatus = 422;
+  /** Every second holder this registration would have created, in declaration order. */
+  readonly conflicts: readonly BareNameConflict[];
+  /** The first conflict's type. */
+  readonly itemType: BareNameOneHolderType;
+  /** The first conflict's name. */
+  readonly itemName: string;
+  /** The package whose registration this refusal stopped. */
+  readonly incomingPackageId: string;
+  /** The first conflict's existing holder. */
+  readonly existingHolder: BareNameHolder;
+
+  constructor(conflicts: readonly BareNameConflict[], options: { door?: 'cold-boot' } = {}) {
+    const [first] = conflicts;
+    const remedy = first.existingHolder.kind === 'package'
+      ? `Rename the item in "${first.incomingPackageId}"${first.rename ? ` (to "${first.rename}")` : ''}, ` +
+        `rename it in "${first.existingHolder.packageId}", or uninstall one of the two packages.`
+      : `Rename the item in "${first.incomingPackageId}"${first.rename ? ` (to "${first.rename}")` : ''} — ` +
+        'a built-in name is never available to a package.';
+    super(
+      options.door === 'cold-boot'
+        ? `Bare-name conflict at boot: ${conflicts.map(bareNameConflictLine).join('; ')}. ${BARE_NAME_REASON} ` +
+          `The boot is refused. Rename the item in one of the packages, or uninstall one of them, then ` +
+          `restart. See ADR-0048.`
+        : `Bare-name conflict: package "${first.incomingPackageId}" cannot register ` +
+          `${conflicts.length === 1 ? 'a name' : `${conflicts.length} names`} another holder already holds — ` +
+          `${conflicts.map(bareNameConflictLine).join('; ')}. ${BARE_NAME_REASON} ${remedy} See ADR-0048.`,
+    );
+    this.name = 'BareNameConflictError';
+    this.conflicts = conflicts;
+    this.itemType = first.type;
+    this.itemName = first.name;
+    this.incomingPackageId = first.incomingPackageId;
+    this.existingHolder = first.existingHolder;
+  }
+}
+
+/**
+ * The cold boot's half of the bare-name rule (`bare-name-one-holder.ts`, "The
+ * cold boot"): seal the registry — from here on both doors refuse a new holder
+ * at once — and act on every name two installed packages already hold, by
+ * `mode`: `'warn'` logs {@link bareNameColdBootWarning} once and returns the
+ * conflicts; `'refuse'` throws {@link BareNameConflictError} with
+ * `door: 'cold-boot'`. The engine plugin calls it at `kernel:bootstrapped`,
+ * once every package of the boot has registered.
+ *
+ * @throws {BareNameConflictError} under `'refuse'`, when any name is held twice.
+ */
+export function sealBareNameHoldersAtColdBoot(
+  registry: SchemaRegistry,
+  mode: BareNameColdBootMode,
+  logger?: { warn(message: string, meta?: unknown): void },
+): BareNameConflict[] {
+  const conflicts = registry.sealBareNameHolders();
+  if (conflicts.length === 0) return conflicts;
+  if (mode === 'refuse') throw new BareNameConflictError(conflicts, { door: 'cold-boot' });
+  logger?.warn(bareNameColdBootWarning(conflicts), {
+    conflicts: conflicts.map((c) => ({
+      type: c.type,
+      name: c.name,
+      holders: [c.existingHolder.kind === 'package' ? c.existingHolder.packageId : c.existingHolder.kind, c.incomingPackageId],
+      ...(c.rename ? { rename: c.rename } : {}),
+    })),
+  });
+  return conflicts;
+}
+
 /** One second default record page {@link DefaultRecordPageConflictError} refused. */
 export interface DefaultRecordPageConflict {
   /** The object both pages are the default record page of. */
@@ -3909,6 +4055,23 @@ export class SchemaRegistry {
     });
   }
 
+  /** Record who holds one bare name (`bare-name-one-holder.ts`) before its first write. */
+  private noteBareNameClaim(type: BareNameOneHolderType, name: string): void {
+    this.restorePoint?.note(`bareNameClaim\u0000${type}\u0000${name}`, () => {
+      const saved = this.bareNameClaims.get(type)?.get(name);
+      const copy = saved ? new Set(saved) : undefined;
+      return () => {
+        let byName = this.bareNameClaims.get(type);
+        if (copy !== undefined) {
+          if (!byName) this.bareNameClaims.set(type, byName = new Map());
+          byName.set(name, copy);
+        } else {
+          byName?.delete(name);
+        }
+      };
+    });
+  }
+
   /**
    * Record the default record page claims before `packageId`'s first rewrite
    * of them ({@link recordDefaultRecordPageClaims} drops all of the package's
@@ -4414,6 +4577,199 @@ export class SchemaRegistry {
     const claimant = this.securityCatalogClaims.get(type)?.get(name);
     if (claimant !== undefined) holders.add(claimant);
     return [...holders];
+  }
+
+  // ==========================================
+  // Bare names — one name, one package holder (`bare-name-one-holder.ts`)
+  // ==========================================
+
+  /**
+   * Covered type → name → the installed packages that declared it, in install
+   * order — recorded by {@link installPackage}, forgotten by
+   * {@link uninstallPackage}, for the reason {@link securityCatalogClaims} is:
+   * the package door registers no item, so the claim is how it remembers a
+   * declared name. A SET, unlike the security catalog's single claimant: a
+   * cold boot registers every package before anything is judged, so two
+   * packages that both declare a name both hold it until one is renamed or
+   * uninstalled.
+   */
+  private bareNameClaims = new Map<BareNameOneHolderType, Map<string, Set<string>>>();
+
+  /**
+   * Set once, by {@link sealBareNameHolders} at the end of the cold boot. Until
+   * then the doors judge nothing (module doc, "The cold boot"); from then on
+   * both refuse a new holder.
+   */
+  private bareNameHoldersSealed = false;
+
+  /** Has the cold boot sealed the bare-name holders (the doors now refuse)? */
+  get bareNameHoldersAreSealed(): boolean {
+    return this.bareNameHoldersSealed;
+  }
+
+  /**
+   * The packages holding `(type, name)`, in the order the item store serves
+   * them — the first is the holder a caller with no package is served — then
+   * any holder by install claim alone. A package holds a name through an item
+   * registered under it (its composite `<packageId>:<name>` slot) or its
+   * install claim. ⛔ Never the bare slot: that is the environment catalog
+   * (the ADR-0005 overlay), whatever `_packageId` its hydrated row wears.
+   */
+  private bareNamePackageHolders(type: BareNameOneHolderType, name: string): string[] {
+    const holders = new Set<string>();
+    const suffix = `:${name}`;
+    for (const [key, item] of this.metadata.get(type) ?? []) {
+      if (key === name || !key.endsWith(suffix)) continue;
+      const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+      holders.add(typeof stamped === 'string' && stamped !== '' ? stamped : key.slice(0, -suffix.length));
+    }
+    for (const claimant of this.bareNameClaims.get(type)?.get(name) ?? []) holders.add(claimant);
+    return [...holders];
+  }
+
+  /**
+   * The rename a refusal carries for `name` in `packageId` — its namespace
+   * prefixed ({@link suggestedBareNameRename}) — read from the manifest the
+   * door holds, else from the installed record. None for a shareable platform
+   * namespace (`base` / `system` / `sys`): it names no one package.
+   */
+  private bareNameRenameFor(packageId: string, name: string, namespace?: string): string | undefined {
+    const ns = namespace ?? this.getPackage(packageId)?.manifest?.namespace;
+    if (!ns || isShareableNamespace(ns)) return undefined;
+    return suggestedBareNameRename(ns, name);
+  }
+
+  /**
+   * Every holder `incomingPackageId` would join by holding `(type, name)` —
+   * the ONE predicate both doors ask ({@link refuseBareNameConflicts} at the
+   * package door, the item seam in {@link registerItem}). Empty before the
+   * seal, and empty when `incomingPackageId` already holds the name: a reload,
+   * a re-install or an upgrade of a package that came through the boot beside
+   * another holder is not a new holder (module doc, "The cold boot"). A
+   * built-in name is read only when `builtIns` (the package door), as the
+   * security catalog reads its own.
+   */
+  private bareNameHoldersOtherThan(
+    type: BareNameOneHolderType,
+    name: string,
+    incomingPackageId: string,
+    opts: { builtIns: boolean },
+  ): BareNameHolder[] {
+    if (!this.bareNameHoldersSealed) return [];
+    const packages = this.bareNamePackageHolders(type, name);
+    if (packages.includes(incomingPackageId)) return [];
+    const found = new Map<string, BareNameHolder>();
+    if (opts.builtIns && BUILT_IN_BARE_NAMES[type].has(name)) found.set(bareNameHolderKey({ kind: 'built-in' }), { kind: 'built-in' });
+    for (const packageId of packages) {
+      const holder: BareNameHolder = { kind: 'package', packageId };
+      found.set(bareNameHolderKey(holder), holder);
+    }
+    return [...found.values()];
+  }
+
+  /**
+   * The package door's half of the rule: once sealed, refuse a package whose
+   * declared picklists, mappings or datasets bear a name another holder holds,
+   * ahead of every mutation {@link installPackage} makes — the security
+   * catalog's disposition, for its reasons: every conflict collected into one
+   * refusal, no co-owner exemption, no `collisionPolicy` downgrade, and a
+   * package with no identity not judged.
+   *
+   * @throws {BareNameConflictError} ADR-0112 envelope, naming both holders of
+   *   each conflicting name and the rename.
+   */
+  private refuseBareNameConflicts(manifest: ObjectStackManifest, selfId: string | undefined): void {
+    if (selfId === undefined || !this.bareNameHoldersSealed) return;
+    const conflicts: BareNameConflict[] = [];
+    const seen = new Set<string>();
+    for (const { type, name } of declaredBareNames(manifest)) {
+      // One package declaring one name twice is one holder.
+      const key = `${type}|${name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      for (const existingHolder of this.bareNameHoldersOtherThan(type, name, selfId, { builtIns: true })) {
+        conflicts.push({
+          type,
+          name,
+          incomingPackageId: selfId,
+          existingHolder,
+          rename: this.bareNameRenameFor(selfId, name, manifest.namespace),
+        });
+      }
+    }
+    if (conflicts.length > 0) throw new BareNameConflictError(conflicts);
+  }
+
+  /**
+   * Record `packageId`'s bare-name claims — additive, like
+   * {@link recordSecurityCatalogClaims} and for its reasons; released by
+   * {@link uninstallPackage}. Recorded before the seal too: the cold boot reads
+   * them.
+   */
+  private recordBareNameClaims(packageId: string, manifest: ObjectStackManifest): void {
+    for (const { type, name } of declaredBareNames(manifest)) {
+      let byName = this.bareNameClaims.get(type);
+      if (!byName) this.bareNameClaims.set(type, byName = new Map());
+      this.noteBareNameClaim(type, name);
+      let claimants = byName.get(name);
+      if (!claimants) byName.set(name, claimants = new Set());
+      claimants.add(packageId);
+    }
+  }
+
+  /** Drop every bare-name claim `packageId` holds. */
+  private forgetBareNameClaims(packageId: string): void {
+    for (const byName of this.bareNameClaims.values()) {
+      for (const [name, claimants] of byName) {
+        claimants.delete(packageId);
+        if (claimants.size === 0) byName.delete(name);
+      }
+    }
+  }
+
+  /**
+   * The cold boot's seal (`bare-name-one-holder.ts`, "The cold boot"): from
+   * this call on, both doors refuse a new holder of a covered name. Answers
+   * every name the boot left held twice, as the conflicts
+   * {@link BareNameConflictError} reports — the holder a caller with no package
+   * is served as the existing one, each other package as an incoming one with
+   * its rename — and a package holding a built-in name. Sorted by type, then
+   * name, so two boots of one deployment report alike. Records and refuses
+   * nothing else: what the boot does with the answer is
+   * {@link sealBareNameHoldersAtColdBoot}'s mode.
+   */
+  sealBareNameHolders(): BareNameConflict[] {
+    this.bareNameHoldersSealed = true;
+    const conflicts: BareNameConflict[] = [];
+    for (const type of BARE_NAME_ONE_HOLDER_TYPES) {
+      const candidates = new Set<string>();
+      for (const key of this.metadata.get(type)?.keys() ?? []) {
+        const sep = key.lastIndexOf(':');
+        if (sep > 0) candidates.add(key.slice(sep + 1));
+      }
+      for (const name of this.bareNameClaims.get(type)?.keys() ?? []) candidates.add(name);
+      for (const name of [...candidates].sort()) {
+        if (name === '') continue;
+        const packages = this.bareNamePackageHolders(type, name);
+        if (BUILT_IN_BARE_NAMES[type].has(name)) {
+          for (const packageId of packages) {
+            conflicts.push({
+              type, name, incomingPackageId: packageId, existingHolder: { kind: 'built-in' },
+              rename: this.bareNameRenameFor(packageId, name),
+            });
+          }
+          continue;
+        }
+        const [served, ...others] = packages;
+        for (const packageId of others) {
+          conflicts.push({
+            type, name, incomingPackageId: packageId, existingHolder: { kind: 'package', packageId: served },
+            rename: this.bareNameRenameFor(packageId, name),
+          });
+        }
+      }
+    }
+    return conflicts;
   }
 
   // ==========================================
@@ -7179,6 +7535,26 @@ export class SchemaRegistry {
       }
     }
 
+    // One name, one package holder for a picklist, a mapping or a dataset —
+    // the item seam (`bare-name-one-holder.ts`; ADR-0048 §3.4 narrowed). Once
+    // the cold boot has sealed the holders, a package registering one under a
+    // name another package holds — and that it does not hold itself — is
+    // refused BEFORE anything below stamps or stores it. The package door has
+    // already judged what a manifest declares; this is the seam every OTHER
+    // package-bound registration reaches (a nested plugin's collections, a
+    // plugin registering through the registry directly). ⛔ A registration
+    // with no `packageId` is the environment catalog — the ADR-0005 overlay —
+    // and is never judged.
+    if (packageId && isBareNameOneHolderType(type)) {
+      const holders = this.bareNameHoldersOtherThan(type, baseName, packageId, { builtIns: false });
+      if (holders.length > 0) {
+        const rename = this.bareNameRenameFor(packageId, baseName);
+        throw new BareNameConflictError(
+          holders.map((existingHolder) => ({ type, name: baseName, incomingPackageId: packageId, existingHolder, rename })),
+        );
+      }
+    }
+
     // One default record page per object per deployment — the item seam
     // (maintainer ruling A on objectstack#23015; `default-record-page.ts`): a
     // package registering a page as the default record page of an object
@@ -7305,7 +7681,11 @@ export class SchemaRegistry {
     // ⚠️ Except for the three security catalog types, refused at the top of this
     // method: an assignment names a position or a permission set with no
     // package context, so there a second holder is an ambiguity no caller can
-    // resolve (maintainer ruling Q4 = A on #15196).
+    // resolve (maintainer ruling Q4 = A on #15196). ⚠️ And except for the
+    // bare-name types, refused (once the cold boot has sealed) at the top of
+    // this method too: a field's picklist, an import's mapping and a dashboard's
+    // dataset are resolved by name with no package (ruling C on #30798;
+    // `bare-name-one-holder.ts`).
     //
     // Same-package re-registration still overwrites (idempotent reload), and a
     // runtime/DB overlay over a packaged item is the sanctioned ADR-0005 path,
@@ -8203,6 +8583,16 @@ export class SchemaRegistry {
     // exactly as two strangers do.
     this.refuseDefaultRecordPageConflicts(manifest, selfId);
 
+    // One name, one package holder for a picklist, a mapping or a dataset —
+    // the names their consumers resolve with no package (ADR-0048 §3.4
+    // narrowed; maintainer ruling C on #30798, phase 1;
+    // `bare-name-one-holder.ts`). Also ahead of every mutation, with no
+    // co-owner exemption and no `collisionPolicy` downgrade, for the security
+    // catalog's reasons. Judged only once the cold boot has sealed the holders:
+    // during a boot every package registers again, and a deployment that
+    // already holds a clash is the cold boot's to report.
+    this.refuseBareNameConflicts(manifest, selfId);
+
     const now = new Date().toISOString();
 
     // [#18877] 「缺省 = 保持，有旗 = 设置」 — an install that was not asked to move
@@ -8289,6 +8679,8 @@ export class SchemaRegistry {
     if (selfId !== undefined) this.recordSecurityCatalogClaims(selfId, manifest);
     // …and the default record pages it declares (see `defaultRecordPageClaims`).
     if (selfId !== undefined) this.recordDefaultRecordPageClaims(selfId, manifest);
+    // …and its picklist, mapping and dataset names (see `bareNameClaims`).
+    if (selfId !== undefined) this.recordBareNameClaims(selfId, manifest);
     this.log(`[Registry] Installed package: ${manifest.id} (${manifest.name})`);
     return pkg;
   }
@@ -8456,6 +8848,8 @@ export class SchemaRegistry {
     // …and the default record pages it declared, so the next package may
     // declare a default for those objects.
     this.forgetDefaultRecordPageClaims(id);
+    // …and its picklist, mapping and dataset names.
+    this.forgetBareNameClaims(id);
     // [#30581] …and the navigation entries it put into other packages' apps:
     // with no row left, the fold's disabled check cannot withhold them.
     this.setPackageNavContributions(id, []);
