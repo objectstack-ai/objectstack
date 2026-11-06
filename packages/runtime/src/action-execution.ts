@@ -4171,6 +4171,11 @@ function declarativeUpdateRefusal(message: string, status: number): Error {
  * inventing a 403 for the pair would answer a question the platform declines to
  * answer everywhere else. See the note on `loadActionSubjectRecord`.
  *
+ * [#30848] Except for a caller who may not update the OBJECT at all: the data
+ * door refuses that write `403` before it looks the record up, so the pair
+ * gets that 403 here too ({@link refuseUngrantedDeclarativeUpdate}), one
+ * answer for both members of the pair, and the pair stays undistinguished.
+ *
  * ## What is NOT checked here
  *
  * `visible` — contract point 6. It is a per-record UI predicate the client
