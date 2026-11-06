@@ -31,8 +31,10 @@
  *   5. publish + install — `os package publish` itself, run in this process
  *      with the version and environment decided above, so the manifest id,
  *      namespace and `objectstack.manifest.json` rules stay in ONE place;
- *   6. wait (`waitUntilServed`) — served ⇒ 0; the environment's build failed ⇒
- *      its reason and 1; timeout ⇒ what it waited for and 1.
+ *   6. wait (`waitUntilServed`, polling `data.served` — objectstack-ai/cloud#3651)
+ *      — each poll first sends one request to the environment itself, because
+ *      its builds are request-driven; live ⇒ 0; the environment's build failed
+ *      ⇒ its reason and 1; timeout ⇒ what it waited for and 1.
  *
  * Steps 1–4 write nothing anywhere, so a refusal there leaves no package row,
  * no version and no installation behind.
@@ -53,7 +55,7 @@ import { DEFAULT_CLOUD_URL, resolveCloudCredential } from '../utils/cloud-config
 import { describeEnvironment, resolveInstallTarget } from '../utils/install-target.js';
 import { compileForDeploy } from '../utils/deploy-build.js';
 import { devVersion } from '../utils/dev-version.js';
-import { waitUntilServed, type ServedVersionVerdict } from '../utils/served-version.js';
+import { fetchEnvironmentOrigin, waitUntilServed, wakeEnvironment, type ServedVersionVerdict } from '../utils/served-version.js';
 import PackagePublish from './package/publish.js';
 
 /** The artifact the build writes and the publish reads — `os build`'s default output. */
@@ -84,9 +86,12 @@ export default class Deploy extends Command {
       default: true,
       allowNo: true,
     }),
+    // 600 s, not less: a failed build is reported only after three failed
+    // rounds in a row (or a build that outruns its own timeout), so a broken
+    // build can read `pending` for minutes before it reads `failed`.
     'wait-timeout': Flags.integer({
       description: 'Seconds to wait for the environment to serve the new version',
-      default: 300,
+      default: 600,
       min: 1,
     }),
     server: Flags.string({
@@ -162,7 +167,6 @@ export default class Deploy extends Command {
       }
 
       // 5. Publish + install, through `os package publish` itself.
-      const since = Date.now();
       const publish = new PackagePublish(
         [
           artifactPath,
@@ -194,23 +198,29 @@ export default class Deploy extends Command {
       }
       console.log('');
       printStep(`Waiting until ${where} serves ${outcome.manifestId} ${outcome.version}...`);
-      const verdict = await waitUntilServed(
-        {
-          baseUrl: outcome.baseUrl,
-          token: outcome.token,
-          environmentId: target.environmentId,
-          packageId: outcome.packageId,
-          manifestId: outcome.manifestId,
-          version: outcome.version,
-          versionId: outcome.versionId,
-          since,
-        },
-        {
-          timeoutMs: flags['wait-timeout'] * 1000,
-          intervalMs: DEPLOY_POLL_INTERVAL_MS,
-          onPending: (observed) => printStep(`  still waiting — ${observed}`),
-        },
-      );
+      const served = {
+        baseUrl: outcome.baseUrl,
+        token: outcome.token,
+        environmentId: target.environmentId,
+        manifestId: outcome.manifestId,
+        version: outcome.version,
+        versionId: outcome.versionId,
+      };
+      // The environment rebuilds only when it gets a request, so the wait sends
+      // it one per poll. Without its URL the rebuild waits for real traffic.
+      const origin = await fetchEnvironmentOrigin(served);
+      if (!origin) {
+        printWarning(
+          `${baseUrl} did not report ${where}'s URL, so this cannot nudge its rebuild: `
+          + 'it starts when the environment next gets a request (open the app).',
+        );
+      }
+      const verdict = await waitUntilServed(served, {
+        timeoutMs: flags['wait-timeout'] * 1000,
+        intervalMs: DEPLOY_POLL_INTERVAL_MS,
+        wake: origin ? () => wakeEnvironment(origin) : undefined,
+        onPending: (observed) => printStep(`  still waiting — ${observed}`),
+      });
       const code = reportVerdict(verdict, { where, manifestId: outcome.manifestId, version: outcome.version, baseUrl });
       if (code !== 0) this.exit(code);
     } catch (error) {
@@ -244,8 +254,17 @@ export function reportVerdict(
     case 'timeout':
       printError(
         `Timed out after ${Math.round(verdict.waitedMs / 1000)}s waiting for ${ctx.where} to serve ${what} `
-        + `(last report: ${verdict.lastObserved}). The install is recorded; the environment may still be building. `
-        + 'Wait longer with --wait-timeout <seconds>.',
+        + `(last report: ${verdict.lastObserved}). The install is recorded and the environment keeps serving the `
+        + 'previous build meanwhile. A failing build is reported only after three failed rounds in a row, so it can '
+        + 'read as still building for minutes; wait longer with --wait-timeout <seconds>, or open the environment '
+        + 'in the ObjectOS Cloud console to see its build.',
+      );
+      return 1;
+    case 'superseded':
+      printError(
+        `${ctx.where} no longer points at ${what}: another install replaced it (now version id `
+        + `${verdict.desiredVersionId}), so whether ${ctx.version} went live no longer matters. Run \`os deploy\` again `
+        + 'to put this build back.',
       );
       return 1;
     case 'unreadable':

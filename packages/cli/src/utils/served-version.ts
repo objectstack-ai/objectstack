@@ -7,36 +7,46 @@
  * ## Why a wait at all
  *
  * The control plane answers the install as soon as it has written the desired
- * state and evicted the kernel; the environment rebuilds afterwards, keeps
- * serving the OLD build while it does (stale-while-rebuild), and keeps serving
- * it if the build fails. So "installed" in the publish answer means "asked
- * for", and a developer who opens the app right away sees the old version
- * with no word that the new one failed to build.
+ * state; the environment rebuilds afterwards, keeps serving the OLD build while
+ * it does (stale-while-rebuild), and keeps serving it if the build fails. So
+ * "installed" in the publish answer means "asked for", and a developer who
+ * opens the app right away may see the old version with no word that the new
+ * one failed to build.
  *
- * ## ⚠️ The read this polls is an ASSUMPTION until objectstack-ai/cloud#3651 lands
+ * ## The read: `data.served` (objectstack-ai/cloud#3651, PR objectstack-ai/cloud#3662)
  *
- * The served-version signal is the server half's item 3, and its contract is
- * not final. Everything that depends on its shape lives in TWO functions here
- * — {@link fetchInstallationReport} (the request) and
- * {@link interpretInstallationReport} (the reading) — and nothing outside this
- * file knows the shape, so adopting the final contract edits this file only.
+ * `GET /api/v1/cloud/environments/{environmentId}/packages/{manifestId}`, with
+ * the credential the publish used, answers `data.served`:
  *
- * Assumed: the installation read that exists today,
- * `GET /api/v1/cloud/environments/:envId/installations/:packageId` (keyed by the
- * internal `sys_package.id`, answered with the publish credential, envelope
- * `{ success, data }`), additionally answers the observed columns the control
- * database already carries on `sys_package_installation`, camel-cased beside
- * its existing `installed` / `installationId` / `version` keys:
+ *     state             'live' | 'pending' | 'failed'
+ *     desiredVersionId  the installed version — equals the publish answer's `id`
+ *     versionId         the version the environment last reported serving
+ *     version           its version string
+ *     observedStatus    installed | incomplete | failed | pending | null
+ *     observedAt        when that was reported
+ *     error             the build's failure reason (redacted), when state is 'failed'
  *
- *     observedStatus     'installed' | 'incomplete' | 'pending' | 'drift' | 'failed'
- *     observedVersionId  the sys_package_version.id the environment now serves
- *     observedVersion    that version's string
- *     reconcileError     the build failure's reason, when observedStatus is 'failed'
- *     lastReconciledAt   ISO time of the report the four above come from
+ * `live` ends the wait; `failed` prints `error` and exits non-zero; `pending`
+ * keeps polling. ⛔ Not the installed-state probe
+ * (`GET …/installations/:packageId`): it keeps its old shape and carries no
+ * `served`.
  *
- * A report with NONE of those keys is a control plane that does not report a
- * served version yet — today's cloud. That is said plainly and the wait ends
- * without claiming the new version is live; it never spins to the timeout.
+ * Two facts about the server shape the loop:
+ *
+ * 1. **Builds are request-driven.** Nothing rebuilds until the environment
+ *    gets traffic, so every poll also sends one request to the environment's
+ *    own URL ({@link wakeEnvironment}) — that starts the rebuild, or retries a
+ *    failed one.
+ * 2. **Failures surface late.** A failure is reported only once the runtime's
+ *    failure streak trips (three failed rounds in a row) or a build outruns its
+ *    timeout; one failed round still reads `pending`. The default wait is sized
+ *    for that, and a timeout says so.
+ *
+ * Everything that knows this shape lives in this file — {@link fetchServedReport}
+ * (the request) and {@link interpretServedReport} (the reading) — so a change
+ * to the contract edits this file only. An answer with no `served` at all is a
+ * control plane from before that contract: said plainly, never spun to the
+ * timeout, never called live.
  */
 
 import { readErrorMessage } from './response-envelope.js';
@@ -46,45 +56,42 @@ export interface ServedVersionTarget {
   baseUrl: string;
   token: string;
   environmentId: string;
-  /** `sys_package.id` (internal), the key the installation read uses. */
-  packageId: string;
-  /** Shown in messages. */
+  /** The read is keyed by manifest id. */
   manifestId: string;
   version: string;
+  /** The publish answer's `id` — what `served.desiredVersionId` must equal. */
   versionId: string | undefined;
-  /** Client clock when the publish started; a failure reported before it is a previous build's. */
-  since: number;
 }
 
-/** One reading of the installation, reduced to what the wait decides on. */
-export type InstallationReading =
+/** One reading of `data.served`, reduced to what the wait decides on. */
+export type ServedReading =
   | { kind: 'served'; version: string; incomplete: boolean }
   | { kind: 'failed'; reason: string }
+  | { kind: 'superseded'; desiredVersionId: string }
   | { kind: 'pending'; observed: string }
   | { kind: 'unsupported' };
 
 /** One poll's outcome, before interpretation. */
-export type InstallationReport =
+export type ServedReport =
   | { ok: true; data: Record<string, unknown> }
   | { ok: false; status: number; error: string; retryable: boolean };
 
-export type FetchInstallationReport = (target: ServedVersionTarget) => Promise<InstallationReport>;
+export type FetchServedReport = (target: ServedVersionTarget) => Promise<ServedReport>;
 
 /** The wait's verdict — the caller prints it and picks the exit code. */
 export type ServedVersionVerdict =
   | { kind: 'served'; version: string; incomplete: boolean }
   | { kind: 'failed'; reason: string }
+  | { kind: 'superseded'; desiredVersionId: string }
   | { kind: 'timeout'; waitedMs: number; lastObserved: string }
   | { kind: 'unsupported' }
   | { kind: 'unreadable'; status: number; error: string };
 
-const OBSERVED_KEYS = ['observedStatus', 'observedVersionId', 'observedVersion', 'reconcileError', 'lastReconciledAt'];
-
-/** The request half of the assumed contract. Never throws. */
-export const fetchInstallationReport: FetchInstallationReport = async (target) => {
+/** The request half of the contract. Never throws. */
+export const fetchServedReport: FetchServedReport = async (target) => {
   const url =
     `${target.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(target.environmentId)}`
-    + `/installations/${encodeURIComponent(target.packageId)}`;
+    + `/packages/${encodeURIComponent(target.manifestId)}`;
   try {
     const response = await fetch(url, { headers: { Authorization: `Bearer ${target.token}` } });
     let parsed: any = null;
@@ -105,69 +112,111 @@ export const fetchInstallationReport: FetchInstallationReport = async (target) =
   }
 };
 
-/** The reading half of the assumed contract. Pure. */
-export function interpretInstallationReport(
+/** The reading half of the contract. Pure. */
+export function interpretServedReport(
   data: Record<string, unknown>,
-  target: Pick<ServedVersionTarget, 'version' | 'versionId' | 'since'>,
-): InstallationReading {
-  if (!OBSERVED_KEYS.some((key) => key in data)) return { kind: 'unsupported' };
+  target: Pick<ServedVersionTarget, 'version' | 'versionId'>,
+): ServedReading {
+  const served = data.served;
+  if (!served || typeof served !== 'object') return { kind: 'unsupported' };
+  const s = served as Record<string, unknown>;
+  const str = (key: string) => (typeof s[key] === 'string' && (s[key] as string).trim() ? (s[key] as string).trim() : undefined);
 
-  const status = typeof data.observedStatus === 'string' ? data.observedStatus : undefined;
-  const observedVersionId = typeof data.observedVersionId === 'string' ? data.observedVersionId : undefined;
-  const observedVersion = typeof data.observedVersion === 'string' ? data.observedVersion : undefined;
-  const isOurs =
-    (target.versionId !== undefined && observedVersionId === target.versionId)
-    || observedVersion === target.version;
+  // The installation now points at a different version: someone installed over
+  // this deploy, so neither `live` nor `failed` is about the version we published.
+  const desired = str('desiredVersionId');
+  if (desired && target.versionId && desired !== target.versionId) {
+    return { kind: 'superseded', desiredVersionId: desired };
+  }
 
-  if ((status === 'installed' || status === 'incomplete') && isOurs) {
-    return { kind: 'served', version: observedVersion ?? target.version, incomplete: status === 'incomplete' };
+  const state = str('state');
+  const observedStatus = str('observedStatus');
+  if (state === 'live') {
+    return { kind: 'served', version: str('version') ?? target.version, incomplete: observedStatus === 'incomplete' };
   }
-  if (status === 'failed') {
-    const reportedAt = typeof data.lastReconciledAt === 'string' ? Date.parse(data.lastReconciledAt) : NaN;
-    // A failure is ours when it names our version, or was reported after this
-    // publish began. An older failure is a previous build's and is not news.
-    if (isOurs || (Number.isFinite(reportedAt) && reportedAt >= target.since)) {
-      const reason = typeof data.reconcileError === 'string' && data.reconcileError.trim()
-        ? data.reconcileError.trim()
-        : 'the environment reported a failed build without a reason';
-      return { kind: 'failed', reason };
-    }
+  if (state === 'failed') {
+    return { kind: 'failed', reason: str('error') ?? 'the environment reported a failed build without a reason' };
   }
-  const observed = observedVersion
-    ? `${status ?? 'status not reported'}, serving ${observedVersion}`
-    : (status ?? 'nothing reported yet');
+  const version = str('version');
+  const observed = version
+    ? `${observedStatus ?? 'status not reported'}, serving ${version}`
+    : (observedStatus ?? 'nothing reported yet');
   return { kind: 'pending', observed };
 }
 
 /**
+ * The environment's own origin, from the control plane's environment read
+ * (`data.environment.hostname`). `undefined` when it has none or the read
+ * fails — the wait then cannot wake the build, and the caller says so.
+ */
+export async function fetchEnvironmentOrigin(target: Pick<ServedVersionTarget, 'baseUrl' | 'token' | 'environmentId'>): Promise<string | undefined> {
+  try {
+    const response = await fetch(
+      `${target.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(target.environmentId)}`,
+      { headers: { Authorization: `Bearer ${target.token}` } },
+    );
+    if (!response.ok) return undefined;
+    const parsed: any = await response.json().catch(() => null);
+    const hostname = (parsed?.data ?? parsed)?.environment?.hostname;
+    if (typeof hostname !== 'string' || !hostname.trim()) return undefined;
+    const trimmed = hostname.trim().replace(/\/+$/, '');
+    return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * One request to the environment itself, so a request-driven rebuild starts
+ * (or a failed one retries). Best-effort by design: the answer while it builds
+ * is a 503 `kernel_warming`, and nothing about it is read. `/api/v1/discovery`
+ * is served by the environment's kernel — unlike `/api/v1/health`, the
+ * container liveness probe, which answers without one.
+ */
+export async function wakeEnvironment(origin: string, timeoutMs = 10_000): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    await fetch(`${origin}/api/v1/discovery`, { signal: controller.signal });
+  } catch {
+    // Unreachable or slow — the next poll asks again.
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Poll until the environment serves `target.version`, reports its build
- * failed, or `timeoutMs` passes. The clock and the sleep are injectable so a
- * test drives the whole wait without real time.
+ * failed, or `timeoutMs` passes. Each poll first wakes the environment (when
+ * `wake` is given). The clock and the sleep are injectable so a test drives
+ * the whole wait without real time.
  */
 export async function waitUntilServed(
   target: ServedVersionTarget,
   options: {
     timeoutMs: number;
     intervalMs: number;
-    fetchReport?: FetchInstallationReport;
+    fetchReport?: FetchServedReport;
+    wake?: () => Promise<void>;
     now?: () => number;
     sleep?: (ms: number) => Promise<void>;
     onPending?: (observed: string) => void;
   },
 ): Promise<ServedVersionVerdict> {
-  const fetchReport = options.fetchReport ?? fetchInstallationReport;
+  const fetchReport = options.fetchReport ?? fetchServedReport;
   const now = options.now ?? Date.now;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const started = now();
   let lastObserved = 'nothing reported yet';
 
   for (;;) {
+    await options.wake?.();
     const report = await fetchReport(target);
     if (!report.ok) {
       if (!report.retryable) return { kind: 'unreadable', status: report.status, error: report.error };
       lastObserved = `the read answered ${report.status || 'no response'}: ${report.error}`;
     } else {
-      const reading = interpretInstallationReport(report.data, target);
+      const reading = interpretServedReport(report.data, target);
       if (reading.kind !== 'pending') return reading;
       if (reading.observed !== lastObserved) options.onPending?.(reading.observed);
       lastObserved = reading.observed;

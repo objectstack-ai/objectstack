@@ -3172,9 +3172,12 @@ only environment. Every refusal comes before anything is written: not logged
 in, no environment to name, a failed build (its errors are printed), or a
 `manifest.version` that is not semver. A build the environment itself reports
 as failed prints the environment's reason and exits `1`; so does a wait that
-times out, naming what it waited for. On a control plane that does not yet
-report which version an environment serves, the command says so and does not
-claim the new version is live.
+times out, naming what it waited for. An environment rebuilds only when it gets
+a request, so while it waits the command sends it one on every poll. A failing
+build is reported only after three failed rounds in a row, so it can read as
+still building for a few minutes before the reason appears. On a control plane
+that does not yet report which version an environment serves, the command says
+so and does not claim the new version is live.
 
 There is no deploy on save: on ObjectOS Cloud your organization's environment
 is its production, so a deploy is always a deliberate act.
@@ -3183,7 +3186,7 @@ is its production, so a deploy is always a deliberate act.
 |---|---|---|
 | `--env <id>` | `OS_ENVIRONMENT_ID` | Environment to deploy into (default: the active one for this control plane, then your organization's only one) |
 | `--no-wait` | — | Return once the install is recorded |
-| `--wait-timeout <seconds>` | — | How long to wait for the environment to serve the new version (default `300`) |
+| `--wait-timeout <seconds>` | — | How long to wait for the environment to serve the new version (default `600`) |
 | `-s, --server <url>` | `OS_CLOUD_URL` | Control-plane URL. Default `https://cloud.objectos.ai`, or the URL recorded by `os cloud login` |
 | `-t, --token <key>` | `OS_CLOUD_API_KEY` | Bearer token; `$OS_TOKEN` and `~/.objectstack/cloud.json` are the fallbacks |
 
