@@ -197,7 +197,7 @@ publishers and two version shapes:
 |---|---|---|
 | `latest` | the stable release (GA) | `release.yml`, outside pre mode — the Version Packages PR flow below. The only path that writes `latest` |
 | `next` | the pre-release (`X.Y.Z-next.N`) during a release-candidate cycle | `release.yml` in pre mode: `.changeset/pre.json` says `mode: pre`, `tag: next`, and `changeset publish` publishes under that tag |
-| `next` | a snapshot of `main` (`0.0.0-next-YYYYMMDDHHMMSS`) outside a cycle | `release.yml`'s snapshot lane: **Actions → Release → Run workflow** with `snapshot_next` checked, then a required reviewer approves `Snapshot next of main <commit> (awaiting approval)` at `environment: release`. It cuts the newest commit whose full battery is green on it, runs `changeset version --snapshot next` in the runner only (never committed), and runs `changeset publish --tag next --no-git-tag`: no tag, no GitHub Release, no Version Packages PR change, `latest` untouched. It refuses while `.changeset/pre.json` says `mode: pre` at the selected commit or at main's tip, read again after the approval (the cycle owns `next`) and while any fixed-group member has no version on npm (a first publish takes `latest`). ADR-0125, amendment of 2026-11-05 |
+| `next` | a snapshot of `main` (`0.0.0-next-YYYYMMDDHHMMSS`) outside a cycle | `release.yml`'s snapshot lane, **proposed daily by schedule and published on approval**: a daily cron (or **Actions → Release → Run workflow** with `snapshot_next` checked) starts the preflight, and a required reviewer then approves `Snapshot next of main <commit> (awaiting approval)` at `environment: release` — nothing publishes without that click, and a proposal nobody approves is superseded by the next day's. It cuts the newest commit whose full battery is green on it, runs `changeset version --snapshot next` in the runner only (never committed), and runs `changeset publish --tag next --no-git-tag`: no tag, no GitHub Release, no Version Packages PR change, `latest` untouched. It refuses while `.changeset/pre.json` says `mode: pre` at the selected commit or at main's tip, read again after the approval (the cycle owns `next`) and while any fixed-group member has no version on npm (a first publish takes `latest`) — so the daily run is a red preflight, by design, until every member has debuted. ADR-0125, amendments of 2026-11-05 and 2026-11-06 |
 
 A snapshot version sorts below every stable version, so the next stable publish's
 dist-tag step moves `next` back up to it. An app that needs a fix the day it lands
@@ -218,8 +218,10 @@ held, **whole**, at the environment gate until a required reviewer approves it (
 The approval is the release act on that lane, so read ADR-0125 D3 before touching it:
 an environment with no required reviewers passes automatically and silently, which on
 a push-started lane is not a weakened gate but no gate at all. (`release.yml` also
-carries a 6-hourly `schedule`, added by #11233; it reaches only the bookkeeping
-`version-pr` job, which has no publish capability by construction.) That is the
+carries two `schedule` crons: the 6-hourly one, added by #11233, reaches only the
+bookkeeping `version-pr` job, which has no publish capability by construction; the
+daily one, added by the 2026-11-06 amendment, starts only the `next` snapshot
+preflight, whose publish waits at the same `release` gate.) That is the
 2026-08-07 ruling (「版本发布必须是人工的」) re-implemented, not relaxed, and it is not
 negotiable in either direction — see `release.yml`'s header for the two releases that
 were minted without a human and the lane split that ended it.
