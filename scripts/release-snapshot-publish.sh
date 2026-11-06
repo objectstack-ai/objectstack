@@ -14,7 +14,13 @@
 #      refusal the stable publish runs: no published @object-ui package carries
 #      tooling material (a test, a mock, a `*.tsbuildinfo`) or lacks its build.
 #      `--no-build` because the build the job ran is what gets packed;
-#   2. the ruling's command, `changeset publish --tag next --no-git-tag`.
+#   2. npm's answer record, started exactly as scripts/release-publish.sh starts
+#      it (`release-verify-npm.mjs --start-npm-record`, `npm_config_logs_dir`,
+#      `npm_config_logs_max`), so the job's `release-verify-npm.mjs` read-back
+#      names what npm answered for a package it cannot read;
+#   3. the ruling's command, `changeset publish --tag next --no-git-tag`;
+#   4. `release-verify-npm.mjs --npm-answers`, npm's answer per package, printed
+#      whatever the publish's exit, which the script then exits with.
 #
 # What makes the tag `next` and only `next` is not this file: the job runs
 # `node scripts/ci/snapshot-next.mjs guard` first, and that script's header
@@ -44,4 +50,22 @@ if ! node ui/scripts/check-published-dist-tooling.mjs --no-build; then
   exit 1
 fi
 
-changeset publish --tag next --no-git-tag
+# Keep npm's own answer for every package — scripts/release-publish.sh's
+# header has the measurement: `changeset publish` keeps none of npm's output,
+# and npm's debug log of each run (its `http fetch PUT <status>` line included)
+# is what tells "accepted, registry slow" from "refused" or "never uploaded".
+# After the scan on purpose: its `npm pack --dry-run` runs stay out of the
+# record. Only npm's log settings change here.
+NPM_RECORD_DIR="$(node scripts/release-verify-npm.mjs --start-npm-record)"
+export npm_config_logs_dir="$NPM_RECORD_DIR"
+export npm_config_logs_max=100000
+
+publish_status=0
+changeset publish --tag next --no-git-tag || publish_status=$?
+
+# npm's answer per package, printed before anything else can fail. A report,
+# never the verdict: the job's read-back reads the record again and fails closed.
+node scripts/release-verify-npm.mjs --npm-answers \
+  || echo "::warning::could not print npm's per-package answers; scripts/release-verify-npm.mjs reads the record again."
+
+exit "$publish_status"

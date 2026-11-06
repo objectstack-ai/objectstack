@@ -4,9 +4,13 @@
 // snapshot-next -- the guard and the debut rule of release.yml's `next`
 // snapshot lane (ADR-0125, amendment of 2026-11-05; ruling record 6663894403).
 //
-//   node scripts/ci/snapshot-next.mjs preflight [--record FILE]
+//   node scripts/ci/snapshot-next.mjs preflight [--main-ref REF] [--record FILE]
 //       before any deployment is queued, and again after the approval: refuses
-//       while `.changeset/pre.json` says `mode: pre`, when the publishable set
+//       while `.changeset/pre.json` says `mode: pre` -- read TWICE, in the
+//       selected commit's tree and at REF (default `refs/remotes/origin/main`,
+//       main as this job's checkout fetched it), so a cycle entered on main
+//       after the selected commit, or during the approval wait, is seen -- when
+//       the publishable set
 //       is not the Changesets fixed group, and when any member of that group has
 //       no version on npm (the debut rule). `--record` writes every member's
 //       dist-tags as read, which `verify` compares against after the publish.
@@ -19,7 +23,7 @@
 //       a group member that the snapshot version does not satisfy.
 //   node scripts/ci/snapshot-next.mjs verify --record FILE --version V
 //       after the publish: every member's `next` is V and `latest` did not move.
-//   node scripts/ci/snapshot-next.mjs dry-run [--keep]
+//   node scripts/ci/snapshot-next.mjs dry-run [--main-ref REF] [--keep]
 //       the rehearsal: the registry reading of `preflight` (reported, not
 //       stopped on), then the bare `changeset version --snapshot next`, then
 //       `guard` with the pack, then the tree put back. Publishes nothing and
@@ -44,7 +48,13 @@
 //   2. pre mode, where changesets publishes under the pre state's tag instead.
 //      Refused before any deployment is queued (changesets itself refuses both
 //      `version --snapshot` and `publish --tag` in pre mode, so an approval then
-//      would fail after the click).
+//      would fail after the click). The selected commit's own tree is not
+//      enough: it is older than main's tip by construction, and the approval
+//      can wait a day, so a cycle entered on main since then would not show
+//      there -- and a snapshot published under it would overwrite the cycle's
+//      `next`. `preflight` therefore also reads main's tip as fetched
+//      (MAIN_REF) and refuses on `mode: pre` at either; a MAIN_REF that does
+//      not resolve is NOT MEASURED, never a pass.
 //   3. a `publishConfig.tag`, an `.npmrc` `tag` or an `npm_config_tag` that a
 //      package or the environment carries. Refused by `guard`.
 //   4. a package's FIRST publish, which takes `latest` whatever tag the client
@@ -61,7 +71,7 @@
 // version step and `changeset pack` in the working tree and puts the tree back.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
@@ -84,6 +94,10 @@ const PUBLISH_SCRIPT = resolve(HERE, '../release-snapshot-publish.sh');
 export const SNAPSHOT_TAG = 'next';
 export const PUBLISH_COMMAND = 'changeset publish --tag next --no-git-tag';
 export const PUBLISH_SCRIPT_CALL = 'bash scripts/release-snapshot-publish.sh';
+// The publish line as the script spells it: the ruling's command, its exit kept
+// so npm's answers print before the script exits with it (release-publish.sh's
+// shape).
+export const PUBLISH_LINE = `${PUBLISH_COMMAND} || publish_status=$?`;
 export const VERSION_COMMAND = 'changeset version --snapshot next';
 
 // The version `changeset version --snapshot next` writes with this repository's
@@ -102,6 +116,10 @@ export const PREFLIGHT_JOB = 'snapshot-next-preflight';
 export const SNAPSHOT_JOB = 'snapshot-next';
 // The stable lane's jobs that a snapshot dispatch must not start.
 export const STABLE_JOBS = Object.freeze(['release-integrity', 'full-battery', 'publish', 'docker']);
+// Main's tip as the job's `fetch-depth: 0` checkout fetched it: the second
+// place `preflight` reads the RC cycle (header, check 2). Both jobs pass it.
+export const MAIN_REF = 'refs/remotes/origin/main';
+const PRE_JSON = '.changeset/pre.json';
 
 const DEFAULT_REGISTRY = 'https://registry.npmjs.org';
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -134,6 +152,20 @@ export function preModeRefusal(preJsonText) {
     return `.changeset/pre.json carries mode ${JSON.stringify(mode)}, which is neither \`pre\` nor \`exit\`. Refusing rather than guessing what it means for \`next\`.`;
   }
   return null;
+}
+
+/**
+ * The RC-cycle refusals from BOTH readings: `.changeset/pre.json` in the
+ * selected commit's tree and at MAIN_REF (each text, or null when absent).
+ * Either one in `mode: pre` refuses; each refusal names where it was read.
+ */
+export function preCycleRefusals({ atCommit, atMain, mainRef = MAIN_REF }) {
+  const out = [];
+  const commit = preModeRefusal(atCommit);
+  if (commit) out.push(`at the selected commit: ${commit}`);
+  const main = preModeRefusal(atMain);
+  if (main) out.push(`at ${mainRef} (main's tip as this job fetched it, newer than the selected commit): ${main}`);
+  return out;
 }
 
 /** The fixed group's member names, or a refusal when the config is not one group. */
@@ -331,6 +363,23 @@ function readOptional(path) {
   return existsSync(path) ? readFileSync(path, 'utf8') : null;
 }
 
+/**
+ * `.changeset/pre.json` at REF, read from git: the text, or null when REF's
+ * tree has no such file. Throws when REF does not resolve or git cannot read
+ * it -- whether main is in a cycle is then unknown, which is never a pass.
+ */
+export function readPreJsonAt(root, ref) {
+  if (!/^[A-Za-z0-9._/-]+$/.test(ref)) throw new Error(`${JSON.stringify(ref)} is not a ref spelling this reader accepts`);
+  const commit = run('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: root });
+  if (commit.status !== 0) throw new Error(`${ref} does not resolve to a commit here, so whether main has entered a release-candidate cycle is unknown (the checkout must fetch main: fetch-depth: 0)`);
+  const ls = run('git', ['ls-tree', '--name-only', ref, '--', PRE_JSON], { cwd: root });
+  if (ls.status !== 0) throw new Error(`git ls-tree ${ref} -- ${PRE_JSON} failed (exit ${ls.status}): ${ls.stderr.trim()}`);
+  if (ls.stdout.trim() === '') return null;
+  const show = run('git', ['show', `${ref}:${PRE_JSON}`], { cwd: root });
+  if (show.status !== 0) throw new Error(`git show ${ref}:${PRE_JSON} failed (exit ${show.status}): ${show.stderr.trim()}`);
+  return show.stdout;
+}
+
 function workspaceState(root) {
   const config = readJson(join(root, '.changeset/config.json'));
   const group = fixedGroup(config);
@@ -343,10 +392,15 @@ function workspaceState(root) {
 // ---------------------------------------------------------------------------
 
 /** The refusals that hold before any deployment is queued. Returns the report. */
-export async function preflight({ root = REPO_ROOT, read = readRegistryState } = {}) {
+export async function preflight({
+  root = REPO_ROOT,
+  read = readRegistryState,
+  mainRef = MAIN_REF,
+  readPre = () => ({ atCommit: readOptional(join(root, PRE_JSON)), atMain: readPreJsonAt(root, mainRef) }),
+} = {}) {
   const refusals = [];
-  const pre = preModeRefusal(readOptional(join(root, '.changeset/pre.json')));
-  if (pre) refusals.push(pre);
+  const { atCommit, atMain } = readPre();
+  refusals.push(...preCycleRefusals({ atCommit, atMain, mainRef }));
   const { group, publishable } = workspaceState(root);
   if (group.problem) refusals.push(group.problem);
   refusals.push(...groupProblems(group.names, publishable.map((p) => p.name)));
@@ -357,6 +411,7 @@ export async function preflight({ root = REPO_ROOT, read = readRegistryState } =
     members: group.names.length,
     refusals,
     unread,
+    mainRef,
     packages: group.names.map((name) => ({ name, latest: states[name]?.distTags?.latest ?? null, next: states[name]?.distTags?.next ?? null, published: Object.hasOwn(states, name) ? states[name] !== null : null })),
   };
 }
@@ -510,12 +565,12 @@ function restoreTree(root, untrackedBefore) {
   if (left.length > 0) throw new Error(`the tree was not restored: ${left.slice(0, 5).join(', ')}`);
 }
 
-async function dryRun({ root = REPO_ROOT, keep = false, read = readRegistryState } = {}) {
+async function dryRun({ root = REPO_ROOT, keep = false, read = readRegistryState, mainRef = MAIN_REF } = {}) {
   console.log(`snapshot-next dry-run: nothing is published, tagged or pushed; no npm token is read.`);
   const head = run('git', ['rev-parse', 'HEAD'], { cwd: root }).stdout.trim();
   console.log(`tree: ${root} at ${head}`);
-  const pre = await preflight({ root, read });
-  console.log(`preflight: ${pre.members} fixed-group member(s) read on npm; ${pre.refusals.length} refusal(s), ${pre.unread.length} unread.`);
+  const pre = await preflight({ root, read, mainRef });
+  console.log(`preflight: RC cycle read at the tree and at ${mainRef}; ${pre.members} fixed-group member(s) read on npm; ${pre.refusals.length} refusal(s), ${pre.unread.length} unread.`);
   for (const r of pre.refusals) console.log(`  REFUSED  ${r}`);
   for (const u of pre.unread) console.log(`  UNREAD   ${u}`);
 
@@ -650,9 +705,27 @@ export function snapshotWiring(yamlText, publishScriptText) {
   const calls = snap.filter((line) => line.includes(PUBLISH_SCRIPT_CALL));
   if (calls.length !== 1) findings.push(`\`${SNAPSHOT_JOB}\` must call \`${PUBLISH_SCRIPT_CALL}\` exactly once (found ${calls.length})`);
   const publishLines = script.filter((line) => /\bchangeset\s+publish\b/.test(line));
-  if (publishLines.length !== 1 || publishLines[0].trim() !== PUBLISH_COMMAND) {
-    findings.push(`the publish script must run exactly one publish, \`${PUBLISH_COMMAND}\` (found ${publishLines.length}: ${publishLines.map((l) => l.trim()).join(' | ') || 'none'})`);
+  if (publishLines.length !== 1 || publishLines[0].trim() !== PUBLISH_LINE) {
+    findings.push(`the publish script must run exactly one publish, \`${PUBLISH_LINE}\` (found ${publishLines.length}: ${publishLines.map((l) => l.trim()).join(' | ') || 'none'})`);
   }
+  // npm's answer record, in release-publish.sh's order: the scan, then the
+  // record started and handed to npm, then the publish, then the answers, then
+  // the publish's own exit.
+  const lineAt = (re) => script.findIndex((line) => re.test(line));
+  const scanAt = lineAt(/node ui\/scripts\/check-published-dist-tooling\.mjs --no-build\b/);
+  const recordAt = lineAt(/^NPM_RECORD_DIR="\$\(node scripts\/release-verify-npm\.mjs --start-npm-record\)"$/);
+  const logsDirAt = lineAt(/^export npm_config_logs_dir="\$NPM_RECORD_DIR"$/);
+  const logsMaxAt = lineAt(/^export npm_config_logs_max=100000$/);
+  const scriptPublishAt = lineAt(/\bchangeset\s+publish\b/);
+  const answersAt = lineAt(/^node scripts\/release-verify-npm\.mjs --npm-answers\b/);
+  const exitAt = lineAt(/^exit "\$publish_status"$/);
+  if (scanAt === -1 || scriptPublishAt === -1 || scanAt > scriptPublishAt) findings.push('the publish script must run `check-published-dist-tooling.mjs --no-build` before the publish');
+  if ([recordAt, logsDirAt, logsMaxAt].some((i) => i === -1)) {
+    findings.push('the publish script must start npm\'s answer record as release-publish.sh does: `release-verify-npm.mjs --start-npm-record`, then export `npm_config_logs_dir` and `npm_config_logs_max`');
+  } else if (!(scanAt < recordAt && recordAt < logsDirAt && logsDirAt < scriptPublishAt && logsMaxAt < scriptPublishAt)) {
+    findings.push('the publish script must start npm\'s answer record after the dist-tooling scan (its npm runs stay out of the record) and before the publish');
+  }
+  if (answersAt === -1 || answersAt < scriptPublishAt || exitAt === -1 || exitAt < answersAt) findings.push('the publish script must print `release-verify-npm.mjs --npm-answers` after the publish, whatever its exit, then exit with the publish\'s status');
   for (const [re, what] of FORBIDDEN_IN_SNAPSHOT) {
     if (script.some((line) => re.test(line))) findings.push(`the publish script carries ${what}: the snapshot lane pushes no tag, cuts no Release, moves no dist-tag and builds no image`);
   }
@@ -662,6 +735,11 @@ export function snapshotWiring(yamlText, publishScriptText) {
   const versionAt = at(snap, /\bchangeset version --snapshot next\s*$/);
   if (versionAt === -1) findings.push(`\`${SNAPSHOT_JOB}\` never runs the bare \`${VERSION_COMMAND}\``);
   if (guardAt === -1 || publishAt === -1 || guardAt > publishAt || versionAt > guardAt) findings.push(`\`${SNAPSHOT_JOB}\` must run the version step, then \`snapshot-next.mjs guard\`, then the publish`);
+  for (const [job, lines] of [[PREFLIGHT_JOB, pre], [SNAPSHOT_JOB, snap]]) {
+    const runs = lines.filter((line) => /node scripts\/ci\/snapshot-next\.mjs (preflight|dry-run)\b/.test(line));
+    const unmain = runs.filter((line) => !line.includes(` --main-ref ${MAIN_REF}`));
+    if (unmain.length) findings.push(`\`${job}\` reads the RC cycle without \`--main-ref ${MAIN_REF}\` (${unmain.map((l) => l.trim()).join(' | ')}): a cycle entered on main after the selected commit would not be seen`);
+  }
   if (at(snap, /node scripts\/ci\/snapshot-next\.mjs preflight\b/) === -1 || at(snap, /node scripts\/ci\/snapshot-next\.mjs preflight\b/) > versionAt) findings.push(`\`${SNAPSHOT_JOB}\` must re-run \`snapshot-next.mjs preflight\` after the approval, before the version step`);
   if (at(snap, /node scripts\/ci\/snapshot-next\.mjs verify\b/) < publishAt) findings.push(`\`${SNAPSHOT_JOB}\` must run \`snapshot-next.mjs verify\` after the publish`);
   if (at(pre, /scheduled-full-run\.mjs --snapshot-commit\b/) === -1) findings.push(`\`${PREFLIGHT_JOB}\` never selects the commit with \`scheduled-full-run.mjs --snapshot-commit\``);
@@ -682,6 +760,7 @@ export function snapshotWiring(yamlText, publishScriptText) {
 
 const SELF_TEST_BATTERIES = Object.freeze({
   'the RC cycle: pre mode refuses, exit and absence pass, the unreadable refuses': 5,
+  'the RC cycle at both readings: the selected commit and main\'s tip': 8,
   'the fixed group: one group, equal to the publishable set': 5,
   'the debut rule: never published or no latest refuses': 4,
   'the versions: one 0.0.0-next snapshot of the whole group': 5,
@@ -690,10 +769,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the packed manifests: no workspace range, every intra-group range satisfied': 7,
   'the registry read: 404 is never published, anything unread is never guessed': 5,
   'verify: next names the snapshot, latest never moves to it': 4,
-  'release.yml: the snapshot wiring': 15,
+  'release.yml: the snapshot wiring': 21,
   'release.yml: exclusivity, evaluated job by job': 7,
+  'release-snapshot-publish.sh, run with a stubbed changeset: npm\'s answer record': 7,
 });
-const SELF_TEST_BATTERY_FLOOR = 11;
+const SELF_TEST_BATTERY_FLOOR = 13;
 
 export async function selfTest() {
   const seen = new Map();
@@ -720,6 +800,61 @@ export async function selfTest() {
   await t('mode exit passes', () => preModeRefusal('{"mode":"exit","tag":"next"}') === null);
   await t('an unknown mode refuses', () => preModeRefusal('{"mode":"weird"}') !== null);
   await t('unparseable JSON refuses', () => preModeRefusal('{not json') !== null);
+
+  battery('the RC cycle at both readings: the selected commit and main\'s tip');
+  const PRE = '{"mode":"pre","tag":"next","initialVersions":{},"changesets":[]}';
+  const EXITED = '{"mode":"exit","tag":"next","initialVersions":{},"changesets":[]}';
+  // The whole preflight, on this repository's real fixed group, with every
+  // member published (so only the cycle can refuse) and pre.json stubbed at
+  // each of the two readings.
+  const allPublished = async () => ({ distTags: { latest: '18.3.0' }, versions: 1 });
+  const cycle = (atCommit, atMain) => preflight({ read: allPublished, readPre: () => ({ atCommit, atMain }) });
+  await t('pre at the selected commit only refuses, naming the commit', async () => {
+    const r = await cycle(PRE, null);
+    return !r.ok && r.refusals.length === 1 && r.refusals[0].startsWith('at the selected commit:');
+  });
+  await t('⭐ pre at main\'s tip only (entered after the commit, or during the approval wait) refuses, naming main', async () => {
+    const r = await cycle(null, PRE);
+    return !r.ok && r.refusals.length === 1 && r.refusals[0].startsWith(`at ${MAIN_REF}`);
+  });
+  await t('pre at both refuses once per reading', async () => {
+    const r = await cycle(PRE, PRE);
+    return !r.ok && r.refusals.length === 2;
+  });
+  await t('pre at neither (absent, or exited) passes', async () => (await cycle(null, null)).ok && (await cycle(EXITED, null)).ok && (await cycle(null, EXITED)).ok);
+  // The git reader, on a scratch repository: main has pre.json, the older commit has not.
+  const repo = mkdtempSync(join(tmpdir(), 'snapshot-next-pre-'));
+  try {
+    const git = (...args) => run('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], { cwd: repo });
+    git('init', '-q', '-b', 'main');
+    writeFileSync(join(repo, 'a'), '1\n');
+    git('add', 'a');
+    git('commit', '-qm', 'c');
+    const older = git('rev-parse', 'HEAD').stdout.trim();
+    mkdirSync(join(repo, '.changeset'));
+    writeFileSync(join(repo, PRE_JSON), PRE);
+    git('add', PRE_JSON);
+    git('commit', '-qm', 'enter pre');
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    git('checkout', '-q', '--detach', older);
+    await t('the git reader sees pre.json at main\'s tip while the detached tree has none', () => readPreJsonAt(repo, MAIN_REF) === PRE && readOptional(join(repo, PRE_JSON)) === null);
+    await t('a ref whose tree has no pre.json reads as absent', () => readPreJsonAt(repo, older) === null);
+    await t('a main ref that does not resolve throws (NOT MEASURED), never reads as absent', () => {
+      try {
+        readPreJsonAt(repo, 'refs/remotes/origin/nope');
+        return false;
+      } catch (err) {
+        return /does not resolve/.test(err.message);
+      }
+    });
+    await t('the default preflight reads the tree AND main\'s tip: the detached scratch tree refuses on main\'s cycle', async () => {
+      const readPre = () => ({ atCommit: readOptional(join(repo, PRE_JSON)), atMain: readPreJsonAt(repo, MAIN_REF) });
+      const r = await preflight({ read: allPublished, readPre });
+      return r.refusals.length === 1 && r.refusals[0].startsWith(`at ${MAIN_REF}`) && r.mainRef === MAIN_REF;
+    });
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 
   battery('the fixed group: one group, equal to the publishable set');
   await t('one group is read, sorted', () => fixedGroup({ fixed: [['b', 'a']] }).names.join() === 'a,b' && fixedGroup({ fixed: [['a']] }).problem === null);
@@ -833,7 +968,7 @@ export async function selfTest() {
   const yml = readFileSync(RELEASE_WORKFLOW, 'utf8');
   const sh = readFileSync(PUBLISH_SCRIPT, 'utf8');
   // The publish script's code line (its header comments spell the command too).
-  const PUBLISH_LINE = /\nchangeset publish --tag next --no-git-tag\n/;
+  const PUBLISH_LINE_RE = /\nchangeset publish --tag next --no-git-tag \|\| publish_status=\$\?\n/;
   const fires = (mutated, needle) => mutated !== yml && snapshotWiring(mutated, sh).some((f) => f.includes(needle));
   const firesSh = (mutated, needle) => mutated !== sh && snapshotWiring(yml, mutated).some((f) => f.includes(needle));
   await t('the checked-in release.yml and publish script hold', () => {
@@ -847,13 +982,23 @@ export async function selfTest() {
   await t('an if: under !cancelled() is refused', () => fires(yml.replace(/(\n {2}snapshot-next:[\s\S]*?\n {4}if: >-\n\s*)success\(\) &&/, '$1!cancelled() &&'), 'success() &&'));
   await t('the stable publish group is refused', () => fires(yml.replace('group: release-snapshot-next-', 'group: release-publish-'), 'concurrency group'));
   await t('contents: write is refused', () => fires(yml.replace(/(\n {2}snapshot-next:[\s\S]*?\n {6})contents: read/, '$1contents: write'), 'contents: read'));
-  await t('a publish with another tag is refused', () => firesSh(sh.replace(PUBLISH_LINE, '\nchangeset publish --tag latest --no-git-tag\n'), 'exactly one publish'));
-  await t('a publish that keeps git tags is refused', () => firesSh(sh.replace(PUBLISH_LINE, '\nchangeset publish --tag next\n'), 'exactly one publish'));
-  await t('a git push in the publish script, or in the job, is refused', () => firesSh(sh.replace(PUBLISH_LINE, `\n${PUBLISH_COMMAND}\ngit push origin --tags\n`), 'git push') && fires(yml.replace(`          ${PUBLISH_SCRIPT_CALL}\n`, `          ${PUBLISH_SCRIPT_CALL}\n          git push origin --tags\n`), 'git push'));
+  await t('a publish with another tag is refused', () => firesSh(sh.replace(PUBLISH_LINE_RE, '\nchangeset publish --tag latest --no-git-tag || publish_status=$?\n'), 'exactly one publish'));
+  await t('a publish that keeps git tags is refused', () => firesSh(sh.replace(PUBLISH_LINE_RE, '\nchangeset publish --tag next || publish_status=$?\n'), 'exactly one publish'));
+  await t('a git push in the publish script, or in the job, is refused', () => firesSh(sh.replace(PUBLISH_LINE_RE, `\n${PUBLISH_LINE}\ngit push origin --tags\n`), 'git push') && fires(yml.replace(`          ${PUBLISH_SCRIPT_CALL}\n`, `          ${PUBLISH_SCRIPT_CALL}\n          git push origin --tags\n`), 'git push'));
   await t('a publish run inline in the job is refused', () => fires(yml.replace(`          ${PUBLISH_SCRIPT_CALL}\n`, `          ${PUBLISH_SCRIPT_CALL}\n          changeset publish --tag next --no-git-tag\n`), 'runs `changeset publish` itself'));
   await t('a guard after the publish is refused', () => fires(yml.replace(/node scripts\/ci\/snapshot-next\.mjs guard\b/, 'node scripts/ci/snapshot-next.mjs gaurd'), 'then the publish'));
   await t('a preflight without the distance-zero gate is refused', () => fires(yml.replace(/(--release-commit "\$commit") --require-distance-zero/, '$1'), '--require-distance-zero'));
   await t('a snapshot job reading inputs.force is refused', () => fires(yml.replace(/(\n {2}snapshot-next:[\s\S]*?\n {4}if: >-\n[^\n]*\n)/, '$1      !inputs.force &&\n'), 'inputs.force'));
+  await t('a publish script that starts no npm answer record is refused', () => firesSh(sh.replace(/\nNPM_RECORD_DIR="[^\n]*\n/, '\n'), 'answer record') && firesSh(sh.replace(/\nexport npm_config_logs_dir="\$NPM_RECORD_DIR"\n/, '\n'), 'answer record'));
+  await t('a record started before the dist-tooling scan is refused (the scan\'s npm runs would land in it)', () => {
+    const rec = sh.match(/\nNPM_RECORD_DIR="[^\n]*\n/)?.[0] ?? '';
+    const cut = sh.replace(rec, '\n').replace(/\nif ! node ui\/scripts\/check-published-dist-tooling/, `${rec}if ! node ui/scripts/check-published-dist-tooling`);
+    return firesSh(cut, 'after the dist-tooling scan');
+  });
+  await t('a publish script that never prints npm\'s answers is refused', () => firesSh(sh.replace(/\nnode scripts\/release-verify-npm\.mjs --npm-answers \\\n[^\n]*\n/, '\n'), '--npm-answers'));
+  await t('a publish whose exit is not kept (the answers would never print on a failure) is refused', () => firesSh(sh.replace(PUBLISH_LINE_RE, `\n${PUBLISH_COMMAND}\n`), 'exactly one publish') && firesSh(sh.replace(/\nexit "\$publish_status"\n/, '\n'), 'exit with the publish'));
+  await t('a preflight in either job without --main-ref is refused', () => fires(yml.replace(/(node scripts\/ci\/snapshot-next\.mjs preflight) --main-ref refs\/remotes\/origin\/main\n/, '$1\n'), '--main-ref') && fires(yml.replace(/(node scripts\/ci\/snapshot-next\.mjs preflight) --main-ref refs\/remotes\/origin\/main --record/, '$1 --record'), '--main-ref'));
+  await t('a dry run without --main-ref is refused', () => fires(yml.replace(/(snapshot-next\.mjs dry-run) --main-ref refs\/remotes\/origin\/main/, '$1'), '--main-ref'));
   await t('pnpm run version in the lane is refused', () => fires(yml.replace(/changeset version --snapshot next\s*\n/, 'changeset version --snapshot next\n          pnpm run version\n'), 'pnpm run version'));
 
   battery('release.yml: exclusivity, evaluated job by job');
@@ -882,6 +1027,74 @@ export async function selfTest() {
     const cut = yml.replace(/(\n {2}release-integrity:[\s\S]*?) && !inputs\.snapshot_next\)/, '$1)');
     return cut !== yml && started(cut, 'workflow_dispatch', { [SNAPSHOT_INPUT]: true }).runs.includes('release-integrity');
   });
+
+  battery('release-snapshot-publish.sh, run with a stubbed changeset: npm\'s answer record');
+  {
+    // The script, copied into a scratch root beside a symlink to the real
+    // release-verify-npm.mjs (its imports resolve from the real file, so it
+    // reads this repository's workspace). The scratch root holds a stub
+    // `node_modules/.bin/changeset` -- the script puts that directory first on
+    // PATH -- which records what npm would be handed and writes one npm debug
+    // log for the anchor package into the logs dir; a stub dist-tooling scan
+    // writes a log of its own wherever npm's logs dir points, so a record
+    // started before the scan would hold it. `git` is stubbed to log any call.
+    const { ANCHOR_PACKAGE, tarballName, npmRecordDir, resolveVerificationTargets } = await import('../release-verify-npm.mjs');
+    const box = mkdtempSync(join(tmpdir(), 'snapshot-next-publish-sh-'));
+    try {
+      const root = join(box, 'root');
+      const bin = join(box, 'bin');
+      for (const d of [join(root, 'scripts'), join(root, 'ui/scripts'), join(root, 'node_modules/.bin'), bin]) mkdirSync(d, { recursive: true });
+      copyFileSync(PUBLISH_SCRIPT, join(root, 'scripts/release-snapshot-publish.sh'));
+      symlinkSync(resolve(HERE, '../release-verify-npm.mjs'), join(root, 'scripts/release-verify-npm.mjs'));
+      const anchor = resolveVerificationTargets(listWorkspacePackages(REPO_ROOT)).find((x) => x.name === ANCHOR_PACKAGE);
+      writeFileSync(join(root, 'ui/scripts/check-published-dist-tooling.mjs'), [
+        "import { appendFileSync, writeFileSync } from 'node:fs';",
+        "appendFileSync(process.env.STUB_LOG, `scan ${process.argv.slice(2).join(' ')}\\n`);",
+        "if (process.env.npm_config_logs_dir) writeFileSync(`${process.env.npm_config_logs_dir}/scan-debug-0.log`, '0 verbose cli node npm\\n');",
+        "process.exit(Number(process.env.STUB_SCAN_EXIT || 0));",
+      ].join('\n'));
+      writeFileSync(join(root, 'node_modules/.bin/changeset'), [
+        '#!/bin/sh',
+        'printf \'argv=%s\\nlogs_dir=%s\\nlogs_max=%s\\nglobalconfig=%s\\n\' "$*" "$npm_config_logs_dir" "$npm_config_logs_max" "${npm_config_globalconfig-unset}" > "$STUB_SEEN"',
+        `printf '%s\\n' '0 verbose cli node npm' '8 verbose argv "publish" "--ignore-scripts" "${tarballName(anchor.name, anchor.version)}" "--json"' '17 http fetch PUT 200 https://registry.npmjs.org/@objectstack%2fcli 812ms' '26 verbose exit 0' > "$npm_config_logs_dir/2026-11-06T00_00_00_000Z-debug-0.log"`,
+        'echo "changeset $*" >> "$STUB_LOG"',
+        'exit "${STUB_CHANGESET_EXIT:-0}"',
+      ].join('\n'));
+      writeFileSync(join(bin, 'git'), '#!/bin/sh\necho "git $*" >> "$STUB_LOG"\n');
+      chmodSync(join(root, 'node_modules/.bin/changeset'), 0o755);
+      chmodSync(join(bin, 'git'), 0o755);
+      const runScript = ({ changesetExit = 0, scanExit = 0 } = {}) => {
+        const runnerTemp = mkdtempSync(join(box, 'runner-'));
+        const recordDir = npmRecordDir({ RUNNER_TEMP: runnerTemp });
+        mkdirSync(recordDir, { recursive: true });
+        writeFileSync(join(recordDir, 'stale-debug-0.log'), 'a stale record from another run');
+        const seen = join(runnerTemp, 'seen');
+        const stubLog = join(runnerTemp, 'log');
+        const env = { PATH: `${bin}:${process.env.PATH}`, HOME: box, RUNNER_TEMP: runnerTemp, STUB_SEEN: seen, STUB_LOG: stubLog, STUB_CHANGESET_EXIT: String(changesetExit), STUB_SCAN_EXIT: String(scanExit), npm_config_globalconfig: '/home/runner/.config/pnpm/rc' };
+        const r = spawnSync('bash', [join(root, 'scripts/release-snapshot-publish.sh')], { cwd: root, env, encoding: 'utf8' });
+        return {
+          status: r.status,
+          out: `${r.stdout}${r.stderr}`,
+          seen: existsSync(seen) ? readFileSync(seen, 'utf8') : '',
+          calls: existsSync(stubLog) ? readFileSync(stubLog, 'utf8').trim().split('\n') : [],
+          record: existsSync(recordDir) ? readdirSync(recordDir) : [],
+          recordDir,
+        };
+      };
+      const good = runScript();
+      await t('a clean publish exits 0, after the scan, with the ruling\'s command and no git call', () => good.status === 0 && good.calls.join(' ; ') === `scan --no-build ; changeset ${PUBLISH_COMMAND.replace(/^changeset /, '')}`);
+      await t('npm is handed the record dir release-verify-npm.mjs names, its 10-file cap lifted, the inherited globalconfig dropped', () => good.seen.includes(`logs_dir=${good.recordDir}\n`) && good.seen.includes('logs_max=100000\n') && good.seen.includes('globalconfig=unset'));
+      await t('the record is emptied first, and the scan\'s npm runs stay out of it: the publish\'s log is the only one', () => good.record.length === 1 && good.record[0].startsWith('2026-11-06'));
+      await t('⭐ npm\'s answer for the package is printed, with the count line', () => good.out.includes(`${ANCHOR_PACKAGE}@${anchor.version} — npm ACCEPTED the upload: PUT 200 in 812 ms`) && /npm's answers: 1 of \d+ package\(s\) accepted/.test(good.out));
+      const bad = runScript({ changesetExit: 7 });
+      await t('a failed publish still prints npm\'s answers, then exits with the publish\'s own status', () => bad.status === 7 && bad.out.includes('npm\'s answer per package'));
+      await t('and calls no git at all', () => !bad.calls.some((c) => c.startsWith('git')) && !good.calls.some((c) => c.startsWith('git')));
+      const refused = runScript({ scanExit: 1 });
+      await t('a red dist-tooling scan stops the script before the record and the publish', () => refused.status === 1 && !refused.calls.some((c) => c.startsWith('changeset')) && refused.record.join() === 'stale-debug-0.log');
+    } finally {
+      rmSync(box, { recursive: true, force: true });
+    }
+  }
 
   // The floor, before the verdict.
   const declaredNames = Object.keys(SELF_TEST_BATTERIES);
@@ -935,14 +1148,14 @@ async function main(argv = process.argv.slice(2)) {
   if (mode === 'preflight') {
     let report;
     try {
-      report = await preflight();
+      report = await preflight({ mainRef: argValue(argv, '--main-ref') ?? MAIN_REF });
     } catch (err) {
       console.error(`::error::snapshot preflight NOT MEASURED -- ${err.message}`);
       return EXIT_PREREQUISITE_NOT_MET;
     }
     const record = argValue(argv, '--record');
     if (record) writeFileSync(record, `${JSON.stringify(report, null, 2)}\n`);
-    console.log(`snapshot-next preflight: ${report.members} fixed-group member(s), ${report.refusals.length} refusal(s), ${report.unread.length} unread.`);
+    console.log(`snapshot-next preflight: RC cycle read at the tree and at ${report.mainRef}; ${report.members} fixed-group member(s), ${report.refusals.length} refusal(s), ${report.unread.length} unread.`);
     for (const r of report.refusals) console.log(`::error::snapshot refused -- ${r}`);
     for (const u of report.unread) console.log(`::error::snapshot refused, NOT MEASURED -- npm could not be read for ${u}`);
     summary(['### `next` snapshot preflight', '', `- fixed-group members read on npm: \`${report.members}\``, `- refusals: \`${report.refusals.length}\`, unread: \`${report.unread.length}\``, ...report.refusals.map((r) => `  - ${r}`)]);
@@ -982,17 +1195,17 @@ async function main(argv = process.argv.slice(2)) {
   }
   if (mode === 'dry-run') {
     try {
-      return await dryRun({ keep: argv.includes('--keep') });
+      return await dryRun({ keep: argv.includes('--keep'), mainRef: argValue(argv, '--main-ref') ?? MAIN_REF });
     } catch (err) {
       console.error(`::error::snapshot dry run failed -- ${err.message}`);
       return EXIT_PREREQUISITE_NOT_MET;
     }
   }
   console.error(
-    'usage: snapshot-next.mjs preflight [--record FILE]\n' +
+    'usage: snapshot-next.mjs preflight [--main-ref REF] [--record FILE]\n' +
       '       snapshot-next.mjs guard [--pack-dir DIR] [--json-out FILE]\n' +
       '       snapshot-next.mjs verify --record FILE --version V\n' +
-      '       snapshot-next.mjs dry-run [--keep]\n' +
+      '       snapshot-next.mjs dry-run [--main-ref REF] [--keep]\n' +
       '       snapshot-next.mjs --self-test',
   );
   return 1;

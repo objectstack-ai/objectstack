@@ -2255,16 +2255,19 @@ jobs:
         run: pnpm check:changeset-fixed
 
       # The RC cycle, the fixed group and the debut rule, read at the selected
-      # commit. A refusal here fails the job, so `snapshot-next` is skipped and
-      # no deployment is queued.
+      # commit. The cycle is read a second time at main's tip as this job's
+      # checkout fetched it, before the detach (the detach moves HEAD, never
+      # `refs/remotes/origin/main`): the selected commit is older than main's
+      # tip, and a cycle entered since would own `next`. A refusal here fails
+      # the job, so `snapshot-next` is skipped and no deployment is queued.
       - name: Refuse during an RC cycle, or before every group member has debuted
-        run: node scripts/ci/snapshot-next.mjs preflight
+        run: node scripts/ci/snapshot-next.mjs preflight --main-ref refs/remotes/origin/main
 
       # The dry run: the bare version step, the guard over changesets' publish
       # plan and over every packed manifest (pnpm substitutes `workspace:*` at
       # pack time), then the tree put back. Publishes nothing; no token is read.
       - name: Dry run (version, plan, packed manifests, tag)
-        run: node scripts/ci/snapshot-next.mjs dry-run
+        run: node scripts/ci/snapshot-next.mjs dry-run --main-ref refs/remotes/origin/main
 
   snapshot-next:
     # The approval screen (ADR-0125 D2, and the amendment's rule for this lane):
@@ -2353,9 +2356,12 @@ jobs:
 
       # Re-read after the approval, which can come a day after the preflight:
       # the cycle and the debut rule again, and every member's dist-tags as they
-      # stand now — the record `verify` compares `latest` against.
+      # stand now — the record `verify` compares `latest` against. The cycle is
+      # read in the selected commit's tree AND at the `refs/remotes/origin/main`
+      # this job's checkout fetched just now (the ancestry guard above reads the
+      # same ref), so a cycle entered during the approval wait refuses here.
       - name: Refuse during an RC cycle, or before every group member has debuted (after the approval)
-        run: node scripts/ci/snapshot-next.mjs preflight --record "${RUNNER_TEMP}/snapshot-next-before.json"
+        run: node scripts/ci/snapshot-next.mjs preflight --main-ref refs/remotes/origin/main --record "${RUNNER_TEMP}/snapshot-next-before.json"
 
       # ⛔ The BARE command, never `pnpm run version`: that chain aborts at
       # sync-protocol-version.mjs on a major below 1, and the snapshot is
