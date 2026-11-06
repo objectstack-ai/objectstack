@@ -25,6 +25,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid at collection, not inside a clocked case: the dispatcher's reach dynamic-imports it (check:test-source-alias).
+import '@objectstack/metadata';
 
 import { SysUser } from '@objectstack/platform-objects/identity';
 import { ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec/identity';

@@ -24,6 +24,8 @@
 // sign-in off, pinned in plugin-auth), and the doors relay its answer whole.
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid at collection, not inside a clocked case: the dispatcher's reach dynamic-imports it (check:test-source-alias).
+import '@objectstack/metadata';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
