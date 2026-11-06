@@ -666,6 +666,13 @@ These rules apply to `allowed_ip_ranges`.
   matches no address at sign-in. If a stored list or `OS_AUTH_ALLOWED_IP_RANGES`
   already holds one, the server logs it at startup with the entry named, and only
   the list's other entries admit anyone.
+- **A value that is not text is refused.** The field holds its entries as text, one
+  per line or comma-separated. A value written in another form, such as a JSON list,
+  a number or an object, names no list: through the API or by a write inside the
+  server, it is refused the same way, with `constraint: { type: 'textarea' }`, and
+  nothing is stored. A value of another
+  form stored before this check admits no address at sign-in, and the server logs
+  it at startup. Save the list as text, or clear it.
 - **A save that would lock you out is refused.** When you save the field, the server
   checks the new list against the address your own request comes from. It finds that
   address by the same rule as the gate (`server.trustProxy` decides whether the
