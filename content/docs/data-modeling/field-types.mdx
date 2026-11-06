@@ -247,7 +247,7 @@ amount declares `precision: 18` — and is never compared with the currency.
 
 **In the Console:** a numeric input with the currency's symbol. The read-only display, the
 grid cell, the input's `step` and the rounding applied when the input loses focus all use the
-currency's minor unit, so a JPY amount shows no decimals and a KWD amount shows three. With no
+currency's CLDR fraction digits, so a JPY amount shows no decimals and a KWD amount shows three. With no
 currency resolved at all, an amount shows two decimals. A `record`-mode amount resolves only
 its own record's code, never the tenant default. A field-level `currency` key is
 refused: the currency is `currencyConfig`. The input is a native number box; see
@@ -595,7 +595,7 @@ the parent's form edits the children as rows of a table:
 - **Booleans.** A derived `boolean` or `toggle` child field becomes a `select` cell storing
   `'true'` / `'false'`, labelled in the session language.
 - **Currency.** A `currency` cell shows the resolved currency's symbol, and decimals of that
-  currency's minor unit; `prefix` replaces the symbol only.
+  currency's CLDR fraction digits; `prefix` replaces the symbol only.
 - **Order.** When the columns are derived and the child object has a field named `position`, `sort_order`, `sequence`,
   `line_no`, `line_number` or `sort`, the grid stamps each row's index into it whenever a row is
   added, removed, duplicated or dragged, so the order is saved with the rows.
