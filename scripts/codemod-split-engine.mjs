@@ -1399,11 +1399,20 @@ function moduleText(moduleFile, title, movers, scope, leafNames, routed = false)
 }
 
 /** The opening lines of a facet module's header docblock: its section's title and the names of its bodies. */
-function moduleHeaderLines(title, names) {
+/**
+ * A facet module's header sentence, wrapped. `tail` is the words a hand edit
+ * wrote after that sentence in the same paragraph (the fourth pass reads them
+ * back with `headerNamesOf` and carries them over unedited); the first pass
+ * writes none.
+ */
+function moduleHeaderLines(title, names, tail = []) {
   const listed = names.map((n, i) => `\`${n}\`${i === names.length - 1 ? '' : ','}`);
   return wrapComment([MARK, 'The', `"${title}"`, 'section', 'of', '`ObjectQL`:', 'the', 'bodies', 'of',
-    ...listed, 'moved', 'out', 'of', '`engine.ts`', 'whole', 'by', `\`${SCRIPT}\`.`]);
+    ...listed, ...HEADER_SENTENCE_END.trim().split(' '), ...tail]);
 }
+
+/** The words that close a facet module's header sentence, after its list of names. */
+const HEADER_SENTENCE_END = ` moved out of \`engine.ts\` whole by \`${SCRIPT}\`.`;
 
 /**
  * One facet member, as its module holds it: the method's docblock (a private
@@ -3114,14 +3123,23 @@ async function mainHandDocs(tm, argv) {
 // decision someone writes here.
 //
 // The proof (`--members --verify --base REF` re-runs it) undoes the moves from
-// the head alone, as the first pass's does: each moved body, docblock and
-// `async` goes back onto its stub; each receiving module loses the moved
-// members, the host members and import bindings only they read, and its header
-// their names; the statics route and the host factory lose what only they
-// read. The result must be the base `engine.ts` and modules byte for byte (the
-// base's import bindings only moved bodies read pruned from it, as the first
-// pass prunes them), every other generated module unchanged, and each moved
-// member its base method's text exactly, by a stay-rule reading of the base.
+// the head, as the first pass's does: each moved body, docblock and `async`
+// goes back onto its stub; each receiving module loses the moved members, the
+// host members and import bindings only they read, and its header their names;
+// the statics route and the host factory lose what only they read. The result
+// must be the base `engine.ts` and modules byte for byte (the base's import
+// bindings only moved bodies read pruned from it, as the first pass prunes
+// them), every other generated module unchanged, and each moved member its
+// base method's text exactly, by a stay-rule reading of the base.
+//
+// Two shapes a hand edit leaves are read, not refused (#30572). A header the
+// hand wrote on after, in its first paragraph, keeps those words after the
+// sentence this pass rewrites (`headerNamesOf`), when the two rewrap to the
+// header byte for byte. And the one import edit a read of the head cannot tell
+// back, a binding a moved body brought that something staying still reads (a
+// docblock link the base left unresolved), is inverted from the base's import
+// block (`importEditsOf`): the bindings the head added or widened, each one a
+// moved member reads, and none the base had dropped or narrowed.
 
 const MEMBERS_CARD = '#30055';
 
@@ -3202,16 +3220,27 @@ function headerRegionOf(text) {
  * is `moduleHeaderLines` of them. The list is the header's own, which a hand
  * edit to the module may have left behind its members: this pass adds and
  * removes its names in it and leaves the rest as it stands.
+ *
+ * A hand edit may also have written on after the header's sentence, in the
+ * same paragraph, about a member it wrote into the module (#30572: one the
+ * first pass never moved, so the list does not name it). Those words come back
+ * as `tail`, and the header is accepted only when `moduleHeaderLines` of the
+ * names and that tail rewraps to it byte for byte: what the pass rewrites is
+ * then exactly the sentence it owns, with the hand's words after it carried
+ * over, and the undo rewraps the same tail.
  */
 function headerNamesOf(text, title) {
   const region = headerRegionOf(text);
   if (!region) return null;
   const prose = text.slice(region.start, region.end).split('\n').map((l) => l.replace(/^ \*( |$)/, '')).join(' ');
   const i = prose.indexOf(' the bodies of ');
-  const j = prose.lastIndexOf(' moved out of ');
-  if (i < 0 || j < i) return null;
+  const j = i < 0 ? -1 : prose.indexOf(HEADER_SENTENCE_END, i);
+  if (j < 0) return null;
   const names = [...prose.slice(i, j).matchAll(/`([^`]+)`/g)].map((m) => m[1]);
-  return moduleHeaderLines(title, names).join('\n') === text.slice(region.start, region.end) ? { region, names } : null;
+  const rest = prose.slice(j + HEADER_SENTENCE_END.length);
+  const tail = rest === '' ? [] : rest.startsWith(' ') ? rest.slice(1).split(' ') : null;
+  if (!tail || tail.some((w) => w === '')) return null;
+  return moduleHeaderLines(title, names, tail).join('\n') === text.slice(region.start, region.end) ? { region, names, tail } : null;
 }
 
 /** A facet module's host interface: its member lines, each `[readonly ]m: Class['m'];`, in order. */
@@ -3328,9 +3357,12 @@ function specifierLines(specifier, bindings) {
 /**
  * Drop the import bindings nothing in a facet module reads, re-rendering each
  * specifier's lines as the first pass writes them (`specifierLines`), so a
- * pruned leaf list wraps as `namedStatement` wraps it.
+ * pruned leaf list wraps as `namedStatement` wraps it. `inverse` is the import
+ * edits a move made that a read cannot tell back (`importEditsOf`): the
+ * bindings it added are dropped though something left still reads them, and
+ * the ones it widened from type-only to value are made type-only again.
  */
-function pruneModuleImports(tm, moduleFile, text) {
+function pruneModuleImports(tm, moduleFile, text, inverse = { added: new Set(), widened: new Set() }) {
   const used = usedImportNames(tm, text);
   const decls = importDeclsOf(tm, moduleFile, text);
   const edits = [];
@@ -3338,8 +3370,11 @@ function pruneModuleImports(tm, moduleFile, text) {
     const run = decls.filter((d) => d.specifier === specifier);
     const have = new Map();
     for (const d of run) for (const [local, e] of d.bindings) have.set(local, e);
-    const kept = new Map([...have].filter(([local]) => used.has(local)));
-    if (kept.size === have.size) continue;
+    const key = (local) => importKey(specifier, local);
+    const kept = new Map([...have]
+      .filter(([local]) => used.has(local) && !inverse.added.has(key(local)))
+      .map(([local, e]) => [local, inverse.widened.has(key(local)) ? { ...e, value: false } : e]));
+    if (kept.size === have.size && [...kept].every(([local, e]) => e.value === have.get(local).value)) continue;
     const start = run[0].start;
     if (kept.size === 0) {
       const end = text[run.at(-1).end] === '\n' ? run.at(-1).end + 1 : run.at(-1).end;
@@ -3502,7 +3537,7 @@ function generateMembers(tm, text, moduleTexts, planned) {
       const k = listed.findIndex((n) => classPos(n) > r.node.getStart());
       listed.splice(k < 0 ? listed.length : k, 0, r.name);
     }
-    modEdits.push({ start: header.region.start, end: header.region.end, text: moduleHeaderLines(title, listed).join('\n') });
+    modEdits.push({ start: header.region.start, end: header.region.end, text: moduleHeaderLines(title, listed, header.tail).join('\n') });
     // The host interface gains what the moved bodies read.
     const reads = new Map();
     const writes = new Set();
@@ -3580,15 +3615,55 @@ function generateMembers(tm, text, moduleTexts, planned) {
   return { host: pruned.text, modules: moduleOut, pruned: pruned.removed };
 }
 
+/** One import binding's identity in a module: its specifier and its local name. */
+const importKey = (specifier, local) => `${specifier}\u0000${local}`;
+
 /**
- * Undo this pass's moves out of one receiving module, from its head text
- * alone: drop the named members and their names from the header's list, keep
- * the host members the rest still `Pick`, and prune the imports nothing reads.
- * Checks the head on the way (`fail`): the header lists them, the interface is the
- * union of the `Pick`s, and no import binding is unread. Returns the text, or
- * null when the head is not a module this pass can read.
+ * The import edits this pass made to a receiving module, read off its base
+ * and head import blocks (#30572): the bindings the head has and the base had
+ * not (`added`), and the ones the base bound type-only and the head binds as a
+ * value (`widened`). The prune alone cannot undo either when the module's
+ * remaining text still reads the name: a docblock link the base carried
+ * unresolved resolves once a moved body's import binds it, and a binding a
+ * staying member reads as a type reads as one still. So the proof inverts the
+ * edits it reads here instead, and each is checked on the way (`fail`): it is
+ * one the moved members' own text reads (a moved body, or its docblock), and
+ * the head never narrowed or dropped a base binding, which no undo could
+ * restore. The comparison stays byte for byte: the edits name bindings only,
+ * and the lines they leave are rendered as the first pass writes them.
  */
-function undoMembersModule(tm, file, text, names, title, fail) {
+function importEditsOf(tm, file, baseText, headText, movedText, fail) {
+  const bindingsOf = (text) => {
+    const out = new Map();
+    for (const d of importDeclsOf(tm, file, text)) for (const [local, e] of d.bindings) out.set(importKey(d.specifier, local), { local, ...e });
+    return out;
+  };
+  const base = bindingsOf(baseText);
+  const head = bindingsOf(headText);
+  const added = new Set();
+  const widened = new Set();
+  const readByMoved = (local) => new RegExp(`\\b${local.replace(/\$/g, '\\$')}\\b`).test(movedText);
+  for (const [k, h] of head) {
+    const b = base.get(k);
+    if (b && b.value === h.value) continue;
+    if (b && b.value && !h.value) { fail(`${file}: binds ${h.local} type-only, where its base bound it as a value`); continue; }
+    if (!readByMoved(h.local)) { fail(`${file}: ${b ? 'binds as a value' : 'imports'} ${h.local}, which ${b ? 'its base bound type-only' : 'its base did not'} and no moved member reads`); continue; }
+    (b ? widened : added).add(k);
+  }
+  for (const [k, b] of base) if (!head.has(k)) fail(`${file}: dropped the import binding ${b.local}, which no undo can restore`);
+  return { added, widened };
+}
+
+/**
+ * Undo this pass's moves out of one receiving module, from its head text and
+ * its base's import block: drop the named members and their names from the
+ * header's list, keep the host members the rest still `Pick`, invert the
+ * import edits the moves made (`importEditsOf`) and prune the imports nothing
+ * reads. Checks the head on the way (`fail`): the header lists them, the
+ * interface is the union of the `Pick`s, and no import binding is unread.
+ * Returns the text, or null when the head is not a module this pass can read.
+ */
+function undoMembersModule(tm, file, text, names, title, fail, baseText) {
   const facet = facetMembersOf(tm, file, text);
   const header = headerNamesOf(text, title);
   if (!facet || !header) { fail(`${file}: not a facet module as the first pass writes one`); return null; }
@@ -3601,15 +3676,17 @@ function undoMembersModule(tm, file, text, names, title, fail) {
   if (unread.length > 0) fail(`${file}: imports what nothing in it reads: ${unread.join(', ')}`);
   const keep = facet.members.filter((m) => !names.includes(m.name));
   if (keep.length === 0) { fail(`${file}: every member is one this pass moved (it never starts a facet)`); return null; }
+  const movedText = facet.members.filter((m) => names.includes(m.name)).map((m) => m.text).join('\n');
+  const inverse = importEditsOf(tm, file, baseText, text, movedText, fail);
   const edits = [
     { start: facet.start, end: facet.end, text: keep.map((m) => m.text).join('\n\n') },
-    { start: header.region.start, end: header.region.end, text: moduleHeaderLines(title, header.names.filter((n) => !names.includes(n))).join('\n') },
+    { start: header.region.start, end: header.region.end, text: moduleHeaderLines(title, header.names.filter((n) => !names.includes(n)), header.tail).join('\n') },
   ];
   if (iface) {
     const kept = union(keep);
     edits.push({ start: iface.start, end: iface.end, text: [...iface.members].filter(([k]) => kept.has(k)).map(([, v]) => v.line).join('\n') });
   }
-  return pruneModuleImports(tm, file, applyOrderedEdits(text, edits));
+  return pruneModuleImports(tm, file, applyOrderedEdits(text, edits), inverse);
 }
 
 /** The statics `ObjectQL.x` each routed module's text reads. */
@@ -3691,7 +3768,7 @@ function verifyMembers(tm, baseText, headText, baseModules, headModules, {
     }
     if (b === null) { fail(`${file}: absent at base (this pass never starts a facet)`); continue; }
     const mvs = touched.get(file);
-    const u = undoMembersModule(tm, file, h, mvs.map((mv) => mv.name), mvs[0].title, fail);
+    const u = undoMembersModule(tm, file, h, mvs.map((mv) => mv.name), mvs[0].title, fail, b);
     if (u === null) continue;
     undone.set(file, u);
     if (u !== b) fail(`undoing the moves out of ${file} does not rebuild its base (first difference at line ${firstDiffLine(u, b)})`);
@@ -3929,7 +4006,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'refusals': 6,
   'scoped classes (second pass)': 16,
   'hand-series docblocks (third pass)': 19,
-  'named methods onto the split class (fourth pass)': 18,
+  'named methods onto the split class (fourth pass)': 23,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
 
@@ -4646,6 +4723,43 @@ async function selfTest() {
       fails(out.host.replace('    return 2 + VIA_SEAM', '    return 3 + VIA_SEAM'), []) &&
       fails(out.host, [[LEAF_MODULE, (mods.get(LEAF_MODULE) ?? '').replace('const LOCAL_VALUE = 1;', 'const LOCAL_VALUE = 2;')]]));
     check('a head that moved nothing fails', verifyMembers(tm, input, input, mods, mods, opts).failures.some((f) => f.startsWith('nothing moved')));
+
+    // #30572's two shapes: a header a hand edit wrote on after, and a docblock link the base left unresolved.
+    const baseLife = mods.get('engine-lifecycle.ts') ?? '';
+    const baseHeader = headerNamesOf(baseLife, 'Lifecycle');
+    const withHeader = (lines) => baseLife.slice(0, baseHeader.region.start) + lines.join('\n') + baseLife.slice(baseHeader.region.end);
+    const tail = '`handWritten` was written here, beside the gate whose verdict it answers.'.split(' ');
+    const handMods = new Map([...mods, ['engine-lifecycle.ts', withHeader(moduleHeaderLines('Lifecycle', baseHeader.names, tail))]]);
+    const hand = generateMembers(tm, input, handMods, planMembers(tm, input, handMods, names, opts));
+    const handHead = new Map([...handMods, ...hand.modules]);
+    const handLife = hand.modules.get('engine-lifecycle.ts') ?? '';
+    const handRead = headerNamesOf(handLife, 'Lifecycle');
+    const hv = verifyMembers(tm, input, hand.host, handMods, handHead, opts);
+    check('a header a hand edit wrote on after is accepted: the list grows, the hand\'s words follow it unedited, and the moves prove',
+      hv.failures.length === 0 && hv.moved.length === 2 && handRead?.tail.join(' ') === tail.join(' ') &&
+      handRead.names.join() === (headerNamesOf(lifecycle, 'Lifecycle')?.names ?? []).join(), hv.failures.join(' | '));
+    check('a hand tail that does not rewrap as the pass wraps it refuses', refused(() => generateMembers(tm, input,
+      new Map([...mods, ['engine-lifecycle.ts', withHeader([...moduleHeaderLines('Lifecycle', baseHeader.names), ' * `handWritten`', ' * was', ' * written', ' * here.'])]]),
+      planMembers(tm, input, mods, names, opts))));
+    check('one edited character in the hand\'s words at head fails',
+      verifyMembers(tm, input, hand.host, handMods, new Map([...handHead, ['engine-lifecycle.ts', handLife.replace('verdict it answers.', 'verdict it answers!')]]), opts).failures.length > 0);
+    const linkDoc = (extra) => baseLife.replace(placeholderDoc('writes'), `/** The body of \`ObjectQL#writes\`; see {@link FourthShape}${extra}. */`);
+    const linkMods = new Map([...mods, ['engine-lifecycle.ts', linkDoc('')]]);
+    const link = generateMembers(tm, input, linkMods, planMembers(tm, input, linkMods, names, opts));
+    const linkHead = new Map([...linkMods, ...link.modules]);
+    const linkLife = link.modules.get('engine-lifecycle.ts') ?? '';
+    const lv = verifyMembers(tm, input, link.host, linkMods, linkHead, opts);
+    check('a base docblock link a moved body\'s import comes to resolve: the undo drops the binding the move added, and the moves prove byte for byte',
+      linkLife.includes("import type { FourthShape } from './fourth-shape.js';") && !linkDoc('').includes("from './fourth-shape.js'") &&
+      lv.failures.length === 0 && lv.moved.length === 2, lv.failures.join(' | '));
+    {
+      const extraMods = new Map([...mods, ['engine-lifecycle.ts', linkDoc(' and {@link ExtraLinked}')]]);
+      const extra = generateMembers(tm, input, extraMods, planMembers(tm, input, extraMods, names, opts));
+      const extraLife = (extra.modules.get('engine-lifecycle.ts') ?? '').replace("import type { FourthShape } from './fourth-shape.js';", "import type { ExtraLinked, FourthShape } from './fourth-shape.js';");
+      const ev = verifyMembers(tm, input, extra.host, extraMods, new Map([...extraMods, ...extra.modules, ['engine-lifecycle.ts', extraLife]]), opts);
+      check('a binding the head added that only a staying docblock links, and no moved member reads, fails',
+        extraLife.includes('ExtraLinked, FourthShape') && ev.failures.some((f) => f.includes('ExtraLinked') && f.includes('no moved member reads')), ev.failures.join(' | '));
+    }
   }
 
   const declared = Object.keys(SELF_TEST_BATTERIES);

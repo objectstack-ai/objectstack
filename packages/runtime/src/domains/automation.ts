@@ -230,6 +230,11 @@ export function buildAutomationContext(body: any, context: HttpProtocolContext):
     // never re-derived, so a refused run's message renders in the language of
     // the console around it. `AutomationContext.locale` names its reader.
     if (typeof ec?.locale === 'string' && ec.locale.length > 0) automationContext.locale = ec.locale;
+    // [#30213] The administrator an impersonation session names — attribution
+    // only, forwarded so the run's writes record who was at the keyboard while
+    // `userId` stays the impersonated user. Absent on the user's own request.
+    // `AutomationContext.impersonatedBy` names its readers.
+    if (typeof ec?.impersonatedBy === 'string' && ec.impersonatedBy.trim()) automationContext.impersonatedBy = ec.impersonatedBy.trim();
     return automationContext;
 }
 

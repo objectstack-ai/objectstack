@@ -1,7 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { PushDeliveryDataSchema, PushRouteSchema } from '@objectstack/spec/api';
+import type { IDataEngine } from '@objectstack/spec/contracts';
 import type { UserDevice } from '@objectstack/spec/system';
+import { RECIPIENT_LOCALE_FIELD, USER_OBJECT, resolveRecipientLocale } from './recipient-locale.js';
+import { FAN_OUT_SYSTEM_CONTEXT } from './fan-out-system-context.js';
 import type {
     ChannelAvailability,
     ChannelAvailabilityQuery,
@@ -29,6 +32,8 @@ export interface PushSenderSurface {
         title: string;
         body: string;
         data: Record<string, string>;
+        /** The generic visible line a hosted relay delivery shows instead of the content, in the recipient's language. */
+        notice?: string;
     }): Promise<
         | { status: 'sent'; messageId?: string }
         | { status: 'invalid_token'; reason: string }
@@ -51,6 +56,43 @@ export interface PushChannelOptions {
     getPush(): PushSenderSurface | undefined;
     /** The device registry: the recipient's devices, and the dead-token retirement. */
     devices: PushDeviceSurface;
+    /**
+     * The data engine the recipient's `sys_user.locale` is read from, for the
+     * generic notice line ({@link pushNoticeLine}). Absent, or a read that
+     * fails: the deployment default, then English. Never costs the delivery.
+     */
+    getData?(): IDataEngine | undefined;
+    /** The deployment default locale (`II18nService.getDefaultLocale()`), probed per delivery. */
+    getDefaultTemplateLocale?(): string | undefined;
+}
+
+/**
+ * The generic visible line a hosted relay delivery shows, per locale. The
+ * relay is a third party to the notification, so its payload carries this
+ * line instead of the title and body (`PushRelayPayloadSchema.text`), in the
+ * recipient's language: the same chain every channel reads
+ * (`resolveRecipientLocale`, ruling on #29920 Q4 C). A locale with no line
+ * here takes its language's line, else English.
+ */
+export const PUSH_NOTICE_LINES: Readonly<Record<string, string>> = {
+    en: 'You have a new notification',
+    'zh-CN': '您有一条新通知',
+    'ja-JP': '新しい通知があります',
+    'es-ES': 'Tienes una notificación nueva',
+};
+
+/** The notice line for `locale`: its own line, else its language's, else English. */
+export function pushNoticeLine(locale: string | undefined): string {
+    if (locale) {
+        const wanted = locale.toLowerCase();
+        const keys = Object.keys(PUSH_NOTICE_LINES);
+        const exact = keys.find((k) => k.toLowerCase() === wanted);
+        if (exact) return PUSH_NOTICE_LINES[exact]!;
+        const language = wanted.split('-')[0];
+        const sameLanguage = keys.find((k) => k.toLowerCase().split('-')[0] === language);
+        if (sameLanguage) return PUSH_NOTICE_LINES[sameLanguage]!;
+    }
+    return PUSH_NOTICE_LINES.en!;
 }
 
 /** The one token for "there is no transport", shared with `isAvailable()` (see sms-channel.ts). */
@@ -113,6 +155,34 @@ const ROUTE_MAX_BYTES = 1024;
  *   `permanent`, exactly as the sms and email channels answer it.
  */
 export function createPushChannel(opts: PushChannelOptions): MessagingChannel {
+    /**
+     * The recipient's language (#13881's chain: `sys_user.locale`, then the
+     * deployment default), read once per delivery for the notice line. A
+     * failed read falls to the deployment default: it never costs the push.
+     */
+    async function recipientLocale(ctx: MessagingChannelContext, recipient: string): Promise<string | undefined> {
+        const deploymentLocale = () => opts.getDefaultTemplateLocale?.();
+        const data = opts.getData?.();
+        let own: unknown;
+        if (data) {
+            try {
+                // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT: the
+                // recipient's locale, read for the delivery only.
+                const user = await data.findOne(
+                    USER_OBJECT,
+                    { where: { id: recipient }, fields: [RECIPIENT_LOCALE_FIELD] },
+                    { context: FAN_OUT_SYSTEM_CONTEXT },
+                );
+                own = (user as Record<string, unknown> | null | undefined)?.[RECIPIENT_LOCALE_FIELD];
+            } catch (err) {
+                ctx.logger.warn(
+                    `[push] recipient locale lookup for '${recipient}' failed (${(err as Error).message}); the notice line takes the deployment default`,
+                );
+            }
+        }
+        return resolveRecipientLocale(own, deploymentLocale);
+    }
+
     return {
         id: 'push',
 
@@ -157,6 +227,7 @@ export function createPushChannel(opts: PushChannelOptions): MessagingChannel {
             const title = truncateUtf8(plain(n.title), TITLE_MAX_BYTES);
             const body = truncateUtf8(plain(n.body), BODY_MAX_BYTES);
             const data = deliveryData(n.notificationId, n.actionUrl);
+            const notice = pushNoticeLine(await recipientLocale(ctx, delivery.recipient));
 
             const sent: string[] = [];
             const dead: string[] = [];
@@ -168,6 +239,7 @@ export function createPushChannel(opts: PushChannelOptions): MessagingChannel {
                     title,
                     body,
                     data: withOrigin(data, device.origin),
+                    notice,
                 });
                 if (result.status === 'sent') {
                     sent.push(result.messageId ?? '');

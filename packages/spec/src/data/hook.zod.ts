@@ -1378,14 +1378,17 @@ export const HookContextSchema = lazySchema(() => z.object({
    * or the audit writer — can tell "the run / the person this write belongs
    * to" from "an unrelated caller".
    *
-   * Three marks, none authorizing, for three different questions:
+   * Four marks, none authorizing, for four different questions:
    *  - `flowRunId` — WHAT produced the write (a machine origin, no person);
    *  - `attributedUserId` — WHO is CREDITED for a write the system authorized
    *    (a person, but never the subject the write was authorized as);
    *  - `performedByClientId` — WHICH AGENT performed a write authorized as the
    *    human in `session.userId` (ADR-0090 D10 rule 4's `performed_by`; the
    *    `on_behalf_of` half is that same `session.userId`, so it is not carried
-   *    a second time here).
+   *    a second time here);
+   *  - `impersonatedBy` — WHICH ADMINISTRATOR made a write from an
+   *    impersonation session, authorized as the impersonated user in
+   *    `session.userId`.
    *
    * Kept OUT of `session` on purpose. A writer can have provenance and no
    * identity at all — a schedule-triggered flow run resolves no principal — and
@@ -1400,6 +1403,7 @@ export const HookContextSchema = lazySchema(() => z.object({
     flowRunId: z.string().optional().describe('Id of the automation flow run performing this write, when it originates from a flow data node. Lets a hook recognize the run that OWNS state that run itself opened — the approvals record lock exempts the run holding the pending request.'),
     attributedUserId: z.string().optional().describe('The real human credited for a write whose authorization subject was the SYSTEM — e.g. the admin whose better-auth `update-member-role` call the identity adapter executes as `isSystem`. ATTRIBUTION ONLY: the audit writer records it as `sys_audit_log.user_id`; no security middleware reads it, and it never becomes the subject the write is authorized as.'),
     performedByClientId: z.string().optional().describe('[ADR-0090 D10 rule 4] The AGENT that performed this write — the OAuth client (`azp`, a registered sys_oauth_application id) the access token was issued to, when an AI client acted on behalf of the human in `session.userId`. Copied from `ExecutionContext.performedBy.clientId`, which only the /mcp OAuth door sets. ATTRIBUTION ONLY, exactly like `attributedUserId`: the audit writer records it in `sys_audit_log.metadata` as `performed_by` beside `on_behalf_of`; no security middleware reads it and it never becomes the subject the write is authorized as. Absent on every non-delegated write, so a hook tells the two apart by the key being there rather than by guesswork.'),
+    impersonatedBy: z.string().optional().describe('The ADMINISTRATOR (a sys_user id) who made this write from an impersonation session, while `session.userId` is the impersonated user the write is authorized as. Copied from `ExecutionContext.impersonatedBy`, which the shared request-identity resolution sets from the session read. ATTRIBUTION ONLY, exactly like `performedByClientId`: the audit writer records it as `sys_audit_log.metadata.impersonated_by` and on the sys_activity row; no security middleware reads it and it never becomes the subject the write is authorized as. Absent on every write the user made themselves.'),
   }).optional().describe('Server-stamped write provenance (never client-supplied, never an authorization input)'),
 
   /**

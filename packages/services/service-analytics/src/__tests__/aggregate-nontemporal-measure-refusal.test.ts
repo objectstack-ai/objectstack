@@ -424,3 +424,117 @@ describe('#16099 — the controls: every pair the table accepts still compiles',
     expect(bare.length).toBe(1);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [#30773] The DIMENSION sibling of #24426's virtual-field measure refusal
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A dataset whose dimensions are `dims` (name → field), with one plain count, so
+ * the only thing judged is the dimension list.
+ */
+const datasetWithDimensions = (dims: Array<Record<string, unknown>>) => DatasetSchema.parse({
+  name: 'task_dims',
+  label: 'Task dimensions',
+  object: 'duly_task',
+  include: [],
+  dimensions: dims,
+  measures: [{ name: 'task_count', aggregate: 'count' }],
+});
+
+/** The compile's refusal of `dimension` (at `index`) grouping by the formula `margin`. */
+const virtualDimensionRefusal = (dimension: string, index: number) =>
+  `[dataset-compiler] dataset "task_dims" dimension "${dimension}" (dimensions.${index}) groups by field "margin", ` +
+  'which object "duly_task" declares as `formula` — its value is computed on read and never stored, so no driver ' +
+  'materialises a column to group by, and every query selecting this dimension is refused. Denormalise the value ' +
+  'onto "duly_task" (a stored field, written when the source changes) and point the dimension at that field.';
+
+describe('[#30773] a dataset DIMENSION over a virtual field is refused when the dataset is compiled', () => {
+  // Measured on `origin/main` `2d04cd2b` before this gate: `registerDataset`
+  // ACCEPTED a dataset with a dimension over a `formula`, a query selecting a
+  // stored dimension of it was SERVED, and only a query selecting the formula
+  // dimension was refused, at query time, in front of whoever opened the tile.
+  const DIMS = [
+    { name: 'status', field: 'status', type: 'string' },
+    { name: 'margin_band', field: 'margin', type: 'string' },
+  ];
+
+  it('the request door (queryDataset): DATASET_INVALID / 400 naming the dimension, its position and the remedy, before any SQL', async () => {
+    for (const selected of [['margin_band'], ['status']]) {
+      const { svc, sqls } = makeService();
+      const err = await refusalOf(() => svc.queryDataset(
+        datasetWithDimensions(DIMS) as never,
+        { dimensions: selected, measures: ['task_count'] } as never,
+      ));
+      expect(err.code, selected.join()).toBe('DATASET_INVALID');
+      expect(err.status, selected.join()).toBe(400);
+      expect(err.message, selected.join()).toBe(virtualDimensionRefusal('margin_band', 1));
+      expect(sqls, selected.join()).toEqual([]);
+    }
+  });
+
+  it('the configuration door (registerDataset) refuses the same dataset, in the same words', () => {
+    const { svc } = makeService();
+    let err: (Error & { code?: string; status?: number }) | undefined;
+    try {
+      svc.registerDataset(datasetWithDimensions(DIMS) as never);
+    } catch (e) {
+      err = e as Error & { code?: string; status?: number };
+    }
+    expect(err?.code).toBe('DATASET_INVALID');
+    expect(err?.status).toBe(400);
+    expect(err?.message).toBe(virtualDimensionRefusal('margin_band', 1));
+  });
+
+  it('refuses a date dimension bucketed over a formula too: the gate is the storage fact, not the returnType', async () => {
+    const { svc } = makeService();
+    const err = await refusalOf(() => svc.queryDataset(
+      datasetWithDimensions([{ name: 'margin_month', field: 'margin', type: 'date', dateGranularity: 'month' }]) as never,
+      { measures: ['task_count'] } as never,
+    ));
+    expect(err.code).toBe('DATASET_INVALID');
+    expect(err.message).toBe(virtualDimensionRefusal('margin_month', 0));
+  });
+
+  it('controls: a stored dimension, a date dimension and a numeric one still compile and query', async () => {
+    const { svc, sqls } = makeService([{ status: 'open', submitted_at: '2026-03', cycle_days: 3, task_count: 1 }]);
+    const ds = datasetWithDimensions([
+      { name: 'status', field: 'status', type: 'string' },
+      { name: 'submitted_at', field: 'submitted_at', type: 'date', dateGranularity: 'month' },
+      { name: 'cycle_days', field: 'cycle_days', type: 'number' },
+    ]);
+    expect(() => svc.registerDataset(ds as never)).not.toThrow();
+    const r: any = await svc.queryDataset(ds as never, { dimensions: ['status', 'cycle_days'], measures: ['task_count'] } as never);
+    expect(r.rows.length).toBe(1);
+    expect(sqls.length).toBe(1);
+  });
+
+  it('the cannot-answer tiers do not block: no hook, a field the hook cannot resolve, a relationship path', () => {
+    // No `sourceFieldMeta` at all (no data engine wired).
+    const noMeta = new AnalyticsService({
+      queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
+      executeRawSql: async () => [],
+    } as never);
+    expect(() => noMeta.registerDataset(datasetWithDimensions(DIMS) as never)).not.toThrow();
+    // A field the hook does not answer for.
+    expect(() => makeService().svc.registerDataset(
+      datasetWithDimensions([{ name: 'other', field: 'no_such_field', type: 'string' }]) as never,
+    )).not.toThrow();
+    // A dotted path: the hook answers for the BASE object only, so a joined
+    // leaf is the query-time doors' and the lint leg's to judge.
+    const rel = DatasetSchema.parse({
+      name: 'task_dims_rel', label: 'Task dimensions', object: 'duly_task', include: ['account'],
+      dimensions: [{ name: 'acct_margin', field: 'account.margin', type: 'string' }],
+      measures: [{ name: 'task_count', aggregate: 'count' }],
+    });
+    expect(() => makeService().svc.registerDataset(rel as never)).not.toThrow();
+  });
+
+  it('leaves the measure gate over the same formula as it was: a count compiles, a total keeps the stored-number remedy', async () => {
+    const counted = run('count', 'margin');
+    await expect(counted.go()).resolves.toBeDefined();
+    const err = await refusalOf(run('sum', 'margin').go);
+    expect(err.code).toBe('DATASET_INVALID');
+    expect(err.message).toContain(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+  });
+});

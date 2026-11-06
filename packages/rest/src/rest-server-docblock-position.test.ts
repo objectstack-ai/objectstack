@@ -251,6 +251,9 @@ const MOVED_FILE_FLOORS: Readonly<Record<Exclude<RestServerRegistrarFile, typeof
     'record-page-routes.ts': 10,
     'meta-app-bundle-routes.ts': 15,
     'user-work-routes.ts': 6,
+    // [#30675] The module header, the capability's, the body keys', the host
+    // interface's, the two body helpers' and the function's.
+    'meta-record-currency-backfill-route.ts': 7,
 };
 const MOVED_FILES: ReadonlyArray<{ file: string; minBlocks: number }> = REST_SERVER_REGISTRAR_FILES
     .filter((file): file is Exclude<RestServerRegistrarFile, typeof FILE> => file !== FILE)
@@ -313,6 +316,6 @@ describe('[#23050 slice 3] the registrar list this pin reads', () => {
         // keys, the function's, and the engine resolver's inside it).
         expect(Object.keys(MOVED_FILE_FLOORS).sort())
             .toEqual(REST_SERVER_REGISTRAR_FILES.filter((file) => file !== FILE).sort());
-        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(101);
+        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(108);
     });
 });

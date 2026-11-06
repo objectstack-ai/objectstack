@@ -1380,6 +1380,7 @@ const zh = {
     daysAgo_other: '{{count}}天前',
     // Activity feed actors
     systemActor: '系统',
+    impersonatedActor: '{{admin}} 代{{user}}操作',
     unknownUser: '未知用户',
     // Record meta footer (audit provenance)。createdBy/updatedBy 后面跟的是
     // 操作者("创建人 Dev Admin · 5 分钟前");created/updated 是无操作者时的

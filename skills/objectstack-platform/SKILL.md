@@ -302,7 +302,7 @@ token through the `CAPABILITY_PROVIDERS` registry in
 | Token | Provider package |
 |:--|:--|
 | `automation` | `@objectstack/service-automation` — flows, and any declarative `connectors:` entry |
-| `analytics` `cache` `storage` `queue` `job` `messaging` `realtime` `settings` `sms` `push` | `@objectstack/service-` + the token |
+| `analytics` `cache` `storage` `queue` `job` `messaging` `realtime` `settings` `sms` `push` | `@objectstack/service-` + the token ([the `push` block](./references/operations.md#mobile-push)) |
 | `marketplace` | `@objectstack/service-package` |
 | `audit` `email` `sharing` `approvals` `webhooks` | `@objectstack/plugin-` + the token |
 | `pinyin-search` | `@objectstack/plugin-pinyin-search` |
@@ -331,8 +331,7 @@ Five rules that change what you write:
 - **Declaring is a demand.** A capability YOU declared whose provider package is
   absent is a hard boot error; one the platform auto-injects for you stays
   best-effort (warn and continue).
-- **`auth` implies `email`.** Auth callbacks (password reset, email
-  verification, magic link, invitation) need the mail service, so the CLI
+- **`auth` implies `email`.** Auth callbacks need the mail service, so the CLI
   appends `email` whenever `auth` is required.
 - **Keep `automation` whenever `plugins:` lists a connector** — connector
   executors register their provider factories with it, and without it they have

@@ -338,6 +338,10 @@ async function deciderSegmentContext(
     // platform administrator's submission would hand a member's decision
     // segment the deployment-level rows. Seeded for the decider below.
     delete switched.posture;
+    // The impersonating administrator belonged to the write that STARTED the
+    // run: the decider is a different person acting in their own name, so the
+    // segment they own names no impersonator.
+    delete switched.impersonatedBy;
     // The trigger user's email is theirs too: kept under the decider's id,
     // it would admit the decider to every row an email-keyed policy grants
     // the submitter. Removed on both postures, and seeded for the decider
