@@ -102,6 +102,15 @@ import type { ReadNamesWithoutViews } from './useObjectPresence.js';
 
 const NO_MISSING: readonly string[] = [];
 
+/**
+ * `readObjectScope` with the provider's package-local `batch: true` hand-off
+ * beside `views: false` (objectstack#29444, `MetadataProvider`): the names not
+ * asked yet are asked in one `?names=` request.
+ */
+type ReadNamesInOneRequest = (
+  scope: { names: readonly string[]; views: false; batch: true },
+) => ReturnType<ReadNamesWithoutViews>;
+
 /** No app requires an object: nothing is gated, and nothing is asked. */
 const NO_REQUIRED_OBJECTS = Object.freeze({ objects: [] as readonly unknown[], missing: NO_MISSING });
 
@@ -383,8 +392,19 @@ export function useNavMemberGates(forApp?: Record<string, unknown>): NavMemberGa
   // hold, so composing them read the whole `/meta/view` list on every route
   // of such an app. The route's own objects are composed with their views by
   // the route's reader (`AppContent`), not here.
+  //
+  // objectstack#29444 — outside an app (a frame whose app has no `name`: the
+  // home page, a frame that mounts no expression scope) the union is asked in
+  // ONE `GET /meta/object?names=a,b,c` (`batch: true`, the provider's
+  // batched names scope), not one by-name read per name. A name the answer
+  // leaves out is missing, as a by-name 404 was; a read that obtained no
+  // answer leaves every name unanswered, so each entry shows, as when a
+  // by-name read failed. Inside an app the union is still asked by name: the
+  // route's own objects are among its names, and their by-name read is the
+  // one the record form shares with the adapter (objectui#13044).
   const metadata = useMetadata();
   const packageId = typeof app?._packageId === 'string' && app._packageId ? app._packageId : undefined;
+  const outsideApp = !(typeof app?.name === 'string' && app.name !== '');
   const readObjectScope = metadata.getTypeStatus?.('object') === 'idle' ? metadata.readObjectScope : undefined;
   const unionNames = readObjectScope && !packageId ? requiredObjectUnion(metadata.apps, app) : NO_MISSING;
   const scope: { objects: readonly unknown[]; missing: readonly string[] } | null = !readObjectScope
@@ -393,7 +413,9 @@ export function useNavMemberGates(forApp?: Record<string, unknown>): NavMemberGa
       ? (readObjectScope as ReadNamesWithoutViews)({ packageId, views: false })
       : unionNames.length === 0
         ? NO_REQUIRED_OBJECTS
-        : (readObjectScope as ReadNamesWithoutViews)({ names: unionNames, views: false });
+        : outsideApp
+          ? (readObjectScope as ReadNamesInOneRequest)({ names: unionNames, views: false, batch: true })
+          : (readObjectScope as ReadNamesWithoutViews)({ names: unionNames, views: false });
   const metadataObjects = scope ? scope.objects : metadata.objects;
   const missingObjects = scope ? scope.missing : NO_MISSING;
   const registeredObjectNames = useMemo(
