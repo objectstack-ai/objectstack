@@ -248,13 +248,13 @@ With an `otherwise` branch:
 
 Calling an external API, hitting another object, or running arbitrary code is
 **not** a validation type. Implement it as a `beforeInsert` / `beforeUpdate`
-lifecycle hook and throw on failure — the typed, supported extension point:
+lifecycle hook and throw on failure:
 
 ```typescript
 import { defineHook, HookContext } from '@objectstack/spec/data';
 
 const taxIdCheck = defineHook({
-  name: 'tax_id_external_check',
+  name: 'crm_tax_id_external_check',
   object: 'account',
   events: ['beforeInsert', 'beforeUpdate'],
   handler: async (ctx: HookContext) => {

@@ -43,8 +43,8 @@
     },
     {
       "id": 3,
-      "prompt": "Build an autolaunched flow `budget_approval` on `project`: when `budget` increases past 100000, route to a manager who can approve, reject, or send it back to the submitter for revision; a resubmission returns to the manager. Cap it at two send-backs.",
-      "expected_output": "The ADR-0044 shape: an `approval` node (`type: 'approval'`, `approvers: [{ type: 'position', value: 'manager' }]`, `lockRecord: true`, `maxRevisions: 2`) with `approve` / `reject` out-edges plus a `revise` out-edge to an `approval_revise` node, and a resubmit edge back into the approval node typed `type: 'back'` — what legalises the cycle for `registerFlow`. The flow lives in `flows` (no `approvals` collection).",
+      "prompt": "Build an autolaunched flow `crm_budget_approval` on `project`: when `budget` increases past 100000, route to a manager who can approve, reject, or send it back to the submitter for revision; a resubmission returns to the manager. Cap it at two send-backs.",
+      "expected_output": "The ADR-0044 shape: an `approval` node (`type: 'approval'`, `approvers: [{ type: 'position', value: 'crm_manager' }]`, `lockRecord: true`, `maxRevisions: 2`) with `approve` / `reject` out-edges plus a `revise` out-edge to an `approval_revise` node, and a resubmit edge back into the approval node typed `type: 'back'` — what legalises the cycle for `registerFlow`. The flow lives in `flows` (no `approvals` collection).",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -120,8 +120,8 @@
     },
     {
       "id": 7,
-      "prompt": "An expense approval only holders of `expense.approve_request` may start; route to the `finance_manager` position; the submitter must never approve their own expense.",
-      "expected_output": "Flow-level `requiredPermissions: ['expense.approve_request']`, checked at every door that starts the flow (never a run-user positions check inside it); the `approval` node names `approvers: [{ type: 'position', value: 'finance_manager' }]` with `excludeSubmitter: true`, and `onEmptyApprovers` is anything but `auto_approve`, refused beside it.",
+      "prompt": "An expense approval only holders of `expense.approve_request` may start; route to the `crm_finance_manager` position; the submitter must never approve their own expense.",
+      "expected_output": "Flow-level `requiredPermissions: ['expense.approve_request']`, checked at every door that starts the flow (never a run-user positions check inside it); the `approval` node names `approvers: [{ type: 'position', value: 'crm_finance_manager' }]` with `excludeSubmitter: true`, and `onEmptyApprovers` is anything but `auto_approve`, refused beside it.",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -155,7 +155,7 @@
     },
     {
       "id": 9,
-      "prompt": "Build a screen flow `convert_lead` that asks for a company name and a contact name, creates a `crm_account` and a linked `crm_contact`, and ends on a screen linking to both new records.",
+      "prompt": "Build a screen flow `crm_convert_lead` that asks for a company name and a contact name, creates a `crm_account` and a linked `crm_contact`, and ends on a screen linking to both new records.",
       "expected_output": "A `type: 'screen'` flow: a `screen` collecting `company_name` and `contact_name`; two `create_record` nodes with `outputVariable` (`account`, `contact`), the contact linked by `account: { dialect: 'cel', source: 'account.id' }`; a last `screen` of two `type: 'record_link'` fields with `reference` (`crm_account`, `crm_contact`) and `defaultValue: { dialect: 'cel', source: 'account.id' }` / `'contact.id'`, no `required`, `placeholder` or `options`. The `end` carries no `message` (refused when completed), the `description` no markdown link — the links are the `record_link` fields, never the object field type.",
       "files": [],
       "assertions": {
@@ -190,7 +190,7 @@
     },
     {
       "id": 11,
-      "prompt": "When a `contractor` is marked `onboarded`, grant its linked user (`contractor.user_id`) the `contractor_portal` permission set; run the flow as system so the grant always lands.",
+      "prompt": "When a `contractor` is marked `onboarded`, grant its linked user (`contractor.user_id`) the `crm_contractor_portal` permission set; run the flow as system so the grant always lands.",
       "expected_output": "Not as system: a system-context insert into `sys_user_permission_set` (as into `sys_user_position`, `sys_invitation` or `sys_member`) is refused with `PERMISSION_DENIED` — elevation does not lift a governed identity write, a system subflow included. The flow runs `runAs: 'user'`: its `create_record` on `sys_user_permission_set` is judged by the delegated-administration gate as the user whose write fired it, recorded as `granted_by`; a user the gate would not let grant the set is refused — the rule, not a defect.",
       "files": [],
       "assertions": {
@@ -210,7 +210,7 @@
     {
       "id": 12,
       "prompt": "Spread new `crm_case` records evenly across the support team; a `refund_requested` case needs sign-off from the support-leads queue.",
-      "expected_output": "An assignment rule, not a flow or hook: `defineAssignmentRule({ name: 'case_intake', object: 'crm_case', entries: [{ name: 'all', assignTo: { type: 'queue', value: 'support_team' }, strategy: 'round_robin' }] })` in `assignmentRules` — evaluated once per insert on a still-ownerless row, never on update; no counter field. The sign-off is an `approval` node (`type: 'approval'`) with `approvers: [{ type: 'queue', value: 'support_leads' }]`: the queue's members join the slate at node entry; an empty queue adds nobody.",
+      "expected_output": "An assignment rule, not a flow or hook: `defineAssignmentRule({ name: 'crm_case_intake', object: 'crm_case', entries: [{ name: 'all', assignTo: { type: 'queue', value: 'crm_support_team' }, strategy: 'round_robin' }] })` in `assignmentRules` — evaluated once per insert on a still-ownerless row, never on update; no counter field. The sign-off is an `approval` node (`type: 'approval'`) with `approvers: [{ type: 'queue', value: 'crm_support_leads' }]`: the queue's members join the slate at node entry; an empty queue adds nobody.",
       "files": [],
       "assertions": {
         "must_contain": [
