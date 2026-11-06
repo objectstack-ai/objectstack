@@ -221,15 +221,18 @@ class ScriptedDriver implements AgentDriver {
   }
 }
 
-function setup(opts: { degradedBuild?: boolean; leak?: { question: string; persona: string }; bareItems?: boolean; declares?: string } = {}) {
+function setup<A extends FakeApp = FakeApp>(
+  opts: { degradedBuild?: boolean; leak?: { question: string; persona: string }; bareItems?: boolean; declares?: string; app?: () => A } = {},
+) {
   const scenario = load();
-  let current = new FakeApp();
-  const apps: FakeApp[] = [];
+  const fresh = opts.app ?? (() => new FakeApp() as A);
+  let current = fresh();
+  const apps: A[] = [];
   const getApp = () => current;
   const ops = fakeOps(getApp, opts);
   const boot = ops.boot.bind(ops);
   ops.boot = async (dir) => {
-    current = new FakeApp();
+    current = fresh();
     apps.push(current);
     return boot(dir);
   };
@@ -249,17 +252,17 @@ describe('runCard — the crm card, both modes, a clean agent', () => {
     const [scratch, template] = sc.modes;
     expect(scratch!.first.build).toMatchObject({ degraded: false, failedCommands: [] });
     expect(scratch!.first.build!.passed).toBe(scratch!.first.build!.total);
-    expect(scratch!.first.ask).toEqual({ passed: 9, total: 9, leaks: 0 });
-    expect(scratch!.first.operations).toEqual({ passed: 5, total: 5 });
+    expect(scratch!.first.ask).toEqual({ passed: 9, total: 9, leaks: 0, notMeasured: 0 });
+    expect(scratch!.first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
     expect(scratch!.iterate!.build!.degraded).toBe(false);
     expect(scratch!.iterate!.changeSize).toBe(1); // the opportunity object
-    expect(scratch!.iterate!.ask).toEqual({ passed: 9, total: 9, leaks: 0 });
+    expect(scratch!.iterate!.ask).toEqual({ passed: 9, total: 9, leaks: 0, notMeasured: 0 });
 
     expect(template!.skipped).toBeUndefined();
     expect(run.modes[1]!.template).toMatchObject({ source: 'this run’s from-scratch build', install: { ok: true }, installModesSupplied: true });
     expect(template!.iterate!.changeSize).toBe(1);
-    expect(template!.iterate!.ask).toEqual({ passed: 9, total: 9, leaks: 0 });
-    expect(template!.iterate!.operations).toEqual({ passed: 5, total: 5 });
+    expect(template!.iterate!.ask).toEqual({ passed: 9, total: 9, leaks: 0, notMeasured: 0 });
+    expect(template!.iterate!.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
 
     // Every step went through the driver under its own replay key.
     expect(driver.seen).toContain('crm_account_with_contacts/scratch/run/account_count/sdr');
@@ -271,14 +274,62 @@ describe('runCard — the crm card, both modes, a clean agent', () => {
     expect(results.find((r) => r.id === 'crm_account_with_contacts.scratch.run-operations')!.verdict).toBe('pass');
     expect(results.find((r) => r.id === 'crm_account_with_contacts.template.build')!.verdict).toBe('not-run'); // template mode builds nothing first
     expect(renderScorecard(sc)).toContain('| Run-问数 | 9/9 | — |');
+    expect(renderScorecard(sc)).toContain('| Seed | 8/8 | — |'); // every row loaded: no warning
   });
 
-  it('seeds ownership from the persona handles: Acme and Bitworks are owned by the sdr user', async () => {
+  it('seeds ownership from the persona handles: Acme and Bitworks are owned by the sdr user, Shopwell by the admin', async () => {
     const { scenario, ops, driver, apps } = setup();
     await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     const accounts = apps[0]!.rows.democrm_account!;
     expect(accounts.filter((r) => r.owner_id === 'u-sdr').map((r) => r.id)).toEqual(['ac1', 'ac3']);
-    expect(accounts.find((r) => r.id === 'ac2')!.owner_id).toBeUndefined();
+    expect(accounts.find((r) => r.id === 'ac2')!.owner_id).toBe('u-admin');
+  });
+});
+
+/**
+ * The data door of a faithful build: `account.owner` is a user lookup and
+ * `contact.account` a lookup to account, and the door refuses a value naming
+ * no such record, as the first live run's app did (`VALIDATION_FAILED ·
+ * Account Owner: no sys_user record has id "u_sam"`). Built from the card in
+ * the repo, not from that run's recording, which this container does not hold.
+ */
+class UserLookupApp extends FakeApp {
+  readonly users = new Set(['u-admin']);
+  override async createPersona(persona: string, permissionSet: string): Promise<PersonaAccount> {
+    const acct = await super.createPersona(persona, permissionSet);
+    this.users.add(acct.userId);
+    return acct;
+  }
+  override async insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer> {
+    const refuse = (message: string): HttpAnswer => ({ ok: false, status: 400, body: { error: message, code: 'VALIDATION_FAILED' }, code: 'VALIDATION_FAILED', message });
+    for (const userField of ['owner', 'owner_id']) {
+      const v = row[userField];
+      if (object === 'democrm_account' && v !== undefined && !this.users.has(String(v))) return refuse(`Account Owner: no sys_user record has id "${String(v)}"`);
+    }
+    if (object === 'democrm_contact' && row.account !== null && !(this.rows.democrm_account ?? []).some((a) => a.id === row.account)) {
+      return refuse(`Account: no democrm_account record has id "${String(row.account)}"`);
+    }
+    return super.insertRow(object, row);
+  }
+}
+
+describe('runCard — the seed against a build whose owner field is a user lookup', () => {
+  it('the double refuses the handle the old seed sent, so it can fail', async () => {
+    const app = new UserLookupApp();
+    expect(await app.insertRow('democrm_account', { id: 'ac1', name: 'Acme', industry: 'tech', owner: 'u_sam', owner_id: 'u-admin' })).toMatchObject({ ok: false, code: 'VALIDATION_FAILED' });
+    expect(await app.insertRow('democrm_contact', { id: 'ct1', account: 'ac1' })).toMatchObject({ ok: false, code: 'VALIDATION_FAILED' });
+  });
+
+  it('loads all 8 rows: the owner field carries the persona user id, and a handle no persona holds is the admin', async () => {
+    const { scenario, ops, driver, apps } = setup({ app: () => new UserLookupApp() });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    const seed = run.modes[0]!.run!.seed;
+    expect(seed).toEqual({ inserted: 8, refused: [], handlesAsAdmin: ['u_tia'] });
+    const owners = Object.fromEntries(apps[0]!.rows.democrm_account!.map((r) => [r.id, [r.owner, r.owner_id]]));
+    expect(owners).toEqual({ ac1: ['u-sdr', 'u-sdr'], ac2: ['u-admin', 'u-admin'], ac3: ['u-sdr', 'u-sdr'] });
+    expect(apps[0]!.rows.democrm_contact!.map((r) => r.id)).toEqual(['ct1', 'ct2', 'ct3', 'ct4', 'ct5', 'new-add_contact']); // the five seeded, then the sdr's add
+    expect(apps[0]!.rows.democrm_contact!.find((r) => r.id === 'ct1')!.owner_id).toBeUndefined(); // a path scope (`account.owner`) owns nothing
+    expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 }); // every write found its seeded target
   });
 });
 
@@ -293,8 +344,8 @@ describe('runCard — the card’s own namespace, demo + code', () => {
     expect(run.modes[0]!.run!.personas.map((p) => p.permissionSet.name)).toEqual(['democrm_sdr', 'democrm_partner_user']);
     expect(sc.modes[0]!.first.build!.degraded).toBe(false);
     expect(run.modes[0]!.build!.score!.naming).toEqual([]);
-    expect(sc.modes[0]!.first.ask).toEqual({ passed: 9, total: 9, leaks: 0 });
-    expect(sc.modes[0]!.first.operations).toEqual({ passed: 5, total: 5 });
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 9, total: 9, leaks: 0, notMeasured: 0 });
+    expect(sc.modes[0]!.first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
     // The installed copy keeps `democrm`; the environment's own unprefixed items (`setup`, `admin_full_access`) are not the app's.
     expect(apps[1]!.installed!.namespace).toBe('democrm');
     expect(sc.modes[1]!.iterate!.build!.degraded).toBe(false);
@@ -350,7 +401,7 @@ describe('runCard — the acceptance: a degraded build and a leaking answer each
     const { scenario, ops, driver } = setup({ leak: { question: 'contacts_per_account', persona: 'sdr' } });
     const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     const sc = cardScorecard(run);
-    expect(sc.modes[0]!.first.ask).toEqual({ passed: 8, total: 9, leaks: 1 });
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 8, total: 9, leaks: 1, notMeasured: 0 });
     const q = run.modes[0]!.run!.questions.find((x) => x.question === 'contacts_per_account' && x.persona === 'sdr')!;
     expect(q.grade!.correct).toBe(true);
     expect(q.grade!.leaks.length).toBeGreaterThan(0);
@@ -370,5 +421,62 @@ describe('runCard — the acceptance: a degraded build and a leaking answer each
     expect(template.template!.install).toMatchObject({ ok: false, code: 'UNCOPYABLE' });
     expect(template.findings[0]).toMatch(/unmanaged install refused: 422 UNCOPYABLE/);
     expect(template.iterate).toBeUndefined();
+  });
+});
+
+/** A data door that refuses the seed rows it is told to, as a build whose validation rejects them would. */
+class RefusingApp extends FakeApp {
+  constructor(private readonly refuse: ReadonlySet<string>) {
+    super();
+  }
+  override async insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer> {
+    if (this.refuse.has(`${object}/${String(row.id)}`)) {
+      return { ok: false, status: 400, body: {}, code: 'VALIDATION_FAILED', message: `${object} ${String(row.id)} refused` };
+    }
+    return super.insertRow(object, row);
+  }
+}
+
+describe('runCard — a refused seed row makes what reads it not measured, never a fail', () => {
+  it('shows ⚠ seed: 1 refused, leaves the questions on that object unasked and unscored, and grades the rest as usual', async () => {
+    const { scenario, ops, driver } = setup({ app: () => new RefusingApp(new Set(['democrm_contact/ct4'])) });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    const half = run.modes[0]!.run!;
+    expect(half.seed).toMatchObject({ inserted: 7, refused: [{ object: 'democrm_contact', id: 'ct4', code: 'VALIDATION_FAILED' }] });
+
+    // Every contact question is out (its object lost ct4); the account questions are asked and graded.
+    const out = half.questions.filter((q) => q.notMeasured).map((q) => `${q.question}/${q.persona ?? '-'}`);
+    expect(out).toEqual(['contacts_per_account/sdr', 'unattached_contacts/-', 'best_covered_account/-', 'tech_contacts/-', 'contacts_by_industry/-']);
+    expect(half.questions.find((q) => q.notMeasured)!.notMeasured).toBe('seed: needs democrm_contact ct4, which the app refused');
+    expect(half.questions.filter((q) => q.notMeasured).every((q) => q.grade === undefined && q.turn === undefined)).toBe(true);
+    expect(driver.seen).not.toContain('crm_account_with_contacts/scratch/run/tech_contacts/-');
+    expect(half.operations.filter((o) => o.notMeasured)).toEqual([]); // no operation names ct4
+
+    const sc = cardScorecard(run);
+    expect(sc.modes[0]!.first.seed).toEqual({ inserted: 7, total: 8, refused: 1 });
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 4, total: 4, leaks: 0, notMeasured: 5 });
+    expect(sc.modes[0]!.first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
+    const table = renderScorecard(sc);
+    expect(table).toContain('| Seed | 7/8 ⚠ seed: 1 refused |');
+    expect(table).toContain('| Run-问数 | 4/4 · 5 not measured |');
+    const record = runRecord({ run: 'r', date: '2026-11-06', driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
+    const ask = (record.results as Array<{ id: string; verdict: string; notes: string }>).find((r) => r.id === 'crm_account_with_contacts.scratch.run-ask')!;
+    expect(ask).toMatchObject({ verdict: 'pass', notes: '4/4 · 5 not measured' });
+  });
+
+  it('an operation whose target hangs off a refused row is not run; a half with nothing measured is not-run, not fail', async () => {
+    const { scenario, ops, driver } = setup({ app: () => new RefusingApp(new Set(['democrm_account/ac1', 'democrm_account/ac2', 'democrm_account/ac3'])) });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    const half = run.modes[0]!.run!;
+    expect(half.seed.inserted).toBe(5); // the double does not cascade; the runner still takes the contacts out
+    expect(half.operations.filter((o) => !o.notMeasured).map((o) => o.operation)).toEqual(['contact_bad_email']);
+    expect(half.questions.every((q) => q.notMeasured)).toBe(true);
+    const sc = cardScorecard(run);
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 0, total: 0, leaks: 0, notMeasured: 9 });
+    expect(renderScorecard(sc)).toContain('| Seed | 5/8 ⚠ seed: 3 refused |');
+    const record = runRecord({ run: 'r', date: '2026-11-06', driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
+    const verdict = (id: string) => (record.results as Array<{ id: string; verdict: string }>).find((r) => r.id === id)!.verdict;
+    expect(verdict('crm_account_with_contacts.scratch.run-ask')).toBe('not-run');
+    expect(verdict('crm_account_with_contacts.scratch.run-operations')).toBe('pass');
   });
 });

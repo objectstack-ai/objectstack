@@ -128,8 +128,8 @@
         "id": "add_line",
         "kind": "create",
         "object": "invoice_line",
-        "ask": {"en": "Add 2 Widgets at 5 each to INV-003."},
-        "values": {"invoice": "i3", "product": "Widget", "quantity": 2, "unit_price": 5, "amount": 10},
+        "ask": {"en": "Add 2 Widgets to INV-003, 10 in total."},
+        "values": {"invoice": "i3", "product": "Widget", "quantity": 2, "amount": 10},
         "actingAs": "sales_rep",
         "outcome": {
           "kind": "applied",
@@ -163,8 +163,8 @@
         "id": "line_without_product",
         "kind": "create",
         "object": "invoice_line",
-        "ask": {"en": "Add a line of 2 at 5 to INV-001, no product."},
-        "values": {"invoice": "i1", "quantity": 2, "unit_price": 5, "amount": 10},
+        "ask": {"en": "Add a line of 2, 10 in total, to INV-001, no product."},
+        "values": {"invoice": "i1", "quantity": 2, "amount": 10},
         "actingAs": "sales_rep",
         "outcome": {"kind": "refused", "code": "VALIDATION_FAILED"}
       },

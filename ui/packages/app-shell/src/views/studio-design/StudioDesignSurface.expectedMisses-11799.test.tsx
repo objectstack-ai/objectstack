@@ -11,8 +11,10 @@
  *  - whether a draft exists comes from the drafts ledger (`GET /meta/_drafts`,
  *    the client's shared read), and the draft is read only when listed;
  *  - the published baseline is read only when the load uses it, for an item
- *    with no pending draft, so an unsaved item never asks `/layers`;
- *  - the Interfaces pillar's app found only in the ledger reads no `/layers`.
+ *    with no pending draft;
+ *  - objectstack#30859 — an item with a pending draft asks `/layers` once, for
+ *    its stored `draft` layer (its buffer), which the server answers for an
+ *    item that has only a draft, so that read is no miss either.
  *
  * The REAL pillars over a REAL `MetadataClient`, whose transport is an
  * in-memory server answering as the framework does: a 404 for `?state=draft`
@@ -91,8 +93,10 @@ async function serve(input: RequestInfo | URL, init?: RequestInit): Promise<Resp
     } else if (seg.length === 1) {
       body = { items: [...server.active.values()].filter((r) => r.type === seg[0]).map((r) => r.body) };
     } else if (seg.length === 3 && seg[2] === 'layers') {
+      // As the server answers an admitted author (objectstack#30859): a pending draft is served as stored, as `draft`, and an item with only a draft still has layers.
       const row = server.active.get(`${seg[0]}/${seg[1]}`);
-      if (row) body = { code: null, overlay: row.body, overlayScope: 'env', effective: row.body };
+      const draft = (server.drafts.get(`${seg[0]}/${seg[1]}`)?.body as Row | undefined) ?? null;
+      if (row || draft) body = { code: null, overlay: row?.body ?? null, overlayScope: row ? 'env' : null, effective: row?.body ?? null, draft };
       else [status, body] = [404, { error: { code: 'NOT_FOUND', message: 'absent' } }];
     } else if (seg.length === 2 && method === 'PUT') {
       const item = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
@@ -196,7 +200,7 @@ describe('Interfaces pillar — opening leaves asks no 404 question (objectui#11
     put(server.drafts, 'dashboard', 'fresh_dashboard', dashboard('fresh_dashboard'));
   });
 
-  it('a saved leaf with no draft reads its baseline and no draft; an unsaved leaf reads its draft and no baseline', async () => {
+  it('a saved leaf with no draft reads its baseline and no draft; an unsaved leaf reads its draft and its stored draft layer, no miss', async () => {
     render(interfacesTree());
     await waitFor(() => expect(asked('dashboard', 'customer_dashboard', '/layers')).toBe(1));
     await settle();
@@ -206,7 +210,8 @@ describe('Interfaces pillar — opening leaves asks no 404 question (objectui#11
     fireEvent.click(await screen.findByTitle('dashboard · fresh_dashboard'));
     await waitFor(() => expect(asked('dashboard', 'fresh_dashboard', '?state=draft')).toBe(1));
     await settle();
-    expect(asked('dashboard', 'fresh_dashboard', '/layers')).toBe(0);
+    // objectstack#30859 — the one `/layers` read is the stored draft, answered.
+    expect(asked('dashboard', 'fresh_dashboard', '/layers')).toBe(1);
     expect(misses()).toEqual([]);
   });
 
@@ -229,21 +234,23 @@ describe('Interfaces pillar — opening leaves asks no 404 question (objectui#11
     fireEvent.click(await screen.findByTitle('dashboard · customer_dashboard'));
     await waitFor(() => expect(asked('dashboard', 'customer_dashboard', '?state=draft')).toBe(1));
     await settle();
-    // It now has a draft, so its baseline is not read a second time.
-    expect(asked('dashboard', 'customer_dashboard', '/layers')).toBe(1);
+    // It now has a draft: the second `/layers` read is its stored draft layer
+    // (objectstack#30859), whose answer carries the published layer as well.
+    expect(asked('dashboard', 'customer_dashboard', '/layers')).toBe(2);
     expect(misses()).toEqual([]);
   });
 });
 
 describe('Interfaces pillar — an app found only in the drafts ledger (objectui#11799)', () => {
-  it('reads its draft and no /layers', async () => {
+  it('reads its draft and its stored draft layer, no miss', async () => {
     put(server.drafts, 'app', 'acme_app', { name: 'acme_app', label: 'Acme', navigation: NAV });
     put(server.active, 'dashboard', 'customer_dashboard', dashboard('customer_dashboard'));
     render(interfacesTree());
     await waitFor(() => expect(asked('app', 'acme_app', '?state=draft')).toBe(1));
     await waitFor(() => expect(asked('dashboard', 'customer_dashboard', '/layers')).toBe(1));
     await settle();
-    expect(asked('app', 'acme_app', '/layers')).toBe(0);
+    // objectstack#30859 — the one `/layers` read is the stored draft, answered.
+    expect(asked('app', 'acme_app', '/layers')).toBe(1);
     expect(misses()).toEqual([]);
   });
 
