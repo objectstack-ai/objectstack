@@ -259,10 +259,10 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
  * empty list. A minimum, not a refinement, so the published JSON Schema
  * states it.
  *
- * **Declared ahead of its producer.** No list door reads `names` yet, so its
- * describe opens `[PLANNED — not yet served]`; the server PR on #29236 drops
- * the marker in the change that serves the member (the pin is in
- * `protocol.test.ts`).
+ * **Served.** Both list doors (the REST server's and the runtime
+ * dispatcher's `GET /meta/:type`) read `?names=` and push it down here (#29236),
+ * on every type except `package`: a `package` list item is keyed by its id and
+ * carries no `name`, so the `package` list refuses `?names=` with `400`.
  */
 export const GetMetaItemsRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name (e.g., "object", "plugin")'),
@@ -271,12 +271,12 @@ export const GetMetaItemsRequestSchema = lazySchema(() => z.object({
     .min(1, 'Name at least one item, or leave `names` out to list every item')
     .optional()
     .describe(
-      '[PLANNED — not yet served] Item names to narrow the list to: only the named items of the type '
-      + 'are answered, among those the list would answer without it. Sent over HTTP as one '
+      'Item names to narrow the list to: only the named items of the type '
+      + 'are answered, among those the list would answer without it. Served on every type except '
+      + '`package`, whose items are keyed by id; the `package` list refuses it with 400. Sent over HTTP as one '
       + 'comma-separated value (`?names=a,b,c`). A name that matches no item is simply absent from the '
       + 'answer (no 404). An empty value is refused with 400 rather than read as every item; leave the '
-      + 'key out to list every item. No list door reads it yet: until one does, a request carrying it '
-      + 'is answered as if it were absent.',
+      + 'key out to list every item.',
     ),
   previewDrafts: z.boolean().optional().describe(
     'Draft-visibility switch (ADR-0033 draft-overlay preview): when true, '

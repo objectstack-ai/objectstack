@@ -61,7 +61,7 @@ function artifact(opts: { degraded?: boolean; iterated?: boolean; ns?: string } 
     objects,
     permissions: [
       { name: 'sdr', objects: { [n('account')]: { allowRead: true }, [n('contact')]: { allowRead: true, allowCreate: true, allowEdit: true } }, fields: { [`${n('contact')}.email`]: { readable: false } } },
-      { name: 'partner_user', objects: { [n('contact')]: { allowRead: true } } },
+      { name: 'partner_user', objects: { [n('contact')]: { allowRead: true, allowCreate: true } } },
     ],
   };
 }
@@ -248,7 +248,7 @@ describe('runCard — the crm card, both modes, a clean agent', () => {
 
     // Every step went through the driver under its own replay key.
     expect(driver.seen).toContain('crm_account_with_contacts/scratch/run/account_count/sdr');
-    expect(driver.seen).toContain('crm_account_with_contacts/template/iterate-run/remove_chen/sdr');
+    expect(driver.seen).toContain('crm_account_with_contacts/template/iterate-run/remove_ben/sdr');
     expect(driver.seen).not.toContain('crm_account_with_contacts/scratch/run/account_count/-'); // persona-scoped: asked as its personas
 
     const record = runRecord({ run: 'r', date: '2026-11-05', driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
