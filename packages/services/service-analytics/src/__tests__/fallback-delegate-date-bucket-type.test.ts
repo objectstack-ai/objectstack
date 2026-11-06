@@ -27,6 +27,9 @@
  * capturing a pre-registered analytics service under a `queryCapabilities`
  * override with `objectqlAggregate: false`.
  *
+ * [#29304] …and a plain group over the `formula`, which the engine face now
+ * refuses at `groupBy.0`: the delegate reads no field type either.
+ *
  * The delegate here is a recording double: the pin is the service's face (the
  * refusal, and that the delegate was never called), not the delegate's fold.
  */
@@ -182,6 +185,8 @@ describe('[#29364] the fallback face refuses a date bucket over a field that is 
     ['a formula by month', bucket(['calc', 'month']), 'calc', 'groupBy.0.dateGranularity'],
     ['a text column by month', bucket(['region', 'month']), 'region', 'groupBy.0.dateGranularity'],
     ['a formula after a datetime bucket', bucket(['closed_at', 'year'], ['calc', 'month']), 'calc', 'groupBy.1.dateGranularity'],
+    // [#29304] A plain group over the formula, no bucket.
+    ['a formula, grouped plainly', { cube: CUBE, measures: [`${CUBE}.amount_sum`], dimensions: [`${CUBE}.calc`] }, 'calc', 'groupBy.0'],
   ];
 
   for (const [faceLabel, makeFace] of FACES) {
