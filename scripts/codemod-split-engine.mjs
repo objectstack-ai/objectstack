@@ -4606,7 +4606,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'scoped classes (second pass)': 16,
   'hand-series docblocks (third pass)': 19,
   'named methods onto the split class (fourth pass)': 23,
-  'identity port, computed keys and exported names (fourth pass, #30020)': 18,
+  'identity port, computed keys and exported names (fourth pass, #30020)': 23,
   'hand-series host slots (fifth pass, #30020)': 17,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
@@ -5606,6 +5606,28 @@ async function selfTest() {
     check('an identity port without its docblock fails', fails(out.host, [['engine-identity.ts', idm.replace(`${FACADE_DOC}\n`, '')]]));
     check('a header left saying "types only" beside a value import fails',
       fails(out.host, [['engine-identity.ts', idm.replace(VALUES_CYCLE_PARA, TYPES_CYCLE_PARA)]]));
+    {
+      // A leaf statement a hand grew on one line past the wrap width (#30227 left one in
+      // engine-security-resolvers.ts): the move and the undo render it back on one line.
+      const leaf = leafSpecifier();
+      const long = ['alphaPlanEntry', 'betaPlanEntry', 'computeStoredExpressionsLong', 'deltaProjectionPlanner', 'epsilonRelatedFields'];
+      const oneLine = `import { ${long.join(', ')} } from '${leaf}';`;
+      const decls = importDeclsOf(tm, 'engine-identity.ts', `${oneLine}\nimport type { ObjectQL } from './engine.js';\n`);
+      const run = decls.filter((d) => d.specifier === leaf);
+      const styles = runStyles(`${oneLine}\nimport type { ObjectQL } from './engine.js';\n`, run, leaf);
+      const grown = new Map([...run[0].bindings, ['GAMMA_SLOT', { form: 'named', imported: 'GAMMA_SLOT', value: true }]]);
+      const rendered = specifierLines(leaf, grown, styles ?? {});
+      check('a leaf import a hand grew on one line past the wrap width reads as `line`, and a name a move adds keeps it on one line',
+        oneLine.length > 120 && styles?.value === 'line' &&
+        rendered?.join('\n') === `import { ${[...grown.keys()].sort().join(', ')} } from '${leaf}';` &&
+        specifierLines(leaf, grown, {}).join('\n') !== rendered.join('\n'), JSON.stringify({ styles, rendered }));
+      const wrapped = namedStatement('import', long, ` from '${leaf}';`);
+      check('the first pass\'s own wrapped statement reads as `wrap`',
+        wrapped.includes('\n') && runStyles(wrapped, importDeclsOf(tm, 'engine-identity.ts', wrapped), leaf)?.value === 'wrap');
+      const neither = `import { ${long.slice(0, 3).join(', ')},\n  ${long.slice(3).join(', ')} } from '${leaf}';`;
+      check('a statement in neither form reads as null, so the pass refuses the run rather than rewrap it',
+        runStyles(neither, importDeclsOf(tm, 'engine-identity.ts', neither), leaf) === null);
+    }
   }
 
   open('hand-series host slots (fifth pass, #30020)');
