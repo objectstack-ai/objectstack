@@ -188,6 +188,15 @@ export const AUTH_ROUTE_LEDGER: readonly AuthRouteLedgerEntry[] = [
   // statement — the method exists, this row declares it, and the URL now
   // resolves to an enumerated route.
   { route: 'POST /api/v1/auth/set-initial-password', family: 'objectstack-mount', source: 'objectstack', disposition: 'sdk', client: 'auth.setInitialPassword' },
+  // #30918 — the AI assistants (OAuth consents) a person has authorized, and
+  // when each was last used: one ObjectStack read for the person, one for a
+  // platform administrator, both in the SDK (`oauth.authorizedClients`). The
+  // tracker id stays HERE and never in the `note` string, per the #16678 note
+  // below. Neither needs the provider's plugin to answer: `sys_oauth_consent`
+  // is registered whether or not it is enabled, so both are unconditional
+  // mounts and carry no `requires`.
+  { route: 'GET /api/v1/auth/admin/authorized-clients', family: 'objectstack-mount', source: 'objectstack', disposition: 'sdk', client: 'oauth.authorizedClients.listForUser', note: 'another person\'s authorized AI assistants, ?userId=ID: platform-admin gated exactly as the admin session doors are (ADR-0068 D2, a held session refused per ADR-0069 D3), the gate run before the query is read, so a caller outside that reach is refused once whether or not the person exists; an organization owner or admin is not a platform admin and is refused. Every organization the person granted in, each row naming its organizationId. Read only. Closed query set {userId}: missing, empty or repeated is 400, an id naming no user is 404' },
+  { route: 'GET /api/v1/auth/authorized-clients', family: 'objectstack-mount', source: 'objectstack', disposition: 'sdk', client: 'oauth.authorizedClients.list', note: 'the caller\'s own authorized AI assistants (OAuth consents), keyed by the session\'s subject and nothing else: the query set is closed and empty, so a userId or any other parameter is refused 400 rather than ignored. Each row: consent id (the key /oauth2/delete-consent takes), clientId, name, scopes, organizationId, authorizedAt, lastUsedAt (start of the most recent hour with a verified MCP call, null when none is recorded); no token, code, secret or session value. Newest first, at most 200 rows with truncated saying when there are more; Cache-Control: no-store' },
   // ─────────────────────────────────────────────────────────────────────
   // #10534 — the remaining ObjectStack raw-app mounts, ledgered.
   //

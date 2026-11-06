@@ -187,6 +187,9 @@ import {
   verifyMcpAccessToken,
   type McpAccessTokenHost,
 } from './auth-manager-mcp-access-token.js';
+// [#30918] The coarse last-use stamp a verified MCP call writes on its consent.
+import { McpClientLastUseStamper, mcpClientLastUseStoreFor } from './mcp-client-last-use.js';
+import { runAfterResponse } from './run-after-response.js';
 // [#25224 cut 10] The request routing — the seam every better-auth request
 // passes through, route ownership and the endpoint path both key on; the
 // methods of the same names below hand each body the members it reads
@@ -4417,6 +4420,13 @@ export class AuthManager {
    * caller vets it on every request by the rule that vets a session's active
    * organization (`vetOrganizationClaim`, `@objectstack/core`), as the
    * `IAuthService` contract states.
+   *
+   * [#30918] A token that verifies also schedules, AFTER the verdict and off
+   * the request's path, the coarse last-use stamp on the consent it was minted
+   * under (`mcp-client-last-use.ts`): at most one write per consent per hour,
+   * from this verified principal and the server's clock. The stamp reads and
+   * writes nothing the verdict depends on, and its failure is never this
+   * method's failure.
    */
   verifyMcpAccessToken(
     token: string,
@@ -4429,7 +4439,47 @@ export class AuthManager {
       isMcpOAuthEnabled: (...a) => this.isMcpOAuthEnabled(...a),
       rereadKeyringForUnknownKey: (...a) => this.rereadKeyringForUnknownKey(...a),
     };
-    return verifyMcpAccessToken.call(host, token);
+    // [#30918] A token that verified is a verified MCP call: its consent's
+    // coarse last-use stamp is settled after the response, never awaited here,
+    // and from the verified principal only (`mcp-client-last-use.ts`).
+    return verifyMcpAccessToken.call(host, token).then((principal) => {
+      if (principal) this.scheduleMcpClientLastUse(principal);
+      return principal;
+    });
+  }
+
+  /** [#30918] The per-manager stamper, built on first use. */
+  private mcpClientLastUse?: McpClientLastUseStamper;
+
+  /**
+   * [#30918] Settle the last-use stamp of the consent `principal`'s token was
+   * minted under, after the response (`run-after-response.ts`). At most one
+   * write per consent per hour, from the verified principal and the server's
+   * clock alone; the first failure in this process is reported at `error`
+   * (`error` when the host logger carries it, else `warn`, called through the
+   * property — see {@link audienceLogError}).
+   */
+  private scheduleMcpClientLastUse(principal: { userId: string; clientId?: string; organizationId?: string }): void {
+    if (!principal.clientId) return;
+    const stamper = (this.mcpClientLastUse ??= new McpClientLastUseStamper(
+      mcpClientLastUseStoreFor(() => this.getDataEngine()),
+      {
+        onFirstFailure: (error) =>
+          this.audienceLogError(
+            '[AuthManager] The last-use time of authorized AI assistants could not be recorded: '
+              + 'the authorized-clients reads keep answering the last stamp that landed as if it were current. '
+              + 'Check that schema sync has added sys_oauth_consent.last_used_at and that the data engine is reachable; '
+              + 'each consent is retried once an hour, and only this first failure is reported.',
+            { error: error instanceof Error ? error.message : String(error) },
+          ),
+      },
+    ));
+    runAfterResponse(
+      () => stamper.record(principal),
+      () => {
+        // `record` never rejects; its own failure report is above.
+      },
+    );
   }
 
   /**

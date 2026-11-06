@@ -26,8 +26,9 @@
  * keeps both methods — the published `dist/*.d.ts` lists each one — and each
  * body is one literal of exactly the {@link McpAccessTokenHost} members that
  * method reads, plus a `.call`. `verifyMcpAccessToken` is no longer `async`:
- * it returns the moved function's own promise, so a caller awaits the same
- * promise the body settles, with no extra wrapper.
+ * it returns the moved function's own promise with one `.then` on it, which
+ * hands a verified principal to the coarse last-use stamp
+ * (`mcp-client-last-use.ts`, #30918) and resolves to the same value.
  *
  * A method goes as a closure that calls it on the manager at call time, so a
  * test double or spy set on the manager is still the one a body reaches —
