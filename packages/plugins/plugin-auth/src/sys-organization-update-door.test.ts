@@ -11,7 +11,7 @@
  * `sys-organization-update-door.test.ts` there). The whole safety of that
  * widening rests on this package: the identity write guard's per-object update
  * whitelist — `MANAGED_EXTENSION_EDITABLE_FIELDS.sys_organization`, registered
- * at `kernel:ready` by `auth-plugin.ts` — must keep admitting exactly the four
+ * at `kernel:ready` by `auth-plugin.ts` — must keep admitting exactly the ruled
  * platform-owned extension columns and keep stripping everything else,
  * better-auth's own `name` / `slug` / `logo` / `metadata` included.
  *
@@ -47,8 +47,8 @@ import {
 } from './identity-write-guard.js';
 import { managedExtensionEditableFields } from './managed-extension-fields.js';
 
-/** The four columns the ruling names, in the whitelist's own order. */
-const RULED_COLUMNS = ['require_mfa', 'parent_organization_id', 'sort_order', 'timezone'];
+/** The columns the ruling names, in the whitelist's own order — less `require_mfa`, retired with the multi-factor levels (`organization-access-policy.ts`). */
+const RULED_COLUMNS = ['parent_organization_id', 'sort_order', 'timezone'];
 
 /** better-auth's own organization columns on this object — protocol fields. */
 const BETTER_AUTH_COLUMNS = ['name', 'slug', 'logo', 'metadata'];
@@ -89,7 +89,7 @@ async function guardedUpdate(data: Record<string, unknown>): Promise<any> {
   }
 }
 
-describe('#15873 — the whitelist is the four ruled columns, every one a real column on the object', () => {
+describe('#15873 — the whitelist is the ruled columns (less the retired require_mfa), every one a real column on the object', () => {
   it('MANAGED_EXTENSION_EDITABLE_FIELDS.sys_organization is exactly the ruled set', () => {
     expect([...managedExtensionEditableFields('sys_organization')].sort()).toEqual([...RULED_COLUMNS].sort());
   });
@@ -117,7 +117,7 @@ describe('#15873 — the guard holds the column gate on a user-context update', 
   });
 
   it.each(RULED_COLUMNS)('%s alone passes the guard un-stripped', async (column) => {
-    const value = column === 'require_mfa' ? true : column === 'sort_order' ? 7 : column === 'timezone' ? 'Asia/Shanghai' : 'org_parent';
+    const value = column === 'sort_order' ? 7 : column === 'timezone' ? 'Asia/Shanghai' : 'org_parent';
     const data: Record<string, unknown> = { id: 'org_1', [column]: value };
     expect(await guardedUpdate(data)).toBeNull();
     expect(data, `the guard must not strip ${column}`).toEqual({ id: 'org_1', [column]: value });

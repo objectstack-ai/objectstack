@@ -288,7 +288,7 @@ export const zhHant: PlatformTranslationData = {
         sessions: { title: '工作階段', description: '成員工作階段的有效時長。每項限制只能比部署的更短。' },
         multi_factor: { title: '多因素驗證', description: '本組織中哪些人必須以驗證器應用程式(TOTP)保護帳戶。' },
       },
-      fields: {
+      keys: {
         allowed_ip_ranges: { label: '允許的 IP 範圍' },
         session_idle_timeout_minutes: { label: '閒置逾時(分鐘)' },
         session_absolute_max_hours: { label: '工作階段最長有效期(小時)' },

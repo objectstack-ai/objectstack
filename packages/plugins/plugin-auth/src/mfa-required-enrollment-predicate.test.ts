@@ -102,7 +102,7 @@ describe('the global mfa_required switch needs two-factor enrollment', () => {
     return { settings, manager, warn };
   };
 
-  const required = (manager: AuthManager) => (manager as any).config.mfaRequired === true;
+  const required = (manager: AuthManager) => ((manager as any).config.mfaRequirement ?? 'off') !== 'off';
 
   // ── 1. The refusal ──────────────────────────────────────────────────────────
 
@@ -110,7 +110,7 @@ describe('the global mfa_required switch needs two-factor enrollment', () => {
     process.env[ENV] = 'false';
     const { settings, manager } = await boot();
 
-    const refusal = await refusalOf(settings.setMany('auth', { mfa_required: true, mfa_grace_period_days: 3 }));
+    const refusal = await refusalOf(settings.setMany('auth', { mfa_required: 'everyone', mfa_grace_period_days: 3 }));
     expect(refusal.code).toBe('SETTINGS_VALIDATION');
     expect(refusal.fields).toEqual([
       expect.objectContaining({
@@ -120,13 +120,13 @@ describe('the global mfa_required switch needs two-factor enrollment', () => {
       }),
     ]);
 
-    expect(await settings.get('auth', 'mfa_required')).toMatchObject({ value: false, source: 'default' });
+    expect(await settings.get('auth', 'mfa_required')).toMatchObject({ value: 'off', source: 'default' });
     expect(await settings.get('auth', 'mfa_grace_period_days')).toMatchObject({ source: 'default' });
     expect(required(manager)).toBe(false);
     expect(manager.isTwoFactorEnabled()).toBe(false);
     expect(manager.getPublicConfig().features.twoFactor).toBe(false);
     // Off, or the value in force, is never refused.
-    await expect(settings.setMany('auth', { mfa_required: false })).resolves.toBeDefined();
+    await expect(settings.setMany('auth', { mfa_required: 'off' })).resolves.toBeDefined();
   });
 
   it('the settings PUT door answers 400 SETTINGS_VALIDATION at the key, in the caller language', async () => {
@@ -167,7 +167,7 @@ describe('the global mfa_required switch needs two-factor enrollment', () => {
     const req = {
       params: { namespace: 'auth' },
       query: {},
-      body: { mfa_required: true },
+      body: { mfa_required: 'everyone' },
       headers: { 'accept-language': 'zh-CN,zh;q=0.9' },
       method: 'PUT',
       path: '/api/settings/auth',
@@ -190,8 +190,8 @@ describe('the global mfa_required switch needs two-factor enrollment', () => {
     if (value !== undefined) process.env[ENV] = value;
     const { settings, manager } = await boot();
 
-    await settings.setMany('auth', { mfa_required: true });
-    expect(await settings.get('auth', 'mfa_required')).toMatchObject({ value: true });
+    await settings.setMany('auth', { mfa_required: 'administrators' });
+    expect(await settings.get('auth', 'mfa_required')).toMatchObject({ value: 'administrators' });
     await vi.waitFor(() => expect(required(manager)).toBe(true));
     expect(manager.isTwoFactorEnabled()).toBe(true);
     expect(manager.getPublicConfig().features.twoFactor).toBe(true);
@@ -201,12 +201,12 @@ describe('the global mfa_required switch needs two-factor enrollment', () => {
 
   it('a switch stored on before the check is not re-judged, and the gate still reads enrollment off', async () => {
     const settings = makeSettings();
-    await settings.setMany('auth', { mfa_required: true });
+    await settings.setMany('auth', { mfa_required: 'administrators' });
     process.env[ENV] = 'false';
     const { manager } = await boot(settings);
 
     // The value in force: the settings service asks no predicate about it.
-    await expect(settings.setMany('auth', { mfa_required: true })).resolves.toBeDefined();
+    await expect(settings.setMany('auth', { mfa_required: 'administrators' })).resolves.toBeDefined();
     // Read as on, enforced by nobody: `features.twoFactor` is what says so.
     expect(required(manager)).toBe(true);
     expect(manager.isTwoFactorEnabled()).toBe(false);
@@ -217,17 +217,21 @@ describe('the global mfa_required switch needs two-factor enrollment', () => {
 
   it('judges a change to on only, and only while enrollment stays off', () => {
     const off = mfaRequiredEnrollmentPredicate(() => false);
-    expect(off({ next: true, current: false })?.constraint).toEqual({ twoFactor: false, overriddenBy: 'OS_AUTH_TWO_FACTOR' });
+    expect(off({ next: 'everyone', current: 'off' })?.constraint).toEqual({ twoFactor: false, overriddenBy: 'OS_AUTH_TWO_FACTOR' });
+    expect(off({ next: 'administrators', current: 'off' })).toBeDefined();
+    // A move between the two levels turns nothing on that is not already on.
+    expect(off({ next: 'everyone', current: 'administrators' })).toBeUndefined();
+    expect(off({ next: 'off', current: 'everyone' })).toBeUndefined();
     // Stored toggles read as `bindAuthSettings` reads them.
     expect(off({ next: 'true', current: null })).toBeDefined();
     expect(off({ next: 1, current: undefined })).toBeDefined();
     expect(off({ next: false, current: true })).toBeUndefined();
     expect(off({ next: null, current: true })).toBeUndefined();
     expect(off({ next: true, current: 'true' })).toBeUndefined();
-    expect(mfaRequiredEnrollmentPredicate(() => true)({ next: true, current: false })).toBeUndefined();
+    expect(mfaRequiredEnrollmentPredicate(() => true)({ next: 'everyone', current: 'off' })).toBeUndefined();
     // A language off the platform locale table falls back to English; French is on it.
-    expect(off({ next: true, current: false, locale: 'sw-KE' })?.message).toBe(MFA_REQUIRED_ENROLLMENT_COPY.en);
-    expect(off({ next: true, current: false, locale: 'fr-FR' })?.message).toBe(MFA_REQUIRED_ENROLLMENT_COPY.fr);
+    expect(off({ next: 'everyone', current: 'off', locale: 'sw-KE' })?.message).toBe(MFA_REQUIRED_ENROLLMENT_COPY.en);
+    expect(off({ next: 'everyone', current: 'off', locale: 'fr-FR' })?.message).toBe(MFA_REQUIRED_ENROLLMENT_COPY.fr);
   });
 
   it('a settings service without write predicates is said at warn, only while the pin makes it matter', () => {

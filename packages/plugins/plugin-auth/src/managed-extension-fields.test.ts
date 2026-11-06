@@ -5,7 +5,7 @@
  * objects.
  *
  * Extending a better-auth table is established practice (`sys_user.manager_id`,
- * `sys_organization.require_mfa`, and now the D6 group-structure fields). The
+ * `sys_organization.timezone`, and now the D6 group-structure fields). The
  * hazard is a NAME COLLISION: if a better-auth upgrade introduces a field with
  * the same name, ownership of that column silently changes hands — our writes
  * start clobbering better-auth state, or better-auth's start clobbering ours,

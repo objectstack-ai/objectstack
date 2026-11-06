@@ -416,7 +416,7 @@ export const zhCN: PlatformTranslationData = {
         sessions: { title: '会话', description: '成员会话的有效时长。每项限制只能比部署的更短。' },
         multi_factor: { title: '多因素认证', description: '本组织中哪些人必须用身份验证器应用(TOTP)保护账户。' },
       },
-      fields: {
+      keys: {
         allowed_ip_ranges: { label: '允许的 IP 范围' },
         session_idle_timeout_minutes: { label: '闲置超时(分钟)' },
         session_absolute_max_hours: { label: '会话最长有效期(小时)' },

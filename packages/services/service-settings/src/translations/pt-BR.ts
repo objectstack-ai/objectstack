@@ -409,7 +409,7 @@ export const ptBR: PlatformTranslationData = {
         sessions: { title: 'Sessões', description: 'Por quanto tempo a sessão de um membro permanece válida. Cada limite só pode ser menor que o da implantação.' },
         multi_factor: { title: 'Multifator', description: 'Quem nesta organização deve proteger a conta com um aplicativo autenticador (TOTP).' },
       },
-      fields: {
+      keys: {
         allowed_ip_ranges: { label: 'Faixas de IP permitidas' },
         session_idle_timeout_minutes: { label: 'Tempo limite de inatividade (minutos)' },
         session_absolute_max_hours: { label: 'Duração máxima da sessão (horas)' },

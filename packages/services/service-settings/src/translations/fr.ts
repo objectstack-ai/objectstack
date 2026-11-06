@@ -422,7 +422,7 @@ export const fr: PlatformTranslationData = {
         sessions: { title: 'Sessions', description: 'Combien de temps la session d’un membre reste valide. Chaque limite peut seulement être plus courte que celle du déploiement.' },
         multi_factor: { title: 'Multifacteur', description: 'Qui, dans cette organisation, doit protéger son compte avec une application d’authentification (TOTP).' },
       },
-      fields: {
+      keys: {
         allowed_ip_ranges: { label: 'Plages d’adresses IP autorisées' },
         session_idle_timeout_minutes: { label: 'Délai d’inactivité (minutes)' },
         session_absolute_max_hours: { label: 'Durée de vie maximale de la session (heures)' },

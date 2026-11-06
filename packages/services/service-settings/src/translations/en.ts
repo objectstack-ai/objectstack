@@ -236,7 +236,7 @@ export const en: PlatformTranslationData = {
         sessions: { title: 'Sessions', description: 'How long a member\'s session stays valid. Each limit can only be shorter than the deployment\'s.' },
         multi_factor: { title: 'Multi-factor', description: 'Who in this organization must protect their account with an authenticator app (TOTP).' },
       },
-      fields: {
+      keys: {
         allowed_ip_ranges: { label: 'Allowed IP ranges' },
         session_idle_timeout_minutes: { label: 'Idle timeout (minutes)' },
         session_absolute_max_hours: { label: 'Absolute session lifetime (hours)' },

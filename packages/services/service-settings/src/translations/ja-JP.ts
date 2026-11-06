@@ -361,7 +361,7 @@ export const jaJP: PlatformTranslationData = {
         sessions: { title: 'セッション', description: 'メンバーのセッションの有効期間。各上限はデプロイの上限より短くすることしかできません。' },
         multi_factor: { title: '多要素認証', description: 'この組織で認証アプリ (TOTP) によるアカウント保護が必須となる人。' },
       },
-      fields: {
+      keys: {
         allowed_ip_ranges: { label: '許可する IP 範囲' },
         session_idle_timeout_minutes: { label: 'アイドルタイムアウト (分)' },
         session_absolute_max_hours: { label: 'セッションの最大有効期間 (時間)' },

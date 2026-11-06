@@ -389,7 +389,7 @@ export const ar: PlatformTranslationData = {
         sessions: { title: 'الجلسات', description: 'مدة صلاحية جلسة العضو. لا يمكن لأي حد إلا أن يكون أقصر من حد النشر.' },
         multi_factor: { title: 'المصادقة متعددة العوامل', description: 'من في هذه المؤسسة يجب أن يحمي حسابه بتطبيق مصادقة (TOTP).' },
       },
-      fields: {
+      keys: {
         allowed_ip_ranges: { label: 'نطاقات IP المسموح بها' },
         session_idle_timeout_minutes: { label: 'مهلة الخمول (بالدقائق)' },
         session_absolute_max_hours: { label: 'الحد الأقصى لعمر الجلسة (بالساعات)' },
