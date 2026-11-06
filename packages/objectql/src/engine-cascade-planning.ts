@@ -511,8 +511,14 @@ export class CascadePlanningFacet {
    * A nested `delete()` the walk makes for a member joins the ambient set
    * ({@link cascadeDeleteSets}); any other delete reaching here — a hook's,
    * say — is the root of its own cascade, as before.
+   *
+   * [#30237, ADR-0148 D1] `onCollected` is the recycle bin's moment: called
+   * once with the freshly collected set, after the #26718 restricts are judged
+   * and before the walk deletes or clears anything, so the snapshot reads every
+   * row as it stood. Never called for a member that joins a cascade already in
+   * progress: such a row belongs to its root's entry.
    */
-  static async cascadeDeleteRelations(this: Pick<CascadePlanningHost, '_registry' | 'cascadeDeleteSets' | 'collectCascadeDeleteSet' | 'refuseRestrictsInsideOwnCascade' | 'walkReferencingRelations'>, object: string, ids: ReadonlyArray<string | number>, context?: ExecutionContext, depth = 0): Promise<void> {
+  static async cascadeDeleteRelations(this: Pick<CascadePlanningHost, '_registry' | 'cascadeDeleteSets' | 'collectCascadeDeleteSet' | 'refuseRestrictsInsideOwnCascade' | 'walkReferencingRelations'>, object: string, ids: ReadonlyArray<string | number>, context?: ExecutionContext, depth = 0, onCollected?: (set: CascadeDeleteSet) => Promise<void>): Promise<void> {
     const roots: Array<string | number> = [];
     const seen = new Set<string>();
     for (const id of ids) {
@@ -555,6 +561,7 @@ export class CascadePlanningFacet {
     // [#26718] Every restrict a member's own cascade would override is judged
     // here, before the first write.
     await this.refuseRestrictsInsideOwnCascade(cascadeSet, fresh.map((id) => ({ object, id })), context, objects);
+    if (onCollected) await onCollected(cascadeSet);
     await this.cascadeDeleteSets.run(cascadeSet, () =>
       this.walkReferencingRelations(object, fresh, context, objects, cascadeSet),
     );
@@ -1163,6 +1170,13 @@ export class CascadePlanningFacet {
               } else {
                 await this.update(childName, { id: depId, [fieldName]: null }, { context: referentialCtx } as any);
               }
+              // [#30237, ADR-0148 D2] The reference a restore re-links while
+              // the field still lacks it: the live row, the field, and the id
+              // this delete removed from it. Only a delete that enters the
+              // recycle bin carries the list.
+              cascadeSet.clearedReferences?.push({
+                object: childName, id: String(depId), field: fieldName, value: String(id),
+              });
             }
           }
           // [#27004] Every row outside the set has had `id` cleared from it.

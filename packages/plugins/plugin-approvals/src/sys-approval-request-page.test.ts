@@ -308,7 +308,7 @@ describe('sys_approval_request detail page — its label in the translation bund
 
   it('every served locale carries the label, and a translated locale serves its translation', () => {
     const locales = Object.keys(ApprovalsTranslations).sort();
-    expect(locales).toEqual(['ar', 'en', 'es-ES', 'fr', 'ja-JP', 'pt-BR', 'zh-CN', 'zh-Hant']);
+    expect(locales).toEqual(['ar', 'de', 'en', 'es-ES', 'fr', 'ja-JP', 'ko', 'pt-BR', 'ru', 'zh-CN', 'zh-Hant']);
     for (const locale of locales) {
       const served = (ApprovalsTranslations as AnyRec)[locale]?.pages?.[NAME]?.label;
       const authored = (approvalsPageTranslations as AnyRec)[locale]?.[NAME]?.label;

@@ -11,10 +11,10 @@
 import { z } from 'zod';
 import { Field } from './field.zod';
 
-// The object FILE, its registration in `PlatformObjectsPlugin` and its row in
-// `PLATFORM_OBJECTS_BY_PACKAGE` land together with the engine slice (#30237):
-// that registry means "a table exists", so the name joins it only with the
-// table. The object file builds `fields` from RECYCLE_BIN_ENTRY_FIELDS below.
+// The object FILE is `sys-recycle-bin.object.ts` in @objectstack/platform-objects,
+// which builds `fields` from RECYCLE_BIN_ENTRY_FIELDS below. `PlatformObjectsPlugin`
+// registers it and `PLATFORM_OBJECTS_BY_PACKAGE` lists its name: that registry
+// means "a table exists", and the name sits there because the table does.
 /**
  * The recycle bin: one system object, one entry per delete operation
  * (ADR-0148 D1).
