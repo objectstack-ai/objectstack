@@ -608,13 +608,13 @@ function MarketplacePackagePageBody() {
    * `RESOURCE_CONFLICT`) take no branch: each message names its own remedy,
    * and the page has nothing to add to it.
    */
-  const installRefusalText = (e: any): string => {
+  const installRefusalText = (e: unknown): string => {
     // ADR-0141 D2 — an unsatisfied declared dependency, drawn from the
     // refusal's facts in the reader's locale; without facts the envelope's
     // message stands.
     const dependencyMissing = dependencyMissingText(e);
     if (dependencyMissing) return dependencyMissing;
-    const msg = e?.message ?? String(e);
+    const msg = (e as { message?: string } | null | undefined)?.message ?? String(e);
     if (errorCodeIs(e, 'MANIFEST_CONFLICT')) return t('marketplace.install.localManifestConflict', { message: msg });
     if (errorCodeIs(e, 'UNAUTHENTICATED')) return t('marketplace.install.localUnauthorized');
     if (errorCodeIs(e, 'MARKETPLACE_UNAVAILABLE')) return t('marketplace.install.localMarketplaceUnavailable');
