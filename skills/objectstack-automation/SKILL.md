@@ -23,8 +23,8 @@ metadata:
 ## When to Use This Skill
 
 Flows (auto-launched, screen, scheduled), state machines and approvals,
-record-change triggers, scheduled automation, vendor integrations and their
-callbacks, and **assignment rules** that route a new record to a queue or a person.
+record-change triggers, vendor integrations and their callbacks, and
+**assignment rules**.
 
 > **Predicates and conditions are CEL** — every `condition` / `guard` /
 > `entryCondition` / filter `value` is an **Expression** envelope: a plain CEL
@@ -126,6 +126,11 @@ error. **RAW** keys are read as written: a
     actionUrl: '/tasks/{{ record.id }}', // overrides the pair
 } }
 ```
+
+An option label in a notice: `{{ stage | option:opportunity.stage }}` in the mail
+`template` (each recipient's language; mail-only, refused in inline `title` /
+`message`) — never `label()` in `templateData`, evaluated once per run, before
+fan-out.
 
 ### Flow Variables
 
@@ -315,7 +320,8 @@ export const caseIntake = defineAssignmentRule({
 ```
 
 `strategy` is for a queue target only; `assignTo: { type: 'user', value: '<id>' }`
-names one owner. Queues are declared in `queues` (objectstack-data); an approval
+names one owner, who holds the row only while an active member of its organization
+(else ownerless). Queues are declared in `queues` (objectstack-data); an approval
 for the same people is `approvers: [{ type: 'queue', value: 'support_intake' }]`
 ([Approver Types](./references/state-machines-and-approvals.md#approver-types)).
 ⛔ Never a `beforeInsert` hook that picks an owner, nor a round-robin counter field.
@@ -421,14 +427,6 @@ reason to write code.
 
 ---
 
-## CRM Automation Blueprint
-
-Lifecycle first, as Flow / Approval metadata: `src/flows/*.flow.ts` with explicit
-`variables`, `nodes` + `edges`, exported from `src/flows/index.ts` into
-`defineStack({ flows })`.
-
----
-
 ## Verify your work
 
 A bare ref (`status == 'open'`) resolves (fields are flattened into scope), so
@@ -439,8 +437,6 @@ and `os validate` errors on an unknown `record.<field>`:
 os validate     # CEL/predicate validation + schema
 # or: os build  # the same gates, plus emits dist/
 ```
-
-In a scaffolded project: `npm run validate`.
 
 ---
 

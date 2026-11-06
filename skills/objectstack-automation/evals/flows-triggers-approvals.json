@@ -260,6 +260,23 @@
           "actionUrl:"
         ]
       }
+    },
+    {
+      "id": 15,
+      "prompt": "Email the opportunity owner and the sales manager when an opportunity has sat in one stage for 30 days; the subject must show the `stage` as its label, in each recipient's own language.",
+      "expected_output": "The notify node names a mail `template` (never inline `title` / `message`, which are one text for every recipient), and the template's subject prints the stage with the mail formatter `{{ stage | option:opportunity.stage }}` — the argument a bare `object.field`, no quotes — so the renderer prints that recipient's label from the field's option list in the recipient's locale. Not `label()` in `templateData`: the map is evaluated once per run, before recipients fan out, so it cannot differ per recipient; and `option` is mail-only, refused in an inline `title` / `message`. The stage value itself reaches the template as stored (`stage` in `templateData`).",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "option:opportunity.stage",
+          "template",
+          "once per run"
+        ],
+        "must_not_contain": [
+          "source: 'label(",
+          "| label"
+        ]
+      }
     }
   ]
 }

@@ -490,7 +490,14 @@ export const CEILINGS = new Map([
   // request signing, which the built-in providers serve (recipe 6 and the
   // `signed` kind in references/integration-recipes.md). Re-locked AT the
   // measurement, headroom 0 tokens.
-  ['skills/objectstack-automation/SKILL.md', 6449],
+  // 6449 -> 6448 (cards #30731 + #30826): the notify section's option-label
+  // line and the user-target active-member clause, paid by deleting the CRM
+  // Automation Blueprint section (the `src/flows` layout lives in
+  // objectstack-platform's bootstrap reference), the "When to Use" restatement
+  // of the assignment-rules heading and the scaffolded-project validate line
+  // (objectstack-formula's Verify section). Re-locked AT the measurement,
+  // headroom 0 tokens.
+  ['skills/objectstack-automation/SKILL.md', 6448],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
