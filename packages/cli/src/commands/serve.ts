@@ -30,7 +30,7 @@ import {
 // posture is the authoritative knob and `resolveTenancyPosture()` already folds
 // the legacy boolean in as its unset-fallback. serve's last direct reader of the
 // boolean was the banner, and that was exactly the drift #4801 fixed.
-import { readEnvWithDeprecation, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, stampSearchPinyinEnabled, isModuleNotFoundError, DATASOURCE_SECRET_RESOLVER_SERVICE, type IDatasourceSecretResolver } from '@objectstack/types';
+import { readEnvWithDeprecation, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, stampSearchPinyinEnabled, isModuleNotFoundError, DATASOURCE_SECRET_RESOLVER_SERVICE, CRYPTO_PROVIDER_SERVICE, type IDatasourceSecretResolver } from '@objectstack/types';
 import { PLATFORM_CAPABILITY_TOKENS, PLATFORM_ALWAYS_ON_CAPABILITIES, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from '@objectstack/spec/kernel';
 // [#22301] The `requires` token → provider table and its exact identity match,
 // shared with `@objectstack/verify`'s `bootStack` — see `Serve.CAPABILITY_PROVIDERS`
@@ -65,6 +65,7 @@ import { TENANCY_POSTURES, type TenancyPosture } from '@objectstack/spec/securit
 // tally could certify itself.
 import {
   SEED_SETTLEMENT_SERVICE,
+  type ICryptoProvider,
   type ISeedSettlementService,
   type SeedSettlementSnapshot,
   type SeedSuppressionReason,
@@ -4707,6 +4708,10 @@ export default class Serve extends Command {
         }
       }
 
+      // The stack's plugins as the kernel received them — instances, after
+      // `materializeStackPlugin` — so the crypto-provider composition check
+      // before `runtime.start()` reads what each one declares.
+      const stackMountedPlugins: unknown[] = [];
       if (plugins.length > 0) {
         for (const plugin of plugins) {
           try {
@@ -4742,6 +4747,7 @@ export default class Serve extends Command {
             // with a `warn` naming both versions. That is how an app supplies
             // options to a plugin this CLI mounts without them.
             await kernel.use(pluginToLoad);
+            stackMountedPlugins.push(pluginToLoad);
             const pluginName = plugin.name || plugin.constructor?.name || 'unnamed';
             trackPlugin(pluginName);
           } catch (e: any) {
@@ -5085,6 +5091,39 @@ export default class Serve extends Command {
         }
       }
 
+      // ── The ONE secret crypto provider (host composition root) ─────────
+      // Every `sys_secret` row is sealed by one ICryptoProvider: the data
+      // engine's secret fields (wired after `runtime.start()` below), the
+      // datasource secret binder and the default settings service (both
+      // composed before it). A plugin supplies that provider — a KMS/Vault one,
+      // for customer-managed keys — by registering it as the kernel service
+      // CRYPTO_PROVIDER_SERVICE during its init; without one this host keeps
+      // its own LocalCryptoProvider (AES-256-GCM keyed off `OS_SECRET_KEY` or a
+      // persisted key file), exactly as before the seam existed. All three
+      // consumers hold `hostCrypto.provider`, which chooses once every plugin
+      // has initialized (`createHostCryptoProvider`). The fallback is the
+      // deferred LocalCryptoProvider: built at that choice, not here, because
+      // the key file is settled only once the database is open (the settings
+      // service's `start()`).
+      let hostCrypto: ReturnType<typeof createHostCryptoProvider> | undefined;
+      let hostCryptoUnavailable: unknown;
+      try {
+        const { deferredLocalCryptoProvider } = await import(
+          /* webpackIgnore: true */ '@objectstack/service-settings'
+        );
+        const localCryptoProvider = deferredLocalCryptoProvider();
+        hostCrypto = createHostCryptoProvider(() => localCryptoProvider.resolve());
+        // ⛔ Not `trackPlugin`ed: it is the host's own seam, not a capability.
+        await kernel.use(hostCrypto.plugin);
+      } catch (cryptoErr: unknown) {
+        // Reached only when the settings package (which ships the local
+        // provider) does not load. The consumers below then report it where
+        // they did before: the datasource admin builds no binder, and the
+        // secret-field wiring warns that writing a secret field fails closed.
+        hostCrypto = undefined;
+        hostCryptoUnavailable = cryptoErr;
+      }
+
       // 5. Capability resolver — auto-load service plugins declared in
       // `requires: [...]` that are NOT tier-gated. Each entry of
       // Serve.CAPABILITY_PROVIDERS maps a token to a package + factory; if the
@@ -5184,7 +5223,15 @@ export default class Serve extends Command {
               `  ⚠ StorageServicePlugin using local driver (${resolved.localStorageRoot}) — switch to S3/GCS/Azure for production (set OS_STORAGE_* or configure storage in Setup → Settings).`,
             ));
           }
-          const provider = arg !== undefined ? new Ctor(arg) : new Ctor();
+          // The default settings service seals its encrypted settings with the
+          // host's one crypto provider (above), not a LocalCryptoProvider of its
+          // own: a provider a plugin registers then holds the settings' keys
+          // too. Without a registration the shared one is that same local
+          // provider — same constructor, same key source.
+          const ctorArg: any = cap === 'settings' && hostCrypto
+            ? { ...(arg ?? {}), cryptoProvider: hostCrypto.provider }
+            : arg;
+          const provider = ctorArg !== undefined ? new Ctor(ctorArg) : new Ctor();
           await kernel.use(provider);
           resolverMounted.push(provider);
           trackPlugin(spec.export);
@@ -5235,12 +5282,6 @@ export default class Serve extends Command {
         }
       }
 
-      // Shared dev crypto provider for ALL of sys_secret (datasource creds
-      // below + secret fields after start). One instance ⇒ one key, so every
-      // encrypted secret decrypts under the same provider. Created lazily by
-      // whichever block runs first.
-      let sharedCryptoProvider: any = undefined;
-
       // ── External Datasource Federation (ADR-0015) ─────────────────
       // Federation (introspect / draft / import / validate of external
       // tables) ships in the open framework.
@@ -5283,11 +5324,12 @@ export default class Serve extends Command {
       // whether the UI can manage datasources. Mounted by default so a
       // self-host runtime is a complete low-code platform out of the box.
       //
-      // Credentials are bound through the SAME crypto provider used for
-      // `secret` fields below (`sharedCryptoProvider`), so every secret in
-      // `sys_secret` (settings, secret fields, datasource creds) shares one
-      // key. Wired BEFORE runtime.start() so the plugin's kernel:ready boot
-      // rehydration (which decrypts persisted creds) has its binder ready.
+      // Credentials are bound through the host's ONE crypto provider
+      // (`hostCrypto`, above), the one `secret` fields and the settings service
+      // use, so every secret in `sys_secret` (settings, secret fields,
+      // datasource creds) is sealed by one provider. Wired BEFORE
+      // runtime.start() so the plugin's kernel:ready boot rehydration (which
+      // decrypts persisted creds) has its binder ready.
       try {
         const adminMod: any = await import('@objectstack/service-datasource');
         const {
@@ -5320,36 +5362,32 @@ export default class Serve extends Command {
             find: (o: string, q?: any) => resolveEngine()?.find(o, q),
           };
 
-          // Fail-closed binder over the shared dev crypto provider. If the
+          // Fail-closed binder over the host's one crypto provider. If the
           // binder can't be built, leave `secrets` undefined — the plugin
           // then rejects secret-bearing create/update instead of storing
           // cleartext (by design).
           let secrets: any = undefined;
           try {
-            const { deferredLocalCryptoProvider } = await import(
-              /* webpackIgnore: true */ '@objectstack/service-settings'
-            );
-            // First block to touch `sharedCryptoProvider` (still undefined
-            // here); the secret-field wiring below reuses this instance so
-            // every sys_secret shares one key. Built at its FIRST USE, not
-            // here: the database is not open yet, and when two key files hold
-            // different keys the boot chooses between them only once it is
-            // (the settings service's `start()`). The binder first decrypts at
-            // `kernel:ready`, after that choice.
-            sharedCryptoProvider = deferredLocalCryptoProvider();
+            if (!hostCrypto) throw hostCryptoUnavailable;
+            // The host provider chooses nothing here: plugins have not
+            // initialized, and a plugin may still register the provider. The
+            // binder first seals or opens a credential at `kernel:ready`, after
+            // every init and after the key file is settled, so a credential
+            // written before the post-start wiring below is sealed by the
+            // registered provider when there is one, never by the local one.
             secrets = createDatasourceSecretBinder({
               engine: lazySecretEngine,
-              cryptoProvider: sharedCryptoProvider,
+              cryptoProvider: hostCrypto.provider,
             });
           } catch (cryptoErr: any) {
-            // Reached only when the module or the binder fails to load: the
-            // deferred provider constructs nothing here, so a key problem
-            // never lands in this catch. Leave `secrets` undefined so the
-            // plugin rejects secret-bearing create/update rather than storing
-            // cleartext. A key problem surfaces where the provider is first
-            // built, the secret-field wiring below (`resolve()`), which
-            // rethrows a production "Refusing to start in production" error,
-            // so the boot still refuses and nothing is duplicated here.
+            // Reached only when the settings package or the binder fails to
+            // load: the host provider constructs nothing here, so a key
+            // problem never lands in this catch. Leave `secrets` undefined so
+            // the plugin rejects secret-bearing create/update rather than
+            // storing cleartext. A key problem surfaces where the provider is
+            // first built (`kernel:ready`, or the secret-field wiring below),
+            // which rethrows a production "Refusing to start in production"
+            // error, so the boot still refuses and nothing is duplicated here.
             console.warn(
               chalk.yellow(
                 `  ⚠ datasource admin: no CryptoProvider (${cryptoErr?.message ?? cryptoErr}); secret-bearing datasource create/update will fail closed`,
@@ -5605,6 +5643,12 @@ export default class Serve extends Command {
         } as any);
       }
 
+      // Two plugins that each declare the crypto provider (`providesServices`)
+      // refuse here, both named, before either initializes; see
+      // `refuseTwoCryptoProviderPlugins`. An undeclared second registration is
+      // refused by the kernel itself when it happens.
+      refuseTwoCryptoProviderPlugins([...stackMountedPlugins, ...resolverMounted]);
+
       // Boot the runtime
       await runtime.start();
 
@@ -5616,46 +5660,48 @@ export default class Serve extends Command {
       // objectql's `secret` field type encrypts on write to `sys_secret`
       // and fails closed when no ICryptoProvider is registered. objectql
       // must NOT depend on a crypto implementation (layering), so the
-      // host injects one here. Dev/self-host gets a LocalCryptoProvider
-      // (AES-256-GCM keyed off `OS_SECRET_KEY` or a persisted dev key);
-      // production hosts swap this for a KMS/Vault-backed provider (e.g.
-      // via an env-gated branch or a dedicated plugin) before secrets are
-      // written. We resolve the data engine by its registered service name
-      // and feature-detect `setCryptoProvider` so older engines / alternate
-      // data services degrade gracefully (writing a secret then fails
-      // closed, as designed, rather than silently storing cleartext).
+      // host injects one here: its ONE crypto provider (`hostCrypto`, composed
+      // before the capability resolver), which the datasource binder and the
+      // default settings service already hold. That is the provider a plugin
+      // registered as CRYPTO_PROVIDER_SERVICE during init (a KMS/Vault one),
+      // else this host's LocalCryptoProvider (AES-256-GCM keyed off
+      // `OS_SECRET_KEY` or a persisted dev key). We resolve the data engine by
+      // its registered service name and feature-detect `setCryptoProvider` so
+      // older engines / alternate data services degrade gracefully (writing a
+      // secret then fails closed, as designed, rather than silently storing
+      // cleartext).
       try {
         const dataEngine: any =
           kernel.getService?.('data') ?? kernel.getService?.('objectql');
         if (dataEngine && typeof dataEngine.setCryptoProvider === 'function') {
-          if (!sharedCryptoProvider) {
-            const { LocalCryptoProvider } = await import(
-              /* webpackIgnore: true */ '@objectstack/service-settings'
-            );
-            // In production LocalCryptoProvider throws when no stable key
-            // (OS_SECRET_KEY / persisted file) is available — the fail-loud
-            // guard against silently minting an ephemeral key and losing
-            // every sys_secret value after a restart. Let that error be loud:
-            // secret writes must not proceed under an unstable key.
-            sharedCryptoProvider = new LocalCryptoProvider();
-          } else if (typeof sharedCryptoProvider.resolve === 'function') {
-            // The deferred instance the datasource binder shares: build it now
-            // (the key file was chosen during `runtime.start()`), so the same
-            // production refusal stays at boot rather than at the first write.
-            sharedCryptoProvider.resolve();
+          if (!hostCrypto) {
+            throw hostCryptoUnavailable instanceof Error
+              ? hostCryptoUnavailable
+              : new Error(String(hostCryptoUnavailable));
           }
-          dataEngine.setCryptoProvider(sharedCryptoProvider);
+          // Chosen by now (at `kernel:ready`) and held to it: a provider
+          // registered after init, or the registered one replaced, refuses the
+          // boot here. On the local path, LocalCryptoProvider throws in
+          // production when no stable key (OS_SECRET_KEY / persisted file) is
+          // available — the fail-loud guard against silently minting an
+          // ephemeral key and losing every sys_secret value after a restart.
+          // Let that error be loud: secret writes must not proceed under an
+          // unstable key.
+          hostCrypto.provider.confirm();
+          dataEngine.setCryptoProvider(hostCrypto.provider);
           if (isDev) {
             printDiagnostic(
               chalk.dim(
-                '  ↪ secret fields: LocalCryptoProvider wired (dev) — set OS_SECRET_KEY and swap for KMS/Vault in production',
+                hostCrypto.provider.source === 'registered'
+                  ? `  ↪ secret fields: the crypto provider a plugin registered as '${CRYPTO_PROVIDER_SERVICE}' wired`
+                  : '  ↪ secret fields: LocalCryptoProvider wired (dev) — set OS_SECRET_KEY and swap for KMS/Vault in production',
               ),
             );
           }
         }
       } catch (err: any) {
         const msg = String(err?.message ?? err);
-        if (msg.includes('Refusing to start in production')) {
+        if (err instanceof HostCryptoProviderRefusal || msg.includes('Refusing to start in production')) {
           // Fail-loud config error: print the actionable guidance verbatim.
           console.error(chalk.red(msg));
           throw err;
@@ -6137,6 +6183,207 @@ export function createDatasourceSecretResolverPlugin(
       ctx.registerService(DATASOURCE_SECRET_RESOLVER_SERVICE, resolver);
     },
   };
+}
+
+/**
+ * Which provider seals this boot's secrets: the one a plugin registered as
+ * {@link CRYPTO_PROVIDER_SERVICE}, or the host's own `LocalCryptoProvider`.
+ */
+export type HostCryptoProviderSource = 'registered' | 'local';
+
+/**
+ * The ONE crypto provider `os serve` hands every producer of a `sys_secret`
+ * row — the data engine (secret fields), the datasource secret binder
+ * (datasource credentials) and the default `SettingsServicePlugin` (encrypted
+ * settings) — so every secret opens under the provider that sealed it.
+ *
+ * Those consumers are composed before any plugin initializes, and the provider
+ * is decided by what a plugin registers DURING init. So this object is handed
+ * out first and chooses later — at its first use, or at `kernel:ready`,
+ * whichever comes first — and never while plugin init is still running
+ * (AGENTS.md, "Startup registry reads": resolve where it is used).
+ */
+export interface HostCryptoProvider extends ICryptoProvider {
+  /**
+   * The provider every call goes to, chosen at the first call and then kept:
+   * the registered one, or the local fallback when no plugin registered one.
+   * While plugin init is still running it refuses and chooses nothing: a
+   * provider may still register, and a secret another provider sealed now
+   * would not open under it. A fallback whose constructor refuses (production
+   * without a stable key) throws that refusal from every call.
+   */
+  resolve(): ICryptoProvider;
+  /**
+   * {@link resolve}, then refuse when the registry no longer holds what was
+   * chosen: a provider registered after plugin init (this boot already chose
+   * the local one), or the registered one replaced. Called once the boot is
+   * over, before the data engine is handed the provider.
+   */
+  confirm(): ICryptoProvider;
+  /** What {@link resolve} chose, or `undefined` before it has chosen. */
+  readonly source: HostCryptoProviderSource | undefined;
+}
+
+/**
+ * A refusal of the host's crypto-provider composition. It names the service
+ * and the plugins, ⛔ never a registered value: the provider holds every
+ * secret's key.
+ */
+export class HostCryptoProviderRefusal extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'HostCryptoProviderRefusal';
+  }
+}
+
+/** The plugin context members {@link createHostCryptoProvider}'s plugin reads. */
+interface HostCryptoProviderContext {
+  getServices(): Map<string, unknown>;
+  getKernel?: () => { getState?: () => string } | undefined;
+  hook(name: string, handler: () => Promise<void> | void): void;
+}
+
+/** What a value registered as {@link CRYPTO_PROVIDER_SERVICE} must carry, as callable members. */
+const CRYPTO_PROVIDER_MEMBERS = ['encrypt', 'decrypt', 'rotateKey', 'digest', 'keyedDigest'] as const;
+
+/** `'a'`, `'a' and 'b'`, `'a', 'b' and 'c'`. */
+function quotedNameList(names: readonly string[]): string {
+  const quoted = names.map((name) => `'${name}'`);
+  return quoted.length <= 1 ? quoted.join('') : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`;
+}
+
+/**
+ * Build the host's one crypto provider ({@link HostCryptoProvider}) and the
+ * plugin that lets it read the kernel's service registry.
+ *
+ * - `local` builds the fallback, `LocalCryptoProvider`. It is called only when
+ *   no plugin registered a provider, so its production refusal for an unstable
+ *   key is reached exactly where it was before a plugin could supply one.
+ * - The plugin reads nothing in `init()`: it keeps the context and resolves
+ *   the provider from a `kernel:ready` hook. Registered during init, that hook
+ *   runs before every hook registered in a `start()` — the settings service's
+ *   among them — so a production boot without a stable local key still stops
+ *   at `kernel:ready`.
+ */
+export function createHostCryptoProvider(local: () => ICryptoProvider): {
+  provider: HostCryptoProvider;
+  plugin: { name: string; version: string; init(ctx: HostCryptoProviderContext): Promise<void> };
+} {
+  let registry: { read(): unknown; initDone(): boolean } | undefined;
+  let chosen: { provider: ICryptoProvider; source: HostCryptoProviderSource; registered: unknown } | undefined;
+
+  const asCryptoProvider = (value: unknown): ICryptoProvider => {
+    const missing = CRYPTO_PROVIDER_MEMBERS.filter(
+      (member) => typeof (value as Record<string, unknown> | null)?.[member] !== 'function',
+    );
+    if (missing.length > 0) {
+      throw new HostCryptoProviderRefusal(
+        `Refusing to boot: the service '${CRYPTO_PROVIDER_SERVICE}' a plugin registered is not a crypto provider — `
+        + `it has no ${missing.map((member) => `${member}()`).join(', ')}. Register an ICryptoProvider there.`,
+      );
+    }
+    return value as ICryptoProvider;
+  };
+
+  const resolve = (): ICryptoProvider => {
+    if (chosen) return chosen.provider;
+    if (!registry?.initDone()) {
+      throw new HostCryptoProviderRefusal(
+        'Refusing to seal or open a secret while plugins are still initializing: a plugin may still register '
+        + `the crypto provider ('${CRYPTO_PROVIDER_SERVICE}'), and a secret another provider sealed now would `
+        + 'not open under it. Seal and open secrets from start() or later, never from init().',
+      );
+    }
+    const registered = registry.read();
+    chosen = registered === undefined
+      ? { provider: local(), source: 'local', registered }
+      : { provider: asCryptoProvider(registered), source: 'registered', registered };
+    return chosen.provider;
+  };
+
+  const confirm = (): ICryptoProvider => {
+    const provider = resolve();
+    if (registry!.read() !== chosen!.registered) {
+      throw new HostCryptoProviderRefusal(
+        chosen!.source === 'local'
+          ? `Refusing to boot: a plugin registered the crypto provider ('${CRYPTO_PROVIDER_SERVICE}') after every `
+            + 'plugin had initialized, when this boot had already chosen LocalCryptoProvider for its secrets. '
+            + "Register it with ctx.registerService in the plugin's init()."
+          : `Refusing to boot: the crypto provider registered as '${CRYPTO_PROVIDER_SERVICE}' was replaced after `
+            + 'this boot chose it. Every secret is sealed by one provider, so it is registered once, in init(), '
+            + 'and never replaced.',
+      );
+    }
+    return provider;
+  };
+
+  const provider: HostCryptoProvider = {
+    encrypt: async (plain, ctx) => resolve().encrypt(plain, ctx),
+    decrypt: async (handle, ctx) => resolve().decrypt(handle, ctx),
+    rotateKey: async (handle, ctx) => resolve().rotateKey(handle, ctx),
+    digest: (plain) => resolve().digest(plain),
+    keyedDigest: async (plain) => resolve().keyedDigest(plain),
+    resolve,
+    confirm,
+    get source() {
+      return chosen?.source;
+    },
+  };
+
+  const plugin = {
+    name: 'com.objectstack.cli.host-crypto-provider',
+    version: '1.0.0',
+    init: async (ctx: HostCryptoProviderContext): Promise<void> => {
+      let ready = false;
+      registry = {
+        read: () => ctx.getServices().get(CRYPTO_PROVIDER_SERVICE),
+        // Every init() has run once the kernel leaves `initializing` (Phase 2
+        // begins) — read where the question is asked, never recorded here.
+        initDone: () => {
+          const state = ctx.getKernel?.()?.getState?.();
+          return ready || (state !== undefined && state !== 'idle' && state !== 'initializing');
+        },
+      };
+      ctx.hook('kernel:ready', async () => {
+        ready = true;
+        resolve();
+      });
+    },
+  };
+
+  return { provider, plugin };
+}
+
+/**
+ * Refuse a composition in which more than one plugin declares, in
+ * `providesServices` (ADR-0116), that it registers {@link CRYPTO_PROVIDER_SERVICE}.
+ *
+ * The provider seals every secret field, datasource credential and encrypted
+ * setting, so letting either one win would leave secrets the other sealed
+ * unreadable. The kernel already refuses a second `registerService` under one
+ * name, but cannot say who registered first; a declaration can, so this names
+ * every declaring plugin before any of them initializes. A plugin registered
+ * twice under one `name` boots once (the later one), and is counted once.
+ */
+export function refuseTwoCryptoProviderPlugins(plugins: Iterable<unknown>): void {
+  const byName = new Map<string, unknown>();
+  for (const plugin of plugins) {
+    const name = (plugin as { name?: unknown } | null)?.name;
+    if (typeof name === 'string') byName.set(name, plugin);
+  }
+  const declaring = [...byName]
+    .filter(([, plugin]) => {
+      const provides = (plugin as { providesServices?: unknown }).providesServices;
+      return Array.isArray(provides) && provides.includes(CRYPTO_PROVIDER_SERVICE);
+    })
+    .map(([name]) => name);
+  if (declaring.length > 1) {
+    throw new HostCryptoProviderRefusal(
+      `Refusing to boot: ${declaring.length} plugins provide the crypto provider ('${CRYPTO_PROVIDER_SERVICE}'): `
+      + `${quotedNameList(declaring)}. It seals every secret field, datasource credential and encrypted setting, `
+      + "so exactly one plugin may provide it — keep one of them in the stack's plugins.",
+    );
+  }
 }
 
 /**
