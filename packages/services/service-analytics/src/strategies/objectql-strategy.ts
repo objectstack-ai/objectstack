@@ -147,6 +147,27 @@ interface CrossObjectPlan {
 }
 
 /**
+ * [#29304] The engine's refusal of a VIRTUAL (`formula`) attribute on the
+ * cross-object path, judged by the service's copy
+ * (`dataset-date-bucket-door.ts` `assertDatasetGroupTargetsStored`) on the
+ * keys that path's FK-resolve aggregate hands the related object
+ * (`resolveFkAttr`: `groupBy: ['id', attr]`). The engine refuses that
+ * aggregate, but only once a base row carries a key to resolve: an empty base
+ * served the dimension, and the echo, which runs nothing, rendered a `LEFT
+ * JOIN` grouping by a column no table stores. Called by both, after the base
+ * keys are judged, so the query and its echo give one answer on any data. A
+ * host that wired no field types is not judged.
+ */
+function assertCrossObjectAttrsStored(plan: CrossObjectPlan | null | undefined, ctx: StrategyContext): void {
+  const declared = (ctx as DatasetScopedStrategyContext).declaredFieldType;
+  if (!plan || typeof declared !== 'function') return;
+  for (const cd of plan.crossDims) {
+    if (cd.attr === 'id') continue;
+    assertDatasetGroupTargetsStored(cd.refObject, ['id', cd.attr], (field) => declared.call(ctx, cd.refObject, field));
+  }
+}
+
+/**
  * Why the echo of a date bucket refuses: the in-memory zone, or no driver
  * expression for the bucket (with the dialect the host names, `'unknown'` when
  * it names none).
@@ -808,6 +829,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // column no table stores.
     assertDatasetGroupTargetsStored(tableName, echoGroupBy, (field) => declaredType?.call(ctx, tableName, field));
     assertDatasetDateBucketsTemporal(tableName, echoGroupBy, (field) => declaredType?.call(ctx, tableName, field));
+    // [#29304] …then a cross-object dimension over a virtual attribute, as
+    // `executeCrossObject` judges it after its base aggregate.
+    assertCrossObjectAttrsStored(plan, ctx);
     const joinClauses: string[] = [];
     // [#21441] The bucket expression the driver itself groups by for its
     // dialect, read from the `dateBucketSql` hook: `strftime('%Y-%m', …)` on
@@ -1533,6 +1557,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       timezone: query.timezone,
       context: ctx.context,
     });
+
+    // [#29304] A cross-object dimension over a virtual attribute, whether or
+    // not a base row carries a key to resolve. See {@link assertCrossObjectAttrsStored}.
+    assertCrossObjectAttrsStored(plan, ctx);
 
     // Resolve each cross-object dim's FK → attribute, SCOPED to the referenced
     // object: a related record the caller cannot read never yields its
