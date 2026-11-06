@@ -5,7 +5,7 @@
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (package as first-class citizen), [ADR-0005](./0005-metadata-customization-overlay.md) (artifact vs runtime overlay precedence), [ADR-0008](./0008-metadata-repository-and-change-log.md) (metadata repository, `MetaRef` identity), [ADR-0010](./0010-metadata-protection-model.md) (package provenance / `_packageId` stamping)
 **Consumers**: `@objectstack/objectql` (`SchemaRegistry.registerItem`, `ObjectQL.registerApp`, install path), `@objectstack/console` / `objectui` (routing + metadata resolution), package authors, CLI/CI install path, the app marketplace registry.
 **Surfaced by**: ADR-0046 review (doc naming) → generalised to all bare-named metadata → re-examined through the app-marketplace install lens.
-**Addenda**: [2026-08-08 — publish-time / marketplace namespace exclusivity](#addendum-2026-08-08-publish-time--marketplace-namespace-exclusivity) (**Proposed**; additive to §3.2, supersedes nothing).
+**Addenda**: [2026-08-08 — publish-time / marketplace namespace exclusivity](#addendum-2026-08-08-publish-time--marketplace-namespace-exclusivity) (**Accepted** 2026-08-08 — maintainer ruling on #1825, [acceptance comment 5226411687](https://github.com/objectstack-ai/objectstack/issues/1825#issuecomment-5226411687), landed by PR #6671; additive to §3.2, supersedes nothing).
 
 ---
 
@@ -367,7 +367,12 @@ Status legend: **[done]** shipped · **[proposed]** not yet built ·
 
 ## Addendum (2026-08-08): publish-time / marketplace namespace exclusivity
 
-> **Status of this addendum: Proposed.** It is **additive to §3.2** and
+> **Status of this addendum: Accepted (2026-08-08).** The maintainer accepted
+> it as drafted, D2 and D3 rule 2 included, on #1825
+> ([acceptance comment 5226411687](https://github.com/objectstack-ai/objectstack/issues/1825#issuecomment-5226411687),
+> 2026-08-08 13:55Z); PR #6671 landed it the same day with this line still
+> reading "Proposed", that comment being the acceptance record of authority
+> until the line caught up (2026-11-06, #30814). It is **additive to §3.2** and
 > **supersedes no text above** — §§1–6 stand verbatim, the install-time gate's
 > semantics are unchanged, and §3.5 (namespace rename-on-install) stays
 > deferred. What it adds is a **second, earlier checkpoint** in front of the
@@ -715,6 +720,18 @@ building the gate earlier than this buys nothing: with no third-party
 publishers there is no cross-vendor collision to prevent, which is exactly why
 the work sat on hold. This addendum therefore draws the **contract** now and
 lets the enterprise-side implementation be scheduled against the opening date.
+
+> **Note (2026-11-06, #30814) — where the precondition stands; no decision
+> changes.** Phase A2, the publish-time gate (§A.6), stays bound to this
+> precondition: it lands before third-party publishing opens, and the opening
+> waits for it. While publishing is first-party only, first-party namespaces
+> are reserved at switch-on by D2 and D4 — the back-fill awards each published
+> namespace to the publisher of its earliest published version, and the
+> reservation is held by that publisher — so no separate official reserved
+> list is needed. Phase A1 is landed: PR #6864 (2026-08-09) carries
+> `namespace` on the publish payload in this repository, read off the
+> artifact's `manifest.namespace`, and objectstack-ai/cloud#1927 is its
+> cloud-side half.
 
 ### A.6 Phasing
 
