@@ -141,7 +141,12 @@ a grouped aggregate, and sits outside every filter on the pair until it holds a 
 The code is the one you give with `--code`, and it is never derived: not from the
 `defaultCurrency` the field had under `fixed`, not from the organization's currency.
 One run writes one code, so if the stored amounts are in more than one currency, split
-those rows with your own writes first. See
+those rows with your own writes first. Each organization has its own home currency, so
+on a database whose rows belong to more than one organization, run it once per
+organization with `--org <id>` and the code that organization's rows are in: a run
+naming no organization there is refused before any write and lists each organization's
+codeless row count, and `--all-organizations` writes the one code into every
+organization's rows when it really is right for all of them. See
 [`os migrate record-currency-codes`](/docs/deployment/cli#os-migrate-record-currency-codes).
 
 ### Aggregating a record-mode amount
@@ -362,8 +367,8 @@ lists every row that changes, with its stored and new values.
 of 1, a later rate or a zero. The report names each one and why: no rate in force on its
 document date (add the rate), an amount with no currency code (run
 [`os migrate record-currency-codes`](#switching-a-field-that-already-holds-rows) first: no
-rate can help a row that names no currency; it writes its one code into every
-organization's codeless rows, so check the per-organization count first), no document date, or no home currency. Until
+rate can help a row that names no currency; give it `--org` for each organization's
+code), no document date, or no home currency. Until
 a re-run converts them, a total over the home field leaves those rows out, so the command
 keeps exiting 1 while any is listed, and the applied run's audit entry records them. The
 full reference is [`os migrate recompute-home-amounts`](/docs/deployment/cli#os-migrate-recompute-home-amounts).
