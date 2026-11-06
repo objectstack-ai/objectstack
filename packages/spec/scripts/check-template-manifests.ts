@@ -153,9 +153,7 @@ function selfTest(): never {
 
     const base = {
       $schema: TEMPLATE_MANIFEST_SCHEMA_URL,
-      name: 'blank',
       namespace: 'blank',
-      specVersion: '^6.0.0',
       displayName: 'Blank Starter',
     };
 
@@ -203,6 +201,14 @@ function selfTest(): never {
       'wrong-schema fixture: a manifest claiming a different $schema must FAIL',
     );
 
+    // RED — a retired key is refused with its prescription (#31035): the
+    // tombstone, not a silent strip, is what this gate reports.
+    const retired = write('retired-key', { ...base, specVersion: '^18.0.0' });
+    check(
+      checkManifest(retired).some((p) => p.startsWith('specVersion:') && p.includes('was removed')),
+      `retired-key fixture: a retired key must FAIL with its prescription; got ${JSON.stringify(checkManifest(retired))}`,
+    );
+
     // RED — malformed JSON is a finding, not a skip.
     const broken = write('broken', '{ not json');
     check(
@@ -213,8 +219,8 @@ function selfTest(): never {
     // Discovery walks recursively and finds exactly the manifests written above.
     const discovered = findManifests(dir);
     check(
-      discovered.length === 7,
-      `discovery: expected 7 fixture manifests, found ${discovered.length}`,
+      discovered.length === 8,
+      `discovery: expected 8 fixture manifests, found ${discovered.length}`,
     );
 
     // The vacuous-green guard's input: an empty tree yields zero, which `main`
@@ -237,7 +243,7 @@ function selfTest(): never {
   console.log(
     '✅  self-test: accepts a manifest with no manifestId (#7319) and one with a well-formed id,\n' +
       '    rejects a malformed manifestId / namespace (#6861), a missing required key, a\n' +
-      '    contradictory $schema and malformed JSON; discovery walks the template tree.',
+      '    retired key, a contradictory $schema and malformed JSON; discovery walks the template tree.',
   );
   process.exit(0);
 }
