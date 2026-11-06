@@ -31,6 +31,7 @@ import { describeSeedLocale, resolveSeedLocaleForLoad } from './seed-locale.js';
 import { declareSeedSource, recordOrganizationReplay, type SeedLandingReport } from './seed-settlement.js';
 import { loadDisabledPackageIds } from './package-state-store.js';
 import { readServedWithheldFieldReaders, servedWithheldFieldReadersMessage } from './domains/packages.js';
+import { asPackageStateStore, PACKAGE_STATE_STORE_PLUGIN_NAME } from './package-state-host-store.js';
 import type { IFieldFileService, IMetadataService, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
 import { FIELD_FILE_SERVICE } from '@objectstack/spec/contracts';
 import { normalizeFlowFunctionEntry, type NormalizedFlowFunction } from '@objectstack/spec/automation';
@@ -179,12 +180,19 @@ export class AppPlugin implements Plugin {
      * `start()`, and a database it refuses must be left as it found it — so this
      * plugin's `start()`, which loads the inline seed, runs only after the guard
      * has judged. Order-if-present: every other kernel is unchanged.
+     *
+     * The host's package-state store (`PACKAGE_STATE_STORE_PLUGIN_NAME`,
+     * `./package-state-host-store.ts`, spelled as a literal for the same
+     * reason): `init()` seeds the registry's disabled set from it, so it must
+     * be registered first. Order-if-present: a kernel without it seeds from
+     * the file under `OS_HOME`, as before.
      */
     optionalDependencies = [
         'com.objectstack.engine.objectql',
         'com.objectstack.organization-ownership-boot-guard',
         'com.objectstack.auth',
         'com.objectstack.auth.identity-objects',
+        'com.objectstack.package-state-store',
     ];
     /**
      * The one init-time service this plugin CANNOT degrade without: a
@@ -241,6 +249,14 @@ export class AppPlugin implements Plugin {
      * disagree about which datasources this artifact registers from code — and
      * the residual-owner warning prints once, at whichever read comes first.
      */
+    /**
+     * Which store the boot seed read: `'host'` (the registered
+     * `package-state-store` service) or `'file'` (the file under `OS_HOME`),
+     * `undefined` when there was no engine to seed. `start()` holds a `'file'`
+     * seed against a host store that registered after it — see
+     * {@link refuseLatePackageStateStore}.
+     */
+    private packageStateSeedSource?: 'host' | 'file';
     private codeDatasourceOwners?: Array<{ datasource: any; owner: { packageId?: string; packageVersion?: string } }>;
     /**
      * [#23649] Set once {@link installDatasourceMapping} has handed the stack's
@@ -569,7 +585,7 @@ export class AppPlugin implements Plugin {
         // envs, and a package an operator had disabled came back ENABLED on
         // every restart. The seed must land before ANY registration path runs,
         // which is Phase 1, unconditionally.
-        this.seedPersistedDisabledPackages(ctx);
+        await this.seedPersistedDisabledPackages(ctx);
         if (this.empty) {
             ctx.logger.debug('[AppPlugin] empty env — no app payload, skipping init', {
                 pluginName: this.name,
@@ -694,14 +710,55 @@ export class AppPlugin implements Plugin {
      * because that decomposition happens at the `manifest.register()` call at
      * the end of init.
      *
-     * Best-effort — never block boot on this. Degrades silently on kernels
-     * with no engine (metadata-only one-shot commands, mock-engine tests).
+     * The store is the host's when one is registered as the
+     * `package-state-store` service (`createPackageStateStorePlugin`,
+     * `./package-state-host-store.ts`, ordered ahead of this plugin by
+     * `optionalDependencies`), and the file under `OS_HOME` otherwise.
+     *
+     * The file read is best-effort, exactly as before: it never blocks boot.
+     * A HOST store's read that throws fails the boot instead, because seeding
+     * nothing would bring every module its operator switched off back on, and
+     * nothing would look wrong (ADR-0025 §3.5 M1 makes the same call for the
+     * installed-plugin loader: a disable that cannot be read is not read as
+     * "nothing is disabled"). Degrades silently on kernels with no engine
+     * (metadata-only one-shot commands, mock-engine tests).
      */
-    private seedPersistedDisabledPackages(ctx: PluginContext): void {
+    private async seedPersistedDisabledPackages(ctx: PluginContext): Promise<void> {
+        let setter: ((ids: Iterable<string>) => void) | undefined;
+        let ql: { registry?: { setInitialDisabledPackageIds?: (ids: Iterable<string>) => void } } | undefined;
         try {
-            const ql = ctx.getService<{ registry?: { setInitialDisabledPackageIds?: (ids: Iterable<string>) => void } }>('objectql');
-            const setter = ql?.registry?.setInitialDisabledPackageIds;
-            if (typeof setter === 'function') {
+            ql = ctx.getService<{ registry?: { setInitialDisabledPackageIds?: (ids: Iterable<string>) => void } }>('objectql');
+            setter = ql?.registry?.setInitialDisabledPackageIds;
+        } catch {
+            // No engine on this kernel — nothing to seed.
+        }
+        if (typeof setter !== 'function') return;
+        const hostStore = this.registeredPackageStateStore(ctx);
+        this.packageStateSeedSource = hostStore ? 'host' : 'file';
+        if (hostStore) {
+            let disabled: Set<string>;
+            try {
+                disabled = new Set(
+                    Array.from(await hostStore.loadDisabledPackageIds(this.projectContext?.environmentId))
+                        .filter((id): id is string => typeof id === 'string'),
+                );
+            } catch (err) {
+                throw new Error(
+                    `[AppPlugin] the host's package-state store (${PACKAGE_STATE_STORE_PLUGIN_NAME}) could not read `
+                    + `which packages are disabled, so the boot stops rather than bring them back enabled: `
+                    + `${(err as Error)?.message ?? String(err)}`,
+                );
+            }
+            if (disabled.size > 0) {
+                setter.call(ql!.registry, disabled);
+                ctx.logger.info('[AppPlugin] seeded persisted disabled packages', {
+                    environmentId: this.projectContext?.environmentId,
+                    store: 'host',
+                    disabled: Array.from(disabled),
+                });
+            }
+        } else {
+            try {
                 const disabled = loadDisabledPackageIds(this.projectContext?.environmentId);
                 if (disabled.size > 0) {
                     setter.call(ql!.registry, disabled);
@@ -710,12 +767,13 @@ export class AppPlugin implements Plugin {
                         disabled: Array.from(disabled),
                     });
                 }
+            } catch (err) {
+                ctx.logger.warn('[AppPlugin] failed to seed persisted package state', {
+                    error: (err as Error)?.message ?? String(err),
+                });
             }
-        } catch (err) {
-            ctx.logger.warn('[AppPlugin] failed to seed persisted package state', {
-                error: (err as Error)?.message ?? String(err),
-            });
         }
+        // [#30756] Whichever store seeded the boot, the same final reading.
         this.reportWithheldFieldReadersAtBoot(ctx);
     }
 
@@ -761,6 +819,39 @@ export class AppPlugin implements Plugin {
                 });
             }
         });
+    }
+
+    /**
+     * The host's package-state store, or `undefined` when this kernel has
+     * none. The service name is a literal so `check:init-service-contract`
+     * can hold this init-time read to the `optionalDependencies` entry above.
+     */
+    private registeredPackageStateStore(ctx: PluginContext) {
+        let registered: unknown;
+        try {
+            registered = ctx.getService('package-state-store');
+        } catch {
+            return undefined;
+        }
+        return asPackageStateStore(registered);
+    }
+
+    /**
+     * A boot that seeded from the FILE, on a kernel where a host store is
+     * registered by now, read the wrong store: the host's plugin initialized
+     * after this one, so the disables it holds were never seeded while the
+     * package doors will write to it. Refused by name, with the fix, rather
+     * than served with two stores in play.
+     */
+    private refuseLatePackageStateStore(ctx: PluginContext): void {
+        if (this.packageStateSeedSource !== 'file') return;
+        if (this.registeredPackageStateStore(ctx) === undefined) return;
+        throw new Error(
+            `[AppPlugin] a package-state store was registered as the 'package-state-store' service after this `
+            + `plugin's boot seed had already read the file under OS_HOME, so the packages that store holds as `
+            + `disabled would come back enabled. Register it with createPackageStateStorePlugin(store) from `
+            + `@objectstack/runtime, which is ordered ahead of AppPlugin.`,
+        );
     }
 
     /**
@@ -1293,6 +1384,7 @@ export class AppPlugin implements Plugin {
     }
 
     start = async (ctx: PluginContext) => {
+        this.refuseLatePackageStateStore(ctx);
         if (this.empty) {
             ctx.logger.debug('[AppPlugin] empty env — no app payload, skipping start', {
                 pluginName: this.name,

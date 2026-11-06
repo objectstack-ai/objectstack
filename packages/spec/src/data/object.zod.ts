@@ -33,10 +33,11 @@ import { SINGLE_OPTION_TYPES } from './field-value.zod';
 // `password` exemption rather than restating it. No runtime cycle: that module's
 // only imports are type-only.
 import { isMaskedOnReadFieldType } from './masked-field-types';
-// The one-required-master predicate, shared with the v18 stored-row listing
+// The one-master predicate, shared with the v18 stored-row listing
 // (`conversions/refused-shapes.ts`) so the parse and the upgrade's preview
 // refuse one set. Public: re-exported from `@objectstack/spec/data`, with the
-// field predicate `isControlledByParentMasterField` it counts.
+// field predicate `isControlledByParentMasterField` it counts and the
+// resolver `controlledByParentMasterOf` it judges the one master with.
 import { controlledByParentMasterRefusal } from './controlled-by-parent-master';
 // The ADR-0015 §4.2 binding predicate, shared with `defineStack`'s
 // cross-reference pass and the v18 stored-row listing. Internal to the spec.
@@ -2760,6 +2761,17 @@ function refuseFieldsInRelatedListGroups(fieldGroups: unknown, fields: unknown, 
  * derives its master from EXACTLY ONE `master_detail` field declared
  * `required: true`. The parse refuses the object otherwise — zero such fields,
  * or two or more — naming the object and the rule, at
+ *
+ * ⚠️ Amended by ruling A of #30905 (ADR-0055 §1 as amended): with no required
+ * one, the object's ONLY `master_detail`, declared `required: false`, is its
+ * master too, an OPTIONAL one — a detail row may name no master, and such a
+ * row is read by its owner and by View All on the detail. On the parsed map an
+ * omitted `required` is `false` (see below), so this refinement admits it as
+ * the optional master as well: the parse cannot tell the two spellings apart.
+ * The omission is caught where it is visible — `ObjectSchema.create()` forces
+ * it to `true`, the stored-row seams convert it to `true`, and `os lint`'s
+ * `relationship/master-detail-required` reports it at `error`. The rest of
+ * this docblock records the rule as first landed and reads with that change:
  * `['sharingModel']` (nothing to derive from) or `['fields']` (more than one
  * candidate), the same two locations `os lint` reports
  * `security-controlled-by-parent-no-relation` /
@@ -2790,7 +2802,9 @@ function refuseFieldsInRelatedListGroups(fieldGroups: unknown, fields: unknown, 
  * refusal every door that parses meets.
  *
  * Read on the PARSED field map: `required` is `z.boolean().default(false)`, so
- * an omitted `required` here is `false` — and is refused. That is the builder's
+ * an omitted `required` here is `false` — and is refused. ⚠️ Since ruling A of
+ * #30905, `false` on the object's only `master_detail` is the optional master,
+ * so an omitted one is admitted as that (see above). That is the builder's
  * own contract seen from the other side: `ObjectSchema.create()` forces an
  * omitted `required` to `true` on every `master_detail` under this sharing
  * model ({@link forceCbpMasterDetailRequired}), so an object authored through
@@ -2806,7 +2820,9 @@ function refuseFieldsInRelatedListGroups(fieldGroups: unknown, fields: unknown, 
  * diagnostic carrying this message (ADR-0087's 2026-07-31 addendum, "reads
  * diagnose, never drop"), and the save door refuses it with 422. The other
  * shapes are not converted:
- *   - an explicit `required: false` — the builder refuses it, too;
+ *   - an explicit `required: false` — the builder refuses it, too (⚠️ until
+ *     ruling A of #30905; on the object's only `master_detail` it is the
+ *     optional master now, accepted as stored);
  *   - two masters — choosing one is the pick §1 refuses;
  *   - a required `lookup` — turning it into a `master_detail` changes what
  *     deleting the master does to every row, and whether the object should
@@ -3719,7 +3735,10 @@ const ObjectSchemaBase = strictObject(
    * master-detail relationship: its access is *derived* from the master record
    * — a user sees/edits a detail only if they can see/edit its master. The
    * object must declare exactly one required `master_detail` field identifying
-   * the master; the security layer auto-injects `masterFK IN (accessible master
+   * the master — or, with none, exactly one `master_detail` declared
+   * `required: false`, an optional master: a detail row that names no master is
+   * read by its owner (`owner_id`) and by View All on the detail (ADR-0055 §1
+   * and §2 as amended); the security layer auto-injects `masterFK IN (accessible master
    * ids)` on reads and requires master edit-access on by-id writes. No RLS policy
    * is authored — the inheritance is derived from the relationship.
    */
@@ -4083,9 +4102,10 @@ const ObjectSchemaBase = strictObject(
   // [#27069] A field group carrying `relatedList` is a body table: no field
   // joins it. See the helper's docblock.
   refuseFieldsInRelatedListGroups(object.fieldGroups, object.fields, ctx);
-  // [ADR-0055 §1 · #23100 ruling B] Exactly one required `master_detail`
-  // under `controlled_by_parent` — the one master relation the runtime derives
-  // access from. See the helper's docblock.
+  // [ADR-0055 §1 · #23100 ruling B, as amended by #30905 ruling A] Exactly one
+  // master `master_detail` under `controlled_by_parent` (the required one, or
+  // the only one declared `required: false`) — the one master relation the
+  // runtime derives access from. See the helper's docblock.
   refuseControlledByParentWithoutOneMaster(object.name, object.sharingModel, object.fields, ctx);
   // [ADR-0055 §3 amendment · ruling 6398566164] `sharing.controlledByParent.ownerMayEdit`
   // is read only on a `controlled_by_parent` detail. See the helper's docblock.
@@ -4425,8 +4445,17 @@ function assertReferenceViaSiblingDeclared(objectName: unknown, fields: unknown)
 /**
  * [#9138 — commit 75b7c240a, maintainer ruling Direction 2 / ADR-0055] Under
  * `sharingModel: 'controlled_by_parent'` the builder FORCES `required: true`
- * on every `master_detail` reference, and REFUSES an explicit
- * `required: false` there, loudly.
+ * on every `master_detail` reference that OMITS `required`, and keeps an
+ * explicit `required: true` as written.
+ *
+ * ⚠️ Amended by ruling A of #30905 (ADR-0055 §1 as amended): an explicit
+ * `required: false` on the object's ONLY `master_detail` is no longer refused
+ * here (one beside another still is). It declares the OPTIONAL master
+ * — a detail row may name none, and such a row is read by its owner and by
+ * View All on the detail ({@link refuseControlledByParentWithoutOneMaster}
+ * judges whether it is the object's one master). The text below, down to the
+ * second bullet, records the rule as first landed; the force itself is
+ * unchanged: an omitted `required` still means required.
  *
  * Why: a `controlled_by_parent` detail's access is *derived* from its master
  * through that reference (the `sharingModel` docblock above already states
@@ -4448,7 +4477,10 @@ function assertReferenceViaSiblingDeclared(objectName: unknown, fields: unknown)
  *   `relationship/master-detail-required` already computes exactly this fix);
  * - explicit `required: false` → refused with a located error — the author
  *   wrote a contradiction, and silently flipping an explicitly authored value
- *   would hide it (ADR-0032 "no silent failure").
+ *   would hide it (ADR-0032 "no silent failure"). ⚠️ Retired by ruling A of
+ *   #30905 on the object's ONLY `master_detail`: it is the optional master
+ *   now, passed to the parse as written. Beside another `master_detail` it
+ *   is still refused here, with the message naming the other.
  *
  * `readonly` / `system` are not read here: the builder forces nothing about
  * them, and the parse it ends in refuses a one master carrying either
@@ -4481,21 +4513,30 @@ function forceCbpMasterDetailRequired(
   if (sharingModel !== 'controlled_by_parent') return fields;
   if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return fields;
   let out: Record<string, unknown> | undefined;
-  for (const [fieldName, def] of Object.entries(fields as Record<string, unknown>)) {
-    if (!def || typeof def !== 'object' || Array.isArray(def)) continue;
+  const masterDetails = Object.entries(fields as Record<string, unknown>).filter(
+    ([, def]) =>
+      !!def && typeof def === 'object' && !Array.isArray(def)
+      && (def as Record<string, unknown>).type === 'master_detail',
+  );
+  for (const [fieldName, def] of masterDetails) {
     const field = def as Record<string, unknown>;
-    if (field.type !== 'master_detail') continue;
     if (field.required === true) continue;
+    // [ADR-0055 §1 as amended · #30905 ruling A] An explicit `required: false`
+    // on the object's ONLY `master_detail` is the optional master, kept as
+    // written. Beside another `master_detail` it is still the contradiction
+    // this builder refused before the ruling: that field is not the master
+    // (§1 keeps one), so it is a second parent, which §1 declares a `lookup`.
     if (field.required === false) {
+      if (masterDetails.length === 1) continue;
       const name = typeof objectName === 'string' && objectName.length > 0 ? objectName : '<unnamed>';
+      const others = masterDetails.filter(([other]) => other !== fieldName).map(([other]) => `\`${other}\``);
       throw new Error(
         `ObjectSchema.create('${name}'): field \`${fieldName}\` declares \`required: false\` on a `
-        + "`master_detail` reference under `sharingModel: 'controlled_by_parent'` — a contradiction "
-        + 'with no honest reading. A controlled-by-parent detail derives ALL of its record '
-        + 'access from the master this field names (ADR-0055); a row allowed to omit the master FK '
-        + 'is unreadable by everyone (the derived filter `masterFK IN (accessible master ids)` '
-        + 'never matches null) and unwritable thereafter. Remove `required: false` (the builder '
-        + 'declares the reference required by construction), or if this object is not a '
+        + "`master_detail` reference under `sharingModel: 'controlled_by_parent'`, beside another "
+        + `\`master_detail\` (${others.join(', ')}). Only an object's ONLY \`master_detail\` may be `
+        + 'declared `required: false`, an optional master (ADR-0055 §1): beside another it names a '
+        + 'second parent, and a controlled-by-parent detail derives its access from one master. '
+        + 'Declare every parent other than the master as a `lookup`, or if this object is not a '
         + 'master-detail child, change its `sharingModel`.',
       );
     }
@@ -4630,11 +4671,10 @@ export const ObjectSchema = lazySchema(() => {
     // sibling assertions, rather than one error per seeded row at load time.
     assertReferenceViaSiblingDeclared(cfg.name, cfg.fields);
     // [#9138 — commit 75b7c240a, ruling Direction 2] A `controlled_by_parent` object's
-    // `master_detail` reference is forced `required: true` (an explicit
-    // `required: false` throws, loudly) so the unsafe shape cannot be newly
-    // declared. Raw `.parse()`/`.safeParse()` do not force it — they refuse a
-    // `controlled_by_parent` object without exactly one required
-    // `master_detail` instead (#23100 ruling B) — see the function's docblock.
+    // `master_detail` reference that omits `required` is forced `required: true`;
+    // an explicit `required: false` on its only `master_detail` is kept, the
+    // optional master (ruling A of #30905), and refused beside another. Raw `.parse()`/`.safeParse()` do not force it — they judge the
+    // object's one master instead (#23100 ruling B) — see the function's docblock.
     const forcedFields = forceCbpMasterDetailRequired(cfg.name, cfg.sharingModel, cfg.fields);
     const withDefaults = {
       ...cfg,
@@ -5112,8 +5152,10 @@ function fieldPatchesDescription(): string {
     '(`mergeObjectDefinitions`) after the additive merges, on every object read: a tenant\'s own text keeps ' +
     'winning, and between two extensions the higher `priority` wins. A patch naming a field or option value ' +
     'the target does not have is refused at install and by `os validate`; a field the same extension ' +
-    'replaces in `fields` is refused here. Example: `fieldPatches: { industry: { label: \'Sector\', ' +
-    'inlineHelpText: \'The market the account sells into\', options: { technology: { label: \'Tech\' } } } }`.'
+    'replaces in `fields` is refused here. An option of a field bound to a shared `picklist` is never ' +
+    'patchable: its labels are the picklist\'s, so only a field declaring its own `options` takes an option ' +
+    'patch. Example: `fieldPatches: { industry: { label: \'Sector\', inlineHelpText: \'The market the ' +
+    'account sells into\' }, type: { options: { customer: { label: \'Client\' } } } }`.'
   );
 }
 
@@ -5128,7 +5170,9 @@ function fieldPatchesDescription(): string {
  *   fields: { sales_stage: Field.select([...]) },
  *   // A base field's display properties only (ADR-0146 D10), applied by the
  *   // registry merge (`mergeObjectDefinitions`) — see `fieldPatches`.
- *   fieldPatches: { industry: { label: 'Sector', options: { technology: { label: 'Tech' } } } },
+ *   // Where `industry` is picklist-bound, as on HotCRM's `crm_account`, its options are not
+ *   // patchable (its display keys are); an option patch goes on a field declaring its own options.
+ *   fieldPatches: { industry: { label: 'Sector' }, type: { options: { customer: { label: 'Client' } } } },
  * }]
  * ```
  */

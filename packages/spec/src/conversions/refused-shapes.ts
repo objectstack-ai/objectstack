@@ -66,8 +66,8 @@ import {
   type FlowNodeValueTemplateRefusal,
 } from '../automation/flow-value-slot-template.js';
 import {
+  controlledByParentMasterOf,
   controlledByParentMasterRefusal,
-  isControlledByParentMasterField,
   type ControlledByParentMasterRefusal,
 } from '../data/controlled-by-parent-master.js';
 import { duplicateActionNames } from '../data/duplicate-action-names.js';
@@ -146,12 +146,17 @@ function controlledByParentFate(refusal: ControlledByParentMasterRefusal, fields
         + 'the upgrade never picks one. Keep `master_detail` with `required: true` on the master and '
         + `declare each other parent as a \`lookup\`, ${ownSharingModel}.`;
     case 'master-not-required': {
+      // [#30905 ruling A] An explicit `required: false` is the optional master
+      // and is no longer listed: this arm retired for it. What is left is a
+      // `required` that is neither boolean, which the field parse refuses on
+      // its own (an omitted one is converted by the chain before this reads).
       const name = refusal.masterDetails[0]!;
       const def = fields[name];
       const written = isDict(def) && 'required' in def ? JSON.stringify(def.required) : 'nothing';
-      return `Its one \`master_detail\`, \`${name}\`, declares \`required: ${written}\`, which the builder `
-        + 'refuses rather than forcing, so the upgrade does not overrule it. Declare `required: true` on it, '
-        + `${ownSharingModel}.`;
+      return `Its one \`master_detail\`, \`${name}\`, declares \`required: ${written}\`, which is neither `
+        + 'the required master nor the optional one, so the upgrade does not guess. Declare `required: true` '
+        + '(every row names its master) or `required: false` (a row may name none, and is then readable only '
+        + `by its owner and by View All on the object) on it, ${ownSharingModel}.`;
     }
     case 'required-lookup-only':
       return `It declares no \`master_detail\`, and ${fieldList(refusal.requiredLookups)} `
@@ -165,11 +170,11 @@ function controlledByParentFate(refusal: ControlledByParentMasterRefusal, fields
         + 'and nothing to convert. Add a `master_detail` field with `required: true` referencing the master '
         + `object, ${ownSharingModel}.`;
     case 'master-not-writable': {
-      const master = refusal.masterDetails.find((n) => isControlledByParentMasterField(fields[n]))!;
-      return `Its one required \`master_detail\`, \`${master}\`, `
+      const master = controlledByParentMasterOf(fields)!;
+      return `Its one ${master.optional ? 'optional' : 'required'} \`master_detail\`, \`${master.field}\`, `
         + 'is marked `readonly` or `system`. Dropping the flag changes who may write the reference, so the '
-        + 'upgrade does not write it. Remove the flag and declare the master reference as an ordinary required '
-        + `field, ${ownSharingModel}.`;
+        + 'upgrade does not write it. Remove the flag and declare the master reference as an ordinary '
+        + `${master.optional ? '' : 'required '}field, ${ownSharingModel}.`;
     }
   }
 }
@@ -206,7 +211,8 @@ const controlledByParentWithoutOneMaster: RefusedStoredShape = {
         path: `${path}.${refusal.path}`,
         from: JSON.stringify({ sharingModel: obj.sharingModel, fields: relation }),
         reason: 'No lossless rewrite: protocol 18 derives a controlled-by-parent object\'s master from exactly '
-          + 'one writable `master_detail` declared `required: true`, and this object does not declare exactly one. '
+          + 'one writable `master_detail` declared `required: true`, or, with none, from its only `master_detail` '
+          + 'declared `required: false`, and this object does not declare exactly one. '
           + `${controlledByParentLeftAsStored(refusal)} `
           + `${controlledByParentFate(refusal, fields)} ${refusal.message}`,
       });

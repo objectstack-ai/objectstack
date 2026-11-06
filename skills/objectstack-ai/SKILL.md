@@ -199,7 +199,7 @@ permissions and row-level security:
 | `query_records`, `get_record` | reads — filter, field selection, sorting, pagination |
 | `aggregate_records` | GROUP BY totals; registered only when the data bridge implements `aggregate` |
 | `validate_expression` | build-accurate CEL check before a formula is authored into metadata |
-| `create_record`, `update_record`, `delete_record` | writes; `delete_record` is annotated destructive |
+| `create_record`, `update_record`, `delete_record` | writes; `delete_record` is refused with `ACTION_CONFIRMATION_REQUIRED` (428) unless it sends `confirm: true` — ask the human first, then retry |
 | `list_actions`, `run_action` | your AI-exposed business Actions — the same `ai.exposed` opt-in as above |
 
 ---

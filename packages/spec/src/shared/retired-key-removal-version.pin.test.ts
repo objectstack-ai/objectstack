@@ -341,14 +341,24 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
     refusal("action:group member's patch", () => ActionGroupPropsSchema.safeParse({ actions: [{ label: 'Close', patch: { status: 'done' } }] }), 'actions'),
     refusal("action:menu member's patch", () => ActionMenuPropsSchema.safeParse({ actions: [{ label: 'Close', patch: { status: 'done' } }] }), 'actions'),
   ],
+  // [ADR-0055 §1 as amended · #30905 ruling A] The parse reads an omitted
+  // `required` on an object's ONLY `master_detail` as `false` (the parsed field
+  // map defaults it), so that shape is an optional master at the parse and no
+  // longer refused there; the builder still forces it, this conversion still
+  // converts it at rest, and `os lint` reports it. The refusal the parse still
+  // answers on this surface is the shape the conversion leaves as stored: two
+  // `master_detail` fields, neither declaring `required`.
   'cbp-master-detail-required-defaulted': [
     refusal(
-      'a controlled_by_parent master_detail without `required`',
+      'a controlled_by_parent object whose two master_detail fields declare no `required`',
       () => ObjectSchema.safeParse({
         name: 'cbp_line',
         label: 'Line',
         sharingModel: 'controlled_by_parent',
-        fields: { order: { type: 'master_detail', label: 'Order', reference: 'cbp_order' } },
+        fields: {
+          order: { type: 'master_detail', label: 'Order', reference: 'cbp_order' },
+          batch: { type: 'master_detail', label: 'Batch', reference: 'cbp_batch' },
+        },
       }),
       'sharingModel',
     ),

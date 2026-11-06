@@ -41,129 +41,15 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
-      "member": "reconcileViewExpansions",
-      "card": "#30147",
-      "reason": "codemod limit: closed-set, reads the private static field `registeredViewExpansions` (only a called private static method is in the closed set) (#29985 report)"
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.ts",
-      "member": "packagelessOverlayWriteRefusal",
-      "card": "#30147",
-      "reason": "codemod limit: closed-set, a local named `host` would shadow the host parameter; name-taken (#29985 report)"
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.ts",
-      "member": "namedBaseOverlayWriteRefusal",
-      "card": "#30147",
-      "reason": "codemod limit: closed-set, a local named `host` would shadow the host parameter; name-taken (#29985 report)"
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.ts",
-      "member": "static mergesOverlayAtRead",
-      "card": "#30147",
-      "reason": "codemod limit: static-reads-class, a private static that reads `this` (the class) (#29985 report)"
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.ts",
-      "member": "static registryAllowsOverlay",
-      "card": "#30147",
-      "reason": "codemod limit: static-reads-class, a private static that reads `this` (the class) (#29985 report)"
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.ts",
-      "member": "static isOverlayAllowed",
-      "card": "#30147",
-      "reason": "codemod limit: static-reads-class, a private static that reads `this` (the class) (#29985 report)"
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.ts",
-      "member": "static isRuntimeCreateAllowed",
-      "card": "#30147",
-      "reason": "codemod limit: static-reads-class, a private static that reads `this` (the class) (#29985 report)"
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.ts",
-      "member": "static codeOnlySourceHint",
-      "card": "#30147",
-      "reason": "codemod limit: static-reads-class, a private static that names the class (#29985 report)"
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.ts",
-      "member": "static codeOnlyCreateError",
-      "card": "#30147",
-      "reason": "codemod limit: static-reads-class, a private static that names the class (#29985 report)"
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.ts",
-      "member": "static codeOnlyOverrideError",
-      "card": "#30147",
-      "reason": "codemod limit: static-reads-class, a private static that names the class (#29985 report)"
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.ts",
-      "member": "static refuseOrganizationScopedWrite",
-      "card": "#30147",
-      "reason": "codemod limit: static-reads-class, a private static that reads `this` (the class) (#29985 report)"
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.ts",
-      "member": "static overlayPackageMismatchError",
-      "card": "#30147",
-      "reason": "codemod limit: static-reads-class, a private static that names the class (#29985 report)"
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.ts",
-      "member": "rethrowUnlessMetadataStoreUnprovisioned",
-      "card": "#30147",
-      "reason": "codemod limit: no-host-read, the body reads no member, so the moved function would leave its host parameter unread (#29985 report)"
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.ts",
       "member": "triggerAutomation",
       "card": "#30147",
-      "reason": "codemod limit: no-host-read, the body reads no member, so the moved function would leave its host parameter unread (#29985 report)"
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.ts",
-      "member": "objectExtensionItemRefusal",
-      "card": "#30147",
-      "reason": "codemod limit: name-taken, its name is already a module-scope binding of protocol.ts (#29985 report)"
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.ts",
-      "member": "packagedBaseRefusal",
-      "card": "#30147",
-      "reason": "codemod limit: host-entry-predicate, it reaches the type predicate isPackagedBaseRefusal through a host entry not yet written (#29985 report)"
+      "reason": "accepted exception (#30147 phase 3): its body is one `throw` (no shorter than a stub), and its section (Batch and *Many data) has no facet module; the codemod's members pass adds to a written facet and never starts one, so a facet for one statement would be the only reason to start it"
     },
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
       "member": "applySeedBodies",
       "card": "#30020",
       "reason": "state-owning: gate reading, a hand-series host slot computes (optional-call service lookup); the hand-series host rule is #30020's"
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.ts",
-      "member": "static OVERLAY_ALLOWED_TYPES",
-      "card": "#30147",
-      "reason": "codemod limit: gate reading, a static table built in an initializer body at class load (a pure function of imports; the initializer can move to a module)"
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.ts",
-      "member": "static STATIC_REGISTRY_TYPES",
-      "card": "#30147",
-      "reason": "codemod limit: gate reading, a static table built in an initializer body at class load (a pure function of imports; the initializer can move to a module)"
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.ts",
-      "member": "static RUNTIME_CREATE_ALLOWED_TYPES",
-      "card": "#30147",
-      "reason": "codemod limit: gate reading, a static table built in an initializer body at class load (a pure function of imports; the initializer can move to a module)"
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.ts",
-      "member": "static OVERLAY_CAPABLE_TYPES",
-      "card": "#30147",
-      "reason": "codemod limit: gate reading, a static table built in an initializer body at class load (a pure function of imports; the initializer can move to a module)"
     },
     {
       "file": "packages/objectql/src/engine.ts",

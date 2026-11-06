@@ -46,15 +46,29 @@ describe('owd-sharing — deriveMasterObject', () => {
  * the master, and any other shape names none. The installed spec's
  * `ObjectSchema` is the oracle for which shapes the platform accepts: every
  * shape this reader names a master for parses as a `controlled_by_parent`
- * object, and every shape it names none for is refused.
+ * object, and every shape it names none for is refused, with one exception.
+ *
+ * ADR-0055 §1 as amended (objectstack#30905 ruling A) adds an OPTIONAL master:
+ * an object's only `master_detail` declared `required: false`. The parse cannot
+ * tell an omitted `required` from `false`, so it admits the omitted shape too,
+ * while this reader names none for it, as the runtime does for an object that
+ * reaches it unparsed (it reads `required: false` literally, never its
+ * absence). That row records the parse's answer apart from the master named.
  */
 describe('owd-sharing — deriveMasterObject agrees with the runtime (objectui#12326)', () => {
   const asCbp = (fields: Record<string, unknown>) =>
     ObjectSchema.safeParse({ name: 'crm_case', sharingModel: 'controlled_by_parent', fields }).success;
 
-  const SHAPES: Array<[string, Record<string, unknown>, string | undefined]> = [
+  // [label, fields, the master named, whether the spec parse accepts it when
+  // that differs from "a master is named"]
+  const SHAPES: Array<[string, Record<string, unknown>, string | undefined, boolean?]> = [
     ['one required master', { account: { type: 'master_detail', reference: 'crm_account', required: true } }, 'crm_account'],
-    ['one master without required', { account: { type: 'master_detail', reference: 'crm_account' } }, undefined],
+    [
+      'one master without required (the parse reads it as an optional master; this reader names none)',
+      { account: { type: 'master_detail', reference: 'crm_account' } },
+      undefined,
+      true,
+    ],
     [
       'two required masters',
       {
@@ -75,9 +89,9 @@ describe('owd-sharing — deriveMasterObject agrees with the runtime (objectui#1
     ['no relationship field', { subject: { type: 'text' } }, undefined],
   ];
 
-  it.each(SHAPES)('%s', (_label, fields, master) => {
+  it.each(SHAPES)('%s', (_label, fields, master, parses) => {
     expect(deriveMasterObject(fields)).toBe(master);
-    expect(asCbp(fields)).toBe(master !== undefined);
+    expect(asCbp(fields)).toBe(parses ?? master !== undefined);
   });
 });
 

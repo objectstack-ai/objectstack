@@ -1604,14 +1604,15 @@ export class ObjectQL implements IObjectQLEngine {
    * master an object-scoped read middleware narrows, or one bound to another
    * datasource than the detail — judged by the read path's own predicate
    * ({@link uncomposableReadableIdsParent}). A detail's access derives from its
-   * one required `master_detail` (ADR-0055 §1), so such a declaration is one
+   * one master `master_detail` (ADR-0055 §1: the required one, or as amended
+   * its only one declared `required: false`), so such a declaration is one
    * the runtime cannot honour: `ObjectQLPlugin` refuses the boot on any entry.
    *
    * Both facts are deployment facts (the datasource mapping, a package's
    * default datasource, lifecycle routing, the middleware registrations), so
    * the answer is final only once every plugin has registered its middleware —
    * which several do inside their own `kernel:ready` handler. Asked earlier, it
-   * is short. A detail with no single required master, or whose master the
+   * is short. A detail with no single master, or whose master the
    * registry does not hold, is no entry: other rules own those.
    */
   findUnservableControlledByParentMasters(): UnservableControlledByParentMaster[] {
