@@ -17,9 +17,23 @@ import { enObjects } from './en.objects.generated.js';
 import { zhCNObjects } from './zh-CN.objects.generated.js';
 import { jaJPObjects } from './ja-JP.objects.generated.js';
 import { esESObjects } from './es-ES.objects.generated.js';
+import { zhHantObjects } from './zh-Hant.objects.generated.js';
+import { arObjects } from './ar.objects.generated.js';
+import { frObjects } from './fr.objects.generated.js';
+import { ptBRObjects } from './pt-BR.objects.generated.js';
+import { ruObjects } from './ru.objects.generated.js';
+import { deObjects } from './de.objects.generated.js';
+import { koObjects } from './ko.objects.generated.js';
 import { zhCNGeneratedSourceHashes } from './zh-CN.source-hashes.generated.js';
 import { jaJPGeneratedSourceHashes } from './ja-JP.source-hashes.generated.js';
 import { esESGeneratedSourceHashes } from './es-ES.source-hashes.generated.js';
+import { zhHantGeneratedSourceHashes } from './zh-Hant.source-hashes.generated.js';
+import { arGeneratedSourceHashes } from './ar.source-hashes.generated.js';
+import { frGeneratedSourceHashes } from './fr.source-hashes.generated.js';
+import { ptBRGeneratedSourceHashes } from './pt-BR.source-hashes.generated.js';
+import { ruGeneratedSourceHashes } from './ru.source-hashes.generated.js';
+import { deGeneratedSourceHashes } from './de.source-hashes.generated.js';
+import { koGeneratedSourceHashes } from './ko.source-hashes.generated.js';
 import { sharingPageTranslations, sharingPageSourceHashes } from './pages.js';
 
 /**
@@ -65,5 +79,33 @@ export const SharingTranslations: TranslationBundle = {
   'es-ES': withSourceFallback(
     { objects: esESObjects, pages: sharingPageTranslations['es-ES'] },
     enSource, sharingPageSourceHashes['es-ES'], esESGeneratedSourceHashes,
+  ),
+  'zh-Hant': withSourceFallback(
+    { objects: zhHantObjects, pages: sharingPageTranslations['zh-Hant'] },
+    enSource, sharingPageSourceHashes['zh-Hant'], zhHantGeneratedSourceHashes,
+  ),
+  'ar': withSourceFallback(
+    { objects: arObjects, pages: sharingPageTranslations['ar'] },
+    enSource, sharingPageSourceHashes['ar'], arGeneratedSourceHashes,
+  ),
+  'fr': withSourceFallback(
+    { objects: frObjects, pages: sharingPageTranslations['fr'] },
+    enSource, sharingPageSourceHashes['fr'], frGeneratedSourceHashes,
+  ),
+  'pt-BR': withSourceFallback(
+    { objects: ptBRObjects, pages: sharingPageTranslations['pt-BR'] },
+    enSource, sharingPageSourceHashes['pt-BR'], ptBRGeneratedSourceHashes,
+  ),
+  'ru': withSourceFallback(
+    { objects: ruObjects, pages: sharingPageTranslations['ru'] },
+    enSource, sharingPageSourceHashes['ru'], ruGeneratedSourceHashes,
+  ),
+  'de': withSourceFallback(
+    { objects: deObjects, pages: sharingPageTranslations['de'] },
+    enSource, sharingPageSourceHashes['de'], deGeneratedSourceHashes,
+  ),
+  'ko': withSourceFallback(
+    { objects: koObjects, pages: sharingPageTranslations['ko'] },
+    enSource, sharingPageSourceHashes['ko'], koGeneratedSourceHashes,
   ),
 };
