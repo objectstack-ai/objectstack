@@ -62,6 +62,9 @@ const mockClient = vi.hoisted(() => ({
       overlay: eff,
       overlayScope: eff ? 'env' : null,
       effective: eff,
+      // As the server serves an admitted author: the pending draft as stored (objectstack#30859).
+      // Stored, so without the read's `_diagnostics` decoration.
+      draft: server.draft ? Object.fromEntries(Object.entries(server.draft).filter(([key]) => !key.startsWith('_'))) : null,
       editable: true,
       deletable: true,
       resettable: false,

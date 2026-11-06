@@ -65,6 +65,10 @@ import {
 // [ADR-0048 N.3] The security catalog's one-holder envelope, raised here by the
 // cold-boot check (see `refuseEnvironmentHeldSecurityCatalogNames`).
 import { SecurityCatalogNameConflictError, findEnvironmentHeldSecurityCatalogNames } from './registry.js';
+// One name, one package holder for a picklist, mapping or dataset — the cold
+// boot's seal and its one switch (`bare-name-one-holder.ts`, "The cold boot").
+import { sealBareNameHoldersAtColdBoot } from './registry.js';
+import { BARE_NAME_COLD_BOOT_MODE } from './bare-name-one-holder.js';
 // [ADR-0029 D3] The registry's own refusal of a second owner — read, never
 // re-derived, when a residual object's name is already owned.
 import { ObjectOwnershipConflictError, collectManifestBoundActions, collectManifestObjectNames, describeBoundActionCollision, describeUnboundActionTargets, FIND_BOUND_ACTION_COLLISIONS, type BoundActionCollision } from './registry.js';
@@ -1209,6 +1213,16 @@ export class ObjectQLPlugin implements Plugin {
     // would tell a brand-new deployment its gates are open moments after they
     // were closed.
     ctx.hook('kernel:bootstrapped', async () => {
+        // [#30803] Seal the bare-name holders (`bare-name-one-holder.ts`): every
+        // package of this boot has registered by now — the AppPlugin bodies in
+        // `init()`, the install-local rehydrate at `kernel:ready` — so from here
+        // on the package door and the item seam refuse a NEW holder of a
+        // picklist, mapping or dataset name. A name the boot left held twice is
+        // the switch's: warned once, naming both holders and the rename, or the
+        // boot refused. Never sealed on a kernel that withholds the boot-phase
+        // hooks: there the doors never refuse.
+        const registry = this.ql?.registry;
+        if (registry) sealBareNameHoldersAtColdBoot(registry, BARE_NAME_COLD_BOOT_MODE, ctx.logger);
         // [ADR-0139 D5.2 / D5.3] A `controlled_by_parent` detail over a master
         // the engine composes no read over fails the boot, naming both and the
         // remedy. Judged HERE, not at `kernel:ready`: the object-scoped read

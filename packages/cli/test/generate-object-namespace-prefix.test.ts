@@ -26,8 +26,15 @@
  *   view    `object`                no finding at all: a binding to nothing, silently
  *
  * No `os validate` gate judges a view's, action's, flow's, dashboard's, app's
- * or skill's OWN `name` against the namespace. So those stay as typed, and
- * every OBJECT name gains the prefix through one derivation (`objectNameFor`).
+ * or skill's OWN `name` against the namespace, and every OBJECT name gains the
+ * prefix through one derivation (`objectNameFor`).
+ *
+ * Since ruling C on #30798, every other name a package authors carries the
+ * namespace too, and `os lint`'s `naming/namespace-prefix` warns on a bare
+ * one. So a scaffold's own `name` gains the prefix through `itemName`
+ * (`namespacedItemName`). That is a warning, not a refusal, so it does not
+ * make a generator `namesObject`: the flag still means "writes an OBJECT
+ * name", the one spelling `defineStack` refuses unprefixed.
  *
  * One exception the census above could not see, because it stops at
  * `os validate` (#20215): the RUNTIME registers a views container under the
@@ -195,17 +202,25 @@ describe('[#20197] `namesObject` is what each template actually does', () => {
     expect(GENERATOR_SCAFFOLD_TARGETS.length).toBeGreaterThan(0);
   });
 
-  // `runMetadataGeneration` reads the manifest only for a generator that
-  // declares `namesObject`, so a template that writes an object name without
-  // the flag would silently lose the prefix again. Derived from the output,
-  // never from a list: a generator added tomorrow is measured the day it lands.
+  // `runMetadataGeneration` refuses to guess the namespace only for a
+  // generator that declares `namesObject`, so a template that writes an object
+  // name without the flag would write it unprefixed into a project whose
+  // config does not load. Derived from the output, never from a list: a
+  // generator added tomorrow is measured the day it lands.
+  //
+  // The scaffold's OWN name carries the namespace whatever the flag says
+  // (ruling C on #30798, see the header), so it is held fixed before the two
+  // outputs are compared — except on the object scaffold, whose own name IS
+  // an object name.
+  const ownNameHeldFixed = (target: (typeof GENERATOR_SCAFFOLD_TARGETS)[number], source: string) =>
+    target.type === 'object' ? source : source.split(target.itemName(STEM, NS)).join(target.itemName(STEM));
   const unbound = GENERATOR_SCAFFOLD_TARGETS.filter((t) => Object.keys(t.binds).length === 0);
   const bound = GENERATOR_SCAFFOLD_TARGETS.filter((t) => t.binds.object !== undefined);
 
   it.each(unbound.map((t) => [t.type, t] as const))(
-    '`os g %s` declares namesObject exactly when its output depends on the namespace',
+    '`os g %s` declares namesObject exactly when its output depends on the namespace through an object name',
     (_type, target) => {
-      const dependsOnNamespace = target.generate(STEM, NS) !== target.generate(STEM);
+      const dependsOnNamespace = ownNameHeldFixed(target, target.generate(STEM, NS)) !== target.generate(STEM);
       expect(target.namesObject).toBe(dependsOnNamespace);
     },
   );
@@ -213,19 +228,21 @@ describe('[#20197] `namesObject` is what each template actually does', () => {
   // [#21325] A binding scaffold's object is resolved against the namespace by
   // the COMMAND, before rendering, so it must declare `namesObject` — and the
   // template must write exactly the object it was handed, the namespace
-  // changing nothing: a template that re-derived the object would differ here.
+  // changing nothing but the scaffold's own name: a template that re-derived
+  // the object would differ here.
   it.each(bound.map((t) => [t.type, t] as const))(
     '`os g %s` binds an object: it declares namesObject, and writes the object it is handed',
     (_type, target) => {
       expect(target.namesObject).toBe(true);
       const bindings = probeBindings(target);
-      expect(target.generate(STEM, NS, bindings)).toBe(target.generate(STEM, undefined, bindings));
+      expect(ownNameHeldFixed(target, target.generate(STEM, NS, bindings)))
+        .toBe(target.generate(STEM, undefined, bindings));
     },
   );
 });
 
 describe('[#20197] under a manifest namespace, the generated set passes the gate', () => {
-  it('prefixes every object name, and only object names', async () => {
+  it('prefixes every object name, and every scaffold\'s own name', async () => {
     const a = await generateAll(STEM, NS);
     expect(objectNamesWritten(a)).toEqual({
       'object.name': PREFIXED,
@@ -237,8 +254,10 @@ describe('[#20197] under a manifest namespace, the generated set passes the gate
       // to; since #21325 it writes no `name`, so its key is its `object`.
       'view (its registered key)': PREFIXED,
     });
-    // The census: no gate judges these against the namespace, so they are
-    // written exactly as they were before this change.
+    // The census found no `os validate` gate judging these; ruling C on
+    // #30798 puts them under `os lint`'s `naming/namespace-prefix`, so each
+    // carries the namespace through `itemName`. The action's `target` is the
+    // flow's name, read off the stack, so it carries it the same way.
     expect({
       action: a.action.name,
       'action target (a flow)': a.action.target,
@@ -247,12 +266,12 @@ describe('[#20197] under a manifest namespace, the generated set passes the gate
       app: a.app.name,
       skill: a.skill.name,
     }).toEqual({
-      action: STEM,
-      'action target (a flow)': `${STEM}_flow`,
-      flow: `${STEM}_flow`,
-      dashboard: `${STEM}_dashboard`,
-      app: `${STEM}_app`,
-      skill: STEM,
+      action: PREFIXED,
+      'action target (a flow)': `${PREFIXED}_flow`,
+      flow: `${PREFIXED}_flow`,
+      dashboard: `${PREFIXED}_dashboard`,
+      app: `${PREFIXED}_app`,
+      skill: PREFIXED,
     });
   });
 
