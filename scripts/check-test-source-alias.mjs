@@ -1337,6 +1337,119 @@ function clockedWindowFindings(file, offendingSpecs, packageDir) {
   return findings;
 }
 
+// ── the source reach: a literal load inside the source under test ───────────
+
+/**
+ * `vi.mock('x', …)` / `vi.doMock('x', …)`: the specifier is answered by a
+ * factory, so a load of it from the source under test never transforms the
+ * artifact. Read from the test file only — that is where a mock is registered.
+ */
+const MOCKED_SPECIFIER = /\bvi\s*\.\s*(?:mock|doMock)\s*\(\s*['"]([^'"]+)['"]/g;
+const MOCK_CALL = /\bvi\s*\.\s*(?:mock|doMock)\s*\(/;
+
+/** Any dynamic form in a file's raw text: the cheap pre-filter `clockedWindowFindings` also uses. */
+const DYNAMIC_FORM = /\b(?:import|require)\s*\(/;
+
+/**
+ * `path -> one file's edges`, per scan (cleared with `importCache`): a source
+ * file under test is reached by many tests, and resolving its relative
+ * specifiers is `statSync` work, so each file is read and resolved once.
+ *
+ * `children` are the same-package files it loads during COLLECTION (a static
+ * import, or a module-scope dynamic one); `warm` is every specifier it loads
+ * then; `clocked` is every literal dynamic load inside one of its function
+ * bodies. Exactly `moduleLoadSites`' two halves, plus the relative resolution.
+ */
+const reachEdgeCache = new Map();
+
+function reachEdgesOf(file, packageDir) {
+  const cached = reachEdgeCache.get(file);
+  if (cached) return cached;
+  let edges = { children: [], warm: new Set(), clocked: [] };
+  try {
+    const source = readFileSync(file, 'utf8');
+    // Masking is the expensive half (see `importCache`). A file with no dynamic
+    // form anywhere in its text has no clocked load and loads exactly its
+    // runtime imports during collection, which the walk has already read.
+    const { moduleScope, clocked } = DYNAMIC_FORM.test(source)
+      ? moduleLoadSites(source)
+      : { moduleScope: new Set(fileRuntimeImports(file)), clocked: [] };
+    const children = [];
+    for (const spec of moduleScope) {
+      if (!spec.startsWith('.')) continue;
+      const target = resolveRelative(file, spec);
+      if (target && isInsidePackage(packageDir, target)) children.push(target);
+    }
+    edges = { children, warm: moduleScope, clocked };
+  } catch {
+    /* unreadable: no edges, the silent direction like every reader here */
+  }
+  reachEdgeCache.set(file, edges);
+  return edges;
+}
+
+/**
+ * The clocked loads a test reaches IN THE SOURCE UNDER TEST: a literal dynamic
+ * load of a measured specifier inside a function body of a same-package file
+ * this test loads during collection, directly or through further collection-
+ * time imports, with no collection-time load of that specifier anywhere in the
+ * same reach and no mock of it in the test file.
+ *
+ * A finding names the test file (where the remedy goes), the source site, and
+ * the chain of files that carried the test to it. One finding per specifier,
+ * the first site found breadth-first, so the chain printed is a shortest one.
+ */
+function sourceReachFindings(file, offendingSpecs, packageDir, alreadyReported) {
+  let source;
+  try {
+    source = readFileSync(file, 'utf8');
+  } catch {
+    return [];
+  }
+  const mocked = new Set();
+  if (MOCK_CALL.test(source)) {
+    const commentsOnly = maskComments(source);
+    MOCKED_SPECIFIER.lastIndex = 0;
+    let match;
+    while ((match = MOCKED_SPECIFIER.exec(commentsOnly))) mocked.add(match[1]);
+  }
+
+  const root = reachEdgesOf(file, packageDir);
+  const warm = new Set(root.warm);
+  const parent = new Map([[file, null]]);
+  const queue = [];
+  for (const child of root.children) {
+    if (parent.has(child)) continue;
+    parent.set(child, file);
+    queue.push(child);
+  }
+  /** spec -> the first site reached, breadth-first */
+  const sites = new Map();
+  for (let i = 0; i < queue.length; i++) {
+    const at = queue[i];
+    const edges = reachEdgesOf(at, packageDir);
+    for (const spec of edges.warm) warm.add(spec);
+    for (const site of edges.clocked) {
+      if (!offendingSpecs.has(site.spec) || sites.has(site.spec)) continue;
+      sites.set(site.spec, { ...site, at });
+    }
+    for (const child of edges.children) {
+      if (parent.has(child)) continue;
+      parent.set(child, at);
+      queue.push(child);
+    }
+  }
+
+  const findings = [];
+  for (const [spec, site] of sites) {
+    if (warm.has(spec) || mocked.has(spec) || alreadyReported.has(spec)) continue;
+    const chain = [];
+    for (let at = site.at; at != null; at = parent.get(at)) chain.unshift(at);
+    findings.push({ spec, form: site.form, line: 1, source: { file: site.at, line: site.line }, chain });
+  }
+  return findings;
+}
+
 /**
  * `path -> specifiers`, for the whole process. Crossing the package boundary
  * means the SAME dependency source is walked once per consuming config — nine
@@ -1376,6 +1489,21 @@ function resolveRelative(fromFile, spec) {
  * the file a cross-boundary walk continues into.
  */
 function resolveModulePath(baseDir, spec) {
+  const key = `${baseDir}\u0000${spec}`;
+  if (resolveCache.has(key)) return resolveCache.get(key);
+  const found = resolveModulePathUncached(baseDir, spec);
+  resolveCache.set(key, found);
+  return found;
+}
+
+/**
+ * `baseDir + specifier -> file | null`, per scan (cleared with `importCache`).
+ * Every test that reaches a hub file resolves the same relative specifiers, and
+ * each miss is up to two dozen `statSync` calls.
+ */
+const resolveCache = new Map();
+
+function resolveModulePathUncached(baseDir, spec) {
   const base = resolve(baseDir, spec);
   const candidates = [];
   for (const suffix of RELATIVE_CANDIDATE_SUFFIXES) candidates.push(base + suffix);
@@ -1911,6 +2039,8 @@ function scan(root) {
   // `check()` calls to exercise registry drift, and a cache that outlived a
   // scan would answer those later passes from the pre-rewrite content.
   importCache.clear();
+  reachEdgeCache.clear();
+  resolveCache.clear();
   const workspace = listWorkspacePackages(root);
   const names = new Set(workspace.map((p) => p.name));
   const artifactPackages = new Set(workspace.filter((p) => resolvesToArtifact(p.json)).map((p) => p.name));
@@ -2009,8 +2139,18 @@ function scan(root) {
     const clockedLoads = [];
     if (offendingSpecs.size > 0) {
       for (const file of reachable.testFiles.sort()) {
-        for (const finding of clockedWindowFindings(file, offendingSpecs, pkg.dir)) {
+        const direct = clockedWindowFindings(file, offendingSpecs, pkg.dir);
+        for (const finding of direct) {
           clockedLoads.push({ ...finding, file: relative(root, file) });
+        }
+        const reported = new Set(direct.map((f) => f.spec));
+        for (const finding of sourceReachFindings(file, offendingSpecs, pkg.dir, reported)) {
+          clockedLoads.push({
+            ...finding,
+            file: relative(root, file),
+            source: { file: relative(root, finding.source.file), line: finding.source.line },
+            chain: finding.chain.map((f) => relative(root, f)),
+          });
         }
       }
     }
@@ -3683,6 +3823,7 @@ if (argv.includes('--self-test')) {
   printList(REPO_ROOT);
 } else {
   const { failures, packages, measured, publishedCount } = check(REPO_ROOT, KNOWN_UNALIASED_TEST_IMPORTS);
+  if (process.env.PROBE_DUMP) writeFileSync(process.env.PROBE_DUMP, JSON.stringify(packages.flatMap((p) => p.clockedLoads.filter((l) => l.chain)), null, 0)); // PROBE-TEMP
   if (failures.length > 0) {
     console.error('check-test-source-alias FAILED\n');
     for (const failure of failures) console.error(`  ✗ ${failure}\n`);
