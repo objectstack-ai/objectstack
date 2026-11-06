@@ -74,7 +74,7 @@
     {
       "id": 8,
       "prompt": "Web-form leads arrive ownerless; inside sales holds them until a rep takes one, and two reps must never own the same lead.",
-      "expected_output": "`queues: [defineQueue({ name: 'inside_sales', label: 'Inside Sales', members: [{ type: 'position', value: 'inside_sales_rep' }] })]` and an `assignmentRules` entry `assignTo: { type: 'queue', value: 'inside_sales' }` with no `strategy` park each lead in the injected `queue` column; a rep claims by an ordinary by-id `{ owner_id: <self> }` update, the loser gets `409 CONCURRENT_UPDATE`.",
+      "expected_output": "`queues: [defineQueue({ name: 'crm_inside_sales', label: 'Inside Sales', members: [{ type: 'position', value: 'crm_inside_sales_rep' }] })]` and an `assignmentRules` entry `assignTo: { type: 'queue', value: 'crm_inside_sales' }` with no `strategy` park each lead in the injected `queue` column; a rep claims by an ordinary by-id `{ owner_id: <self> }` update, the loser gets `409 CONCURRENT_UPDATE`.",
       "files": [],
       "assertions": {
         "must_contain": ["defineQueue", "type: 'position'", "type: 'queue'", "CONCURRENT_UPDATE"],

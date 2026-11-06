@@ -4987,7 +4987,7 @@ export class AuthManager {
   private resolveActor(
     ctx: any,
     options?: { failedReadThrows?: boolean },
-  ): Promise<{ userId: string; activeOrgId?: string } | null> {
+  ): Promise<{ userId: string; activeOrgId?: string; impersonatedBy?: string } | null> {
     // [#25224 cut 1] The body moved to `auth-manager-actor-guards.ts`; it reads no member of this class.
     return resolveActor(ctx, options);
   }

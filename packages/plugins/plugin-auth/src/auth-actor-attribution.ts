@@ -63,17 +63,36 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { agentForwardPerformedBy } from './agent-forward-identity-view.js';
 
 /**
- * Resolves the acting user id for the current auth request, or `null` when no
- * session can be established. Supplied by the hook layer, which is the only
- * place the session actor exists.
+ * The human a better-auth write is credited to, as the session names them.
+ *
+ * `impersonatedBy` is the administrator at the keyboard when that session is
+ * an impersonation session (better-auth's admin plugin stamps it on the
+ * session row): the write is still credited to `userId`, the impersonated
+ * user, and `impersonatedBy` rides beside it as the attribution-only
+ * `ExecutionContext.impersonatedBy` the audit writer records as
+ * `impersonated_by`, the key a record write made from the same session
+ * already carries. Read off the SESSION, never off a request body.
  */
-export type AuthActorResolver = () => Promise<string | null | undefined>;
+export interface AttributedAuthActor {
+  userId: string;
+  impersonatedBy?: string;
+}
+
+/**
+ * Resolves the acting user for the current auth request, or `null` when no
+ * session can be established. Supplied by the hook layer, which is the only
+ * place the session actor exists. A bare string is the user id alone; the
+ * object form also names the impersonating administrator, when there is one.
+ */
+export type AuthActorResolver = () => Promise<
+  string | { userId?: string | null; impersonatedBy?: string | null } | null | undefined
+>;
 
 interface AuthActorScope {
   /** Set by the before-hook; run at most once, on first demand. */
   resolver?: AuthActorResolver;
   /** Memoized resolution for this request (shared by concurrent writes). */
-  pending?: Promise<string | undefined>;
+  pending?: Promise<AttributedAuthActor | undefined>;
   /**
    * True only INSIDE the resolver's own async subtree. Session resolution goes
    * back through better-auth and can itself write (session refresh); that write
@@ -106,11 +125,12 @@ export function runWithAuthActorScope<T>(fn: () => Promise<T>): Promise<T> {
  * the system, and this route's own authorization already happened, above.
  */
 export function runAttributedToUser<T>(
-  userId: string | undefined,
+  actor: string | { id: string; impersonatedBy?: string | null } | undefined,
   fn: () => Promise<T>,
 ): Promise<T> {
   return runWithAuthActorScope(async () => {
-    if (userId) setAuthActorResolver(async () => userId);
+    const known = typeof actor === 'string' ? { userId: actor } : actor ? { userId: actor.id, impersonatedBy: actor.impersonatedBy } : undefined;
+    if (known?.userId) setAuthActorResolver(async () => known);
     return fn();
   });
 }
@@ -139,6 +159,19 @@ export function setAuthActorResolver(resolver: AuthActorResolver): void {
  * must never fail the write it was describing.
  */
 export async function resolveAttributedUserId(): Promise<string | undefined> {
+  return (await resolveAttributedActor())?.userId;
+}
+
+/**
+ * The acting user for the current auth request together with the
+ * administrator impersonating them, or `undefined` when there is no acting
+ * user (the same cases as {@link resolveAttributedUserId}). `impersonatedBy`
+ * is present only for an impersonation session, and only as a non-blank
+ * string; without a user it is never answered on its own.
+ *
+ * Never throws, for the reason {@link resolveAttributedUserId} gives.
+ */
+export async function resolveAttributedActor(): Promise<AttributedAuthActor | undefined> {
   const scope = scopeStore.getStore();
   if (!scope || scope.suspended) return undefined;
   if (!scope.pending) {
@@ -146,14 +179,26 @@ export async function resolveAttributedUserId(): Promise<string | undefined> {
     if (!resolver) return undefined;
     scope.pending = scopeStore.run({ suspended: true }, async () => {
       try {
-        const resolved = await resolver();
-        return typeof resolved === 'string' && resolved.length > 0 ? resolved : undefined;
+        return attributedActorOf(await resolver());
       } catch {
         return undefined;
       }
     });
   }
   return scope.pending;
+}
+
+/** A resolver's answer as an {@link AttributedAuthActor}, or `undefined` when it names no user. */
+function attributedActorOf(resolved: Awaited<ReturnType<AuthActorResolver>>): AttributedAuthActor | undefined {
+  const nonBlank = (v: unknown): string | undefined =>
+    typeof v === 'string' && v.trim().length > 0 ? v.trim() : undefined;
+  if (typeof resolved === 'string') {
+    return resolved.length > 0 ? { userId: resolved } : undefined;
+  }
+  const userId = typeof resolved?.userId === 'string' && resolved.userId.length > 0 ? resolved.userId : undefined;
+  if (!userId) return undefined;
+  const impersonatedBy = nonBlank(resolved?.impersonatedBy);
+  return impersonatedBy ? { userId, impersonatedBy } : { userId };
 }
 
 /**
@@ -168,9 +213,17 @@ export async function resolveAttributedUserId(): Promise<string | undefined> {
 export async function authSystemWriteContext(): Promise<{
   isSystem: true;
   attributedUserId?: string;
+  impersonatedBy?: string;
   performedBy?: { clientId: string };
 }> {
-  const attributedUserId = await resolveAttributedUserId();
+  const actor = await resolveAttributedActor();
+  const attributedUserId = actor?.userId;
+  // An impersonation session's write is credited to the impersonated user
+  // (above) and names the administrator at the keyboard beside it, as the
+  // attribution-only `ExecutionContext.impersonatedBy` a record write from the
+  // same session carries: the audit writer records it as `impersonated_by`.
+  // Read off the session by the resolver, never off the request body.
+  const impersonatedBy = actor?.impersonatedBy;
   // [ADR-0090 D10 rule 5, #28367] A forwarded AI agent's identity write is
   // attributed to both: the user (above) and the agent's client, which the
   // audit row records as `performed_by`. Attribution only, like the user half.
@@ -178,6 +231,7 @@ export async function authSystemWriteContext(): Promise<{
   return {
     isSystem: true,
     ...(attributedUserId ? { attributedUserId } : {}),
+    ...(impersonatedBy ? { impersonatedBy } : {}),
     ...(performedBy ? { performedBy } : {}),
   };
 }

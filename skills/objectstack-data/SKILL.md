@@ -409,9 +409,9 @@ organization adds users and teams through `sys_queue_member` rows:
 import { defineQueue } from '@objectstack/spec/security';
 
 export const supportIntake = defineQueue({
-  name: 'support_intake',   // the one name the `queue` column, a rule, an approver and a sharing recipient use
+  name: 'crm_support_intake',   // the one name the `queue` column, a rule, an approver and a sharing recipient use
   label: 'Support Intake',
-  members: [{ type: 'position', value: 'service_agent' }],
+  members: [{ type: 'position', value: 'crm_service_agent' }],
 });
 // defineStack({ queues: [supportIntake], assignmentRules: [...] }) — routing rows in: objectstack-automation
 ```
@@ -429,7 +429,7 @@ picklist, a round-robin counter field, or a hook that picks an owner.
 
 ---
 
-→ Seed Data & Fixtures (`defineSeed()`) moved verbatim to [references/seeds.md](./references/seeds.md) (Quick start · `Seed` fields · Import modes · `externalId` selection · Relationship references · Dynamic values (CEL) · Seed best practices).
+→ Seed Data & Fixtures (`defineSeed()`) moved verbatim to [references/seeds.md](./references/seeds.md).
 
 ---
 
