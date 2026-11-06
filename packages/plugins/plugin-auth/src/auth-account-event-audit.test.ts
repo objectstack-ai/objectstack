@@ -273,7 +273,7 @@ describe('[#30924] an MFA-held sign-in records the hold on its own login row', (
   // ADR-0069 D3: a global MFA requirement, a lapsed grace window, an account
   // that never enrolled. The sign-in itself succeeds (a session is minted and
   // the user can still reach `/two-factor/*` to enroll); the session is held.
-  const MFA_POLICY = { mfaRequired: true, mfaGracePeriodDays: 0, plugins: { twoFactor: true } };
+  const MFA_POLICY = { mfaRequirement: 'everyone', mfaGracePeriodDays: 0, plugins: { twoFactor: true } };
 
   /** Start the account's grace clock a day ago, so the hold applies now. */
   function lapseGrace(engine: any): void {
