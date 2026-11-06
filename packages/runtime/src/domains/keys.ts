@@ -87,7 +87,7 @@ const KEYS_ALLOWED_METHODS = 'POST';
  */
 const KEYS_SESSION_REQUIRED_MESSAGE =
     'Creating an API key requires a signed-in session. Sign in and create the key from the API Keys '
-    + 'page or the Connect an Agent page; a request authenticated with an API key cannot create keys.';
+    + 'page or the Connect an AI Assistant page; a request authenticated with an API key cannot create keys.';
 
 /**
  * The legacy branch matched `=== '/keys' || startsWith('/keys/') ||

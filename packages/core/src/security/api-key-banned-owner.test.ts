@@ -13,8 +13,14 @@
  *  - not a revocation: nothing is written while the ban holds, and the same
  *    key is admitted again once it is lifted;
  *  - the key's own lifecycle still answers first;
- *  - an owner read that throws is the branded store outage; a store with no
- *    `sys_user` table holds no ban.
+ *  - an owner read that throws is the branded store outage.
+ *
+ * And, on the same owner read: an API key authenticates only as an owner who
+ * exists (maintainer ruling 2026-11-05, option B). A key whose owner the read
+ * does not find — a store with no `sys_user` table included — is `refused`
+ * (`owner_absent`) exactly as a banned owner's key is: no principal, no
+ * fall-through to the session path, the anonymous entry an unknown key gets,
+ * nothing written, and one operator line naming the key row and the owner.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -141,9 +147,12 @@ describe('resolveApiKeyAdmission — a banned owner\'s key is refused while the 
     expect((await admit(ql)).outcome).toBe('lifecycle');
   });
 
-  it('a key whose owner row is absent keeps today\'s answer — no row holds no ban', async () => {
+  it('a key whose owner does not exist is refused (owner_absent), with no principal', async () => {
     const { ql } = makeQl(null);
-    expect((await admit(ql)).outcome).toBe('admitted');
+    const admission = await admit(ql);
+    expect(admission).toMatchObject({ outcome: 'refused', reason: 'owner_absent', keyId: 'key_1', userId: OWNER });
+    expect(admission).not.toHaveProperty('principal');
+    expect(await resolveApiKeyPrincipal(ql, headers(), NOW, undefined, undefined, undefined)).toBeUndefined();
   });
 
   it('an owner read that throws is the branded store outage, never an admission', async () => {
@@ -159,13 +168,56 @@ describe('resolveApiKeyAdmission — a banned owner\'s key is refused while the 
     expect(err.code).toBe('SERVICE_UNAVAILABLE');
   });
 
-  it('a store with no sys_user table holds no ban', async () => {
-    const { ql } = makeQl({ id: OWNER, banned: true });
+  it('a store with no sys_user table has no owner who exists: the key is refused as owner_absent', async () => {
+    const { ql } = makeQl({ id: OWNER, banned: false });
     const find = ql.find.bind(ql);
     ql.find = async (object: string, opts: any) => {
       if (object === 'sys_user') throw new Error('no such table: sys_user');
       return find(object, opts);
     };
+    expect(await admit(ql)).toMatchObject({ outcome: 'refused', reason: 'owner_absent', keyId: 'key_1', userId: OWNER });
+  });
+});
+
+describe('resolveApiKeyAdmission — an API key authenticates only as an owner who exists', () => {
+  it('reads the owner by id, as the system, once — the same read the ban takes', async () => {
+    const { ql, reads } = makeQl(null);
+    await admit(ql);
+    const ownerReads = reads.filter((r) => r.object === 'sys_user');
+    expect(ownerReads).toHaveLength(1);
+    expect(ownerReads[0].opts).toMatchObject({ where: { id: OWNER }, limit: 1, context: { isSystem: true } });
+  });
+
+  it('a refusal writes nothing: the key row is not revoked and its use is not stamped', async () => {
+    const { ql, tables, update } = makeQl(null);
+    const keyRowBefore = { ...tables.sys_api_key[0] };
+    expect((await admit(ql)).outcome).toBe('refused');
+    expect(update).not.toHaveBeenCalled();
+    expect(tables.sys_api_key[0]).toEqual(keyRowBefore);
+  });
+
+  it('the key\'s own lifecycle answers first: a revoked key whose owner does not exist is refused as revoked', async () => {
+    const { ql } = makeQl(null, { revoked: true });
+    expect((await admit(ql)).outcome).toBe('lifecycle');
+  });
+
+  it('an owner read that throws is still the branded store outage, never a refusal or an admission', async () => {
+    const { ql } = makeQl(null);
+    const find = ql.find.bind(ql);
+    ql.find = async (object: string, opts: any) => {
+      if (object === 'sys_user') throw new Error('connection reset');
+      return find(object, opts);
+    };
+    const err = await admit(ql).catch((e) => e);
+    expect(isAuthzStoreUnavailableError(err)).toBe(true);
+    expect(err.status).toBe(503);
+    expect(err.code).toBe('SERVICE_UNAVAILABLE');
+  });
+
+  it('control: the same key is admitted once its owner exists', async () => {
+    const { ql, tables } = makeQl(null);
+    expect((await admit(ql)).outcome).toBe('refused');
+    tables.sys_user.push({ id: OWNER });
     expect((await admit(ql)).outcome).toBe('admitted');
   });
 });
@@ -210,6 +262,42 @@ describe('resolveAuthzContext — a banned owner\'s key resolves as a key that d
     }
   });
 
+  it('a key whose owner does not exist resolves the same context a made-up key resolves, and the operator line names the key and the owner', async () => {
+    const { ql } = makeQl(null);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const refusalLines = () => warn.mock.calls.flat().map(String).filter((l) => l.includes('API key refused'));
+      const absent = await resolve(ql, KEY);
+      expect(refusalLines()).toHaveLength(1);
+      const madeUp = await resolve(ql, MADE_UP_KEY);
+      expect(absent.userId).toBeUndefined();
+      expect(absent.credential).toBeUndefined();
+      expect(absent).toEqual(madeUp);
+      // One line, server-side only, naming the reason, the key row id and the owner id.
+      const [line] = refusalLines();
+      expect(line).toContain('(owner_absent)');
+      expect(line).toContain('key=key_1');
+      expect(line).toContain(`principal=${OWNER}`);
+      // The made-up key is not a refusal: it adds no line.
+      expect(refusalLines()).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('a key whose owner does not exist never falls through to a session sent beside it', async () => {
+    const { ql } = makeQl(null);
+    const getSession = vi.fn(async () => ({ user: { id: COOKIE_USER }, session: { userId: COOKIE_USER } }));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const authz = await resolve(ql, KEY, getSession);
+      expect(authz.userId).toBeUndefined();
+      expect(getSession).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('control: a non-banned owner\'s key resolves the owner, credential api_key', async () => {
     const { ql } = makeQl({ id: OWNER, banned: false });
     const authz = await resolve(ql, KEY);
@@ -238,10 +326,10 @@ describe('a refused key gets the anonymous entry an unknown key gets, on a face 
   const ORG = 'org_only';
 
   /** A guest anchor that grants something, in the one organization the guest entry derives. */
-  function guestServingQl(keyRow: Record<string, unknown>, owner: Record<string, unknown>) {
+  function guestServingQl(keyRow: Record<string, unknown>, owner: Record<string, unknown> | null) {
     const tables: Record<string, any[]> = {
       sys_api_key: [{ id: 'key_1', key: hashApiKey(KEY), user_id: OWNER, revoked: false, scopes: '[]', ...keyRow }],
-      sys_user: [owner],
+      sys_user: owner ? [owner] : [],
       sys_member: [],
       sys_organization: [{ id: ORG }],
       sys_metadata_activation: [],
@@ -292,5 +380,16 @@ describe('a refused key gets the anonymous entry an unknown key gets, on a face 
     expect(unknown.tenantId).toBe(ORG);
     expect(banned.userId).toBeUndefined();
     expect(banned).toEqual(unknown);
+  });
+
+  it('a key whose owner does not exist and an unknown key get the same guest entry', async () => {
+    const ql = guestServingQl({}, null);
+    const absent = await quietly(() => onGuestFace(ql, KEY));
+    const unknown = await onGuestFace(ql, MADE_UP_KEY);
+    // Non-vacuous: the guest anchor really grants something here.
+    expect(unknown.permissions).toEqual([GUEST_SET]);
+    expect(unknown.tenantId).toBe(ORG);
+    expect(absent.userId).toBeUndefined();
+    expect(absent).toEqual(unknown);
   });
 });

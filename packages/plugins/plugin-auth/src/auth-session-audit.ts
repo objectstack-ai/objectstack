@@ -78,6 +78,31 @@
  * names the RESOLVED account's id, and an identifier that resolves to no
  * account produces no row (an auth row without a subject is the shape this
  * module already refuses to write, above).
+ *
+ * ## A sign-in an authentication policy holds (#30924)
+ *
+ * An ADR-0069 D3 enforced-MFA hold is NOT a refused sign-in: the credential
+ * check passes, better-auth mints the session, and the hold is a posture of
+ * that session, computed per session read (`customSession` → `user.authGate`)
+ * and enforced at the transport seams, so a held user still reaches
+ * `/two-factor/*` to enroll. The sign-in therefore already has its row, the
+ * `login` above, and that row is where the hold is recorded:
+ * `context.reason` names the posture's machine code (`MFA_REQUIRED`, the same
+ * vocabulary a refused sign-in's `reason` uses) and `context.rule` the policy
+ * that holds it (`mfa_required`), from `AUDITED_SESSION_HOLD_RULES` in
+ * `session-policy-hold.ts`, a package-internal module so the published surface
+ * of this one does not move.
+ *
+ * Why the `login` row and not a `login_failed` beside it: the session exists,
+ * so a `login_failed` would contradict the `login` the same sign-in wrote, and
+ * anyone counting `login_failed` rows for brute-force detection would count
+ * users who are signed in. Why at session creation and not where the gate is
+ * computed: that computation runs on every session read, so a row written
+ * there would be one row per request instead of one per sign-in. The hook
+ * asks the same one posture computation the gate asks
+ * (`AuthManager.resolveUserAuthGates`), so the row records a posture the
+ * session is really held by, and fails open exactly where the gate does: no
+ * posture read, no hold recorded.
  */
 
 import { getIP } from '@better-auth/core/utils/ip';

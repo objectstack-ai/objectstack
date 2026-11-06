@@ -846,6 +846,9 @@ export const TEMPLATES: Record<string, {
       // after `pnpm install` without a separate build step.
       start: 'objectstack compile && objectstack serve',
       build: 'objectstack compile',
+      // The dev loop's one cloud step: build, publish a dev version, install it
+      // into the organization's environment and wait until it is live.
+      deploy: 'objectstack deploy',
       validate: 'objectstack validate',
       lint: 'objectstack lint',
       typecheck: 'tsc --noEmit',

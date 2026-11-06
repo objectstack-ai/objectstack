@@ -14,18 +14,29 @@ import {
 } from './api-key.js';
 
 /**
+ * The owners the key rows name, as `sys_user` rows: an API key authenticates
+ * only as an owner who exists, so a fixture whose keys should authenticate
+ * says their owners exist. Pass `users` to `makeQl` to say otherwise.
+ */
+function ownersOf(rows: any[]): any[] {
+  return [...new Set(rows.map((r) => r.user_id).filter((id) => typeof id === 'string' && id))].map((id) => ({ id }));
+}
+
+/**
  * In-memory sys_api_key store exposing the `find` shape the verifier uses.
  *
  * [commit 4c9780c7a] `limit` is ENFORCED — presence, not truthiness, so `limit: 0` returns
  * nothing rather than everything. A double that drops the bound makes any limit
  * change on this read green by construction; the verifier reads with `limit: 1`.
  */
-function makeQl(rows: any[]) {
+function makeQl(rows: any[], users: any[] = ownersOf(rows)) {
+  const tables: Record<string, any[]> = { sys_api_key: rows, sys_user: users };
   return {
     find: async (object: string, opts: any) => {
-      if (object !== 'sys_api_key') return [];
+      const table = tables[object];
+      if (!table) return [];
       const where = opts?.where ?? {};
-      const matched = rows.filter((r) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
+      const matched = table.filter((r) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
       return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
     },
   };
