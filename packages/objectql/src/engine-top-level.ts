@@ -12,7 +12,7 @@
 // importer of `./engine.js` reads what it read.
 
 import { AUDIT_PROVENANCE_FIELDS, ENGINE_UPDATE_UPSERT_REMOVED, FILE_REFERENCE_TYPES, FullTextSearchSchema, QUERY_CURSOR_REMOVED, QUERY_DISTINCT_REMOVED, REFERENCE_VALUE_TYPES, RPC_QUERY_ALIAS_SLOTS, VALID_AST_OPERATORS, foldQueryAliasSlots, isFilterAST, isMultiValueField, lowerFilterCondition, normalizeFilterComparandTypes, parseFilterAST, readAutonumberCounter, referenceCarrierOf, referenceTargetOf, resolveInjectedColumnProvenance } from '@objectstack/spec/data';
-import type { DroppedFieldsEvent, FilterCondition, FilterLoweringOptions, HookContext, QueryAST, QueryAliasSlot, ServiceObject } from '@objectstack/spec/data';
+import type { DroppedFieldsEvent, FilterCondition, FilterLoweringOptions, HookContext, QueryAST, QueryAliasSlot, RecycleBinClearedReference, ServiceObject } from '@objectstack/spec/data';
 import type { EngineFilterJudgement, ISecurityService } from '@objectstack/spec/contracts';
 import { assertFilterIsMaterializable, assertListComparandShapes, collectComposableReadableIds, invalidFilterError } from './filter-comparand-shape.js';
 import { assertResolvedTemporalTokensInRange, assertTemporalComparandsInterpretable } from './temporal-comparand-door.js';
@@ -4372,6 +4372,16 @@ export interface CascadeDeleteSet {
    * one has removed from it; the remainder written leaves those out too.
    */
   readonly cleared: Map<string, Set<string>>;
+  /**
+   * [#30237, ADR-0148 D2] Every `set_null` reference the walk cleared, one per
+   * live row, field and removed id: the referencing row, the field, and the id
+   * the field held (a row this delete removes). Present only on the set of a
+   * delete that enters the recycle bin, which assigns it when the set is
+   * collected; the walk appends to it, nested deletes of the same cascade
+   * included, and the entry keeps it so a restore can re-link what is still
+   * empty.
+   */
+  clearedReferences?: RecycleBinClearedReference[];
 }
 
 /** [#26718] One member of a {@link CascadeDeleteSet}, as a single key. */

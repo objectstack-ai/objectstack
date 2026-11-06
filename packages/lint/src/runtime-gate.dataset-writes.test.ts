@@ -61,6 +61,8 @@ const OBJECTS = [
       issued_on: { type: 'date', label: 'Issued' },
       total: { type: 'currency', label: 'Total' },
       account: { type: 'lookup', label: 'Account', reference: 'acme_account' },
+      // [#30773] A virtual field: computed on read, never stored.
+      total_label: { type: 'formula', label: 'Total label', expression: 'record.region', returnType: 'text' },
     },
   },
   {
@@ -225,6 +227,21 @@ describe('the door refuses each crossed rule s own defect (#19143)', () => {
         measures: [{ name: 'region_total', aggregate: 'sum', field: 'region' }],
       }),
       'measure-aggregate-field-type-refused',
+    );
+    expect(result.rulesRun).toContain('validateDatasetMeasureAggregates');
+  });
+
+  it('⭐ LIT — a dimension over a formula field, which no query can group by (#30773)', () => {
+    // The dataset compile refuses it with `400 DATASET_INVALID` and every
+    // analytics face refuses the group with `400 INVALID_FIELD`; this is the
+    // same refusal at the save, where the author is standing.
+    const result = expectRefusal(
+      cleanDataset({ dimensions: [{ name: 'status', field: 'status' }, { name: 'total_label', field: 'total_label' }] }),
+      'dimension-virtual-field-refused',
+    );
+    expect(result.errors.find((e) => e.rule === 'dimension-virtual-field-refused')?.path).toBe(
+      // The door rewrites the snapshot's index to the written item's name.
+      'datasets.acme_invoice_metrics.dimensions[1].field',
     );
     expect(result.rulesRun).toContain('validateDatasetMeasureAggregates');
   });

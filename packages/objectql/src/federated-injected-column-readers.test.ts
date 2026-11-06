@@ -309,6 +309,11 @@ const READERS: Record<string, Row> = {
     disposition: 'row-value',
     why: 'reads the tenant column off the written row; a federated row has none, so the event omits it',
   },
+  // [#30237] A recycle-bin entry belongs to the organization of the record it holds.
+  'recycle-bin/capture.ts#organizationOf :: resolveTenantFieldName()': {
+    disposition: 'row-value',
+    why: "reads the tenant column off the snapshotted root row; a federated row has none, so the entry takes the deleting context's organization",
+  },
   'relation-filter-lowering.ts#admitRelationCondition :: referenceTargetOf()': {
     disposition: 'caller-predicate',
     why: "lowers a relation condition the caller wrote; it names an injected column only when the caller did",
@@ -442,6 +447,14 @@ const READERS: Record<string, Row> = {
   'assignment-rules.ts#roundRobin :: organization_id': {
     disposition: 'not-a-read',
     why: 'keys the sys_assignment_cursor row, a platform table the engine itself reads and writes',
+  },
+  'assignment-rules.ts#authoredRules :: organization_id': {
+    disposition: 'not-a-read',
+    why: "keys an organization's sys_assignment_rule rows, a platform table plugin-sharing owns",
+  },
+  'assignment-rules.ts#organizationMemberStanding :: organization_id': {
+    disposition: 'not-a-read',
+    why: 'keys the sys_member row a user target is a member by, a platform table',
   },
   'assignment-rules.ts#route :: queue': {
     disposition: 'not-a-read',

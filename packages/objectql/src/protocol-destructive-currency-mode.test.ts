@@ -104,6 +104,9 @@ describe('ObjectStackProtocolImplementation - currency_mode_to_record', () => {
             expect(message).toContain('fall into the null group of a grouped aggregate');
             expect(message).toContain('sit outside every currency-paired filter');
             expect(message).toContain(`os migrate record-currency-codes --object ${object} --field amount --code <ISO 4217 code>`);
+            // …and, for an organization admin with no shell, the REST door beside it.
+            expect(message).toContain('`POST /api/v1/meta/_migrate-record-currency-codes`');
+            expect(message).toContain(`{ "object": "${object}", "field": "amount", "code": "<ISO 4217 code>" }`);
             // It reads no row of the object: the only reads are the
             // metadata store's own (the row this save overwrites).
             for (const verb of ['find', 'findOne', 'count', 'aggregate'] as const) {

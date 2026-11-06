@@ -132,16 +132,23 @@ export function buildSession(execCtx?: ExecutionContext): HookContext['session']
  * `provenance` value is exactly what this function returns, so a key
  * declared on `hook.zod.ts` and missing here is declared and never
  * populated (ADR-0049).
+ *
+ * `impersonatedBy` rides it for the FOURTH time: an impersonation session's
+ * write authorizes as the impersonated user, so the administrator at the
+ * keyboard reaches the audit writer here and never through `session`, where
+ * every caller-gating hook would read the administrator as the caller.
  */
 export function buildProvenance(execCtx?: ExecutionContext): HookContext['provenance'] {
   const flowRunId = (execCtx as any)?.flowRunId;
   const attributedUserId = (execCtx as any)?.attributedUserId;
   const performedByClientId = (execCtx as any)?.performedBy?.clientId;
-  if (!flowRunId && !attributedUserId && !performedByClientId) return undefined;
+  const impersonatedBy = (execCtx as any)?.impersonatedBy;
+  if (!flowRunId && !attributedUserId && !performedByClientId && !impersonatedBy) return undefined;
   return {
     ...(flowRunId ? { flowRunId: String(flowRunId) } : {}),
     ...(attributedUserId ? { attributedUserId: String(attributedUserId) } : {}),
     ...(performedByClientId ? { performedByClientId: String(performedByClientId) } : {}),
+    ...(impersonatedBy ? { impersonatedBy: String(impersonatedBy) } : {}),
   };
 }
 

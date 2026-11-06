@@ -802,15 +802,24 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   { object: 'sys_mail_message', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); the message's mailbox carries the organization`, anchors: [parent('mailbox_id', 'sys_mailbox')] },
   { object: 'sys_mail_association', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); the association's message carries the organization`, anchors: [parent('mail_message_id', 'sys_mail_message')] },
   // Ownership queues (`@objectstack/plugin-sharing`, ADR-0142): an organization
-  // authors its queues and their members, and the assignment engine writes its
-  // cursor, each under that organization. A member and a cursor name their
-  // queue or rule by name, not by id, so no parent anchors them.
+  // authors its queues, their members and its own assignment rules, and the
+  // assignment engine writes its cursor, each under that organization. A
+  // member, a cursor and a rule name their queue or rule by name, not by id,
+  // so no parent anchors them.
   { object: 'sys_queue', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_queue_member', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); names its queue by name, not by id; ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_assignment_cursor', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); names its rule by name, not by id; ${D10_SINGLE}`, anchors: [] },
+  { object: 'sys_assignment_rule', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); its organization column is required, so no NULL row has a producer; ${D10_SINGLE}`, anchors: [] },
   // Exchange rates (`@objectstack/platform-objects`, #27185): an organization's
   // administrators author its own rate table; no parent row anchors a rate.
   { object: 'sys_exchange_rate', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
+  // The recycle bin (`@objectstack/platform-objects`, ADR-0148, #30237): the
+  // engine writes each entry with the organization of the record it holds,
+  // else the deleting context's. A NULL row comes only from a delete with
+  // neither (a tenancy-disabled object deleted by a context with no active
+  // organization). The record an entry names is gone, so no parent row
+  // anchors an entry.
+  { object: 'sys_recycle_bin', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
   // A reader's own named list views (`@objectstack/platform-objects`, ruling
   // 6570568131 on #28971): user data on the preference template, each row in
   // its owner's organization; no parent row anchors a view.

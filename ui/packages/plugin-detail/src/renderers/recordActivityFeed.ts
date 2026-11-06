@@ -958,6 +958,68 @@ export function activityActorName(row: SysActivityRow): string | null {
 }
 
 /**
+ * Who a `sys_activity` row says acted, as one line: {@link activityActorName}
+ * (else `systemActorLabel`), and, when an administrator made the write from an
+ * impersonation session, that administrator beside them.
+ */
+export function activityActorLine(
+  row: SysActivityRow,
+  systemActorLabel: string,
+  impersonatedActorTemplate?: string,
+  unknownUserLabel = 'Unknown',
+): string {
+  const actor = activityActorName(row) ?? systemActorLabel;
+  // An administrator the writer could not name is still an administrator: the
+  // unknown-user text, never "System" and never the raw id.
+  const admin = activityImpersonatorName(row, unknownUserLabel);
+  return admin ? composeImpersonatedActor(impersonatedActorTemplate, admin, actor) : actor;
+}
+
+/**
+ * The English template of the actor line a write made from an impersonation
+ * session reads as. `{{admin}}` is the administrator at the keyboard and
+ * `{{user}}` the impersonated user the write is recorded as; a caller passes
+ * the translated `detail.impersonatedActor` in its place.
+ */
+export const IMPERSONATED_ACTOR_FALLBACK = '{{admin}} on behalf of {{user}}';
+
+/**
+ * The administrator who made this row's write from an impersonation session,
+ * or `null` for every write the user made themselves. The writer
+ * (`@objectstack/plugin-audit`) stamps `metadata.impersonated_by` with the
+ * administrator's id and `metadata.impersonated_by_name` with their name as it
+ * read it; the name is what can be shown, so a row that carries only the id
+ * still names an administrator, by the localized unknown-user text the caller
+ * passes as `unknownLabel`.
+ */
+export function activityImpersonatorName(row: SysActivityRow, unknownLabel?: string): string | null {
+  const raw = row?.metadata;
+  if (typeof raw !== 'string') return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  const meta = parsed as { impersonated_by?: unknown; impersonated_by_name?: unknown };
+  if (typeof meta.impersonated_by !== 'string' || !meta.impersonated_by.trim()) return null;
+  const name = meta.impersonated_by_name;
+  if (typeof name === 'string' && name.trim()) return name.trim();
+  return unknownLabel ?? null;
+}
+
+/**
+ * The actor line 「Dev Admin 代王工操作」: `template` (the translated
+ * `detail.impersonatedActor`, or {@link IMPERSONATED_ACTOR_FALLBACK}) with
+ * `{{admin}}` and `{{user}}` filled in.
+ */
+export function composeImpersonatedActor(template: string | undefined, admin: string, user: string): string {
+  const pattern = template && template.includes('{{admin}}') ? template : IMPERSONATED_ACTOR_FALLBACK;
+  return pattern.split('{{admin}}').join(admin).split('{{user}}').join(user);
+}
+
+/**
  * One `sys_activity` row → one {@link FeedItem}, or `null` when the row is not
  * record activity (see {@link ACTIVITY_TYPE_TO_FEED_TYPE}).
  *
@@ -983,6 +1045,8 @@ export function activityActorName(row: SysActivityRow): string | null {
 export function activityRowToFeedItem(
   row: SysActivityRow,
   systemActorLabel: string,
+  impersonatedActorTemplate?: string,
+  unknownUserLabel?: string,
 ): FeedItem | null {
   const rawType = String(row?.type);
   const known = Object.prototype.hasOwnProperty.call(ACTIVITY_TYPE_TO_FEED_TYPE, rawType);
@@ -1004,7 +1068,9 @@ export function activityRowToFeedItem(
     type: feedType,
     // `systemActorLabel` only when no person can be named (objectui#12067):
     // a row a user made used to read "System" whenever `actor_name` was empty.
-    actor: activityActorName(row) ?? systemActorLabel,
+    // A write made from an impersonation session names the administrator
+    // beside the user it is recorded as: 「Dev Admin 代王工操作」.
+    actor: activityActorLine(row, systemActorLabel, impersonatedActorTemplate, unknownUserLabel),
     actorAvatarUrl: row.actor_avatar_url ?? undefined,
     body: row.summary ?? '',
     createdAt: activityTimestamp(row),

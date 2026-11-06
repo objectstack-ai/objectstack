@@ -84,6 +84,8 @@ import {
     metaItemLayersDeprecationHeaders,
     metaItemPackageBinding,
     metaItemQueryRefusal,
+    metaListNames,
+    metaListQueryRefusal,
     metaMemberSelector,
     metaQueryArityRefusal,
     metaRequestLocale,
@@ -553,6 +555,23 @@ function metaItemReadGateSources(
         ...(typeof protocol?.packagelessLayeredReadRefusal === 'function'
             ? { packagelessLayeredReadRefusal: (item: { type: string; name: string; member?: string }) => protocol.packagelessLayeredReadRefusal!(item) }
             : {}),
+        // [#30797] The deployment's `errors.permission_denied` override, as
+        // `RestServer.resolveMessageTranslator` hands it: the request's i18n
+        // service's `t`, or `undefined` when there is none. A service that
+        // cannot be resolved answers `undefined` — the refusal's wording must
+        // never turn its 403 into a 500 (a throwing `t` is caught by
+        // `renderOperationMessage` itself).
+        resolveMessageTranslator: async () => {
+            let i18n: { t?: unknown } | null | undefined;
+            try {
+                i18n = await deps.resolveService(context, 'i18n');
+            } catch {
+                return undefined;
+            }
+            if (!i18n || typeof i18n.t !== 'function') return undefined;
+            const t = i18n.t as (key: string, locale: string, params?: Record<string, unknown>) => string;
+            return (key, locale, params) => t.call(i18n, key, locale, params);
+        },
     };
 }
 
@@ -2191,10 +2210,15 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     if (parts.length === 1) {
         const typeOrName = parts[0];
         // [#23214] Before any read of the list's query, as `RestServer`'s list
-        // asks it: `package`, `preview`, `object`, `include` and `id` are each
-        // one value, and a repeat would scope nothing, select no view, or drop
-        // a filter and answer the whole list.
-        const arity = metaQueryArityRefusal('list', query);
+        // asks it: `package`, `preview`, `object`, `include`, `id` and
+        // [#29236] `names` are each one value, and a repeat would scope
+        // nothing, select no view, or drop a filter and answer the whole list.
+        // [#29236] …and, first, RECOGNITION over the list's closed set
+        // (`META_LIST_QUERY_PARAMS`): a name the list does not read is a
+        // located 400, never the whole list with a 200. One decision for both
+        // transports (`metaListQueryRefusal`).
+        const listType = pluralToSingular(typeOrName);
+        const arity = metaListQueryRefusal(listType, query);
         if (arity) return queryRefusalAnswer(deps, arity);
         // Extract optional package filter from query string.
         // [#22188] `RestServer`'s reading: `all`, the list's "show everything"
@@ -2224,7 +2248,6 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // the store does not know, and a chain fault must be answered as itself
         // — never fall through to the next store as though the first had not
         // answered.
-        const listType = pluralToSingular(typeOrName);
 
         // [#9488 · #20408] A segment that names no metadata type is REFUSED —
         // `400 INVALID_REQUEST`, the one refusal `RestServer`'s list answers —
@@ -2253,13 +2276,26 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             && mayReadPendingDrafts(_context.executionContext);
         const answerList = (data: any) =>
             answerMetaList(deps, _context, protocol, listType, query, previewDrafts, data);
+        // [#29236] `?names=a,b`, read as `RestServer`'s list reads it — an
+        // empty one refused before any store read — and pushed down to the
+        // protocol's list read, so it filters before it decorates. The chain
+        // narrows by the same reading, which also holds the answer of the
+        // metadata service and registry exits below, which take no names.
+        let names: readonly string[] | undefined;
+        try {
+            names = metaListNames(query);
+        } catch (e: any) {
+            return { handled: true, response: deps.errorFromThrown(e, 400) };
+        }
 
         let listed: any;
         if (protocol && typeof protocol.getMetaItems === 'function') {
             try {
                 // [ADR-0131 D6] No organization: environment → code, the
                 // partition `RestServer`'s list reads.
-                const data = await protocol.getMetaItems({ type: typeOrName, packageId, previewDrafts });
+                const data = await protocol.getMetaItems({
+                    type: typeOrName, packageId, previewDrafts, ...(names ? { names: [...names] } : {}),
+                });
                 // Return any valid response from protocol (including empty items arrays)
                 if (data && (data.items !== undefined || Array.isArray(data))) listed = data;
             } catch (e: any) {

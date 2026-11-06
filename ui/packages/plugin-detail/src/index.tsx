@@ -87,6 +87,10 @@ export {
   ACTIVITY_TYPE_TO_FEED_TYPE,
   UNMAPPED_ACTIVITY_FEED_TYPE,
   activityRowToFeedItem,
+  // The impersonation actor line 「X 代 Y 操作」, shared with the console's
+  // audit-log field history so the two surfaces word it alike.
+  composeImpersonatedActor,
+  IMPERSONATED_ACTOR_FALLBACK,
   // `resetUnknownActivityTypeWarnings` is test-only and stays off the barrel
   // objectui#11195: the refused-read verdict joins the reading for the same
   // reason. `RecordDetailView` reads the same two tables, and a refusal it

@@ -47,8 +47,22 @@ import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spe
 import { registerSettingsRoutes, type SettingsRoutesOptions } from './settings-routes.js';
 import { SETTINGS_ROUTE_LEDGER } from './settings-route-ledger.js';
 import type { SettingsContext } from './settings-service.types.js';
+import type { DeploymentNoticeDoor, DeploymentNoticeState } from './deployment-notice.js';
 
 const NS = 'branding';
+
+/**
+ * [#30120] The deployment notice's two routes call a door, not the service.
+ * Each fixture below carries its door under this key, so `capture` mounts
+ * the routes with it and a route reaching the door is recorded like a route
+ * reaching the service.
+ */
+const NOTICE_DOOR = Symbol('deploymentNoticeDoor');
+const NOTICE: DeploymentNoticeState = {
+  production: true,
+  findings: [{ id: 'database_local_file', severity: 'high', variable: 'OS_DATABASE_URL', file: '/srv/app/.objectstack/data/app.db' }],
+  fingerprint: 'database_local_file',
+};
 
 interface Registered {
   verb: string;
@@ -73,7 +87,8 @@ function capture(service: unknown, opts: SettingsRoutesOptions = {}) {
     listen: async () => {},
     close: async () => {},
   };
-  registerSettingsRoutes(http as any, service as any, opts);
+  const deploymentNotice = (service as Record<symbol, DeploymentNoticeDoor | undefined>)[NOTICE_DOOR];
+  registerSettingsRoutes(http as any, service as any, { deploymentNotice, ...opts });
   return { routes, middleware };
 }
 
@@ -84,11 +99,22 @@ function capture(service: unknown, opts: SettingsRoutesOptions = {}) {
  */
 function untouchableService() {
   const calls: string[] = [];
+  const door: DeploymentNoticeDoor = {
+    read: async () => {
+      calls.push('deploymentNotice.read');
+      throw new Error('the deployment notice was read by an anonymous request');
+    },
+    hide: async () => {
+      calls.push('deploymentNotice.hide');
+      throw new Error('the deployment notice was hidden by an anonymous request');
+    },
+  };
   const service = new Proxy(
     {},
     {
       get(_target, prop) {
         if (prop === 'then') return undefined;
+        if (prop === NOTICE_DOOR) return door;
         return (..._args: unknown[]) => {
           calls.push(String(prop));
           throw new Error(`service.${String(prop)} was reached by an anonymous request`);
@@ -117,6 +143,13 @@ function permissiveService() {
       seen.push({ method: 'runAction', ctx });
       return { ok: true };
     },
+    [NOTICE_DOOR]: {
+      read: async (ctx: SettingsContext) => { seen.push({ method: 'deploymentNotice.read', ctx }); return NOTICE; },
+      hide: async ({ context }: { context: SettingsContext }) => {
+        seen.push({ method: 'deploymentNotice.hide', ctx: context });
+        return { outcome: 'recorded' as const, state: NOTICE };
+      },
+    } satisfies DeploymentNoticeDoor,
   };
   return { service, seen };
 }
@@ -142,7 +175,8 @@ async function drive(route: Registered, headers: Record<string, string> = {}) {
     {
       params: paramsFor(route.path),
       query: {},
-      body: route.verb === 'GET' ? undefined : { workspace_name: 'anonymous-write' },
+      // `fingerprint` is the hide route's one field; the other routes ignore it.
+      body: route.verb === 'GET' ? undefined : { workspace_name: 'anonymous-write', fingerprint: NOTICE.fingerprint },
       headers,
       method: route.verb,
       path: route.path,
@@ -179,10 +213,11 @@ const ANONYMOUS_CONTEXTS: Array<{ name: string; opts: SettingsRoutesOptions }> =
 ];
 
 describe('the settings family census — read off the registration', () => {
-  it('registers exactly four routes, the ledgered ones, and no middleware past them', () => {
+  it('registers exactly six routes, the ledgered ones, and no middleware past them', () => {
     const { routes, middleware } = capture(untouchableService().service);
-    // ⭐ A count, on purpose: a fifth route has to come through this file.
-    expect(routes).toHaveLength(4);
+    // ⭐ A count, on purpose: a seventh route has to come through this file.
+    // [#30120] Five and six are the deployment notice's read and hide.
+    expect(routes).toHaveLength(6);
     expect(routes.map((r) => `${r.verb} ${r.path}`).sort()).toEqual(
       SETTINGS_ROUTE_LEDGER.map((row) => row.route).sort(),
     );
@@ -219,7 +254,7 @@ describe('ADR-0056 D2 — an anonymous caller is refused 401 on every route of t
     expect(isAuthGateAllowlisted(basePath, 'GET')).toBe(true);
     const { service, calls } = untouchableService();
     const { routes } = capture(service, { basePath });
-    expect(routes).toHaveLength(4);
+    expect(routes).toHaveLength(6);
     for (const route of routes) expectAnonymousRefusal(await drive(route));
     expect(calls).toEqual([]);
   });
@@ -230,7 +265,12 @@ describe('CONTROL — a signed-in caller is served as before', () => {
 
   it.each(census)('%s · signed in → 200, and the service sees that caller', async (key) => {
     const { service, seen } = permissiveService();
-    const signedIn: SettingsContext = { enforced: true, userId: 'usr_admin', permissions: ['setup.access', 'setup.write'] };
+    // `manage_platform_settings` is the deployment notice's capability.
+    const signedIn: SettingsContext = {
+      enforced: true,
+      userId: 'usr_admin',
+      permissions: ['setup.access', 'setup.write', 'manage_platform_settings'],
+    };
     const route = capture(service, { contextFromRequest: () => signedIn }).routes.find(
       (r) => `${r.verb} ${r.path}` === key,
     )!;

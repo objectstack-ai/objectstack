@@ -565,6 +565,8 @@ export type {
     RecordCurrencyBackfillEngine,
     RecordCurrencyBackfillLogger,
     RecordCurrencyBackfillOptions,
+    RecordCurrencyBackfillOrganization,
+    RecordCurrencyBackfillOrganizationsRefusal,
 } from './record-currency-backfill.js';
 // [ADR-0144 D5, D7 parameter 1, Open item 8] The explicit recompute of stored
 // home amounts behind `os migrate recompute-home-amounts`: the write's own
@@ -628,6 +630,8 @@ export type {
   LifecycleFloorViolation,
 } from './lifecycle/lifecycle-service.js';
 export { parseLifecycleDuration } from './lifecycle/duration.js';
+// [#30237, ADR-0148 D3] What a host hands `ObjectQLPlugin`'s `recycleBinRetention`.
+export type { RecycleBinRetentionSettings } from './recycle-bin/retention.js';
 export { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
 
 // [#4551] Read-only referential-integrity audit — the reporting half of the
@@ -766,3 +770,15 @@ export type { AuthzInvalidationBridgeOptions } from './authz-invalidation-bridge
 // package's published surface is exactly what it was.
 export { resolveArtifactPackageOrder } from '@objectstack/core';
 export type { ArtifactPackageError } from '@objectstack/core';
+
+// [ADR-0142 D5, ruling A on organization-authored routing] What the save guard
+// of an organization's own `sys_assignment_rule` row (`@objectstack/plugin-sharing`)
+// asks of the assignment seam, so the row is judged by the paths the engine
+// evaluates it by: the table name, the CEL compile of `criteria` / `load`, and
+// the one "active member of the organization" predicate for a user target.
+export {
+  ASSIGNMENT_RULE_OBJECT,
+  assignmentExpressionRefusals,
+  organizationMemberStanding,
+} from './assignment-rules.js';
+export type { OrganizationMemberStanding } from './assignment-rules.js';

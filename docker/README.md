@@ -87,15 +87,26 @@ package set or on a version range.
 ## What the image presets
 
 - `OS_ARTIFACT_PATH=/srv/app/objectstack.json`, `OS_PORT=8080`,
-  `NODE_ENV=production`
+  `NODE_ENV=production`, `OS_DEPLOYMENT_DURABILITY_CHECK_ENABLED=true`
 - Runs as the non-root `node` user
 - `HEALTHCHECK` on `/api/v1/health` (liveness); use `/api/v1/ready` as the
   readiness probe in orchestrators
 
 **You must inject at runtime:** `OS_DATABASE_URL`, `OS_AUTH_SECRET`,
-`OS_SECRET_KEY` — never bake them into an image. Full variable catalog and
-reverse-proxy / multi-node guidance:
-[Self-Hosted Deployment](https://objectstack.ai/docs/deployment/self-hosting).
+`OS_SECRET_KEY` — never bake them into an image. **The image refuses to start
+without all three** (`OS_DEPLOYMENT_DURABILITY_CHECK_ENABLED=true`): it exits
+naming the missing ones, because without them the data would be a SQLite file in
+the container layer and both secrets would be generated there, all lost when the
+container is replaced. An explicit `OS_DATABASE_URL=file:/path/on/a/volume/app.db`
+passes, so SQLite on a mounted volume still works.
+
+Upgrading a container that ran on values the image generated? Carry them over
+first, from the old container's `/home/node/.objectstack`: `OS_AUTH_SECRET` is
+the contents of `auth-secret`, `OS_SECRET_KEY` the contents of `dev-crypto-key`,
+and the data is `data/objectstack.db`. The refusal prints these paths.
+
+Full variable catalog and reverse-proxy / multi-node guidance:
+[Self-Hosted Deployment](https://objectstack.ai/docs/deployment/self-hosting#when-the-three-are-not-set).
 
 ## Local build of this image
 

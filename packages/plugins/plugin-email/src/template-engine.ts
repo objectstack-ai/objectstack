@@ -46,7 +46,11 @@
  * (`currencyCodeValueRefusal`). A `currency` hole with no argument formats in
  * the tenant default currency, {@link RenderOptions.currency}; with none it
  * throws `TEMPLATE_INVALID` as well (`currencyDefaultRefusal`), since it then
- * names no currency at all. Those are the ways a render throws: it prints
+ * names no currency at all. `{{ stage | option:opportunity.stage }}` prints a
+ * select value as its option's label from {@link RenderOptions.optionLabels},
+ * the table the send builds in the recipient's locale; with no table for the
+ * field it throws `TEMPLATE_INVALID` (`optionTableRefusal`), and a value the
+ * table does not hold prints as stored. Those are the ways a render throws: it prints
  * neither a substituted currency nor formatter syntax to a recipient.
  *
  * Deliberately tiny (no loops / conditionals / partials) — the design
@@ -56,7 +60,15 @@
  * runtime; we resist that until a real use case demands it.
  */
 
-import { currencyCodeValueRefusal, currencyDefaultRefusal, formatValue, mailHolePattern, parseMailHole } from '@objectstack/formula';
+import {
+  currencyCodeValueRefusal,
+  currencyDefaultRefusal,
+  formatValue,
+  mailHolePattern,
+  optionTableRefusal,
+  parseMailHole,
+  type OptionLabelTable,
+} from '@objectstack/formula';
 
 /** Locale + reference timezone for hole formatters (ADR-0053 Phase 2). */
 export interface RenderOptions {
@@ -68,6 +80,15 @@ export interface RenderOptions {
    * Unset, such a hole makes the render throw `TEMPLATE_INVALID`.
    */
   currency?: string;
+  /**
+   * The label table an `{{ stage | option:opportunity.stage }}` hole reads,
+   * keyed by its `object.field`, in the recipient's locale — built per send by
+   * `buildOptionLabelTable` (`option-label-table.ts`). With no table for the
+   * hole's key, or one holding no option, the render throws
+   * `TEMPLATE_INVALID`: it never prints the stored value where a label was
+   * promised.
+   */
+  optionLabels?: OptionLabelTable;
 }
 
 function lookup(data: Record<string, any>, path: string): unknown {
@@ -147,6 +168,21 @@ function render(
           const refusal = currencyDefaultRefusal(match, opts.currency, 'mail');
           if (refusal) throw new Error(`TEMPLATE_INVALID: ${refusal}`);
         }
+        // `option:object.field` prints from the label table the send built,
+        // judged before the value is read, as `currency` with no default is:
+        // with no table for the field, or one with no option in it, nothing is
+        // labelled.
+        if (parsed.optionField !== undefined) {
+          const key = `${parsed.optionField.object}.${parsed.optionField.field}`;
+          const refusal = optionTableRefusal(match, key, opts.optionLabels);
+          if (refusal) throw new Error(`TEMPLATE_INVALID: ${refusal}`);
+          if (Object.keys(opts.optionLabels![key]).length === 0) {
+            throw new Error(
+              `TEMPLATE_INVALID: the hole ${match} prints the option labels of \`${key}\`, and the label table `
+              + 'for that field holds no option, so no value would ever print as a label.',
+            );
+          }
+        }
         // `currency:@path`: the code is the send's data at that path, judged
         // before the amount is read, as a literal argument is.
         let arg = parsed.arg;
@@ -162,6 +198,7 @@ function render(
           locale: opts.locale,
           timeZone: opts.timeZone,
           currency: opts.currency,
+          ...(opts.optionLabels ? { optionLabels: opts.optionLabels } : {}),
         });
         // The grammar refuses a formatter the whitelist does not name, so
         // `formatValue` knows this one; if the two ever disagree the render

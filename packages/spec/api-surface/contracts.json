@@ -132,6 +132,7 @@
     "IBasicServiceRegistry (interface)",
     "IBusinessUnitGraphService (interface)",
     "ICacheService (interface)",
+    "ICloudBindingService (interface)",
     "IClusterService (interface)",
     "ICounter (interface)",
     "ICryptoProvider (interface)",

@@ -68,7 +68,8 @@ import { localizePackage } from './usePackageL10n.js';
 import { isNewerVersion } from './versionPrecedence.js';
 import {
   getMarketplacePackage,
-  getDeclaredInstallModes,
+  getServedPackageBody,
+  declaredInstallModesOf,
   installPackage,
   installLocal,
   uninstallLocal,
@@ -93,6 +94,7 @@ import {
 import { useDependencyMissingText } from './dependencyMissing.js';
 import { useProtocolCheckSkippedText } from './protocolCheckSkipped.js';
 import { ProtocolCheckSkippedNote } from './ProtocolCheckSkippedNote.js';
+import { installPreviewOf, type InstallPreview } from './installPreview.js';
 import {
   forgetSampleData,
   noteServedSampleCount,
@@ -112,6 +114,7 @@ import { SuggestedBindingsPanel, type SuggestedBindingsStrings } from '../../com
 import { ConnectorCredentialsStep } from './ConnectorCredentialsStep.js';
 import type { SuggestedBinding } from '../../services/suggestedBindingsApi.js';
 import { errorCodeIs } from '@object-ui/types';
+import { MarketplaceNamespaceGate } from './MarketplaceNamespaceGate.js';
 
 /**
  * Whether a cloud install lands in the environment this console renders, read
@@ -163,7 +166,19 @@ function versionEntryId(version: string): string {
   return `marketplace-version-${version}`;
 }
 
+/**
+ * The page under the frame that fetches its strings first — the
+ * `marketplace` namespace (`MarketplaceNamespaceGate.tsx` says why).
+ */
 export function MarketplacePackagePage() {
+  return (
+    <MarketplaceNamespaceGate>
+      <MarketplacePackagePageBody />
+    </MarketplaceNamespaceGate>
+  );
+}
+
+function MarketplacePackagePageBody() {
   const navigate = useNavigate();
   const { packageId, appName } = useParams<{ packageId?: string; appName?: string }>();
   const { isAdmin, isResolved } = useWorkspaceAdminStatus();
@@ -312,6 +327,12 @@ export function MarketplacePackagePage() {
   // to another package never offers or sends the last one's.
   const [modesRead, setModesRead] = useState<{ packageId: string; modes: readonly LocalInstallMode[] | undefined } | null>(null);
   const [modePick, setModePick] = useState<{ packageId: string; mode: LocalInstallMode } | null>(null);
+  // objectstack#30325 — what the install will add, read from the same manifest
+  // answer as the modes, kept with its package. `preview: null` = the manifest
+  // could not be read or is not a package body; no entry for this package yet
+  // = still reading. The confirm in front of a local Install draws it.
+  const [previewRead, setPreviewRead] = useState<{ packageId: string; preview: InstallPreview | null } | null>(null);
+  const [confirmLocalOpen, setConfirmLocalOpen] = useState(false);
   // `undefined` until read, when the manifest declares none, or when it could
   // not be read: then no choice is drawn and no mode is sent, so the door's own
   // default and answer decide.
@@ -362,10 +383,15 @@ export function MarketplacePackagePage() {
     let cancelled = false;
     (async () => {
       try {
-        const modes = await getDeclaredInstallModes(packageId);
-        if (!cancelled) setModesRead({ packageId, modes });
+        // One read serves both: the modes it declares, and what it adds.
+        const body = await getServedPackageBody(packageId);
+        if (cancelled) return;
+        setModesRead({ packageId, modes: declaredInstallModesOf(body) });
+        setPreviewRead({ packageId, preview: installPreviewOf(body) });
       } catch {
         // No manifest to read: no choice and no mode, and the door decides.
+        // The confirm says it could not read what the install adds.
+        if (!cancelled) setPreviewRead({ packageId, preview: null });
       }
     })();
     return () => { cancelled = true; };
@@ -629,12 +655,23 @@ export function MarketplacePackagePage() {
   };
 
   /**
+   * The local Install button: opens the confirm that says what the install
+   * adds (objectstack#30325). Its Install is the one click that installs, so
+   * the install itself is unchanged and stays one click away.
+   */
+  const doInstallLocal = () => {
+    if (!packageId) return;
+    if (offeredInstallModes && !requestedInstallMode) return;
+    setConfirmLocalOpen(true);
+  };
+
+  /**
    * Install this package into the LOCAL runtime kernel (not a cloud env).
-   * Single-target operation — no picker, no dialog. Same-origin POST so
+   * Single-target operation — no environment picker. Same-origin POST so
    * cloud session is not required. The local AuthPlugin session is what
    * the backend validates.
    */
-  const doInstallLocal = async () => {
+  const runInstallLocal = async () => {
     if (!packageId) return;
     // ADR-0131 D6 — the mode is sent only when the manifest declares
     // `installModes`: its one mode, or the operator's pick among several.
@@ -1346,6 +1383,7 @@ export function MarketplacePackagePage() {
     ? t('marketplace.install.mode.required')
     : undefined;
   const installModeReasonId = 'install-mode-required-reason';
+  const localPreviewRead = previewRead && previewRead.packageId === packageId ? previewRead : null;
   const primaryAction = supportsLocal
     ? {
       label: installingLocal
@@ -1627,6 +1665,63 @@ export function MarketplacePackagePage() {
           </Card>
         </div>
       </div>
+
+      {/* objectstack#30325 — the confirm in front of a local Install: what the
+          install adds, read from the manifest it installs, and the grants it
+          will suggest. Its Install runs the install as the button did. */}
+      <AlertDialog open={confirmLocalOpen} onOpenChange={setConfirmLocalOpen}>
+        <AlertDialogContent data-testid="install-preview-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {localInstall
+                ? t('marketplace.install.preview.reinstallTitle', { name: loc.displayName })
+                : t('marketplace.install.preview.title', { name: loc.displayName })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {!localPreviewRead
+                ? t('marketplace.install.preview.reading')
+                : localPreviewRead.preview
+                  ? t('marketplace.install.preview.intro')
+                  : t('marketplace.install.preview.unreadable')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {localPreviewRead?.preview && (
+            <div className="space-y-3 text-sm" data-testid="install-preview">
+              <dl className="grid grid-cols-[auto_auto] justify-start gap-x-6 gap-y-1">
+                <dt className="text-muted-foreground">{t('marketplace.install.preview.objects')}</dt>
+                <dd className="font-medium tabular-nums" data-testid="install-preview-objects">{localPreviewRead.preview.objects}</dd>
+                <dt className="text-muted-foreground">{t('marketplace.install.preview.permissionSets')}</dt>
+                <dd className="font-medium tabular-nums" data-testid="install-preview-permission-sets">{localPreviewRead.preview.permissionSets}</dd>
+                <dt className="text-muted-foreground">{t('marketplace.install.preview.sampleRecords')}</dt>
+                <dd className="font-medium tabular-nums" data-testid="install-preview-sample-records">
+                  {localPreviewRead.preview.sampleRecordsAtMost
+                    ? t('marketplace.install.preview.atMost', { count: localPreviewRead.preview.sampleRecords })
+                    : localPreviewRead.preview.sampleRecords}
+                </dd>
+              </dl>
+              {localPreviewRead.preview.sampleRecords > 0 && (
+                <p className="text-muted-foreground">{t('marketplace.install.preview.sampleNote')}</p>
+              )}
+              {localPreviewRead.preview.suggestedGrants.length > 0 && (
+                <ul className="space-y-1" data-testid="install-preview-suggestions">
+                  {localPreviewRead.preview.suggestedGrants.map((set) => (
+                    <li key={set}>{t('marketplace.install.preview.suggestsEveryone', { set })}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="install-preview-confirm"
+              onClick={() => { void runInstallLocal(); }}
+            >
+              {localInstall ? t('marketplace.action.reinstall') : t('marketplace.action.install')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={installOpen} onOpenChange={(o) => { setInstallOpen(o); if (!o) { setInstallResult(null); setAcknowledged(false); } }}>
         <DialogContent

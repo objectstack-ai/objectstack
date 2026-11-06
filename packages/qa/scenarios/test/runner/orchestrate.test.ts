@@ -9,7 +9,9 @@
  *
  * What it pins is the card's acceptance: one record per card with both modes
  * side by side, and a degraded build and a leaking answer each SHOWING UP in
- * the scorecard.
+ * the scorecard. And the names: every project is in the card's own namespace
+ * (`democrm`), and a build naming any non-object item without that prefix
+ * fails its Build half.
  */
 
 import { dirname, resolve } from 'node:path';
@@ -40,8 +42,11 @@ function load(): LoadedScenario {
 
 const select = (values: string[]) => ({ type: 'select', options: values.map((value) => ({ value, label: value })) });
 
-function artifact(opts: { degraded?: boolean; iterated?: boolean; ns?: string } = {}) {
-  const n = (name: string) => (opts.ns ? `${opts.ns}_${name}` : name);
+const NS = 'democrm';
+
+function artifact(opts: { degraded?: boolean; iterated?: boolean; ns?: string; bareItems?: boolean } = {}) {
+  const ns = opts.ns ?? NS;
+  const n = (name: string) => `${ns}_${name}`;
   const objects: unknown[] = [
     { name: n('account'), fields: { name: { type: 'text' }, industry: select(['tech', 'retail']), owner: { type: 'text' } } },
   ];
@@ -50,19 +55,21 @@ function artifact(opts: { degraded?: boolean; iterated?: boolean; ns?: string } 
     objects.push({
       name: n('contact'),
       fields: { full_name: { type: 'text' }, email: { type: 'email' }, account: { type: 'lookup', reference: n('account') } },
-      actions: [action('create_contact'), action('reassign_contact'), action('delete_contact', true)],
+      actions: [action(n('create_contact')), action(n('reassign_contact')), action(n('delete_contact'), true)],
     });
   }
   if (opts.iterated) {
     objects.push({ name: n('opportunity'), fields: { stage: select(['a', 'b', 'c', 'd']), account: { type: 'lookup', reference: n('account') } } });
   }
   return {
-    manifest: { id: 'com.example.crm', ...(opts.ns ? { namespace: opts.ns } : {}) },
+    manifest: { id: `com.example.${ns}`, namespace: ns },
     objects,
     permissions: [
-      { name: 'sdr', objects: { [n('account')]: { allowRead: true }, [n('contact')]: { allowRead: true, allowCreate: true, allowEdit: true } }, fields: { [`${n('contact')}.email`]: { readable: false } } },
-      { name: 'partner_user', objects: { [n('contact')]: { allowRead: true } } },
+      { name: n('sdr'), objects: { [n('account')]: { allowRead: true }, [n('contact')]: { allowRead: true, allowCreate: true, allowEdit: true } }, fields: { [`${n('contact')}.email`]: { readable: false } } },
+      { name: n('partner_user'), objects: { [n('contact')]: { allowRead: true, allowCreate: true } } },
     ],
+    // A build that names a view and a dashboard bare: the objects are prefixed (defineStack insists), these are not.
+    ...(opts.bareItems ? { views: [{ name: 'all_accounts', object: n('account') }], dashboards: [{ name: 'overview', widgets: [] }] } : {}),
   };
 }
 
@@ -72,14 +79,18 @@ interface FakeProject {
   phase: 'scaffolded' | 'built' | 'iterated';
 }
 
-function fakeOps(app: () => FakeApp, opts: { degradedBuild?: boolean; ns?: string } = {}): ProjectOps & { projects: Map<string, FakeProject> } {
+function fakeOps(app: () => FakeApp, opts: { degradedBuild?: boolean; bareItems?: boolean; declares?: string } = {}): ProjectOps & { projects: Map<string, FakeProject>; scaffolded: string[] } {
   const projects = new Map<string, FakeProject>();
+  const scaffolded: string[] = [];
   const ok = (command: string) => ({ command, exit: 0, tail: '', ms: 1 });
   return {
     projects,
-    async scaffold(name) {
-      projects.set(name, { phase: 'scaffolded' });
-      return { dir: name, result: ok(`create-objectstack ${name}`) };
+    scaffolded,
+    async scaffold(name, under) {
+      const dir = `${under}/${name}`;
+      scaffolded.push(dir);
+      projects.set(dir, { phase: 'scaffolded' });
+      return { dir, result: ok(`create-objectstack ${name}`) };
     },
     async os(dir, args) {
       const degraded = opts.degradedBuild && projects.get(dir)!.phase === 'built';
@@ -88,13 +99,14 @@ function fakeOps(app: () => FakeApp, opts: { degradedBuild?: boolean; ns?: strin
     readArtifact(dir) {
       const p = projects.get(dir)!;
       if (p.phase === 'scaffolded') return undefined;
-      return artifact({ degraded: opts.degradedBuild && p.phase === 'built', iterated: p.phase === 'iterated', ...(opts.ns ? { ns: opts.ns } : {}) });
+      return artifact({ degraded: opts.degradedBuild && p.phase === 'built', iterated: p.phase === 'iterated', ...(opts.bareItems ? { bareItems: true } : {}) });
     },
     async boot() {
       return { url: 'http://fake', stop: async () => {}, log: () => '' };
     },
     harness: () => app(),
-    namespace: () => opts.ns,
+    // As create-objectstack does: the namespace is the project name, unless a test says otherwise.
+    namespace: (dir) => opts.declares ?? dir.slice(dir.lastIndexOf('/') + 1),
   };
 }
 
@@ -107,6 +119,9 @@ class FakeApp implements AppHarness {
   audit: Record<string, string> = {};
   installed: Record<string, unknown> | undefined;
   installAnswer: HttpAnswer = { ok: true, status: 200, body: {} };
+  grants: string[] = [];
+  /** What a fresh environment already serves without any prefix (measured: `setup`, `admin_full_access`, …). */
+  platform: Record<string, unknown[]> = { apps: [{ name: 'setup' }], permissions: [{ name: 'admin_full_access', objects: {} }] };
   async signInAdmin() {}
   adminUserId() {
     return 'u-admin';
@@ -114,8 +129,9 @@ class FakeApp implements AppHarness {
   organizationId() {
     return 'org';
   }
-  async createPersona(persona: string): Promise<PersonaAccount> {
-    return { persona, userId: `u-${persona}`, email: `${persona}@scenario.test`, apiKey: `key-${persona}`, permissionSet: { name: persona, assigned: true } };
+  async createPersona(persona: string, permissionSet: string): Promise<PersonaAccount> {
+    this.grants.push(permissionSet);
+    return { persona, userId: `u-${persona}`, email: `${persona}@scenario.test`, apiKey: `key-${persona}`, permissionSet: { name: permissionSet, assigned: true } };
   }
   async adminApiKey() {
     return 'key-admin';
@@ -137,7 +153,7 @@ class FakeApp implements AppHarness {
   async metadataAsArtifact(collections: readonly string[]) {
     const src = (this.installed ?? {}) as Record<string, unknown[]>;
     const out: Record<string, unknown[]> = {};
-    for (const c of collections) out[c] = [...(src[c] ?? [])];
+    for (const c of collections) out[c] = [...(this.platform[c] ?? []), ...(src[c] ?? [])];
     return out;
   }
 }
@@ -163,9 +179,8 @@ class ScriptedDriver implements AgentDriver {
     private readonly ops: ReturnType<typeof fakeOps>,
     private readonly app: () => FakeApp,
     private readonly leak: { question: string; persona: string } | undefined,
-    private readonly ns?: string,
   ) {
-    this.scenario = namespacedScenario(scenario, ns);
+    this.scenario = namespacedScenario(scenario);
   }
   info(): DriverInfo {
     return { driver: 'recorded', version: 'scripted test replay', apiBilled: false };
@@ -176,7 +191,7 @@ class ScriptedDriver implements AgentDriver {
     if (task.mode === 'template') {
       const app = this.app();
       const objects = (app.installed!.objects as unknown[]) ?? [];
-      app.installed = { ...app.installed!, objects: [...objects, ...artifact({ iterated: true, ...(this.ns ? { ns: this.ns } : {}) }).objects.slice(2)] };
+      app.installed = { ...app.installed!, objects: [...objects, ...artifact({ iterated: true }).objects.slice(2)] };
     }
     return { turn: turn('Done.') };
   }
@@ -206,7 +221,7 @@ class ScriptedDriver implements AgentDriver {
   }
 }
 
-function setup(opts: { degradedBuild?: boolean; leak?: { question: string; persona: string }; ns?: string } = {}) {
+function setup(opts: { degradedBuild?: boolean; leak?: { question: string; persona: string }; bareItems?: boolean; declares?: string } = {}) {
   const scenario = load();
   let current = new FakeApp();
   const apps: FakeApp[] = [];
@@ -218,7 +233,7 @@ function setup(opts: { degradedBuild?: boolean; leak?: { question: string; perso
     apps.push(current);
     return boot(dir);
   };
-  const driver = new ScriptedDriver(scenario, ops, getApp, opts.leak, opts.ns);
+  const driver = new ScriptedDriver(scenario, ops, getApp, opts.leak);
   return { scenario, ops, driver, apps };
 }
 
@@ -248,7 +263,7 @@ describe('runCard — the crm card, both modes, a clean agent', () => {
 
     // Every step went through the driver under its own replay key.
     expect(driver.seen).toContain('crm_account_with_contacts/scratch/run/account_count/sdr');
-    expect(driver.seen).toContain('crm_account_with_contacts/template/iterate-run/remove_chen/sdr');
+    expect(driver.seen).toContain('crm_account_with_contacts/template/iterate-run/remove_ben/sdr');
     expect(driver.seen).not.toContain('crm_account_with_contacts/scratch/run/account_count/-'); // persona-scoped: asked as its personas
 
     const record = runRecord({ run: 'r', date: '2026-11-05', driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
@@ -261,22 +276,60 @@ describe('runCard — the crm card, both modes, a clean agent', () => {
   it('seeds ownership from the persona handles: Acme and Bitworks are owned by the sdr user', async () => {
     const { scenario, ops, driver, apps } = setup();
     await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
-    const accounts = apps[0]!.rows.account!;
+    const accounts = apps[0]!.rows.democrm_account!;
     expect(accounts.filter((r) => r.owner_id === 'u-sdr').map((r) => r.id)).toEqual(['ac1', 'ac3']);
     expect(accounts.find((r) => r.id === 'ac2')!.owner_id).toBeUndefined();
   });
 });
 
-describe('runCard — a namespaced project (every scaffold declares one)', () => {
-  it('reads the card relative to the namespace: seed lands on crm_account, answers citing the bare name still count', async () => {
-    const { scenario, ops, driver, apps } = setup({ ns: 'crm' });
+describe('runCard — the card’s own namespace, demo + code', () => {
+  it('scaffolds the project as democrm and reads the card relative to it; the template host is hostcrm', async () => {
+    const { scenario, ops, driver, apps } = setup();
     const run = await runCard(scenario, driver, ops, { modes: ['scratch', 'template'], admin: ADMIN, iterateRun: false });
     const sc = cardScorecard(run);
-    expect(Object.keys(apps[0]!.rows).sort()).toEqual(['crm_account', 'crm_contact']);
+    expect(ops.scaffolded).toEqual(['crm-account-with-contacts-scratch/democrm', 'crm-account-with-contacts-template/hostcrm']);
+    expect(Object.keys(apps[0]!.rows).sort()).toEqual(['democrm_account', 'democrm_contact']);
+    expect(apps[0]!.grants).toEqual(['democrm_sdr', 'democrm_partner_user']);
+    expect(run.modes[0]!.run!.personas.map((p) => p.permissionSet.name)).toEqual(['democrm_sdr', 'democrm_partner_user']);
     expect(sc.modes[0]!.first.build!.degraded).toBe(false);
+    expect(run.modes[0]!.build!.score!.naming).toEqual([]);
     expect(sc.modes[0]!.first.ask).toEqual({ passed: 9, total: 9, leaks: 0 });
     expect(sc.modes[0]!.first.operations).toEqual({ passed: 5, total: 5 });
-    expect(sc.modes[1]!.iterate!.build!.degraded).toBe(false); // the template keeps its own namespace
+    // The installed copy keeps `democrm`; the environment's own unprefixed items (`setup`, `admin_full_access`) are not the app's.
+    expect(apps[1]!.installed!.namespace).toBe('democrm');
+    expect(sc.modes[1]!.iterate!.build!.degraded).toBe(false);
+    expect(run.modes[1]!.iterate!.build.score!.naming).toEqual([]);
+  });
+
+  it('a project whose scaffold declares another namespace is skipped, never read against it', async () => {
+    const { scenario, ops, driver } = setup({ declares: 'crm_account_w' });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN });
+    expect(run.modes[0]!.skipped).toMatch(/declares namespace `crm_account_w`, not the card's `democrm`/);
+    expect(driver.seen).toEqual([]);
+  });
+
+  it('a supplied template declaring another namespace is skipped, never installed', async () => {
+    const { scenario, ops, driver } = setup();
+    const run = await runCard(scenario, driver, ops, { modes: ['template'], admin: ADMIN, templateArtifact: artifact({ ns: 'crm' }) });
+    expect(run.modes[0]!.skipped).toMatch(/template declares namespace `crm`, not the card's `democrm`/);
+    expect(ops.scaffolded).toEqual([]);
+  });
+
+  it('a build naming a non-object item bare fails its Build half: one finding per item, and it is never verified', async () => {
+    const { scenario, ops, driver } = setup({ bareItems: true });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch', 'template'], admin: ADMIN, iterateRun: false });
+    const sc = cardScorecard(run);
+    expect(run.modes[0]!.build!.score!.expect.checks.every((c) => c.pass)).toBe(true); // every expected name is there…
+    expect(run.modes[0]!.build!.score!.naming.map((c) => c.check)).toEqual(['bare-name:dashboard:overview', 'bare-name:view:all_accounts']);
+    expect(sc.modes[0]!.first.build!.degraded).toBe(true); // …and the build still fails
+    expect(sc.modes[1]!.skipped).toMatch(/no verified build/);
+    expect(sc.modes[0]!.findings).toEqual([
+      expect.stringMatching(/^build: bare item name dashboard overview \(.*`democrm_<short>`/),
+      expect.stringMatching(/^build: bare item name view all_accounts /),
+      expect.stringMatching(/^iterate build: bare item name dashboard overview /),
+      expect.stringMatching(/^iterate build: bare item name view all_accounts /),
+    ]);
+    expect(renderScorecard(sc)).toContain('- scratch finding: build: bare item name view all_accounts');
   });
 });
 

@@ -910,7 +910,7 @@ import { ObjectStackAdapter, type MetaItemAccess } from '@object-ui/data-objects
 const adapter = new ObjectStackAdapter({ baseUrl: '' });
 
 const access: MetaItemAccess = await adapter.probeMetaItemAccess('dashboard', 'legal_board');
-// { verdict: 'denied', message: "You do not have permission to open the 'legal_board' dashboard." }
+// { verdict: 'denied', message: "You do not have permission to perform this action. Contact your administrator if you need access." }
 ```
 
 `verdict` is `granted`, `denied`, `not_found`, `unreachable` (no answer was
