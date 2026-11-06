@@ -164,11 +164,13 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('useObjectListViewDraft — an unpublished view is not asked for /layers (objectui#11799)', () => {
-  it('a view with a draft and no layer sends no /layers, and the buffer holds the draft as before', async () => {
+  it('a view with a draft and no published layer asks /layers once, for its stored draft, with no 404, and the buffer holds the draft', async () => {
     server.drafts.set(`view/${VIEW}`, viewItem(['title', 'status']));
     await openLeaf();
 
-    expect(layersAsked()).toBe(0);
+    // objectstack#30859 — the buffer is the stored `draft` layer, which the
+    // server answers for a view that has only a draft.
+    expect(layersAsked()).toBe(1);
     expect(server.requests.filter((r) => r.status === 404)).toEqual([]);
     expect(probe()).toEqual({
       loadedFor: `listView:${VIEW}`,

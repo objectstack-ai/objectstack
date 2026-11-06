@@ -14,12 +14,13 @@
  *  - a setting whose answering entry is `by: 'copilot'` shows the draft chip;
  *    the elements the copilot added to `kanban.columns` are marked and the
  *    published ones are not, read by comparing the draft's array with the
- *    published one — the ONE layered read this adds beside a draft;
+ *    published one — read from the ONE layered read a pending draft takes for
+ *    its stored `draft` layer (objectstack#30859), never a second one;
  *  - the source line names the added elements and the minutes since `at`;
  *  - a `studio` entry draws nothing and adds no read;
  *  - CONTROLS: a published view with no draft draws nothing; a draft whose read
- *    recorded no `draftChanges` draws nothing and sends no `/layers`; a draft
- *    created over no published body (`[]`) marks every element without one;
+ *    recorded no `draftChanges` draws nothing and adds no `/layers` read; a
+ *    draft created over no published body (`[]`) marks every element without one;
  *  - the panel's save sends `?surface=studio`, once.
  */
 
@@ -226,7 +227,7 @@ describe('ObjectListViewInspector — the copilot’s draft marks (objectui#1272
     );
   });
 
-  it('a `studio` entry draws no copilot mark and adds no read', async () => {
+  it('a `studio` entry draws no copilot mark and adds no read beyond the stored draft', async () => {
     server.active.set(`view/${VIEW}`, kanbanView(['book']));
     server.drafts.set(`view/${VIEW}`, {
       row: kanbanView(['book', 'reader']),
@@ -236,7 +237,8 @@ describe('ObjectListViewInspector — the copilot’s draft marks (objectui#1272
     expect(chipsOf(panel)).toEqual([]);
     expect(markedElements(panel)).toEqual([]);
     expect(within(panel).queryByTestId('studio-draft-source')).toBeNull();
-    expect(layersAsked()).toBe(0);
+    // objectstack#30859 — the one read is the stored draft layer; no read is added for marks.
+    expect(layersAsked()).toBe(1);
   });
 
   it('CONTROL: a published view with no pending draft draws no mark', async () => {
@@ -247,16 +249,17 @@ describe('ObjectListViewInspector — the copilot’s draft marks (objectui#1272
     expect(layersAsked()).toBe(1);
   });
 
-  it('CONTROL: a draft whose read recorded no `draftChanges` draws no mark and sends no /layers', async () => {
+  it('CONTROL: a draft whose read recorded no `draftChanges` draws no mark and adds no /layers read for marks', async () => {
     server.active.set(`view/${VIEW}`, kanbanView(['book']));
     server.drafts.set(`view/${VIEW}`, { row: kanbanView(['book', 'reader']) });
     const panel = await openPanel();
     expect(chipsOf(panel)).toEqual([]);
     expect(markedElements(panel)).toEqual([]);
-    expect(layersAsked()).toBe(0);
+    // objectstack#30859 — the one read is the stored draft layer; no read is added for marks.
+    expect(layersAsked()).toBe(1);
   });
 
-  it('CONTROL: a draft the copilot created over no published body (`[]`) marks every element, with no /layers', async () => {
+  it('CONTROL: a draft the copilot created over no published body (`[]`) marks every element, with no /layers read for marks', async () => {
     server.drafts.set(`view/${VIEW}`, {
       row: kanbanView(['book', 'reader']),
       draftChanges: [{ path: [], by: 'copilot', actor: 'usr_1', at: minutesAgo(3) }],
@@ -268,7 +271,8 @@ describe('ObjectListViewInspector — the copilot’s draft marks (objectui#1272
       within(within(panel).getByTestId(testId)).getAllByTestId('studio-draft-element-chip').map((e) => e.getAttribute('data-draft-of'));
     expect(elementsIn('list-view-kanban-fields')).toEqual(['book', 'reader']);
     expect(elementsIn('list-view-columns')).toEqual(['book', 'status']);
-    expect(layersAsked()).toBe(0);
+    // objectstack#30859 — the one read is the stored draft layer; no read is added for marks.
+    expect(layersAsked()).toBe(1);
   });
 
   it('the panel’s save sends `?surface=studio`, once', async () => {
