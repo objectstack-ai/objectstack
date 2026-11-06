@@ -12,14 +12,13 @@
 //
 //   Webhooks / HTTP Deliveries   `@objectstack/plugin-webhooks`
 //   Datasources                  `@objectstack/service-datasource`
-//   Connect an Agent             `@objectstack/mcp`
 //   Connector Credentials        `@objectstack/service-automation`
 //   Connector Connections        `@objectstack/service-automation` (same contribution)
 //   Cloud Connection             `@objectstack/cloud-connection`
 //
 // Each contributor states the group's other priorities in its own header so
 // that its number sorts where it means to — and nothing held those headers to
-// the code. A later contributor could renumber one of the five and silently
+// the code. A later contributor could renumber one of the four and silently
 // reorder the menu an administrator reads. This file is that hold.
 //
 // ⛔ The priorities are READ from the real contributions, never copied here as
@@ -66,7 +65,6 @@ const GROUP = 'group_integrations';
  */
 const EXPECTED_TIERS: readonly (readonly string[])[] = [
     ['nav_webhooks', 'nav_http_deliveries', 'nav_datasources'],
-    ['nav_connect_agent'],
     // One contribution carries both, in this order (ADR-0143 D5 added the second).
     ['nav_connector_credentials', 'nav_connector_connections'],
     ['nav_cloud_connection'],
@@ -101,6 +99,10 @@ async function setupContributions(): Promise<Array<{ packageId: string; contribu
     const sources: Array<[string, AnyRec[]]> = [
         ['@objectstack/plugin-webhooks', await manifestsRegisteredBy(new WebhookOutboxPlugin({ autoEnqueue: false }))],
         ['@objectstack/service-datasource', await manifestsRegisteredBy(new DatasourceAdminServicePlugin({}) as any)],
+        // Still read although it no longer contributes here: Connect an AI
+        // Assistant sits in `group_overview` (#30895), and the "nothing
+        // contributes into the group that this pin does not order" check below
+        // reds if it moves back.
         ['@objectstack/mcp', [CONNECT_AGENT_UI_BUNDLE as AnyRec]],
         ['@objectstack/service-automation', [CONNECTOR_CREDENTIALS_UI_BUNDLE as AnyRec]],
         ['@objectstack/cloud-connection', [CLOUD_CONNECTION_UI_BUNDLE as AnyRec]],
@@ -126,7 +128,7 @@ function groupChildren(app: AnyRec | undefined, groupId: string): string[] {
 }
 
 describe('Setup → Integrations: the merged order follows each contributor\'s priority', () => {
-    it('serves the five contributors in priority order, read from the contributions themselves', async () => {
+    it('serves the four contributors in priority order, read from the contributions themselves', async () => {
         const contributions = await setupContributions();
 
         // `structuredClone`: `registerApp` writes the `_lock` envelope onto

@@ -13,9 +13,17 @@
 
 import { describe, it, expect } from 'vitest';
 import { FEDERATION_READ_CAPABILITY, FEDERATION_WRITE_CAPABILITY } from '@objectstack/rest';
+import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
 import { buildMcpBridge } from './mcp.js';
 import { resolveExecutionContext } from '../security/resolve-execution-context.js';
 import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';
+
+/**
+ * The dispatcher's loud lookup (`DomainHandlerDeps.resolveServiceOrLoud`) on a
+ * host that registers no `tenancy` service: `undefined`, the supported
+ * composition, read as `single`.
+ */
+const noTenancyService = async () => undefined;
 
 function bridgeFor(systemPermissions: string[], service: unknown) {
   const lookups: string[] = [];
@@ -24,6 +32,7 @@ function bridgeFor(systemPermissions: string[], service: unknown) {
       lookups.push(name);
       return name === 'external-datasource' ? service : undefined;
     },
+    resolveServiceOrLoud: noTenancyService,
   };
   const context = { environmentId: 'env_1', executionContext: { userId: 'u_1', systemPermissions } };
   return { bridge: buildMcpBridge(deps as never, context as never), lookups };
@@ -147,6 +156,7 @@ function bridgeOver(executionContext: unknown, service: unknown) {
       lookups.push(name);
       return name === 'external-datasource' ? service : undefined;
     },
+    resolveServiceOrLoud: noTenancyService,
   };
   const context = { environmentId: 'env_1', executionContext };
   return { bridge: buildMcpBridge(deps as never, context as never), lookups };
@@ -215,5 +225,106 @@ describe('the federation pair rides the bridge only for an envelope that can cal
     const { bridge } = bridgeOver(ec, fakeService());
     expect(typeof bridge.listRemoteTables).toBe('undefined');
     expect(typeof bridge.importObject).toBe('undefined');
+  });
+});
+
+// ── [ADR-0131 D3 · D12 items 7–8 · D11] `import_object` is a write to the environment's catalog ──
+//
+// The REST import route's twin (`external-datasource-routes-auth-guard.test.ts`
+// pins the route): under a walled tenancy posture every write to the
+// environment's metadata catalog is the platform operator's, and an import saves
+// an object into it. So `import_object` asks `walledCatalogWriteVerdict` after
+// the family's capability rule and before the service is looked up, reading the
+// posture the way this transport's other walled doors read it
+// (`readEffectiveTenancyPosture`). `list_remote_tables` writes nothing and is
+// not asked.
+
+function bridgeWithTenancy(opts: {
+  /** The `tenancy` service the dispatcher's loud lookup answers, `'none'` for none, `'failing'` for one that cannot answer. */
+  tenancy: { posture: string } | 'none' | 'failing';
+  /** The caller's ADR-0095 posture rung. */
+  posture?: string;
+}) {
+  const lookups: string[] = [];
+  const service = fakeService();
+  const deps = {
+    resolveService: async (_ctx: unknown, name: string) => {
+      lookups.push(name);
+      return name === 'external-datasource' ? service : undefined;
+    },
+    resolveServiceOrLoud: async (_ctx: unknown, name: string) => {
+      lookups.push(`loud:${name}`);
+      if (name !== 'tenancy' || opts.tenancy === 'none') return undefined;
+      if (opts.tenancy === 'failing') throw new Error('the tenancy store did not answer');
+      return opts.tenancy;
+    },
+  };
+  const executionContext = {
+    userId: 'u_1',
+    systemPermissions: [FEDERATION_READ_CAPABILITY, FEDERATION_WRITE_CAPABILITY],
+    ...(opts.posture !== undefined ? { posture: opts.posture } : {}),
+  };
+  const context = { environmentId: 'env_1', executionContext };
+  return { bridge: buildMcpBridge(deps as never, context as never), lookups, service };
+}
+
+describe('[ADR-0131 D12 items 7–8] under a walled tenancy posture `import_object` is the platform operator\'s, like every write to the environment\'s catalog', () => {
+  for (const posture of ['group', 'isolated'] as const) {
+    it(`${posture}: an organization administrator holding both federation capabilities is refused 403 PERMISSION_DENIED, before the service is looked up`, async () => {
+      const { bridge, lookups, service } = bridgeWithTenancy({ tenancy: { posture }, posture: 'TENANT_ADMIN' });
+
+      const refused = await bridge.importObject('erp', 'Products', {}).then(
+        () => undefined,
+        (err: unknown) => err as { code?: unknown; status?: unknown; message?: string },
+      );
+
+      expect(refused, 'the import is refused').toBeDefined();
+      expect({ code: refused?.code, status: refused?.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+      expect(refused?.message).toContain(`'${posture}' tenancy posture`);
+      expect(refused?.message).toContain('ADR-0131 D3, D12 items 7–8, D11');
+      expect(lookups).not.toContain('external-datasource');
+      expect(service.calls).toEqual([]);
+    });
+  }
+
+  it('the refusal is the walled verdict the metadata save door answers for an object', async () => {
+    const { bridge } = bridgeWithTenancy({ tenancy: { posture: 'group' }, posture: 'TENANT_ADMIN' });
+
+    const verdict = walledCatalogWriteVerdict({ type: 'object', tenancyPosture: 'group', callerPosture: 'TENANT_ADMIN' });
+    expect(verdict.allowed).toBe(false);
+    await expect(bridge.importObject('erp', 'Products', {})).rejects.toMatchObject({
+      message: verdict.allowed ? undefined : verdict.message,
+    });
+  });
+
+  it('a read writes no catalog item: the same organization administrator still lists the remote tables under a wall', async () => {
+    const { bridge, service } = bridgeWithTenancy({ tenancy: { posture: 'group' }, posture: 'TENANT_ADMIN' });
+
+    await expect(bridge.listRemoteTables('erp', {})).resolves.toEqual([{ name: 'Products', columnCount: 6 }]);
+    expect(service.calls).toEqual([['listRemoteTables', 'erp', {}]]);
+  });
+
+  it('control: the platform operator imports under a wall', async () => {
+    const { bridge, service } = bridgeWithTenancy({ tenancy: { posture: 'group' }, posture: 'PLATFORM_ADMIN' });
+
+    await expect(bridge.importObject('erp', 'Products', { writable: true })).resolves.toMatchObject({ name: 'products' });
+    expect(service.calls).toEqual([['importObject', 'erp', 'Products', { writable: true }]]);
+  });
+
+  it('control: under `single`, and with no tenancy service at all, the same organization administrator imports as before', async () => {
+    for (const tenancy of [{ posture: 'single' }, 'none'] as const) {
+      const { bridge, service } = bridgeWithTenancy({ tenancy, posture: 'TENANT_ADMIN' });
+
+      await expect(bridge.importObject('erp', 'Products', {}), JSON.stringify(tenancy)).resolves.toMatchObject({ name: 'products' });
+      expect(service.calls, JSON.stringify(tenancy)).toEqual([['importObject', 'erp', 'Products', {}]]);
+    }
+  });
+
+  it('a tenancy service that is registered and cannot answer refuses 503 SERVICE_UNAVAILABLE, never a permit', async () => {
+    const { bridge, service, lookups } = bridgeWithTenancy({ tenancy: 'failing', posture: 'TENANT_ADMIN' });
+
+    await expect(bridge.importObject('erp', 'Products', {})).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+    expect(lookups).not.toContain('external-datasource');
+    expect(service.calls).toEqual([]);
   });
 });

@@ -86,11 +86,13 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { hashApiKey } from '@objectstack/core';
+import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 // The relative import carries its `.js` extension (see the note in
 // `direct-mount-introspection.test.ts`): under `moduleResolution: nodenext` an
 // extension-less one does not resolve and every symbol it names becomes `any`.
 import { createRestApiPlugin } from './rest-api-plugin.js';
+import { registerExternalDatasourceRoutes } from './external-datasource-routes.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const BASE = '/api/v1';
@@ -256,6 +258,8 @@ async function bootFederation(
           ? [{ id: 'key_1', key: hashApiKey(API_KEY), user_id: 'u_federation', revoked: false, active_organization_id: 'o1' }]
           : [];
       }
+      // The key's owner exists: an API key authenticates only as an owner who exists.
+      if (object === 'sys_user') return query?.where?.id === 'u_federation' ? [{ id: 'u_federation' }] : [];
       if (object === 'sys_user_permission_set') {
         return query?.where?.user_id === 'u_federation' && grants.length > 0
           ? [{ id: 'ups_1', user_id: 'u_federation', permission_set_id: GRANT_SET_ID, permission_set: 'federation_caller', organization_id: 'o1' }]
@@ -603,5 +607,237 @@ describe('[#9901] the family requires a capability above authentication', () => 
     expect(statusCode).toBe(403);
     expect(body?.error?.code).toBe('PERMISSION_DENIED');
     expect(service.importObject).not.toHaveBeenCalled();
+  });
+});
+
+// ── [ADR-0131 D3 · D12 items 7–8 · D11] the import is a write to the environment's catalog ──
+//
+// Under a walled tenancy posture (`isolated`, `group`) every organization shares
+// the environment's metadata catalog, and every write to it is the platform
+// operator's: the one predicate is `walledCatalogWriteVerdict`
+// (`@objectstack/metadata-core`), which the `/meta` save door asks after its
+// capability gate. An import saves an object into that catalog, so the import
+// route asks the same verdict, right after this family's capability gate and
+// before the service is looked up. Inert under `single` and with no `tenancy`
+// service; the platform operator rung and `isSystem` are admitted.
+//
+// The registrar is mounted directly here, over a resolver that states the
+// caller's ADR-0095 posture rung, because the rung is what the verdict reads
+// and the plugin-boot fixture above derives none. The posture is read off the
+// registrar's own kernel, the one its `external-datasource` lookup reads.
+
+const IMPORT_ROUTE = FAMILY.find((r) => r.call === 'importObject')!;
+const LIST_ROUTE = FAMILY.find((r) => r.call === 'listRemoteTables')!;
+
+/** The kernel's rejection for a service nobody registered, branded as `PluginLoader.getService` brands it. */
+const notRegistered = (name: string) =>
+  Object.assign(new Error(`Service '${name}' not found`), {
+    __objectstackServiceNotRegistered: true,
+    code: 'SERVICE_NOT_REGISTERED',
+    serviceName: name,
+  });
+
+function mountWithTenancy(opts: {
+  /** The `tenancy` service the kernel answers, `'none'` for no registration, `'failing'` for one that cannot answer. */
+  tenancy: { posture: string } | 'none' | 'failing';
+  /** The caller's ADR-0095 posture rung. */
+  posture?: string;
+  grants?: readonly string[];
+}) {
+  const server = createRecordingServer();
+  const service = federationServiceSpies();
+  const lookups: string[] = [];
+  const kernel = {
+    getServiceAsync: async (name: string) => {
+      lookups.push(`kernel:${name}`);
+      if (name !== 'tenancy' || opts.tenancy === 'none') throw notRegistered(name);
+      if (opts.tenancy === 'failing') throw new Error('the tenancy store did not answer');
+      return opts.tenancy;
+    },
+  };
+  const ctx = {
+    getService: vi.fn((name: string) => {
+      lookups.push(name);
+      if (name === 'external-datasource') return service;
+      throw notRegistered(name);
+    }),
+    getKernel: () => kernel,
+    logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  };
+  const grants = opts.grants ?? FULL_GRANT;
+  registerExternalDatasourceRoutes(server as any, ctx as any, BASE, {
+    resolveExecutionContext: async () => ({
+      userId: 'u_federation',
+      systemPermissions: [...grants],
+      ...(opts.posture !== undefined ? { posture: opts.posture } : {}),
+    }),
+  });
+  return { table: server.table, service, lookups };
+}
+
+describe('[ADR-0131 D12 items 7–8] under a walled tenancy posture the import is the platform operator\'s, like every write to the environment\'s catalog', () => {
+  for (const posture of ['group', 'isolated'] as const) {
+    it(`${posture}: an organization administrator holding both federation capabilities is refused the import 403 PERMISSION_DENIED, before the service is looked up`, async () => {
+      const { table, service, lookups } = mountWithTenancy({ tenancy: { posture }, posture: 'TENANT_ADMIN' });
+
+      const { statusCode, body } = await call(table, IMPORT_ROUTE, {});
+
+      expect(statusCode).toBe(403);
+      expect(body?.success).toBe(false);
+      expect(body?.error?.code).toBe('PERMISSION_DENIED');
+      expect(body?.error?.message).toContain(`'${posture}' tenancy posture`);
+      expect(body?.error?.message).toContain('ADR-0131 D3, D12 items 7–8, D11');
+      expect(service.importObject).not.toHaveBeenCalled();
+      expect(lookups).not.toContain('external-datasource');
+    });
+  }
+
+  it('the refusal is the walled verdict the metadata save door answers for an object, not a sentence of this family\'s own', async () => {
+    const { table } = mountWithTenancy({ tenancy: { posture: 'group' }, posture: 'TENANT_ADMIN' });
+
+    const { body } = await call(table, IMPORT_ROUTE, {});
+
+    const verdict = walledCatalogWriteVerdict({ type: 'object', tenancyPosture: 'group', callerPosture: 'TENANT_ADMIN' });
+    expect(verdict.allowed).toBe(false);
+    expect(body?.error?.message).toBe(verdict.allowed ? undefined : verdict.message);
+  });
+
+  it('the capability gate still answers first: a caller lacking the write capability is told which capability, not the posture', async () => {
+    const { table, service } = mountWithTenancy({
+      tenancy: { posture: 'group' }, posture: 'TENANT_ADMIN', grants: [READ_CAPABILITY],
+    });
+
+    const { statusCode, body } = await call(table, IMPORT_ROUTE, {});
+
+    expect(statusCode).toBe(403);
+    expect(body?.error?.code).toBe('PERMISSION_DENIED');
+    expect(body?.error?.message).toContain(WRITE_CAPABILITY);
+    expect(body?.error?.message).not.toContain('tenancy posture');
+    expect(service.importObject).not.toHaveBeenCalled();
+  });
+
+  it('a read writes no catalog item: the same organization administrator still lists the remote tables under a wall', async () => {
+    const { table, service } = mountWithTenancy({ tenancy: { posture: 'group' }, posture: 'TENANT_ADMIN' });
+
+    const { statusCode, body } = await call(table, LIST_ROUTE, {});
+
+    expect(statusCode).toBe(LIST_ROUTE.ok);
+    expect(body?.success).toBe(true);
+    expect(service.listRemoteTables).toHaveBeenCalledWith(DS, { schema: undefined });
+  });
+
+  it('control: the platform operator imports under a wall', async () => {
+    const { table, service } = mountWithTenancy({ tenancy: { posture: 'group' }, posture: 'PLATFORM_ADMIN' });
+
+    const { statusCode, body } = await call(table, IMPORT_ROUTE, {});
+
+    expect(statusCode).toBe(IMPORT_ROUTE.ok);
+    expect(body?.success).toBe(true);
+    expect(service.importObject).toHaveBeenCalledWith(DS, 'customers', {});
+  });
+
+  it('control: under `single`, and with no tenancy service at all, the same organization administrator imports as before', async () => {
+    for (const tenancy of [{ posture: 'single' }, 'none'] as const) {
+      const { table, service } = mountWithTenancy({ tenancy, posture: 'TENANT_ADMIN' });
+
+      const { statusCode, body } = await call(table, IMPORT_ROUTE, {});
+
+      expect(statusCode, JSON.stringify(tenancy)).toBe(IMPORT_ROUTE.ok);
+      expect(body?.success, JSON.stringify(tenancy)).toBe(true);
+      expect(service.importObject, JSON.stringify(tenancy)).toHaveBeenCalledWith(DS, 'customers', {});
+    }
+  });
+
+  it('a tenancy service that is registered and cannot answer refuses 503 SERVICE_UNAVAILABLE, never a permit', async () => {
+    const { table, service } = mountWithTenancy({ tenancy: 'failing', posture: 'TENANT_ADMIN' });
+
+    const { statusCode, body } = await call(table, IMPORT_ROUTE, {});
+
+    expect(statusCode).toBe(503);
+    expect(body?.success).toBe(false);
+    expect(body?.error?.code).toBe('SERVICE_UNAVAILABLE');
+    expect(service.importObject).not.toHaveBeenCalled();
+  });
+});
+
+// The catalog refresh is the family's other write: it rewrites the datasource's
+// cached `external_catalog` snapshot, an item of the same environment-wide
+// catalog, so it answers to the same walled verdict for that type, in the same
+// order of checks.
+
+const REFRESH_ROUTE = FAMILY.find((r) => r.call === 'refreshCatalog')!;
+
+describe('[ADR-0131 D12 items 7–8] under a walled tenancy posture the catalog refresh is the platform operator\'s, like every write to the environment\'s catalog', () => {
+  for (const posture of ['group', 'isolated'] as const) {
+    it(`${posture}: an organization administrator holding both federation capabilities is refused the refresh 403 PERMISSION_DENIED, before the service is looked up`, async () => {
+      const { table, service, lookups } = mountWithTenancy({ tenancy: { posture }, posture: 'TENANT_ADMIN' });
+
+      const { statusCode, body } = await call(table, REFRESH_ROUTE, {});
+
+      expect(statusCode).toBe(403);
+      expect(body?.success).toBe(false);
+      expect(body?.error?.code).toBe('PERMISSION_DENIED');
+      expect(body?.error?.message).toContain(`'${posture}' tenancy posture`);
+      expect(body?.error?.message).toContain('ADR-0131 D3, D12 items 7–8, D11');
+      expect(service.refreshCatalog).not.toHaveBeenCalled();
+      expect(lookups).not.toContain('external-datasource');
+    });
+  }
+
+  it('the refusal is the walled verdict the metadata save door answers for an external catalog', async () => {
+    const { table } = mountWithTenancy({ tenancy: { posture: 'group' }, posture: 'TENANT_ADMIN' });
+
+    const { body } = await call(table, REFRESH_ROUTE, {});
+
+    const verdict = walledCatalogWriteVerdict({ type: 'external_catalog', tenancyPosture: 'group', callerPosture: 'TENANT_ADMIN' });
+    expect(verdict.allowed).toBe(false);
+    expect(body?.error?.message).toBe(verdict.allowed ? undefined : verdict.message);
+  });
+
+  it('the capability gate still answers first: a caller lacking the write capability is told which capability, not the posture', async () => {
+    const { table, service } = mountWithTenancy({
+      tenancy: { posture: 'group' }, posture: 'TENANT_ADMIN', grants: [READ_CAPABILITY],
+    });
+
+    const { statusCode, body } = await call(table, REFRESH_ROUTE, {});
+
+    expect(statusCode).toBe(403);
+    expect(body?.error?.code).toBe('PERMISSION_DENIED');
+    expect(body?.error?.message).toContain(WRITE_CAPABILITY);
+    expect(body?.error?.message).not.toContain('tenancy posture');
+    expect(service.refreshCatalog).not.toHaveBeenCalled();
+  });
+
+  it('control: the platform operator refreshes under a wall', async () => {
+    const { table, service } = mountWithTenancy({ tenancy: { posture: 'group' }, posture: 'PLATFORM_ADMIN' });
+
+    const { statusCode, body } = await call(table, REFRESH_ROUTE, {});
+
+    expect(statusCode).toBe(REFRESH_ROUTE.ok);
+    expect(body?.success).toBe(true);
+    expect(service.refreshCatalog).toHaveBeenCalledWith(DS);
+  });
+
+  it('control: under `single`, and with no tenancy service at all, the same organization administrator refreshes as before', async () => {
+    for (const tenancy of [{ posture: 'single' }, 'none'] as const) {
+      const { table, service } = mountWithTenancy({ tenancy, posture: 'TENANT_ADMIN' });
+
+      const { statusCode, body } = await call(table, REFRESH_ROUTE, {});
+
+      expect(statusCode, JSON.stringify(tenancy)).toBe(REFRESH_ROUTE.ok);
+      expect(body?.success, JSON.stringify(tenancy)).toBe(true);
+      expect(service.refreshCatalog, JSON.stringify(tenancy)).toHaveBeenCalledWith(DS);
+    }
+  });
+
+  it('a tenancy service that is registered and cannot answer refuses the refresh 503 SERVICE_UNAVAILABLE, never a permit', async () => {
+    const { table, service } = mountWithTenancy({ tenancy: 'failing', posture: 'TENANT_ADMIN' });
+
+    const { statusCode, body } = await call(table, REFRESH_ROUTE, {});
+
+    expect(statusCode).toBe(503);
+    expect(body?.success).toBe(false);
+    expect(body?.error?.code).toBe('SERVICE_UNAVAILABLE');
+    expect(service.refreshCatalog).not.toHaveBeenCalled();
   });
 });

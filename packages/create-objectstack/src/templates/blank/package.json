@@ -10,6 +10,7 @@
     "dev": "objectstack dev",
     "start": "objectstack start",
     "build": "objectstack build",
+    "deploy": "objectstack deploy",
     "validate": "objectstack validate",
     "lint": "objectstack lint",
     "typecheck": "tsc --noEmit",

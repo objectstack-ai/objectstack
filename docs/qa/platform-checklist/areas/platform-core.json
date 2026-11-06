@@ -3326,7 +3326,7 @@
       "title": "The settings audit trail keeps no fingerprint of a secret-valued setting that a reader can match offline: both ledgers record the platform's keyed digest or none, never the value or an unkeyed hash, so a caller who can only read the audit rows learns that the secret changed and nothing about its value",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3408,7 +3408,7 @@
       },
       "source": [
         "packages/services/service-settings/src/settings-service.ts#secretAuditDigest (one helper supplies a secret write's fingerprint on both write branches, the sys_secret path and the legacy inline-adapter path: the provider's keyedDigest, or null with a once-per-key warn; never the adapter's unkeyed digest)",
-        "packages/services/service-settings/src/config-change-audit.ts#CONFIG_CHANGE_ACTION (the sys_audit_log config_change row: object_name sys_setting, new_value carries namespace/key/scope/digest, never the value; null on a reset)",
+        "packages/services/service-settings/src/config-change-audit.ts#CONFIG_CHANGE_ACTION (the sys_audit_log config_change row: object_name sys_setting, or sys_platform_setting for a global value; new_value carries namespace/key/scope/digest, null on a reset, and old_value the same shape for the value the stored row held before, null when it held none; a secret-valued key's sides carry the masked digest and never the value, while a non-secret key's also carry the value readable)",
         "packages/spec/src/contracts/crypto-provider.ts#keyedDigest (the contract text: a secret's audit fingerprint comes from keyedDigest and never from digest; with no keyed digest the trail records none)",
         "packages/services/service-settings/src/manifests/mail.manifest.ts (mail.api_key: type password, encrypted: true)",
         "#21792 (the maintainer ruling: secret-valued settings are fingerprinted with the keyed digest, never an unkeyed one; non-secret settings unchanged) · PR #21809 (the fix)",
@@ -3444,6 +3444,12 @@
           "date": "2026-10-27",
           "change": "steps[3] and [6], acceptance[1].clause, [4] (clause, verify), negative[0] and automated.ref re-pointed: a non-secret setting's audit digest is now the SHA-256 the sys_setting_audit / sys_platform_setting_audit columns declare, spelled 'sha256:' + 64 hex (crypto-adapter.ts settingAuditDigest), no longer the adapter's FNV-1a 32 ('fnv32:'). The step-7 control computes the algorithm the service now writes, so it can still prove the offline search would find an unkeyed digest. Not loosened: the secret search keeps the FNV-1a 32 as a second net, so a secret row carrying either unkeyed form still fails",
           "ref": "#26465"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-06",
+          "change": "source[1] re-pointed: the config_change row now records the before (old_value) and the after readable for a non-secret key, as ADR-0007 Audit & history decides, so 'never the value' holds for secret-valued keys only. No clause changed: every clause here scores the secret key mail.api_key, whose rows still carry the masked keyed digest and never the value, on both sides",
+          "ref": "#30923"
         }
       ]
     },

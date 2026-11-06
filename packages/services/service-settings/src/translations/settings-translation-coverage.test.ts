@@ -24,7 +24,7 @@ import { describe, it, expect } from 'vitest';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import { lifecycleSettingsManifest } from '@objectstack/objectql';
 import * as manifestsModule from '../manifests/index.js';
-import { en, zhCN, jaJP, esES, zhHant, ar, fr, ptBR } from './index.js';
+import { en, zhCN, jaJP, esES, zhHant, ar, fr, ptBR, ru, de, ko } from './index.js';
 
 // The manifests barrel also exports action handlers and the aggregate array;
 // keep only the manifest objects.
@@ -57,6 +57,9 @@ const LOCALES: Array<[string, { settings?: Record<string, any> }]> = [
   ['ar', ar],
   ['fr', fr],
   ['pt-BR', ptBR],
+  ['ru', ru],
+  ['de', de],
+  ['ko', ko],
 ];
 
 function missingFor(data: { settings?: Record<string, any> }, m: SettingsManifest): string[] {
