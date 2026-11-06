@@ -1266,7 +1266,10 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // `selection` / `pagination` / `userFilters` (with the `fields` repeater's
       // six row properties) / `appearance` / `userActions` / `navigation` /
       // `sharing` composites — thirty row labels, authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(732);
+      // 733 since #30692: the object form's `fieldGroups` repeater offers
+      // `requiresFeature` (the deployment feature a group needs) — one row
+      // label, authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(733);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

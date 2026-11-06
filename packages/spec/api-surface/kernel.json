@@ -377,6 +377,7 @@
     "RealTimeNotificationConfigSchema (const)",
     "RequiredAction (type)",
     "RequiredActionSchema (const)",
+    "RequiresFeatureSlot (type)",
     "ResolvedDependency (type)",
     "ResolvedDependencySchema (const)",
     "ResolvedPackageDependency (type)",

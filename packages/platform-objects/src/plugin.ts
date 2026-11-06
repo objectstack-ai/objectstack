@@ -9,6 +9,7 @@ import { SysSecret } from './system/sys-secret.object.js';
 import { SysExchangeRate } from './system/sys-exchange-rate.object.js';
 import { SysTrustedKey } from './system/sys-trusted-key.object.js';
 import { SysLifecycleState } from './system/sys-lifecycle-state.object.js';
+import { SysRecycleBin } from './system/sys-recycle-bin.object.js';
 import { attestFreshDatastore } from './system/migration-flag.js';
 import type {
   II18nService,
@@ -63,6 +64,12 @@ import { SEED_SETTLEMENT_SERVICE } from '@objectstack/spec/contracts';
  *    re-sweeping within a minute. Its only reader and writer is the engine's
  *    own `LifecycleService`, which treats a kernel without this object as
  *    one that cannot say and sweeps as before.
+ *  - **`sys_recycle_bin`** — the recycle bin (ADR-0148, #30237): one entry
+ *    per delete operation, written by the ObjectQL engine's by-id delete for
+ *    every business object, whichever package declared it. Its writer is the
+ *    engine, present in every composition, so it registers with the engine-
+ *    facing infrastructure, on the project database. A composition without it
+ *    keeps no snapshot, and the engine says so once per object.
  *  - **`sys_metadata_activation`** — the packaged-metadata activation
  *    ledger (ADR-0126 §4). Same story a third time, and the ruling that
  *    moved it here is recorded verbatim on #12359 (maintainer, 2026-08-26,
@@ -209,7 +216,7 @@ export class PlatformObjectsPlugin {
         version: this.version,
         type: 'plugin',
         scope: 'system',
-        objects: [SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate, SysTrustedKey, SysLifecycleState],
+        objects: [SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate, SysTrustedKey, SysLifecycleState, SysRecycleBin],
       });
       ctx?.getService?.('manifest')?.register?.({
         ...ACTIVATION_LEDGER_MANIFEST,
