@@ -224,8 +224,9 @@ export function seedModeOverwritesMatchedRows(mode: string): boolean {
   return mode === 'upsert' || mode === 'update';
 }
 
-interface ReadDataset extends UpgradePlanSeedDataset {
-  raw: Bag;
+/** A dataset as the plan reads it, with the declaration it was read from. */
+export interface UpgradePlanSeedDatasetRead extends UpgradePlanSeedDataset {
+  raw: Record<string, unknown>;
 }
 
 function stableText(value: unknown): string {
@@ -238,8 +239,14 @@ function stableText(value: unknown): string {
   }
 }
 
-function datasetsOf(side: PackageUpgradeSide | undefined): Map<string, ReadDataset> {
-  const out = new Map<string, ReadDataset>();
+/**
+ * One side's seed datasets under the keys the plan names them by: `object`,
+ * plus its match key and its locales when they are not the defaults, and
+ * ` #n` on a second dataset under one key. Exported so a reader of the
+ * environment (`planUpgrade`) pairs datasets exactly as the plan does.
+ */
+export function upgradePlanSeedDatasets(side: PackageUpgradeSide | undefined): Map<string, UpgradePlanSeedDatasetRead> {
+  const out = new Map<string, UpgradePlanSeedDatasetRead>();
   for (const item of side?.data ?? []) {
     if (!isBag(item) || typeof item.object !== 'string' || item.object === '') continue;
     const externalId = typeof item.externalId === 'string' || Array.isArray(item.externalId)
@@ -259,13 +266,13 @@ function datasetsOf(side: PackageUpgradeSide | undefined): Map<string, ReadDatas
   return out;
 }
 
-function publicDataset(d: ReadDataset): UpgradePlanSeedDataset {
+function publicDataset(d: UpgradePlanSeedDatasetRead): UpgradePlanSeedDataset {
   return { key: d.key, object: d.object, externalId: d.externalId, mode: d.mode, records: d.records };
 }
 
 function compareSeeds(installed: PackageUpgradeSide | undefined, incoming: PackageUpgradeSide | undefined): PackageUpgradePlan['seeds'] {
-  const before = datasetsOf(installed);
-  const after = datasetsOf(incoming);
+  const before = upgradePlanSeedDatasets(installed);
+  const after = upgradePlanSeedDatasets(incoming);
   const seeds: PackageUpgradePlan['seeds'] = { added: [], removed: [], changed: [] };
   for (const [key, d] of before) if (!after.has(key)) seeds.removed.push(publicDataset(d));
   for (const [key, d] of after) {

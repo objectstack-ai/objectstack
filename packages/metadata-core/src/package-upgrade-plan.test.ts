@@ -6,7 +6,14 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { comparePackageVersions, isEmptyPackageUpgradePlan, typeChangeCategory } from './package-upgrade-plan.js';
+import { SeedMode } from '@objectstack/spec/data';
+import {
+  comparePackageVersions,
+  isEmptyPackageUpgradePlan,
+  seedModeOverwritesMatchedRows,
+  typeChangeCategory,
+  upgradePlanSeedDatasets,
+} from './package-upgrade-plan.js';
 
 type Fields = Record<string, Record<string, unknown>>;
 
@@ -168,6 +175,20 @@ describe('seed datasets', () => {
     );
     expect(plan.seeds.removed.map((d) => d.key)).toEqual(['acme_old']);
     expect(plan.seeds.changed).toEqual([expect.objectContaining({ key: 'acme_deal', mode: 'upsert', fromMode: 'ignore', changed: ['mode'] })]);
+  });
+
+  it('the modes whose replay writes over a row it matches, of every mode the spec declares', () => {
+    expect(SeedMode.options.filter(seedModeOverwritesMatchedRows)).toEqual(['update', 'upsert']);
+  });
+
+  it('a dataset is keyed by its object, its non-default match key and locales, and its repeat', () => {
+    const keys = [...upgradePlanSeedDatasets({ data: [
+      { object: 'acme_deal', records: [] },
+      { object: 'acme_deal', externalId: 'code', records: [] },
+      { object: 'acme_deal', locale: ['zh-CN', 'en'], records: [] },
+      { object: 'acme_deal', records: [] },
+    ] }).keys()];
+    expect(keys).toEqual(['acme_deal', 'acme_deal by code', 'acme_deal [en,zh-CN]', 'acme_deal #2']);
   });
 
   it('record key order is not a change', () => {
