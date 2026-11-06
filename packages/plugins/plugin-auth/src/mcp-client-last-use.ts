@@ -32,8 +32,8 @@
  * arrived, and a row is written only when its stored hour is older than the
  * current one. So:
  *
- *  - **at most one write per consent per hour**, however many MCP calls the
- *    client makes in it. An assistant can make hundreds of tool calls a
+ *  - **at most one write per consent per hour in each process**, however
+ *    many MCP calls the client makes in it. An assistant can make hundreds of tool calls a
  *    minute; a per-request write would turn every one into a write on an
  *    identity table. An hour is the granularity a person needs to answer
  *    "is this laptop's assistant still acting as me?" and the granularity
@@ -54,10 +54,16 @@
  *
  * The MCP request does not wait for the stamp: the manager schedules it after
  * the response (`run-after-response.ts`). A failed read or write loses that
- * hour's stamp and nothing else. It is reported once per process at `error`,
- * because the reads keep answering an older stamp as if it were current, and
- * the hour is retried in the next hour, not on the next call, so a store
- * outage never becomes a write per request.
+ * hour's stamp and nothing else. Each DISTINCT failure (by its message) is
+ * reported once per process at `error`, because the reads keep answering an
+ * older stamp as if it were current, and the hour is retried in the next
+ * hour, not on the next call, so a store outage never becomes a write or a
+ * log line per request. Keying the report on the message, not on "the first
+ * failure", is what keeps one benign failure from silencing a later real
+ * one (the missing column, an unreachable store). The benign one is also
+ * not a failure at all: a consent withdrawn between the read and the write
+ * leaves nothing to stamp, so the real store answers that write's
+ * `RECORD_NOT_FOUND` as done.
  */
 
 /** The stamp's granularity: one clock hour. */
@@ -65,6 +71,13 @@ export const MCP_CLIENT_LAST_USE_GRANULARITY_MS = 60 * 60 * 1000;
 
 /** How many (client, user, organization) keys one process remembers. */
 export const MCP_CLIENT_LAST_USE_MEMO_CAP = 10_000;
+
+/**
+ * How many distinct failure messages one process reports. A bound, so a store
+ * whose error text varies per row cannot turn the report into a log line per
+ * consent; past it the stamper stays silent, as one consent's hour is.
+ */
+export const MCP_CLIENT_LAST_USE_FAILURE_REPORT_CAP = 16;
 
 /** The verified principal, exactly as `verifyMcpAccessToken` returns it. */
 export interface VerifiedMcpPrincipal {
@@ -86,7 +99,7 @@ export interface StampableConsent {
 export interface McpClientLastUseStore {
   /** Every consent `userId` holds for `clientId`, across organizations. */
   consentsFor(clientId: string, userId: string): Promise<StampableConsent[]>;
-  /** Write `at` as the consent's stamp. */
+  /** Write `at` as the consent's stamp. A consent that is gone by now is a no-op. */
   stamp(consentId: string, at: Date): Promise<void>;
 }
 
@@ -155,7 +168,16 @@ export function mcpClientLastUseStoreFor(getEngine: () => unknown): McpClientLas
       }));
     },
     async stamp(consentId, at) {
-      await engine().update('sys_oauth_consent', { id: consentId, last_used_at: at }, { context: SYSTEM_CTX });
+      try {
+        await engine().update('sys_oauth_consent', { id: consentId, last_used_at: at }, { context: SYSTEM_CTX });
+      } catch (error) {
+        // The consent was read a moment ago and withdrawn since (the person,
+        // or a revoke, deleted the row): there is no grant left to stamp, so
+        // the engine's by-id 404 (`recordNotFoundError`, `@objectstack/core`)
+        // is the stamp's done, not its failure.
+        if ((error as { code?: unknown } | null)?.code === 'RECORD_NOT_FOUND') return;
+        throw error;
+      }
     },
   };
 }
@@ -168,14 +190,15 @@ export function mcpClientLastUseStoreFor(getEngine: () => unknown): McpClientLas
 export class McpClientLastUseStamper {
   /** (client, user, organization) → the hour start this process last settled. */
   private readonly settled = new Map<string, number>();
-  private failureReported = false;
+  /** The failure messages this process has already reported. */
+  private readonly reportedFailures = new Set<string>();
 
   constructor(
     private readonly store: McpClientLastUseStore,
     private readonly opts: {
       now?: () => number;
-      /** Told about the FIRST failure in this process only. */
-      onFirstFailure?: (error: unknown) => void;
+      /** Told about each DISTINCT failure (by message) once in this process. */
+      onNewFailure?: (error: unknown) => void;
     } = {},
   ) {}
 
@@ -203,10 +226,12 @@ export class McpClientLastUseStamper {
       if (consent.lastUsedAt && consent.lastUsedAt.getTime() >= hour) return;
       await this.store.stamp(consent.id, new Date(hour));
     } catch (error) {
-      if (this.failureReported) return;
-      this.failureReported = true;
+      const message = error instanceof Error ? error.message : String(error);
+      if (this.reportedFailures.has(message)) return;
+      if (this.reportedFailures.size >= MCP_CLIENT_LAST_USE_FAILURE_REPORT_CAP) return;
+      this.reportedFailures.add(message);
       try {
-        this.opts.onFirstFailure?.(error);
+        this.opts.onNewFailure?.(error);
       } catch {
         // A report is best-effort; the stamp never becomes the caller's failure.
       }

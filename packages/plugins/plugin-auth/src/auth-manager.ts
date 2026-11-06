@@ -4423,8 +4423,8 @@ export class AuthManager {
    *
    * [#30918] A token that verifies also schedules, AFTER the verdict and off
    * the request's path, the coarse last-use stamp on the consent it was minted
-   * under (`mcp-client-last-use.ts`): at most one write per consent per hour,
-   * from this verified principal and the server's clock. The stamp reads and
+   * under (`mcp-client-last-use.ts`): at most one write per consent per hour
+   * in each process, from this verified principal and the server's clock. The stamp reads and
    * writes nothing the verdict depends on, and its failure is never this
    * method's failure.
    */
@@ -4454,8 +4454,9 @@ export class AuthManager {
   /**
    * [#30918] Settle the last-use stamp of the consent `principal`'s token was
    * minted under, after the response (`run-after-response.ts`). At most one
-   * write per consent per hour, from the verified principal and the server's
-   * clock alone; the first failure in this process is reported at `error`
+   * write per consent per hour in each process, from the verified principal
+   * and the server's clock alone; each distinct failure is reported once per
+   * process at `error`
    * (`error` when the host logger carries it, else `warn`, called through the
    * property — see {@link audienceLogError}; `console.error` when the manager
    * was given no logger, so the report is never silent).
@@ -4465,12 +4466,12 @@ export class AuthManager {
     const stamper = (this.mcpClientLastUse ??= new McpClientLastUseStamper(
       mcpClientLastUseStoreFor(() => this.getDataEngine()),
       {
-        onFirstFailure: (error) => {
+        onNewFailure: (error) => {
           const message =
             '[AuthManager] The last-use time of authorized AI assistants could not be recorded: '
             + 'the authorized-clients reads keep answering the last stamp that landed as if it were current. '
             + 'Check that schema sync has added sys_oauth_consent.last_used_at and that the data engine is reachable; '
-            + 'each consent is retried once an hour, and only this first failure is reported.';
+            + 'each consent is retried once an hour, and each distinct failure is reported once per process.';
           const meta = { error: error instanceof Error ? error.message : String(error) };
           if (this.config.logger) this.audienceLogError(message, meta);
           else console.error(message, meta);

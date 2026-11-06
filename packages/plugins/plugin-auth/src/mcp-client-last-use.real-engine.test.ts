@@ -18,7 +18,9 @@
  *  - NOT CLIENT-CONTROLLABLE: the provider's own update-consent door strips a
  *    last-use member from its body, and a token that does not verify, or
  *    names no `azp` client, stamps nothing;
- *  - a failing store never fails the MCP call and is reported once.
+ *  - a failing store never fails the MCP call, and each distinct failure is
+ *    reported once; a consent withdrawn between the stamp's read and its
+ *    write is no failure, so it cannot spend the report a real outage needs.
  *
  * The access rules of the two reads are pinned on the real plugin in
  * `authorized-clients-read.real-plugin.test.ts`.
@@ -378,8 +380,84 @@ describe('[#30918] a failing store', () => {
     }
     expect(attempts, 'one attempt per hour, however many calls').toBe(2);
     const reports = r.logger.error.mock.calls.filter(([message]) => String(message).includes('last-use time'));
-    expect(reports, 'reported once per process').toHaveLength(1);
+    expect(reports, 'the same failure is reported once per process').toHaveLength(1);
     expect(String(reports[0][0])).toContain('sys_oauth_consent.last_used_at');
     expect(reports[0][1]).toEqual({ error: 'no such column: last_used_at' });
+  }, 60_000);
+
+  it('reports each DISTINCT failure once, so an earlier failure never silences a later, different one', async () => {
+    const r = await rig();
+    await r.consent();
+    const failures: Record<number, string> = {
+      [HOUR_10]: 'SQLITE_BUSY: database is locked',
+      [HOUR_11]: 'no such column: last_used_at',
+      [HOUR_11 + 60 * MINUTE]: 'SQLITE_BUSY: database is locked',
+    };
+    let attempts = 0;
+    const realUpdate = (r.engine.update as any).getMockImplementation();
+    vi.mocked(r.engine.update).mockImplementation((async (object: string, ...rest: unknown[]) => {
+      if (object === 'sys_oauth_consent') {
+        attempts += 1;
+        throw new Error(failures[Math.floor(Date.now() / (60 * MINUTE)) * 60 * MINUTE]);
+      }
+      return realUpdate(object, ...rest);
+    }) as never);
+
+    for (const at of [HOUR_10 + 5 * MINUTE, HOUR_11 + 5 * MINUTE, HOUR_11 + 65 * MINUTE]) {
+      vi.setSystemTime(at);
+      await r.manager.verifyMcpAccessToken(await r.mint());
+      await drain();
+    }
+    expect(attempts, 'one attempt in each of the three hours').toBe(3);
+    const reports = r.logger.error.mock.calls.filter(([message]) => String(message).includes('last-use time'));
+    expect(
+      reports.map(([, meta]) => meta),
+      'the locked store, then the missing column; the locked store again is not reported twice',
+    ).toEqual([{ error: 'SQLITE_BUSY: database is locked' }, { error: 'no such column: last_used_at' }]);
+  }, 60_000);
+
+  it('a consent withdrawn between the stamp\'s read and its write is no failure: nothing is reported, and a later outage still is', async () => {
+    const r = await rig();
+    const withdrawn = await r.consent();
+    // The race on the real engine: the stamp reads the consent, then the
+    // person withdraws it (the row is deleted) before the stamp's write lands.
+    let withdrawAfterNextRead = true;
+    const realFind = (r.engine.find as any).getMockImplementation();
+    vi.mocked(r.engine.find).mockImplementation((async (object: string, ...rest: unknown[]) => {
+      const rows = await realFind(object, ...rest);
+      if (object === 'sys_oauth_consent' && withdrawAfterNextRead) {
+        withdrawAfterNextRead = false;
+        await r.engine.delete('sys_oauth_consent', { where: { id: withdrawn }, ...SYS } as never);
+      }
+      return rows;
+    }) as never);
+    const realUpdate = (r.engine.update as any).getMockImplementation();
+    let updateErrors: string[] = [];
+    vi.mocked(r.engine.update).mockImplementation((async (object: string, ...rest: unknown[]) => {
+      try {
+        return await realUpdate(object, ...rest);
+      } catch (error) {
+        updateErrors.push(String((error as { code?: unknown }).code));
+        throw error;
+      }
+    }) as never);
+
+    await r.manager.verifyMcpAccessToken(await r.mint());
+    await drain();
+    expect(updateErrors, 'the write did land on a row that was gone').toEqual(['RECORD_NOT_FOUND']);
+    const reportsOf = () => r.logger.error.mock.calls.filter(([message]) => String(message).includes('last-use time'));
+    expect(reportsOf(), 'a withdrawn consent has nothing to stamp, so it is not reported').toHaveLength(0);
+
+    // A later real outage, in the same process, is still reported.
+    await r.consent();
+    updateErrors = [];
+    vi.mocked(r.engine.update).mockImplementation((async (object: string, ...rest: unknown[]) => {
+      if (object === 'sys_oauth_consent') throw new Error('no such column: last_used_at');
+      return realUpdate(object, ...rest);
+    }) as never);
+    vi.setSystemTime(HOUR_11 + 5 * MINUTE);
+    await r.manager.verifyMcpAccessToken(await r.mint());
+    await drain();
+    expect(reportsOf().map(([, meta]) => meta)).toEqual([{ error: 'no such column: last_used_at' }]);
   }, 60_000);
 });

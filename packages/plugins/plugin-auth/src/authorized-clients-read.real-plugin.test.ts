@@ -476,6 +476,49 @@ describe('#30918 GET /admin/authorized-clients — another person\'s grants', ()
     }
   });
 
+  it('rule 7, outside their organizations: an organization admin or owner naming a person of ANOTHER organization gets the same one refusal', async () => {
+    const rig = await arrange();
+    await grantBob(rig);
+    // Alice joins Beta only, and grants a client there: Olivia and Oscar hold
+    // Acme, so Alice is a person outside every organization they administer.
+    await rig.engine.insert('sys_member', {
+      organization_id: ORG_BETA,
+      user_id: rig.ids.alice,
+      role: 'member',
+      created_at: new Date(),
+    });
+    await rig.registerClient('client_beta_only', 'Beta Assistant');
+    await rig.grant(rig.ids.alice, 'client_beta_only', {
+      referenceId: ORG_BETA,
+      createdAt: new Date('2026-11-04T09:00:00.000Z'),
+    });
+    const orgsOf = (userId: string) =>
+      ((rig.engine.tables.get('sys_member') ?? []) as any[])
+        .filter((row) => row.user_id === userId)
+        .map((row) => row.organization_id);
+    expect(orgsOf(rig.ids.alice), 'precondition: the target is in Beta only').toEqual([ORG_BETA]);
+
+    for (const [who, email] of [
+      ['orgAdmin', ORG_ADMIN_EMAIL],
+      ['orgOwner', OWNER_EMAIL],
+    ] as const) {
+      const cookie = await rig.signIn(email);
+      const callerId = (await rig.sessionUser(cookie))?.id;
+      expect(orgsOf(callerId), `precondition: ${who} is in Acme only`).toEqual([ORG_ACME]);
+      expect((await rig.sessionUser(cookie))?.isPlatformAdmin, `precondition: ${who} holds no platform standing`).toBe(false);
+
+      const outside = await readJson(await rig.get(`${ADMIN_AUTHORIZED_CLIENTS_PATH}?userId=${rig.ids.alice}`, cookie));
+      const inside = await readJson(await rig.get(`${ADMIN_AUTHORIZED_CLIENTS_PATH}?userId=${rig.ids.bob}`, cookie));
+      expect(outside.status, `${who}: ${outside.text}`).toBe(403);
+      expect(outside.body.error.code, who).toBe('PERMISSION_DENIED');
+      // The same bytes for a person inside and outside their organization:
+      // the gate reads no organization, so neither answer says which it is.
+      expect(outside.text, who).toBe(inside.text);
+      expect(outside.text).not.toContain('client_beta_only');
+      expect(outside.text).not.toContain(rig.ids.alice);
+    }
+  });
+
   it('a platform administrator naming nobody, a repeated or unknown parameter is 400; an id naming no user is 404', async () => {
     const rig = await arrange();
     await grantBob(rig);
