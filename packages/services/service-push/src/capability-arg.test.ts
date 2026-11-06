@@ -6,15 +6,17 @@
  * the stack's `push` key, parsed, or a refusal before the kernel boots.
  *
  * The refusals are the point. A relay configuration (an absent key and `{}`
- * included) has no sender yet, so serving it would mount the push channel and
- * answer every push as if it were sent; and a compiled artifact can carry an
- * inline secret that `defineStack` would have refused, so the boot judges it
- * again. Each refusal names the remedy, and none echoes a secret value.
+ * included) on a deployment that declared it has no control plane can never
+ * deliver, so serving it would mount the push channel and answer every push as
+ * if it were sent; and a compiled artifact can carry an inline secret that
+ * `defineStack` would have refused, so the boot judges it again. Each refusal
+ * names the remedy, and none echoes a secret value. Anywhere else the relay
+ * boots: an unbound server binds while it runs.
  */
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { resolvePushCapabilityArg } from './capability-arg.js';
-import { PushServicePlugin, PUSH_RELAY_NOT_SERVED_MESSAGE } from './push-plugin.js';
+import { PushServicePlugin, PUSH_RELAY_AIR_GAPPED_MESSAGE } from './push-plugin.js';
 import { PushService } from './push-service.js';
 
 const APNS = { teamId: 'TEAM123456', keyId: 'KEY1234567', topic: 'com.example.app', environment: 'production' as const, credentialRef: 'APNS_KEY' };
@@ -39,20 +41,47 @@ describe('resolvePushCapabilityArg — the direct transport is built', () => {
   });
 });
 
-describe('resolvePushCapabilityArg — the relay is refused at boot', () => {
-  it.each([
-    ['an absent push key', undefined],
-    ['null', null],
-    ['the empty block', {}],
-    ["transport: 'relay'", { transport: 'relay' }],
-    ['a staging relay endpoint', { transport: 'relay', endpoint: 'https://relay.staging.example.com' }],
-  ])('%s is refused, naming the missing sender and the direct transport', (_name, push) => {
+const RELAY_CASES = [
+  ['an absent push key', undefined],
+  ['null', null],
+  ['the empty block', {}],
+  ["transport: 'relay'", { transport: 'relay' }],
+  ['a staging relay endpoint', { transport: 'relay', endpoint: 'https://relay.staging.example.com' }],
+] as const;
+
+describe('resolvePushCapabilityArg — the relay is built', () => {
+  beforeEach(() => vi.stubEnv('OS_CLOUD_URL', ''));
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each(RELAY_CASES)('%s hands the plugin the relay block, bound or not', (_name, push) => {
+    expect(resolvePushCapabilityArg(push).options.config.transport).toBe('relay');
+  });
+
+  it('keeps an explicit relay endpoint', () => {
+    expect(resolvePushCapabilityArg({ endpoint: 'https://relay.staging.example.com' }).options.config).toEqual({
+      transport: 'relay',
+      endpoint: 'https://relay.staging.example.com',
+    });
+  });
+});
+
+describe('resolvePushCapabilityArg — the relay is refused on a deployment with no control plane', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each(RELAY_CASES)('%s is refused under OS_CLOUD_URL=off, naming the air gap, the inbox and the direct transport', (_name, push) => {
+    vi.stubEnv('OS_CLOUD_URL', 'off');
     const read = () => resolvePushCapabilityArg(push);
-    expect(read).toThrow(PUSH_RELAY_NOT_SERVED_MESSAGE);
-    expect(read).toThrow(/its sender has not shipped/);
+    expect(read).toThrow(PUSH_RELAY_AIR_GAPPED_MESSAGE);
+    expect(read).toThrow(/declared it has no control plane/);
+    expect(read).toThrow(/in-app inbox/);
     expect(read).toThrow(/transport: 'direct'/);
     // Where the operator writes it on this boot path.
     expect(read).toThrow(/stack definition's push key/);
+  });
+
+  it('a direct block still boots under OS_CLOUD_URL=off: it needs no control plane', () => {
+    vi.stubEnv('OS_CLOUD_URL', 'off');
+    expect(resolvePushCapabilityArg({ apns: APNS }).options.config.transport).toBe('direct');
   });
 });
 
