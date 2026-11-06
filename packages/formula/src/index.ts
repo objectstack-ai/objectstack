@@ -92,7 +92,7 @@ export type {
 } from './template-engine';
 // The mail template hole grammar — one copy, read by `@objectstack/plugin-email`'s
 // renderer, the placement judge below and `@objectstack/lint`'s grammar rule.
-export { mailHolePattern, parseMailHole, judgeMailHoleGrammar } from './mail-hole-grammar';
+export { mailHolePattern, parseMailHole, judgeMailHoleGrammar, optionObjectUnregisteredPlatform } from './mail-hole-grammar';
 export type { ParsedMailHole, MailHoleGrammarFinding, MailHoleGrammarOptions } from './mail-hole-grammar';
 // #25189 — where a hole may sit in a mail template's HTML face (ruling
 // 6335348115 on #25082, F1 A2 / F3 C2). Here because both readers already

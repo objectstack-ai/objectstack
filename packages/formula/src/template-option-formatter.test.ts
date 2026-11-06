@@ -14,7 +14,7 @@
 import { EmailTemplateDefinitionSchema } from '@objectstack/spec/system';
 import { describe, expect, it } from 'vitest';
 
-import { judgeMailHoleGrammar, parseMailHole } from './mail-hole-grammar';
+import { judgeMailHoleGrammar, optionObjectUnregisteredPlatform, parseMailHole } from './mail-hole-grammar';
 import {
   formatValue,
   judgeHoleFormatter,
@@ -124,7 +124,19 @@ describe('the object and field, judged against the app\'s objects', () => {
   it('an object that resolves with its fields not in hand (null) has its field left unjudged', () => {
     const withPlatform = new Map<string, ReadonlyMap<string, boolean> | null>([...objects, ['sys_user', null]]);
     expect(judgeMailHoleGrammar('At {{ status | option:sys_user.status }}', { objects: withPlatform })).toEqual([]);
-    expect(judgeMailHoleGrammar('At {{ status | option:sys_user.status }}', { objects }).map((f) => f.refusal.rule))
+    expect(judgeMailHoleGrammar('At {{ status | option:sys_user.phase }}', { objects: withPlatform })).toEqual([]);
+  });
+
+  it('⭐ a platform-prefixed object the objects do not carry is rung ④: not refused, its field not judged', () => {
+    for (const object of ['sys_userz', 'cloud_tenantz', 'ai_agentz']) {
+      const ref = { object, field: 'status' };
+      expect(optionObjectUnregisteredPlatform(ref, objects)).toBe(true);
+      expect(judgeMailHoleGrammar(`At {{ status | option:${object}.status }}`, { objects })).toEqual([]);
+    }
+    // Control: the same spelling without the prefix is refused, and a carried object is not rung ④.
+    expect(optionObjectUnregisteredPlatform({ object: 'userz', field: 'status' }, objects)).toBe(false);
+    expect(optionObjectUnregisteredPlatform({ object: 'opportunity', field: 'stage' }, objects)).toBe(false);
+    expect(judgeMailHoleGrammar('At {{ status | option:userz.status }}', { objects }).map((f) => f.refusal.rule))
       .toEqual(['option-object-unknown']);
   });
 

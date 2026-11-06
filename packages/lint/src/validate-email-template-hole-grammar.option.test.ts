@@ -90,9 +90,19 @@ describe('a reference that names an option list', () => {
 
   it('⭐ a platform-provided object the stack does not carry resolves, its field left to the publish door and the send', () => {
     expect(validateEmailTemplateHoleGrammar(stackWith(onlySubject('{{ status | option:sys_user.status }}')))).toEqual([]);
-    // Control: a platform-shaped name no package registers is still refused.
-    expect(validateEmailTemplateHoleGrammar(stackWith(onlySubject('{{ status | option:sys_userz.status }}'))).map((f) => f.message))
-      .toEqual([expect.stringContaining('names the object `sys_userz`, which resolves to no object')]);
+  });
+
+  it('⭐ a platform-prefixed object no known package registers is advised at warning, not refused (ladder rung ④)', () => {
+    const findings = validateEmailTemplateHoleGrammar(stackWith(onlySubject('Stalled at {{ status | option:sys_userz.status }}')));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ severity: 'warning', rule: EMAIL_TEMPLATE_HOLE_GRAMMAR, path: 'emailTemplates[0].subject' });
+    expect(findings[0].message).toContain('{{ status | option:sys_userz.status }}');
+    expect(findings[0].message).toContain('names the object `sys_userz`, which has a platform prefix, but no known package registers it');
+    expect(findings[0].hint).toContain('object-reference-unregistered-platform');
+    expect(findings[0].hint).toContain(OPTION_ARGUMENT_RULE);
+    // Control: the same spelling without the prefix is refused.
+    expect(validateEmailTemplateHoleGrammar(stackWith(onlySubject('{{ status | option:userz.status }}'))).map((f) => [f.severity, f.message]))
+      .toEqual([['error', expect.stringContaining('names the object `userz`, which resolves to no object')]]);
   });
 
   it('control: the same hole is refused once the object is not declared — the verdict reads the declaration', () => {
@@ -139,6 +149,19 @@ describe('the authoring doors', () => {
       parsed: ObjectStackDefinitionSchema.parse(refused) as Record<string, unknown>,
     }).filter((f) => f.severity === 'error' && f.rule === EMAIL_TEMPLATE_HOLE_GRAMMAR).map((f) => f.path))
       .toEqual(['emailTemplates[0].subject']);
+  });
+
+  it('⭐ os validate and the publish door agree on rung ④: a warning, never an error', () => {
+    const tpl = onlySubject('{{ status | option:sys_userz.status }}');
+    const normalized = normalizeStackInput(stackWith(tpl) as Record<string, unknown>);
+    const atValidate = runAuthoringRules('validate', {
+      normalized: normalized as Record<string, unknown>,
+      parsed: ObjectStackDefinitionSchema.parse(normalized) as Record<string, unknown>,
+    }).filter((f) => f.rule === EMAIL_TEMPLATE_HOLE_GRAMMAR);
+    expect(atValidate.map((f) => [f.severity, f.path])).toEqual([['warning', 'emailTemplates[0].subject']]);
+    const atPublish = runRuntimeAuthoringRules({ type: 'email_template', item: tpl, context: { objects: [opportunity] } });
+    expect(atPublish.errors).toEqual([]);
+    expect(atPublish.advisories.filter((f) => f.rule === EMAIL_TEMPLATE_HOLE_GRAMMAR).map((f) => f.path)).toEqual(['emailTemplates[0].subject']);
   });
 
   it('⭐ the runtime publish gate judges an email_template write against the live objects it carries', () => {

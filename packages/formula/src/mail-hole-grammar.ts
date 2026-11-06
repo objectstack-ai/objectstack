@@ -46,9 +46,15 @@
  * argument is parsed ({@link ParsedMailHole}.`optionField`) and, when the
  * caller hands in the app's objects ({@link MailHoleGrammarOptions}.`objects`),
  * judged against them: the object must exist, the field must be one of its
- * fields, and that field must declare options.
+ * fields, and that field must declare options. A name the objects do not
+ * carry that has a platform prefix (`sys_`, `cloud_`, `ai_`) is rung ④ of the
+ * object-reference ladder: a package outside this app may register it, so the
+ * grammar does not refuse it and does not judge its field
+ * ({@link optionObjectUnregisteredPlatform}); the authoring rule advises on it,
+ * and a send with no option list for it is refused at render.
  */
 
+import { hasPlatformObjectPrefix } from '@objectstack/spec/system';
 import {
   CURRENCY_ARGUMENT_RULE,
   currencyCodePath,
@@ -160,10 +166,27 @@ export interface MailHoleGrammarOptions {
    * judged here. Present, an `option:object.field` hole is judged against
    * it: an object it does not name (`option-object-unknown`), a field that
    * object does not have (`option-field-unknown`) and a field without options
-   * (`option-field-no-options`) are refused. Absent, the reference is not
+   * (`option-field-no-options`) are refused. A name it does not carry that
+   * has a platform prefix is not refused and its field not judged
+   * ({@link optionObjectUnregisteredPlatform}). Absent, the reference is not
    * judged here.
    */
   objects?: ReadonlyMap<string, ReadonlyMap<string, boolean> | null>;
+}
+
+/**
+ * Whether an `option` hole's object is rung ④ of the object-reference ladder
+ * against `objects`: not among them, and spelled with a platform prefix
+ * (`sys_`, `cloud_`, `ai_`), so a package outside this app may still register
+ * it. Such a name is neither refused nor judged by {@link judgeMailHoleGrammar};
+ * a caller that advises (the authoring rule, at `warning`) reads this, and a
+ * render with no label table for it refuses at send (`optionTableRefusal`).
+ */
+export function optionObjectUnregisteredPlatform(
+  ref: OptionFieldReference,
+  objects: ReadonlyMap<string, ReadonlyMap<string, boolean> | null>,
+): boolean {
+  return !objects.has(ref.object) && hasPlatformObjectPrefix(ref.object);
 }
 
 /** Why an `option` hole's object and field cannot label its value, or `null` when the field declares options. */
@@ -172,6 +195,7 @@ function optionFieldRefusal(
   ref: OptionFieldReference,
   objects: ReadonlyMap<string, ReadonlyMap<string, boolean> | null>,
 ): TemplateHoleGrammarRefusal | null {
+  if (optionObjectUnregisteredPlatform(ref, objects)) return null;
   const fields = objects.get(ref.object);
   if (fields === undefined) {
     return {

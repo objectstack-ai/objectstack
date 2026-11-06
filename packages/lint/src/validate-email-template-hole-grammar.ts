@@ -39,6 +39,11 @@
  *   and, with its field left unjudged here, a platform-provided object the
  *   stack does not carry (`PLATFORM_PROVIDED_OBJECT_NAMES`). At the publish
  *   door the stack's objects are the live object universe the gate carries.
+ *   A name none of these carries that has a platform prefix (`sys_`,
+ *   `cloud_`, `ai_`) is the ladder's rung ④ (`object-reference-unregistered-platform`):
+ *   a package outside the app may register it, so the hole is not refused —
+ *   it gets a `warning`, its field unjudged, and a send with no option list
+ *   for it is refused at render.
  *
  * WHICH holes are refused is not decided here: it is `@objectstack/formula`'s
  * `judgeMailHoleGrammar`, the grammar the mail renderer itself parses with,
@@ -59,7 +64,15 @@
  * placement rule's question (`validate-email-template-hole-placements.ts`).
  */
 
-import { CURRENCY_ARGUMENT_RULE, declaresOptionsOnceServed, judgeMailHoleGrammar, OPTION_ARGUMENT_RULE } from '@objectstack/formula';
+import {
+  CURRENCY_ARGUMENT_RULE,
+  declaresOptionsOnceServed,
+  judgeMailHoleGrammar,
+  mailHolePattern,
+  OPTION_ARGUMENT_RULE,
+  optionObjectUnregisteredPlatform,
+  parseMailHole,
+} from '@objectstack/formula';
 
 import { collectionEntries } from './collection-entries.js';
 import { PLATFORM_PROVIDED_OBJECT_NAMES } from '@objectstack/spec/system';
@@ -72,7 +85,8 @@ type AnyRec = Record<string, unknown>;
 export const EMAIL_TEMPLATE_HOLE_GRAMMAR = 'email-template-hole-grammar';
 
 export interface EmailTemplateHoleGrammarFinding {
-  severity: 'error';
+  /** `error` for a hole the grammar refuses; `warning` for an `option` hole on rung ④ of the object ladder. */
+  severity: 'error' | 'warning';
   rule: typeof EMAIL_TEMPLATE_HOLE_GRAMMAR;
   where: string;
   /** Positional config path, e.g. `emailTemplates[0].subject`. */
@@ -119,7 +133,8 @@ function optionFieldsOf(obj: AnyRec): Map<string, boolean> {
  *    the publish door, whose live universe carries the served object, and at
  *    send, never here.
  *
- * Any other name resolves to nothing and is refused.
+ * A name none of these carries resolves to nothing: refused, unless it has a
+ * platform prefix (rung ④, {@link unregisteredPlatformOptionHoles}).
  */
 function optionFieldIndex(stack: AnyRec): Map<string, Map<string, boolean> | null> {
   const index = new Map<string, Map<string, boolean> | null>();
@@ -137,6 +152,23 @@ function optionFieldIndex(stack: AnyRec): Map<string, Map<string, boolean> | nul
     if (!index.has(name)) index.set(name, null);
   }
   return index;
+}
+
+/**
+ * The `option` holes of one face whose object is rung ④ of the object ladder
+ * against `objects` — platform-prefixed, and carried by no rung above — which
+ * the grammar neither refuses nor judges, in order.
+ */
+function unregisteredPlatformOptionHoles(
+  face: string,
+  objects: ReadonlyMap<string, ReadonlyMap<string, boolean> | null>,
+): { start: number; text: string; object: string }[] {
+  const holes: { start: number; text: string; object: string }[] = [];
+  for (const m of face.matchAll(mailHolePattern())) {
+    const ref = parseMailHole(m[2], m[0])?.optionField;
+    if (ref && optionObjectUnregisteredPlatform(ref, objects)) holes.push({ start: m.index ?? 0, text: m[0], object: ref.object });
+  }
+  return holes;
 }
 
 export function validateEmailTemplateHoleGrammar(stack: AnyRec): EmailTemplateHoleGrammarFinding[] {
@@ -161,6 +193,21 @@ export function validateEmailTemplateHoleGrammar(stack: AnyRec): EmailTemplateHo
             'A mail template hole is `{{ path }}` or `{{ path | formatter[:arg] }}`, with one formatter. '
             + `${hole.refusal.rule.startsWith('option-') ? OPTION_ARGUMENT_RULE : CURRENCY_ARGUMENT_RULE} `
             + 'Anything more belongs in the caller that supplies the data.',
+        });
+      }
+      for (const hole of unregisteredPlatformOptionHoles(text, objects)) {
+        findings.push({
+          severity: 'warning',
+          rule: EMAIL_TEMPLATE_HOLE_GRAMMAR,
+          where: `email template "${name}"${locale}`,
+          path: `${path}.${face}`,
+          message:
+            `${face}: the hole ${hole.text} names the object \`${hole.object}\`, which has a platform prefix, but no `
+            + 'known package registers it and this stack does not define it, so it likely resolves to nothing; its '
+            + `field is not judged here, and a send that finds no option list for it is refused (offset ${hole.start})`,
+          hint:
+            'Check the spelling against the object the providing package registers, or ignore this if a third-party '
+            + `package provides it (\`os explain object-reference-unregistered-platform\`). ${OPTION_ARGUMENT_RULE}`,
         });
       }
     }

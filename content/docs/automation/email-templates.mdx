@@ -173,7 +173,10 @@ artifact provides, and the platform's objects all resolve), whose field that
 object does not have, or whose field declares no options (`email-template-hole-grammar`, a `422 INVALID_METADATA` at the publish
 door), and an argument that is not a bare `object.field`: a quoted one
 (`option:'opportunity.stage'`), a field with no object (`option:stage`) or a
-marked path (`option:@stage_ref`). `option` belongs to mail templates: in-app
+marked path (`option:@stage_ref`). An object none of those carries whose name
+has a platform prefix (`sys_`, `cloud_`, `ai_`) is not refused: a package
+outside the app may register it, so the hole gets a warning, its field is not
+judged, and a send that finds no option list for it is refused. `option` belongs to mail templates: in-app
 template text (flow notifications, action and bulk-action copy) refuses it as a
 formatter it does not know.
 
