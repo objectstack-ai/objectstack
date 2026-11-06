@@ -298,6 +298,64 @@
 //     such a call never enters that measurement and is still not reported;
 //     widening the population is a different card.
 //
+// ── The source reach: a load the SOURCE under test pays for the test (#30909) ─
+//
+// Both readers above look for the load in the TEST file. The source under test
+// writes them too: a route handler that guards `await import('@objectstack/
+// objectql')` pays that transform for whichever case first gets past the
+// handler's own gates. Measured (#30873): `meta-write-door-capability-
+// enumeration.test.ts` at `main` 98f640d5 reached `meta-record-currency-
+// backfill-route.ts`'s guarded import through `rest-server.ts`; the import took
+// 3.2 s cold inside a 5000 ms `testTimeout`, the case timed out 3 of 3 on two
+// loaded cores, and Test Core went red on a PR that touched nothing in
+// `packages/rest`. This gate exited 0 on that tree.
+//
+// So a third reader follows the test's COLLECTION-TIME reach into its own
+// package: every relative file it loads during collection (a static import or a
+// module-scope dynamic one), transitively, never across a bare specifier. A
+// literal dynamic load of a measured specifier (the population above, unchanged)
+// inside a function body of a reached file is a finding against the TEST, unless
+// some file in the same reach loads that specifier at module scope (it is then
+// paid during collection already) or the test `vi.mock`s / `vi.doMock`s it. The
+// remedy is the one the other readers print: a module-top `import '<spec>'` in
+// the test file.
+//
+// ⚖️ Why it judges only the test files a change adds or edits. Static reach is
+// not execution: `rest-server.ts` registers every route, so every rest test that
+// builds a `RestServer` reaches every handler's guarded import, while only the
+// cases that really call that handler pay it. Measured on `main` 0e882086 over
+// EVERY test file: 2307 test files and 5491 (test, specifier) pairs, from only
+// 89 source sites in 53 files (`ui/packages/app-shell` 932 files, `packages/
+// runtime` 387, `ui/packages/components` 287, `packages/metadata-protocol` 200,
+// `packages/rest` 187, `packages/cli` 179, eight more packages under 70 each).
+// Bounding the depth does not rescue it: direct imports only still flag 363
+// files and miss the incident (its site is two hops out); two hops flag 848.
+// The rule cannot tell which of those files is the one that pays, and warming
+// all of them moves an evaluation into every file's collection for nothing. So
+// the half is asked where an author is already at work: a test file the change
+// adds or edits, measured from the merge base with `origin/main` (committed,
+// staged, unstaged and untracked alike). On a `main` push the base is HEAD and
+// the half judges nothing; on a PR or a queue build it judges that change's test
+// files, which is exactly the incident's shape (a case added to a file that then
+// reached a cold site). The rest burn down as lanes touch them, one module-top
+// line each. `--reach-all` runs the census over every test file;
+// `--changed-from <ref>` names another base. No merge base is a FAILURE, never a
+// pass: a rule that could not run must not read as a rule that passed.
+//
+// Boundaries, stated so they are not rediscovered as bugs:
+//
+//   - Collection-time edges only. A relative `await import('./x.js')` inside a
+//     function is not followed, so a load `x.ts` makes at its module top is not
+//     seen; neither is anything past a bare specifier. Both are the silent
+//     direction.
+//   - Warmth is read inside the package. A module-top import of ANOTHER workspace
+//     package whose `dist/` itself loads the specifier does warm it at run time,
+//     and is not credited here — the loud direction; the remedy line costs nothing
+//     the run was not already paying.
+//   - A mock is credited whether or not its factory calls `importOriginal`.
+//   - A source edit that ADDS a cold site reds no unchanged test; the next change
+//     to a test that reaches it does.
+//
 // ── Payload: a dir the package's own tsconfig excludes holds no test ROOT ───
 //
 // A test file under a directory the package's own `tsconfig.json` excludes is
@@ -347,6 +405,8 @@
 // Usage:
 //   node scripts/check-test-source-alias.mjs
 //   node scripts/check-test-source-alias.mjs --list      # measured state, registry-shaped
+//   node scripts/check-test-source-alias.mjs --reach-all # the source reach over EVERY test file
+//   node scripts/check-test-source-alias.mjs --changed-from <ref>   # the source reach's base
 //   node scripts/check-test-source-alias.mjs --self-test
 
 import { readFileSync, readdirSync, statSync, existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
@@ -3095,6 +3155,66 @@ function buildFixtureTree() {
       '});\n',
   });
 
+  // (30-35) THE SOURCE REACH (#30909). The incident's shape at fixture size: the
+  // test imports a hub (`server.ts`), the hub imports a route at module top, and
+  // the route guards a literal `import('@fx/core')` inside its handler, so the
+  // load sits two collection-time hops from the test and nowhere in the test.
+  const ROUTE = 'export async function handle(): Promise<unknown> {\n  return await import(\'@fx/core\');\n}\n';
+  const HUB = "import { handle } from './route.js';\nexport class Server {\n  run() {\n    return handle();\n  }\n}\n";
+  const CASE = "it('y', async () => new Server().run());\n";
+  // (30) VIOLATING: the 98f640d5 shape.
+  fixture(root, 'packages/source-reach', {
+    'package.json': ARTIFACT_MANIFEST('@fx/source-reach'),
+    'src/route.ts': ROUTE,
+    'src/server.ts': HUB,
+    'src/thing.test.ts': "import { it } from 'vitest';\nimport { Server } from './server.js';\n" + CASE,
+  });
+  // (31) THE REMEDY: the same reach, with the module-top import the gate prints.
+  fixture(root, 'packages/source-reach-paid', {
+    'package.json': ARTIFACT_MANIFEST('@fx/source-reach-paid'),
+    'src/route.ts': ROUTE,
+    'src/server.ts': HUB,
+    'src/thing.test.ts': "import '@fx/core';\nimport { it } from 'vitest';\nimport { Server } from './server.js';\n" + CASE,
+  });
+  // (32) WARM IN THE REACH: another file the test loads during collection
+  // imports the specifier statically, so the load is paid before any clock.
+  fixture(root, 'packages/source-reach-warm', {
+    'package.json': ARTIFACT_MANIFEST('@fx/source-reach-warm'),
+    'src/route.ts': ROUTE,
+    'src/server.ts': "import './warm.js';\n" + HUB,
+    'src/warm.ts': "import { alive } from '@fx/core';\nexport const warm = alive;\n",
+    'src/thing.test.ts': "import { it } from 'vitest';\nimport { Server } from './server.js';\n" + CASE,
+  });
+  // (33) MOCKED: the factory answers the import, so no artifact is transformed.
+  fixture(root, 'packages/source-reach-mocked', {
+    'package.json': ARTIFACT_MANIFEST('@fx/source-reach-mocked'),
+    'src/route.ts': ROUTE,
+    'src/server.ts': HUB,
+    'src/thing.test.ts':
+      "import { it, vi } from 'vitest';\nimport { Server } from './server.js';\n" +
+      "vi.mock('@fx/core', () => ({ alive: 0 }));\n" +
+      CASE,
+  });
+  // (34) THE BOUNDARY: a hub that reaches its route only through a LAZY relative
+  // import inside a function is not followed (header, "The source reach").
+  fixture(root, 'packages/source-reach-lazy-hop', {
+    'package.json': ARTIFACT_MANIFEST('@fx/source-reach-lazy-hop'),
+    'src/route.ts': ROUTE,
+    'src/server.ts':
+      "export class Server {\n  async run() {\n    const { handle } = await import('./route.js');\n    return handle();\n  }\n}\n",
+    'src/thing.test.ts': "import { it } from 'vitest';\nimport { Server } from './server.js';\n" + CASE,
+  });
+  // (35) ONE FINDING PER SPECIFIER: the test also pays the same load in its own
+  // body, which the direct reader already reports; the reach must not add a second.
+  fixture(root, 'packages/source-reach-direct-too', {
+    'package.json': ARTIFACT_MANIFEST('@fx/source-reach-direct-too'),
+    'src/route.ts': ROUTE,
+    'src/server.ts': HUB,
+    'src/thing.test.ts':
+      "import { it } from 'vitest';\nimport { Server } from './server.js';\n" +
+      "it('y', async () => {\n  await import('@fx/core');\n  return new Server().run();\n});\n",
+  });
+
   return root;
 }
 
@@ -3128,6 +3248,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the latent half (#9674)': 8,
   'the clocked-window rule (#10126)': 19,
   'a type reference or literal text is not a load (#25766)': 21,
+  'the source reach: a load the source under test pays (#30909)': 12,
   'the import clause is bounded to ONE statement (#12555)': 11,
   'the declared population must stay READABLE by the dispatch deriver': 11,
   'the declaration must still BE the workspace (#11510)': 22,
@@ -3136,7 +3257,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 11;
+const SELF_TEST_BATTERY_FLOOR = 12;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -3672,6 +3793,82 @@ function selfTest() {
         `${shape} inside a test body was not read as exactly one clocked load — the erasure rule swallowed a real load`,
       );
     }
+
+    // ── the source reach (#30909) ─────────────────────────────────────────
+    battery('the source reach: a load the source under test pays (#30909)');
+    // `check(root, {})` judges the reach on EVERY test file (no scope), the way
+    // `--reach-all` does; the scoped run further down is the CI default.
+    const reachAll = check(root, {});
+    const reachIn = (failures, needle) =>
+      failures.filter((f) => f.includes(needle) && f.includes('in the source under test'));
+    const violating = 'packages/source-reach/src/thing.test.ts';
+    expect(
+      reachIn(reachAll.failures, `${violating}:2`).length === 1,
+      'a literal import() two collection-time hops into the source under test was not reported against the test — the 98f640d5 miss',
+    );
+    expect(
+      reachIn(reachAll.failures, violating).every(
+        (f) =>
+          f.includes("import('@fx/core')") &&
+          f.includes('packages/source-reach/src/route.ts:2') &&
+          f.includes(`${violating} → packages/source-reach/src/server.ts → packages/source-reach/src/route.ts`),
+      ),
+      'the source-reach finding did not name the specifier, the source site, or the chain that reached it',
+    );
+    expect(
+      reachIn(reachAll.failures, violating).every(
+        (f) => f.includes("import '@fx/core';") && f.includes('clocked windows measure behaviour, never loading'),
+      ),
+      'the source-reach finding printed no module-top import to add, or dropped the convention sentence',
+    );
+    // The controls below are worth something only if `@fx/core` is in each
+    // one's measured population — otherwise they pass by having nothing to find.
+    expect(
+      ['paid', 'warm', 'mocked', 'lazy-hop'].every((name) =>
+        reachAll.packages.find((p) => p.name === `@fx/source-reach-${name}`)?.unaliased.includes('@fx/core'),
+      ),
+      'a source-reach control fixture lost `@fx/core` from its measured population, so its silence proves nothing',
+    );
+    expect(
+      reachIn(reachAll.failures, 'packages/source-reach-paid/').length === 0,
+      'a test that already pays the load at module top was reported — the reader stopped asking WHERE the load is paid',
+    );
+    expect(
+      reachIn(reachAll.failures, 'packages/source-reach-warm/').length === 0,
+      'a load another reached file already pays during collection was reported',
+    );
+    expect(
+      reachIn(reachAll.failures, 'packages/source-reach-mocked/').length === 0,
+      'a vi.mock()ed specifier was reported, though its factory answers the import',
+    );
+    expect(
+      reachIn(reachAll.failures, 'packages/source-reach-lazy-hop/').length === 0,
+      'a lazy relative hop was followed — the header states collection-time edges only',
+    );
+    expect(
+      reachAll.failures.filter((f) => f.includes('packages/source-reach-direct-too/src/thing.test.ts')).length === 1 &&
+        reachIn(reachAll.failures, 'packages/source-reach-direct-too/').length === 0,
+      'a load the direct reader already reports was reported a second time by the source reach',
+    );
+    // The scope: the CI default judges only the test files a change adds or
+    // edits, so the violating file reds only when it is in that set.
+    const scopedOut = check(root, {}, { reachScope: new Set(['packages/source-reach-paid/src/thing.test.ts']) });
+    expect(
+      reachIn(scopedOut.failures, violating).length === 0,
+      'the source reach judged a test file outside the changed set',
+    );
+    const scopedIn = check(root, {}, { reachScope: new Set([violating]) });
+    expect(
+      reachIn(scopedIn.failures, violating).length === 1 && scopedIn.reachJudged === 1,
+      'the source reach did not judge a changed test file, or judged more than the changed set',
+    );
+    // The direct reader is not scoped: it still reports every file.
+    expect(
+      scopedOut.failures.some(
+        (f) => f.includes('packages/clocked-load/src/thing.test.ts:3') && f.includes('a CLOCKED window'),
+      ),
+      'scoping the source reach also scoped the direct clocked-window reader',
+    );
 
     // ── the import clause is bounded to ONE statement (#12555) ────────────
     //
