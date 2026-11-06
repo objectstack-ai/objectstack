@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/core': patch
 '@objectstack/objectql': patch
 '@objectstack/runtime': patch
@@ -12,8 +12,8 @@
 
 feat(audit): a write made while an administrator impersonates a user now records the administrator
 
-Clause-②: yes
-Metadata-protocol: none
+Clause-②: yes (widening)
+Metadata-protocol: added
 
 An administrator who impersonates a user writes as that user, and until now nothing on the write said otherwise: the `sys_audit_log` row, the `sys_activity` row and the record were byte-identical to the user's own work. The session already knew (`sys_session.impersonated_by`); the write did not.
 
