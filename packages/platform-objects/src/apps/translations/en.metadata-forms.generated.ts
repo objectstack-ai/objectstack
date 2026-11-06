@@ -112,6 +112,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Visible When",
         helpText: "CEL predicate over the record (e.g. record.type == 'invoice') — the entry form shows the whole group, header included, only while it is TRUE."
       },
+      "fieldGroups.requiresFeature": {
+        label: "Requires Feature",
+        helpText: "Deployment feature the group needs (e.g. multiOrgEnabled): where it is off, the entry form and the record detail page hide the whole group. Combined with Visible When, the group shows only while both hold. The fields stay readable through the API."
+      },
       fields: {
         label: "Fields",
         helpText: "Add the columns this object will store"

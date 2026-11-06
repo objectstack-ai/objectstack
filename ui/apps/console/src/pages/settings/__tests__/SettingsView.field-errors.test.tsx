@@ -31,6 +31,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { I18nProvider } from '@object-ui/i18n';
 
 const getSettingsNamespace = vi.fn();
 const saveSettingsNamespace = vi.fn();
@@ -106,13 +107,20 @@ function validationRejection() {
   return err;
 }
 
+/**
+ * Mounts an explicit `en` I18nProvider: the format miss below reads in the
+ * console's words (objectstack#30206), so the pack must be loaded for the
+ * assertion to read a sentence rather than a key.
+ */
 function renderView() {
   return render(
-    <MemoryRouter initialEntries={['/settings/ai']}>
-      <Routes>
-        <Route path="/settings/:namespace" element={<SettingsView />} />
-      </Routes>
-    </MemoryRouter>,
+    <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
+      <MemoryRouter initialEntries={['/settings/ai']}>
+        <Routes>
+          <Route path="/settings/:namespace" element={<SettingsView />} />
+        </Routes>
+      </MemoryRouter>
+    </I18nProvider>,
   );
 }
 
@@ -136,8 +144,10 @@ describe('SettingsView — a rejected save marks the field that caused it', () =
     fireEvent.change(inputFor('Gateway model')!, { target: { value: 'gpt4o' } });
     fireEvent.click(await screen.findByRole('button', { name: /save/i }));
 
-    // The server's own sentence, verbatim — not re-worded by the console.
-    const msg = await screen.findByText(/does not match the expected format/i);
+    // A format miss (`invalid_format`) reads in the console's words, naming the
+    // row by its label and repeating the help line it replaces
+    // (objectstack#30206); any other code keeps the server's sentence.
+    const msg = await screen.findByText('Gateway model is not in a valid format. Use provider/model.');
     expect(msg).toBeTruthy();
     expect(msg.getAttribute('role')).toBe('alert');
 
@@ -164,7 +174,7 @@ describe('SettingsView — a rejected save marks the field that caused it', () =
 
     fireEvent.change(inputFor('Gateway model')!, { target: { value: 'gpt4o' } });
     fireEvent.click(await screen.findByRole('button', { name: /save/i }));
-    await screen.findByText(/does not match the expected format/i);
+    await screen.findByText(/is not in a valid format/i);
 
     // Gone — the two say the same kind of thing and share one slot.
     expect(screen.queryByText('Use provider/model.')).toBeNull();
@@ -179,12 +189,12 @@ describe('SettingsView — a rejected save marks the field that caused it', () =
 
     fireEvent.change(inputFor('Gateway model')!, { target: { value: 'gpt4o' } });
     fireEvent.click(await screen.findByRole('button', { name: /save/i }));
-    await screen.findByText(/does not match the expected format/i);
+    await screen.findByText(/is not in a valid format/i);
 
     // Typing contradicts an error describing the value the server saw.
     fireEvent.change(inputFor('Gateway model')!, { target: { value: 'anthropic/claude' } });
     await waitFor(() => {
-      expect(screen.queryByText(/does not match the expected format/i)).toBeNull();
+      expect(screen.queryByText(/is not in a valid format/i)).toBeNull();
     });
     expect(inputFor('Gateway model')!.getAttribute('aria-invalid')).toBeNull();
     // …and the help text comes back with it.
@@ -198,7 +208,7 @@ describe('SettingsView — a rejected save marks the field that caused it', () =
 
     fireEvent.change(inputFor('Gateway model')!, { target: { value: 'gpt4o' } });
     fireEvent.click(await screen.findByRole('button', { name: /save/i }));
-    await screen.findByText(/does not match the expected format/i);
+    await screen.findByText(/is not in a valid format/i);
 
     saveSettingsNamespace.mockResolvedValueOnce({
       values: { gateway_model: { value: 'anthropic/claude', source: 'tenant' } },
@@ -207,7 +217,7 @@ describe('SettingsView — a rejected save marks the field that caused it', () =
     fireEvent.click(await screen.findByRole('button', { name: /save/i }));
 
     await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
-    expect(screen.queryByText(/does not match the expected format/i)).toBeNull();
+    expect(screen.queryByText(/is not in a valid format/i)).toBeNull();
   });
 
   it('a failure carrying no field array still toasts, and marks nothing', async () => {

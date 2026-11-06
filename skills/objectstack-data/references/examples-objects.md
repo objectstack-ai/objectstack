@@ -111,14 +111,12 @@ Declared `indexes` are a separate decision — see
 
 ### Lifecycle Hooks
 
-Implement business logic at data operation lifecycle points:
-
 <!-- os:check -->
 ```typescript
 import { defineHook, HookContext } from '@objectstack/spec/data';
 
 export default defineHook({
-  name: 'account_defaults',
+  name: 'crm_account_defaults',
   object: 'account',
   events: ['beforeInsert'],
   handler: async (ctx: HookContext) => {

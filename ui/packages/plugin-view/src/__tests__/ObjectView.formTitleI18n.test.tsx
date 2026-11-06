@@ -51,12 +51,13 @@
  *     wrote a title, so the author's title is used — that branch is deliberately
  *     untouched and this pins it.
  *
- * The provider-less fallback is asserted in
- * `ObjectView.formTitleNoProviderFallback.test.tsx` — it cannot live in this
- * file, because `createI18n` registers its instance as react-i18next's
- * module-global default and that registration survives `cleanup()`; a
- * "no provider" render here would silently resolve against whichever locale a
- * previous test mounted.
+ * The provider-less fallback is asserted in the
+ * `ObjectView.formTitleNoProviderFallback` block of
+ * `ObjectView.harness.test.tsx`. It was written outside this file because
+ * `createI18n` registers its instance as react-i18next's module-global default
+ * and that registration survives `cleanup()`; a "no provider" render here would
+ * have resolved against whichever locale a previous test mounted, until
+ * `vitest.setup.i18n-global.ts` began restoring the global after every test.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';

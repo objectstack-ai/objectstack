@@ -95,7 +95,12 @@ carries `SKILL.md` alone — `gen:skill-refs` only visits skills listed in its
 ## Conventions enforced across skills
 
 - **Zod first.** Never invent types — read `node_modules/@objectstack/spec/src/**/*.zod.ts`.
-- **Short object names** (`account`, `task`); no `namespace`, no `tableName`.
+- **Every non-object name carries the namespace** (`crm_send_email`, `crm_sales_rep`);
+  a snippet with no manifest uses `crm`. Exempt: fields, object extensions,
+  container views, translations (`<ns>_<locale>`). The one rule lives in
+  `objectstack-platform/SKILL.md`.
+- **Short object names in snippets** (`account`, `task`); no object-level
+  `namespace`, no `tableName`.
 - **CEL for all expressions** — predicates, conditions, schedules. Use the
   `F\`\``, `P\`\``, `cel\`\``, `cron\`\``, `tmpl\`\`` tagged templates from
   `@objectstack/spec`. Legacy `OLD` / `NEW` are not CEL — use

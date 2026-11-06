@@ -2369,25 +2369,64 @@ const en = {
       clientAddressDirect: 'Your address, as the server judges it: {{address}}. A list that leaves it out cannot be saved from here. This server does not trust proxy headers, so behind a proxy this is the proxy\'s address.',
       clientAddressViaProxy: 'Your address, as the server judges it: {{address}}, read from the forwarded headers of the proxy this server trusts. A list that leaves it out cannot be saved from here.',
       clientAddressUnknown: 'The server cannot establish your address, so a non-empty list cannot be saved from here.',
+      // A settings value that misses its declared pattern (objectstack#30206),
+      // said in the console's words instead of the server's English sentence.
+      // `{{setting}}` is the setting's label and `{{help}}` the help line the
+      // refusal replaces under the field; `invalidFormatPick` is for a setting
+      // chosen from a list.
+      invalidFormat: '{{setting}} is not in a valid format.',
+      invalidFormatHelp: '{{setting}} is not in a valid format. {{help}}',
+      invalidFormatPick: 'Choose a value for {{setting}} from the list.',
     },
-    // The one-time workspace-timezone prompt (objectui#11758): asked of an
-    // administrator while `localization.timezone` is still the manifest default.
-    // `{{current}}` is that default, `{{zone}}` the zone the admin confirmed.
-    workspaceTimezonePrompt: {
-      title: 'Set the system timezone',
-      description: 'This system still uses the platform default timezone, {{current}}. The system timezone decides what "today" means in formulas, how reports group dates and how dates and times are shown, for everyone in the system. Your browser timezone is filled in below.',
-      laterHint: 'You can change it at any time on the Settings page.',
-      decline: 'Keep the default',
-      confirm: 'Set timezone',
-      saved: 'System timezone set to {{zone}}',
-      currencyTitle: 'Set the default currency',
-      currencyDescription: 'This organization has no default currency yet, so amounts are shown without a currency symbol. The currency of your browser\'s region, {{name}} ({{code}}), is filled in below.',
-      currencyConfirm: 'Set currency',
-      currencySaved: 'Default currency set to {{currency}}',
-      bothTitle: 'Set the system timezone and default currency',
-      bothConfirm: 'Save',
-      bothSaved: 'System timezone set to {{zone}} and default currency set to {{currency}}',
-      notNow: 'Not now',
+    // The first-run checklist at the top of Home (objectstack#30206): what an
+    // administrator sets up first, each row's line read from the real setting.
+    // `{{name}}` is the organization's name; `{{language}}`, `{{country}}`,
+    // `{{zone}}` and `{{currency}}` the values in words; `{{current}}` the
+    // timezone the system uses now. `progress` counts the rows shown. A row
+    // that is done shows its value alone, so it has no `done` line here.
+    firstRunChecklist: {
+      title: 'Get your system ready',
+      description: 'What to set up before your colleagues start. Every item can be changed later in Setup.',
+      progress: '{{done}} of {{total}} done',
+      dismiss: 'Hide checklist',
+      set: 'Set',
+      change: 'Change',
+      view: 'View',
+      confirm: 'Confirm',
+      cancel: 'Cancel',
+      prefilled: 'Values not set yet are suggested from your browser. Nothing is saved until you confirm.',
+      organizationName: {
+        title: 'Name your organization',
+        todo: 'It still has the name it was created with, "{{name}}".',
+        action: 'Rename',
+      },
+      languageCountry: {
+        title: 'Default language and country',
+        todo: 'Currently {{language}} and {{country}}. Confirm them or choose others.',
+        saved: 'Default language and country saved',
+      },
+      timezone: {
+        title: 'System timezone',
+        todo: 'Still the platform default, {{current}}. It decides what "today" means in formulas and how reports group dates.',
+        saved: 'System timezone set to {{zone}}',
+      },
+      currency: {
+        title: 'Default currency',
+        todo: 'Not set yet, so amounts are shown without a currency symbol.',
+        saved: 'Default currency set to {{currency}}',
+      },
+      mail: {
+        title: 'Email delivery',
+        todo: 'Not set up yet, so emails such as invitations and password resets are not delivered.',
+        done: 'Set up to deliver emails.',
+        action: 'Set up',
+      },
+      invite: {
+        title: 'Invite colleagues',
+        todo: 'You are the only member so far.',
+        done: 'Colleagues have joined or been invited.',
+        action: 'Invite',
+      },
     },
     error: {
       connectionFailed: 'Cannot connect to server',
@@ -4597,6 +4636,36 @@ const en = {
   // is the seed, an IANA id printed verbatim.
   cloudWorkspaceTimezoneNotice: {
     seeded: 'The environment timezone was set to {{zone}} from your browser when the environment was created. You can change it in Settings → Localization.',
+  },
+  // objectstack#30120 — the deployment notice: what a production deployment
+  // keeps on its own disk because nobody set OS_DATABASE_URL, OS_AUTH_SECRET or
+  // OS_SECRET_KEY, shown to administrators on the home page and at the top of
+  // Setup's System Overview (`app-shell` `DeploymentNotice`). `{{file}}` is a
+  // path on the server, printed verbatim. `copy.*` are comment lines of the
+  // variables the copy button puts on the clipboard.
+  deploymentNotice: {
+    title: "This server keeps your data and secrets on its own disk",
+    titleLow: "Finish setting up this deployment",
+    intro: "Nobody set where this production deployment keeps them. Hand the settings below to whoever runs the server, so that replacing it loses nothing.",
+    finding: {
+      databaseLocalFile: "Your business data is a file on this server ({{file}}). Replacing the server or its disk loses it.",
+      authSecretGenerated: "The sign-in secret was generated on this server. If it is lost, everyone is signed out.",
+      dataKeyFile: "The key that encrypts saved passwords and API keys is a file on this server ({{file}}). If it is lost, they can no longer be read.",
+      fileStorageLocal: "Uploaded files are kept on this server's disk.",
+      emailNotConfigured: "No email service is set up, so invitations and password resets are not sent by email.",
+    },
+    copy: {
+      button: "Copy the settings",
+      database: "Your database, e.g. postgres://user:pass@db-host:5432/app, or file:/path/on/a/kept/volume/app.db. Today the data is in {{file}}: move it over before you switch.",
+      carryOver: "Carry the current value over: the contents of {{file}}",
+      newValue: "A long random value, the same on every restart, e.g. the output of: openssl rand -hex 32",
+    },
+    copied: "Copied",
+    hide: "Hide",
+    hideNoAuditLog: "This deployment keeps no audit log, so the notice cannot be hidden.",
+    hideFailed: "The notice could not be hidden. Try again.",
+    hiddenLine: "The deployment notice is hidden. What it states still applies.",
+    showAgain: "Show again",
   },
   // The AI HITL approval inbox (`@object-ui/plugin-chatbot`'s
   // `AiPendingActionsInbox`) — objectui#7173. Its four relative-time phrases

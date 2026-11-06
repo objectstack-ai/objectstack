@@ -634,6 +634,20 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         confirmText: "Leave this organization? You will lose access to its environments and members.",
         successMessage: "You have left the organization"
       }
+    },
+    _sections: {
+      identity: {
+        label: "Identity"
+      },
+      branding: {
+        label: "Branding"
+      },
+      configuration: {
+        label: "Configuration"
+      },
+      group_structure: {
+        label: "Group Structure"
+      }
     }
   },
   sys_member: {

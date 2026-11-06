@@ -10,6 +10,11 @@
  *      the tree? (a lookup names a listed object; a question reads a field a
  *      seed row carries; a capability area is a checklist area; …)
  *
+ * One judgement needs the whole directory: an app `code` is unique across the
+ * library, because each card's app gets a namespace of its own (`demo` + code,
+ * `scenarioNamespace` in `schema.ts`). So {@link loadScenarios} refuses every card that
+ * shares a code; {@link loadScenarioFile}, handed one file, cannot judge it.
+ *
  * A card with any refusal is not returned at all: a half-valid card would let
  * a runner score against a scenario that does not mean what it says.
  *
@@ -21,6 +26,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
 import {
+  AppCodeSchema,
   GUARDRAIL_CHECKS,
   ScenarioCardSchema,
   type ScenarioCard,
@@ -94,20 +100,42 @@ export function loadScenarios(dir: string, options: LoadOptions): LoadResult {
     .filter((name) => name.endsWith('.json'))
     .sort()
     .map((name) => join(dir, name));
+  const loaded = files.map((file) => ({ file, ...loadOne(file, options) }));
+
+  // ── app codes: one card per code across the library ──
+  // A card refused for another fault still holds its code, so the clash is
+  // named now rather than after the other fault is fixed.
+  const holders = new Map<string, string[]>();
+  for (const one of loaded) if (one.code !== undefined) holders.set(one.code, [...(holders.get(one.code) ?? []), one.file]);
+
   const result: LoadResult = { cards: [], refusals: [] };
-  for (const file of files) {
-    const one = loadScenarioFile(file, options);
-    if (one.card) result.cards.push(one.card);
+  for (const one of loaded) {
+    const others = one.code === undefined ? [] : holders.get(one.code)!.filter((f) => f !== one.file);
+    if (others.length > 0) {
+      one.refusals.push({
+        file: one.file,
+        path: 'code',
+        message: `duplicate app code \`${one.code}\`, also the code of ${others.map((f) => basename(f)).join(', ')}: each card's app needs a namespace of its own`,
+      });
+    } else if (one.card) {
+      result.cards.push(one.card);
+    }
     result.refusals.push(...one.refusals);
   }
   return result;
 }
 
-/** Load one card file. */
+/** Load one card file. Code uniqueness is a library judgement: see {@link loadScenarios}. */
 export function loadScenarioFile(
   file: string,
   options: LoadOptions,
 ): { card?: LoadedScenario; refusals: Refusal[] } {
+  const { card, refusals } = loadOne(file, options);
+  return card ? { card, refusals } : { refusals };
+}
+
+/** One file, plus its well-formed app code (read even when the card is refused for another fault). */
+function loadOne(file: string, options: LoadOptions): { card?: LoadedScenario; refusals: Refusal[]; code?: string } {
   const refusals: Refusal[] = [];
   const refuse = (path: IssuePath, message: string) =>
     refusals.push({ file, path: formatPath(path), message });
@@ -119,6 +147,8 @@ export function loadScenarioFile(
     refuse([], `not valid JSON: ${(e as Error).message}`);
     return { refusals };
   }
+  const rawCode = (raw as { code?: unknown } | null)?.code;
+  const code = AppCodeSchema.safeParse(rawCode).success ? (rawCode as string) : undefined;
 
   const parsed = ScenarioCardSchema.safeParse(raw);
   if (!parsed.success) {
@@ -130,13 +160,13 @@ export function loadScenarioFile(
         refuse(issue.path as IssuePath, issue.message);
       }
     }
-    return { refusals };
+    return { refusals, ...(code !== undefined ? { code } : {}) };
   }
 
   const card = parsed.data;
   const computed = checkCard(card, basename(file, '.json'), options, refuse);
-  if (refusals.length > 0) return { refusals };
-  return { card: { file, card, ...computed }, refusals };
+  if (refusals.length > 0) return { refusals, code: card.code };
+  return { card: { file, card, ...computed }, refusals, code: card.code };
 }
 
 type Refuse = (path: IssuePath, message: string) => void;

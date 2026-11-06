@@ -126,7 +126,15 @@ export interface ActorGuardHost {
 export async function resolveActor(
   ctx: any,
   options?: { failedReadThrows?: boolean },
-): Promise<{ userId: string; activeOrgId?: string } | null> {
+): Promise<{ userId: string; activeOrgId?: string; impersonatedBy?: string } | null> {
+  // The administrator an impersonation session names (better-auth's admin
+  // plugin stamps `impersonatedBy` on the session row), read off the SESSION
+  // only: the attribution seam carries it beside the user as the
+  // attribution-only `impersonatedBy` of an identity write.
+  const impersonatorOn = (session: any): { impersonatedBy?: string } => {
+    const by = session?.impersonatedBy ?? session?.impersonated_by;
+    return typeof by === 'string' && by.trim().length > 0 ? { impersonatedBy: by.trim() } : {};
+  };
   try {
     const { getSessionFromCtx } = await import('better-auth/api');
     const s: any = await getSessionFromCtx(ctx as any);
@@ -136,6 +144,7 @@ export async function resolveActor(
         userId: String(userId),
         activeOrgId:
           s?.session?.activeOrganizationId ?? s?.activeOrganizationId ?? undefined,
+        ...impersonatorOn(s?.session),
       };
     }
   } catch { /* fall through to explicit token resolution */ }
@@ -181,6 +190,7 @@ export async function resolveActor(
             userId,
             activeOrgId:
               sess.activeOrganizationId ?? sess.active_organization_id ?? undefined,
+            ...impersonatorOn(sess),
           };
         }
       }

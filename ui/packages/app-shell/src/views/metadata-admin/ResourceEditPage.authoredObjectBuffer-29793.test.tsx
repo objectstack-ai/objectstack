@@ -16,6 +16,11 @@
  * The editor's canvas is a stub that prints the buffer and patches one field
  * label, so the page's own load, autosave and publish refreshes are what is
  * under test.
+ *
+ * objectstack#30786 — the second describe holds the same for a view, an app and
+ * a dashboard, whose served draft is translated the same way: measured on a
+ * zh-CN stack, the save refresh installed the served draft (`紧急`, `功能展示`,
+ * the dashboard's widget titles) and the next save stored it as source text.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -102,7 +107,13 @@ vi.mock('./useMetadata', async (importOriginal) => {
     ...mod,
     useMetadataClient: () => mockClient,
     useMetadataTypes: () => ({
-      entries: [{ type: 'object', name: 'object', label: 'Object', allowEnvironmentOverlay: true, schema: { required: [] } }],
+      entries: ['object', 'view', 'app', 'dashboard'].map((type) => ({
+        type,
+        name: type,
+        label: type,
+        allowEnvironmentOverlay: true,
+        schema: { required: [] },
+      })),
     }),
   };
 });
@@ -239,3 +250,199 @@ describe('MetadataResourceEditPage in a zh-CN console — an object buffer is th
     expect(srv.saves).toEqual([]);
   });
 });
+
+// ── objectstack#30786 — a view, an app and a dashboard ──────────────────────
+
+interface TranslatedType {
+  type: 'view' | 'app' | 'dashboard';
+  name: string;
+  /** The item as its author wrote it (the stored row; source text only). */
+  authored: Row;
+  /** The served `?state=draft` body for a zh-CN console, as measured. */
+  zh: (doc: Row) => Row;
+  /** One edit, through the page's own patch door. */
+  patch: (draft: Row) => Row;
+  /** Every translatable string of `doc`, in source text. */
+  sourceText: (doc: Row) => unknown;
+}
+
+const TRANSLATED_TYPES: TranslatedType[] = [
+  {
+    type: 'view',
+    name: 'showcase_task.urgent',
+    authored: {
+      name: 'showcase_task.urgent',
+      object: 'showcase_task',
+      viewKind: 'list',
+      label: 'Urgent',
+      config: { label: 'Urgent', type: 'grid', data: { provider: 'object', object: 'showcase_task' }, columns: [{ field: 'title' }] },
+      order: 1,
+    },
+    zh: (doc) => ({ ...doc, label: '紧急' }),
+    patch: (draft) => ({ order: Number(draft.order ?? 0) + 1 }),
+    sourceText: (doc) => doc.label,
+  },
+  {
+    type: 'app',
+    name: 'showcase_app',
+    authored: {
+      name: 'showcase_app',
+      label: 'Showcase',
+      navigation: [
+        { id: 'nav_capability_map', type: 'page', label: 'Capability Map', pageName: 'showcase_capability_map' },
+        { id: 'nav_workspace', type: 'group', label: 'Workspace', children: [{ id: 'nav_my_work', type: 'page', label: 'My Work', pageName: 'showcase_my_work' }] },
+      ],
+    },
+    zh: (doc) => {
+      const nav = doc.navigation as Row[];
+      return {
+        ...doc,
+        label: '功能展示',
+        navigation: [
+          { ...nav[0], label: '能力地图' },
+          { ...nav[1], label: '工作区', children: [{ ...(nav[1].children as Row[])[0], label: '我的工作' }] },
+        ],
+      };
+    },
+    patch: (draft) => ({ description: `${String(draft.description ?? '')}edited` }),
+    sourceText: (doc) => {
+      const nav = doc.navigation as Row[];
+      return [doc.label, nav[0].label, nav[1].label, (nav[1].children as Row[])[0].label];
+    },
+  },
+  {
+    type: 'dashboard',
+    name: 'showcase_ops_dashboard',
+    authored: {
+      name: 'showcase_ops_dashboard',
+      label: 'Delivery Operations',
+      widgets: [
+        { id: 'active_projects', type: 'metric', title: 'Active Projects', layout: { x: 0, y: 0, w: 3, h: 2 } },
+        { id: 'tasks_by_status', type: 'bar', title: 'Tasks by Status', layout: { x: 3, y: 0, w: 6, h: 4 } },
+      ],
+    },
+    zh: (doc) => {
+      const widgets = doc.widgets as Row[];
+      return { ...doc, label: '交付运营', widgets: [{ ...widgets[0], title: '进行中的项目' }, { ...widgets[1], title: '任务状态分布' }] };
+    },
+    patch: (draft) => ({ description: `${String(draft.description ?? '')}edited` }),
+    sourceText: (doc) => {
+      const widgets = doc.widgets as Row[];
+      return [doc.label, widgets[0].title, widgets[1].title];
+    },
+  },
+];
+
+const SOURCE_TEXT: Record<TranslatedType['type'], unknown> = {
+  view: 'Urgent',
+  app: ['Showcase', 'Capability Map', 'Workspace', 'My Work'],
+  dashboard: ['Delivery Operations', 'Active Projects', 'Tasks by Status'],
+};
+
+/** Canvas stand-in for one type: prints the buffer, and makes the type's one edit. */
+function stubCanvasFor(spec: TranslatedType) {
+  return function TypeStubCanvas({ draft, onPatch }: { draft: Row; onPatch?: (patch: Row) => void }) {
+    return (
+      <>
+        <pre data-testid="editor-draft">{JSON.stringify(draft)}</pre>
+        <button type="button" onClick={() => onPatch?.(spec.patch(draft))}>
+          edit once
+        </button>
+      </>
+    );
+  };
+}
+
+function renderTypeZh(spec: TranslatedType) {
+  const path = `/metadata/${spec.type}/${spec.name}`;
+  window.history.replaceState(null, '', path);
+  render(
+    <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }} persistLanguage={false}>
+      <MemoryRouter initialEntries={[path]}>
+        <MetadataResourceEditPage type={spec.type} name={spec.name} />
+      </MemoryRouter>
+    </I18nProvider>,
+  );
+}
+
+describe.each(TRANSLATED_TYPES)(
+  'MetadataResourceEditPage in a zh-CN console — a $type buffer is the authored document (objectstack#30786)',
+  (spec) => {
+    const realTypePreview = getMetadataPreview(spec.type);
+
+    beforeEach(() => {
+      srv.overlay = null;
+      srv.draft = null;
+      srv.servesDraftLayer = true;
+      srv.saves.length = 0;
+      registerMetadataPreview(spec.type, stubCanvasFor(spec) as never);
+      // A shipped item: the stored row is the package's (`code`), and the
+      // layered read serves every layer untranslated.
+      mockClient.layered.mockImplementation(async () => ({
+        code: wire(spec.authored),
+        overlay: srv.overlay,
+        overlayScope: srv.overlay ? 'env' : null,
+        effective: wire(srv.overlay ?? spec.authored),
+        ...(srv.servesDraftLayer ? { draft: srv.draft } : {}),
+        editable: true,
+        deletable: true,
+        resettable: true,
+        lock: 'none',
+      }));
+      mockClient.getDraft.mockImplementation(async () => {
+        if (!srv.draft) {
+          throw Object.assign(new Error(`No pending draft exists for ${spec.type}/${spec.name}.`), { code: 'NO_DRAFT', status: 404 });
+        }
+        return { type: spec.type, name: spec.name, item: { ...spec.zh(srv.draft), _diagnostics: { valid: true } } };
+      });
+    });
+
+    afterEach(() => {
+      if (realTypePreview) registerMetadataPreview(spec.type, realTypePreview);
+    });
+
+    it('no pending draft: two edits in a row each PUT source text, the second after the save refresh re-read the draft', async () => {
+      renderTypeZh(spec);
+      await waitFor(() => expect(editorDraft().name).toBe(spec.name), { timeout: 8000 });
+      expect(spec.sourceText(editorDraft())).toStrictEqual(SOURCE_TEXT[spec.type]);
+
+      fireEvent.click(screen.getByRole('button', { name: 'edit once' }));
+      await waitFor(() => expect(srv.saves.length).toBe(1), { timeout: 8000 });
+      expect(srv.saves[0]!.opts).toMatchObject({ mode: 'draft' });
+      expect(spec.sourceText(srv.saves[0]!.body)).toStrictEqual(SOURCE_TEXT[spec.type]);
+
+      // The save refresh: the served draft is now the zh-CN one, the layers' the stored one.
+      await waitFor(() => expect(mockClient.getDraft.mock.calls.length).toBeGreaterThan(1), { timeout: 8000 });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+      expect(spec.sourceText(editorDraft())).toStrictEqual(SOURCE_TEXT[spec.type]);
+
+      fireEvent.click(screen.getByRole('button', { name: 'edit once' }));
+      await waitFor(() => expect(srv.saves.length).toBe(2), { timeout: 8000 });
+      expect(spec.sourceText(srv.saves[1]!.body)).toStrictEqual(SOURCE_TEXT[spec.type]);
+      expect(spec.sourceText(srv.draft!)).toStrictEqual(SOURCE_TEXT[spec.type]);
+    });
+
+    it('a pending draft: the buffer is the stored draft, and one edit PUTs it in source text', async () => {
+      srv.draft = wire({ ...spec.authored, ...spec.patch(spec.authored) });
+      renderTypeZh(spec);
+      await waitFor(() => expect(editorDraft().name).toBe(spec.name), { timeout: 8000 });
+      expect(spec.sourceText(editorDraft())).toStrictEqual(SOURCE_TEXT[spec.type]);
+
+      fireEvent.click(screen.getByRole('button', { name: 'edit once' }));
+      await waitFor(() => expect(srv.saves.length).toBeGreaterThan(0), { timeout: 8000 });
+      expect(spec.sourceText(srv.saves.at(-1)!.body)).toStrictEqual(SOURCE_TEXT[spec.type]);
+    });
+
+    it('a served draft whose stored copy the layers do not carry installs no buffer, and nothing is sent', async () => {
+      srv.draft = wire(spec.authored);
+      srv.servesDraftLayer = false;
+      renderTypeZh(spec);
+
+      await screen.findByText(t('engine.studio.refusal.draftUnreadable', 'zh-CN'), undefined, { timeout: 8000 });
+      expect(screen.queryByTestId('editor-draft')).toBeNull();
+      expect(srv.saves).toEqual([]);
+    });
+  },
+);

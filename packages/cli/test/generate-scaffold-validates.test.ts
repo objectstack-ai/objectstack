@@ -313,7 +313,13 @@ describe('[#21325] a binding scaffold binds what it was handed, never what its o
 
   it.each(binding)('`os g $type probe_thing` writes the bound object and nowhere names `probe_thing` as one', async (t) => {
     const { artifact } = await projectWith(t.type);
-    const text = JSON.stringify(artifact);
+    // The scaffold's own `name` carries the namespace (ruling C on #30798), so
+    // an action's, a permission set's or a dataset's IS `${NS}_${ITEM}`. It is
+    // pinned on its own, and only the rest of the artifact is searched for an
+    // object reference.
+    const { name: ownName, ...references } = artifact;
+    expect(ownName).toBe(t.itemName(ITEM, NS));
+    const text = JSON.stringify(references);
     const bound = target('object').itemName(PREREQUISITE_STEM.object, NS);
     expect(text).toContain(`"${bound}"`);
     // The object the removed derivation would have bound: the item's own

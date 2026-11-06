@@ -55,6 +55,16 @@
  * already run would still be the bug and would still pass a status-only check.
  */
 
+// [#30873] Paid at module scope so the first load lands during collection, not
+// inside a clocked window (`pnpm check:test-source-alias`). The `#30675` control
+// at the end of this file is the one case here that gets past a gate to the
+// record-currency backfill door's guarded `import('@objectstack/objectql')`, which
+// resolves through `dist/` and costs a cold transform of the engine's module
+// graph. Measured on 4 vCPU before this line: the import 3.2 s idle, the case
+// 3.3-4.0 s idle (every other case under 20 ms) and `Test timed out in 5000ms`
+// 3 of 3 on two loaded cores. Loaded here, the door's import is a cache hit.
+import '@objectstack/objectql';
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
 import { RestServer } from './rest-server.js';

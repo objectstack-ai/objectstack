@@ -204,17 +204,18 @@ contradicts it, and correct it here when it does.
   read-only" assumption: the pair is the door, and the read-only-package lock the
   console renders is a *different* gate (see `access-security.readonly-package-locks-studio`).
 
-- **A fresh organization's first page opens under a one-time prompt: "Set the default
-  currency", or the system timezone, or both in one dialog.** An administrator is asked
-  once while `localization.timezone` is still the manifest default or the organization
-  has no default currency (`ui/apps/console/src/pages/settings/WorkspaceTimezonePrompt.tsx`,
-  `workspaceTimezonePromptLogic.ts`), so on a fresh DB the dialog
-  (`data-testid="workspace-timezone-prompt"`) sits over the first page the admin opens,
-  Studio and app pages included (QA runs #29890 and #29893). Dismiss it with **Not now**
-  (Keep the default when only the timezone is asked), `data-testid="workspace-timezone-prompt-decline"`,
-  before any screenshot or DOM read. The answer is remembered per organization and user in
-  that browser's `localStorage` (`os:workspace-timezone-prompt:<org>:<user>`), so a new
-  browser context asks again. ⛔ Do not score a clause FAIL for chrome hidden under it.
+- **A fresh organization's Home carries a first-run checklist for the administrator; no
+  dialog opens over any page.** Until objectstack#30206 a one-time "Set the default
+  currency" / system timezone dialog sat over the first page an administrator opened. It
+  is gone: the same questions are rows of a card at the top of `/home`
+  (`ui/apps/console/src/pages/settings/FirstRunChecklist.tsx`,
+  `data-testid="first-run-checklist"`), shown only to a session that may write
+  `localization`, and it writes nothing until a row's own Confirm. Studio, Setup and app
+  pages open with nothing in front of them. A screenshot of Home on a fresh DB shows the
+  card above the page's sections; its close button
+  (`data-testid="first-run-checklist-dismiss"`) hides it for that organization and user in
+  that browser's `localStorage` (`os:first-run-checklist:<org>:<user>`). ⛔ Do not score a
+  Home clause FAIL because the card pushes the page's sections down.
 
 - **`objectstack verify --rls` is a separate invocation — bare `verify` prints no RLS
   section at all.** `runRlsProofs` runs only behind the flag

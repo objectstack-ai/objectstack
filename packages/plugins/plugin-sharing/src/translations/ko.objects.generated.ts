@@ -343,5 +343,71 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         label: "대기열별"
       }
     }
+  },
+  sys_assignment_rule: {
+    label: "배정 규칙",
+    pluralLabel: "배정 규칙",
+    description: "조건에 맞는 각 새 레코드를 대기열 또는 한 사람에게 보냅니다.",
+    fields: {
+      organization_id: {
+        label: "조직",
+        help: "이 규칙이 속한 조직입니다."
+      },
+      name: {
+        label: "이름",
+        help: "규칙을 식별합니다. 영문 소문자, 숫자, 밑줄만 쓸 수 있으며, 설치된 앱이 제공하는 규칙의 이름은 쓸 수 없습니다."
+      },
+      label: {
+        label: "표시 레이블"
+      },
+      description: {
+        label: "설명"
+      },
+      object_name: {
+        label: "객체",
+        help: "이 규칙이 새 레코드를 보내는 대상 객체입니다. 레코드에 소유자가 있는 객체만 배정할 수 있습니다."
+      },
+      criteria: {
+        label: "조건",
+        help: "이 규칙이 가져갈 새 레코드입니다. 비워 두면 앞선 규칙이 가져가지 않은 모든 새 레코드를 가져갑니다. 레코드에 대한 식으로 작성합니다(예: record.priority == \"high\")."
+      },
+      sort_order: {
+        label: "순서",
+        help: "여러 규칙이 같은 레코드를 가져갈 수 있으면 순서 값이 가장 낮은 규칙부터 시도합니다. 조직의 규칙은 항상 설치된 앱이 제공하는 규칙보다 먼저 시도됩니다."
+      },
+      recipient_type: {
+        label: "배정 대상",
+        help: "레코드를 구성원이 가져갈 수 있는 대기열로 보내거나, 한 사람에게 바로 보냅니다.",
+        options: {
+          queue: "대기열",
+          user: "사용자"
+        }
+      },
+      recipient_id: {
+        label: "대기열 또는 사용자",
+        help: "레코드가 갈 대기열 또는 사람입니다. 사람은 이 조직의 활성 구성원이어야 합니다."
+      },
+      strategy: {
+        label: "구성원 선택",
+        help: "대기열인 경우: 레코드를 한 구성원에게 바로 넘깁니다. 돌아가며 넘기거나 미완료 작업이 가장 적은 구성원을 고릅니다. 비워 두면 구성원이 가져갈 때까지 레코드가 대기열에 남습니다.",
+        options: {
+          round_robin: "순환 배정",
+          least_loaded: "최소 부하"
+        }
+      },
+      load: {
+        label: "미완료 작업",
+        help: "\"최소 부하\"에서 필수: 어떤 레코드를 구성원의 미완료 작업으로 셀지 레코드에 대한 식으로 작성합니다(예: record.status != \"closed\")."
+      },
+      active: {
+        label: "활성",
+        help: "끄면 규칙을 삭제하지 않고 새 레코드 배정을 멈춥니다."
+      }
+    },
+    _views: {
+      by_object: {
+        label: "객체별"
+      }
+    }
   }
 };

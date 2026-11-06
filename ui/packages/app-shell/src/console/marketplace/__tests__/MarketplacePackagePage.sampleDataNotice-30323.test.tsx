@@ -150,6 +150,8 @@ async function install(withProvider = false) {
   const button = await screen.findByRole('button', { name: /«marketplace\.action\.(install|reinstall)»/ });
   await act(async () => {});
   fireEvent.click(button);
+  // objectstack#30325 — Install opens the confirm; its Install installs.
+  fireEvent.click(await screen.findByTestId('install-preview-confirm'));
   return view;
 }
 
