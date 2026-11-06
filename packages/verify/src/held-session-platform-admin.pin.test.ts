@@ -151,14 +151,14 @@ const HELD_STATES: readonly HeldState[] = [
   {
     code: 'MFA_REQUIRED',
     async arm() {
-      auth.applyConfigPatch({ mfaRequired: true, mfaGracePeriodDays: 0 });
+      auth.applyConfigPatch({ mfaRequirement: 'everyone', mfaGracePeriodDays: 0 });
       const lapsed = new Date(Date.now() - 10 * DAY_MS);
       for (const id of [adminId, memberId]) {
         await ql.update('sys_user', { id, mfa_required_at: lapsed }, SYS);
       }
     },
     async disarm() {
-      auth.applyConfigPatch({ mfaRequired: false });
+      auth.applyConfigPatch({ mfaRequirement: 'off' });
     },
   },
 ];

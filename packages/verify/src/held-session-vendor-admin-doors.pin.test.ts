@@ -261,12 +261,12 @@ const HELD_STATES: readonly HeldState[] = [
     async arm() {
       // Two-factor with it, as the `auth.mfa_required` setting applies them: the
       // gate holds a user for MFA only while they can enroll.
-      auth.applyConfigPatch({ mfaRequired: true, mfaGracePeriodDays: 0, plugins: { twoFactor: true } });
+      auth.applyConfigPatch({ mfaRequirement: 'everyone', mfaGracePeriodDays: 0, plugins: { twoFactor: true } });
       const lapsed = new Date(Date.now() - 10 * DAY_MS);
       for (const id of everyone()) await ql.update('sys_user', { id, mfa_required_at: lapsed }, SYS);
     },
     async disarm() {
-      auth.applyConfigPatch({ mfaRequired: false });
+      auth.applyConfigPatch({ mfaRequirement: 'off' });
     },
   },
   {
