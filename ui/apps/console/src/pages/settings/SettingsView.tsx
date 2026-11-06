@@ -4,7 +4,8 @@
  * Fetches manifest+values from `/api/settings/:namespace`, lays them
  * out via <SettingsField>, tracks dirty state, and saves through PUT.
  * A successful save or action reads the namespace again, manifest included.
- * Env-locked fields are read-only and show <EnvLockBadge>.
+ * Env-locked fields are read-only and show <EnvLockBadge>; one with a value
+ * stored beneath the pin offers to clear that saved value.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -596,6 +597,30 @@ export function SettingsView() {
     }
   };
 
+  /**
+   * Clear the value stored beneath an env pin (objectstack#30665): `null` for
+   * this one key, the write the server lets through a pin (ADR-0007 D6). It
+   * writes at once, after the row's own confirm, and leaves the draft alone: the
+   * row cannot be edited, so the clear is not one of the page's edits. The pin
+   * still answers the key, so the row reads the env value before and after.
+   */
+  const onClearSaved = async (key: string) => {
+    setSaving(true);
+    try {
+      const res = await saveSettingsNamespace(namespace, { [key]: null });
+      setPayload({ ...payload, values: { ...values, ...res.values } });
+      toast.success(t('console.settingsView.savedCleared'));
+      void reread(namespace);
+    } catch (err: any) {
+      // The pin itself never refuses a clear, so a refusal here is something
+      // else (a lock a stored row carries, a 403): the server's sentence says
+      // which, and `lockedByEnv` would misname it.
+      toast.error(err?.message ?? t('console.settingsView.saveFailed'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const onAction = async (actionId: string) => {
     setSaving(true);
     try {
@@ -734,6 +759,7 @@ export function SettingsView() {
                 // The scope the server writes this key at: the specifier's
                 // own, else the manifest's, else the spec's default `tenant`.
                 writeScope={spec.scope ?? manifest.scope ?? 'tenant'}
+                onClearSaved={key ? () => onClearSaved(key) : undefined}
               />
             );
           })}
