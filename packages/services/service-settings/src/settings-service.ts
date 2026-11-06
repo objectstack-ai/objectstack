@@ -2526,7 +2526,12 @@ export class SettingsService {
     };
   }
 
-  /** Persist a single key. Throws SettingsLockedError when env-locked. */
+  /**
+   * Persist a single key. Throws SettingsLockedError when an env override in
+   * force pins the key, unless `value` is a clear (`null` / `undefined`), which
+   * clears the stored value beneath the pin and leaves the env value in force
+   * (see {@link setMany}).
+   */
   async set(
     namespace: string,
     key: string,
@@ -2545,6 +2550,14 @@ export class SettingsService {
    * naming each such key (`invalid_value`, `constraint: { scope: 'user' }`):
    * the row it would store names no owner, and the user rung answers only its
    * owner, so no reader would ever see it while the write reported success.
+   *
+   * A key an env override in force pins refuses every write with
+   * {@link SettingsLockedError} (`locked-by-env`, ADR-0007 D6) but a clear
+   * (`null` / `undefined`): a clear nulls the row stored beneath the pin, so
+   * the key falls back to its default once the override is removed, and
+   * changes nothing in force — the answer still reads the env value with
+   * `locked: true`. It is judged by the row locks and the write predicates
+   * like any other clear.
    *
    * `display` picks the language of a write predicate's refusal and hands it
    * the request the write arrived on, and nothing else (see
@@ -2589,7 +2602,23 @@ export class SettingsService {
       // UI refused with `SETTINGS_LOCKED`, and `get()` reporting `locked: false`
       // to a settings page that would then fail its own save. See
       // `effectiveEnvOverride`.
-      if (this.effectiveEnvOverride(reg, namespace, key)) {
+      //
+      // [#30385] A CLEAR goes through the pin (ADR-0007 D6 keeps refusing every
+      // other write): `null` / `undefined`, the spelling every clear in this
+      // service uses, never a value such as `''` that a key would store. The
+      // pin decides what is in force, and a clear changes nothing there — the
+      // env value still wins, and the answer still reads `locked: true` from
+      // `env`. What it does change is the stored value the key falls back to
+      // once the override is removed, and that value is otherwise reachable by
+      // nothing: the override hides it from every read and refuses every
+      // write, so an operator who pinned a key to recover from a bad stored
+      // value (`OS_AUTH_ALLOWED_IP_RANGES=` for an allow-list that locks them
+      // out) gets the same bad value back the moment the pin is lifted. The
+      // clear then meets every judgment a clear meets without a pin — the
+      // Phase 2 row locks and the platform-rung rule below, the write
+      // predicates — so no lock a row carries is bypassed.
+      const clears = patch[key] === null || typeof patch[key] === 'undefined';
+      if (!clears && this.effectiveEnvOverride(reg, namespace, key)) {
         throw new SettingsLockedError(namespace, key);
       }
 
