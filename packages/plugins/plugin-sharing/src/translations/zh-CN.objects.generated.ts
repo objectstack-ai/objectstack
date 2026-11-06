@@ -343,5 +343,71 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "按队列"
       }
     }
+  },
+  sys_assignment_rule: {
+    label: "分配规则",
+    pluralLabel: "分配规则",
+    description: "将每条符合条件的新记录发送到一个队列或一个人。",
+    fields: {
+      organization_id: {
+        label: "组织",
+        help: "该规则所属的组织。"
+      },
+      name: {
+        label: "名称",
+        help: "标识该规则。只能使用小写字母、数字和下划线，且不能与已安装应用提供的规则同名。"
+      },
+      label: {
+        label: "显示标签"
+      },
+      description: {
+        label: "描述"
+      },
+      object_name: {
+        label: "对象",
+        help: "该规则将其新记录发送出去的对象。只有记录带有所有者的对象才能被分配。"
+      },
+      criteria: {
+        label: "条件",
+        help: "该规则接收哪些新记录；留空则接收所有未被前面规则接收的新记录。写成针对记录的表达式，例如 record.priority == \"high\"。"
+      },
+      sort_order: {
+        label: "顺序",
+        help: "当你的多条规则都可能接收同一条记录时，顺序值最小的规则最先尝试。你的规则总是先于已安装应用提供的规则尝试。"
+      },
+      recipient_type: {
+        label: "分配给",
+        help: "将记录发送到一个队列（由其成员领取），或直接发送给某个人。",
+        options: {
+          queue: "队列",
+          user: "用户"
+        }
+      },
+      recipient_id: {
+        label: "队列或用户",
+        help: "记录要发往的队列或人员。人员必须是该组织的有效成员。"
+      },
+      strategy: {
+        label: "选择成员",
+        help: "针对队列：直接把记录交给一名成员，轮流分配或选择未完成工作最少的成员。留空则记录留在队列中，直到有成员领取。",
+        options: {
+          round_robin: "轮流分配",
+          least_loaded: "负载最少"
+        }
+      },
+      load: {
+        label: "未完成工作",
+        help: "选择“负载最少”时必填：哪些记录算作成员的未完成工作，写成针对记录的表达式，例如 record.status != \"closed\"。"
+      },
+      active: {
+        label: "启用",
+        help: "关闭后该规则不再分配新记录，但不会被删除。"
+      }
+    },
+    _views: {
+      by_object: {
+        label: "按对象"
+      }
+    }
   }
 };

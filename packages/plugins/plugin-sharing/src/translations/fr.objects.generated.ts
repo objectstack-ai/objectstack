@@ -343,5 +343,71 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Par file d’attente"
       }
     }
+  },
+  sys_assignment_rule: {
+    label: "Règle d’attribution",
+    pluralLabel: "Règles d’attribution",
+    description: "Envoie chaque nouvel enregistrement qui remplit une condition à une file d’attente ou à une personne.",
+    fields: {
+      organization_id: {
+        label: "Organisation",
+        help: "L’organisation à laquelle appartient cette règle."
+      },
+      name: {
+        label: "Nom",
+        help: "Identifie la règle. Lettres minuscules, chiffres et traits de soulignement uniquement, et pas le nom d’une règle fournie par une application installée."
+      },
+      label: {
+        label: "Libellé affiché"
+      },
+      description: {
+        label: "Description"
+      },
+      object_name: {
+        label: "Objet",
+        help: "L’objet dont cette règle envoie les nouveaux enregistrements. Seuls les objets dont les enregistrements ont un propriétaire peuvent être attribués."
+      },
+      criteria: {
+        label: "Condition",
+        help: "Les nouveaux enregistrements que prend cette règle ; laissez vide pour prendre chaque nouvel enregistrement qu’aucune règle précédente n’a pris. S’écrit comme une expression sur l’enregistrement, par exemple record.priority == \"high\"."
+      },
+      sort_order: {
+        label: "Ordre",
+        help: "Lorsque plusieurs de vos règles pourraient prendre le même enregistrement, celle dont l’ordre est le plus bas est essayée en premier. Vos règles sont toujours essayées avant celles des applications installées."
+      },
+      recipient_type: {
+        label: "Attribuer à",
+        help: "Envoie l’enregistrement à une file d’attente, où ses membres peuvent le prendre, ou directement à une personne.",
+        options: {
+          queue: "File d’attente",
+          user: "Utilisateur"
+        }
+      },
+      recipient_id: {
+        label: "File d’attente ou utilisateur",
+        help: "La file d’attente, ou la personne, à qui va l’enregistrement. Une personne doit être un membre actif de cette organisation."
+      },
+      strategy: {
+        label: "Choisir un membre",
+        help: "Pour une file d’attente : remet l’enregistrement directement à un membre, à tour de rôle ou à celui qui a le moins de travail en cours. Laissez vide pour laisser l’enregistrement dans la file d’attente jusqu’à ce qu’un membre le prenne.",
+        options: {
+          round_robin: "À tour de rôle",
+          least_loaded: "Moins chargé"
+        }
+      },
+      load: {
+        label: "Travail en cours",
+        help: "Obligatoire avec « Moins chargé » : les enregistrements qui comptent comme travail en cours d’un membre, écrits comme une expression sur l’enregistrement, par exemple record.status != \"closed\"."
+      },
+      active: {
+        label: "Actif",
+        help: "Désactivez-la pour que cette règle cesse d’attribuer les nouveaux enregistrements, sans la supprimer."
+      }
+    },
+    _views: {
+      by_object: {
+        label: "Par objet"
+      }
+    }
   }
 };

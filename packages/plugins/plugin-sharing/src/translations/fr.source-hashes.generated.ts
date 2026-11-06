@@ -18,6 +18,8 @@
  */
 
 export const frGeneratedSourceHashes: Readonly<Record<string, string>> = {
+  "objects.sys_assignment_rule.fields.criteria.label": "bfcca3fe6f93b90c",
+  "objects.sys_assignment_rule.fields.description.label": "779a4342c8eb6707",
   "objects.sys_queue.fields.description.label": "779a4342c8eb6707",
   "objects.sys_record_share.fields.source.label": "8fe786e8e29c8cec",
   "objects.sys_share_link.fields.audience.label": "6530e0148b77428f",
