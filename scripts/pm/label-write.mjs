@@ -143,6 +143,16 @@
  * `--remove`, `--assign`, `--unassign`, `--clear-assignees` and
  * `--allow-two-states` are refused beside it.
  *
+ * ## A retired lane alias is written as its lane
+ *
+ * An `--add` naming a retired lane spelling (`domain:engine`, `domain:services`,
+ * `domain:cli`, `domain:rest`) is rewritten to `domain:server` when the options
+ * are parsed — `rewriteRetiredLaneLabels` (`fleet-write/dispatch.mjs`) over the
+ * one alias map — so step ② computes its target on the label that will really
+ * land and step ④'s read-back diffs against it, on either transport; step ②
+ * prints one line per rewrite. ⛔ A rewrite, never a refusal. `--remove` is
+ * left literal: taking a retired label off a card has to name it.
+ *
  * ## Exit codes — capture them BEFORE any pipe
  *
  *   0  the write landed AND the read-back matched the target.
@@ -188,7 +198,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
-import { EXIT_UNCONFIRMED, exitForResult, packRequest, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
+import { EXIT_UNCONFIRMED, exitForResult, packRequest, resolveRoute, retiredLaneRewriteLine, rewriteRetiredLaneLabels, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
 import { refusalText as relayRefusalText } from './fleet-write/validate.mjs';
 import { isProxyRefusal, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from './write-pace.mjs';
 import {
@@ -686,7 +696,10 @@ export function parseOptions(argv) {
     else return { ok: false, error: `unrecognised option \`${flag}\`` };
   }
 
-  opts.add = parseList(opts.add);
+  // A retired lane alias is written as its lane (header), before any target is computed; --remove stays literal.
+  const lanes = rewriteRetiredLaneLabels(parseList(opts.add));
+  opts.add = lanes.labels;
+  opts.laneRewrites = lanes.rewrites;
   opts.remove = parseList(opts.remove);
   opts.assign = parseList(opts.assign);
   opts.unassign = parseList(opts.unassign);
@@ -828,6 +841,7 @@ export async function runLabelWrite(options, deps = {}) {
     unassign: options.unassign,
     clearAll: options.clearAssignees,
   });
+  for (const r of options.laneRewrites ?? []) record(`[${stamp()}] ② rewritten — ${retiredLaneRewriteLine(r)}`);
   record(
     `[${stamp()}] ② 目标 labels — ${labels.target.length}: ${render(labels.target)}` +
       ` · POST ${render(labels.addCalls)} · DELETE ${render(labels.removeCalls)}` +
@@ -1561,11 +1575,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the four steps, end to end against a fake board': 10,
   'the fallback: one PATCH, and the assignee echo that makes it survivable': 7,
   'the remaining exits: refusal, mismatch, the ONE-OF block and the dry run': 5,
+  'the retired lane aliases: an --add of domain:engine / services / cli / rest is written as domain:server before the target, step ② says so, the read-back is clean on either transport; --remove and a live domain:* label pass untouched': 8,
   'the CLI: what a typo must never be allowed to mean': 8,
   'the relay transport: ONE dispatch carrying the whole stroke, the same read-back, and an accepted dispatch with no run UNCONFIRMED under auto too — never a direct write': 14,
   'the release: a silent claim reclaimed in ONE relay stroke — Release: comment → pm:queue on → pm:dispatched off → unassign — on the knock\'s SERVER-clock age, RELAY-ONLY, never a direct write': 32,
 });
-const SELF_TEST_BATTERY_FLOOR = 11;
+const SELF_TEST_BATTERY_FLOOR = 12;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -1748,6 +1763,25 @@ export async function selfTest() {
 
   const dry = await driveOffline(['--repo', 'o/r', '--issue', '7', '--add', 'x', '--dry-run'], { labels: [] });
   t('a dry run writes nothing and says the board was never read back', [dry.exit, dry.fake.calls.map((c) => c.op), dry.text.includes('never the board')], [EXIT_OK, ['card-read'], true]);
+
+  // ── retired lane aliases ─────────────────────────────────────────────────
+  battery('the retired lane aliases: an --add of domain:engine / services / cli / rest is written as domain:server before the target, step ② says so, the read-back is clean on either transport; --remove and a live domain:* label pass untouched');
+  {
+    t('each retired spelling parses to domain:server, one rewrite row each', ['domain:engine', 'domain:services', 'domain:cli', 'domain:rest'].map((l) => [parseOptions(['--issue', '7', '--add', l]).options.add.join(), parseOptions(['--issue', '7', '--add', l]).options.laneRewrites.length]), [['domain:server', 1], ['domain:server', 1], ['domain:server', 1], ['domain:server', 1]]);
+    t('beside domain:server, or twice, it collapses to one', [parseOptions(['--issue', '7', '--add', 'domain:engine,domain:server']).options.add, parseOptions(['--issue', '7', '--add', 'domain:cli', '--add', 'domain:rest']).options.add], [['domain:server'], ['domain:server']]);
+    t('control: a live domain:* label and a non-lane label pass untouched, no row', [parseOptions(['--issue', '7', '--add', 'domain:spec,pm:queue']).options.add, parseOptions(['--issue', '7', '--add', 'domain:spec,pm:queue']).options.laneRewrites], [['domain:spec', 'pm:queue'], []]);
+    t('⛔ --remove keeps the retired name it must take off', parseOptions(['--issue', '7', '--add', 'domain:server', '--remove', 'domain:engine']).options.remove, ['domain:engine']);
+    const direct = await driveOffline(['--repo', 'o/r', '--issue', '7', '--add', 'domain:engine,priority:p2'], { labels: ['pm:queue'] });
+    t('direct: the POST carries domain:server, the read-back is clean, exit 0', [direct.exit, direct.fake.board.labels, direct.res.reAdded ?? []], [EXIT_OK, ['pm:queue', 'domain:server', 'priority:p2'], []], direct.text.slice(-400));
+    t('…and step ② prints the rewrite', direct.out.some((l) => l.includes('② rewritten — label domain:engine → domain:server (retired alias)')), true);
+    const relabel = await driveOffline(['--repo', 'o/r', '--issue', '7', '--add', 'domain:server', '--remove', 'domain:engine'], { labels: ['domain:engine', 'pm:queue'] });
+    t("triage's relabel still works: domain:engine off, domain:server on, no rewrite line", [relabel.exit, relabel.fake.board.labels, relabel.text.includes('retired alias')], [EXIT_OK, ['pm:queue', 'domain:server'], false]);
+    const viaRelay = await driveOffline(['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--add', 'domain:rest'], { labels: ['pm:queue'] }, {
+      route: { requested: 'dispatch', transport: 'dispatch', reason: 'self-test: dispatch', error: null, session: 'session_01ABCDEFGHJKMNPQRSTVWXYZ' },
+      relay: 'success',
+    });
+    t('relay: the ONE dispatch carries domain:server and reads back clean, exit 0', [viaRelay.exit, viaRelay.sent[0]?.actions?.[0]?.labels, viaRelay.fake.board.labels], [EXIT_OK, ['domain:server'], ['pm:queue', 'domain:server']], viaRelay.text.slice(-400));
+  }
 
   // ── the CLI ──────────────────────────────────────────────────────────────
   battery('the CLI: what a typo must never be allowed to mean');

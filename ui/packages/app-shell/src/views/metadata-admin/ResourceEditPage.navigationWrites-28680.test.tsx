@@ -48,8 +48,10 @@ const mockClient = {
   listDrafts: vi.fn(async () => []),
   layered: vi.fn(async () => {
     const effective = server.overlay ?? server.code;
-    if (!effective) return { code: null, overlay: null, overlayScope: null, effective: null };
+    // The pending draft as stored (objectstack#29814): always pending here, as `getDraft` below.
+    if (!effective) return { code: null, overlay: null, overlayScope: null, effective: null, draft: PAGE };
     return {
+      draft: PAGE,
       code: server.code,
       overlay: server.overlay,
       overlayScope: server.overlay ? 'env' : null,

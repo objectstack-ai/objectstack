@@ -2,20 +2,24 @@
 
 ## Field Groups (MVP)
 
-Organize fields into logical groups (e.g., "Contact Information", "Billing",
-"System") for forms, detail pages, and editors.
-
 - Declare groups on `ObjectSchema.fieldGroups` — **array order is the display order**.
 - Assign each field to a group via `Field.group`, which references an
   `ObjectFieldGroup.key`. In-group display order equals the traversal order
   of `fields`.
-- Group keys must be `snake_case`; group labels are human-readable.
+- Group keys must be `snake_case`.
 - Optional per-group: `icon`, `description`, and `collapse`
   (`'none'` always open · `'expanded'` collapsible, starts open ·
-  `'collapsed'` collapsible, starts closed — replaces the deprecated
-  `defaultExpanded` flag, ADR-0085). Groups render identically on forms,
-  modals, and detail pages; for a bespoke single-page layout assign a
-  custom Page instead.
+  `'collapsed'` collapsible, starts closed). Groups render identically on forms,
+  modals, and detail pages.
+- Hide a whole group, header included, with `visibleWhen` (CEL over
+  `record.*`; FALSE or a fault hides it) or `requiresFeature` (a deployment
+  feature flag from `PUBLIC_AUTH_FEATURES` in `@objectstack/spec/kernel`; an
+  unknown flag is refused). At parse `requiresFeature` is lowered into the
+  group's `visibleWhen` and stripped, AND-combined after an authored
+  `visibleWhen`. Presentation only: the fields stay readable through the API.
+  `sys_organization` hides Parent Organization and Sort Order on one
+  organization:
+  `{ key: 'group_structure', label: 'Group Structure', requiresFeature: 'multiOrgEnabled' }`.
 
 <!-- os:check -->
 ```typescript
@@ -44,10 +48,6 @@ export default ObjectSchema.create({
 });
 ```
 
-**Supported migrations at this layer:** add / rename / delete / reorder groups
-(edit the `fieldGroups` array), assign a field to a group (edit `Field.group`).
-Explicit per-field in-group ordering is deferred to a future iteration.
-
 ## Quick-Start Template
 
 <!-- os:check -->
@@ -60,7 +60,7 @@ export default ObjectSchema.create({
   pluralLabel: 'Support Cases',
   description: 'A customer-reported issue tracked to resolution.',
   icon: 'life-buoy',
-  sharingModel: 'private',                 // required in practice — see above
+  sharingModel: 'private',                 // required in practice
   highlightFields: ['subject', 'status', 'priority'],
   enable: {
     trackHistory: true,
@@ -111,14 +111,12 @@ Declared `indexes` are a separate decision — see
 
 ### Lifecycle Hooks
 
-Implement business logic at data operation lifecycle points:
-
 <!-- os:check -->
 ```typescript
 import { defineHook, HookContext } from '@objectstack/spec/data';
 
 export default defineHook({
-  name: 'account_defaults',
+  name: 'crm_account_defaults',
   object: 'account',
   events: ['beforeInsert'],
   handler: async (ctx: HookContext) => {
@@ -160,9 +158,6 @@ protection?: {
 }
 ```
 
-The block is `.strict()`: `reason` is **required** (min 1 / max 500 chars) and
-unknown keys are rejected.
-
 | `lock` | Edit | Delete | Typical use |
 |:---|:---:|:---:|:---|
 | `none` (default) | ✅ | ✅ | Normal authored metadata |
@@ -174,7 +169,6 @@ unknown keys are rejected.
 
 <!-- os:check -->
 ```typescript
-// src/objects/sys-user.object.ts
 import { ObjectSchema } from '@objectstack/spec/data';
 
 export const SysUserObject = ObjectSchema.create({

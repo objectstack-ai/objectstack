@@ -525,7 +525,7 @@
       "source": [
         "packages/spec/src/data/filter.zod.ts#AST_OPERATOR_MAP (AST_OPERATOR_MAP / FieldOperatorsSchema — the operator variant source)",
         "packages/spec/src/data/query.zod.ts#QueryAST (QueryAST keys)",
-        "packages/metadata-protocol/src/protocol.ts#UNSUPPORTED_QUERY_PARAM (supported $-params + UNSUPPORTED_QUERY_PARAM #2926 ⑩, INVALID_FIELD #4134)",
+        "packages/metadata-protocol/src/protocol-data-crud.ts#UNSUPPORTED_QUERY_PARAM (supported $-params + UNSUPPORTED_QUERY_PARAM #2926 ⑩, INVALID_FIELD #4134)",
         "packages/spec/src/data/filter.zod.ts#checkFilterConditionComparands (the request-schema refusal of a scalar list comparand on the POST door, #20116 — the $-object spelling, located at query.where.<field>.$nin)",
         "packages/spec/src/data/data-engine.zod.ts#lowerFoldedTransportValues (the AST/FilterArray spelling on the POST door, refused at query.where when it cannot be lowered)",
         "packages/spec/src/data/data-engine.zod.ts#QueryTransportParamsSchema (`filter` is a declared transport spelling of `where` — why negative[0] no longer probes with it)",
@@ -2736,14 +2736,14 @@
       "surface": "api",
       "personas": [
         "admin, authenticated — the live-boot half",
-        "a restricted member who cannot read every field of showcase_project — a member bound to the client_liaison position (showcase_client_liaison set: budget, budget_remaining and spent unreadable) — the masking clause is only observable as a non-admin",
+        "a restricted member who cannot read every field of showcase_project — a member bound to the showcase_client_liaison position (showcase_client_liaison set: budget, budget_remaining and spent unreadable) — the masking clause is only observable as a non-admin",
         "no persona for the variant half: a non-default `metadata` block is authorable only by a programmatic embedder (knownGaps)"
       ],
       "fixtures": {
         "app": "showcase",
         "requires": [
           "a stock showcase boot for the default-config half (prefix /meta, cache on, masking ON by default)",
-          "a persona whose field-level security hides at least one field of a served object — on stock that is the client_liaison position's showcase_client_liaison set, which withholds showcase_project.budget, .spent and .budget_remaining (readable:false); no stock persona carries FLS on any showcase_account field, so a showcase_account diff is empty for everyone. Without such a persona the masking clause scores blocked(fixture), never green",
+          "a persona whose field-level security hides at least one field of a served object — on stock that is the showcase_client_liaison position's showcase_client_liaison set, which withholds showcase_project.budget, .spent and .budget_remaining (readable:false); no stock persona carries FLS on any showcase_account field, so a showcase_account diff is empty for everyone. Without such a persona the masking clause scores blocked(fixture), never green",
           "a scratch vitest harness in packages/rest for the variant half (construct, registerRoutes(), getRoutes())"
         ],
         "knownGaps": [
@@ -2754,7 +2754,7 @@
       "steps": [
         "boot the showcase on its own port and DB; as admin fire the default-prefix metadata mounts and capture status: GET /api/v1/meta, /meta/types, /meta/diagnostics, /meta/_drafts, GET /meta/object, GET /meta/object/showcase_task, /meta/object/showcase_task/references, /meta/object/showcase_task/layers, /meta/book/<a seeded book>/tree; fire the routing-404 control alongside",
         "GET /api/v1/discovery and read routes.metadata — it must equal the base plus the configured prefix",
-        "as the restricted persona (a member bound to the client_liaison position) GET /api/v1/meta/object/showcase_project and diff the served fields against the admin's copy of the same document",
+        "as the restricted persona (a member bound to the showcase_client_liaison position) GET /api/v1/meta/object/showcase_project and diff the served fields against the admin's copy of the same document",
         "harness: construct with { metadata: { prefix: '/metadata' } } and confirm every metadata mount re-bases and the discovery body advertises the new prefix",
         "harness: construct with { metadata: { endpoints: { types: false } } } — GET {prefix} and GET {prefix}/types both disappear (one handler, two paths)",
         "harness: construct with { metadata: { endpoints: { items: false } } } and enumerate what leaves: GET {prefix}/:type and NOTHING else — exactly the one mount its describe() names (#15542 moved the whole-store family off this switch; a run that still sees /diagnostics, /_drafts or POST /_migrate-stored leave with it is the old radius returning)",
@@ -3224,7 +3224,7 @@
         "GET /api/v1/meta/email_template/NAME?member=zh-CN; GET /api/v1/meta/object/showcase_task?member=x",
         "GET /api/v1/meta/object/showcase_task?memeber=x (typo)",
         "GET /api/v1/meta/view?package=all vs GET /api/v1/meta/view",
-        "as a member whose FLS hides a field F: the stock showcase declares field-level security on showcase_project only (showcase_client_liaison hides budget, budget_remaining and spent), and no demo persona holds the client_liaison position, so mint the member (POST /api/v1/auth/admin/create-user, then the password change) and bind it with a sys_user_position row for client_liaison; GET /api/v1/meta/object/showcase_project and read sortability for budget; GET /api/v1/data/showcase_project?sort=budget"
+        "as a member whose FLS hides a field F: the stock showcase declares field-level security on showcase_project only (showcase_client_liaison hides budget, budget_remaining and spent), and no demo persona holds the showcase_client_liaison position, so mint the member (POST /api/v1/auth/admin/create-user, then the password change) and bind it with a sys_user_position row for client_liaison; GET /api/v1/meta/object/showcase_project and read sortability for budget; GET /api/v1/data/showcase_project?sort=budget"
       ],
       "acceptance": [
         {
@@ -3254,7 +3254,7 @@
         {
           "clause": "for the FLS-restricted caller F is ABSENT from sortability.fields (never offered — it is not listed with sortable: false) and the data sort on F is 403 — the two agree",
           "oracle": "api",
-          "verify": "sortability.fields without F + the data answer, for a member bound to the client_liaison position. meta-read-doors-live.dogfood.test.ts asserts both halves over HTTP on a booted showcase: budget absent from sortability.fields (name listed sortable; the admin's definition offers budget, the CONTROL), and GET /api/v1/data/showcase_project?sort=budget → 403 PERMISSION_DENIED beside a served sort on name. packages/rest/src/meta-object-sortability-caller-fls.test.ts ('sortability never offers the unreadable field') holds the same rule at unit, and showcase-fls-read-mask-strip.dogfood.test.ts the data-sort 403 for a scratch permission set",
+          "verify": "sortability.fields without F + the data answer, for a member bound to the showcase_client_liaison position. meta-read-doors-live.dogfood.test.ts asserts both halves over HTTP on a booted showcase: budget absent from sortability.fields (name listed sortable; the admin's definition offers budget, the CONTROL), and GET /api/v1/data/showcase_project?sort=budget → 403 PERMISSION_DENIED beside a served sort on name. packages/rest/src/meta-object-sortability-caller-fls.test.ts ('sortability never offers the unreadable field') holds the same rule at unit, and showcase-fls-read-mask-strip.dogfood.test.ts the data-sort 403 for a scratch permission set",
           "evidence": "both excerpts"
         }
       ],

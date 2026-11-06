@@ -71,8 +71,8 @@ export interface AppHarness {
   signInAdmin(): Promise<void>;
   adminUserId(): string;
   organizationId(): string;
-  /** One user, its own permission set (named after the persona) and one API key. */
-  createPersona(persona: string): Promise<PersonaAccount>;
+  /** One user, the permission set the build declared for it (`<namespace>_<persona>`) and one API key. */
+  createPersona(persona: string, permissionSet: string): Promise<PersonaAccount>;
   /** An API key for the admin, for the questions no persona is named on. */
   adminApiKey(): Promise<string>;
   insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer>;
@@ -166,7 +166,7 @@ export class HttpApp implements AppHarness {
     return this.orgId;
   }
 
-  async createPersona(persona: string): Promise<PersonaAccount> {
+  async createPersona(persona: string, permissionSet: string): Promise<PersonaAccount> {
     const email = `${persona}@scenario.test`;
     const first = `${this.opts.personaPassword ?? 'Scenario-Run-1'}a`;
     const password = this.opts.personaPassword ?? 'Scenario-Run-1';
@@ -186,7 +186,7 @@ export class HttpApp implements AppHarness {
     const grant = await this.call(
       'POST',
       '/api/v1/data/sys_user_permission_set',
-      { user_id: userId, permission_set: persona, organization_id: this.orgId },
+      { user_id: userId, permission_set: permissionSet, organization_id: this.orgId },
       { session: this.admin },
     );
     const key = await this.call('POST', '/api/v1/keys', { name: `scenario-${persona}` }, { session: s });
@@ -198,7 +198,7 @@ export class HttpApp implements AppHarness {
       email,
       apiKey: raw,
       permissionSet: {
-        name: persona,
+        name: permissionSet,
         assigned: grant.ok,
         ...(grant.code ? { code: grant.code } : {}),
         ...(grant.message ? { message: grant.message.slice(0, 300) } : {}),

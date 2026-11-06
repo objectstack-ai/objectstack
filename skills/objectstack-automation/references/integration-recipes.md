@@ -41,7 +41,7 @@ export const StripeConnector = defineConnector({
 });
 // crm_account gains `stripe_available` (currency) and `stripe_synced_at` (datetime).
 export const StripeBalanceSweep = defineFlow({
-  name: 'stripe_balance_sweep', label: 'Stripe balance → house account',
+  name: 'crm_stripe_balance_sweep', label: 'Stripe balance → house account',
   type: 'schedule', runAs: 'system',
   nodes: [
     { id: 'start', type: 'start', label: 'Nightly 03:00',

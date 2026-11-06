@@ -1,8 +1,5 @@
 # Part 3 — Operations: CLI, Testing, Deployment
 
-Every project gets the same `os` command surface — `npm install` does not need
-to be re-run when commands are added.
-
 ## Daily-loop commands
 
 | Command | What it does |
@@ -49,8 +46,7 @@ Both run the same gates:
 3. **Widget-binding integrity (ADR-0021)** — every dashboard widget's
    `dataset` / `dimensions` / `values` resolves to a declared dataset/field.
 
-Both exit non-zero with a located, corrective message. In a scaffolded project
-these are `npm run validate` / `npm run build`.
+Both exit non-zero with a located, corrective message.
 
 **Rule of thumb: never report a metadata change as done until `os validate`
 passes.** (`os lint` is a *separate* style/convention pass and does not
@@ -102,14 +98,11 @@ Port resolution is the same for `os dev` and `os start` (both spawn `os serve`):
 | `os register` | Register the local stack as a deployable target |
 | `os cloud login` / `logout` / `whoami` | Cloud auth subcommands (these three only — there are no `os cloud logs/metrics/status`) |
 | `os package publish [dist/objectstack.json] [--env … --install --visibility org]` | Upload the compiled artifact as a versioned package to the cloud catalog (ADR-0008 P3). Listing file, README, review and every screen the customer's administrator meets: [Marketplace handbook](https://objectstack.ai/docs/deployment/marketplace-handbook) |
-| `os package install <manifest-id │ ./dist/objectstack.json> [--version │ --runtime http://localhost:3000]` | Install a package into a **running** runtime via its install-local endpoint. Catalog mode (by manifest id) or air-gapped local-artifact mode. Auths with the **target runtime's** session (`--email/--password` or `OS_RUNTIME_EMAIL`/`OS_RUNTIME_PASSWORD`), not the cloud login |
+| `os package install <manifest-id │ ./dist/objectstack.json> [--version │ -u/--url http://localhost:3000]` | Install a package into a **running** runtime. Catalog mode (by manifest id) or air-gapped local-artifact mode. Auths as a **target runtime** user (`-t/--token` or `--email/--password`; env `OS_RUNTIME_TOKEN` or `OS_RUNTIME_EMAIL`/`OS_RUNTIME_PASSWORD`), not the cloud login |
 
-> **Cloud connection & marketplace (`@objectstack/cloud-connection`, ADR-0008/0009).**
-> The open runtime-side cloud client. Its plugins —
-> `CloudConnectionPlugin`/`createCloudConnectionPlugin`, `MarketplaceProxyPlugin`,
-> `MarketplaceInstallLocalPlugin`, `RuntimeConfigPlugin` — expose the install-local
-> endpoint that `os package install` targets, ship the **Installed Apps** page and
-> marketplace Setup nav as plugin metadata.
+> **Cloud connection & marketplace (`@objectstack/cloud-connection`, ADR-0008/0009):**
+> the open runtime-side cloud client; its `MarketplaceInstallLocalPlugin` serves the
+> install-local endpoint `os package install` targets.
 
 ## Mobile push
 
@@ -143,36 +136,11 @@ Authoring stops at `kernel.use(plugin)`; these three make it distributable.
 Use `LiteKernel` for unit / integration tests — it skips the cloud bits and
 plugin discovery, so tests run in milliseconds. Assemble the same plugins the
 CLI would auto-register (`use()` is synchronous and chainable):
+`new ObjectQLPlugin()`, `new DriverPlugin(new InMemoryDriver())` and
+`new AppPlugin(stack)` (`AppPlugin`: `@objectstack/runtime`; `stack`: the
+config's default export). The vitest shape: [Testing Plugins](./plugin-development.md#testing-plugins);
+the other imports: [Using Plugins](./plugin-development.md#using-plugins).
 
-```typescript
-import { describe, it, expect } from 'vitest';
-import { LiteKernel } from '@objectstack/core';
-import { ObjectQLPlugin } from '@objectstack/objectql';
-import { DriverPlugin, AppPlugin } from '@objectstack/runtime';
-import { InMemoryDriver } from '@objectstack/driver-memory';
-import stack from '../objectstack.config';
-
-describe('stack boot', () => {
-  it('registers the task object', async () => {
-    const kernel = new LiteKernel({ logger: { level: 'silent' } });
-    kernel
-      .use(new ObjectQLPlugin())
-      .use(new DriverPlugin(new InMemoryDriver()))
-      .use(new AppPlugin(stack));
-    await kernel.bootstrap();
-
-    const ql = kernel.getService<any>('objectql');
-    // query / mutate through the engine — see objectstack-query for the API
-    expect(ql).toBeDefined();
-
-    await kernel.shutdown();
-  });
-});
-```
-
-- **Seed in tests:** declare fixtures in the stack's `data:` collection —
-  they load at boot. See **objectstack-data** for env-scoped fixtures
-  (`env: ['test']`).
 - **Reset between tests:** create a fresh `LiteKernel` per test — with the
   in-memory driver a full bootstrap is cheap, and there is no `reset()`.
 - **HTTP-level tests:** mount `createHonoApp({ kernel })` from
@@ -186,7 +154,7 @@ describe('stack boot', () => {
 | Edge (Cloudflare Workers, Vercel Edge) | `driver-turso` (**cloud / EE only**) | `@objectstack/hono` | Cold-start friendly; LiteKernel only |
 | Serverless (Lambda, Vercel functions) | `driver-sql` (`pg` with pooler) / `driver-mongodb` | `@objectstack/hono` | Mind cold-start: prefer LiteKernel |
 | Browser / WebContainer | `driver-sqlite-wasm` | none (in-process) | Playground, demos |
-| Docker / Kubernetes | any | any | Use `os start` as the entrypoint; pin `PORT` and `EXPOSE` it (see [Ports & networking](#ports--networking)) |
+| Docker / Kubernetes | any | any | Use `os start` as the entrypoint; pin `PORT` and `EXPOSE` it (see [Ports & networking](#ports--networking)). The official image (`ghcr.io/objectstack-ai/objectstack`) refuses to start unless `OS_DATABASE_URL`, `OS_AUTH_SECRET` and `OS_SECRET_KEY` are set at runtime, never baked in; an explicit `OS_DATABASE_URL=file:/path/on/a/mounted/volume/app.db` passes, so SQLite on a volume still works |
 
 ## Health & observability
 
@@ -210,3 +178,4 @@ describe('stack boot', () => {
 | Hot reload misses new objects | Barrel `src/objects/index.ts` not re-exporting — check the file |
 | Login works but **Setup / Studio missing** | The logged-in user isn't a platform admin. Setup/Studio are gated by `setup.access` / `studio.access` on `admin_full_access`, auto-granted only to the first registered **human** (`bootstrapPlatformAdmin`). The `usr_system` seed identity is skipped, so it can't steal the grant. Either sign up first (`--seed-admin`/`--fresh` does this) or check `sys_user_permission_set` for a cross-tenant (`organization_id = NULL`) `admin_full_access` link on your user. Don't edit nav code first. |
 | A permission set is declared but grants nobody anything | Declaring a set is not assigning it — see "Assigning a permission set to a user" in **objectstack-data**. |
+| The official image exits at start naming `OS_DATABASE_URL` / `OS_AUTH_SECRET` / `OS_SECRET_KEY` | The image presets `OS_DEPLOYMENT_DURABILITY_CHECK_ENABLED=true`: with any of the three unset, `os start` exits 1 before it writes a database file or a secret. Set the named ones on the run command. Upgrading a container that ran on the image's defaults? **Keep its generated values**, read from the old container's `/home/node/.objectstack` (`docker exec <container> cat <file>`, or its volume): `OS_AUTH_SECRET` is the contents of `auth-secret`, `OS_SECRET_KEY` the contents of `dev-crypto-key`, and the data is `data/objectstack.db` (`OS_DATABASE_URL=file:…` on the kept volume, or migrate it). Fresh values leave every saved credential unreadable and sign everyone out. |

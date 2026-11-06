@@ -38,6 +38,17 @@
  * 500, ObjectQL the SQL driver's missing-column backstop (400, no `path`), the
  * preview one `null` group holding the total. Every face now answers the
  * engine's plain-group refusal at `groupBy.N`, field for field.
+ *
+ * [#30773] …and since then a dataset that DECLARES a dimension over a formula
+ * no longer compiles: the dataset compile refuses it with `DATASET_INVALID` /
+ * 400 before any face is chosen, whichever members the selection names. So
+ * the formula dimensions moved out of {@link DATASET} into
+ * {@link FORMULA_DATASET}, and the #29167 / #29304 cases on this harness now pin
+ * that earlier refusal, alike on every face. The query-time refusal itself
+ * stays pinned where no dataset compile stands in front of it: the engine's
+ * door (`@objectstack/objectql`), the `/analytics/sql` dry run
+ * (`objectql-echo-non-date-bucket.test.ts`) and the delegated face
+ * (`fallback-delegate-date-bucket-type.test.ts`).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -67,9 +78,36 @@ const DATASET = DatasetSchema.parse({
     { name: 'closed_at', field: 'closed_at', type: 'date' },
     { name: 'closed_on', field: 'closed_on', type: 'date' },
     { name: 'opened_time', field: 'opened_time', type: 'date' },
-    { name: 'calc', field: 'calc', type: 'date' },
     { name: 'region_month', field: 'region', type: 'date', dateGranularity: 'month' },
+  ],
+  measures: [{ name: 'total', aggregate: 'sum', field: 'amount' }],
+});
+
+/**
+ * [#30773] The formula dimensions #29167 / #29304 asked through, in a dataset
+ * of their own behind one stored dimension: a dataset declaring any of them is
+ * refused when it is compiled, so they can no longer share {@link DATASET}.
+ */
+const FORMULA_DATASET = DatasetSchema.parse({
+  name: 'os28852_formula_deals',
+  label: 'Deals by formula',
+  object: OBJECT,
+  dimensions: [
+    { name: 'region', field: 'region', type: 'string' },
+    { name: 'calc', field: 'calc', type: 'date' },
     { name: 'calc_month', field: 'calc', type: 'date', dateGranularity: 'month' },
+    { name: 'calc_s', field: 'calc_s', type: 'string' },
+  ],
+  measures: [{ name: 'total', aggregate: 'sum', field: 'amount' }],
+});
+
+/** [#30773] A dataset whose only formula dimension is `calc_s` (`returnType` text). */
+const FORMULA_TEXT_DATASET = DatasetSchema.parse({
+  name: 'os28852_formula_text_deals',
+  label: 'Deals by text formula',
+  object: OBJECT,
+  dimensions: [
+    { name: 'region', field: 'region', type: 'string' },
     { name: 'calc_s', field: 'calc_s', type: 'string' },
   ],
   measures: [{ name: 'total', aggregate: 'sum', field: 'amount' }],
@@ -92,9 +130,9 @@ describe('[#28852] a date bucket over a column that is not a date, on every face
   let engine: ObjectQL;
   const services: Partial<Record<'native' | 'objectql', AnalyticsService>> = {};
 
-  const ask = (face: Face, selection: Selection) =>
+  const ask = (face: Face, selection: Selection, dataset: typeof DATASET = DATASET) =>
     services[face === 'preview' ? 'objectql' : face]!.queryDataset(
-      DATASET,
+      dataset,
       { ...selection } as never,
       undefined,
       face === 'preview' ? { previewDrafts: true } : undefined,
@@ -200,52 +238,59 @@ describe('[#28852] a date bucket over a column that is not a date, on every face
     expect(refusal).toMatchObject({ path: 'groupBy.0.dateGranularity', field: 'region', fields: ['region'] });
   });
 
-  it('[#29167] refuses a bucket over a formula (virtual: no stored column) with the engine\'s refusal, where the preview served one null group', async () => {
-    // [#28977] pinned the skip this replaces: the engine judged no formula, so
-    // the live faces answered the SQL driver's missing-column backstop (no
-    // path, a "run schema sync" prescription) and the preview served one
-    // `null` group holding the total. The engine's door now refuses a virtual
-    // field, and the service's copy gives the same refusal on the preview.
-    const refusal = await refusedAlike({ measures: ['total'], timeDimensions: [{ dimension: 'calc', granularity: 'month' }] });
-    expect(refusal).toEqual({
-      message:
-        `aggregate('${OBJECT}'): groupBy.0.dateGranularity buckets 'calc' by 'month', but 'calc' is a formula field — `
-        + 'its value is computed on read and never stored, so no driver materialises a column to bucket. The query was '
-        + `NOT run. Denormalise the value onto '${OBJECT}' (a stored date or datetime field, written when the source `
-        + 'changes) and bucket that. A formula field is virtual: with no column behind it the bucket reached the driver '
-        + 'as a column that does not exist, and an engine that aggregates in memory put every row into one null group '
-        + 'while the answer looked served.',
-      code: 'INVALID_FIELD', status: 400, httpStatus: 400,
-      object: OBJECT, param: 'groupBy', path: 'groupBy.0.dateGranularity', field: 'calc', fields: ['calc'],
-    });
+  /**
+   * [#30773] Every face refuses a query on `dataset` with the compile's one
+   * refusal of a formula dimension, field for field: `DATASET_INVALID` / 400.
+   */
+  const refusedAtCompileAlike = async (dataset: typeof DATASET, selection: Selection) => {
+    const refusals: Array<Record<string, unknown>> = [];
+    for (const face of FACES) {
+      const err = (await ask(face, selection, dataset).then(
+        () => { throw new Error(`${face}: expected a refusal, but the query resolved`); },
+        (e: unknown) => e,
+      )) as Error & Record<string, unknown>;
+      expect(err.code, `${face}: ${err.message}`).toBe('DATASET_INVALID');
+      expect(err.status, face).toBe(400);
+      refusals.push({ message: err.message, code: err.code, status: err.status });
+    }
+    for (const [i, refusal] of refusals.entries()) expect(refusal, `${FACES[i]} vs native`).toEqual(refusals[0]);
+    return refusals[0];
+  };
+
+  /** The compile's refusal of the formula dimension `dimension` at `index`, grouping by `field`. */
+  const formulaDimensionRefusal = (dataset: string, dimension: string, index: number, field: string) => ({
+    message:
+      `[dataset-compiler] dataset "${dataset}" dimension "${dimension}" (dimensions.${index}) groups by field `
+      + `"${field}", which object "${OBJECT}" declares as \`formula\` — its value is computed on read and never `
+      + 'stored, so no driver materialises a column to group by, and every query selecting this dimension is '
+      + `refused. Denormalise the value onto "${OBJECT}" (a stored field, written when the source changes) and `
+      + 'point the dimension at that field.',
+    code: 'DATASET_INVALID', status: 400,
   });
 
-  it("[#29167] refuses a dataset dimension's declared dateGranularity over a formula", async () => {
-    const refusal = await refusedAlike({ dimensions: ['calc_month'], measures: ['total'] });
-    expect(refusal).toMatchObject({ path: 'groupBy.0.dateGranularity', field: 'calc', fields: ['calc'] });
+  // [#29167] pinned a bucket over a formula (a `timeDimensions` granularity and
+  // a declared `dateGranularity`) refused on every face with the engine's
+  // virtual-field refusal at `groupBy.0.dateGranularity`, where the preview
+  // served one null group; [#29304] a plain dimension over a formula of either
+  // `returnType` at `groupBy.N`, where native answered 500, ObjectQL the driver
+  // backstop and the preview one null group. [#30773] The dataset declaring
+  // them now refuses at compile, before a face is chosen — for these
+  // selections, and for one that names only its stored dimension.
+  it.each<[string, Selection]>([
+    ['[#29167] a bucket over a formula', { measures: ['total'], timeDimensions: [{ dimension: 'calc', granularity: 'month' }] }],
+    ["[#29167] a dataset dimension's declared dateGranularity over a formula", { dimensions: ['calc_month'], measures: ['total'] }],
+    ['[#29304] a plain dimension over a formula (returnType date)', { dimensions: ['calc'], measures: ['total'] }],
+    ['[#29304] a plain dimension over a formula (returnType text)', { dimensions: ['calc_s'], measures: ['total'] }],
+    ['[#29304] a formula dimension after a stored one', { dimensions: ['region', 'calc_s'], measures: ['total'] }],
+    ['a query naming only the stored dimension', { dimensions: ['region'], measures: ['total'] }],
+  ])('[#30773] refuses %s at compile, alike on every face, naming the first formula dimension the dataset declares', async (_label, selection) => {
+    expect(await refusedAtCompileAlike(FORMULA_DATASET, selection))
+      .toEqual(formulaDimensionRefusal('os28852_formula_deals', 'calc', 1, 'calc'));
   });
 
-  it.each([
-    ['date', 'calc'],
-    ['text', 'calc_s'],
-  ])('[#29304] refuses a plain dimension over a formula (returnType %s) with the engine\'s refusal on every face, where native answered 500, ObjectQL the driver backstop, and the preview one null group', async (_label, field) => {
-    const refusal = await refusedAlike({ dimensions: [field], measures: ['total'] });
-    expect(refusal).toEqual({
-      message:
-        `aggregate('${OBJECT}'): groupBy.0 groups by '${field}', but '${field}' is a formula field — its value is `
-        + 'computed on read and never stored, so no driver materialises a column to group by. The query was NOT run. '
-        + `Denormalise the value onto '${OBJECT}' (a stored field, written when the source changes) and group by that. `
-        + 'A formula field is virtual: with no column behind it the group key reached the driver as a column that does '
-        + 'not exist, and an engine that aggregates in memory put every row into one null group while the answer looked '
-        + 'served.',
-      code: 'INVALID_FIELD', status: 400, httpStatus: 400,
-      object: OBJECT, param: 'groupBy', path: 'groupBy.0', field, fields: [field],
-    });
-  });
-
-  it('[#29304] names the position of a plain formula dimension after a stored one', async () => {
-    const refusal = await refusedAlike({ dimensions: ['region', 'calc_s'], measures: ['total'] });
-    expect(refusal).toMatchObject({ path: 'groupBy.1', field: 'calc_s', fields: ['calc_s'] });
+  it('[#30773] refuses a dataset whose only formula dimension returns text, at its own position', async () => {
+    expect(await refusedAtCompileAlike(FORMULA_TEXT_DATASET, { dimensions: ['region'], measures: ['total'] }))
+      .toEqual(formulaDimensionRefusal('os28852_formula_text_deals', 'calc_s', 1, 'calc_s'));
   });
 
   it('[#29304] still serves a plain dimension over a stored column alike on every face', async () => {

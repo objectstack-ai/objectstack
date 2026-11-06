@@ -33,9 +33,10 @@ import { runCard, type ProjectOps } from './orchestrate.js';
 import { bootDev, os, readArtifact, readNamespace, scaffold } from './project.js';
 import { cardScorecard, renderScorecard, runRecord } from './scorecard.js';
 
-const ADMIN = { email: 'admin@objectos.ai', password: 'admin123' };
+/** The dev admin `objectstack dev --fresh` seeds; the runner and the gallery exporter sign in as it. */
+export const ADMIN = { email: 'admin@objectos.ai', password: 'admin123' };
 
-function findUp(start: string, test: (dir: string) => boolean): string {
+export function findUp(start: string, test: (dir: string) => boolean): string {
   let dir = start;
   for (;;) {
     if (test(dir)) return dir;
@@ -115,7 +116,11 @@ export async function main(argv: readonly string[]): Promise<number> {
   console.log(`driver: ${info.driver} ${info.version ?? ''} · login: ${info.authMethod ?? 'n/a'} · API-billed: no`);
 
   const ops: ProjectOps = {
-    scaffold: (name) => scaffold(work, name, args.createVersion ? { version: args.createVersion } : {}),
+    scaffold: (name, under) => {
+      const parent = join(work, under);
+      mkdirSync(parent, { recursive: true });
+      return scaffold(parent, name, args.createVersion ? { version: args.createVersion } : {});
+    },
     os: (dir, a) => os(dir, a),
     readArtifact,
     namespace: readNamespace,

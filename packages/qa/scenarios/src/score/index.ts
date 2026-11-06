@@ -1,10 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `@objectstack/scenarios/score` — score a LOADED card against what a run
- * produced: a built artifact (`dist/objectstack.json`), an observed write, or
- * an agent's answer. The entry the scenario runner calls; private, like the
- * rest of this package.
+ * `@objectstack/scenarios/score/full` — score a LOADED card against what a
+ * run produced: a built artifact (`dist/objectstack.json`), an observed write,
+ * or an agent's answer. The entry the scenario runner calls; private, like the
+ * rest of this package. The narrow `@objectstack/scenarios/score` is
+ * `./narrow.ts`: everything here except the capability-tag checks and the
+ * card-level functions below.
  *
  * Every function takes a {@link LoadedScenario} (what `loadScenarios` /
  * `loadScenarioFile` return), so the card it judges against has already passed
@@ -15,19 +17,25 @@
  */
 
 import type { LoadedScenario } from '../loader.js';
+import { scenarioNamespace } from '../schema.js';
 import { gradeOperation, type OperationGrade, type OperationObservation } from './scenario-operation-grade.js';
 import { gradePersonaRun, type HiddenScope, type PersonaRunGrade, type RunTranscript } from './scenario-run-grade.js';
 import { scoreScenarioArtifact, type ScenarioArtifactScore } from './scenario-tags.js';
 
 export * from './scenario-graph.js';
+export * from './scenario-naming.js';
 export * from './scenario-operation-grade.js';
 export * from './scenario-run-grade.js';
 export * from './scenario-score.js';
 export * from './scenario-tags.js';
 
-/** Score one built artifact against one loaded card: `expect`, capability tags and agent actions. */
+/**
+ * Score one built artifact against one loaded card: `expect`, capability tags,
+ * agent actions, and every non-object item named without the card's namespace
+ * prefix (`demo` + code) as a failing check of its own.
+ */
 export function scoreCardArtifact(scenario: LoadedScenario, artifact: unknown): ScenarioArtifactScore {
-  return scoreScenarioArtifact(artifact, scenario.card);
+  return scoreScenarioArtifact(artifact, scenario.card, { namespace: scenarioNamespace(scenario.card) });
 }
 
 /** Judge one observed write against the outcome the card declares for operation `operationId`. */

@@ -20,6 +20,7 @@
  *    red at the type check, and a code nobody pinned goes red here.
  */
 
+import { inspect } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { celEngine, collectCelRootIdentifiers, type CelRootIdentifiersResult } from './cel-engine';
 import { templateEngine } from './template-engine';
@@ -855,6 +856,40 @@ function expectLocatorsRead(said: { code: string; params: unknown; source: strin
   }
 }
 
+/**
+ * A refusal's identity in the sweep: the whole refusal, which is its `code`,
+ * `params`, `message` and `source` (`refusal()` in `validate.ts` builds exactly
+ * those four). `inspect` and not `JSON.stringify`, because JSON writes an
+ * `undefined` param as absent and `NaN` as `null`, and two refusals that differ
+ * only there must still be judged apart.
+ */
+function refusalKey(said: ExprValidationError): string {
+  return inspect(said, { depth: Infinity, breakLength: Infinity, maxArrayLength: Infinity, maxStringLength: Infinity });
+}
+
+/**
+ * The validateExpression sweep's budget. The case is synchronous: 5,760
+ * validateExpression calls (3 roles x 128 inputs x 15 schemas), most of the
+ * time in building a typed CEL environment for each call. Its work is the
+ * sweep's breadth, which is the claim, so the breadth stays; only re-judging
+ * duplicate refusals was cut (see the case). Readings of the case, in ms:
+ *
+ *   - CI, `main` push run 42192379976, job `Test Core (4/8)` (127808107135), a
+ *     contended shard: 5034, `Test timed out in 5000ms.` A synchronous body
+ *     runs to its end before vitest judges it, so 5034 is the whole run.
+ *     The six other `Test Core` jobs sampled from the same three days: 429
+ *     to 3065.
+ *   - Local, 4 vCPU, this file alone: 757 to 830 before the cut, 534 to 645
+ *     after it. Pinned to one CPU shared with two busy loops: 2542 to 3063
+ *     before, 1961 to 2137 after.
+ *
+ * The rule follows `packages/cli/test/hook-timeout-override-refusal.test.ts`:
+ * 3x the slowest reading, rounded up to the next second. 3 x 5034 = 15102, so
+ * the budget is 16000. If the sweep's inputs or schemas grow, re-measure and
+ * re-size.
+ */
+const VALIDATE_SWEEP_BUDGET_MS = 16_000;
+
 describe('expression refusal codes — the closed set', () => {
   it('has a pin for every code, and no pin for a code outside the set', () => {
     expect(Object.keys(PINS).sort()).toEqual([...EXPRESSION_REFUSAL_CODES].sort());
@@ -869,6 +904,7 @@ describe('expression refusal codes — the closed set', () => {
 
   it('every refusal validateExpression reports on the sweep carries a code from its set, with params the message interpolates', () => {
     const provoked = new Set<string>();
+    const judged = new Set<string>();
     let refusals = 0;
     for (const role of ['predicate', 'value', 'template'] as const) {
       for (const input of SWEEP_INPUTS) {
@@ -876,6 +912,13 @@ describe('expression refusal codes — the closed set', () => {
           const r = validateExpression(role, input, schema);
           for (const said of [...r.errors, ...r.warnings]) {
             refusals++;
+            // At 98f640d581 the sweep's 3,865 refusals are 199 distinct
+            // ones, and every assertion below reads only the refusal itself
+            // — so one that equals a refusal already judged gets that verdict
+            // again, and is judged once.
+            const key = refusalKey(said);
+            if (judged.has(key)) continue;
+            judged.add(key);
             expect(VALIDATE_CODES.has(said.code), `${said.code} from ${JSON.stringify(input)}`).toBe(true);
             expect(typeof said.params).toBe('object');
             expect(said.params).not.toBeNull();
@@ -890,7 +933,7 @@ describe('expression refusal codes — the closed set', () => {
     // producer owns, so a code whose arm stopped being reachable shows up too.
     expect(refusals).toBeGreaterThan(100);
     expect([...provoked].sort()).toEqual([...VALIDATE_CODES].sort());
-  });
+  }, VALIDATE_SWEEP_BUDGET_MS);
 
   it('every refusal collectCelRootIdentifiers reports on the sweep carries a code from its set', () => {
     const provoked = new Set<string>();

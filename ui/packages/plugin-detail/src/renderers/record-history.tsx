@@ -21,7 +21,8 @@
 import React from 'react';
 import { useRecordContext } from '@object-ui/react';
 import { HistoryTimeline, type HistoryActionField, type HistoryEntry } from '../HistoryTimeline';
-import { activityActorName } from './recordActivityFeed';
+import { activityActorName, activityImpersonatorName, composeImpersonatedActor, IMPERSONATED_ACTOR_FALLBACK } from './recordActivityFeed';
+import { useSafeTranslate } from '@object-ui/i18n';
 
 const splitDesigner = (props: Record<string, any>) => {
   const { 'data-obj-id': id, 'data-obj-type': type, style, ...rest } = props || {};
@@ -185,6 +186,10 @@ export const RecordHistoryRenderer: React.FC<RecordHistoryRendererProps> = ({
   const dataSource = ctx?.dataSource;
   const canSelfFetch = hostEntries === undefined && !!dataSource?.find && !!objectName && recordId != null;
 
+  const tt = useSafeTranslate();
+  const impersonatedActorTemplate = tt('detail.impersonatedActor', IMPERSONATED_ACTOR_FALLBACK);
+  const unknownUserLabel = tt('detail.unknownUser', 'Unknown');
+
   const [fetched, setFetched] = React.useState<HistoryEntry[] | null>(null);
   const [selfLoading, setSelfLoading] = React.useState(false);
 
@@ -225,7 +230,15 @@ export const RecordHistoryRenderer: React.FC<RecordHistoryRendererProps> = ({
               // (no actor at all) from a user it could not name
               // (objectui#12527). Expanded, `actor_id` is the user's record.
               user_id: activityActorId(r),
-              user_name: activityActorName(r),
+              // A write made from an impersonation session names the
+              // administrator beside the user: 「Dev Admin 代王工操作」.
+              user_name: (() => {
+                const name = activityActorName(r);
+                const admin = activityImpersonatorName(r, unknownUserLabel);
+                return admin
+                  ? composeImpersonatedActor(impersonatedActorTemplate, admin, name ?? unknownUserLabel)
+                  : name;
+              })(),
               user_avatar: r.actor_avatar_url ?? null,
               summary: r.summary ?? null,
             } as HistoryEntry;
@@ -235,7 +248,7 @@ export const RecordHistoryRenderer: React.FC<RecordHistoryRendererProps> = ({
       .catch(() => { if (!cancelled) setFetched([]); })
       .finally(() => { if (!cancelled) setSelfLoading(false); });
     return () => { cancelled = true; };
-  }, [canSelfFetch, dataSource, objectName, recordId, limit]);
+  }, [canSelfFetch, dataSource, objectName, recordId, limit, impersonatedActorTemplate, unknownUserLabel]);
 
   const entries: HistoryEntry[] = hostEntries ?? fetched ?? [];
   const loading = hostLoading ?? (canSelfFetch && fetched === null ? selfLoading || true : false);

@@ -130,9 +130,13 @@ export async function globalBeforeHook(
   // `withSystemContext`): better-auth already authorized them under
   // its own ACL, and re-authorizing as the human would open the
   // second adjudication track ADR-0095 D3 closed.
+  //
+  // An impersonation session also names the administrator at the
+  // keyboard: it travels beside the user as the attribution-only
+  // `impersonatedBy`, read off that same session, never off the body.
   setAuthActorResolver(async () => {
     const actor = await this.resolveActor(ctx);
-    return actor?.userId ?? null;
+    return actor ? { userId: actor.userId, impersonatedBy: actor.impersonatedBy } : null;
   });
 
   // ── #23813: a minted principal session is never refreshed ───────

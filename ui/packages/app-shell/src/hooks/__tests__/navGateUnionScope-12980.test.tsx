@@ -77,13 +77,24 @@ function makeAdapter(calls: string[], apps: unknown[], behaviour: Behaviour = {}
     },
     getClient: () => ({
       meta: {
-        getItems: (type: string, options?: { packageId?: string }) => {
-          calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
-          if (type === 'object' && !options?.packageId && behaviour.failWholeList) {
+        getItems: (type: string, options?: { packageId?: string; names?: readonly string[] }) => {
+          calls.push(
+            options?.packageId
+              ? `${type}?package=${options.packageId}`
+              : options?.names
+                ? `${type}?names=${options.names.join(',')}`
+                : type,
+          );
+          if (type === 'object' && !options?.packageId && !options?.names && behaviour.failWholeList) {
             return Promise.reject(Object.assign(new Error('unavailable'), { httpStatus: 503 }));
           }
-          const all = (type === 'object' ? OBJECTS : type === 'app' ? apps : []) as Array<{ _packageId?: string }>;
-          const items = options?.packageId ? all.filter((o) => o._packageId === options.packageId) : all;
+          const all = (type === 'object' ? OBJECTS : type === 'app' ? apps : []) as Array<{ name?: string; _packageId?: string }>;
+          // objectstack#29444 — `?names=` keeps the items of those names; an unknown name is simply absent.
+          const items = options?.packageId
+            ? all.filter((o) => o._packageId === options.packageId)
+            : options?.names
+              ? all.filter((o) => options.names!.includes(o.name ?? ''))
+              : all;
           return Promise.resolve({ type, items: structuredClone(items) });
         },
         getItem: (type: string, name: string) => {
@@ -212,7 +223,7 @@ describe('package-less app: the nav gate reads the union of required objects by 
     expect(answers(failed(), NOTES_APP, APPS).sidebar).toEqual(['nav_note', 'nav_notes_gone']);
   });
 
-  it('objectstack#29121 — outside an app (no app name, the home feeds), the gate reads the app list’s union by name, never the whole registry', async () => {
+  it('objectstack#29121 — outside an app (no app name, the home feeds), the gate reads the app list’s union in one ?names= request (objectstack#29444), never the whole registry', async () => {
     const calls: string[] = [];
     const read = mount({}, APPS, calls);
     await waitFor(() => expect(read().gates.checkCapability('object', 'legacy_gone')).toBe(false));
@@ -220,6 +231,9 @@ describe('package-less app: the nav gate reads the union of required objects by 
 
     expect(read().gates.checkCapability('object', 'crm_account')).toBe(true);
     expect(objectCalls(calls)).not.toContain('object');
+    expect(objectCalls(calls).filter((c) => c.startsWith('object?names=') || c.startsWith('object/'))).toEqual([
+      'object?names=area_gone,crm_account,legacy_gone,note,notes_gone',
+    ]);
     expect(calls).not.toContain('view');
     expect(read().ctx.getTypeStatus!('object')).toBe('idle');
   });

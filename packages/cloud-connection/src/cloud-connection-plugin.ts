@@ -149,8 +149,8 @@ import {
 import type { AuthSessionApi, IAuthService, IObjectQLEngine } from '@objectstack/spec/contracts';
 import { inProcessSessionReadInput } from '@objectstack/types';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
-import { CLOUD_BINDING_SERVICE, createCloudBinding } from './cloud-binding.js';
-import type { ICloudBindingService } from '@objectstack/spec/contracts';
+import { createCloudBinding } from './cloud-binding.js';
+import { CLOUD_BINDING_SERVICE, type ICloudBindingService } from '@objectstack/spec/contracts';
 import { CLOUD_CONNECTION_CAPABILITY, CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
 import { readJsonRequestBody } from './request-json-body.js';
 
@@ -266,7 +266,13 @@ interface ResolvedSession {
 const ENVIRONMENT_NOT_FOUND_MESSAGE = 'Could not resolve an environment for this request host.';
 
 export interface CloudConnectionPluginConfig {
-    /** Control-plane base URL. Default: `OS_CLOUD_URL` (read lazily at kernel:ready). */
+    /**
+     * Control-plane base URL. Default: `OS_CLOUD_URL` (read lazily at
+     * kernel:ready), then the ObjectStack-operated default. An explicit `''`,
+     * or a decline spelling (`off`, `none`, `local`, `disabled`), means "cloud
+     * not configured": the routes answer `CLOUD_UNCONFIGURED` and the
+     * `cloud-binding` service's `controlPlaneUrl()` answers `''`.
+     */
     controlPlaneUrl?: string;
     /** env→cloud service credential. Default: `OS_CLOUD_API_KEY`. */
     controlPlaneApiKey?: string;
@@ -333,8 +339,12 @@ export class CloudConnectionPlugin implements Plugin {
             const rawApp = httpServer.getRawApp();
             // Env vars are read here (not at construction) so a host can set
             // them between config load and kernel boot — preserves the
-            // behavior of the original app-level wiring.
-            const cloudUrl = (this.cfg.controlPlaneUrl ?? process.env.OS_CLOUD_URL ?? '').trim().replace(/\/+$/, '');
+            // behavior of the original app-level wiring. [#30762] The URL is
+            // the `cloud-binding` service's answer, the one the push relay
+            // sender reads too: an explicit empty option means "cloud not
+            // configured" for both, and an absent one falls through to
+            // `OS_CLOUD_URL`, then the default, as `resolveCloudUrl` does.
+            const cloudUrl = this.binding.controlPlaneUrl();
             const cloudApiKey = resolveControlPlaneApiKey(this.cfg.controlPlaneApiKey);
             const deviceClientId = (this.cfg.deviceClientId ?? process.env.OS_CLI_CLIENT_ID ?? 'objectstack-cli').trim();
             const deviceScope = 'openid profile email';

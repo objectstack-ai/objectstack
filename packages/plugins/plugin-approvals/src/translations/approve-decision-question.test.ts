@@ -26,6 +26,9 @@ import { zhHantObjects } from './zh-Hant.objects.generated.js';
 import { arObjects } from './ar.objects.generated.js';
 import { frObjects } from './fr.objects.generated.js';
 import { ptBRObjects } from './pt-BR.objects.generated.js';
+import { ruObjects } from './ru.objects.generated.js';
+import { deObjects } from './de.objects.generated.js';
+import { koObjects } from './ko.objects.generated.js';
 import { SysApprovalRequest } from '../sys-approval-request.object.js';
 
 interface CopyAction {
@@ -53,6 +56,9 @@ const TRANSLATED = [
   ['ar', arObjects],
   ['fr', frObjects],
   ['pt-BR', ptBRObjects],
+  ['ru', ruObjects],
+  ['de', deObjects],
+  ['ko', koObjects],
 ] as const;
 
 describe('approval_approve — the decision question', () => {

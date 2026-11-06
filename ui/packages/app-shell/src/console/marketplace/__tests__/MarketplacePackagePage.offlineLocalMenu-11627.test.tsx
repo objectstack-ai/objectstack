@@ -81,7 +81,7 @@ const offlineConfig = (installLocal: boolean) => ({
   branding: { productName: 'ObjectOS', productShortName: 'ObjectOS' },
 });
 
-/** What `os package install <file> -r` leaves in the install-local ledger: an inline manifest's packageId IS its manifest id. */
+/** What `os package install <file> -u` leaves in the install-local ledger: an inline manifest's packageId IS its manifest id. */
 const CRM_ENTRY = {
   packageId: 'com.example.crm',
   versionId: 'inline',

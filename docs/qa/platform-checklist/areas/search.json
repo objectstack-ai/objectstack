@@ -7,11 +7,11 @@
     "$comment": "AREA-LEVEL standing fixtures. An item opts in with fixtures.provisioning = { use: \"<key>\", why: \"…\" }; the recipe is written ONCE here so several items do not carry drifting copies of the same call sequence. Recipes are runtime-provisioned (no repo file is touched, nothing to seed) and every call is grounded in framework source at the cited file:line — replay them literally, and if one 4xxs, re-read the citation before assuming the recipe rotted. Shape copied from qa-scratch-authz in areas/attachments-storage.json (#7716/#7670).",
     "qa-contributor-bound-member": {
       "title": "A CONTRIBUTOR-BOUND member — an identity that reads a strict SUBSET of showcase_invoice rows (invited sign-up + one sys_user_position row)",
-      "why": "Both-sides RLS needs a persona for whom a specific row is invisible while the object itself is readable. ⚠️ Neither seeded demo persona is that persona, and reaching for them is the trap this recipe closes — measured on 17.1.0 (#10257): Mei (phone.demo@example.com) holds NO position, so showcase_contributor never merges and showcase_invoice answers PERMISSION_DENIED — the OBJECT gate, no rows at all, not a subset; Ada (auditor.demo@example.com) holds `auditor` → showcase_auditor, which carries `showcase_invoice: { allowRead: true, viewAllRecords: true }` — VAMA bypasses record scope entirely, so she sees all 12 — also not a subset. The persona that IS a subset is a member bound to the `contributor` position: showcase_contributor grants read/create/edit on showcase_invoice while the `invoice_own_rows` RLS narrows selects to `owner == current_user.email`, and none of the seeded invoices are owned by a fresh sign-up. Nothing here needs a seed change or a repo file — the whole gap was that the recipe existed only as prose on one item, which is why a runner reached for the demo personas instead and recorded blocked(fixture).",
+      "why": "Both-sides RLS needs a persona for whom a specific row is invisible while the object itself is readable. ⚠️ Neither seeded demo persona is that persona, and reaching for them is the trap this recipe closes — measured on 17.1.0 (#10257): Mei (phone.demo@example.com) holds NO position, so showcase_contributor never merges and showcase_invoice answers PERMISSION_DENIED — the OBJECT gate, no rows at all, not a subset; Ada (auditor.demo@example.com) holds `showcase_auditor` → showcase_auditor, which carries `showcase_invoice: { allowRead: true, viewAllRecords: true }` — VAMA bypasses record scope entirely, so she sees all 12 — also not a subset. The persona that IS a subset is a member bound to the `showcase_contributor` position: showcase_contributor grants read/create/edit on showcase_invoice while the `invoice_own_rows` RLS narrows selects to `owner == current_user.email`, and none of the seeded invoices are owned by a fresh sign-up. Nothing here needs a seed change or a repo file — the whole gap was that the recipe existed only as prose on one item, which is why a runner reached for the demo personas instead and recorded blocked(fixture).",
       "provenance": "run #7629 (framework, 2026-08-11) drove search.rls-both-personas to 4/4 PASS on exactly this persona — 3 invoices visible to the member vs 15 to admin. Promoted from prose on that one item to a replayable area recipe by the 17.1.0 sweep (#10236 B1); the Mei/Ada measurements above are from #10257. Step 1 re-pointed invite-first by #21060 after QA run #21056 met the invite_only default (403 SELF_REGISTRATION_CLOSED on an uninvited sign-up). Step 5's body gained the `owner` it always needed after QA run #23166 met an own-row invisible to its creator (#23169). Steps 2 and 3 name the admin REST doors QA run #24574 measured (an admin GET of sys_user by email and an admin POST of sys_user_position, the position as plain text), and step 5 names the invoice number field `name`, after that run met 400 INVALID_FIELD on `number` and #24593 met 400 on an OData `$filter` (wave anchor #24579, PR #24671). Step 5 asks for a non-churned account after QA run #26456 (wave anchor #25807) met the first listed account churned and the invoice POST refused 400.",
       "app": "showcase",
       "requires": [
-        "a stock dev boot — the `contributor` position declares `showcase_contributor` in its `permissionSets` (examples/app-showcase/src/security/positions.ts), which the resolver reads by name (ADR-0131 D3/D4). ⛔ Do NOT hand-create a sys_position_permission_set row: no resolver reads it, so it proves nothing about the merge",
+        "a stock dev boot — the `showcase_contributor` position declares `showcase_contributor` in its `permissionSets` (examples/app-showcase/src/security/positions.ts), which the resolver reads by name (ADR-0131 D3/D4). ⛔ Do NOT hand-create a sys_position_permission_set row: no resolver reads it, so it proves nothing about the merge",
         "an admin session for the position binding: the admin's POST /api/v1/data/sys_user_position is the insert (sys_user_position is admin-writable system data, packages/plugins/plugin-security/src/objects/sys-user-position.object.ts managedBy 'system-data'; QA run #24574 bound the member this way) — the same pattern access-security.json's permission-set items already replay",
         "a boot on its own port and file DB (dogfood §0); export OS_PORT=<port> as well as passing -p (RUNNER.md's connector self-URL fact) so unrelated flow noise does not pollute the run",
         "an admin session to INVITE the step-1 address before step 1: POST /api/v1/auth/organization/invite-member {\"email\": \"<the step-1 address>\", \"role\": \"member\"}. The stock showcase declares no auth.audience, so its posture is the invite_only default, which answers an uninvited sign-up 403 SELF_REGISTRATION_CLOSED; a pending, unexpired sys_invitation row for the address is what admits it (an admin POST /api/v1/auth/admin/create-user is the other door, and answers mustChangePassword:true)"
@@ -32,9 +32,9 @@
         },
         {
           "step": 3,
-          "call": "as admin, POST /api/v1/data/sys_user_position { user_id: <the step-2 id>, position: 'contributor', organization_id: <the Default Organization's id> } — `position` is the position's machine name as plain text; there is no sys_position object to point at (positions are metadata, plugin-security sys-user-position.object.ts)",
-          "expect": "one row. This is THE step that makes the persona a subset reader: `contributor` resolves to showcase_contributor (auto-bound at boot, see requires), which grants showcase_invoice allowRead/allowCreate/allowEdit, and the RLS rule `invoice_own_rows` (using: `owner == current_user.email`, positions: ['contributor']) narrows every select to rows the caller owns.",
-          "source": "examples/app-showcase/src/security/permission-sets.ts#ContributorPermissionSet — ContributorPermissionSet.objects.showcase_invoice and rowLevelSecurity['invoice_own_rows']; examples/app-showcase/src/security/positions.ts#contributor (the `contributor` position); bind-position-sets.ts for the position→set edge"
+          "call": "as admin, POST /api/v1/data/sys_user_position { user_id: <the step-2 id>, position: 'showcase_contributor', organization_id: <the Default Organization's id> } — `position` is the position's machine name as plain text; there is no sys_position object to point at (positions are metadata, plugin-security sys-user-position.object.ts)",
+          "expect": "one row. This is THE step that makes the persona a subset reader: `showcase_contributor` resolves to the permission set of the same name (auto-bound at boot, see requires), which grants showcase_invoice allowRead/allowCreate/allowEdit, and the RLS rule `invoice_own_rows` (using: `owner == current_user.email`, positions: ['showcase_contributor']) narrows every select to rows the caller owns.",
+          "source": "examples/app-showcase/src/security/permission-sets.ts#ContributorPermissionSet — ContributorPermissionSet.objects.showcase_invoice and rowLevelSecurity['invoice_own_rows']; examples/app-showcase/src/security/positions.ts#showcase_contributor (the `showcase_contributor` position); bind-position-sets.ts for the position→set edge"
         },
         {
           "step": 4,
@@ -224,12 +224,12 @@
       "revision": 8,
       "priority": "P1",
       "surface": "api",
-      "personas": ["seeded admin (sees all invoices)", "signed-up member bound to the contributor position via the qa-contributor-bound-member recipe (invoice_own_rows RLS: owner == current_user.email) — ⛔ NOT one of the seeded demo personas: Mei holds no position (PERMISSION_DENIED, object gate) and Ada holds auditor with viewAllRecords (all 12). See the recipe."],
+      "personas": ["seeded admin (sees all invoices)", "signed-up member bound to the showcase_contributor position via the qa-contributor-bound-member recipe (invoice_own_rows RLS: owner == current_user.email) — ⛔ NOT one of the seeded demo personas: Mei holds no position (PERMISSION_DENIED, object gate) and Ada holds auditor with viewAllRecords (all 12). See the recipe."],
       "fixtures": {
         "app": "showcase",
         "requires": [
           "seeded invoices INV-1001..INV-1012 (12 rows) with owner emails (ada@example.com ×5 / linus@example.com ×4 / grace@example.com ×3) none of which belong to the test member — INV-1003 is linus's, which is why it is the invisible row the guard uses",
-          "a signed-up member holding the contributor position — positions are seeded, users are not: sign the member up, then bind contributor (sys_user_position) before the run. The full replayable sequence, its premise guard and the two personas that do NOT work now live in the area recipe qa-contributor-bound-member (see fixtures.provisioning)"
+          "a signed-up member holding the showcase_contributor position — positions are seeded, users are not: sign the member up, then bind contributor (sys_user_position) before the run. The full replayable sequence, its premise guard and the two personas that do NOT work now live in the area recipe qa-contributor-bound-member (see fixtures.provisioning)"
         ],
         "provisioning": {
           "use": "qa-contributor-bound-member",
@@ -279,10 +279,10 @@
       ],
       "traps": ["wrong-persona", "seed-data-thin"],
       "source": [
-        "examples/app-showcase/src/security/permission-sets.ts#invoice_own_rows (invoice_own_rows: owner == current_user.email, positions ['contributor'])",
+        "examples/app-showcase/src/security/permission-sets.ts#invoice_own_rows (invoice_own_rows: owner == current_user.email, positions ['showcase_contributor'])",
         "examples/app-showcase/src/data/seed/index.ts (INV-1001..1012 owner spread; 'ada sees INV-1001/1002's lines but never linus's INV-1003')",
         "packages/objectql/src/engine.ts#expandSearchOnAst (expandSearchOnAst ANDs into ast.where; count() rides the read middleware — the #2737 total-leak fix)",
-        "packages/metadata-protocol/src/protocol.ts#findData (the paged arm counts a searched list: engine.count is handed the query's search and searchFields, so total is the counted number of matches and hasMore agrees with it; the `countable` exception and its page-local estimate were deleted by #22790, PR #22857) + packages/rest/src/list-search-total-door.test.ts ('[#22790] a paged search reports the counted total', including 'a member counts only the matches it can read')"
+        "packages/metadata-protocol/src/protocol-data-crud.ts#findData (the paged arm counts a searched list: engine.count is handed the query's search and searchFields, so total is the counted number of matches and hasMore agrees with it; the `countable` exception and its page-local estimate were deleted by #22790, PR #22857) + packages/rest/src/list-search-total-door.test.ts ('[#22790] a paged search reports the counted total', including 'a member counts only the matches it can read')"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: RLS × $search both-personas contract; total-leakage clause grounded in the protocol's page-local total for searched lists and the #2737 count middleware fix, persona provisioning gap recorded honestly", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -495,14 +495,14 @@
       "surface": "mixed",
       "personas": [
         "seeded admin (admin@objectos.ai — sees all)",
-        "signed-up member bound to the contributor position (invoice_own_rows RLS — the same restricted persona as search.rls-both-personas)"
+        "signed-up member bound to the showcase_contributor position (invoice_own_rows RLS — the same restricted persona as search.rls-both-personas)"
       ],
       "fixtures": {
         "app": "showcase",
         "requires": [
           "the objectui console (app-shell) with CommandPaletteProvider — the ⌘K/Ctrl+K accelerator, the header Search button, and the ?palette=1/?cmdk=1 deep-link all open the SAME palette overlay (ADR-0054 C1/C3). The button, links, deep-links and programmatic callers share the idempotent openCommandPalette(); the keyboard accelerator TOGGLES by source design (objectui app-shell CommandPaletteProvider.tsx: \"the keydown handler toggles (close-on-repeat is a keyboard nicety)\"), so a repeated ⌘K closes the palette and that is not a FAIL",
           "the seeded CJK/pinyin rows 张伟 (zhangwei@huaning.example) and 华宁科技 (examples/app-showcase/src/data/seed/index.ts) so a CJK/pinyin query has a real hit; the search service (pinyin full-text plugin) installed so GET /api/v1/search resolves",
-          "seeded invoices INV-1001..INV-1012 (12 rows, owner spread ada/linus/grace) and a signed-up member bound to the contributor position (sys_user_position) so the RLS-parity side has an invisible row (INV-1003, owned by linus) to prove absence — provisioned by this area's qa-contributor-bound-member recipe, exactly as in search.rls-both-personas. ⚠ Its step-5 own-row invoice must carry `owner` set to the member's email: invoice_own_rows reads owner == current_user.email and `owner` has no default, so a member-created invoice without it is invisible to its creator (QA run #23166 A5)"
+          "seeded invoices INV-1001..INV-1012 (12 rows, owner spread ada/linus/grace) and a signed-up member bound to the showcase_contributor position (sys_user_position) so the RLS-parity side has an invisible row (INV-1003, owned by linus) to prove absence — provisioned by this area's qa-contributor-bound-member recipe, exactly as in search.rls-both-personas. ⚠ Its step-5 own-row invoice must carry `owner` set to the member's email: invoice_own_rows reads owner == current_user.email and `owner` has no default, so a member-created invoice without it is invisible to its creator (QA run #23166 A5)"
         ],
         "knownGaps": [
           "the /_console bundle is vendored and may be stale — verify the palette/page behavior against current objectui app-shell or a fresh build (stale-console-bundle, RUNNER §2)",
@@ -709,7 +709,7 @@
       "surface": "api",
       "personas": [
         "seeded admin (admin@objectos.ai): the negative control, who sees every object and field",
-        "signed-up member bound to the contributor position via the qa-contributor-bound-member recipe: a strict subset reader of showcase_invoice (invoice_own_rows), refused some objects outright, and refused the admin-only search columns of sys_user"
+        "signed-up member bound to the showcase_contributor position via the qa-contributor-bound-member recipe: a strict subset reader of showcase_invoice (invoice_own_rows), refused some objects outright, and refused the admin-only search columns of sys_user"
       ],
       "fixtures": {
         "app": "showcase",

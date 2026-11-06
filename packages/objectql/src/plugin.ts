@@ -36,6 +36,7 @@ import { isFederatedObject } from './federated-object.js';
 import { wrapDeclarativeHook } from './hook-wrappers.js';
 import { announceStoredExpressionHoles } from './stored-expression-backfill.js';
 import { LifecycleService } from './lifecycle/lifecycle-service.js';
+import { readRecycleBinRetentionEnv, type RecycleBinRetentionSettings } from './recycle-bin/retention.js';
 import { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
 import type { DanglingReferenceAuditOptions } from './integrity/dangling-reference-audit.js';
 import {
@@ -64,6 +65,10 @@ import {
 // [ADR-0048 N.3] The security catalog's one-holder envelope, raised here by the
 // cold-boot check (see `refuseEnvironmentHeldSecurityCatalogNames`).
 import { SecurityCatalogNameConflictError, findEnvironmentHeldSecurityCatalogNames } from './registry.js';
+// One name, one package holder for a picklist, mapping or dataset — the cold
+// boot's seal and its one switch (`bare-name-one-holder.ts`, "The cold boot").
+import { sealBareNameHoldersAtColdBoot } from './registry.js';
+import { BARE_NAME_COLD_BOOT_MODE } from './bare-name-one-holder.js';
 // [ADR-0029 D3] The registry's own refusal of a second owner — read, never
 // re-derived, when a residual object's name is already owned.
 import { ObjectOwnershipConflictError, collectManifestBoundActions, collectManifestObjectNames, describeBoundActionCollision, describeUnboundActionTargets, FIND_BOUND_ACTION_COLLISIONS, type BoundActionCollision } from './registry.js';
@@ -395,6 +400,19 @@ export interface ObjectQLPluginOptions {
     initialDelayMs?: number;
     referenceAudit?: Omit<DanglingReferenceAuditOptions, 'signal'> & { enabled?: boolean };
   };
+  /**
+   * [#30237, ADR-0148 D3] The recycle bin's retention seam: the host's
+   * retention resolver (`RecycleBinRetentionResolver`, `@objectstack/spec/data`)
+   * and the opaque token to call it with, the same one the host's
+   * `resolveFeatures` receives. One kernel serves one environment, so the
+   * token is fixed at boot; the engine never reads it.
+   *
+   * Absent, or a resolver answering `undefined`: `OS_RECYCLE_BIN_RETENTION_DAYS`,
+   * else 30 days. That variable is read once in `init()` as well, so a value
+   * that is not a positive whole number of days stops the boot with the
+   * refusal rather than the first delete.
+   */
+  recycleBinRetention?: RecycleBinRetentionSettings;
 }
 
 /**
@@ -537,6 +555,8 @@ export class ObjectQLPlugin implements Plugin {
   /** ADR-0057 lifecycle enforcement (Reaper/Rotator/Archiver). */
   private lifecycleService: LifecycleService | undefined;
   private lifecycleOptions: ObjectQLPluginOptions['lifecycle'];
+  /** [#30237] The host's recycle-bin retention seam, handed to the engine in `init()`. */
+  private recycleBinRetention: ObjectQLPluginOptions['recycleBinRetention'];
 
   constructor(qlOrOptions?: ObjectQL | ObjectQLPluginOptions, hostContext?: Record<string, any>) {
     // Back-compat: legacy callers passed `(ObjectQL, hostContext)` positionally.
@@ -564,6 +584,7 @@ export class ObjectQLPlugin implements Plugin {
     this.hydrateMetadataFromDb = opts.hydrateMetadataFromDb === true;
     this.registerProtocol = opts.registerProtocol !== false;
     this.lifecycleOptions = opts.lifecycle;
+    this.recycleBinRetention = opts.recycleBinRetention;
   }
 
   /**
@@ -795,6 +816,14 @@ export class ObjectQLPlugin implements Plugin {
     // [#22984] Publish the resolved opt-out where boot-time provisioning
     // plugins read it — see SKIP_SCHEMA_SYNC_ENGINE_KEY.
     (this.ql as unknown as Record<string, unknown>)[SKIP_SCHEMA_SYNC_ENGINE_KEY] = this.skipSchemaSync;
+
+    // [#30237, ADR-0148 D3] The recycle bin's retention: the variable is read
+    // now, so a defect in it stops the boot with the refusal instead of
+    // refusing the first delete, and the host's resolver is handed over. The
+    // resolver itself is asked per delete: its answer may change with the
+    // host's plan, and each entry keeps the one it was given.
+    readRecycleBinRetentionEnv();
+    if (this.recycleBinRetention) this.ql.setRecycleBinRetention(this.recycleBinRetention);
 
     // [ADR-0139 D2] The engine composes a `ReadableIds` leaf from the
     // registered `security` service. Handed over as a SOURCE in the engine's
@@ -1184,6 +1213,16 @@ export class ObjectQLPlugin implements Plugin {
     // would tell a brand-new deployment its gates are open moments after they
     // were closed.
     ctx.hook('kernel:bootstrapped', async () => {
+        // [#30803] Seal the bare-name holders (`bare-name-one-holder.ts`): every
+        // package of this boot has registered by now — the AppPlugin bodies in
+        // `init()`, the install-local rehydrate at `kernel:ready` — so from here
+        // on the package door and the item seam refuse a NEW holder of a
+        // picklist, mapping or dataset name. A name the boot left held twice is
+        // the switch's: warned once, naming both holders and the rename, or the
+        // boot refused. Never sealed on a kernel that withholds the boot-phase
+        // hooks: there the doors never refuse.
+        const registry = this.ql?.registry;
+        if (registry) sealBareNameHoldersAtColdBoot(registry, BARE_NAME_COLD_BOOT_MODE, ctx.logger);
         // [ADR-0139 D5.2 / D5.3] A `controlled_by_parent` detail over a master
         // the engine composes no read over fails the boot, naming both and the
         // remedy. Judged HERE, not at `kernel:ready`: the object-scoped read

@@ -158,7 +158,7 @@ const NAMED_HAND_WRITTEN_COVERAGE: ReadonlyArray<readonly [rule: string, count: 
   ['required/label', 1],
   // `stack.objects[i].fields`
   ['structure/empty-fields', 1],
-  // the PREFIXED_TYPES loop's `stack[key]`, on TWO different keys
+  // the duplicate finding's `stack[key]` (DUPLICATE_KEYED_TYPES), on TWO different keys
   ['naming/namespace-prefix', 2],
   // `checkHookBodyLowering(stack)` — `stack.hooks`
   ['hook-body/not-lowerable', 1],

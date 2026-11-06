@@ -16,7 +16,7 @@ import { defineDataset } from '@objectstack/spec/ui';
  * query with no joins.
  */
 export const TaskDataset = defineDataset({
-  name: 'task_metrics',
+  name: 'todo_task_metrics',
   label: 'Task Metrics',
   description: 'Semantic layer for task counts and time-tracking measures',
   object: 'todo_task',

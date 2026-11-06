@@ -34,7 +34,11 @@ Such fields are returned with `source: 'env', locked: true`. Every write
 (service or REST) but a clear (`null`) fails with HTTP 409. A clear removes
 the value stored beneath the override and changes nothing in force: the key
 still answers the env value, and falls back to its default once the variable
-is removed.
+is removed. The namespace read (`getNamespace`, `GET /api/settings/:namespace`)
+lists the stored entries beneath such a field's `env` entry in `cascadeChain`,
+so a client can tell whether a clear has a value to remove (a secret's entry
+shows the mask, never the value); `get()` and `getMany()` answer it from the
+env alone.
 
 ## Encryption
 

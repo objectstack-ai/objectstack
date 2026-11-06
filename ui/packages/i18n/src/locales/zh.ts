@@ -1380,6 +1380,7 @@ const zh = {
     daysAgo_other: '{{count}}天前',
     // Activity feed actors
     systemActor: '系统',
+    impersonatedActor: '{{admin}} 代{{user}}操作',
     unknownUser: '未知用户',
     // Record meta footer (audit provenance)。createdBy/updatedBy 后面跟的是
     // 操作者("创建人 Dev Admin · 5 分钟前");created/updated 是无操作者时的
@@ -1977,22 +1978,53 @@ const zh = {
       clientAddressDirect: '服务器判定的你的地址：{{address}}。不包含该地址的列表无法在此保存。此服务器不信任代理转发头，若部署在代理之后，这里显示的是代理的地址。',
       clientAddressViaProxy: '服务器判定的你的地址：{{address}}，取自此服务器所信任代理的转发头。不包含该地址的列表无法在此保存。',
       clientAddressUnknown: '服务器无法确定你的地址，因此无法在此保存非空的列表。',
+      invalidFormat: '{{setting}}的格式不正确。',
+      invalidFormatHelp: '{{setting}}的格式不正确。{{help}}',
+      invalidFormatPick: '请从列表中选择{{setting}}。',
     },
-    workspaceTimezonePrompt: {
-      title: '设置系统时区',
-      description: '本系统仍在使用平台默认时区 {{current}}。系统时区决定公式中“今天”的含义、报表如何按日期分组，以及日期和时间如何显示，对系统内所有人生效。下方已填入你的浏览器时区。',
-      laterHint: '之后可随时在“设置”页面中修改。',
-      decline: '保持默认',
-      confirm: '设置时区',
-      saved: '系统时区已设置为 {{zone}}',
-      currencyTitle: '设置默认货币',
-      currencyDescription: '本组织尚未设置默认货币，金额暂不显示币种。下方已填入您浏览器所在地区的货币：{{name}}（{{code}}）。',
-      currencyConfirm: '设置货币',
-      currencySaved: '默认货币已设置为 {{currency}}',
-      bothTitle: '设置系统时区和默认货币',
-      bothConfirm: '保存',
-      bothSaved: '系统时区已设置为 {{zone}}，默认货币已设置为 {{currency}}',
-      notNow: '暂不设置',
+    firstRunChecklist: {
+      title: '完成初始设置',
+      description: '同事开始使用之前，先设置好这几项。每一项之后都可以在 Setup 中修改。',
+      progress: '已完成 {{done}}/{{total}}',
+      dismiss: '隐藏清单',
+      set: '设置',
+      change: '修改',
+      view: '查看',
+      confirm: '确认',
+      cancel: '取消',
+      prefilled: '尚未设置的项已按你的浏览器给出建议。确认之前不会保存任何内容。',
+      organizationName: {
+        title: '为组织命名',
+        todo: '组织仍在使用创建时的名称“{{name}}”。',
+        action: '重命名',
+      },
+      languageCountry: {
+        title: '默认语言和国家/地区',
+        todo: '当前为{{language}}、{{country}}。请确认，或改选其他值。',
+        saved: '默认语言和国家/地区已保存',
+      },
+      timezone: {
+        title: '系统时区',
+        todo: '仍为平台默认时区 {{current}}。系统时区决定公式中“今天”的含义，以及报表如何按日期分组。',
+        saved: '系统时区已设置为 {{zone}}',
+      },
+      currency: {
+        title: '默认货币',
+        todo: '尚未设置，金额暂不显示币种。',
+        saved: '默认货币已设置为 {{currency}}',
+      },
+      mail: {
+        title: '邮件发送',
+        todo: '尚未配置，邀请、重置密码等邮件暂时无法送达。',
+        done: '已配置，可以发送邮件。',
+        action: '去配置',
+      },
+      invite: {
+        title: '邀请同事',
+        todo: '目前只有你一位成员。',
+        done: '已有同事加入或已发出邀请。',
+        action: '邀请',
+      },
     },
     error: {
       connectionFailed: '无法连接到服务器',
@@ -2423,6 +2455,28 @@ const zh = {
       passwordsMore: '更多条目已省略——请使用下载。',
       passwordsDownload: '下载 CSV',
     },
+    // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
+    assignedWork: {
+      title: '此人手上的记录',
+      loading: '正在统计此人手上的记录…',
+      countFailed: '无法统计此人手上的记录：{{message}}',
+      noClient: '此处无法统计此人手上的记录。',
+      none: '此人手上没有你可读取的记录。',
+      summary: '你可读取的记录中有 {{total}} 条在此人手上：拥有 {{owned}} 条，被指派 {{assigned}} 条。',
+      row: '{{object}} · {{field}}',
+      notTransferable: '该字段可填多人，无法在此交接。',
+      truncated: '并非所有用户字段都已统计，此人手上可能还有更多记录。',
+      unreadable: '以下对象你无权读取，未计入：{{objects}}',
+      handoverTo: '交接给',
+      handoverHint: '可选。封禁不必等交接完成。',
+      handover: '交接',
+      handingOver: '正在交接…',
+      handoverNext: '交接下一批',
+      targetBanned: '此人已被封禁，请选择一位在职用户。',
+      transferRefused: '交接被拒绝：{{message}}',
+      report: '已交接 {{updated}} 条，{{failed}} 条未能移交，仍有 {{remaining}} 条在此人手上。',
+      failure: '{{object}} {{id}}：{{message}}',
+    },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
       managedUsers: {
@@ -2732,6 +2786,8 @@ const zh = {
         title: '审计日志',
         subtitle: '只读的系统活动与记录变更，最新的在前。',
         openAsList: '以列表打开',
+        openEntryPage: '打开条目页',
+        openEntryPageHint: '条目页按时间倒序列出同一记录的全部变更。',
         openPresetAsList: '以列表打开 {{label}}',
         presets: '预设',
         presetOtherSource: '此视图读取的是其他数据源。',
@@ -3659,6 +3715,7 @@ const zh = {
     // objectui#13461 — the top bar's avatar button, which holds only the avatar.
     accountMenu: '账户菜单',
     profile: '个人资料',
+    connectAiAssistant: '连接 AI 助手',
     logout: '退出登录',
     preferences: '偏好设置',
     theme: '主题',
@@ -3974,6 +4031,13 @@ const zh = {
       body: '扩展 → 连接器 → + 添加 → 粘贴 JSON 配置:',
       hint: '也可手动添加:传输类型选 Streamable HTTP 并填写此 URL。如果你的版本不支持浏览器登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方创建)。',
     },
+    client: {
+      title: '你用的是哪个 AI 助手？',
+      hint: '选择你的助手，只看它的步骤。本浏览器会记住你的选择。',
+    },
+    advanced: {
+      title: '高级：脚本与 CI',
+    },
     apiKey: {
       title: 'API 密钥',
       badge: '无头场景',
@@ -4000,6 +4064,30 @@ const zh = {
   },
   cloudWorkspaceTimezoneNotice: {
     seeded: '环境时区在创建时已按你的浏览器设为 {{zone}}，可在「设置 → 本地化」中修改。',
+  },
+  deploymentNotice: {
+    title: '这台服务器把你的数据和密钥存放在它自己的磁盘上',
+    titleLow: '完成此部署的设置',
+    intro: '没有人为此生产部署指定这些内容的存放位置。请把下面的设置交给负责运行服务器的人，这样更换服务器时不会丢失任何东西。',
+    finding: {
+      databaseLocalFile: '你的业务数据是这台服务器上的一个文件（{{file}}）。更换服务器或其磁盘会丢失这些数据。',
+      authSecretGenerated: '登录密钥是在这台服务器上生成的。一旦丢失，所有人都会被登出。',
+      dataKeyFile: '用于加密已保存密码和 API 密钥的密钥是这台服务器上的一个文件（{{file}}）。一旦丢失，这些内容将无法再读取。',
+      fileStorageLocal: '上传的文件保存在这台服务器的磁盘上。',
+      emailNotConfigured: '尚未设置邮件服务，因此邀请和密码重置不会通过邮件发送。',
+    },
+    copy: {
+      button: '复制设置',
+      database: '你的数据库，例如 postgres://user:pass@db-host:5432/app，或 file:/path/on/a/kept/volume/app.db。目前数据在 {{file}} 中：切换前请先迁移过去。',
+      carryOver: '沿用当前值：{{file}} 的内容',
+      newValue: '一个较长的随机值，每次重启都保持不变，例如以下命令的输出：openssl rand -hex 32',
+    },
+    copied: '已复制',
+    hide: '隐藏',
+    hideNoAuditLog: '此部署没有审计日志，因此无法隐藏该提示。',
+    hideFailed: '无法隐藏该提示，请重试。',
+    hiddenLine: '部署提示已隐藏，其所述情况仍然存在。',
+    showAgain: '重新显示',
   },
   aiApprovals: {
     title: 'AI 审批',

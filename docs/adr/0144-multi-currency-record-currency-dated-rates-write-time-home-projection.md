@@ -522,6 +522,31 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
     organization-scope flag, no per-organization count), so on a multi-organization deployment, where `dynamic`
     amounts displayed in each organization's own `localization.currency`, that code can be wrong for some of them
     (PR #28128's review should-fix S1, escalated to the epic PM).
+    *Note (2026-11-06):* ruled, letter C, A now and B as its own card
+    ([`6670707546`](https://github.com/objectstack-ai/objectstack/issues/8345#issuecomment-6670707546) on #8345,
+    2026-11-05). A landed in PR #30737 (`e2bcd5c1`, card #30674): the backfill runs one organization at a time.
+    `backfillRecordCurrencyCodes` takes `organizationId`, under which the walk and every `engine.update` run as
+    `{ isSystem: true, tenantId }` and filter on the row's own `organization_id`, and the report counts per
+    organization; with no organization given the rows are walked once read-only, and more than one organization among
+    them is refused `VALIDATION_ERROR` / 400 (`field: 'organizationId'`) before any write, the refusal listing each
+    organization's codeless row count; `allOrganizations` is the explicit way to write the one code into every
+    organization's rows, and the option pair, a blank organization and an organization on an object that stores none
+    are refused before any row is read
+    (`packages/objectql/src/record-currency-backfill.ts#backfillRecordCurrencyCodes`, `#resolveScope`, `#organizationsRefusal`, `#walkCodelessRows`).
+    The CLI exposes both as `os migrate record-currency-codes --org <id>` and `--all-organizations`, an exclusive
+    pair, and prints the refusal's counts with both flags as the remedy
+    (`packages/cli/src/commands/migrate/record-currency-codes.ts#MigrateRecordCurrencyCodes`);
+    `os migrate recompute-home-amounts --org <id>` takes the same shape and is never refused without it (ruling
+    item 3; `packages/objectql/src/home-amount-recompute.ts#recomputeHomeAmounts`). No organization's
+    `localization.currency` is read by the backfill, in its refusal or anywhere in its run (D8 rule 4). B is a tenant-admin door,
+    card #30675: a REST twin of the command shaped on `POST /meta/_migrate-stored`, calling the same engine function,
+    always scoped to the caller's organization, preview unless `apply: true`, behind the maintenance-door switch. Not
+    chosen: A alone, since a cloud-managed tenant still reads a remedy it cannot run; B alone, since a self-hosted
+    multi-organization CLI still writes one code everywhere; D, operations running it for good, contrary to the
+    `_migrate-stored` rationale and ADR-0134 D2; deriving the code from `localization.currency`, which D8 rule 4
+    forbids and which a `dynamic` tenant currency, having no history, could not answer. **Interim, not the answer:**
+    until #30675 lands, a cloud-managed tenant's backfill is run by platform operations on request, with `--org`. This
+    item stays open on its B half until that card lands.
 
 ## Verification notes
 

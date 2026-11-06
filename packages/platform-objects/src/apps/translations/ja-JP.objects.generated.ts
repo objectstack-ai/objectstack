@@ -634,6 +634,20 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         confirmText: "この組織から退出しますか？この組織の環境とメンバーへのアクセスを失います。",
         successMessage: "組織から退出しました"
       }
+    },
+    _sections: {
+      identity: {
+        label: "基本情報"
+      },
+      branding: {
+        label: "ブランディング"
+      },
+      configuration: {
+        label: "設定"
+      },
+      group_structure: {
+        label: "グループ構成"
+      }
     }
   },
   sys_member: {

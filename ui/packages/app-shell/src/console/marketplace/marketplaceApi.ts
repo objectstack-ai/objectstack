@@ -280,19 +280,33 @@ const LOCAL_INSTALL_MODES: readonly LocalInstallMode[] = ['managed', 'unmanaged'
  * - Otherwise each declared mode once: a mode named twice changes nothing
  *   (the spec's reading of the key).
  */
-export async function getDeclaredInstallModes(
-  packageId: string,
-  versionId = 'latest',
-): Promise<readonly LocalInstallMode[] | undefined> {
-  const data = await call<{ manifest?: unknown } | null>(
-    `/packages/${encodeURIComponent(packageId)}/versions/${encodeURIComponent(versionId)}/manifest`,
-  );
-  const body = data?.manifest;
+export function declaredInstallModesOf(body: unknown): readonly LocalInstallMode[] | undefined {
   if (!isPlainRecord(body)) return undefined;
   const declared = (isPlainRecord(body.manifest) ? body.manifest : body).installModes;
   if (!Array.isArray(declared) || declared.length === 0) return undefined;
   if (!declared.every((m) => (LOCAL_INSTALL_MODES as readonly unknown[]).includes(m))) return undefined;
   return LOCAL_INSTALL_MODES.filter((m) => declared.includes(m));
+}
+
+/** {@link declaredInstallModesOf} the manifest a package version serves. */
+export async function getDeclaredInstallModes(
+  packageId: string,
+  versionId = 'latest',
+): Promise<readonly LocalInstallMode[] | undefined> {
+  return declaredInstallModesOf(await getServedPackageBody(packageId, versionId));
+}
+
+/**
+ * The package body a version's manifest answer carries (`data.manifest`): the
+ * body install-local fetches and installs when it is given this package and
+ * version. The package page reads it ONCE, for the install modes it declares
+ * and for what the install will add (objectstack#30325, `installPreview.ts`).
+ */
+export async function getServedPackageBody(packageId: string, versionId = 'latest'): Promise<unknown> {
+  const data = await call<{ manifest?: unknown } | null>(
+    `/packages/${encodeURIComponent(packageId)}/versions/${encodeURIComponent(versionId)}/manifest`,
+  );
+  return data?.manifest;
 }
 
 /**

@@ -4,7 +4,7 @@
     {
       "id": 1,
       "prompt": "Write `objectstack.config.ts` for our CRM app: objects, views and flows under src/, namespace `crm`, protocol 18.",
-      "expected_output": "`defineStack` with a `manifest` of `id`, `version`, `type: 'app'`, `name`, `namespace: 'crm'`, `engines: { protocol: '^18' }`; barrel imports, `objects: Object.values(objects)` (likewise `views` / `flows`); prefixed object names (`crm_account`), no object-level `namespace`, no `tableName`; no driver in `plugins:` (the CLI resolves it); no `workflows` / `approvals` keys (refused).",
+      "expected_output": "`defineStack` with a `manifest` of `id`, `version`, `type: 'app'`, `name`, `namespace: 'crm'`, `engines: { protocol: '^18' }`; barrel imports, `objects: Object.values(objects)` (likewise `views` / `flows`); prefixed object and flow names (`crm_account`, `crm_convert_lead`), no object-level `namespace`, no `tableName`; no driver in `plugins:` (the CLI resolves it); no `workflows` / `approvals` keys (refused).",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -147,8 +147,8 @@
     },
     {
       "id": 9,
-      "prompt": "Add a `support_intake` queue staffed by the `service_agent` position and route every new `crm_case` into it (`requires: ['automation', 'triggers']`).",
-      "expected_output": "Two stack collections: `queues: [defineQueue({ name: 'support_intake', label: 'Support Intake', members: [{ type: 'position', value: 'service_agent' }] })]` and `assignmentRules: [defineAssignmentRule(...)]` with one entry, `assignTo: { type: 'queue', value: 'support_intake' }`; plus `'sharing'` in `requires`: the keys need `@objectstack/plugin-sharing`'s ownership-queue service (`queue` is the job queue), else the boot is refused.",
+      "prompt": "Add a `crm_support_intake` queue staffed by the `crm_service_agent` position and route every new `crm_case` into it (`requires: ['automation', 'triggers']`).",
+      "expected_output": "Two stack collections: `queues: [defineQueue({ name: 'crm_support_intake', label: 'Support Intake', members: [{ type: 'position', value: 'crm_service_agent' }] })]` and `assignmentRules: [defineAssignmentRule(...)]` with one entry, `assignTo: { type: 'queue', value: 'crm_support_intake' }`; plus `'sharing'` in `requires`: the keys need `@objectstack/plugin-sharing`'s ownership-queue service (`queue` is the job queue), else the boot is refused.",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -268,6 +268,23 @@
         "must_not_contain": [
           "requiredPermissions: []",
           "PUT /api/v1/meta/action/crm_close_deal"
+        ]
+      }
+    },
+    {
+      "id": 16,
+      "prompt": "We run the official image on one host with a volume at /home/node/.objectstack and never set any OS_* variable. After pulling the new tag the container exits at once: OS_DATABASE_URL, OS_AUTH_SECRET and OS_SECRET_KEY are not set. Get us back up without losing the logins and the stored credentials.",
+      "expected_output": "The image presets `OS_DEPLOYMENT_DURABILITY_CHECK_ENABLED=true`, so `os start` exits before it writes a database file or a secret while any of the three is unset; set all three on the run command, never in the image. Keep the values the old container generated, read from its `/home/node/.objectstack` (`docker exec` or the volume): `OS_AUTH_SECRET` is the contents of `auth-secret`, `OS_SECRET_KEY` the contents of `dev-crypto-key`, and `OS_DATABASE_URL=file:/home/node/.objectstack/data/objectstack.db` on the kept volume (or migrate that file to a database). Fresh secrets would leave every saved credential unreadable and sign everyone out.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "auth-secret",
+          "dev-crypto-key",
+          "objectstack.db",
+          "/home/node/.objectstack"
+        ],
+        "must_not_contain": [
+          "OS_DEV_CRYPTO_KEY"
         ]
       }
     }

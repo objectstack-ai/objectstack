@@ -1470,7 +1470,7 @@ export async function selfTest() {
     const repoRoot = resolve(SELF_PATH, '../../../..');
     const releaseText = readFileSync(resolve(repoRoot, '.github/workflows/release.yml'), 'utf8');
     const declared = declaredDispatchInputs(releaseText);
-    t('the reader reads release.yml\'s dispatch inputs off disk — force and refresh_version_pr, both boolean, both defaulting to false — so force is declared there and left out here on purpose', declared, { force: { type: 'boolean', default: 'false' }, refresh_version_pr: { type: 'boolean', default: 'false' } });
+    t('the reader reads release.yml\'s dispatch inputs off disk — force, refresh_version_pr and snapshot_next, all boolean, all defaulting to false — so force and snapshot_next are declared there and left out here on purpose', declared, { force: { type: 'boolean', default: 'false' }, refresh_version_pr: { type: 'boolean', default: 'false' }, snapshot_next: { type: 'boolean', default: 'false' } });
     t('every input an entry names is declared by its file with the type its value has, and a null entry\'s file declares none', WORKFLOW_DISPATCH_ALLOWLIST.map((file) => {
       const onDisk = declaredDispatchInputs(readFileSync(resolve(repoRoot, '.github/workflows', file), 'utf8'));
       const entry = WORKFLOW_DISPATCH_INPUTS[file];
@@ -1478,18 +1478,18 @@ export async function selfTest() {
       return [file, onDisk !== null && Object.entries(entry).every(([name, value]) => onDisk[name]?.type === typeof value)];
     }), WORKFLOW_DISPATCH_ALLOWLIST.map((file) => [file, true]));
     // The lane claim, measured: release.yml's own job guards evaluated for the relay's dispatch. The reader is pinned to
-    // read all six jobs and to tell the lanes apart (schedule, push and the repair dispatch are its controls), and a
+    // read all eight jobs and to tell the lanes apart (schedule, push and the repair dispatch are its controls), and a
     // guard mutated in memory must change the answer — so the pin can fail, and a job added there is judged by its guard.
     const started = (text, event, sent) => jobsStartedBy(text, { event, inputs: dispatchRunInputs(declaredDispatchInputs(text), sent) });
     const relayRun = started(releaseText, 'workflow_dispatch', WORKFLOW_DISPATCH_INPUTS[RELEASE]);
-    t('the reader reads every job of release.yml, each with a guard it can evaluate', [Object.keys(workflowJobs(releaseText)).sort(), relayRun.unread], [['docker', 'full-battery', 'publish', 'release-integrity', 'stale-prompts', 'version-pr'], []]);
-    t('⭐ the relay\'s dispatch starts version-pr ALONE — release-integrity, stale-prompts, full-battery, publish and docker are skipped, none undecided (measured live: runs 38351525685 and 38357219168)', [relayRun.runs, relayRun.mayRun, [...relayRun.skipped].sort()], [['version-pr'], [], ['docker', 'full-battery', 'publish', 'release-integrity', 'stale-prompts']]);
+    t('the reader reads every job of release.yml, each with a guard it can evaluate', [Object.keys(workflowJobs(releaseText)).sort(), relayRun.unread], [['docker', 'full-battery', 'publish', 'release-integrity', 'snapshot-next', 'snapshot-next-preflight', 'stale-prompts', 'version-pr'], []]);
+    t('⭐ the relay\'s dispatch starts version-pr ALONE — release-integrity, stale-prompts, full-battery, publish, docker and both snapshot jobs are skipped, none undecided (measured live: runs 38351525685 and 38357219168, before the snapshot lane existed)', [relayRun.runs, relayRun.mayRun, [...relayRun.skipped].sort()], [['version-pr'], [], ['docker', 'full-battery', 'publish', 'release-integrity', 'snapshot-next', 'snapshot-next-preflight', 'stale-prompts']]);
     const repair = started(releaseText, 'workflow_dispatch', { refresh_version_pr: false });
     t('control: the repair dispatch the entry refuses (refresh_version_pr false) starts the audit and MAY reach publish — the reader tells the lanes apart', [repair.runs.includes('release-integrity'), repair.runs.includes('version-pr'), repair.mayRun.includes('publish')], [true, false, true]);
     t('control: schedule starts version-pr alone, push starts the audit and never version-pr', [started(releaseText, 'schedule', {}).runs, started(releaseText, 'push', {}).runs.includes('release-integrity'), started(releaseText, 'push', {}).runs.includes('version-pr')], [['version-pr'], true, false]);
-    const unguarded = releaseText.replace("(github.event_name == 'workflow_dispatch' && !inputs.refresh_version_pr)", "(github.event_name == 'workflow_dispatch' && inputs.refresh_version_pr)");
+    const unguarded = releaseText.replace("(github.event_name == 'workflow_dispatch' && !inputs.refresh_version_pr && !inputs.snapshot_next)", "(github.event_name == 'workflow_dispatch' && inputs.refresh_version_pr && !inputs.snapshot_next)");
     const added = `${releaseText.replace(/\n+$/u, '')}\n\n  extra-lane:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n`;
-    t('⛔ the pin can fail: a release-integrity guard that lost its negation, or a seventh job with no guard, is started by the relay\'s dispatch', [unguarded !== releaseText && started(unguarded, 'workflow_dispatch', REFRESH).runs.includes('release-integrity'), started(added, 'workflow_dispatch', REFRESH).runs.includes('extra-lane')], [true, true]);
+    t('⛔ the pin can fail: a release-integrity guard that lost its negation, or a ninth job with no guard, is started by the relay\'s dispatch', [unguarded !== releaseText && started(unguarded, 'workflow_dispatch', REFRESH).runs.includes('release-integrity'), started(added, 'workflow_dispatch', REFRESH).runs.includes('extra-lane')], [true, true]);
   }
 
   // ── the run_rerun_failed row ──────────────────────────────────────────────

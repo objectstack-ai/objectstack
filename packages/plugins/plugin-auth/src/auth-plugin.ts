@@ -42,6 +42,7 @@ import {
   readMcpServerEnabledEnv,
   isOAuthEligibleBaseUrl,
   ipMatchesRange,
+  unreadableIpRangeEntries,
   // [#16384] The one place `'/api/v1/auth'` is written — see its docblock in
   // auth-manager.ts. This file no longer carries an independent copy.
   DEFAULT_AUTH_BASE_PATH,
@@ -130,7 +131,12 @@ import {
 } from './demo-staff.js';
 import { cloudManagedRefusal } from './cloud-managed.js';
 import { registerCopyInvitationLinkAction } from './invitation-link-action.js';
-import { allowedIpRangesWritePredicate, parseAllowedIpRanges } from './allowed-ip-ranges.js';
+import {
+  ALLOWED_IP_RANGES_ENV,
+  allowedIpRangesWritePredicate,
+  readAllowedIpRanges,
+  type AllowedIpRangesReading,
+} from './allowed-ip-ranges.js';
 import {
   AUTH_SETTING_RESTORE,
   captureDeclaredAuthOptions,
@@ -560,6 +566,8 @@ export class AuthPlugin implements Plugin {
    */
   private allowListUndeterminedWarned = false;
   private allowListUntrustedHeaderWarned = false;
+  /** The applied allow-list value whose unreadable value or entries were last reported, so one is reported once. */
+  private allowListUnreadableReportedFor: string | undefined;
   /**
    * [#30203, #30312] What the deployment itself declared (plugin options and
    * `auth:configure` handlers) for every option an `auth.*` setting can drive,
@@ -2419,7 +2427,9 @@ export class AuthPlugin implements Plugin {
         // [#30203] A cleared value hands the gate back to the deployment's own
         // declaration at once (the restore arms below).
         if (isExplicit('allowed_ip_ranges')) {
-          patch.allowedIpRanges = parseAllowedIpRanges(values.allowed_ip_ranges);
+          const reading = readAllowedIpRanges(values.allowed_ip_ranges);
+          patch.allowedIpRanges = reading.ranges;
+          this.reportUnreadableAllowList(ctx, reading, values.allowed_ip_ranges, sources.allowed_ip_ranges === 'env');
         }
 
         // Anti-abuse (ADR-0069 D2) — account lockout (custom, per-identity)
@@ -3237,6 +3247,63 @@ export class AuthPlugin implements Plugin {
   }
 
   /**
+   * ADR-0069 D5 — name what the gate cannot read in an applied
+   * `allowed_ip_ranges` value: a value that is not text (`readAllowedIpRanges`,
+   * which hands the gate a list that admits nobody for it), or the entries of a
+   * list that name no range (`unreadableIpRangeEntries`, the gate's own
+   * reading). The save check refuses both, so this is a value it never judged:
+   * one stored by an earlier release, or pinned by `OS_AUTH_ALLOWED_IP_RANGES`.
+   * Such a value or entry matches no address at the gate while the setting
+   * reads as set, so `error` (AGENTS.md, degradation log levels), once per
+   * distinct value, with the fix in the same line.
+   */
+  private reportUnreadableAllowList(
+    ctx: PluginContext,
+    reading: AllowedIpRangesReading,
+    raw: unknown,
+    fromEnv: boolean,
+  ): void {
+    if (reading.notText) {
+      let spelled: string;
+      try {
+        spelled = JSON.stringify(raw);
+      } catch {
+        spelled = String(raw);
+      }
+      const notTextKey = `not text: ${spelled}`;
+      if (notTextKey === this.allowListUnreadableReportedFor) return;
+      this.allowListUnreadableReportedFor = notTextKey;
+      const kind = reading.notText === 'object' ? 'an object' : `a ${reading.notText}`;
+      ctx.logger.error(
+        `[auth] allowed_ip_ranges (ADR-0069 D5) holds a value that is not text (${kind}), so it names no list, ` +
+          'and sign-in is admitted from no address while it is in force. Fix: save the list in the settings ' +
+          'console as text, one entry per line or comma-separated, or clear it; locked out, start the server ' +
+          `with ${ALLOWED_IP_RANGES_ENV} set to an empty value.`,
+      );
+      return;
+    }
+    const { ranges } = reading;
+    const unreadable = unreadableIpRangeEntries(ranges);
+    const key = unreadable.length > 0 ? JSON.stringify(ranges) : undefined;
+    if (key === this.allowListUnreadableReportedFor) return;
+    this.allowListUnreadableReportedFor = key;
+    if (!key) return;
+    const named = unreadable.map((entry) => JSON.stringify(entry)).join(', ');
+    ctx.logger.error(
+      `[auth] allowed_ip_ranges (ADR-0069 D5) holds ${unreadable.length === 1 ? 'an entry' : 'entries'} that ` +
+        `${unreadable.length === 1 ? 'is' : 'are'} not an IP address or a CIDR range: ${named}. ` +
+        `${unreadable.length === 1 ? 'It matches' : 'Each matches'} no address, so sign-in is admitted only from ` +
+        "the list's other entries, if any, while the settings console shows the list as in force. Fix: " +
+        (fromEnv
+          ? `correct ${ALLOWED_IP_RANGES_ENV} (read at startup) `
+          : 'correct the stored list in the settings console ') +
+        'so each entry is an address, or an address, "/" and a prefix length in decimal digits (0 to 32 for IPv4, ' +
+        '0 to 128 for IPv6), or clear it' +
+        (fromEnv ? '.' : `; locked out, start the server with ${ALLOWED_IP_RANGES_ENV} set to an empty value.`),
+    );
+  }
+
+  /**
    * ADR-0069 D5 — the operator-facing explanation of an allow-list refusal,
    * for the two cases where the reason is not simply "an address outside the
    * ranges". Logged at `warn` (a refusal the requester was told about, not a
@@ -3605,7 +3672,14 @@ export class AuthPlugin implements Plugin {
       const session: SessionRead | null = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
       const verdict = judgePlatformAdmin(session);
       if (!verdict.ok) return c.json(verdict.refusal.body, verdict.refusal.status);
-      return verdict.actor;
+      // An impersonation session names the administrator at the keyboard; the
+      // route's identity writes carry it beside the admitted actor as the
+      // attribution-only `impersonatedBy` (`runAttributedToUser`), read off
+      // this session and never off the body. Authorization is unchanged.
+      const impersonatedBy = session?.session?.impersonatedBy;
+      return typeof impersonatedBy === 'string' && impersonatedBy.trim() !== ''
+        ? { ...verdict.actor, impersonatedBy: impersonatedBy.trim() }
+        : verdict.actor;
     };
 
     // ── [#24877] ADR-0069 D5/D7 — better-auth's universal handler for the
@@ -3733,7 +3807,7 @@ export class AuthPlugin implements Plugin {
         // Attribution only — the route's own authorization already happened
         // in `gateAdmin`. Opening the actor seam here credits the `sys_user`
         // row to the admin instead of recording it as the system.
-        const { status, body } = await runAttributedToUser(actor.id, () =>
+        const { status, body } = await runAttributedToUser(actor, () =>
           runSetUserManager(
             {
               getDataEngine: () => this.authManager!.getDataEngine() as any,
@@ -3904,7 +3978,7 @@ export class AuthPlugin implements Plugin {
           // binds in `user.create.after` — are credited to the admin instead
           // of recorded as the system. Attribution only: the route's own
           // authorization already happened above, and the writes stay system.
-          const { status, body } = await runAttributedToUser(actor.id, () =>
+          const { status, body } = await runAttributedToUser(actor, () =>
             runAdminCreateUser(
               {
                 ...adminUserDeps(),
@@ -3979,7 +4053,7 @@ export class AuthPlugin implements Plugin {
           // write is driven server-side and never passes through
           // `AuthManager.handleRequest`, so the request-scoped actor seam is
           // not open unless we open it here.
-          const { status, body } = await runAttributedToUser(actor.id, () =>
+          const { status, body } = await runAttributedToUser(actor, () =>
             runAdminBanUser(adminBanDeps(), actor, c.req.raw),
           );
           return c.json(body, status as any);
@@ -3996,7 +4070,7 @@ export class AuthPlugin implements Plugin {
           if (actor instanceof Response) return actor;
           const unavailable = await adminPluginMissing(c);
           if (unavailable) return unavailable;
-          const { status, body } = await runAttributedToUser(actor.id, () =>
+          const { status, body } = await runAttributedToUser(actor, () =>
             runAdminUnbanUser(adminBanDeps(), actor, c.req.raw),
           );
           return c.json(body, status as any);
@@ -4194,7 +4268,7 @@ export class AuthPlugin implements Plugin {
           })();
           // [#4586] Same seam as create-user: server-side better-auth calls,
           // credited to the admin who ran the import.
-          const { status, body } = await runAttributedToUser(actor.id, () =>
+          const { status, body } = await runAttributedToUser(actor, () =>
             runAdminImportUsers(
             {
               getAuthApi: () => this.authManager!.getApi() as any,
@@ -4248,7 +4322,7 @@ export class AuthPlugin implements Plugin {
         // and never passes through `AuthManager.handleRequest`, so open the
         // attribution seam here — the `sys_member` row this creates is
         // credited to the admin instead of recorded as the system.
-        const { status, body } = await runAttributedToUser(actor.id, () =>
+        const { status, body } = await runAttributedToUser(actor, () =>
           runOrganizationAddMember({ getAuthApi: () => this.authManager!.getApi() as any }, c.req.raw),
         );
         return c.json(body, status as any);
