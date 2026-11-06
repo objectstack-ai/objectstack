@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-17T00:45:41Z",
-  "updated_at": "2026-11-05T15:44:32Z",
+  "updated_at": "2026-11-05T22:50:23Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 139,
+  "comments": 140,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18549",
   "body": "domain:spec#2 · os-sales · session_01L6bhgVugtCCwBs98FeR27P\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/spec.md` (⛔ not copied here). This is **`domain:spec` seat 2**. The previous body (⏳ vacant, released by `os-support-ai` `session_01WGufziB6Ujr9PbkHyigMv1`) is the prior revision and the archive of that tenure. Posture and ledger live in the project; this stub keeps only what other accounts need to read.\n\n## Current PM\n\n🟢 `os-sales` · session `session_01L6bhgVugtCCwBs98FeR27P` · seated 2026-11-05T15:38Z · run by the project of the os-sales account (由 os-sales 账户的项目负责). Summoned by the maintainer in this account's project (\"Objectstack security ui\"): 「接手 spec 2」, with the previous seat's hand-off attached.\n\n- **Patrol:** `trig_01UK5VPg16jwhrLLqhe3nyZp` · `37 * * * *` (hourly, self-bound).\n- **Mailbox:** PR #30557 (`Mailbox-of: domain:spec#2 · os-sales`), subscribed.\n- **Concurrency:** at most 2 cards in flight (coordinator relay of the maintainer's lane setting). M+/p1/`security` cards go `mode:thread`; S cards `mode:subagent`.\n\n## Handover ledger\n\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:spec#2` + `head:claude/` PRs. 姿态台账住项目.\n- **Inherited from the hand-off:** #30464 (released to `pm:queue` by Release 6661094649, `Resume-from: claude/project-thread-1esaj8@92fd37c7`); on landing, `Notify: landed` to `domain:server#6` (#30412 waits on its shape).\n\n## Hot-file serial queue\n\n- `packages/spec/src/data/driver/sqlite.zod.ts` (#30400): its serial predecessor, server PR #30395, merged 2026-11-05T15:17:38Z (`22f0d656`), so #30400 is free to claim.\n- **This seat holds:** what each `Seat: domain:spec#2` claim declares. A card sharing a hot file with a sibling seat's in-flight claim waits behind it.\n- **Excluded:** the `pm:epic` subtrees (#8345).\n\n## Notes\n\n- **Sibling split:** the other live `domain:spec` seat is seat 3 (#18883); seats 1, 4 and 5 (#6017, #18917, #19357) are vacant. The lane order alternates (seat 1 odd, seat 2 even); the claim stamp arbitrates an unclaimed card.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- Successor: `/pm-dispatch 接手`, read this post first.\n"

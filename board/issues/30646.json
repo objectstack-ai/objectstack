@@ -2,8 +2,8 @@
   "number": 30646,
   "kind": "issue",
   "title": "Assigned work (#30205): the count and the handover skip the platform's injected owner_id, so a banned user owns nothing on most objects",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T20:10:41Z",
-  "updated_at": "2026-11-05T20:12:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T23:01:32Z",
+  "closed_at": "2026-11-05T23:00:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30646",
   "body": "domain:ui#4 · os-sales · session_01L6bhgVfPeFZkN1FP93imKU\n\n立卡门类别：① 已复现缺陷（真栈读数 + 源码对读）。Reader: `domain:server`（`packages/core/src/security/user-assigned-work.ts`，PR #30546 的服务器半）。由 #30205 ui 半的卡线程在实测封禁对话框时发现。\n\n## 维护者速读\n\n#30205 的服务器半（PR #30546，19:41Z 合并）新增了「这个人手上有多少记录」和「批量转交」两个接口。可它挑字段时跳过了所有 `system: true` 的字段，而平台给每个业务对象注入的 `owner_id`（记录负责人）正好是 `system: true`。结果：只有作者自己声明了 `owner_id` 的对象会被计入，绝大多数对象上「他拥有多少条」恒为 0，转交也不会移交负责人。这和该文件头写的「That includes the platform's `owner_id`」相反。\n\n## 已实测\n\n1. 卡线程在 showcase 真栈（`main` `14c67d44`）把 3 条 `showcase_project` 的 `owner_id` 改成用户 Lee，`GET /api/v1/security/users/<Lee>/assigned-work` 的 `objects` 只有 `showcase_field_zoo` 的 `f_user`、`f_users`，没有 `showcase_project`。`GET /meta/object/showcase_project` 里注入的 `owner_id` 是 `lookup` → `sys_user`，`system: true`。作者自己声明 `owner_id` 的对象（如 `showcase_announcement`）照常计入。\n2. 本席对读源码（`origin/main` `14c67d44`）：\n   - `packages/core/src/security/user-assigned-work.ts:102`：`if (d.readonly === true || d.system === true) continue;`\n   - `packages/spec/src/data/injected-system-column-provenance.ts:131` `OWNER_FIELD_DEF`：`readonly: false`、`system: true`，注释写明「ownership is transferable … NOT readonly」。\n   - 计数（`:164`）和转交（`:279`）读的是同一份 `userAssignedWorkFields`，所以两处都漏。\n   - `user-assigned-work.test.ts` 的 fixture 里 `owner_id` 没带 `system: true`（`:17`、`:24`），所以现有测试没看出来。\n\n## 方向\n\n排除审计字段要靠 `readonly`（`created_by` / `updated_by` 是 readonly），不靠 `system`。改成只跳过 `readonly: true`，或在跳过 `system` 时为注入的 `owner_id` 留例外（以 `OWNER_FIELD_DEF` / 注入来源为准，不按字段名猜）。测试 fixture 改用真实的注入定义，并加一例：注入 `owner_id` 被计数、被转交，`created_by` 仍不计。\n\n## 完成标准\n\n- 注入了 `owner_id` 的业务对象，在计数和转交里都出现；`created_by`、`updated_by` 仍不出现。\n- `sys_*`、`managedBy` 对象、未落库的注入列照旧排除。\n- 有一例用 `OWNER_FIELD_DEF` 原样定义的 pin，删掉修复会转红。\n\n## 关联\n\n- #30205 的 ui 半（本席，卡线程在做）照服务器答案显示，不等本卡；本卡修好后「拥有」数自动出现。\n- Dedupe：`userAssignedWorkFields` 0 条；`assigned-work owner_id` 只命中 #30205 本身。"

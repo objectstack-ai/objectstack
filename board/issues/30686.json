@@ -1,0 +1,35 @@
+{
+  "number": 30686,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): Parent Organization and Sort Order say they matter only with several organizations",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T22:26:11Z",
+  "updated_at": "2026-11-05T23:14:57Z",
+  "closed_at": "2026-11-05T23:14:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T23:14:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30686",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DPskZrGJsWDXJjZgotFY1fd)_\n\nFixes #30210\n\nCard thread `session_016WV4czYDK9GofBYXSyFkwJ` for `domain:server#4` (claim 6670535485, amended 6670640620). Executes ruling 6670372892: row 4 C here, row 3 D (`sys_organization.timezone` left as it is) closes with this PR, row 4 A is a separate card the seat files.\n\n## 维护者速读\n\n- 问题:单组织部署里「编辑组织」页照样显示「上级组织」「排序」,管理员看不出它们在这里没有作用。\n- 本 PR:这两个字段的帮助文字末尾加一句「仅在部署运行多个组织时有意义」,英文同步。\n- 不变:字段仍然显示、可编辑;权限、数据、行为都不变。时区字段按第 3 行 D 原样保留。\n- 隐藏这两个字段(第 4 行 A,字段组 `requiresFeature`)另立卡,不在本 PR。\n- 风险:纯文案,无迁移;es-ES / ja-JP 包没改(裁定只点名 en / zh-CN),它们继续显示旧句。\n- 规模:5 个文件,+52 / -6。\n\n## What changes\n\n- `packages/platform-objects/src/identity/sys-organization.object.ts`: the `parent_organization_id` and `sort_order` descriptions end with \"Meaningful only where the deployment runs several organizations.\" (the wording the object's `create_organization` action already uses: \"Available only where the deployment runs several organizations.\"). The code comments around them (L39, L482) do not restate the description, so they stay.\n- `en.objects.generated.ts`: the same two helps; `pnpm i18n:extract` reproduces it byte for byte (no change after the run).\n- `zh-CN.objects.generated.ts`: the two helps end with 「仅在部署运行多个组织时有意义。」.\n- New pin `sys-organization-multi-org-fields-help.test.ts` (beside `sys-organization-name-timezone-help.test.ts`): the declaration says it, the en pack equals the declaration, the zh-CN pack says it.\n- One changeset, `@objectstack/platform-objects` patch.\n\n## Why\n\nFrom #30210 row 4: an administrator on a single-organization deployment sees 上级组织 / 排序 on Edit organization and expects an effect. Ruling 6670372892 chose C: say so in the help, no hiding.\n\n## Verification\n\n- Red on `main` `b77c160a` (declaration + packs from main, new test kept): 4 failed / 2 passed (the declaration and zh-CN cases red; the en-equals-declaration case passes on both sides by construction). Green on `35c17506`: 6/6.\n- `@objectstack/platform-objects` test: 116 files, 1577 tests passed; typecheck exit 0 (both on `35c17506`).\n- `pnpm i18n:extract`: exit 0, no change. `check:i18n` exit 0.\n- `dispatch-gates --commands` derived 58 families on `35c17506`; all 58 exit 0; `--ran`: 58 run, 0 NOT-MEASURED, 0 UNRUN. (`check-plugin-teardown-shape --self-test` and `check:dual-build-cjs-loads` first exited 3 on prerequisites; re-run after fetching the pinned fixture commit and the build closure, both exit 0.)\n- `83a9b2fd` merges `origin/main` `a2437b56`; the four commits it brings touch no `platform-objects` file. `pnpm lint` is CI's.\n\n## Acceptance notes\n\n- es-ES and ja-JP packs carry their own translations of the two helps (no source-hash entry, so they are legacy-trusted and served as written): they keep the old sentence without the new clause. The ruling names en / zh-CN only, and no bundle check required more, so they are left; a translator pass can add the clause.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` runs in CI.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [ ] 8. Title, body and comments are in English. (except the `## 维护者速读` block the dispatch asks for)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4czYDK9GofBYXSyFkwJ\n"
+}

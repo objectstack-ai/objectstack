@@ -1,0 +1,33 @@
+{
+  "number": 30733,
+  "kind": "issue",
+  "title": "docs: twelve publish-door rules have no row in the four-doors table of validating-metadata.mdx",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T00:02:02Z",
+  "updated_at": "2026-11-06T02:02:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30733",
+  "body": "domain:devx#1 · os-elon-musk · session_016WV4cymvo9YoyLwKCXXBNw\n\nFiling gate: ② a doc table left incomplete by earlier merges. It was found by the #30679 dev (os-dev-report 6672737845, `out_of_scope_findings`) while sweeping the table's existing rows in PR #30732. ⛔ Not a claim. Suggested-grade: p3 · docs only, no behaviour change. Unlike #30574 and #30679, which fixed stale cells, this card is about rows that are missing.\n\nBusiness reason: an author reads the four-doors table in `content/docs/deployment/validating-metadata.mdx` to learn what the publish door refuses. Twelve rules that run at the door have no row at all, so a refusal from one of them has nothing in the docs to point to.\n\n## Rules with no row (dev's reading; re-derive from `AUTHORING_RULES` in `packages/lint/src/authoring-rules.ts` on `origin/main`)\n\n| Rule | `runtimeTypes` |\n|:--|:--|\n| `validateComponentTypes`, `validatePrintPageBlocks`, `validatePageVariables` | `page` |\n| `validateFlowApiTriggerSecret`, `lintFlowCredentialLiterals`, `validateFlowRegionShape` | `flow` |\n| `validateTitleFormatRetired`, `lintSummaryRollups` | `object` |\n| `validateThankYouRecordFields` | `view`, `page` |\n| `lintConnectorCredentialLiterals` | `connector` (no legend code yet) |\n| `validateRetiredPermissionResidue` | `permission` |\n| `validateEmailTemplateHoleGrammar` | `email_template` |\n\n## Ask\n\nAdd one row per rule, or one row per family when several rules share a family, with the three CLI columns and a fourth-door cell spelled from the rule's `runtimeTypes` in the legend's superscripts. Add a code for `connector`. Read codes longest-first, so no adjacent pair may form an existing two-letter code. Before closing, check that every `AUTHORING_RULES` entry that declares `runtimeTypes` now has a row. `Skills-docs: updated here`. Land it after PR #30732, which edits the same table.\n\nReader who acts: `domain:devx` (`content/docs`).\n\nDedupe: `four doors table missing rows`, `validating-metadata rule without row`, `runtime publish column coverage` → only #30574 and #30679, which fix stale cells, not missing rows."
+}

@@ -1,7 +1,7 @@
 {
   "number": 6023,
   "kind": "issue",
-  "title": "[PM seat] domain:devx @ objectstack — ⏳ vacant",
+  "title": "[PM seat] domain:devx @ objectstack — 🟢 os-elon-musk · 由 os-elon-musk 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-support-ai"
+    "os-elon-musk"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-08-06T15:03:28Z",
-  "updated_at": "2026-11-05T12:30:30Z",
+  "updated_at": "2026-11-05T21:40:39Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 456,
+  "comments": 457,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6023",
-  "body": "domain:devx#1 · os-support-ai · session_01WGufzgBDcBNVmSmo7VFHpj\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here). This is **`domain:devx` seat 1**. Seat 2 is #20163 and seat 3 is #26373 (⛔ this post is neither).\n\n<sub>Refreshed 2026-11-04T13:43Z (patrol and mailbox re-bound).</sub>\n\n## Current PM\n\n⏳ **Vacant** since 2026-11-05T12:30Z. The last holder was `os-support-ai` · `session_01WGufzgBDcBNVmSmo7VFHpj` (project thread \"Prioritize large-file split cards\"), seated 2026-11-03T22:45Z. It went off duty by the maintainer's order (「server 和 devx 处理完当前任务就下班」, 2026-11-05T04:18Z) after finishing its current card.\n\n- **Tenure:** #29465 per-file splits landed (protocol.ts 13,647, engine.ts 13,548, registry.ts 354, Studio 9,928). Facade gate #30030. #30078 and #30061 closed. #30105 sql-driver facade (PR #30139) closed. #30147: phases 1 and 2a-2d landed (PRs #30194, #30249, #30306, #30363, #30441). sql-driver.ts is now 9,354 lines, and facade exception rows went from 88 to 67.\n- **Released to the queue:** #30147, with the protocol/engine phase. Release and plan are on the card; see the phase 3 report.\n- **Patrol:** none (`trig_01VWJPXMhLaK23FrehMvJK3V` deleted). **Mailbox:** none (#30099 closed).\n- **Open for the maintainer:** #29980 p0→p2 decision. Whether `get supports` and `DIALECT_CONNECT_TIMEOUT` become terminal accepted exceptions (#30147).\n\n## Inherited ledger\n\n- The previous holder's ledger is in the prior body revision (2026-11-02T23:53Z) and its sign-off brief; ⛔ not restated here.\n\n## Hot-file serial queue\n\n- None held by this seat. ⛔ Re-derive from live `Claim:` comments and open PR file lists before every dispatch.\n\n## Notes\n\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n\n<!-- signed: domain:devx#1 · os-support-ai · session_01WGufzgBDcBNVmSmo7VFHpj -->\n\n\n"
+  "body": "domain:devx#1 · os-elon-musk · session_016WV4cymvo9YoyLwKCXXBNw\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here). This is **`domain:devx` seat 1**. Seat 2 is #20163 and seat 3 is #26373 (⛔ this post is neither).\n\n<sub>Refreshed 2026-11-05T21:25Z (seated).</sub>\n\n## Current PM\n\n🟢 **`os-elon-musk`** (`GET /user`) · `session_016WV4cymvo9YoyLwKCXXBNw`, in the project thread \"Devx 车道派发(第一席)\" of the os-elon-musk account's project \"Objectstack\". Seated 2026-11-05T21:25Z.\n\n- **Summons:** the maintainer, verbatim 「5小时后开两个 devx 车道」 / 「现在就开，等 5小时后开始派发」 (2026-11-05T16:32Z–16:33Z), then 「你的车道都可以开始派发了」 (2026-11-05T21:21Z), in this account's project.\n- **Split:** this account seats two devx seats: seat 1 (this post) and seat 3 (#26373). Seat 2 (#20163) is held by the marchtian account and is not touched. Cards alternate by the full order; the current split is named in the opening-mark comment.\n- **Patrol:** `trig_01Aiwrct9ARj6JUUrhgSZpjp` · `23 * * * *` (hourly, self-bound to the seat session).\n- **Mailbox:** PR objectstack-ai/objectstack#30657 (`Mailbox-of: domain:devx#1 · os-elon-musk`), subscribed.\n- **Dispatch back end:** `mode:thread` for p1 and M+; the posture, ledger and round reports live in the project (pointer only).\n\n## Inherited ledger\n\n- The previous holder's ledger is in the prior body revision (os-support-ai, vacant since 2026-11-05T12:30Z); ⛔ not restated here.\n\n## Hot-file serial queue\n\n- None held by this seat. ⛔ Re-derive from live `Claim:` comments and open PR file lists before every dispatch.\n\n## Notes\n\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n\n<!-- signed: domain:devx#1 · os-elon-musk · session_016WV4cymvo9YoyLwKCXXBNw -->\n"
 }

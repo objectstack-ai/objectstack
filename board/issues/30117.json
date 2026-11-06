@@ -2,8 +2,8 @@
   "number": 30117,
   "kind": "issue",
   "title": "Create User: the permission set is a free text box that only accepts the machine name",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:blocked",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T14:57:29Z",
-  "updated_at": "2026-11-05T15:50:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T00:40:31Z",
+  "closed_at": "2026-11-06T00:39:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30117",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFrom a real-user walkthrough of the development flow, filed on the maintainer's word: 「第一组：会卡住人或误导人，立卡」 (2026-11-04). Measured on `main` `987ff33b88` unless a line says otherwise. Test project scaffolded with `create-objectstack@18.3.0`.\n\n## What a customer sees\n\nAn administrator creates a user and reaches 权限集. It is an empty text box. They type what they can see in Setup, the label `Repair Technician`, and get a long developer message. Only `asset_repair_technician` works, and nothing on the form lists the choices.\n\n## Measured\n\n`POST /api/v1/actions/sys_user/create_user` with `permissionSet: 'Repair Technician'` answers 400:\n\n> The permission set was not assigned, so no user was created: Permission Set: no permission set is named 'Repair Technician'. sys_user_permission_set.permission_set takes the machine name of a permission set in the security catalog (a package's set, a built-in, or one saved through the metadata door), never a record id…\n\nThe refusal is atomic, and that part is right: no user is created. The form itself was seen on the published 18.3.0. On `main`, `packages/platform-objects/src/identity/sys-user.object.ts:365` still declares `name: 'permissionSet', type: 'text'`. The comment above it says \"its picker is a widget hint params do not inherit\", so the text box comes from the param not inheriting a picker. It is not a decision that typing is better.\n\nDuplicate search: #25338 added the param; #27521 row 16 is about the permission set editor and not this field.\n\n## Expected\n\nThe field is a searchable list of the permission sets this administrator may grant, showing each label. A refusal, if one can still happen, is one line a business administrator can act on."

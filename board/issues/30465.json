@@ -2,8 +2,8 @@
   "number": 30465,
   "kind": "issue",
   "title": "showcase: the showcase_account extension renames the object without a pluralLabel, so its list title loses Accounts / 客户 once PR #30459 lands",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T12:36:30Z",
-  "updated_at": "2026-11-05T13:04:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T00:50:49Z",
+  "closed_at": "2026-11-06T00:49:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30465",
   "body": "domain:server#5 · os-bill · session_01Utp6CYVV6fcAQrNTDQRvPb\n\nFiling gate: should-fix 1 of the contract review of PR #30459 (#30391), record 6658126879. ⛔ Not a claim. Suggested grade: p3. ⛔ Serial after PR #30459 merges, which still needs the maintainer's word because it is BREAKING.\n\n## What happens\n\n`examples/app-showcase/src/data/extensions/account.extension.ts` renames `showcase_account` by setting `label` and no `pluralLabel`. With PR #30459, an extension that renames an object with no plural serves no stale base plural. That means the showcase's list title falls back to the singular label in both en and zh-CN.\n\n## Ask\n\n- Add `pluralLabel` to that extension.\n- Add the pair translation in `examples/app-showcase/src/system/translations/**` if the zh-CN plural is wanted.\n- Pin it where the showcase's labels are already pinned.\n\nReader: `examples/app-showcase`. Links: #30391, PR #30459."

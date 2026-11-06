@@ -2,8 +2,8 @@
   "number": 30324,
   "kind": "issue",
   "title": "[Decision] An installed app's sample data has no owner, so a colleague opening the app sees none of it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T06:18:43Z",
-  "updated_at": "2026-11-05T07:15:25Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T01:03:09Z",
+  "closed_at": "2026-11-06T01:01:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30324",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiling category ②: only the maintainer can decide this. Analysis-tier: seat tier, by the maintainer's word 「不要用 fable」.\n\n## 维护者速读\n\n装好 HotCRM 后，管理员能看到示例客户和收入，但同事打开应用，看到的是空的：实测管理员 11 个客户，普通成员 0 个。你说要带初始数据，「这样客户才能看得到效果」。现在只有管理员看得到效果。要你定：示例数据该让谁看到。我建议 **A**：持有这个应用默认权限集的人，都能只读看到示例数据。\n\n## The question\n\nA company installs an app to try it. The person who installed it sees sample data. Their colleagues, given the app's suggested permission, see an empty app. Who should see the samples?\n\nGoverning text:\n- The maintainer's word on sample data: 「我觉得安装应用市场应用的时候是需要有初始数据的，这样客户才能看得到效果」 (2026-11-05).\n- `packages/cloud-connection/src/marketplace-install-local-plugin.ts`, step 5: seed datasets run now \"so the installed app has demo data on first paint\".\n- Searched `docs/adr` for `sample data`: 0038, 0045 and 0067 mention it, and I did not find a rule on who should see it.\n\nProtocol: option A or B may add a declaration. Whether that needs a spec change is for the dev to report first.\n\n## Measured\n\nOn HotCRM v6.0.0, on a local test deployment, re-check by reading `crm_account` as each user:\n\n| Who | Accounts visible |\n|:--|:--|\n| Dev Admin, who installed it | 11 |\n| A member, before the grant | 403 |\n| A member, after 授予 of `crm_user` to Everyone | 0, and creating one works (201) |\n\nThe seeded rows have `owner_id` and `created_by` empty, and HotCRM's objects use `private` sharing. The member sees only what they own, and nobody owns the samples. `crm_opportunity` reads the same 0. I measured this through the data API for that member; I did not take a screenshot of their dashboard.\n\n## Options\n\n| Option | What it does | What the customer sees | Work |\n|:--|:--|:--|:--|\n| **A. Members with the app's permission can read the samples** | Install marks the rows as sample data, and the sharing check lets anyone holding the app's permission read them, read-only | A team trial shows data to everyone. Clearing removes it for everyone | Server and security lanes, one PR or two; no precedent found |\n| **B. App authors declare it** | A package says how its sample data is shared, for example with a sharing rule in its own metadata | Depends on each author. HotCRM would need a change | Spec, server and app, several PRs; no precedent found |\n| **C. Give the rows to the installer** | Install sets `owner_id` to the person installing | They own the samples. Colleagues still see nothing | Small, one PR; no precedent found |\n| **D. Leave it and say so** | The install note says only administrators can see sample data | No change in what anyone sees, and no surprise | One small PR |\n\nIn business terms: A is a shared demo store that everyone can walk through. B lets each vendor choose. C hands the demo to one person. D puts up a sign.\n\n## Recommendation: A\n\n四轴（中文）：\n\n- **项目长远合理性：** 示例数据的目的就是演示，平台统一处理「示例数据谁能看」，每个应用都不用再写一遍。B 要每个作者都想到这件事，大多数人想不到。\n- **实际业务需求：** 真实场景是部门试用：管理员装好，叫同事来看。同事看到空白，会以为应用坏了或没装好，试用就断了。C 和 D 解决不了这个场景。无反馈数据（产品尚无多少真实客户），按场景判断。\n- **防 AI 写代码犯错：** 出错时谁看到什么很重要。A 必须严格限定在标记为示例的行、并且只读，否则就是静默放宽权限，客户的真实数据可能被看到。这个风险要靠测试钉死：真实行绝不能因此可读。B 把这件事交给 AI 写的元数据，容易漏写，漏了就是静默的空白。\n- **创业阶段不扩散：** A 不给作者增加新配置，比 B 少一个契约面，但比 D 多一段权限逻辑。\n\nBlind spot: A touches the record sharing path, so it needs the security lane's review. I have not measured what happens to a sample row a member then edits, or to rows that reference it.\n\n只看①选 A；②③④ 是否翻转：否。\n\nos-decision-facets\n① 项目长远合理性: A narrows special cases; one platform rule instead of one per app.\n② 实际业务拉动: a department trial where colleagues open the installed app; no field reports yet, argued from the scenario.\n③ 防 AI 犯错: A is a platform rule rather than metadata an AI can forget; it must be pinned to sample rows and read-only so a failure cannot silently expose real rows.\n④ 创业阶段不扩散: no new author-facing key under A; D is the smallest and leaves the trial broken.\n\n## After the ruling\n\nThe seat dispatches one card to the server lane with the security lane reviewing, and the install note wording follows the sibling cleanup card.\n\nBlocks nothing."

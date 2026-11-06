@@ -13,18 +13,20 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T14:58:59Z",
-  "updated_at": "2026-11-04T16:50:27Z",
+  "updated_at": "2026-11-06T00:29:39Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 13,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30120",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFrom a real-user walkthrough of the development flow, filed on the maintainer's word: 「第一组：会卡住人或误导人，立卡」 (2026-11-04), under 「等我决定的都要立卡，并且从业务的角度给我具体解释和我沟通」. Measured on `main` `987ff33b88`.\n\n## The question\n\nWhen someone runs `os start` with `NODE_ENV=production` and no database URL or secrets, should it carry on quietly, warn, or refuse?\n\nGoverning text:\n- `packages/cli/src/commands/start.ts` header: \"zero-config quick boot\", and the auth secret comment: \"Quick-start should 'just work'\".\n- `docker/Dockerfile:119`: the runtime image's command is `os start`, so the same command is both the quick start and the production entry.\n- `packages/cli/src/commands/serve.ts:4845`: `serve` tells the operator to set `OS_AUTH_SECRET`.\n\n## What a customer sees\n\nThey deploy, the server says ready, and everything works. Their data is in a SQLite file under the working directory and their secrets were generated on that disk. If the container is replaced without a volume, the data, the sign-in secret and the key for saved credentials are all gone. Nothing warned them on the way in.\n\n## Measured\n\n`NODE_ENV=production`, `OS_DATABASE_URL`, `OS_AUTH_SECRET` and `OS_SECRET_KEY` unset, `os start` in a project:\n\n- It boots and prints `Mode: production`, with the database at a `file:` path under the home directory.\n- It writes `auth-secret` and `dev-crypto-key` into the home directory.\n- The only warning about durability is the storage one: `StorageServicePlugin using local driver…`. There is none about the database or the secrets.\n- With no `OS_HOME`, it uses the same `.objectstack/data` as `os dev`: the published 18.3.0 opened the developer's own database, with no message.\n\nThe generated `docker-compose.yml` does inject the three values, so that path is fine. A plain `docker run` was not measured, because Docker is not running on this machine.\n\n## Options\n\n- **A. Warn loudly.** Keep booting, and print one clear block naming what is local and what is lost when the disk goes, with the three variables to set. Local trials stay zero-config.\n- **B. Refuse in production mode.** With `NODE_ENV=production` and no durable database or secrets, exit and name them. The quick start stays available without `NODE_ENV=production`.\n- **C. Leave it.**\n\n## Recommendation: A\n\n四轴（中文）：\n\n- **实际业务需求：** 试用的人要零配置，真上线的人要知道数据放哪。两类人用同一条命令。没有警告的代价是容器换掉后数据和登录全丢，而且事后才发现。\n- **项目长远合理性：** B 更严格，但 `NODE_ENV=production` 不等于「这是正式部署」，单机自托管用 SQLite 也合理，直接拒绝会误伤。A 让信息到位，以后要收紧也容易。若你判断创业期就该强制，选 B。\n- **防 AI 写元数据犯错：** 这条不直接涉及元数据；AI 代为部署时，一段明确的警告能让它把变量补上。\n- **创业阶段不扩散：** A 只加启动输出，不加配置项和门禁。\n\nBlocks nothing."

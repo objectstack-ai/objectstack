@@ -1,0 +1,34 @@
+{
+  "number": 30649,
+  "kind": "pull_request",
+  "title": "i18n(service-storage): ship the file and upload-session objects in all eleven platform languages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T20:39:24Z",
+  "updated_at": "2026-11-05T21:27:50Z",
+  "closed_at": "2026-11-05T21:27:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T21:27:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30649",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgBxjikPH2bUin9o95gbAxsx)_\n\n\ndomain:server#2 · os-bill · session_01Utp6Cai5CRdAs4u9gTipWU\n\nRefs #30512 — package 10 of 11 (`@objectstack/service-storage`), moved ahead in the order by the seat now that #30335's storage half (#30627) has merged. The card stays open: the last PR of the series flips the bundle check to the platform locale table.\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** 文件与上传会话两个对象（`sys_file`、`sys_upload_session`）的名称、字段、选项、帮助和视图名补上 7 种语言：繁中、阿语、法语、巴葡、俄语、德语、韩语，与平台语言表的 11 种一致。\n- **为什么改：** 平台语言表（#29428 裁决 F）要求每个界面带齐 11 种语言；这是第 3 期按包补齐的第 10 个包（68 条），按席位安排插队。\n- **风险与回滚：** 只加翻译数据和注册行，不动逻辑、schema、接口；原有 4 种一字未改；已包含 #30627 合入后的全部键。回滚即撤 PR。\n- **先看：** `src/translations/index.ts`（按表标签注册，zh-CN 在 zh-Hant 前），再抽看 `ar.objects.generated.ts`。\n- **两分钟验证：** `node scripts/check-i18n-bundles.mjs --filter=storage` 输出 in sync；`node scripts/check-i18n-stale-fill.mjs` 退出 0。\n- **需要你做的：** 无，席位落地。\n\n## What changes\n\n- Seven new locales for the storage objects under the platform locale table's tags (`zh-Hant`, `ar`, `fr`, `pt-BR`, `ru`, `de`, `ko`): each a `TAG.objects.generated.ts` with all 68 leaves plus its `TAG.source-hashes.generated.ts`, written by the repo's own `os i18n extract --fill=default --source-hashes`, served through `withSourceFallback` like the existing three. `zh-CN` stays ahead of `zh-Hant` in `index.ts`.\n- The extract command in `scripts/i18n-extract.config.ts` lists the seven tags and its merge baseline imports the seven bundles, so `check:i18n` covers them from this PR on.\n\n## Acceptance notes\n\n- **Quality bar (#17508 / PR #19345):** every leaf written for the reader; placeholders, code spans and identifiers byte-identical, checked per leaf against `en`. Arabic is RTL prose with identifiers in Latin script.\n- **Leaves equal to English, on purpose:** the HTTP header name `ETag` in every locale; `Bucket` (the object-storage term the providers' own pt-BR and de documentation use) and `Status` (a native word) in `pt-BR` and `de`. The extractor records each as a source copy.\n- No cross-locale coincidence: `check:i18n-stale-fill` passes with the baseline untouched.\n\n## Verification\n\n<details><summary>Package suite, typecheck, build (verify lock)</summary>\n\n```\nturbo build --filter=@objectstack/service-storage...: 17 tasks successful, exit 0\npnpm --filter @objectstack/service-storage test && typecheck\n Test Files  73 passed (73)\n      Tests  1353 passed (1353)\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n<details><summary>i18n gates and size</summary>\n\n```\nnode scripts/check-i18n-bundles.mjs --filter=storage       in sync                                  EXIT 0\nnode scripts/check-i18n-stale-fill.mjs                     OK (no new stale fills, 1 baselined)     EXIT 0\neslint --no-inline-config on the changed .ts files: exit 0\nchanged lines 1483 (+1482 / -1), 17 files: under the 3000-line threshold\n```\n</details>\n\nDerived gate families (dispatch-gates --commands, reconciled with --ran): 56 run, 0 not measured, all exit 0; recorded in the os-dev-report on #30512.\n\nDogfood: not run — content-only package PR, no `!` in the title and no `(narrowing)` arm.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6Cai5CRdAs4u9gTipWU\n"
+}

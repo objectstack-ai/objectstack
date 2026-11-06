@@ -1,0 +1,35 @@
+{
+  "number": 30754,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): report a refused object-storage sync on the batch publish element",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T00:40:54Z",
+  "updated_at": "2026-11-06T01:34:50Z",
+  "closed_at": "2026-11-06T01:34:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-06T01:34:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30754",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DNBMwUTtGfWdmHXn1G2e37Z)_\n\nFixes #30693\n\ndomain:server#4 · os-elon-musk · session_016WV4czAsRaaqvLX3Tkidba\n\nClause-②: no\nMetadata-protocol: none\n\nClaim: 6672619391 (amended 6672668925) · Branch: `claude/project-thread-dx78mn` · Changed lines: +165 / −9 (4 files; product code +18 / −6, the rest is pins and the changeset)\n\n## 维护者速读\n\n- 改了什么：Studio「发布整个应用」（`POST /api/v1/packages/:id/publish-drafts`）里某个对象的存储同步被数据源拒绝时，该对象在 `published[]` 里的那一项现在带上 `object-storage-sync-refused` 警告，与单项发布、发布模式保存（#30635）给的是同一条。\n- 为什么改：之前整包发布照样回成功，表没建或没改，只有服务器日志知道；用户直到读写失败才发现。\n- 风险与回滚：很小。状态码、成功标志和其他键都不变，发布不失败；同步正常的项不加 `advisories` 键（已钉）。回滚即撤 PR。\n- 先看：`packages/metadata-protocol/src/protocol.ts` 里 `publishPackageDrafts` 第二阶段循环那一处 `eff.storageRefused`；`protocol-publish-drafts-advisories.test.ts` 末尾新 describe。\n- 两分钟验证：`pnpm --filter @objectstack/metadata-protocol exec vitest run src/protocol-publish-drafts-advisories.test.ts`，预期 8 条全绿，其中 4 条是 #30693 的。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `publishPackageDrafts`, Phase 2: the element for each promoted item is now built as a local, pushed in the same place as before (element order unchanged), and after `runPublishSideEffects` answers, its `storageRefused` (the advisory `ensureObjectStorage` builds through `objectStorageSyncRefusedNotice`, added by #30691) is appended to that element's `advisories`. The builder is reused, not copied: the batch door reads the same `eff.storageRefused` field `publishMetaItem` reads.\n- The gate's own findings stay first; the sync advisory comes after them. The element's array is a copy of `p.advisories`, so the promotion's findings list is not mutated.\n- Omitted when empty, as before: an element whose sync ran (or a non-object type) carries no `advisories` key.\n- `published[].advisories` is already declared on `PublishPackageDraftsResponseSchema` as `RuntimeAuthoringIssueSchema[]`, so no spec change.\n- `ensureObjectStorage`'s docblock now names the batch door as the third consumer.\n\n## Tests\n\nNew describe `[#30693] publishPackageDrafts reports a refused object-storage sync on that object's element` in `packages/metadata-protocol/src/protocol-publish-drafts-advisories.test.ts`. That file's stub engine gains a `syncObjectSchema` double (the #30635 fixture shape: a name in the refused set throws an undeclared error). Every case goes through the real `publishPackageDrafts`:\n\n- A batch of two objects and one flow, one object refused: `success: true`, `outcome: 'published'`, 3 published. Only the refused object's element carries one advisory (`rule`, `severity: 'warning'`, `path: ''`, `where: 'object \"ticket\"'`, the six `RuntimeAuthoringIssueSchema` keys). The undeclared driver text is withheld from the body and still in the server log. The sibling object and the flow have the key set `name, type, version`.\n- A declared (409) driver refusal is quoted on the element, as on the single-item doors.\n- A flow gate advisory and an object sync refusal in one batch each ride their own element.\n- CONTROL: a batch whose every sync runs has no `advisories` anywhere in `published`, and both objects were synced.\n\n## Acceptance notes\n\n- Reproduced through the door by ablation on the fix commit `8d702f83`: guarding the new `if` to `false` (via `scripts/ablation-replace.mjs`) turns the three refusal pins red (`Tests 3 failed | 5 passed (8)`) and leaves the CONTROL and the four #9343 pins green. Restored: blob equals `HEAD`, `git diff HEAD` empty. The tests import `./protocol.js` from `src`, so no dist rebuild was involved.\n- The old per-element `published.push` happened before the side effects; the push stays there, so an item whose side effects throw is still reported as published (the metadata is live), unchanged.\n- `#30687` (codemod moving door bodies into facets) does not move `publishPackageDrafts`; read on its head `c2e3fa7f`. `#30709` and `#30713` touch other members of `protocol.ts`. Whichever lands second merges.\n\n## Verification\n\nAll on the final head `5a6e0a90` (the fix, the changeset, and a plain merge of `origin/main` at `f0ad1f79`).\n\n- `pnpm --filter @objectstack/metadata-protocol test` + `typecheck` under `os-verify-lock`: `VERDICT command-exit 0`, `Test Files 319 passed | 4 skipped (323)`, `Tests 22480 passed | 26 skipped (22506)`. No other package's public face changed (an internal loop and one docblock), so no consumer sweep.\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 60 families. Each run with its exit code recorded before any pipe; `--ran` reconciliation: `60 derived famil(ies) accounted for — 60 run, 0 NOT-MEASURED`, every one `exit 0`.\n- `check:dual-build-cjs-loads` and `check:lean-entry-closure` exited 3 (prerequisite: built dists) on the first pass and `0` after a whole-tree `turbo run build` (`119 successful, 119 total`).\n- `node scripts/check-nul-bytes.mjs`: exit 0.\n- Repo-wide scans (`pnpm lint`, `test:repo`) and every family outside the derivation are CI's.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` is CI's.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4czAsRaaqvLX3Tkidba\n"
+}

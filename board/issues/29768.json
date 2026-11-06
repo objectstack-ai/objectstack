@@ -2,8 +2,8 @@
   "number": 29768,
   "kind": "issue",
   "title": "notifications: store the push device's origin on sys_user_device and copy it into push data (ruling B on #29642, server half)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:blocked",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T03:56:52Z",
-  "updated_at": "2026-11-03T04:56:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T00:53:19Z",
+  "closed_at": "2026-11-06T00:52:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29768",
   "body": "domain:spec#3 · os-support-ai · session_01WGufzfgvGexKn9vLHsy89K\n\nFiling gate: ② a maintainer ruling's server half. Ruling B on #29642 (record 6593872191, maintainer 「同意」 2026-11-03T02:26Z): \"the Console sends the origin it was loaded from in `RegisterDeviceRequest`. The server stores it on the `UserDevice` row, and the push channel copies it into `PushDeliveryDataSchema`.\" The spec half is PR #29767 (#29642), which declares `origin` on all three schemas with the device-side members marked `[PLANNED — not yet stored]`. ⛔ Not a claim. Suggested-grade: p2 (inherits #29642; without it the declared `origin` is never stored or sent, so the mobile shell still opens a tap on the wrong server).\n\n**Business reason.** A user with two saved servers in the mobile shell (objectstack-ai/mobile#173) taps a push from server B and lands on server A. The fix only works once the server stores the origin at registration and sends it back on every push. Reader: the `domain:server` seat, after PR #29767 merges.\n\n## What to build (measured by the #29642 dev, os-dev-report 6595041258)\n\n- `packages/services/service-messaging/src/objects/user-device.object.ts`: `sys_user_device` gains an `origin` field beside `app_id` / `locale`.\n- `packages/services/service-messaging/src/device-registry.ts`: the row write stores `request.origin ?? null` (beside `app_id: request.appId ?? null`, `locale: request.locale ?? null`), and the row read sets `device.origin` when present (beside `if (row.locale) device.locale = …`).\n- `packages/runtime/src/domains/notifications.ts`: no edit needed; `POST /devices` already passes `parsed.data` to `registerDevice`, so `origin` reaches the registry once the spec merges.\n- The push channel (#29041): copy the device row's `origin` into the push `data` (`PushDeliveryDataSchema.origin`). `git grep PushDeliveryData` outside `packages/spec` is empty today, so the copy lands there.\n- Remove the two `[PLANNED — not yet stored]` markers in `packages/spec` and flip the marker pin in `push-server-origin.test.ts` in the same PR (a spec-text edit inside the server PR, the declaration's own retirement).\n\n## Out of scope\n\n- The Console sending `window.location.origin` at registration rides #29042.\n\nSerial: after PR #29767.\n\nDedupe: searched `\"sys_user_device\" origin` (3 hits: #29642, #29068 closed, #29067 closed) and `push origin device registry` (47 hits; nearest #29042 Console registration, #29067/#29068 the closed registry build). **New.**\n\nLinks back: #29642, PR #29767, #29042, #29041, objectstack-ai/mobile#174.\n"

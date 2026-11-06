@@ -1,0 +1,31 @@
+{
+  "number": 30664,
+  "kind": "issue",
+  "title": "Settings reset: an env-pinned key keeps its stored value beneath the pin, while the reset says the namespace is back on environment/default configuration",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T21:37:47Z",
+  "updated_at": "2026-11-05T21:55:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30664",
+  "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ③ a maintainer ruling that names this card: #30385 ruling A (Ruling confirmed on the card, maintainer 「同意」 2026-11-05T21:34Z), item 2 — \"`resetNamespace` and the built-in reset action are not touched here … a separate p3 card; it does not block this one.\" Read by the seat in the cited file on `main`. ⛔ Not a claim. Suggested grade: p3.\nDedupe: `reset env-pinned stored value`, `resetNamespace locked-by-env`. Nearest: #30385 (the clear of an env-pinned key, PR #30448). **New.**\n\n## What happens\n\n`SettingsService.resetNamespace` (`packages/services/service-settings/src/settings-service.ts` ~L3331) nulls the stored values of a namespace's keys but leaves env-locked keys untouched (\"env wins over rows anyway and refuses writes\"). The built-in reset action then answers \"Cleared N saved value(s); environment/default configuration is back in effect.\" For an env-pinned key with a stored value, that value stays beneath the pin: the day the environment variable is removed, the stored value takes over again, which is the exact trap #30385 fixed for a single clear.\n\nAfter PR #30448 a clear of an env-pinned key is allowed and sets its stored value to `null`, so the reason for skipping those keys in the reset is gone.\n\n## Expected\n\n- The reset also clears the stored value beneath an env pin (the same `null` write #30448 allows), and changes nothing in force while the pin holds.\n- The reset's answer stays true: it counts what it cleared, and says when some keys are still pinned by the environment.\n- Pins: an env-pinned key with a stored value is cleared by the reset and reads its default once the env var is gone; a non-pinned key behaves as today.\n\nReader: `domain:server` (`service-settings`). Serial: after PR #30448 and the ADR-0007 D6 amendment."
+}

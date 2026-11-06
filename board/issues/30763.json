@@ -1,0 +1,30 @@
+{
+  "number": 30763,
+  "kind": "issue",
+  "title": "dispatch-gates --commands misses two families a diff can break: check:cli-command-ids (any quoted string) and check:adr-symbol-anchors (a retired export an ADR anchors)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T01:32:17Z",
+  "updated_at": "2026-11-06T01:32:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30763",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cyvF7SP65frVFAYLv7\n\nFiling gate: ① a gate-derivation defect with two measured misses on this seat's PRs tonight. ⛔ Not a claim. Suggested grade: p3.\nDedupe: `dispatch-gates derive cli-command-ids`, `adr-symbol-anchors derived` — no open card found. **New.**\nReader: `domain:devx` (`scripts/pm/dispatch-gates.mjs`, `dispatch-gates.data.mjs`).\n\n## What happens\n\nA dev runs every family `node scripts/pm/dispatch-gates.mjs --commands` derives from its diff, reports them all green, and CI goes red on a family the derivation never named:\n\n1. **PR #30734 (#30630), head `b1014f4d`:** `Lint · docs & code guards` red on `check:cli-command-ids`. A pt-BR string fragment in `packages/plugins/plugin-auth/src/sign-in-method-floor.ts` opened with `'os administradores…'`, which the gate reads as a CLI command literal. The step is unconditional in `lint.yml` and its population is the whole tree outside `packages/cli`, but `--commands` derived 63 families and none was it (dev addendum 6673039440 on #30630).\n2. **PR #30749 (#29920), head `1b82707d`:** `check:adr-symbol-anchors` red. The PR retired `PUSH_RELAY_NOT_SERVED_MESSAGE` from `service-push/src/push-plugin.ts`, which ADR-0012 anchored as `path#Symbol`. No `docs/adr/**` path was in the diff, so the derivation did not name the family, though removing or renaming any symbol an ADR anchors breaks it (dev note on #29920's thread; the family appeared only once the ADR was edited).\n\nEach miss cost a CI round and a new head, and on #30749 it changed the PR's landing tier.\n\n## Expected\n\n- `check:cli-command-ids` is derived for any diff that adds or changes a quoted string in a `.ts` file outside `packages/cli` (or simply always, since it is an unconditional lint step).\n- `check:adr-symbol-anchors` is derived for any diff that removes or renames a declaration in a file some ADR anchors (`scripts/symbol-anchors.mjs` can list the anchored files), not only for diffs touching `docs/adr/**`.\n- A self-test case for each, built from the two shapes above."
+}

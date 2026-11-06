@@ -2,8 +2,8 @@
   "number": 30615,
   "kind": "issue",
   "title": "Report, chart and table drills list more records than the number for a filtered measure: they do not read the answer's per-measure drillScopes",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T18:04:54Z",
-  "updated_at": "2026-11-05T19:43:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T21:37:54Z",
+  "closed_at": "2026-11-05T21:36:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30615",
   "body": "domain:spec#2 · os-sales · session_01L6bhgVugtCCwBs98FeR27P\n\nFiling gate: ① (a report, chart or table drill lists records the number did not count; named real producer below) and ④ (cross-layer: the ui half of #30526, whose spec + server half landed in PR #30596). No `domain:*` label: triage routes it. The fix lands in `ui/packages/plugin-report` and `ui/packages/plugin-dashboard`. The dashboard tile click is #30080, not this card.\n\n## Observed\n\nA drill from a dataset number builds its record list from the clicked bucket (`dimensionFields` / `drillRawRows` / `drillRawTotals`, `drillRanges`) AND the widget's own filter. The number itself is computed under the dataset's `filter` AND the measure's `filter` AND the widget filter. For a measure that declares a `filter`, or a dataset that declares one, the drill therefore lists a superset of the records the number counted.\n\n- **reach: named real producer.** `examples/app-showcase/src/ui/dashboards/revenue-pulse.dashboard.ts:76`, the table `table_rate_by_status`, shows `paid_count` by `status`. `paid_count` is `aggregate: 'count', filter: { status: 'paid' }` (`examples/app-showcase/src/ui/datasets/revenue-pulse.dataset.ts:32`). A drill on the `open` row's `paid_count` cell lists every open invoice, while the number is 0.\n- The same superset is pinned at the service on a real ObjectQL + SQLite engine: the bucket alone lists 4 records against `paid_count` 2 (`packages/services/service-analytics/src/__tests__/dataset-drill-scopes.test.ts`, the CONTROL pin, landed in PR #30596).\n\n## The contract to read (landed, PR #30596)\n\n`AnalyticsResult.drillScopes?: Record<string, FilterCondition>`: `@objectstack/spec/contracts` `AnalyticsResult`, and on the wire `AnalyticsResultResponseSchema.data.drillScopes`. `@object-ui/data-objectstack` `queryDataset` passes it through, typed as the spec slot.\n\n- Each selected measure name maps to the list filter, on the answer's `object`, that selects the records the measure aggregates: the dataset `filter` ∧ the measure `filter` ∧ the aggregated column holding a value. `{}` means no extra leg.\n- A measure **absent** from the map has no list filter that selects its records: a derived measure, or a scope that names a relationship path. Under the #30080 ruling (comment 6631202970) that measure offers no drill. The whole map can be `{}` when every selected measure is absent; the TypeScript contract says so, and the wire `describe` does not yet.\n- A `__compare` column has no entry.\n- The field is set on every dataset answer that has rows. It is absent on a cube query answer and on a draft-preview answer, and the dev decides with a reading what a drill does there.\n\n## What each consumer composes\n\ndrill list filter = the clicked bucket ∧ the widget filter ∧ `drillScopes[measure]`\n\n- Report drill (`ui/packages/plugin-report/**`).\n- Chart and table widget drills (`ui/packages/plugin-dashboard/**`).\n- Not here: the dashboard metric tile click is #30080. It is back in `pm:queue` and resumes from its WIP.\n- Also: `data-objectstack` `queryDataset` drops `drillRawTotals` today (zero readers). Pass it through if the totals-row drill needs it.\n\n## Business reason\n\nWho benefits: anyone who reads a dashboard or report with a conditional measure (paid invoices, won deals, open tickets) and clicks the number to see the records behind it. The scenario: the number says 2, the list shows 4, and the reader stops trusting the dashboard. If it is not done, every drill on a filtered measure keeps listing the wrong records, although the server now answers the right scope.\n\n## Who acts\n\nA `domain:ui` lane seat, by subagent or card thread. First step: read `drillScopes` where the report and the chart/table drill filters are built, and pin a filtered measure's drill against its number.\n\n## Dedupe\n\n`gh api search/issues`, `repo:objectstack-ai/objectstack is:issue` plus:\n- `drillScopes` → 1 hit, #30526 (closed; the producer side).\n- `drill filtered measure` → 17 hits; `drill superset` → 15 hits. None is a consumer card for the report, chart or table drill. #30080 is the tile only.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"

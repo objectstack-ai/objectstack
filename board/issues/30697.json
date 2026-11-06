@@ -1,0 +1,35 @@
+{
+  "number": 30697,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol, cli, cloud-connection): a declared action override moved to another object is told which object the base ships the action on",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T22:38:41Z",
+  "updated_at": "2026-11-05T23:29:56Z",
+  "closed_at": "2026-11-05T23:29:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T23:29:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30697",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D6Ehjp6oVrWQjMzb1AkDfRk)_\n\nFixes #30623\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n1. 改了什么：`.custom` 动作覆盖把 `objectName` 写成了与基包动作不同的对象时，`declared_package_ships_no_such_item` 拒绝信息现在点名两个对象，并告诉作者保留基包动作的 `objectName`；三个入口（保存/发布门、`os validate`、托管安装）用同一句话。\n2. 为什么改：#30623。原话说基包「没有叫 X 的动作」、让作者「改名」，可名字是对的、错的是对象，作者会去改错地方。\n3. 风险与回滚：只改文案。规则、错误码（`NOT_OVERRIDABLE`）、状态码（403）、判定结果全不变；基包根本没有这个名字时，文案与今天一字不差。回滚即 revert。\n4. 先看：`protocol-packaged-base-refusal.ts` 的 `shipsNoSuchItemMessage`（唯一的句子构造器）和 `OverrideWriteClosure.baseItemsOf`（三个入口各自递进基包的同类条目）。\n5. 两分钟验证：`pnpm --filter @objectstack/cloud-connection exec vitest run src/marketplace-install-local-override-gate.test.ts`，预期 14/14 绿，其中 `[#30623]` 两条（换对象、CONTROL）。\n6. 需要你做的：无，席位落地。\n\n## What changes\n\n- **One builder** — `shipsNoSuchItemMessage` in `packages/metadata-protocol/src/protocol-packaged-base-refusal.ts` writes the `declared_package_ships_no_such_item` sentence. `judgeOverrideWrite` already serves all three doors, so the builder lives there, in the lowest package all three already import; no new cross-package export.\n- When a declared `action` override names a base that ships an action of that name on **another object**, the sentence becomes: `'action/NAME' declares an override of 'BASE' on object 'OVERRIDE_OBJECT', but 'BASE' ships its action 'NAME' on object 'BASE_OBJECT'. An override replaces the base's action on that action's own object: keep the base action's objectName: 'BASE_OBJECT' in the override, or remove overrides to keep it as 'PAIR''s own item (ADR-0146 D2).`\n- Otherwise (another type, a name the base does not ship at all, or no base items in hand) the sentence is today's, byte for byte.\n- `OverrideWriteClosure` gains an optional `baseItemsOf(base)`: the base's items of this type at any object. Each door hands it the items it already holds:\n  - save/publish door (`overrideWriteVerdict`): the artifact lookup's items under that base's `_packageId`;\n  - `os validate` (`packages/cli/src/utils/override-declarations.ts`): the base package's walked items, when the artifact carries it;\n  - managed install (`packages/cloud-connection/src/marketplace-install-local-plugin.ts`): the base's listing it already reads (`heldBy`).\n- The packageless overlay migration (`protocol-packageless-overlay-migration.ts`, `cli migrate packageless-overlays`) only names the code in a comment and asks `overrideWriteVerdict`, so it gets the new sentence with no change.\n- The rule, code and status are unchanged. No `packages/spec/**`.\n\nChanged lines: 174 (+165 / -9, 7 files).\n\n## Tests\n\n- Save door: `packages/objectql/src/protocol-flow-custom-override.test.ts`: `[#30623]` pins the full sentence through `saveMetaItem` (403 `NOT_OVERRIDABLE`) for `showcase_task_close` moved to `showcase_other`, plus a CONTROL for an unshipped name (today's sentence, whole verdict).\n- `os validate`: `packages/cli/src/utils/override-declarations.test.ts`: `log_call` (base on `crm_account`) declared on `crm_lead`, first sentence plus the `objectName: 'crm_account'` remedy; CONTROL `no_such_call`.\n- Managed install: `packages/cloud-connection/src/marketplace-install-local-override-gate.test.ts`: `crm_close` (base on `crm_account`) declared on `crm_lead` → 403, nothing saved or ledgered, first sentence plus remedy; separate CONTROL `crm_reopen`.\n\n<details><summary>Ablation (one, on the builder)</summary>\n\n`node scripts/ablation-replace.mjs` on `protocol-packaged-base-refusal.ts`, anchor `if (others.length > 0) {` → `if (others.length > 0 && String('ABLATE30623') === 'on') {`; `pnpm --filter @objectstack/metadata-protocol build`; `ablation-dist-preflight.mjs @objectstack/metadata-protocol ABLATE30623` exit 0 (marker in dist).\n\n- objectql: `Tests 1 failed | 14 passed (15)`; red: `[#30623] the moved override's refusal names both objects…`\n- cli: `Tests 1 failed | 11 passed (12)`; red: `[#30623] an action override moved to another object…`\n- cloud-connection: `Tests 1 failed | 13 passed (14)`; red: the moved override; the CONTROL stays green.\n\nRestore: `blob == HEAD (153a82430761)`, `git diff HEAD` empty; rebuild; preflight `--absent` ✓; the three files 15/15, 12/12, 14/14.\n</details>\n\n## Acceptance notes\n\n- `os-dev-report` on #30623 lists the local gate readings; CI runs the full farm.\n\n## Verification\n\n<details><summary>Local runs</summary>\n\nHead after the gates: `01adff4f` (the fix commit); `9569f388` adds only a merge of `origin/main` touching none of the 7 files.\n\n- Build: `turbo run build` closure for cli / cloud-connection / objectql + metadata-protocol: 62/62 tasks, lock VERDICT command-exit 0.\n- Typecheck: `pnpm --filter metadata-protocol --filter cli --filter cloud-connection --filter objectql typecheck`: VERDICT command-exit 0.\n- `@objectstack/metadata-protocol` vitest: Test Files 317 passed | 4 skipped; Tests 22454 passed | 26 skipped; exit 0.\n- `@objectstack/cloud-connection` vitest: Test Files 70 passed; Tests 892 passed; exit 0.\n- `@objectstack/cli` `--project unit` (after `pnpm --filter @objectstack/cli build`): Test Files 389 passed; Tests 5432 passed; VERDICT command-exit 0. Integration layer declared to CI (no spawn entry touched).\n- `@objectstack/objectql`: `src/protocol-flow-custom-override.test.ts` 15/15; the full package run is CI's.\n- `dispatch-gates --commands`: 64 families; 63 exit 0; `check:dual-build-cjs-loads` exit 3 then 1 on an unrelated `@objectstack/organizations` dist that this targeted build did not emit (needs a whole-tree build): NOT MEASURED, CI runs it. `--ran`: `64 derived famil(ies) accounted for — 63 run, 1 NOT-MEASURED`.\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cx3aafYJDsJo3siYFw\n"
+}

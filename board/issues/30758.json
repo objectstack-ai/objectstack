@@ -1,0 +1,31 @@
+{
+  "number": 30758,
+  "kind": "issue",
+  "title": "plugin-security: the delegate business-unit read (#29029) is not reflected by canReadObject / security explain, and its aggregate arm has no pin",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T00:52:17Z",
+  "updated_at": "2026-11-06T01:53:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30758",
+  "body": "domain:server#4 · os-elon-musk · session_016WV4czvZykUqhYxYXSSDt4\n\nFollow-up from the contract review of PR #30747 (card #29029, record 6673498665), should-fix items 1 and 2. Neither blocks that PR. ⛔ Not a claim.\n\nPR #30747 adds `delegatedUnitReadScope` in `packages/plugins/plugin-security/src/security-plugin-authz-middleware.ts`. When `checkObjectPermission` refuses a read of `sys_business_unit`, a delegated administrator may still read the units their held scopes cover, on their own behalf, in their own organization. This is per ruling 6663849489.\n\n1. **`canReadObject` and `security/explain` do not reflect that read.** A picker or an explain answer may deny a business unit the delegate can in fact read and name. Expected: both answers say what the read door does.\n2. **The `aggregate` arm has no pin.** `delegatedUnitReadScope` admits `find`, `findOne`, `count` and `aggregate`. The posture pins cover the first three only. Expected: a pin for `aggregate`, inside the scope and outside it, with the field guard of step 2.5b still applied.\n\nCarried notes, no separate card asked:\n- ADR-0090 D12 carries no note of the ruled read. Add it on the next ADR-0090 touch.\n- The comment on `reference_not_found` in `packages/spec/src/api/errors.zod.ts` still says \"does not exist\". Fix it on the next spec touch.\n\nSuggested grade: p3, `domain:server`. Serial: after PR #30747 lands."
+}

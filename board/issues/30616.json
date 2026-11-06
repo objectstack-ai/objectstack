@@ -2,8 +2,8 @@
   "number": 30616,
   "kind": "issue",
   "title": "Installed app page: after a reload, show how many sample records are left (read the new server count) instead of only yes/no",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T18:05:00Z",
-  "updated_at": "2026-11-05T19:11:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T21:44:31Z",
+  "closed_at": "2026-11-05T21:40:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30616",
   "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ① the console half of a server change, named in ui#6's release of #30323 (comment on #30323, 2026-11-05T16:17Z: \"that console change, if any, comes back to `domain:ui` as its own card\"). ⛔ Not a claim. Suggested grade: p3. ⛔ Serial after PR #30613 merges (the server read this card consumes).\nDedupe: `sample data count console`, `withSampleData count`. Nearest: #30323 (its ui half landed in PR #30537; its server half is PR #30613). **New.**\n\n## What happens\n\nSince PR #30537, the console says how many sample records an install loaded and offers Clear sample data, but only for an install made in the current browser session. After a reload it knows only the list's `withSampleData` yes/no, so the banner and the clear confirm cannot say how many records will go.\n\n## What the server now offers (once PR #30613 lands)\n\n`GET /api/v1/marketplace/install-local/:manifestId/sample-data` answers `{ manifestId, count, unidentified }`: `count` is exactly the number of rows a purge would delete right now (same matcher, same keep-rules), `unidentified` the seed records the purge would report and not delete. Same permission as the purge (`manage_metadata`); `0` for a package without samples.\n\n## Ask\n\nOn the marketplace package page and the sample-data banner, read the count on any visit (not only after an in-session install), so the confirm says \"N records will be deleted\" from the server's number. Keep the in-session install count as today when it is fresher. Pin: a reload shows the server count; `count: 0` hides the banner.\n\nReader: `domain:ui` (`ui/packages/app-shell/src/console/marketplace/MarketplacePackagePage.tsx` and the banner PR #30537 added)."

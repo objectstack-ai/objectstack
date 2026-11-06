@@ -2,8 +2,8 @@
   "number": 30584,
   "kind": "issue",
   "title": "spec: a blueprint field cannot carry a default value, so a boolean flag built by AI starts empty instead of false (cloud#972 guidance is silently dropped)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p1",
     "repo:cloud"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T16:42:53Z",
-  "updated_at": "2026-11-05T20:11:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T22:58:55Z",
+  "closed_at": "2026-11-05T22:43:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30584",
   "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **executing a recorded ruling**. On objectstack-ai/cloud#3619 (PR objectstack-ai/cloud#3633) the maintainer chose **B** for the boolean-default breach that contract review 6661416702 found. Their selection, verbatim: 「改选 B，#3633 等 spec」. The ruling record is on objectstack-ai/cloud#3619. This card is the spec half. objectstack-ai/cloud#3619 is `pm:blocked` on it.\n\n**Owner.** The `repo:cloud` lane (`repo:cloud#3`, objectstack-ai/objectstack#30278) follows it to close. It widens a published schema (`Clause-②: yes (widening)`), so it is spec-lane work, and triage routes it. It takes the same route as objectstack-ai/objectstack#30430 (PR #30484, widget `aggregate` and view `startDateField`).\n\n## 维护者速读\n\nAI 搭建应用时，「是否完成 / 已付款」这类布尔字段本该默认「否」，cloud 的搭建指引也这么教（cloud#972 事故之后）。但蓝图的字段定义里没有 `defaultValue`，AI 写了也会被悄悄丢掉，新建记录时这个字段是空，不是「否」，按「否」筛选会漏掉这些记录。cloud#3633 要把「写了不认识的键」改成直接拒收，届时 AI 照指引写反而搭建失败。按裁决，给蓝图字段加一个可选的 `defaultValue`。\n\n## Measured\n\n- `packages/spec/src/ai/solution-blueprint.zod.ts:109-126` at objectstack `origin/main` declares these keys on `BlueprintFieldSchema`: `name`, `label`, `type`, `required`, `reference`, `options`, `summaryOperations` and `expression`. It has no `defaultValue`. The strict designer mirror `StrictField` (`:407`) has the same keys.\n- Cloud's solution-design corpus (`packages/service-ai-studio/src/skills/solution-design-skill.ts`, `process-modeling` rule, the 「CHECKBOX / 是否X FLAGS ARE NEVER REQUIRED」 bullet) tells every in-app build and every MCP client: \"Write every 是否完成 / 已付款 / is_active-style flag as `{ type:'boolean', defaultValue:false }`\". This follows the live failure cloud#972, where a required boolean refused the unchecked switch.\n- At cloud's pin `1a3ea0c0`, `SolutionBlueprintSchema.safeParse` strips `defaultValue` with `success: true`, measured by the cloud#3619 dev. Cloud's applier sets `defaultValue: false` only on a boolean sent `required: true` (`relaxRequiredBooleans`), so a flag written as the guidance says gets no default at all.\n\n## The ruled design\n\n1. Add an optional `defaultValue` on the blueprint field, in the lenient `BlueprintFieldSchema` and in the strict mirror `StrictField`. The strict mirror needs a shape the designer's structured output can carry. The spec lane picks it, for example a scalar union or nullable, and states its choice.\n2. The value is checked against the field's `type`: a boolean takes a boolean, a number a number, a select one of its own option values, and so on. The spec lane decides which types admit a default at all. It refuses the rest by name rather than stripping them, and states that list in the describe.\n3. The describe says the value becomes the built field's default. It also says the boolean-flag rule: a 是否X flag is never `required` and defaults to `false`.\n\n## Acceptance\n\n- Schema tests: a boolean with `defaultValue: false` parses; a type-mismatched value is refused; an absent value still parses (the key is optional); the strict mirror accepts what the lenient schema accepts for each admitted type.\n- A liveness ledger row for the new key, with its consumer named: the objectstack-ai/cloud#3619 cloud half, where cloud's applier carries it into the built field and the undeclared-key refusal admits it on the pin move. The row stays `planned` until that lands.\n- `Clause-②: yes (widening)`, with the spec-lane contract review on record.\n\nDedupe (issues, open and closed, 2026-11-05): `repo:objectstack-ai/objectstack blueprint field defaultValue is:issue` returned 5 hits, all seat posts or unrelated (#6017, #21464, #6015, #12708, #20749). `BlueprintFieldSchema default is:issue` returned 3 hits, all closed and on other keys (#24198 option `kind`, #20827 select options, #24197 formula reference). None is on this slot."

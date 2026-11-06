@@ -1,0 +1,35 @@
+{
+  "number": 30677,
+  "kind": "pull_request",
+  "title": "fix(core): count and hand over the injected owner_id in a banned user's assigned work",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T22:07:00Z",
+  "updated_at": "2026-11-05T23:00:16Z",
+  "closed_at": "2026-11-05T23:00:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T23:00:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30677",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DKzfSXJ79oXBZ9JNgjMFa6R)_\n\nFixes #30646\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：封禁用户时「他手上有多少记录」的计数和「批量转交」现在会算上平台给每个业务对象注入的负责人字段 `owner_id`；`created_by` / `updated_by` 仍不计、不转。\n- 为什么改：原逻辑跳过所有 `system: true` 的字段，而注入的 `owner_id` 正是 `system: true`（但不是只读），导致绝大多数对象上「拥有」恒为 0、转交也不移交负责人。\n- 风险与回滚：只改字段筛选一行，排除依据从「system 或 readonly」改为「readonly」；访问控制不变（计数和转交仍以调用者身份读写）。回滚即 revert 本 PR。\n- 先看：`packages/core/src/security/user-assigned-work.ts` 第 102 行附近的筛选条件；其次 `user-assigned-work.test.ts` 的 fixture（改用真实的 `OWNER_FIELD_DEF` / `AUDIT_FIELD_DEFS`）。\n- 两分钟验证：`pnpm --filter @objectstack/core exec vitest run --project local src/security/user-assigned-work.test.ts`，预期 12 个测试全绿。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n`userAssignedWorkFields` (the field picker both the count and the hand-over read) skipped any user reference with `readonly: true` OR `system: true`. The platform's injected `owner_id` (`OWNER_FIELD_DEF` in `packages/spec/src/data/injected-system-column-provenance.ts`) is `system: true`, `readonly: false`, so on every object that did not declare `owner_id` itself, owned records were neither counted nor handed over. The picker now excludes by `readonly` only. The audit lookups `created_by` / `updated_by` are `readonly: true` both as injected (`AUDIT_FIELD_DEFS`) and when an author declares them (`applyAuditFieldGovernance` forces `readonly` / `system` over a declared audit field), so they stay out. `sys_*` objects, `managedBy` objects and unprovisioned injected columns are excluded exactly as before. The module header now says why `system` alone does not exclude a field.\n\nA repo grep for user references (`reference: 'sys_user'`) carrying `system: true` finds only the injected owner and the two audit lookups, so no other field changes classification.\n\nAccess control is untouched: every count, read and write still runs under the caller's own context.\n\n## Tests\n\n- The test fixture now builds `owner_id`, `created_by` and `updated_by` from the real `OWNER_FIELD_DEF` / `AUDIT_FIELD_DEFS`, so the existing count and hand-over cases pin the injected owner; the seed row also holds the banned user in `created_by` / `updated_by`, and the hand-over case asserts those stay unchanged.\n- New case: an object carrying only `OWNER_FIELD_DEF` plus the four audit columns yields exactly `owner_id`, and the case asserts the premise (`system: true`, `readonly: false`).\n\nAblation (head `90919afc`, fix committed first, mutation via `scripts/ablation-replace.mjs`, restore proven by blob == HEAD and empty `git diff HEAD`):\n\n- Put the `system === true` skip back: `Tests 9 failed | 3 passed (12)`; the new pin fails with `expected [] to deeply equal [ { object: 'deal', … } ]`, and the count and hand-over cases fail.\n- Control leg, delete the `readonly` skip instead (nothing excluded by field flags): `Tests 5 failed | 7 passed (12)`; the new pin and the count and hand-over cases fail because `created_by` / `updated_by` get picked.\n\n## Acceptance notes\n\n- None beyond the card's scope.\n\n## Verification\n\nAll on head `90919afc`.\n\n- `pnpm --filter @objectstack/core test`: Test Files 136 passed, Tests 3087 passed (exit 0).\n- `pnpm --filter @objectstack/core typecheck`: exit 0.\n- `pnpm lint`: exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 60 families derived; `--ran` reconciliation: 59 run with exit 0, 1 NOT MEASURED (`pnpm check:dual-build-cjs-loads`, PREREQUISITE NOT MET: needs a full `pnpm build`; CI's `Lint & Repo Gates` runs it). `check-plugin-teardown-shape.mjs --self-test` and `check:lean-entry-closure` first exited 3 on prerequisites, then exited 0 after fetching the pinned fixture commit and building `@objectstack/objectql`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cytLmJxfAmgPVjUbbW\n"
+}

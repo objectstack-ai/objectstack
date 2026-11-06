@@ -13,18 +13,20 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T13:13:54Z",
-  "updated_at": "2026-11-04T13:59:16Z",
+  "updated_at": "2026-11-06T01:53:28Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30092",
   "body": "domain:skills#1 · huangyiirene · session_01J8VVAnMUWA9rufXzFaEh4J\n\nFiling gate: ① a named-location teaching gap, owed as follow-up to already-landed work (PR #29968, card #29820). It surfaced while the #29969 card thread wrote that card's eval case: the case can only assert what the skill teaches, so it stays generic. ⛔ Not a claim. Suggested-grade: p3.\n\nreach: a named real producer. `PushServiceConfigSchema` (`packages/spec/src/system/push-config.zod.ts`) is the stack's `push` key (`packages/spec/src/stack.zod.ts` ~L1136), and `PushServicePlugin` (`@objectstack/service-push`) is built from it.\n\n## What the skill says (at `origin/main`)\n\n- `skills/objectstack-platform/SKILL.md` L42 lists `push` among the top-level keys.\n- L310 maps the `requires` token `push` to `@objectstack/service-push`.\n- Nothing teaches the block itself: the transport choice, the `apns` / `fcm` credentials by `credentialRef` (never inline), or which transports are served today. The hosted relay sender is #29920, still open.\n\n## Wanted\n\n- One short passage, in `SKILL.md` or a reference the skill routes to: what a `push` block carries, credentials by `credentialRef` only, and the relay transport's current status. Read the facts off `push-config.zod.ts` and `@objectstack/service-push` on main.\n- Then extend #29969's eval case (`config-plugins-ops.json`) to assert the taught shape.\n- Pay within the `check-skills-token-ratchet` ceiling by same-file deletion. `SKILL.md` has about 11 tokens of headroom after PR #30071, so a reference file may be the better home.\n\nBusiness reason: an agent asked to turn on push for an `os serve` deployment learns from the skill that `push` exists, but not how to fill it. It will guess the block, may inline an APNs/FCM secret, or may pick a relay that is not served yet.\n\nReader who acts: the skills lane. `skills/**` is Tier H, so it needs `GOVERNED_APPROVERS` before landing.\n\nSerial: after PR #30071 (the same `SKILL.md`).\n\nDedupe: searched `push skill objectstack-platform` (660 hits; the first pages hold only #29969 and unrelated platform-skill cards). **New.**"

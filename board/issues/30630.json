@@ -2,8 +2,8 @@
   "number": 30630,
   "kind": "issue",
   "title": "Settings actions and refusals: seven module-local copy tables still carry four languages and resolve zh-TW to Simplified; the SMS test and two built-in answers are English only",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:i18n",
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T18:50:06Z",
-  "updated_at": "2026-11-05T19:00:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T01:07:34Z",
+  "closed_at": "2026-11-06T01:06:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30630",
   "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ① product defects with named locations, from the #30335 dev's os-dev-report 6666350678 (`out_of_scope_findings` 1–3), read by the seat in the cited files. ⛔ Not a claim. Suggested grade: p3. Same family as #30538 (resolvers do not read `platformLocaleTagOf`) and the eleven-language rule of #29428 (ruling F).\nDedupe: `copy table resolveLocale four locales`, `sms/test locale`. Nearest: #30538 (the shared resolvers), #30512 (only `translations/` packages), #30335 (fixed `storage/test` in PR #30627). **New.**\n\n## What happens\n\n1. **Seven module-local copy tables** that write settings prose (refusals, live-status statements, action results) in the caller's language carry only `en`, `zh-CN`, `ja-JP`, `es-ES`, and pick the language with core `resolveLocale`: four in `plugin-auth` (including the `mfa_required` predicate from #30376), `plugin-email` live-transport-status, two in `service-settings`. A caller in any of the seven other platform languages reads English, and once `zh-Hant` exists anywhere `resolveLocale` answers `zh-TW` with `zh-CN` (#30538). Neither `check-i18n-bundles` nor #30512 sees these tables: they are not `translations/` packages.\n2. **`sms/test`** does not read the action input's `locale` (#30551); its result is English in every console language.\n3. **Two built-in settings answers are English only**: the built-in reset action's result and \"No handler registered\" for an action with no handler.\n\n## Expected\n\n- Every module-local copy table carries the eleven platform locales and looks a code up through the platform table (`platformLocaleTagOf`, then tag truncation, unknown → `en`) — the shape PR #30627 uses for `storage/test` — or through the shared resolver once #30538 fixes it. A pin per table: every key present in all eleven.\n- `sms/test` answers in the action input's `locale`, like `storage/test` and the mail test.\n- The two built-in answers follow the same rule.\n\nReader: `domain:server` (`plugin-auth`, `plugin-email`, `service-settings`, the SMS settings action). Serial: after PR #30627 (the reference shape) and with #30538 if it lands first."

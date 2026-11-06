@@ -1,7 +1,7 @@
 {
   "number": 28677,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 5 — ⏳ vacant",
+  "title": "[PM seat] domain:server · seat 5 — 🟢 os-elon-musk · 由 os-elon-musk 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-bill"
+    "os-elon-musk"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T13:10:21Z",
-  "updated_at": "2026-11-05T17:44:22Z",
+  "updated_at": "2026-11-05T21:36:17Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 11,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28677",
-  "body": "domain:server#5 · os-bill · session_01Utp6CYVV6fcAQrNTDQRvPb\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 5**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761 and seat 4 is #27737 (⛔ this post is none of them).\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-bill` · `session_01Utp6CYVV6fcAQrNTDQRvPb` · seated 2026-11-05T00:46Z, signed off 2026-11-05T17:45Z on the maintainer's word that the server lane keeps seat 2 only.\n- **Sign-off brief:** comment 6665000218. `check-handover.mjs` exit 0.\n- **Mailbox:** PR #30191 closed at sign-off; a successor reopens one at seating.\n- **Patrol:** routine `trig_01NeWoQSAL63tgyaron2dGAX` deleted at sign-off.\n- To seat: `/pm-dispatch 接手`, after reading this post and the brief.\n\n## Ledger\n\n- **In flight:** none. Stay-behind: none.\n- **Handed on:** #30391 (`pm:queue`; PR #30459 ACCEPTed, waits for the maintainer's ready + auto-merge), #30465 (serial after PR #30459), #30212 row 2 (`pm:queue`, put to security#1), #30054 (`pm:blocked`, Blocked-by #30518, #30572). Seat 2 (#20966) is the online sibling.\n- **Decision box:** read live (`needs-user-decision` + `domain:server`).\n\n## Hot-file serial queue\n\n- None held by this seat.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes. PRs open only through the relay `pr_create`.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#5 · os-bill · session_01Utp6CYVV6fcAQrNTDQRvPb -->"
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cyvF7SP65frVFAYLv7\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 5**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 4 is #27737 and seat 6 is #29908 (⛔ this post is none of them).\n\n## Current PM\n\n🟢 `os-elon-musk` · `session_016WV4cyvF7SP65frVFAYLv7` · seated 2026-11-05T21:34Z · 由 os-elon-musk 账户的项目负责 (project \"Objectstack\", thread \"Server 车道派发(席5 #28677)\"). Previous PM: `os-bill` · `session_01Utp6CYVV6fcAQrNTDQRvPb`, vacant since 2026-11-05T17:45Z (sign-off brief 6665000218).\n\n## Handover ledger\n\n- **Inherited:** nothing in flight. The previous holder's hand-ons (#30391, #30465, #30212 row 2, #30054) are read live from their cards, not from this post.\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#5` + `head:claude/` PRs. Posture and ledger live in the project (姿态台账住项目).\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Mailbox:** PR #30661 (subscribed). **Patrol:** `trig_01CQXc5Yfg1u5bi5yePKVfpY` · `41 * * * *`.\n- **Siblings:** seat 1 (#6367) is this project's; seats 3 (#26761) and 4 (#27737) are opened by this project in the same summons; seat 2 (#20966, os-bill) is online. The claim stamp arbitrates.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#5 · os-elon-musk · session_016WV4cyvF7SP65frVFAYLv7 -->\n"
 }

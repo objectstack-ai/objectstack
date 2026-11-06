@@ -1,0 +1,34 @@
+{
+  "number": 30738,
+  "kind": "pull_request",
+  "title": "fix(example-showcase): the showcase_account extension declares the plural with its renamed label",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T00:10:34Z",
+  "updated_at": "2026-11-06T00:49:44Z",
+  "closed_at": "2026-11-06T00:49:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-06T00:49:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30738",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DBFhkQHTZPTwLSqiWCH7wN5)_\n\nFixes #30465\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — showcase example only\n\n## 维护者速读\n\n- 改了什么：showcase 的 `showcase_account` 对象扩展在改名 `Account (Success Overlay)` 的同时补上复数 `Accounts (Success Overlay)`。\n- 为什么改：PR #30459 之后，只改 label 不写复数的扩展不再返回旧复数，列表标题会退回单数名。\n- 风险与回滚：只动示例与一条 dogfood 用例，无发布包；回滚即撤本 PR。\n- 先看：`examples/app-showcase/src/data/extensions/account.extension.ts`，再看 dogfood 文件里新增的 `[#30465]` 用例。\n- 两分钟验证：`pnpm --filter @objectstack/dogfood exec vitest run test/showcase-object-extension-scalar-divergence.dogfood.test.ts`，预期 8 条全绿。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `examples/app-showcase/src/data/extensions/account.extension.ts`: the extension that renames `showcase_account` to `Account (Success Overlay)` now declares `pluralLabel: 'Accounts (Success Overlay)'`. Since PR #30459 a rename without a plural is served with no plural, and the Console titles a list by the served plural, else the label; so the list title had fallen back to the singular.\n- `packages/qa/dogfood/test/showcase-object-extension-scalar-divergence.dogfood.test.ts` (the file that already pins this object's served label): one new case. The extension declares the plural, and `GET /meta/object/showcase_account` and `GET /meta/object` both serve the label and the plural as declared, in `en` and in `zh-CN`.\n- **No translation change.** The card asked for a zh-CN plural in `examples/app-showcase/src/system/translations/**` only if one is wanted. That bundle is the showcase's code catalog, not a `.custom` pair. `translateObject` reads a scalar that diverges from the packaged base only from the pair's catalog (#8284 comparison rule, ADR-0146 D2). So a zh-CN entry there would not be served for either string. In zh-CN the singular is served as written (`Account (Success Overlay)`), and the plural now matches it. The pin measures exactly that.\n\n## Acceptance notes\n\n- The commit message carries a `Fixes #30465` line. The dev contract keeps card relations to the PR body only. An amend plus a lease-guarded force-push of this unshared branch was refused by the session's permission classifier, so the line stays. It closes the same card this body closes.\n\n## Verification\n\n<details><summary>Pin, reverse leg, typecheck, derived gates — head 32c6f5771</summary>\n\n- Dogfood closure build: `pnpm --filter '@objectstack/dogfood^...' build` under `os-verify-lock.sh`: `VERDICT command-exit 0`.\n- Touched pin: `pnpm --filter @objectstack/dogfood exec vitest run --maxWorkers=2 test/showcase-object-extension-scalar-divergence.dogfood.test.ts`: `VERDICT command-exit 0`, Test Files 1 passed, Tests 8 passed (8).\n- Reverse leg: the extension file restored to `origin/main` (`git restore --source=origin/main`; the showcase resolves from source, so no rebuild): the new case fails (exit 1, 1 failed), and the other 7 pass. Restored with `git checkout HEAD --`; blob equals HEAD and `git diff HEAD` is empty.\n- `pnpm --filter @objectstack/example-showcase --filter @objectstack/dogfood typecheck`: both ran `tsc --noEmit`, `VERDICT command-exit 0`.\n- eslint on the two changed files: exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at 32c6f5771: 55 commands, each run with its exit code captured before any pipe. 53 exit 0 on the first pass. `check-plugin-teardown-shape --self-test` exit 3 (its pinned fixture commit was outside the shallow clone), then exit 0 after fetching that commit. `pnpm check:dual-build-cjs-loads` exit 3, NOT MEASURED: it needs a whole-workspace build, and only the dogfood closure was built. CI runs it.\n- `dispatch-gates --ran`: 55 derived, 54 run, 1 NOT-MEASURED, 0 UNRUN, exit 0.\n- Changeset: none. `@objectstack/example-showcase` and `@objectstack/dogfood` are both `private: true`, so `skip-changeset`.\n- Full dogfood not run: the title has no `!` and `Clause-②` has no narrowing arm.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cytQjG9X1CrCgytUM5)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

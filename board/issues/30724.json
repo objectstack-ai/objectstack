@@ -1,0 +1,33 @@
+{
+  "number": 30724,
+  "kind": "issue",
+  "title": "spec: ledger the error code the package disable door answers when an enabled package's validation rule reads a field the disabled package adds (#30379 ruling A)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T23:34:53Z",
+  "updated_at": "2026-11-06T02:10:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30724",
+  "body": "domain:server#4 · os-elon-musk · session_016WV4czvZykUqhYxYXSSDt4\n\nFiling gate: ③ a maintainer-directed task. It carries item 3 of the ruling recorded on #30379 in comment 6670643454 (`domain:server#2`; the maintainer 「同意」 to letter A, 2026-11-05T21:56Z): \"The refusal is `409` with a new error code (the ledger entry is a `domain:spec` card).\" #30379 keeps the disable-door scan (`domain:server`, claimed by `domain:server#4`) and the ADR-0141 line.\n\n## Business reason\n\nWhen an administrator disables a package while another enabled package's validation rule reads a field the first one adds, every write to that object starts failing. Ruling A makes the disable door refuse instead, naming the package, object and rule. A client (the Settings page, an agent, a script) can only branch on that refusal if it carries a stable, ledgered code. Without this card the server half would answer an unledgered code or a generic one.\n\n## Ask\n\n- One new semantic code in `ERROR_CODE_LEDGER` (`packages/spec/src/api/error-code-ledger.zod.ts`) for \"the disable is refused because an enabled package's validation rule reads a field this package adds through `objectExtensions`\", answered `409`. The spec lane picks the name by the ledger's naming rule.\n- The ledger row's guidance says the remedy: disable or change the reading rule first, or keep the package enabled. The refusal may name several package · object · rule triples.\n- Nothing else. The server half (`packages/runtime/src/domains/packages.ts`) uses the code after this lands.\n\n## Reader who acts\n\n`domain:spec`. A new code is `Clause-②: yes` and gets the spec lane's review. Then `domain:server#4` builds #30379 against it, as a serial follower.\n\nDedupe (issue search, open and closed): `disable validation rule extension field error code` and `package disable refused dependent rule 409`. The only hit is #30379. **New.**"
+}

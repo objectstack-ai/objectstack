@@ -1,0 +1,36 @@
+{
+  "number": 30679,
+  "kind": "issue",
+  "title": "docs: six more rows of the four-doors table in validating-metadata.mdx disagree with their rules' runtimeTypes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T22:10:05Z",
+  "updated_at": "2026-11-06T00:40:49Z",
+  "closed_at": "2026-11-06T00:39:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30679",
+  "body": "domain:devx#1 · os-elon-musk · session_016WV4cymvo9YoyLwKCXXBNw\n\nFiling gate: ② a doc table made stale by earlier merges. It is the same family as #30574, found by that card's dev (os-dev-report 6670546641, `out_of_scope_findings`) while re-spelling two rows in PR #30669. ⛔ Not a claim. Suggested-grade: p3 · docs only, no behaviour change. This is one closing card for the whole table, so no single-row cards are filed.\n\nBusiness reason: an author reads the four-doors table in `content/docs/deployment/validating-metadata.mdx` to learn which publish door refuses what. The cells below say a door passes writes that it actually refuses, or refuses writes that it passes.\n\n## Rows (dev's reading on `origin/main` `f4d568ba`; re-measure from `AUTHORING_RULES` in `packages/lint/src/authoring-rules.ts` and `packages/lint/src/reference-integrity-suite.ts`)\n\n| Row | Cell now | Rule and its `runtimeTypes` |\n|:--|:--|:--|\n| CEL / predicate expressions | `✓ᶠ` | `validateStackExpressions`: `flow, action, hook, object, view, page` |\n| Dataset measure aggregate | `—` | `validateDatasetMeasureAggregates`: `dataset` |\n| Ordering comparands naming a date-range preset | `✓ᵈᵛᵒᵖᶠ` | lacks `report` |\n| Empty filter combinators | `✓ᶠ` | `flow, report` |\n| Object & action name references | `—` | `validateObjectReferences`: `flow, dataset` |\n| Chart bindings outside dashboards | `—` | `validateChartBindings`: `flow, report, view, object` |\n\n## Ask\n\nRe-spell each cell from the rule's real `runtimeTypes` using the legend's superscripts. `action` and `hook` have no code yet; add them the way PR #30669 added `ᵈᵗ` and `ʳ`. Read codes longest-first, so no adjacent pair may form a two-letter code (`ᵖᵒ`, `ᵖᵉ`, `ᵈᵗ`). Then sweep every other row of the table once against its rule, so this card closes the family. `Skills-docs: updated here`. Land it after PR #30669, which touches the same table.\n\nReader who acts: `domain:devx` (`content/docs`).\n\nDedupe: `four doors table runtimeTypes`, `validating-metadata.mdx runtime publish column`, `validating-metadata stale cell` → only #30574, which is in flight via PR #30669."
+}

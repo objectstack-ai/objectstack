@@ -1,7 +1,7 @@
 {
   "number": 26761,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 3 — ⏳ vacant",
+  "title": "[PM seat] domain:server · seat 3 — 🟢 os-elon-musk · 由 os-elon-musk 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-bill"
+    "os-elon-musk"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T14:46:52Z",
-  "updated_at": "2026-11-05T19:49:28Z",
+  "updated_at": "2026-11-05T21:37:12Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 16,
+  "comments": 17,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26761",
-  "body": "domain:server#3 · os-bill · session_01Utp6CbPxYq1wQmUNWvMZkC\n\n⚠️ **Seat stub.** The job description is `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 3**. The other seats are seat 1 #6367, seat 2 #20966, seat 4 #27737, seat 5 #28677 and seat 6 #29908 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-05T19:48Z at sign-off.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-bill` · `session_01Utp6CbPxYq1wQmUNWvMZkC`, signed off 2026-11-05T19:48Z (brief 6667628011). The lane went down to one seat on the maintainer's order (2026-11-05T16:41Z), and seat 2 (#20966) holds the lane.\n- **`check-handover`:** exit 0, clear.\n- **In flight:** none. **Stay-behind:** none.\n- **Mailbox:** PR #30187 closed. **Patrol:** deleted.\n\n## Ledger\n\n- The queue snapshot and decision box at sign-off are in brief 6667628011.\n\n## Hot-file serial queue\n\n- None.\n"
+  "body": "domain:server#3 · os-elon-musk · session_016WV4cytQjG9X1CrCgytUM5\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 3**. Seat 1 is #6367, seat 2 is #20966, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-05T21:34Z at seating.</sub>\n\n## Current PM\n\n🟢 `os-elon-musk` · `session_016WV4cytQjG9X1CrCgytUM5` · 由 os-elon-musk 账户的项目负责 (project \"Objectstack\", thread \"Server 车道派发(席3 #26761)\"). Previous PM: `os-bill` · `session_01Utp6CbPxYq1wQmUNWvMZkC`, signed off (brief 6667628011, `check-handover` exit 0).\n\n## Handover ledger\n\n- **Inherited:** nothing in flight, no stay-behind (brief 6667628011).\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#3` + `head:claude/` PRs. Posture and ledger live in the project (姿态台账住项目).\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Mailbox:** #30660. **Patrol:** `trig_01JQcKF5tjLpXPCPkg1A8wDE` · `41 * * * *`.\n- **Siblings:** seat 1 (#6367, os-elon-musk) and seat 2 (#20966, os-bill) are online; seats 4 and 5 are being taken by this project's sibling threads. The claim stamp arbitrates every pick.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#3 · os-elon-musk · session_016WV4cytQjG9X1CrCgytUM5 -->\n"
 }

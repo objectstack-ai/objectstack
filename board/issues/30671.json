@@ -1,0 +1,34 @@
+{
+  "number": 30671,
+  "kind": "pull_request",
+  "title": "docs(create-objectstack): say the blank template's note object is a sample to delete",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T21:54:34Z",
+  "updated_at": "2026-11-05T22:58:47Z",
+  "closed_at": "2026-11-05T22:58:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T22:58:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30671",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DRquKj6JcDG6dW2Jb6ZH2T4)_\nFixes #30125\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`create-objectstack` 空白模板生成的 README 新增「The sample `note` object」一节,`note.object.ts` 开头加一段注释,都说明 `note` 是示例对象,并给出删除或替换的三步。\n- 为什么改:#30125 第 5 项。新项目里的 `note` 会随构建发布、出现在 REST 和 MCP 的对象列表里,而生成的项目里没有任何地方说它只是示例,开发者可能一直带着它上线。\n- 风险与回滚:只改模板里的文档和注释,不动对象定义、测试和 `os g object`。回滚即 revert 本 PR。\n- 先看:`packages/create-objectstack/src/templates/blank/README.md` 新增一节;`src/objects/note.object.ts` 头部注释。\n- 两分钟验证:`pnpm --filter create-objectstack exec vitest run --maxWorkers=2`,预期 24 个测试文件全过。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `templates/blank/README.md`: a new section, \"The sample `note` object\", says `src/objects/note.object.ts` is a sample that ships in every build, is served over REST and is listed to MCP clients until removed, and gives the three steps to delete or replace it (delete the file and its export line in `src/objects/index.ts`; point `note.test.ts` at one of your own objects, since it imports `Note`; run `pnpm validate` and `pnpm test`). The Layout bullet for `src/objects/` links to it.\n- `templates/blank/src/objects/note.object.ts`: a header comment saying the same, so a developer or coding agent opening the object file reads it there too.\n- One root changeset, `create-objectstack: patch`.\n\nNot changed, on purpose: the sample object itself (`note.test.ts` depends on it) and `os g object`.\n\n## Tests\n\n`pnpm --filter create-objectstack exec vitest run --maxWorkers=2` under the verify lock on `7eea2807`: Test Files 24 passed (24), Tests 369 passed (369), `VERDICT command-exit 0`. This covers the template pins that read these two files (`starter-comments-self-contained`, `blank-template-console-disclosure`, `blank-readme-validate-disclosure`). No ablation: the diff changes documentation and a comment, no tested behaviour.\n\n## Acceptance notes\n\n- Premise measured on `origin/main` `f4d568ba` before editing: neither the template README nor `note.object.ts` said the object is a sample; the object's `description` called it \"the starter object for a blank environment\" only.\n- The new comment carries no repo-internal reference (no ADR id, issue number or monorepo path), as `starter-comments-self-contained.test.ts` requires of shipped comments.\n\n## Verification\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 52 families on `7eea2807`; the list is identical on the merge head `22f58ae4` (merge of `origin/main` `b77c160a`, which adds no change of this PR's own). `--ran` reconciliation: 52 accounted, 48 run with exit 0, 4 NOT MEASURED (exit 3, PREREQUISITE NOT MET: they read built `dist/` trees, and this diff touches no package source; CI builds and runs them). `check:commit-card-trailers --range origin/main..HEAD` exit 0.\n\n<details><summary>Gate exit codes (52)</summary>\n\n```text\nnode scripts/check-adr-0087-registration.mjs --base origin/main :: exit 0\nnode scripts/check-adr-0087-registration.mjs --self-test :: exit 0\nnode scripts/check-changeset-no-major.mjs --base origin/main :: exit 0\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-adoption.mjs :: exit 0\nnode scripts/check-comment-mask-adoption.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/check-dts-emitted.mjs --self-test :: exit 0\nnode scripts/check-empty-changeset.mjs --base origin/main :: exit 0\nnode scripts/check-empty-changeset.mjs --self-test :: exit 0\nnode scripts/check-issue-citations.mjs :: exit 0\nnode scripts/check-plugin-teardown-shape.mjs :: exit 0\nnode scripts/check-plugin-teardown-shape.mjs --self-test :: exit 0\nnode scripts/ci/assert-turbo-remote-cache.mjs --self-test :: exit 0\nnode scripts/ci/plan-test-core-shards.mjs --self-test :: exit 0\nnode scripts/ci/prune-turbo-cache.mjs --self-test :: exit 0\nnode scripts/docs-audit/check-affected-docs.mjs :: exit 0\nnode scripts/docs-audit/check-drift-comment.mjs :: exit 0\nnode scripts/pm/release-rehearsal-clone.mjs --self-test :: exit 0\nnode scripts/release-pending-publish.mjs --self-test :: exit 0\npnpm --filter @objectstack/spec run check:duration-unit-keys :: exit 0\npnpm --filter @objectstack/spec run check:template-manifests :: exit 0\npnpm check:changeset-gate-self-tests :: exit 0\npnpm check:ci-filter-parity :: exit 0\npnpm check:closed-ceremony-text :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:doc-authoring :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:dts-closure :: exit 3\npnpm check:dual-build-cjs-loads :: exit 3\npnpm check:gitlink-declared :: exit 0\npnpm check:issue-citations :: exit 0\npnpm check:keyed-text-bounds :: exit 0\npnpm check:lean-entry-closure :: exit 3\npnpm check:logger-receiver-detach :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:org-identifier :: exit 0\npnpm check:page-declaration-shape :: exit 0\npnpm check:platform-object-tenancy-census :: exit 0\npnpm check:published-files :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:registry-log-declared :: exit 0\npnpm check:rest-log-spy-declared :: exit 0\npnpm check:slot-lookup :: exit 0\npnpm check:sourcemap-no-sources-content :: exit 3\npnpm check:system-context-census :: exit 0\npnpm check:template-version-sync :: exit 0\npnpm check:test-source-alias :: exit 0\npnpm check:tier-file-adoption :: exit 0\npnpm check:undeclared-dep-imports :: exit 0\npnpm check:watch-hint-literal :: exit 0\n```\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cz8vMayjbrsVxur2KN\n"
+}

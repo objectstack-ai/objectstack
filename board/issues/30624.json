@@ -2,7 +2,7 @@
   "number": 30624,
   "kind": "pull_request",
   "title": "fix(spec)!: `action:icon` and the `action:group` / `action:menu` members refuse `confirmText` beside a non-empty array `params`, as `action:button` does",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T18:29:57Z",
-  "updated_at": "2026-11-05T20:05:04Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-05T20:34:19Z",
+  "closed_at": "2026-11-05T20:34:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T20:34:16Z",
   "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/30624",

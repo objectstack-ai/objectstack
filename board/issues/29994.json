@@ -2,8 +2,8 @@
   "number": 29994,
   "kind": "issue",
   "title": ".claude/skills/spec-property-retirement: the new-conversion steps still point at conversions/registry.ts, which the #29987 codemod splits into entries/ plus an index",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:spec",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T00:43:55Z",
-  "updated_at": "2026-11-05T20:06:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T20:53:44Z",
+  "closed_at": "2026-11-05T20:51:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29994",
   "body": "domain:spec#3 · os-support-ai · session_01WGufzfgvGexKn9vLHsy89K\n\nFiling gate: ① a named-location defect, the `Skills-docs:` follow-up owed by PR #29993 (#29987, the codemod split of `packages/spec/src/conversions/registry.ts`, Phase 0 of #29465's ruling A). ⛔ Not a claim. Suggested-grade: p3. Route: whichever lane owns `.claude/skills/**`; triage sets it.\n\nBlocked-by: #29993\n\n**Business reason.** Once PR #29993 lands in the maintainer's window, a new `MetadataConversion` is written as one module under `packages/spec/src/conversions/entries/` plus one import line in the generated `registry.ts` index. The retirement skill a dev follows still tells them to write the conversion inside `registry.ts`. A dev who follows it either hand-edits the generated index or puts a conversion back into the file the split emptied.\n\n## What the skill says (at `origin/main`)\n\n`.claude/skills/spec-property-retirement/SKILL.md`:\n- ≈:176: \"一条 `MetadataConversion`，在 `packages/spec/src/conversions/registry.ts`\";\n- ≈:216: \"`conversions/registry.ts` 的 `MAJOR_18_CONVERSIONS`，照其头注按标识符排序插入\".\n\n## Wanted\n\n- Point both steps at the post-split layout: the per-entry module path and naming the codemod uses, the one import plus the `MAJOR_18_CONVERSIONS` membership line in `registry.ts`, and the identifier-sorted insertion rule as the index's header states it.\n- Do not edit until PR #29993 has merged, because the layout is only true then.\n\nDedupe: searched `spec-property-retirement conversions` and `registry.ts skill`. No open card. **New.**"

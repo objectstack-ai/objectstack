@@ -1,0 +1,34 @@
+{
+  "number": 30757,
+  "kind": "pull_request",
+  "title": "docs(ui): say a runtime-created package refuses navigationContributions",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T00:52:08Z",
+  "updated_at": "2026-11-06T01:34:50Z",
+  "closed_at": "2026-11-06T01:34:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-06T01:34:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30757",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DRCebTxJ23HyuyNC6nY6j1n)_\n\ndomain:devx#1 · os-elon-musk · session_016WV4cysyBHsRoQHwB2ZEc1\n\nFixes #30711\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: updated here\n\n## 维护者速读\n\n- **改了什么**:在 `content/docs/ui/apps.mdx` 的「Contributing navigation to another app」一节加了一句话,说明 `navigationContributions` 只在代码包加载时生效,运行时创建的包带这个键会被 `400 VALIDATION_ERROR` 拒绝,并点名两条可用路线。\n- **为什么改**:PR #30707 已让运行时安装入口拒绝这个键;文档不说,只读文档的作者(人或 AI)会照写并撞上拒绝。\n- **风险与回滚**:纯文档,一句话,不发布任何包;回滚即撤这一个 commit。\n- **先看**:① `content/docs/ui/apps.mdx` 新增的那一段(第 832 行附近)。\n- **两分钟验证**:对照 `packages/metadata-protocol/src/protocol-package-install.ts` 里 `runtimeNavigationContributionsRefusal` 的拒绝文本,确认文档点名的两条路线与它一致。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\n- `content/docs/ui/apps.mdx`, section *Contributing navigation to another app*: one sentence after the opening paragraph. It says the key is honoured only from a code package, whose contributions are registered when it loads; that a package created at runtime (`POST /api/v1/packages`) carrying `navigationContributions` is refused with `400 VALIDATION_ERROR`; and which two routes work instead: an override of the installed app in its customization package for the app's own menu, or a code package to contribute entries into another package's app.\n\n## Why\n\nPR #30707 (#30072) made the runtime package door refuse the key, with a refusal that names those two routes. The page described the key without saying a runtime-created package cannot carry it.\n\n## Tests\n\nDocs only: no package code changed, so no package tests apply.\n\n## Acceptance notes\n\n- **Placement.** The sentence sits in the section that describes the key (about L828 on the base), not beside the `landing` note near L757: that note says contributed items cannot be named by `landing`, which is about the target app's parse, not about where the key is accepted. One sentence in one place, as the card asks.\n- **Wording follows the refusal on main.** The two routes are paraphrased from `runtimeNavigationContributionsRefusal` (`packages/metadata-protocol/src/protocol-package-install.ts`); the status and code follow `packages/runtime/src/domains/packages.ts`, which answers it with `deps.error(message, 400)`, the standard catalog's `VALIDATION_ERROR`.\n- **Changeset.** None: `content/docs/**` ships in no package's `files[]`. Labelled `skip-changeset`.\n\n## Verification\n\n<details><summary>dispatch-gates on head add7670ec7: 43 derived, 43 run, all exit 0</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 43 commands for the one changed path. All 43 ran on head `add7670ec7` (after merging `origin/main`) and exited 0. Prerequisites first: `git fetch --unshallow`, `pnpm install --frozen-lockfile`, a turbo build of the `@objectstack/lint`, `@objectstack/client-react` and `@objectstack/formula` closures (lock VERDICT command-exit 0, 41/41 tasks), and `pnpm --filter @objectstack/spec gen:schema`. Without them five families exited 3 (prerequisite, not measured) on the first pass; they are green after.\n\n`node scripts/pm/dispatch-gates.mjs --ran FILE --repo objectstack-ai/objectstack`: \"43 derived famil(ies) accounted for — 43 run, 0 NOT-MEASURED\", exit 0.\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [x] 3. No formatter ran; `pnpm lint` passes. (lint is CI's run)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cysyBHsRoQHwB2ZEc1\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cysyBHsRoQHwB2ZEc1)_\n"
+}

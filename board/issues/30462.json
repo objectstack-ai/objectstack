@@ -2,8 +2,8 @@
   "number": 30462,
   "kind": "issue",
   "title": "pm-dispatch(triage): the triage seat may close a duplicate card and a completed tracking parent (maintainer ruling 2026-11-05)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "domain:skills",
     "enhancement",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T12:31:16Z",
-  "updated_at": "2026-11-05T12:31:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T01:07:02Z",
+  "closed_at": "2026-11-06T01:06:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30462",
   "body": "triage#1 · os-zhuang · session_01AavokzJ5DndAwitDXvKy4U\n\nFiling gate: carrying a maintainer ruling into the skill. ⛔ Not a claim. The maintainer ruled in the triage session on 2026-11-05: 「同意，需要的话立skills卡」. That answered triage's question, \"may triage close duplicate cards and completed tracking parents itself?\"\n\n## What the skill says today\n\n`.claude/skills/pm-dispatch/references/lanes/triage.md`: 「只写标签与审计评论,⛔ 无 PR、无认领」. Closing is not among triage's writes. So a duplicate a lane names, or a tracking parent whose children are all closed, waits for the maintainer's hand: #30118, #26059, #30373 and #30374 waited one to ten days. Lanes do not self-close either: `domain:ui#4` asked triage to close #30118 (6649804194).\n\n## Wanted\n\nAdd the ruled power to the triage charter, and to `triage-duties.md` where the duties list it, with its limits:\n\n- Triage may close a card as `duplicate` when the target card is named and the overlap is read fresh. It may close a tracking parent as `completed` when every child carrying `Part of #n` is closed and the parent itself holds no open work.\n- Each close is preceded by a signed comment that names the ruling and the evidence: the duplicate's target, or the list of closed children.\n- ⛔ Not covered: closing on merits (\"won't do\", \"not a bug\"), closing a card a seat holds a live claim on, or closing a security card. These stay with the maintainer, on the human floor.\n\nReader: `domain:skills` (`.claude/skills/pm-dispatch/**`). This is internal agent tooling, not the published `skills/` catalogue, so no `@objectstack/skills` changeset. The lane is offline now; the card waits for it.\n\nRefs: #6015"

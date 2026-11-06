@@ -2,8 +2,8 @@
   "number": 29814,
   "kind": "issue",
   "title": "meta: a pending draft has no untranslated, author-owned read; Studio re-opens its object draft translated and governed",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,24 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:blocked",
     "pm:blocking",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T06:04:48Z",
-  "updated_at": "2026-11-03T07:44:50Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T00:21:47Z",
+  "closed_at": "2026-11-06T00:20:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29814",
   "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\n立卡门类别: ① 产品缺陷 — 具名落点. Blocking finding of #29793 (card step 4/5: \"if no untranslated read exists, that is a server-side card first\"). The card thread measured it on `origin/main` `b62463f1` by reading the code (full notes: claim 6596634127, card thread report). Reader: `domain:server`.\n\n**Business reason.** A tenant author with the console in Chinese (or any non-English locale) edits an object in Studio. Studio autosaves the edit as a draft, and from then on it re-opens and re-PUTs the draft as the server served it, which is translated and carries the platform-injected columns (`owner_id`, `queue`, ...). The author's own labels are replaced by translations, and the platform's columns are sent back as author fields. #29673 (PR #29790) makes the write door repair some of this. Slots the door does not compare (list-view labels, validation messages) are stored translated.\n\n**Measured (code read, `b62463f1`).**\n- Studio's object editor (`ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx:8004-8039`) and Setup's (`views/metadata-admin/ResourceEditPage.tsx:1348-1400`) build the edit buffer as `draft ?? layers.effective ?? layers.code`. The draft comes from `GET /api/v1/meta/object/X?state=draft&package=P`.\n- That item read, `?state=draft` included, goes through `createMetaItemAnswer` (`packages/rest/src/meta-item-read-gate.ts:3903`), which translates unconditionally. The runtime dispatcher does the same (`packages/runtime/src/domains/meta.ts:736-742`). The draft body is also governed, with injected columns added (`metadata-protocol/src/protocol-meta-item-reads.ts:117-124`).\n- `metaRequestLocale` (`meta-item-read-gate.ts:2826`) falls back from `Accept-Language` to `?locale=` and then to the i18n default locale. Leaving out the header still answers translated, and there is no opt-out.\n- `GET /meta/object/X/layers` (`rest-server.ts:4305`, runtime `domains/meta.ts:902`) is untranslated and raw for `code` and `overlay`, but it serves published layers only, with no draft layer.\n\nSo the published document has an author-owned read (`/layers` `overlay ?? code`), and a pending draft has none.\n\n## Wanted\n\n1. An untranslated, ungoverned read of a pending draft body, as authored. Any of these would do: a `draft` member on the `/layers` answer, or an explicit switch on `?state=draft` that skips translation and governance. Name the shape by route and code site, at the REST route and in the runtime dispatcher.\n2. Pin it: a zh-CN request of the new read returns the stored draft byte for byte (source labels, no injected columns), and the existing translated `?state=draft` read is unchanged.\n3. Once it lands, #29793 (ui) moves the Studio and Setup edit buffers onto it.\n\n**Level:** a new read member or switch is a widening of the meta REST surface. Expect `Clause-②: yes (widening)`, whose protocol level is the server seat's call.\n\nRelated: #29793 (blocked by this), #29673 / PR #29790 (the write door)."

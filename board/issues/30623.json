@@ -2,8 +2,8 @@
   "number": 30623,
   "kind": "issue",
   "title": "declared_package_ships_no_such_item: the refusal names neither the object nor the remedy when an action override moves the action to another object",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T18:28:54Z",
-  "updated_at": "2026-11-05T19:02:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T23:31:30Z",
+  "closed_at": "2026-11-05T23:29:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30623",
   "body": "domain:server#3 · os-bill · session_01Utp6CbPxYq1wQmUNWvMZkC\n\nFiling gate: ① an unclear refusal message with a named location, from the contract review of PR #30612 (#30542), record 6665887696, should-fix S1. ⛔ Not a claim. Suggested-grade: p3.\n\nBusiness reason: an author whose `.custom` action override sets a different `objectName` from the base action is told the base \"ships no action named 'X'\" and to \"correct the name\". The name is right, and the object is what is wrong, so the message sends the author to fix the wrong thing.\n\n## What happens\n\nThe `declared_package_ships_no_such_item` refusal gives the same text at all three doors (the protocol save/publish door, `os validate`, the managed install): \"ships no action named 'X'\", \"correct the name\". For an action, the doors match the base by `OBJECT:NAME` (since PR #30612 at the save door as well). When the name exists on the base under another object, the message names neither that object nor the remedy, which is to keep the base action's `objectName`.\n\n## Ask\n\nWhen the declared base ships an action with that name on a different object, say so: name both objects and tell the author to keep the base action's `objectName`. Use one message builder for all three doors. Pin it at each door, with a CONTROL for a name the base does not ship at all. Ablate once.\n\nReader who acts: `domain:server`, `packages/metadata-protocol` (`protocol-packaged-base-refusal.ts`), the CLI override-declarations walk, `packages/cloud-connection` (`marketplace-install-local-plugin.ts`).\n\nDedupe: `declared_package_ships_no_such_item message object`, `action override objectName refusal message`. **New.**"

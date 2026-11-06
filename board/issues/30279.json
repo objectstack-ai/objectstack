@@ -2,8 +2,8 @@
   "number": 30279,
   "kind": "issue",
   "title": "spec(migrations): the flow-record-read-and-decision-type-mismatch-refused entry's surface names only a time-relative flow sweeping the start node's objectName",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:spec",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T04:33:50Z",
-  "updated_at": "2026-11-05T20:07:20Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T20:39:55Z",
+  "closed_at": "2026-11-05T20:37:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30279",
   "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ② a published text that disagrees with the code it describes, found by the #30026 dev (PR #30276, os-dev-report 6649735495) and out of that card's surface (`packages/spec` excluded there). ⛔ Not a claim. Triage sets the grade.\nReader: `domain:spec`, `packages/spec/src/migrations/entries/semantic/18.flow-record-read-and-decision-type-mismatch-refused.ts` (`surface`, and the matching sentence in `reason`).\nDedupe: `flow-record-read-and-decision-type-mismatch-refused`, `timeRelative.object` surface → none open. **New.**\n\n## What is wrong\n\nThe ADR-0087 semantic entry for the #30015 refusal says the refusal covers \"the same conditions … of a time-relative flow (start config.timeRelative) sweeping the start node's objectName\". `TimeRelativeTriggerSchema.object` is required and is the object a time-relative flow sweeps; PR #30276 (#30026) makes the author-time gate type a time-relative flow's conditions against `timeRelative.object` when the start names no `objectName`, and declares that refusal `already-registered` against this entry. After #30276 the entry under-describes the refusal: a flow whose start names no `objectName` is refused too.\n\n## Wanted\n\n- [ ] Reword the `surface` (and the `reason` sentence \"A time-relative sweep launches each run with the swept row as its record…\") to name the swept object as `timeRelative.object`, typed against it when the start names no `objectName`, and against the start's `objectName` when that is the swept object.\n- [ ] Land after PR #30276 merges, so the text matches the tree.\n\nLinks: #30026, PR #30276, PR #30015, #29959."

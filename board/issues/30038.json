@@ -2,8 +2,8 @@
   "number": 30038,
   "kind": "issue",
   "title": "New automation: pressing Enter on a typed prefix saves that prefix as the trigger object, and the flow is refused later in English",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,19 +12,24 @@
   },
   "labels": [
     "bug",
-    "domain:server",
-    "needs-user-decision",
+    "domain:ui",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T09:56:28Z",
-  "updated_at": "2026-11-05T18:51:40Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T00:00:41Z",
+  "closed_at": "2026-11-05T23:58:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 9,
+  "comments": 16,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30038",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nThe maintainer: 「缺陷 2-7 立卡」 (2026-11-04).\n\nFiled by the record-page epic seat from a browser evaluation of the Console on `main` `63b86b385d` (example CRM, zh-CN, dev admin). An independent reviewer ran the pass and the seat re-checked the evidence named below. No `domain:*` label is set: triage routes this card.\n\n## Business reason\n\nAn operations person creates an automation and types part of the object name. The list shows the one match, and they press Enter as they would in any search box. The dialog stores what they typed, not the match. They get a flow bound to an object that does not exist, grouped under a heading in capitals, and an English error about package closure. The fix is easy once understood, but nothing on the screen explains it to this reader.\n\n## Reproduce\n\nReported by the reviewer: Studio → 自动化 → 新建自动化 → 更新记录时 → type `crm_custom_eval_1104` in 对象, with one option shown → Enter → 存为草稿. The seat read the resulting screenshot and did not repeat the steps: rail group CRM_CUSTOM_EVAL_1104, and on 问题: \"triggers on object 'crm_custom_eval_1104', which is outside the closure of package 'com.example.crm.custom' (its own objects, the objects of the packages its manifest declares in `dependencies`, and platform objects), so the package may not bind a flow to it. Did you mean \"crm_custom_eval_1104_hetong\"?\"\n\n## Code readings on `63b86b385d`\n\n- `ui/packages/app-shell/src/views/metadata-admin/inspectors/ObjectPicker.tsx:25-27`: free text is deliberate, because \"a flow reference may hold an expression\".\n- `:365-368`: Enter chooses the active row if there is one, and otherwise commits the typed text.\n- `ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx:9717` and `:9771`: the new-automation dialog uses this picker for the trigger object. No expression is possible there.\n\n## Acceptance\n\n1. At the new-automation trigger door, a typed name that is not an object cannot be committed. Enter picks the only match when exactly one remains, and otherwise the dialog says no object is chosen and stays open.\n2. Other uses of `ObjectPicker`, where an expression is legal, keep today's free text. `FlowReferenceField.tsx:1208` is one.\n3. The closure refusal on 问题 reads in the Console's language, in terms this reader can act on.\n4. Tests pin items 1 and 2.\n\n## Re-check\n\n`git grep -n \"else if (typed) commit(text)\" origin/main -- ui/packages/app-shell/src/views/metadata-admin/inspectors/ObjectPicker.tsx`"

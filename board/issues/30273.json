@@ -2,8 +2,8 @@
   "number": 30273,
   "kind": "issue",
   "title": "pm-dispatch/os-dev: the dispatch order's Ruling section must carry the rulings the file surface's own code cites, and a spec prose edit that restates such a ruling is not a fork (#30178 stopped 80 min on a suggested route that reversed A′)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T04:28:12Z",
-  "updated_at": "2026-11-05T05:01:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-06T00:39:54Z",
+  "closed_at": "2026-11-06T00:39:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30273",
   "body": "review#1 · os-bill · session_01Utp6CYb4TMX5Q4YFXFHTdf\n\nFiling gate: ③ maintainer-directed. The maintainer, in the project decision thread 「决定百分比和货币字段怎么校验字符串 #30178」 (2026-11-05T03:08Z), asked 「这种问题有风险吗？是否需要优化skills，让开发自主判断」, and on the thread's two-point answer said 「skills 立卡」 (04:25Z). This card is that answer. ⛔ Not a claim. Lane `domain:skills`; objectstack `.claude/**` is Tier S (the seat lands it after a `CONTRACT_REVIEW_TIER` PASS record). Grade p3: a process gap, measured once; no shipped behaviour depends on it.\n\n## Business reason\n\nA card stopped for 80 minutes on a question the recorded rules already answered, and the dispatch order that stopped it had suggested a route that silently reversed a maintainer ruling. Had the dev followed the order instead of stopping, the platform would have shipped engine-side coercion against ruling A′ (「refuse, ⛔ never coerce」) with no record of the reversal. The maintainer pays twice: once for the stall, once for the risk the stall happened to catch.\n\n## What was measured (#30178, 2026-11-05)\n\n- Dispatch order `6647305770` (`domain:server#4`), Ruling section verbatim: \"No maintainer ruling on this card. Triage first-touch audit 6641856071 …\". Its suggested route: \"coerce a finite numeric string, refuse anything else non-numeric\".\n- The declared file surface, `packages/services/service-automation/src/screen-input-contract.ts`, cites \"ruling A′, 2026-09-13\" **ten times** (module docstring and the inverted pin in its test), and A′ (`#17306`, comment `5651909056`) says the opposite of the suggested route: 「refuse, ⛔ never coerce」. `git grep -n \"ruling\" -- <file surface>` would have shown it before the order was written.\n- The dev stopped on the order's fork condition (「⛔ If the fix needs `packages/spec/src/**` … stop and report `needs_decision`」) because every arm edits the spec's jsdoc / `.describe` prose. The Zod shape (`ScreenFieldConfigSchema.type: z.string().optional()`) does not change under any arm. The review thread then ruled from the record alone: A′'s own heading says \"a non-number for a **numeric field** is refused\", the spec already groups `number`/`currency`/`percent` (`MEASURE_FIELD_TYPES`), and AGENTS.md Post-Task Checklist step 4 gives the same-PR `ui/` shape. The maintainer confirmed the letter (`6648655128`).\n- Timeline: dev `needs_decision` 01:47Z → review thread 呈批 02:1xZ → maintainer 「同意」 03:07Z. Nothing in the 80 minutes needed the maintainer's judgement except the ui-lane pause.\n\n## Wanted (two rule changes; the skills seat owns the wording and keeps `check:pm-skill-ratchet` green — compress, do not raise ceilings)\n\n1. **`references/execution-duties.md` L12** (「维护者裁决逐字引入派发词裁决分区作约束,无则写明无裁决」): \"a ruling on this card\" is not the whole set. Before writing the order, the seat greps the **declared file surface** (sources and their tests) for `ruling`, `Ruling-ref`, `maintainer` and `⛔`, and every ruling cited there enters the Ruling section verbatim (id + the sentence). 「无裁决」 may be written only when that grep is empty. The suggested route (third zone, L127) ⛔ must not contradict a ruling the Ruling section carries; where the seat believes the ruling should move, the order says so and routes the question to a review thread **before** dispatch, not through the dev.\n2. **SKILL.md 〈升级与决策〉 L217 / L223 and the dev's stop rule (`.claude/agents/os-dev.md` L77, L351–354)**: split \"contract\" into shape and prose. A change to the Zod shape, the error-code ledger, an authorable key (add / remove / tombstone) or a published export stays a fork (`needs_decision`). A change to spec **prose** (jsdoc, `.describe`, `content/docs/**` and the regenerated mirrors) that restates a ruling the Ruling section already carries is **not** a fork: the dev edits it in the same PR, names the ruling id in the PR body, and the landing owes the contract-review-tier record the narrowing already owes. The order's file-surface fence then names `packages/spec/src/**` prose as in scope for that case instead of a blanket ⛔. (The `domain:spec` lane row, SKILL.md L162, keeps describe/JSDoc prose in its domain; this is a declared cross-lane touch for a ruling restatement, the shape #15706 / #25062 used, not a lane move.)\n\nWhat this does **not** change: a dev never reverses a ruling on its own (the `#30178` stop was correct and stays correct); `needs_decision` still goes to a review thread (maintainer 2026-10-29 rule); the maintainer's lane pauses and Tier H surfaces are untouched.\n\n## Pins / acceptance\n\n- `check:pm-skill-ratchet` and `check-governed-prose` green; `node scripts/pm/check-governed-merges.mjs --test <paths>` answers Tier S for the touched files.\n- A worked example in the runbook or the order template: the `#30178` order rewritten with the grep's output in its Ruling section and the route it would then have suggested (refuse, A′), so the next seat sees the shape.\n\n## Dedupe\n\nOpen `domain:skills` titles read 2026-11-05T04:3xZ (26): #30159 and #30114 (pm-dispatch, MCP write / private-repo security), #29285 (PR body trailer door), #28763 (runbook review claim), #29828 / #29745 (decision cards on PR assignee / labels), #22060 (rule-text diet). None is about rulings cited in the file surface or about fork granularity. **New.**\n\nLinks back: #30178 (the case; ruling `6648655128`), #17306 (ruling A′ `5651909056`), #25062 (ruling-restatement cross-lane precedent).\nSize: S."

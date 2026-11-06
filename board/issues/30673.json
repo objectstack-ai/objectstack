@@ -1,0 +1,35 @@
+{
+  "number": 30673,
+  "kind": "pull_request",
+  "title": "i18n(service-messaging): ship the notification objects and digest heading in ru, de and ko (第 5 包的 B 半)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T21:58:33Z",
+  "updated_at": "2026-11-05T22:58:47Z",
+  "closed_at": "2026-11-05T22:58:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T22:58:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30673",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgBxjikPH2bUin9o95gbAxsx)_\n\n\ndomain:server#2 · os-bill · session_01Utp6Cai5CRdAs4u9gTipWU\n\nRefs #30512 — **第 5 包的 B 半** (package 5 of 11, `@objectstack/service-messaging`, second half: `ru`, `de`, `ko`). The A half (`zh-Hant`, `ar`, `fr`, `pt-BR`) merged as #30638; with this half the package carries all eleven platform languages. The card stays open until the last PR of the series flips the bundle check to the platform locale table.\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** 消息/通知七个对象的名称、字段、选项、帮助和视图名，以及摘要标题「您有 {{count}} 条通知」，补上俄、德、韩 3 种。这是第 5 包的 B 半；A 半（繁中、阿、法、巴葡）已由 #30638 合入，本包至此 11 种齐全。\n- **为什么改：** 平台语言表（#29428 裁决 F）要求 11 种语言；本包整包超过 3000 行，按席位裁决拆成 A/B 两半，本半单独可绿。\n- **风险与回滚：** 只加翻译数据和注册行，`messages.ts` 的语言类型加宽到 11 种；不动逻辑、schema、接口，已有 8 种一字未改。两处测试只是把新语言加进它们检查的语言表，**规则覆盖变宽，不是放宽**。回滚即撤 PR。\n- **先看：** `src/translations/messages.ts`（俄语 2 以上也变格：2–4 与 5+，所以俄语标题和阿语一样写成计数式「Уведомлений: {{count}}」，说明注释已点名俄语），再抽看 `ru.objects.generated.ts`。\n- **两分钟验证：** `node scripts/check-i18n-bundles.mjs --filter=messaging` 输出 in sync；`pnpm --filter @objectstack/service-messaging test` 全绿。\n- **需要你做的：** 无，席位落地。\n\n## What changes\n\n- Three new locales for the messaging objects under the platform locale table's tags: each a `TAG.objects.generated.ts` with all 203 object leaves plus its `TAG.source-hashes.generated.ts`, written by the repo's own `os i18n extract --fill=default --source-hashes`, served through `withSourceFallback` after the A half's four.\n- `messages.ts`: the digest heading in the three locales; `MessagingLocale` widens to all eleven tags. The plural note now names Russian beside Arabic: `t()` selects no plural form and Russian varies above two (2–4 vs 5+), so its heading is a tally (`Уведомлений: {{count}}`), correct for every count. German takes the plural for every count from two up; Korean does not inflect.\n- The extract command lists the three tags and its merge baseline imports the three bundles, so `check:i18n` covers them from this PR on.\n\n## Test changes — coverage widened, nothing loosened\n\n- `admin-copy-vocabulary.test.ts` and `setup-list-empty-states.test.ts` list the bundles they hold to their wording rules; the three new bundles join that list, so the rules now also cover them. No assertion changed.\n\n## Acceptance notes\n\n- **Quality bar (#17508 / PR #19345):** every leaf written for the reader; placeholders, code spans and identifiers byte-identical, checked per leaf against `en`. German writes the digest as `Zusammenfassung`, not the English loanword.\n- **Leaves equal to English, on purpose:** product and protocol names `APNs`, `FCM`, `Android`, `iOS`, and one help leaf that is a list of status codes, in every locale; beyond those, native German words only: `Info`, `Partition`, `Status`, `Version`, `Web`. `ru` and `ko` carry nothing else equal to English.\n- No cross-locale coincidence: `check:i18n-stale-fill` passes with the baseline untouched.\n\n## Verification\n\n<details><summary>Package suite, typecheck, build (verify lock, at the rebased head)</summary>\n\n```\nturbo build --filter=@objectstack/service-messaging...: 16 tasks successful, exit 0\npnpm --filter @objectstack/service-messaging test && typecheck\n Test Files  66 passed (66)\n      Tests  851 passed (851)\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n<details><summary>i18n gates and size</summary>\n\n```\nnode scripts/check-i18n-bundles.mjs --filter=messaging     in sync                                  EXIT 0\nnode scripts/check-i18n-stale-fill.mjs                     OK (no new stale fills, 1 baselined)     EXIT 0\neslint --no-inline-config on the changed .ts files: exit 0\nchanged lines 1619 (+1610 / -9), 12 files: under the 3000-line threshold\n```\n</details>\n\nDerived gate families (dispatch-gates --commands, reconciled with --ran): 62 run, 0 not measured, all exit 0; recorded in the os-dev-report on #30512.\n\nDogfood: not run — content-only package PR, no `!` in the title and no `(narrowing)` arm.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6Cai5CRdAs4u9gTipWU\n"
+}

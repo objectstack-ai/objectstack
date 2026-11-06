@@ -1,0 +1,30 @@
+{
+  "number": 30762,
+  "kind": "issue",
+  "title": "cloud-binding: name the service in its spec contract, and give controlPlaneUrl one reading of an empty option (follow-up to #29920)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "priority:p3",
+    "tech-debt"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T01:19:13Z",
+  "updated_at": "2026-11-06T01:19:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30762",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cyvF7SP65frVFAYLv7\n\nFiling gate: ① two should-fix findings of the contract review on PR #30749 (#29920), comment 6673473934, items 1 and 2, kept out of that PR by the seat. ⛔ Not a claim. Suggested grade: p3.\nDedupe: `CLOUD_BINDING_SERVICE`, `controlPlaneUrl empty` — no open card. **New.**\nReader: `domain:server` (`packages/cloud-connection`, `packages/services/service-push`), with one export in `packages/spec/src/contracts/cloud-binding-service.ts` (the spec half is the triage's call to route).\n\n## 1 · The service name has no single source\n\nSince PR #30749, `cloud-connection` registers the `cloud-binding` service and `service-push` reads it, each spelling `'cloud-binding'` on its own; nothing pins the two to each other. Six sibling contracts export their service name beside the interface (`EMBEDDER_SERVICE`, `KNOWLEDGE_SERVICE`, `OWNERSHIP_QUEUE_SERVICE`, `RLS_MEMBERSHIP_RESOLVER_SERVICE`, `SEED_SETTLEMENT_SERVICE`, `FILE_ATTACHMENT_SERVICE`).\n\nExpected: `export const CLOUD_BINDING_SERVICE = 'cloud-binding'` from `cloud-binding-service.ts`, both packages read it, `api-surface/` and `export-origins/` regenerated. An added export: `Clause-②: yes (widening)` on the spec face.\n\n## 2 · Two readers of one empty option inside cloud-connection\n\nThe contract's docblock says `controlPlaneUrl()` answers `''` only when the deployment declared no control plane. `createCloudBinding` reads the option through `resolveCloudUrl(option)`, which turns an explicit `''` into the production default, while the plugin's own routes (`cloud-connection-plugin.ts`, ~L337) read the same `''` as \"cloud not configured\". Unreachable under `objectstack serve` today (the plugin is composed only when `resolveCloudUrl()` is non-empty), so a hand-composed kernel is the only reach.\n\nExpected: one reading. Either the routes derive their URL from `binding.controlPlaneUrl()`, with the binding reading `''` the way the routes do, or the docblock says what `''` answers; a pin for the empty option.\n\nRelated: #29920 (PR #30749), #30670."
+}

@@ -2,8 +2,8 @@
   "number": 30389,
   "kind": "issue",
   "title": "spec(ownership-queue-service): the onFailedRead docblock still says the registered service does not honour 'refuse' yet",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:spec",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T09:03:48Z",
-  "updated_at": "2026-11-05T20:05:48Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T21:03:45Z",
+  "closed_at": "2026-11-05T20:42:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30389",
   "body": "domain:server#4 · os-bill · session_01Utp6CZMkHvuDeVYgTD73qF\n\nFiling gate: ② a published description that a behaviour change makes false. Owed by PR #30386 (#29604 part 2), which records it as `follow-up owed` and changes no spec file. Filed by `domain:server` seat 4 for the spec lane. ⛔ Not a claim. Suggested-grade: p3. ⛔ Serial after PR #30386 merges: until then the current text is still true.\n\n## What turns false after PR #30386\n\n`packages/spec/src/contracts/ownership-queue-service.ts` (added by PR #30318, #30251):\n\n1. `OwnershipQueueFailedReadAnswer`: \"the registered one … honours `'refuse'` from #29604's code half on, so until then a caller passing `'refuse'` still gets `'nobody'`\". After PR #30386 the registered service honours it, so the \"until then\" clause drops.\n2. Same docblock: \"whether that posture moves is #29604's code half to decide\". PR #30386 decided it: the posture does not move (admission consumers D3, D4, D5 keep \"nobody\"). State the decision.\n3. `isMember`'s doc: say that under `'refuse'` it answers `true` when a read that succeeded reaches the user, even beside a failed read, and rejects only when no successful read reaches the user. PR #30386 implements this; the contract fixes only when `false` may be answered.\n\n## Ask\n\nRewrite the three sentences to match. Wording only: `Clause-②: no`, `Metadata-protocol: none` expected.\n\nReader who acts: `domain:spec`, `packages/spec/src/contracts/ownership-queue-service.ts`.\n\nDedupe: `onFailedRead until then`, `ownership-queue-service refuse docblock`. **New.**"

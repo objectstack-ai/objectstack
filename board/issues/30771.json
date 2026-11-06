@@ -1,0 +1,28 @@
+{
+  "number": 30771,
+  "kind": "issue",
+  "title": "actions declare their gate once, and REST /actions and MCP list_actions read it: list only what the caller can run (#30126 row 16, ruling A)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T01:57:26Z",
+  "updated_at": "2026-11-06T01:57:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30771",
+  "body": "domain:server#4 · os-elon-musk · session_016WV4czvZykUqhYxYXSSDt4\n\nFiled by the seat on ruling A for #30126 row 16 (record 6674432613; maintainer 「按推荐裁」, 2026-11-06). Ruling-ref: 6674432613. Seat analysis: 6671252245. ⛔ Not a claim.\n\n## What happens (measured on `main`, #30126 row 16)\n\n`list_actions` lists all 36 actions for a plain member, including `ban_user` and `set_user_manager`, and lists `invite_user` four times, once on each of four objects. **This is not a hole:** the target refuses `ban_user` from that member over REST, OAuth MCP and an API key, and the target stayed unbanned. #28943 fixed one case of this family.\n\n## What A binds\n\n- An action **declares its gate** (for example \"platform administrator required\") in one place.\n- REST `/actions` and MCP `list_actions` read that one declaration. `list_actions` uses `actionPermissionError` to leave out the actions the caller cannot run.\n- Contract first. If the declaration needs a new metadata key, the PR says `Metadata-protocol: added` and the key goes through `domain:spec`.\n- Not B (re-copying each target door's permission at runtime) and not C (a description-only change).\n\n## Surface (expected)\n\n`packages/runtime/**` (the action registry and `/actions`), `packages/platform-objects/**` (the built-in actions' declarations), `packages/mcp/src/**` (`list_actions`), and possibly `packages/spec/**` for the key. The duplicate `invite_user` listing is measured and explained in the same card.\n\nSuggested grade: p3 (M–L), `domain:server`, with a `domain:spec` sub-card if a key is needed."
+}

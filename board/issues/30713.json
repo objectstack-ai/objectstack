@@ -1,0 +1,35 @@
+{
+  "number": 30713,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol,rest,runtime): serve the pending draft as the /layers draft layer, untranslated and ungoverned",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T22:59:45Z",
+  "updated_at": "2026-11-06T00:20:38Z",
+  "closed_at": "2026-11-06T00:20:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-06T00:20:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30713",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D6zjFMV3ohoQ82rQMxswmcE)_\n\ndomain:server#1 · os-elon-musk · session_016WV4cxJ8w29kmRj5j2Ex2D\n\nFixes #29814\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：`GET /meta/:type/:name/layers`（以及已弃用的 `?layers=`）现在按 spec 已声明的 `draft` 成员返回待发布草稿，REST 与 runtime 两个入口一致：原样存储的草稿，不翻译、不注入平台列，没有草稿时为 `null`。\n- 为什么改：Studio / Setup 编辑对象时以 `?state=draft` 的结果作为编辑缓冲，那份结果已被翻译并注入了 `owner_id` 等平台列，存回去就把译文和平台列写进了作者的草稿；有了 `draft` 层，#29793 才能把编辑缓冲改为 `draft ?? overlay ?? code`。\n- 风险与回滚：只对既有草稿读准入（`mayReadPendingDrafts`）放行的调用方返回 `draft`，其余调用方的响应里没有这个键，什么都没放宽；单一提交可整体回滚。唯一可见的行为变化：只有草稿、从未发布的条目，对已准入的作者由 404 变为 200（只带 `draft` 层）。\n- 先看：`packages/rest/src/meta-item-read-gate.ts`（共用分层链把 `draft` 纳入逐调用方门控与掩码）、`packages/metadata-protocol/src/protocol-meta-layered-reads.ts`（草稿层的读取地址与原样性）、`packages/rest/src/rest-server.ts`（REST 入口的准入）。\n- 两分钟验证：`pnpm --filter @objectstack/runtime exec vitest run src/domains/meta-layers-draft-layer.test.ts`，预期 16/16 通过（两个入口 × 两种拼写）。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- **Protocol.** `getMetaItemLayered(request, { withDraft: true })` adds the `draft` layer: the row the strict `state: 'draft'` read serves, at that read's address (the named package's draft; naming none, the draft the strict draft address names, with that read's best-effort first match), read as the `overlay` layer is read (the stored body through the conversion chain), credential-redacted like every layer, and never governed, translated or stamped. `null` when no draft is pending. Without the option the answer carries no `draft` key, so the method's in-process readers (security catalog echo, packaged permission-set lock gate, `/published`) read no draft.\n- **Both transports** (`RestServer.serveMetaItemLayered`, the runtime dispatcher's `answerMetaLayered`) ask for the layer only for a caller the existing draft-read admission admits (`mayReadPendingDrafts`), declared in its own `const` as every draft switch is. This reuses that predicate unchanged and relaxes nothing: a caller it does not admit is answered the layers with no `draft` key, which says nothing about whether a draft exists, and a name with only a draft stays that caller's 404.\n- **The shared layered chain** (`createMetaLayeredAnswer`) treats `draft` as a layer for every step: presence, the per-caller gate under the stored-version policy (whole for whoever may write the item, pruned as `?state=draft` prunes it otherwise), and the ADR-0106 mask. The mask never writes an absent `draft` key in.\n- **Draft-read censuses** (`meta-draft-read-door-census.test.ts`, the runtime twin in `meta-draft-read-builder-gate.test.ts`) now see the `withDraft` option and ledger it as a `read` switch, so a later copy of it without the admission is red.\n\nThe spec member was declared by #29855 (PR #29863); `packages/spec` is untouched.\n\n## Tests\n\n`packages/runtime/src/domains/meta-layers-draft-layer.test.ts`: a real store per door (better-sqlite3, the real `sys_metadata*` objects, a real protocol), `RestServer`'s handlers and the real `HttpDispatcher`, an i18n service with a zh-CN catalog; each case on both spellings.\n\n- a zh-CN read serves the draft byte for byte as stored (compared with the row read back from `sys_metadata`): source labels, no injected column;\n- `?state=draft` is unchanged: the same draft translated and governed, and none of its injected columns is on the draft layer;\n- `draft: null` for an item with no pending draft; `?package=` picks that package's draft;\n- a never-published name is served to an author as its draft layer;\n- a stored cleartext credential in a draft is redacted, the rest served as stored;\n- the per-caller gate: an app draft is whole for its author and pruned for a `studio.access` reader, exactly as `?state=draft` answers each;\n- a caller not admitted gets no `draft` key on either door, and a draft-only name stays 404.\n\n<details><summary>Ablations (each restored, blob equal to HEAD, `git diff HEAD` empty)</summary>\n\n- REST admission forced to `true`: the not-admitted case reds on the `RestServer` door only (1 failed / 15 passed). Re-run on the final spelling of that line: same result.\n- runtime admission forced to `true`: the not-admitted case reds on the catch-all door only (1 failed / 15 passed).\n- `draft` taken off the chain's gated layer list: 8 red on both doors (the draft-only presence, `?package=`, redaction and per-caller gate cases).\n- REST admission forced to `true` against the REST census: \"every read switch carries its admission in its own declaration\" reds.\n\n</details>\n\n## Acceptance notes\n\n- The draft layer is converted through the stored-item chain, as the `overlay` layer is. For a current-spec body this is the identity (the byte-for-byte pin holds through it); a row carrying a retired spelling is served converted, which is what its publish would store.\n- Redaction applies to `draft` for the same reason it applies to `code` and `overlay`: it subtracts a credential and nothing else.\n\n## Verification\n\nLocal runs, final readings to be quoted with the head they ran on in the report comment on #29814: `typecheck` for `@objectstack/metadata-protocol`, `@objectstack/rest`, `@objectstack/runtime`; their `pnpm test`; every family `node scripts/pm/dispatch-gates.mjs --commands` derives from this diff, reconciled with `--ran`; `pnpm lint`. CI's required checks are the authority for everything else.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cxJ8w29kmRj5j2Ex2D)_\n"
+}

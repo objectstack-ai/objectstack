@@ -1,0 +1,35 @@
+{
+  "number": 30684,
+  "kind": "pull_request",
+  "title": "docs(skills): teach an action param's widget key in the action dialog",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T22:24:20Z",
+  "updated_at": "2026-11-06T01:19:12Z",
+  "closed_at": "2026-11-06T01:19:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-06T01:19:09Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30684",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DRWthi8yfG9DK3ZmXw4eGpW)_\n\ndomain:skills#1 · os-elon-musk · session_016WV4cyNZ7aKsfF5vTBgKKn\n\nFixes #30549\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么:** 两个技能文件教动作参数的 `widget`:objectui 协议规则的内联参数清单加上 `widget`(写注册过的字段控件名,如 `text` 参数写 `'permission-ref'` 就是权限集选择器;未注册的名字退回 `type` 控件,批量对话框不读它,服务端仍按 `type` 校验);objectstack-ui 动作规则说清字段型参数只在沿用或重述字段 `type` 时继承字段的 `widget`,改了 `type` 要自己写 `widget`。\n- **为什么改:** PR #30543 落地后控制台已读这个键,但技能没教,作者和 AI 仍写自由文本参数;原句还暗示字段型参数总会继承字段控件,与代码不符。\n- **风险与回滚:** 只改文档,无 schema、键或行为变化;token 预算靠同文件删重复句付清,不抬上限。回滚即撤销本 PR。\n- **先看:** ① `skills/objectui/rules/protocol.md` 的 Inline params 条;② `skills/objectstack-ui/rules/actions.md` 的 Action Parameter Patterns 段;③ 两文件中被删的重复句(付账用)。\n- **两分钟验证:** `node scripts/check-skills-token-ratchet.mjs`,预期 actions.md 2259/2259、protocol.md 4352/4368,整体通过。\n- **需要你做的:** 审阅并批准(`skills/**` 为 Tier H,需人工合并)。\n\n## What changes\n\n- `skills/objectui/rules/protocol.md`, \"Inline params\": the widget-config list gains `widget`. It names a registered field widget that draws the param instead of its `type` widget (`'permission-ref'` on a `text` param is the permission-set picker); an unregistered name keeps the `type` widget; the selection bar's bulk dialog ignores it; the server validates by `type`.\n- `skills/objectstack-ui/rules/actions.md`, \"Action Parameter Patterns\": the field's `widget` is inherited only while the param keeps or restates the field's `type`; a param that overrides `type` names its own `widget`.\n- One root changeset, `'@objectstack/skills': patch`.\n\nEvery taught fact is read off `origin/main` (`b77c160a`), not the card's prose:\n\n- `ui/packages/fields/src/resolveActionParams.ts` `inheritedWidget`: the param's own `widget` wins; with no `type` the field's `widget` is inherited; with a `type`, only when `resolveParamWidgetType(param.type) === resolveParamWidgetType(field.type)`. Inline and unresolved branches copy `param.widget`.\n- `ui/packages/app-shell/src/utils/paramToField.ts` `authoredWidgetKey`: a name `resolveFormWidgetType` resolves (not the `text` fallback) replaces the `type` widget key; otherwise the `type` widget stays.\n- `packages/spec/liveness/action.json` `params.widget`: `live`; the dispatcher still validates the submitted value by `type`; not read by plugin-grid `bulkParamToField`.\n- `permission-ref` is a registered widget (`ui/packages/fields/src/FieldEditWidget.tsx`, `ui/packages/components/src/renderers/form/form.tsx`).\n\n### Token ratchet: paid by same-file deletion, no ceiling raise\n\n| file | before (bytes / tokens) | after (bytes / tokens) | ceiling |\n|---|---|---|---|\n| `skills/objectstack-ui/rules/actions.md` | 9024 / 2256 | 9033 / 2259 | 2259 |\n| `skills/objectui/rules/protocol.md` | 17456 / 4364 | 17408 / 4352 | 4368 |\n\nLines: actions.md 179 → 180, protocol.md 377 → 377 (whole-file `wc -l`). No SKILL.md changes, so the package's SKILL.md sum is unchanged.\n\nDeleted restatements (each already said elsewhere in the same file):\n\n- protocol.md: \"resolve the value in the host … or carry it on a `text` node's `content`\" under *Fields That are NOT Evaluated* (the Bindable Text Keys rule says it, and now carries the `SchemaRenderer` wording); \"There is no way to opt a type in from metadata …\" (the closed-list sentence above it says it); \"the third row works today, but its channel is an open contract question\" (the Keys Live on the Node rule says it, and the sentence already points there).\n- actions.md: \"so a body that must scope by org reads it from `ctx` explicitly\" (the preceding sentence says how to read the org); the `skipped while newTabUrl is set` comment (the prose says `newTabUrl` skips the round-trip); `static template;` in a comment (the heading line says static `target`).\n\n## Why\n\nAfter PR #30543 the action dialog draws a param's `widget`, but neither skill named the key, and the actions rule promised that every field-backed param inherits the field widget. Authors kept writing free-text params where a picker exists.\n\n## Acceptance notes\n\n- The bulk dialog's limit is stated as a limit, not taught as supported (card \"Not in scope\").\n- The field-backed bullet in `protocol.md` still lists what is inherited without `widget`; the inheritance rule is taught once, in `actions.md`, to stay inside the ceiling.\n\n## Verification\n\nAll local readings are on head `f49a7c33` (the only commit), base `b77c160a`.\n\n<details><summary>Gates: 44 derived families + pnpm lint</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 44 families from the diff; each ran with its exit code captured before any pipe, then `--ran` reconciled: `✓ dispatch-gates --ran: 44 derived famil(ies) accounted for — 43 run, 1 NOT-MEASURED (1 DERIVED from a recorded exit 3).`\n\n- 43 families: exit 0, including `check-skills-token-ratchet.mjs` (and `--self-test`), `pnpm --dir ui exec vitest run scripts/`, `check:skill-examples`, `check:doc-formula-expressions`, `check:doc-authoring`, `check:skill-identifier-liveness`, `check:nul-bytes`, `check-empty-changeset`, `check-changeset-no-major`, `check-adr-0087-registration`.\n- NOT MEASURED: `pnpm check:dual-build-cjs-loads`, reason: exit 3, PREREQUISITE NOT MET (needs a whole-tree build; only the `@objectstack/client-react...`, `@objectstack/formula`, `@objectstack/lint...` closures were built). CI runs it.\n- `pnpm lint`: exit 0.\n- `check-commit-card-trailers.mjs --range origin/main..HEAD`: pass.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cyNZ7aKsfF5vTBgKKn)_\n"
+}

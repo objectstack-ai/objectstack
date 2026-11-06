@@ -1,0 +1,35 @@
+{
+  "number": 30694,
+  "kind": "pull_request",
+  "title": "docs: name resolveLocaleAmong's five-step locale ladder where comments still restate four steps",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T22:33:27Z",
+  "updated_at": "2026-11-05T23:26:56Z",
+  "closed_at": "2026-11-05T23:26:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T23:26:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30694",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DBFhkQHTZPTwLSqiWCH7wN5)_\n\nFixes #30617\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — comment/docs text only; skills/** carried by #30603\n\n## 维护者速读\n\n- 改了什么:服务端注释、翻译文档页与一条 QA 清单条目里的语言匹配说明,从旧的四步改为 `resolveLocaleAmong` 的五步(多了平台语言表一步)。\n- 为什么改:#30601 已把两个解析器统一到五步;旧说明会让人以为繁体请求(zh-TW)落到第一个 zh-* 文案,加繁体包时会误判。\n- 风险与回滚:零运行时改动,只动注释/文档/清单文本;回滚即 revert 本 PR。\n- 先看:`content/docs/ui/translations.mdx`(对外文档)、`docs/qa/platform-checklist/areas/integration-system.json`(清单条款 revision 15→16)、`organization-mfa-enrollment-guard.ts` 注释。\n- 两分钟验证:`node scripts/check-platform-checklist.mjs`,预期打印 OK。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nComment, docs and checklist text only; no code or behaviour change. Each place that restated the old four-step ladder (exact, case-insensitive, base language, variant) now names `resolveLocaleAmong` (`@objectstack/spec/system`) and its five steps, adding the platform locale table step (`platformLocaleTagOf`: `zh` reaches `zh-CN`, `zh-TW` / `zh-HK` / `zh-MO` reach `zh-Hant`), or says the table step only adds answers for the table's aliases.\n\n- `packages/objectql/src/engine-validation-messages.ts`: the `negotiatedMessageLocale` doc comment.\n- `packages/objectql/src/engine-validation-locale-negotiation.test.ts`: the header comment.\n- `packages/services/service-automation/src/engine.ts`: the comment on the `resolveBundleLocale` import.\n- `packages/plugins/plugin-auth/src/organization-mfa-enrollment-guard.ts`: the module doc and the `copyLocaleFor` doc (the copy carries no `zh-Hant`, so `zh-TW` still reads `zh-CN`).\n- `packages/plugins/plugin-email/src/template-loader.ts`: the sorted-tags comment now says the sort fixes both first-match steps (table language and variant expansion).\n- `content/docs/ui/translations.mdx`: the \"Within the bundle, matching walks\" paragraph.\n- `docs/qa/platform-checklist/areas/integration-system.json`: `integration-system.email-template-render` acceptance[3] clause and verify; revision 15 to 16 with a history row. The showcase bundle holds no `zh-Hant` tag, so no verdict changes.\n\nDropped from the card's list: `packages/plugins/plugin-auth/src/idp-locale-claim.ts` already names `resolveOfferedLocale` and the five steps on `origin/main` (b77c160a), so it is unchanged.\n\n## Acceptance notes\n\n- `packages/spec/src/stack.zod.ts` (the `defineStack` email-template floor warning) still prints the four-step list (exact, case-insensitive, base language, variant expansion). It is in spec and outside this card's file list, so it is not touched here. Noted, not filed.\n- No changeset: the diff publishes nothing — comment text in published packages and an unpublished test file, docs and checklist. `skip-changeset` label.\n\n## Verification\n\nGates run at e5703af2 (`node scripts/pm/dispatch-gates.mjs --commands`, 87 derived): 79 exit 0; 7 exit 3 NOT MEASURED (prerequisite not met in this shallow, unbuilt worktree: `check-plugin-teardown-shape --self-test` needs an unshallow clone; `@objectstack/lint` doc-formula-expressions and doc-security-posture, spec `check:skill-examples`, `check:docs-transcript-drift`, `check:dual-build-cjs-loads`, `check:lean-entry-closure` need builds); `check:type-check-debt` NOT MEASURED locally (it re-measures every package typecheck; hit the local timeout). CI's Lint & Repo Gates runs all of them. `node scripts/check-platform-checklist.mjs` exit 0. eslint on the five changed TS files exit 0 (scoped; the whole-repo lint is CI's).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

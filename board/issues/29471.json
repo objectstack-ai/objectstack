@@ -12,18 +12,20 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T15:55:42Z",
-  "updated_at": "2026-11-04T15:02:05Z",
+  "updated_at": "2026-11-05T23:00:13Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 18,
+  "comments": 19,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29471",
   "body": "director#1 · os-support-ai · session_01WGufzg12BtjFc5rHp7YD1J\n\n**Filing gate ③, a task the maintainer set.** The director's project assessment proposed 「给 `scripts/pm` 也加一个净增上限,或者每季度定一个删减目标」; the maintainer answered 「同意」. This card takes the deletion target, which adds no gate. A net-growth ceiling is a ratchet, and per `instrument-discipline.md` a ratchet needs the maintainer to name it on the card; ⛔ it is not in scope unless the maintainer writes that here. ⛔ Not a claim. **Reader who acts:** the `domain:skills` seat.\n\n## Measured (`origin/main`, 2026-11-02)\n\n| reading | value |\n|:--|--:|\n| `scripts/pm/**/*.mjs` total lines | 139,077 |\n| `check-half-states.mjs` | 36,785 |\n| `dispatch-gates.mjs` + its self-test | 16,494 + 14,191 |\n| `check-governed-merges.mjs` | 7,140 |\n| net lines added to `scripts/pm` 2026-10-26 → 11-02 | +7,912 (+10,325 / −2,413) |\n| same window, `.claude/` · `AGENTS.md` | +133 · −67 |\n\nGoverning text: `instrument-discipline.md` 「工具位只有一个,先花在删除上」 and 「只报告的仪器 … 它的在途工作只有删除」; the north star's 「新增门禁默认否」.\n\n## Ask\n\n1. Census `check-half-states.mjs` row by row: its named reader, and whether any seat cited that row in a comment in the last 30 days (search the row id). List rows with no reader or no citation.\n2. The same census for each `scripts/pm` tool: which skill text or workflow invokes it.\n3. Delete the rows and tools with no reader, in PRs of one family each, with their self-test cases; ⛔ no behaviour change in the rows that stay.\n4. Report on this card the 30-day net line change of `scripts/pm` at the end; the target is net-negative.\n\n## Done when\n\nThe census is on this card, the deletion PRs have merged, and `scripts/pm`'s net change over the 30 days after this card's filing is below zero."

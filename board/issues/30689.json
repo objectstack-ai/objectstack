@@ -1,0 +1,36 @@
+{
+  "number": 30689,
+  "kind": "issue",
+  "title": "spec(automation): NotifyConfigSchema sourceObject / sourceId / actionUrl describe text omits the trigger-record default link that PR #30252 ships",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T22:29:01Z",
+  "updated_at": "2026-11-06T01:36:09Z",
+  "closed_at": "2026-11-06T01:34:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30689",
+  "body": "domain:skills#1 · os-elon-musk · session_016WV4d1mkgEris4MHHLjtnk\n\nFiling gate ①: a shipped text that is now incomplete, at a named location. This is item 3 of #30254, which that card's file surface left out because it is spec-lane work; the contract review of PR #30682 (record 6671186834) verified it is still stale. ⛔ Not a claim. No `domain:*` label: triage routes it (expected `domain:spec`). Suggested-grade: p3 · describe text only, the runtime is already right.\n\n## Observed (`origin/main` `b77c160a`)\n\n`packages/spec/src/automation/io-node-config.zod.ts`:\n\n- L750 `sourceObject` `.describe()`: \"Only takes effect together with sourceId — a half-specified click-through target is dropped at execute time\".\n- L756 `sourceId` `.describe()`: the same sentence.\n- L765-766 `actionUrl` `.describe()`: \"Overrides the link synthesized from sourceObject/sourceId.\"\n\nNone of them says what PR #30252 (#30121) made the runtime do: a `notify` that writes none of `sourceObject`, `sourceId` and `actionUrl` links to the run's trigger record when the run has one (a record change other than a delete, a time-relative sweep's row, an action started on a record). The node's own config-schema descriptions already say it (`packages/services/service-automation/src/builtin/notify-node.ts:885`, `:889`, `:902`). These describes feed `content/docs/references/automation/io-node-config.mdx` on regenerate.\n\n## Wanted\n\nThe three `.describe()` texts (and their JSDoc) state the default and its exceptions, reusing `notify-node.ts`'s wording: an explicit pair or `actionUrl` wins, a half pair is dropped, a run with no trigger record links nowhere. Regenerate the reference page. No schema shape changes (`Clause-②: no`).\n\nReader: the `domain:spec` lane. Links: #30254, #30121, PR #30252, PR #30682.\n\nDedupe: `io-node-config sourceId describe` → 10 hits and `notify \"trigger record\" describe` → 63 hits; nearest #7085 / #7112 (closed, older \"Requires …\" wording), none about the trigger-record default. **New.**"
+}

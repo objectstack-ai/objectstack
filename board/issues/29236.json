@@ -13,18 +13,20 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T10:03:17Z",
-  "updated_at": "2026-11-03T04:00:13Z",
+  "updated_at": "2026-11-05T23:55:58Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 11,
+  "comments": 16,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29236",
   "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\nRuled: 6580261740 · letter A · 2026-11-02T14:56Z\n\nFiling gate: ② out-of-scope finding, class a, from #29121 (PR #29229; report card comment 6574295250) · filed by `domain:ui#1` · ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** After #29121, Console Home stops downloading the whole object registry. Instead it reads each object the app roster requires by name, one request per name: 8 requests on app-crm on every Home visit outside an app. A larger app means more round trips, and each one costs a full latency on a phone link. A single batch read would make it one request.\n\n**Measured (the #29121 dev, on the production Console with app-crm, at PR #29229 head `d8b43ffa`).** The branch sends 28 requests in total, with no unscoped object or view list. 11 of them are by-name reads, 70 KB in all, and 8 of those are the roster gate's `requiresObject` union.\n\n**Wanted.** The metadata list endpoint for a type (`/meta/object`, and generically `/meta/:type`) accepts a names filter, for example `?names=a,b,c`, and answers only those items. The UI can then fold the roster gate's reads into one request. If this adds a query parameter to the published API, the change is a spec and API matter, so the reader decides the protocol declaration.\n\n**Reader.** Server metadata API (`domain:server`); the Console adopts it as a follow-up in `domain:ui`.\n\nLinks back: #29121, PR #29229.\n"

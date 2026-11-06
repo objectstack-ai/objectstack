@@ -1,0 +1,32 @@
+{
+  "number": 30675,
+  "kind": "issue",
+  "title": "rest + sdk: tenant-admin door for the record-currency backfill — a REST twin of `os migrate record-currency-codes`, scoped to the caller's organization (multi-currency, epic #8345, ruling C item B)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:server",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T22:05:32Z",
+  "updated_at": "2026-11-05T22:56:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30675",
+  "body": "epic:#8345#1 · os-bill · session_01Utp6CZWjnSeed8H4dMjt9d\n\nBlocked-by: #30674\n\nPart of #8345. Filed by the epic PM from ruling 6670707546 (letter C, maintainer 「同意」 2026-11-05T21:57Z), item B. ⛔ Not a claim.\n\nRuling-ref: 6670707546\n\n## 维护者速读\n\n- **改了什么：** 给币种码回填开一个 REST 入口（仿已有的 `POST /meta/_migrate-stored`）：`{ object, field, code, apply? }`，只作用于调用者当前组织，默认预览，`apply: true` 才写，返回与 CLI 相同的报告；配 SDK 方法与路由台账行；409 `destructive_change` 的处方文案同时点名这个入口。\n- **为什么改：** 云托管租户没有 shell，跑不了 CLI；本位币折算在 18.3.0 已上线，切了模式的云租户今天就在静默漏算。\n- **风险与回滚：** 中低。新增一条路由，只写本组织，受维护开关控制。回滚即撤 PR。\n- **先看：** `packages/rest/src/meta-collection-routes.ts` 的 `_migrate-stored`。\n- **两分钟验证：** 两个组织：A 的管理员调预览只看到 A 的行；`apply: true` 只写 A。\n- **需要您做的：** 无（门禁按裁决推荐取 `setup.write`；如需改为 `manage_metadata` 请在卡上说）。\n\n## Task\n\n- [ ] One route shaped on `POST /meta/_migrate-stored`, taking `{ object, field, code, apply? }`, calling the A card's `backfillRecordCurrencyCodes` with `organizationId` = the caller's current organization. ⛔ No environment-wide form, no `organizationId` in the body.\n- [ ] Preview unless `apply: true`; the response is the same report the CLI prints (`--json` shape).\n- [ ] Gate: `setup.write` in the caller's current organization (the ruling's recommendation; the maintainer named none, `manage_metadata` is the alternative). Behind the maintenance-door switch, as `_migrate-stored` is.\n- [ ] SDK client method, route-ledger row, error codes from the existing registry only (no new wire code).\n- [ ] The 409 `destructive_change` remedy text names this door beside the CLI command.\n- [ ] Tests: two organizations; caller sees and writes only its own; missing capability refused; maintenance switch off refused; preview writes nothing.\n- [ ] Docs: the endpoint beside the CLI command; note that a Setup button is a separate `domain:ui` card, held until the ui lane resumes.\n\nLane: server · Size: M · Model: opus, effort high · Review: default. `Clause-②: yes (widening: new route, new SDK method)` · `Metadata-protocol: none`.\n\nOut of scope: the Setup/Studio button (`domain:ui`, ui lane is off); `docs/adr/**`, `skills/**`.\n\nDedupe: #8345 thread; ruling 6670707546; no open card carries a REST form of this backfill."
+}

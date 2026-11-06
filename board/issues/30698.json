@@ -1,0 +1,34 @@
+{
+  "number": 30698,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0007 D6 — a null clear of an env-pinned key is not refused (#30385)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T22:39:06Z",
+  "updated_at": "2026-11-06T01:13:59Z",
+  "closed_at": "2026-11-06T01:13:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-06T01:13:57Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30698",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg7PpRrnuu2FgdSkRXPUGd2w)_\ndomain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\n## 维护者速读\n\n- 改了什么：ADR-0007 状态行加「已修订」；D6 补一句「环境变量锁定不拒绝清除（`null`），行锁和写入规则照常判」；REST 表 409 一栏、架构草图和服务接口注释各加同样的例外；新增一个 ADR 锚点文件，把 `settings-service.ts` 钉到 ADR-0007。\n- 为什么改：执行 #30385 裁定 A（2026-11-05「同意」）。代码 PR #30448 允许清掉锁定键底下存的旧值，ADR 原文写的是「一律 409」，须先修订 ADR。\n- 风险与回滚：纯文档，不动代码；生效值仍是环境变量，锁定标记不变。回滚即还原本 PR 一次提交。\n- 先看：`docs/adr/0007-settings-manifest-and-kv-store.md` 第 3 行、第 86 行、第 101 行（D6）、第 303 行、第 323 行（REST 表），以及新锚点文件。\n- 两分钟验证：`node scripts/check-adr-links.mjs && pnpm check:adr-anchors && pnpm check:adr-index`，预期全绿。\n- 需要你做的：Tier H，审阅人 os-zhuang + hotlong；本 PR 先合，之后 #30448 再落地。\n\nRefs #30385\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nADR-0007 D6 said every UI write to an env-pinned key is refused with HTTP 409 `locked-by-env`. PR #30448 lets exactly one write through the pin: a clear (`null` / absent), which nulls the stored row beneath the override. The value in force does not move — the resolver still answers `source='env', locked=true` — and every other write stays 409 (`settings-service.ts` pre-flight: `const clears = patch[key] === null || typeof patch[key] === 'undefined'; if (!clears && this.effectiveEnvOverride(...)) throw new SettingsLockedError(...)`).\n\nPer AGENTS.md (a decision change amends the original ADR's status line), and per contract review 6671549520's three should-fixes:\n\n1. **Status line** — `· **Amended (2026-11-05, #30385)** — D6: a clear (null) of an env-pinned key is not refused; it clears the stored value beneath the override and changes nothing in force.`\n2. **D6** — the exception sentence (the pin does not refuse a clear; the row locks and the key's write predicates still judge it like any clear), with the superseded wording kept inline as an *Amended* note.\n3. **REST table** — `PUT /api/settings/:namespace` row: `(409 if any key locked-by-env, except a null clear)`.\n4. **Architecture sketch (L86) and the service-surface comment (L303)** — the same exception, `(a null clear excepted — D6)`, so the ADR does not contradict D6.\n\nOut of scope (known drift, untouched): `resetNamespace` wording (reset still skips pinned keys; widening it is #30664), D-tier drift, env-var prefixes.\n\n## ADR anchor\n\nNew `scripts/adr-anchors/packages__services__service-settings__src__settings-service.ts.json` (`ADR-0007`), as ruling 6670154789 item 3 names. Its invariant: an env override in force refuses every write but a clear; the clear nulls the stored row and changes nothing in force. `settings-service.ts` already cites ADR-0007 on `main`, so `pnpm check:adr-anchors` is green on `main` and on this branch.\n\n## Verification\n\nAt head `27a3e1c9`: derived gates for the two files, 29 of 29 exit 0; `--ran` reconcile 0 NOT-MEASURED. The first head (`26da6f27`) ran 21 of 21. Contract review PASS 6671549520 on the first head; the delta review covers the fix commit.\n\nNo changeset: docs/adr only (`skip-changeset`).\n\n<!-- signed: domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL -->\n"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 30748,
+  "kind": "issue",
+  "title": "Setup → Audit Logs: the row drawer has no way to open the audit row's record page, which lists the other changes to the same record",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T00:28:44Z",
+  "updated_at": "2026-11-06T00:28:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30748",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cyvF7SP65frVFAYLv7\n\nFiling gate: ① the ui half of #30209 row 4 B, named by the seat in its ACCEPT on PR #30728 (comment 6672516987, \"Out of scope / follow-up\"); the server half landed in PR #30728 (merge commit `05a30e6e`). ⛔ Not a claim. Suggested grade: p3.\nDedupe: `sys_audit_log_detail`, `AuditLogPage drawer record page`, `other changes to the same record` — no open card. **New.**\nReader: the `ui/**` lane (`ui/apps/console/src/pages/system/AuditLogPage.tsx`).\n\n## What happens\n\nSince PR #30728, `sys_audit_log` has a default record page (`sys_audit_log_detail`, `plugin-audit`) that lists every other ledger row with the same `record_id`, newest first. Beside a settings write's `config_change` row (which carries only a digest) that list holds the CRUD mirror's create/update rows for the same settings row, so the administrator can read what the value was changed to; `config_change` rows now carry `record_id` = the settings row id for this to work.\n\nSetup → Audit Logs (`AuditLogPage.tsx`) is a custom page: a row click opens its own side drawer (event details + JSON diff), and nothing in the drawer opens the row's record page. \"Open as list\" goes to the object list, not to a row. So from the place an administrator actually reads the ledger, the \"other changes to the same record\" list is not reachable; the administrator still sees a digest and no value.\n\n## Expected\n\n- The drawer offers a way to open the selected audit row's record page (the generic record route for `sys_audit_log` / that row's id), at least for a row that carries a `record_id`.\n- Or, if the ui lane prefers, the drawer itself lists the other rows with the same `record_id` (the same read the page's related list makes, through the data API, so the ledger's read gate and redaction apply unchanged).\n- A pin: on a `config_change` row the drawer reaches the mirror's update row for the same settings row.\n\nRelated: #30209 (the Setup readability card; rows 1 and 5 B still open there)."
+}

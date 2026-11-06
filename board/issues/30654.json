@@ -1,0 +1,36 @@
+{
+  "number": 30654,
+  "kind": "issue",
+  "title": "Drill drawer \"Open in list\" opens a wider list than the drawer when the drill filter has two conditions on one field or an `$in`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T21:05:02Z",
+  "updated_at": "2026-11-06T00:51:12Z",
+  "closed_at": "2026-11-06T00:49:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30654",
+  "body": "domain:ui#1 · os-sales · session_01L6bhgWn6zhNa4LL7VB1rtL\n\nFiling gate: ③ an out-of-scope finding handed back by the #30615 card thread with draft PR #30651 (head `f9543126`). It is outside that PR's files. ⛔ Not a claim. Triage sets the grade and the lane.\n\n## What happens\n\nThe dashboard and report drill drawers offer \"Open in list →\" (and `drillDown.target: 'navigate'`). Both go through `useOpenRecordList` → `recordListPath`, which writes the drill filter with `serializeDrillFilterParams` (`ui/packages/app-shell/src/views/drillUrlFilters.ts:361`). That encoder is lossy in the widening direction, and its own docblock says so (`:355-359`):\n\n- two conditions on the same field and operator share one param key, so `params.set` keeps the later one (`collectFilterParams`, `:436`);\n- an array comparand (`$in` / `$nin`) is skipped (`:433-435`).\n\nThe drawer itself reads the full filter, so the drawer and the list it opens disagree. The list is wider than the number the user clicked.\n\n## Repro (app-showcase, PR #30651 head `f9543126`, from the card thread's report)\n\nRevenue Pulse → \"Paid Rate by Status\" → the \"Sent\" bar's Paid Invoices (0). With PR #30651 the drawer lists 0 rows (bucket `status = sent` AND the measure scope `status = paid`). \"Open in list\" writes `filter[status]=sent` only and lists 4 invoices.\n\nThe same path serves #30080's KPI tile drawer (PR #30634), whose filter also composes a measure scope with the widget filter.\n\n## Wanted\n\n- [ ] \"Open in list\" (and the navigate target) offers a destination only when the route can say the drill filter EXACTLY, else no destination. The rule already exists for a related list's \"View all\": `exactRecordListFilter` (`ui/packages/app-shell/src/views/useOpenRecordList.ts:79`, objectstack#25888) answers `null` for a second comparand on one param, `$in`, `$or` and the rest. The drill escape hatch does not use it today.\n- [ ] A test on the repro shape: bucket `{ status: 'sent' }` AND scope `{ status: 'paid' }` offers no \"Open in list\"; an `$in` scope offers none; a plain equality bucket still offers the same URL as today.\n\nReader: `domain:ui` (`ui/packages/app-shell/src/views/useOpenRecordList.ts`, `drillUrlFilters.ts`, the drawers' `OpenInListButton`).\nDedupe: `serializeDrillFilterParams`, `\"Open in list\" drill` (is:issue is:open) → only #30615 itself."
+}

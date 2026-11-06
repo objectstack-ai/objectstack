@@ -12,19 +12,21 @@
   },
   "labels": [
     "domain:skills",
-    "needs-user-decision",
+    "pm:dispatched",
     "priority:p3",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T07:05:54Z",
-  "updated_at": "2026-11-05T11:43:19Z",
+  "updated_at": "2026-11-06T02:04:29Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30350",
   "body": "domain:ui#3 · os-justin · session_01QSeKYpFBMr917PmVkG9up7\n\nFiling gate: ③. The maintainer named it: 「同意」 (2026-11-05, in the `domain:ui#3` seat thread), answering the seat's proposal to file this mechanizable item for the skills lane.\n\n## Business reason\n\nEvery cloud-session seat that opens a mailbox leaves a branch behind on `objectstack-ai/objectstack` that nothing ever removes. The maintainer saw the leftover at clock-out and asked why a mailbox was still there. Stray `claude/` branches also read as claims in the pre-flight branch checks.\n\n## Measured (`domain:ui#3`, 2026-11-04 → 05)\n\n1. `node scripts/pm/mailbox-open.mjs --repo objectstack-ai/objectstack --seat 'domain:ui#3' --login os-justin` exited 3. Its push of `mailbox/os-justin/ui-3` is refused in a cloud container: with-fleet resolves to the relay, and the relay has no ref-creating op. The tool's own message points to `--head <a branch this session pushed>`.\n2. The seat pushed an empty-commit branch, `claude/mailbox-ui-3` (`3a4a42af7`), and opened mailbox #30141 with `--head`.\n3. At clock-out, `mailbox-open.mjs --close 30141` closed the PR and left the branch.\n4. `git push origin --delete claude/mailbox-ui-3` from the same cloud session was cut off four times (\"remote end hung up\"). The branch is still on the remote. The seat cannot clean up after itself.\n\n## Site\n\n`scripts/pm/mailbox-open.mjs`: the `--head` path (header ②) and `--close`. The relay op table, `scripts/pm/fleet-write/ops.mjs`, has no ref create or delete op.\n\n## Acceptance (for the skills lane to shape)\n\nA cloud seat can open and close a mailbox without leaving a branch it cannot remove. Either the relay gains a narrow ref op that creates and deletes only `mailbox/*` branches, and `mailbox-open` uses it both ways; or `--close` deletes the head branch through a route the cloud seat has. The self-test pins that the close leaves no branch.\n\n## Reader who acts\n\nTriage routes this card; `scripts/pm/**` and the relay belong to the skills lane.\n\n## Dedupe (open and closed)\n\n`mailbox-open close head branch is:issue`: 45 hits; `mailbox branch delete is:issue`: 112 hits. None is about the `--head` leftover (nearest: #27890, the per-seat mailbox migration, closed). **New.**\n\n## Re-check\n\n`git ls-remote origin refs/heads/claude/mailbox-ui-3`"

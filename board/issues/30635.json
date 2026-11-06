@@ -2,8 +2,8 @@
   "number": 30635,
   "kind": "issue",
   "title": "Object save answers success when the schema sync behind it is refused: the caller never learns the table was not created or adopted",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T19:20:30Z",
-  "updated_at": "2026-11-05T19:20:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T23:29:15Z",
+  "closed_at": "2026-11-05T23:26:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30635",
   "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ① a public door's wrong answer, measured live by the #30562 dev (PR #30632 body; os-dev-report 6667000624, `out_of_scope_findings` 1), read by the seat in the cited file. ⛔ Not a claim. Suggested grade: p2. Related: #22985 (closed: the refusal is logged at `error`; this card is about the caller, not the log).\nDedupe: `schema sync refused 200`, `ensureObjectStorage refused`, `save reports sync refusal`. Nearest: #30562 (the data-loss half, fixed by PR #30632), #22985 (log level, closed). **New.**\n\n## What happens\n\n`PUT /api/v1/meta/object/NAME` publishes the object, then syncs its storage (`ensureObjectStorage`, `packages/metadata-protocol/src/protocol-registry-hydration.ts`). When the driver refuses the sync, the refusal is caught and written to the server log at `error`, and the save still answers `200` success with nothing that says storage did not follow. Measured on a managed SQLite datasource: with PR #30632 a `_id`-keyed table holding rows is now refused and its rows are kept, but the admin who saved the object sees success and finds out only when reads or writes against the object fail.\n\nThe same holds for every other driver refusal that path catches (column type conflicts, refused DDL), not only the new one.\n\n## Expected\n\n- The save's answer tells the caller that storage did not follow, and why, without undoing the publish the answer already stands for: e.g. an additive field on the success body (storage not synced, the driver's refusal message) that Studio/Setup shows as a warning. Status code and existing body keys stay as they are (a widening, not a narrowing).\n- A pin through the door: a refused sync answers with that field and the refusal text; a clean sync answers without it.\n- The ui half (show the warning after save) is a separate card once the server field exists.\n\nReader: `domain:server` (`metadata-protocol`). If the reader finds that a non-2xx answer is the only honest shape, stop and ask: that is a decision, not this card."

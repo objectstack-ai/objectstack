@@ -1,7 +1,7 @@
 {
   "number": 6367,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 1 — ⏳ vacant",
+  "title": "[PM seat] domain:server · seat 1 — 🟢 os-elon-musk · 由 os-elon-musk 账户的项目负责",
   "state": "open",
   "state_reason": "reopened",
   "draft": null,
@@ -15,17 +15,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-warren"
+    "os-elon-musk"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-08-07T15:16:20Z",
-  "updated_at": "2026-11-03T14:14:16Z",
+  "updated_at": "2026-11-05T21:27:32Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 362,
+  "comments": 363,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6367",
-  "body": "domain:server#1 · os-warren · session_01JQwxbXsK9j25sd7eVwW96G\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 1**. Seat 2 is #20966, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908. #6021 and #6024 are archives of this post, ⛔ do not sit there.\n\n## Current PM\n\n⏳ **vacant** since 2026-11-03T14:13Z. Previous PM: `os-warren` · session `session_01JQwxbXsK9j25sd7eVwW96G` (seated 2026-11-03T00:37Z). The maintainer stood the server lane down on 2026-11-03: 「server 当前的任务处理完，合并后就下班」 and 「没开工的暂停」. Take this seat only on the maintainer's word: `/pm-dispatch 接手`, then read this post and its newest comment, the clock-out brief 6606083914.\n\n## Handover ledger\n\n- **In flight:** none. `check-handover` exited 0. No PR of this seat waits on the queue or on a human. `Stay-behind:` none.\n- **Paused, never started:** #29814. Its `Blocked-by` #29855 closed (PR #29863 merged `c1af99c0`), and it still reads `pm:blocked` + `pm:blocking` until triage's unblock scan moves it. The order and the review's escalations are listed in the brief.\n- **Queue snapshot, decision box and `pm:blocked`:** in the brief (live read at clock-out).\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#1` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Mailbox:** PR #29662 closes with this clock-out. A successor opens a mailbox on sitting.\n- **Patrol:** none. The hourly patrol trigger is deleted.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#1 · os-warren · session_01JQwxbXsK9j25sd7eVwW96G -->\n"
+  "body": "domain:server#1 · os-elon-musk · session_016WV4cytLmJxfAmgPVjUbbW\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 1**. Seat 2 is #20966, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908. #6021 and #6024 are archives of this post, ⛔ do not sit there.\n\n## Current PM\n\n🟢 `os-elon-musk` · `session_016WV4cytLmJxfAmgPVjUbbW` · seated 2026-11-05T21:23Z · 由 os-elon-musk 账户的项目负责 (project \"Objectstack\", thread \"Server 车道派发(第一席)\"). Previous PM: `os-warren` · `session_01JQwxbXsK9j25sd7eVwW96G`, vacant since 2026-11-03T14:13Z (clock-out brief 6606083914).\n\n## Handover ledger\n\n- **Inherited:** nothing in flight. #29814 (paused, never started) is read in this round's unblock scan.\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#1` + `head:claude/` PRs. Posture and ledger live in the project (姿态台账住项目).\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Mailbox:** opened at seating (see the seated mark). **Patrol:** see the seated mark.\n- **Sibling:** seat 2 (#20966, os-bill) is online. Full-order alternation: seat 1 odd, seat 2 even; the claim stamp arbitrates.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#1 · os-elon-musk · session_016WV4cytLmJxfAmgPVjUbbW -->\n"
 }

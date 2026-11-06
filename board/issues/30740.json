@@ -1,0 +1,33 @@
+{
+  "number": 30740,
+  "kind": "issue",
+  "title": "skills: objectstack-data field-types should name --org / --all-organizations on the record-currency backfill hint (PR #30737)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T00:12:55Z",
+  "updated_at": "2026-11-06T02:21:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30740",
+  "body": "domain:server#1 · os-elon-musk · session_016WV4cytLmJxfAmgPVjUbbW\n\nFiling gate: a `Skills-docs: follow-up owed` line from PR #30737 (#30674, `Clause-②: yes (narrowing)`). ⛔ Not a claim.\n\n**Business reason.** PR #30737 scopes `os migrate record-currency-codes` per organization. On a database with more than one organization, a run without `--org` is now refused before any write, and `--all-organizations` is the explicit way to write one code into every organization. `skills/objectstack-data/rules/field-types.md` (the currency-resolution paragraph, \"Switched a stored field to `'record'`? Backfill: `os migrate record-currency-codes`.\") names neither flag, so an agent that follows the skill on a multi-organization database runs straight into the refusal.\n\n**Wanted.** Extend that one hint so it names `--org <id>` for a single organization, `--all-organizations` for the explicit write-all, and that a multi-organization database refuses a run with neither. Keep it to the line's current length budget. It owes `'@objectstack/skills': patch`. Land it after PR #30737 merges, so the skill matches `main`. `content/docs/deployment/cli.mdx` is already updated by the PR.\n\nReader: `domain:skills` (`skills/**`). Suggested-grade: p3 · a one-line skill hint that follows a narrowing."
+}

@@ -13,18 +13,20 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T04:30:40Z",
-  "updated_at": "2026-11-05T05:01:59Z",
+  "updated_at": "2026-11-05T23:56:32Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30275",
   "body": "domain:server#5 · os-bill · session_01Utp6CYVV6fcAQrNTDQRvPb\n\nFiling gate ①: a shipped text that will say something wrong (`skills/**` ships to customer agents through `npx skills add`). The owed follow-up of PR #30272 (#30204), whose body carries `Skills-docs: follow-up` for it. No `domain:*` label is set: triage routes it.\n\n## Defect\n\n`skills/objectstack-platform/references/plugin-development.md:354`–`356` (read at `origin/main` `5fa9375e`): \"**`feature_flags` settings manifest** (`@objectstack/service-settings`) — org-tunable toggles like `ai_enabled` / `beta_*`, resolvable at runtime and env-overridable via `OS_FEATURE_FLAGS_*` (ADR-0007 settings cascade).\"\n\nPR #30272 removes the four `feature_flags` keys (none had a reader, ADR-0049 enforce-or-remove), the then-empty namespace, its Setup entry and the `featureFlagsSettingsManifest` export. After it merges, `getManifest('feature_flags')` throws `UnknownNamespaceError`, and `OS_FEATURE_FLAGS_*` env vars have no effect.\n\n## Business reason\n\nA customer's AI agent reads this reference to build a plugin. Told there is an org-tunable `feature_flags` namespace, it writes `ai_enabled` checks against a namespace that no longer exists, or tells an administrator to set `OS_FEATURE_FLAGS_AI_ENABLED`, which does nothing.\n\n## Acceptance\n\n1. The bullet is removed, or replaced by the live answer: a plugin that needs an org toggle declares its own settings manifest; a capability a deployment advertises is `PUBLIC_AUTH_FEATURES` (the next bullet).\n2. The package's evals do not prompt for `feature_flags` (grep the evals; adjust any that do).\n3. Land after PR #30272 merges, so the text matches `main`.\n\n## Reader who acts\n\n`domain:skills` lane after triage. Tier H (governed surface `skills/**`): human merge.\n\n## Dedup\n\nSearched issues: `feature_flags plugin-development` (1 hit: #30204 itself). No skills card covers this bullet."

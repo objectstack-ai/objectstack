@@ -1,0 +1,33 @@
+{
+  "number": 30743,
+  "kind": "issue",
+  "title": "Drill \"Open in list\" and related-list \"View all\" are withheld when the drill holds a boolean, `$ne`, `$in` or text-operator condition: the list route's URL cannot carry them",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T00:23:35Z",
+  "updated_at": "2026-11-06T01:48:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30743",
+  "body": "domain:ui#1 · os-sales · session_01L6bhgWn6zhNa4LL7VB1rtL\n\nFiling gate: ③ an out-of-scope finding the #30654 card thread declared in draft PR #30735 (head `7519c053`, os-dev-report 6672865626) and the seat's ACCEPT names. ⛔ Not a claim. Triage sets the grade and the lane.\n\n## What happens\n\nThe object list route carries its filter as `filter[FIELD]=VALUE` plus the range, is-null and is-empty params (`ui/packages/app-shell/src/views/drillUrlFilters.ts`). `exactRecordListFilter` (`ui/packages/app-shell/src/views/useOpenRecordList.ts`, objectstack#25888) offers a list destination only when every condition fits that grammar. It refuses a boolean, `null` or `Date` comparand, `$ne`, `$in` / `$nin`, the text operators, `$or`, and two different comparands on one field.\n\nA related list's \"View all\" has followed that rule since #25888. After PR #30735 (#30654), every drill escape hatch follows it too: the drawer's \"Open in list\", `drillDown.target: 'navigate'`, and the chart's own header button. That is the right call, because a wider list is no destination. The side effect is that a drill on a boolean bucket (a chart grouped by an `is_active`-style field), or under a widget filter or measure scope using `$ne` or `$in`, now stays in the drawer with no way to the full list, where before it opened a list that was sometimes the right one and sometimes wider.\n\n## Wanted\n\n- [ ] Measure which of these the list page (`ObjectDataPage`, `parseUrlFilterTriples`) can read back EXACTLY once written, and give the route a spelling for the ones it can: a boolean comparand and `$in` are the likely first two (a boolean bucket and a measure scope like `status in (...)` are common drills).\n- [ ] Each new spelling joins `exactRecordListFilter`'s accepted set with its own round-trip proof (written alone, reads back as exactly one triple), so the drill exits and \"View all\" regain a destination together.\n- [ ] Nothing that cannot round-trip is accepted: no destination stays better than a wider list.\n\nReader: `domain:ui` (`ui/packages/app-shell/src/views/drillUrlFilters.ts`, `useOpenRecordList.ts`, `ObjectDataPage`'s URL read).\nDedupe: `exactRecordListFilter`, `list route URL filter $in`, `filter boolean list route` (is:issue is:open) → only #30654 itself."
+}

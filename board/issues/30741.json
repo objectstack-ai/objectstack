@@ -1,0 +1,34 @@
+{
+  "number": 30741,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): let triage close duplicates and completed tracking parents",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-06T00:16:36Z",
+  "updated_at": "2026-11-06T01:06:00Z",
+  "closed_at": "2026-11-06T01:05:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-06T01:05:58Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30741",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DSw5aPMJMFmu7Ea4UzDAZtU)_\n\ndomain:skills#1 · os-elon-musk · session_016WV4czGYzFgExGjPWM86fG\n\nFixes #30462\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:把您 11-05 在分诊会话里的裁决(「同意,需要的话立skills卡」)写进分诊席章程与职责:分诊可自己关两类卡,一是点名目标、本轮新读确认重叠的重复卡(`duplicate`),二是 `Part of #n` 子卡全关、自身无 open 工作的追踪父单(`completed`)。\n- 为什么改:原章程写「只写标签与审计评论」,重复卡和已完父单只能等您动手,#30118、#26059 等等了 1–10 天。\n- 边界:每次关卡前先贴签名评论,点名所据裁决与证据;按是非关(won't do / not a bug)、有活认领的卡、安全卡不在此权,仍归您。\n- 风险与回滚:只改 `.claude/` 下两份规则文本,两文件行数持平(20 / 100),没抬任何天花板;回滚即 revert。\n- 先看:`triage-duties.md` 第 70 行(重复卡并卡行)、第 73–74 行(两条新行),以及 `lanes/triage.md` 第 4 行。\n- 需要你做的:无,Tier S,席位复核后落地。\n\n## What changes\n\n- `.claude/skills/pm-dispatch/references/lanes/triage.md` L4: triage's writes become \"labels, audit comments and closes\" (was \"labels and audit comments\"). The rest of the line is kept; the opening clause is compressed to fit the 120-byte line cap.\n- `.claude/skills/pm-dispatch/references/triage-duties.md`:\n  - L70 (the same-file-same-mechanism merge line): drops \"at first-touch grading only\", so a duplicate a lane names later can also be closed; it names the relay op: `issue_patch` with `state_reason: duplicate` (was `duplicate_of`, which the relay's `state_reason` enum does not carry).\n  - L73 (new): close a duplicate only when the target is named and the overlap is read fresh; close a tracking parent as `completed` when every `Part of #n` child is closed and the parent holds no open work.\n  - L74 (new): each close is preceded by a signed comment naming the ruling and the evidence. ⛔ Closing on merits, a card under a live claim, and a security card are outside this power and stay with the maintainer.\n- The op exists already: `scripts/pm/fleet-write/ops.mjs` `issue_patch` takes `state` and `state_reason` (enum `completed`, `not_planned`, `duplicate`, `reopened`). No `scripts/pm/**` change.\n\n## Paying the line ceilings\n\nBoth files were at headroom 0 (`triage.md` 20, `triage-duties.md` 100). Nothing was raised:\n\n- `lanes/triage.md`: the edit stays inside L4.\n- `triage-duties.md` gains two lines and pays two:\n  - the four disjunct lines ①–④ (old L13–15) are rewritten as two, with the same labels and the same `updated_at` ~2-minute cut;\n  - the half-state backlog line (old L18: ②③④ oldest first, P0 suspects first, newest-first does not apply) is folded into the ordering line (old L20).\n\n## Carried rulings and ⛔ constraints read in the two files\n\n`grep -n 'ruling|裁决|维护者|⛔'` on both files: 7 matching lines in `lanes/triage.md` and 33 in `triage-duties.md` on the base. Every one is kept. The ones this power touches:\n\n- `triage-duties.md` 「⛔ 带 `pm:dispatched`/assignee/open 或 merged PR 引用的卡不动」 now names the close lines among its exceptions (「例外:关卡行、下三行、锚卡首触。」, head `51d3c137`). Without that, a finished tracking parent that merged PRs reference could not be closed, which is the close the ruling grants. The close lines still exclude a live claim and a parent with open work.\n- The human floor's 「卡的命运(关 not planned、降级、撤回、砍半)」 and the first-touch `not_planned` closes (「无则关」, 「三类外首触关闭只清门前存量」) are untouched. The new ⛔ line is scoped to \"this power\" (此权) so it does not contradict those existing first-touch rules.\n- 「在飞(assignee/open PR)永不并」 on the merge line is kept, and matches the live-claim exclusion.\n\n## Verification\n\nGates derived by `node scripts/pm/dispatch-gates.mjs --commands` on head `1e3e11c7`: 19 of 19 run, all exit 0, reconciled with `--ran` (0 NOT-MEASURED). Also run: `pnpm lint` (exit 0), `pnpm check:pm-governed-prose` (exit 0). `check:pm-skill-ratchet` (line ceilings and the 120-byte line cap) and `check:pm-skill-id-lint` (no issue numbers in the skill text) are among the 19. `node scripts/pm/check-governed-merges.mjs --test` on the two paths answers GOVERNED, Tier S.\n\n## Acceptance notes\n\n- Worked examples (not copied into the skill, which carries no issue numbers): triage's signed closes on #30118 (duplicate, comment 6658063257) and #29465 (completed tracking parent, comment 6670579539).\n- `scripts/pm/check-half-states.mjs` L17381 is a code comment that quotes the old ordering wording 「队列每轮清空时最新优先;清不空的那一刻起改最老优先」. The meaning is unchanged, but the quote is no longer verbatim. It is not asserted by any test, and `scripts/pm/**` is outside this card's surface.\n- The two new lines sit after the \"执行席 ⛔ 不并卡\" line and before the in-flight re-check rows, so the 「例外:下三行」 reference on the \"不动\" line still points at the same three lines.\n- No changeset: the diff is `.claude/**` only (`skip-changeset`), as the card states.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (Not touched.)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (Publishes nothing: `skip-changeset`.)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (Not touched.)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English (the 维护者速读 block is the lane's maintainer summary).\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4czGYzFgExGjPWM86fG\n\n<!-- signed: domain:skills#1 · os-elon-musk · session_016WV4czGYzFgExGjPWM86fG -->\n"
+}

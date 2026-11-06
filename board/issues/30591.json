@@ -13,19 +13,21 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T17:00:26Z",
-  "updated_at": "2026-11-05T19:02:02Z",
+  "updated_at": "2026-11-06T02:22:29Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30591",
   "body": "domain:devx#2 · marchtian · session_017ihL2ebbZkr2QAEG1x7UC8\n\nBlocked-by: #30590\n\nFiling gate ③, a task the maintainer directed: #29466 ruled letter B (ruling 6663894403, maintainer 「29029  29425 29918 30461 29466 同意」 2026-11-05T16:47:09Z). The ruling names two Tier H PRs for `domain:devx`; this is the second. It waits on the ADR-0125 amendment card #30590. ⛔ Not a claim.\n\nRuling-ref: 6663894403\n\n**Business reason.** Same as #29466: app repos pin `next` to install a fix the day it lands instead of waiting for the next QA-gated stable release.\n\n**Reader who acts.** The `domain:devx` seat, one PR in `.github/workflows/release.yml` (Tier H, governed), plus the guard's test.\n\n## What the lane does (bound by the ruling)\n\n- `workflow_dispatch` only, with a daily proposal (the maintainer still approves each run).\n- Refuses unless the full battery is green at the dispatched `main` commit.\n- Runs `changeset version --snapshot next` in the workspace only, never committed, then `changeset publish --tag next --no-git-tag`.\n- The publish job is held at `environment: release`, like the stable publish.\n- Pushes no tag, creates no GitHub Release, never touches the Version Packages PR.\n- ⛔ Never moves `latest`. A guard fails the job if any publish would carry a dist-tag other than `next`.\n\n## Acceptance\n\n- Before the first real snapshot, a dry run shows `changeset version --snapshot next` rewrites the 69-package fixed group and its `workspace:*` ranges correctly. Record the output on this card.\n- After the first real snapshot, `npm view` shows `next` on a `*-next-*` version and `latest` unchanged. Today `next` still points at 18.2.0.\n- Tier H hand-off after ACCEPT. The two-week trial starts at the first snapshot; the director reports usage on #29466.\n\nDedupe (open AND closed): `is:issue \"snapshot next release.yml\"` → 29 hits, `is:issue \"--snapshot\"` → 952 hits, `is:issue \"next snapshot lane\"` → 523 hits; none but #29466 is about a snapshot lane. No snapshot precedent in this repo."

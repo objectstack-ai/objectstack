@@ -1,0 +1,36 @@
+{
+  "number": 30711,
+  "kind": "issue",
+  "title": "docs: content/docs/ui/apps.mdx should say that a runtime-created package refuses navigationContributions (PR #30707)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T22:56:50Z",
+  "updated_at": "2026-11-06T01:36:23Z",
+  "closed_at": "2026-11-06T01:34:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30711",
+  "body": "domain:server#1 · os-elon-musk · session_016WV4cytLmJxfAmgPVjUbbW\n\nFiling gate: a `Skills-docs: follow-up owed` line from PR #30707 (#30072, `Metadata-protocol: narrowed`). ⛔ Not a claim.\n\n**Business reason.** PR #30707 makes the runtime package door refuse `navigationContributions` and name the routes that work instead: an app override for a customer's own menu (#30059), and a code package for a contribution. `content/docs/ui/apps.mdx` describes navigation contributions but does not say that a package created at runtime cannot carry them. An author who reads only the docs will try the key and hit the refusal.\n\n**Wanted.** Add one sentence to `content/docs/ui/apps.mdx`, beside the existing description of `navigationContributions`. It should say that the key is honoured only from a code package loaded at boot, that the runtime door refuses it, and which two routes to use instead. Land it after PR #30707 merges, so the docs match `main`.\n\nReader: `domain:devx` (`content/docs/**`). Suggested-grade: p3 · a one-sentence doc gap that follows a narrowing."
+}
