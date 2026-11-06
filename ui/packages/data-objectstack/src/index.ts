@@ -7964,6 +7964,11 @@ export { MetadataClient, readSaveAdvisories } from './metadata-client';
 // `getDraft` that produces the envelope, because the unwrap-and-strip is part
 // of that method's contract rather than a detail of any one view.
 export { extractDraftBody } from './draft-envelope';
+// objectstack#29793, objectstack#30786 - the one reading of which document an
+// editor edits (the item as authored, from `layered()`), exported beside the
+// client whose answer it reads so every editor that saves an item asks it.
+export { authoredBuffer, authoredPublished, editsAuthoredLayers } from './authored-layers';
+export type { AuthoredBuffer, AuthoredLayers } from './authored-layers';
 // objectui#12725 - the reader of the same envelope's per-key provenance
 // (`draftChanges`, objectstack#24298): which surface last changed a key of the
 // pending draft. One reader, so the longest-prefix rule is spelled once.
