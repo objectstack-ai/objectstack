@@ -30,12 +30,16 @@
  * the pair, declared; what uses it listed from the references read before
  * anything is published, a failed read said as failed; a designer's blocking
  * issue holding the edit unsent; and a kept publish refusal shown at the item.
+ *
+ * objectstack#30859 — on a zh-CN console the dataset's pending draft is edited
+ * as stored (the layered read's `draft` at the pair), never as the translated
+ * `?state=draft` read, and a served draft with no stored copy opens nothing.
  */
 
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const BASE = 'com.example.hotcrm';
@@ -52,9 +56,19 @@ const srv = vi.hoisted(() => ({
   resets: [] as Array<{ type: string; name: string; opts: Record<string, unknown> }>,
   reads: [] as Array<{ op: string; type: string; name: string; opts: Record<string, unknown> }>,
   version: 0,
+  /** objectstack#30859 — the console's locale: `zh` serves `?state=draft` translated, as the server does. */
+  servedLocale: 'en' as 'en' | 'zh',
+  /** `false` models a server that does not serve the stored `draft` layer to this caller. */
+  servesDraftLayer: true,
 }));
 
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+/** objectstack#30859 — the zh-CN catalog's labels for the dataset, as `translateDataset` applies them. */
+const ZH_LABELS: Record<string, string> = { 'Opportunity Metrics': '商机指标', Opportunities: '商机数', 'Total Amount': '总金额' };
+const translated = (doc: Record<string, unknown>): Record<string, unknown> =>
+  JSON.parse(JSON.stringify(doc), (key, value) =>
+    key === 'label' && typeof value === 'string' ? (ZH_LABELS[value] ?? value) : value,
+  ) as Record<string, unknown>;
 /** The canonical member when none is named, as the server reads a bare name. */
 const slot = (type: string, name: string, member?: string) =>
   `${type}/${name}/${type === 'email_template' ? (member ?? 'en-US') : ''}`;
@@ -69,7 +83,8 @@ const mockClient = vi.hoisted(() => ({
   getDraft: vi.fn(async (type: string, name: string, opts: { packageId?: string; member?: string } = {}) => {
     srv.reads.push({ op: 'getDraft', type, name, opts: clone(opts) });
     const draft = srv.drafts.get(opts.packageId ?? '')?.get(slot(type, name, opts.member));
-    return draft ? { type, name, item: clone(draft), version: `v${srv.version}` } : null;
+    if (!draft) return null;
+    return { type, name, item: srv.servedLocale === 'zh' ? translated(draft) : clone(draft), version: `v${srv.version}` };
   }),
   layered: vi.fn(async (type: string, name: string, opts: { packageId?: string; member?: string } = {}) => {
     srv.reads.push({ op: 'layered', type, name, opts: clone(opts) });
@@ -77,12 +92,16 @@ const mockClient = vi.hoisted(() => ({
     const code = srv.rows.get(opts.packageId ?? '')?.get(key) ?? null;
     // N-10: the pair's declaring row is served over the base's item, member by member.
     const overlay = opts.packageId === BASE ? (srv.rows.get(PAIR)?.get(key) ?? null) : null;
-    if (!code && !overlay) throw Object.assign(new Error('Not found'), { status: 404 });
+    // objectstack#30859 — the pending draft at that package, as stored (never
+    // translated), served to an admitted author; an item with only a draft has layers too.
+    const draft = srv.drafts.get(opts.packageId ?? '')?.get(key) ?? null;
+    if (!code && !overlay && !draft) throw Object.assign(new Error('Not found'), { status: 404 });
     return {
       code: code ? clone(code) : null,
       overlay: overlay ? clone(overlay) : null,
       overlayScope: overlay ? 'env' : null,
       effective: clone(overlay ?? code),
+      ...(srv.servesDraftLayer ? { draft: draft ? clone(draft) : null } : {}),
     };
   }),
   save: vi.fn(async (type: string, name: string, item: unknown, opts: Record<string, unknown> = {}) => {
@@ -127,6 +146,7 @@ import {
   type MetadataDefaultInspectorProps,
 } from '../metadata-admin/default-inspector-registry';
 import type { StudioRefusal } from './metadataError';
+import { t } from '../metadata-admin/i18n';
 
 /**
  * The dataset's designer slot: the draft it is handed, its read-only gate, one
@@ -137,6 +157,7 @@ function DesignerProbe({ draft, onPatch, onBlockingIssuesChange, readOnly }: Met
   return (
     <div data-testid="designer-probe" data-readonly={String(readOnly)}>
       <p data-testid="designer-probe-aggregate">{String(measures[1]?.aggregate ?? '')}</p>
+      <p data-testid="designer-probe-labels">{[draft.label, ...measures.map((m) => m.label)].map(String).join(' | ')}</p>
       <button
         type="button"
         data-testid="designer-probe-avg"
@@ -238,6 +259,8 @@ beforeEach(() => {
   srv.resets.length = 0;
   srv.reads.length = 0;
   srv.version = 0;
+  srv.servedLocale = 'en';
+  srv.servesDraftLayer = true;
   for (const fn of Object.values(mockClient)) fn.mockClear();
   vi.stubGlobal(
     'fetch',
@@ -616,5 +639,60 @@ describe('Customize a read-only base’s dataset (objectstack#30064)', () => {
     const strip = await screen.findByTestId('studio-bundle-editor-publish-refusal', undefined, { timeout: 8000 });
     expect(within(strip).getByRole('alert')).toHaveTextContent('Check Aggregate of the measure “Total Amount”');
     expect(within(strip).getByTestId('studio-refusal-detail')).toHaveTextContent('expected_revenue');
+  });
+});
+
+describe('a read-only base’s dataset draft is edited as stored on a zh-CN console (objectstack#30859)', () => {
+  /** The pair's pending draft as its author saved it: source labels, declared. */
+  const pendingDraft = () => {
+    const { _packageId: _dropped, ...whole } = clone(METRICS);
+    return { ...whole, overrides: { package: BASE, basedOn: '4.0.0' } };
+  };
+
+  beforeEach(() => {
+    srv.servedLocale = 'zh';
+    at(srv.drafts, PAIR).set(slot('dataset', 'opportunity_metrics'), pendingDraft());
+  });
+
+  it('the designer is handed the stored draft, not the translated read, and an edit saves source labels', async () => {
+    mount({ type: 'dataset', name: 'opportunity_metrics', listedPair: PAIR });
+    // Red on base: the buffer was the served draft, `商机指标 | 商机数 | 总金额`.
+    await waitFor(
+      () =>
+        expect(screen.getByTestId('designer-probe-labels')).toHaveTextContent(
+          'Opportunity Metrics | Opportunities | Total Amount',
+        ),
+      { timeout: 8000 },
+    );
+    // The stored draft is read at the draft read's address: the pair.
+    expect(srv.reads).toContainEqual({ op: 'layered', type: 'dataset', name: 'opportunity_metrics', opts: { packageId: PAIR } });
+
+    if (screen.queryByTestId('studio-customize')) await customize();
+    await waitFor(() => expect(screen.getByTestId('designer-probe')).toHaveAttribute('data-readonly', 'false'));
+    fireEvent.click(screen.getByTestId('designer-probe-avg'));
+    await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 5000 });
+    const [save] = srv.saves;
+    expect(save.opts).toMatchObject({ mode: 'draft', packageId: PAIR });
+    const sent = save.body as { label: unknown; measures: Array<{ label: unknown; aggregate: unknown }> };
+    expect(sent.label).toBe('Opportunity Metrics');
+    expect(sent.measures.map((m) => [m.label, m.aggregate])).toEqual([
+      ['Opportunities', 'count'],
+      ['Total Amount', 'avg'],
+    ]);
+    expect(JSON.stringify(save.body)).not.toMatch(/[㐀-鿿]/u);
+  });
+
+  it('a served draft whose stored copy the layers do not serve opens no buffer, and nothing is sent', async () => {
+    srv.servesDraftLayer = false;
+    mount({ type: 'dataset', name: 'opportunity_metrics', listedPair: PAIR });
+    expect(
+      await screen.findByText(t('engine.studio.refusal.draftUnreadable', 'en-US'), undefined, { timeout: 8000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('designer-probe')).toBeNull();
+    await act(async () => {
+      await sleep(2500);
+    });
+    expect(srv.saves).toEqual([]);
+    expect(srv.drafts.get(PAIR)?.get(slot('dataset', 'opportunity_metrics'))).toEqual(pendingDraft());
   });
 });

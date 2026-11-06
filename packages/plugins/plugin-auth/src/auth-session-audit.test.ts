@@ -287,3 +287,100 @@ describe('[#8144] the mapping refuses to invent an actor', () => {
     expect(event).toEqual({ action: 'login', userId: 'usr_1' });
   });
 });
+
+describe('[#30924] a session an authentication policy holds records the hold on its own login row', () => {
+  // The posture computation is the manager's own (`resolveUserAuthGates`, the
+  // one the session gate asks); these cases stub its ANSWER and read what the
+  // composed hook hands the sink, so what is pinned is the wiring and the
+  // mapping. The real computation over a real better-auth sign-in is pinned in
+  // `auth-account-event-audit.test.ts`.
+  const MFA = { code: 'MFA_REQUIRED', message: 'Set up an authenticator app.' };
+  const EXPIRED = { code: 'PASSWORD_EXPIRED', message: 'Change your password.' };
+  const RESET = { code: 'PASSWORD_RESET_REQUIRED', message: 'Change your temporary password.' };
+
+  function hooksWithGates(answer: (userId: string, options: unknown) => Promise<unknown[]>) {
+    const recordAuthEvent = vi.fn(async (_event: AuthSessionAuditEventInput) => undefined);
+    const manager = new AuthManager({
+      secret: SECRET,
+      baseUrl: 'http://localhost:3000',
+      getAuditSink: () => ({ recordAuthEvent }),
+    } as any);
+    const resolveUserAuthGates = vi.spyOn(manager, 'resolveUserAuthGates').mockImplementation(answer as any);
+    const hooks = (manager as any).composeDatabaseHooks(undefined) as any;
+    return { hooks, recordAuthEvent, resolveUserAuthGates };
+  }
+
+  it('an MFA-held session: the login row carries reason MFA_REQUIRED and rule mfa_required, asked once for its user in its organization', async () => {
+    const { hooks, recordAuthEvent, resolveUserAuthGates } = hooksWithGates(async () => [MFA]);
+
+    await hooks.session.create.after(SESSION, { path: '/sign-in/email' });
+
+    expect(resolveUserAuthGates).toHaveBeenCalledTimes(1);
+    expect(resolveUserAuthGates).toHaveBeenCalledWith('usr_1', { organizationId: 'org_1' });
+    expect(recordAuthEvent).toHaveBeenCalledTimes(1);
+    expect(firstEvent(recordAuthEvent)).toEqual({
+      action: 'login',
+      userId: 'usr_1',
+      sessionId: 'ses_1',
+      organizationId: 'org_1',
+      ipAddress: '203.0.113.7',
+      userAgent: 'Mozilla/5.0 (probe)',
+      context: { endpoint: '/sign-in/email', reason: 'MFA_REQUIRED', rule: 'mfa_required' },
+    });
+  });
+
+  it('control: no posture holds the session, so the login row is exactly as before', async () => {
+    const { hooks, recordAuthEvent } = hooksWithGates(async () => []);
+    await hooks.session.create.after(SESSION, { path: '/sign-in/email' });
+    expect(firstEvent(recordAuthEvent).context).toEqual({ endpoint: '/sign-in/email' });
+  });
+
+  it('control: a posture the table does not record (password expiry) leaves the row as before', async () => {
+    const { hooks, recordAuthEvent } = hooksWithGates(async () => [EXPIRED]);
+    await hooks.session.create.after(SESSION, { path: '/sign-in/email' });
+    expect(firstEvent(recordAuthEvent).context).toEqual({ endpoint: '/sign-in/email' });
+  });
+
+  it('a user held by the forced reset AND enforced MFA has the MFA hold recorded', async () => {
+    const { hooks, recordAuthEvent } = hooksWithGates(async () => [RESET, MFA]);
+    await hooks.session.create.after(SESSION, { path: '/sign-in/email' });
+    expect(firstEvent(recordAuthEvent).context).toMatchObject({ reason: 'MFA_REQUIRED', rule: 'mfa_required' });
+  });
+
+  it('an impersonation session is held by an account-scope posture, so enforced MFA is recorded there too', async () => {
+    const { hooks, recordAuthEvent } = hooksWithGates(async () => [RESET, MFA]);
+    await hooks.session.create.after({ ...SESSION, impersonatedBy: 'usr_admin' }, { path: '/admin/impersonate-user' });
+    const event = firstEvent(recordAuthEvent);
+    expect(event.actor).toBe('usr_admin');
+    expect(event.context).toEqual({
+      endpoint: '/admin/impersonate-user',
+      impersonated_by: 'usr_admin',
+      reason: 'MFA_REQUIRED',
+      rule: 'mfa_required',
+    });
+  });
+
+  it('a posture read that throws records no hold, and the login row is still written', async () => {
+    const { hooks, recordAuthEvent } = hooksWithGates(async () => {
+      throw new Error('sys_user unreachable');
+    });
+    await expect(hooks.session.create.after(SESSION, { path: '/sign-in/email' })).resolves.toBeUndefined();
+    expect(recordAuthEvent).toHaveBeenCalledTimes(1);
+    expect(firstEvent(recordAuthEvent).context).toEqual({ endpoint: '/sign-in/email' });
+  });
+
+  it('no audit plugin installed: no posture read at all', async () => {
+    const manager = new AuthManager({ secret: SECRET, baseUrl: 'http://localhost:3000' } as any);
+    const resolveUserAuthGates = vi.spyOn(manager, 'resolveUserAuthGates');
+    const hooks = (manager as any).composeDatabaseHooks(undefined) as any;
+    await hooks.session.create.after(SESSION, { path: '/sign-in/email' });
+    expect(resolveUserAuthGates).not.toHaveBeenCalled();
+  });
+
+  it('a session with no subject: no posture read and no row', async () => {
+    const { hooks, recordAuthEvent, resolveUserAuthGates } = hooksWithGates(async () => [MFA]);
+    await hooks.session.create.after({ id: 'ses_x' }, { path: '/sign-in/email' });
+    expect(resolveUserAuthGates).not.toHaveBeenCalled();
+    expect(recordAuthEvent).not.toHaveBeenCalled();
+  });
+});

@@ -57,12 +57,15 @@ interface Recorded { object: string; data: Record<string, unknown> }
 function makeQl(row: Record<string, unknown>, opts: { failUpdate?: boolean } = {}) {
   const updates: Recorded[] = [];
   const rows: any[] = [{ id: KEY_ID, key: hashApiKey(RAW), prefix: 'osk_lifecycl', user_id: OWNER, revoked: false, ...row }];
+  // The key's owner exists: an API key authenticates only as an owner who exists.
+  const tables: Record<string, any[]> = { sys_api_key: rows, sys_user: [{ id: OWNER }] };
   const ql = {
     updates,
     find: async (object: string, findOpts: any) => {
-      if (object !== 'sys_api_key') return [];
+      const table = tables[object];
+      if (!table) return [];
       const where = findOpts?.where ?? {};
-      const matched = rows.filter((r) => Object.entries(where).every(([k, v]) => {
+      const matched = table.filter((r) => Object.entries(where).every(([k, v]) => {
         if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
         return r[k] === v;
       }));

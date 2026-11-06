@@ -89,8 +89,10 @@ async function serve(input: RequestInfo | URL, init?: RequestInit): Promise<Resp
     } else if (seg.length === 3 && seg[2] === 'layers' && server.failLayers.has(`${seg[0]}/${seg[1]}`)) {
       [status, body] = [500, { error: { code: 'INTERNAL_ERROR', message: 'metadata store unavailable' } }];
     } else if (seg.length === 3 && seg[2] === 'layers') {
+      // As the server answers an admitted author (objectstack#30859): a pending draft is served as stored, as `draft`, and an item with only a draft still has layers.
       const row = server.active.get(`${seg[0]}/${seg[1]}`);
-      if (row) body = { code: null, overlay: row, overlayScope: 'env', effective: row };
+      const draft = server.drafts.get(`${seg[0]}/${seg[1]}`) ?? null;
+      if (row || draft) body = { code: null, overlay: row ?? null, overlayScope: row ? 'env' : null, effective: row ?? null, draft };
       else [status, body] = [404, { error: { code: 'NOT_FOUND', message: 'absent' } }];
     } else if (seg.length === 2) {
       const draftRead = q.get('state') === 'draft';
@@ -162,11 +164,13 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('useObjectListViewDraft — an unpublished view is not asked for /layers (objectui#11799)', () => {
-  it('a view with a draft and no layer sends no /layers, and the buffer holds the draft as before', async () => {
+  it('a view with a draft and no published layer asks /layers once, for its stored draft, with no 404, and the buffer holds the draft', async () => {
     server.drafts.set(`view/${VIEW}`, viewItem(['title', 'status']));
     await openLeaf();
 
-    expect(layersAsked()).toBe(0);
+    // objectstack#30859 — the buffer is the stored `draft` layer, which the
+    // server answers for a view that has only a draft.
+    expect(layersAsked()).toBe(1);
     expect(server.requests.filter((r) => r.status === 404)).toEqual([]);
     expect(probe()).toEqual({
       loadedFor: `listView:${VIEW}`,

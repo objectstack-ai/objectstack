@@ -123,6 +123,7 @@ import {
 } from './studio-canvas-preview.js';
 import { isSameSurface, type Surface, type SurfaceIdentity } from './navSurface.js';
 import { issueRefusal, plainRefusal, type StudioHeld } from './metadataError.js';
+import { readAuthoredDraft } from './authoredDraft.js';
 import { isStudioHiddenSystemField } from './studioHiddenSystemField.js';
 import {
   fieldNamesHeldByTypeBlock,
@@ -381,6 +382,8 @@ export interface ObjectListViewDraft {
    * refused save as an author sentence over its raw text, a load as the text.
    * objectstack#29148 — `draftUnreadable`: the server refused to read the
    * view's pending draft (`403`), so no buffer was installed over it.
+   * objectstack#30859 — with `error: null`, a draft was served whose stored
+   * copy the layered read did not serve, so no buffer was installed either.
    */
   failure: { during: 'load' | 'save' | 'draftUnreadable'; error: unknown } | null;
   /** Replace the view item with an edited one. */
@@ -663,8 +666,22 @@ export function useObjectListViewDraft({
         const draftResp = draftRead.answer;
         // A served draft is the whole document, taken as-is (objectui#10765);
         // the published layer only without one. Both lose the read
-        // decorations a save must not send back.
-        const draft = extractDraftBody(draftResp) as Row | null;
+        // decorations a save must not send back. objectstack#30859 — the
+        // pending draft is edited as stored, read at the draft read's address:
+        // the served body is translated for this locale.
+        const served = extractDraftBody(draftResp);
+        const authoredRead = served
+          ? await readAuthoredDraft(client, 'view', viewId, served, { packageId: readAt })
+          : null;
+        if (cancelled) return;
+        const authored = authoredRead?.buffer ?? null;
+        if (authored?.kind === 'unserved') {
+          readAtRef.current = null;
+          setBuffer({ for: '', row: null, dirty: false, hasDraft: true, draftChanges: null, published: undefined });
+          setFailure({ during: 'draftUnreadable', error: null });
+          return;
+        }
+        const draft = authored ? (authored.body as Row) : null;
         // objectui#11799 — so the published layer is read only for a view with
         // no pending draft. A view the panel created and nobody published has
         // a draft and no layer, and `GET …/layers` answers 404 for it.
@@ -692,13 +709,16 @@ export function useObjectListViewDraft({
         // owner here: a layered read naming no package is refused for a name
         // two packages hold. On a read-only base that is the base, whose read
         // serves its declared override (ADR-0146 D8).
+        // objectstack#30859 — the stored draft's read at this same package
+        // already carries that layer, so it is not asked again.
         const layeredAt = { packageId };
+        const draftLayers = readAt === packageId ? (authoredRead?.layers ?? null) : null;
         const lay = objectDraftOnly
           ? null
           : !draft
             ? await client.layered<Row>('view', viewId, layeredAt)
             : marksNeedPublished
-              ? await client.layered<Row>('view', viewId, layeredAt).catch(() => undefined)
+              ? (draftLayers ?? (await client.layered<Row>('view', viewId, layeredAt).catch(() => undefined)))
               : null;
         if (cancelled) return;
         const published = (lay as { effective?: unknown; code?: unknown } | null)?.effective ?? (lay as { code?: unknown } | null)?.code;
@@ -1311,7 +1331,11 @@ export function ObjectListViewInspector({
     : failure.during === 'save'
       ? issueRefusal(failure.error, locale)
       : failure.during === 'draftUnreadable'
-        ? { message: t('engine.studio.refusal.draftUnreadable', locale), detail: formatMetadataError(failure.error) }
+        ? {
+            message: t('engine.studio.refusal.draftUnreadable', locale),
+            // `null`: a draft whose stored copy was not served, with no server sentence to show.
+            detail: failure.error === null ? undefined : formatMetadataError(failure.error),
+          }
         : plainRefusal(failure.error);
   const working = row ?? newListViewItem(target, seedColumns);
   // objectstack#30046 — the name the header's view switcher gives the view.

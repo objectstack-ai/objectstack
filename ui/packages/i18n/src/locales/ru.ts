@@ -2488,6 +2488,28 @@ const ru = {
       dark: "Тёмная",
       system: "Системная",
     },
+    // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
+    assignedWork: {
+      title: 'Записи этого человека',
+      loading: 'Подсчёт записей этого человека…',
+      countFailed: 'Не удалось подсчитать записи этого человека: {{message}}',
+      noClient: 'Здесь нельзя подсчитать записи этого человека.',
+      none: 'У этого человека нет записей, которые вы можете читать.',
+      summary: 'Записей, которые вы можете читать: {{total}}; владелец — {{owned}}, назначено — {{assigned}}.',
+      row: '{{object}} · {{field}}',
+      notTransferable: 'Поле содержит нескольких человек, поэтому его нельзя передать здесь.',
+      truncated: 'Подсчитаны не все пользовательские поля; записей может быть больше.',
+      unreadable: 'Не подсчитаны, так как у вас нет доступа на чтение: {{objects}}',
+      handoverTo: 'Передать',
+      handoverHint: 'Необязательно. Блокировка не ждёт передачи.',
+      handover: 'Передать',
+      handingOver: 'Передача…',
+      handoverNext: 'Передать следующую партию',
+      targetBanned: 'Этот человек заблокирован. Выберите активного пользователя.',
+      transferRefused: 'Передача отклонена: {{message}}',
+      report: 'Передано: {{updated}}, не удалось перенести: {{failed}}, осталось: {{remaining}}.',
+      failure: '{{object}} {{id}}: {{message}}',
+    },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
       managedUsers: {
@@ -2806,6 +2828,8 @@ const ru = {
         title: 'Журнал аудита',
         subtitle: 'Активность системы и изменения записей, только для чтения. Сначала новые.',
         openAsList: 'Открыть списком',
+        openEntryPage: 'Открыть страницу записи журнала',
+        openEntryPageHint: 'На странице записи журнала перечислены все изменения той же записи, сначала новые.',
         openPresetAsList: 'Открыть «{{label}}» списком',
         presets: 'Пресеты',
         presetOtherSource: 'Это представление читает другой источник данных.',
@@ -3611,6 +3635,7 @@ const ru = {
     // objectui#13461 — the top bar's avatar button, which holds only the avatar.
     accountMenu: 'Меню аккаунта',
     profile: "Профиль",
+    connectAiAssistant: "Подключить ИИ-ассистента",
     logout: "Выйти",
     preferences: "Настройки",
     theme: "Тема",
@@ -3962,6 +3987,13 @@ const ru = {
       title: 'QwenWork',
       body: 'Расширения → Коннекторы → + Добавить → Вставить JSON-конфигурацию:',
       hint: 'Или добавьте вручную как Streamable HTTP с этим URL. Если ваша версия не поддерживает вход через браузер, добавьте заголовок запроса Authorization: Bearer <ключ API> (создайте ключ ниже).',
+    },
+    client: {
+      title: 'Каким ИИ-ассистентом вы пользуетесь?',
+      hint: 'Выберите свой, чтобы видеть только его шаги. Этот браузер запомнит ваш выбор.',
+    },
+    advanced: {
+      title: 'Дополнительно: скрипты и CI',
     },
     apiKey: {
       title: 'API-ключи',

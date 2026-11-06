@@ -13,6 +13,10 @@
  * `MetadataClient`, whose transport is an in-memory server: the drafts ledger
  * lists the gated view, and its `?state=draft` read answers 403 as the read
  * gate does.
+ *
+ * objectstack#30859 — a pending view draft served translated (zh-CN) is
+ * edited and saved as the layered read's stored `draft` layer; one whose
+ * stored copy the layers do not serve installs no buffer.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -49,6 +53,13 @@ const server = {
   drafts: new Map<string, Record<string, unknown>>(),
   /** Draft rows whose read is refused as the audience gate refuses it. */
   gated: new Set<string>(),
+  /**
+   * objectstack#30859 — what the `?state=draft` read serves in place of the
+   * stored draft (its translation for the console's locale), and the drafts
+   * whose stored copy the layered read serves as its `draft` layer.
+   */
+  servedAs: new Map<string, Record<string, unknown>>(),
+  draftLayer: new Set<string>(),
   layerReads: [] as string[],
   puts: [] as Array<{ item: string; ifMatch: string | null; ifNoneMatch: string | null }>,
 };
@@ -76,11 +87,19 @@ async function serve(input: RequestInfo | URL, init?: RequestInit): Promise<Resp
   if (seg.length === 3 && seg[2] === 'layers') {
     server.layerReads.push(item);
     const row = server.active.get(item);
-    return row ? json(200, { code: null, overlay: row, overlayScope: 'env', effective: row }) : json(404, { error: { code: 'NOT_FOUND' } });
+    const stored = server.draftLayer.has(item) ? server.drafts.get(item) : undefined;
+    if (!row && !stored) return json(404, { error: { code: 'NOT_FOUND' } });
+    return json(200, {
+      code: null,
+      overlay: row ?? null,
+      overlayScope: 'env',
+      effective: row ?? null,
+      ...(stored ? { draft: stored } : {}),
+    });
   }
   if (url.searchParams.get('state') === 'draft') {
     if (server.gated.has(item)) return json(403, { success: false, error: { code: 'PERMISSION_DENIED', message: GATE_REFUSAL } });
-    const row = server.drafts.get(item);
+    const row = server.servedAs.get(item) ?? server.drafts.get(item);
     return row ? json(200, { type: seg[0], name: seg[1], item: row, version: 'v1' }) : json(404, { error: { code: 'NO_DRAFT' } });
   }
   const row = server.active.get(item);
@@ -149,6 +168,8 @@ beforeEach(() => {
   server.active.clear();
   server.drafts.clear();
   server.gated.clear();
+  server.servedAs.clear();
+  server.draftLayer.clear();
   server.layerReads = [];
   server.puts = [];
   hook.current = null;
@@ -193,5 +214,46 @@ describe('useObjectListViewDraft — a view draft the server refuses to read is 
     await act(async () => hook.current!.save({ unmoved: () => true }));
     await flush();
     expect(server.puts).toEqual([{ item: `view/${VIEW}`, ifMatch: null, ifNoneMatch: '*' }]);
+  });
+});
+
+describe('useObjectListViewDraft — a pending view draft is edited as stored, not as served (objectstack#30859)', () => {
+  const stored = () => viewItem(['title', 'status'], { label: 'Open tasks', description: 'Tasks nobody closed' });
+  const served = () => viewItem(['title', 'status'], { label: '未完成任务', description: '没人关闭的任务' });
+
+  it('zh-CN: the buffer and the saved view carry the author’s text, never the served translation', async () => {
+    server.drafts.set(`view/${VIEW}`, stored());
+    server.servedAs.set(`view/${VIEW}`, served());
+    server.draftLayer.add(`view/${VIEW}`);
+
+    mount();
+
+    expect(await screen.findByTestId('list-view-columns', undefined, { timeout: 8000 })).toBeInTheDocument();
+    expect(hook.current!.row).toMatchObject({ label: 'Open tasks', description: 'Tasks nobody closed' });
+    // The stored draft is read at the draft read's own package.
+    expect(server.layerReads).toEqual([`view/${VIEW}`]);
+
+    await act(async () => hook.current!.edit({ ...hook.current!.row!, config: { ...stored().config, columns: ['title'] } }));
+    await act(async () => hook.current!.save({ unmoved: () => true }));
+    await flush();
+    expect(server.puts).toEqual([{ item: `view/${VIEW}`, ifMatch: 'v1', ifNoneMatch: null }]);
+    const saved = server.drafts.get(`view/${VIEW}`)!;
+    expect(saved).toMatchObject({ label: 'Open tasks', description: 'Tasks nobody closed' });
+    expect(JSON.stringify(saved)).not.toMatch(/未完成任务|没人关闭的任务/);
+  });
+
+  it('a pending draft the layers do not serve: no buffer is installed, the strip says why, and the save sends nothing', async () => {
+    server.drafts.set(`view/${VIEW}`, stored());
+    server.servedAs.set(`view/${VIEW}`, served());
+
+    mount();
+
+    const strip = await screen.findByTestId('list-view-refusal', undefined, { timeout: 8000 });
+    expect(strip).toHaveTextContent(t('engine.studio.refusal.draftUnreadable', 'en-US'));
+    expect(screen.queryByTestId('list-view-columns')).toBeNull();
+    expect(hook.current!.row).toBeNull();
+    await act(async () => hook.current!.save({ unmoved: () => true }));
+    await flush();
+    expect(server.puts).toEqual([]);
   });
 });

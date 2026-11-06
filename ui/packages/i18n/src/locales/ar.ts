@@ -2601,6 +2601,28 @@ const ar = {
       dark: "داكن",
       system: "النظام",
     },
+    // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
+    assignedWork: {
+      title: 'السجلات التي يحتفظ بها هذا الشخص',
+      loading: 'جارٍ عدّ السجلات التي يحتفظ بها هذا الشخص…',
+      countFailed: 'تعذّر عدّ السجلات التي يحتفظ بها هذا الشخص: {{message}}',
+      noClient: 'لا يمكن عدّ السجلات التي يحتفظ بها هذا الشخص هنا.',
+      none: 'لا يحتفظ هذا الشخص بأي سجلات يمكنك قراءتها.',
+      summary: 'يحتفظ بـ {{total}} من السجلات التي يمكنك قراءتها: مالك لـ {{owned}}، ومُسند إليه {{assigned}}.',
+      row: '{{object}} · {{field}}',
+      notTransferable: 'يضم هذا الحقل عدة أشخاص، لذا لا يمكن تسليمه هنا.',
+      truncated: 'لم تُعدّ كل حقول المستخدم؛ قد يحتفظ هذا الشخص بالمزيد.',
+      unreadable: 'لم تُعدّ لأنك لا تستطيع قراءتها: {{objects}}',
+      handoverTo: 'تسليم إلى',
+      handoverHint: 'اختياري. لا ينتظر الحظر اكتمال التسليم.',
+      handover: 'تسليم',
+      handingOver: 'جارٍ التسليم…',
+      handoverNext: 'تسليم الدفعة التالية',
+      targetBanned: 'هذا الشخص محظور. اختر مستخدمًا نشطًا.',
+      transferRefused: 'رُفض التسليم: {{message}}',
+      report: 'سُلّم {{updated}}، وتعذّر نقل {{failed}}، ولا يزال {{remaining}} لديه.',
+      failure: '{{object}} {{id}}: {{message}}',
+    },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
       managedUsers: {
@@ -2925,6 +2947,8 @@ const ar = {
         title: 'سجل التدقيق',
         subtitle: 'نشاط النظام وتغييرات السجلات للقراءة فقط. الأحدث أولاً.',
         openAsList: 'فتح كقائمة',
+        openEntryPage: 'فتح صفحة الإدخال',
+        openEntryPageHint: 'تعرض صفحة الإدخال كل التغييرات على السجل نفسه، الأحدث أولاً.',
         openPresetAsList: 'فتح {{label}} كقائمة',
         presets: 'إعدادات مسبقة',
         presetOtherSource: 'يقرأ هذا العرض مصدر بيانات آخر.',
@@ -3741,6 +3765,7 @@ const ar = {
     // objectui#13461 — the top bar's avatar button, which holds only the avatar.
     accountMenu: 'قائمة الحساب',
     profile: "الملف الشخصي",
+    connectAiAssistant: "ربط مساعد ذكاء اصطناعي",
     logout: "تسجيل الخروج",
     preferences: "التفضيلات",
     theme: "السمة",
@@ -4104,6 +4129,13 @@ const ar = {
       title: 'QwenWork',
       body: 'الإضافات ← الموصلات ← + إضافة ← لصق إعداد JSON:',
       hint: 'أو أضفه يدويًا كـ Streamable HTTP بهذا العنوان. إذا لم يدعم إصدارك تسجيل الدخول عبر المتصفح، أضف ترويسة الطلب Authorization: Bearer <مفتاح API> (أنشئ مفتاحًا أدناه).',
+    },
+    client: {
+      title: 'أي مساعد ذكاء اصطناعي تستخدم؟',
+      hint: 'اختر مساعدك لترى خطواته فقط. يتذكر هذا المتصفح اختيارك.',
+    },
+    advanced: {
+      title: 'متقدم: البرامج النصية وCI',
     },
     apiKey: {
       title: 'مفاتيح API',
