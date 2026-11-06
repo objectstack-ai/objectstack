@@ -565,6 +565,8 @@ export type {
     RecordCurrencyBackfillEngine,
     RecordCurrencyBackfillLogger,
     RecordCurrencyBackfillOptions,
+    RecordCurrencyBackfillOrganization,
+    RecordCurrencyBackfillOrganizationsRefusal,
 } from './record-currency-backfill.js';
 // [ADR-0144 D5, D7 parameter 1, Open item 8] The explicit recompute of stored
 // home amounts behind `os migrate recompute-home-amounts`: the write's own
@@ -628,6 +630,8 @@ export type {
   LifecycleFloorViolation,
 } from './lifecycle/lifecycle-service.js';
 export { parseLifecycleDuration } from './lifecycle/duration.js';
+// [#30237, ADR-0148 D3] What a host hands `ObjectQLPlugin`'s `recycleBinRetention`.
+export type { RecycleBinRetentionSettings } from './recycle-bin/retention.js';
 export { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
 
 // [#4551] Read-only referential-integrity audit — the reporting half of the

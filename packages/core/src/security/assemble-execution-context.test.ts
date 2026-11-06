@@ -629,3 +629,26 @@ describe('a guest request is a named caller, never an empty context', () => {
     });
   }
 });
+
+describe('impersonatedBy — the administrator of an impersonation session, carried as attribution only', () => {
+  const IMPERSONATED: ResolvedAuthzContext = { ...HUMAN_MINIMAL, impersonatedBy: 'u_admin' };
+  const assembly = (authz: ResolvedAuthzContext) => ({
+    authz, oauth: undefined, localization: undefined, requestLocale: undefined, accessToken: undefined, authGate: undefined,
+  });
+
+  it('both entries carry it, beside a subject that stays the impersonated user', () => {
+    for (const ctx of [assembleExecutionContext(assembly(IMPERSONATED)), assembleExecutionContextOrGuest(assembly(IMPERSONATED))]) {
+      expect(ctx?.impersonatedBy).toBe('u_admin');
+      expect(ctx?.userId).toBe(HUMAN_MINIMAL.userId);
+      expect(ctx?.positions).toEqual(HUMAN_MINIMAL.positions);
+      expect(ExecutionContextSchema.parse(ctx).impersonatedBy).toBe('u_admin');
+    }
+  });
+
+  it('is absent for the user\'s own session and never on a guest envelope', () => {
+    expect('impersonatedBy' in assembleExecutionContext(assembly(HUMAN_MINIMAL))!).toBe(false);
+    const guest = assembleExecutionContextOrGuest(assembly({ ...ANONYMOUS, impersonatedBy: 'u_admin' }));
+    expect(guest?.principalKind).toBe('guest');
+    expect('impersonatedBy' in guest!).toBe(false);
+  });
+});

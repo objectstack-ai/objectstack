@@ -148,6 +148,10 @@ naming no organization there is refused before any write and lists each organiza
 codeless row count, and `--all-organizations` writes the one code into every
 organization's rows when it really is right for all of them. See
 [`os migrate record-currency-codes`](/docs/deployment/cli#os-migrate-record-currency-codes).
+With no shell on the deployment (a hosted organization), an organization admin holding
+`setup.write` runs the same backfill for their current organization's rows with
+`POST /api/v1/meta/_migrate-record-currency-codes` and the body
+`{ "object", "field", "code", "apply" }`, a preview unless `apply` is `true`.
 
 ### Aggregating a record-mode amount
 

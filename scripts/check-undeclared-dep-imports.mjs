@@ -323,6 +323,20 @@ const LEDGER = [
       + 'the same seam for exactly that reason — so declaring it would reverse a stance the tree '
       + 'states, not repair an omission.',
   },
+  {
+    pkg: '@objectstack/rest',
+    dep: '@objectstack/objectql',
+    // [ADR-0144, ruling 6670707546 item B] The record-currency code backfill door loads
+    // `backfillRecordCurrencyCodes` the way the state-machine door above loads its function.
+    file: 'packages/rest/src/meta-record-currency-backfill-route.ts',
+    kind: 'optional-runtime-probe',
+    why:
+      'The record-currency code backfill door (`POST /meta/_migrate-record-currency-codes`) calls '
+      + 'the engine package\'s backfill function through the same guarded probe as the state-machine '
+      + 'door: the import is wrapped in try/catch and a deployment serving REST WITHOUT the data '
+      + 'engine answers 501 NOT_IMPLEMENTED rather than failing to load. Declaring it would couple '
+      + '`@objectstack/rest` to the engine, the stance the row above records.',
+  },
   // The objectui Console (imported as ui/ at the cutover, #25752 bill item 20). Two rows,
   // one per dependency, each covering the package's whole `src/` directory: the evidence
   // is the manifest, so it is per package, not per call site.

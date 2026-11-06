@@ -1663,6 +1663,40 @@ every write turns a blank code into a code, so a second run finds nothing to wri
 Re-running until the report says zero *is* the verification, which is why this
 command records no flag.
 
+A walk that reaches `--max-records` stops there: the report says `truncated: true`, the
+text says the walk is incomplete, and the command never prints "nothing to backfill"
+for rows it did not examine. Re-run without the cap to finish.
+
+**Without shell access, use the route.** An organization admin on a hosted deployment
+cannot reach its database from a shell. The same backfill is exposed over HTTP, for the
+rows of **the caller's current organization only**:
+
+```http
+POST /api/v1/meta/_migrate-record-currency-codes
+Content-Type: application/json
+
+{ "object": "opportunity", "field": "amount", "code": "USD", "apply": true }
+```
+
+or from the SDK:
+
+```ts
+const preview = await client.meta.migrateRecordCurrencyCodes({ object: 'opportunity', field: 'amount', code: 'USD' });
+const result  = await client.meta.migrateRecordCurrencyCodes({ object: 'opportunity', field: 'amount', code: 'USD', apply: true });
+```
+
+It answers `{ "success": true, "data": … }` with, as `data`, the report this command
+prints under `--json` (its `report` member), and
+takes the same posture: **preview unless `apply` is literally `true`**. It is the
+`--org` run for the caller's current organization: there is no environment-wide form,
+and the body takes no organization (`organizationId` or `allOrganizations` in it is
+refused with `VALIDATION_ERROR` / 400, as is any other key outside `object`, `field`,
+`code` and `apply`). A request with no current organization is refused `403`. It
+requires the `setup.write` capability in that organization and answers `403`
+otherwise; the code, field and object refusals are the command's. It is mounted with
+the other maintenance routes, so `metadata.endpoints.maintenance: false` takes it away.
+There is no Setup button for it yet: that is separate UI work.
+
 #### `os migrate recompute-home-amounts`
 
 A record-mode amount that declares a home amount is converted into the organization's home
