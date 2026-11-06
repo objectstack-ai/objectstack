@@ -335,7 +335,7 @@ describe('backfillRecordCurrencyCodes — one organization at a time', () => {
     expect(deal('b1').currency_code).toBeUndefined();
     expect(d.writes.map((w) => w.id).sort()).toEqual(['a1', 'a2']);
     // The walk filters on the row's own organization; every write runs as it.
-    for (const [, ast] of vi.mocked(d.driver.find).mock.calls.filter(([o]) => o === 'deal')) {
+    for (const [, ast] of vi.mocked(d.driver.find).mock.calls.filter(([o]: unknown[]) => o === 'deal')) {
       expect(JSON.stringify((ast as any).where)).toContain('"organization_id":"org_a"');
     }
     expect(formatRecordCurrencyBackfillReport(report)[0]).toBe(
@@ -346,10 +346,10 @@ describe('backfillRecordCurrencyCodes — one organization at a time', () => {
   it('under a walled posture the scope also reaches the driver as the organization predicate', async () => {
     posture = 'isolated';
     await run({ organizationId: 'org_b', apply: true });
-    const finds = vi.mocked(d.driver.find).mock.calls.filter(([o]) => o === 'deal');
+    const finds = vi.mocked(d.driver.find).mock.calls.filter(([o]: unknown[]) => o === 'deal');
     expect(finds.length).toBeGreaterThan(0);
     for (const call of finds) expect(call[2]).toMatchObject({ tenantId: 'org_b' });
-    expect(vi.mocked(d.driver.update).mock.calls.map((c) => c[1])).toEqual(['b1']);
+    expect(vi.mocked(d.driver.update).mock.calls.map((c: unknown[]) => c[1])).toEqual(['b1']);
     expect(deal('b1').currency_code).toBe('USD');
     expect(deal('a1').currency_code).toBeUndefined();
   });
