@@ -3867,7 +3867,7 @@ const ja = {
       authorized: '{{date}} に認可',
       lastUsedHour: '最終使用:{{time}} からの 1 時間以内',
       notRecorded: '使用記録なし',
-      truncated: '新しい順に {{count}} 件を表示しています。',
+      truncated: '新しいものだけを表示しています。認可済みのアシスタントはほかにもあります。',
       withdrawLater: 'このページからアシスタントの認可を取り消す機能はまだありません。',
       keys: 'あなたの API キー',
       keysEmpty: 'API キーはありません。',

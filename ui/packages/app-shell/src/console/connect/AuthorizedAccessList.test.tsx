@@ -185,7 +185,7 @@ describe('§1 authorized assistants', () => {
   it('says when the server answered only the newest grants', async () => {
     listMock.mockResolvedValueOnce({ clients: CLIENTS, truncated: true });
     await renderSettled();
-    expect(screen.getByText('«connectAgent.access.truncated|3»')).toBeInTheDocument();
+    expect(screen.getByText('«connectAgent.access.truncated»')).toBeInTheDocument();
   });
 });
 

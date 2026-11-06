@@ -3864,7 +3864,7 @@ const ko = {
       authorized: '{{date}}에 승인',
       lastUsedHour: '마지막 사용: {{time}}부터 1시간 이내',
       notRecorded: '사용 기록 없음',
-      truncated: '최신 {{count}}개만 표시합니다.',
+      truncated: '최신 항목만 표시합니다. 승인한 어시스턴트가 더 있습니다.',
       withdrawLater: '이 페이지에서 어시스턴트 승인을 철회하는 기능은 아직 없습니다.',
       keys: '내 API 키',
       keysEmpty: 'API 키가 없습니다.',

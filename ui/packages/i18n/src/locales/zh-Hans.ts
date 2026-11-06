@@ -4075,7 +4075,7 @@ const zh = {
       authorized: '授权于 {{date}}',
       lastUsedHour: '最近使用:{{time}} 起的一小时内',
       notRecorded: '未记录使用时间',
-      truncated: '仅显示最新的 {{count}} 个。',
+      truncated: '仅显示最新的部分,你授权的助手还有更多。',
       withdrawLater: '暂不支持在此页面撤销助手的授权。',
       keys: '你的 API 密钥',
       keysEmpty: '你还没有 API 密钥。',

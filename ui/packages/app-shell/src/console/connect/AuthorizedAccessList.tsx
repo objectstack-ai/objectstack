@@ -168,7 +168,7 @@ function AssistantRows({
       </ul>
       {truncated ? (
         <p className="text-xs text-muted-foreground">
-          {t('connectAgent.access.truncated', { count: clients.length })}
+          {t('connectAgent.access.truncated')}
         </p>
       ) : null}
       <p className="text-xs text-muted-foreground">{t('connectAgent.access.withdrawLater')}</p>

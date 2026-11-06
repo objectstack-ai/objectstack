@@ -3942,7 +3942,7 @@ const es = {
       authorized: 'Autorizado el {{date}}',
       lastUsedHour: 'Último uso en la hora que empieza a las {{time}}',
       notRecorded: 'Uso no registrado',
-      truncated: 'Se muestran los {{count}} más recientes.',
+      truncated: 'Solo se muestran los más recientes; ha autorizado más.',
       withdrawLater: 'Todavía no es posible retirar un asistente desde esta página.',
       keys: 'Sus claves API',
       keysEmpty: 'No tiene claves API.',

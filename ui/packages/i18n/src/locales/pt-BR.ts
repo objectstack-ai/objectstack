@@ -3937,7 +3937,7 @@ const pt = {
       authorized: 'Autorizado em {{date}}',
       lastUsedHour: 'Último uso na hora que começa às {{time}}',
       notRecorded: 'Uso não registrado',
-      truncated: 'Mostrando os {{count}} mais recentes.',
+      truncated: 'Só os mais recentes são mostrados; você autorizou mais.',
       withdrawLater: 'Ainda não é possível retirar um assistente por esta página.',
       keys: 'Suas chaves de API',
       keysEmpty: 'Você não tem chaves de API.',

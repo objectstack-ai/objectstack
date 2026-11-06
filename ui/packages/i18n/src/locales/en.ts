@@ -4676,7 +4676,7 @@ const en = {
       authorized: 'Authorized {{date}}',
       lastUsedHour: 'Last used in the hour from {{time}}',
       notRecorded: 'Last use not recorded',
-      truncated: 'Showing the newest {{count}}.',
+      truncated: 'Only the newest are shown; you have authorized more.',
       withdrawLater: 'Withdrawing an assistant from this page is not available yet.',
       keys: 'Your API keys',
       keysEmpty: 'You have no API keys.',

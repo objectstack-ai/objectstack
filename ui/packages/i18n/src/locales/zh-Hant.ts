@@ -4075,7 +4075,7 @@ const zhHant = {
       authorized: '授權於 {{date}}',
       lastUsedHour: '最近使用:{{time}} 起的一小時內',
       notRecorded: '未記錄使用時間',
-      truncated: '僅顯示最新的 {{count}} 個。',
+      truncated: '僅顯示最新的部分,你授權的助手還有更多。',
       withdrawLater: '暫不支援在此頁面撤銷助手的授權。',
       keys: '你的 API 金鑰',
       keysEmpty: '你還沒有 API 金鑰。',

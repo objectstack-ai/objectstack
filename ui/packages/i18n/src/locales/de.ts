@@ -3865,7 +3865,7 @@ const de = {
       authorized: 'Autorisiert am {{date}}',
       lastUsedHour: 'Zuletzt verwendet in der Stunde ab {{time}}',
       notRecorded: 'Keine Nutzung erfasst',
-      truncated: 'Die neuesten {{count}} werden angezeigt.',
+      truncated: 'Nur die neuesten werden angezeigt; Sie haben weitere autorisiert.',
       withdrawLater: 'Einen Assistenten auf dieser Seite zu entziehen ist noch nicht möglich.',
       keys: 'Ihre API-Schlüssel',
       keysEmpty: 'Sie haben keine API-Schlüssel.',
