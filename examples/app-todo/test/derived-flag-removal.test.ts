@@ -41,7 +41,7 @@
  * failure mode changed — a silent zero became a named 400.
  *
  * `status` and `due_date` are stored, indexed columns that already carry the
- * information, and both are declared dimensions on the `task_metrics` dataset,
+ * information, and both are declared dimensions on the `todo_task_metrics` dataset,
  * so the dashboard/report filters now sit on the semantic layer's own vocabulary.
  *
  * ## What these tests pin

@@ -12,9 +12,9 @@
 //   acceptance[4] — each child the related list serves re-reads by its own
 //     API id with the same row.
 //   acceptance[5]'s server half, negative[2]'s server half — the child read is
-//     gated at the server on both ends: a member staffed `contributor` (whose
+//     gated at the server on both ends: a member staffed `showcase_contributor` (whose
 //     set omits showcase_contact read) is refused the identical parent-scoped
-//     query 403, and a member staffed `manager` reads it 200 with rows.
+//     query 403, and a member staffed `showcase_manager` reads it 200 with rows.
 //
 // The console's request shape (acceptance[0], negative[0]: `top`/`skip` on
 // every child request), the pager text, the derived tabs and the relatedList
@@ -70,8 +70,8 @@ describe('records-forms.related-list-server-pagination — the parent-scoped chi
     ql = await stack.kernel.getServiceAsync('objectql');
     const [northwind] = await stack.rows('showcase_account', { name: 'Northwind' });
     northwindId = String(northwind.id);
-    contributorTok = await staffed('rel-contributor@verify.test', 'contributor');
-    managerTok = await staffed('rel-manager@verify.test', 'manager');
+    contributorTok = await staffed('rel-contributor@verify.test', 'showcase_contributor');
+    managerTok = await staffed('rel-manager@verify.test', 'showcase_manager');
   }, 180_000);
 
   afterAll(async () => {

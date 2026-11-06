@@ -11,7 +11,7 @@ import { defineDataset } from '@objectstack/spec/ui';
  * same thing on every tile. Single-object dataset (no `include`).
  */
 export const OpportunityDataset = defineDataset({
-  name: 'opportunity_metrics',
+  name: 'crm_opportunity_metrics',
   label: 'Opportunity Metrics',
   description: 'Semantic layer for sales-pipeline counts and amounts',
   object: 'crm_opportunity',
