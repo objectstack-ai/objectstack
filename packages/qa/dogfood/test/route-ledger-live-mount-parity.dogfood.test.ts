@@ -210,7 +210,7 @@ describe('route ledger ↔ live mount parity (#7526)', () => {
     stack = await bootShowcase({
       // Boot as WIDE as this gate can, so as few rows as possible have to be
       // pinned: every plugin added here converts a pin into a measurement.
-      // `StorageServicePlugin` alone converts ten — the whole storage ledger,
+      // `StorageServicePlugin` alone converts twelve — the whole storage ledger,
       // which the lean default boot leaves entirely unobserved.
       //
       // NOT `automation: true`, and the reason is worth writing down: the

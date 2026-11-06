@@ -161,6 +161,8 @@ other adapter.
 | GET | `/storage/upload/chunked/:uploadId/progress` | `storage.resumeUpload` | Read session progress (first step of a resume) |
 | GET | `/storage/files/:fileId/url` | `storage.getDownloadUrl` | Resolve a short-lived signed download URL |
 | GET | `/storage/files/:fileId` | — | Stable browser URL; 302s to the same signed URL (what file fields carry) |
+| GET | `/storage/upload-links/:token` | — | The page a single-use upload link opens (minted by the MCP `create_upload_link` tool): a file picker |
+| PUT | `/storage/upload-links/:token` | — | Spend the link on the request body; the file lands on the record and field the link is bound to |
 
 `storage.upload(file)` runs steps 1–3 for you, including the direct-to-storage
 `PUT` in step 2. Step 1 refuses an empty `mimeType` with `400 INVALID_REQUEST`,
