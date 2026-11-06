@@ -314,8 +314,9 @@ export const SysAuditLog = ObjectSchema.create({
     // operators only, whether a search term applied (never the term) and the
     // outcome; never an exported value. A request the door refused writes no
     // row. Its shipped surface is the `config_changes` list view above, beside
-    // the `import` row of the same shape, and the unfiltered `recent` and
-    // `all_events` views.
+    // the `import` row of the same shape, and the `all_events` view; `recent`
+    // lists it too, except an export of an object that view leaves out
+    // (`AUDIT_LOG_DEFAULT_VIEW_EXCLUDED_OBJECTS`, the settings stores).
     //
     // ADR-0087 retirement (#8315, the same ruling carried by triage): `restore`
     // left this enum for the same reason and by the same measurement. It was
