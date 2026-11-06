@@ -38,6 +38,11 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 
 import { PackagesPage } from '../../../views/metadata-admin/PackagesPage';
 import { initRuntimeConfig, resetRuntimeConfigForTesting } from '../../../runtime-config';
+// The page's package form reaches the CEL authoring helpers, which load these
+// two lazily; warmed here so their first load is paid at import, not inside a
+// test's bounded wait.
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 type Pack = typeof en;
 const EN = { defaultLanguage: 'en', detectBrowserLanguage: false } as const;
