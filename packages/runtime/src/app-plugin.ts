@@ -30,6 +30,7 @@ import { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from '.
 import { describeSeedLocale, resolveSeedLocaleForLoad } from './seed-locale.js';
 import { declareSeedSource, recordOrganizationReplay, type SeedLandingReport } from './seed-settlement.js';
 import { loadDisabledPackageIds } from './package-state-store.js';
+import { readServedWithheldFieldReaders, servedWithheldFieldReadersMessage } from './domains/packages.js';
 import type { IFieldFileService, IMetadataService, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
 import { FIELD_FILE_SERVICE } from '@objectstack/spec/contracts';
 import { normalizeFlowFunctionEntry, type NormalizedFlowFunction } from '@objectstack/spec/automation';
@@ -57,6 +58,13 @@ import { countServerTiming } from '@objectstack/observability';
  * live while the main path had it suppressed (#3760).
  */
 const SEED_WRITE_OPTIONS = { context: SEED_WRITE_EXECUTION_CONTEXT } as const;
+
+/**
+ * [#30756] The registries whose boot already reads the rules a disabled package
+ * leaves reading a withheld field ({@link AppPlugin.reportWithheldFieldReadersAtBoot}):
+ * one reading per registry, however many `AppPlugin`s share it.
+ */
+const WITHHELD_FIELD_READERS_REPORTED = new WeakSet<object>();
 
 /**
  * [#25779] What every seed loader this plugin builds is given beyond its
@@ -708,6 +716,51 @@ export class AppPlugin implements Plugin {
                 error: (err as Error)?.message ?? String(err),
             });
         }
+        this.reportWithheldFieldReadersAtBoot(ctx);
+    }
+
+    /**
+     * [#30756] The boot half of the enable door's refusal. The state file
+     * records only DISABLES, so a boot has no enable to refuse: a package that
+     * is not listed boots enabled. A reading package that boots enabled beside
+     * a disabled package whose `objectExtensions` field its active rule reads
+     * (a release that added the rule, a state file written before the enable
+     * door judged this) therefore lands in the state the door refuses, and
+     * every write to that object answers `400 VALIDATION_FAILED`. The boot
+     * neither refuses (one object's writes are not worth the whole runtime)
+     * nor rewrites the operator's recorded state: it says so once, naming
+     * every rule and the remedies (`readServedWithheldFieldReaders`).
+     *
+     * Read at `kernel:bootstrapped`, after the `kernel:ready` rehydrates have
+     * registered every package, so the reading is the boot's final one and not
+     * a verdict a later registration contradicts. Once per registry, however
+     * many `AppPlugin`s share it. At `warn`: the requester of every refused
+     * write is told, so nothing claims to persist that did not; the log is the
+     * operator's remedy, not a durability alarm.
+     */
+    private reportWithheldFieldReadersAtBoot(ctx: PluginContext): void {
+        let registry: unknown;
+        try {
+            registry = ctx.getService<{ registry?: unknown }>('objectql')?.registry;
+        } catch {
+            return; // no engine on this kernel — nothing to read
+        }
+        if (!registry || typeof registry !== 'object' || WITHHELD_FIELD_READERS_REPORTED.has(registry)) return;
+        WITHHELD_FIELD_READERS_REPORTED.add(registry);
+        ctx.hook('kernel:bootstrapped', async () => {
+            try {
+                const readers = readServedWithheldFieldReaders(registry);
+                if (readers.length === 0) return;
+                ctx.logger.warn(`[AppPlugin] ${servedWithheldFieldReadersMessage(readers)}`, {
+                    environmentId: this.projectContext?.environmentId,
+                    rules: readers.map((d) => ({ package: d.packageId, object: d.object, rule: d.rule, reads: d.fields, withheldBy: d.withheldBy })),
+                });
+            } catch (err) {
+                ctx.logger.warn('[AppPlugin] failed to read the rules a disabled package leaves reading a withheld field', {
+                    error: (err as Error)?.message ?? String(err),
+                });
+            }
+        });
     }
 
     /**

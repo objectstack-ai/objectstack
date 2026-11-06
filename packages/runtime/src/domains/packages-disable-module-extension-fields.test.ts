@@ -248,8 +248,9 @@ interface Booted {
     engine: ObjectQL;
 }
 
-async function bootKernel(root: string, options: SuiteOptions = {}): Promise<Booted> {
+async function bootKernel(root: string, options: SuiteOptions = {}, beforeBootstrap?: (kernel: ObjectKernel) => void): Promise<Booted> {
     const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+    beforeBootstrap?.(kernel);
     const engine = new ObjectQL();
     engine.registerDriver(new SqlDriver({
         client: 'better-sqlite3',
@@ -1004,4 +1005,60 @@ describe('[#30756] POST /packages with enableOnInstall: true asks the same scan'
         expect(registry.getPackage(READER)?.enabled).toBe(true);
         expect(loadDisabledPackageIds(undefined).has(READER)).toBe(false);
     });
+});
+
+describe('[#30756] a boot whose state file leaves an enabled package\'s rule reading a withheld field says so once', () => {
+    /** Boot with the kernel logger's `warn` lines captured, and return them beside the kernel. */
+    async function bootCapturingWarnings(disableModule: boolean) {
+        const root = mkdtempSync(join(tmpdir(), 'os-suite-ext-bootread-'));
+        writeFileSync(join(root, '.keep'), '');
+        process.env.OS_HOME = mkdtempSync(join(home, 'bootread-'));
+        // The state file records the field's package as disabled; the reading
+        // package is not listed, so it boots enabled: no door is passed.
+        if (disableModule) setPackageDisabled(ENVIRONMENT_ID, MODULE, true);
+        const warnings: string[] = [];
+        const booted = await bootKernel(root, { rules: true }, (kernel) => {
+            const logger = (kernel as any).logger;
+            const warn = logger.warn.bind(logger);
+            logger.warn = (message: unknown, ...rest: unknown[]) => { warnings.push(String(message)); return warn(message, ...rest); };
+        });
+        return { root, booted, readerWarnings: () => warnings.filter((w) => w.includes('through objectExtensions')) };
+    }
+
+    it('names every rule, the objects whose writes are refused and the package to enable, once; the remedy then lets writes land', async () => {
+        const { root, booted, readerWarnings } = await bootCapturingWarnings(true);
+        try {
+            const { kernel, engine } = booted;
+            expect(engine.registry.getPackage(MODULE)?.enabled, 'precondition: the state file disabled the field\'s package').toBe(false);
+            expect(engine.registry.getPackage(RULES)?.enabled, 'precondition: the reading package boots enabled').not.toBe(false);
+            expect(readerWarnings()).toEqual([
+                `[AppPlugin] 3 active validation rules read fields that a disabled package adds through objectExtensions, so every write to ${ACCOUNT}, ${VISIT} is refused (400 VALIDATION_FAILED) until this is resolved — ${listingOfRules([
+                    { packageId: RULES, object: ACCOUNT, rule: RULE_NOT_NEGATIVE, fields: [CREDIT] },
+                    { packageId: RULES, object: ACCOUNT, rule: RULE_REVIEW, fields: [CREDIT] },
+                    { packageId: RULES, object: VISIT, rule: RULE_VISIT_HOP, fields: [`account.${CREDIT}`] },
+                ])}. Switch off or change those rules, disable the package that serves them, or enable '${MODULE}'.`,
+            ]);
+            // What the sentence says: the write is refused while the state stands.
+            const refused = await dispatchAs(kernel, 'POST', `/data/${ACCOUNT}`, { name: 'Delta' });
+            expect({ status: refused.status, code: refused.code }).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
+            // One of the remedies it names: the field's package enabled.
+            expect((await dispatchAs(kernel, 'PATCH', `/packages/${MODULE}/enable`)).status).toBe(200);
+            const written = await dispatchAs(kernel, 'POST', `/data/${ACCOUNT}`, { name: 'Delta', [CREDIT]: 10 });
+            expect(written.status, String(written.message)).toBe(201);
+        } finally {
+            await shutdown(booted);
+            rmSync(root, { recursive: true, force: true });
+        }
+    }, 120_000);
+
+    it('control: a boot with nothing disabled says nothing', async () => {
+        const { root, booted, readerWarnings } = await bootCapturingWarnings(false);
+        try {
+            expect(booted.engine.registry.getPackage(MODULE)?.enabled).not.toBe(false);
+            expect(readerWarnings()).toEqual([]);
+        } finally {
+            await shutdown(booted);
+            rmSync(root, { recursive: true, force: true });
+        }
+    }, 120_000);
 });

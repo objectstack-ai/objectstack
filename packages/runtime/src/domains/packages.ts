@@ -808,7 +808,7 @@ const PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE = { code: 'PACKAGE_DISABLE_R
  * name, and the withheld fields it reads (`FIELD`, or `REF.FIELD` for a read
  * one hop through a reference field of the rule's object).
  */
-interface DisableDependentRule {
+export interface DisableDependentRule {
     packageId: string;
     object: string;
     rule: string;
@@ -1093,7 +1093,7 @@ function disableDependentRulesMessage(lead: string, dependents: readonly Disable
  * stays withheld: {@link DisableDependentRule}, plus the disabled packages that
  * add the fields it reads (`withheldBy`), whose enable is the other remedy.
  */
-interface EnableDependentRule extends DisableDependentRule {
+export interface EnableDependentRule extends DisableDependentRule {
     withheldBy: string[];
 }
 
@@ -1233,6 +1233,50 @@ function readEnableDependentRules(registry: any, packageId: string): EnableDepen
         .sort((a, b) => a.packageId.localeCompare(b.packageId)
             || a.object.localeCompare(b.object)
             || a.rule.localeCompare(b.rule));
+}
+
+/**
+ * [#30756] The served state the enable door now refuses to enter, read as it
+ * stands: every active rule served right now that reads a field a disabled
+ * package withholds, on an object whose owner is enabled. Empty when no package
+ * is disabled. The boot reads it once its registry is complete
+ * (`AppPlugin`, `kernel:bootstrapped`): the environment's state file records
+ * only disables, so a reading package that boots enabled beside a disabled
+ * field package (a release that added the rule, or a state file written
+ * before the enable door judged this) lands here without passing any door.
+ * Ordered by package, object and rule.
+ */
+export function readServedWithheldFieldReaders(registry: any): EnableDependentRule[] {
+    if (typeof registry?.getObjectContributors !== 'function'
+        || typeof registry?.getAllObjects !== 'function'
+        || typeof registry?.getStorageObject !== 'function'
+        || typeof registry?.isPackageDisabled !== 'function'
+        || typeof registry?.getAllPackages !== 'function') return [];
+    const off = (id: unknown): boolean => registry.isPackageDisabled(id);
+    const packages = registry.getAllPackages() as Array<{ manifest?: { id?: unknown } }>;
+    if (!packages.some((pkg) => off(pkg?.manifest?.id))) return [];
+    return readWithheldFieldReaders(registry, foldByName(registry.getAllObjects()), off)
+        .sort((a, b) => a.packageId.localeCompare(b.packageId)
+            || a.object.localeCompare(b.object)
+            || a.rule.localeCompare(b.rule));
+}
+
+/**
+ * The boot's one sentence for {@link readServedWithheldFieldReaders}: what every
+ * write to the named objects now answers, every rule, and the remedies.
+ */
+export function servedWithheldFieldReadersMessage(readers: readonly EnableDependentRule[]): string {
+    const one = readers.length === 1;
+    const listed = readers
+        .map((d) => `${d.packageId} · ${d.object} · ${d.rule} (reads ${d.fields.join(', ')})`)
+        .join('; ');
+    const objects = [...new Set(readers.map((d) => d.object))].sort();
+    const adders = [...new Set(readers.flatMap((d) => d.withheldBy))].sort();
+    return `${one ? 'An active validation rule reads a field' : `${readers.length} active validation rules read fields`} `
+        + `that a disabled package adds through objectExtensions, so every write to ${objects.join(', ')} is refused `
+        + `(400 VALIDATION_FAILED) until this is resolved — ${listed}. Switch off or change ${one ? 'that rule' : 'those rules'}, `
+        + `disable the package that serves ${one ? 'it' : 'them'}, or enable `
+        + `${adders.length === 0 ? 'the package that adds the field' : adders.map((id) => `'${id}'`).join(', ')}.`;
 }
 
 /**
