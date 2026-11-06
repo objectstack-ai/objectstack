@@ -194,6 +194,31 @@ describe('backfillRecordCurrencyCodes — rows stored before the switch to recor
     );
   });
 
+  it('a walk the cap cuts short says so, and never claims every row was examined', async () => {
+    // Two coded rows first, so the capped walk meets no codeless row at all.
+    stored('c1', { amount: 1, currency_code: 'EUR' });
+    stored('c2', { amount: 2, currency_code: 'EUR' });
+    stored('c3', { amount: 3 });
+    const capped = await backfillRecordCurrencyCodes(engine, quietLogger, {
+      object: 'deal', field: 'amount', code: 'USD', maxRecords: 2,
+    });
+    expect(capped).toMatchObject({ scannedRecords: 2, codeless: 0, truncated: true });
+    const lines = formatRecordCurrencyBackfillReport(capped);
+    expect(lines).toContain('No codeless deal.amount amount among the 2 row(s) examined.');
+    expect(lines.some((l) => l.includes('nothing to backfill'))).toBe(false);
+    expect(lines).toContain('⚠ Walk incomplete — some rows were not examined; re-run without the cap to finish.');
+    // The run was unscoped, so its one-organization verdict saw only those rows.
+    expect(lines.some((l) => l.includes('The organization check saw only the rows examined'))).toBe(true);
+    expect(recordCurrencyBackfillComplete(capped)).toBe(false);
+
+    // A scoped run names its organization, so it owes no organization-check line.
+    const scoped = formatRecordCurrencyBackfillReport({ ...capped, organizationId: 'org_a' });
+    expect(scoped.some((l) => l.includes('The organization check'))).toBe(false);
+    // The same walk, uncapped, is complete and says so.
+    const whole = await backfillRecordCurrencyCodes(engine, quietLogger, { object: 'deal', field: 'amount', code: 'USD' });
+    expect(whole).toMatchObject({ scannedRecords: 3, codeless: 1, truncated: false });
+  });
+
   it('a code that is not an ISO 4217 member is refused before any row is read', async () => {
     seedMixed();
     for (const code of ['usd', 'XYZ', 'US', ' USD', '']) {

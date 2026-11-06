@@ -54,17 +54,23 @@
  * to load. `scripts/check-undeclared-dep-imports.mjs` ledgers that probe
  * against this file.
  *
- * ## Errors
+ * ## The envelope, and errors
  *
- * Only codes the registry already carries: `FORBIDDEN` (capability, no current
- * organization), `VALIDATION_ERROR` (the body), `NOT_IMPLEMENTED` (no engine),
- * and the backfill's own refusals (`INVALID_FIELD` for a field that is not a
+ * Born on the shared pair (`sendOk` / `sendError`, `@objectstack/types`): the
+ * report is the `data` of `{ success: true, data }`, the payload the CLI's
+ * `--json` prints as its `report`, and every refusal is
+ * `{ success: false, error: { code, message } }`. Only codes the registry
+ * already carries: `FORBIDDEN` (capability, no current organization),
+ * `VALIDATION_ERROR` (the body), `NOT_IMPLEMENTED` (no engine), and the
+ * backfill's own refusals (`INVALID_FIELD` for a field that is not a
  * record-mode amount or a code outside ISO 4217, the object-not-found answer),
- * each answered through `handleRouteError` with the status the function gave.
+ * answered with the status and code the function threw, resolved by the shared
+ * `resolveThrownHttpError`. Anything else is a fault: `sendServerFault` logs
+ * the throw and answers the route's generic text.
  */
 
 import { rethrowAuthzStoreUnavailable } from '@objectstack/core';
-import { handleRouteError } from './error-response.js';
+import { demotedDeclaredCode, resolveThrownHttpError, sendError, sendOk, sendServerFault } from '@objectstack/types';
 import { logWarn } from './log.js';
 import type { MetaRouteScope } from './meta-collection-routes.js';
 import { wiredEngineOrLoud, type RestServer } from './rest-server.js';
@@ -144,28 +150,22 @@ export function registerMetaRecordCurrencyBackfillRoute(
                 const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
                 const held = new Set<string>(Array.isArray(ctx?.systemPermissions) ? ctx.systemPermissions : []);
                 if (!ctx?.isSystem && !held.has(RECORD_CURRENCY_BACKFILL_CAPABILITY)) {
-                    res.status(403).json({
-                        error: {
-                            code: 'FORBIDDEN',
-                            message:
-                                'Backfilling record currency codes requires the `setup.write` capability in your ' +
-                                'current organization.',
-                        },
-                    });
-                    return;
+                    return sendError(
+                        res,
+                        403,
+                        'FORBIDDEN',
+                        'Backfilling record currency codes requires the `setup.write` capability in your current organization.',
+                    );
                 }
                 const organizationId = typeof ctx?.tenantId === 'string' && ctx.tenantId !== '' ? ctx.tenantId : undefined;
                 if (organizationId === undefined) {
-                    res.status(403).json({
-                        error: {
-                            code: 'FORBIDDEN',
-                            message:
-                                'This request has no current organization, and the backfill fills the rows of the ' +
-                                'caller\'s current organization only: select the organization whose rows you mean ' +
-                                'and retry. Nothing was read.',
-                        },
-                    });
-                    return;
+                    return sendError(
+                        res,
+                        403,
+                        'FORBIDDEN',
+                        'This request has no current organization, and the backfill fills the rows of the caller\'s ' +
+                            'current organization only: select the organization whose rows you mean and retry. Nothing was read.',
+                    );
                 }
                 const body = readBody(req.body);
                 const ql: any = await wiredEngineOrLoud(
@@ -184,21 +184,40 @@ export function registerMetaRecordCurrencyBackfillRoute(
                     || typeof ql?.find !== 'function'
                     || typeof ql?.update !== 'function'
                 ) {
-                    res.status(501).json({
-                        error: {
-                            code: 'NOT_IMPLEMENTED',
-                            message: 'The record currency code backfill is not available in this runtime: it has no data engine.',
-                        },
-                    });
-                    return;
+                    return sendError(
+                        res,
+                        501,
+                        'NOT_IMPLEMENTED',
+                        'The record currency code backfill is not available in this runtime: it has no data engine.',
+                    );
                 }
                 // Per-row failures are in the report the caller receives; the
                 // log line is the operator's copy.
                 const logger = { info: () => {}, warn: (message: string) => logWarn(message) };
                 const report = await backfill(ql, logger, { ...body, organizationId });
-                res.json(report);
-            } catch (error: any) {
-                handleRouteError(res, error);
+                return sendOk(res, report);
+            } catch (error: unknown) {
+                // A refusal the body judge or the backfill DECLARED (a 4xx with
+                // its code) is the caller's answer; anything else is a fault.
+                const thrown = resolveThrownHttpError(error);
+                if (thrown.declaredStatus !== undefined && thrown.status >= 400 && thrown.status < 500) {
+                    const field = (error as { field?: unknown } | null)?.field;
+                    const declaredCode = demotedDeclaredCode(thrown);
+                    return sendError(res, thrown.status, thrown.code, thrown.message, {
+                        ...(typeof field === 'string'
+                            ? { details: { fields: [{ field, code: thrown.code, message: thrown.message }] } }
+                            : {}),
+                        ...(declaredCode !== undefined ? { declaredCode } : {}),
+                    });
+                }
+                const status = thrown.declaredStatus !== undefined && thrown.status >= 500 ? thrown.status : 500;
+                return sendServerFault(
+                    res,
+                    status,
+                    status === 500 ? 'INTERNAL_ERROR' : thrown.code,
+                    'Backfilling record currency codes failed.',
+                    error,
+                );
             }
         },
         metadata: {

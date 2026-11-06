@@ -316,6 +316,20 @@ describe('os migrate record-currency-codes', () => {
     expect(lines.find((line) => line.startsWith('Dry run —'))).toBe(`${DRY_RUN_LINE} ${JOURNAL_MODE_SWITCH_NOTE}`);
   }, RUN_TIMEOUT);
 
+  it('a walk --max-records cut short says it is incomplete, never "nothing to backfill"', async () => {
+    boot(POSTGRES_CONFIG);
+    vi.mocked(backfillRecordCurrencyCodes).mockResolvedValue({
+      ...REPORT, organizationId: 'org_a', allOrganizations: false, organizations: [],
+      scannedRecords: 2, codeless: 0, skippedCodePresent: 2, sampleRecordIds: [], truncated: true,
+    } as any);
+    await MigrateRecordCurrencyCodes.run([...NAMING, '--org', 'org_a', '--max-records', '2'], { root: CLI_ROOT });
+    const text = printedLines().join('\n');
+    expect(text).toContain('No codeless opportunity.amount amount among the 2 row(s) examined.');
+    expect(text).toContain('Walk incomplete — 2 row(s) examined, 0 codeless.');
+    expect(text).not.toContain('Nothing to backfill');
+    expect(text).not.toContain('nothing to backfill');
+  }, RUN_TIMEOUT);
+
   it('on PostgreSQL the dry-run line names no switch', async () => {
     boot(POSTGRES_CONFIG);
     await MigrateRecordCurrencyCodes.run(NAMING, { root: CLI_ROOT });

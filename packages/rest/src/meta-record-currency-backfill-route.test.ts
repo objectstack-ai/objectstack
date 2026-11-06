@@ -139,7 +139,9 @@ function boot(
             if (!route) throw new Error(`POST ${PATH} is not registered`);
             const res = mockRes();
             await route.handler({ params: {}, query: {}, headers: {}, body }, res);
-            return { status: res.statusCode as number, body: res.json.mock.calls.at(-1)?.[0] as any };
+            const raw = res.json.mock.calls.at(-1)?.[0] as any;
+            // `body` is the payload of `{ success: true, data }`, or the refusal envelope itself.
+            return { status: res.statusCode as number, raw, body: raw?.success === true ? raw.data : raw };
         },
     };
 }
@@ -182,6 +184,8 @@ describe('POST /meta/_migrate-record-currency-codes — the caller\'s organizati
     it('a preview counts the caller\'s organization\'s rows only, and writes nothing', async () => {
         const answer = await boot(engine, ADMIN_A).call({ object: 'deal', field: 'amount', code: 'USD' });
         expect(answer.status).toBe(200);
+        // The report is the `data` of the shared envelope, and nothing rides beside it.
+        expect(Object.keys(answer.raw).sort()).toEqual(['data', 'success']);
         expect(answer.body).toMatchObject({
             object: 'deal', organizationId: 'org_a', allOrganizations: false, field: 'amount', codeField: 'currency_code',
             code: 'USD', scannedRecords: 3, codeless: 2, written: 0, skippedCodePresent: 1, applied: false,
@@ -297,6 +301,8 @@ describe('POST /meta/_migrate-record-currency-codes — the caller\'s organizati
     it('the backfill\'s own refusals answer with its status and code, before any row is read', async () => {
         const notIso = await boot(engine, ADMIN_A).call({ object: 'deal', field: 'amount', code: 'usd', apply: true });
         expect({ status: notIso.status, code: notIso.body?.error?.code }).toEqual({ status: 400, code: 'INVALID_FIELD' });
+        expect(notIso.raw).toMatchObject({ success: false });
+        expect(notIso.body.error.details?.fields?.[0]).toMatchObject({ field: 'currency_code', code: 'INVALID_FIELD' });
         const notRecord = await boot(engine, ADMIN_A).call({ object: 'deal', field: 'name', code: 'USD', apply: true });
         expect({ status: notRecord.status, code: notRecord.body?.error?.code }).toEqual({ status: 400, code: 'INVALID_FIELD' });
         const noObject = await boot(engine, ADMIN_A).call({ object: 'no_such_object', field: 'amount', code: 'USD' });
