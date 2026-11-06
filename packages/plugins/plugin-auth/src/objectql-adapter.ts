@@ -4,8 +4,7 @@ import type { IDataEngine } from '@objectstack/core';
 import { createAdapterFactory } from 'better-auth/adapters';
 import type { CleanedWhere, WhereOperator } from 'better-auth/adapters';
 import { SystemObjectName } from '@objectstack/spec/system';
-import { resolveAttributedUserId } from './auth-actor-attribution.js';
-import { agentForwardPerformedBy } from './agent-forward-identity-view.js';
+import { authSystemWriteContext } from './auth-actor-attribution.js';
 import { inScimRequestScope } from './scim-connection-service.js';
 import { adoptExistingMembership } from './adopt-membership.js';
 import { refuseIssuerRepointWithLiveBindings } from './account-identity-preflight.js';
@@ -751,22 +750,14 @@ export function withSystemContext(engine: IDataEngine): IDataEngine {
   const asSystem = (q: any) => ({ ...(q ?? {}), context: { isSystem: true, ...(q?.context ?? {}) } });
   // The attributed human is spread FIRST so an explicit caller-supplied context
   // still wins on every key — the same precedence `isSystem` already had.
-  const asAttributedSystem = async (q: any) => {
-    const attributedUserId = await resolveAttributedUserId();
-    // [ADR-0090 D10 rule 5, #28367] A forwarded AI agent's write also names the
-    // agent's client (`performedBy`), so the audit row records both sides.
-    const performedBy = agentForwardPerformedBy();
-    if (!attributedUserId && !performedBy) return asSystem(q);
-    return {
-      ...(q ?? {}),
-      context: {
-        ...(attributedUserId ? { attributedUserId } : {}),
-        ...(performedBy ? { performedBy } : {}),
-        isSystem: true,
-        ...(q?.context ?? {}),
-      },
-    };
-  };
+  // The context is the one `authSystemWriteContext()` builds for every
+  // better-auth-owned write: the attributed human, the administrator
+  // impersonating them on an impersonation session, and a forwarded AI agent's
+  // client ([ADR-0090 D10 rule 5, #28367]), so the audit row records each side.
+  const asAttributedSystem = async (q: any) => ({
+    ...(q ?? {}),
+    context: { ...(await authSystemWriteContext()), ...(q?.context ?? {}) },
+  });
   return {
     insert: async (m: string, d: any, o?: any) => e.insert(m, d, await asAttributedSystem(o)),
     update: async (m: string, d: any, o?: any) => e.update(m, d, await asAttributedSystem(o)),

@@ -325,7 +325,19 @@ async function deciderSegmentContext(
     const context = run.context;
     const decider = signal[RESUME_AUTHORITY_SERVICE] === true ? signal.resumedBy : undefined;
     if (typeof decider !== 'string' || decider === '') return context;
-    if (context?.userId === decider) return context;
+    // The decider's segment names exactly the DECISION's impersonating
+    // administrator: the one the owning service read off the decision
+    // request's session, honoured only beside the decider it vouches for.
+    // The stamp of the write that STARTED the run is never carried over:
+    // whoever was at the keyboard then did not make this decision.
+    const impersonatedBy = decisionImpersonatorOf(signal);
+    if (context?.userId === decider) {
+        if (context.impersonatedBy === impersonatedBy) return context;
+        const same: AutomationContext = { ...context };
+        if (impersonatedBy) same.impersonatedBy = impersonatedBy;
+        else delete same.impersonatedBy;
+        return same;
+    }
     const switched: SeededRunContext = {
         ...(context ?? {}),
         userId: decider,
@@ -339,9 +351,10 @@ async function deciderSegmentContext(
     // segment the deployment-level rows. Seeded for the decider below.
     delete switched.posture;
     // The impersonating administrator belonged to the write that STARTED the
-    // run: the decider is a different person acting in their own name, so the
-    // segment they own names no impersonator.
+    // run: the segment the decider owns names only the administrator, if any,
+    // who made THIS decision while impersonating the decider.
     delete switched.impersonatedBy;
+    if (impersonatedBy) switched.impersonatedBy = impersonatedBy;
     // The trigger user's email is theirs too: kept under the decider's id,
     // it would admit the decider to every row an email-keyed policy grants
     // the submitter. Removed on both postures, and seeded for the decider
@@ -351,6 +364,19 @@ async function deciderSegmentContext(
     if (switched.runAs === 'system') return switched;
     await this.seedRunGrants(run.flowName, switched, 'deciding');
     return switched;
+}
+
+/**
+ * The administrator a decision's resume signal names as impersonating its
+ * decider ({@link ResumeSignal.impersonatedBy}), as a non-blank string, or
+ * `undefined`. Read only by {@link deciderSegmentContext}, after the signal's
+ * service marker and decider are established.
+ */
+function decisionImpersonatorOf(signal: ResumeSignal): string | undefined {
+    const by = signal.impersonatedBy;
+    if (typeof by !== 'string') return undefined;
+    const trimmed = by.trim();
+    return trimmed ? trimmed : undefined;
 }
 
 /** The body of {@link AutomationEngine.expandDeclaredLookups}, moved unedited; that method's docblock is its contract. */

@@ -3605,7 +3605,14 @@ export class AuthPlugin implements Plugin {
       const session: SessionRead | null = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
       const verdict = judgePlatformAdmin(session);
       if (!verdict.ok) return c.json(verdict.refusal.body, verdict.refusal.status);
-      return verdict.actor;
+      // An impersonation session names the administrator at the keyboard; the
+      // route's identity writes carry it beside the admitted actor as the
+      // attribution-only `impersonatedBy` (`runAttributedToUser`), read off
+      // this session and never off the body. Authorization is unchanged.
+      const impersonatedBy = session?.session?.impersonatedBy;
+      return typeof impersonatedBy === 'string' && impersonatedBy.trim() !== ''
+        ? { ...verdict.actor, impersonatedBy: impersonatedBy.trim() }
+        : verdict.actor;
     };
 
     // ── [#24877] ADR-0069 D5/D7 — better-auth's universal handler for the
@@ -3733,7 +3740,7 @@ export class AuthPlugin implements Plugin {
         // Attribution only — the route's own authorization already happened
         // in `gateAdmin`. Opening the actor seam here credits the `sys_user`
         // row to the admin instead of recording it as the system.
-        const { status, body } = await runAttributedToUser(actor.id, () =>
+        const { status, body } = await runAttributedToUser(actor, () =>
           runSetUserManager(
             {
               getDataEngine: () => this.authManager!.getDataEngine() as any,
@@ -3904,7 +3911,7 @@ export class AuthPlugin implements Plugin {
           // binds in `user.create.after` — are credited to the admin instead
           // of recorded as the system. Attribution only: the route's own
           // authorization already happened above, and the writes stay system.
-          const { status, body } = await runAttributedToUser(actor.id, () =>
+          const { status, body } = await runAttributedToUser(actor, () =>
             runAdminCreateUser(
               {
                 ...adminUserDeps(),
@@ -3979,7 +3986,7 @@ export class AuthPlugin implements Plugin {
           // write is driven server-side and never passes through
           // `AuthManager.handleRequest`, so the request-scoped actor seam is
           // not open unless we open it here.
-          const { status, body } = await runAttributedToUser(actor.id, () =>
+          const { status, body } = await runAttributedToUser(actor, () =>
             runAdminBanUser(adminBanDeps(), actor, c.req.raw),
           );
           return c.json(body, status as any);
@@ -3996,7 +4003,7 @@ export class AuthPlugin implements Plugin {
           if (actor instanceof Response) return actor;
           const unavailable = await adminPluginMissing(c);
           if (unavailable) return unavailable;
-          const { status, body } = await runAttributedToUser(actor.id, () =>
+          const { status, body } = await runAttributedToUser(actor, () =>
             runAdminUnbanUser(adminBanDeps(), actor, c.req.raw),
           );
           return c.json(body, status as any);
@@ -4194,7 +4201,7 @@ export class AuthPlugin implements Plugin {
           })();
           // [#4586] Same seam as create-user: server-side better-auth calls,
           // credited to the admin who ran the import.
-          const { status, body } = await runAttributedToUser(actor.id, () =>
+          const { status, body } = await runAttributedToUser(actor, () =>
             runAdminImportUsers(
             {
               getAuthApi: () => this.authManager!.getApi() as any,
@@ -4248,7 +4255,7 @@ export class AuthPlugin implements Plugin {
         // and never passes through `AuthManager.handleRequest`, so open the
         // attribution seam here — the `sys_member` row this creates is
         // credited to the admin instead of recorded as the system.
-        const { status, body } = await runAttributedToUser(actor.id, () =>
+        const { status, body } = await runAttributedToUser(actor, () =>
           runOrganizationAddMember({ getAuthApi: () => this.authManager!.getApi() as any }, c.req.raw),
         );
         return c.json(body, status as any);

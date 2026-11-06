@@ -10,9 +10,10 @@
  * MetadataFieldsPage
  *
  * Setup-app container that renders {@link FieldDesigner} bound to one
- * object's `fields` map, loaded from `GET /api/v1/meta/object/:name`
- * and persisted by issuing `PUT /api/v1/meta/object/:name` with the
- * merged-back fields. Mirrors {@link MetadataObjectsPage}.
+ * object's `fields` map, loaded as authored (`overlay ?? code` from
+ * `GET /api/v1/meta/object/:name/layers`, objectstack#30786) and persisted
+ * by issuing `PUT /api/v1/meta/object/:name` with the merged-back fields.
+ * Mirrors {@link MetadataObjectsPage}.
  *
  * Why we save the *parent object* instead of `/meta/field/:name`:
  *   In the ObjectStack data protocol, fields live INSIDE an object's
@@ -49,6 +50,7 @@ import { retiredFieldKeysFor } from '@object-ui/types/internal/retired-field-key
 import {
   MetadataClient,
   RELATIONSHIP_TYPES_REQUIRING_REFERENCE,
+  authoredPublished,
   dropServedPicklistOptions,
   formatMetadataError,
   type MetadataClientConfig,
@@ -910,7 +912,19 @@ export function MetadataFieldsPage({
   const reload = useCallback(async () => {
     setState({ loading: true, error: null, raw: null });
     try {
-      const raw = await client.get<ServerObjectSchema>('object', objectName);
+      // objectstack#30786 — the edit base is the object as its author wrote it,
+      // `overlay ?? code` off the layered read, never the served item read: that
+      // one is translated for the console's `Accept-Language` and carries the
+      // platform's injected columns, so a field edit in a Chinese console wrote
+      // the translated labels (and the injected columns) back as authored. The
+      // layered read is served untranslated; `authoredPublished` is the one
+      // reading of it the console's other object editors use.
+      const layers = await client.layered('object', objectName);
+      // A name with neither layer is one this server does not hold (the layered
+      // read answers a 404 as all-null layers), as the item read's `null` was.
+      const raw = layers.overlay != null || layers.code != null
+        ? (authoredPublished('object', layers) as ServerObjectSchema)
+        : null;
       if (!raw) {
         setState({
           loading: false,
@@ -952,12 +966,14 @@ export function MetadataFieldsPage({
         ...state.raw,
         fields: toFieldsMap(next, prevFields),
       };
-      // objectui#11692 — `state.raw` is the SERVED object, and `carryOver` /
-      // `carryPreservedField` carry every per-field key it holds, so a
-      // picklist-bound field leaves with `picklist` AND the options the runtime
-      // resolved from the list. The authoring door refuses the pair for the
-      // whole object, whichever field was edited. This page has no options
-      // editor, so those `options` can only be the served copy: they stay out.
+      // objectui#11692 — `carryOver` / `carryPreservedField` carry every
+      // per-field key `state.raw` holds, so a picklist-bound field that came
+      // with the options the runtime resolved from the list would leave with
+      // `picklist` AND those options, and the authoring door refuses the pair
+      // for the whole object, whichever field was edited. `state.raw` is the
+      // authored document now (objectstack#30786), but this page has no options
+      // editor, so options beside a `picklist` can only be a served copy: they
+      // stay out.
       await client.save('object', objectName, dropServedPicklistOptions(mergedObject));
       await reload();
     } catch (err) {

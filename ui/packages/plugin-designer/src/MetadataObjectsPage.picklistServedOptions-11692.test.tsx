@@ -87,10 +87,24 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
+/**
+ * objectstack#30786 — a save reads the object as authored off the layered read
+ * (`GET …/layers`, `overlay ?? code`), so this double answers that read with the
+ * listed item as its `code` layer (and `effective`).
+ */
+function layersAnswer(url: string, items: ReadonlyArray<{ name?: unknown }>): Response | null {
+  const match = /\/meta\/object\/([^/?]+)\/layers(\?|$)/.exec(url);
+  if (!match) return null;
+  const item = items.find((o) => o.name === decodeURIComponent(match[1]));
+  return item
+    ? json({ type: 'object', name: item.name, code: item, overlay: null, effective: item })
+    : json({ error: 'not found' }, 404);
+}
+
 function realClient(): MetadataClient {
   return new MetadataClient({
     baseUrl: 'http://localhost:3000',
-    fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
       if ((init?.method ?? 'GET').toUpperCase() === 'PUT') {
         const body = JSON.parse(String(init?.body ?? '{}')) as Row;
         const refused = doorRefusal(body);
@@ -111,6 +125,8 @@ function realClient(): MetadataClient {
             )
           : json({ success: true });
       }
+      const layers = layersAnswer(String(input), [SERVED]);
+      if (layers) return layers;
       return json({ items: [SERVED] });
     }) as unknown as typeof fetch,
   });
