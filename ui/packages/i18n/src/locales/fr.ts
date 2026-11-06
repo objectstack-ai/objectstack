@@ -3527,6 +3527,7 @@ const fr = {
     // objectui#13461 — the top bar's avatar button, which holds only the avatar.
     accountMenu: 'Menu du compte',
     profile: "Profil",
+    connectAiAssistant: "Connecter un assistant IA",
     logout: "Se déconnecter",
     preferences: "Préférences",
     theme: "Thème",
@@ -3872,6 +3873,13 @@ const fr = {
       title: 'QwenWork',
       body: 'Extensions → Connecteurs → + Ajouter → Coller la configuration JSON :',
       hint: 'Ou ajoutez-le à la main en Streamable HTTP avec cette URL. Si votre version ne propose pas de connexion par navigateur, ajoutez l’en-tête Authorization: Bearer <clé API> (créez une clé ci-dessous).',
+    },
+    client: {
+      title: 'Quel assistant IA utilisez-vous ?',
+      hint: 'Choisissez le vôtre pour n’afficher que ses étapes. Ce navigateur mémorise votre choix.',
+    },
+    advanced: {
+      title: 'Avancé : scripts et CI',
     },
     apiKey: {
       title: 'Clés API',

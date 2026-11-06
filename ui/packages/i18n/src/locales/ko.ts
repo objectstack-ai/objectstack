@@ -3459,6 +3459,7 @@ const ko = {
     // objectui#13461 — the top bar's avatar button, which holds only the avatar.
     accountMenu: '계정 메뉴',
     profile: "프로필",
+    connectAiAssistant: "AI 어시스턴트 연결",
     logout: "로그아웃",
     preferences: "환경설정",
     theme: "테마",
@@ -3798,6 +3799,13 @@ const ko = {
       title: 'QwenWork',
       body: '확장 → 커넥터 → + 추가 → JSON 구성 붙여넣기:',
       hint: '직접 추가하려면 Streamable HTTP를 선택하고 이 URL을 입력하세요. 브라우저 로그인을 지원하지 않는 버전이라면 요청 헤더 Authorization: Bearer <API 키>를 추가하세요(키는 아래에서 생성).',
+    },
+    client: {
+      title: '어떤 AI 어시스턴트를 사용하시나요?',
+      hint: '사용하는 어시스턴트를 선택하면 해당 단계만 표시됩니다. 이 브라우저가 선택을 기억합니다.',
+    },
+    advanced: {
+      title: '고급: 스크립트 및 CI',
     },
     apiKey: {
       title: 'API 키',

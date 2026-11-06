@@ -58,6 +58,7 @@ import { registerSettingsRoutes } from './settings-routes.js';
 import { NoopCryptoAdapter } from './crypto-adapter.js';
 import { SettingsCryptoUnavailableError } from './settings-service.types.js';
 import { SettingsService } from './settings-service.js';
+import { authSettingsManifest } from './manifests/auth.manifest.js';
 
 const OWNER_PACKAGE = 'com.objectstack.test.config-change-audit';
 
@@ -339,16 +340,16 @@ async function bootPlugin(opts: BootOptions = {}) {
 /** Parse a row's `metadata` JSON. */
 const metaOf = (row: Record<string, unknown>): any => JSON.parse(String(row.metadata));
 
-/** Drive `PUT /api/settings/branding_test` through a mounted route set. */
-async function put(http: MockHttp, body: Record<string, unknown>) {
+/** Drive `PUT /api/settings/:namespace` (`branding_test` unless named) through a mounted route set. */
+async function put(http: MockHttp, body: Record<string, unknown>, namespace = 'branding_test') {
   const handler = http.routes.get('PUT /api/settings/:namespace')!;
   const req = {
-    params: { namespace: 'branding_test' },
+    params: { namespace },
     query: {},
     body,
     headers: {},
     method: 'PUT',
-    path: '/api/settings/branding_test',
+    path: `/api/settings/${namespace}`,
   } as unknown as IHttpRequest;
   const state: { status: number; body?: any } = { status: 200 };
   const res = {
@@ -895,5 +896,151 @@ describe('#18368 — an unmounted `sys_audit_log` is a configuration, not a faul
       encrypted: false,
     });
     expect(lines.filter((l) => l.includes(NOT_WRITTEN))).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#30923] Readable before and after — a secret only as its fingerprint
+// ---------------------------------------------------------------------------
+
+/**
+ * [#30923] The row recorded a digest of the AFTER and nothing of the before,
+ * so a policy change's before and after could be read from no door (measured
+ * on `origin/main`: `old_value` absent, `new_value` = namespace, key, scope and
+ * a digest). ADR-0007 § Audit & history decided both halves: every write
+ * records its before and after, and a value declared `encrypted: true` only as
+ * a placeholder and a checksum.
+ *
+ * The rule is the manifest's `encrypted: true`, which `type: 'password'`
+ * forces, decided once in `SettingsService` (`auditReadable`). These cases
+ * drive the real plugin, its real sink and the real `auth` manifest, through
+ * the service and through the settings route that every door writes by.
+ */
+describe('#30923 — a config_change row records the before and the after', () => {
+  const parse = (v: unknown): any => (v === null || v === undefined ? v : JSON.parse(String(v)));
+  const ipRows = (boot: Awaited<ReturnType<typeof bootPlugin>>) =>
+    boot.ledgerRows().filter((r) => metaOf(r).key === 'allowed_ip_ranges');
+  const BEFORE = '203.0.113.0/24';
+  const AFTER = '198.51.100.0/24';
+
+  it('`auth.allowed_ip_ranges`: a first write records a null before; a change records both values readable', async () => {
+    const boot = await bootPlugin({ userId: 'usr_admin', tenantId: 'org_1' });
+    boot.service.registerManifest(authSettingsManifest);
+
+    await boot.service.setMany('auth', { allowed_ip_ranges: BEFORE }, boot.writeCtx);
+    await boot.service.setMany('auth', { allowed_ip_ranges: AFTER }, boot.writeCtx);
+
+    const [first, change] = ipRows(boot);
+    expect(first.old_value).toBeNull();
+    expect(parse(first.new_value)).toMatchObject({ namespace: 'auth', key: 'allowed_ip_ranges', value: BEFORE });
+    expect(parse(change.old_value)).toMatchObject({ namespace: 'auth', key: 'allowed_ip_ranges', scope: 'global', value: BEFORE });
+    expect(parse(change.new_value)).toMatchObject({ namespace: 'auth', key: 'allowed_ip_ranges', scope: 'global', value: AFTER });
+    // Each side keeps its fingerprint: the before's is the after's of the write
+    // that stored it, and the settings trail's `old_hash`.
+    expect(parse(change.old_value).digest).toBe(parse(first.new_value).digest);
+    expect(parse(change.old_value).digest).toBe(boot.settingAuditRows()[1].old_hash);
+    // `metadata` names the change and carries no value.
+    expect(String(change.metadata)).not.toContain(AFTER);
+  });
+
+  it('through the settings route: the PUT door records the same before and after', async () => {
+    const boot = await bootPlugin({ userId: 'usr_admin' });
+    boot.service.registerManifest(authSettingsManifest);
+    const authorized = new MockHttp();
+    registerSettingsRoutes(authorized, boot.service, {
+      // The `auth` manifest's own read and write capability.
+      contextFromRequest: () => ({ enforced: true, userId: 'usr_admin', permissions: ['manage_platform_settings'] }),
+    });
+
+    expect((await put(authorized, { allowed_ip_ranges: BEFORE }, 'auth')).state.status).toBe(200);
+    expect((await put(authorized, { allowed_ip_ranges: AFTER }, 'auth')).state.status).toBe(200);
+
+    const [, change] = ipRows(boot);
+    expect(parse(change.old_value).value).toBe(BEFORE);
+    expect(parse(change.new_value).value).toBe(AFTER);
+  });
+
+  it('a reset records its before value, and no after', async () => {
+    const boot = await bootPlugin({ userId: 'usr_admin' });
+    boot.service.registerManifest(authSettingsManifest);
+    await boot.service.setMany('auth', { allowed_ip_ranges: BEFORE }, boot.writeCtx);
+    await boot.service.setMany('auth', { allowed_ip_ranges: null }, boot.writeCtx);
+
+    const [, reset] = ipRows(boot);
+    expect(metaOf(reset).event).toBe('settings.reset');
+    expect(parse(reset.old_value)).toMatchObject({ key: 'allowed_ip_ranges', value: BEFORE });
+    expect(reset.new_value).toBeNull();
+
+    // …and a write after the reset replaced a cleared row: its before is null.
+    await boot.service.setMany('auth', { allowed_ip_ranges: AFTER }, boot.writeCtx);
+    expect(ipRows(boot)[2].old_value).toBeNull();
+  });
+
+  it('a secret-valued key records no plaintext in `old_value`, `new_value` or `metadata`, only masked digests', async () => {
+    const boot = await bootPlugin({ userId: 'usr_admin' });
+    const NEXT = 'sk_live_30923_rotated_do_not_log';
+    await boot.service.setMany('branding_test', { api_key: SECRET }, boot.writeCtx);
+    await boot.service.setMany('branding_test', { api_key: NEXT }, boot.writeCtx);
+    await boot.service.setMany('branding_test', { api_key: null }, boot.writeCtx);
+
+    const rows = boot.ledgerRows();
+    expect(rows.map((r) => metaOf(r).event)).toEqual(['settings.set', 'settings.set', 'settings.reset']);
+    for (const row of rows) {
+      for (const col of ['old_value', 'new_value', 'metadata'] as const) {
+        expect(String(row[col])).not.toContain(SECRET);
+        expect(String(row[col])).not.toContain(NEXT);
+      }
+      for (const side of [parse(row.old_value), parse(row.new_value)]) {
+        if (side === null) continue;
+        expect(side).not.toHaveProperty('value');
+        expect(side.digest).toMatch(/^<encrypted:hmac-sha256:[0-9a-f]{64}>$/);
+      }
+    }
+    const [first, rotate, reset] = rows;
+    expect(first.old_value).toBeNull();
+    // The before of each write is the after the write before it recorded.
+    expect(parse(rotate.old_value).digest).toBe(parse(first.new_value).digest);
+    expect(parse(reset.old_value).digest).toBe(parse(rotate.new_value).digest);
+    expect(reset.new_value).toBeNull();
+    // The shape a reader of the pre-#30923 row parses is unchanged.
+    expect(Object.keys(parse(first.new_value))).toEqual(['namespace', 'key', 'scope', 'digest']);
+  });
+
+  it('a key declared secret after a plaintext write: the replaced plaintext is never recorded', async () => {
+    const boot = await bootPlugin({ userId: 'usr_admin' });
+    const PLAIN = 'was-plain-30923';
+    await boot.service.setMany('branding_test', { workspace_name: PLAIN }, boot.writeCtx);
+    boot.service.registerManifest({
+      ...manifest,
+      specifiers: [{ type: 'password', key: 'workspace_name', label: 'Workspace name', required: false }, manifest.specifiers[1]],
+    });
+    await boot.service.setMany('branding_test', { workspace_name: 'now-secret-30923' }, boot.writeCtx);
+
+    const [, flipped] = boot.ledgerRows();
+    expect(metaOf(flipped).encrypted).toBe(true);
+    expect(JSON.stringify(flipped)).not.toContain(PLAIN);
+    expect(JSON.stringify(flipped)).not.toContain('now-secret-30923');
+    expect(parse(flipped.old_value)).toEqual({
+      namespace: 'branding_test',
+      key: 'workspace_name',
+      scope: 'global',
+      digest: '<encrypted>',
+    });
+  });
+
+  it('a key no longer declared secret: the encrypted row it replaces is recorded masked, the new value readable', async () => {
+    const boot = await bootPlugin({ userId: 'usr_admin' });
+    await boot.service.setMany('branding_test', { api_key: SECRET }, boot.writeCtx);
+    boot.service.registerManifest({
+      ...manifest,
+      specifiers: [manifest.specifiers[0], { type: 'text', key: 'api_key', label: 'API key', required: false }],
+    });
+    await boot.service.setMany('branding_test', { api_key: 'public-now-30923' }, boot.writeCtx);
+
+    const [, unflipped] = boot.ledgerRows();
+    expect(JSON.stringify(unflipped)).not.toContain(SECRET);
+    expect(parse(unflipped.old_value)).not.toHaveProperty('value');
+    expect(parse(unflipped.old_value).digest).toBe('<encrypted>');
+    expect(parse(unflipped.new_value).value).toBe('public-now-30923');
   });
 });
