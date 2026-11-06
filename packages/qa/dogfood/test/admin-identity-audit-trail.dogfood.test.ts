@@ -329,9 +329,13 @@ describe('#4940: what an admin identity operation leaves in sys_audit_log', () =
     const listed = await list.text();
     expect(list.status, listed).toBe(200);
     expect(listed).toContain(credentialId);
+    // Export is refused outright, even to the platform admin: no permission set
+    // grants `allowExport` on this engine-owned object (measured 403). Pinned so a
+    // future grant has to come back here and show the export serves no secret.
     const exported = await stack.apiAs(adminToken, 'GET', '/data/sys_scim_connection_credential/export');
     const exportedText = await exported.text();
-    expect(exported.status, exportedText.slice(0, 300)).toBe(200);
+    expect(exported.status, exportedText.slice(0, 300)).toBe(403);
+    expect(JSON.parse(exportedText).code).toBe('EXPORT_NOT_PERMITTED');
     for (const served of [listed, exportedText]) {
       expect(served).not.toContain(token);
       expect(served).not.toContain(digest);
