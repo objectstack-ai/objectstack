@@ -112,6 +112,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Condición de visibilidad",
         helpText: "Predicado CEL sobre el registro (p. ej., record.type == 'invoice'): el formulario de entrada muestra el grupo entero, encabezado incluido, solo mientras sea TRUE."
       },
+      "fieldGroups.requiresFeature": {
+        label: "Requiere función",
+        helpText: "Función del despliegue que necesita el grupo (p. ej., multiOrgEnabled): donde está desactivada, el formulario de entrada y la página de detalle del registro ocultan el grupo entero. Junto con Condición de visibilidad, el grupo solo se muestra mientras se cumplen ambas. Los campos siguen siendo legibles a través de la API."
+      },
       fields: {
         label: "Campos",
         helpText: "Añade las columnas que almacenará este objeto"
