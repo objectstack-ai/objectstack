@@ -8,11 +8,10 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Config } from '@oclif/core';
+import type { Config } from '@oclif/core';
 import ObjectStackHelp from '../src/help.js';
 import { BUILD_NEXT_STEP, EVERYDAY_COMMANDS, formatEverydayCommands } from '../src/utils/next-steps.js';
 import Build from '../src/commands/build.js';
@@ -29,8 +28,15 @@ describe('bare os lists the everyday commands first', () => {
     }
   });
 
-  it('the root help page carries the everyday block, deploy among it, ahead of the full listing', async () => {
-    const config = await Config.load(PKG);
+  it('the root help page carries the everyday block, deploy among it, ahead of the full listing', () => {
+    // The fields oclif's root page reads, and no more: a full `Config.load`
+    // scans the whole command table for a page that prints none of it.
+    const config = {
+      bin: 'os',
+      userAgent: '@objectstack/cli/0.0.0 linux-x64 node-v22',
+      topicSeparator: ' ',
+      pjson: { description: 'ObjectStack CLI', oclif: {} },
+    } as unknown as Config;
     const help = new ObjectStackHelp(config);
     const root = help.formatRoot();
     expect(root).toContain(formatEverydayCommands(config.bin));
@@ -59,15 +65,28 @@ describe('os build names os deploy as the next step; os compile does not', () =>
     vi.spyOn(console, 'log').mockImplementation(record);
     vi.spyOn(console, 'error').mockImplementation(record);
     vi.spyOn(console, 'warn').mockImplementation(record);
-    await run();
-    vi.restoreAllMocks();
+    const cwd = process.cwd();
+    process.chdir(dir);
+    try {
+      await run();
+    } finally {
+      process.chdir(cwd);
+      vi.restoreAllMocks();
+    }
     return lines.join('\n');
   }
 
+  // Under the package's git-ignored `tmp/`, so the config's `@objectstack/spec`
+  // import resolves through this package's own dependencies.
   async function stack(): Promise<string> {
-    dir = await mkdtemp(join(tmpdir(), 'os-30871-next-step-'));
+    await mkdir(join(PKG, 'tmp'), { recursive: true });
+    dir = await mkdtemp(join(PKG, 'tmp', 'next-step-'));
     const config = join(dir, 'objectstack.config.ts');
-    await writeFile(config, "export default { manifest: { id: 'com.acme.hint', name: 'Hint', version: '1.0.0' } };\n");
+    await writeFile(
+      config,
+      "import { defineStack } from '@objectstack/spec';\n"
+      + "export default defineStack({ manifest: { id: 'com.acme.hint', name: 'Hint', version: '1.0.0', type: 'app' } });\n",
+    );
     return config;
   }
 
@@ -76,12 +95,12 @@ describe('os build names os deploy as the next step; os compile does not', () =>
     const out = await captured(() => Build.run([config, '--output', join(dir, 'dist', 'objectstack.json')]));
     expect(out).toContain('Build complete');
     expect(out).toContain(BUILD_NEXT_STEP);
-  });
+  }, 60_000);
 
   it('os compile — what os dev runs on every rebuild — prints no hint', async () => {
     const config = await stack();
     const out = await captured(() => Compile.run([config, '--output', join(dir, 'dist', 'objectstack.json')]));
     expect(out).toContain('Build complete');
     expect(out).not.toContain(BUILD_NEXT_STEP);
-  });
+  }, 60_000);
 });

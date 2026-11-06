@@ -40,7 +40,8 @@ export interface CloudEnvironmentSummary {
   displayName?: string;
   organizationId?: string;
   status?: string;
-  isSystem?: boolean;
+  /** `is_system` on the row: platform infrastructure, not an environment a developer installs into. */
+  infrastructure?: boolean;
 }
 
 /** The list call's outcome: the rows, or why there are none to read. */
@@ -94,7 +95,7 @@ export const listCloudEnvironments: ListCloudEnvironments = async ({ baseUrl, to
           displayName: typeof row.display_name === 'string' && row.display_name ? row.display_name : undefined,
           organizationId: typeof row.organization_id === 'string' ? row.organization_id : undefined,
           status: typeof row.status === 'string' ? row.status : undefined,
-          isSystem: row.is_system === true || row.is_system === 1,
+          infrastructure: row.is_system === true || row.is_system === 1,
         })),
     };
   } catch (err: any) {
@@ -109,7 +110,7 @@ export const listCloudEnvironments: ListCloudEnvironments = async ({ baseUrl, to
 
 /** The rows a developer can install into: not archived, not platform infrastructure. */
 export function installableEnvironments(rows: CloudEnvironmentSummary[]): CloudEnvironmentSummary[] {
-  return rows.filter((row) => row.status !== 'archived' && !row.isSystem);
+  return rows.filter((row) => row.status !== 'archived' && !row.infrastructure);
 }
 
 /** `name (id)`, or the bare id when the row has no name. */
