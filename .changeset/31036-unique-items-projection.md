@@ -4,8 +4,12 @@
 
 feat(spec): the published JSON Schema states the marketplace taxonomy facets' no-duplicates rule as `uniqueItems: true`
 
-Clause-②: no
+Clause-②: no (narrowing) — the published `json-schema/**` declarations of the two taxonomy facets, and of the six schemas that carry them, refuse a list that repeats a value, which they admitted before. The parse already refused it; nothing is widened and no key is added, removed or renamed.
 Metadata-protocol: none
+
+<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and no metadata type or stored shape moves: the set of documents the parse accepts is byte-for-byte what it was, and the lists the published files stop admitting are lists the parse already refused. An author lists each facet value once; there is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+
+**BREAKING (published artifact narrows)** — a validator reading `packages/spec/json-schema/**` (an editor, codegen, an external check) now refuses a duplicated `businessFunctions` or `industries` value at 14 sites in 8 published schemas.
 
 `businessFunctions` and `industries` refuse a repeated value at parse time (`['sales', 'sales']` is refused with "`businessFunctions` lists a value more than once; list each value once."), but `packages/spec/json-schema/**` dropped that rule, so an editor or an external validator reading the published files accepted the duplicate. The files now say `uniqueItems: true` on both facets, wherever they appear: `marketplace/MarketplaceBusinessFunctions`, `marketplace/MarketplaceIndustries`, and the `businessFunctions` / `industries` properties of `marketplace/Package`, `marketplace/CreatePackageRequest`, `marketplace/UpdatePackageRequest`, `marketplace/MarketplaceListing`, `marketplace/TemplateManifest` and `marketplace/MarketplaceSearchResponse` (under `items`).
 

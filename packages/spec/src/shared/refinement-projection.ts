@@ -182,6 +182,20 @@ export type ProjectableRefinement =
    * predicate and one value to `uniqueItems` — the published file would refuse
    * a document the runtime accepts. The scalar parameter type is what makes a
    * call site on an array of objects a compile error rather than a wider file.
+   *
+   * ⛔ And the ITEM PARSE must be the identity on scalars. The predicate judges
+   * the parsed OUTPUT, `uniqueItems` judges the DOCUMENT, and the scalar type
+   * bounds only the output. An item that rewrites its value — `z.coerce.*`,
+   * `.trim()`, `.toLowerCase()`, any `.transform()` to a scalar — still type-
+   * checks, yet `[1, "1"]` under coercion or `['a', ' a']` under a trim is one
+   * value to the runtime and two to the keyword: the file would read
+   * `projected` while being WIDER than the runtime, and the ledger would
+   * certify the gap. Compose it only over items that parse a scalar to itself:
+   * `z.enum`, `z.literal`, `z.string()`, `z.number()`, `z.boolean()`,
+   * `z.null()` and unions of them, with checks but no rewrite. The same wider
+   * direction exists, unreachably for the facets, for two JSON numerals beyond
+   * 2^53 that round to one double: one value to the predicate, two to a
+   * validator comparing mathematical value.
    */
   | { readonly pattern: 'unique-items' };
 
@@ -418,6 +432,13 @@ export type JsonScalar = string | number | boolean | null;
  * (`refinement-projection.test.ts` evaluates `uniqueItems` against the
  * predicate on a corpus), since a `Set` and a keyword are two spellings of one
  * rule, not one spelling used twice.
+ *
+ * ⛔ Only over items whose parse is the identity on scalars — `z.enum`,
+ * `z.literal`, `z.string()`, `z.number()`, `z.boolean()`, `z.null()` — and
+ * ⛔ never over a coercing, trimming, case-folding or transforming item: the
+ * predicate sees the rewritten values and the keyword the written ones, so
+ * the published file would be wider than the runtime while the ledger reads
+ * `projected` (the `unique-items` arm's docblock gives the specimens).
  *
  * ```ts
  * z.array(MarketplaceIndustrySchema).refine(UNIQUE_SCALAR_ITEMS, {
