@@ -372,6 +372,21 @@ function matchesShortcutChord(
  * The home chord leaves those alone, so an editor that binds the same keys
  * keeps them (objectui#12605).
  */
+/** The page the Connect an AI Assistant entries open (`@objectstack/mcp`). */
+const CONNECT_ASSISTANT_PAGE = 'connect_agent';
+
+/**
+ * Whether a served navigation tree carries a `page` entry for `pageName`,
+ * groups included. The tree is the server's, already folded and filtered for
+ * this caller, so a hit means the page is registered and reachable.
+ */
+function navCarriesPage(items: unknown, pageName: string): boolean {
+  if (!Array.isArray(items)) return false;
+  return items.some((item: any) =>
+    (item?.type === 'page' && item?.pageName === pageName)
+    || navCarriesPage(item?.children, pageName));
+}
+
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   if (target instanceof HTMLElement && target.isContentEditable) return true;
@@ -626,6 +641,16 @@ export function AppHeader({
   const routeType = pathParts[2];
 
   const safeObjects = objects ?? [];
+
+  // Connect an AI Assistant: every signed-in person's own door to connecting an
+  // AI client, so it sits in the avatar menu beside Profile (objectstack#30895).
+  // Drawn only while the served Account app carries the page: `@objectstack/mcp`
+  // contributes that entry exactly when it registers the page, so a deployment
+  // with MCP turned off shows no dead item.
+  const accountApp = (metadataApps || []).find((a: any) => a?.name === 'account');
+  const connectAssistantPath = accountApp && navCarriesPage((accountApp as any).navigation, CONNECT_ASSISTANT_PAGE)
+    ? `/apps/${appAddressSegment(metadataApps, accountApp)}/page/${CONNECT_ASSISTANT_PAGE}`
+    : undefined;
 
   // The app the route is in.
   const appNameKey = activeAppName || currentAppName || appNameFromRoute;
@@ -1271,6 +1296,16 @@ export function AppHeader({
                 <User className="mr-2 h-4 w-4" />
                 {t('user.profile', { defaultValue: 'Profile' })}
               </DropdownMenuItem>
+              {connectAssistantPath && (
+                <DropdownMenuItem
+                  onClick={() => leaveTo(connectAssistantPath)}
+                  className="cursor-pointer"
+                  data-testid="header-connect-ai-assistant"
+                >
+                  <Bot className="mr-2 h-4 w-4" />
+                  {t('user.connectAiAssistant', { defaultValue: 'Connect an AI Assistant' })}
+                </DropdownMenuItem>
+              )}
               {/*
                * Workspace entries. The header-left WorkspaceSwitcher carries
                * the same destinations, but it renders NOTHING below two orgs

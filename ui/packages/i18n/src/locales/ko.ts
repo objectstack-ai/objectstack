@@ -3459,6 +3459,7 @@ const ko = {
     // objectui#13461 — the top bar's avatar button, which holds only the avatar.
     accountMenu: '계정 메뉴',
     profile: "프로필",
+    connectAiAssistant: "AI 어시스턴트 연결",
     logout: "로그아웃",
     preferences: "환경설정",
     theme: "테마",

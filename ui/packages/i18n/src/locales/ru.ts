@@ -3611,6 +3611,7 @@ const ru = {
     // objectui#13461 — the top bar's avatar button, which holds only the avatar.
     accountMenu: 'Меню аккаунта',
     profile: "Профиль",
+    connectAiAssistant: "Подключить ИИ-ассистента",
     logout: "Выйти",
     preferences: "Настройки",
     theme: "Тема",
