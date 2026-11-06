@@ -14,6 +14,10 @@
  * query runs the engine's in-memory aggregation over them: the controls below
  * read real buckets, and a refusal is proven to precede every read.
  *
+ * [#29304] …and a plain group (a name, or `{ field }`) over a virtual
+ * (`formula`) field, beside the #29167 bucket over one: `INVALID_FIELD` / 400
+ * at `groupBy.N` / `groupBy.N.field`.
+ *
  * [#25819] The REST door's empty-list refusal is the protocol's own
  * (`protocol.empty-aggregate-axis.test.ts`); the wire half below runs it over
  * the real engine, which is what turned it into `404 OBJECT_NOT_FOUND`.
@@ -128,6 +132,45 @@ describe('[#25818] the aggregate query shapes that answered a plausible wrong ta
     expect(reads, 'every refusal precedes the driver').toHaveLength(0);
   });
 
+  it('[#29304] refuses a plain group over a virtual (formula) field, whatever its returnType: INVALID_FIELD / 400 at groupBy.N (a name) or groupBy.N.field — no read', async () => {
+    // Before this arm the in-memory aggregation served one null group holding
+    // every row, and a SQL driver refused a missing column with no path.
+    const cases: ReadonlyArray<readonly [unknown, string, string]> = [
+      ['doubled', 'doubled', 'groupBy.1'],
+      ['opened_calc', 'opened_calc', 'groupBy.1'],
+      [{ field: 'opened_calc' }, 'opened_calc', 'groupBy.1.field'],
+      [{ field: 'doubled', alias: 'd' }, 'doubled', 'groupBy.1.field'],
+    ];
+    for (const [entry, field, path] of cases) {
+      const label = JSON.stringify(entry);
+      const err = await refusalOf(aggregate({ groupBy: ['status', entry], aggregations: [COUNT] }));
+      expect(envelopeOf(err), label).toEqual({ code: 'INVALID_FIELD', status: 400, httpStatus: 400 });
+      expect({ path: err?.path, param: err?.param, field: err?.field, fields: err?.fields, object: err?.object }, label)
+        .toEqual({ path, param: 'groupBy', field, fields: [field], object: OBJECT });
+      expect(err!.message, label).toBe(
+        `aggregate('${OBJECT}'): ${path} groups by '${field}', but '${field}' is a formula field — its value is computed `
+        + 'on read and never stored, so no driver materialises a column to group by. The query was NOT run. Denormalise '
+        + `the value onto '${OBJECT}' (a stored field, written when the source changes) and group by that. A formula `
+        + 'field is virtual: with no column behind it the group key reached the driver as a column that does not exist, '
+        + 'and an engine that aggregates in memory put every row into one null group while the answer looked served.',
+      );
+    }
+    // The first offending position is named, whichever axis would refuse later ones.
+    const first = await refusalOf(aggregate({ groupBy: ['doubled', { field: 'name', dateGranularity: 'month' }], aggregations: [COUNT] }));
+    expect({ code: first?.code, path: first?.path }).toEqual({ code: 'INVALID_FIELD', path: 'groupBy.0' });
+    expect(reads, 'every refusal precedes the driver').toHaveLength(0);
+  });
+
+  it('[#29304] the REST door answers the plain-group refusal at its path, through findData and the wire mapping', async () => {
+    const protocol = new ObjectStackProtocolImplementation(engine);
+    const err = await refusalOf(protocol.findData({ object: OBJECT, query: { groupBy: ['opened_calc'], aggregations: [COUNT] } } as any));
+    expect({ code: err?.code, status: err?.status, path: err?.path }).toEqual({ code: 'INVALID_FIELD', status: 400, path: 'groupBy.0' });
+    const wire = mapDataError(err, OBJECT);
+    expect({ status: wire.status, code: wire.body.code }).toEqual({ status: 400, code: 'INVALID_FIELD' });
+    expect(String(wire.body.error)).toContain("groupBy.0 groups by 'opened_calc', but 'opened_calc' is a formula field");
+    expect(reads).toHaveLength(0);
+  });
+
   it('refuses a repeated aggregation alias: INVALID_QUERY / 400 at the second aggregations.N.alias — no read', async () => {
     const err = await refusalOf(aggregate({
       aggregations: [COUNT, { function: 'sum', field: 'amount', alias: 'n' }],
@@ -174,6 +217,12 @@ describe('[#25818] the aggregate query shapes that answered a plausible wrong ta
     // The declaration cannot type an undeclared column: no verdict. [#29167] A
     // formula under a dateGranularity is refused (above), no longer a control.
     await expect(aggregate({ groupBy: [{ field: 'created_at', dateGranularity: 'month' }], aggregations: [COUNT] })).resolves.toBeDefined();
+    // [#29304] A stored field grouped plainly, as a name and in the object form,
+    // and a value aggregate beside no virtual group key: served.
+    await expect(aggregate({ groupBy: ['status'], aggregations: [COUNT] }))
+      .resolves.toEqual([{ status: 'open', n: 2 }, { status: 'won', n: 1 }]);
+    await expect(aggregate({ groupBy: [{ field: 'status' }], aggregations: [COUNT] }))
+      .resolves.toEqual([{ status: 'open', n: 2 }, { status: 'won', n: 1 }]);
     // An alias moves the group column, so the field's own name is free.
     await expect(aggregate({ groupBy: [{ field: 'status', alias: 's' }], aggregations: [{ function: 'count', alias: 'status' }] }))
       .resolves.toEqual([{ s: 'open', status: 2 }, { s: 'won', status: 1 }]);
@@ -182,7 +231,7 @@ describe('[#25818] the aggregate query shapes that answered a plausible wrong ta
       groupBy: [{ field: 'opened_on', dateGranularity: 'year', alias: 'y' }, { field: 'opened_on', dateGranularity: 'month', alias: 'm' }],
       aggregations: [COUNT, { function: 'sum', field: 'amount', alias: 'total' }],
     })).resolves.toEqual([{ y: '2026', m: '2026-01', n: 1, total: 10 }, { y: '2026', m: '2026-02', n: 2, total: 50 }]);
-    expect(reads, "each served query read once").toHaveLength(5);
+    expect(reads, "each served query read once").toHaveLength(7);
   });
 
   it('the REST door answers the engine\'s refusal, not a 200 — through findData and the wire mapping', async () => {

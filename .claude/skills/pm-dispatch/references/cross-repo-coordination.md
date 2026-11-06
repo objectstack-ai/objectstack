@@ -8,12 +8,10 @@
 - 新仓登记是一张清单:座位贴、标签、类别归属、门禁盘点、写身份锁移植(deny + hooks)。
 - 新仓三件:加入 `GOVERNED_REPOS`、安装车队 App、写 `lanes/<repo>.md` 宪章;应用仓无分诊席。
 - 新仓准入只问一句:真需要常设席位吗;hotcrm 宪章见 `references/lanes/hotcrm.md`。
-- objectui 仓已并入本仓 `ui/`:UI 卡住本仓,`ui/**` 代码归 `domain:ui`,受管面归 `domain:skills`。
-- 协议恒归 `domain:spec`;跨层功能照规则 2,`ui/` 子单归 `domain:ui`。
 - 车道可分席(席号 `· seat N`,或域×仓):忙时一车道开多席,闲时收归一席;每席独立座位贴。
 - 认领评论带 `Seat: domain:X#N` 行申报席号(缺省席 1);同席认领互斥,他席认领不触发自退。
 - 拆分触发预登记:单轮逼近 fire 周期,或某仓在全序下持续断粮 ⇒ 按仓拆回多席。
-- seam 卡单一归属:归修复落地仓的席,双仓皆动 objectstack 侧主导;涉 cloud 者归 cloud PM(下文)。
+- seam 卡单一归属:归修复落地仓的席,双仓皆动 objectstack 侧主导;涉 cloud 者归 cloud PM(域表)。
 - `scripts/pm/**` 等住 objectstack 的全板工具链单写手恒为 objectstack 侧席,他侧上游立卡回链。
 - 工装只答被告知的仓,缺 `--repo`/`PM_SWEEP_REPO` 即答 objectstack;⛔ 不答手上那张卡的仓。
 - 规则 1:issue 住在修复落地的仓,分诊时按判据严格执行。
@@ -21,6 +19,9 @@
 - 转仓走 `issue-transfer.mjs`;名册外或平台拒才重建:出处头 + 裸 `#N` 改全名 + 关源单为 moved。
 - 缝卡收窄为真协调卡:留 objectstack 带 `repo:*`,正文点名读者(哪个座位、哪一步)。
 - 决策卡留在立卡仓,总监席扫全部仓 `needs-user-decision` 呈批;在飞卡 ⛔ 不中途转仓。
+- 认领 `Responsibility:` 首答写失效代码住哪仓;住 objectstack(含 `ui/`)即平台缺陷。
+- 平台缺陷的修复是所属 `domain:*` 车道的平台卡;应用仓卡挂 `pm:blocked`+`Blocked-by:` 该卡。
+- 应用仓只加应用侧(cloud:控制面、控制台、托管安装);绕行须在案裁决 + 同笔立移除卡。
 - 规则 2:跨层功能点或 `ui/` 消费的 `Seam:` 卡恒由分诊立父单 + 逐层子单,spec/后端先行。
 - `main` 有 `ui/` 起,新 spec 键不再先行、取代上句次序:与首个读者同 PR,hotcrm 读者同合并批。
 - 下游带 `Blocked-by: <owner/repo>#<n>`;`Blocked-by` 未关闭/未合并的不派发,对 GitHub 现验。
@@ -41,7 +42,6 @@
 - 转移落对方队列:目标仓立单带 `pm:queue`、出处行与一行可执行判据,依赖用 `Blocked-by:`。
 - 跨座位请求骑在它所关的既有卡上:请求席在自卡写 `Blocked-by:`,并在目标卡留一条评论。
 - 该评论点名席位与步骤;无既有卡承载且请求自身即立卡门 ①②④ 时才立新卡。
-- 涉 cloud 即整卡归 cloud PM(`repo:cloud` 席):要读改 cloud 代码、生产方、事实或带 cloud 半边。
 - 本仓卡挂 `domain:cloud`+`repo:cloud`+活态,摘车道 `domain:*`,⛔ 不挂 `status:parked`。
 - 他仓卡能转即转 cloud 仓,否则本仓立 `repo:cloud` 承接卡写全所求;⛔ 不拆半边等读数。
 - 在飞卡见涉 cloud 即 `Release:`+`pm:retriage` 交分诊转 cloud 车道,已测读点留卡。

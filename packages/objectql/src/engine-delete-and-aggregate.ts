@@ -40,7 +40,11 @@ import { assertNoInternalFieldEvaluated, rejectInternalFieldEvaluation } from '.
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
 import { assertRecordCurrencyAggregatesGrouped } from './record-currency-aggregate-door.js';
-import { assertAggregatedColumnsAreDistinct, assertDateBucketTargetsAreTemporal } from './aggregate-query-shape-door.js';
+import {
+    assertAggregatedColumnsAreDistinct,
+    assertDateBucketTargetsAreTemporal,
+    assertGroupByTargetsAreStored,
+} from './aggregate-query-shape-door.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import { aggregatedRowColumnClasses, aggregatedRowColumnTypes, aggregatedRowColumns, applyHaving, assertAggregationFilterIsEvaluable, assertHavingIsEvaluable, assertHavingIsFilterCondition } from './having-filter.js';
 import {
@@ -131,6 +135,11 @@ export class DeleteAndAggregateFacet {
       // (every row in one null bucket), and two columns of the aggregated row
       // under one name (the last value written won). After the two doors
       // above, so a JSON field under a date bucket keeps their words.
+      // [#29167, #29304] A group entry of any form over a VIRTUAL (`formula`)
+      // field first: no driver stores a column for it (a SQL driver refused
+      // it as a missing column, the in-memory aggregation served one null
+      // group), and the date-bucket door has no class to judge it by.
+      assertGroupByTargetsAreStored(object, this._registry.getObject(object), query.groupBy);
       assertDateBucketTargetsAreTemporal(object, this._registry.getObject(object), query.groupBy);
       assertAggregatedColumnsAreDistinct(object, query.groupBy, query.aggregations);
       // [#10576] The per-aggregation `filter` (`AggregationNodeSchema.filter`,
