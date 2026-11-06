@@ -6,7 +6,7 @@ feat(formula): a mail template hole may name the `option` formatter, `{{ stage |
 
 Clause-②: yes (widening)
 Metadata-protocol: added
-Skills-docs: follow-up owed — `skills/objectstack-automation/SKILL.md` (the `notify` section) gains one line: an option label in a notice is written with the mail formatter `{{ stage | option:opportunity.stage }}`, not with `label()` in `templateData`. The skills lane owns that file.
+Skills-docs: follow-up #30731 — `skills/objectstack-automation/SKILL.md` (the `notify` section) gains one line: an option label in a notice is written with the mail formatter `{{ stage | option:opportunity.stage }}`, not with `label()` in `templateData`. The skills lane owns that file.
 
 - **`option` is a mail template's formatter.** `judgeHoleFormatter(…, 'mail')`, `parseMailHole` and `judgeMailHoleGrammar` accept `option:object.field`, and `parseMailHole` returns the reference as `optionField: { object, field }`. `MAIL_TEMPLATE_FORMATTERS` (new) is the mail list, `TEMPLATE_FORMATTERS` then `option`, and the mail refusals list it as the known formatters. `OPTION_ARGUMENT_RULE` (new) is the one sentence the spec, the renderer and the authoring rule quote; `optionFieldReference` (new) parses the argument.
 - **The argument is a bare `object.field`.** No argument, an empty one, a field with no object (`option:stage`), a quoted reference (`option:'opportunity.stage'`), a marked path (`option:@stage_ref`) and a second dot are refused (`option-field-shape`), naming the hole, the argument and the rule.
