@@ -82,10 +82,19 @@ name: Release
 #                                          queues no approval prompt at all.
 #   workflow_dispatch → `publish`          the repair lane. Takes no version;
 #   (WITHOUT                                audits main the same way, minus the
-#    `refresh_version_pr`)                  push range (a dispatch is one human
-#                                          act, not one per landing), and
+#    `refresh_version_pr`                   push range (a dispatch is one human
+#    or `snapshot_next`)                    act, not one per landing), and
 #                                          publishes the same version commit.
 #                                          Same environment gate.
+#   workflow_dispatch → `snapshot-next`    the `next` snapshot lane (ADR-0125,
+#   WITH `snapshot_next`                   amendment of 2026-11-05). Runs NONE
+#                                          of the stable jobs above. Cuts the
+#                                          newest commit whose full battery is
+#                                          green ON it, versions it in the
+#                                          workspace only, and publishes under
+#                                          `next` alone after the same
+#                                          environment approval. No tag, no
+#                                          Release, never `latest`.
 #
 # WHY `version-pr` LEFT THE PUSH TRIGGER (#11233, 2026-08-23)
 # ----------------------------------------------------------
@@ -123,7 +132,8 @@ name: Release
 # duplicate the publish invariants where they can drift apart):
 #
 #     dispatch WITH    `refresh_version_pr` → version-pr only, no deployment
-#     dispatch WITHOUT `refresh_version_pr` → the repair lane, exactly as before
+#     dispatch WITH    `snapshot_next`      → the snapshot lane only (end of file)
+#     dispatch WITHOUT either               → the repair lane, exactly as before
 #     schedule                              → version-pr only
 #     push to main                          → release-integrity (+ publish)
 #
@@ -174,10 +184,12 @@ name: Release
 # reaching this job is not a loosening: the job has no publish capability by
 # construction, so the event that starts it cannot change what it is able to do.
 # Release/D4/image backfill for an already-published version stays on push runs —
-# it is the #4900 repair, and it cannot mint a version. `npm publish` and
-# `git push --tags` still live in exactly one job, that job is reachable from
-# `push` and from the repair dispatch ONLY — never from `schedule`, never from a
-# refresh dispatch — and it cannot start without a human approving it.
+# it is the #4900 repair, and it cannot mint a version. A stable `npm publish`
+# and `git push --tags` still live in exactly one job, that job is reachable
+# from `push` and from the repair dispatch ONLY — never from `schedule`, never
+# from a refresh or a snapshot dispatch — and it cannot start without a human
+# approving it. The one other publish, the `next` snapshot, lives in
+# `snapshot-next`: dispatch-only, held at the same environment, no tag at all.
 
 on:
   push:
@@ -226,6 +238,24 @@ on:
           waiting for the next 6-hourly refresh. Runs the bookkeeping lane ONLY:
           no audit, no publish, no deployment queued at the `release`
           environment. Leave unchecked to use the publish repair lane.
+        required: false
+        default: false
+        type: boolean
+      # The `next` snapshot lane (ADR-0125, amendment of 2026-11-05; ruling
+      # record 6663894403, #29466 letter B). Its effect is to move this dispatch
+      # onto the snapshot lane: `snapshot-next-preflight` and `snapshot-next`
+      # require it, and `release-integrity`, `full-battery` and `publish` refuse
+      # a dispatch that carries it, exactly as they refuse `refresh_version_pr`.
+      # Toward the stable lane it is strictly subtractive. The snapshot lane
+      # never reads `force`; beside `refresh_version_pr` it runs nothing (the
+      # harmless reading, as for `refresh_version_pr` + `force` above).
+      snapshot_next:
+        description: >-
+          Cut a `next` snapshot of main: the newest commit whose full battery is
+          green ON it, versioned in the workspace only (never committed) and
+          published under the `next` dist-tag alone after a maintainer approves
+          the `release` environment. No stable job runs, no tag is pushed, no
+          GitHub Release is cut and `latest` never moves.
         required: false
         default: false
         type: boolean
@@ -956,9 +986,15 @@ jobs:
     # environment for a maintainer to dismiss. The audit mints nothing, so this
     # is not a safety guard; it is the noise guard the collision section above
     # argues for. Bookkeeping events do not get a release audit.
+    #
+    # `!inputs.snapshot_next` is the snapshot lane's half (ADR-0125, amendment
+    # of 2026-11-05), read exactly as `refresh_version_pr` is: a snapshot
+    # dispatch gets no stable audit, so it can never queue a stable publish
+    # prompt — one a dispatch would park in the publish group beyond
+    # `stale-prompts`' reach (it never cancels a dispatch run).
     if: >-
       github.event_name == 'push' ||
-      (github.event_name == 'workflow_dispatch' && !inputs.refresh_version_pr)
+      (github.event_name == 'workflow_dispatch' && !inputs.refresh_version_pr && !inputs.snapshot_next)
     runs-on: ubuntu-latest
     # Run wall of the 376 push runs among the 400 most recent (2026-10-22..27), an upper
     # bound for this job: p99 4.6 min, max 6.9. The bound leaves room for the backfill
@@ -1516,13 +1552,14 @@ jobs:
     # Same predicate as `publish`, verbatim, so the read happens exactly when
     # a publish would be queued and on no other event; a skipped gate reads as
     # a skipped `needs` to `publish`, whose `success()` is then false — the
-    # same fail-closed direction.
+    # same fail-closed direction. `!inputs.snapshot_next` likewise: a snapshot
+    # dispatch skips the audit, and this gate says so in its own guard.
     needs: [release-integrity]
     if: >-
       success() &&
       (needs.release-integrity.outputs.publish-pending == 'true' ||
        (github.event_name == 'workflow_dispatch' && inputs.force &&
-        !inputs.refresh_version_pr))
+        !inputs.refresh_version_pr && !inputs.snapshot_next))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -1551,7 +1588,9 @@ jobs:
         run: node scripts/ci/scheduled-full-run.mjs --release-gate --release-commit "$VERSION_COMMIT"
 
   # ══════════════════════════════════════════════════════════════════════════
-  # HUMAN LANE — the ONLY job in this repository that publishes.
+  # HUMAN LANE — the ONLY job in this repository that publishes a STABLE
+  # version (the `next` snapshot lane at the end of this file is the other
+  # publish, held at the same environment).
   # ══════════════════════════════════════════════════════════════════════════
   publish:
     # The job NAME is the approval screen (ADR-0125 D2). GitHub shows the job
@@ -1604,12 +1643,18 @@ jobs:
     # unnecessary: what makes the force branch safe would then be a fact about a
     # DIFFERENT job's `if:`, discoverable only by reading it, and the next person
     # to touch either guard gets no warning. This is the one job in the
-    # repository that publishes; its guard states its own preconditions.
+    # repository that publishes a STABLE version; its guard states its own
+    # preconditions.
+    #
+    # `!inputs.snapshot_next` is the snapshot lane's half (ADR-0125, amendment
+    # of 2026-11-05), redundant in exactly the same way and written for the
+    # same reason: `force` never reaches the snapshot lane, and the snapshot
+    # input never reaches this job.
     if: >-
       success() &&
       (needs.release-integrity.outputs.publish-pending == 'true' ||
        (github.event_name == 'workflow_dispatch' && inputs.force &&
-        !inputs.refresh_version_pr))
+        !inputs.refresh_version_pr && !inputs.snapshot_next))
     runs-on: ubuntu-latest
     # ⛔ A timeout here cancels mid-`changeset publish`, the half-published state the
     # concurrency note below exists to prevent, so this bound is set from the steps' own
@@ -2101,3 +2146,286 @@ jobs:
     uses: ./.github/workflows/docker-publish.yml
     with:
       version: ${{ needs.publish.outputs.cli-version || needs.release-integrity.outputs.cli-version }}
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # SNAPSHOT LANE — a maintainer-approved `next` snapshot of main (ADR-0125,
+  # amendment of 2026-11-05; ruling record 6663894403, #29466 letter B).
+  # Dispatch-only, and exclusive: it starts only on a dispatch carrying
+  # `snapshot_next`, and that dispatch runs none of the stable lane's jobs.
+  # ══════════════════════════════════════════════════════════════════════════
+  #
+  # What it does, and what it never does:
+  #   - snapshots the head of the newest green full-battery run on main, at
+  #     distance zero (`scheduled-full-run.mjs --snapshot-commit`, confirmed by
+  #     `--release-gate --require-distance-zero`);
+  #   - runs the bare `changeset version --snapshot next` in its own checkout and
+  #     commits none of it — the bumped manifests, the consumed changesets and
+  #     the rendered CHANGELOG entries stay in the runner (`contents: read`,
+  #     `persist-credentials: false`: nothing here can push);
+  #   - publishes with `changeset publish --tag next --no-git-tag`, after the
+  #     guard (`scripts/ci/snapshot-next.mjs`) proved every package goes out
+  #     under `next` alone and no member of the fixed group would debut;
+  #   - ⛔ pushes no tag, cuts no GitHub Release, uploads no ADR-0087 D4 asset,
+  #     builds no runtime image, never touches the Version Packages PR, runs
+  #     none of the stable post-publish acts and never moves `latest`.
+  #
+  # Every refusal — not on main, no distance-zero green commit, a release-
+  # candidate cycle (`.changeset/pre.json` `mode: pre`), a member with no version
+  # on npm, a dry run that fails — lands in the PREFLIGHT job, which carries no
+  # environment, so no approval prompt ever appears for a snapshot that would be
+  # refused. The publish job re-reads the cycle and the debut rule after the
+  # approval, because an approval can come a day later.
+  #
+  # ⛔ D3 holds here exactly as for `publish`: if `release` ever has no required
+  # reviewers, this lane is void, and it is removed in the same change that
+  # reverts `publish` to a dispatch trigger (ADR-0125's amendment says why).
+  snapshot-next-preflight:
+    name: Snapshot next preflight (battery, RC cycle, debut, dry run)
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.snapshot_next &&
+      !inputs.refresh_version_pr
+    runs-on: ubuntu-latest
+    # Install, the version step and a pack of the whole fixed group; the pack
+    # is the long pole.
+    timeout-minutes: 40
+    permissions:
+      # `actions: read` is the run listings of ci.yml and lint.yml;
+      # `contents: read` is the checkout.
+      actions: read
+      contents: read
+    outputs:
+      commit: ${{ steps.commit.outputs.commit }}
+      commit-short: ${{ steps.commit.outputs.commit-short }}
+    steps:
+      # `fetch-depth: 0`: the commit is found on main's first-parent history,
+      # and the reader refuses a shallow clone.
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      # The newest commit at which both full-battery workflows (CI, Lint & Type
+      # Check) have their deciding run ON it, green — then the release gate,
+      # asked at that commit with distance zero required, must agree. Both read
+      # through `--json`, so no prose line is parsed. Runs off this checkout
+      # with no install: scheduled-full-run.mjs imports node builtins only.
+      - name: Select the commit (the newest with the full battery green on it)
+        id: commit
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::the snapshot lane cuts from main only (got ${GITHUB_REF})."
+            exit 1
+          fi
+          node scripts/ci/scheduled-full-run.mjs --snapshot-commit --from "${GITHUB_SHA}" --json > "${RUNNER_TEMP}/snapshot-commit.json"
+          commit=$(jq -r '.commit // empty' "${RUNNER_TEMP}/snapshot-commit.json")
+          if ! printf '%s' "$commit" | grep -Eqx '[0-9a-f]{40}'; then
+            echo "::error::the selection named no commit ('${commit}'). Refusing."
+            exit 1
+          fi
+          node scripts/ci/scheduled-full-run.mjs --release-gate --release-commit "$commit" --require-distance-zero --json > "${RUNNER_TEMP}/snapshot-gate.json"
+          if ! jq -e --arg c "$commit" '.ok == true and .distanceZero == true and .requireDistanceZero == true and .releaseCommit == $c' "${RUNNER_TEMP}/snapshot-gate.json" > /dev/null; then
+            jq . "${RUNNER_TEMP}/snapshot-gate.json"
+            echo "::error::the release gate does not read the full battery green ON ${commit} (record above). Refusing."
+            exit 1
+          fi
+          git checkout --quiet --detach "$commit"
+          echo "commit=${commit}" >> "$GITHUB_OUTPUT"
+          echo "commit-short=${commit:0:12}" >> "$GITHUB_OUTPUT"
+          {
+            echo "## \`next\` snapshot of main \`${commit}\`"
+            echo
+            echo "- dispatched at main \`${GITHUB_SHA}\` by \`${GITHUB_ACTOR}\`; the snapshot is cut $(jq -r '.offset' "${RUNNER_TEMP}/snapshot-commit.json") first-parent commit(s) behind it"
+            jq -r '.workflows[] | "- \(.name): run \(.runId) (\(.event)) concluded \(.conclusion) ON the commit (distance \(.distance))"' "${RUNNER_TEMP}/snapshot-gate.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # From here on the tree is the selected commit, with its own tooling.
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+
+      - name: Verify Changesets "fixed" group covers every public package
+        run: pnpm check:changeset-fixed
+
+      # The RC cycle, the fixed group and the debut rule, read at the selected
+      # commit. A refusal here fails the job, so `snapshot-next` is skipped and
+      # no deployment is queued.
+      - name: Refuse during an RC cycle, or before every group member has debuted
+        run: node scripts/ci/snapshot-next.mjs preflight
+
+      # The dry run: the bare version step, the guard over changesets' publish
+      # plan and over every packed manifest (pnpm substitutes `workspace:*` at
+      # pack time), then the tree put back. Publishes nothing; no token is read.
+      - name: Dry run (version, plan, packed manifests, tag)
+        run: node scripts/ci/snapshot-next.mjs dry-run
+
+  snapshot-next:
+    # The approval screen (ADR-0125 D2, and the amendment's rule for this lane):
+    # it says this is a `next` snapshot and names the main commit it is cut
+    # from. ⛔ It must never read like the stable prompt, which
+    # scripts/release-pending-publish.mjs reads as `Publish <one token> to npm
+    # (awaiting approval)` (PUBLISH_JOB_NAME) — pinned by snapshot-next.mjs's
+    # self-test.
+    name: Snapshot next of main ${{ needs.snapshot-next-preflight.outputs.commit-short }} (awaiting approval)
+    needs: [snapshot-next-preflight]
+    # Held whole until a required reviewer approves (D2, D3): no checkout, no
+    # build, no version step, no publish before the click.
+    environment: release
+    if: >-
+      success() &&
+      github.event_name == 'workflow_dispatch' && inputs.snapshot_next &&
+      !inputs.refresh_version_pr
+    runs-on: ubuntu-latest
+    # Build + Console build about 15 min cold, the guard's pack a few minutes,
+    # `changeset publish` about 15, the registry read-back up to 35, then the
+    # dist-tag read. The approval wait is not job time.
+    timeout-minutes: 120
+    # Its OWN group (ADR-0125 D5 as the amendment reads it): a snapshot waiting
+    # at the environment holds this group, never `release-publish-<ref>`, so it
+    # neither hides nor evicts a stable prompt, and none evicts it. Never
+    # cancelled in progress: a cancel mid-publish leaves the group half on npm.
+    concurrency:
+      group: release-snapshot-next-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      # Read only: this job pushes no tag and cuts no Release, so it holds no
+      # credential that could.
+      contents: read
+    steps:
+      - name: Checkout the selected commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.snapshot-next-preflight.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      # Before anything from the tree is trusted: the checkout is the commit the
+      # preflight selected, and that commit is on main.
+      - name: Guard the approved snapshot (branch, commit)
+        env:
+          COMMIT: ${{ needs.snapshot-next-preflight.outputs.commit }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::the snapshot lane may only run on main (got ${GITHUB_REF})."
+            exit 1
+          fi
+          if ! printf '%s' "$COMMIT" | grep -Eqx '[0-9a-f]{40}'; then
+            echo "::error::the preflight named no commit ('${COMMIT}'). An empty ref would check out github.sha, which the battery has not passed. Refusing."
+            exit 1
+          fi
+          if [ "$(git rev-parse HEAD)" != "$COMMIT" ]; then
+            echo "::error::the workspace is at $(git rev-parse HEAD), not the selected commit ${COMMIT}. Refusing."
+            exit 1
+          fi
+          if [ "$(git rev-parse --is-shallow-repository)" != 'false' ]; then
+            echo "::error::shallow clone: an ancestry answer here would not be evidence."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$COMMIT" refs/remotes/origin/main; then
+            echo "::error::${COMMIT} is not on main as fetched just now. Refusing."
+            exit 1
+          fi
+          {
+            echo "## Publishing a \`next\` snapshot of \`${COMMIT}\`"
+            echo
+            echo "- started by: \`${GITHUB_ACTOR}\`; authorised by the \`release\` environment approval on this run"
+            echo "- dist-tag: \`next\` alone; no tag, no GitHub Release, \`latest\` untouched"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+
+      - name: Verify Changesets "fixed" group covers every public package
+        run: pnpm check:changeset-fixed
+
+      # Re-read after the approval, which can come a day after the preflight:
+      # the cycle and the debut rule again, and every member's dist-tags as they
+      # stand now — the record `verify` compares `latest` against.
+      - name: Refuse during an RC cycle, or before every group member has debuted (after the approval)
+        run: node scripts/ci/snapshot-next.mjs preflight --record "${RUNNER_TEMP}/snapshot-next-before.json"
+
+      # ⛔ The BARE command, never `pnpm run version`: that chain aborts at
+      # sync-protocol-version.mjs on a major below 1, and the snapshot is
+      # `0.0.0-next-<datetime>`. Nothing it writes is committed.
+      - name: Version the workspace as a next snapshot (never committed)
+        id: version
+        run: |
+          set -euo pipefail
+          pnpm exec changeset version --snapshot next
+          version=$(jq -r '.version' packages/cli/package.json)
+          if ! printf '%s' "$version" | grep -Eqx '0\.0\.0-next-[0-9]{14}'; then
+            echo "::error::the version step left @objectstack/cli at '${version}', not a next snapshot. Refusing."
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "- version: \`${version}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Build the Console dist
+        run: pnpm run console:build
+
+      # The two ADR-0087 registry projections the spec tarball ships, with NO
+      # per-release section — the pre-release half of the script, reading
+      # nothing from npm — then the gate that the packed copies match a fresh
+      # generation.
+      - name: Generate and verify the spec projections (no per-release section)
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          bash scripts/release-spec-changes.sh --generate
+          bash scripts/release-spec-changes.sh --verify
+
+      - name: Refuse tooling material in a published @object-ui package
+        run: node ui/scripts/check-published-dist-tooling.mjs --no-build
+
+      # THE GUARD: every package publishes under `next` alone, at one snapshot
+      # version of the whole group, and every packed manifest resolves inside
+      # the snapshot. Fails the job before anything reaches the registry.
+      - name: Guard the publish (dist-tag, versions, plan, packed manifests)
+        run: node scripts/ci/snapshot-next.mjs guard --pack-dir "${RUNNER_TEMP}/snapshot-next-pack"
+
+      # The ruling's command, run off the installed binary rather than through
+      # `pnpm run` / `pnpm exec`, which export npm_config_globalconfig: the
+      # nested pnpm `changeset publish` spawns would then hand npm one file as
+      # both its user and its global config (scripts/release-publish.sh says
+      # why). `--no-git-tag`: no tag is created, and none could be pushed.
+      - name: Publish to npm under next (no git tag)
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" >> "$HOME/.npmrc"
+          unset npm_config_globalconfig NPM_CONFIG_GLOBALCONFIG
+          PATH="${GITHUB_WORKSPACE}/node_modules/.bin:${PATH}"
+          changeset publish --tag next --no-git-tag
+
+      # Every package of the group at the snapshot version on npm, with the
+      # stable lane's own bounded read-back (it absorbs latency, never absence).
+      - name: Verify every package reached npm
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: node scripts/release-verify-npm.mjs
+
+      # `next` names the snapshot on every member, and no `latest` moved to it.
+      # A `latest` on the snapshot is an incident for the maintainer — never
+      # repaired with a counter-publish (Prime Directive 15).
+      - name: Verify the dist-tags (next on the snapshot, latest unmoved)
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: node scripts/ci/snapshot-next.mjs verify --record "${RUNNER_TEMP}/snapshot-next-before.json" --version "$VERSION"
