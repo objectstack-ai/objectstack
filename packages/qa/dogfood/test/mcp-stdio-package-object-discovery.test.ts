@@ -385,7 +385,8 @@ const DATA_TOOLS: ReadonlyArray<readonly [string, (object: string) => Record<str
   ['aggregate_records', (o) => ({ objectName: o, aggregations: [{ function: 'count', alias: 'n' }] })],
   ['create_record', (o) => ({ objectName: o, data: { name: 'written' } })],
   ['update_record', (o) => ({ objectName: o, recordId: 'r_any', data: { name: 'written' } })],
-  ['delete_record', (o) => ({ objectName: o, recordId: 'r_any' })],
+  // `confirm: true` passes the delete confirmation gate, so the call meets the gates behind it.
+  ['delete_record', (o) => ({ objectName: o, recordId: 'r_any', confirm: true })],
 ];
 
 /** Every engine call a data tool could reach `object`'s store through. */

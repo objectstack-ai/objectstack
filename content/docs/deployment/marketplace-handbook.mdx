@@ -228,6 +228,9 @@ the detail.
    For every other package provided by code or by an installed app (the app
    itself, a plugin, a platform package), the runtime answers
    `PATCH /api/v1/packages/:id/disable` with `422 WRITABLE_PACKAGE_REQUIRED`.
+   A disable that would leave a validation rule reading a field the package
+   adds is refused with `409 PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`
+   ([below](#disabling-a-module)).
    To take an installed app away, uninstall it.
 8. **Upgrading.** You publish a new version; nothing running changes. An
    environment installed through the cloud shows **Update available → v…** and
@@ -302,6 +305,21 @@ its data is kept.
 - **Restart.** The choice is kept per environment and survives a restart.
 - **Authoring.** A disabled module is still read-only: edit, publish, revert
   and delete keep answering `422 WRITABLE_PACKAGE_REQUIRED`.
+- **A rule that reads its fields.** A module that adds fields to another
+  object through `objectExtensions` cannot be disabled while a validation rule
+  of any enabled package reads one of those fields: declared dependent or not,
+  your app's `.custom` pair (where the customer's own rules live) included, at
+  any severity. The disable door answers
+  `409 PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`, and its message names
+  each rule as `package · object · rule (reads FIELD)`; nothing changes.
+  Withheld, the field could not be read, and every write to that object would
+  fail the rule. Switch off or change each named rule first (a rule the
+  customer switched off on their copy of the object counts as off), or disable
+  the package that owns it. A formula over the field does not block the
+  disable: it answers `null` while the module is off. An overwrite of the
+  enabled module with `enableOnInstall: false` that would leave it disabled in
+  that state answers the same `409`, and the module stays enabled; a fresh
+  install with `enableOnInstall: false` lands disabled, as before.
 
 **What your app's own code meets.** A hook of your app that reads or writes a
 module's object through `ctx.api.object('<object>')` runs inside the server,
