@@ -351,6 +351,7 @@
     "api/CompleteChunkedUploadResponse:error",
     "api/CompleteChunkedUploadResponse:meta",
     "api/CompleteChunkedUploadResponse:success",
+    "api/CompleteUploadRequest:attachTo",
     "api/CompleteUploadRequest:eTag",
     "api/CompleteUploadRequest:fileId",
     "api/ConceptListResponse:data",

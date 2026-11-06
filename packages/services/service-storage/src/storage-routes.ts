@@ -1972,8 +1972,12 @@ function judgeCompletion(session: UploadSessionRecord, listed: ReadonlyArray<Lis
  *
  * The eTag a completion may carry is not compared: no adapter's `getInfo`
  * reports the stored object's ETag, so there is nothing to compare it with.
+ *
+ * Package-internal (not re-exported from `index.ts`): exported so the attach
+ * verb's commit of an upload (`FileAttachmentService.attachUploadAs`) asks the
+ * same question before it commits.
  */
-async function heldBytesRefusal(storage: IStorageService, file: FileRecord): Promise<string | null> {
+export async function heldBytesRefusal(storage: IStorageService, file: FileRecord): Promise<string | null> {
   const remedy =
     'Send the file to its upload URL (start a new upload if that URL has expired), then complete again. ' +
     'The file stays pending until then.';
