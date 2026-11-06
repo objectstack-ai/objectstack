@@ -140,6 +140,15 @@ describe('the object and field, judged against the app\'s objects', () => {
       .toEqual(['option-object-unknown']);
   });
 
+  it('⭐ objects that are the live universe have no rung ④: a platform-prefixed name they do not carry is refused', () => {
+    for (const object of ['sys_userz', 'cloud_tenantz', 'ai_agentz']) {
+      expect(judgeMailHoleGrammar(`At {{ status | option:${object}.status }}`, { objects, liveUniverse: true })
+        .map((f) => f.refusal.rule)).toEqual(['option-object-unknown']);
+    }
+    // A name the live universe carries is judged as before.
+    expect(judgeMailHoleGrammar(`At ${HOLE}`, { objects, liveUniverse: true })).toEqual([]);
+  });
+
   it('judges no reference when no objects are handed in', () => {
     expect(judgeMailHoleGrammar('At {{ stage | option:deal.stage }}')).toEqual([]);
   });

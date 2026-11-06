@@ -50,8 +50,10 @@
  * carry that has a platform prefix (`sys_`, `cloud_`, `ai_`) is rung ④ of the
  * object-reference ladder: a package outside this app may register it, so the
  * grammar does not refuse it and does not judge its field
- * ({@link optionObjectUnregisteredPlatform}); the authoring rule advises on it,
- * and a send with no option list for it is refused at render.
+ * ({@link optionObjectUnregisteredPlatform}); the authoring rule advises on it
+ * at the CLI doors. Objects that are the live served universe (the publish
+ * door, the renderer; {@link MailHoleGrammarOptions}.`liveUniverse`) have no
+ * rung ④: there nothing else can register the name, and it is refused.
  */
 
 import { hasPlatformObjectPrefix } from '@objectstack/spec/system';
@@ -172,15 +174,25 @@ export interface MailHoleGrammarOptions {
    * judged here.
    */
   objects?: ReadonlyMap<string, ReadonlyMap<string, boolean> | null>;
+  /**
+   * `true` when `objects` is the deployment's whole served object universe —
+   * the live objects the metadata publish door carries, or the renderer's at
+   * send — rather than one app's declaration. Then nothing else can register
+   * a name `objects` does not carry, so rung ④ does not apply: a
+   * platform-prefixed name it does not carry is refused
+   * (`option-object-unknown`) like any other. Absent or `false`, rung ④
+   * applies ({@link optionObjectUnregisteredPlatform}).
+   */
+  liveUniverse?: boolean;
 }
 
 /**
  * Whether an `option` hole's object is rung ④ of the object-reference ladder
  * against `objects`: not among them, and spelled with a platform prefix
  * (`sys_`, `cloud_`, `ai_`), so a package outside this app may still register
- * it. Such a name is neither refused nor judged by {@link judgeMailHoleGrammar};
- * a caller that advises (the authoring rule, at `warning`) reads this, and a
- * render with no label table for it refuses at send (`optionTableRefusal`).
+ * it. Unless the objects are the live universe (`liveUniverse`), such a name
+ * is neither refused nor judged by {@link judgeMailHoleGrammar}; a caller that
+ * advises (the authoring rule at the CLI doors, at `warning`) reads this.
  */
 export function optionObjectUnregisteredPlatform(
   ref: OptionFieldReference,
@@ -194,8 +206,9 @@ function optionFieldRefusal(
   hole: string,
   ref: OptionFieldReference,
   objects: ReadonlyMap<string, ReadonlyMap<string, boolean> | null>,
+  liveUniverse: boolean,
 ): TemplateHoleGrammarRefusal | null {
-  if (optionObjectUnregisteredPlatform(ref, objects)) return null;
+  if (!liveUniverse && optionObjectUnregisteredPlatform(ref, objects)) return null;
   const fields = objects.get(ref.object);
   if (fields === undefined) {
     return {
@@ -245,7 +258,7 @@ export function judgeMailHoleGrammar(face: string, options: MailHoleGrammarOptio
   for (const m of face.matchAll(mailHolePattern())) {
     const parsed = parseMailHole(m[2], m[0]);
     const optionRefusal = parsed?.optionField !== undefined && options.objects !== undefined
-      ? optionFieldRefusal(m[0], parsed.optionField, options.objects)
+      ? optionFieldRefusal(m[0], parsed.optionField, options.objects, options.liveUniverse === true)
       : null;
     if (parsed?.refusal) {
       findings.push({ start: m.index ?? 0, text: m[0], refusal: parsed.refusal });

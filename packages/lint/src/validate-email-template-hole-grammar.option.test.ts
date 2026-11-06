@@ -151,17 +151,47 @@ describe('the authoring doors', () => {
       .toEqual(['emailTemplates[0].subject']);
   });
 
-  it('⭐ os validate and the publish door agree on rung ④: a warning, never an error', () => {
-    const tpl = onlySubject('{{ status | option:sys_userz.status }}');
-    const normalized = normalizeStackInput(stackWith(tpl) as Record<string, unknown>);
-    const atValidate = runAuthoringRules('validate', {
-      normalized: normalized as Record<string, unknown>,
-      parsed: ObjectStackDefinitionSchema.parse(normalized) as Record<string, unknown>,
-    }).filter((f) => f.rule === EMAIL_TEMPLATE_HOLE_GRAMMAR);
-    expect(atValidate.map((f) => [f.severity, f.path])).toEqual([['warning', 'emailTemplates[0].subject']]);
-    const atPublish = runRuntimeAuthoringRules({ type: 'email_template', item: tpl, context: { objects: [opportunity] } });
-    expect(atPublish.errors).toEqual([]);
-    expect(atPublish.advisories.filter((f) => f.rule === EMAIL_TEMPLATE_HOLE_GRAMMAR).map((f) => f.path)).toEqual(['emailTemplates[0].subject']);
+  describe('⭐ the CLI doors walk the ladder, the publish door reads the live universe alone', () => {
+    const atCli = (command: (typeof AUTHORING_COMMANDS)[number], tpl: Record<string, unknown>) => {
+      const normalized = normalizeStackInput(stackWith(tpl) as Record<string, unknown>);
+      return runAuthoringRules(command, {
+        normalized: normalized as Record<string, unknown>,
+        parsed: ObjectStackDefinitionSchema.parse(normalized) as Record<string, unknown>,
+      }).filter((f) => f.rule === EMAIL_TEMPLATE_HOLE_GRAMMAR).map((f) => [f.severity, f.path]);
+    };
+    const atPublish = (tpl: Record<string, unknown>, objects: unknown[]) => {
+      const result = runRuntimeAuthoringRules({ type: 'email_template', item: tpl, context: { objects } });
+      return {
+        errors: result.errors.map((f) => [f.rule, f.path, f.message]),
+        advisories: result.advisories.filter((f) => f.rule === EMAIL_TEMPLATE_HOLE_GRAMMAR).map((f) => f.path),
+      };
+    };
+    const sysUser = {
+      name: 'sys_user',
+      label: 'User',
+      fields: { status: { type: 'select', label: 'Status', options: [{ value: 'active', label: 'Active' }] } },
+    };
+
+    it.each([
+      ['a platform-prefixed name no package registers (rung ④)', '{{ status | option:sys_userz.status }}', 'sys_userz', [['warning', 'emailTemplates[0].subject']]],
+      ['a platform object name the live universe does not carry', '{{ status | option:sys_user.status }}', 'sys_user', []],
+    ])('%s: os validate and os build answer from the ladder, the publish door refuses at error', (_label, hole, object, cli) => {
+      const tpl = onlySubject(`Stalled at ${hole}`);
+      expect(atCli('validate', tpl)).toEqual(cli);
+      expect(atCli('build', tpl)).toEqual(cli);
+      const published = atPublish(tpl, [opportunity]);
+      expect(published.advisories).toEqual([]);
+      expect(published.errors).toEqual([[
+        EMAIL_TEMPLATE_HOLE_GRAMMAR,
+        'emailTemplates[0].subject',
+        expect.stringContaining(`names the object \`${object}\`, which resolves to no object`),
+      ]]);
+    });
+
+    it('control: the publish door accepts the platform object once the live universe serves it', () => {
+      expect(atPublish(onlySubject('{{ status | option:sys_user.status }}'), [opportunity, sysUser]))
+        .toEqual({ errors: [], advisories: [] });
+    });
   });
 
   it('⭐ the runtime publish gate judges an email_template write against the live objects it carries', () => {

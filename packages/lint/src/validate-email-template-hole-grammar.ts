@@ -37,13 +37,14 @@
  *   them (`objectExtensions` folded in, the injected system columns beside
  *   the declared fields), the objects this artifact's `packages[]` provide,
  *   and, with its field left unjudged here, a platform-provided object the
- *   stack does not carry (`PLATFORM_PROVIDED_OBJECT_NAMES`). At the publish
- *   door the stack's objects are the live object universe the gate carries.
- *   A name none of these carries that has a platform prefix (`sys_`,
- *   `cloud_`, `ai_`) is the ladder's rung ④ (`object-reference-unregistered-platform`):
- *   a package outside the app may register it, so the hole is not refused —
- *   it gets a `warning`, its field unjudged, and a send with no option list
- *   for it is refused at render.
+ *   stack does not carry (`PLATFORM_PROVIDED_OBJECT_NAMES`). A name none of
+ *   these carries that has a platform prefix (`sys_`, `cloud_`, `ai_`) is the
+ *   ladder's rung ④ (`object-reference-unregistered-platform`): a package
+ *   outside the app may register it, so at the CLI doors the hole is not
+ *   refused — it gets a `warning`, its field unjudged. At the publish door
+ *   the stack's objects are the live object universe the gate carries, the
+ *   whole of what resolves: no rung below it, and a name it does not carry is
+ *   refused whatever its prefix.
  *
  * WHICH holes are refused is not decided here: it is `@objectstack/formula`'s
  * `judgeMailHoleGrammar`, the grammar the mail renderer itself parses with,
@@ -135,12 +136,20 @@ function optionFieldsOf(obj: AnyRec): Map<string, boolean> {
  *
  * A name none of these carries resolves to nothing: refused, unless it has a
  * platform prefix (rung ④, {@link unregisteredPlatformOptionHoles}).
+ *
+ * At the publish door (`liveUniverse`) the stack's objects are the live
+ * universe the gate carries, every object the deployment serves, so the index
+ * is that universe alone: no `packages[]` rung, no platform-name rung, and no
+ * rung ④ — a name it does not carry is refused, whatever its prefix, as
+ * `list-view-object-unknown` refuses a list view's unresolvable binding there.
  */
-function optionFieldIndex(stack: AnyRec): Map<string, Map<string, boolean> | null> {
+function optionFieldIndex(stack: AnyRec, liveUniverse: boolean): Map<string, Map<string, boolean> | null> {
   const index = new Map<string, Map<string, boolean> | null>();
   for (const obj of objectsAsServed(stack).objects) {
     if (typeof obj.name === 'string' && obj.name !== '') index.set(obj.name, optionFieldsOf(obj));
   }
+  // The live universe is every object the deployment serves: no rung below it.
+  if (liveUniverse) return index;
   for (const entry of packagesOf(stack)) {
     const body = entry.manifest;
     if (!body || typeof body !== 'object' || Array.isArray(body)) continue;
@@ -171,7 +180,22 @@ function unregisteredPlatformOptionHoles(
   return holes;
 }
 
-export function validateEmailTemplateHoleGrammar(stack: AnyRec): EmailTemplateHoleGrammarFinding[] {
+/** How the rule reads the stack's objects. */
+export interface EmailTemplateHoleGrammarOptions {
+  /**
+   * `true` at the runtime publish door (`AuthoringRuleContext.runtimeWriteType`
+   * set): the stack's objects are the live object universe the gate carries,
+   * judged as the whole of what resolves. Absent or `false` (the CLI doors),
+   * the object-reference ladder applies, rung ④ advising at `warning`.
+   */
+  liveUniverse?: boolean;
+}
+
+export function validateEmailTemplateHoleGrammar(
+  stack: AnyRec,
+  options: EmailTemplateHoleGrammarOptions = {},
+): EmailTemplateHoleGrammarFinding[] {
+  const liveUniverse = options.liveUniverse === true;
   const findings: EmailTemplateHoleGrammarFinding[] = [];
   let objects: Map<string, Map<string, boolean> | null> | undefined;
   for (const { rec: template, path } of collectionEntries(stack.emailTemplates, 'emailTemplates')) {
@@ -181,8 +205,8 @@ export function validateEmailTemplateHoleGrammar(stack: AnyRec): EmailTemplateHo
     for (const face of FACES) {
       const text = template[face];
       if (typeof text !== 'string') continue;
-      objects ??= optionFieldIndex(stack);
-      for (const hole of judgeMailHoleGrammar(text, { variables, objects })) {
+      objects ??= optionFieldIndex(stack, liveUniverse);
+      for (const hole of judgeMailHoleGrammar(text, { variables, objects, liveUniverse })) {
         findings.push({
           severity: 'error',
           rule: EMAIL_TEMPLATE_HOLE_GRAMMAR,
@@ -195,7 +219,7 @@ export function validateEmailTemplateHoleGrammar(stack: AnyRec): EmailTemplateHo
             + 'Anything more belongs in the caller that supplies the data.',
         });
       }
-      for (const hole of unregisteredPlatformOptionHoles(text, objects)) {
+      for (const hole of liveUniverse ? [] : unregisteredPlatformOptionHoles(text, objects)) {
         findings.push({
           severity: 'warning',
           rule: EMAIL_TEMPLATE_HOLE_GRAMMAR,
