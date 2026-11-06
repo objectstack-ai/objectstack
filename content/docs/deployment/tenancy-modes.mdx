@@ -68,9 +68,11 @@ and the engine's own writes (seeders, installers, migrations) write it. Holding
 write doors (save, reset, publish, rollback), the install-wide stored rewrite
 (`POST /meta/_migrate-stored`), every `/packages` write,
 `install-local` install, upgrade and uninstall, the `/automation`
-definition writes, and the import of a remote table as an object
+definition writes, the import of a remote table as an object
 (`POST /datasources/:name/external/tables/:remote/import` and the MCP
-`import_object` tool) refuse such a caller `403`, naming the posture.
+`import_object` tool), and the refresh of a federated datasource's cached
+catalog (`POST /datasources/:name/external/refresh-catalog`) refuse such a
+caller `403`, naming the posture.
 
 - **Headquarters IT** authors the environment's metadata as the platform
   operator: declare its administrators in `OS_PLATFORM_OWNER_EMAIL`. A

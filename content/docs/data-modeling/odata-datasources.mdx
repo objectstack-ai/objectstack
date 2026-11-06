@@ -148,7 +148,8 @@ What each piece does on this driver:
   `list_remote_tables` and `import_object`. An import saves an object into the
   environment's metadata, so under the `group` and `isolated` tenancy postures only
   the platform operator imports, as only the platform operator saves any other
-  metadata there ([tenancy modes](/docs/deployment/tenancy-modes)). The draft maps each EDM type to a field
+  metadata there ([tenancy modes](/docs/deployment/tenancy-modes)). A refresh of the
+  datasource's catalog saves its snapshot there too, so the same holds for it. The draft maps each EDM type to a field
   type, makes the key the `id`, and writes `columnMap` for every property whose name is
   not a snake_case field name (`CategoryID` becomes `category_id`). EDM types with no
   field type, such as `Edm.Duration` or a service's own enum, are listed for review. An

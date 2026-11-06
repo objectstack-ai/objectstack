@@ -45,8 +45,9 @@
  * Under a wall, the doors that write the environment's metadata ask a second
  * predicate after their capability gate, {@link walledCatalogWriteVerdict}:
  * the `/meta` item write doors, `POST /meta/_migrate-stored`, the `/packages`
- * write doors, the `/automation` definition writes, `install-local` and the
- * external-table import (the REST route and the MCP `import_object` tool).
+ * write doors, the `/automation` definition writes, `install-local`, the
+ * external-table import (the REST route and the MCP `import_object` tool) and
+ * the federated catalog refresh.
  *
  * ── Refusal messages (#7450) ──────────────────────────────────────────────
  *
@@ -183,8 +184,9 @@ export const PLATFORM_OPERATOR_POSTURE = 'PLATFORM_ADMIN';
  * rollback), `POST /meta/_migrate-stored` on both transports, the `/packages`
  * write doors, the `/automation` definition writes,
  * `install-local` (install, upgrade, uninstall), the permission-set clone
- * door, and the external-table import on both of its doors (the REST route and
- * the MCP `import_object` tool, which save an `object` into the catalog). (The
+ * door, the external-table import on both of its doors (the REST route and
+ * the MCP `import_object` tool, which save an `object` into the catalog), and
+ * the federated catalog refresh (which saves an `external_catalog`). (The
  * security plugin's data door on the catalog objects asked it too,
  * until those objects retired — ADR-0131 D3, C3 stage 8: no `sys_position`,
  * `sys_permission_set` or `sys_capability` write reaches the engine, so a

@@ -437,7 +437,8 @@ export function registerExternalDatasourceRoutes(
    * the capability rule, with the caller's posture rung and `isSystem` off the
    * same resolution: the verdict the metadata save door asks, never restated
    * here. Inert under `single` and with no `tenancy` service. The import names
-   * `'object'`, the type it saves. Asked before the service lookup like
+   * `'object'`, the type it saves; the catalog refresh names `'external_catalog'`,
+   * the type of the snapshot it saves. Asked before the service lookup like
    * everything above, so the refusal precedes the remote introspection and the
    * write. Answered `403 PERMISSION_DENIED`, this family's spelling of a 403,
    * with the verdict's sentence; a posture that could not be read answers the
@@ -747,12 +748,18 @@ export function registerExternalDatasourceRoutes(
     // A 'write' that answers with the snapshot — every remote table and column
     // — so it requires the read capability as well as the write one
     // (2026-11-03 ruling; `federationCapabilityRefusal`).
+    //
+    // [ADR-0131 D3 · D12 items 7–8 · D11] …and it saves the datasource's
+    // `external_catalog` snapshot into the environment's metadata catalog, so
+    // under a walled tenancy posture it is the platform operator's, refused as
+    // the metadata save door refuses any other catalog write
+    // (`refuseFederationRequest`'s `catalogWrite`).
     {
       method: 'POST',
       path: `${ext}/refresh-catalog`,
       metadata: { summary: 'Refresh the external datasource catalog snapshot', tags: ['datasources'] },
       handler: async (req: any, res: any) => {
-        if (await refuseFederationRequest(req, res, 'write')) return;
+        if (await refuseFederationRequest(req, res, 'write', { catalogWrite: 'external_catalog' })) return;
         const svc = externalService();
         if (!svc?.refreshCatalog) return unavailable(res);
         try {
