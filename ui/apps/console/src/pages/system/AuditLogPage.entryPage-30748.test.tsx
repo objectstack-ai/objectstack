@@ -199,7 +199,7 @@ describe('AuditLogPage — the drawer opens the row\'s record page', () => {
   });
 
   it('under zh, the link and the hint read the zh pack', async () => {
-    const zhAudit = builtInLocales.zh.console.system.auditLog;
+    const zhAudit = builtInLocales['zh-Hans'].console.system.auditLog;
     // Guard: real zh rows, not English copied over.
     expect(zhAudit.openEntryPage).not.toBe(builtInLocales.en.console.system.auditLog.openEntryPage);
     expect(zhAudit.openEntryPageHint).not.toBe(builtInLocales.en.console.system.auditLog.openEntryPageHint);
