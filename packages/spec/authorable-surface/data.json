@@ -713,6 +713,7 @@
     "data/ObjectFieldGroup:key",
     "data/ObjectFieldGroup:label",
     "data/ObjectFieldGroup:relatedList",
+    "data/ObjectFieldGroup:requiresFeature",
     "data/ObjectFieldGroup:visibleWhen",
     "data/PerOperationRequiredPermissions:create",
     "data/PerOperationRequiredPermissions:delete",

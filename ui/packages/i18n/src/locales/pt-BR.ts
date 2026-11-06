@@ -1176,6 +1176,7 @@ const pt = {
   detail: {
     editInlineHint: "Clique duas vezes para editar",
     systemActor: "Sistema",
+    impersonatedActor: "{{admin}} em nome de {{user}}",
     unknownUser: "Desconhecido",
     created: "Criado",
     updated: "Atualizado",
@@ -3867,6 +3868,30 @@ const pt = {
   },
   cloudWorkspaceTimezoneNotice: {
     seeded: "O fuso horário do ambiente foi definido como {{zone}} com base no seu navegador quando ele foi criado. Você pode alterá-lo em Configurações → Localização.",
+  },
+  deploymentNotice: {
+    title: "Este servidor guarda seus dados e segredos no próprio disco",
+    titleLow: "Conclua a configuração desta implantação",
+    intro: "Ninguém definiu onde esta implantação de produção os guarda. Entregue as configurações abaixo a quem administra o servidor, para que substituí-lo não faça perder nada.",
+    finding: {
+      databaseLocalFile: "Seus dados de negócio são um arquivo neste servidor ({{file}}). Substituir o servidor ou o disco dele faz perdê-los.",
+      authSecretGenerated: "O segredo de login foi gerado neste servidor. Se ele se perder, todos serão desconectados.",
+      dataKeyFile: "A chave que criptografa as senhas e chaves de API salvas é um arquivo neste servidor ({{file}}). Se ela se perder, elas não poderão mais ser lidas.",
+      fileStorageLocal: "Os arquivos enviados ficam no disco deste servidor.",
+      emailNotConfigured: "Nenhum serviço de e-mail está configurado, então convites e redefinições de senha não são enviados por e-mail.",
+    },
+    copy: {
+      button: "Copiar as configurações",
+      database: "Seu banco de dados, por exemplo postgres://user:pass@db-host:5432/app, ou file:/path/on/a/kept/volume/app.db. Hoje os dados estão em {{file}}: transfira-os antes de trocar.",
+      carryOver: "Mantenha o valor atual: o conteúdo de {{file}}",
+      newValue: "Um valor aleatório longo, o mesmo a cada reinício, por exemplo a saída de: openssl rand -hex 32",
+    },
+    copied: "Copiado",
+    hide: "Ocultar",
+    hideNoAuditLog: "Esta implantação não mantém log de auditoria, então o aviso não pode ser ocultado.",
+    hideFailed: "Não foi possível ocultar o aviso. Tente novamente.",
+    hiddenLine: "O aviso da implantação está oculto. O que ele informa continua valendo.",
+    showAgain: "Mostrar novamente",
   },
   aiApprovals: {
     title: "Aprovações de IA",

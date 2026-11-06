@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseAuditValue,
+  auditImpersonatorId,
   collectAuditChanges,
   collectLookupIds,
   formatAuditValue,
@@ -47,6 +48,18 @@ describe('parseAuditValue', () => {
     expect(parseAuditValue({ a: 1 })).toEqual({ a: 1 });
     expect(parseAuditValue(null)).toBeNull();
     expect(parseAuditValue('not json')).toBeNull();
+  });
+});
+
+describe('auditImpersonatorId', () => {
+  it('reads the administrator of an impersonation session off the row metadata', () => {
+    expect(auditImpersonatorId('{"impersonated_by":"u-admin"}')).toBe('u-admin');
+    expect(auditImpersonatorId({ impersonated_by: 'u-admin', performed_by: 'cli' })).toBe('u-admin');
+  });
+  it("CONTROL: a row the user wrote themselves names no administrator", () => {
+    expect(auditImpersonatorId(null)).toBeNull();
+    expect(auditImpersonatorId('{"performed_by":"cli","on_behalf_of":"u1"}')).toBeNull();
+    expect(auditImpersonatorId('not json')).toBeNull();
   });
 });
 

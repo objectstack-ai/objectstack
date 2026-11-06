@@ -1657,6 +1657,7 @@ const en = {
     daysAgo_other: '{{count}}d ago',
     // Activity feed actors
     systemActor: 'System',
+    impersonatedActor: '{{admin}} on behalf of {{user}}',
     unknownUser: 'Unknown',
     // Record meta footer (audit provenance). `created`/`updated` are the
     // actor-less variants — "Created by · 5m ago" dangles when created_by
@@ -4596,6 +4597,36 @@ const en = {
   // is the seed, an IANA id printed verbatim.
   cloudWorkspaceTimezoneNotice: {
     seeded: 'The environment timezone was set to {{zone}} from your browser when the environment was created. You can change it in Settings → Localization.',
+  },
+  // objectstack#30120 — the deployment notice: what a production deployment
+  // keeps on its own disk because nobody set OS_DATABASE_URL, OS_AUTH_SECRET or
+  // OS_SECRET_KEY, shown to administrators on the home page and at the top of
+  // Setup's System Overview (`app-shell` `DeploymentNotice`). `{{file}}` is a
+  // path on the server, printed verbatim. `copy.*` are comment lines of the
+  // variables the copy button puts on the clipboard.
+  deploymentNotice: {
+    title: "This server keeps your data and secrets on its own disk",
+    titleLow: "Finish setting up this deployment",
+    intro: "Nobody set where this production deployment keeps them. Hand the settings below to whoever runs the server, so that replacing it loses nothing.",
+    finding: {
+      databaseLocalFile: "Your business data is a file on this server ({{file}}). Replacing the server or its disk loses it.",
+      authSecretGenerated: "The sign-in secret was generated on this server. If it is lost, everyone is signed out.",
+      dataKeyFile: "The key that encrypts saved passwords and API keys is a file on this server ({{file}}). If it is lost, they can no longer be read.",
+      fileStorageLocal: "Uploaded files are kept on this server's disk.",
+      emailNotConfigured: "No email service is set up, so invitations and password resets are not sent by email.",
+    },
+    copy: {
+      button: "Copy the settings",
+      database: "Your database, e.g. postgres://user:pass@db-host:5432/app, or file:/path/on/a/kept/volume/app.db. Today the data is in {{file}}: move it over before you switch.",
+      carryOver: "Carry the current value over: the contents of {{file}}",
+      newValue: "A long random value, the same on every restart, e.g. the output of: openssl rand -hex 32",
+    },
+    copied: "Copied",
+    hide: "Hide",
+    hideNoAuditLog: "This deployment keeps no audit log, so the notice cannot be hidden.",
+    hideFailed: "The notice could not be hidden. Try again.",
+    hiddenLine: "The deployment notice is hidden. What it states still applies.",
+    showAgain: "Show again",
   },
   // The AI HITL approval inbox (`@object-ui/plugin-chatbot`'s
   // `AiPendingActionsInbox`) — objectui#7173. Its four relative-time phrases

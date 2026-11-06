@@ -7,6 +7,7 @@ import {
   AggregationFunction,
   isAggregateCompatibleWithFieldType,
   isMultiValueField,
+  isVirtualSearchField,
   virtualFieldAggregateRemedy,
 } from '@objectstack/spec/data';
 import type { Dataset, DatasetMeasure, DatasetDimension } from '@objectstack/spec/ui';
@@ -468,6 +469,54 @@ function assertAggregateFieldTypeCompatible(
 }
 
 /**
+ * [#30773] Refuse a dataset DIMENSION whose field the base object declares
+ * VIRTUAL — computed on read, never stored (the spec's `isVirtualSearchField`
+ * / `SEARCH_VIRTUAL_TYPES`, today `formula`), whatever its `returnType`.
+ *
+ * A dimension is a GROUP KEY: it compiles to a cube dimension whose `sql` is
+ * the field, and every query that selects it groups (or buckets) by that
+ * column. No driver materialises a column for a virtual field, so since
+ * #29304 every analytics face refuses that group at query time with
+ * `INVALID_FIELD` / 400 at `groupBy.N` (`aggregate-query-shape-door.ts`
+ * `assertGroupByTargetsAreStored`; the service's copy in
+ * `dataset-date-bucket-door.ts`). Before this gate the dataset itself still
+ * compiled and registered, so the author published a dimension no query could
+ * serve and the refusal reached a dashboard reader instead. This is the
+ * authoring half Prime Directive #12 asks for, the dimension sibling of the
+ * measure's virtual-field refusal (#24426, `virtualFieldAggregateRemedy`):
+ * `DATASET_INVALID` / 400 — a verdict about the dataset DOCUMENT, decided from
+ * metadata alone — naming the dimension, its position and the remedy the
+ * query-time doors name (store the value on a stored field and group by that).
+ *
+ * Tiering is the measure gate's ("cannot answer, do not block"): no
+ * `declaredValueShape` hook, a field the hook cannot resolve, or a
+ * RELATIONSHIP-PATH field (the hook answers for the base object only) is not
+ * judged here. A dotted dimension over a virtual leaf stays the query-time
+ * doors' and the lint leg's (`dimension-virtual-field-refused`), which resolves
+ * the object graph. ⛔ No local type list: the verdict is the spec predicate's.
+ */
+function assertDimensionFieldStored(
+  datasetName: string,
+  objectName: string,
+  dimension: DatasetDimension,
+  index: number,
+  declaredValueShape?: (objectName: string, field: string) => ValueShapeFieldDef | undefined,
+): void {
+  if (!declaredValueShape) return;
+  const field = dimension.field;
+  if (!field || field.includes('.')) return;
+  const fieldType = declaredValueShape(objectName, field)?.type;
+  if (!fieldType || !isVirtualSearchField({ type: fieldType })) return;
+  throw datasetInvalidError(
+    `[dataset-compiler] dataset "${datasetName}" dimension "${dimension.name}" (dimensions.${index}) groups by ` +
+    `field "${field}", which object "${objectName}" declares as \`${fieldType}\` — its value is computed on read ` +
+    'and never stored, so no driver materialises a column to group by, and every query selecting this dimension ' +
+    `is refused. Denormalise the value onto "${objectName}" (a stored field, written when the source changes) and ` +
+    'point the dimension at that field.',
+  );
+}
+
+/**
  * One column of the base object by its bare name — the spec's `duration.from` /
  * `to` shape (`ANALYTICS_BASE_COLUMN`, which `@objectstack/spec` does not
  * export). Judged again here because a dataset can reach the compile without
@@ -805,8 +854,13 @@ export function compileDataset(
 
   // Compile dimensions.
   const dimensions: Record<string, CubeDimension> = {};
-  for (const d of dataset.dimensions) {
+  for (const [index, d] of dataset.dimensions.entries()) {
     assertDeclared(d.field, 'dimension', d.name);
+    // [#30773] …and the column must be STORED: a group key over a virtual field
+    // is one no query can serve. Placed after the join-declaration check, as the
+    // measure's type gate is, so a dotted field is refused for the reason it is
+    // actually wrong before this gate stands down on it.
+    assertDimensionFieldStored(dataset.name, dataset.object, d, index, options?.declaredValueShape);
     // The dimension's NAME is the key it is filed under (`dimensions[d.name]`
     // below) — the cube member carries no inner copy: #20300 retired
     // `Dimension.name` (ADR-0049 enforce-or-remove), because every consumer

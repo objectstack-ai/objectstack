@@ -343,5 +343,71 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Por fila"
       }
     }
+  },
+  sys_assignment_rule: {
+    label: "Regra de atribuição",
+    pluralLabel: "Regras de atribuição",
+    description: "Envia cada novo registro que atende a uma condição para uma fila ou para uma pessoa.",
+    fields: {
+      organization_id: {
+        label: "Organização",
+        help: "A organização à qual esta regra pertence."
+      },
+      name: {
+        label: "Nome",
+        help: "Identifica a regra. Apenas letras minúsculas, dígitos e sublinhados, e não pode ser o nome de uma regra fornecida por um aplicativo instalado."
+      },
+      label: {
+        label: "Rótulo de exibição"
+      },
+      description: {
+        label: "Descrição"
+      },
+      object_name: {
+        label: "Objeto",
+        help: "O objeto cujos novos registros esta regra envia. Só podem ser atribuídos objetos cujos registros têm proprietário."
+      },
+      criteria: {
+        label: "Condição",
+        help: "Quais novos registros esta regra pega; deixe vazio para pegar todo novo registro que nenhuma regra anterior pegou. Escrita como uma expressão sobre o registro, por exemplo record.priority == \"high\"."
+      },
+      sort_order: {
+        label: "Ordem",
+        help: "Quando várias das suas regras puderem pegar o mesmo registro, a de menor ordem é tentada primeiro. Suas regras são sempre tentadas antes das regras fornecidas pelos aplicativos instalados."
+      },
+      recipient_type: {
+        label: "Atribuir a",
+        help: "Envia o registro para uma fila, onde seus membros podem pegá-lo, ou diretamente para uma pessoa.",
+        options: {
+          queue: "Fila",
+          user: "Usuário"
+        }
+      },
+      recipient_id: {
+        label: "Fila ou usuário",
+        help: "A fila, ou a pessoa, para a qual o registro vai. Uma pessoa precisa ser um membro ativo desta organização."
+      },
+      strategy: {
+        label: "Escolher um membro",
+        help: "Para uma fila: entrega o registro diretamente a um membro, em rodízio ou escolhendo quem tiver menos trabalho em aberto. Deixe vazio para manter o registro na fila até que um membro o pegue.",
+        options: {
+          round_robin: "Rodízio",
+          least_loaded: "Menor carga"
+        }
+      },
+      load: {
+        label: "Trabalho em aberto",
+        help: "Obrigatório com \"Menor carga\": quais registros contam como trabalho em aberto de um membro, escrito como uma expressão sobre o registro, por exemplo record.status != \"closed\"."
+      },
+      active: {
+        label: "Ativo",
+        help: "Desative para que esta regra pare de atribuir novos registros, sem excluí-la."
+      }
+    },
+    _views: {
+      by_object: {
+        label: "Por objeto"
+      }
+    }
   }
 };

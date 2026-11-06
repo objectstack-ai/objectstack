@@ -1,5 +1,10 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import {
+    isControlPlaneDeclined as isControlPlaneDeclinedInCore,
+    isControlPlaneDeclinedSpelling as isDeclinedSpelling,
+} from '@objectstack/core';
+
 /**
  * Shared marketplace / cloud control-plane defaults.
  *
@@ -11,23 +16,14 @@
  */
 export const DEFAULT_CLOUD_URL = 'https://cloud.objectos.ai';
 
-/**
- * The spellings by which a deployment declares "this runtime has no control
- * plane" — the repo's one existing, documented, network-posture declaration.
- *
- * ONE definition, read in two directions: `resolveCloudUrl()` turns it into an
- * empty URL, and {@link isControlPlaneDeclined} answers whether it was said at
- * all. They were a single inline list until the telemetry posture (#10805)
- * needed the second question; keeping two copies would let "what counts as
- * off" drift between "no cloud calls" and "no client telemetry", which is
- * precisely the pair that must never disagree.
- */
-const CLOUD_DECLINED_SPELLINGS: readonly string[] = ['off', 'none', 'local', 'disabled'];
-
-/** Is this raw declaration one of the documented "no control plane" spellings? */
-function isDeclinedSpelling(raw: string): boolean {
-    return CLOUD_DECLINED_SPELLINGS.includes(raw.trim().toLowerCase());
-}
+// The "no control plane" spellings live in `@objectstack/core`
+// (`CLOUD_DECLINED_SPELLINGS`), beside `resolveControlPlaneApiKey`, so a
+// package that cannot depend on this one (the push relay sender, #29920) reads
+// the same definition. ONE definition, read in two directions here:
+// `resolveCloudUrl()` turns it into an empty URL, and
+// {@link isControlPlaneDeclined} answers whether it was said at all. Keeping
+// two copies would let "what counts as off" drift between "no cloud calls" and
+// "no client telemetry", which is precisely the pair that must never disagree.
 
 /**
  * Resolve the effective control-plane URL from an explicit constructor
@@ -73,5 +69,5 @@ export function resolveCloudUrl(explicit?: string | null): string {
  * ask twice — see `RuntimeConfigPlugin.declinesControlPlane()`.
  */
 export function isControlPlaneDeclined(explicit?: string | null): boolean {
-    return isDeclinedSpelling(explicit ?? process.env.OS_CLOUD_URL ?? '');
+    return isControlPlaneDeclinedInCore(explicit);
 }

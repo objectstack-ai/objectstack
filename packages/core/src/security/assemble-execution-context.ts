@@ -147,6 +147,7 @@ export const ENTRY_EXECUTION_CONTEXT_FIELDS = [
   'principalKind',
   'onBehalfOf',
   'performedBy',
+  'impersonatedBy',
   'audience',
   'userId',
   'tenantId',
@@ -354,6 +355,13 @@ function entryFields(
     // what narrows the optional away — the guard that made `agent` truthy is
     // this same property.
     performedBy: agent?.clientId ? { clientId: agent.clientId } : undefined,
+    // The administrator who started the impersonation session that admitted
+    // `userId` (the resolver's session arm reads `session.impersonatedBy`).
+    // Attribution, not authorization, in the shape `performedBy` uses: the
+    // subject stays the impersonated user above, whose grants the envelope
+    // carries, and no security middleware reads this. An anonymous entry has
+    // no session to have been minted for anyone.
+    impersonatedBy: anonymous ? undefined : authz.impersonatedBy,
     // [ADR-0090 D10/D11 · ruling of record 6355206139, letter B] The resolver's
     // population stamp: `'external'` for a holder of `org_external`, absent
     // (read as 'internal') otherwise. It rides an AGENT envelope too: the

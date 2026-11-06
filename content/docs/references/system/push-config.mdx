@@ -11,8 +11,9 @@ vendors.
 
 **Read by `@objectstack/service-push`.** `PushServicePlugin` parses its
 `config` option with `PushServiceConfigSchema` when it initialises:
-for the direct transport it builds one vendor transport per block, and it
-refuses the relay transport, not yet served (#29920). The `push` channel in
+for the relay transport it sends through the hosted push relay with the
+server's cloud binding credential, and for the direct transport it builds
+one vendor transport per block. The `push` channel in
 `@objectstack/service-messaging` delivers through the push service it
 registers. Under `objectstack serve` the value is the stack definition's
 `push` key, read when the stack declares `requires: ['push']` (below).
@@ -44,14 +45,15 @@ credential (a vendor block, or a key an operator would reach for), and a
 direct block with no vendor block, which names no `credentialRef` and so
 could deliver to nothing.
 
-**What is served today.** The direct transport is: it ships as
-`@objectstack/service-push` (ADR-0012, amended 2026-11-03, #29041), and
-`objectstack serve` reads it from the stack's `push` key. The relay
-transport is not yet: the relay sender is follow-up card #29920, and until
-it ships the boot refuses a relay block, the default `{}` included (the
-`push` capability's reader before the kernel boots, and `PushServicePlugin`
-when it initialises), so a server is never left believing it pushes when
-nothing would deliver.
+**What is served.** Both transports, in `@objectstack/service-push`
+(ADR-0012, amended 2026-11-03, #29041), read by `objectstack serve` from
+the stack's `push` key. The relay sender (#29920) reads the binding
+credential from the `cloud-binding` service on every send, so a server
+that is not bound yet still boots: its push channel reports no transport
+until the bind is done, and the bind takes effect without a restart. The
+boot refuses a relay block, the default `{}` included, only on a deployment
+that declared it has no control plane (`OS_CLOUD_URL=off`), where nothing
+could ever deliver through the relay (ADR-0012 §6.1, the air-gap rule).
 
 It sits beside `EmailServiceConfigSchema` (`email-config.zod.ts`), the
 declaration of the email channel's transport selection.
@@ -76,7 +78,8 @@ stack that declares `requires: ['push']` has `objectstack serve` (and
 The reader parses the key with this schema again at boot, because a
 compiled artifact may not have passed `defineStack`, and it refuses two
 things there, failing the boot: a relay block (the default `{}` and an
-absent key included), because nothing sends it yet, and an inline secret.
+absent key included) on a deployment that declared it has no control
+plane, and an inline secret.
 A host that composes the plugin in code hands it the value through the
 constructor instead. No `OS_PUSH_*` environment variable carries any of
 it: the vendor blocks hold no secret to override, and each `credentialRef`
@@ -168,7 +171,7 @@ Direct push transport for a white-label build: one block per vendor (apns, fcm),
 
 ## PushRelayTransportConfig
 
-[PLANNED — not yet served] The hosted push relay transport (the default): authenticated by the server cloud binding credential, so it carries none. The push service refuses it at boot until the relay sender ships
+The hosted push relay transport (the default): authenticated by the server cloud binding credential, so it carries none. Read by the push service, which sends each push to the relay once the server is bound to the cloud
 
 ### Properties
 
@@ -182,7 +185,7 @@ Direct push transport for a white-label build: one block per vendor (apns, fcm),
 
 ## PushServiceConfig
 
-Push channel transport configuration: the hosted relay (the default) or direct delivery to apns and fcm for a white-label build. The push service reads it: direct drives the vendor transports, and relay is refused at boot until the relay sender ships
+Push channel transport configuration: the hosted relay (the default) or direct delivery to apns and fcm for a white-label build. The push service reads it: relay sends through the hosted relay with the server cloud binding, and direct drives the vendor transports
 
 ### Union Options
 
@@ -190,7 +193,7 @@ This schema accepts one of the following structures:
 
 #### Option 1
 
-[PLANNED — not yet served] The hosted push relay transport (the default): authenticated by the server cloud binding credential, so it carries none. The push service refuses it at boot until the relay sender ships
+The hosted push relay transport (the default): authenticated by the server cloud binding credential, so it carries none. Read by the push service, which sends each push to the relay once the server is bound to the cloud
 
 ### Properties
 

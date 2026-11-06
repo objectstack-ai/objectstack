@@ -18,6 +18,7 @@ import { ObjectListViewSchema } from '../ui/view.zod';
  */
 import { EvaluatedExpressionInputSchema, TemplateExpressionInputSchema, type EvaluatedExpression, type EvaluatedExpressionInput } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { PUBLIC_AUTH_FEATURE_NAMES, lowerRequiresFeature } from '../kernel/public-auth-features';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { closedObject, strictObject } from '../shared/strict-object';
 import { ProtectionSchema } from '../shared/protection.zod';
@@ -1290,6 +1291,38 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
   ).meta({ title: 'Visible When' }),
 
   /**
+   * Declarative capability gate — the field-group twin of the action-level
+   * `requiresFeature` (`ui/action.zod.ts`). Names a deployment feature flag of
+   * `PUBLIC_AUTH_FEATURES` (`@objectstack/spec/kernel`), the same vocabulary
+   * actions use, so a flag outside it is refused at parse. Lowered at parse
+   * time into this group's `visibleWhen` by `lowerRequiresFeature` — the same
+   * gate an action gets (`features.multiOrgEnabled != false` for a default-on
+   * flag, `== true` for an opt-in one) — and stripped from the output, so a
+   * consumer only ever sees the canonical `visibleWhen`.
+   *
+   * Composition with an authored `visibleWhen`: AND, the author's predicate
+   * first and the gate last — `(<author predicate>) && <gate>` — so the group
+   * shows only where both hold. A non-CEL `visibleWhen` refuses the pair;
+   * write the combined predicate by hand.
+   *
+   * Both renderers bind the host's `features` root when they evaluate a
+   * group's `visibleWhen` (the form's section gate and the record page's
+   * `record:details`), so the lowered gate is enforced on both. Like every
+   * field-group predicate it is presentation only: the fields stay readable
+   * through the API.
+   *
+   * Fault direction: this slot is fail-closed, an action's `visible` is
+   * fail-soft. A `features` scope that does not carry the flag (the console's
+   * `{}` until `/auth/config` resolves, or for good if that fetch fails) makes
+   * the gate fault rather than answer, so the group is HIDDEN there even for a
+   * default-on flag, where the same gate on an action would show it. The group
+   * appears once the host publishes the flag.
+   */
+  requiresFeature: z.enum(PUBLIC_AUTH_FEATURE_NAMES).optional().describe(
+    "Deployment feature flag gating this group, from the same set an action's `requiresFeature` names (e.g. 'multiOrgEnabled'). Lowered at parse time into the group's `visibleWhen` (AND-composed after an authored `visibleWhen`) and stripped from the output; the whole group is hidden where the flag is off. Presentation only: the fields stay readable through the API.",
+  ).meta({ title: 'Requires Feature' }),
+
+  /**
    * [ADR-0085] Collapse behaviour of the group's rendered section, on every
    * surface (form, detail, drawer). One enum, three valid states — replaces
    * the old `defaultExpanded` flag AND the UI-dialect `collapsible`/`collapsed`
@@ -1310,7 +1343,9 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
   collapsible: z.boolean().optional().describe("[DEPRECATED → collapse] Boolean pair with `collapsed`; use the `collapse` enum.").meta({ title: 'Collapsible' }),
   /** @deprecated [ADR-0085 → `collapse`] UI-dialect alias (pair with `collapsible`); mapped onto `collapse` at parse. */
   collapsed: z.boolean().optional().describe("[DEPRECATED → collapse] true → 'collapsed' (collapsible, starts closed) on its own — it needs no `collapsible` and outranks `collapsible: false`; false → 'none', or 'expanded' beside `collapsible: true`. Use the `collapse` enum.").meta({ title: 'Collapsed' }),
-}));
+  // `requiresFeature` → `visibleWhen`, the action precedent's lowering with the
+  // group's slot name; the key never reaches the output.
+}).transform((group, ctx) => lowerRequiresFeature(group, ctx, 'visibleWhen')));
 
 export type ObjectFieldGroup = z.input<typeof ObjectFieldGroupSchema>;
 /** Post-parse shape of {@link ObjectFieldGroup} — defaults applied, transforms run (ADR-0122). */

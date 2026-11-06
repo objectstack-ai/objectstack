@@ -51,7 +51,9 @@ const door = {
 const mockClient = {
   list: vi.fn(async () => []),
   listDrafts: vi.fn(async () => []),
-  layered: vi.fn(async () => ({ effective: PAGE, code: PAGE, editable: true })),
+  // The `draft` layer is served beside a readable draft (objectstack#29814),
+  // and withheld with it when its read is refused.
+  layered: vi.fn(async () => ({ effective: PAGE, code: PAGE, editable: true, ...(door.gated ? {} : { draft: door.draft }) })),
   getDraft: vi.fn(async (_type: string, _name: string, _opts?: { packageId?: string }) => {
     if (door.gated) {
       throw Object.assign(new Error(GATE_REFUSAL), {
