@@ -241,3 +241,46 @@ export async function verifyScimBearerToken(
     ...(expiresAt ? { expiresAt } : {}),
   };
 }
+
+/** Minimal engine surface {@link revokeScimConnectionCredential} needs. */
+interface RevocationEngine {
+  findOne(
+    object: string,
+    query: { where: Record<string, unknown>; fields?: string[] },
+    options?: { context?: { isSystem?: boolean } },
+  ): Promise<Record<string, unknown> | null>;
+  update(object: string, data: Record<string, unknown>): Promise<unknown>;
+}
+
+/** What {@link revokeScimConnectionCredential} found and did. */
+export type ScimCredentialRevocation =
+  | { outcome: 'revoked'; credentialId: string; connectionId: string }
+  | { outcome: 'already_revoked'; credentialId: string; connectionId: string }
+  | { outcome: 'not_found' };
+
+/**
+ * Revoke one credential (#30958): switch its row's `active` off — the switch
+ * {@link verifyScimBearerToken} refuses on — so its bearer is refused from the
+ * next SCIM request on. The row is kept (its digest is one-way; the audit
+ * trail and the staged-rotation history point at it). Rotation is a second
+ * {@link mintScimConnectionCredential} for the same `connectionId` followed by
+ * this. A row already inactive is reported as such and not written again.
+ */
+export async function revokeScimConnectionCredential(
+  engine: RevocationEngine,
+  credentialId: string,
+): Promise<ScimCredentialRevocation> {
+  const row = await engine.findOne(
+    SCIM_CREDENTIAL_OBJECT,
+    { where: { id: credentialId }, fields: ['id', 'connection_id', 'active'] },
+    CREDENTIAL_PROBE_CONTEXT,
+  );
+  if (!row) return { outcome: 'not_found' };
+  const connectionId = String((row as { connection_id?: unknown }).connection_id ?? '');
+  const id = String((row as { id?: unknown }).id);
+  // Read `active` the way the verifier does: anything not affirmatively active is off.
+  const active = (row as { active?: unknown }).active;
+  if (active === false || active === 0 || active == null) return { outcome: 'already_revoked', credentialId: id, connectionId };
+  await engine.update(SCIM_CREDENTIAL_OBJECT, { id, active: false });
+  return { outcome: 'revoked', credentialId: id, connectionId };
+}
