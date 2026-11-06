@@ -1143,7 +1143,6 @@ export type Iso_kernel_startupOrchestrator__PluginStartupResultSchema = Assert<E
 // marketplace/marketplace.zod.ts
 export type Iso_marketplace_marketplace__ArtifactDownloadResponseSchema = Assert<Eq< z.input< typeof M50.ArtifactDownloadResponseSchema >, z.infer< typeof M50.ArtifactDownloadResponseSchema > >>;
 export type Iso_marketplace_marketplace__ListingStatusSchema = Assert<Eq< z.input< typeof M50.ListingStatusSchema >, z.infer< typeof M50.ListingStatusSchema > >>;
-export type Iso_marketplace_marketplace__MarketplaceCategorySchema = Assert<Eq< z.input< typeof M50.MarketplaceCategorySchema >, z.infer< typeof M50.MarketplaceCategorySchema > >>;
 export type Iso_marketplace_marketplace__MarketplaceInstallResponseSchema = Assert<Eq< z.input< typeof M50.MarketplaceInstallResponseSchema >, z.infer< typeof M50.MarketplaceInstallResponseSchema > >>;
 export type Iso_marketplace_marketplace__PricingModelSchema = Assert<Eq< z.input< typeof M50.PricingModelSchema >, z.infer< typeof M50.PricingModelSchema > >>;
 export type Iso_marketplace_marketplace__PublisherVerificationSchema = Assert<Eq< z.input< typeof M50.PublisherVerificationSchema >, z.infer< typeof M50.PublisherVerificationSchema > >>;
@@ -1156,7 +1155,6 @@ export type Iso_marketplace_packageVersion__UpdatePackageVersionRequestSchema = 
 
 // marketplace/package.zod.ts
 export type Iso_marketplace_package__CreatePackageRequestSchema = Assert<Eq< z.input< typeof M52.CreatePackageRequestSchema >, z.infer< typeof M52.CreatePackageRequestSchema > >>;
-export type Iso_marketplace_package__PackageCategorySchema = Assert<Eq< z.input< typeof M52.PackageCategorySchema >, z.infer< typeof M52.PackageCategorySchema > >>;
 export type Iso_marketplace_package__PackageLocaleSchema = Assert<Eq< z.input< typeof M52.PackageLocaleSchema >, z.infer< typeof M52.PackageLocaleSchema > >>;
 export type Iso_marketplace_package__PackagePublisherSchema = Assert<Eq< z.input< typeof M52.PackagePublisherSchema >, z.infer< typeof M52.PackagePublisherSchema > >>;
 export type Iso_marketplace_package__PackageTranslationSchema = Assert<Eq< z.input< typeof M52.PackageTranslationSchema >, z.infer< typeof M52.PackageTranslationSchema > >>;
