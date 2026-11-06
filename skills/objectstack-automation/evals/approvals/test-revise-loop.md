@@ -11,7 +11,7 @@ This file states only what a grader scores, so the rule has one home.
 
 ## Scenario
 
-> Build an autolaunched flow `budget_approval` on the `project` object: when
+> Build an autolaunched flow `crm_budget_approval` on the `project` object: when
 > `budget` increases past 100000, route to a manager for approval. The manager
 > can **approve**, **reject**, or **send the record back to the submitter for
 > revision**; after the submitter reworks and resubmits, it returns to the

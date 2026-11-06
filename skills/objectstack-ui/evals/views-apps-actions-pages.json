@@ -23,8 +23,8 @@
     },
     {
       "id": 3,
-      "prompt": "Add a Convert action on `lead` — only for qualified, not-yet-converted leads, from the record header and each list row, launching the `lead_conversion` flow — and a bulk 'Add to campaign' that asks which campaign, for the selected rows.",
-      "expected_output": "Two `defineAction` items. Convert: `type: 'flow'`, `target: 'lead_conversion'`, `locations: ['record_header', 'list_item']`, `visible: P`record.status == \"qualified\" && record.is_converted == false`` (bare CEL, never brace-wrapped), `confirmText`, `successMessage`, `refreshAfter: true`. Bulk: `type: 'script'`, `locations: ['list_toolbar']`, a field-backed `params: [{ field: 'campaign_id', objectOverride: 'campaign', required: true }]`, and a `body` that reads `input.selectedIds`.",
+      "prompt": "Add a Convert action on `lead` — only for qualified, not-yet-converted leads, from the record header and each list row, launching the `crm_lead_conversion` flow — and a bulk 'Add to campaign' that asks which campaign, for the selected rows.",
+      "expected_output": "Two `defineAction` items. Convert: `type: 'flow'`, `target: 'crm_lead_conversion'`, `locations: ['record_header', 'list_item']`, `visible: P`record.status == \"qualified\" && record.is_converted == false`` (bare CEL, never brace-wrapped), `confirmText`, `successMessage`, `refreshAfter: true`. Bulk: `type: 'script'`, `locations: ['list_toolbar']`, a field-backed `params: [{ field: 'campaign_id', objectOverride: 'campaign', required: true }]`, and a `body` that reads `input.selectedIds`.",
       "files": [],
       "assertions": {
         "must_contain": ["defineAction", "locations", "record_header", "list_toolbar", "visible", "successMessage", "selectedIds"],
@@ -73,7 +73,7 @@
     },
     {
       "id": 8,
-      "prompt": "Make the Reassign Lead toast read 'Lead NAME reassigned'; after Convert's lead_conversion flow completes, open the opportunity it created.",
+      "prompt": "Make the Reassign Lead toast read 'Lead NAME reassigned'; after Convert's crm_lead_conversion flow completes, open the opportunity it created.",
       "expected_output": "`successMessage: 'Lead {{ record.name }} reassigned'` (a `${…}` hole fails `os validate`); Convert gets `onSuccess: { navigate }` ending `${result.output.opportunity_id}`, an `isOutput` flow variable.",
       "files": [],
       "assertions": {
@@ -104,7 +104,7 @@
     {
       "id": 11,
       "prompt": "Add a 'Log Call' action on `contact` that asks for the call notes and the outcome in a dialog, and make the dialog's button read Log Call instead of Confirm.",
-      "expected_output": "One `defineAction` with field-backed `params` (`call_notes`, `call_outcome`) and `submitText: 'Log Call'` beside them — the verb on the param dialog's submit button, an I18nLabel translated at `objects.contact._actions.log_call.submitText`. Not `confirmText` (the message of a param-less action's confirm dialog, refused beside `params`), not `submitLabel` / `confirmLabel` (refused, naming `submitText`), and never blank.",
+      "expected_output": "One `defineAction` with field-backed `params` (`call_notes`, `call_outcome`) and `submitText: 'Log Call'` beside them — the verb on the param dialog's submit button, an I18nLabel translated at `objects.contact._actions.crm_log_call.submitText`. Not `confirmText` (the message of a param-less action's confirm dialog, refused beside `params`), not `submitLabel` / `confirmLabel` (refused, naming `submitText`), and never blank.",
       "files": [],
       "assertions": {
         "must_contain": ["params", "submitText: 'Log Call'"],

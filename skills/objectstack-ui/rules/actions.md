@@ -2,7 +2,7 @@
 
 ## Where Actions Appear (`locations`)
 
-`locations` is an array — an action can live in multiple surfaces:
+`locations` is an array of surfaces:
 
 | Value            | Surface |
 |:-----------------|:--------|
@@ -31,7 +31,7 @@ import { defineAction } from '@objectstack/spec/ui';
 import { P } from '@objectstack/spec';
 
 export const ReassignLeadAction = defineAction({
-  name: 'reassign_lead',
+  name: 'crm_reassign_lead',
   label: 'Reassign Lead',
   objectName: 'lead',
   type: 'api',
@@ -57,17 +57,17 @@ import { defineAction } from '@objectstack/spec/ui';
 import { P } from '@objectstack/spec';
 
 export const ConvertLeadAction = defineAction({
-  name: 'convert_lead',
+  name: 'crm_convert_lead',
   label: 'Convert Lead',
   objectName: 'lead',
   icon: 'arrow-right-circle',
   type: 'flow',
-  target: 'lead_conversion',                // name of the flow
+  target: 'crm_lead_conversion',            // name of the flow
   locations: ['record_header', 'list_item'],
   visible: P`record.status == "qualified" && record.is_converted == false`,
   confirmText: 'Are you sure you want to convert this lead?',
   successMessage: 'Lead converted successfully!',
-  onSuccess: { navigate: '/apps/crm/opportunity/record/${result.output.opportunity_id}' },
+  onSuccess: { navigate: '/apps/crm_enterprise/opportunity/record/${result.output.opportunity_id}' },
   refreshAfter: true,
 });
 ```
@@ -79,7 +79,7 @@ export const ConvertLeadAction = defineAction({
 import { defineAction } from '@objectstack/spec/ui';
 
 export const AddToCampaignAction = defineAction({
-  name: 'create_campaign',
+  name: 'crm_create_campaign',
   label: 'Add to Campaign',
   objectName: 'lead',
   icon: 'send',
@@ -131,7 +131,7 @@ in a new tab and relative ones navigate in place.
 import { defineAction } from '@objectstack/spec/ui';
 
 export const PrintA3Action = defineAction({
-  name: 'print_a3',
+  name: 'crm_print_a3',
   label: 'Print Summary Sheet (A3)',
   type: 'url',
   target: '/print/a3?id=${record.id}',   // interpolated at click
@@ -151,11 +151,11 @@ auth (the tab carries no in-app session).
 
 ```typescript
 export const OpenInvoicePdfAction = defineAction({
-  name: 'open_invoice_pdf',
+  name: 'crm_open_invoice_pdf',
   label: 'Open PDF',
   objectName: 'invoice',
   type: 'script',
-  target: 'open_invoice_pdf',   // registered handler
+  target: 'crm_open_invoice_pdf', // registered handler
   opensInNewTab: true,
   newTabUrl: '/api/v1/invoice/{recordId}/pdf',
   locations: ['record_header'],
