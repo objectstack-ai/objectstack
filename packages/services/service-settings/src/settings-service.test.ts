@@ -378,7 +378,7 @@ describe('SettingsService — resetNamespace / built-in reset action', () => {
     expect(r.value).toBeNull();
   });
 
-  it('leaves env-locked keys untouched', async () => {
+  it('leaves an env-locked key with nothing stored beneath it untouched', async () => {
     const svc = new SettingsService({ env: { OS_BRANDING_WORKSPACE_NAME: 'EnvCorp' } });
     svc.registerManifest(brandingSettingsManifest);
     await expect(svc.resetNamespace('branding')).resolves.toBe(0);
@@ -2878,5 +2878,94 @@ describe('SettingsService — a clear goes through an env pin, every other write
 
     const answer = await svc.setMany('pinned', { banner: null }, platformAdmin);
     expect(answer.banner).toMatchObject({ value: 'Pinned banner', source: 'env', locked: true });
+  });
+});
+
+describe('SettingsService — a reset clears the value stored beneath an env pin', () => {
+  const RESETTABLE = {
+    namespace: 'resettable',
+    version: 1,
+    label: 'Resettable',
+    scope: 'tenant',
+    specifiers: [
+      { type: 'text', key: 'motto', label: 'Motto', scope: 'tenant', default: 'none' },
+      { type: 'text', key: 'banner', label: 'Banner', scope: 'tenant', default: 'none' },
+      { type: 'text', key: 'footer', label: 'Footer', scope: 'tenant', default: 'none' },
+    ],
+  } as any;
+
+  /** `motto` pinned over a stored value, `banner` stored and not pinned, `footer` pinned with nothing stored. */
+  async function namespaceWithPins() {
+    const env: Record<string, string | undefined> = {};
+    const audit: Array<Record<string, unknown>> = [];
+    const svc = new SettingsService({
+      env,
+      auditWriter: { write: async (row: unknown) => { audit.push(row as Record<string, unknown>); } },
+    } as any);
+    svc.registerManifest(RESETTABLE);
+    await svc.setMany('resettable', { motto: 'Stored motto', banner: 'Stored banner' });
+    env.OS_RESETTABLE_MOTTO = 'Pinned motto';
+    env.OS_RESETTABLE_FOOTER = 'Pinned footer';
+    audit.length = 0;
+    return { env, svc, audit };
+  }
+
+  it('clears the pinned key\'s stored value, counts it, and changes nothing in force while the pin holds', async () => {
+    const { env, svc } = await namespaceWithPins();
+    const changes: Array<{ key: string; action: string }> = [];
+    svc.subscribe('resettable', (e) => { changes.push(e as { key: string; action: string }); });
+
+    await expect(svc.resetNamespace('resettable')).resolves.toBe(2);
+    expect(changes.map((c) => [c.key, c.action]).sort()).toEqual([['banner', 'reset'], ['motto', 'reset']]);
+    expect(await svc.get('resettable', 'motto')).toMatchObject({ value: 'Pinned motto', source: 'env', locked: true });
+    expect(await svc.get('resettable', 'footer')).toMatchObject({ value: 'Pinned footer', source: 'env', locked: true });
+    expect(await svc.get('resettable', 'banner')).toMatchObject({ value: 'none', source: 'default' });
+
+    // Lift the pins: each key reads its default, not the value once stored beneath it.
+    delete env.OS_RESETTABLE_MOTTO;
+    delete env.OS_RESETTABLE_FOOTER;
+    expect(await svc.get('resettable', 'motto')).toMatchObject({ value: 'none', source: 'default', locked: false });
+    expect(await svc.get('resettable', 'footer')).toMatchObject({ value: 'none', source: 'default', locked: false });
+  });
+
+  it('records the pinned key\'s reset as a single clear of it records it', async () => {
+    const reset = await namespaceWithPins();
+    await reset.svc.resetNamespace('resettable');
+    const single = await namespaceWithPins();
+    await single.svc.set('resettable', 'motto', null);
+
+    const motto = (rows: Array<Record<string, unknown>>) => rows.filter((r) => r.key === 'motto');
+    expect(motto(reset.audit)).toEqual(motto(single.audit));
+    expect(motto(reset.audit)).toEqual([expect.objectContaining({ action: 'reset', newHash: null })]);
+    expect(reset.audit.map((r) => r.key).sort()).toEqual(['banner', 'motto']);
+  });
+
+  it('a pin with nothing stored beneath it is not cleared, and a second reset clears nothing', async () => {
+    const { svc, audit } = await namespaceWithPins();
+    await svc.resetNamespace('resettable');
+    audit.length = 0;
+    await expect(svc.resetNamespace('resettable')).resolves.toBe(0);
+    expect(audit).toEqual([]);
+  });
+
+  it('the reset action counts the pinned key it cleared and says how many keys the environment still pins', async () => {
+    const { svc } = await namespaceWithPins();
+    const first = await svc.runAction('resettable', 'reset', null);
+    expect(first).toMatchObject({ ok: true, severity: 'info' });
+    expect(first.message).toBe(
+      'Cleared 2 saved value(s); environment/default configuration is back in effect. '
+      + '2 setting(s) remain pinned by environment variables.',
+    );
+
+    const second = await svc.runAction('resettable', 'reset', null, {}, { locale: 'zh-CN' });
+    expect(second.message).toBe('没有可清除的已保存值：当前已在使用环境变量/默认配置。仍有 2 个设置由环境变量固定。');
+  });
+
+  it('a namespace no environment variable pins answers without the pinned sentence', async () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(RESETTABLE);
+    await svc.set('resettable', 'motto', 'Stored motto');
+    const r = await svc.runAction('resettable', 'reset', null);
+    expect(r.message).toBe('Cleared 1 saved value(s); environment/default configuration is back in effect.');
   });
 });
