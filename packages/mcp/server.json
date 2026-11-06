@@ -25,7 +25,7 @@
       "headers": [
         {
           "name": "x-api-key",
-          "description": "Optional osk_ API key, minted on the deployment's Connect an Agent page. Leave it unset to sign in with OAuth instead.",
+          "description": "Optional osk_ API key, minted on the deployment's Connect an AI Assistant page. Leave it unset to sign in with OAuth instead.",
           "isRequired": false,
           "isSecret": true
         }

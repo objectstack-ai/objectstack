@@ -9,7 +9,7 @@
 // promise TOGETHER:
 //
 //   1. a PERMISSIONLESS principal gets `200` on `GET /api/v1/meta/apps/account`
-//      with `nav_connect_agent` present in `grp_account_developer`; and
+//      with `nav_connect_agent` present in `grp_account_ai_assistant`; and
 //   2. that SAME principal still gets `403` / `PERMISSION_DENIED` on
 //      `GET /api/v1/meta/apps/setup`, with `connect_agent` absent from the body.
 //
@@ -215,12 +215,16 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
 
         // `ACCOUNT_APP` declares no `requiredPermissions` — deliberately, so
         // every authenticated user reaches their own security surface — and the
-        // fold puts the contributed entry inside the group that already carries
-        // `nav_account_api_keys`.
+        // fold puts the contributed entry into the AI Assistant slot the app
+        // declares for it (#30895), leaving the collapsed Developer group as
+        // authored.
+        expect(groupChildren(account.body?.item, 'grp_account_ai_assistant'))
+            .toEqual(['nav_connect_agent']);
         expect(groupChildren(account.body?.item, 'grp_account_developer'))
-            .toEqual(['nav_account_api_keys', 'nav_account_oauth_apps', 'nav_connect_agent']);
-        // The whole served tree, counted: 11 authored ids + the one contributed.
-        expect(navIds(account.body?.item)).toHaveLength(12);
+            .toEqual(['nav_account_api_keys', 'nav_account_oauth_apps']);
+        // The whole served tree, counted: 12 authored ids (the AI Assistant
+        // slot among them) + the one contributed.
+        expect(navIds(account.body?.item)).toHaveLength(13);
         // …and the entry's TARGET rode along, so the menu item resolves.
         expect(JSON.stringify(account.body)).toContain('connect_agent');
 
@@ -250,8 +254,9 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
         expect(setupAllowed.body?.error).toBeUndefined();
         const allowedIds = navIds(setupAllowed.body?.item);
         expect(allowedIds).toContain('nav_connect_agent');
-        expect(groupChildren(setupAllowed.body?.item, 'group_integrations'))
-            .toContain('nav_connect_agent');
+        // The top group, behind System Overview (#30895).
+        expect(groupChildren(setupAllowed.body?.item, 'group_overview'))
+            .toEqual(['nav_system_overview', 'nav_connect_agent']);
         // The Setup tree the platform admin is served BY THIS COMPOSITION: 9
         // authored groups less `group_approvals`, which nothing contributes
         // into and the filter collapses, plus the 23 entries
