@@ -35,7 +35,7 @@ import {
   sealBareNameHoldersAtColdBoot,
 } from './registry.js';
 import { BUILT_IN_BARE_NAMES, bareNameReason, handlerOwnerPackageId } from './bare-name-one-holder.js';
-import type { ObjectQL } from './engine.js';
+import type { HookHandler, ObjectQL } from './engine.js';
 
 type ManifestService = { register(m: unknown): void | Promise<void> };
 type Holder = { kind: string; packageId?: string };
@@ -66,7 +66,7 @@ const marker = (item: unknown): string | undefined =>
   (item as { label?: string; summary?: string } | undefined)?.label ?? (item as { summary?: string } | undefined)?.summary;
 
 /** An action bound to `object`. */
-const boundAction = (name: string, tag: string, object: string) => ({ ...body('action', name, tag), objectName: object });
+const boundAction = (name: string, tag: string, object: string): Record<string, unknown> => ({ ...body('action', name, tag), objectName: object });
 
 /** The package's own object, so a bound action has a target. */
 const itemObject = (ns: string) => ({
@@ -98,8 +98,9 @@ const caught = async (fn: () => unknown): Promise<Refusal | undefined> => {
   }
 };
 
+/** A function a package's handlers bring: a distinct closure per call, so `resolveFunction`'s identity tells two holders apart. */
+const fn = (tag: string): HookHandler => Object.assign(async () => {}, { tag });
 /** The functions a package's handlers bring, as the runtime binds them: under `app:<packageId>`. */
-const fn = (tag: string) => async () => tag;
 const bindFunctions = (ql: ObjectQL, packageId: string, names: string[], tag = packageId.split('.').pop()!) =>
   ql.bindHooks([], { packageId: `app:${packageId}`, functions: Object.fromEntries(names.map((n) => [n, fn(tag)])) });
 
