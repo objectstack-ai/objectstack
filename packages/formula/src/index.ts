@@ -66,19 +66,33 @@ export { cronEngine } from './cron-engine';
 export {
   templateEngine,
   TEMPLATE_FORMATTERS,
+  MAIL_TEMPLATE_FORMATTERS,
   formatValue,
   judgeHoleFormatter,
   CURRENCY_ARGUMENT_RULE,
+  // `option:object.field`, a mail template's own formatter: the rule sentence
+  // and the parse of its argument.
+  OPTION_ARGUMENT_RULE,
+  optionFieldReference,
+  // An `option` hole with no label table for its `object.field` is refused
+  // with this sentence by every renderer, never printed as stored.
+  optionTableRefusal,
   currencyCodePath,
   currencyCodeValueRefusal,
   // A `currency` hole with no argument formats in the tenant default currency the
   // caller supplies; with none, every renderer refuses it with this sentence.
   currencyDefaultRefusal,
 } from './template-engine';
-export type { TemplateHoleDialect, TemplateHoleGrammarRefusal, TemplateHoleGrammarRule } from './template-engine';
+export type {
+  OptionFieldReference,
+  OptionLabelTable,
+  TemplateHoleDialect,
+  TemplateHoleGrammarRefusal,
+  TemplateHoleGrammarRule,
+} from './template-engine';
 // The mail template hole grammar — one copy, read by `@objectstack/plugin-email`'s
 // renderer, the placement judge below and `@objectstack/lint`'s grammar rule.
-export { mailHolePattern, parseMailHole, judgeMailHoleGrammar } from './mail-hole-grammar';
+export { mailHolePattern, parseMailHole, judgeMailHoleGrammar, optionObjectUnregisteredPlatform } from './mail-hole-grammar';
 export type { ParsedMailHole, MailHoleGrammarFinding, MailHoleGrammarOptions } from './mail-hole-grammar';
 // #25189 — where a hole may sit in a mail template's HTML face (ruling
 // 6335348115 on #25082, F1 A2 / F3 C2). Here because both readers already
