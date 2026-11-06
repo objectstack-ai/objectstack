@@ -75,10 +75,12 @@ export type PublicAuthFeatureEntry = {
   semantics: PublicAuthFeatureSemantics;
   /**
    * Spec inputs gated on this flag. Path grammar:
-   * `<object>.actions.<action>` or `<object>.actions.<action>.params.<name|field>`.
+   * `<object>.actions.<action>`, `<object>.actions.<action>.params.<name|field>`,
+   * or `<object>.fieldGroups.<key>` for an object's field group (whose
+   * predicate slot is `visibleWhen`).
    * The platform-objects completeness guard resolves each path and asserts the
-   * target's `visible` predicate carries {@link featureGatePredicate} as a
-   * conjunct. A param path resolves to the FIRST param on that name or field;
+   * target's `visible` (a field group's `visibleWhen`) predicate carries
+   * {@link featureGatePredicate} as a conjunct. A param path resolves to the FIRST param on that name or field;
    * further params on the same field that reference the flag are booked by the
    * same path, whatever their gate (see `phoneNumber`).
    * Mutually exclusive with `exempt`.
@@ -159,6 +161,9 @@ export const PUBLIC_AUTH_FEATURES = {
       'sys_organization.actions.delete_organization',
       'sys_organization.actions.set_active_organization',
       'sys_organization.actions.leave_organization',
+      // Parent Organization and Sort Order: they order and group organizations
+      // against each other, so Edit organization hides them on one organization.
+      'sys_organization.fieldGroups.group_structure',
     ],
     notes:
       'Reflects ACTUAL multi-tenancy capability (the tenancy posture enforces ' +
