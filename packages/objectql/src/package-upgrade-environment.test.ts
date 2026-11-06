@@ -16,7 +16,7 @@ import { planPackageUpgrade } from './package-upgrade-environment.js';
 type Row = Record<string, unknown>;
 
 /** In-memory driver: equality, `$in` and `$ne` WHERE; `find` honours `limit`. */
-function makeDriver(rowsByObject: Record<string, Row[]>, failing: ReadonlySet<string> = new Set()) {
+function makeDriver(rowsByObject: Record<string, Row[]>) {
   const matches = (row: Row, where: any): boolean => {
     if (!where || typeof where !== 'object') return true;
     for (const [k, v] of Object.entries(where)) {
@@ -38,10 +38,7 @@ function makeDriver(rowsByObject: Record<string, Row[]>, failing: ReadonlySet<st
     }
     return true;
   };
-  const rowsOf = (object: string) => {
-    if (failing.has(object)) throw new Error(`connection lost reading ${object}`);
-    return (rowsByObject[object] ?? []).map((row) => ({ ...row }));
-  };
+  const rowsOf = (object: string) => (rowsByObject[object] ?? []).map((row) => ({ ...row }));
   return {
     name: 'memory', version: '0.0.0', supports: {} as any,
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
@@ -61,9 +58,9 @@ function makeDriver(rowsByObject: Record<string, Row[]>, failing: ReadonlySet<st
   };
 }
 
-async function makeEngine(objects: Array<{ name: string; fields: Record<string, unknown> }>, rows: Record<string, Row[]>, failing?: Set<string>) {
+async function makeEngine(objects: Array<{ name: string; fields: Record<string, unknown> }>, rows: Record<string, Row[]>) {
   const engine = new ObjectQL();
-  engine.registerDriver(makeDriver(rows, failing) as any, true);
+  engine.registerDriver(makeDriver(rows) as any, true);
   await engine.init();
   for (const object of objects) (engine.registry as any).registerObject(object);
   return engine;
@@ -130,7 +127,8 @@ describe('rows a customer edited that the seed replay overwrites', () => {
   it('a reading that fails is null, never zero, and is told', async () => {
     const warn = vi.fn();
     const body = { objects: [STAGE], data: [{ object: 'acme_stage', mode: 'upsert', records: stages({ won: 'Won' }) }] };
-    const engine = await makeEngine([STAGE], {}, new Set(['acme_stage']));
+    const engine = await makeEngine([STAGE], {});
+    vi.spyOn(engine, 'find').mockRejectedValue(new Error('connection lost reading acme_stage'));
     const { environment } = await planPackageUpgrade(engine, body, structuredClone(body), { warn });
     expect(environment.seeds).toEqual([expect.objectContaining({ matchedRows: null, editedRows: null })]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('answered null, never zero'), expect.objectContaining({ object: 'acme_stage' }));
