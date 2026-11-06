@@ -1052,14 +1052,14 @@ const FIELD_GROUP_VISIBLE_WHEN_SLOT = 'field group visibleWhen';
  * `a) && (b`) is told apart from the lowering's single parenthesised group.
  */
 export function withoutLoweredFeatureGate(raw: unknown): unknown {
-  const source = celSourceOf(raw);
-  if (source === undefined) return raw;
+  const loweredSource = celSourceOf(raw);
+  if (loweredSource === undefined) return raw;
   for (const flag of PUBLIC_AUTH_FEATURE_NAMES) {
     const gate = featureGatePredicate(flag);
-    if (source === gate) return undefined;
-    const tail = `) && ${gate}`;
-    if (!source.startsWith('(') || !source.endsWith(tail)) continue;
-    const authored = source.slice(1, source.length - tail.length);
+    if (loweredSource === gate) return undefined;
+    const loweredTail = `) && ${gate}`;
+    if (!loweredSource.startsWith('(') || !loweredSource.endsWith(loweredTail)) continue;
+    const authored = loweredSource.slice(1, loweredSource.length - loweredTail.length);
     if (!collectCelRootIdentifiers(authored).ok) return raw;
     return typeof raw === 'string' ? authored : { ...(raw as AnyRec), source: authored };
   }
