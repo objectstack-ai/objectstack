@@ -66,7 +66,12 @@ const QA_ADMIN = {
 
 const QA_ALPHA = { name: 'qa_alpha', label: 'QA Alpha', objects: {} } as unknown as PermissionSet;
 const QA_BETA = { name: 'qa_beta', label: 'QA Beta', objects: {} } as unknown as PermissionSet;
-const CATALOG = [MEMBER_DEFAULT, QA_ADMIN, QA_ALPHA, QA_BETA];
+/** Two sets sharing one label: a label is display text, never unique. */
+const QA_TWIN_A = { name: 'qa_twin_a', label: 'QA Twin', objects: {} } as unknown as PermissionSet;
+const QA_TWIN_B = { name: 'qa_twin_b', label: 'QA Twin', objects: {} } as unknown as PermissionSet;
+/** An agent ceiling set (ADR-0090 D10): no person's grant may name it, so it is never suggested. */
+const AGENT_CEILING = { name: 'mcp_agent_data_read', label: 'QA Agent Reader', objects: {} } as unknown as PermissionSet;
+const CATALOG = [MEMBER_DEFAULT, QA_ADMIN, QA_ALPHA, QA_BETA, QA_TWIN_A, QA_TWIN_B, AGENT_CEILING];
 
 const SYS = { isSystem: true } as const;
 const ADMIN = { userId: 'u_admin', positions: [], permissions: ['qa_admin'] };
@@ -264,6 +269,94 @@ describe('the data door (a non-system writer)', () => {
     expect(await grantsOf(h, 'u_7')).toHaveLength(1);
     expect(h.ctx.logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('was NOT checked'),
+      expect.objectContaining({ object: 'sys_user_permission_set' }),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The refusal's sentence — one line an administrator can act on
+// ---------------------------------------------------------------------------
+
+describe('the refusal says, in one line, what to pick instead', () => {
+  // Every grant path shares this sentence: Setup's grant form writes through
+  // this door, and Create User hands it on after its own "no user was created"
+  // (plugin-auth `admin-user-endpoints.ts`). The literals are the pin: an
+  // assertion against `grantSetNotInCatalogMessage` alone would follow any
+  // wording back to the developer message.
+  async function refusedMessage(value: string): Promise<string> {
+    const h = await boot();
+    const err = await refusalOf(() => h.engine.insert(
+      'sys_user_permission_set', { user_id: 'u_msg', permission_set: value }, { context: ADMIN } as any,
+    ));
+    expectNotInCatalogRefusal(err, value);
+    expect(await grantsOf(h, 'u_msg'), 'a refused grant stores nothing').toHaveLength(0);
+    const { message } = envelopeOf(err).fields[0];
+    expect((err as Error).message, 'the top-level message is the same sentence').toBe(message);
+    return message;
+  }
+
+  it('NEGATIVE — a name no set has: one line, no developer vocabulary', async () => {
+    const message = await refusedMessage('qa_nowhere');
+    expect(message).toBe("There is no permission set named 'qa_nowhere': choose one from the list.");
+    expect(message).not.toMatch(/sys_user_permission_set|machine name|record id|metadata door|security catalog/);
+    expect(message).not.toContain('\n');
+  });
+
+  it('NEGATIVE — a set\'s LABEL typed where its name belongs: the sentence names the set to pick', async () => {
+    expect(await refusedMessage('QA Alpha')).toBe(
+      "'QA Alpha' is the label of the permission set named 'qa_alpha': choose it from the list, or enter 'qa_alpha'.",
+    );
+  });
+
+  it('the label is matched ignoring case and surrounding spaces', async () => {
+    expect(await refusedMessage(' qa beta ')).toBe(
+      "' qa beta ' is the label of the permission set named 'qa_beta': choose it from the list, or enter 'qa_beta'.",
+    );
+  });
+
+  it('a label two sets share names both, and picks neither', async () => {
+    expect(await refusedMessage('QA Twin')).toBe(
+      "'QA Twin' is the label of more than one permission set ('qa_twin_a', 'qa_twin_b'): choose the one you mean from the list.",
+    );
+  });
+
+  it('an agent ceiling set is never suggested: no person\'s grant may name one', async () => {
+    expect(await refusedMessage('QA Agent Reader')).toBe(
+      "There is no permission set named 'QA Agent Reader': choose one from the list.",
+    );
+  });
+
+  it('NEGATIVE — names only what the caller could grant: a caller the delegated-administration gate refuses hears no set name', async () => {
+    // The suggestion is made by this hook, which runs only after the ADR-0090
+    // D12 gate admitted the write. Past the gate stand only tenant-level
+    // administrators, who may grant every set the picker lists (the agent
+    // ceilings excepted, never suggested above); an organization administrator
+    // or a delegate naming a value the catalog does not hold is refused by the
+    // gate itself (`delegated-admin-gate.test.ts`, "not in the security
+    // catalog"). Measured here with a caller who administers nothing.
+    const h = await boot();
+    const MEMBER = { userId: 'u_member', positions: [], permissions: ['member_default'] };
+    const err = await refusalOf(() => h.engine.insert(
+      'sys_user_permission_set', { user_id: 'u_reach', permission_set: 'QA Alpha' }, { context: MEMBER } as any,
+    ));
+    expect(envelopeOf(err)).toMatchObject({ status: 403, code: 'PERMISSION_DENIED' });
+    expect((err as Error).message).not.toContain('qa_alpha');
+    expect(await grantsOf(h, 'u_reach')).toHaveLength(0);
+  });
+
+  it('a catalog that cannot be listed still refuses, with the plain sentence, and the operator is told', async () => {
+    const h = await boot();
+    const metadata = h.ctx.getService('metadata');
+    vi.spyOn(metadata, 'list').mockRejectedValue(new Error('metadata store down'));
+    const err = await refusalOf(() => h.engine.insert(
+      'sys_user_permission_set', { user_id: 'u_list', permission_set: 'QA Alpha' }, { context: ADMIN } as any,
+    ));
+    expectNotInCatalogRefusal(err, 'QA Alpha');
+    expect(envelopeOf(err).fields[0].message).toBe("There is no permission set named 'QA Alpha': choose one from the list.");
+    expect(await grantsOf(h, 'u_list')).toHaveLength(0);
+    expect(h.ctx.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('could not be listed'),
       expect.objectContaining({ object: 'sys_user_permission_set' }),
     );
   });

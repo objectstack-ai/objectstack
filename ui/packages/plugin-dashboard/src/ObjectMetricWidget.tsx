@@ -602,7 +602,7 @@ export const ObjectMetricWidget: React.FC<ObjectMetricWidgetProps> = ({
   // field carrying a stale `scale: 2` showed yen cents. With a code resolved,
   // the amount now goes to `formatCurrency` — the list cell's own formatter
   // (`CurrencyCellRenderer`), the same one the grid footer takes — so tile,
-  // footer and cell agree by reference: the currency's ISO 4217 minor-unit
+  // footer and cell agree by reference: the currency's CLDR fraction-digit
   // count, a whole amount included (objectui#11444 retired the whole-amount
   // trimming). The finished string is not a number, so `MetricWidget` shows it
   // as given.

@@ -88,11 +88,38 @@
  *    only for a sink that has none). Suppressing an expectation is the point;
  *    suppressing a fault would be the same defect one layer down.
  *
- * ## No plaintext, ever
+ * ## [#30923] Before and after, readable — a secret only as its fingerprint
  *
- * The sink receives a DIGEST, never a value — `SettingsService` masks an
- * encrypted key's digest as `<encrypted:…>` before it calls. Nothing on this
- * path can reach the cleartext, so there is no redaction step to forget.
+ * ADR-0007 § *Audit & history* decided what this row carries: every write
+ * records its before and after, and a value declared `encrypted: true` is
+ * never written to the audit, only a placeholder and a checksum. Until #30923
+ * the row carried the after's digest alone, so a policy change's before and
+ * after could be read from no door. Now:
+ *
+ *  - `new_value` is `{ namespace, key, scope, value, digest }`: the value the
+ *    write stored and its fingerprint. `null` on a reset, which stores nothing.
+ *  - `old_value` is the same shape for the value the SAME stored row (the one
+ *    `record_id` names) held before the write — so a reset records its before
+ *    here — and `null` when that row held none: a first write at this rung, or
+ *    a row an earlier reset cleared.
+ *  - A secret-valued key carries NO `value` on either side, only `digest`,
+ *    masked `<encrypted:` + the provider's keyed digest + `>` (`<encrypted>`
+ *    when none can be had): exactly the `new_value` these rows carried before,
+ *    so a reader that parses it keeps working. Secret-valued is the manifest's
+ *    word, `encrypted: true`, which `type: 'password'` forces — the only
+ *    sensitivity flag a specifier declares, and the one every credential key
+ *    of the shipped manifests carries — or a replaced row stored encrypted.
+ *
+ * The rule is applied ONCE, where the manifest is known: `SettingsService`'s
+ * `auditReadable` decides before the sink is called, and hands this sink a
+ * secret's masked digest and never its value. Nothing on this path can reach
+ * a secret's cleartext, so there is no redaction step here to forget, and
+ * `metadata` carries no value of any key.
+ *
+ * Who is SERVED a readable value is the ledger's read side: `plugin-audit`'s
+ * field redaction narrows a `config_change` row's `value` for a reader whose
+ * field-level security masks the settings store's `value`, as it narrows the
+ * CRUD mirror's row about the same write.
  */
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
@@ -191,7 +218,7 @@ type ConfigChangeLogger = SettingsDiagnosticsLogger & {
  * no (AGENTS.md → *Startup registry reads*). A settings write is an admin-rate
  * operation, so the per-call registry lookup costs nothing worth memoizing.
  */
-function ledgerIsMounted(engine: IDataEngine): boolean | undefined {
+export function ledgerIsMounted(engine: IDataEngine): boolean | undefined {
   const getSchema = (engine as any)?.getSchema;
   if (typeof getSchema !== 'function') return undefined;
   try {
@@ -202,6 +229,33 @@ function ledgerIsMounted(engine: IDataEngine): boolean | undefined {
     // is absent — it has told us nothing.
     return undefined;
   }
+}
+
+/**
+ * The ONE insert this module makes onto the platform audit ledger, shared by
+ * the settings write sink below and the deployment notice's hide
+ * ({@link recordDeploymentConfigChange}), so both rows are written the same
+ * way, under the same system context.
+ */
+async function insertLedgerRow(eng: any, row: Record<string, unknown>): Promise<void> {
+  await eng.insert('sys_audit_log', row, { context: SYSTEM_CTX });
+}
+
+/**
+ * Record one deployment-level `config_change` row whose caller must KNOW it
+ * landed: the deployment notice's hide (ruling A3, record 6634240777), where
+ * the row is part of the act. Unlike the settings sink below it is not
+ * best-effort: `no-ledger` when this deployment mounts no `sys_audit_log`
+ * (asked first, exactly as the sink asks), and a failed insert throws to the
+ * caller instead of being reported once and swallowed.
+ */
+export async function recordDeploymentConfigChange(
+  engine: IDataEngine,
+  row: Record<string, unknown>,
+): Promise<'recorded' | 'no-ledger'> {
+  if (ledgerIsMounted(engine) === false) return 'no-ledger';
+  await insertLedgerRow(engine, { ...row, action: CONFIG_CHANGE_ACTION });
+  return 'recorded';
 }
 
 function safeStringify(value: unknown): string {
@@ -262,20 +316,41 @@ export function buildConfigChangeAuditSink(
           // principal, or null for an in-process/boot write.
           actor,
           object_name: entry.scope === 'global' ? CONFIG_CHANGE_GLOBAL_OBJECT_NAME : CONFIG_CHANGE_OBJECT_NAME,
-          // A settings write has no single record id: `sys_setting` is keyed on
-          // the composite `(namespace, key, scope, user_id)` and
-          // `sys_platform_setting` on `(namespace, key)`. Null is the honest
-          // answer and the shape `plugin-auth`'s run-level `import` row already
-          // uses; WHICH setting changed is in `metadata` and `new_value`.
-          record_id: null,
-          // The digest, never the value — see the module header. A reset has no
-          // new state to describe.
+          // The stored settings row the write landed on, as `upsertRow`
+          // reports it: the `sys_setting` row of a tenant or user value, the
+          // `sys_platform_setting` row of a global one, so `object_name` and
+          // `record_id` are one pointer pair. It is the id the CRUD mirror's own
+          // row about the same write carries, so the ledger's record page lists
+          // this row beside that one (`plugin-audit`'s `sys_audit_log` page).
+          // Null only when the store returned no id (the in-memory fallback);
+          // WHICH setting changed is still in `metadata`, unchanged.
+          //
+          // A row that names a record is read under the ledger's parent-record
+          // gate (`plugin-audit`'s `audit-log-read-visibility.ts`): a reader
+          // who cannot read that settings row is not served it, the rule the
+          // mirror's row already follows.
+          record_id: entry.recordId ?? null,
+          // [#30923] The before and the after, readable for a key that is not
+          // secret-valued and as a masked digest for one that is — see the
+          // module header. The service decided which: a secret's entry carries
+          // no `value`. The before is what the stored row held, `null` when it
+          // held nothing; a reset has no new state to describe.
+          old_value: entry.previous
+            ? safeStringify({
+                namespace: entry.namespace,
+                key: entry.key,
+                scope: entry.scope,
+                ...(entry.previous.value !== undefined ? { value: entry.previous.value } : {}),
+                digest: entry.previous.digest,
+              })
+            : null,
           new_value: isReset
             ? null
             : safeStringify({
                 namespace: entry.namespace,
                 key: entry.key,
                 scope: entry.scope,
+                ...(entry.value !== undefined ? { value: entry.value } : {}),
                 digest: entry.valueDigest,
               }),
           // [ADR-0131 D7] The organization this row is ABOUT — the ledger's
@@ -297,7 +372,7 @@ export function buildConfigChangeAuditSink(
           }),
         };
 
-        await eng.insert('sys_audit_log', row, { context: SYSTEM_CTX });
+        await insertLedgerRow(eng, row);
       } catch (err: any) {
         // Reported once per process, not once per settings write: a failure here
         // is systemic (the ledger is mounted but unreachable — DDL never ran,

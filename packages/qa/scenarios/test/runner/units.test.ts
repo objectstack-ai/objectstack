@@ -1,0 +1,329 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * The runner's pure parts: the stream-json reader, the observation builder,
+ * and the cost guard. No model, no network, no server.
+ */
+
+import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { describe, expect, it } from 'vitest';
+
+import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
+import { gradeCardOperation } from '../../src/score/index.js';
+import {
+  ApiBillingRefusedError,
+  assertSubscriptionLogin,
+  MissingRecordingError,
+  RecordedDriver,
+  subscriptionOnlyEnv,
+} from '../../src/runner/driver.js';
+import { asksToConfirm, countWrites, noWriteAttempted, observedAnswer, observeOperation, uncodedToolError } from '../../src/runner/observe.js';
+import { citationLabels, namespaceOfConfig, namespacedScenario, permissionSetName, templateHostName } from '../../src/runner/namespace.js';
+import { changeSize, hiddenValues, installableManifest, seedDependence, seedOrder, withoutItems } from '../../src/runner/orchestrate.js';
+import { buildPrompt, dataContract, iteratePrompt, questionPrompt, templateIteratePrompt, unheldHandles, userHandleFields, verifyArgs, verifyFlags } from '../../src/runner/prompts.js';
+import { parseStreamJson, refusalCodeOf, toolNameOf, type ParsedTurn } from '../../src/runner/transcript.js';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const CARD_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/crm_account_with_contacts.json');
+const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
+
+function load(): LoadedScenario {
+  const { card, refusals } = loadScenarioFile(CARD_FILE, { areas: readCapabilityAreas(AREAS_DIR) });
+  if (!card) throw new Error(refusals.map(formatRefusal).join('\n'));
+  return card;
+}
+
+/** A stream-json transcript in the shape Claude Code 2.1 printed against a booted app (ids shortened). */
+const STREAM = [
+  '{"type":"system","subtype":"init","model":"m","mcp_servers":[{"name":"app","status":"connected"}]}',
+  '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"mcp__app__list_objects","input":{}}]}}',
+  '{"type":"user","message":{"content":[{"tool_use_id":"t1","type":"tool_result","content":[{"type":"text","text":"{\\"objects\\":[{\\"name\\":\\"account\\"}]}"}]}]}}',
+  '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t2","name":"mcp__app__aggregate_records","input":{"objectName":"account"}}]}}',
+  '{"type":"user","message":{"content":[{"type":"tool_result","content":"{\\n  \\"error\\": {\\n    \\"code\\": \\"PERMISSION_DENIED\\",\\n    \\"status\\": 403\\n  }\\n}","is_error":true,"tool_use_id":"t2"}]}}',
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"I could not count them."}]}}',
+  '{"type":"result","subtype":"success","is_error":false,"num_turns":3,"result":"I could not count them.","total_cost_usd":0.1}',
+  '{"type":"assistant","message":{"content":[{"type":"te', // a torn line from a killed process
+].join('\n');
+
+const turnOf = (replyText: string, calls: Array<Partial<ParsedTurn['toolCalls'][number]> & { name: string }> = []): ParsedTurn => ({
+  replyText,
+  toolCalls: calls.map((c) => ({ rawName: `mcp__app__${c.name}`, input: {}, output: undefined, ...c })),
+  meta: {},
+});
+
+describe('parseStreamJson', () => {
+  it('pairs each tool call with its result, drops the MCP prefix and keeps the error flag', () => {
+    const t = parseStreamJson(STREAM);
+    expect(t.toolCalls.map((c) => [c.name, c.isError === true])).toEqual([
+      ['list_objects', false],
+      ['aggregate_records', true],
+    ]);
+    expect(t.toolCalls[0]!.output).toBe('{"objects":[{"name":"account"}]}');
+    expect(t.replyText).toBe('I could not count them.');
+    expect(t.meta).toMatchObject({ model: 'm', numTurns: 3, resultSubtype: 'success', mcpServers: [{ name: 'app', status: 'connected' }] });
+  });
+
+  it('keeps a call with no result as output undefined — a cut-short turn is visible', () => {
+    const t = parseStreamJson(STREAM.split('\n').slice(0, 2));
+    expect(t.toolCalls).toHaveLength(1);
+    expect(t.toolCalls[0]!.output).toBeUndefined();
+    expect(t.meta.resultSubtype).toBeUndefined();
+  });
+
+  it('reads both refusal envelopes and nothing else', () => {
+    expect(refusalCodeOf('{"error":{"code":"VALIDATION_FAILED","status":400}}')).toBe('VALIDATION_FAILED');
+    expect(refusalCodeOf({ error: 'denied', code: 'PERMISSION_DENIED' })).toBe('PERMISSION_DENIED');
+    expect(refusalCodeOf('MCP error -32602: Input validation error')).toBeUndefined();
+    expect(refusalCodeOf('{"records":[]}')).toBeUndefined();
+    expect(toolNameOf('mcp__my_app__get_record')).toBe('get_record');
+    expect(toolNameOf('ToolSearch')).toBe('ToolSearch');
+  });
+});
+
+describe('observedAnswer — the ordered rules', () => {
+  const obj = 'contact';
+  it('rows changed ⇒ applied, whatever the transcript says', () => {
+    expect(observedAnswer(turnOf('Done?'), obj, 1)).toEqual({ kind: 'applied' });
+  });
+  it('a successful write call ⇒ applied', () => {
+    expect(observedAnswer(turnOf('', [{ name: 'create_record', input: { objectName: obj }, output: '{"id":"x"}' }]), obj, 0).kind).toBe('applied');
+  });
+  it('ACTION_CONFIRMATION_REQUIRED ⇒ pending_confirmation; any other code ⇒ refused with it', () => {
+    const confirm = turnOf('', [{ name: 'run_action', input: { actionName: 'delete_contact' }, output: '{"error":{"code":"ACTION_CONFIRMATION_REQUIRED"}}', isError: true }]);
+    expect(observedAnswer(confirm, obj, 0)).toEqual({ kind: 'pending_confirmation' });
+    const refused = turnOf('', [{ name: 'update_record', input: { objectName: obj }, output: '{"error":{"code":"PERMISSION_DENIED"}}', isError: true }]);
+    expect(observedAnswer(refused, obj, 0)).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED' });
+  });
+  it('no write call and the reply asks to confirm ⇒ pending_confirmation; otherwise noWriteAttempted', () => {
+    expect(observedAnswer(turnOf('Are you sure you want to delete Chen Li?'), obj, 0)).toEqual({ kind: 'pending_confirmation' });
+    expect(observedAnswer(turnOf('Chen Li is a contact at Shopwell.'), obj, 0)).toEqual({ kind: 'refused', code: noWriteAttempted });
+  });
+  it('a failed write call with no code ⇒ uncodedToolError, and a call on another object is not this write', () => {
+    expect(observedAnswer(turnOf('', [{ name: 'create_record', input: { objectName: obj }, output: 'MCP error -32602', isError: true }]), obj, 0)).toEqual({ kind: 'refused', code: uncodedToolError });
+    expect(observedAnswer(turnOf('', [{ name: 'create_record', input: { objectName: 'account' }, output: '{}' }]), obj, 0)).toEqual({ kind: 'refused', code: noWriteAttempted });
+    expect(asksToConfirm('确认删除吗')).toBe(true);
+  });
+});
+
+describe('observeOperation → gradeCardOperation, on the real crm card', () => {
+  const crm = load();
+  const op = (id: string) => crm.card.run.operations.find((o) => o.id === id)!;
+  const seedContacts = crm.card.run.seed.contact!.map((r) => ({ ...r, updated_at: 't0' }));
+
+  it('counts rows added, removed and changed, ignoring the clock', () => {
+    expect(countWrites(seedContacts, seedContacts.map((r) => ({ ...r, updated_at: 't1' })))).toBe(0);
+    expect(countWrites(seedContacts, seedContacts.slice(1))).toBe(1);
+    expect(countWrites(seedContacts, [...seedContacts, { id: 'n', full_name: 'x' }])).toBe(1);
+  });
+
+  it('an applied create reads its row back by `where`', () => {
+    const after = [...seedContacts, { id: 'new1', full_name: 'Fay Wu', account: 'ac3' }];
+    const obs = observeOperation({
+      op: op('add_contact'),
+      turn: turnOf('Added.', [{ name: 'create_record', input: { objectName: 'contact' }, output: '{"id":"new1"}' }]),
+      before: seedContacts,
+      after,
+      rowsByObject: { contact: after },
+    });
+    expect(gradeCardOperation(crm, 'add_contact', obs).pass).toBe(true);
+  });
+
+  it('a refusal grades on the code AND on nothing written; an audit actor is required where declared', () => {
+    const refused = observeOperation({
+      op: op('contact_bad_email'),
+      turn: turnOf('', [{ name: 'create_record', input: { objectName: 'contact' }, output: '{"error":{"code":"VALIDATION_FAILED"}}', isError: true }]),
+      before: seedContacts,
+      after: seedContacts,
+      rowsByObject: { contact: seedContacts },
+    });
+    expect(gradeCardOperation(crm, 'contact_bad_email', refused).pass).toBe(true);
+
+    const moved = seedContacts.map((r) => (r.id === 'ct5' ? { ...r, account: 'ac1' } : r));
+    const base = { op: op('move_eli'), turn: turnOf('Done.'), before: seedContacts, after: moved, rowsByObject: { contact: moved } };
+    expect(gradeCardOperation(crm, 'move_eli', observeOperation(base)).pass).toBe(false); // audit not read ⇒ not observed
+    expect(gradeCardOperation(crm, 'move_eli', observeOperation({ ...base, auditActor: 'sdr' })).pass).toBe(true);
+    expect(gradeCardOperation(crm, 'move_eli', observeOperation({ ...base, auditActor: 'admin' })).pass).toBe(false);
+  });
+
+  it('a delete the agent carried out instead of asking fails the pending-confirmation outcome', () => {
+    const after = seedContacts.filter((r) => r.id !== 'ct2');
+    const obs = observeOperation({ op: op('remove_ben'), turn: turnOf('Deleted.'), before: seedContacts, after, rowsByObject: { contact: after } });
+    expect(obs.answer.kind).toBe('applied');
+    expect(gradeCardOperation(crm, 'remove_ben', obs).pass).toBe(false);
+  });
+});
+
+describe('the cost guard — no API-billed model, ever', () => {
+  it('refuses an API key in the environment, an API-key login and no login', () => {
+    expect(() => assertSubscriptionLogin({ ANTHROPIC_API_KEY: 'x' }, { loggedIn: true, authMethod: 'oauth_token' })).toThrow(ApiBillingRefusedError);
+    expect(() => assertSubscriptionLogin({ ANTHROPIC_AUTH_TOKEN: 'x' }, { loggedIn: true, authMethod: 'oauth_token' })).toThrow(ApiBillingRefusedError);
+    expect(() => assertSubscriptionLogin({}, { loggedIn: true, authMethod: 'api_key' })).toThrow(ApiBillingRefusedError);
+    expect(() => assertSubscriptionLogin({}, { loggedIn: false })).toThrow(ApiBillingRefusedError);
+    expect(assertSubscriptionLogin({}, { loggedIn: true, authMethod: 'oauth_token' })).toBe('oauth_token');
+  });
+
+  it('strips the billing variables from every child environment', () => {
+    const env = subscriptionOnlyEnv({ ANTHROPIC_API_KEY: 'k', ANTHROPIC_AUTH_TOKEN: 't', PATH: '/bin' });
+    expect(env).toEqual({ PATH: '/bin' });
+  });
+
+  it('the recorded driver answers what was recorded and is loud about a step it lacks', async () => {
+    const turn: ParsedTurn = { replyText: 'hi', toolCalls: [], meta: {} };
+    const d = new RecordedDriver({ driver: { driver: 'claude-code-cli', authMethod: 'oauth_token', apiBilled: false }, turns: { 'c/scratch/run/q/-': turn }, files: {} });
+    expect(await d.ask({ card: 'c', mode: 'scratch', phase: 'run', step: 'q', prompt: '', mcp: { url: '', apiKey: '' } })).toBe(turn);
+    await expect(d.ask({ card: 'c', mode: 'scratch', phase: 'run', step: 'other', prompt: '', mcp: { url: '', apiKey: '' } })).rejects.toThrow(MissingRecordingError);
+    expect(d.info().apiBilled).toBe(false);
+  });
+
+  it('the recorded driver writes recorded files into the project and refuses one escaping it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rec-'));
+    const turn: ParsedTurn = { replyText: '', toolCalls: [], meta: {} };
+    const ok = new RecordedDriver({ driver: { driver: 'x', apiBilled: false }, turns: { 'c/scratch/build/author/-': turn }, files: { 'c/scratch/build/author/-': { 'src/a.ts': 'x' } } });
+    await ok.author({ card: 'c', mode: 'scratch', phase: 'build', step: 'author', cwd: dir, prompt: '' });
+    expect(readFileSync(join(dir, 'src/a.ts'), 'utf8')).toBe('x');
+    const bad = new RecordedDriver({ driver: { driver: 'x', apiBilled: false }, turns: { 'c/scratch/build/author/-': turn }, files: { 'c/scratch/build/author/-': { '../escape.ts': 'x' } } });
+    await expect(bad.author({ card: 'c', mode: 'scratch', phase: 'build', step: 'author', cwd: dir, prompt: '' })).rejects.toThrow(/escapes/);
+    expect(existsSync(join(dir, '..', 'escape.ts'))).toBe(false);
+  });
+});
+
+describe('prompts, seed order, template manifest and change size', () => {
+  const crm = load();
+
+  it('the build prompt carries the seed, the persona sets and the handles — never a question or an outcome', () => {
+    const p = buildPrompt(namespacedScenario(crm).card);
+    expect(p).toContain('"full_name": "Ana Ruiz"');
+    expect(p).toContain('`democrm_sdr` for `sdr` (Sales development representative): must not read the field `democrm_contact.email`');
+    expect(dataContract(crm.card)).toContain('`u_sam` = `sdr`');
+    for (const q of crm.card.run.questions) expect(p).not.toContain(q.ask.en!);
+    expect(p).not.toContain('VALIDATION_FAILED');
+    expect(questionPrompt(crm, 'tech_accounts')).toMatch(/^How many accounts are in tech\?/);
+  });
+
+  it('every authoring prompt states the every-item-prefixed rule, and the contract names every item prefixed', () => {
+    const card = namespacedScenario(crm).card;
+    const server = { baseUrl: 'http://x', adminEmail: 'a@x', adminPassword: 'p' };
+    for (const p of [buildPrompt(card), iteratePrompt(card), templateIteratePrompt(card, server)]) {
+      expect(p).toContain("Naming: this app's namespace is `democrm`. Name EVERY metadata item you declare `democrm_<name>`");
+      expect(p).toMatch(/not only objects, but also views, apps, .*dashboards.*permission sets/);
+    }
+    const contract = dataContract(card);
+    expect(contract).toContain('- `democrm_delete_contact` on `democrm_contact`');
+    expect(contract).toContain('`democrm_partner_user` for `partner_user`');
+    expect(contract).not.toMatch(/named exactly by the id/);
+  });
+
+  it('both authoring loops name the verify invocation the runner scores with, next to validate and build', () => {
+    const card = namespacedScenario(crm).card;
+    expect(verifyArgs(card)).toEqual(['verify', '--reference-shapes']);
+    for (const p of [buildPrompt(card), iteratePrompt(card)]) {
+      expect(p).toContain('run `npx objectstack validate`, `npx objectstack build` and `npx objectstack verify --reference-shapes` and fix what they report until all three pass');
+    }
+  });
+
+  it('a user-handle field is a scope field the card declares as neither lookup nor select; the contract says it is loaded with a user id', () => {
+    const card = namespacedScenario(crm).card;
+    expect([...userHandleFields(card)]).toEqual(['democrm_account.owner']);
+    expect(unheldHandles(card)).toEqual(['u_tia']);
+    expect(dataContract(card)).toContain(
+      'In `democrm_account.owner` the value is a handle that stands for a user, and the handle text is never stored: the runner loads that field, ' +
+        'and the row’s owner (`owner_id`), with that user’s id (`u_sam` → the `sdr` user; `u_tia`, which no person below holds → the admin user ' +
+        'the runner signs in as). Make that field accept a user id; a rule on it matches that user.',
+    );
+    // A scope field that names a row (`ticket.assignee` → agent, `customer.id`) or an option (`ticket_comment.visibility`) is not one.
+    const desk = loadScenarioFile(resolve(HERE, '../../../../../docs/qa/scenarios/service_desk.json'), { areas: readCapabilityAreas(AREAS_DIR) }).card!;
+    expect([...userHandleFields(desk.card)]).toEqual([]);
+  });
+
+  it('a refused seed row takes out its children and what the card names on them, and nothing else', () => {
+    const card = namespacedScenario(crm).card;
+    const dep = seedDependence(card, [{ object: 'democrm_account', id: 'ac1' }]);
+    expect([...dep.out.keys()].sort()).toEqual(['democrm_account/ac1', 'democrm_contact/ct1', 'democrm_contact/ct2']);
+    const op = (id: string) => dep.operation(card.run.operations.find((o) => o.id === id)!);
+    expect(op('partner_edits_account')).toBe('seed: needs democrm_account ac1, which the app refused'); // its target
+    expect(op('remove_ben')).toBe('seed: needs democrm_contact ct2, a child of democrm_account ac1, which the app refused'); // a child
+    expect(op('move_eli')).toBe('seed: needs democrm_account ac1, which the app refused'); // the account it writes
+    expect(op('add_contact')).toBeUndefined();
+    expect(op('contact_bad_email')).toBeUndefined();
+    const q = (id: string) => dep.question(card.run.questions.find((x) => x.id === id)!);
+    expect(q('tech_accounts')).toBe('seed: needs democrm_account ac1, which the app refused');
+    expect(q('unattached_contacts')).toBe('seed: needs democrm_contact ct1, a child of democrm_account ac1, which the app refused');
+    expect(seedDependence(card, []).out.size).toBe(0);
+  });
+
+  it('chooses verify proofs from the tags, and seeds a lookup target before its referrer', () => {
+    expect(verifyFlags(crm.card)).toEqual(['--reference-shapes']);
+    expect(seedOrder(crm)).toEqual(['account', 'contact']);
+  });
+
+  it('hidden values are the persona’s hidden-field cells, distinctive ones only', () => {
+    expect(hiddenValues(crm, 'sdr')).toContain('ana@acme.test');
+    expect(hiddenValues(crm, 'partner_user')).toEqual([]);
+  });
+
+  it('the install body is the flat manifest; a missing installModes is supplied and SAID so', () => {
+    const art = { manifest: { id: 'com.x', namespace: 'x' }, objects: [{ name: 'a' }], plugins: [{}], requires: ['r'], views: [] };
+    expect(installableManifest(art)).toEqual({ manifest: { id: 'com.x', namespace: 'x', objects: [{ name: 'a' }], installModes: ['unmanaged'] }, installModesSupplied: true });
+    expect(installableManifest({ manifest: { id: 'y', installModes: ['managed', 'unmanaged'] } }).installModesSupplied).toBe(false);
+  });
+
+  it("an environment's metadata less what it served before the install is the app alone", () => {
+    const baseline = { apps: [{ name: 'setup' }], permissions: [{ name: 'admin_full_access' }] };
+    const after = { apps: [{ name: 'setup' }, { name: 'democrm_app' }], permissions: [{ name: 'admin_full_access' }, { name: 'democrm_sdr' }], objects: [{ name: 'democrm_account' }] };
+    expect(withoutItems(after, baseline)).toEqual({ apps: [{ name: 'democrm_app' }], permissions: [{ name: 'democrm_sdr' }], objects: [{ name: 'democrm_account' }] });
+  });
+
+  it('change size counts items added, removed and changed', () => {
+    const before = { objects: [{ name: 'a', fields: { x: 1 } }, { name: 'b' }] };
+    const after = { objects: [{ fields: { x: 2 }, name: 'a' }, { name: 'c' }] };
+    expect(changeSize(before, after)).toEqual({ added: ['objects/c'], removed: ['objects/b'], changed: ['objects/a'], total: 3 });
+    expect(changeSize(before, { objects: [{ fields: { x: 1 }, name: 'a' }, { name: 'b' }] }).total).toBe(0); // key order is not a change
+  });
+});
+
+describe('namespace-relative cards', () => {
+  const crm = load();
+
+  it('reads the namespace a scaffolded config declares', () => {
+    expect(namespaceOfConfig("  manifest: {\n    id: 'com.example.x',\n    namespace: 'crm_probe',\n")).toBe('crm_probe');
+    expect(namespaceOfConfig('defineStack({ manifest: { id: "x" } })')).toBeUndefined();
+  });
+
+  it('reads every item name the card states against demo + its code; fields, row ids and persona ids untouched', () => {
+    const n = namespacedScenario(crm).card;
+    expect(n.code).toBe('crm');
+    expect(n.expect.objects).toEqual(['democrm_account', 'democrm_contact']);
+    expect(n.expect.lookups).toEqual([{ object: 'democrm_contact', field: 'account', to: 'democrm_account' }]);
+    expect(Object.keys(n.run.seed)).toEqual(['democrm_account', 'democrm_contact']);
+    expect(n.run.seed.democrm_contact![0]!.account).toBe('ac1'); // row ids untouched
+    expect(n.run.personas.map((p) => p.id)).toEqual(['sdr', 'partner_user']);
+    expect(n.run.personas.find((p) => p.id === 'sdr')!.hidden.fields).toEqual([{ object: 'democrm_contact', field: 'email' }]);
+    expect(n.run.personas.find((p) => p.id === 'sdr')!.scope![1]).toEqual({ object: 'democrm_contact', field: 'account.owner', value: 'u_sam' });
+    expect(n.run.operations.find((o) => o.id === 'add_contact')!.outcome).toMatchObject({ state: [{ object: 'democrm_contact' }] });
+    expect(n.run.agentActions!.map((a) => `${a.object}.${a.name}`)).toEqual([
+      'democrm_contact.democrm_create_contact',
+      'democrm_contact.democrm_reassign_contact',
+      'democrm_contact.democrm_delete_contact',
+    ]);
+    expect(n.iterate.expectDelta.lookups).toEqual([{ object: 'democrm_opportunity', field: 'account', to: 'democrm_account' }]);
+    expect(namespacedScenario(crm).truths).toBe(crm.truths);
+    expect(namespacedScenario(namespacedScenario(crm)).card).toEqual(n); // a name already carrying the prefix keeps it
+    expect(citationLabels(crm)).toEqual({ democrm_account: ['account'], democrm_contact: ['contact'], democrm_opportunity: ['opportunity'] });
+    expect(permissionSetName(crm.card, 'sdr')).toBe('democrm_sdr');
+  });
+
+  it('prefixes the expected dashboards and every nav target, not only objects', () => {
+    const card = { ...crm.card, expect: { ...crm.card.expect, dashboards: ['overview'], appNavTargets: ['account', 'overview'] } };
+    const n = namespacedScenario({ ...crm, card }).card;
+    expect(n.expect.dashboards).toEqual(['democrm_overview']);
+    expect(n.expect.appNavTargets).toEqual(['democrm_account', 'democrm_overview']);
+  });
+
+  it("template mode's host is named after the code, never the app's namespace", () => {
+    expect(templateHostName(crm.card)).toBe('hostcrm');
+  });
+});

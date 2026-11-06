@@ -94,7 +94,7 @@ copilot claiming abilities it did not have.
 import { defineSkill } from '@objectstack/spec';
 
 export default defineSkill({
-  name: 'case_management',
+  name: 'crm_case_management',
   label: 'Case Management',
   description: 'Triage, query, and escalate support cases.',
   instructions: `
@@ -104,8 +104,8 @@ export default defineSkill({
     - Escalated cases must summarise the actions already taken.
   `,
   // Every name resolves: two platform tools (rung 2) plus one action tool
-  // materialised from this stack's own `escalate_case` Action (rung 3).
-  tools: ['query_records', 'get_record', 'action_escalate_case'],
+  // materialised from this stack's own `crm_escalate_case` Action (rung 3).
+  tools: ['query_records', 'get_record', 'action_crm_escalate_case'],
   triggerConditions: [
     { field: 'objectName', operator: 'eq', value: 'support_case' },
   ],

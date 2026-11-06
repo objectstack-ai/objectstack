@@ -262,8 +262,9 @@ const BUILD_ONLY_GATES: Readonly<Record<string, string>> = {
  * Three rows it has held moved to SHARED_NON_REGISTRY_GATES when `compile.ts`
  * gained the call: `findViewContainerNameRefusals` (#20331 → #20393),
  * `findOverrideDeclarationRefusals` (#28410 → #28643) and
- * `findExtensionFieldSuffixRefusals` (#28564 → #28727). It holds one today,
- * `findFieldPatchTargetRefusals` (#28565), whose card did not name the build.
+ * `findExtensionFieldSuffixRefusals` (#28564 → #28727). It holds two today,
+ * `findFieldPatchTargetRefusals` (#28565) and `findRedeclaredOwnerFieldRefusals`
+ * (#30610), whose cards did not name the build.
  */
 const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {
   findFieldPatchTargetRefusals:
@@ -271,6 +272,12 @@ const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {
     'in-stack target lacks, judged by the marketplace install door\'s own `fieldPatchTargetRefusals`. Wired ' +
     'where the rollout card asked for it (`os validate` and the install door); `os build` still emits such an ' +
     'artifact, which the install door then refuses — the build-side gap, reported rather than closed here.',
+  findRedeclaredOwnerFieldRefusals:
+    '[ADR-0146 D10, second rule] An `objectExtensions[].fields` entry re-declaring a field another package of the ' +
+    'artifact declares, beyond the display-property whitelist, judged by the save and install doors\' own ' +
+    '`judgeRedeclaredOwnerFields`. Wired at the three doors its card named (`os validate`, the publish doors, the ' +
+    'install door); `os build` still emits such an artifact, which the install door then refuses — the same ' +
+    'build-side gap as the row above, reported rather than closed here.',
 };
 
 /**
@@ -372,6 +379,12 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
   // anything behind.
   'An advisory about the local dev database, not the stack — says what the artifact leaves behind; judges no metadata and refuses nothing':
     ['readLocalCustomizations', 'localCustomizationNotice'],
+  // `os build`'s next-step line (`utils/next-steps.ts`): a constant string
+  // printed after a successful build, naming `os deploy`. It reads nothing and
+  // refuses nothing; `os validate` writes no artifact, so it has no next step
+  // to name.
+  'The next step after a successful build — a fixed line naming the command that follows; reads and judges nothing':
+    ['BUILD_NEXT_STEP'],
   'Presentation — renders, formats or serialises a verdict something else reached; judges nothing':
     [
       'printHeader',
@@ -557,8 +570,21 @@ const NOTICE_PROSE = 'converted at load; conversion';
  * Neither command contains a regex literal today, and the failure direction is
  * loud rather than silent — a derailed scan blanks call sites, which strands
  * ledger entries and reds `no ledger entry is stale` below.
+ *
+ * Memoized by source text, so each command is masked once per run however many
+ * cases read it. The scan is pure, so a source that changed is a new key.
  */
+const MASKED = new Map<string, string>();
+
 function codeOnly(src: string): string {
+  const hit = MASKED.get(src);
+  if (hit !== undefined) return hit;
+  const masked = maskSource(src);
+  MASKED.set(src, masked);
+  return masked;
+}
+
+function maskSource(src: string): string {
   const out = src.split('');
   const N = src.length;
   const blank = (from: number, to: number): void => {
@@ -630,14 +656,33 @@ const NOT_CALLABLE: ReadonlySet<string> = new Set([
  *   - a gate never CALLED here but handed on as a value (`list.map(gate)`).
  *     Asserted absent by requiring every value import to be either called or
  *     declared in a ledger.
+ *
+ * ⚠️ Cost, which is linear and must stay so. The three tests below read only
+ * the text just before a match: the whitespace run in front of it, plus at
+ * most nine characters before that run (the `\b` before `function`, or the
+ * `..` before a `.`). `before` is therefore cut there rather than at the start
+ * of the file, so each match reads a few characters, not the whole file up to
+ * it, and the answer is the same. Slicing from 0 made one scan of `compile.ts`
+ * cost about 20 ms (549 matches each re-reading up to 88 KB), while the masker
+ * costs about 3 ms. The "no call shape" case scanned once per value import, so
+ * it timed out at vitest's 5 s default on a loaded Test Core runner. Results
+ * are memoized by source text for the same reason as {@link codeOnly}.
  */
-function callSitesOf(src: string): Set<string> {
+const CALL_SITES = new Map<string, ReadonlySet<string>>();
+
+function callSitesOf(src: string): ReadonlySet<string> {
+  const hit = CALL_SITES.get(src);
+  if (hit !== undefined) return hit;
   const code = codeOnly(src);
   const found = new Set<string>();
   const re = /([A-Za-z_$][\w$]*)\s*\(/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(code)) !== null) {
-    const before = code.slice(0, m.index);
+    // Start of the whitespace run in front of the match. A blanked comment or
+    // string is part of that run, so it can be long: walk it, never assume it.
+    let ws = m.index;
+    while (ws > 0 && /\s/.test(code[ws - 1])) ws--;
+    const before = code.slice(Math.max(0, ws - 9), m.index);
     // Tail of a longer identifier, or a property access. `...spread(` is a
     // call of `spread`, so the dot test must not fire on the third dot.
     if (/[\w$]$/.test(before)) continue;
@@ -647,10 +692,11 @@ function callSitesOf(src: string): Set<string> {
     if (NOT_CALLABLE.has(m[1])) continue;
     found.add(m[1]);
   }
+  CALL_SITES.set(src, found);
   return found;
 }
 
-const callSitesIn = (file: string): Set<string> => callSitesOf(sourceOf(file));
+const callSitesIn = (file: string): ReadonlySet<string> => callSitesOf(sourceOf(file));
 
 /** Is `name` invoked anywhere in this command's source? */
 const calls = (file: string, name: string) => callSitesIn(file).has(name);
@@ -1100,6 +1146,15 @@ describe('os validate is the read-only superset of os build (#3782, #4409)', () 
     // under-reports: a spread-applied call is a call, a property access is not.
     expect(callSitesOf('const a = [...lintUnknownStackKeys(s)];\n').has('lintUnknownStackKeys')).toBe(true);
     expect(callSitesOf('const a = registry.findFoo(s);\n').has('findFoo')).toBe(false);
+
+    // The look-behind is cut at the whitespace run before a match, and a
+    // blanked comment is part of that run. A comment longer than any fixed
+    // window between the dot (or the keyword) and the name must not turn a
+    // property access or a declaration into a call.
+    const longComment = `/* ${'x'.repeat(200)} */`;
+    expect(callSitesOf(`const a = registry.\n  ${longComment}\n  findFoo(s);\n`).has('findFoo')).toBe(false);
+    expect(callSitesOf(`async function\n  ${longComment}\n  declared(s) {}\n`).has('declared')).toBe(false);
+    expect(callSitesOf(`const a = [...\n  ${longComment}\n  lintUnknownStackKeys(s)];\n`).has('lintUnknownStackKeys')).toBe(true);
   });
 
   it('no ledger entry is stale', () => {
@@ -1163,6 +1218,7 @@ describe('os validate is the read-only superset of os build (#3782, #4409)', () 
       // statement it skipped drops names from the classification demand, which
       // is silent in the wrong direction.
       const values = valueImportsOf(src);
+      const called = callSitesOf(src);
       expect(
         importsConsumed.get(src),
         `${file}: the import parse consumed ${importsConsumed.get(src)} of ${importStatementCount(src)} ` +
@@ -1174,7 +1230,7 @@ describe('os validate is the read-only superset of os build (#3782, #4409)', () 
       // (`list.map(gate)`) rather than called, which has no `gate(` call site
       // at all. `formatUnknownAuthoringKey` is exactly that shape today.
       const unaccounted = [...values]
-        .filter((name) => !callSitesIn(file).has(name) && !CLASSIFIED.has(name))
+        .filter((name) => !called.has(name) && !CLASSIFIED.has(name))
         .sort();
       expect(
         unaccounted,

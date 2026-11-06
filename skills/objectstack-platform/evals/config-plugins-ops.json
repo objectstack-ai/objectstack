@@ -4,7 +4,7 @@
     {
       "id": 1,
       "prompt": "Write `objectstack.config.ts` for our CRM app: objects, views and flows under src/, namespace `crm`, protocol 18.",
-      "expected_output": "`defineStack` with a `manifest` of `id`, `version`, `type: 'app'`, `name`, `namespace: 'crm'`, `engines: { protocol: '^18' }`; barrel imports, `objects: Object.values(objects)` (likewise `views` / `flows`); prefixed object names (`crm_account`), no object-level `namespace`, no `tableName`; no driver in `plugins:` (the CLI resolves it); no `workflows` / `approvals` keys (refused).",
+      "expected_output": "`defineStack` with a `manifest` of `id`, `version`, `type: 'app'`, `name`, `namespace: 'crm'`, `engines: { protocol: '^18' }`; barrel imports, `objects: Object.values(objects)` (likewise `views` / `flows`); prefixed object and flow names (`crm_account`, `crm_convert_lead`), no object-level `namespace`, no `tableName`; no driver in `plugins:` (the CLI resolves it); no `workflows` / `approvals` keys (refused).",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -147,8 +147,8 @@
     },
     {
       "id": 9,
-      "prompt": "Add a `support_intake` queue staffed by the `service_agent` position and route every new `crm_case` into it (`requires: ['automation', 'triggers']`).",
-      "expected_output": "Two stack collections: `queues: [defineQueue({ name: 'support_intake', label: 'Support Intake', members: [{ type: 'position', value: 'service_agent' }] })]` and `assignmentRules: [defineAssignmentRule(...)]` with one entry, `assignTo: { type: 'queue', value: 'support_intake' }`; plus `'sharing'` in `requires`: the keys need `@objectstack/plugin-sharing`'s ownership-queue service (`queue` is the job queue), else the boot is refused.",
+      "prompt": "Add a `crm_support_intake` queue staffed by the `crm_service_agent` position and route every new `crm_case` into it (`requires: ['automation', 'triggers']`).",
+      "expected_output": "Two stack collections: `queues: [defineQueue({ name: 'crm_support_intake', label: 'Support Intake', members: [{ type: 'position', value: 'crm_service_agent' }] })]` and `assignmentRules: [defineAssignmentRule(...)]` with one entry, `assignTo: { type: 'queue', value: 'crm_support_intake' }`; plus `'sharing'` in `requires`: the keys need `@objectstack/plugin-sharing`'s ownership-queue service (`queue` is the job queue), else the boot is refused.",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -201,17 +201,20 @@
     {
       "id": 12,
       "prompt": "Turn on push notifications for our `os serve` deployment: our own iOS and Android apps, signed with our APNs key and our Firebase project.",
-      "expected_output": "`requires: ['push']` on the stack root (the token mounts `@objectstack/service-push`) plus a top-level `push:` key on the stack definition for the transport; no host code, no `PushServicePlugin` in `plugins:`. The APNs signing key and the Firebase service-account JSON stay in the secrets layer (an environment variable in the open tier) and the config names them by reference (`credentialRef`): no `.p8` key, `privateKey` or service-account JSON written inline.",
+      "expected_output": "`requires: ['push']` on the stack root (the token mounts `@objectstack/service-push`) plus a top-level `push:` key on the stack definition; no host code, no `PushServicePlugin` in `plugins:`. Their own signed apps take `transport: 'direct'`, the transport served today, with an `apns` block (`teamId`, `keyId`, `topic`, `environment`, `credentialRef`) and an `fcm` block (`projectId`, `credentialRef`). The APNs signing key and the Firebase service-account JSON stay in the secrets layer (an environment variable in the open tier) and each `credentialRef` names one: no `.p8` key, `privateKey`, `serviceAccount` or service-account JSON written inline. Not the hosted relay, which the boot refuses until its sender ships.",
       "files": [],
       "assertions": {
         "must_contain": [
           "requires",
           "'push'",
-          "push:"
+          "push:",
+          "transport: 'direct'",
+          "credentialRef"
         ],
         "must_not_contain": [
           "BEGIN PRIVATE KEY",
           "privateKey:",
+          "serviceAccount:",
           "\"private_key\""
         ]
       }
@@ -219,7 +222,7 @@
     {
       "id": 13,
       "prompt": "HotCRM (`hotcrm`, 3.2.0) ships the `crm_pipeline` dataset and the `crm_sales_overview` page. Can we replace both with our own the way we replaced its `crm_account_grid` view, or is that only for views?",
-      "expected_output": "The same declaration, both types. In `hotcrm.custom`, an item of the same name and type with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` in its body replaces the base's dataset or page whole, and every read of the name serves it: a pair's declared override is served for a view, dashboard, report, email_template, translation, flow, page, app, dataset, doc, book or mapping. Not an edit of HotCRM's read-only item, not a package-unbound Setup row, and not an object extension (`__c` fields add to an object and replace no dataset or page).",
+      "expected_output": "The same declaration, both types. In `hotcrm.custom`, an item of the same name and type with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` in its body replaces the base's dataset or page whole, and every read of the name serves it: a pair's declared override is served for a view, dashboard, report, email_template, translation, flow, action, page, app, dataset, doc, book or mapping. Not an edit of HotCRM's read-only item, not a package-unbound Setup row, and not an object extension (`__c` fields add to an object and replace no dataset or page).",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -247,6 +250,24 @@
         "must_not_contain": [
           "/rollback",
           "PUT /api/v1/meta/view/crm_account_grid"
+        ]
+      }
+    },
+    {
+      "id": 15,
+      "prompt": "HotCRM (`hotcrm`, 3.2.0) ships the `crm_close_deal` action on `crm_opportunity` with `requiredPermissions: ['crm_close_deal']`. The customer wants it relabelled \"Mark won\", run a different script, and usable by every sales rep, including reps without that capability. How do we change it?",
+      "expected_output": "Relabel it and change what it runs with a declared override in the paired `hotcrm.custom`: an action of the same name on the same object (`objectName: 'crm_opportunity'`) carrying `overrides: { package: 'hotcrm', basedOn: '3.2.0' }`. Its behaviour (`label`, `type`, `body`, …) replaces the base's whole, and it runs for whoever could already run the base action. It cannot widen who that is: dropping `crm_close_deal` from `requiredPermissions` is refused `403 NOT_OVERRIDABLE` (`declared_action_widens_access`), and so is turning `ai.exposed` on or `ai.requiresConfirmation` off. Give the reps the capability through their permission set instead. Moving the action to another object is refused too (`declared_package_ships_no_such_item`). Not an edit of HotCRM's read-only action and not a copy under the same name from a dependent package.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "hotcrm.custom",
+          "overrides:",
+          "requiredPermissions",
+          "declared_action_widens_access"
+        ],
+        "must_not_contain": [
+          "requiredPermissions: []",
+          "PUT /api/v1/meta/action/crm_close_deal"
         ]
       }
     }

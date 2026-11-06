@@ -68,6 +68,7 @@ import {
   createFieldPresenceProbe,
 } from './audit-writers.js';
 import type { AuthEventAuditLogger } from './auth-event-audit.js';
+import { IMPERSONATED_BY_KEY, impersonatorOf } from './impersonation-attribution.js';
 
 /** The `sys_audit_log.action` value this writer emits. */
 export const ACTION_INVOCATION_AUDIT_ACTION = 'action_invocation' as const;
@@ -90,9 +91,11 @@ export interface ActionInvocationAuditEvent {
   /**
    * The invocation's envelope: the caller's `ExecutionContext` with
    * `surface` set by the door. Read for `surface`, `userId`, `actor`,
-   * `tenantId` and `performedBy` — nothing else.
+   * `tenantId`, `performedBy` and `impersonatedBy` — nothing else.
    */
-  context: Pick<ExecutionContext, 'surface' | 'userId' | 'actor' | 'tenantId' | 'performedBy'> | undefined;
+  context:
+    | Pick<ExecutionContext, 'surface' | 'userId' | 'actor' | 'tenantId' | 'performedBy' | 'impersonatedBy'>
+    | undefined;
   /** The action's declared name (the routed name for an undeclared one). */
   actionName: string;
   /** The action's object; absent for an object-less (global) action. */
@@ -180,6 +183,10 @@ export function buildActionInvocationAuditRow(
     metadata.performed_by = performedBy;
     metadata.on_behalf_of = userId ?? null;
   }
+  // The impersonating administrator, under the key the CRUD mirror writes,
+  // present only when an impersonation session made the call.
+  const impersonatedBy = impersonatorOf(ctx);
+  if (impersonatedBy) metadata[IMPERSONATED_BY_KEY] = impersonatedBy;
 
   const objectName = nonEmpty(event.objectName);
   const row: Record<string, unknown> = {

@@ -44,6 +44,19 @@
  * both its query and its dry run (`analytics-service.ts`,
  * `assertDelegatedDateBucketsTemporal`).
  *
+ * [#29304] …and a PLAIN group key over a virtual field, which the engine's
+ * storage-axis door (`assertGroupByTargetsAreStored`) now refuses ahead of its
+ * date-bucket door, `INVALID_FIELD` / 400 at `groupBy.N`. Measured on
+ * `origin/main` `447226b2` before it, a dataset or cube dimension over a
+ * `formula` (`returnType` `date` or `text`): the dry run rendered
+ * `GROUP BY calc` on both compositions and the preview served one `null`
+ * group holding the total, while the native strategy answered
+ * `DATABASE_ERROR` / 500 and the ObjectQL strategy the SQL driver's
+ * missing-column backstop. {@link assertDatasetGroupTargetsStored} gives the
+ * engine's refusal on the faces that hand it no keys (the preview, the dry
+ * run, the delegated service), and `NativeSQLStrategy.canHandle` declines a
+ * grouped dimension over a virtual field so the live query reaches the engine.
+ *
  * Why a copy of the sentence: `@objectstack/objectql` is a dev dependency of
  * this package, never a runtime one, and its root does not export the door.
  * The message, code, status and keys are the engine's, and
@@ -61,7 +74,7 @@ type DateBucketRefusal = Error & {
   field?: string; fields?: string[]; object?: string; param?: string; path?: string;
 };
 
-/** The refusal `assertDatasetDateBucketsTemporal` throws, with the engine's keys. */
+/** The refusal this module's two doors throw, with the engine's keys. */
 function dateBucketRefusal(message: string, object: string, field: string, path: string): DateBucketRefusal {
   const err = new Error(message) as DateBucketRefusal;
   err.code = StandardErrorCode.enum.INVALID_FIELD;
@@ -72,9 +85,53 @@ function dateBucketRefusal(message: string, object: string, field: string, path:
 }
 
 /**
+ * [#29167, #29304] Refuse the first key in `groupBy` (built for a query on
+ * `object`), plain or bucketed, whose field `declaredType` reads as a VIRTUAL
+ * field (the spec's `isVirtualSearchField`), with the engine's refusal for it:
+ * `aggregate-query-shape-door.ts` `assertGroupByTargetsAreStored`, the bucket
+ * in `virtualDateBucketMessage`'s words, the plain key in
+ * `virtualGroupMessage`'s. Called ahead of
+ * {@link assertDatasetDateBucketsTemporal}, as the engine calls its two doors.
+ */
+export function assertDatasetGroupTargetsStored(
+  object: string,
+  groupBy: readonly AggregateGroupKey[],
+  declaredType: (field: string) => string | undefined,
+): void {
+  for (const [i, key] of groupBy.entries()) {
+    const field = typeof key === 'string' ? key : key.field;
+    const type = declaredType(field);
+    if (type === undefined || !isVirtualSearchField({ type } as never)) continue;
+    if (typeof key !== 'string') {
+      const path = `groupBy.${i}.dateGranularity`;
+      throw dateBucketRefusal(
+        `aggregate('${object}'): ${path} buckets '${field}' by '${key.dateGranularity}', but '${field}' `
+        + `is a ${type} field — its value is computed on read and never stored, so no driver materialises a `
+        + `column to bucket. The query was NOT run. Denormalise the value onto '${object}' (a stored date or `
+        + 'datetime field, written when the source changes) and bucket that. A formula field is virtual: with '
+        + 'no column behind it the bucket reached the driver as a column that does not exist, and an engine '
+        + 'that aggregates in memory put every row into one null group while the answer looked served.',
+        object, field, path,
+      );
+    }
+    const path = `groupBy.${i}`;
+    throw dateBucketRefusal(
+      `aggregate('${object}'): ${path} groups by '${field}', but '${field}' is a ${type} field — its value `
+      + 'is computed on read and never stored, so no driver materialises a column to group by. The query was NOT '
+      + `run. Denormalise the value onto '${object}' (a stored field, written when the source changes) and group `
+      + 'by that. A formula field is virtual: with no column behind it the group key reached the driver as a '
+      + 'column that does not exist, and an engine that aggregates in memory put every row into one null group '
+      + 'while the answer looked served.',
+      object, field, path,
+    );
+  }
+}
+
+/**
  * Refuse the first bucketed key in `groupBy` (built for a query on `object`)
- * whose field `declaredType` reads as a virtual field, or as declared and
- * neither a date nor a datetime, with the engine's refusal for it.
+ * whose field `declaredType` reads as declared and neither a date nor a
+ * datetime, with the engine's refusal for it. A virtual field is judged ahead
+ * of this door, by {@link assertDatasetGroupTargetsStored}.
  */
 export function assertDatasetDateBucketsTemporal(
   object: string,
@@ -86,19 +143,6 @@ export function assertDatasetDateBucketsTemporal(
     const { field, dateGranularity } = key;
     const type = declaredType(field);
     const path = `groupBy.${i}.dateGranularity`;
-    // [#29167] The engine's virtual-field arm (`aggregate-query-shape-door.ts`
-    // `virtualDateBucketMessage`), judged first as there.
-    if (type !== undefined && isVirtualSearchField({ type } as never)) {
-      throw dateBucketRefusal(
-        `aggregate('${object}'): ${path} buckets '${field}' by '${dateGranularity}', but '${field}' `
-        + `is a ${type} field — its value is computed on read and never stored, so no driver materialises a `
-        + `column to bucket. The query was NOT run. Denormalise the value onto '${object}' (a stored date or `
-        + 'datetime field, written when the source changes) and bucket that. A formula field is virtual: with '
-        + 'no column behind it the bucket reached the driver as a column that does not exist, and an engine '
-        + 'that aggregates in memory put every row into one null group while the answer looked served.',
-        object, field, path,
-      );
-    }
     if (type === undefined || CALENDAR_DATE_TYPES.has(type) || INSTANT_TYPES.has(type)) continue;
     throw dateBucketRefusal(
       `aggregate('${object}'): ${path} buckets '${field}' by '${dateGranularity}', but '${field}' `

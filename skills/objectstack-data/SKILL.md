@@ -337,7 +337,7 @@ See [rules/indexing.md](./rules/indexing.md) for composite indexes, unique scope
 refused), the retired `type` / `partial`, and partial / gin / gist indexes at the
 database layer.
 
-→ Moved verbatim to [references/examples-objects.md](./references/examples-objects.md) § Lifecycle Hooks (the hooks reference itself is [references/data-hooks.md](./references/data-hooks.md)).
+→ Moved verbatim to [references/examples-objects.md](./references/examples-objects.md) § Lifecycle Hooks.
 
 ---
 
@@ -346,7 +346,8 @@ database layer.
 To add fields/validations/indexes to an object you do not own, author
 `defineObjectExtension({ extend, fields, fieldPatches, priority })` and register it on
 `defineStack({ objectExtensions: [...] })`. `priority` sets merge order (default
-`200`, range `0–999`); an extension can add but never remove. ⛔ Not the same key
+`200`, range `0–999`); an extension can add but never remove, except that a new
+`label` without `pluralLabel` clears the base plural unless a tenant authored it (set both). ⛔ Not the same key
 as object-level `ownership` (the record-ownership enum
 `'user' | 'business_unit' | 'org' | 'none'`). Schema:
 `node_modules/@objectstack/spec/src/data/object.zod.ts` (`ObjectExtensionSchema`).
@@ -408,9 +409,9 @@ organization adds users and teams through `sys_queue_member` rows:
 import { defineQueue } from '@objectstack/spec/security';
 
 export const supportIntake = defineQueue({
-  name: 'support_intake',   // the one name the `queue` column, a rule, an approver and a sharing recipient use
+  name: 'crm_support_intake',   // the one name the `queue` column, a rule, an approver and a sharing recipient use
   label: 'Support Intake',
-  members: [{ type: 'position', value: 'service_agent' }],
+  members: [{ type: 'position', value: 'crm_service_agent' }],
 });
 // defineStack({ queues: [supportIntake], assignmentRules: [...] }) — routing rows in: objectstack-automation
 ```
@@ -428,7 +429,7 @@ picklist, a round-robin counter field, or a hook that picks an owner.
 
 ---
 
-→ Seed Data & Fixtures (`defineSeed()`) moved verbatim to [references/seeds.md](./references/seeds.md) (Quick start · `Seed` fields · Import modes · `externalId` selection · Relationship references · Dynamic values (CEL) · Seed best practices).
+→ Seed Data & Fixtures (`defineSeed()`) moved verbatim to [references/seeds.md](./references/seeds.md).
 
 ---
 

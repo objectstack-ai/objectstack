@@ -18,6 +18,7 @@ import { companySettingsManifest } from './manifests/company.manifest.js';
 import { brandingSettingsManifest } from './manifests/branding.manifest.js';
 import { builtinSettingsManifests } from './manifests/index.js';
 import { evaluateVisibility, visibilitySource } from './visibility-eval.js';
+import { SETTINGS_SECRET_MASK } from './settings-secret-redaction.js';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
 
 describe('reference manifests are spec-valid', () => {
@@ -378,7 +379,7 @@ describe('SettingsService — resetNamespace / built-in reset action', () => {
     expect(r.value).toBeNull();
   });
 
-  it('leaves env-locked keys untouched', async () => {
+  it('leaves an env-locked key with nothing stored beneath it untouched', async () => {
     const svc = new SettingsService({ env: { OS_BRANDING_WORKSPACE_NAME: 'EnvCorp' } });
     svc.registerManifest(brandingSettingsManifest);
     await expect(svc.resetNamespace('branding')).resolves.toBe(0);
@@ -404,6 +405,37 @@ describe('SettingsService — resetNamespace / built-in reset action', () => {
     svc.registerAction('branding', 'reset', async () => ({ ok: true, severity: 'info', message: 'custom' }));
     const r = await svc.runAction('branding', 'reset', null);
     expect(r.message).toBe('custom');
+  });
+});
+
+describe('SettingsService — the built-in action answers are written in the caller\'s language', () => {
+  it('the built-in reset answers in display.locale: zh-TW in Traditional, ru in Russian', async () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(brandingSettingsManifest);
+    await svc.set('branding', 'workspace_name', 'Acme');
+    const cleared = await svc.runAction('branding', 'reset', null, {}, { locale: 'zh-TW' });
+    expect(cleared).toMatchObject({ ok: true, severity: 'info', message: '已清除 1 個已儲存的值；環境變數/預設設定已重新生效。' });
+    expect((await svc.get('branding', 'workspace_name')).source).toBe('default');
+
+    const nothing = await svc.runAction('branding', 'reset', null, {}, { locale: 'ru' });
+    expect(nothing).toMatchObject({
+      ok: true,
+      message: 'Нет сохранённых значений для очистки: уже используются настройки из окружения или по умолчанию.',
+    });
+  });
+
+  it('an action with no handler is refused in display.locale; no locale, or one off the table, keeps English', async () => {
+    const svc = new SettingsService();
+    svc.registerManifest(mailSettingsManifest);
+    expect(await svc.runAction('mail', 'nope', null, {}, { locale: 'de-DE' })).toMatchObject({
+      ok: false,
+      severity: 'error',
+      message: 'Für die Aktion „nope“ in „mail“ ist kein Handler registriert.',
+    });
+    for (const display of [{}, { locale: 'sw-KE' }]) {
+      expect((await svc.runAction('mail', 'nope', null, {}, display)).message)
+        .toBe("No handler registered for action 'nope' in 'mail'.");
+    }
   });
 });
 
@@ -2743,5 +2775,356 @@ describe('auth lockout window is enforced again (#7169)', () => {
         ).not.toThrow();
       }
     }
+  });
+});
+
+describe('SettingsService — a clear goes through an env pin, every other write does not (#30385)', () => {
+  // Two keys a pin can sit on: one below the global rung, one on it.
+  const PINNED = {
+    namespace: 'pinned',
+    version: 1,
+    label: 'Pinned',
+    scope: 'tenant',
+    readPermission: 'setup.access',
+    writePermission: 'setup.write',
+    specifiers: [
+      { type: 'text', key: 'motto', label: 'Motto', scope: 'tenant', default: 'none' },
+      { type: 'text', key: 'banner', label: 'Banner', scope: 'global', default: 'none' },
+    ],
+  } as any;
+  const orgAdmin = { enforced: true, permissions: ['setup.access', 'setup.write'], userId: 'usr_org_admin' };
+  const platformAdmin = {
+    enforced: true,
+    permissions: ['setup.access', 'setup.write', 'manage_platform_settings'],
+    userId: 'usr_platform_admin',
+  };
+  const refusalOf = (p: Promise<unknown>) => p.then(() => undefined, (e: any) => e);
+
+  /** A stored value under a pin that is set after it: the operator's recovery. */
+  async function pinnedOverStored() {
+    const env: Record<string, string | undefined> = {};
+    const svc = new SettingsService({ env });
+    svc.registerManifest(PINNED);
+    await svc.set('pinned', 'motto', 'Stored');
+    env.OS_PINNED_MOTTO = 'Pinned';
+    return { env, svc };
+  }
+
+  it('a clear clears the stored value beneath the pin and changes nothing in force: the answer still reads env, locked', async () => {
+    const { env, svc } = await pinnedOverStored();
+    const changes: unknown[] = [];
+    svc.subscribe('pinned', (e) => { changes.push(e); });
+
+    const answer = await svc.set('pinned', 'motto', null);
+    expect(answer).toMatchObject({ value: 'Pinned', source: 'env', locked: true });
+    expect(answer.lockedReason).toContain('OS_PINNED_MOTTO');
+    expect(await svc.get('pinned', 'motto')).toMatchObject({ value: 'Pinned', source: 'env', locked: true });
+    expect(changes).toEqual([expect.objectContaining({ key: 'motto', action: 'reset' })]);
+
+    // Lift the pin: the key falls back to its default, not to the old value.
+    delete env.OS_PINNED_MOTTO;
+    expect(await svc.get('pinned', 'motto')).toMatchObject({ value: 'none', source: 'default', locked: false });
+  });
+
+  it('`undefined` is a clear too, alongside an ordinary write in the same batch', async () => {
+    const { env, svc } = await pinnedOverStored();
+    await svc.setMany('pinned', { motto: undefined, banner: 'Saved' });
+    delete env.OS_PINNED_MOTTO;
+    expect((await svc.get('pinned', 'motto')).source).toBe('default');
+    expect((await svc.get('pinned', 'banner')).value).toBe('Saved');
+  });
+
+  it('every other write is refused SETTINGS_LOCKED as before, the empty string included, and the whole batch stores nothing', async () => {
+    const { env, svc } = await pinnedOverStored();
+    for (const value of ['Other', '']) {
+      const refusal = await refusalOf(svc.set('pinned', 'motto', value));
+      expect(refusal).toBeInstanceOf(SettingsLockedError);
+      expect(refusal).toMatchObject({ code: 'SETTINGS_LOCKED', reason: 'locked-by-env', key: 'motto' });
+    }
+    const batch = await refusalOf(svc.setMany('pinned', { banner: 'Saved', motto: 'Other' }));
+    expect(batch).toMatchObject({ code: 'SETTINGS_LOCKED', reason: 'locked-by-env', key: 'motto' });
+
+    delete env.OS_PINNED_MOTTO;
+    expect(await svc.get('pinned', 'motto')).toMatchObject({ value: 'Stored', source: 'tenant' });
+    expect((await svc.get('pinned', 'banner')).source).toBe('default');
+  });
+
+  it('a locked row at an upper rung still refuses a clear below it', async () => {
+    const { env, svc } = await pinnedOverStored();
+    await (svc as any).upsertRow({
+      namespace: 'pinned', key: 'motto', scope: 'global', user_id: null, value: 'Platform motto',
+      value_enc: null, encrypted: false, locked: true, locked_reason: 'Set by the platform.',
+    });
+
+    const refusal = await refusalOf(svc.set('pinned', 'motto', null));
+    expect(refusal).toBeInstanceOf(SettingsLockedError);
+    expect(refusal).toMatchObject({ code: 'SETTINGS_LOCKED', reason: 'locked-by-global', key: 'motto' });
+
+    delete env.OS_PINNED_MOTTO;
+    expect(await svc.get('pinned', 'motto')).toMatchObject({ value: 'Platform motto', source: 'global', locked: true });
+  });
+
+  it('a locked row at the write\'s own rung refuses a non-platform clear, and the platform writes through it', async () => {
+    const env: Record<string, string | undefined> = { OS_PINNED_BANNER: 'Pinned banner' };
+    const svc = new SettingsService({ env });
+    svc.registerManifest(PINNED);
+    await (svc as any).upsertRow({
+      namespace: 'pinned', key: 'banner', scope: 'global', user_id: null, value: 'Platform banner',
+      value_enc: null, encrypted: false, locked: true, locked_reason: 'Set by the platform.',
+    });
+
+    const refusal = await refusalOf(svc.setMany('pinned', { banner: null }, orgAdmin));
+    expect(refusal).toBeInstanceOf(SettingsLockedError);
+    expect(refusal).toMatchObject({ code: 'SETTINGS_LOCKED', reason: 'locked-by-global', key: 'banner' });
+
+    const answer = await svc.setMany('pinned', { banner: null }, platformAdmin);
+    expect(answer.banner).toMatchObject({ value: 'Pinned banner', source: 'env', locked: true });
+  });
+});
+
+describe('SettingsService — a reset clears the value stored beneath an env pin', () => {
+  const RESETTABLE = {
+    namespace: 'resettable',
+    version: 1,
+    label: 'Resettable',
+    scope: 'tenant',
+    specifiers: [
+      { type: 'text', key: 'motto', label: 'Motto', scope: 'tenant', default: 'none' },
+      { type: 'text', key: 'banner', label: 'Banner', scope: 'tenant', default: 'none' },
+      { type: 'text', key: 'footer', label: 'Footer', scope: 'tenant', default: 'none' },
+    ],
+  } as any;
+
+  /** `motto` pinned over a stored value, `banner` stored and not pinned, `footer` pinned with nothing stored. */
+  async function namespaceWithPins() {
+    const env: Record<string, string | undefined> = {};
+    const audit: Array<Record<string, unknown>> = [];
+    const svc = new SettingsService({
+      env,
+      auditWriter: { write: async (row: unknown) => { audit.push(row as Record<string, unknown>); } },
+    } as any);
+    svc.registerManifest(RESETTABLE);
+    await svc.setMany('resettable', { motto: 'Stored motto', banner: 'Stored banner' });
+    env.OS_RESETTABLE_MOTTO = 'Pinned motto';
+    env.OS_RESETTABLE_FOOTER = 'Pinned footer';
+    audit.length = 0;
+    return { env, svc, audit };
+  }
+
+  it('clears the pinned key\'s stored value, counts it, and changes nothing in force while the pin holds', async () => {
+    const { env, svc } = await namespaceWithPins();
+    const changes: Array<{ key: string; action: string }> = [];
+    svc.subscribe('resettable', (e) => { changes.push(e as { key: string; action: string }); });
+
+    await expect(svc.resetNamespace('resettable')).resolves.toBe(2);
+    expect(changes.map((c) => [c.key, c.action]).sort()).toEqual([['banner', 'reset'], ['motto', 'reset']]);
+    expect(await svc.get('resettable', 'motto')).toMatchObject({ value: 'Pinned motto', source: 'env', locked: true });
+    expect(await svc.get('resettable', 'footer')).toMatchObject({ value: 'Pinned footer', source: 'env', locked: true });
+    expect(await svc.get('resettable', 'banner')).toMatchObject({ value: 'none', source: 'default' });
+
+    // Lift the pins: each key reads its default, not the value once stored beneath it.
+    delete env.OS_RESETTABLE_MOTTO;
+    delete env.OS_RESETTABLE_FOOTER;
+    expect(await svc.get('resettable', 'motto')).toMatchObject({ value: 'none', source: 'default', locked: false });
+    expect(await svc.get('resettable', 'footer')).toMatchObject({ value: 'none', source: 'default', locked: false });
+  });
+
+  it('records the pinned key\'s reset as a single clear of it records it', async () => {
+    const reset = await namespaceWithPins();
+    await reset.svc.resetNamespace('resettable');
+    const single = await namespaceWithPins();
+    await single.svc.set('resettable', 'motto', null);
+
+    const motto = (rows: Array<Record<string, unknown>>) => rows.filter((r) => r.key === 'motto');
+    expect(motto(reset.audit)).toEqual(motto(single.audit));
+    expect(motto(reset.audit)).toEqual([expect.objectContaining({ action: 'reset', newHash: null })]);
+    expect(reset.audit.map((r) => r.key).sort()).toEqual(['banner', 'motto']);
+  });
+
+  it('a pin with nothing stored beneath it is not cleared, and a second reset clears nothing', async () => {
+    const { svc, audit } = await namespaceWithPins();
+    await svc.resetNamespace('resettable');
+    audit.length = 0;
+    await expect(svc.resetNamespace('resettable')).resolves.toBe(0);
+    expect(audit).toEqual([]);
+  });
+
+  it('the reset action counts the pinned key it cleared and says how many keys the environment still pins', async () => {
+    const { svc } = await namespaceWithPins();
+    const first = await svc.runAction('resettable', 'reset', null);
+    expect(first).toMatchObject({ ok: true, severity: 'info' });
+    expect(first.message).toBe(
+      'Cleared 2 saved value(s); environment/default configuration is back in effect. '
+      + '2 setting(s) remain pinned by environment variables.',
+    );
+
+    const second = await svc.runAction('resettable', 'reset', null, {}, { locale: 'zh-CN' });
+    expect(second.message).toBe('没有可清除的已保存值：当前已在使用环境变量/默认配置。仍有 2 个设置由环境变量固定。');
+  });
+
+  it('a namespace no environment variable pins answers without the pinned sentence', async () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(RESETTABLE);
+    await svc.set('resettable', 'motto', 'Stored motto');
+    const r = await svc.runAction('resettable', 'reset', null);
+    expect(r.message).toBe('Cleared 1 saved value(s); environment/default configuration is back in effect.');
+  });
+});
+
+describe('SettingsService — the namespace read lists what is stored beneath an env pin', () => {
+  // A pin on each rung a clear can land at, a secret, and a JSON key whose env
+  // value can coerce to null.
+  const BENEATH = {
+    namespace: 'beneath',
+    version: 1,
+    label: 'Beneath',
+    scope: 'tenant',
+    specifiers: [
+      { type: 'text', key: 'motto', label: 'Motto', scope: 'tenant', default: 'none' },
+      { type: 'text', key: 'banner', label: 'Banner', scope: 'global', default: 'none' },
+      { type: 'text', key: 'nickname', label: 'Nickname', scope: 'user', default: 'none' },
+      { type: 'password', key: 'api_secret', label: 'API secret', scope: 'tenant' },
+      { type: 'password', key: 'spare_secret', label: 'Spare secret', scope: 'tenant' },
+      { type: 'json', key: 'rules', label: 'Rules', scope: 'tenant', default: [] },
+    ],
+  } as any;
+  const envEntry = (value: unknown, envName: string) => ({
+    scope: 'env', value, locked: true, lockedReason: `Set via env: ${envName}`, effective: true,
+  });
+
+  /** A crypto adapter whose decrypt is watched, so a read can prove it never opened a secret. */
+  function watchedCrypto(): CryptoAdapter & { decrypt: ReturnType<typeof vi.fn> } {
+    return {
+      confidential: true,
+      encrypt: async (plain: string) => 'kms:' + Buffer.from(plain, 'utf8').toString('base64'),
+      decrypt: vi.fn(async (cipher: string) => Buffer.from(cipher.replace(/^kms:/, ''), 'base64').toString('utf8')),
+      digest: () => 'fnv32:deadbeef',
+    };
+  }
+
+  /** `motto` stored then pinned: the operator's recovery, before the clear. */
+  async function pinnedOverStored() {
+    const env: Record<string, string | undefined> = {};
+    const crypto = watchedCrypto();
+    const svc = new SettingsService({ env, crypto });
+    svc.registerManifest(BENEATH);
+    await svc.set('beneath', 'motto', 'Stored motto');
+    env.OS_BENEATH_MOTTO = 'Pinned motto';
+    return { env, svc, crypto };
+  }
+
+  it('a pinned key over a stored row lists that row beneath its env entry; the answer is otherwise the pin\'s', async () => {
+    const { svc } = await pinnedOverStored();
+    const { values } = await svc.getNamespace('beneath');
+
+    expect(values.motto).toEqual({
+      value: 'Pinned motto',
+      source: 'env',
+      locked: true,
+      lockedReason: 'Set via env: OS_BENEATH_MOTTO',
+      cascadeChain: [
+        envEntry('Pinned motto', 'OS_BENEATH_MOTTO'),
+        { scope: 'tenant', value: 'Stored motto', locked: false, lockedReason: undefined },
+        { scope: 'default', value: 'none' },
+      ],
+    });
+    // The env entry is the only effective one, and the first non-null one.
+    expect(values.motto.cascadeChain!.filter((e) => e.effective)).toHaveLength(1);
+  });
+
+  it('after the clear through the pin the stored entry reads null; a pin with no row lists none', async () => {
+    const { env, svc } = await pinnedOverStored();
+    await svc.set('beneath', 'motto', null);
+    env.OS_BENEATH_BANNER = 'Pinned banner';
+
+    const { values } = await svc.getNamespace('beneath');
+    expect(values.motto.cascadeChain).toEqual([
+      envEntry('Pinned motto', 'OS_BENEATH_MOTTO'),
+      { scope: 'tenant', value: null, locked: false, lockedReason: undefined },
+      { scope: 'default', value: 'none' },
+    ]);
+    expect(values.banner.cascadeChain).toEqual([
+      envEntry('Pinned banner', 'OS_BENEATH_BANNER'),
+      { scope: 'default', value: 'none' },
+    ]);
+  });
+
+  it('a global key lists its global row, and an upper row\'s lock rides along, so a refused clear is visible', async () => {
+    const { env, svc } = await pinnedOverStored();
+    await svc.set('beneath', 'banner', 'Stored banner');
+    env.OS_BENEATH_BANNER = 'Pinned banner';
+    await (svc as any).upsertRow({
+      namespace: 'beneath', key: 'motto', scope: 'global', user_id: null, value: 'Platform motto',
+      value_enc: null, encrypted: false, locked: true, locked_reason: 'Set by the platform.',
+    });
+
+    const { values } = await svc.getNamespace('beneath');
+    expect(values.banner.cascadeChain).toEqual([
+      envEntry('Pinned banner', 'OS_BENEATH_BANNER'),
+      { scope: 'global', value: 'Stored banner', locked: false, lockedReason: undefined },
+      { scope: 'default', value: 'none' },
+    ]);
+    expect(values.motto.cascadeChain!.slice(1, 3)).toEqual([
+      { scope: 'global', value: 'Platform motto', locked: true, lockedReason: 'Set by the platform.' },
+      { scope: 'tenant', value: 'Stored motto', locked: false, lockedReason: undefined },
+    ]);
+    // The pin still answers: an upper row's lock does not take the lock over.
+    expect(values.motto).toMatchObject({ source: 'env', lockedReason: 'Set via env: OS_BENEATH_MOTTO' });
+  });
+
+  it('a user key lists the caller\'s own row only', async () => {
+    const env: Record<string, string | undefined> = {};
+    const svc = new SettingsService({ env });
+    svc.registerManifest(BENEATH);
+    await svc.set('beneath', 'nickname', 'Ada', { userId: 'usr_a' });
+    await svc.set('beneath', 'nickname', 'Bob', { userId: 'usr_b' });
+    env.OS_BENEATH_NICKNAME = 'Pinned';
+
+    const forA = (await svc.getNamespace('beneath', { userId: 'usr_a' })).values.nickname.cascadeChain!;
+    expect(forA.slice(1)).toEqual([{ scope: 'user', value: 'Ada' }, { scope: 'default', value: 'none' }]);
+    const forNobody = (await svc.getNamespace('beneath')).values.nickname.cascadeChain!;
+    expect(forNobody.slice(1)).toEqual([{ scope: 'default', value: 'none' }]);
+  });
+
+  it('a secret beneath a pin shows that a value is stored, never the value, and is never decrypted', async () => {
+    const { env, svc, crypto } = await pinnedOverStored();
+    await svc.set('beneath', 'api_secret', 'stored-secret-plaintext');
+    env.OS_BENEATH_API_SECRET = 'env-secret';
+    env.OS_BENEATH_SPARE_SECRET = 'env-spare';
+    crypto.decrypt.mockClear();
+
+    const { values } = await svc.getNamespace('beneath');
+    expect(values.api_secret.cascadeChain).toEqual([
+      envEntry('env-secret', 'OS_BENEATH_API_SECRET'),
+      { scope: 'tenant', value: SETTINGS_SECRET_MASK, locked: false, lockedReason: undefined },
+      { scope: 'default', value: null },
+    ]);
+    expect(values.spare_secret.cascadeChain!.slice(1)).toEqual([{ scope: 'default', value: null }]);
+    expect(JSON.stringify(values)).not.toContain('stored-secret-plaintext');
+    expect(crypto.decrypt).not.toHaveBeenCalled();
+
+    // Cleared through the pin, the secret's stored entry reads null.
+    await svc.set('beneath', 'api_secret', null);
+    const after = (await svc.getNamespace('beneath')).values.api_secret.cascadeChain!;
+    expect(after[1]).toEqual({ scope: 'tenant', value: null, locked: false, lockedReason: undefined });
+  });
+
+  it('an override whose value coerces to null keeps its single env entry', async () => {
+    const env: Record<string, string | undefined> = {};
+    const svc = new SettingsService({ env });
+    svc.registerManifest(BENEATH);
+    await svc.set('beneath', 'rules', ['stored']);
+    env.OS_BENEATH_RULES = 'null';
+
+    const { values } = await svc.getNamespace('beneath');
+    expect(values.rules).toMatchObject({ value: null, source: 'env', locked: true });
+    expect(values.rules.cascadeChain).toEqual([envEntry(null, 'OS_BENEATH_RULES')]);
+  });
+
+  it('get() and getMany() still answer a pin from the env alone', async () => {
+    const { svc } = await pinnedOverStored();
+    const pinOnly = [envEntry('Pinned motto', 'OS_BENEATH_MOTTO')];
+    expect((await svc.get('beneath', 'motto')).cascadeChain).toEqual(pinOnly);
+    expect((await svc.getMany('beneath', ['motto'])).motto.cascadeChain).toEqual(pinOnly);
   });
 });

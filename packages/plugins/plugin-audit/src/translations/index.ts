@@ -46,6 +46,7 @@ import {
   deMessages,
   koMessages,
 } from './messages.js';
+import { auditPageTranslations, auditPageSourceHashes } from './pages.js';
 
 /**
  * ## The provenance companions are READ here, not merely recorded
@@ -64,28 +65,29 @@ import {
  * before it can testify. So the only reader-visible consequence was the wrong
  * string on the page.
  *
- * `recorded` (3rd argument) stays `undefined` on purpose: it judges the
- * HAND-AUTHORED sections (`apps` / `dashboards` / `pages`), which this set does
- * not have — its bundles are entirely generated. The companion goes in the 4th
- * slot, which judges the generated ones. This is the shape
- * `@objectstack/platform-objects`'s own `metadata-translations/index.ts` uses.
+ * `recorded` (3rd argument) judges the HAND-AUTHORED sections (`apps` /
+ * `dashboards` / `pages`). This set has exactly one: the `pages` entry of the
+ * record page the plugin ships (`./pages.ts`), whose recorded digests go there.
+ * The generated companion goes in the 4th slot, which judges the generated
+ * `objects` bundles. Two tables, two predicates — the shape
+ * `@objectstack/plugin-approvals` uses for its own record page.
  *
  * ⛔ Do not drop the 4th argument to quiet a staleness report. Serving the
  * superseded draft is the bug; `check:i18n-stale-fill`'s UNSERVED PROVENANCE
  * verdict fails the build if a committed companion stops being consulted here.
  */
-const enSource: TranslationData = { objects: enObjects, messages: enMessages };
+const enSource: TranslationData = { objects: enObjects, pages: auditPageTranslations.en, messages: enMessages };
 
 export const AuditTranslations: TranslationBundle = {
   en: enSource,
-  'zh-CN': withSourceFallback({ objects: zhCNObjects, messages: zhCNMessages }, enSource, undefined, zhCNGeneratedSourceHashes),
-  'ja-JP': withSourceFallback({ objects: jaJPObjects, messages: jaJPMessages }, enSource, undefined, jaJPGeneratedSourceHashes),
-  'es-ES': withSourceFallback({ objects: esESObjects, messages: esESMessages }, enSource, undefined, esESGeneratedSourceHashes),
-  'zh-Hant': withSourceFallback({ objects: zhHantObjects, messages: zhHantMessages }, enSource, undefined, zhHantGeneratedSourceHashes),
-  'ar': withSourceFallback({ objects: arObjects, messages: arMessages }, enSource, undefined, arGeneratedSourceHashes),
-  'fr': withSourceFallback({ objects: frObjects, messages: frMessages }, enSource, undefined, frGeneratedSourceHashes),
-  'pt-BR': withSourceFallback({ objects: ptBRObjects, messages: ptBRMessages }, enSource, undefined, ptBRGeneratedSourceHashes),
-  'ru': withSourceFallback({ objects: ruObjects, messages: ruMessages }, enSource, undefined, ruGeneratedSourceHashes),
-  'de': withSourceFallback({ objects: deObjects, messages: deMessages }, enSource, undefined, deGeneratedSourceHashes),
-  'ko': withSourceFallback({ objects: koObjects, messages: koMessages }, enSource, undefined, koGeneratedSourceHashes),
+  'zh-CN': withSourceFallback({ objects: zhCNObjects, pages: auditPageTranslations['zh-CN'], messages: zhCNMessages }, enSource, auditPageSourceHashes['zh-CN'], zhCNGeneratedSourceHashes),
+  'ja-JP': withSourceFallback({ objects: jaJPObjects, pages: auditPageTranslations['ja-JP'], messages: jaJPMessages }, enSource, auditPageSourceHashes['ja-JP'], jaJPGeneratedSourceHashes),
+  'es-ES': withSourceFallback({ objects: esESObjects, pages: auditPageTranslations['es-ES'], messages: esESMessages }, enSource, auditPageSourceHashes['es-ES'], esESGeneratedSourceHashes),
+  'zh-Hant': withSourceFallback({ objects: zhHantObjects, pages: auditPageTranslations['zh-Hant'], messages: zhHantMessages }, enSource, auditPageSourceHashes['zh-Hant'], zhHantGeneratedSourceHashes),
+  'ar': withSourceFallback({ objects: arObjects, pages: auditPageTranslations['ar'], messages: arMessages }, enSource, auditPageSourceHashes['ar'], arGeneratedSourceHashes),
+  'fr': withSourceFallback({ objects: frObjects, pages: auditPageTranslations['fr'], messages: frMessages }, enSource, auditPageSourceHashes['fr'], frGeneratedSourceHashes),
+  'pt-BR': withSourceFallback({ objects: ptBRObjects, pages: auditPageTranslations['pt-BR'], messages: ptBRMessages }, enSource, auditPageSourceHashes['pt-BR'], ptBRGeneratedSourceHashes),
+  'ru': withSourceFallback({ objects: ruObjects, pages: auditPageTranslations['ru'], messages: ruMessages }, enSource, auditPageSourceHashes['ru'], ruGeneratedSourceHashes),
+  'de': withSourceFallback({ objects: deObjects, pages: auditPageTranslations['de'], messages: deMessages }, enSource, auditPageSourceHashes['de'], deGeneratedSourceHashes),
+  'ko': withSourceFallback({ objects: koObjects, pages: auditPageTranslations['ko'], messages: koMessages }, enSource, auditPageSourceHashes['ko'], koGeneratedSourceHashes),
 };

@@ -64,6 +64,7 @@ export {
   validateDatasetMeasureAggregates,
   MEASURE_AGGREGATE_FIELD_TYPE_REFUSED,
   DIMENSION_JSON_STORED_FIELD_REFUSED,
+  DIMENSION_VIRTUAL_FIELD_REFUSED,
   MEASURE_DURATION_FIELD_TYPE_REFUSED,
   // [#23235] The dimension leg's group-key verdict on its own, so a consumer
   // deriving dataset dimensions (cloud's AI build) asks the door's two
@@ -139,6 +140,8 @@ export {
   validateFlowApiTriggerSecret,
   FLOW_TRIGGER_UNKNOWN_OBJECT,
   FLOW_INPUT_UNKNOWN_OBJECT,
+  FLOW_INPUT_OBJECT_LESS,
+  FLOW_INPUT_RECORD_READ_AS_LIST,
   FLOW_DRAFT_STATUS_AMBIGUOUS,
   FLOW_TRIGGER_UNKNOWN_EVENT,
   FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
@@ -1098,7 +1101,7 @@ export {
   validateEmailTemplateHoleGrammar,
   EMAIL_TEMPLATE_HOLE_GRAMMAR,
 } from './validate-email-template-hole-grammar.js';
-export type { EmailTemplateHoleGrammarFinding } from './validate-email-template-hole-grammar.js';
+export type { EmailTemplateHoleGrammarFinding, EmailTemplateHoleGrammarOptions } from './validate-email-template-hole-grammar.js';
 
 export { lintAutonumberFormats } from './lint-autonumber-formats.js';
 export type { AutonumberLintFinding } from './lint-autonumber-formats.js';

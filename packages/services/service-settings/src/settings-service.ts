@@ -64,6 +64,7 @@ import {
 } from '@objectstack/core';
 import { SETTINGS_SECRET_MASK } from './settings-secret-redaction.js';
 import { USER_OBJECT, assertUserReferenceResolves, registeredLabel } from './actor-reference.js';
+import { settingsActionCopy } from './settings-action-copy.js';
 import {
   firstRejectedDomainMember,
   knownValueDomain,
@@ -1948,6 +1949,10 @@ export class SettingsService {
     // picked up by the `lockedEntry` scan below and reported as locking a value
     // it is not even providing, which is the opposite of what the read API owes
     // its caller.
+    //
+    // An override in force answers here without touching the store: this is
+    // the lightweight read request paths call. What is stored beneath the pin
+    // is listed by the inspection read, `getNamespace` (#30823).
     const envOverride = this.effectiveEnvOverride(reg, namespace, key);
     if (envOverride) {
       const { envName, value } = envOverride;
@@ -1962,6 +1967,21 @@ export class SettingsService {
       };
     }
 
+    return this.resolveStored<T>(reg, namespace, key, ctx);
+  }
+
+  /**
+   * The stored cascade of one key, below any env override: what {@link get}
+   * answers when no override is in force, and what a key an override pins
+   * falls back to once the override is removed ({@link resetNamespace} reads
+   * it to find a value stored beneath a pin).
+   */
+  private async resolveStored<T = unknown>(
+    reg: RegisteredManifest,
+    namespace: string,
+    key: string,
+    ctx: SettingsContext,
+  ): Promise<ResolvedSettingValue<T>> {
     const scope = reg.scopes.get(key)!;
     // For 'user' scope we pre-filter by user_id; for 'tenant' and 'global'
     // we load everything for the namespace and pick the right row below.
@@ -2038,13 +2058,36 @@ export class SettingsService {
     keys: readonly string[],
     ctx: SettingsContext = {},
   ): Promise<Record<string, ResolvedSettingValue>> {
+    return this.resolveMany(namespace, keys, ctx, false);
+  }
+
+  /**
+   * {@link getMany}, and, when `beneathPins` is set, the stored cascade
+   * beneath every in-force env override too ({@link withStoredBeneath}).
+   *
+   * `beneathPins` is the inspection read's, {@link getNamespace}: the
+   * namespace read the settings page draws from, where a field an `OS_*`
+   * variable pins must say whether a value is stored beneath the pin, so the
+   * page can offer the clear {@link setMany} lets through it (ADR-0007 D6).
+   * `getMany` and {@link get} leave it off: they are the lightweight resolver
+   * that request paths call (the localization read behind every request
+   * context), and an override answers there without touching the store.
+   * A pinned key joins the grouped load below, so the inspection read costs
+   * no extra load unless every key of a group is pinned.
+   */
+  private async resolveMany(
+    namespace: string,
+    keys: readonly string[],
+    ctx: SettingsContext,
+    beneathPins: boolean,
+  ): Promise<Record<string, ResolvedSettingValue>> {
     const reg = this.registry.get(namespace);
     if (!reg) throw new UnknownNamespaceError(namespace);
     for (const key of keys) {
       if (!reg.scopes.has(key)) throw new UnknownKeyError(namespace, key);
     }
     const out: Record<string, ResolvedSettingValue> = {};
-    const pending: Array<{ key: string; scope: SpecifierScope }> = [];
+    const pending: Array<{ key: string; scope: SpecifierScope; pinned?: true }> = [];
     for (const key of keys) {
       const envOverride = this.effectiveEnvOverride(reg, namespace, key);
       if (envOverride) {
@@ -2058,6 +2101,12 @@ export class SettingsService {
             { scope: 'env', value, locked: true, lockedReason: `Set via env: ${envName}`, effective: true },
           ],
         };
+        // An override whose value is null keeps its one entry: anything listed
+        // beneath it would be the first non-null entry of the chain, which the
+        // read contract makes the effective source, and the env value is.
+        if (beneathPins && value !== null && value !== undefined) {
+          pending.push({ key, scope: reg.scopes.get(key)!, pinned: true });
+        }
         continue;
       }
       pending.push({ key, scope: reg.scopes.get(key)! });
@@ -2082,11 +2131,26 @@ export class SettingsService {
       const sets = await this.loadRowSets(namespace, groups, reach);
       const userRows = userKeys.length > 0 ? sets[0] : [];
       const otherRows = otherKeys.length > 0 ? sets[sets.length - 1] : [];
-      for (const { key, scope } of userKeys) {
-        out[key] = await this.resolveKeyFromRows(reg, key, scope, userRows, userId, reach);
+      const resolve = async (
+        { key, scope, pinned }: (typeof pending)[number],
+        rows: SettingsRow[],
+        rowUserId: string | null,
+      ): Promise<ResolvedSettingValue> => {
+        if (!pinned) return this.resolveKeyFromRows(reg, key, scope, rows, rowUserId, reach);
+        // A secret beneath a pin is not in force, so no caller needs its
+        // plaintext, and decrypting it could only fail the read: its rows say
+        // whether a value is stored, as the REST read's mask says it.
+        const materialise = reg.encryptedKeys.has(key)
+          ? async (row: SettingsRow) => storedSecretPresence(row)
+          : undefined;
+        const stored = await this.resolveKeyFromRows(reg, key, scope, rows, rowUserId, reach, materialise);
+        return withStoredBeneath(out[key], stored);
+      };
+      for (const entry of userKeys) {
+        out[entry.key] = await resolve(entry, userRows, userId);
       }
-      for (const { key, scope } of otherKeys) {
-        out[key] = await this.resolveKeyFromRows(reg, key, scope, otherRows, null, reach);
+      for (const entry of otherKeys) {
+        out[entry.key] = await resolve(entry, otherRows, null);
       }
     }
     return out;
@@ -2107,6 +2171,9 @@ export class SettingsService {
    * The tenant and user rungs each take ONE row, the one the reach owns
    * ({@link preferredRow}) — never whichever row a positional `find` happens
    * to meet first.
+   *
+   * `materialise` turns a row into the value its entry carries; by default
+   * {@link materialiseRow}, which decrypts a secret.
    */
   private async resolveKeyFromRows<T = unknown>(
     reg: RegisteredManifest,
@@ -2115,6 +2182,7 @@ export class SettingsService {
     rows: SettingsRow[],
     userId: string | null,
     reach: OrganizationReach,
+    materialise: (row: SettingsRow) => Promise<unknown> = (row) => this.materialiseRow(row),
   ): Promise<ResolvedSettingValue<T>> {
     // 2. cascade walk — OS_* env (handled by callers) > global > tenant > user > default
     //
@@ -2125,7 +2193,7 @@ export class SettingsService {
 
     const globalRow = rows.find((r) => r.key === key && r.scope === 'global');
     if (globalRow) {
-      const value = await this.materialiseRow(globalRow);
+      const value = await materialise(globalRow);
       chain.push({
         scope: 'global',
         value,
@@ -2142,7 +2210,7 @@ export class SettingsService {
       if (tenantRow) {
         chain.push({
           scope: 'tenant',
-          value: await this.materialiseRow(tenantRow),
+          value: await materialise(tenantRow),
           locked: !!tenantRow.locked,
           lockedReason: tenantRow.locked_reason ?? undefined,
         });
@@ -2161,7 +2229,7 @@ export class SettingsService {
       if (userRow) {
         chain.push({
           scope: 'user',
-          value: await this.materialiseRow(userRow),
+          value: await materialise(userRow),
         });
       }
     }
@@ -2265,7 +2333,17 @@ export class SettingsService {
     return posture !== undefined && postureEnforcesWall(posture);
   }
 
-  /** Resolve every value in a namespace + return the manifest. */
+  /**
+   * Resolve every value in a namespace + return the manifest.
+   *
+   * The inspection read: the one the settings page draws from
+   * (`GET /api/settings/:namespace` serves it, redacted). Each key resolves
+   * as {@link getMany} resolves it, and a key an `OS_*` override pins also
+   * lists, beneath its env entry, the stored cascade the key falls back to
+   * once the override is removed (#30823) — so the page can tell whether a
+   * value is stored beneath the pin, at the scope a clear would null. A
+   * secret's entries there carry the read mask or `null`, never its value.
+   */
   async getNamespace(
     namespace: string,
     ctx: SettingsContext = {},
@@ -2278,8 +2356,9 @@ export class SettingsService {
     this.assertPermitted(reg.manifest, 'read', ctx);
 
     // [#10826] One grouped row load instead of one per key — same resolution
-    // per key by construction (getMany shares get()'s extracted cascade).
-    const values = await this.getMany(namespace, Array.from(reg.scopes.keys()), ctx);
+    // per key by construction (getMany shares get()'s extracted cascade), and
+    // [#30823] the stored cascade beneath each pin from that same load.
+    const values = await this.resolveMany(namespace, Array.from(reg.scopes.keys()), ctx, true);
     // A key whose options a source serves is offered what the running system
     // offers, for the value in effect (`registerOptionSource`).
     return { manifest: this.servedManifest(reg, namespace, values, display), values };
@@ -2525,7 +2604,12 @@ export class SettingsService {
     };
   }
 
-  /** Persist a single key. Throws SettingsLockedError when env-locked. */
+  /**
+   * Persist a single key. Throws SettingsLockedError when an env override in
+   * force pins the key, unless `value` is a clear (`null` / `undefined`), which
+   * clears the stored value beneath the pin and leaves the env value in force
+   * (see {@link setMany}).
+   */
   async set(
     namespace: string,
     key: string,
@@ -2544,6 +2628,14 @@ export class SettingsService {
    * naming each such key (`invalid_value`, `constraint: { scope: 'user' }`):
    * the row it would store names no owner, and the user rung answers only its
    * owner, so no reader would ever see it while the write reported success.
+   *
+   * A key an env override in force pins refuses every write with
+   * {@link SettingsLockedError} (`locked-by-env`, ADR-0007 D6) but a clear
+   * (`null` / `undefined`): a clear nulls the row stored beneath the pin, so
+   * the key falls back to its default once the override is removed, and
+   * changes nothing in force — the answer still reads the env value with
+   * `locked: true`. It is judged by the row locks and the write predicates
+   * like any other clear.
    *
    * `display` picks the language of a write predicate's refusal and hands it
    * the request the write arrived on, and nothing else (see
@@ -2588,7 +2680,23 @@ export class SettingsService {
       // UI refused with `SETTINGS_LOCKED`, and `get()` reporting `locked: false`
       // to a settings page that would then fail its own save. See
       // `effectiveEnvOverride`.
-      if (this.effectiveEnvOverride(reg, namespace, key)) {
+      //
+      // [#30385] A CLEAR goes through the pin (ADR-0007 D6 keeps refusing every
+      // other write): `null` / `undefined`, the spelling every clear in this
+      // service uses, never a value such as `''` that a key would store. The
+      // pin decides what is in force, and a clear changes nothing there — the
+      // env value still wins, and the answer still reads `locked: true` from
+      // `env`. What it does change is the stored value the key falls back to
+      // once the override is removed, and that value is otherwise reachable by
+      // nothing: the override hides it from every read and refuses every
+      // write, so an operator who pinned a key to recover from a bad stored
+      // value (`OS_AUTH_ALLOWED_IP_RANGES=` for an allow-list that locks them
+      // out) gets the same bad value back the moment the pin is lifted. The
+      // clear then meets every judgment a clear meets without a pin — the
+      // Phase 2 row locks and the platform-rung rule below, the write
+      // predicates — so no lock a row carries is bypassed.
+      const clears = patch[key] === null || typeof patch[key] === 'undefined';
+      if (!clears && this.effectiveEnvOverride(reg, namespace, key)) {
         throw new SettingsLockedError(namespace, key);
       }
 
@@ -2760,13 +2868,15 @@ export class SettingsService {
         updated_at: new Date().toISOString(),
         updated_by: ctx.userId ?? null,
       };
-      const { previousEnc, previous } = await this.upsertRow(rowForKey);
+      const { previousEnc, previous, rowId } = await this.upsertRow(rowForKey);
 
       // The audit's `old_hash`, taken HERE: after the upsert's probe named the
       // previous row, and before the reap below destroys the ciphertext a
       // secret's previous handle points at (#26534). Only an audited write
       // pays for it, and only a secret overwrite pays a read and a decrypt.
-      const oldHash = !this.auditWriter
+      // [#30923] Both ledgers read it: the `config_change` row's before half
+      // carries the same fingerprint (see `auditPrevious`).
+      const oldHash = !this.auditWriter && !this.audit
         ? null
         : isEncrypted
           ? await this.previousSecretAuditDigest(namespace, key, previous)
@@ -2793,11 +2903,17 @@ export class SettingsService {
             // an audit row invisible to RLS readers — see `SettingsAuditSink`.
             tenantId: ctx.tenantId,
             action: isNull ? 'reset' : 'set',
-            valueDigest: isEncrypted
-              ? digest === null ? '<encrypted>' : '<encrypted:' + digest + '>'
-              : digest ?? '',
+            valueDigest: isEncrypted ? SettingsService.maskedSecretDigest(digest) : digest ?? '',
+            // [#30923] The after half, readable — never for a secret-valued
+            // key (`auditReadable`), and never on a reset, which stores nothing.
+            ...(!isNull && SettingsService.auditReadable(isEncrypted, null) ? { value: rawValue } : {}),
+            // [#30923] The before half: what the same stored row held.
+            previous: SettingsService.auditPrevious(previous, isEncrypted, oldHash),
             encrypted: isEncrypted,
             requestId: ctx.requestId,
+            // The stored settings row this write landed on, so the ledger row
+            // names it as its record (see `upsertRow`).
+            recordId: rowId,
           });
         } catch {
           // [#8145] Never fail a write because a ledger is unhappy — the same
@@ -3322,23 +3438,46 @@ export class SettingsService {
 
   /**
    * Clear every persisted row in a namespace so values fall back to
-   * env/defaults. Env-locked keys are untouched (env wins over rows
-   * anyway and refuses writes). Persisted rows are nulled rather than
-   * deleted so the audit trail records the reset per key.
+   * env/defaults. Persisted rows are nulled rather than deleted so the audit
+   * trail records the reset per key.
    *
-   * Returns the number of cleared keys.
+   * A key an env override in force pins is cleared too when a value is stored
+   * beneath the pin, by the clear {@link setMany} lets through a pin (ADR-0007
+   * D6): it changes nothing in force — the env value still answers — and the
+   * key falls back to its default once the override is removed, instead of to
+   * the old stored value.
+   *
+   * Returns the number of cleared keys, pinned ones included.
    */
   async resetNamespace(namespace: string, ctx: SettingsContext = {}): Promise<number> {
+    return (await this.resetNamespaceRows(namespace, ctx)).cleared;
+  }
+
+  /**
+   * {@link resetNamespace}, also answering how many of the namespace's keys an
+   * env override still pins after the reset: those keep their env value, and
+   * the built-in `reset` action says so.
+   */
+  private async resetNamespaceRows(
+    namespace: string,
+    ctx: SettingsContext,
+  ): Promise<{ cleared: number; pinned: number }> {
     const payload = await this.getNamespace(namespace, ctx);
+    const reg = this.registry.get(namespace)!;
     const patch: Record<string, null> = {};
+    let pinned = 0;
     for (const [key, v] of Object.entries(payload.values)) {
-      if (v.source === 'global' || v.source === 'tenant' || v.source === 'user') {
+      // A pinned key answers `env` and hides its stored rows, so whether a
+      // value is stored beneath the pin is read from the cascade below it.
+      if (v.source === 'env') pinned++;
+      const stored = v.source === 'env' ? (await this.resolveStored(reg, namespace, key, ctx)).source : v.source;
+      if (stored === 'global' || stored === 'tenant' || stored === 'user') {
         patch[key] = null;
       }
     }
     const keys = Object.keys(patch);
     if (keys.length > 0) await this.setMany(namespace, patch, ctx);
-    return keys.length;
+    return { cleared: keys.length, pinned };
   }
 
   /**
@@ -3365,20 +3504,25 @@ export class SettingsService {
       // clears persisted rows (back to env/defaults). Plugins may
       // override it via registerAction for richer behaviour (e.g. the
       // AI plugin re-runs env adapter detection after the clear).
+      //
+      // Both answers are written in the caller's language (`display.locale`,
+      // `settingsActionCopy`), as a handler's own answer is.
+      const copy = settingsActionCopy(display.locale);
       if (actionId === 'reset') {
-        const cleared = await this.resetNamespace(namespace, ctx);
+        const { cleared, pinned } = await this.resetNamespaceRows(namespace, ctx);
+        const answer = cleared > 0 ? copy.resetCleared(cleared) : copy.resetNothing;
         return {
           ok: true,
           severity: 'info',
-          message: cleared > 0
-            ? `Cleared ${cleared} saved value(s); environment/default configuration is back in effect.`
-            : 'No saved values to clear — already using environment/default configuration.',
+          // A key an env override pins keeps its env value through the reset,
+          // so the answer says how many still do.
+          message: pinned > 0 ? answer + copy.resetStillPinned(pinned) : answer,
         };
       }
       return {
         ok: false,
         severity: 'error',
-        message: `No handler registered for action '${actionId}' in '${namespace}'.`,
+        message: copy.noHandler(actionId, namespace),
       };
     }
     const values: Record<string, unknown> = {};
@@ -3661,6 +3805,65 @@ export class SettingsService {
   }
 
   /**
+   * [#30923] The ONE rule the `config_change` row's values are recorded by:
+   * may this value be written READABLE?
+   *
+   * Never for a secret-valued key — `keyIsSecret` is `encryptedKeys`
+   * membership: the manifest's `encrypted: true`, which `type: 'password'`
+   * forces (see `registerManifest`), the only sensitivity flag a specifier
+   * declares — and never for a value read off a row stored `encrypted: true`
+   * (written while the key was declared secret, whatever its manifest says
+   * now). Such a value is described by its masked fingerprint alone, as
+   * ADR-0007 § Audit & history decides: a placeholder and a checksum, never
+   * the plaintext.
+   */
+  private static auditReadable(keyIsSecret: boolean, row: SettingsRow | null): boolean {
+    return !keyIsSecret && row?.encrypted !== true;
+  }
+
+  /**
+   * A secret's fingerprint as the `config_change` row carries it, on either
+   * half: `<encrypted:` + the keyed digest + `>`, or `<encrypted>` when no
+   * keyed digest can be had (see `secretAuditDigest`).
+   */
+  private static maskedSecretDigest(digest: string | null): string {
+    return digest === null ? '<encrypted>' : '<encrypted:' + digest + '>';
+  }
+
+  /**
+   * [#30923] The before half of the `config_change` row
+   * ({@link SettingsAuditSink}'s `previous`), off the row the upsert probed.
+   *
+   * `null` when that row held nothing: no row (a first write at this rung,
+   * whatever a rung above it or the default answered), or a row an earlier
+   * reset cleared. A value {@link auditReadable} allows is recorded with its
+   * declared SHA-256, the `old_hash` the settings trail records; any other is
+   * its masked fingerprint alone — the keyed digest `old_hash` records for a
+   * secret, or `<encrypted>` where none can be had. That includes a plaintext
+   * row of a key declared secret after it was written: the previous value is
+   * not shown, and an unkeyed hash of it would be the fingerprint the trail
+   * never carries for a secret.
+   */
+  private static auditPrevious(
+    previous: SettingsRow | null,
+    keyIsSecret: boolean,
+    secretDigest: string | null,
+  ): { value?: unknown; digest: string } | null {
+    if (!previous) return null;
+    const held =
+      previous.encrypted === true
+        ? SettingsService.handleOf(previous.value_enc) !== null
+        : previous.value !== null && typeof previous.value !== 'undefined';
+    if (!held) return null;
+    if (SettingsService.auditReadable(keyIsSecret, previous)) {
+      return { value: previous.value, digest: settingAuditDigest(stableStringify(previous.value)) };
+    }
+    // Only a secret key's `old_hash` is keyed; a non-secret key's is an
+    // unkeyed hash and is never put beside a secret.
+    return { digest: SettingsService.maskedSecretDigest(keyIsSecret ? secretDigest : null) };
+  }
+
+  /**
    * The `old_hash` of a non-secret write (#26465): the declared SHA-256 of
    * the value the row held before it, or `null` when it held none (no row, or
    * a reset row whose value is `null`).
@@ -3725,10 +3928,17 @@ export class SettingsService {
    * held BEFORE: `previousEnc` for the secret reaper (#8030), `previous` for
    * the audit's `old_hash` (#26465). Both come off the existence probe the
    * upsert makes anyway, so a write with no previous row costs no extra read.
+   *
+   * `rowId` is the id of the stored row the write landed on: the probed row's
+   * on an update, the engine's insert result's on an insert. The `config_change`
+   * ledger row records it as its `record_id`, so the ledger names the settings
+   * row the way the CRUD mirror's own row about that write does. `null` when the
+   * store hands back no id (the in-memory fallback, a host engine whose insert
+   * returns nothing).
    */
   private async upsertRow(
     row: SettingsRow,
-  ): Promise<{ previousEnc: string | null; previous: SettingsRow | null }> {
+  ): Promise<{ previousEnc: string | null; previous: SettingsRow | null; rowId: string | null }> {
     if (this.engine) {
       const { object, where, data } = this.rowIdentity(row);
       // All three engine calls carry the explicit system opt-in
@@ -3750,7 +3960,7 @@ export class SettingsService {
           data,
           context: SETTINGS_SYSTEM_CONTEXT,
         });
-        return { previousEnc, previous };
+        return { previousEnc, previous, rowId: SettingsService.rowIdOf(previous) };
       }
       // Under the opt-in the engine no longer checks that a user-scope row's
       // `user_id` names a user, so the service keeps that refusal before the
@@ -3769,8 +3979,8 @@ export class SettingsService {
           row.user_id,
         );
       }
-      await this.engine.insert(object, data, { context: SETTINGS_SYSTEM_CONTEXT });
-      return { previousEnc: null, previous: null };
+      const inserted = await this.engine.insert(object, data, { context: SETTINGS_SYSTEM_CONTEXT });
+      return { previousEnc: null, previous: null, rowId: SettingsService.rowIdOf(inserted) };
     }
     const idx = this.memoryIndexOf(row);
     if (idx >= 0) {
@@ -3779,10 +3989,20 @@ export class SettingsService {
       // carry keeps what the row held — above all its lock, which a write the
       // platform rung makes through it must leave in place.
       this.memory[idx] = { ...previous, ...row };
-      return { previousEnc: SettingsService.handleOf(previous.value_enc), previous };
+      return { previousEnc: SettingsService.handleOf(previous.value_enc), previous, rowId: null };
     }
     this.memory.push(row);
-    return { previousEnc: null, previous: null };
+    return { previousEnc: null, previous: null, rowId: null };
+  }
+
+  /**
+   * The stored id of a settings row, as the engine returned or read it; `null`
+   * when there is none. The in-memory fallback's rows carry no id, and nothing
+   * stores them anywhere a ledger row could point at.
+   */
+  private static rowIdOf(row: unknown): string | null {
+    const id = (row as { id?: unknown } | null | undefined)?.id;
+    return typeof id === 'string' && id !== '' ? id : typeof id === 'number' ? String(id) : null;
   }
 
   /**
@@ -4016,6 +4236,32 @@ export class SettingsService {
 // ---------------------------------------------------------------------------
 // Local helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * [#30823] An env-pinned answer with the stored cascade beneath the pin: the
+ * env entry stays first and the effective one, and below it come the entries
+ * the key's read lists when no override is in force (the rows the caller's
+ * cascade draws on, then the default), so a reader can tell whether a value is
+ * stored at the scope a clear would null. Their own `effective` flag goes:
+ * the stored pick is not what is in force. Nothing else of the answer moves.
+ */
+function withStoredBeneath(pinned: ResolvedSettingValue, stored: ResolvedSettingValue): ResolvedSettingValue {
+  const beneath = (stored.cascadeChain ?? []).map((entry) => {
+    const copy = { ...entry };
+    delete copy.effective;
+    return copy;
+  });
+  return { ...pinned, cascadeChain: [...(pinned.cascadeChain ?? []), ...beneath] };
+}
+
+/**
+ * What a secret's row shows beneath a pin: the read mask when it stores a
+ * value, else `null`. Read off the row, never decrypted.
+ */
+function storedSecretPresence(row: SettingsRow): string | null {
+  const stored = row.encrypted ? row.value_enc : row.value;
+  return stored === null || stored === undefined ? null : SETTINGS_SECRET_MASK;
+}
 
 /** Stable stringify so the audit digest is order-independent. */
 function stableStringify(input: unknown): string {

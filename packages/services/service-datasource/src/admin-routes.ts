@@ -35,6 +35,7 @@ import {
 } from '@objectstack/core';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import type { ErrorCode } from '@objectstack/spec/api';
+import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 // The slots this module resolves, by their declared contracts. Erasing a
 // lookup to `any` is banned (#4127/#4176/#4202/#4251) and the ban is right
 // here: `IAuthService` is what declares BOTH shapes of the session accessor
@@ -44,7 +45,7 @@ import type { ErrorCode } from '@objectstack/spec/api';
 import type { IAuthService, IDataEngine, IHttpServer } from '@objectstack/spec/contracts';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { inProcessSessionReadInput, sendOk, sendError } from '@objectstack/types';
-import { DRIVER_CATALOG } from './driver-catalog.js';
+import { driverCatalogFor } from './driver-catalog.js';
 import { DRIVER_CATALOG_SEGMENT } from './datasource-route-reserved-names.js';
 // [#27618] The package's one "no such datasource" refusal: GET answers an
 // unknown name in its words, as every other by-name door does.
@@ -199,6 +200,19 @@ function toWebHeaders(raw: unknown): Headers | undefined {
     return headers;
   }
   return undefined;
+}
+
+/**
+ * The requester's display language, read the way the REST metadata door and
+ * the settings routes read it: the top `Accept-Language` tag, else a string
+ * `?locale=`. The console sends its own language as `Accept-Language` on every
+ * API call. It picks the language of served words only and authorizes nothing.
+ */
+function requestLocaleOf(req: { headers?: unknown; query?: Record<string, unknown> } | undefined): string | undefined {
+  const preferred = preferredLocaleFromHeader(toWebHeaders(req?.headers)?.get('accept-language'));
+  if (preferred) return preferred;
+  const query = req?.query?.locale;
+  return typeof query === 'string' && query.length > 0 ? query : undefined;
 }
 
 /**
@@ -705,9 +719,10 @@ export function registerDatasourceAdminRoutes(
   // Catalog of connection drivers + their JSON-Schema config (drives the
   // Studio connection form). Static metadata — no service dependency, so it
   // is always available even before any datasource-admin service is wired.
+  // Its words are served in the requester's language (`driverCatalogFor`).
   server.get(`${root}/${DRIVER_CATALOG_SEGMENT}`, async (req: any, res: any) => {
     if (await requireDatasourceAdmin(req, res)) return;
-    sendOk(res, { drivers: DRIVER_CATALOG });
+    sendOk(res, { drivers: driverCatalogFor(requestLocaleOf(req)) });
   });
 
   // Read-only schema introspection for the Studio "sync objects" flow.

@@ -175,6 +175,12 @@ function makeStubEngine() {
             tableOf(table).delete(found.key);
             return { deleted: 1 };
         },
+        // [#30635] A publish syncs the object's storage, and a refused sync
+        // rides the answer's `advisories`. This double's sync succeeds, so the
+        // advisories these pins read are the gate's alone.
+        async syncObjectSchema() {
+            return true;
+        },
         registry: {
             registerItem: () => {},
             registerObject: () => {},

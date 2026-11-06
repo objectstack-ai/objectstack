@@ -36,8 +36,8 @@ import type { SourceHashes } from '@objectstack/platform-objects/apps';
 
 type PageTranslations = NonNullable<TranslationData['pages']>;
 
-/** The shipped locales, the same four the generated bundles carry. */
-export type ApprovalsLocale = 'en' | 'zh-CN' | 'ja-JP' | 'es-ES';
+/** The shipped locales, the same set the generated bundles carry. */
+export type ApprovalsLocale = 'en' | 'zh-CN' | 'ja-JP' | 'es-ES' | 'zh-Hant' | 'ar' | 'fr' | 'pt-BR' | 'ru' | 'de' | 'ko';
 
 export const approvalsPageTranslations: Readonly<Record<ApprovalsLocale, PageTranslations>> = {
   en: {
@@ -52,6 +52,27 @@ export const approvalsPageTranslations: Readonly<Record<ApprovalsLocale, PageTra
   'es-ES': {
     sys_approval_request_detail: { label: 'Solicitud de aprobación' },
   },
+  'zh-Hant': {
+    sys_approval_request_detail: { label: '核准請求' },
+  },
+  ar: {
+    sys_approval_request_detail: { label: 'طلب الموافقة' },
+  },
+  fr: {
+    sys_approval_request_detail: { label: 'Demande d’approbation' },
+  },
+  'pt-BR': {
+    sys_approval_request_detail: { label: 'Solicitação de aprovação' },
+  },
+  ru: {
+    sys_approval_request_detail: { label: 'Запрос на согласование' },
+  },
+  de: {
+    sys_approval_request_detail: { label: 'Genehmigungsanfrage' },
+  },
+  ko: {
+    sys_approval_request_detail: { label: '승인 요청' },
+  },
 };
 
 /**
@@ -62,4 +83,11 @@ export const pageSourceHashes: Readonly<Record<Exclude<ApprovalsLocale, 'en'>, S
   'zh-CN': { 'pages.sys_approval_request_detail.label': '903e2bc9c8f36633' },
   'ja-JP': { 'pages.sys_approval_request_detail.label': '903e2bc9c8f36633' },
   'es-ES': { 'pages.sys_approval_request_detail.label': '903e2bc9c8f36633' },
+  'zh-Hant': { 'pages.sys_approval_request_detail.label': '903e2bc9c8f36633' },
+  ar: { 'pages.sys_approval_request_detail.label': '903e2bc9c8f36633' },
+  fr: { 'pages.sys_approval_request_detail.label': '903e2bc9c8f36633' },
+  'pt-BR': { 'pages.sys_approval_request_detail.label': '903e2bc9c8f36633' },
+  ru: { 'pages.sys_approval_request_detail.label': '903e2bc9c8f36633' },
+  de: { 'pages.sys_approval_request_detail.label': '903e2bc9c8f36633' },
+  ko: { 'pages.sys_approval_request_detail.label': '903e2bc9c8f36633' },
 };

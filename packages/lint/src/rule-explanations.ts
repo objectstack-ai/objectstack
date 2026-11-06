@@ -2170,10 +2170,10 @@ const FLOW_INPUT_UNKNOWN_OBJECT_EXPLANATION: RuleExplanation = {
   covers: 'why an unknown start-input object warns, and when it refuses',
   paragraphs: [
     'A flow input may declare that its value is the id of a record of a named object, with `objectName` on ' +
-      'the variable. The start doors are to load such an input from exactly that name in the caller\'s own ' +
-      'scope before the run exists, so a name no object answers to would refuse every start that supplies ' +
-      'the input. Names match exactly — `app_candidate`, not `candidate`. The declaration is planned: no ' +
-      'door reads it yet, and the property lint says so separately.',
+      'the variable. The start doors load such an input from exactly that name in the caller\'s own ' +
+      'scope before the run exists, so a name no object answers to refuses every start that supplies ' +
+      'the input. Names match exactly — `app_candidate`, not `candidate`. Every door that starts the flow ' +
+      'by name enforces the declaration.',
     'The rule asks whether this stack defines the object. One it does not define may be declared by ' +
       'another installed package, which a build of this stack cannot see, so the finding is a warning and ' +
       'can be ignored when such a package declares the object; a `sys_` name is a platform object and is ' +
@@ -2356,6 +2356,25 @@ const DIMENSION_JSON_STORED_FIELD_REFUSED_EXPLANATION: RuleExplanation = {
       'grouping: a record query on the field\'s object with `where { FIELD: { $contains: VALUE } }` ' +
       'counts or lists the records that hold VALUE, one query per member.',
     JSON_STORED_COLUMN,
+    ANALYTICS_MEMBER_WALK,
+  ],
+};
+
+const DIMENSION_VIRTUAL_FIELD_REFUSED_EXPLANATION: RuleExplanation = {
+  rule: 'dimension-virtual-field-refused',
+  covers: 'why analytics does not group by a formula field',
+  paragraphs: [
+    'A dimension is a GROUP KEY: a dataset dimension compiles to a cube dimension whose `sql` is its ' +
+      '`field`, and a query that selects it groups (or date-buckets) by that column. A virtual field, a ' +
+      '`formula`, is computed on read and never stored, whatever its `returnType`: no driver materialises ' +
+      'a column for it, so there is nothing to group by. Every analytics face refuses such a group with ' +
+      '`400 INVALID_FIELD` at `groupBy.N`, and the dataset compile refuses a dataset declaring one over its ' +
+      'own object with `400 DATASET_INVALID`, so no report, dashboard or query is ever served from it. ' +
+      'Before those refusals the group key reached the driver as a column that does not exist, or an ' +
+      'engine that aggregates in memory put every row into one null group while the answer looked served.',
+    'Denormalise the value: store it in a field of its own on the object (written by a hook or a flow ' +
+      'when its source changes), and point the dimension at that stored field. This rule makes the same ' +
+      'refusal where the author is standing. A dotted path is judged on the leaf\'s own declaration.',
     ANALYTICS_MEMBER_WALK,
   ],
 };
@@ -5737,6 +5756,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [VALIDATION_RULE_JSON_SCHEMA_UNKNOWN_FORMAT_EXPLANATION.rule]: VALIDATION_RULE_JSON_SCHEMA_UNKNOWN_FORMAT_EXPLANATION,
   [MEASURE_AGGREGATE_FIELD_TYPE_REFUSED_EXPLANATION.rule]: MEASURE_AGGREGATE_FIELD_TYPE_REFUSED_EXPLANATION,
   [DIMENSION_JSON_STORED_FIELD_REFUSED_EXPLANATION.rule]: DIMENSION_JSON_STORED_FIELD_REFUSED_EXPLANATION,
+  [DIMENSION_VIRTUAL_FIELD_REFUSED_EXPLANATION.rule]: DIMENSION_VIRTUAL_FIELD_REFUSED_EXPLANATION,
   [MEASURE_DURATION_FIELD_TYPE_REFUSED_EXPLANATION.rule]: MEASURE_DURATION_FIELD_TYPE_REFUSED_EXPLANATION,
   [REACT_CHART_DRILLDOWN_INVALID_EXPLANATION.rule]: REACT_CHART_DRILLDOWN_INVALID_EXPLANATION,
   [REACT_CHART_AGGREGATE_INVALID_EXPLANATION.rule]: REACT_CHART_AGGREGATE_INVALID_EXPLANATION,

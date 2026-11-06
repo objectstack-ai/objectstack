@@ -48,8 +48,9 @@
  *     (#27627). A pin that only watched
  *     `GET {prefix}/:type/:name` would sit green through twelve of them
  *     moving, which is the state #15854 measured.
- *   - `metadata.endpoints.maintenance` gates THREE, one of them the write
- *     door `POST {prefix}/_migrate-stored`.
+ *   - `metadata.endpoints.maintenance` gates FOUR, two of them write doors:
+ *     `POST {prefix}/_migrate-stored` and the record-currency code backfill
+ *     `POST {prefix}/_migrate-record-currency-codes`.
  *
  * Asserting the difference is EXACTLY a named set catches a gate that grows a
  * route as loudly as one that loses a route.
@@ -192,9 +193,17 @@ const CASES: Array<{ path: string; removes: string[] }> = [
     // [#15542] THREE whole-store operations, one of them a WRITE door. The key
     // the ruling created so that closing a listing read stops disarming a
     // migration door.
+    //
+    // [ADR-0144, ruling 6670707546 item B] FOUR: the record-currency code
+    // backfill door joined it, behind this switch as `_migrate-stored` is.
     {
         path: 'metadata.endpoints.maintenance',
-        removes: [`GET ${META}/_drafts`, `GET ${META}/diagnostics`, `POST ${META}/_migrate-stored`],
+        removes: [
+            `GET ${META}/_drafts`,
+            `GET ${META}/diagnostics`,
+            `POST ${META}/_migrate-record-currency-codes`,
+            `POST ${META}/_migrate-stored`,
+        ],
     },
     // [#15854] TWELVE routes (thirteen since #27627, below) — the WHOLE per-item face, which is what the
     // switch's name has always promised: the reads, the per-item WRITES
@@ -266,6 +275,7 @@ const CASES: Array<{ path: string; removes: string[] }> = [
             `GET ${META}/types`,
             `POST ${META}/:type/:name/publish`,
             `POST ${META}/:type/:name/rollback`,
+            `POST ${META}/_migrate-record-currency-codes`,
             `POST ${META}/_migrate-stored`,
             `PUT ${META}/:type/:name`,
         ],

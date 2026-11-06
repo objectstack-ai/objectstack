@@ -11,7 +11,7 @@ export const entry: SemanticMigration = {
     + '`inline-grid-column-identity-only-currency-scale-refused`',
   replacement: 'no `scale` on a currency inline grid column. DELETE the key — that is the whole '
     + 'migration: a currency amount\'s decimal places are its currency\'s, not a column setting. The '
-    + 'currency\'s ISO 4217 minor unit decides how the cell displays the amount and the width a '
+    + 'currency\'s CLDR fraction digits decide how the cell displays the amount and the width a '
     + 'computed amount is rounded to. ⛔ Nothing replaces the key: do not re-declare its value under '
     + 'any other key.',
   reason:

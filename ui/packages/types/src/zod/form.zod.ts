@@ -1088,8 +1088,8 @@ function retiredGridFieldKey(alias: GridFieldRetiredKey) {
  */
 const CURRENCY_FIELD_SCALE_REFUSAL =
   '`scale` is not valid on a `currency` field — delete the key. A currency amount\'s decimal '
-  + 'places are its currency\'s, not a field setting: the currency\'s ISO 4217 minor unit (2 for '
-  + 'USD, 0 for JPY, 3 for KWD) decides how the amount displays, and the field\'s write allowance '
+  + 'places are its currency\'s, not a field setting: the currency\'s CLDR fraction digits (2 for '
+  + 'USD, 0 for JPY, 3 for KWD) decide how the amount displays, and the field\'s write allowance '
   + 'stays unconstrained — a currency write is accepted with the decimals it carries, as it always '
   + 'was on a currency field that declared no `scale`. The key\'s one enforced effect was refusing '
   + 'writes with more decimals, which this field type no longer does.';

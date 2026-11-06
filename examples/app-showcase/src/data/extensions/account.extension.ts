@@ -13,6 +13,10 @@ import { defineObjectExtension } from '@objectstack/spec/data';
 export const AccountExtension = defineObjectExtension({
   extend: 'showcase_account',
   label: 'Account (Success Overlay)',
+  // The plural travels with the label: an extension that renames an object
+  // without one is served with no plural at all (the base's `Accounts` names
+  // the old label), so the list title would fall back to the singular.
+  pluralLabel: 'Accounts (Success Overlay)',
   fields: {
     loyalty_tier: {
       name: 'loyalty_tier',

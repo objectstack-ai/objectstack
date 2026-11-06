@@ -262,12 +262,13 @@ describe('[#20215] refused: the write would stop a loading config from loading',
     expect(runs.actionControl.code, out(runs.actionControl)).toBe(0);
     expect(readFileSync(join(dirs.wired, 'src', 'actions', 'index.ts'), 'utf-8'))
       .toContain("export { default as approve } from './approve.action';");
-    expect(runs.actionControl.stdout).toContain("'approve'");
+    // The action's own name carries the namespace (ruling C on #30798).
+    expect(runs.actionControl.stdout).toContain(`'${NS}_approve'`);
     // The bindings, named: the object passed, and the stack's only flow.
     const action = readFileSync(join(dirs.wired, 'src', 'actions', 'approve.action.ts'), 'utf-8');
     expect(action).toContain(`objectName: '${NS}_approve'`);
-    expect(action).toContain("target: 'approval_changed_flow'");
-    expect(runs.actionControl.stdout).toContain('approval_changed_flow');
+    expect(action).toContain(`target: '${NS}_approval_changed_flow'`);
+    expect(runs.actionControl.stdout).toContain(`${NS}_approval_changed_flow`);
     // Reached: no wiring lines to add.
     expect(runs.actionControl.stdout).not.toContain('import * as actions');
   });

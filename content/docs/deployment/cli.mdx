@@ -166,6 +166,11 @@ Starts development mode. Three usage shapes:
 2. **With a pre-built artifact** (`--artifact <path|url>`) — skips auto-compile and boots the artifact directly. No `objectstack.config.ts` needed in cwd. Useful for *trying out a published app in dev mode without cloning its source.*
 3. **Monorepo root** (cwd has `pnpm-workspace.yaml`) — orchestrates `pnpm -r dev` across packages.
 
+Once the local server is up, `os dev` in an interactive terminal offers
+**`d` to deploy**: it runs [`os deploy`](#os-deploy) in the same terminal, and
+when you are not logged in to ObjectOS Cloud the same key runs `os cloud login`
+first. Saving a file never deploys.
+
 ```bash
 os dev                     # Auto-compile cwd config, then start
 os dev my-package          # Workspace package (monorepo orchestration mode)
@@ -1623,6 +1628,7 @@ covers the switch). This command writes the code into those rows.
 ```bash
 os migrate record-currency-codes --object opportunity --field amount --code USD          # Dry run: counts the rows, writes none
 os migrate record-currency-codes --object opportunity --field amount --code USD --apply  # Write the code (prompts)
+os migrate record-currency-codes --object opportunity --field amount --code EUR --org org_emea --apply   # One organization
 os migrate record-currency-codes --object opportunity --field amount --code USD --apply --yes --json   # CI / scripts
 ```
 
@@ -1633,6 +1639,21 @@ the field had under `fixed`, from the organization's `localization.currency`, or
 anything else. A row that holds a code is never touched, whatever the code, and a row
 with no amount owes none. If the stored amounts are in more than one currency, split
 them with your own writes first: nothing here can tell those rows apart.
+
+**One organization at a time.** Each organization has its own home currency, so one
+code is right for the rows of at most the organizations that use it. `--org <id>` fills
+only that organization's rows: the walk and every write run as that organization, and
+the walk filters on each row's own `organization_id`. When the object's rows belong to
+**more than one organization** and you give neither `--org` nor `--all-organizations`,
+the run (a dry run as well as `--apply`) is refused with `VALIDATION_ERROR` / 400 and
+exit 1 before any row is written, and the refusal lists each organization's codeless
+row count; under `--json` they are in its `organizations` array. Re-run with `--org`
+once per organization, each with the code its rows are in. `--all-organizations` is
+the explicit way to write the one code into every organization's codeless rows, and
+the report then counts each organization apart. `--org` and `--all-organizations`
+together are a usage error. When the rows belong to one organization (or name none),
+the run behaves as it always did. The command never reads an organization's
+`localization.currency` to pick a code for you.
 
 **A bad `--code` is refused before anything is opened.** A code that is not an
 uppercase ISO 4217 code (`usd`, `EURO`) is refused with `INVALID_FIELD` / 400 and
@@ -1647,6 +1668,40 @@ every write turns a blank code into a code, so a second run finds nothing to wri
 Re-running until the report says zero *is* the verification, which is why this
 command records no flag.
 
+A walk that reaches `--max-records` stops there: the report says `truncated: true`, the
+text says the walk is incomplete, and the command never prints "nothing to backfill"
+for rows it did not examine. Re-run without the cap to finish.
+
+**Without shell access, use the route.** An organization admin on a hosted deployment
+cannot reach its database from a shell. The same backfill is exposed over HTTP, for the
+rows of **the caller's current organization only**:
+
+```http
+POST /api/v1/meta/_migrate-record-currency-codes
+Content-Type: application/json
+
+{ "object": "opportunity", "field": "amount", "code": "USD", "apply": true }
+```
+
+or from the SDK:
+
+```ts
+const preview = await client.meta.migrateRecordCurrencyCodes({ object: 'opportunity', field: 'amount', code: 'USD' });
+const result  = await client.meta.migrateRecordCurrencyCodes({ object: 'opportunity', field: 'amount', code: 'USD', apply: true });
+```
+
+It answers `{ "success": true, "data": … }` with, as `data`, the report this command
+prints under `--json` (its `report` member), and
+takes the same posture: **preview unless `apply` is literally `true`**. It is the
+`--org` run for the caller's current organization: there is no environment-wide form,
+and the body takes no organization (`organizationId` or `allOrganizations` in it is
+refused with `VALIDATION_ERROR` / 400, as is any other key outside `object`, `field`,
+`code` and `apply`). A request with no current organization is refused `403`. It
+requires the `setup.write` capability in that organization and answers `403`
+otherwise; the code, field and object refusals are the command's. It is mounted with
+the other maintenance routes, so `metadata.endpoints.maintenance: false` takes it away.
+There is no Setup button for it yet: that is separate UI work.
+
 #### `os migrate recompute-home-amounts`
 
 A record-mode amount that declares a home amount is converted into the organization's home
@@ -1658,6 +1713,7 @@ report.
 ```bash
 os migrate recompute-home-amounts --object invoice                               # Dry run: reports, writes none
 os migrate recompute-home-amounts --object invoice --since 2026-01-01            # Documents dated on or after Jan 1 only
+os migrate recompute-home-amounts --object invoice --org org_emea                # One organization's rows only
 os migrate recompute-home-amounts --object invoice --field amount --apply        # Write (prompts)
 os migrate recompute-home-amounts --object invoice --apply --yes --json          # CI / scripts
 ```
@@ -1683,7 +1739,10 @@ one amount; without it, every amount of the object that declares a home amount i
 recomputed. `--since YYYY-MM-DD` keeps the rows whose **document date** (the field
 `homeAmount.rateDate` names, the date that picks the rate) is on or after that day, a
 `datetime` read as its day in the organization's timezone; a row with no document date is
-outside every `--since` window. A malformed `--since` is refused with `VALIDATION_FAILED` /
+outside every `--since` window. `--org <id>` limits the run to one organization's rows,
+read and written as that organization; without it the run covers every organization,
+each in its own home currency, and is never refused for that (it writes no value you
+chose). A malformed `--since` is refused with `VALIDATION_FAILED` /
 400 before the database is opened; an object the deployment does not declare
 (`OBJECT_NOT_FOUND`), or one or a `--field` that declares no home amount (`INVALID_FIELD`),
 is refused after the boot and before any row is read.
@@ -1693,7 +1752,7 @@ is refused after the boot and before any row is read.
 | Reason | The row | Fix, then re-run |
 |:---|:---|:---|
 | `rate_missing` | No rate for its currency is in force on its document date (the report names both). | Add the rate. |
-| `code_blank` | An amount with no currency code: stored before the field switched to record mode. | [`os migrate record-currency-codes`](#os-migrate-record-currency-codes). It writes its one code into the codeless rows of **every** organization, so check the report's `code_blank` count per organization first. |
+| `code_blank` | An amount with no currency code: stored before the field switched to record mode. | [`os migrate record-currency-codes`](#os-migrate-record-currency-codes) with `--org`, once per organization, each with the code its rows are in; the report's `code_blank` count per organization says which ones owe codes. |
 | `document_date_blank` | A foreign-currency amount with no document date. | Fill the document date. |
 | `home_currency_unset` | Its organization has no `localization.currency`. | Set **Localization → Default currency**. |
 | `unconvertible` | A code, amount or document date the write itself refuses. | Correct the value. |
@@ -3009,7 +3068,9 @@ os cloud login --email me@acme.com --password secret   # CI
 Like `os login`, in an interactive terminal it uses the browser-based device
 flow: it prints a one-time verification URL and polls until you approve. If
 cloud credentials already exist it exits successfully with "Already logged in";
-pass `--force` to re-authenticate.
+pass `--force` to re-authenticate. Re-authenticating to the same control plane
+as the same account keeps the active environment recorded in `cloud.json`; a
+different control plane or account starts without one.
 
 ##### `os cloud login --json` is NDJSON — the same exception as `os login`
 
@@ -3085,6 +3146,53 @@ os environments bind <environment-id> --artifact ./dist/objectstack.json --build
 is reserved for the server-side reseed endpoint; use it only when that endpoint
 is available in your deployment.
 
+### Deploy
+
+#### `os deploy`
+
+Puts the app in the current directory on your ObjectOS Cloud environment, with
+no flags. It builds the app (the compile [`os build`](#os-compile) runs),
+publishes it as `<manifest.version>-dev.<YYYYMMDDHHMMSS>` — a UTC semver
+pre-release, so deploying again never needs a version bump — installs that
+version into your organization's environment, and waits until the environment
+serves it. Scaffolded projects run it as `npm run deploy`, and
+[`os dev`](#os-dev) runs it when you press `d`.
+
+```bash
+os cloud login                   # once per machine
+os deploy
+os deploy --env env_abc123       # your account reaches several environments
+os deploy --no-wait              # return once the install is recorded
+```
+
+The environment is resolved exactly as
+[`os package publish --install`](#os-package-publish) resolves it: `--env`,
+then the active environment for this control plane, then your organization's
+only environment. Every refusal comes before anything is written: not logged
+in, no environment to name, a failed build (its errors are printed), or a
+`manifest.version` that is not semver. A build the environment itself reports
+as failed prints the environment's reason and exits `1`; so does a wait that
+times out, naming what it waited for. An environment rebuilds only when it gets
+a request, so while it waits the command sends it one on every poll. A failing
+build is reported only after three failed rounds in a row, so it can read as
+still building for a few minutes before the reason appears. On a control plane
+that does not yet report which version an environment serves, the command says
+so and does not claim the new version is live.
+
+There is no deploy on save: on ObjectOS Cloud your organization's environment
+is its production, so a deploy is always a deliberate act.
+
+| Flag | Env equivalent | Purpose |
+|---|---|---|
+| `--env <id>` | `OS_ENVIRONMENT_ID` | Environment to deploy into (default: the active one for this control plane, then your organization's only one) |
+| `--no-wait` | — | Return once the install is recorded |
+| `--wait-timeout <seconds>` | — | How long to wait for the environment to serve the new version (default `600`) |
+| `-s, --server <url>` | `OS_CLOUD_URL` | Control-plane URL. Default `https://cloud.objectos.ai`, or the URL recorded by `os cloud login` |
+| `-t, --token <key>` | `OS_CLOUD_API_KEY` | Bearer token; `$OS_TOKEN` and `~/.objectstack/cloud.json` are the fallbacks |
+
+`os package publish` stays the command for a **release**: it publishes the
+version the manifest declares, with `--install` optional.
+
 ### Packages
 
 The two commands that move a compiled app onto a platform. They target
@@ -3137,6 +3245,14 @@ resolves an install target by bare id, with no name or short-id rescue. A value
 written by an older CLI into `credentials.json` is copied across once, and only
 when both files' `url`s agree.
 
+With neither `--env` nor an active environment, `--install` asks the control
+plane for your organization's environments and uses the only one, printing
+which; archived and platform environments are not counted. On ObjectOS Cloud
+every organization has exactly one environment, so this is the usual case.
+None, several, or a list that cannot be read is a refusal: the command exits
+`1` before it registers the package or publishes a version, and lists the
+candidates with how to pass `--env`.
+
 **Options:**
 
 | Flag | Env equivalent | Purpose |
@@ -3151,8 +3267,8 @@ when both files' `url`s agree.
 | `--category <slug>` | — | Marketplace category slug (`crm`, `hr`, `devtools`, …) |
 | `--visibility <level>` | — | `org` (installable across your organization) · `private` (explicit grants only) · `marketplace` (public after review). Omitted: not sent, so the control plane decides — an existing package keeps its visibility, a new one gets the control plane's default (`org` on ObjectOS Cloud) |
 | `--org <id>` | `OS_ORG_ID` | `owner_org_id`. Required with a bearer key in service mode; ignored in user mode |
-| `--env <id>` | `OS_ENVIRONMENT_ID` | Environment to install the new version into. Defaults to the environment [`os environments switch`](#cloud-environments) — or `os environments create --activate` — recorded **for this control plane** in `~/.objectstack/cloud.json` |
-| `--install` | — | Auto-install into `--env` after publishing. With no `--env`, no `$OS_ENVIRONMENT_ID` and no active environment for this control plane, it reports that and publishes without installing |
+| `--env <id>` | `OS_ENVIRONMENT_ID` | Environment to install the new version into. Defaults to the environment [`os environments switch`](#cloud-environments) — or `os environments create --activate` — recorded **for this control plane** in `~/.objectstack/cloud.json`, then to your organization's only environment |
+| `--install` | — | Install the new version after publishing, into `--env` or the environment it defaults to. With no environment to name — none, several, or a list the control plane would not give — it exits `1` **before publishing anything**, naming how to pass one |
 | `--seed-sample-data` | — | Include sample data in that auto-install |
 | `--pre-release` | — | Mark the version as a pre-release (also inferred — see below) |
 | `--submit` | — | Submit the new version for marketplace review. Needs the package's visibility to be `marketplace` (already stored, or set with `--visibility marketplace`) and a complete listing |
@@ -3225,7 +3341,7 @@ Two modes, chosen by the shape of the argument:
 
 ```bash
 # catalog mode — the TARGET runtime resolves the version from its own catalog
-os package install com.acme.crm --version 1.2.0 --runtime https://app.example.com
+os package install com.acme.crm --version 1.2.0 --url https://app.example.com
 
 # air-gapped mode — the artifact is read locally and sent inline; no catalog, works offline
 os package install ./dist/objectstack.json
@@ -3238,18 +3354,25 @@ catalog id that happens to match a file in the working directory is installed
 from that file instead.
 
 **The credential is the *runtime* identity, not your cloud login.** The target
-runtime authenticates the call with its own session, so `--email` / `--password`
-(or `OS_RUNTIME_EMAIL` / `OS_RUNTIME_PASSWORD`) name an account **on that
-runtime**. A `401` means exactly that, and the command says so; `os cloud login`
+runtime authenticates the call itself: pass a token it issued (`-t, --token`, or
+`OS_RUNTIME_TOKEN`), or `--email` / `--password` (or `OS_RUNTIME_EMAIL` /
+`OS_RUNTIME_PASSWORD`) for an account **on that runtime** — one or the other,
+not both. A `401` means exactly that, and the command says so; `os cloud login`
 credentials do not apply here.
+
+The server and the credential are spelled as in `os package export` and the
+other server-talking commands: `-u, --url` and `-t, --token`. `-r, --runtime`
+is gone with no alias, so a script that passes it is refused as an unknown flag;
+write `-u URL` instead.
 
 **Options:**
 
 | Flag | Env equivalent | Purpose |
 |---|---|---|
 | `package` (positional, required) | — | Package manifest id (`com.acme.crm`) **or** a path to a compiled artifact JSON |
-| `-r, --runtime <url>` | `OS_RUNTIME_URL` | Base URL of the runtime to install **into** (default `http://localhost:3000`) |
+| `-u, --url <url>` | `OS_RUNTIME_URL` | Base URL of the runtime to install **into** (default `http://localhost:3000`) |
 | `-v, --version <semver>` | — | Version to install in catalog mode (default `latest`). Air-gapped mode takes the version from the artifact |
+| `-t, --token <token>` | `OS_RUNTIME_TOKEN` | A token the target runtime issued (an API key); instead of `--email` / `--password` |
 | `--email <email>` | `OS_RUNTIME_EMAIL` | Account email on the target runtime |
 | `--password <password>` | `OS_RUNTIME_PASSWORD` | Account password on the target runtime |
 | `--confirm-global-uniques` | — | Affirm this app's installation-wide `unique` constraints are genuinely platform-wide — see below |

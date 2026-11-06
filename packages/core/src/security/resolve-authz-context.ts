@@ -160,6 +160,19 @@ export interface ResolvedAuthzContext {
    */
   credential?: 'api_key' | 'session';
   /**
+   * The administrator who started the impersonation session that admitted
+   * {@link userId} — `session.impersonatedBy` off the same session read
+   * (better-auth's admin plugin; `sys_session.impersonated_by`). Set only when
+   * {@link credential} is `'session'`; absent for an API key and for every
+   * session the user started themselves.
+   *
+   * ATTRIBUTION ONLY: carried onto `ExecutionContext.impersonatedBy` so the
+   * audit writer can name the person at the keyboard. Nothing in this
+   * resolver's grant aggregation reads it — {@link userId} stays the
+   * impersonated user, whose grants the request resolves.
+   */
+  impersonatedBy?: string;
+  /**
    * [ADR-0069 · #23287, ruling C′ item 3] The principal's authentication-policy
    * posture, decided once here for whichever credential admitted it:
    *
@@ -579,7 +592,8 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
   // replaced (an API key already outranks a session), and a refusal that
   // quietly becomes a session login is not a refusal.
   if (admission.outcome === 'refused') {
-    // [#15256 / 2A] The `organization_required` decision point. One line, here,
+    // [#15256 / 2A] The decision point of every refusal the admission decides
+    // (`organization_required`, `owner_banned`, `owner_absent`). One line, here,
     // where the admission verdict is read — ⛔ not a second copy inside
     // `api-key.ts`'s admission path, which would log the same refusal twice.
     warnApiKeyRefusal({
@@ -604,6 +618,7 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
     ? admission.principal
     : undefined;
   let credential: ResolvedAuthzContext['credential'];
+  let impersonatedBy: string | undefined;
   let authGate: AuthGate | undefined = admission.outcome === 'held' ? admission.gate : undefined;
   if (keyPrincipal) {
     userId = keyPrincipal.userId;
@@ -624,6 +639,10 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
       tenantId = tenantId ?? sessionData?.session?.activeOrganizationId;
       if (userId) {
         credential = 'session';
+        // The impersonating administrator, off the same read that admitted the
+        // session. Attribution only — the grants below stay `userId`'s.
+        const by = sessionData?.session?.impersonatedBy;
+        if (typeof by === 'string' && by.trim()) impersonatedBy = by.trim();
         // [ADR-0069 · #23287] The session's posture, off the same read that
         // admitted it — so a door asks one field for either credential.
         authGate = normalizeAuthGate(sessionData?.user) ?? undefined;
@@ -651,6 +670,7 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
   ctx.userId = userId;
   if (tenantId) ctx.tenantId = tenantId;
   if (credential) ctx.credential = credential;
+  if (impersonatedBy) ctx.impersonatedBy = impersonatedBy;
   if (authGate) ctx.authGate = authGate;
   if (!ql || typeof ql.find !== 'function') return ctx;
 

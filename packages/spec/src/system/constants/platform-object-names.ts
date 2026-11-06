@@ -60,6 +60,7 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
     'sys_job_queue',
     'sys_job_run',
     'sys_jwks',
+    'sys_lifecycle_state',
     'sys_member',
     'sys_metadata_activation',
     'sys_migration',
@@ -76,6 +77,7 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
     'sys_personal_view',
     'sys_platform_setting',
     'sys_platform_setting_audit',
+    'sys_recycle_bin',
     'sys_scim_connection_binding',
     'sys_scim_connection_credential',
     'sys_scim_group',
@@ -116,6 +118,7 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
   /** `@objectstack/plugin-sharing` — record shares & share links; ownership queues and the assignment cursor (ADR-0142). */
   'plugin-sharing': [
     'sys_assignment_cursor',
+    'sys_assignment_rule',
     'sys_queue',
     'sys_queue_member',
     'sys_record_share',

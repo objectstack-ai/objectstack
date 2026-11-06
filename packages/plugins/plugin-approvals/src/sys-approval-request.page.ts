@@ -122,12 +122,12 @@ export const SysApprovalRequestDetailPage: Page = {
             position: 'top',
             items: [
               {
-                label: { en: 'Details', 'zh-CN': '详情', 'ja-JP': '詳細', 'es-ES': 'Detalles' },
+                label: { en: 'Details', 'zh-CN': '详情', 'ja-JP': '詳細', 'es-ES': 'Detalles', 'zh-Hant': '詳細資料', 'ar': 'التفاصيل', 'fr': 'Détails', 'pt-BR': 'Detalhes', 'ru': 'Подробности', 'de': 'Details', 'ko': '세부 정보' },
                 icon: 'file-text',
                 children: [{ type: 'record:details' }],
               },
               {
-                label: { en: 'Timeline', 'zh-CN': '时间线', 'ja-JP': 'タイムライン', 'es-ES': 'Cronología' },
+                label: { en: 'Timeline', 'zh-CN': '时间线', 'ja-JP': 'タイムライン', 'es-ES': 'Cronología', 'zh-Hant': '時間軸', 'ar': 'المخطط الزمني', 'fr': 'Chronologie', 'pt-BR': 'Linha do tempo', 'ru': 'Хронология', 'de': 'Verlauf', 'ko': '타임라인' },
                 icon: 'history',
                 children: [
                   {
@@ -139,7 +139,7 @@ export const SysApprovalRequestDetailPage: Page = {
                       sort: [{ field: 'created_at', order: 'desc' }],
                       limit: 50,
                       showViewAll: true,
-                      title: { en: 'Timeline', 'zh-CN': '时间线', 'ja-JP': 'タイムライン', 'es-ES': 'Cronología' },
+                      title: { en: 'Timeline', 'zh-CN': '时间线', 'ja-JP': 'タイムライン', 'es-ES': 'Cronología', 'zh-Hant': '時間軸', 'ar': 'المخطط الزمني', 'fr': 'Chronologie', 'pt-BR': 'Linha do tempo', 'ru': 'Хронология', 'de': 'Verlauf', 'ko': '타임라인' },
                     },
                   },
                 ],

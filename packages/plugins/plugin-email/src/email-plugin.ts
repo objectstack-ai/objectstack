@@ -595,6 +595,18 @@ export class EmailServicePlugin implements Plugin {
       return i18n?.getFallbackLocale?.();
     });
 
+    // A template's `option` holes read the served objects and the i18n
+    // service, resolved at each send (resolve where it is used): an engine or
+    // an i18n service registered after this plugin is seen, and a host with
+    // no data engine builds no table, so such a hole is refused at render.
+    this.service.setOptionLabelSources(() => {
+      const engine = resolveDataEngine(ctx) as { getObject?: (name: string) => unknown } | null;
+      if (!engine || typeof engine.getObject !== 'function') return undefined;
+      let i18n: II18nService | undefined;
+      try { i18n = ctx.getService<II18nService>('i18n'); } catch { i18n = undefined; }
+      return { getObject: (name) => engine.getObject!(name), ...(i18n ? { i18n } : {}) };
+    });
+
     // [#23946] Persistence + the template loader are wired HERE, before the
     // service is handed out, and not at this plugin's `kernel:ready`. A
     // plugin that STARTS before this one runs its own `kernel:ready` hooks

@@ -348,9 +348,18 @@ nothing. The template handed a whole token holding a list, written as a list
 entry (`['{owners}']`), on as **one** recipient joined with commas (`'u1,u2'`),
 which reached nobody. Guard a recipient field that may be unset —
 `has(record.assignee) ? record.assignee : null` — so it is dropped rather than
-failing the run. `sourceId` takes a string or an envelope evaluating to one:
-`null` leaves the key unset, and a half-specified click-through pair is
-dropped, as before. The node's `sourceObject`, `actorId` and `payload` are
+failing the run. `sourceId` takes a string or an envelope evaluating to one;
+`null` is a written `sourceId` that resolves to nothing, so the pair is dropped,
+not defaulted. A node that writes none of `sourceObject`, `sourceId` and
+`actionUrl` links to the run's trigger record when it has one — a record change
+other than a delete or a before-create, a time-relative sweep's row, an action
+started on a record — so a record-triggered `notify` opens its record without a
+pair. An explicit pair or `actionUrl` wins; a half-specified pair is dropped,
+never defaulted; a run with no trigger record (a schedule tick, an inbound API
+post, a manual start with no record) links nowhere. A before-create run's record
+has no id until the driver issues one at the write, after the hook, so it links
+only when the caller wrote the id.
+The node's `sourceObject`, `actorId` and `payload` are
 **literals**, read as written: no flow computed one, so nothing is evaluated
 there — write the value itself (`sourceObject: 'crm_case'`). A `{…}` token
 there is refused, since it would reach the messaging service with its braces,

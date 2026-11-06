@@ -507,8 +507,8 @@ export class MCPServerPlugin implements Plugin {
       if (!apiKey) {
         throw new Error(
           '[MCP] The stdio transport is enabled (OS_MCP_STDIO_ENABLED / autoStart) but OS_MCP_STDIO_API_KEY is not set. ' +
-            'stdio must run under a real identity — mint an API key on the Connect an Agent page ' +
-            '(Account → Developer for any signed-in user; Setup → Connect an Agent for admins), ' +
+            'stdio must run under a real identity — mint an API key on the Connect an AI Assistant page ' +
+            '(the avatar menu or Account → AI Assistant for any signed-in user; Setup → Overview for admins), ' +
             'or POST /api/v1/keys, and set ' +
             'OS_MCP_STDIO_API_KEY=osk_.... Refusing to start an unscoped stdio server (ADR-0101).',
         );
@@ -829,7 +829,7 @@ export class MCPServerPlugin implements Plugin {
     }
 
     // ── Plugin-carried Setup UI (cloud ADR-0009 principle) ──
-    // "Connect an agent" page + nav entry ship WITH the MCP capability and
+    // "Connect an AI Assistant" page + nav entries ship WITH the MCP capability and
     // follow the HTTP surface's default-on switch: an opted-out deployment
     // advertises nothing, so it gets no page either.
     if (isMcpServerEnabled()) {

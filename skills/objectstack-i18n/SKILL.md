@@ -89,7 +89,7 @@ const en: TranslationData = {
         details: { label: 'Details' },
       },
       _actions: {
-        complete: {
+        todo_complete: {
           label: 'Complete',
           confirmText: 'Mark this task as completed?',
           successMessage: 'Task completed',
@@ -373,8 +373,10 @@ registers when no i18n plugin is present):
   plugins can each contribute their own `objects.*` slice
 - **`getLocales()`** / **`setSupportedLocales()`** / **`getDefaultLocale()`** / **`setDefaultLocale()`**
 
-The in-memory fallback additionally resolves locale codes
-(exact → case-insensitive → base language `zh-CN` → `zh` → variant `zh` → `zh-CN`).
+The in-memory fallback additionally resolves locale codes through `resolveLocaleAmong`
+(`@objectstack/spec/system`), the one ladder `resolveBundleLocale` also runs: exact →
+case-insensitive → same platform-table language (`zh-TW` → `zh-Hant`) → base language
+`zh-CN` → `zh` → first registered variant `zh` → `zh-CN`.
 
 The contract also declares optional methods — `getFieldLabels`, `getCoverage`,
 `suggestTranslations` — that **no shipped implementation provides**. Treat them

@@ -218,7 +218,7 @@ Writes fail loudly rather than silently degrading:
 
 | Condition | Thrown | Code |
 | :--- | :--- | :--- |
-| An `OS_*` override is in force for the key | `SettingsLockedError` | `SETTINGS_LOCKED` |
+| An `OS_*` override is in force for the key, and the write is not a clear | `SettingsLockedError` | `SETTINGS_LOCKED` |
 | A row at an upper scope has `locked=true`, or a row at the write's own scope has it and the caller is not the platform | `SettingsLockedError` | `SETTINGS_LOCKED` (`locked-by-<scope>`) |
 | Key not declared by the manifest | `UnknownKeyError` | `SETTINGS_UNKNOWN_KEY` |
 | Namespace has no manifest | `UnknownNamespaceError` | `SETTINGS_UNKNOWN_NAMESPACE` |
@@ -261,6 +261,19 @@ OS_ALLOWED_ORIGINS=["a","b","c"]   # default is array/object → JSON.parse
 ```
 
 If the raw value cannot be parsed for the expected type, the raw string is used.
+
+**What is stored beneath a pin is listed by the namespace read.** An override in
+force answers `source: 'env'`, `locked: true`, and `get()` / `getMany()` build
+that answer from the env alone, without reading the store. `getNamespace()` — the
+read `GET /api/settings/:namespace` serves to the Setup page — also lists, below
+the `env` entry of `cascadeChain`, the entries the key's read would carry with no
+override in force: its stored rows, then the default. The `env` entry stays the
+effective one. An entry at the key's declared scope with a non-null value is the
+value a clear (`null`) removes, so the page can tell whether "clear the saved
+value" has anything to clear. A secret's entries beneath the pin carry the read
+mask or `null`, never its value. An override whose value coerces to `null` keeps
+its single `env` entry, since any non-null entry below it would read as the
+effective one.
 
 **A value outside a declared option table is ignored, not repaired.** When the
 specifier declares `options` and the env value matches none of them, the env

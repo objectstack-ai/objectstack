@@ -184,7 +184,8 @@ describe('the email service is built from the app\'s mail configuration', () => 
  * `requires: ['push']` gets `PushServicePlugin`, built from its `push` key by
  * the reader `serve` reads (`resolvePushCapabilityArg`, off the provider
  * module); the relay that an absent key reads as is refused before the kernel
- * boots, because nothing sends it yet.
+ * boots on a deployment that declared it has no control plane
+ * (`OS_CLOUD_URL=off`), because nothing could ever deliver through it there.
  */
 describe('the push service is built from the app\'s push configuration', () => {
   const direct = { transport: 'direct', fcm: { projectId: 'example-app', credentialRef: 'SVC_FCM_SERVICE_ACCOUNT' } };
@@ -200,11 +201,18 @@ describe('the push service is built from the app\'s push configuration', () => {
     expect(plain!.kernel.hasPlugin(CAPABILITY_PROVIDERS.push!.identities[0]!)).toBe(false);
   }, BOOT_TIMEOUT);
 
-  it('requires push with no push key fails the boot before the kernel starts: the relay it reads as has no sender', async () => {
+  it('requires push with no push key under OS_CLOUD_URL=off fails the boot before the kernel starts: the relay it reads as is unreachable', async () => {
     // Refused by the capability's reader while the boot builds the provider's
     // argument (`cannot build it`), not later by the plugin's own init.
-    await expect(bootStack(onePackage({ requires: ['push'] }))).rejects.toThrow(
-      /this configuration cannot build it: PushServicePlugin: the hosted push relay[\s\S]*its sender has not shipped[\s\S]*transport: 'direct'[\s\S]*stack definition's push key/,
-    );
+    const saved = process.env.OS_CLOUD_URL;
+    process.env.OS_CLOUD_URL = 'off';
+    try {
+      await expect(bootStack(onePackage({ requires: ['push'] }))).rejects.toThrow(
+        /this configuration cannot build it: PushServicePlugin: the hosted push relay[\s\S]*declared it has no control plane[\s\S]*transport: 'direct'[\s\S]*stack definition's push key/,
+      );
+    } finally {
+      if (saved === undefined) delete process.env.OS_CLOUD_URL;
+      else process.env.OS_CLOUD_URL = saved;
+    }
   }, BOOT_TIMEOUT);
 });

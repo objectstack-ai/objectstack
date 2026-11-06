@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef, type ReactElement } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordFieldHistoryContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { activityRowToFeedItem, composeImpersonatedActor, IMPERSONATED_ACTOR_FALLBACK, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordFieldHistoryContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderPhoneContext, PageHeaderTrailingContext, PanelToggles, RecordTopBar, cn, useRecordStepKeys, type PanelToggleItem, type RecordTopBarStepper } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
@@ -30,6 +30,7 @@ import { pruneUnregisteredRecordPageObjects, recordPageChildObjects } from './re
 import { stripDiscussionNodes, hasExplicitAttachments, hasExplicitApprovals } from '../utils/pageSchemaIntrospect.js';
 import { ActionConfirmDialog, type ConfirmDialogState } from './ActionConfirmDialog.js';
 import { ActionParamDialog, type ParamDialogState } from './ActionParamDialog.js';
+import { resolveParamDialogCompanion } from './actionDialogCompanion.js';
 import { ActionResultDialog, type ResultDialogState } from './ActionResultDialog.js';
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
@@ -86,7 +87,7 @@ import {
 // that import the app-shell barrel.
 import './record-approvals-renderer.js';
 import { getRecordDisplayName } from '../utils/index.js';
-import { parseAuditValue, collectAuditChanges, collectLookupIds, formatAuditValue } from '../utils/auditHistoryDisplay.js';
+import { parseAuditValue, collectAuditChanges, collectLookupIds, formatAuditValue, auditImpersonatorId } from '../utils/auditHistoryDisplay.js';
 import { useFavorites } from '../hooks/useFavorites.js';
 import {
   RECORD_RELATED_COLUMN_PREFERENCE,
@@ -485,10 +486,15 @@ function activityWindowQuery(objectName: string, recordId: string) {
  * `sys_comment`, or they are account events rather than record activity).
  * Everything else comes back as an item, including a type nobody has mapped.
  */
-function activityRowsToFeedItems(rows: readonly any[], systemActorLabel: string): FeedItem[] {
+function activityRowsToFeedItems(
+  rows: readonly any[],
+  systemActorLabel: string,
+  impersonatedActorTemplate?: string,
+  unknownUserLabel?: string,
+): FeedItem[] {
   const mapped: FeedItem[] = [];
   for (const row of rows) {
-    const item = activityRowToFeedItem(row, systemActorLabel);
+    const item = activityRowToFeedItem(row, systemActorLabel, impersonatedActorTemplate, unknownUserLabel);
     if (item) mapped.push(item);
   }
   return mapped;
@@ -1596,6 +1602,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // The runner's `run`, as `useConsoleActionRuntime` forwards it: a
         // refused run keeps what the user typed (objectui#13161).
         run,
+        // The host-composed panel above the params, picked as
+        // `useConsoleActionRuntime` picks it (objectstack#30205).
+        companion: resolveParamDialogCompanion(objForI18n, action?.name, row),
       });
     });
   }, [objectName, objectDef, objects, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionSubmitText, actionCancelText, language]);
@@ -2794,7 +2803,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         $filter: { record_id: pureRecordId, object_name: objectDef.name },
         $orderby: { created_at: 'desc' },
         $top: 50,
-        $select: ['id', 'created_at', 'action', 'user_id', ...(hasActorColumn ? ['actor'] : []), 'old_value', 'new_value'],
+        $select: ['id', 'created_at', 'action', 'user_id', ...(hasActorColumn ? ['actor'] : []), 'old_value', 'new_value', 'metadata'],
       })
       .then(async (res: any) => {
         if (cancelled) return;
@@ -2802,10 +2811,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
 
         // 1) Resolve actor display names + avatars in a single batched call
         //    so the timeline never falls back to a raw UUID.
+        //    The administrator of an impersonation session rides the same
+        //    read: the writer records them as `metadata.impersonated_by`.
+        const impersonators = items.map((it) => auditImpersonatorId(it?.metadata));
         const userIds = Array.from(
           new Set(
-            items
-              .map((it) => it?.user_id)
+            [...items.map((it) => it?.user_id), ...impersonators]
               .filter((v): v is string => typeof v === 'string' && v.length > 0),
           ),
         );
@@ -2894,9 +2905,22 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             from: formatAuditValue(objectDef.fields?.[c.field], c.from, fmtCtx),
             to: formatAuditValue(objectDef.fields?.[c.field], c.to, fmtCtx),
           }));
+          // A write made from an impersonation session names the
+          // administrator beside the user: 「Dev Admin 代王工操作」.
+          const adminId = impersonators[idx];
+          const userName = u?.name ?? actorLabel;
+          const adminName = adminId
+            ? (userMap.get(adminId)?.name ?? t('detail.unknownUser', { defaultValue: 'Unknown' }))
+            : null;
           return {
             ...it,
-            user_name: u?.name ?? actorLabel,
+            user_name: adminName
+              ? composeImpersonatedActor(
+                  t('detail.impersonatedActor', { defaultValue: IMPERSONATED_ACTOR_FALLBACK, admin: '{{admin}}', user: '{{user}}' }),
+                  adminName,
+                  userName ?? t('detail.unknownUser', { defaultValue: 'Unknown' }),
+                )
+              : userName,
             user_avatar: u?.image ?? null,
             changes: changes.length > 0 ? changes : undefined,
           };
@@ -3363,7 +3387,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           return held === peek ? prev : { ...prev, [threadId]: peek };
         });
         if (!res?.data?.length) return;
-        const mapped = activityRowsToFeedItems(res.data, t('detail.systemActor', { defaultValue: 'System' }));
+        const mapped = activityRowsToFeedItems(
+          res.data,
+          t('detail.systemActor', { defaultValue: 'System' }),
+          t('detail.impersonatedActor', { defaultValue: IMPERSONATED_ACTOR_FALLBACK, admin: '{{admin}}', user: '{{user}}' }),
+          t('detail.unknownUser', { defaultValue: 'Unknown' }),
+        );
         if (!mapped.length) return;
         // Merge by id into THIS record's slice (timeline events are
         // append-only); `mergeFeedRows` sorts by createdAt ascending so the
@@ -3427,7 +3456,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // step to another record fills this one's slice, never the one on screen.
     Promise.resolve(dataSource.find('sys_activity', activityWindowQuery(objectName, pureRecordId)))
       .then((res: any) => {
-        const mapped = activityRowsToFeedItems(res?.data ?? [], t('detail.systemActor', { defaultValue: 'System' }));
+        const mapped = activityRowsToFeedItems(
+          res?.data ?? [],
+          t('detail.systemActor', { defaultValue: 'System' }),
+          t('detail.impersonatedActor', { defaultValue: IMPERSONATED_ACTOR_FALLBACK, admin: '{{admin}}', user: '{{user}}' }),
+          t('detail.unknownUser', { defaultValue: 'Unknown' }),
+        );
         if (!mapped.length) return;
         setFeedItemsByRecord(prev => ({
           ...prev,

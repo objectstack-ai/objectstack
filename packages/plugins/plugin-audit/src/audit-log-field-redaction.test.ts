@@ -350,3 +350,83 @@ describe('[#21155] sys_audit_log before/after snapshots are served through the s
     for (const v of [V.masked2, V.unserved2, V.unservedDel]) expect(blob).toContain(v);
   });
 });
+
+// ---------------------------------------------------------------------------
+// [#30923] A settings write's `config_change` row
+// ---------------------------------------------------------------------------
+
+/**
+ * [#30923] service-settings' `config_change` row carries the setting's value
+ * before and after, readable for a key that is not secret-valued: one field of
+ * the settings store the row names (`sys_setting`, or `sys_platform_setting`
+ * for a global value), with its digest. A reader whose field-level security
+ * masks that field is served neither the value nor its fingerprint, as the
+ * CRUD mirror's row about the same write is narrowed; which setting changed
+ * stays.
+ *
+ * Pinned on the seam's own function over rows in the writer's shape: the writer
+ * is service-settings, which this package does not depend on. Its read-path
+ * mount is the one the scene above pins.
+ */
+describe('[#30923] a config_change row is narrowed by the settings store\'s `value` field', () => {
+  const S = { before: 'ALRSETTINGBEFORE41', after: 'ALRSETTINGAFTER42' };
+  const STORES = ['sys_setting', 'sys_platform_setting'];
+  const STORE_FIELDS = ['id', 'namespace', 'key', 'scope', 'value', 'value_enc', 'encrypted'];
+  /** The settings store's `value` is served to this reader MASKED. */
+  const MASKS_VALUE = { userId: 'u_settings_masked', tenantId: 'org_1' };
+  /** Served every field of the settings stores — the control. */
+  const SERVED_VALUE = { userId: 'u_settings_control', tenantId: 'org_1' };
+
+  const settingsSecurity = {
+    async getReadableFields(object: string): Promise<string[] | undefined> {
+      return STORES.includes(object) ? STORE_FIELDS : undefined;
+    },
+    async getQueryableFields(object: string, context?: any): Promise<string[] | undefined> {
+      const readable = (await settingsSecurity.getReadableFields(object)) ?? [];
+      return context?.userId === MASKS_VALUE.userId ? readable.filter((f) => f !== 'value') : readable;
+    },
+  };
+  const WHICH = { namespace: 'auth', key: 'allowed_ip_ranges', scope: 'global' };
+  const side = (value: string) => JSON.stringify({ ...WHICH, value, digest: 'sha256:' + 'ab'.repeat(32) });
+  const configRow = (object_name: string | null): Row => ({
+    id: 'cc1',
+    action: 'config_change',
+    object_name,
+    record_id: 'set1',
+    old_value: side(S.before),
+    new_value: side(S.after),
+  });
+
+  for (const store of STORES) {
+    it(`masked on ${store}: neither side keeps the value or its digest, and which setting changed stays`, async () => {
+      const row = configRow(store);
+      await redactAuditLogRows([row], settingsSecurity, MASKS_VALUE);
+      expect(snap(row, 'old_value')).toEqual(WHICH);
+      expect(snap(row, 'new_value')).toEqual(WHICH);
+      expect(JSON.stringify(row)).not.toContain(S.before);
+      expect(JSON.stringify(row)).not.toContain(S.after);
+    });
+  }
+
+  it('control: a reader served the store\'s value reads both sides byte-identical to the row at rest', async () => {
+    const row = configRow('sys_setting');
+    const atRest = { ...row };
+    await redactAuditLogRows([row], settingsSecurity, SERVED_VALUE);
+    expect(row).toEqual(atRest);
+    expect(snap(row, 'new_value').value).toBe(S.after);
+  });
+
+  it('a config_change row naming no settings store is served as written', async () => {
+    const row = configRow(null);
+    const atRest = { ...row };
+    await redactAuditLogRows([row], settingsSecurity, MASKS_VALUE);
+    expect(row).toEqual(atRest);
+  });
+
+  it('fail closed: a settings config_change snapshot that is not a JSON object is dropped', async () => {
+    const row = { ...configRow('sys_setting'), old_value: `not json ${S.before}` };
+    await redactAuditLogRows([row], settingsSecurity, SERVED_VALUE);
+    expect(row).not.toHaveProperty('old_value');
+    expect(snap(row, 'new_value').value).toBe(S.after);
+  });
+});

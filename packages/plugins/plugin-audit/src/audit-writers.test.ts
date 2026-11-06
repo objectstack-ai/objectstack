@@ -323,6 +323,29 @@ describe('audit writers — operational plumbing is excluded (#5193, ADR-0057 D5
     }
   });
 
+  it('writes NO audit/activity row for the lifecycle sweeper\'s watermark, first insert or hourly update (ADR-0057 §3.3)', async () => {
+    // `LifecycleService` inserts the `sys_lifecycle_state` row after its first
+    // completed sweep and updates it after every one since. Audited, each
+    // sweep fed the ledger a row the next sweep archives: cleanup re-feeding
+    // the table it drains.
+    const { engine, fire, created } = makeEngine({ ...SCHEMA, sys_lifecycle_state: ['id', 'last_swept_at'] });
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', {
+      object: 'sys_lifecycle_state',
+      input: { id: 'lifecycle', last_swept_at: '2026-11-06T00:00:00.000Z' },
+      result: { id: 'lifecycle', last_swept_at: '2026-11-06T00:00:00.000Z' },
+      session: { isSystem: true },
+    });
+    await fire('afterUpdate', {
+      object: 'sys_lifecycle_state',
+      input: { id: 'lifecycle', last_swept_at: '2026-11-06T01:00:00.000Z' },
+      previous: { id: 'lifecycle', last_swept_at: '2026-11-06T00:00:00.000Z' },
+      result: { id: 'lifecycle', last_swept_at: '2026-11-06T01:00:00.000Z' },
+      session: { isSystem: true },
+    });
+    expect(created).toEqual([]);
+  });
+
   it('pays no before-phase snapshot read — for the skipped object OR the business one (#6656)', async () => {
     // [#6656] This case used to assert the saving for `sys_job_queue` only,
     // with `crm_lead` as the CONTROL that still paid — because #5860 could
@@ -519,6 +542,69 @@ describe('audit writers — chunked upload sessions are excluded (#5202, ADR-005
       object: 'crm_lead',
       input: { id: 'lead-1' },
       result: { id: 'lead-1', name: 'Acme' },
+      session: { userId: 'user-1' },
+    });
+    expect(created.map((c) => c.object)).toEqual(['sys_audit_log', 'sys_activity']);
+  });
+});
+
+describe('audit writers — recycle-bin entries are excluded (ADR-0148 D4, ADR-0057 §3.3)', () => {
+  // An entry as the engine writes it: `snapshot` holds every declared column of
+  // the deleted rows, `internal: true` ones included. Nothing here may reach
+  // the ledger through the generic writer.
+  const SCHEMA = {
+    sys_audit_log: SINGLE_TENANT.sys_audit_log,
+    sys_activity: SINGLE_TENANT.sys_activity,
+    sys_recycle_bin: ['id', 'object_name', 'record_id', 'record_count', 'snapshot', 'deleted_by', 'deleted_at', 'retention_days', 'purge_after', 'organization_id'],
+    crm_lead: ['id', 'name'],
+  };
+  const entry = (deletedBy: string | null) => ({
+    id: 'rb-1',
+    object_name: 'crm_lead',
+    record_id: 'lead-1',
+    record_count: 1,
+    snapshot: { rows: [{ object: 'crm_lead', id: 'lead-1', values: { id: 'lead-1', name: 'Acme', scoring_notes: 'internal only' } }], clearedReferences: [] },
+    deleted_by: deletedBy,
+    deleted_at: '2026-11-06T00:00:00.000Z',
+    retention_days: 30,
+    purge_after: '2026-12-06T00:00:00.000Z',
+    organization_id: 'org-1',
+  });
+
+  it('writes NO audit/activity row for the lifecycle reap of an entry', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterDelete', {
+      object: 'sys_recycle_bin',
+      input: { id: 'rb-1' },
+      previous: entry('user-1'),
+      result: { id: 'rb-1' },
+      session: { isSystem: true },
+    });
+    expect(created).toEqual([]);
+  });
+
+  it("writes NO audit/activity row when a user's delete clears an entry's deleted_by", async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterUpdate', {
+      object: 'sys_recycle_bin',
+      input: { id: 'rb-1', deleted_by: null },
+      previous: entry('user-1'),
+      result: entry(null),
+      session: { userId: 'user-admin' },
+    });
+    expect(created).toEqual([]);
+  });
+
+  it('still audits the business delete the entry was taken for (the skip stays narrow)', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterDelete', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      previous: { id: 'lead-1', name: 'Acme' },
+      result: { id: 'lead-1' },
       session: { userId: 'user-1' },
     });
     expect(created.map((c) => c.object)).toEqual(['sys_audit_log', 'sys_activity']);

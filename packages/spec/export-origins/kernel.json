@@ -376,6 +376,7 @@
     "RealTimeNotificationConfigSchema": "src/kernel/events/integrations.zod.ts#RealTimeNotificationConfigSchema (const)",
     "RequiredAction": "src/kernel/dependency-resolution.zod.ts#RequiredAction (type)",
     "RequiredActionSchema": "src/kernel/dependency-resolution.zod.ts#RequiredActionSchema (const)",
+    "RequiresFeatureSlot": "src/kernel/public-auth-features.ts#RequiresFeatureSlot (type)",
     "ResolvedDependency": "src/kernel/dependency-resolution.zod.ts#ResolvedDependency (type)",
     "ResolvedDependencySchema": "src/kernel/dependency-resolution.zod.ts#ResolvedDependencySchema (const)",
     "ResolvedPackageDependency": "src/kernel/plugin-security.zod.ts#ResolvedPackageDependency (type)",

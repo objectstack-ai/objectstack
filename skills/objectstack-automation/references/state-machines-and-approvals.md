@@ -72,7 +72,7 @@ is one diagram a reviewer (or AI) can read end-to-end.
 // A record-triggered flow: high-value opportunities need manager sign-off,
 // and director sign-off too when the amount clears 500k.
 {
-  name: 'opportunity_discount_approval',
+  name: 'crm_opportunity_discount_approval',
   label: 'Opportunity Discount Approval',
   type: 'record_change',
   nodes: [
@@ -95,7 +95,7 @@ is one diagram a reviewer (or AI) can read end-to-end.
       type: 'approval',
       label: 'Sales Manager Review',
       config: {
-        approvers: [{ type: 'position', value: 'sales_manager' }],
+        approvers: [{ type: 'position', value: 'crm_sales_manager' }],
         behavior: 'first_response',
         lockRecord: true,
         approvalStatusField: 'approval_status',
@@ -111,7 +111,7 @@ is one diagram a reviewer (or AI) can read end-to-end.
       type: 'approval',
       label: 'Sales Director Sign-off',
       config: {
-        approvers: [{ type: 'position', value: 'sales_director' }],
+        approvers: [{ type: 'position', value: 'crm_sales_director' }],
         behavior: 'unanimous',
         approvalStatusField: 'approval_status',
       },
@@ -178,7 +178,7 @@ Three pieces author it:
 ```typescript
 {
   id: 'manager_review', type: 'approval', label: 'Manager Review',
-  config: { approvers: [{ type: 'position', value: 'manager' }], lockRecord: true, maxRevisions: 2 },
+  config: { approvers: [{ type: 'position', value: 'crm_manager' }], lockRecord: true, maxRevisions: 2 },
 },
 { id: 'wait_revision', type: 'approval_revise', label: 'Awaiting Revision' },
 // …among the approval's edges…
@@ -250,7 +250,7 @@ an id that does not exist gets.
 |:-------|:------------|
 | `user`       | A specific user id (`value` = user id) |
 | `position`   | Holders of a position — `value` = the position machine name, resolved via `sys_user_position` (ADR-0090 D3) |
-| `org_membership_level` | The **org-membership tier** — `value` is one of `owner`/`admin`/`delegated_admin`/`member`. **NOT** a position: `{ type: 'org_membership_level', value: 'sales_manager' }` matches nobody; use `position`. Spelled `role` before ADR-0090 D3 — that spelling is deprecated, still resolves, and is removed in the next major |
+| `org_membership_level` | The **org-membership tier** — `value` is one of `owner`/`admin`/`delegated_admin`/`member`. **NOT** a position: `{ type: 'org_membership_level', value: 'crm_sales_manager' }` matches nobody; use `position`. Spelled `role` before ADR-0090 D3 — that spelling is deprecated, still resolves, and is removed in the next major |
 | `team`       | Members of a flat `sys_team` |
 | `department` | A department + all descendant departments |
 | `manager`    | The submitter's manager (`sys_user.manager_id`) |
@@ -308,7 +308,7 @@ The full "previous approver picks the next step's approvers" loop, end to end
 import { defineFlow } from '@objectstack/spec';
 
 export const DynamicApprovalFlow = defineFlow({
-  name: 'dynamic_approval',
+  name: 'crm_dynamic_approval',
   label: 'Dynamic Approval',
   type: 'autolaunched',
   status: 'active',
@@ -362,7 +362,7 @@ Object-hook `ctx` is a different vocabulary — see **objectstack-data**
 
 | Field | Purpose |
 |:------|:--------|
-| `approvers` | Who may act (≥ 1 — see Approver Types above). Each approver may carry an optional **`group`** label (e.g. `{ type: 'position', value: 'auditor', group: 'finance' }`) — with `behavior: 'per_group'`, approvers sharing a label form one group; unlabelled approvers each form their own |
+| `approvers` | Who may act (≥ 1 — see Approver Types above). Each approver may carry an optional **`group`** label (e.g. `{ type: 'position', value: 'crm_auditor', group: 'finance' }`) — with `behavior: 'per_group'`, approvers sharing a label form one group; unlabelled approvers each form their own |
 | `behavior` | `first_response` (first approver decides), `unanimous` (all must approve), `quorum` (`minApprovals` of N — M-of-N collective sign-off), or `per_group` (EACH approver `group` must reach `minApprovals` — one-from-each-group sign-off, 会签). In every mode a single rejection finalizes the node as `rejected`. Default `first_response` |
 | `minApprovals` | Approvals required — total for `quorum`, per group for `per_group`. Omitted ⇒ ALL resolvable approvers under `quorum`, `1` per group; clamped at runtime so a misconfiguration can never deadlock |
 | `lockRecord` | Lock the triggering record from edits while pending. Default `true` |
@@ -371,7 +371,7 @@ Object-hook `ctx` is a different vocabulary — see **objectstack-data**
 | `excludeSubmitter` | `true` drops the run's submitter (`submitter_id`) from the resolved slate, whatever approver type produced them — segregation of duties; a slate it empties takes the `onEmptyApprovers` route, never a silent pass. `onEmptyApprovers: 'auto_approve'` is **refused** beside it (it would approve exactly the request this exists to stop): use `admin_rescue`, `fail` or `fallback`. Default `false` |
 | `decisionOutputs` | Decision outputs a decision may carry: bare keys (free text) **or typed declarations** `{ key, label?, type: 'text'\|'user'\|'department'\|'position'\|'team', multiple?, required? }`, enforced at the decision — see *Recording a decision* |
 | `escalation` | Optional per-node SLA — `{ enabled, timeoutHours, action: reassign\|auto_approve\|auto_reject\|notify, escalateTo?, notifySubmitter }`. `timeoutHours` is **calendar (wall-clock) hours** — nights, weekends and holidays count; the platform ships no business-hours calendar. `escalateTo` is a **position machine name** (expanded to its holders via `sys_user_position`, ADR-0090 D3) or a specific user id — never a membership tier. `reassign` without `escalateTo` degrades to notify (linted) |
-| `maxRevisions` | Send-backs per run before auto-reject (ADR-0044) — see *Send-back for revision* above |
+| `maxRevisions` | Send-backs per run before auto-reject (ADR-0044) |
 
 ### Branching, side-effects & rejection
 

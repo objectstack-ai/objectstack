@@ -489,7 +489,7 @@ export const LocationCoordinatesSchema = lazySchema(() => z.object({
  * tombstone for the removed key and the answers for its two natural spellings.
  */
 const CURRENCY_DECIMAL_PLACES_ARE_THE_CURRENCYS =
-  'a currency amount\'s decimal places are its currency\'s ISO 4217 minor unit (2 for USD, '
+  'a currency amount\'s decimal places are its currency\'s CLDR fraction digits (2 for USD, '
   + '0 for JPY, 3 for KWD), which every display face derives from the currency itself, so '
   + 'there is no decimal-places setting to declare. Do not move the number to the '
   + 'field-level `precision`: that key is the amount\'s TOTAL digit count (a DECIMAL(18,2) '
@@ -501,8 +501,8 @@ const CURRENCY_DECIMAL_PLACES_ARE_THE_CURRENCYS =
  * #19992 (ADR-0049 enforce-or-remove, triage direction REMOVE under ruling 乙 on
  * #19910 — 「a currency's decimal places are the currency's, not a setting」):
  * `precision` was a declared, validated key that no renderer or runtime ever
- * read. objectui's `CurrencyField` derives the width from the currency's ISO
- * 4217 minor unit (read points recorded in `liveness/field.json`, row
+ * read. objectui's `CurrencyField` derives the width from the currency's CLDR
+ * fraction digits (read points recorded in `liveness/field.json`, row
  * `currencyConfig`), and no code read the key at all — measured with a lit
  * control (`currencyConfig.currencyMode` IS read) over objectstack
  * `packages/**` + `examples/**`, objectui (the console's tree and `main`) and
@@ -708,8 +708,8 @@ function refuseSummaryWithoutField(
  * - Custom business-specific codes
  * Stricter validation can be implemented at the application layer based on business requirements.
  *
- * There is no decimal-places key: a currency's decimal places are its ISO 4217
- * minor unit (see {@link CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE} for the
+ * There is no decimal-places key: a currency's decimal places are its CLDR
+ * fraction digits (see {@link CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE} for the
  * removed `precision`).
  *
  * `defaultCurrency` has no default (#27157, ruling 6464202770 on #27119, Q2 =
@@ -1078,13 +1078,13 @@ const INLINE_GRID_COLUMN_HISTORY =
  * as `FieldSchema`'s currency refusal with the subject swapped, same remedy:
  * delete the key, nothing replaces it.
  * `inline-grid-column-currency-scale-refused.test.ts` holds the two refusals
- * to the same first sentence and the same minor-unit clause, so a rewording of
- * one that leaves the other behind goes red.
+ * to the same first sentence and the same fraction-digits clause, so a rewording
+ * of one that leaves the other behind goes red.
  */
 const INLINE_GRID_CURRENCY_SCALE_REFUSAL =
   '`scale` is not valid on a `currency` inline grid column — delete the key. A currency '
-  + 'amount\'s decimal places are its currency\'s, not a column setting: the currency\'s ISO 4217 '
-  + 'minor unit (2 for USD, 0 for JPY, 3 for KWD) decides how the cell displays the amount and the '
+  + 'amount\'s decimal places are its currency\'s, not a column setting: the currency\'s CLDR '
+  + 'fraction digits (2 for USD, 0 for JPY, 3 for KWD) decide how the cell displays the amount and the '
   + 'width a computed amount is rounded to. `scale` stays valid on a `number` column.';
 
 /**
@@ -1156,7 +1156,7 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   // `type: 'currency'` by the `.superRefine` below (ruling B carried to this
   // mirror); the describe names the one type set it still applies to.
   scale: z.number().int().nonnegative().max(MAX_RENDERABLE_SCALE, { message: SCALE_UPPER_BOUND_MESSAGE }).optional()
-    .describe('Decimal places to round a computed numeric result to (integer 0-100). REFUSED on a column declaring `type: \'currency\'` — delete it there: the currency\'s ISO 4217 minor unit decides. The upper bound is the renderer\'s: the grid rounds with `toFixed`, which throws a RangeError above 100.').meta({ title: 'Scale' }),
+    .describe('Decimal places to round a computed numeric result to (integer 0-100). REFUSED on a column declaring `type: \'currency\'` — delete it there: the currency\'s CLDR fraction digits decide. The upper bound is the renderer\'s: the grid rounds with `toFixed`, which throws a RangeError above 100.').meta({ title: 'Scale' }),
   autofill: z.boolean().optional().describe("For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable.").meta({ title: 'Autofill' }),
   readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — the cell is read-only when TRUE, evaluated per row against the row as `record` plus the header as `parent` (e.g. P`parent.status == 'paid'`).").meta({ title: 'Read-only When' }),
   requiredWhen: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`. PRESENTATION ONLY: this flags the cell inline-invalid in the grid; nothing on the write path reads it. The server-enforced contract is the child FIELD\'s own `requiredWhen` — a transition gate, see `Field.requiredWhen` — which hydration copies onto an identity-only column, so declaring the requirement here alone enforces nothing.').meta({ title: 'Required When' }),
@@ -1460,7 +1460,7 @@ export const FieldSchema = lazySchema(() => {
   // stays the fixed exact decimal of NUMERIC_COLUMN_REPRESENTATION. The
   // describe states the counting rule because the field reference page is
   // generated from it, and that page is what an author reads.
-  precision: z.number().int().min(0).optional().describe('Total digits (non-negative integer) — the `p` of a DECIMAL(p, s): the digits of the value, integer and fraction together, counted at the field\'s decimal places, so `precision: 5, scale: 2` holds up to 999.99 and refuses 1234.5 (1234.50 is 6 digits). Enforced on writes of `number`, `currency`, `percent`, `rating` and `slider` fields: a value that needs more digits is refused with field code `max_precision`, never rounded. Counted on the STORED value: at the declared `scale` when one applies, else at the value\'s own decimal places (leading zeros never count) — so on a `currency` field, where `scale` is refused, an amount\'s written decimals count toward the total; a fraction-stored `percent` is counted two places further right (`scale + 2`, or 2 with no `scale`), which makes the count that of the percentage-point value as displayed. Not decimal places (that is `scale`; a currency\'s are its ISO 4217 minor unit) and not a column size: every numeric column keeps the platform\'s fixed exact decimal whatever this declares. Not read on any other field type.'),
+  precision: z.number().int().min(0).optional().describe('Total digits (non-negative integer) — the `p` of a DECIMAL(p, s): the digits of the value, integer and fraction together, counted at the field\'s decimal places, so `precision: 5, scale: 2` holds up to 999.99 and refuses 1234.5 (1234.50 is 6 digits). Enforced on writes of `number`, `currency`, `percent`, `rating` and `slider` fields: a value that needs more digits is refused with field code `max_precision`, never rounded. Counted on the STORED value: at the declared `scale` when one applies, else at the value\'s own decimal places (leading zeros never count) — so on a `currency` field, where `scale` is refused, an amount\'s written decimals count toward the total; a fraction-stored `percent` is counted two places further right (`scale + 2`, or 2 with no `scale`), which makes the count that of the percentage-point value as displayed. Not decimal places (that is `scale`; a currency\'s are its CLDR fraction digits) and not a column size: every numeric column keeps the platform\'s fixed exact decimal whatever this declares. Not read on any other field type.'),
   // #18972 — and an UPPER bound, for the same declared=enforced reason one
   // axis over: `scale` is unrenderable above 100 at every consumer, so a
   // larger declaration could only ever crash a reader. See
@@ -1485,7 +1485,7 @@ export const FieldSchema = lazySchema(() => {
   // (batch #218 item 2, letter 乙) words. The describe names the type set the
   // key still applies to, for the same reason as above.
   scale: z.number().int().min(0).max(MAX_RENDERABLE_SCALE, { message: SCALE_UPPER_BOUND_MESSAGE }).optional()
-    .describe('Decimal places (integer 0-100). Applies to `number`, `percent`, `rating` and `slider` fields, where it is enforced on writes, and to a `formula` field, whose computed result is rounded to it. REFUSED on a `currency` field — delete it there: a currency amount\'s decimal places are its currency\'s, so the currency\'s ISO 4217 minor unit decides how the amount displays, and a currency write\'s decimal places stay unconstrained. OMITTED on a `percent` field ⇒ 0 decimal places, so a stored 0.25 reads `25%` on every face; omitted on any OTHER numeric type declares NO fixed width — the value keeps its natural precision, and a DECLARED `scale: 0` (a year, a fiscal period, an ordinal) stays distinguishable from having declared nothing, so nothing is defaulted there. Consumers resolve the effective width by calling `resolveFieldScale` from `@objectstack/spec/data`, the single source for an absent `scale`: a renderer that spells its own fallback is a width no other face can see, and that is how one stored 0.25 came to read `25%` on the read-only cell and `25.00%` in the edit widget. On a `percent` field this is the number of decimal places of the PERCENTAGE-POINT value as displayed and entered — `scale: 2` means 12.34% — and the STORED precision derives from the field\'s storage scale rather than being declared again: a fraction-stored percent (no `max`, or a `max` at or below 1) stores 12.34% as 0.1234 and is allowed `scale + 2` decimal places at the write seam, while a whole-percent field (`max` above 1) stores the displayed number itself and is allowed exactly `scale`. `number`, `rating` and `slider` are allowed exactly `scale`. The upper bound is the platform\'s, not a policy: renderers turn `scale` into fraction digits through `toFixed` and `Intl.NumberFormat`\'s `maximumFractionDigits`, both of which throw a RangeError above 100 — so a larger declaration is unrenderable by any conforming consumer.'),
+    .describe('Decimal places (integer 0-100). Applies to `number`, `percent`, `rating` and `slider` fields, where it is enforced on writes, and to a `formula` field, whose computed result is rounded to it. REFUSED on a `currency` field — delete it there: a currency amount\'s decimal places are its currency\'s, so the currency\'s CLDR fraction digits decide how the amount displays, and a currency write\'s decimal places stay unconstrained. OMITTED on a `percent` field ⇒ 0 decimal places, so a stored 0.25 reads `25%` on every face; omitted on any OTHER numeric type declares NO fixed width — the value keeps its natural precision, and a DECLARED `scale: 0` (a year, a fiscal period, an ordinal) stays distinguishable from having declared nothing, so nothing is defaulted there. Consumers resolve the effective width by calling `resolveFieldScale` from `@objectstack/spec/data`, the single source for an absent `scale`: a renderer that spells its own fallback is a width no other face can see, and that is how one stored 0.25 came to read `25%` on the read-only cell and `25.00%` in the edit widget. On a `percent` field this is the number of decimal places of the PERCENTAGE-POINT value as displayed and entered — `scale: 2` means 12.34% — and the STORED precision derives from the field\'s storage scale rather than being declared again: a fraction-stored percent (no `max`, or a `max` at or below 1) stores 12.34% as 0.1234 and is allowed `scale + 2` decimal places at the write seam, while a whole-percent field (`max` above 1) stores the displayed number itself and is allowed exactly `scale`. `number`, `rating` and `slider` are allowed exactly `scale`. The upper bound is the platform\'s, not a policy: renderers turn `scale` into fraction digits through `toFixed` and `Intl.NumberFormat`\'s `maximumFractionDigits`, both of which throw a RangeError above 100 — so a larger declaration is unrenderable by any conforming consumer.'),
   min: z.number().optional().describe('Minimum value. Checked on the WRITTEN value only — the same transition-gate class as `requiredWhen`: an UPDATE validates just the fields the payload carries, so a stored value below a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused, and a repairing write is accepted. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   max: z.number().optional().describe('Maximum value. Checked on the WRITTEN value only — the same transition-gate class as `min`: a stored value above a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   /**
@@ -2584,6 +2584,41 @@ export const FieldSchema = lazySchema(() => {
   // `index: true` created no index. Declare the index in object `indexes[]`.
   externalId: z.boolean().default(false).describe('Not read: no upsert, import or seed matches on this flag. A seed dataset names its match field in its own `externalId`; an import names it in the mapping\'s `upsertKey`.'),
 
+  /**
+   * Package-author rename declaration (epic cloud#3652, ruling D3, verbatim
+   * 「写进清单 renamedFrom」, under Q3 「默认拒绝，需显式映射（推荐）」 — this
+   * supersedes item 5 of objectstack#24443's ruling A, "No rename spelling is
+   * added to the spec"). The earlier key or keys of THIS field, so an upgrade
+   * from a version that still has the old key carries that column's data to
+   * this field instead of dropping the old column out of the declaration and
+   * adding an empty one.
+   *
+   * Judged at parse, minimally: each entry is a field key (this grammar, here,
+   * where one field is all there is to see). The rest — not the field's own
+   * key, not a key another field of the same object still declares, not an
+   * old key two fields both claim, each entry once — needs the field's key in
+   * its object's `fields` map (`name` is optional) or the whole map, and lives
+   * in `ObjectSchema`'s superRefine (`refuseDishonestRenamedFrom`), whose
+   * refusals name the object, the field and the old key. Type
+   * compatibility between the old and the new field is NOT judged here: it
+   * depends on the installed version, so the upgrade plan judges it.
+   *
+   * Read only at package upgrade (the upgrade plan and the rename execution);
+   * no record read, write or query reads it. Declared ahead of those readers
+   * — `planned` in `liveness/field.json`.
+   */
+  renamedFrom: z.array(
+    z.string().regex(/^[a-z_][a-z0-9_]*$/, {
+      message: 'Each `renamedFrom` entry is an earlier key of this field, so it must be a field key: lowercase snake_case (e.g. "account_name").',
+    }),
+  ).optional().describe(
+    'Earlier keys of THIS field, written in the field-key grammar (lowercase snake_case), e.g. `renamedFrom: [\'company\']` on a field now keyed `account_name`. '
+    + 'On a package upgrade from a version that has one of these keys and not this one, the platform carries that column\'s data to this field instead of adding an empty column. '
+    + 'A field renamed twice lists both earlier keys. Each entry once; never this field\'s own key; never a key another field of the same object still declares (that name is still in use); never an old key another field of the same object also claims. '
+    + 'Read only at package upgrade: no record read, write or query reads it, and the type of the old column is judged by the upgrade plan, not here. '
+    + 'Declared ahead of the upgrade step that carries the data: until that step ships, no upgrade carries a column on this declaration.',
+  ),
+
   // ADR-0010 — runtime protection envelope (internal — set by the loader).
   // `field` is a registered metadata type, so `MetadataPlugin`'s loader stamps
   // `_packageId` / `_provenance` on it. Undeclared, they were dropped on every
@@ -3136,13 +3171,13 @@ export const FieldSchema = lazySchema(() => {
   // 「215 同意」): `scale` is RETIRED from the `currency` type and refused at
   // this seam. On a currency field the key was three-faced: the field
   // designer offered it, the amount's cell never read it (the cell's fraction
-  // digits are the currency's own ISO 4217 minor-unit count), and
+  // digits are the currency's own CLDR fraction-digit count), and
   // `packages/objectql`'s `max_scale` branch still refused writes carrying
   // more decimals — so an author who set it bought a narrower write contract
   // and no visible change. The ruling retires the key rather than aligning the
   // money faces to it. The remedy is worded by ruling 5805782503 (batch #218
   // item 2, letter 乙 — a currency's decimal places are the currency's, not a
-  // setting): delete the key; the currency's ISO 4217 minor unit decides its
+  // setting): delete the key; the currency's CLDR fraction digits decide its
   // display, and its write allowance stays unconstrained (today's contract
   // for a currency field that declares no `scale`). ⛔ The remedy names no
   // other key to carry the value: nothing replaces it. ⛔ No alias and no
@@ -3159,8 +3194,8 @@ export const FieldSchema = lazySchema(() => {
       path: ['scale'],
       message:
         '`scale` is not valid on a `currency` field — delete the key. A currency amount\'s decimal ' +
-        'places are its currency\'s, not a field setting: the currency\'s ISO 4217 minor unit (2 for ' +
-        'USD, 0 for JPY, 3 for KWD) decides how the amount displays, and the field\'s write allowance ' +
+        'places are its currency\'s, not a field setting: the currency\'s CLDR fraction digits (2 for ' +
+        'USD, 0 for JPY, 3 for KWD) decide how the amount displays, and the field\'s write allowance ' +
         'stays unconstrained — a currency write is accepted with the decimals it carries, as it always ' +
         'was on a currency field that declared no `scale`. The key\'s one enforced effect was refusing ' +
         'writes with more decimals, which this field type no longer does.',
@@ -3168,7 +3203,7 @@ export const FieldSchema = lazySchema(() => {
   }
 
   // #20011 — the FIELD-level `precision` on a `currency` field is NOT compared
-  // against the currency's ISO 4217 fraction digits, on purpose. The key is
+  // against the currency's CLDR fraction digits, on purpose. The key is
   // declared "Total digits" — the `p` of a DECIMAL(p, s) amount, so
   // `precision: 18` on a fixed-USD field is DECIMAL(18,2) — and a currency's
   // decimal places are the currency's, not a setting (ruling 5805782503,

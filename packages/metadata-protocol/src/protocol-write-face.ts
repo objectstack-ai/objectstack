@@ -253,7 +253,9 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
                     + 'display as a plain number, fall into the null group of a grouped aggregate, and sit outside every '
                     + 'currency-paired filter until they hold a code; once saved, write it with '
                     + `\`os migrate record-currency-codes --object ${objectName} --field ${fname} --code <ISO 4217 code>\``
-                    + ' (a dry run; add --apply to write).',
+                    + ' (a dry run; add --apply to write), or, with no shell, as an organization admin with '
+                    + `\`POST /api/v1/meta/_migrate-record-currency-codes\` and the body \`{ "object": "${objectName}", "field": "${fname}", "code": "<ISO 4217 code>" }\``
+                    + ' (a preview of your current organization\'s rows; add "apply": true to write).',
             });
         }
     }

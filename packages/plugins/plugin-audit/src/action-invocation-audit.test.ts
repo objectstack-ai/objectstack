@@ -227,6 +227,21 @@ describe('[#27908] the action_invocation row tells an agent\'s call from a click
     expect('target' in JSON.parse(String(row.metadata))).toBe(false);
   });
 
+  it('a click from an impersonation session names the administrator; the user stays the subject', () => {
+    const row = buildActionInvocationAuditRow({
+      ...CLICK,
+      context: { ...CLICK.context, impersonatedBy: 'usr_admin' } as any,
+    });
+    expect(row.user_id).toBe('usr_1');
+    expect(row.actor).toBe('usr_1');
+    expect(JSON.parse(String(row.metadata))).toEqual({
+      surface: 'rest', action_name: 'close_case', branch: 'update', outcome: 'succeeded',
+      impersonated_by: 'usr_admin',
+    });
+    // Control: the user's own click claims no impersonation.
+    expect(JSON.parse(String(buildActionInvocationAuditRow(CLICK).metadata))).not.toHaveProperty('impersonated_by');
+  });
+
   it('an object-less action names no object and no record', () => {
     const row = buildActionInvocationAuditRow({ ...CLICK, objectName: undefined, recordId: 'r1' });
     expect(row.object_name).toBeNull();

@@ -157,6 +157,8 @@ import {
   CLIENT_PAYLOAD_MAX_TOP_LEVEL,
   EVENT_TYPE_MAX_CHARS,
   FIELDS,
+  MAILBOX_BRANCH_SHAPE,
+  MAILBOX_LABEL,
   MAX_ACTIONS,
   MAX_REQUEST_ID_CHARS,
   OPS,
@@ -331,6 +333,7 @@ export function validateField(name, value, spec, where) {
     if (typeof value !== 'string') return `${at} must be a string, got ${typeof value}`;
     if (value.length === 0) return `${at} must not be empty`;
     if (bytes(value) > spec.max) return `${at} is ${bytes(value)} bytes, over its cap of ${spec.max}`;
+    if (spec.shape && !spec.shape.test(value)) return `${at} must be ${spec.what}, got a string of ${value.length} character(s) that is not one — not echoed`;
     return null;
   }
   if (spec.kind === 'list') {
@@ -1004,7 +1007,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the fields: request_id shape and cap, the one organization, the session id': 8,
   'the actions: count, the closed op list, closed keys per op, typed values': 30,
   'the platform ceilings: ten top-level properties and under 64KB, pinned with their source': 6,
-  'refused by construction: no row reaches a merge, a review, a ref, contents, a workflow, a release or an org endpoint': 22,
+  'refused by construction: no row reaches a merge, a review, a ref, contents, a workflow, a release or an org endpoint': 24,
+  "the mailbox_branch_delete row: pull and a claude/mailbox-* branch and nothing else, any other name refused before the dispatch and never echoed; ONE bodiless DELETE of that one ref, carrying the pull and the branch to the executor's fences; contents write, a literal grant, so the mint widens nothing; and it rides the close stroke": 6,
   'the normalised payload: only judged keys travel': 3,
   'the CLI: a file, the event file, GitHub outputs, and the exit ladder': 12,
   'the transfer row: an issue never a pull, a target from the governed roster never the source, a stroke of its own to one target, labels never created': 12,
@@ -1018,8 +1022,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "advisory_read: ghsa_id and public_key alone — the key its own kind, an X25519 key in base64 SPKI DER; a malformed key or id refused before any request and never echoed; ONE GET of one advisory; a stroke of its own whose token alone carries repository-advisories READ; the seal opening byte for byte for its own read and key alone, the parts inside the runner's caps, the sender gate's one setting with every other closed, and the fences, printing no id, state or field": 28,
 });
 // Raised 11 → 12 with the run_rerun_failed battery, 12 → 13 with the hierarchy rows' battery, 13 → 15 with the event
-// file's battery and the advisory rows' battery, 15 → 16 with advisory_read's: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 16;
+// file's battery and the advisory rows' battery, 15 → 16 with advisory_read's, 16 → 17 with mailbox_branch_delete's: one
+// battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 17;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -1164,6 +1169,7 @@ export async function selfTest() {
       pr_draft: { pull: 1 },
       automerge_enable: { pull: 1 },
       automerge_disable: { pull: 1 },
+      mailbox_branch_delete: { pull: 1, branch: 'claude/mailbox-ui-3' },
       transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
       sub_issue_add: { issue: 1, sub_issue: 2 },
       sub_issue_remove: { issue: 1, sub_issue: 2 },
@@ -1198,7 +1204,7 @@ export async function selfTest() {
   battery('refused by construction: no row reaches a merge, a review, a ref, contents, a workflow, a release or an org endpoint');
   {
     const sample = {
-      issue: 7, pull: 7, comment_id: 7, body: 'b', title: 't', head: 'h', base: 'main', labels: ['a b'], assignees: ['u'], reviewers: ['u'], team_reviewers: ['t'], state: 'closed', state_reason: 'completed', expected_head_sha: SHA, target_repo: `${TARGET_OWNER}/objectui`,
+      issue: 7, pull: 7, comment_id: 7, body: 'b', title: 't', head: 'h', base: 'main', branch: 'claude/mailbox-ui-3', labels: ['a b'], assignees: ['u'], reviewers: ['u'], team_reviewers: ['t'], state: 'closed', state_reason: 'completed', expected_head_sha: SHA, target_repo: `${TARGET_OWNER}/objectui`,
       workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF, run_id: 7, sub_issue: 8, ghsa_id: GHSA, collaborators: ['u'],
       summary: 's', description: 'd', severity: 'low', cwe_ids: ['CWE-79'], advisory_state: 'closed', packages: ['p'], versions: [VERSION], public_key: READER.spki,
     };
@@ -1216,6 +1222,9 @@ export async function selfTest() {
     t("the governed-review follow-up runs after exactly pr_ready — derived from the rows, never listed; ⛔ pr_create is OFF it, the draft open summons nobody and a human is asked at the seat's hand-off (pr_request_reviewers after ACCEPT + a same-head PASS) — and its two writes are a POST to requested_reviewers carrying requested and a POST to the additive issue-assignees endpoint carrying assigned, both in the family pin above", [GOVERNED_REVIEW_OPS, OPS.pr_create.governedReview ?? null, everyRequest.filter((r) => r.governedReview).map((r) => [r.op, r.verb, r.path, r.requested ?? null, r.assigned ?? null])], [['pr_ready'], null, [['pr_ready', 'POST', `/repos/${TARGET_OWNER}/objectstack/pulls/7/requested_reviewers`, ['u'], null], ['pr_ready', 'POST', `/repos/${TARGET_OWNER}/objectstack/issues/7/assignees`, null, ['u']]]]);
     t('…an empty list spells no request, and a governedReview row is never a row whose spelled requests change: pr_create and pr_ready keep the request lists they always had', [governedReviewRequests('o/r', 7), OPS.pr_create.requests({ op: 'pr_create', title: 't', head: 'h', base: 'b' }, 'o/r').length, OPS.pr_ready.requests({ op: 'pr_ready', pull: 7 }, 'o/r').length], [[], 1, 1]);
     t('⛔ no request path reaches a refused family', everyRequest.filter((r) => REFUSED_PATH_FAMILIES.some((re) => re.test(r.path))).map((r) => `${r.op} ${r.path}`), []);
+    t("⛔ the ONE request any row sends under /git/ is mailbox_branch_delete's DELETE of one claude/mailbox-* ref — no create, no move, no other ref", everyRequest.filter((r) => r.path.includes('/git/')).map((r) => [r.op, r.verb, r.path]), [['mailbox_branch_delete', 'DELETE', `/repos/${TARGET_OWNER}/objectstack/git/refs/heads/claude/mailbox-ui-3`]]);
+    const gitTails = ['refs', 'refs/heads/main', 'refs/heads/claude/project-thread-x', 'refs/heads/mailbox/os-zhuang/triage-1', 'refs/heads/claude/mailbox-ui-3/x', 'refs/heads/claude/mailbox-', 'refs/heads/claude/mailbox-UI-3', 'refs/heads/claude/mailbox-a..b', 'refs/tags/claude/mailbox-ui-3', 'ref/heads/claude/mailbox-ui-3', 'matching-refs/heads/claude', 'trees', 'blobs', 'commits', 'tags'];
+    t('positive control: every other /git/ path — a ref create, another or a nested ref, a tag, a tree, blob or commit — and /contents/ are still caught, while the one mailbox ref is caught by none', [gitTails.filter((tail) => !REFUSED_PATH_FAMILIES.some((re) => re.test(`/repos/o/r/git/${tail}`))), REFUSED_PATH_FAMILIES.some((re) => re.test('/repos/o/r/contents/a')), REFUSED_PATH_FAMILIES.filter((re) => re.test('/repos/o/r/git/refs/heads/claude/mailbox-ui-3')).length], [[], true, 0]);
     t('⛔ the table\'s one PUT is pr_update_branch\'s update-branch, an action endpoint — no PUT reaches /labels or /assignees, the whole-set replaces', [everyRequest.filter((r) => r.verb === 'PUT').map((r) => `${r.op} ${r.path}`), everyRequest.some((r) => r.verb === 'PUT' && /\/(labels|assignees)$/.test(r.path))], [[`pr_update_branch /repos/${TARGET_OWNER}/objectstack/pulls/7/update-branch`], false]);
     t("every verb is one of POST, PATCH, PUT, DELETE — but advisory_read's GET of one advisory, the one GET any row sends, which writes nothing", [everyRequest.filter((r) => r.verb !== 'GET').every((r) => ['POST', 'PATCH', 'PUT', 'DELETE'].includes(r.verb)), everyRequest.filter((r) => r.verb === 'GET').map((r) => `${r.op} ${r.path}`)], [true, [`advisory_read /repos/${TARGET_OWNER}/objectstack/security-advisories/${GHSA}`]]);
     t('pr_update_branch spends pull-requests — where GitHub\'s ledger lists update-branch, server-to-server, no additional permission — and carries the sha in its body', [OPS.pr_update_branch.permission, OPS.pr_update_branch.requests({ op: 'pr_update_branch', pull: 7, expected_head_sha: SHA }, 'o/r')[0].body], ['pull-requests', { expected_head_sha: SHA }]);
@@ -1233,16 +1242,16 @@ export async function selfTest() {
     t('labels_remove is one directed DELETE per name, URL-encoded, idempotent on 404', OPS.labels_remove.requests({ op: 'labels_remove', issue: 1, labels: ['a b', 'c'] }, 'o/r').map((r) => [r.verb, r.path, r.idempotent404]), [['DELETE', '/repos/o/r/issues/1/labels/a%20b', true], ['DELETE', '/repos/o/r/issues/1/labels/c', true]]);
     t('every op names a permission the token is narrowed to', OP_NAMES.every((op) => OPS[op].permission in PERMISSIONS));
     // The permission map, pinned entry by entry: the auto-merge mutations need `contents: write` on the
-    // App token (measured live: without it, "Resource not accessible by integration"), and NOTHING else may
-    // spend it — the table has no contents op, so the grant reaches exactly two mutations. `workflows: write`
+    // App token (measured live: without it, "Resource not accessible by integration"), and beside them only
+    // mailbox_branch_delete's one ref DELETE spends it (comment 6674408912) — no file write. `workflows: write`
     // is the maintainer's ruling (comment 6104822731): a literal grant on every stroke, spent by the
     // `automerge_enable` row alone (`alsoSpends`) when the pull it arms changes a workflow file.
     t('the map is exactly issues/pull-requests/contents/workflows/actions/repository-advisories write and metadata read', PERMISSIONS, { issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read', actions: 'write', 'repository-advisories': 'write' });
     t('workflows is spent by automerge_enable alone, as alsoSpends, and is no row\'s permission', [OP_NAMES.filter((op) => (OPS[op].alsoSpends ?? []).includes('workflows')), OP_NAMES.filter((op) => OPS[op].permission === 'workflows')], [['automerge_enable'], []]);
     t('nothing wider: every PERMISSIONS key but metadata (the sender gate\'s read) is spent by some row as its permission or an alsoSpends, and the two sets are exactly actions/contents/issues/pull-requests/repository-advisories/workflows', [Object.keys(PERMISSIONS).filter((name) => name !== 'metadata').sort(), [...new Set(OP_NAMES.flatMap((op) => [OPS[op].permission, ...(OPS[op].alsoSpends ?? [])]))].sort()], [['actions', 'contents', 'issues', 'pull-requests', 'repository-advisories', 'workflows'], ['actions', 'contents', 'issues', 'pull-requests', 'repository-advisories', 'workflows']]);
     t('the two auto-merge rows spend contents', [OPS.automerge_enable.permission, OPS.automerge_disable.permission], ['contents', 'contents']);
-    t('⛔ …and no other row does: contents reaches the two auto-merge mutations and nothing else', OP_NAMES.filter((op) => OPS[op].permission === 'contents').sort(), ['automerge_disable', 'automerge_enable']);
-    t('every row spending contents is a GraphQL auto-merge mutation, never a REST path', OP_NAMES.filter((op) => OPS[op].permission === 'contents').every((op) => OPS[op].requests({ op, pull: 1 }).every((r) => r.graphql && /PullRequestAutoMerge$/.test(r.graphql.mutation))));
+    t('⛔ …and beside them mailbox_branch_delete alone: contents reaches the two auto-merge mutations and one ref DELETE', OP_NAMES.filter((op) => OPS[op].permission === 'contents').sort(), ['automerge_disable', 'automerge_enable', 'mailbox_branch_delete']);
+    t('every row spending contents is a GraphQL auto-merge mutation but mailbox_branch_delete, whose one REST request is a DELETE of a head ref', OP_NAMES.filter((op) => OPS[op].permission === 'contents').map((op) => OPS[op].requests({ op, pull: 1, branch: 'claude/mailbox-x' }, 'o/r').map((r) => (r.graphql ? /PullRequestAutoMerge$/.test(r.graphql.mutation) : `${r.verb} ${r.path}`))), [[true], [true], ['DELETE /repos/o/r/git/refs/heads/claude/mailbox-x']]);
     const repoRoot = resolve(SELF_PATH, '../../../..');
     t('the relay files the table declares are on disk, repo-relative, and this file is one of them', [RELAY_FILES.filter((f) => !existsSync(resolve(repoRoot, f))), RELAY_FILES.includes('scripts/pm/fleet-write/validate.mjs')], [[], true]);
     // The workflow's mint step declares the SAME map: every grant outside `STROKE_SCOPED_PERMISSIONS` as a literal
@@ -1256,6 +1265,22 @@ export async function selfTest() {
     t('the workflow mint step declares exactly the non-scoped grants of PERMISSIONS as literal permission-* inputs', declared, literal);
     const scopedInputs = [...workflowText.matchAll(/^\s+permission-([a-z-]+):\s*\$\{\{\s*steps\.validate\.outputs\.permission_([a-z_]+)\s*\}\}\s*$/gm)].map((m) => [m[1], m[2]]);
     t('…and each stroke-scoped grant as an input reading the validator\'s permission_<name> output, and nothing else that way', scopedInputs, STROKE_SCOPED_PERMISSIONS.map((name) => [name, name.replace(/-/g, '_')]));
+  }
+
+  // ── the mailbox_branch_delete row ─────────────────────────────────────────
+  battery("the mailbox_branch_delete row: pull and a claude/mailbox-* branch and nothing else, any other name refused before the dispatch and never echoed; ONE bodiless DELETE of that one ref, carrying the pull and the branch to the executor's fences; contents write, a literal grant, so the mint widens nothing; and it rides the close stroke");
+  {
+    const REPO = `${TARGET_OWNER}/objectstack`;
+    const drop = (branch, extra = {}) => fixturePayload({ actions: [{ op: 'mailbox_branch_delete', pull: 30141, branch, ...extra }] });
+    t('the shape is claude/mailbox- and a lower-case slug, and the label is pm:mailbox', [MAILBOX_BRANCH_SHAPE.source, MAILBOX_LABEL], ['^claude\\/mailbox-[a-z0-9]+(?:[._-][a-z0-9]+)*$', 'pm:mailbox']);
+    t('a claude/mailbox-* branch is accepted — a seat slug with a dot among them', [validatePayload(drop('claude/mailbox-ui-3')).ok, validatePayload(drop('claude/mailbox-repo-www.objectos.ai-2')).ok], [true, true]);
+    const outside = ['claude/project-thread-mvsts5', 'mailbox/os-zhuang/triage-1', 'claude/mailbox-', 'claude/mailbox-UI-3', 'claude/mailbox-ui/3', 'claude/mailbox-a..b', 'claude/mailbox-ui-3/', 'claude/mailbox-ui-3.', ' claude/mailbox-ui-3', 'main', 'refs/heads/claude/mailbox-ui-3', 'claude/mailbox-x/../../contents/a'];
+    t("⛔ every other name is refused before the dispatch, naming the shape and never echoing the value: another thread's branch, a local seat's mailbox/ branch, an empty slug, upper case, a slash, a dot pair, a trailing slash or dot, a space, main, a qualified ref, a path escape", outside.filter((b) => validatePayload(drop(b)).errors?.join() !== `actions[0].branch must be ${FIELDS.branch.what}, got a string of ${b.length} character(s) that is not one — not echoed`), []);
+    t('closed keys: pull and branch both required, a non-integer pull and any other key refused', [refuses(fixturePayload({ actions: [{ op: 'mailbox_branch_delete', branch: 'claude/mailbox-ui-3' }] }), 'pull'), refuses(fixturePayload({ actions: [{ op: 'mailbox_branch_delete', pull: 1 }] }), 'branch'), refuses(drop('claude/mailbox-ui-3', { pull: '1' }), 'positive integer'), refuses(drop('claude/mailbox-ui-3', { sha: SHA }), 'actions[0].sha is not a key `mailbox_branch_delete` takes')], [true, true, true, true]);
+    const req = OPS.mailbox_branch_delete.requests({ op: 'mailbox_branch_delete', pull: 30141, branch: 'claude/mailbox-ui-3' }, REPO);
+    t("ONE DELETE of that one ref, no body, carrying the pull and the branch to the executor's fences — and no refused family reaches it", [req.length, req[0].verb, req[0].path, 'body' in req[0], req[0].mailboxBranch, REFUSED_PATH_FAMILIES.filter((re) => re.test(req[0].path)).length], [1, 'DELETE', `/repos/${REPO}/git/refs/heads/claude/mailbox-ui-3`, false, { pull: 30141, branch: 'claude/mailbox-ui-3' }, 0]);
+    const close = validatePayload(fixturePayload({ actions: [{ op: 'comment', issue: 30141, body: 'b' }, { op: 'issue_patch', issue: 30141, state: 'closed' }, { op: 'mailbox_branch_delete', pull: 30141, branch: 'claude/mailbox-ui-3' }] }));
+    t('contents write, a literal grant, no alsoSpends, not alone: the close stroke — comment, close, delete — is accepted and its token is the five literal grants, nothing stroke-scoped', [OPS.mailbox_branch_delete.permission, STROKE_SCOPED_PERMISSIONS.includes('contents'), OPS.mailbox_branch_delete.alsoSpends ?? null, OPS.mailbox_branch_delete.alone ?? false, close.ok, close.ok ? tokenPermissionsOf(close.payload) : null, close.ok ? outputLine(close.payload, 'permission_actions') : null], ['contents', false, null, false, true, { issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read' }, 'permission_actions=']);
   }
 
   // ── the normalised payload ────────────────────────────────────────────────
@@ -1344,7 +1369,7 @@ export async function selfTest() {
       comment: { issue: 1, body: 'b' }, comment_edit: { comment_id: 1, body: 'b' }, labels_add: { issue: 1, labels: ['a'] }, labels_remove: { issue: 1, labels: ['a'] },
       assign: { issue: 1, assignees: ['u'] }, unassign: { issue: 1, assignees: ['u'] }, issue_patch: { issue: 1, state: 'closed' }, issue_create: { title: 't', body: 'b' },
       pr_create: { title: 't', head: 'h', base: 'main' }, pr_request_reviewers: { pull: 1, reviewers: ['u'] }, pr_update_branch: { pull: 1, expected_head_sha: SHA }, pr_ready: { pull: 1 }, pr_draft: { pull: 1 },
-      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, workflow_dispatch: { workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF },
+      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, mailbox_branch_delete: { pull: 1, branch: 'claude/mailbox-ui-3' }, workflow_dispatch: { workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF },
       run_rerun_failed: { run_id: 1 }, sub_issue_add: { issue: 1, sub_issue: 2 }, sub_issue_remove: { issue: 1, sub_issue: 2 },
       advisory_report: { summary: 's', description: 'd' }, advisory_create: { summary: 's', description: 'd', packages: ['p'] }, advisory_collaborators_add: { ghsa_id: GHSA, collaborators: ['u'] }, advisory_versions: { ghsa_id: GHSA, versions: [VERSION] }, advisory_state: { ghsa_id: GHSA, advisory_state: 'draft' },
       advisory_read: { ghsa_id: GHSA, public_key: READER.spki },
@@ -1445,7 +1470,7 @@ export async function selfTest() {
     const repoRoot = resolve(SELF_PATH, '../../../..');
     const releaseText = readFileSync(resolve(repoRoot, '.github/workflows/release.yml'), 'utf8');
     const declared = declaredDispatchInputs(releaseText);
-    t('the reader reads release.yml\'s dispatch inputs off disk — force and refresh_version_pr, both boolean, both defaulting to false — so force is declared there and left out here on purpose', declared, { force: { type: 'boolean', default: 'false' }, refresh_version_pr: { type: 'boolean', default: 'false' } });
+    t('the reader reads release.yml\'s dispatch inputs off disk — force, refresh_version_pr and snapshot_next, all boolean, all defaulting to false — so force and snapshot_next are declared there and left out here on purpose', declared, { force: { type: 'boolean', default: 'false' }, refresh_version_pr: { type: 'boolean', default: 'false' }, snapshot_next: { type: 'boolean', default: 'false' } });
     t('every input an entry names is declared by its file with the type its value has, and a null entry\'s file declares none', WORKFLOW_DISPATCH_ALLOWLIST.map((file) => {
       const onDisk = declaredDispatchInputs(readFileSync(resolve(repoRoot, '.github/workflows', file), 'utf8'));
       const entry = WORKFLOW_DISPATCH_INPUTS[file];
@@ -1453,18 +1478,18 @@ export async function selfTest() {
       return [file, onDisk !== null && Object.entries(entry).every(([name, value]) => onDisk[name]?.type === typeof value)];
     }), WORKFLOW_DISPATCH_ALLOWLIST.map((file) => [file, true]));
     // The lane claim, measured: release.yml's own job guards evaluated for the relay's dispatch. The reader is pinned to
-    // read all six jobs and to tell the lanes apart (schedule, push and the repair dispatch are its controls), and a
+    // read all eight jobs and to tell the lanes apart (schedule, push and the repair dispatch are its controls), and a
     // guard mutated in memory must change the answer — so the pin can fail, and a job added there is judged by its guard.
     const started = (text, event, sent) => jobsStartedBy(text, { event, inputs: dispatchRunInputs(declaredDispatchInputs(text), sent) });
     const relayRun = started(releaseText, 'workflow_dispatch', WORKFLOW_DISPATCH_INPUTS[RELEASE]);
-    t('the reader reads every job of release.yml, each with a guard it can evaluate', [Object.keys(workflowJobs(releaseText)).sort(), relayRun.unread], [['docker', 'full-battery', 'publish', 'release-integrity', 'stale-prompts', 'version-pr'], []]);
-    t('⭐ the relay\'s dispatch starts version-pr ALONE — release-integrity, stale-prompts, full-battery, publish and docker are skipped, none undecided (measured live: runs 38351525685 and 38357219168)', [relayRun.runs, relayRun.mayRun, [...relayRun.skipped].sort()], [['version-pr'], [], ['docker', 'full-battery', 'publish', 'release-integrity', 'stale-prompts']]);
+    t('the reader reads every job of release.yml, each with a guard it can evaluate', [Object.keys(workflowJobs(releaseText)).sort(), relayRun.unread], [['docker', 'full-battery', 'publish', 'release-integrity', 'snapshot-next', 'snapshot-next-preflight', 'stale-prompts', 'version-pr'], []]);
+    t('⭐ the relay\'s dispatch starts version-pr ALONE — release-integrity, stale-prompts, full-battery, publish, docker and both snapshot jobs are skipped, none undecided (measured live: runs 38351525685 and 38357219168, before the snapshot lane existed)', [relayRun.runs, relayRun.mayRun, [...relayRun.skipped].sort()], [['version-pr'], [], ['docker', 'full-battery', 'publish', 'release-integrity', 'snapshot-next', 'snapshot-next-preflight', 'stale-prompts']]);
     const repair = started(releaseText, 'workflow_dispatch', { refresh_version_pr: false });
     t('control: the repair dispatch the entry refuses (refresh_version_pr false) starts the audit and MAY reach publish — the reader tells the lanes apart', [repair.runs.includes('release-integrity'), repair.runs.includes('version-pr'), repair.mayRun.includes('publish')], [true, false, true]);
     t('control: schedule starts version-pr alone, push starts the audit and never version-pr', [started(releaseText, 'schedule', {}).runs, started(releaseText, 'push', {}).runs.includes('release-integrity'), started(releaseText, 'push', {}).runs.includes('version-pr')], [['version-pr'], true, false]);
-    const unguarded = releaseText.replace("(github.event_name == 'workflow_dispatch' && !inputs.refresh_version_pr)", "(github.event_name == 'workflow_dispatch' && inputs.refresh_version_pr)");
+    const unguarded = releaseText.replace("(github.event_name == 'workflow_dispatch' && !inputs.refresh_version_pr && !inputs.snapshot_next)", "(github.event_name == 'workflow_dispatch' && inputs.refresh_version_pr && !inputs.snapshot_next)");
     const added = `${releaseText.replace(/\n+$/u, '')}\n\n  extra-lane:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n`;
-    t('⛔ the pin can fail: a release-integrity guard that lost its negation, or a seventh job with no guard, is started by the relay\'s dispatch', [unguarded !== releaseText && started(unguarded, 'workflow_dispatch', REFRESH).runs.includes('release-integrity'), started(added, 'workflow_dispatch', REFRESH).runs.includes('extra-lane')], [true, true]);
+    t('⛔ the pin can fail: a release-integrity guard that lost its negation, or a ninth job with no guard, is started by the relay\'s dispatch', [unguarded !== releaseText && started(unguarded, 'workflow_dispatch', REFRESH).runs.includes('release-integrity'), started(added, 'workflow_dispatch', REFRESH).runs.includes('extra-lane')], [true, true]);
   }
 
   // ── the run_rerun_failed row ──────────────────────────────────────────────
@@ -1501,7 +1526,7 @@ export async function selfTest() {
       comment: { issue: 1, body: 'b' }, comment_edit: { comment_id: 1, body: 'b' }, labels_add: { issue: 1, labels: ['a'] }, labels_remove: { issue: 1, labels: ['a'] },
       assign: { issue: 1, assignees: ['u'] }, unassign: { issue: 1, assignees: ['u'] }, issue_patch: { issue: 1, state: 'closed' }, issue_create: { title: 't', body: 'b' },
       pr_create: { title: 't', head: 'h', base: 'main' }, pr_request_reviewers: { pull: 1, reviewers: ['u'] }, pr_update_branch: { pull: 1, expected_head_sha: SHA }, pr_ready: { pull: 1 }, pr_draft: { pull: 1 },
-      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
+      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, mailbox_branch_delete: { pull: 1, branch: 'claude/mailbox-ui-3' }, transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
       sub_issue_add: { issue: 1, sub_issue: 2 }, sub_issue_remove: { issue: 1, sub_issue: 2 },
       advisory_report: { summary: 's', description: 'd' }, advisory_create: { summary: 's', description: 'd', packages: ['p'] }, advisory_collaborators_add: { ghsa_id: GHSA, collaborators: ['u'] }, advisory_versions: { ghsa_id: GHSA, versions: [VERSION] }, advisory_state: { ghsa_id: GHSA, advisory_state: 'draft' },
       advisory_read: { ghsa_id: GHSA, public_key: READER.spki },
@@ -1768,7 +1793,7 @@ export async function selfTest() {
       comment: { issue: 1, body: 'b' }, comment_edit: { comment_id: 1, body: 'b' }, labels_add: { issue: 1, labels: ['a'] }, labels_remove: { issue: 1, labels: ['a'] },
       assign: { issue: 1, assignees: ['u'] }, unassign: { issue: 1, assignees: ['u'] }, issue_patch: { issue: 1, state: 'closed' }, issue_create: { title: 't', body: 'b' },
       pr_create: { title: 't', head: 'h', base: 'main' }, pr_request_reviewers: { pull: 1, reviewers: ['u'] }, pr_update_branch: { pull: 1, expected_head_sha: SHA }, pr_ready: { pull: 1 }, pr_draft: { pull: 1 },
-      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
+      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, mailbox_branch_delete: { pull: 1, branch: 'claude/mailbox-ui-3' }, transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
       sub_issue_add: { issue: 1, sub_issue: 2 }, sub_issue_remove: { issue: 1, sub_issue: 2 },
       workflow_dispatch: { workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF }, run_rerun_failed: { run_id: 1 },
     };

@@ -277,6 +277,12 @@ import { getMetadataResource } from '../metadata-admin/registry.js';
 import { useMetadataClient, useMetadataTypes } from '../metadata-admin/useMetadata.js';
 // objectui#11773 — every draft save of an existing item sends the version its buffer was built on.
 import { readDraftForSave, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
+import {
+  authoredObjectBuffer,
+  authoredPublishedObject,
+  servedOnlyFields,
+  type ObjectLayers,
+} from '../metadata-admin/authoredObjectBuffer.js';
 // objectstack#26858 — the served verdict a flow's inspectors read at their own paths.
 import {
   DraftVerdictBodyContext,
@@ -384,6 +390,7 @@ import {
   readFields,
   writeFields,
   newField,
+  type FieldEntry,
 } from '../metadata-admin/previews/object-fields-io.js';
 import type { FieldTypeId } from '../metadata-admin/previews/field-types.js';
 import {
@@ -391,6 +398,7 @@ import {
   readExternalBinding,
   useExternalWriteState,
 } from '../metadata-admin/previews/external-object.js';
+import { readAuthoredDraft } from './authoredDraft.js';
 import { CreateItemDialog } from './CreateItemDialog.js';
 import { AddFieldPopover } from './AddFieldPopover.js';
 // objectui#11787 — the shared draft autosave, moved to its own module unchanged.
@@ -2703,7 +2711,25 @@ export function InterfacesPillar({
           setAppStatus('missing');
           return;
         }
-        const appDraftResp = appDraftRead.answer;
+        // objectstack#30859 — a pending app draft is edited as stored, read at
+        // the draft read's address: the served body's label and navigation
+        // labels are translated for this locale. A draft whose stored copy was
+        // not served installs no nav buffer, as a refused one above.
+        const servedAppDraft = extractDraftBody(appDraftRead.answer);
+        const authoredApp = servedAppDraft
+          ? (await readAuthoredDraft(client, 'app', name, servedAppDraft, { packageId: navReadAt })).buffer
+          : null;
+        if (cancelled) return;
+        if (authoredApp?.kind === 'unserved') {
+          setAppDraft({});
+          setAppDraftFor('');
+          setNavDirty(false);
+          setEditNav(false);
+          setNavHasDraft(true);
+          setError({ message: t('engine.studio.refusal.draftUnreadable', locale) });
+          setAppStatus('missing');
+          return;
+        }
         const lay = layRaw as { effective?: Record<string, unknown>; code?: Record<string, unknown> } | null;
         const eff = (lay?.effective ?? lay?.code ?? {}) as Record<string, unknown>;
         // objectui#12688 — the list row read above is the server's `/meta`
@@ -2714,7 +2740,7 @@ export function InterfacesPillar({
         // objectstack#29851 — from the same two answers: the entries the fold
         // added, by id, for the contributed rows' labels. No request of its own.
         setServedContributed(saved ? servedContributedNavOf(eff, published[0]) : NO_SERVED_CONTRIBUTED_NAV);
-        const appDraftBody = extractDraftBody(appDraftResp);
+        const appDraftBody = authoredApp ? authoredApp.body : null;
         // A served draft is the whole document — taken as-is, never spread
         // over the published layer (objectui#10765; the rule is stated once
         // at `ResourceEditPage`'s load effect). Baseline only when no draft.
@@ -3033,7 +3059,26 @@ export function InterfacesPillar({
           });
           return;
         }
-        const body = extractDraftBody(draftRead.answer);
+        // objectstack#30859 — a pending draft is edited as stored, read at the
+        // draft read's address: the served body of a page, a view, a dashboard
+        // or a report is translated for this locale. A draft whose stored copy
+        // was not served installs no buffer, as a refused one above.
+        const served = extractDraftBody(draftRead.answer);
+        const authoredRead = served
+          ? await readAuthoredDraft(client, current.type, current.name, served, { packageId: readAt })
+          : null;
+        if (cancelled) return;
+        const authored = authoredRead?.buffer ?? null;
+        if (authored?.kind === 'unserved') {
+          setDraft({});
+          setDraftFor('');
+          forgetLeafVersion();
+          leafReadAtRef.current = null;
+          setIfDirty(false);
+          setError({ message: t('engine.studio.refusal.draftUnreadable', locale) });
+          return;
+        }
+        const body = authored ? authored.body : null;
         // objectui#11799 — the baseline is read only when it is used, for a
         // leaf with no pending draft. An unsaved leaf always has one, so it
         // never asks `/layers`, which answers 404 for a name with no layer.
@@ -3053,8 +3098,16 @@ export function InterfacesPillar({
         // objectui#12688 — with no pending draft the baseline just read IS the
         // dashboard's published layer; with one, it is read below, and only
         // for a dashboard the server serves (so never for an unsaved one).
+        // objectstack#30859 — unless the stored draft was just read at the
+        // leaf's owner: that answer carries the published layer too.
         if (current.type === 'dashboard') {
-          setLeafPublished({ key: leafKeyOf(current), doc: body ? null : baseline, read: !body });
+          const pairedLayers = body && readAt === (current.addedIn ?? packageId) ? authoredRead?.layers : null;
+          if (pairedLayers) {
+            const doc = (pairedLayers.effective ?? pairedLayers.code ?? null) as Record<string, unknown> | null;
+            setLeafPublished({ key: leafKeyOf(current), doc, read: true });
+          } else {
+            setLeafPublished({ key: leafKeyOf(current), doc: body ? null : baseline, read: !body });
+          }
         }
         // Served draft as-is, baseline only without one (objectui#10765): a
         // spread over `effective` resurrects every key the draft deleted.
@@ -5688,10 +5741,6 @@ export function DataPillar({
   // Tracks which object's baseline is currently loaded — so we (re)load exactly
   // once per selected object and never clobber an in-progress draft.
   const loadedNameRef = React.useRef<string | null>(null);
-  // objectui#12508 — the names the package's published list answered at the
-  // rail's last read; `null` until it has answered. The object load below
-  // reads it to tell a draft-only object from a published one.
-  const publishedObjectNamesRef = React.useRef<ReadonlySet<string> | null>(null);
   // objectui#11773 — the version `objDraft` was saved at, sent as `If-Match` by
   // every save of this buffer (the autosave and the column reorder). A
   // conflict's "reload" re-runs the load below for the open object.
@@ -5753,6 +5802,11 @@ export function DataPillar({
   // definition's own form fields, in its order. Set where the load installs the
   // baseline, so its identity changes only with it (see `formFields`).
   const [publishedFormFields, setPublishedFormFields] = React.useState<string[]>([]);
+  // objectstack#29793 — the fields the SERVED object carries that the buffer's
+  // authored layers do not declare (the platform's injected columns, a field
+  // another package folds on). The buffer holds what the author wrote; these
+  // keep the header count and the records grid on the server's object.
+  const [servedOnly, setServedOnly] = React.useState<FieldEntry[]>([]);
   // The package's object-name namespace (framework#2694). New objects are
   // auto-prefixed with `<namespace>_` so an author can never draft a prefix-less
   // object that publish would later reject (code NAMESPACE_PREFIX).
@@ -5848,7 +5902,6 @@ export function DataPillar({
           .map((o) => ({ type: 'object', name: String(o.name ?? ''), label: String(o.label ?? o.name ?? ''), icon: o.icon ? String(o.icon) : undefined }))
           .filter((o) => o.name);
         const known = new Set(baseItems.map((o) => o.name));
-        publishedObjectNamesRef.current = new Set(known);
         for (const d of draftHeaders) {
           if (d.name && !known.has(d.name)) {
             baseItems.push({ type: 'object', name: d.name, label: draftLabels.get(d.name) ?? d.name, icon: undefined });
@@ -5916,22 +5969,13 @@ export function DataPillar({
         // layered read naming no package is refused for a name two packages hold.
         const readLayers = () => client.layered<Record<string, unknown>>('object', current.name, { packageId });
         const readDraft = () => readDraftForSave<Record<string, unknown>>(client, 'object', current.name, packageId);
-        // objectui#12508 — a draft-only object (a pending draft, and no row in
-        // the package's published list) has no layer, and `/layers` answers
-        // 404 for it. So for a name the published list does not hold, the
-        // draft is read first and the layers only without one: a name
-        // published since the rail's read has no pending draft either, so it
-        // is still asked. A published name reads both at once, as before.
-        const publishedNames = publishedObjectNamesRef.current;
-        let layRaw: unknown;
-        let draftRead: Awaited<ReturnType<typeof readDraft>>;
-        if (publishedNames && !publishedNames.has(current.name)) {
-          draftRead = await readDraft();
-          if (cancelled) return;
-          layRaw = extractDraftBody(draftRead.answer) || 'refused' in draftRead ? {} : await readLayers();
-        } else {
-          [layRaw, draftRead] = await Promise.all([readLayers(), readDraft()]);
-        }
+        // objectstack#29793 — the layers are read for every object, a
+        // draft-only one included: they hold the buffer (`authoredObjectBuffer`,
+        // the stored `draft` layer), and a caller the server serves that layer
+        // to is answered it for a draft-only name too. The draft read stays
+        // beside it for what only it carries: the version pin, the publish
+        // verdict and the per-key provenance.
+        const [layRaw, draftRead] = await Promise.all([readLayers(), readDraft()]);
         if (cancelled) return;
         // objectstack#29148 — an object draft the server refused to read is no
         // absence: no buffer is installed over it (see InterfacesPillar's leaf
@@ -5947,8 +5991,23 @@ export function DataPillar({
         const lay = layRaw as { effective?: Record<string, unknown>; code?: Record<string, unknown> };
         const baseline = (lay.effective ?? lay.code ?? {}) as Record<string, unknown>;
         const draftBody = extractDraftBody(draftRead.answer);
-        // Served draft as-is, baseline only without one (objectui#10765).
-        setObjDraft(draftBody ?? baseline);
+        // objectstack#29793 — the buffer is the object as its author wrote it:
+        // the stored draft as-is (objectui#10765), else `overlay ?? code`. The
+        // served draft above is translated and governed, so it is never the
+        // buffer; a draft whose stored copy was not served installs nothing.
+        const authored = authoredObjectBuffer(layRaw as ObjectLayers, draftBody);
+        if (authored.kind === 'unserved') {
+          setObjDraftFor('');
+          setError({ message: t('engine.studio.refusal.draftUnreadable', locale) });
+          return;
+        }
+        setObjDraft(authored.body);
+        setServedOnly(
+          servedOnlyFields((draftBody ?? baseline).fields, [
+            authored.body.fields,
+            authoredPublishedObject(layRaw as ObjectLayers).fields,
+          ]),
+        );
         // objectstack#27644 — the verdict on that body, and the body it judged.
         const draftVerdict = draftEnvelopeDiagnostics(draftRead.answer);
         setObjVerdict(editedItemDiagnostics({ hasDraft: !!draftBody, draftDiagnostics: draftVerdict, layered: lay }));
@@ -6052,12 +6111,16 @@ export function DataPillar({
   }, [client, current, extendsBase, publishNonce, extReloadNonce, recordExtRead]);
 
   // The header counts the fields the canvas shows, and names the platform's
-  // own columns apart: "2 fields (+8 system)".
+  // own columns apart: "2 fields (+8 system)". objectstack#29793 — the
+  // platform's columns are the served object's: the buffer holds only what the
+  // author wrote, so the ones it does not declare are counted from `servedOnly`.
   const fieldCount = React.useMemo(() => {
-    const all = readFields(shownDraft.fields).entries.length;
+    const { entries } = readFields(shownDraft.fields);
+    const held = new Set(entries.map((e) => e.name));
     const own = formFieldNames(shownDraft.fields).length;
-    return { own, system: all - own };
-  }, [shownDraft]);
+    const served = servedOnly.filter((e) => !held.has(e.name)).length;
+    return { own, system: entries.length - own + served };
+  }, [shownDraft, servedOnly]);
   const fieldCountText =
     tFormat(fieldCount.own === 1 ? 'engine.studio.data.fieldCountOne' : 'engine.studio.data.fieldCount', locale, {
       count: fieldCount.own,
@@ -6092,14 +6155,18 @@ export function DataPillar({
    * a PRODUCER-side fix; ListView's by-identity dependency is correct for a genuine
    * column change and is left alone.
    */
-  const gridColumnsComputed = React.useMemo(
-    () =>
-      readFields(shownDraft.fields)
+  const gridColumnsComputed = React.useMemo(() => {
+    // objectstack#29793 — the served object's columns the buffer does not
+    // declare (`owner_id` and the other injected ones) lead, as they lead the
+    // served object: the grid shows the records as the server has them.
+    const held = readFields(shownDraft.fields).entries;
+    const heldNames = new Set(held.map((e) => e.name));
+    return [...servedOnly.filter((e) => !heldNames.has(e.name)), ...held]
         // objectui#11780 — a column the platform injects AND hides (`__search`,
         // `owning_business_unit_id`) is no column an author manages. Read off
         // the definition this memo already holds, so the key stays
         // `objDraft.fields` and the identity reasoning above is unchanged.
-        .entries.filter((e) => !isStudioHiddenSystemField(e.def))
+        .filter((e) => !isStudioHiddenSystemField(e.def))
         .map((e) => e.name)
         .filter((n) => !STUDIO_SYSTEM_FIELD_NAMES.has(n) && n !== 'actions')
         // cloud#1652 — a column the server does not have yet must not reach the
@@ -6114,9 +6181,8 @@ export function DataPillar({
         // what the grid asks for. The new field is still selected in the
         // inspector, which is where it gets configured; it joins the grid once
         // it is published and therefore queryable.
-        .filter((n) => publishedFieldNames.has(n)),
-    [shownDraft.fields, publishedFieldNames],
-  );
+        .filter((n) => publishedFieldNames.has(n));
+  }, [shownDraft.fields, publishedFieldNames, servedOnly]);
   // objectstack#28575 — with a base object's extension open, the folded object
   // (`shownDraft`) is rebuilt on every extension edit, so a label typed into an
   // extension field would hand the grid a fresh columns array per keystroke:

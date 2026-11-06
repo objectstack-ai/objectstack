@@ -1109,22 +1109,29 @@ export function labelNames(issue) {
  * Lane labels retired INTO another lane, read as that lane everywhere this
  * sweep compares a card's `domain:*` label with a seat's (maintainer ruling
  * 2026-10-22, letter 乙: `domain:engine`, `domain:services` and `domain:cli`
- * fold into `domain:server`). The transition is designed to interrupt nothing:
+ * fold into `domain:server`; `domain:rest`, never a lane of its own, is read
+ * the same way by the maintainer's 2026-11-06 「车道的问题同意」). The
+ * transition is designed to interrupt nothing:
  * in-flight cards keep their old label until they land, open cards are
  * relabelled in batches by triage after the merge lands, and seat posts are
- * retitled at each seat's next round — so for a while one lane is spelled four
+ * retitled at each seat's next round — so for a while one lane is spelled five
  * ways on the board. Every lane comparison below goes through
  * {@link canonicalLane}, which is what lets a `domain:server` seat count a
  * `domain:engine` queue card as its own, a seat still titled `domain:cli` see
  * a claim on a `domain:server` card, and the census count a card carrying both
  * spellings once. ⛔ An alias map, never a vocabulary: it says nothing about
  * which labels EXIST (that is `scripts/pm/ensure-pm-labels.sh`), and the
- * cleanup PR that retires the three label objects deletes these rows with them.
+ * cleanup PR that retires the label objects deletes these rows with them. The
+ * write doors (`issue-create.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`)
+ * read this same map to WRITE `domain:server` in an alias's place
+ * (`rewriteRetiredLaneLabels`, `fleet-write/dispatch.mjs`): a rewrite, never a
+ * refusal.
  */
 export const LANE_LABEL_ALIASES = Object.freeze({
   'domain:engine': 'domain:server',
   'domain:services': 'domain:server',
   'domain:cli': 'domain:server',
+  'domain:rest': 'domain:server',
 });
 
 /**
@@ -8339,6 +8346,66 @@ export function h74QueuedWithoutTriageAudit(issue, commentBodies, parent) {
     'never a label, comment or body written from this script. Exempt by design: `tracking`, `pm:epic`, ' +
     '`pm:seat`, `qa-run`, `status:parked`, `queue-flake-anchor` and `platform-checklist-watchdog` carriers; a non-fleet card (human ' +
     'author, no seat signature); a main-red anchor card; a sub-issue inheriting its parent\'s domain or grade.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H75 — an OPEN PR whose body states a CROSS-REPO issue as its premise, when
+// that issue CLOSED after the PR opened. Maintainer word, 2026-11-06, verbatim:
+// 「平台的问题应该在平台处理」. Measured: an app-repo PR opened 01:54Z to build a
+// workaround because a platform door "answered 501", citing the platform card;
+// that card closed 02:10Z, fixed at its source, and the PR sat on the governed
+// review route on the stale premise with nothing re-reading it.
+//
+// The anchors are the filing card's three spellings, never imagined ones
+// (`PROSE_BLOCKER_ANCHORS`'s rule). Only CROSS-REPO refs are targets: a local
+// premise is the same board's business and H19's. Targets ride H19's resolver
+// and cache, capped per PR like H4's prose candidates. ⛔ Report-only (triage:
+// 「新增门禁默认否」): the remedy is a re-measure before ACCEPT or hand-off.
+// ---------------------------------------------------------------------------
+
+/** The premise spellings H75 reads a line for: "because …", "blocked by/on …", "answers 501 (…)". */
+export const H75_PREMISE_ANCHOR = /\bbecause\b|\bblocked (?:by|on)\b|\banswer(?:s|ed)? [1-5]\d\d\b/iu;
+
+/** Every distinct CROSS-REPO ref on a premise-anchored line of a PR body, at most `H4_PROSE_CANDIDATE_CAP`. */
+export function h75PremiseTargets(pr, ownerRepo = OWNER_REPO) {
+  const out = new Map();
+  for (const raw of String(pr?.body ?? '').split(/\r?\n/)) {
+    const line = undecorateProseLine(raw);
+    if (!H75_PREMISE_ANCHOR.test(line)) continue;
+    for (const m of line.matchAll(PROSE_REF_SCAN)) {
+      if (!m[1] || /^pr$/iu.test(m[1])) continue;
+      const target = blockerTargetKey({ repo: m[1], number: m[2] }, ownerRepo);
+      if (!target.local && Number.isFinite(target.number)) out.set(target.key, target);
+    }
+  }
+  return [...out.values()].slice(0, H4_PROSE_CANDIDATE_CAP);
+}
+
+/**
+ * H75 — null when clean, else the finding sentence. A target closed BEFORE the
+ * PR opened is clean (the author wrote against a known state); an unresolved
+ * one fires UNJUDGED, never clean (#4690).
+ */
+export function h75PremiseClosedSinceOpened(pr, resolutions) {
+  const opened = Date.parse(pr?.created_at ?? '');
+  if (!Number.isFinite(opened) || !Array.isArray(resolutions)) return null;
+  const stale = resolutions.filter((r) => r?.state === 'closed' && Date.parse(r.closedAt ?? '') > opened);
+  if (stale.length) {
+    return (
+      `open PR whose body states ${stale.map((r) => `\`${r.key}\` (closed ${r.closedAt})`).join(', ')} as its ` +
+      `premise, and that issue CLOSED after this PR opened (${pr.created_at}). The reason this PR exists may be ` +
+      'gone, fixed at its source: re-measure the premise before ACCEPT or human hand-off, and when the platform ' +
+      'fixed it, withdraw the app-side workaround rather than land it. Report-only: ⛔ never a label, comment or ' +
+      'body written from this script.'
+    );
+  }
+  const unread = resolutions.filter((r) => r?.state === 'unresolved');
+  if (!unread.length) return null;
+  return (
+    `${UNJUDGED_MARKER} open PR whose body states ${unread.map((r) => `\`${r.key}\` (${r.detail})`).join(', ')} ` +
+    'as a cross-repo premise that could NOT be read this sweep — whether it closed after this PR opened is ' +
+    'UNJUDGED, not settled. Read it by hand before ACCEPT: an unreadable premise is not a live one.'
   );
 }
 
@@ -15661,6 +15728,48 @@ export function h72OffTableMailboxLines(reading, nowMs = Date.now()) {
 }
 
 // ---------------------------------------------------------------------------
+// H76 — an OPEN PR with NO assignee, a `pm:mailbox` PR excepted. Ruling record
+// 6674390671 (letter A): a PR names its owner — the dev's `pr_create` carries
+// the claim's `Account:` as its assignee, and a hand-over (sibling takeover,
+// release, reassignment) re-assigns the PR in the same stroke as the claim
+// change (`references/execution-duties.md` 认领). The same ruling makes this
+// row report-only, ⛔ no gate. A mailbox is a seat's doorbell, never a delivery
+// (`project-forms.md` 〈信箱 PR〉), so it is exempt; its label is
+// `mailbox-open.mjs`'s MAILBOX_LABEL, handed in by the sweep, never spelled
+// here. When the sweep could not load that label the row cannot tell a mailbox
+// from a delivery, so it fires UNJUDGED, never clean (#4690). Drafts are
+// INCLUDED: a dev's PR stays a draft until its seat lands it. Free — it reads
+// the open listing already in hand.
+// ---------------------------------------------------------------------------
+
+/**
+ * H76 — null when clean or out of scope, else the finding sentence.
+ *
+ * @param {object} pr — a `/pulls?state=open` list row.
+ * @param {string} mailboxLabel — `mailbox-open.mjs`'s MAILBOX_LABEL, handed in by the sweep; anything else is unread.
+ */
+export function h76OpenPrWithoutAssignee(pr, mailboxLabel) {
+  if (!pr || pr.state === 'closed') return null;
+  if ((pr.assignees ?? []).length > 0 || pr.assignee) return null;
+  if (typeof mailboxLabel !== 'string' || mailboxLabel === '') {
+    return (
+      `${UNJUDGED_MARKER} open PR with NO assignee, and the mailbox label could not be read this sweep — ` +
+      'whether it is an exempt mailbox PR is UNJUDGED, not settled. Read its labels by hand: a mailbox is ' +
+      'exempt, any other open PR owes its owner as assignee.'
+    );
+  }
+  if (labelNames(pr).includes(mailboxLabel)) return null;
+  return (
+    'open PR with NO assignee. A PR names its owner (ruling record 6674390671): the dev\'s `pr_create` carries ' +
+    'the claim\'s `Account:`, and a hand-over (sibling takeover, release, reassignment) re-assigns the PR in the ' +
+    'same stroke as the claim change. Remedy — WHO and HOW: the seat holding the card this PR names assigns that ' +
+    'card\'s assignee through the relay (`assign` op, the PR number as `issue`); a bot PR with no card takes its ' +
+    'owning lane seat\'s account, or stays unassigned with a note. ⛔ Report-only: nothing is written from this ' +
+    `script. Out of scope: a \`${mailboxLabel}\` PR (a seat's doorbell, never a delivery).`
+  );
+}
+
+// ---------------------------------------------------------------------------
 // H64 (#18069, re-keyed by #18237) — a seat- or dev-signed artefact that names
 // no session.
 //
@@ -19633,6 +19742,9 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // ⛔ Not `inventory`: it alarms about one card.
   H74: 'state',
 
+  // H75 is a `stall`, H19's band for H19's reason: the PR's premise outlived itself and nothing re-reads it.
+  H75: 'stall',
+
   // H63 is a `state`, and the other three bands are refused on their own
   // criteria. ⛔ Not `gate`: that band exists for the row that can tell a
   // STRIPPED gate from an ungated card — an ABSENCE reading as a green light —
@@ -19847,6 +19959,11 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // is stopped (not `stall`), and no write on the board repairs a sent comment
   // (not `state`) — the repair is the next bell, spelled from the table.
   H72: 'inventory',
+
+  // H76 is a `state`, H1's band for H1's reason: a live PR half-written — the
+  // owner the ruling makes it name is missing, and the repair is one relay
+  // `assign` on the board. ⛔ Not `stall`: an unowned PR can still land.
+  H76: 'state',
 });
 
 const FAMILY_BAND_RANK = new Map(HALF_STATE_FAMILY_BANDS.map((b) => [b.name, b.rank]));
@@ -23734,6 +23851,22 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     }
   }
 
+  // H76 — an open PR with no assignee, off the listing above, free. The mailbox
+  // label is imported LAZILY for H72's reason (banner above `h72NeedsThread`);
+  // a failed import leaves it unread, and every unowned PR then fires UNJUDGED.
+  {
+    let mailboxLabel = null;
+    try {
+      ({ MAILBOX_LABEL: mailboxLabel } = await import('./mailbox-open.mjs'));
+    } catch {
+      mailboxLabel = null;
+    }
+    for (const pr of seenPrs.values()) {
+      const unowned = h76OpenPrWithoutAssignee(pr, mailboxLabel);
+      if (unowned) findings.push([pr, 'H76', unowned]);
+    }
+  }
+
   // H16 — the only predicate here whose input no listing carries:
   // `mergeable_state` lives on the single-PR endpoint alone. One GET per
   // CANDIDATE (the gathering policy is `h16NeedsDetail`, which answers from
@@ -24642,6 +24775,14 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   stats.crossRepoProbed = repoReadCache.size;
   stats.crossRepoUnreadable = [...repoReadCache.values()].filter((v) => v === false).length;
 
+  // H75 — premise freshness over the open PRs listed above, on H19's resolver and cache (drafts included).
+  for (const pr of seenPrs.values()) {
+    const resolutions = [];
+    for (const target of h75PremiseTargets(pr)) resolutions.push(await resolveBlockerTarget(target));
+    const stale = h75PremiseClosedSinceOpened(pr, resolutions);
+    if (stale) findings.push([pr, 'H75', stale]);
+  }
+
   // -- H40 — the dangling-reference patrol (#13634) --------------------------
   //
   // Runs LAST, deliberately. It is the only pass here whose cost is a budget
@@ -25238,6 +25379,9 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // through this predicate — lives in record-recognisers.mjs's doorbell battery,
   // because this self-test cannot import that module (H62's banner).
   'H72 mailbox off-table bells': 20,
+  // Registered with the unowned-PR row, pin just under the count: the firing, the assignee/mailbox/closed
+  // exemptions, the unread-label UNJUDGED leg, the text, the band and the wiring.
+  'H76 unowned open PR': 11,
   // Registered with the ruled-card-in-the-box row (#29386), pin just under the
   // count: the firing case, the label / fence / anchoring / id controls each
   // beside its positive twin, the threshold boundary, the governing stamp, the
@@ -25248,6 +25392,9 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // channel, every exemption beside a non-exempt twin, the population edges,
   // the three thread states, the text, the summary pair and the band.
   'H74 first-touch audit': 46,
+  // Registered with the premise-freshness row, pin just under the count: the measured timeline firing, its
+  // before-open / open / local / unanchored controls, the UNJUDGED leg, the cap, the text and the band.
+  'H75 premise freshness': 15,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
@@ -28582,6 +28729,26 @@ async function selfTest() {
   b(BATTERY28675, '⭐ H72: the sweep takes the ONE reader and the opener\'s label LAZILY — `mailboxEvents` from record-recognisers.mjs, MAILBOX_LABEL from mailbox-open.mjs — and spells no doorbell key of its own', (() => { const src = readFileSync(fileURLToPath(import.meta.url), 'utf8'); return src.includes("import('./record-recognisers.mjs')") && src.includes("import('./mailbox-open.mjs')") && !/^import [^\n]*from '\.\/(?:record-recognisers|mailbox-open)\.mjs'/mu.test(src) && !src.includes(['MAILBOX_KEYS', '='].join(' ')); })(), true);
   b(BATTERY28675, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY28675) && SELF_TEST_BATTERIES[BATTERY28675] > 0, true);
 
+  // -- H76: an open PR with no assignee (ruling record 6674390671, letter A). The fixture is a relay-opened dev
+  //    draft as the card measured them (26 of 27 open PRs unassigned), offline, never a live read.
+  const BATTERY76 = 'H76 unowned open PR';
+  const MAILBOX76 = 'pm:mailbox';
+  const pr76 = (extra = {}) => ({ number: 30778, state: 'open', draft: true, assignees: [], assignee: null, labels: [{ name: 'skip-changeset' }], user: { login: 'objectstack-fleet[bot]', type: 'Bot' }, ...extra });
+  const row76 = String(h76OpenPrWithoutAssignee(pr76(), MAILBOX76) ?? '');
+  b(BATTERY76, 'H76 fires: an open dev draft with no assignee and no mailbox label', row76.length > 0 && !isUnjudgedFinding(row76), true);
+  b(BATTERY76, 'H76 row: names the ruling, the claim\'s `Account:`, the relay `assign` op, the bot-PR arm and the report-only boundary', ['ruling record 6674390671', 'the claim\'s `Account:`', '`assign` op', 'owning lane seat\'s account', 'Report-only'].every((x) => row76.includes(x)), true);
+  b(BATTERY76, 'H76: a ready (non-draft) PR fires exactly like a draft — drafts are included, not the only population', typeof h76OpenPrWithoutAssignee(pr76({ draft: false }), MAILBOX76), 'string');
+  b(BATTERY76, '⛔ H76: a PR with an assignee is clean — the list field or the legacy single field', [h76OpenPrWithoutAssignee(pr76({ assignees: [{ login: 'os-elon-musk' }] }), MAILBOX76), h76OpenPrWithoutAssignee(pr76({ assignee: { login: 'os-elon-musk' } }), MAILBOX76)].join(), ',');
+  b(BATTERY76, '⛔ H76: an unassigned `pm:mailbox` PR is exempt, and its unlabelled twin is not', [h76OpenPrWithoutAssignee(pr76({ labels: [{ name: MAILBOX76 }, { name: 'pinned' }] }), MAILBOX76), typeof h76OpenPrWithoutAssignee(pr76({ labels: [{ name: 'pinned' }] }), MAILBOX76)].join(), ',string');
+  b(BATTERY76, '⛔ H76: a closed PR and a missing row are silent, never a crash', [h76OpenPrWithoutAssignee(pr76({ state: 'closed' }), MAILBOX76), h76OpenPrWithoutAssignee(undefined, MAILBOX76), h76OpenPrWithoutAssignee(null, MAILBOX76)].join(), ',,');
+  const unread76 = [null, undefined, ''].map((label) => String(h76OpenPrWithoutAssignee(pr76(), label) ?? ''));
+  b(BATTERY76, 'H76: an UNREAD mailbox label fires UNJUDGED, never clean — null, undefined and empty alike', unread76.every((t) => t.startsWith(UNJUDGED_MARKER) && isUnjudgedFinding(t)), true);
+  b(BATTERY76, '⛔ H76: …but an ASSIGNED PR stays clean with the label unread — the label is only the mailbox exemption', h76OpenPrWithoutAssignee(pr76({ assignees: [{ login: 'os-elon-musk' }] }), null), null);
+  b(BATTERY76, 'H76: not a loud finding — it never escalates a sweep', [isLoudFinding(row76), isLoudFinding(unread76[0])].join(), 'false,false');
+  b(BATTERY76, 'H76 band: registered as `state` (H1\'s), and the sweep really pushes it', `${familyBand('H76')}/${familyRegistryCoverage().emitted.includes('H76')}`, 'state/true');
+  b(BATTERY76, 'H76 wiring: every listed open PR is judged with the label taken LAZILY from mailbox-open.mjs, never spelled in the sweep', (() => { const src = readFileSync(fileURLToPath(import.meta.url), 'utf8'); return src.includes("({ MAILBOX_LABEL: mailboxLabel } = await import('./mailbox-open.mjs'));") && src.includes('const unowned = h76OpenPrWithoutAssignee(pr, mailboxLabel);'); })(), true);
+  b(BATTERY76, 'floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY76) && SELF_TEST_BATTERIES[BATTERY76] > 0 && Object.isFrozen(SELF_TEST_BATTERIES), true);
+
   // -- H73 (#29386): a RULED decision card still sitting in the decision box.
   //    Positive controls beside every negative one: the label, the fence, the
   //    anchoring, the id, the threshold, the governing stamp, the re-entry line.
@@ -28710,6 +28877,33 @@ async function selfTest() {
   b(BATTERY74, 'H74 band: registered as `state` (H13\'s), and the sweep really pushes it', `${familyBand('H74')}/${familyRegistryCoverage().emitted.includes('H74')}`, 'state/true');
   b(BATTERY74, 'H74: not a loud finding — it never escalates a sweep', isLoudFinding(row74([])), false);
   b(BATTERY74, 'floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY74) && SELF_TEST_BATTERIES[BATTERY74] > 0 && Object.isFrozen(SELF_TEST_BATTERIES), true);
+
+  // -- H75: an open PR whose cross-repo premise closed after it opened. The fixture is the measured timeline
+  //    (cloud PR opened 2026-11-05T01:54Z; the platform card it cites closed 02:10Z), offline, never a live read.
+  const BATTERY75 = 'H75 premise freshness';
+  const CLOUD75 = 'objectstack-ai/cloud';
+  const pr75 = (body, extra = {}) => ({ number: 3595, created_at: '2026-11-05T01:54:00Z', body, ...extra });
+  const BODY75 = "Builds a cloud-only path because the environment's HTTP door answered 501 (objectstack#30192).";
+  const res75 = (state, closedAt = null, extra = {}) => [{ ...blockerTargetKey({ repo: 'objectstack', number: 30192 }, CLOUD75), state, closedAt, detail: null, ...extra }];
+  const keys75 = (body, repo = CLOUD75) => h75PremiseTargets(pr75(body), repo).map((t) => t.key).join();
+  b(BATTERY75, 'H75 targets: the measured body names the platform card in full owner/repo form', keys75(BODY75), 'objectstack-ai/objectstack#30192');
+  b(BATTERY75, 'H75 targets: "blocked by" and "because" anchor a line too, decorated or not', [keys75('Blocked by `objectstack#7`.'), keys75('**Because** objectstack-ai/objectstack#8 refuses.')].join(), 'objectstack-ai/objectstack#7,objectstack-ai/objectstack#8');
+  b(BATTERY75, '⛔ H75 targets: a LOCAL ref is not a cross-repo premise, bare or repo-qualified', [keys75('because #30192 answered 501'), keys75('because objectstack#30192 answered 501', 'objectstack-ai/objectstack')].join(), ',');
+  b(BATTERY75, '⛔ H75 targets: a cross-repo ref on an UNANCHORED line is no premise', keys75('Follow-up to objectstack#30192.'), '');
+  b(BATTERY75, 'H75 targets: the per-PR cap bounds requests', h75PremiseTargets(pr75(`because ${[1, 2, 3, 4, 5, 6, 7].map((n) => `objectstack#${n}`).join(' ')}`), CLOUD75).length, H4_PROSE_CANDIDATE_CAP);
+  const fired75 = String(h75PremiseClosedSinceOpened(pr75(BODY75), res75('closed', '2026-11-05T02:10:00Z')) ?? '');
+  b(BATTERY75, 'H75 fires: the premise closed sixteen minutes after the PR opened', fired75.length > 0, true);
+  b(BATTERY75, 'H75 row: names the target, both stamps, the re-measure and the report-only boundary', ['`objectstack-ai/objectstack#30192` (closed 2026-11-05T02:10:00Z)', '(2026-11-05T01:54:00Z)', 're-measure the premise before ACCEPT', 'never a label, comment or body written'].every((x) => fired75.includes(x)), true);
+  b(BATTERY75, '⛔ H75: a premise that closed BEFORE the PR opened is clean', h75PremiseClosedSinceOpened(pr75(BODY75), res75('closed', '2026-11-05T01:50:00Z')), null);
+  b(BATTERY75, '⛔ H75: a premise still OPEN is clean', h75PremiseClosedSinceOpened(pr75(BODY75), res75('open')), null);
+  const unread75 = String(h75PremiseClosedSinceOpened(pr75(BODY75), res75('unresolved', null, { detail: 'HTTP 404' })) ?? '');
+  b(BATTERY75, 'H75: an UNRESOLVED premise fires UNJUDGED, never clean', unread75.startsWith(UNJUDGED_MARKER) && isUnjudgedFinding(unread75) && unread75.includes('(HTTP 404)'), true);
+  b(BATTERY75, 'H75: a closed premise leads even beside an unresolved one', String(h75PremiseClosedSinceOpened(pr75(BODY75), [...res75('closed', '2026-11-05T02:10:00Z'), ...res75('unresolved')])).startsWith('open PR whose body'), true);
+  b(BATTERY75, '⛔ H75: no targets, an unreadable open stamp or a missing row is silent, never a crash', [h75PremiseClosedSinceOpened(pr75(BODY75), []), h75PremiseClosedSinceOpened(pr75(BODY75, { created_at: undefined }), res75('closed', '2026-11-05T02:10:00Z')), h75PremiseClosedSinceOpened(undefined, undefined), h75PremiseTargets(undefined).length].join(), ',,,0');
+  b(BATTERY75, 'H75: not a loud finding — it never escalates a sweep', isLoudFinding(fired75), false);
+  b(BATTERY75, 'H75 band: registered as `stall` (H19\'s), and the sweep really pushes it', `${familyBand('H75')}/${familyRegistryCoverage().emitted.includes('H75')}`, 'stall/true');
+  b(BATTERY75, 'H75 wiring: the sweep resolves targets through H19\'s ONE resolver, never a fetch of its own', readFileSync(fileURLToPath(import.meta.url), 'utf8').includes('for (const target of h75PremiseTargets(pr)) resolutions.push(await resolveBlockerTarget(target));'), true);
+  b(BATTERY75, 'floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY75) && SELF_TEST_BATTERIES[BATTERY75] > 0 && Object.isFrozen(SELF_TEST_BATTERIES), true);
 
   // -- H64 — a seat- or dev-signed artefact that names no session (#18069,
   //    re-keyed by #18237) ---------------------------------------------------
@@ -31849,12 +32043,13 @@ async function selfTest() {
   b(BATTERY_SERVER, 'alias: `domain:engine` reads as `domain:server`', canonicalLane('domain:engine'), 'domain:server');
   b(BATTERY_SERVER, 'alias: `domain:services` reads as `domain:server`', canonicalLane('domain:services'), 'domain:server');
   b(BATTERY_SERVER, 'alias: `domain:cli` reads as `domain:server`', canonicalLane('domain:cli'), 'domain:server');
+  b(BATTERY_SERVER, 'alias: `domain:rest` reads as `domain:server`', canonicalLane('domain:rest'), 'domain:server');
   b(BATTERY_SERVER, 'alias control: `domain:server` is its own canonical form', canonicalLane('domain:server'), 'domain:server');
   b(BATTERY_SERVER, 'alias control: a lane the map does not name passes through untouched', canonicalLane('domain:spec'), 'domain:spec');
   b(BATTERY_SERVER, 'alias control: a non-lane label passes through untouched', canonicalLane('pm:queue'), 'pm:queue');
   b(BATTERY_SERVER, 'alias control: a non-string is handed back, never thrown on', canonicalLane(undefined), undefined);
   b(BATTERY_SERVER, 'alias map: frozen', Object.isFrozen(LANE_LABEL_ALIASES), true);
-  b(BATTERY_SERVER, 'alias map: it names exactly the three retired lanes', Object.keys(LANE_LABEL_ALIASES).sort().join(), 'domain:cli,domain:engine,domain:services');
+  b(BATTERY_SERVER, 'alias map: it names exactly the four retired lane spellings', Object.keys(LANE_LABEL_ALIASES).sort().join(), 'domain:cli,domain:engine,domain:rest,domain:services');
   b(BATTERY_SERVER, 'alias map: every value is the one surviving lane', Object.values(LANE_LABEL_ALIASES).every((v) => v === 'domain:server'), true);
   // The seat title: a post not yet retitled is the merged lane's seat, number intact.
   b(BATTERY_SERVER, 'seat title: a `domain:engine · seat 2` post reads as `domain:server`, seat 2', [seatLane(seat38('[PM seat] domain:engine · seat 2 — 🟢 os-b')).lane, seatLane(seat38('[PM seat] domain:engine · seat 2 — 🟢 os-b')).seat].join(), 'domain:server,2');

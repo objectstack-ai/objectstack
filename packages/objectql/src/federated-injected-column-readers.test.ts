@@ -309,6 +309,11 @@ const READERS: Record<string, Row> = {
     disposition: 'row-value',
     why: 'reads the tenant column off the written row; a federated row has none, so the event omits it',
   },
+  // [#30237] A recycle-bin entry belongs to the organization of the record it holds.
+  'recycle-bin/capture.ts#organizationOf :: resolveTenantFieldName()': {
+    disposition: 'row-value',
+    why: "reads the tenant column off the snapshotted root row; a federated row has none, so the entry takes the deleting context's organization",
+  },
   'relation-filter-lowering.ts#admitRelationCondition :: referenceTargetOf()': {
     disposition: 'caller-predicate',
     why: "lowers a relation condition the caller wrote; it names an injected column only when the caller did",
@@ -377,6 +382,14 @@ const READERS: Record<string, Row> = {
     disposition: 'skips',
     why: 'the recompute reads the stamp its apply keeps, and leaves the column out of its read (and its write) on a federated object',
   },
+  'record-currency-backfill.ts#resolveScope :: isFederatedUnprovisionedInjectedColumn()': {
+    disposition: 'skips',
+    why: 'the code backfill never selects an injected column a federated object does not provision',
+  },
+  'record-currency-backfill.ts#resolveScope :: organization_id': {
+    disposition: 'skips',
+    why: 'the code backfill reads the organization it counts and scopes a row by, and leaves the column out of its read on a federated object',
+  },
   'stored-expression-backfill.ts#backfillStoredExpressions :: isFederatedUnprovisionedInjectedColumn()': {
     disposition: 'skips',
     why: 'the backfill never sends an injected column a federated object does not provision',
@@ -434,6 +447,14 @@ const READERS: Record<string, Row> = {
   'assignment-rules.ts#roundRobin :: organization_id': {
     disposition: 'not-a-read',
     why: 'keys the sys_assignment_cursor row, a platform table the engine itself reads and writes',
+  },
+  'assignment-rules.ts#authoredRules :: organization_id': {
+    disposition: 'not-a-read',
+    why: "keys an organization's sys_assignment_rule rows, a platform table plugin-sharing owns",
+  },
+  'assignment-rules.ts#organizationMemberStanding :: organization_id': {
+    disposition: 'not-a-read',
+    why: 'keys the sys_member row a user target is a member by, a platform table',
   },
   'assignment-rules.ts#route :: queue': {
     disposition: 'not-a-read',
@@ -711,7 +732,7 @@ describe('[#21918] every engine reader of an injected column has a disposition t
     }
   }, SCAN_BUDGET_MS);
 
-  it('the sites that skip are exactly the cascade scan, its plan, the organization-delete count, the lifecycle tenant partition, the home-amount recompute and the stored-expression backfill', () => {
+  it('the sites that skip are exactly the cascade scan, its plan, the organization-delete count, the lifecycle tenant partition, the home-amount recompute, the record-currency backfill and the stored-expression backfill', () => {
     const skipping = new Set(
       Object.entries(READERS)
         .filter(([, row]) => row.disposition === 'skips')
@@ -723,6 +744,7 @@ describe('[#21918] every engine reader of an injected column has a disposition t
       'engine-cascade-planning.ts#planCascadeAtomicity',
       'home-amount-recompute.ts#recomputeHomeAmounts',
       'lifecycle/lifecycle-service.ts#tenantWindowsFor',
+      'record-currency-backfill.ts#resolveScope',
       'stored-expression-backfill.ts#backfillStoredExpressions',
     ]);
   });

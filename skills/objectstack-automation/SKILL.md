@@ -45,7 +45,7 @@ A **Flow** is a directed graph of nodes — the primary automation building bloc
 | `screen` | Interactive — presents UI screens to the user (wizards, forms) |
 | `schedule` | Runs on a cron/interval cadence declared on the **start node's `config.schedule`** — or a **per-record date sweep** via `config.timeRelative`, see *Time-relative triggers* |
 | `record_change` | Fires automatically on record create/update/delete. `autolaunched` + the same `record-*` binding behaves identically; `record_change` also opts into the trigger-readiness lint |
-| `api` | Inbound **webhook** — needs a start-node `secretRef` (or a literal `secret`; see *Inbound webhook triggers* below); a flow only ever started explicitly is `autolaunched` |
+| `api` | Inbound **webhook** — needs a start-node `secretRef` (see *Inbound webhook triggers* below); a flow only ever started explicitly is `autolaunched` |
 
 **A flow an installed package ships** is read-only. To change what it does, save
 a same-named flow in the base's paired `.custom` package declaring
@@ -121,9 +121,9 @@ error. **RAW** keys are read as written: a
     topic: 'task',                     // RAW; default 'notify'
     severity: 'warning',               // RAW; CLOSED enum info|warning|critical
     channels: ['inbox'],               // RAW; default inbox
-    sourceObject: 'task',              // click-through: a PAIR, else dropped
-    sourceId: { dialect: 'cel', source: 'record.id' }, // (a value slot)
-    actionUrl: '/tasks/{{ record.id }}', // text slot; overrides the synthesized link
+    sourceObject: 'task',              // link: PAIR, else dropped; none of the 3 ⇒ the
+    sourceId: { dialect: 'cel', source: 'record.id' }, // trigger record (not on delete/before-create), if any
+    actionUrl: '/tasks/{{ record.id }}', // overrides the pair
 } }
 ```
 
@@ -292,7 +292,7 @@ write them right the first time:
 
 ## Assignment rules — route a new record to a queue or a person
 
-The third automation family: `assignmentRules` on the stack routes each inserted
+`assignmentRules` on the stack routes each inserted
 row of an `ownership: 'user'` object whose `owner_id` and `queue` are both still
 empty — once, after every `beforeInsert` hook, never on update, never refusing the
 insert (ADR-0142 D5). Entries are ordered; the first whose `criteria` (CEL over
@@ -303,12 +303,12 @@ insert (ADR-0142 D5). Entries are ordered; the first whose `criteria` (CEL over
 import { defineAssignmentRule } from '@objectstack/spec/automation';
 
 export const caseIntake = defineAssignmentRule({
-  name: 'case_intake',
+  name: 'crm_case_intake',
   object: 'crm_case',
   entries: [
     { name: 'urgent', criteria: 'record.priority == "urgent"',
-      assignTo: { type: 'queue', value: 'escalations' } },           // no strategy: parked for a claim
-    { name: 'rest', assignTo: { type: 'queue', value: 'support_intake' },
+      assignTo: { type: 'queue', value: 'crm_escalations' } },       // no strategy: parked for a claim
+    { name: 'rest', assignTo: { type: 'queue', value: 'crm_support_intake' },
       strategy: 'least_loaded', load: 'record.status != "closed"' }, // or 'round_robin'; `load` only with least_loaded
   ],
 });
@@ -316,7 +316,7 @@ export const caseIntake = defineAssignmentRule({
 
 `strategy` is for a queue target only; `assignTo: { type: 'user', value: '<id>' }`
 names one owner. Queues are declared in `queues` (objectstack-data); an approval
-for the same people is `approvers: [{ type: 'queue', value: 'support_intake' }]`
+for the same people is `approvers: [{ type: 'queue', value: 'crm_support_intake' }]`
 ([Approver Types](./references/state-machines-and-approvals.md#approver-types)).
 ⛔ Never a `beforeInsert` hook that picks an owner, nor a round-robin counter field.
 
