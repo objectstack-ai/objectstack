@@ -90,7 +90,7 @@ describe.each(LAUNCHERS)('$name — the plan-awaiting-approval marker (objectui#
     renderIn('zh', launcher.element);
     publish('conv-a', true);
 
-    const zh = (builtInLocales.zh as unknown as { console: { ai: { dock: { planAwaitingApproval: string } } } })
+    const zh = (builtInLocales['zh-Hans'] as unknown as { console: { ai: { dock: { planAwaitingApproval: string } } } })
       .console.ai.dock.planAwaitingApproval;
     expect(zh).not.toBe(EN_MARKER);
     await vi.waitFor(() =>

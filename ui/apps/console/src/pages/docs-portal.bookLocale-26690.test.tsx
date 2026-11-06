@@ -155,7 +155,7 @@ describe('objectstack#26690 — the docs sidebar serves the request locale', () 
 describe("objectstack#30554 — the docs chrome's own words follow the session language", () => {
   const ENTRY = '/apps/com.example.crm/docs/manual/crm_start_login';
 
-  for (const language of ['zh', 'ja', 'es'] as const) {
+  for (const language of ['zh-Hans', 'zh-Hant', 'ja', 'es'] as const) {
     it(`a ${language} reader sees the home link and the Uncategorized title in ${language}`, async () => {
       const pack = builtInLocales[language].help;
       // Guard: the expectations are real translations, not the English words.

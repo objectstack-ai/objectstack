@@ -32,34 +32,24 @@
  *   without polluting the protocol.
  * - A converter (`specReportToPresentation`) lets the legacy renderer keep
  *   working while we migrate to spec-native rendering.
- *
- * ## Aggregation naming
- *
- * The UI spec uses `aggregate: 'unique'` while the data layer (ObjectQL,
- * `@objectstack/spec/data`) uses `count_distinct`. Use {@link mapAggregateToQL}
- * when translating a Report column into an ObjectQL `AggregationNode`.
  */
 
 // `@objectstack/spec` 17.0.0-rc.6 retired every `…Input` alias and moved the
 // bare name onto the `z.input` side: `Report`/`ReportChart` are now
 // `z.input<typeof …Schema>` and `ReportParsed`/`ReportChartParsed` carry the
-// `z.infer` shape these bindings used to read under the bare name. Both pairs
-// below are therefore re-pointed so that each local alias keeps the meaning it
-// had at rc.5 — `SpecReport`/`SpecReportChart` stay PARSED, `SpecReportInput`/
-// `SpecReportChartInput` stay INPUT. Following the rename by name alone (`X` →
-// `X`) would have silently swapped the two.
+// `z.infer` shape these bindings used to read under the bare name. The pair
+// below is therefore re-pointed so that each local alias keeps the meaning it
+// had at rc.5 — `SpecReport` stays PARSED, `SpecReportInput` stays INPUT.
+// Following the rename by name alone (`X` → `X`) would have silently swapped
+// the two.
 import type {
   ReportParsed as SpecReportType_,
   Report as SpecReportInputType_,
-  ReportChartParsed as SpecReportChartType_,
-  ReportChart as SpecReportChartInputType_,
   JoinedReportBlock as SpecJoinedReportBlockType_,
 } from '@objectstack/spec/ui';
 
 import {
   ReportSchema as SpecReportSchema_,
-  ReportChartSchema as SpecReportChartSchema_,
-  ReportType as SpecReportTypeEnum_,
   Report as SpecReportFactory_,
 } from '@objectstack/spec/ui';
 
@@ -69,8 +59,6 @@ import {
 
 export type SpecReport = SpecReportType_;
 export type SpecReportInput = SpecReportInputType_;
-export type SpecReportChart = SpecReportChartType_;
-export type SpecReportChartInput = SpecReportChartInputType_;
 
 /**
  * The four report types defined by the UI Protocol.
@@ -83,15 +71,6 @@ export type SpecReportChartInput = SpecReportChartInputType_;
 export type SpecReportTypeName = 'tabular' | 'summary' | 'matrix' | 'joined';
 
 /**
- * Aggregation enum as it appears in the *UI* Report spec
- * (`@objectstack/spec/ui` Report.columns[].aggregate).
- *
- * Note that this intentionally differs from the data-layer `AggregationFunction`
- * enum used in ObjectQL — see {@link mapAggregateToQL}.
- */
-export type SpecReportAggregate = 'sum' | 'avg' | 'max' | 'min' | 'count' | 'unique';
-
-/**
  * Date granularity for time-based grouping
  * (`Report.groupingsDown[].dateGranularity`).
  */
@@ -102,60 +81,12 @@ export type SpecReportDateGranularity = 'day' | 'week' | 'month' | 'quarter' | '
 // ---------------------------------------------------------------------------
 
 export const SpecReportSchema = SpecReportSchema_;
-export const SpecReportChartSchema = SpecReportChartSchema_;
-export const SpecReportTypeEnum = SpecReportTypeEnum_;
 
 /**
  * Spec factory helper (`Report.create`).
  * Validates the input against the spec and returns a typed `SpecReport`.
  */
 export const SpecReport = SpecReportFactory_;
-
-// ---------------------------------------------------------------------------
-// Aggregate mapping: UI spec → data layer (ObjectQL)
-// ---------------------------------------------------------------------------
-
-/**
- * The aggregation enum used by the ObjectQL data layer.
- * Kept as a string union (rather than importing the value from
- * `@objectstack/spec/data`) so this types-only package stays
- * runtime-dependency-free.
- */
-export type QLAggregationFunction =
-  | 'count'
-  | 'sum'
-  | 'avg'
-  | 'min'
-  | 'max'
-  | 'count_distinct'
-  | 'array_agg'
-  | 'string_agg';
-
-/**
- * Translate a UI-layer aggregate name into the corresponding ObjectQL
- * `AggregationFunction`. The only non-trivial mapping is `unique → count_distinct`.
- *
- * @example
- * mapAggregateToQL('unique') // 'count_distinct'
- * mapAggregateToQL('sum')    // 'sum'
- */
-export function mapAggregateToQL(aggregate: SpecReportAggregate): QLAggregationFunction {
-  switch (aggregate) {
-    case 'unique': return 'count_distinct';
-    case 'sum':
-    case 'avg':
-    case 'min':
-    case 'max':
-    case 'count':
-      return aggregate;
-    default: {
-      // Exhaustiveness check
-      const _exhaustive: never = aggregate;
-      void _exhaustive;
-      return 'count';
-    }
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Adapter: spec Report → legacy presentation ReportComponentSchema
@@ -282,25 +213,3 @@ export function isSpecReport(value: unknown): value is SpecReport {
  * rather than kept beside it.
  */
 export type JoinedReportBlock = SpecJoinedReportBlockType_;
-
-/**
- * A `SpecReport` of `type: 'joined'` carrying its constituent blocks.
- * Use this as the schema input to `ReportRenderer` (dataset-bound blocks render
- * through `DatasetReportRenderer`).
- *
- * `blocks` is the spec's own `Report.blocks`, made required. It is on the
- * PARSED tier, like `SpecReport` itself (`type` and each `order[].direction`
- * are defaulted), so each element is assignable to the authoring-tier
- * {@link JoinedReportBlock}, but not the other way round.
- */
-export type JoinedSpecReport = SpecReport & {
-  type: 'joined';
-  blocks: NonNullable<SpecReport['blocks']>;
-};
-
-/** Type guard for joined reports with a `blocks` array. */
-export function isJoinedSpecReport(value: unknown): value is JoinedSpecReport {
-  if (!isSpecReport(value)) return false;
-  const v = value as Record<string, unknown>;
-  return v.type === 'joined' && Array.isArray((v as { blocks?: unknown }).blocks);
-}

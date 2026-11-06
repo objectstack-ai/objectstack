@@ -28,6 +28,7 @@ export default defineConfig({
       { find: /^@objectstack\/spec$/, replacement: path.resolve(HERE, '../../spec/src/index.ts') },
       { find: /^@objectstack\/spec\/data$/, replacement: path.resolve(HERE, '../../spec/src/data/index.ts') },
       { find: /^@objectstack\/spec\/integration$/, replacement: path.resolve(HERE, '../../spec/src/integration/index.ts') },
+      { find: /^@objectstack\/spec\/kernel$/, replacement: path.resolve(HERE, '../../spec/src/kernel/index.ts') },
       { find: /^@objectstack\/spec\/marketplace$/, replacement: path.resolve(HERE, '../../spec/src/marketplace/index.ts') },
       { find: /^@objectstack\/verify$/, replacement: path.resolve(HERE, '../../verify/src/index.ts') },
     ],

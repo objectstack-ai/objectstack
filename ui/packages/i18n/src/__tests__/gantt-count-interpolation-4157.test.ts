@@ -32,6 +32,7 @@
  * `GanttView.tsx`, which is how the conflict key drifted in the first place.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { builtInLocales } from '../locales';
 
 /** Dotted paths under `gantt.` whose call site passes `{ count }` to `t()`. */
@@ -55,7 +56,7 @@ const at = (lang: string, dotted: string): string | undefined =>
 
 describe('gantt count-interpolation spelling (objectui#4157)', () => {
   it('covers all ten built-in packs', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
   });
 
   it.each(LANGS)('%s spells every count placeholder as i18next {{count}}', (lang) => {

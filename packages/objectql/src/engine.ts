@@ -84,6 +84,7 @@ import {
 // [#30237, ADR-0148] The recycle bin's write side: the capture body, and the
 // retention seam the host hands over (`RecycleBinCaptureHost`).
 import { openRecycleBinCapture, type RecycleBinCapture } from './recycle-bin/capture.js';
+import { emptyRecycleBin, purgeRecycleBinEntry, readPermanentDelete, type RecycleBinRemovalOptions } from './recycle-bin/purge.js';
 import type { RecycleBinRetentionSettings } from './recycle-bin/retention.js';
 // [#25522 cut 6] The predicate-write hook dispatch bodies; the methods of the
 // same names below hand each body the members it reads (`HookDispatchHost`).
@@ -105,7 +106,7 @@ import { buildEvalUser, buildProvenance, buildSession, buildUser } from './engin
 // [#25522 cut 10] The write path's reference check and the caller's read of a
 // master-detail header; the methods of the same names below hand each body the
 // members it reads (`ReferentialIntegrityHost`).
-import { assertReferencesResolve, masterDetailHeadersCallerReads, type StoredReferenceRows } from './engine-referential-integrity.js';
+import { assertReferencesResolve, masterDetailHeadersCallerReads, referencesCheckedBeforeRules, type StoredReferenceRows } from './engine-referential-integrity.js';
 // [#25522 cut 11] File-field hydration on read; the methods of the same names
 // below hand each body the members it reads (`FileReferenceHydrationHost`).
 import { callerMayReadSysFile, readParentDerivedFiles, resolveFileReferences, servableFileRows, serveRefusedFileHydration } from './engine-file-reference-hydration.js';
@@ -2732,7 +2733,10 @@ export class ObjectQL implements IObjectQLEngine {
     const readLogger = () => this.logger;
     const host: ThisParameterType<typeof assertReferencesResolve> = {
       get logger() { return readLogger(); },
-      masterDetailHeaderExists: (...a) => this.masterDetailHeaderExists(...a),
+      // [#29029] The stored rows a refused value is forgiven against are read through the caller's own door.
+      find: (...a) => this.find(...a),
+      callerReadableReferenceExists: (...a) => this.callerReadableReferenceExists(...a),
+      callerReadableReferenceRow: (...a) => this.callerReadableReferenceRow(...a),
       referenceExists: (...a) => this.referenceExists(...a),
       referenceRow: (...a) => this.referenceRow(...a),
     };
@@ -2749,13 +2753,23 @@ export class ObjectQL implements IObjectQLEngine {
     return ReferencesAndMasterDetailFacet.referenceExists.call(referencesAndMasterDetailHost.of(this), target, id, context);
   }
 
-  private masterDetailHeaderExists(
+  private callerReadableReferenceExists(
     target: string,
     id: unknown,
     context: ExecutionContext | undefined,
   ): Promise<boolean | null> {
     // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts`, its docblock with it (see `ReferencesAndMasterDetailHost`).
-    return ReferencesAndMasterDetailFacet.masterDetailHeaderExists.call(referencesAndMasterDetailHost.of(this), target, id, context);
+    return ReferencesAndMasterDetailFacet.callerReadableReferenceExists.call(referencesAndMasterDetailHost.of(this), target, id, context);
+  }
+
+  private callerReadableReferenceRow(
+    target: string,
+    id: unknown,
+    context: ExecutionContext | undefined,
+    extraFields: readonly string[],
+  ): Promise<Record<string, unknown> | false | null> {
+    // [#29029, #30205] The body lives in `engine-references-and-master-detail.ts`, its docblock with it (see `ReferencesAndMasterDetailHost`).
+    return ReferencesAndMasterDetailFacet.callerReadableReferenceRow.call(referencesAndMasterDetailHost.of(this), target, id, context, extraFields);
   }
 
   private async masterDetailHeadersCallerReads(
@@ -6044,10 +6058,18 @@ export class ObjectQL implements IObjectQLEngine {
             // [ADR-0144 D8 rule 4] A `record`-mode amount is stored with its
             // currency code, or the row is refused (`ERR_CURRENCY_CODE_REQUIRED`).
             assertRecordCurrencyCodes(object, (schemaForValidation as { fields?: unknown } | undefined)?.fields, rows[i], 'insert');
-            emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: batchSummaries ? batchSummaries.overlay(insertRelatedForRow(rows[i])) : insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) }), this.logger, object);
-            await this.assertReferencesResolve(
+            // [#29029] A write that is not a system write has its references
+            // checked BEFORE the record's validation rules: a reference the
+            // caller cannot read answers `reference_not_found`, whatever a rule
+            // would answer. A system write keeps the rules first
+            // (`referencesCheckedBeforeRules`).
+            const referencesFirst = referencesCheckedBeforeRules(opCtx.context);
+            const checkReferences = () => this.assertReferencesResolve(
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
             );
+            if (referencesFirst) await checkReferences();
+            emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: batchSummaries ? batchSummaries.overlay(insertRelatedForRow(rows[i])) : insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) }), this.logger, object);
+            if (!referencesFirst) await checkReferences();
             // [#25579] Admitted: a later row of this batch reads it in the summary.
             batchSummaries?.accept(rows[i]);
           } catch (e) {
@@ -7874,15 +7896,20 @@ export class ObjectQL implements IObjectQLEngine {
                // resolution failure fails this write closed right here.
                const updatePayload = hookContext.input.data as Record<string, unknown>;
                const permissionsForUpdate = (await this.resolveOptionPermissions(updateSchema, [updatePayload], permissionResolution))(updatePayload);
-               emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent, related: relatedForUpdate, permissions: permissionsForUpdate }), this.logger, object);
                // [#4441] A repoint is as capable of dangling as an initial link.
                // [#29062] …but a value the row already stores is not a repoint:
                // the prior row is what the check forgives a refused value against.
-               await this.assertReferencesResolve(
+               // [#29029] Before the record's validation rules unless this is a
+               // system write, as on insert (`referencesCheckedBeforeRules`).
+               const referencesFirst = referencesCheckedBeforeRules(opCtx.context);
+               const checkReferences = () => this.assertReferencesResolve(
                  updateSchema, hookContext.input.data as Record<string, unknown>,
                  opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
                  async () => [priorRecord],
                );
+               if (referencesFirst) await checkReferences();
+               emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent, related: relatedForUpdate, permissions: permissionsForUpdate }), this.logger, object);
+               if (!referencesFirst) await checkReferences();
                // [commit 9d7f7259f] The by-id driver exit — where a driver's refusal
                // leaves this door, and where a recognised unique violation
                // stops being the driver's error. `envelopeUniqueViolation`
@@ -8287,6 +8314,21 @@ export class ObjectQL implements IObjectQLEngine {
                // set — the patch is shared, so either every row picks a
                // `can`-gated option or none does. Never per row.
                const bulkPermissions = (await this.resolveOptionPermissions(updateSchema, [bulkPatch], permissionResolution))(bulkPatch);
+               // [#4441] The bulk call site too — a guard wired into single-id
+               // writes only is still a hole one call site over (AGENTS.md
+               // PD #10's own worked example, #3106).
+               // [#29062] A refused value is forgiven only when EVERY matched row
+               // already stores it (the `readPriorRows` memo, read only then);
+               // a row it is new to makes it this write's reference.
+               // [#29029] Before the record's validation rules unless this is a
+               // system write, as on insert (`referencesCheckedBeforeRules`).
+               const referencesFirst = referencesCheckedBeforeRules(opCtx.context);
+               const checkReferences = () => this.assertReferencesResolve(
+                 updateSchema, hookContext.input.data as Record<string, unknown>,
+                 opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
+                 readPriorRows,
+               );
+               if (referencesFirst) await checkReferences();
                if (rulesNeedRows) {
                    for (const row of priorRows ?? []) {
                        try {
@@ -8308,17 +8350,7 @@ export class ObjectQL implements IObjectQLEngine {
                    // rule families that never read a header.
                    emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, permissions: bulkPermissions }), this.logger, object);
                }
-               // [#4441] The bulk call site too — a guard wired into single-id
-               // writes only is still a hole one call site over (AGENTS.md
-               // PD #10's own worked example, #3106).
-               // [#29062] A refused value is forgiven only when EVERY matched row
-               // already stores it (the `readPriorRows` memo, read only then);
-               // a row it is new to makes it this write's reference.
-               await this.assertReferencesResolve(
-                 updateSchema, hookContext.input.data as Record<string, unknown>,
-                 opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
-                 readPriorRows,
-               );
+               if (!referencesFirst) await checkReferences();
                // `updateMany` presence is part of the ladder verdict resolved above.
                // [commit 9d7f7259f] The predicate driver exit, enveloped on the same
                // terms as the by-id exit above. A multi-row write names no
@@ -8647,7 +8679,7 @@ export class ObjectQL implements IObjectQLEngine {
     object: string,
     id: string | number,
     context: ExecutionContext | undefined,
-    predicate: boolean,
+    skip: boolean,
   ): RecycleBinCapture | undefined {
     // [#30237] The body lives in `recycle-bin/capture.ts`, its docblock with it (see `RecycleBinCaptureHost`).
     const readRegistry = () => this._registry;
@@ -8664,7 +8696,49 @@ export class ObjectQL implements IObjectQLEngine {
       getDriver: (...a) => this.getDriver(...a),
       buildDriverOptions: (...a) => this.buildDriverOptions(...a),
     };
-    return openRecycleBinCapture.call(host, object, id, context, predicate);
+    return openRecycleBinCapture.call(host, object, id, context, skip);
+  }
+
+  /**
+   * [#30237, ADR-0148 D1] Purge one recycle-bin entry: its rows can no longer be
+   * restored. `true` when the entry was removed; `false` when no entry with that
+   * id is visible to the caller's organization, or the composition registers no
+   * bin (`PlatformObjectsPlugin`).
+   *
+   * Authorized as the `purge` operation on the object the entry's rows belong
+   * to, the recycle-bin manager's verb: until `@objectstack/plugin-security`
+   * maps it to its grant, every caller that is not the system is refused. The
+   * body lives in `recycle-bin/purge.ts`, its docblock with it.
+   */
+  purge(entryId: string | number, options?: RecycleBinRemovalOptions): Promise<boolean> {
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof purgeRecycleBinEntry> = {
+      get _registry() { return readRegistry(); },
+      getDriver: (...a) => this.getDriver(...a),
+      buildDriverOptions: (...a) => this.buildDriverOptions(...a),
+      executeWithMiddleware: (...a) => this.executeWithMiddleware(...a),
+    };
+    return purgeRecycleBinEntry.call(host, entryId, options);
+  }
+
+  /**
+   * [#30237, ADR-0148 D1] Empty the recycle bin of one object: remove every
+   * entry of `object` the caller's organization holds, and answer how many.
+   * `0` when the composition registers no bin. A platform object (`sys_`,
+   * `cloud_`, `ai_`) is refused `400`: the bin never takes one.
+   *
+   * One `purge` operation on `object`, so one authorization covers the act,
+   * as for {@link purge}. The body lives in `recycle-bin/purge.ts`.
+   */
+  empty(object: string, options?: RecycleBinRemovalOptions): Promise<number> {
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof emptyRecycleBin> = {
+      get _registry() { return readRegistry(); },
+      getDriver: (...a) => this.getDriver(...a),
+      buildDriverOptions: (...a) => this.buildDriverOptions(...a),
+      executeWithMiddleware: (...a) => this.executeWithMiddleware(...a),
+    };
+    return emptyRecycleBin.call(host, object, options);
   }
 
   /**
@@ -8925,13 +8999,18 @@ export class ObjectQL implements IObjectQLEngine {
     // reads THIS predicate cannot be looser than this method.
     const dispatch = resolveEngineDeleteDispatch(options as EngineDeleteDispatchInput | undefined);
     const id: any = dispatch.kind === 'by-id' ? dispatch.id : undefined;
+    // [#30237, ADR-0148, Q3 = A] A permanent delete writes no recycle-bin entry
+    // and is authorized as `purge`, the recycle-bin manager's verb. Refused here,
+    // before any middleware or hook, unless it is a by-id delete of an object
+    // the bin takes (see `readPermanentDelete`).
+    const permanent = readPermanentDelete(object, options, dispatch.kind);
     // [#23221] Is this the child delete a cascade issued? Decided here, once,
     // before any middleware or hook runs, so the claim is this call's alone.
     const referentialCascadeDelete = this.claimReferentialCascadeDelete(object, id);
 
     const opCtx: OperationContext = {
       object,
-      operation: 'delete',
+      operation: permanent ? 'purge' : 'delete',
       options,
       context: options?.context,
     };
@@ -9341,8 +9420,9 @@ export class ObjectQL implements IObjectQLEngine {
               // with it: the transaction's rollback when one covers the bin,
               // the capture's compensation otherwise. A caller's `multi: true`
               // opens none, even here: the lifecycle sweep reaps by id with it.
+              // Nor does a permanent delete, which is the point of it.
               const runByIdDelete = async (writeContext?: ExecutionContext) => {
-                const bin = this.openRecycleBinCapture(object, hookContext.input.id as string | number, writeContext, options?.multi === true);
+                const bin = this.openRecycleBinCapture(object, hookContext.input.id as string | number, writeContext, options?.multi === true || permanent);
                 await this.cascadeDeleteRelations(object, [hookContext.input.id as string | number], writeContext, 0, bin?.onCollected)
                   .catch((e: unknown) => { throw cascadeStoppedRefusal(e, object); });
                 const entry = await bin?.write();

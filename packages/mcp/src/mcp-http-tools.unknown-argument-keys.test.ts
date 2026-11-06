@@ -119,6 +119,9 @@ const VALID_ARGS: Record<string, Record<string, unknown>> = {
   update_record: { objectName: 'crm_opportunity', recordId: 'r1', data: { name: 'x' } },
   // `confirm: true`: without it the confirmation gate refuses before the bridge.
   delete_record: { objectName: 'crm_opportunity', recordId: 'r1', confirm: true },
+  // [#30891] A selection is required (`where` or `recordIds`); `confirm: true`
+  // deletes, where an unconfirmed call is answered with the refusal and a preview.
+  delete_records: { objectName: 'crm_opportunity', where: { stage: 'closed_lost' }, confirm: true },
   list_actions: {},
   run_action: { actionName: 'complete_task' },
   resume_run: { runId: 'run_1' },
@@ -227,14 +230,14 @@ describe('MCP tool arguments — undeclared keys are refused (#16913)', () => {
 
   // ── The sweep: every advertised tool holds the same posture ────────────────
 
-  it('advertises the fourteen tools this sweep covers', async () => {
+  it('advertises the fifteen tools this sweep covers', async () => {
     const json = await rpc(runtime, bridge, 'tools/list');
     const names = (json.result?.tools ?? []).map((t: any) => t.name).sort();
     expect(names).toEqual(Object.keys(VALID_ARGS).sort());
     // [#15705] Twelve with `resume_run`, which this stub's bridge implements;
-    // [#30892] fourteen with `read_file` and `create_upload_link`, which it
-    // implements too.
-    expect(names).toHaveLength(14);
+    // [#30891] thirteen with `delete_records`; [#30892] fifteen with
+    // `read_file` and `create_upload_link`, which it implements too.
+    expect(names).toHaveLength(15);
   });
 
   it('every advertised tool ACCEPTS its declared arguments (the sweep control)', async () => {

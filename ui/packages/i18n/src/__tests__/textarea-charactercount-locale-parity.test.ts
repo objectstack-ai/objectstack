@@ -23,6 +23,7 @@
  * the same way, with one extra guard the sibling does not need.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { builtInLocales } from '../locales';
 
 // Derived from the map rather than left as `string[]`: `Object.keys` erases
@@ -41,7 +42,7 @@ const charactersRemainingOf = (lang: LocaleCode) =>
 
 describe('fields.textarea.characterCount locale coverage (objectui#3406)', () => {
   it('covers all ten built-in packs', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
   });
 
   it.each(LANGS)('%s defines the counter sentence as a non-empty string', (lang) => {

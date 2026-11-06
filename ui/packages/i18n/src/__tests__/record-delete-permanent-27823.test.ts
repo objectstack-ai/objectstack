@@ -21,6 +21,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { builtInLocales } from '../locales/index';
 
 type LocaleCode = keyof typeof builtInLocales;
@@ -39,7 +40,7 @@ function permanenceSentence(lang: LocaleCode): string {
 
 describe('record delete says it is permanent and the toast can name the record (objectstack#27823)', () => {
   it('reads ten packs, and the en permanence sentence is the house wording', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     // Positive control for the extraction: it lands on a real sentence, not ''.
     expect(permanenceSentence('en')).toBe('This cannot be undone.');
   });

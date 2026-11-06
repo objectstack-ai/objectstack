@@ -444,6 +444,17 @@ export const EngineDeleteOptionsSchema = lazySchema(() => BaseEngineOptionsSchem
   where: z.union([z.record(z.string(), z.unknown()), FilterConditionSchema]).optional(),
   /** Delete multiple records? If false, only the first match is deleted. Default: false */
   multi: z.boolean().default(false).optional(),
+  /**
+   * [ADR-0148 D3] Delete for good: the deleted rows are not kept in the
+   * recycle bin (`sys_recycle_bin`), so nothing can restore them. This is the
+   * privacy-erasure door, and a recycle-bin manager's act: it is authorized
+   * as the `purge` operation, not as `delete`. Only a by-id delete takes it:
+   * a delete by predicate never enters the bin, so the engine refuses
+   * `permanent: true` beside `multi: true` or without an id.
+   */
+  permanent: z.boolean().optional().describe(
+    'Delete for good: the rows skip the recycle bin and cannot be restored. Authorized as the `purge` operation, not `delete`. By-id deletes only.',
+  ),
 }).describe('QueryAST-aligned options for DataEngine.delete operations'));
 
 // --------------------------------------------------------------------------

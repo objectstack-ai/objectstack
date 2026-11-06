@@ -213,7 +213,7 @@
 
 import { actionCopySource, actionErrorDetail, refusalFieldErrors } from '@object-ui/core';
 import type { ActionResult } from '@object-ui/core';
-import { getLoadedBuiltInLocales } from '@object-ui/i18n';
+import { getLoadedBuiltInLocales, resolveBuiltInLanguage } from '@object-ui/i18n';
 import { declaredUserMessage, delegationScopeMessage, isPermissionError } from '@object-ui/react';
 import { errorCodeIs } from '@object-ui/types';
 import type { AutomationResult } from '@objectstack/spec/contracts';
@@ -303,8 +303,9 @@ type PermissionLinePack = { form?: { noPermissionToSave?: unknown } } | undefine
 
 /**
  * The record form's permission line (`form.noPermissionToSave`) in `locale`,
- * read from the RESIDENT built-in catalogue — exact tag first, then its base
- * language, the registry's own order (the same read `LoadingScreen` makes).
+ * read from the RESIDENT built-in catalogue of the table tag `locale` means —
+ * `resolveBuiltInLanguage`, the registry's own resolution (`zh-CN` → `zh-Hans`,
+ * `zh-TW` → `zh-Hant`, `fr-CA` → `fr`; the same read `LoadingScreen` makes).
  * The active language's catalogue is resident whenever the console runs in
  * it; anything else answers the resident `en` catalogue, which always is.
  * The literal is the last resort only for a registry that answers neither.
@@ -318,10 +319,9 @@ type PermissionLinePack = { form?: { noPermissionToSave?: unknown } } | undefine
 function permissionDeniedLine(locale: string | undefined): string {
     const usable = (line: unknown): string | undefined =>
         typeof line === 'string' && line.trim() ? line : undefined;
-    const base = locale ? locale.toLowerCase().split('-')[0] : undefined;
+    const tag = locale ? resolveBuiltInLanguage(locale) : null;
     return (
-        (locale ? usable((getLoadedBuiltInLocales()[locale] as PermissionLinePack)?.form?.noPermissionToSave) : undefined)
-        ?? (base ? usable((getLoadedBuiltInLocales()[base] as PermissionLinePack)?.form?.noPermissionToSave) : undefined)
+        (tag ? usable((getLoadedBuiltInLocales()[tag] as PermissionLinePack)?.form?.noPermissionToSave) : undefined)
         ?? usable((getLoadedBuiltInLocales().en as PermissionLinePack)?.form?.noPermissionToSave)
         ?? "You don't have permission to save this record."
     );

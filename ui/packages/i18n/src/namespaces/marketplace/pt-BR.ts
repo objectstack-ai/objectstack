@@ -1,7 +1,7 @@
 /**
- * Portuguese (pt) — the lazy `marketplace` namespace's catalogue.
+ * Portuguese, Brazil (pt-BR) — the lazy `marketplace` namespace's catalogue.
  *
- * A PARTIAL pack: the same shape as `../../locales/pt.ts`, holding only
+ * A PARTIAL pack: the same shape as `../../locales/pt-BR.ts`, holding only
  * the `marketplace` group, which `./index.ts` deep-merges into an i18next
  * instance when a marketplace page mounts. `./index.ts` says what the
  * namespace is, why it is lazy, and which gates read this file.

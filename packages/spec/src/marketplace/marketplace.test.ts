@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   PublisherVerificationSchema,
   PublisherSchema,
-  MarketplaceCategorySchema,
   ListingStatusSchema,
   PricingModelSchema,
   MarketplaceListingSchema,
@@ -56,19 +55,6 @@ describe('PublisherSchema', () => {
   });
 });
 
-describe('MarketplaceCategorySchema', () => {
-  it('should accept all valid categories', () => {
-    const categories = [
-      'crm', 'erp', 'hr', 'finance', 'project', 'collaboration',
-      'analytics', 'integration', 'automation', 'ai', 'security',
-      'developer-tools', 'ui-theme', 'storage', 'other',
-    ];
-    categories.forEach(cat => {
-      expect(() => MarketplaceCategorySchema.parse(cat)).not.toThrow();
-    });
-  });
-});
-
 describe('ListingStatusSchema', () => {
   it('should accept all listing statuses', () => {
     const statuses = [
@@ -97,7 +83,7 @@ describe('MarketplaceListingSchema', () => {
       packageId: 'com.acme.crm',
       publisherId: 'pub-001',
       name: 'Acme CRM',
-      category: 'crm' as const,
+      businessFunctions: ['sales' as const],
       latestVersion: '1.0.0',
     };
     const parsed = MarketplaceListingSchema.parse(listing);
@@ -111,7 +97,7 @@ describe('MarketplaceListingSchema', () => {
       packageId: 'com.acme.crm',
       publisherId: 'pub-001',
       name: 'Acme CRM',
-      category: 'crm' as const,
+      businessFunctions: ['sales' as const],
       latestVersion: '1.0.0',
     };
     expect(MarketplaceListingSchema.parse(listing).packageType).toBe('app');
@@ -123,7 +109,7 @@ describe('MarketplaceListingSchema', () => {
       packageId: 'com.acme.pg-driver',
       publisherId: 'pub-001',
       name: 'Postgres Driver',
-      category: 'crm' as const,
+      businessFunctions: ['sales' as const],
       latestVersion: '1.0.0',
       packageType: 'driver',
     };
@@ -139,7 +125,7 @@ describe('MarketplaceListingSchema', () => {
       name: 'Acme CRM',
       tagline: 'Complete customer relationship management for ObjectStack',
       description: '# Acme CRM\n\nFull-featured CRM with sales pipeline...',
-      category: 'crm' as const,
+      businessFunctions: ['sales' as const],
       tags: ['sales', 'pipeline', 'contacts'],
       iconUrl: 'https://acme.com/crm-icon.png',
       screenshots: [
@@ -189,7 +175,7 @@ describe('MarketplaceListingSchema', () => {
       publisherId: 'pub-001',
       name: 'Test',
       tagline: 'x'.repeat(121),
-      category: 'other' as const,
+      businessFunctions: ['it' as const],
       latestVersion: '1.0.0',
     };
     expect(() => MarketplaceListingSchema.parse(listing)).toThrow();
@@ -262,7 +248,8 @@ describe('MarketplaceSearchRequestSchema', () => {
   it('should accept search with filters', () => {
     const request = {
       query: 'crm',
-      category: 'crm' as const,
+      businessFunctions: ['sales' as const, 'marketing' as const],
+      solutionTypes: ['template' as const],
       pricing: 'free' as const,
       publisherVerification: 'verified' as const,
       sortBy: 'popularity' as const,
@@ -271,7 +258,8 @@ describe('MarketplaceSearchRequestSchema', () => {
     };
     const parsed = MarketplaceSearchRequestSchema.parse(request);
     expect(parsed.query).toBe('crm');
-    expect(parsed.category).toBe('crm');
+    expect(parsed.businessFunctions).toEqual(['sales', 'marketing']);
+    expect(parsed.solutionTypes).toEqual(['template']);
     expect(parsed.page).toBe(2);
   });
 
@@ -300,16 +288,19 @@ describe('MarketplaceSearchResponseSchema', () => {
         packageId: 'com.acme.crm',
         publisherId: 'pub-001',
         name: 'Acme CRM',
-        category: 'crm' as const,
+        businessFunctions: ['sales' as const],
         latestVersion: '1.0.0',
       }],
       total: 1,
       page: 1,
       pageSize: 20,
       facets: {
-        categories: [
-          { category: 'crm' as const, count: 12 },
-          { category: 'erp' as const, count: 8 },
+        businessFunctions: [
+          { value: 'sales' as const, count: 12 },
+          { value: 'finance' as const, count: 8 },
+        ],
+        solutionTypes: [
+          { value: 'template' as const, count: 3 },
         ],
         pricing: [
           { model: 'free' as const, count: 15 },
@@ -318,7 +309,8 @@ describe('MarketplaceSearchResponseSchema', () => {
       },
     };
     const parsed = MarketplaceSearchResponseSchema.parse(response);
-    expect(parsed.facets?.categories).toHaveLength(2);
+    expect(parsed.facets?.businessFunctions).toHaveLength(2);
+    expect(parsed.facets?.solutionTypes).toEqual([{ value: 'template', count: 3 }]);
   });
 });
 
@@ -448,7 +440,7 @@ describe('MarketplaceListingSchema - Artifact References', () => {
       packageId: 'com.acme.crm',
       publisherId: 'pub-001',
       name: 'Acme CRM',
-      category: 'crm' as const,
+      businessFunctions: ['sales' as const],
       latestVersion: '2.0.0',
       versions: [
         {

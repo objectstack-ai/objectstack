@@ -108,9 +108,9 @@ describe('MasterDetailForm re-labels derived boolean options when the catalogue 
     const ds = dataSource();
     // A zh session whose catalogue has not landed: the instance boots in zh
     // and, with no zh bundle, every key reads the `en` fallback.
-    const instance = createI18n({ defaultLanguage: 'zh', detectBrowserLanguage: false });
-    instance.removeResourceBundle('zh', 'translation');
-    expect(instance.language).toBe('zh');
+    const instance = createI18n({ defaultLanguage: 'zh-Hans', detectBrowserLanguage: false });
+    instance.removeResourceBundle('zh-Hans', 'translation');
+    expect(instance.language).toBe('zh-Hans');
     expect(instance.t('common.yes')).toBe('Yes');
     render(
       <I18nProvider instance={instance} persistLanguage={false}>
@@ -132,7 +132,7 @@ describe('MasterDetailForm re-labels derived boolean options when the catalogue 
     // not be measuring a late catalogue.
     await waitFor(() => expect(billable()).toEqual(['Yes', 'No']));
     expect(screen.getByTestId('md-form-submit').textContent).toBe('Save');
-    expect(gate.asked).toContain('zh');
+    expect(gate.asked).toContain('zh-Hans');
 
     // An unsaved edit on the first line, made before the catalogue lands.
     fireEvent.change(descriptions()[0], { target: { value: 'Freight, edited' } });

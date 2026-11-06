@@ -16,7 +16,7 @@
     "lookups": [{"object": "contact", "field": "account", "to": "account"}]
   },
   "capabilities": ["records-forms.lookup", "records-forms.select-options", "ai.ask-data", "access-security.field-permissions", "access-security.row-scope"],
-  "category": "crm",
+  "businessFunctions": ["sales"],
   "run": {
     "seed": {
       "account": [

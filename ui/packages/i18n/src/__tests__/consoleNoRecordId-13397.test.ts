@@ -21,7 +21,7 @@ const noRecordIdOf = (pack: unknown) =>
 
 describe('objectui#13397 — the newTabUrl "no record id" refusal is translated', () => {
   it('zh-CN reads it in Chinese', () => {
-    expect(noRecordIdOf(builtInLocales.zh)).toBe('此操作针对单条记录，但没有可用的记录 ID。');
+    expect(noRecordIdOf(builtInLocales['zh-Hans'])).toBe('此操作针对单条记录，但没有可用的记录 ID。');
   });
 
   it('en holds the English source the wrapper falls back to', () => {

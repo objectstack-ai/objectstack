@@ -319,6 +319,18 @@ export const AI_ACTION_CONFIRMATION_MEMBER = 'confirm';
  * The gate's bounds are part of the decision: REST `DELETE /api/v1/data/...`
  * (the human path) and the `update_record` tool stay outside it, no object is
  * exempt, and any future bulk-delete tool takes the same gate.
+ *
+ * ## The third gate: the MCP `delete_records` tool
+ *
+ * The bulk delete (#30891) takes that gate, with the same member, code, HTTP
+ * status and `details` shape, whose `actionName` is `delete_records`. One
+ * difference, and it is the tool's reason to exist: its unconfirmed call READS
+ * the selection (a filter or an id list), as the caller, and answers the
+ * refusal with a `preview` member beside `error` (how many records match, how
+ * many a confirmed call attempts, sample ids), so the human approves a count
+ * rather than a filter. Nothing is deleted. A confirmed call deletes each
+ * selected record as `delete_record` does, under the caller's permissions and
+ * the object's delete rules, which no caller bypasses.
  */
 export interface AIActionConfirmation {
     /**
@@ -340,7 +352,7 @@ export interface AIActionConfirmation {
 export interface ActionConfirmationRequiredDetails {
     /**
      * The declarative action name the refused call addressed; on the MCP
-     * `delete_record` door, the tool's own name, `delete_record`.
+     * `delete_record` and `delete_records` doors, the tool's own name.
      */
     actionName: string;
     /** The object the action operates on; omitted for object-less actions. */
