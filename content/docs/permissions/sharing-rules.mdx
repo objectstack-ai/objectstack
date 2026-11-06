@@ -137,11 +137,21 @@ the rows it owns and the rows granted to it:
   the object (for example `supplier in current_user.<key>`). Such a policy
   lifts the owner-only floor for that object, and the policy bounds the rows.
 
-On a `public_read_write` object, or a system object with no `sharingModel`, a
-share or sharing rule takes effect for external recipients only: the grant is
-accepted for a recipient who is an `external` member of the record's
+On a `public_read_write` object, or a system object with no `sharingModel`,
+whose `owner_id` is real, a share or sharing rule takes effect for external
+recipients only: the grant is accepted for a recipient who is an `external` member of the record's
 organization, every other recipient is refused with `SHARING_NOT_ENABLED`
 (422), and a rule's evaluation writes rows for its external recipients alone.
+
+A sharing rule on an object that no sharing gate consults for any recipient is
+refused when it is saved: an object with no real `owner_id` (a system object
+without one, such as `sys_session`, or a federated object whose `owner_id` is
+the platform's injected anchor), a `controlled_by_parent` detail, or a bypass
+object. It is refused with `SHARING_NOT_ENABLED` (422) and a sentence that
+names the object and how to turn record sharing on for it. This holds for Setup's form and the
+`/data` door as well as `POST /api/v1/sharing/rules`, and for an edit that moves
+a rule onto such an object. A rule saved before this check keeps its row and
+can still be switched off.
 
 `externalSharingModel`, the external dial ADR-0090 D11 declared, was removed
 in `@objectstack/spec` 18 (ADR-0049 enforce-or-remove): while it existed no

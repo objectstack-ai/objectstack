@@ -34,7 +34,7 @@ import { DEFAULT_METADATA_EVAL_CORPUS } from '../../../../cli/src/lint/corpus.js
 import type { ScenarioExpect } from '../../src/schema.js';
 import { formatRefusal, loadScenarioFile, readCapabilityAreas } from '../../src/loader.js';
 import type { ScenarioCard } from '../../src/schema.js';
-import { scoreScenarioArtifact } from '../../src/score/scenario-tags.js';
+import { gradeCapabilityTags, readArtifactFacts, scoreScenarioArtifact } from '../../src/score/scenario-tags.js';
 
 type Bag = Record<string, any>;
 
@@ -111,7 +111,9 @@ describe('control cards — scored end to end against their golden builds', () =
   // passes, and so does every tag the closed table judges on shape. It models
   // no permission set and no action, so a card's field-permission tag and every
   // declared agent action fail on it — the card asks for more than the corpus
-  // build delivers, which is what a capability score exists to say.
+  // build delivers, which is what a capability score exists to say. Its objects
+  // declare no sharing model, so they are private (ADR-0090 D1) and the
+  // row-scope tag passes on them.
   const READINGS: Record<string, { tags: Record<string, string>; actions: number; passedOf: [number, number] }> = {
     crm_account_with_contacts: {
       tags: {
@@ -119,9 +121,10 @@ describe('control cards — scored end to end against their golden builds', () =
         'records-forms.select-options': 'pass',
         'ai.ask-data': 'unscored',
         'access-security.field-permissions': 'fail',
+        'access-security.row-scope': 'pass',
       },
       actions: 0,
-      passedOf: [10, 18],
+      passedOf: [12, 20],
     },
     invoice_with_line_items: {
       tags: {
@@ -130,9 +133,10 @@ describe('control cards — scored end to end against their golden builds', () =
         'records-forms.select-options': 'pass',
         'ai.ask-data': 'unscored',
         'access-security.field-permissions': 'fail',
+        'access-security.row-scope': 'pass',
       },
       actions: 0,
-      passedOf: [18, 27],
+      passedOf: [20, 29],
     },
     project_with_tasks: {
       tags: {
@@ -140,9 +144,10 @@ describe('control cards — scored end to end against their golden builds', () =
         'records-forms.roll-up-summary': 'pass',
         'records-forms.select-options': 'pass',
         'ai.ask-data': 'unscored',
+        'access-security.row-scope': 'pass',
       },
       actions: 0,
-      passedOf: [19, 26],
+      passedOf: [20, 27],
     },
   };
 
@@ -185,10 +190,45 @@ describe('control cards — scored end to end against their golden builds', () =
       (a: Bag) => { a.actions = []; },
       (a: Bag) => { delete a.actions.find((x: Bag) => x.name === 'delete_contact').ai.requiresConfirmation; },
       (a: Bag) => { delete (a.objects as Bag[]).find((o) => o.name === 'contact')!.fields.account; },
+      (a: Bag) => { for (const o of a.objects as Bag[]) o.sharingModel = 'public_read'; },
     ]) {
       const a = structuredClone(complete);
       degrade(a);
       expect(scoreScenarioArtifact(a, card).score!).toBeLessThan(1);
     }
+  });
+
+  it("crm_account_with_contacts: the first live run's build (public_read, sdr narrowed by read policies) passes the row-scope tag", () => {
+    // As the correction on card #30883 (6682060124) read the built artifact:
+    // both objects `public_read`, and the sdr's permission set carrying a
+    // `select` policy per object (a hook-maintained copy of the account owner
+    // on contact, since RLS cannot traverse `account.owner`).
+    const card = controls.find((c) => c.id === 'crm_account_with_contacts')!;
+    const stack = structuredClone(corpusById.get(card.id)!.fixture) as Bag;
+    for (const o of stack.objects as Bag[]) o.sharingModel = 'public_read';
+    (stack.objects as Bag[]).find((o) => o.name === 'contact')!.fields.account_owner = { type: 'text', label: 'Account Owner' };
+    stack.permissions = [{
+      name: 'crm_sdr',
+      label: 'SDR',
+      objects: { account: { allowRead: true }, contact: { allowRead: true } },
+      rowLevelSecurity: [
+        { name: 'own_accounts', object: 'account', operation: 'select', using: 'owner == current_user.id' },
+        { name: 'own_contacts', object: 'contact', operation: 'select', using: 'account_owner == current_user.id' },
+      ],
+    }];
+    const built = parsedBuild(stack);
+    const rowScope = (a: Bag) =>
+      gradeCapabilityTags(readArtifactFacts(a), { ...card, capabilities: ['access-security.row-scope'] }, { namespace: 'crm' })[0]!;
+    expect(rowScope(built).checks.map((c) => [c.check, c.pass])).toEqual([
+      ['row-scope:account->scoped', true],
+      ['row-scope:contact->scoped', true],
+    ]);
+    // Without the contact policy, the sdr reads every contact: the tag fails on that object alone.
+    const leaky = structuredClone(built);
+    leaky.permissions[0].rowLevelSecurity.pop();
+    expect(rowScope(leaky).checks.map((c) => [c.check, c.pass])).toEqual([
+      ['row-scope:account->scoped', true],
+      ['row-scope:contact->scoped', false],
+    ]);
   });
 });

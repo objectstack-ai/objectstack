@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { PLATFORM_ADMIN_SETTINGS_GATE } from './platform-admin-action-gate.js';
 
 /**
  * sys_oauth_application — Registered OAuth/OIDC client application
@@ -98,6 +99,8 @@ export const SysOauthApplication = ObjectSchema.create({
       type: 'api',
       method: 'POST',
       target: '/api/v1/auth/admin/oauth2/toggle-disabled',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_SETTINGS_GATE],
       requiresFeature: 'oidcProvider',
       // The confirm question rides `description`, not `confirmText`: this action
       // collects params, and the console action runner chains confirmation THEN
@@ -131,6 +134,8 @@ export const SysOauthApplication = ObjectSchema.create({
       type: 'api',
       method: 'POST',
       target: '/api/v1/auth/admin/oauth2/toggle-disabled',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_SETTINGS_GATE],
       requiresFeature: 'oidcProvider',
       // Confirm question on `description` — one dialog, not two (#7278/#7309).
       description: 'Re-enable this OAuth application? Token issuance, authorization, and introspection will resume immediately.',

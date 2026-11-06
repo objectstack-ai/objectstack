@@ -179,8 +179,8 @@ describe('SecurityPlugin — People & Organization assignment entries are labell
     const navOf = (locale: string) =>
       ((SetupAppTranslations as any)[locale]?.apps?.setup?.navigation ?? {}) as Record<string, { label?: string }>;
     const locales = Object.keys(SetupAppTranslations).filter((l) => navOf(l).group_people_org?.label);
-    // Control: the four Setup locales carry the group, so the loop below judges something.
-    expect(locales.sort()).toEqual(['en', 'es-ES', 'ja-JP', 'zh-CN']);
+    // Control: every Setup locale carries the group, so the loop below judges something.
+    expect(locales.sort()).toEqual(['en', 'es-ES', 'ja-JP', 'zh-CN', 'zh-Hant']);
 
     const en = navOf('en');
     expect(en[POSITION_HOLDERS.id]?.label).toBe(POSITION_HOLDERS.label);

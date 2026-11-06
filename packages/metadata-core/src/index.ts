@@ -156,3 +156,9 @@ export * from './extension-field-patch-targets.js';
 // authoring gate the draft verdict and the publish doors run, so a flow the
 // engine refuses to register no longer reads valid and publishes.
 export * from './flow-cycle.js';
+
+// [epic cloud#3652 Q3] The package upgrade plan — one comparison of an installed
+// package version with the incoming one, read by `os diff`, the marketplace
+// install door's dry run and the `manifest` service's `planUpgrade`, so the
+// preview an installer reads and the comparison a door decides on are one.
+export * from './package-upgrade-plan.js';

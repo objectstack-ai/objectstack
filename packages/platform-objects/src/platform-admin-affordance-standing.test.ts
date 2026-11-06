@@ -65,6 +65,8 @@ import { readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { celEngine } from '@objectstack/formula';
+import { ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec/identity';
+import { PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
 
 /** The standing, spelled as the ruling fixed it. */
 const STANDING = 'current_user.isPlatformAdmin == true';
@@ -128,6 +130,8 @@ interface FirstPartyAction {
   target: string;
   /** The served (parsed) predicate's CEL source, or undefined when none is declared. */
   source: string | undefined;
+  /** The declared ADR-0066 D4 gate both action doors read, or undefined when none is declared. */
+  requiredPermissions: unknown;
 }
 
 function sourceOf(raw: unknown): string | undefined {
@@ -156,6 +160,7 @@ async function loadActions(): Promise<{ files: number; actions: FirstPartyAction
           file: relative(REPO_ROOT, file),
           target: action.target,
           source: sourceOf(action.visible),
+          requiredPermissions: action.requiredPermissions,
         });
       }
     }
@@ -298,6 +303,37 @@ describe('platform-admin-gated doors: every first-party action offers itself to 
       }
     }
     expect(leaks).toEqual([]);
+  });
+
+  it('each member declares its gate where both action doors read it: a platform capability the rung always carries (#30771)', () => {
+    // `visible` is display only, so the doors never read it. The gate both the
+    // platform action door (`POST /actions/...`, MCP `run_action`) and MCP
+    // `list_actions` read is `requiredPermissions`, through the runtime's one
+    // reader `actionPermissionError`. Each name must be one the PLATFORM_ADMIN
+    // rung carries on both of its anchors (`ADMIN_FULL_ACCESS_CAPABILITIES`) and
+    // a catalog `scope: 'platform'` capability, so the declaration never hides
+    // an action from a caller its door admits on the rung.
+    const carried = new Set(ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions ?? []);
+    const platformScoped = new Set(PLATFORM_CAPABILITIES.filter((c) => c.scope === 'platform').map((c) => c.name));
+    // Positive control: the two names the declarations use are both.
+    for (const name of ['manage_users', 'manage_platform_settings']) {
+      expect(carried.has(name), name).toBe(true);
+      expect(platformScoped.has(name), name).toBe(true);
+    }
+    const wrong: string[] = [];
+    for (const a of family) {
+      const declared = a.requiredPermissions;
+      if (!Array.isArray(declared) || declared.length === 0) {
+        wrong.push(`${a.site} → ${a.target} (${a.file}) declares no requiredPermissions`);
+        continue;
+      }
+      for (const name of declared) {
+        if (typeof name !== 'string' || !carried.has(name) || !platformScoped.has(name)) {
+          wrong.push(`${a.site} declares ${JSON.stringify(name)}, which the rung does not always carry as a platform capability`);
+        }
+      }
+    }
+    expect(wrong, 'spread PLATFORM_ADMIN_USERS_GATE or PLATFORM_ADMIN_SETTINGS_GATE (identity/platform-admin-action-gate.ts)').toEqual([]);
   });
 
   it('the platform admin is still offered every member — the standing is a gate, not an always-false wrapper', () => {
