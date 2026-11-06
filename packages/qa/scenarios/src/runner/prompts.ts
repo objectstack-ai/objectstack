@@ -16,6 +16,10 @@
  *     sees (the card states these as requirements of the app);
  *   - the business actions an agent may call, when the card declares them.
  *
+ * The card handed in here is already namespace-relative (`namespace.ts`): its
+ * object names carry the project's prefix, so the contract states them as the
+ * build must write them.
+ *
  * The questions, their truths, the operations and their outcomes are never in
  * a build prompt. A question turn carries the question, the card's fixed
  * "today" when it has one, and the answer format (figures plus a source line);
@@ -48,7 +52,7 @@ function personaLine(p: Persona): string {
   ];
   const scope = (p.scope ?? []).map((s) => `\`${s.object}\` rows whose \`${s.field}\` is ${JSON.stringify(s.value)}`);
   return (
-    `- \`${p.id}\` (${p.role}): must not see ${hides.join(' or ')}` +
+    `- \`${p.id}\` (${p.role}): must not read ${hides.join(' or ')}` +
     (scope.length ? `; sees only ${scope.join(' and ')}` : '') +
     '.'
   );
@@ -62,7 +66,7 @@ export function dataContract(card: Card): string {
   lines.push(
     'After you finish, a test runner loads the rows below through the data API and signs each person in. ' +
       'Use these object and field machine names exactly (lookup values are the `id` of the referenced row), ' +
-      'and make every value shown valid for its field.',
+      'and make every value shown valid for its field. The object names already carry this project’s namespace prefix.',
   );
   lines.push('');
   lines.push('```json');

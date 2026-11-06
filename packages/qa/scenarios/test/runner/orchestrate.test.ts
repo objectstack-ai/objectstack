@@ -21,6 +21,7 @@ import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenar
 import { truthFigures } from '../../src/score/index.js';
 import type { AppHarness, HttpAnswer, PersonaAccount } from '../../src/runner/app.js';
 import { stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo } from '../../src/runner/driver.js';
+import { namespacedScenario } from '../../src/runner/namespace.js';
 import { runCard, type ProjectOps } from '../../src/runner/orchestrate.js';
 import { cardScorecard, renderScorecard, runRecord } from '../../src/runner/scorecard.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
@@ -39,27 +40,28 @@ function load(): LoadedScenario {
 
 const select = (values: string[]) => ({ type: 'select', options: values.map((value) => ({ value, label: value })) });
 
-function artifact(opts: { degraded?: boolean; iterated?: boolean } = {}) {
+function artifact(opts: { degraded?: boolean; iterated?: boolean; ns?: string } = {}) {
+  const n = (name: string) => (opts.ns ? `${opts.ns}_${name}` : name);
   const objects: unknown[] = [
-    { name: 'account', fields: { name: { type: 'text' }, industry: select(['tech', 'retail']), owner: { type: 'text' } } },
+    { name: n('account'), fields: { name: { type: 'text' }, industry: select(['tech', 'retail']), owner: { type: 'text' } } },
   ];
   if (!opts.degraded) {
     const action = (name: string, confirm = false) => ({ name, ai: { exposed: true, ...(confirm ? { requiresConfirmation: true } : {}) } });
     objects.push({
-      name: 'contact',
-      fields: { full_name: { type: 'text' }, email: { type: 'email' }, account: { type: 'lookup', reference: 'account' } },
+      name: n('contact'),
+      fields: { full_name: { type: 'text' }, email: { type: 'email' }, account: { type: 'lookup', reference: n('account') } },
       actions: [action('create_contact'), action('reassign_contact'), action('delete_contact', true)],
     });
   }
   if (opts.iterated) {
-    objects.push({ name: 'opportunity', fields: { stage: select(['a', 'b', 'c', 'd']), account: { type: 'lookup', reference: 'account' } } });
+    objects.push({ name: n('opportunity'), fields: { stage: select(['a', 'b', 'c', 'd']), account: { type: 'lookup', reference: n('account') } } });
   }
   return {
-    manifest: { id: 'com.example.crm', namespace: 'crm' },
+    manifest: { id: 'com.example.crm', ...(opts.ns ? { namespace: opts.ns } : {}) },
     objects,
     permissions: [
-      { name: 'sdr', objects: { account: { allowRead: true }, contact: { allowRead: true, allowCreate: true, allowEdit: true } }, fields: { 'contact.email': { readable: false } } },
-      { name: 'partner_user', objects: { contact: { allowRead: true } } },
+      { name: 'sdr', objects: { [n('account')]: { allowRead: true }, [n('contact')]: { allowRead: true, allowCreate: true, allowEdit: true } }, fields: { [`${n('contact')}.email`]: { readable: false } } },
+      { name: 'partner_user', objects: { [n('contact')]: { allowRead: true } } },
     ],
   };
 }
@@ -70,7 +72,7 @@ interface FakeProject {
   phase: 'scaffolded' | 'built' | 'iterated';
 }
 
-function fakeOps(app: () => FakeApp, opts: { degradedBuild?: boolean } = {}): ProjectOps & { projects: Map<string, FakeProject> } {
+function fakeOps(app: () => FakeApp, opts: { degradedBuild?: boolean; ns?: string } = {}): ProjectOps & { projects: Map<string, FakeProject> } {
   const projects = new Map<string, FakeProject>();
   const ok = (command: string) => ({ command, exit: 0, tail: '', ms: 1 });
   return {
@@ -86,12 +88,13 @@ function fakeOps(app: () => FakeApp, opts: { degradedBuild?: boolean } = {}): Pr
     readArtifact(dir) {
       const p = projects.get(dir)!;
       if (p.phase === 'scaffolded') return undefined;
-      return artifact({ degraded: opts.degradedBuild && p.phase === 'built', iterated: p.phase === 'iterated' });
+      return artifact({ degraded: opts.degradedBuild && p.phase === 'built', iterated: p.phase === 'iterated', ...(opts.ns ? { ns: opts.ns } : {}) });
     },
     async boot() {
       return { url: 'http://fake', stop: async () => {}, log: () => '' };
     },
     harness: () => app(),
+    namespace: () => opts.ns,
   };
 }
 
@@ -154,12 +157,16 @@ function truthfulAnswer(scenario: LoadedScenario, question: string, persona?: st
 
 class ScriptedDriver implements AgentDriver {
   readonly seen: string[] = [];
+  private readonly scenario: LoadedScenario;
   constructor(
-    private readonly scenario: LoadedScenario,
+    scenario: LoadedScenario,
     private readonly ops: ReturnType<typeof fakeOps>,
     private readonly app: () => FakeApp,
     private readonly leak: { question: string; persona: string } | undefined,
-  ) {}
+    private readonly ns?: string,
+  ) {
+    this.scenario = namespacedScenario(scenario, ns);
+  }
   info(): DriverInfo {
     return { driver: 'recorded', version: 'scripted test replay', apiBilled: false };
   }
@@ -169,7 +176,7 @@ class ScriptedDriver implements AgentDriver {
     if (task.mode === 'template') {
       const app = this.app();
       const objects = (app.installed!.objects as unknown[]) ?? [];
-      app.installed = { ...app.installed!, objects: [...objects, ...artifact({ iterated: true }).objects.slice(2)] };
+      app.installed = { ...app.installed!, objects: [...objects, ...artifact({ iterated: true, ...(this.ns ? { ns: this.ns } : {}) }).objects.slice(2)] };
     }
     return { turn: turn('Done.') };
   }
@@ -199,7 +206,7 @@ class ScriptedDriver implements AgentDriver {
   }
 }
 
-function setup(opts: { degradedBuild?: boolean; leak?: { question: string; persona: string } } = {}) {
+function setup(opts: { degradedBuild?: boolean; leak?: { question: string; persona: string }; ns?: string } = {}) {
   const scenario = load();
   let current = new FakeApp();
   const apps: FakeApp[] = [];
@@ -211,7 +218,7 @@ function setup(opts: { degradedBuild?: boolean; leak?: { question: string; perso
     apps.push(current);
     return boot(dir);
   };
-  const driver = new ScriptedDriver(scenario, ops, getApp, opts.leak);
+  const driver = new ScriptedDriver(scenario, ops, getApp, opts.leak, opts.ns);
   return { scenario, ops, driver, apps };
 }
 
@@ -257,6 +264,19 @@ describe('runCard — the crm card, both modes, a clean agent', () => {
     const accounts = apps[0]!.rows.account!;
     expect(accounts.filter((r) => r.owner_id === 'u-sdr').map((r) => r.id)).toEqual(['ac1', 'ac3']);
     expect(accounts.find((r) => r.id === 'ac2')!.owner_id).toBeUndefined();
+  });
+});
+
+describe('runCard — a namespaced project (every scaffold declares one)', () => {
+  it('reads the card relative to the namespace: seed lands on crm_account, answers citing the bare name still count', async () => {
+    const { scenario, ops, driver, apps } = setup({ ns: 'crm' });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch', 'template'], admin: ADMIN, iterateRun: false });
+    const sc = cardScorecard(run);
+    expect(Object.keys(apps[0]!.rows).sort()).toEqual(['crm_account', 'crm_contact']);
+    expect(sc.modes[0]!.first.build!.degraded).toBe(false);
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 9, total: 9, leaks: 0 });
+    expect(sc.modes[0]!.first.operations).toEqual({ passed: 5, total: 5 });
+    expect(sc.modes[1]!.iterate!.build!.degraded).toBe(false); // the template keeps its own namespace
   });
 });
 

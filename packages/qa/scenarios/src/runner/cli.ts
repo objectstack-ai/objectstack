@@ -30,7 +30,7 @@ import { formatRefusal, loadScenarios, readCapabilityAreas } from '../loader.js'
 import { HttpApp } from './app.js';
 import { ClaudeCodeDriver, RecordedDriver, RecordingDriver, type AgentDriver } from './driver.js';
 import { runCard, type ProjectOps } from './orchestrate.js';
-import { bootDev, os, readArtifact, scaffold } from './project.js';
+import { bootDev, os, readArtifact, readNamespace, scaffold } from './project.js';
 import { cardScorecard, renderScorecard, runRecord } from './scorecard.js';
 
 const ADMIN = { email: 'admin@objectos.ai', password: 'admin123' };
@@ -118,6 +118,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     scaffold: (name) => scaffold(work, name, args.createVersion ? { version: args.createVersion } : {}),
     os: (dir, a) => os(dir, a),
     readArtifact,
+    namespace: readNamespace,
     boot: (dir) => bootDev(dir),
     harness: (url) => new HttpApp({ baseUrl: url, adminEmail: ADMIN.email, adminPassword: ADMIN.password }),
   };

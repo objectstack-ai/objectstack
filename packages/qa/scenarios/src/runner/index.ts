@@ -9,6 +9,7 @@
 
 export * from './app.js';
 export * from './driver.js';
+export * from './namespace.js';
 export * from './observe.js';
 export * from './orchestrate.js';
 export * from './project.js';

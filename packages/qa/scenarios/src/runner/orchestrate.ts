@@ -31,6 +31,7 @@ import {
 } from '../score/index.js';
 import type { AppHarness, PersonaAccount } from './app.js';
 import type { AgentDriver, StepRef } from './driver.js';
+import { citationLabels, namespaceOfArtifact, namespacedScenario } from './namespace.js';
 import { observeOperation, touchedRowId, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
 import { buildPrompt, iteratePrompt, operationPrompt, personaHandles, questionPrompt, templateIteratePrompt, verifyFlags } from './prompts.js';
@@ -50,6 +51,8 @@ export interface ProjectOps {
   readArtifact(dir: string): unknown | undefined;
   boot(dir: string): Promise<BootedApp>;
   harness(url: string): AppHarness;
+  /** The `namespace` the scaffolded project's manifest declares (card objects are read relative to it). */
+  namespace?(dir: string): string | undefined;
 }
 
 export interface RunOptions {
@@ -270,6 +273,7 @@ export async function runHalf(
   app: AppHarness,
   driver: AgentDriver,
   ref: Pick<StepRef, 'card' | 'mode' | 'phase'>,
+  objectLabels?: Record<string, string[]>,
 ): Promise<RunHalf> {
   const { card } = scenario;
   const half: RunHalf = { personas: [], seed: { inserted: 0, refused: [] }, questions: [], operations: [] };
@@ -313,6 +317,7 @@ export async function runHalf(
           res.grade = gradeCardAnswer(scenario, {
             question: q.id,
             ...(persona ? { persona, hidden: { values: hiddenValues(scenario, persona) } } : {}),
+            ...(objectLabels ? { objectLabels } : {}),
             turn,
           });
         } catch (e) {
@@ -369,31 +374,38 @@ async function withApp<T>(ops: ProjectOps, dir: string, findings: string[], use:
 /** Did the build pass — every counted check of the card's `expect`? */
 export const buildPassed = (b: BuildHalf | undefined): boolean => !!b?.score && b.score.expect.checks.length > 0 && b.score.expect.checks.every((c) => c.pass);
 
-async function scratchMode(scenario: LoadedScenario, driver: AgentDriver, ops: ProjectOps, opts: RunOptions): Promise<{ mode: ModeRun; verified?: unknown }> {
-  const card = scenario.card;
+async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: ProjectOps, opts: RunOptions): Promise<{ mode: ModeRun; verified?: unknown }> {
   const mode: ModeRun = { mode: 'scratch', findings: [] };
-  const { dir, result } = await ops.scaffold(`${card.id.replace(/_/g, '-')}-scratch`);
+  const { dir, result } = await ops.scaffold(`${original.card.id.replace(/_/g, '-')}-scratch`);
   if (result.exit !== 0) {
     mode.skipped = `scaffold failed: ${result.tail.slice(-500)}`;
     return { mode };
   }
+  const ns = ops.namespace?.(dir);
+  const scenario = namespacedScenario(original, ns);
+  const labels = citationLabels(original, ns);
+  const card = scenario.card;
   const ref = { card: card.id, mode: 'scratch' as const };
   mode.build = await buildHalf(scenario, dir, ops, async () => (await driver.author({ ...ref, phase: 'build', step: 'author', cwd: dir, prompt: buildPrompt(card) })).turn, scenario);
   const builtArtifact = ops.readArtifact(dir);
-  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }));
+  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels));
 
   const iterated = iteratedScenario(scenario);
   const build = await buildHalf(iterated, dir, ops, async () => (await driver.author({ ...ref, phase: 'iterate', step: 'author', cwd: dir, prompt: iteratePrompt(card) })).turn, iterated);
   const after = ops.readArtifact(dir);
   mode.iterate = { build, ...(builtArtifact !== undefined && after !== undefined ? { changeSize: changeSize(builtArtifact, after) } : {}) };
   if (opts.iterateRun !== false && after !== undefined) {
-    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }));
+    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }, labels));
     if (run) mode.iterate.run = run;
   }
   return { mode, ...(buildPassed(mode.build) ? { verified: builtArtifact } : {}) };
 }
 
-async function templateMode(scenario: LoadedScenario, driver: AgentDriver, ops: ProjectOps, opts: RunOptions, verified: { artifact: unknown; source: string } | undefined): Promise<ModeRun> {
+async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: ProjectOps, opts: RunOptions, verified: { artifact: unknown; source: string } | undefined): Promise<ModeRun> {
+  // The installed copy keeps the TEMPLATE's namespace, not the blank project's.
+  const ns = verified ? namespaceOfArtifact(verified.artifact) : undefined;
+  const scenario = namespacedScenario(original, ns);
+  const labels = citationLabels(original, ns);
   const card = scenario.card;
   const mode: ModeRun = { mode: 'template', findings: [] };
   if (!verified) {
@@ -435,7 +447,7 @@ async function templateMode(scenario: LoadedScenario, driver: AgentDriver, ops: 
       build.error = build.error ?? `score: ${errText(e)}`;
     }
     mode.iterate = { build, changeSize: changeSize(before, after) };
-    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' });
+    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels);
   });
   return mode;
 }

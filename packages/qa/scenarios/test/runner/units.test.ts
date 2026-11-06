@@ -22,6 +22,7 @@ import {
   subscriptionOnlyEnv,
 } from '../../src/runner/driver.js';
 import { asksToConfirm, countWrites, NOT_ATTEMPTED, observedAnswer, observeOperation, UNCODED_TOOL_ERROR } from '../../src/runner/observe.js';
+import { citationLabels, namespaceOfConfig, namespacedScenario } from '../../src/runner/namespace.js';
 import { changeSize, hiddenValues, installableManifest, seedOrder } from '../../src/runner/orchestrate.js';
 import { buildPrompt, dataContract, questionPrompt, verifyFlags } from '../../src/runner/prompts.js';
 import { parseStreamJson, refusalCodeOf, toolNameOf, type ParsedTurn } from '../../src/runner/transcript.js';
@@ -196,7 +197,7 @@ describe('prompts, seed order, template manifest and change size', () => {
   it('the build prompt carries the seed, the persona sets and the handles — never a question or an outcome', () => {
     const p = buildPrompt(crm.card);
     expect(p).toContain('"full_name": "Ana Ruiz"');
-    expect(p).toContain('`sdr` (Sales development representative): must not see the field `contact.email`');
+    expect(p).toContain('`sdr` (Sales development representative): must not read the field `contact.email`');
     expect(dataContract(crm.card)).toContain('`u_sam` = `sdr`');
     for (const q of crm.card.run.questions) expect(p).not.toContain(q.ask.en!);
     expect(p).not.toContain('VALIDATION_FAILED');
@@ -224,5 +225,29 @@ describe('prompts, seed order, template manifest and change size', () => {
     const after = { objects: [{ fields: { x: 2 }, name: 'a' }, { name: 'c' }] };
     expect(changeSize(before, after)).toEqual({ added: ['objects/c'], removed: ['objects/b'], changed: ['objects/a'], total: 3 });
     expect(changeSize(before, { objects: [{ fields: { x: 1 }, name: 'a' }, { name: 'b' }] }).total).toBe(0); // key order is not a change
+  });
+});
+
+describe('namespace-relative cards', () => {
+  const crm = load();
+
+  it('reads the namespace a scaffolded config declares', () => {
+    expect(namespaceOfConfig("  manifest: {\n    id: 'com.example.x',\n    namespace: 'crm_probe',\n")).toBe('crm_probe');
+    expect(namespaceOfConfig('defineStack({ manifest: { id: "x" } })')).toBeUndefined();
+  });
+
+  it('prefixes every object reference and nothing else; identity without a namespace', () => {
+    const n = namespacedScenario(crm, 'ns').card;
+    expect(n.expect.objects).toEqual(['ns_account', 'ns_contact']);
+    expect(n.expect.lookups).toEqual([{ object: 'ns_contact', field: 'account', to: 'ns_account' }]);
+    expect(Object.keys(n.run.seed)).toEqual(['ns_account', 'ns_contact']);
+    expect(n.run.seed.ns_contact![0]!.account).toBe('ac1'); // row ids untouched
+    expect(n.run.personas.find((p) => p.id === 'sdr')!.hidden.fields).toEqual([{ object: 'ns_contact', field: 'email' }]);
+    expect(n.run.personas.find((p) => p.id === 'sdr')!.scope![1]).toEqual({ object: 'ns_contact', field: 'account.owner', value: 'u_sam' });
+    expect(n.run.operations.find((o) => o.id === 'add_contact')!.outcome).toMatchObject({ state: [{ object: 'ns_contact' }] });
+    expect(n.iterate.expectDelta.lookups).toEqual([{ object: 'ns_opportunity', field: 'account', to: 'ns_account' }]);
+    expect(namespacedScenario(crm, 'ns').truths).toBe(crm.truths);
+    expect(namespacedScenario(crm, undefined)).toBe(crm);
+    expect(citationLabels(crm, 'ns')).toEqual({ ns_account: ['account'], ns_contact: ['contact'], ns_opportunity: ['opportunity'] });
   });
 });

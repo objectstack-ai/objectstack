@@ -15,6 +15,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 
+import { namespaceOfConfig } from './namespace.js';
+
 import { subscriptionOnlyEnv } from './driver.js';
 
 export interface CommandResult {
@@ -65,6 +67,12 @@ export async function scaffold(parent: string, name: string, opts: ProjectOption
 /** The project's own CLI: `npx objectstack <args>`. */
 export function os(dir: string, args: readonly string[], timeoutMs?: number): Promise<CommandResult> {
   return runCommand('npx', ['objectstack', ...args], dir, timeoutMs);
+}
+
+/** The `namespace` the project's `objectstack.config.ts` declares. */
+export function readNamespace(dir: string): string | undefined {
+  const p = join(dir, 'objectstack.config.ts');
+  return existsSync(p) ? namespaceOfConfig(readFileSync(p, 'utf8')) : undefined;
 }
 
 export function readArtifact(dir: string): unknown | undefined {
