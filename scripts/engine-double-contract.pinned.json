@@ -22,6 +22,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/cloud-connection/src/marketplace-install-local-seed-owner.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/core/src/security/resolve-user-grants-cache.test.ts",
       "verb": "delete",
       "pinned": 1
