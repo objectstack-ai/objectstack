@@ -129,6 +129,11 @@ const SERVICE_ERROR_CODE: Record<ServiceName, ErrorCode> = {
  * both decisions are reached, why they have to be made here rather than
  * inherited from a seam, and why the capability is neither minted nor split.
  *
+ * Under the walled tenancy postures the four routes that write a datasource
+ * record (create, update, remove, migrate-credential) admit only the platform
+ * operator as well, by the walled-catalog verdict the `/meta` write doors ask
+ * (see `DATASOURCE_ADMIN_CAPABILITY`).
+ *
  * The catalog route is included on purpose. It needs no service and reveals no
  * deployment data, but the family's own route ledger dispositions it
  * `server-only` — as it does every row here; the ledger's `public` disposition
