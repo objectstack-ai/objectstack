@@ -1428,11 +1428,15 @@ export type {
 // ============================================================================
 // v3.0.8 Spec UI Types — Dashboard (P1.3)
 // ============================================================================
+// #25921 (batch 11): seven `Spec`-prefixed aliases in this section are RETIRED,
+// nothing in this workspace or in hotcrm read them: `SpecDashboardHeader`,
+// `SpecDashboardHeaderAction`, `SpecFormView`, `SpecListColumn`,
+// `SpecPageComponent`, `SpecPageRegion` and `SpecPageVariable`. Import the
+// unprefixed name (`DashboardHeader`, `FormView`, …) from `@objectstack/spec/ui`;
+// the changeset carries the FROM/TO.
 export type {
   Dashboard as SpecDashboard,
   DashboardWidget as SpecDashboardWidget,
-  DashboardHeader as SpecDashboardHeader,
-  DashboardHeaderAction as SpecDashboardHeaderAction,
   GlobalFilter as SpecGlobalFilter,
   GlobalFilterOptionsFrom,
   // WidgetMeasure / WidgetMeasureSchema removed in @objectstack/spec 9.0
@@ -1474,7 +1478,6 @@ export type {
 // #3090 tripwire exists to force). objectstack-ai/objectstack#4171 caveat: SpecFormField is `any` today.
 /* eslint-disable no-restricted-imports -- reported at the specifier line, out of -next-line reach */
 export type {
-  FormView as SpecFormView,
   FormSection as SpecFormSection,
   FormField as SpecFormField,
 } from '@objectstack/spec/ui';
@@ -1485,7 +1488,6 @@ export type {
 // ============================================================================
 export type {
   ListView as SpecListView,
-  ListColumn as SpecListColumn,
 } from '@objectstack/spec/ui';
 
 // ============================================================================
@@ -1505,10 +1507,7 @@ export type {
 // ============================================================================
 export type {
   Page as SpecPage,
-  PageComponent as SpecPageComponent,
-  PageRegion as SpecPageRegion,
   PageType as SpecPageType,
-  PageVariable as SpecPageVariable,
   // BlankPageLayout{,Schema,Item,ItemSchema} dropped — `blank` page type has no
   // renderer; removed from @objectstack/spec PageTypeSchema (framework#2265).
 } from '@objectstack/spec/ui';
