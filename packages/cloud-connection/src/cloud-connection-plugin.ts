@@ -101,6 +101,8 @@
 interface PluginContext {
     hook(event: string, handler: (...args: any[]) => any): void;
     getService<T = any>(name: string): T;
+    /** Registers the `cloud-binding` service in `init()` (#29920). */
+    registerService?(name: string, service: unknown): void;
     /**
      * The host kernel — read only for its ASYNC registry, which is what tells a
      * `tenancy` service that was never registered apart from one that broke
@@ -147,6 +149,8 @@ import {
 import type { AuthSessionApi, IAuthService, IObjectQLEngine } from '@objectstack/spec/contracts';
 import { inProcessSessionReadInput } from '@objectstack/types';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
+import { CLOUD_BINDING_SERVICE, createCloudBinding } from './cloud-binding.js';
+import type { ICloudBindingService } from '@objectstack/spec/contracts';
 import { CLOUD_CONNECTION_CAPABILITY, CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
 import { readJsonRequestBody } from './request-json-body.js';
 
@@ -292,15 +296,32 @@ export class CloudConnectionPlugin implements Plugin {
     readonly name = 'com.objectstack.cloud.connection';
     readonly version = '0.3.0';
 
+    /** Services init() registers on every path (ADR-0116). */
+    readonly providesServices = [CLOUD_BINDING_SERVICE];
+
     private readonly cfg: CloudConnectionPluginConfig;
     private readonly store: ConnectionCredentialStore;
+    /**
+     * [#29920] This server's cloud binding: the ONE reader of the effective
+     * control-plane credential. Registered as the `cloud-binding` service, and
+     * the routes below read the same instance, never a copy of its rule.
+     */
+    private readonly binding: ICloudBindingService;
 
     constructor(config: CloudConnectionPluginConfig = {}) {
         this.cfg = config;
         this.store = new ConnectionCredentialStore(config.credentialPath);
+        this.binding = createCloudBinding({
+            controlPlaneApiKey: config.controlPlaneApiKey,
+            controlPlaneUrl: config.controlPlaneUrl,
+            store: this.store,
+        });
     }
 
-    init = async (_ctx: PluginContext): Promise<void> => { /* HTTP wiring on kernel:ready */ };
+    /** Registers the `cloud-binding` service; the HTTP wiring waits for kernel:ready. */
+    init = async (ctx: PluginContext): Promise<void> => {
+        ctx.registerService?.(CLOUD_BINDING_SERVICE, this.binding);
+    };
 
     start = async (ctx: PluginContext): Promise<void> => {
         ctx.hook('kernel:ready', async () => {
@@ -339,8 +360,10 @@ export class CloudConnectionPlugin implements Plugin {
             // cloud-hosted runtimes carry the env→cloud service key; a
             // self-hosted runtime presents the `oscc_…` bearer the bind flow
             // persisted. Lazy so a bind that completes while the runtime is
-            // up takes effect without a restart.
-            const credential = (): string => (platformManaged ? cloudApiKey : this.store.read()?.runtimeToken || '');
+            // up takes effect without a restart. [#29920] Read through the
+            // `cloud-binding` service this plugin registers, the same instance
+            // the push relay sender reads, so the rule has one owner.
+            const credential = (): string => this.binding.credential();
             const authHeaders = (): Record<string, string> => {
                 const cred = credential();
                 return cred ? { Authorization: `Bearer ${cred}` } : {};
