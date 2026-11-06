@@ -17,7 +17,8 @@
  *
  * These cases count the reads the REAL `MetadataProvider` sends to a fake
  * adapter, outside an app, for each hook reader: the names each asks for, by
- * name, and neither list. The CONTROL: once the whole list is loaded, a reader
+ * name, and neither list; the roster gate asks its names in one `?names=`
+ * request (objectstack#29444). The CONTROL: once the whole list is loaded, a reader
  * reads it and asks nothing. `HomeLayout`'s palette and `HomePage`'s recent
  * rows are counted in their own files (`HomeLayout.paletteReads-29121`,
  * `HomePage.recentObjectReads-29121`).
@@ -59,7 +60,7 @@ const APPS = [
   },
 ];
 
-function makeAdapter(calls: string[]) {
+function makeAdapter(calls: string[], failBatch = false) {
   return {
     clearCache: vi.fn(),
     invalidateCache: vi.fn(),
@@ -70,10 +71,21 @@ function makeAdapter(calls: string[]) {
     },
     getClient: () => ({
       meta: {
-        getItems: (type: string, options?: { packageId?: string }) => {
-          calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
+        getItems: (type: string, options?: { packageId?: string; names?: readonly string[] }) => {
+          calls.push(
+            options?.packageId
+              ? `${type}?package=${options.packageId}`
+              : options?.names
+                ? `${type}?names=${options.names.join(',')}`
+                : type,
+          );
+          if (failBatch && options?.names) return Promise.reject(new Error('network down'));
           const all = type === 'object' ? OBJECTS : type === 'app' ? APPS : [];
-          const items = options?.packageId ? all.filter((o: any) => o._packageId === options.packageId) : all;
+          const items = options?.packageId
+            ? all.filter((o: any) => o._packageId === options.packageId)
+            : options?.names
+              ? all.filter((o: any) => options.names!.includes(o.name))
+              : all;
           return Promise.resolve({ type, items: structuredClone(items) });
         },
         getItem: (type: string, name: string) => {
@@ -90,9 +102,9 @@ function makeAdapter(calls: string[]) {
 const metaReads = (calls: string[]) =>
   calls.filter((c) => c === 'object' || c === 'view' || c.startsWith('object?') || c.startsWith('object/'));
 
-function mount(children: React.ReactNode): string[] {
+function mount(children: React.ReactNode, options: { failBatch?: boolean } = {}): string[] {
   const calls: string[] = [];
-  render(<MetadataProvider adapter={makeAdapter(calls)}>{children}</MetadataProvider>);
+  render(<MetadataProvider adapter={makeAdapter(calls, options.failBatch)}>{children}</MetadataProvider>);
   return calls;
 }
 
@@ -140,12 +152,24 @@ describe('Home asks for the objects it names, never the whole registry (objectst
     expect(metaReads(calls)).toEqual(['object/sys_activity']);
   });
 
-  it('outside an app, the roster’s capability gate asks the app list’s required objects by name, and answers as the whole list did', async () => {
+  // objectstack#29444 — in ONE `?names=` request, no longer one by-name read
+  // per name. `sys_cloud_only` is not in this deployment: the answer leaves it
+  // out, and the gate hides its entry, as it did on the by-name read's 404.
+  it('outside an app, the roster’s capability gate asks the app list’s required objects in one ?names= request, and answers as the whole list did', async () => {
     const calls = mount(<GateProbe />);
     await waitFor(() => expect(screen.getByTestId('gate')).toHaveAttribute('data-cloud', 'false'));
     expect(screen.getByTestId('gate')).toHaveAttribute('data-queue', 'true');
     await settle();
-    expect([...metaReads(calls)].sort()).toEqual(['object/sys_cloud_only', 'object/sys_queue']);
+    expect(metaReads(calls)).toEqual(['object?names=sys_cloud_only,sys_queue']);
+  });
+
+  it('outside an app, a ?names= read that obtained no answer leaves every name unanswered: each entry shows, and nothing is asked again', async () => {
+    const calls = mount(<GateProbe />, { failBatch: true });
+    await waitFor(() => expect(metaReads(calls)).toEqual(['object?names=sys_cloud_only,sys_queue']));
+    await settle();
+    expect(screen.getByTestId('gate')).toHaveAttribute('data-cloud', 'true');
+    expect(screen.getByTestId('gate')).toHaveAttribute('data-queue', 'true');
+    expect(metaReads(calls)).toEqual(['object?names=sys_cloud_only,sys_queue']);
   });
 
   it('an activity row names its object from a read of that object alone', async () => {
