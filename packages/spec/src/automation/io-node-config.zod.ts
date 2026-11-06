@@ -432,10 +432,11 @@ const NotifyRecipientsSlotSchema = z.union([
 /**
  * A notify value slot holding ONE string — `sourceId` (#19939): the string as
  * written, or a CEL value envelope the executor evaluates per run to a string.
- * An envelope that evaluates to `null` or a blank string leaves the key unset,
- * as a token that resolved to nothing did; anything else that is not a string
- * fails the node, naming what it evaluated to. A `{…}` token in the string is
- * refused by the one value-slot judge.
+ * An envelope that evaluates to `null` or a blank string is a written key that
+ * resolves to nothing: the click-through pair is dropped rather than defaulted
+ * to the trigger record; anything else that is not a string fails the node,
+ * naming what it evaluated to. A `{…}` token in the string is refused by the
+ * one value-slot judge.
  */
 function notifyStringSlotSchema(key: string, what: string, example: string, description: string) {
   const rule =
@@ -651,9 +652,9 @@ function notifyLiteralRefusals(cfg: {
  *    and link nowhere; a delete's record is gone once the write lands, so it
  *    is not linked; a before-create run's record has no id until the driver
  *    issues one at the write, after the hook, so it links only when the
- *    caller wrote the id. An
- *    explicit pair or an explicit `actionUrl` is the author's word and wins,
- *    and a half-written pair is still dropped, never defaulted. The executor
+ *    caller wrote the id. An explicit pair or an explicit `actionUrl` is the
+ *    author's word and wins, and a half-written pair is still dropped, never
+ *    defaulted. The executor
  *    owns the default (`defaultClickThroughOf` in service-automation's
  *    `notify-node.ts`); the schema shape is unchanged by it.
  *  - The historical aliases (`to`/`subject`/`body`/`url`, nested

@@ -691,10 +691,12 @@ const EMAIL_FIELD_COUNTER_PREFIX = 'notify-email-field-sends:';
  * [#19939] The notify value slot holding one string — `sourceId`, the
  * click-through record's id: the string as written, or a CEL value envelope
  * evaluated in the run's scope to one, through the shared per-slot resolver
- * (`resolveValueSlot`). `null` or a blank string leaves the key unset, as a
- * token that resolved to nothing did; anything else fails the node, naming
- * what it evaluated to — never `String(value)`. (`sourceObject` and `actorId`
- * are literals, read as written.)
+ * (`resolveValueSlot`). `null` or a blank string is a written key that
+ * resolves to nothing: the click-through pair is dropped rather than defaulted
+ * to the trigger record (`defaultClickThroughOf` reads the written config);
+ * anything else fails the node, naming what it evaluated to — never
+ * `String(value)`. (`sourceObject` and `actorId` are literals, read as
+ * written.)
  */
 function resolveStringSlot(
     engine: AutomationEngine,
