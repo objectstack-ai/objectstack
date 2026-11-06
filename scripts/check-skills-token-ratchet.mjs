@@ -1014,7 +1014,7 @@ export const CEILINGS = new Map([
   // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
   ['skills/objectstack-data/references/seeds.md', 1566],
   ['skills/objectstack-platform/references/bootstrap.md', 1351],
-  ['skills/objectstack-platform/references/operations.md', 3119],
+  ['skills/objectstack-platform/references/operations.md', 3108],
   ['skills/objectstack-platform/references/plugin-development.md', 3137],
   ['skills/objectstack-upgrade/references/examples-upgrade.md', 1197],
 
