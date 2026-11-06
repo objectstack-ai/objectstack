@@ -360,7 +360,7 @@ owner's upgrades. A patch carries display keys only
 values and rules stay the owner's. A key the tenant edited keeps the tenant's
 text; between two extensions the higher `priority` wins. A patch naming a field
 or option value the target lacks is refused at install and by `os validate`, and
-a `picklist`-bound field's options (HotCRM's `industry`) are never patchable. Example:
+a `picklist`-bound field's options are never patchable. Example:
 `defineObjectExtension({ extend: 'crm_account', fieldPatches: { industry: { label: 'Sector' }, type: { options: { customer: { label: 'Client' } } } } })`.
 
 **An object an installed package ships** (ADR-0146 D10) is extended from the
@@ -369,7 +369,7 @@ base's paired `.custom` package (`hotcrm.custom`; **objectstack-platform**
 declaration. Every field the pair adds ends in `__c` (`region__c`). The suffix is
 reserved to the pair, so a `__c` field in any other package, or an unsuffixed
 field in a `.custom` extension, is refused at save, publish and install and by
-`os validate` / `os build`; a base field changes only through `fieldPatches`.
+`os validate` / `os build`.
 Studio's **Add field** on a base object writes the same extension, as an
 `object_extension` item of the pair.
 
