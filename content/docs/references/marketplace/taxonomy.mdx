@@ -1,12 +1,12 @@
 ---
 title: Taxonomy — Marketplace Protocol reference
 navTitle: Taxonomy
-description: "A package used to carry a single category, and that one value had to say two different things at once: who the package is FOR."
+description: "Marketplace taxonomy — the ONE classification of a listed package. Reference for every Taxonomy property with its type and default."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-## Marketplace taxonomy — the ONE classification of a listed package
+Marketplace taxonomy — the ONE classification of a listed package.
 
 A package used to carry a single `category`, and that one value had to say
 two different things at once: who the package is FOR (a business function)
@@ -31,14 +31,14 @@ catalog and the console marketplace — so there is no second list to drift:
 Filtering semantics the catalog applies: OR inside one facet, AND across
 facets. Free-text `tags` stay for search only and generate no filter.
 
-### Growing a facet
+## Growing a facet
 
 Values are append-only. Renaming or removing one is an ADR-0087 retirement
 with a data migration. Adding one needs a real listed package, or a ruled
 scenario card, that needs it, and the console's labels in the same change.
 Keep each facet near a dozen values; merge before you grow.
 
-### What is deliberately absent
+## What is deliberately absent
 
 - No `general` / `cross-industry` industry: absence already means that, and a
   catch-all value is the one every author (an AI author first) would tick.
