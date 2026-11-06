@@ -45,23 +45,30 @@ export const shape = () =>
 export const loadScore = () => import('@objectstack/scenarios/score');
 `;
 
-// Preloaded into the child: every URL Node resolves, printed as the last line.
+// Preloaded into the child: every URL Node resolves, written to the file
+// named by SCENARIOS_RESOLVE_RECORD. A FILE, written synchronously: the record
+// is ~140 KB, larger than a pipe's buffer, and a stdout write from an `exit`
+// handler is not flushed past what the pipe takes before the process ends
+// (a truncated record on a loaded CI runner).
 const RECORDER = `
+const { writeFileSync } = require('node:fs');
 const { registerHooks } = require('node:module');
 const seen = [];
 registerHooks({ resolve(specifier, context, next) { const r = next(specifier, context); seen.push(r.url); return r; } });
-process.on('exit', () => process.stdout.write('\\n' + JSON.stringify(seen) + '\\n'));
+process.on('exit', () => writeFileSync(process.env.SCENARIOS_RESOLVE_RECORD, JSON.stringify(seen)));
 `;
 
 let fixture = '';
 
 function runNode(code: string, kind: 'module' | 'commonjs'): { out: Record<string, unknown>; resolved: string[] } {
+  const record = join(fixture, `resolved-${kind}.json`);
+  rmSync(record, { force: true });
   const stdout = execFileSync(process.execPath, ['--require', join(fixture, 'recorder.cjs'), `--input-type=${kind}`, '-e', code], {
     cwd: fixture,
     encoding: 'utf8',
+    env: { ...process.env, SCENARIOS_RESOLVE_RECORD: record },
   });
-  const lines = stdout.trim().split('\n');
-  return { out: JSON.parse(lines[0]!) as Record<string, unknown>, resolved: JSON.parse(lines[lines.length - 1]!) as string[] };
+  return { out: JSON.parse(stdout.trim()) as Record<string, unknown>, resolved: JSON.parse(readFileSync(record, 'utf8')) as string[] };
 }
 
 const probe = (mod: string) => `
