@@ -6,16 +6,16 @@ import { test, expect } from '@playwright/test';
  *
  * This is the empirical pin for the defect, run against the REAL stack because
  * only the server can answer the question the issue asked: does it accept a
- * rule array in `$filter`? It does not. Measured against the published backend
- * backend this lane pins — `OBJECTSTACK_VERSION` in `e2e/live/ci/backend.env`,
- * once held to the lockfile by objectui's CI-guide pin test (objectui#7689; deleted by
- * objectstack#26058), with the showcase-app commit derived from it at boot from
- * the matching `@objectstack/cli` release tag (objectui#7964). That pin has
- * moved since this measurement was first taken, which is why it is named by
- * FILE and not by value: a version literal written here goes stale behind the
- * pin silently, and the whole point of objectui#7689 is that it did — for two
- * minor versions, in the pin itself. The showcase app is the one that release
- * checks out:
+ * rule array in `$filter`? It does not. First measured against the published
+ * release the lane then pinned; the lane now runs against the WORKSPACE
+ * backend: `ui/e2e/live/ci/start-backend.sh` boots this tree's own built
+ * `@objectstack/cli` (`objectstack dev --seed-admin --fresh`) on the app that
+ * `LIVE_BACKEND_APP` names in `ui/e2e/live/ci/backend.env`
+ * (`examples/app-showcase`), so the HEAD Console meets the HEAD backend and no
+ * published version is pinned anywhere (objectstack#27154; backend.env says
+ * why the pin retired). The backend is named by those two files, never by a
+ * version, so this note cannot go stale behind it. The showcase app is that
+ * directory:
  *
  *   GET /api/v1/data/showcase_task
  *     ?$filter=[{"field":"status","operator":"equals","value":"in_progress"}]
@@ -35,8 +35,8 @@ import { test, expect } from '@playwright/test';
  *
  * In the `test:e2e:live:ci` allowlist since objectui#3472, per live-e2e.yml's
  * promotion policy (prove flake-free first, then admit): 3/3 consecutive green
- * runs against the pinned live pair, plus a 5/5 run of the enlarged allowlist
- * to show it does not disturb the incumbent specs.
+ * runs against the live pair as it was then pinned, plus a 5/5 run of the
+ * enlarged allowlist to show it does not disturb the incumbent specs.
  */
 const APP = process.env.SHOWCASE_APP_NAME || 'showcase_app';
 
