@@ -27,6 +27,7 @@
  *    setup registers it).
  *  - Every fixture, adapter and call log is declared inside its block, so no
  *    block reads another's.
+ *  - `sonner`'s mock is the union of the blocks' mocks: `error` and `success`.
  *  - `./index` is imported once, for the blocks that render through
  *    `SchemaRenderer`: it registers `object-gantt` in the `ComponentRegistry`
  *    for the whole file. No block asserts that key absent.
@@ -40,23 +41,31 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act, cleanup } from '@testing-library/react';
 import { NON_GRID_ROW_CEILING, nonGridRowCeilingQuery, ValueDataSource } from '@object-ui/core';
-import { SchemaRendererProvider, SchemaRenderer } from '@object-ui/react';
+import { SchemaRendererProvider, SchemaRenderer, notifyDataChanged } from '@object-ui/react';
+import type { DataSource, DeclaredNode, ObjectGanttBlockNode } from '@object-ui/types';
+import { safeValidateSchema } from '@object-ui/types/zod';
 import { ObjectGantt } from './ObjectGantt';
+// Module scope, not a hook: this import IS the registration (AGENTS.md
+// test-discipline section).
 import './index';
 
-/** The `GanttView` stand-in the running block installed; the `./GanttView` mock renders it. */
+/**
+ * The `GanttView` stand-in the running block installed; the `./GanttView` mock renders it.
+ * Typed `(props: never)` so a block's stand-in keeps its own props annotation.
+ */
 const standIns = vi.hoisted(() => ({
-  ganttView: null as null | ((props: Record<string, unknown>) => unknown),
+  ganttView: null as null | ((props: never) => unknown),
 }));
 
-vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
+// `success` is the `ObjectGantt.invalidationRefetch-10035` block's; no block asserts on a toast.
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 vi.mock('./GanttView', () => ({
   GanttView: (props: Record<string, unknown>) => {
     if (!standIns.ganttView) {
       throw new Error('ObjectGantt.harness: the running block installed no GanttView stand-in in its beforeEach.');
     }
-    return standIns.ganttView(props);
+    return standIns.ganttView(props as never);
   },
 }));
 
@@ -1290,6 +1299,702 @@ describe('ObjectGantt.ruleArrayFilter-10767', () => {
       await waitFor(() => expect(screen.getByTestId('gantt-view')).toBeTruthy());
       await waitFor(() => expect(drawn().count).toBe('3'));
       expect(drawn().ids).toBe(OPEN_IDS);
+    });
+  });
+});
+
+// ── ObjectGantt.colorFieldLadder-7243 ───────────────────────────────────────────
+
+/**
+ * objectui#7243 — `gantt.colorField` used to be passed RAW into the bar's
+ * `backgroundColor`.
+ *
+ * Pointing the documented key at a select field therefore produced
+ * `backgroundColor: "open"` — not a colour, so the browser dropped the
+ * declaration and every bar rendered identically. OMITTING the key was
+ * strictly better: the absent-key branch derived a real colour per status.
+ *
+ * The ladder this file pins (the triage ruling on #7243, shared with
+ * `plugin-timeline` and `plugin-calendar` through
+ * `@object-ui/core#createFieldColorResolver`):
+ *
+ *   1. the field's own option `color` for the record's value;
+ *   2. else the value when it already IS a colour literal (#hex / rgb / hsl);
+ *   3. else the existing semantic-token derivation — never a raw value.
+ *
+ * The assertions read the `tasks` prop `ObjectGantt` hands `GanttView` rather
+ * than the painted bar: that prop IS the colour contract between the two
+ * (`GanttView` writes `backgroundColor: task.color || '#3b82f6'` at four
+ * sites), and reading it keeps the fixture from depending on which of those
+ * four sites a given row happens to take.
+ *
+ * REVERSE VERIFICATION — direction predicted before running: on the
+ * unmodified tree the first case reports `color: 'open'` instead of the
+ * authored `#7c3aed`, and the palette-token case reports `'red'` instead of
+ * that palette's hex. Both are the pre-fix values, not a crash.
+ *
+ * ---
+ *
+ * objectui#7828 — HARNESS GUARDS, ported from the timeline fixture
+ * (objectui#7527 `c2fc261f5`) together with PR #7826's bound capture. Four
+ * changes, none of them about the ladder: the readiness predicate identifies
+ * WHICH render wrote (a title token this call owns) instead of counting
+ * arity; the value returned is the array that predicate accepted, not a
+ * second read of the module global; every render is torn down in a `finally`;
+ * and no renderer may be alive when one is mounted. The two `it` blocks that
+ * used to mount inline now go through the same helper, because guard 4 is
+ * only worth anything if EVERY render in the file is accounted for.
+ *
+ * ⚠️ WHAT WAS MEASURED, because "it stopped failing" is not a mechanism and a
+ * green loop is not evidence — objectui#7466 paid for that reading: on an
+ * idle box the broken timeline harness passed 32/32, the same 32/32 the fixed
+ * one gets. The lever is the METADATA fetch, not machine load, so the lever
+ * was swept. Instrument: the PRE-PORT harness shape (module global,
+ * arity-only predicate, no unmount, re-read of the global) driving two
+ * renders inside one `it` — the objectui#7466 exposure shape — with
+ * `getObjectSchema` held by 0/1/2/3/4/5/6/7/8/9/10/12/15/20/25/35/50 ms,
+ * three runs at each hold, all three components in the SAME vitest runs:
+ *
+ *   ObjectTimeline (ungated CONTROL)   20 fail / 60 runs
+ *   ObjectGantt                         0 fail / 60 runs
+ *   ObjectCalendar                      0 fail / 60 runs
+ *
+ * The control is what makes those zeroes readable at all: the instrument DOES
+ * fire, in this container, on that day, in those same runs — with the card's
+ * exact signature: the second render reads the FIRST render's colour back out
+ * of the global (`second=["#abc"]` where `["#123456"]` was authored).
+ *
+ * Note WHERE it fires: every timeline failure sits at a hold of 1-9ms, and the
+ * coarse grid alone caught it at ONE hold out of eight. That is why the grid
+ * was refined instead of repeated — repetition at a hold outside the window is
+ * exactly the 32/32 that taught objectui#7466 nothing.
+ *
+ * The mechanism, measured the same way — writes into the module global AFTER
+ * the readiness predicate went green, with the render left mounted exactly as
+ * the pre-port harness left it:
+ *
+ *   ObjectTimeline, getObjectSchema +25ms    1 paint at green, 3 LATE writes
+ *   ObjectGantt,    +0 / +25 / +100ms        1 paint, 0 late writes
+ *   ObjectCalendar, +0 / +25 / +100ms        1 paint, 0 late writes
+ *
+ * `ObjectTimeline`'s data effect lists `objectDef`, so it paints once before
+ * the metadata lands and again after. `ObjectGantt` GATES its record query on
+ * the SETTLED schema (objectui#7225 ask 2, objectui#6482's undischarged
+ * gating half — the effect returns early until `objectSchemaReady`), so its
+ * first paint arrives only after the metadata read — the measured paint time
+ * tracks the hold, 31ms at +25 and 114ms at +100 — and no schema-triggered
+ * second paint follows it.
+ *
+ * ⛔ So this file does NOT claim the timeline's two-paint behaviour for
+ * `ObjectGantt`: it was looked for, with a lit instrument, and it is not
+ * there. **No failure was reproducible on this file today.** What is ported
+ * is the HARNESS half, which does not depend on that behaviour — a module
+ * global plus an arity-only predicate cannot say WHICH component wrote,
+ * whatever the component does. The guards are here so that the ordinary next
+ * edit to a ladder fixture — a second assertion inside one of these `it`
+ * blocks, which is precisely the edit that made objectui#7466 — cannot
+ * reintroduce one.
+ */
+describe('ObjectGantt.colorFieldLadder-7243', () => {
+  beforeEach(() => {
+    standIns.ganttView = ({ tasks }: any) => {
+      lastTasks = tasks;
+      return <div data-testid="gantt-view" data-task-count={String(tasks.length)} />;
+    };
+  });
+
+  let lastTasks: any[] = [];
+
+  /** The authored option colours — the single fact all three renderers must agree on. */
+  const STATUS_OPTIONS = [
+    { value: 'open', label: 'Open', color: '#7c3aed' },
+    { value: 'done', label: 'Done', color: '#059669' },
+  ];
+
+  const OBJECT_SCHEMA = {
+    name: 'duly_task',
+    fields: {
+      id: { name: 'id', type: 'text' },
+      subject: { name: 'subject', type: 'text' },
+      visible_from: { name: 'visible_from', type: 'date' },
+      due_date: { name: 'due_date', type: 'date' },
+      status: { name: 'status', type: 'select', options: STATUS_OPTIONS },
+      // No `options` — a plain text field an author may use to store a literal
+      // colour, which is the only shape rung 2 exists for.
+      accent: { name: 'accent', type: 'text' },
+    },
+  };
+
+  const ROWS = [
+    {
+      id: '1',
+      subject: 'Ship it',
+      status: 'open',
+      accent: '#123456',
+      visible_from: '2026-01-01',
+      due_date: '2026-01-10',
+    },
+  ];
+
+  function makeDataSource(rows: any[] = ROWS, objectSchema: any = OBJECT_SCHEMA) {
+    return {
+      find: vi.fn(async () => ({ data: rows, total: rows.length })),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => objectSchema),
+    } as any;
+  }
+
+  /** Distinguishes one render from the next. See `token` below. */
+  let renderSeq = 0;
+
+  /**
+   * Mounts ONE gantt, waits for THIS render to be the one that wrote, and
+   * returns the tasks the predicate accepted. Every render in this file goes
+   * through here — the colour rungs via `colorsFor` below, and the two cases
+   * that need a non-default `gantt` block or object schema directly.
+   */
+  async function tasksFor(
+    ganttConfig: Record<string, any>,
+    rows: any[] = ROWS,
+    objectSchema: any = OBJECT_SCHEMA,
+  ) {
+    // objectui#7828 (objectui#7521's guard) — a STRUCTURAL check, deliberately
+    // not a timing one. RTL's auto-cleanup runs in `afterEach`, never between
+    // two renders inside one `it`, so a render this helper failed to tear down
+    // is observable HERE, at a synchronous point, rather than as a race someone
+    // has to catch in the act.
+    expect(screen.queryAllByTestId('gantt-view')).toHaveLength(0);
+
+    // A token this call OWNS. `ObjectGantt` resolves a task's `title` from the
+    // configured `titleField` first (ADR-0079 ladder), so the token rides
+    // through to `lastTasks` untouched — and it is NOT the value under test, so
+    // the predicate below can tell "THIS render is ready" from "something else
+    // wrote again" without asserting the colour the caller is about to assert.
+    const token = `render-${++renderSeq}`;
+    const stampedRows = rows.map((row, i) => ({ ...row, subject: `${token}-${i}` }));
+
+    lastTasks = [];
+    const schema: any = {
+      type: 'object-gantt',
+      objectName: 'duly_task',
+      gantt: {
+        titleField: 'subject',
+        startDateField: 'visible_from',
+        endDateField: 'due_date',
+        ...ganttConfig,
+      },
+    };
+    const { unmount } = render(
+      <ObjectGantt schema={schema} dataSource={makeDataSource(stampedRows, objectSchema)} />,
+    );
+    try {
+      // Identify the AUTHOR, not just the arity. `lastTasks.length` alone cannot
+      // separate "the component I just mounted has painted" from "an earlier one
+      // painted again": both leave length === rows.length.
+      //
+      // And RETURN THE ARRAY THE PREDICATE ACCEPTED (PR #7826). `lastTasks` is
+      // module-level and mutable, so reading it again on the next line asks a
+      // SECOND question — after `act` has yielded on its way out of `waitFor`, a
+      // real window in which a still-live writer can answer it. Capturing inside
+      // the predicate makes "the value asserted" and "the value validated" the
+      // same object by construction.
+      let settled: typeof lastTasks = [];
+      await waitFor(() => {
+        const tasks = lastTasks;
+        expect(tasks.map((t) => t.title)).toEqual(stampedRows.map((r) => r.subject));
+        settled = tasks;
+      });
+      return settled;
+    } finally {
+      // Tear THIS render down before returning, so nothing this helper mounted
+      // can still be writing to `lastTasks` during the NEXT call — after that
+      // call has reset it. Measured above: `ObjectGantt` emits no late write
+      // today, which is why this is a guard and not a fix.
+      unmount();
+    }
+  }
+
+  async function colorsFor(colorField: string, rows: any[] = ROWS) {
+    return (await tasksFor({ colorField }, rows)).map((t) => t.color);
+  }
+
+  describe('objectui#7243 — gantt colorField ladder', () => {
+    it('rung 1: a select field paints the AUTHORED option colour', async () => {
+      expect(await colorsFor('status')).toEqual(['#7c3aed']);
+    });
+
+    it('rung 2: a literal hex in a plain field still passes through untouched', async () => {
+      expect(await colorsFor('accent')).toEqual(['#123456']);
+    });
+
+    it('rung 3: a value with no option colour derives a colour, never the raw value', async () => {
+      const rows = [{ ...ROWS[0], status: 'in_progress' }];
+      const schemaless = {
+        ...OBJECT_SCHEMA,
+        fields: { ...OBJECT_SCHEMA.fields, status: { name: 'status', type: 'text' } },
+      };
+      const tasks = await tasksFor({ colorField: 'status' }, rows, schemaless);
+      // `in_progress` is a SEMANTIC_COLOR_MAP key -> blue -> that palette's hex.
+      expect(tasks[0].color).toBe('#3b82f6');
+      expect(tasks[0].color).not.toBe('in_progress');
+    });
+
+    it('rung 3: a palette token resolves to that palette colour, not a raw CSS name', async () => {
+      const rows = [{ ...ROWS[0], accent: 'red' }];
+      expect(await colorsFor('accent', rows)).toEqual(['#ef4444']);
+    });
+
+    it('an empty colorField value still falls back to the record status story', async () => {
+      const rows = [{ ...ROWS[0], accent: '' }];
+      // `status: 'open'` -> SEMANTIC_COLOR_MAP blue.
+      expect(await colorsFor('accent', rows)).toEqual(['#3b82f6']);
+    });
+
+    it('borderColorField takes rung 1 too — the alert stroke honours option colours', async () => {
+      const tasks = await tasksFor({ borderColorField: 'status' });
+      expect(tasks[0].borderColor).toBe('#7c3aed');
+    });
+  });
+});
+
+// ── ObjectGantt.invalidationRefetch-10035 ───────────────────────────────────────
+
+/**
+ * objectui#10035 — `ObjectGantt` refetches IN PLACE when the data-invalidation
+ * bus reports a write to the object it reads (AGENTS.md #8's corollary:
+ * refresh data, don't rebuild UI).
+ *
+ * The gantt used to read no refresh input: the registered `object-gantt`
+ * renderer hands it only `schema` and `dataSource`, and its own query named no
+ * counter, no `onMutation` and no bus. So a host could show it a write only by
+ * bumping its `key` — a remount that loses the chart's scroll, collapsed groups
+ * and zoom.
+ *
+ * Every case drives the REAL bus (`notifyDataChanged` from `@object-ui/react`).
+ * `GanttView` is a stand-in carrying an instance id from a `useState`
+ * initializer, which runs once per mount: a changed id means `GanttView` was
+ * unmounted — by a remount of the gantt OR by the loading placeholder a
+ * non-silent reload swaps in. Either is the damage this card is about, so the
+ * in-place case asserts:
+ *   (a) the SAME `GanttView` instance afterwards, and the placeholder never
+ *       painted;
+ *   (b) the rows written after the first read reach it;
+ *   (c) one invalidation costs exactly one query (no refetch storm).
+ */
+describe('ObjectGantt.invalidationRefetch-10035', () => {
+  beforeEach(() => {
+    // Named, because the stand-in calls a hook: it runs inside the mocked `GanttView`.
+    const GanttView = ({ tasks }: any) => {
+      const [id] = React.useState(() => ++instanceSeq);
+      return (
+        <div data-testid="gantt-view" data-instance={id} data-task-count={String(tasks.length)} />
+      );
+    };
+    standIns.ganttView = GanttView;
+  });
+
+  let instanceSeq = 0;
+
+  const OBJECT = 'task';
+
+  const OBJECT_DEF = {
+    name: OBJECT,
+    fields: {
+      id: { name: 'id', type: 'text' },
+      subject: { name: 'subject', type: 'text' },
+      visible_from: { name: 'visible_from', type: 'date' },
+      due_date: { name: 'due_date', type: 'date' },
+    },
+  };
+
+  /** A server whose store the test writes to, so a re-read returns the new row. */
+  function makeAdapter() {
+    const store = [{ id: '1', subject: 'Renewal', visible_from: '2026-01-01', due_date: '2026-01-05' }];
+    return {
+      store,
+      find: vi.fn(async () => ({ data: store.map((r) => ({ ...r })), total: store.length })),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => OBJECT_DEF),
+    } as any;
+  }
+
+  const schema: any = {
+    type: 'object-gantt',
+    objectName: OBJECT,
+    gantt: { titleField: 'subject', startDateField: 'visible_from', endDateField: 'due_date' },
+  };
+
+  const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 100)));
+  const view = () => screen.getByTestId('gantt-view');
+
+  beforeEach(() => {
+    instanceSeq = 0;
+  });
+
+  describe('ObjectGantt refetches in place on a data-invalidation for its object (objectui#10035)', () => {
+    it('re-reads the rows once, silently, into the same GanttView', async () => {
+      const adapter = makeAdapter();
+      render(<ObjectGantt schema={schema} dataSource={adapter} />);
+      await waitFor(() => expect(view().dataset.taskCount).toBe('1'));
+      await settle();
+      const before = view().dataset.instance;
+      const queriesBefore = adapter.find.mock.calls.length;
+
+      adapter.store.push({ id: '2', subject: 'Kickoff', visible_from: '2026-01-02', due_date: '2026-01-03' });
+      await act(async () => {
+        notifyDataChanged({ objectName: OBJECT });
+        // The placeholder must not paint at any point of the reload.
+        expect(screen.queryByText('Loading Gantt chart...')).toBeNull();
+      });
+
+      await waitFor(() =>
+        expect(
+          view().dataset.taskCount,
+          '(b) The gantt never re-read its rows after the bus reported a write to its object.',
+        ).toBe('2'),
+      );
+      await settle();
+      expect(adapter.find.mock.calls.length - queriesBefore, '(c) one invalidation, one query').toBe(1);
+      expect(
+        view().dataset.instance,
+        '(a) GanttView was unmounted: the refresh went through the loading placeholder (a\n'
+          + 'non-silent reload) or a remount, and took the chart\'s scroll and collapse state with it.',
+      ).toBe(before);
+      expect(screen.queryByText('Loading Gantt chart...')).toBeNull();
+    });
+
+    it('a change to another object does not query', async () => {
+      const adapter = makeAdapter();
+      render(<ObjectGantt schema={schema} dataSource={adapter} />);
+      await waitFor(() => expect(view().dataset.taskCount).toBe('1'));
+      await settle();
+      const queriesBefore = adapter.find.mock.calls.length;
+
+      await act(async () => {
+        notifyDataChanged({ objectName: 'some_other_object' });
+      });
+      await settle();
+
+      expect(adapter.find.mock.calls.length - queriesBefore).toBe(0);
+    });
+
+    it('rows a host handed down are not re-queried — the host owns that refresh', async () => {
+      const adapter = makeAdapter();
+      const hostRows = [{ id: 'h1', subject: 'Host row', visible_from: '2026-01-01', due_date: '2026-01-02' }];
+      render(<ObjectGantt schema={schema} dataSource={adapter} {...({ data: hostRows } as any)} />);
+      await waitFor(() => expect(view().dataset.taskCount).toBe('1'));
+      await settle();
+
+      await act(async () => {
+        notifyDataChanged({ objectName: OBJECT });
+      });
+      await settle();
+
+      expect(adapter.find).not.toHaveBeenCalled();
+    });
+  });
+});
+
+// ── ObjectGantt.propertiesBag-10859 ─────────────────────────────────────────────
+
+/**
+ * An authored `object-gantt` writes its props in the spec's `properties` bag,
+ * and the bag draws what the flat spelling drew (objectui#10859, batch 6).
+ *
+ * `@object-ui/types` now arms the authored node from
+ * `ComponentPropsMap['object-gantt']`: `{ type: 'object-gantt', properties: {
+ * … } }` validates, and the flat spelling is refused by name
+ * (`object-gantt-properties-bag-10859-b6.test.ts` holds both faces). That move
+ * is only safe if the renderer reads the bag, so this file renders the node
+ * through the real registry and a recording adapter:
+ *
+ *  - the bag queries its `objectName` with its own `filter` and `sort`, and
+ *    hands the chart one task per returned row, titled by its `gantt` block;
+ *  - the flat spelling code still composes — the props on the node, with the
+ *    `gantt` block — makes the identical call and hands the chart the same
+ *    tasks: `SchemaRenderer` hoists the bag onto the node before `ObjectGantt`
+ *    reads it (the flattened `GanttConfig` keys `ObjectView` once wrote are
+ *    not read since objectstack#25923; `ObjectGantt.blockPrecedence.test.tsx`
+ *    pins their refusal);
+ *  - a bag bound through the node's `dataSource` queries the bound object;
+ *  - a bag on inline rows draws them without a host query;
+ *  - control: a bag naming a different object queries that object and never
+ *    the fixture's, so the first row cannot pass on a fetch the bag did not
+ *    drive.
+ */
+describe('ObjectGantt.propertiesBag-10859', () => {
+  beforeEach(() => {
+    // The bar canvas is not the subject; the tasks the chart is handed are. The
+    // stand-in lists them, as the sibling ObjectGantt tests stub the view.
+    standIns.ganttView = ({ tasks }: { tasks: StandInTask[] }) => (
+      <ul data-testid="gantt-view">
+        {tasks.map((task) => (
+          <li
+            key={String(task.id)}
+            data-testid="gantt-task"
+            data-id={String(task.id)}
+            data-start={task.start.toISOString()}
+            data-end={task.end.toISOString()}
+            data-progress={task.progress}
+          >
+            {task.title}
+          </li>
+        ))}
+      </ul>
+    );
+  });
+
+  type StandInTask = { id: string | number; title: string; start: Date; end: Date; progress: number };
+
+  const GANTT = { startDateField: 'start_date', endDateField: 'end_date', titleField: 'name', progressField: 'progress' };
+  // `as const` keeps `operator` the literal the bag's filter row declares; a
+  // widened `string` is refused there (objectui#8347 took away the index
+  // signature that used to admit the bag on the post-hoist node type).
+  const FILTER = [{ field: 'status', operator: 'equals' as const, value: 'open' }];
+  const SORT: Array<{ field: string; order: 'asc' | 'desc' }> = [{ field: 'name', order: 'desc' }];
+  const ROWS = [
+    { id: 't1', name: 'Design', start_date: '2026-03-02', end_date: '2026-03-06', progress: 100, status: 'open' },
+    { id: 't2', name: 'Build', start_date: '2026-03-09', end_date: '2026-03-20', progress: 40, status: 'open' },
+  ];
+
+  /** The authored spelling, spec-valid. */
+  const BAG: ObjectGanttBlockNode = { type: 'object-gantt', properties: { objectName: 'task', gantt: GANTT, filter: FILTER, sort: SORT } };
+  /** The same props written flat, with the `gantt` block — what a code composer can build. */
+  const FLAT: DeclaredNode = { type: 'object-gantt', objectName: 'task', gantt: GANTT, filter: FILTER, sort: SORT };
+  /** The bag with its object supplied by the node's binding instead. */
+  const BOUND_BAG: DeclaredNode = { type: 'object-gantt', dataSource: { object: 'task' }, properties: { gantt: GANTT } };
+  /** The bag on inline rows. */
+  const INLINE_BAG: DeclaredNode = { type: 'object-gantt', properties: { staticData: ROWS, gantt: GANTT } };
+
+  function makeAdapter() {
+    return {
+      find: vi.fn().mockResolvedValue({ data: ROWS }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn().mockImplementation(async (name: string) => ({
+        name,
+        fields: {
+          name: { type: 'text' },
+          start_date: { type: 'date' },
+          end_date: { type: 'date' },
+          progress: { type: 'number' },
+          status: { type: 'text' },
+        },
+      })),
+    };
+  }
+
+  function renderNode(schema: DeclaredNode) {
+    const adapter = makeAdapter();
+    const view = render(
+      <SchemaRendererProvider dataSource={adapter as unknown as DataSource}>
+        {/* No cast (objectui#11466): each fixture is a `DeclaredNode`. The bag
+            spellings are the authored `object-gantt` node; `FLAT` and
+            `FLAT_CONFIG` are the `ObjectGanttSchema` twin, the node as code
+            composes it, which the validator refuses as authored metadata and
+            the renderer reads all the same (objectui#11355). */}
+        <SchemaRenderer schema={schema} />
+      </SchemaRendererProvider>,
+    );
+    return { adapter, ...view };
+  }
+
+  /** The tasks the chart was handed, once it has been handed all of them. */
+  async function tasksOf(container: HTMLElement, count: number) {
+    await waitFor(() => expect(container.querySelectorAll('[data-testid="gantt-task"]')).toHaveLength(count));
+    return Array.from(container.querySelectorAll('[data-testid="gantt-task"]')).map((el) => ({
+      id: el.getAttribute('data-id'),
+      title: el.textContent,
+      start: el.getAttribute('data-start'),
+      end: el.getAttribute('data-end'),
+      progress: el.getAttribute('data-progress'),
+    }));
+  }
+
+  describe('object-gantt renders from its `properties` bag (objectui#10859 batch 6)', () => {
+    it('the fixtures are the spellings the validator now tells apart (lit control)', () => {
+      expect(safeValidateSchema(BAG).success).toBe(true);
+      expect(safeValidateSchema(BOUND_BAG).success).toBe(true);
+      expect(safeValidateSchema(INLINE_BAG).success).toBe(true);
+      expect(safeValidateSchema(FLAT).success).toBe(false);
+    });
+
+    it('the bag queries its object with its own filter and sort, and hands the chart one task per row', async () => {
+      const { adapter, container } = renderNode(BAG);
+      await waitFor(() => expect(adapter.find).toHaveBeenCalled());
+      const [object, params] = adapter.find.mock.calls[0] as [string, { $filter?: unknown; $orderby?: unknown }];
+      expect(object).toBe('task');
+      expect(JSON.stringify(params.$filter)).toContain('status');
+      expect(params.$orderby).toEqual({ name: 'desc' });
+      const tasks = await tasksOf(container, ROWS.length);
+      expect(tasks.map((task) => task.title).sort()).toEqual(['Build', 'Design']);
+    });
+
+    it('the flat spelling a composer builds (the `gantt` block on the node) makes the identical call and hands the chart the same tasks', async () => {
+      const flatNode = FLAT;
+      const bag = renderNode(BAG);
+      await waitFor(() => expect(bag.adapter.find).toHaveBeenCalled());
+      const bagTasks = await tasksOf(bag.container, ROWS.length);
+      bag.unmount();
+      const flat = renderNode(flatNode);
+      await waitFor(() => expect(flat.adapter.find).toHaveBeenCalled());
+      const flatTasks = await tasksOf(flat.container, ROWS.length);
+      expect(flat.adapter.find.mock.calls[0]).toEqual(bag.adapter.find.mock.calls[0]);
+      expect(flatTasks).toEqual(bagTasks);
+    });
+
+    it('a bag bound through the node\'s `dataSource` queries the bound object', async () => {
+      const { adapter, container } = renderNode(BOUND_BAG);
+      await waitFor(() => expect(adapter.find).toHaveBeenCalled());
+      expect(adapter.find.mock.calls[0][0]).toBe('task');
+      await tasksOf(container, ROWS.length);
+    });
+
+    it('a bag on inline rows draws them, and the host adapter is never queried', async () => {
+      const { adapter, container } = renderNode(INLINE_BAG);
+      const tasks = await tasksOf(container, ROWS.length);
+      expect(tasks.map((task) => task.title).sort()).toEqual(['Build', 'Design']);
+      expect(adapter.find).not.toHaveBeenCalled();
+    });
+
+    it('control: a bag naming another object queries that object, never the fixture\'s', async () => {
+      const { adapter } = renderNode({ ...BAG, properties: { ...BAG.properties, objectName: 'milestone' } });
+      await waitFor(() => expect(adapter.find).toHaveBeenCalled());
+      const objects = adapter.find.mock.calls.map((call) => call[0]);
+      expect(objects).toContain('milestone');
+      expect(objects).not.toContain('task');
+    });
+  });
+});
+
+// ── ObjectGantt.retiredApiProvider-12325 ────────────────────────────────────────
+
+/**
+ * objectui#12325 — a gantt whose `data` still says `provider: 'api'` is not
+ * read through it.
+ *
+ * This file used to be `ObjectGantt.apifetch.test.tsx`, which pinned that an
+ * api-provider gantt fetched its `read.url` through the host's
+ * `SchemaRendererContext.apiFetch` (#2725), falling back to the global fetch.
+ * The view-level `api` data source is retired in `@objectstack/spec`
+ * (objectstack#23082, ADR-0049): a view binds its object or static rows, and a
+ * metadata-declared API call is the page element's `dataSource` binding.
+ * `resolveDataSource` has no `api` arm any more, so the block is an unknown
+ * provider:
+ *
+ *   1. its `read` URL is requested through NEITHER channel — not the host's
+ *      `apiFetch`, not the global fetch — and with no DataSource no row is
+ *      drawn;
+ *   2. with a context DataSource the chart answers it the way it answers any
+ *      unknown provider: it queries `schema.objectName` through that adapter.
+ */
+describe('ObjectGantt.retiredApiProvider-12325', () => {
+  beforeEach(() => {
+    standIns.ganttView = ({ tasks }: any) => (
+      <div data-testid="gantt-view">
+        {tasks.map((t: any) => (
+          <div key={t.id} data-testid={`gv-view-${t.id}`}>{t.title}</div>
+        ))}
+      </div>
+    );
+  });
+
+  const ROWS = [
+    { id: '1', name: 'Task A', start_date: '2024-01-01', end_date: '2024-01-05' },
+  ];
+
+  const ENDPOINT = '/api/gantt/tree';
+
+  function retiredApiSchema(): any {
+    return {
+      type: 'gantt',
+      objectName: 'tasks',
+      gantt: {
+        titleField: 'name',
+        startDateField: 'start_date',
+        endDateField: 'end_date',
+      },
+      data: { provider: 'api', read: { url: ENDPOINT, method: 'GET' } },
+    };
+  }
+
+  function makeFetch() {
+    return vi.fn(async () =>
+      new Response(JSON.stringify({ data: ROWS, total: ROWS.length }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+  }
+
+  function makeContextDS(): DataSource {
+    return {
+      find: vi.fn(async () => ({ data: ROWS, total: ROWS.length })),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => ({ name: 'tasks', fields: {} })),
+    } as unknown as DataSource;
+  }
+
+  /** Lets every in-flight read settle, so a request that would follow is counted. */
+  const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 100)));
+
+  describe("ObjectGantt — a retired provider:'api' block (objectui#12325)", () => {
+    const bareFetch = makeFetch();
+
+    beforeEach(() => {
+      bareFetch.mockClear();
+      vi.stubGlobal('fetch', bareFetch);
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('requests its read URL through neither the host apiFetch nor the global fetch', async () => {
+      const apiFetch = makeFetch();
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      try {
+        render(
+          <SchemaRendererProvider dataSource={null} apiFetch={apiFetch as any}>
+            <ObjectGantt schema={retiredApiSchema()} />
+          </SchemaRendererProvider>,
+        );
+        await settle();
+      } finally {
+        errSpy.mockRestore();
+      }
+
+      expect(apiFetch).not.toHaveBeenCalled();
+      expect(bareFetch).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('gv-view-1')).toBeNull();
+    });
+
+    it('with a context DataSource, queries schema.objectName like any unknown provider, and still requests no URL', async () => {
+      const apiFetch = makeFetch();
+      const ds = makeContextDS();
+
+      render(
+        <SchemaRendererProvider dataSource={ds} apiFetch={apiFetch as any}>
+          <ObjectGantt schema={retiredApiSchema()} dataSource={ds} />
+        </SchemaRendererProvider>,
+      );
+
+      await waitFor(() => expect(screen.getByTestId('gv-view-1')).toBeDefined());
+      expect((ds.find as any).mock.calls.map((call: unknown[]) => call[0])).toEqual(['tasks']);
+      expect(apiFetch).not.toHaveBeenCalled();
+      expect(bareFetch).not.toHaveBeenCalled();
     });
   });
 });

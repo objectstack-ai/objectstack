@@ -183,3 +183,101 @@ describe('useMetadataClient — an emitted advisory reaches the toast sink', () 
     expect(toast.warning).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * The storage-sync advisory, in the producer's EXACT shape (objectstack#30723).
+ *
+ * Copied verbatim from `objectStorageSyncRefusedNotice` in
+ * `packages/metadata-protocol/src/protocol-registry-hydration.ts` (the server
+ * half, objectstack#30635 / PR #30691), with `reason` fixed to the fallback the
+ * producer prints for a driver error that carries no 4xx `status`. Copied, not
+ * imported: the console takes no dependency on the server package for a
+ * fixture.
+ *
+ * What this shape has that the gate's findings above do not is an EMPTY `path`
+ * (the finding is about the object as a whole). `readSaveAdvisories` keeps a
+ * finding only when all six keys are strings, so `''` must survive it; a reader
+ * that demanded a non-empty pointer would drop this one warning on every door
+ * while every gate-finding pin stayed green.
+ */
+function storageSyncRefusedNotice(name: string) {
+  const reason = 'the reason is in the server log';
+  return {
+    rule: 'object-storage-sync-refused',
+    severity: 'warning' as const,
+    where: `object "${name}"`,
+    path: '',
+    message:
+      `object '${name}' was saved and is served, but its storage was NOT created or altered: `
+      + `the datasource refused its schema sync (${reason}). Until the sync runs, reads and writes `
+      + 'against it fail, or miss the columns this save added.',
+    hint:
+      "Resolve the datasource's refusal, then publish the object again (which re-runs the sync), "
+      + 'or restart the server, which syncs the storage of every registered object.',
+  };
+}
+
+describe('useMetadataClient — a refused object storage sync is shown on every object door (objectstack#30723)', () => {
+  const NOTICE = storageSyncRefusedNotice('invoice');
+  const INVOICE = { name: 'invoice', label: 'Invoice', fields: { amount: { type: 'number', label: 'Amount' } } };
+  /** The single-item doors' 200: the object is published and served. */
+  const SYNC_REFUSED_BODY = { success: true, version: 'v3', seq: 3, state: 'active', advisories: [NOTICE] };
+  /** The batch door's 200: the finding rides its own `published[]` element. */
+  const BATCH_BODY = {
+    success: true,
+    outcome: 'published',
+    published: [{ type: 'object', name: 'invoice', advisories: [NOTICE] }],
+  };
+
+  /** The warning the admin reads: the frame's verb, then the server's prose verbatim. */
+  function expectStorageWarning(verb: RegExp) {
+    const [title, options] = warningCall();
+    expect(title).toMatch(verb);
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(options?.description).toContain(`[${NOTICE.rule}] ${NOTICE.where} — ${NOTICE.message}`);
+    expect(options?.description).toContain(NOTICE.hint);
+  }
+
+  beforeEach(() => {
+    vi.mocked(toast.error).mockClear();
+    serverAnswers(SYNC_REFUSED_BODY);
+  });
+
+  it('SAVE door, publish mode: the save resolves and the warning says "Saved"', async () => {
+    const { result } = renderHook(() => useMetadataClient());
+
+    await expect(result.current.save('object', 'invoice', INVOICE)).resolves.toMatchObject({ success: true });
+
+    // Publish mode is the default: no `mode=draft` went on the wire.
+    expect(String(fetchMock.mock.calls[0]![0])).not.toContain('mode=draft');
+    expectStorageWarning(/^Saved\b/);
+  });
+
+  it('PUBLISH door (`publish`): the promotion resolves and the warning says "Published"', async () => {
+    const { result } = renderHook(() => useMetadataClient());
+
+    await expect(result.current.publish('object', 'invoice')).resolves.toMatchObject({ success: true });
+
+    expectStorageWarning(/^Published\b/);
+  });
+
+  it('PUBLISH door (`publishDraft`): the promotion resolves and the warning says "Published"', async () => {
+    const { result } = renderHook(() => useMetadataClient());
+
+    await expect(result.current.publishDraft('object', 'invoice')).resolves.toMatchObject({ success: true });
+
+    expectStorageWarning(/^Published\b/);
+  });
+
+  it('BATCH door (`publishPackageDrafts`): one `published[]` element carries it, the warning says "Published"', async () => {
+    serverAnswers(BATCH_BODY);
+    const { result } = renderHook(() => useMetadataClient());
+
+    await expect(result.current.publishPackageDrafts('com.acme.billing')).resolves.toMatchObject({
+      outcome: 'published',
+    });
+
+    expect(String(fetchMock.mock.calls[0]![0])).toContain('/packages/com.acme.billing/publish-drafts');
+    expectStorageWarning(/^Published\b/);
+  });
+});
