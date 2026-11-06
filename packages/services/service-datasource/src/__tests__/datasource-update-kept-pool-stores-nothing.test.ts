@@ -40,7 +40,16 @@ import { ENTITLED_CREDENTIAL, createSessionAuthService, createGrantsEngine } fro
 // Pay the first transform of the dist-resolved driver at module load, not
 // inside a clocked `it()` (see `scripts/check-test-source-alias.mjs`).
 import '@objectstack/driver-sql';
-import '@objectstack/driver-memory';
+// This suite hands the admin plugin its own driver factory, so the default
+// factory's `memory` arm is never called. The mock answers its static reach
+// without loading the in-memory driver (scripts/driver-memory-census.ledger.json).
+vi.mock('@objectstack/driver-memory', () => ({
+  InMemoryDriver: class {
+    constructor() {
+      throw new Error('the in-memory driver is not used by this suite');
+    }
+  },
+}));
 
 type Row = Record<string, unknown>;
 
