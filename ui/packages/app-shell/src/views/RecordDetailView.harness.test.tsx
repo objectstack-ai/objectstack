@@ -34,7 +34,8 @@
  *    back what the block left: registry entries, a swapped-in
  *    `localStorage`, the contents of both storages, the `lang` / `dir` that
  *    `I18nProvider` sets on `<html>`, the `innerWidth` / `innerHeight` a
- *    block pins, and the call history of the mocks above.
+ *    block pins, the address a block writes into `history`, and the call
+ *    history of the mocks above.
  *  - react-i18next's global instance, which a mounted `I18nProvider`
  *    installs, is put back after every test by `vitest.setup.i18n-global.ts`,
  *    so a block that mounts no provider still renders with none.
@@ -45,10 +46,11 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
-import { render, waitFor, cleanup } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { render, waitFor, cleanup, screen, act, fireEvent } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, BrowserRouter } from 'react-router-dom';
+import { RelatedCountStore } from '@object-ui/components';
 import { ComponentRegistry } from '@object-ui/core';
-import { I18nProvider, LocalizationProvider } from '@object-ui/i18n';
+import { I18nProvider, LocalizationProvider, createI18n } from '@object-ui/i18n';
 import { PermissionProvider, MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { MetadataCtx } from '@object-ui/react';
 import { appSegmentOf } from '../console/home/appLastOpened';
@@ -93,10 +95,11 @@ vi.mock('./MetadataInspector', () => ({
  * Puts back, after the calling block's last test, what the block's hooks and
  * tests left behind, so the next block starts from the state its former file
  * started from: registry entries, a swapped-in `localStorage`, both storages'
- * contents, `<html lang>` / `dir`, `window.innerWidth` / `innerHeight`, and
- * the call history of the module mocks above. Several former files pin
- * `innerWidth` to a desktop width in a `beforeAll` and never take it back,
- * which a fresh window used to hide.
+ * contents, `<html lang>` / `dir`, `window.innerWidth` / `innerHeight`, the
+ * address bar, and the call history of the module mocks above. Several former
+ * files pin `innerWidth` to a desktop width in a `beforeAll` and never take it
+ * back, which a fresh window used to hide; one writes the record's address
+ * into the real `history` and leaves it there.
  *
  * Declared first in the block, so its `beforeAll` runs before the block's own
  * and its `afterAll` after them (Vitest runs after-hooks in reverse order).
@@ -108,7 +111,9 @@ function restoreAfterBlock() {
     innerWidth: undefined,
     innerHeight: undefined,
   };
+  let href = '';
   beforeAll(() => {
+    href = window.location.href;
     registered = new Map(ComponentRegistry.getAllTypes().map((type) => [type, ComponentRegistry.getConfig(type)]));
     storage = Object.getOwnPropertyDescriptor(window, 'localStorage');
     viewport = {
@@ -137,6 +142,7 @@ function restoreAfterBlock() {
       if (before) Object.defineProperty(window, key, before);
       else delete (window as unknown as Record<string, unknown>)[key];
     }
+    window.history.replaceState(null, '', href);
     document.documentElement.removeAttribute('lang');
     document.documentElement.removeAttribute('dir');
     vi.clearAllMocks();
@@ -1322,6 +1328,1221 @@ describe('RecordDetailView.pageHeaderTitleFls-10499', () => {
 
     it('CONTROL — with no provider (policy not loaded) nothing is filtered, per the objectui#10411 rule', async () => {
       await renderRecordPage({ titleFormat: '{email}' }, bare, EMAIL);
+    });
+  });
+});
+
+// ── RecordDetailView.relatedListTitlePlural-11733 ───────────────────────────
+
+/**
+ * objectui#11733 — a related-list section on the record page is titled with
+ * the child object's PLURAL label.
+ *
+ * The section lists the child's records — a project's tasks — but it was
+ * titled with the singular: "Task". Two producers wrote that title, and both
+ * are read here:
+ *
+ *  - the single-relationship title, which `RecordDetailView` resolves from the
+ *    child object (`objectPluralLabel` now, `objectLabel` before);
+ *  - the multi-relationship title `deriveRelatedLists` composes when a child
+ *    points at the parent through more than one field ("Opportunities ·
+ *    Primary Project"), whose list half now comes from the same resolver the
+ *    page hands it, where it used to be the child's raw, untranslated label.
+ *
+ * Measured from a real `RecordDetailView` mount (the `relatedListFilter-4664`
+ * harness, related tab open) inside a real i18next instance booted in the
+ * language under test. The `zh-CN` plurals differ from the `zh-CN` labels on
+ * purpose, so each assertion can tell which key was read; the no-plural child
+ * is the control. The relationship field's own label is the disambiguating
+ * half and is not under test here (it is drawn as authored).
+ *
+ * Direction, written before the run: with both producers put back to the
+ * singular, every plural cell RED (`Task` / `任务`, `Opportunity · …`), the
+ * control GREEN on both sides.
+ */
+
+describe('RecordDetailView.relatedListTitlePlural-11733', () => {
+  restoreAfterBlock();
+
+  type Lang = 'en' | 'zh-CN';
+
+  const PARENT = 'showcase_project';
+  const RECORD_ID = 'p-1';
+
+  const BASE_FIELDS = {
+    id: { type: 'text', label: 'Id' },
+    name: { type: 'text', label: 'Name' },
+  };
+
+  const OBJECTS_EN = [
+    { name: PARENT, label: 'Project', pluralLabel: 'Projects', managedBy: 'platform', fields: BASE_FIELDS },
+    // One relationship to the parent: the page resolves the title.
+    {
+      name: 'showcase_task',
+      label: 'Task',
+      pluralLabel: 'Tasks',
+      managedBy: 'platform',
+      fields: { ...BASE_FIELDS, project: { type: 'master_detail', reference: PARENT, label: 'Project' } },
+    },
+    // Two relationships to the parent: `deriveRelatedLists` composes the titles.
+    {
+      name: 'showcase_opportunity',
+      label: 'Opportunity',
+      pluralLabel: 'Opportunities',
+      managedBy: 'platform',
+      fields: {
+        ...BASE_FIELDS,
+        primary_project: { type: 'lookup', reference: PARENT, label: 'Primary Project' },
+        partner_project: { type: 'lookup', reference: PARENT, label: 'Partner Project' },
+      },
+    },
+    // The control: no plural declared.
+    {
+      name: 'showcase_note',
+      label: 'Note',
+      managedBy: 'platform',
+      fields: { ...BASE_FIELDS, project: { type: 'lookup', reference: PARENT, label: 'Project' } },
+    },
+  ];
+
+  /** `zh-CN`'s served labels for `name`, as the server translates them (objectstack#30390). */
+  const SERVED_ZH: Record<string, { label: string; pluralLabel: string }> = {
+    showcase_task: { label: '任务', pluralLabel: '任务清单' },
+    showcase_opportunity: { label: '商机', pluralLabel: '商机列表' },
+  };
+
+  /**
+   * The object definitions as the server serves them in `lang`: a `zh-CN`
+   * session holds the `zh-CN` answer, and `served` stands in for a rename.
+   */
+  function objectsFor(lang: Lang, served: Record<string, { label: string; pluralLabel: string }> = {}) {
+    const labels = { ...(lang === 'zh-CN' ? SERVED_ZH : {}), ...served };
+    return OBJECTS_EN.map((o) => ({ ...o, ...labels[o.name] }));
+  }
+
+  /** The catalog as the console loads it: `zh-CN` translates both scalars. */
+  const BUNDLE: Record<Lang, Record<string, unknown>> = {
+    en: {},
+    'zh-CN': {
+      showcase: {
+        objects: {
+          showcase_task: { label: '任务', pluralLabel: '任务清单' },
+          showcase_opportunity: { label: '商机', pluralLabel: '商机列表' },
+        },
+      },
+    },
+  };
+
+  function makeDataSource() {
+    return {
+      find: vi.fn(async () => ({ data: [], total: 0 })),
+      create: vi.fn(async (_o: string, row: unknown) => row),
+      findOne: vi.fn(async (_o: string, recordId: string) => ({ id: recordId, name: `Project ${recordId}` })),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+    } as never;
+  }
+
+  function renderPage(lang: Lang, objects: Array<Record<string, unknown>> = objectsFor(lang)) {
+    const i18n = createI18n({ defaultLanguage: lang, detectBrowserLanguage: false });
+    // The instance really booted in the language under test.
+    expect(i18n.language).toBe(lang);
+    i18n.addResourceBundle(lang, 'translation', BUNDLE[lang], true, true);
+    const metadata = {
+      objects,
+      pages: [],
+      loading: false,
+      error: null,
+      refresh: async () => {},
+      invalidate: () => {},
+      ensureType: async () => [],
+      getItem: async () => null,
+      getItemsByType: () => [],
+    } as never;
+    return render(
+      <I18nProvider instance={i18n}>
+        <MemoryRouter initialEntries={[`/app/demo/${PARENT}/${RECORD_ID}?tab=related`]}>
+          <MetadataCtx.Provider value={metadata}>
+            <RecordDetailView
+              dataSource={makeDataSource()}
+              objects={objects as never}
+              onEdit={() => {}}
+              objectNameOverride={PARENT}
+              recordIdOverride={RECORD_ID}
+              embedded
+            />
+          </MetadataCtx.Provider>
+        </MemoryRouter>
+      </I18nProvider>,
+    );
+  }
+
+  /** Whether `text` is drawn as an element's whole text somewhere on the page. */
+  async function drawn(text: string): Promise<boolean> {
+    return (await screen.findAllByText(text, undefined, { timeout: 5000 })).length > 0;
+  }
+  const absent = (text: string) => screen.queryAllByText(text).length === 0;
+
+  beforeEach(() => {
+    cleanup();
+    // The count store is module-scoped; a warm entry would badge this case.
+    RelatedCountStore._reset();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(JSON.stringify({ data: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  describe('RecordDetailView — related-list titles read the plural (objectui#11733)', () => {
+    it('en: "Tasks", and "Opportunities · …" for a child with two relationships', async () => {
+      renderPage('en');
+      expect(await drawn('Tasks')).toBe(true);
+      expect(await drawn('Opportunities · Primary Project')).toBe(true);
+      expect(await drawn('Opportunities · Partner Project')).toBe(true);
+      expect(absent('Task')).toBe(true);
+      expect(absent('Opportunity · Primary Project')).toBe(true);
+    });
+
+    it('zh-CN: the translated plurals, in both producers', async () => {
+      renderPage('zh-CN');
+      expect(await drawn('任务清单')).toBe(true);
+      expect(await drawn('商机列表 · Primary Project')).toBe(true);
+      expect(await drawn('商机列表 · Partner Project')).toBe(true);
+      expect(absent('任务')).toBe(true);
+    });
+
+    it('control: a child that declares no plural is titled with its label', async () => {
+      renderPage('en');
+      expect(await drawn('Note')).toBe(true);
+    });
+  });
+
+  /**
+   * objectstack#30390 — a renamed child object titles its related list with the
+   * served plural, in both producers, never the packaged catalog string.
+   * Directions, written before the run: RED before the change (`任务清单`,
+   * `商机列表 · …`), GREEN after.
+   */
+  describe('RecordDetailView — a renamed child titles its related list as served (objectstack#30390)', () => {
+    it('zh-CN: the served plurals win over the packaged translation', async () => {
+      renderPage(
+        'zh-CN',
+        objectsFor('zh-CN', {
+          showcase_task: { label: '工单', pluralLabel: '工单清单' },
+          showcase_opportunity: { label: '线索', pluralLabel: '线索列表' },
+        }),
+      );
+      expect(await drawn('工单清单')).toBe(true);
+      expect(await drawn('线索列表 · Primary Project')).toBe(true);
+      expect(absent('任务清单')).toBe(true);
+      expect(absent('商机列表 · Primary Project')).toBe(true);
+    });
+  });
+});
+
+// ── RecordDetailView.feedRefusal-11195 ──────────────────────────────────────
+
+/**
+ * RecordDetailView: a REFUSED feed read is not an empty feed (objectui#11195).
+ *
+ * The record page owns the two reads behind its discussion panel,
+ * `sys_activity` and `sys_comment`. Each used to end in `.catch(() => {})`, so
+ * a 403 settled exactly like a 200 with zero rows: an invited member of a
+ * hosted AI-built app opened a record, the server refused the activity read,
+ * and the panel said "No comments yet" with nothing to tell a permission wall
+ * from an empty record (objectstack-ai/cloud#2485).
+ *
+ * What is pinned, each on the rendered panel:
+ *   1. a refused `sys_activity` read (403 envelope, and 401) shows the
+ *      no-permission state, and the read is not retried;
+ *   2. the control: a 200 with zero rows shows the empty state, unchanged;
+ *   3. a 404 is not a refusal, so the empty state stays;
+ *   4. a 500 is not a refusal either, so the panel never says "no permission"
+ *      for it; since objectstack#29188 it shows the load-failure notice, not
+ *      the empty state;
+ *   5. a refused `sys_comment` read beside an answered `sys_activity` read
+ *      keeps the activity rows and says the comments are withheld.
+ *
+ * The harness is `RecordDetailView.feedLoading.test.tsx`'s: the synthesized
+ * record page composes `record:discussion`, so the panel arrives through the
+ * host's `DiscussionContextProvider` and the `record:chatter` renderer.
+ */
+
+describe('RecordDetailView.feedRefusal-11195', () => {
+  restoreAfterBlock();
+
+  // The record page's feed is the Timeline tab's one stream (objectstack#27055);
+  // its empty copy is the stream's.
+  const EMPTY_COMMENTS = 'No activity recorded';
+  const ACTIVITY_DENIED = "You don't have permission to view activity on this record.";
+  const COMMENTS_DENIED = "You don't have permission to view comments on this record.";
+  const OBJECT_NAME = 'crm_account';
+  const RECORD_ID = 'rec-alpha';
+
+  const OBJECTS = [
+    {
+      name: OBJECT_NAME,
+      label: 'Account',
+      managedBy: 'platform',
+      fields: {
+        id: { type: 'text', label: 'Id' },
+        name: { type: 'text', label: 'Name' },
+      },
+    },
+  ];
+
+  /**
+   * A rejected read in the shape the ObjectStack client throws it: the HTTP
+   * status on `httpStatus` and the ADR-0112 code on `code`.
+   */
+  const rejection = (httpStatus: number, code: string) =>
+    Object.assign(new Error(`${httpStatus} ${code}`), { httpStatus, code });
+
+  interface FeedResponses {
+    sys_comment: () => Promise<any>;
+    sys_activity: () => Promise<any>;
+  }
+
+  function makeDataSource(feed: FeedResponses) {
+    const find = vi.fn((objectName: string) => {
+      if (objectName === 'sys_comment') return feed.sys_comment();
+      if (objectName === 'sys_activity') return feed.sys_activity();
+      return Promise.resolve({ data: [] });
+    });
+    return {
+      find,
+      findOne: vi.fn(async () => ({ id: RECORD_ID, name: 'Alpha' })),
+      create: vi.fn(async () => ({})),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+    } as any;
+  }
+
+  function makeMetadata() {
+    return {
+      objects: OBJECTS,
+      pages: [],
+      loading: false,
+      error: null,
+      refresh: async () => {},
+      invalidate: () => {},
+      ensureType: async () => [],
+      getItem: async () => null,
+      getItemsByType: () => [],
+    } as any;
+  }
+
+  function renderDetail(dataSource: any) {
+    return render(
+      <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?tab=timeline`]}>
+        <MetadataCtx.Provider value={makeMetadata()}>
+          <RecordDetailView
+            dataSource={dataSource}
+            objects={OBJECTS}
+            onEdit={() => {}}
+            objectNameOverride={OBJECT_NAME}
+            recordIdOverride={RECORD_ID}
+            embedded
+          />
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+  }
+
+  const readsOf = (dataSource: any, objectName: string) =>
+    dataSource.find.mock.calls.filter((call: unknown[]) => call[0] === objectName).length;
+
+  /** Let every settled read's follow-up render land before counting reads. */
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+  beforeEach(() => {
+    cleanup();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(JSON.stringify({ data: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  describe('RecordDetailView: a refused sys_activity read shows the no-permission state (objectui#11195)', () => {
+    it('a 403 PERMISSION_DENIED envelope shows the no-permission state, not the empty state', async () => {
+      const dataSource = makeDataSource({
+        sys_comment: () => Promise.resolve({ data: [] }),
+        sys_activity: () => Promise.reject(rejection(403, 'PERMISSION_DENIED')),
+      });
+
+      renderDetail(dataSource);
+
+      const notice = await screen.findByTestId('activity-access-denied');
+      expect(notice.textContent).toContain(ACTIVITY_DENIED);
+      expect(notice.querySelector('[data-denied-source="activity"]')).not.toBeNull();
+      expect(notice.querySelector('[data-denied-source="comments"]')).toBeNull();
+      // Visually distinct from the empty state, which is not rendered at all.
+      expect(screen.queryByText(EMPTY_COMMENTS)).toBeNull();
+      expect(screen.queryByTestId('activity-loading')).toBeNull();
+      // The message never names the object's internal name, or the table.
+      expect(notice.textContent).not.toContain(OBJECT_NAME);
+      expect(notice.textContent).not.toContain('sys_activity');
+    });
+
+    it('does not retry a refused read', async () => {
+      // The baseline is the SAME page answered with zero rows: the refusal may
+      // issue the read no more often than an answered read is issued.
+      const answered = makeDataSource({
+        sys_comment: () => Promise.resolve({ data: [] }),
+        sys_activity: () => Promise.resolve({ data: [] }),
+      });
+      renderDetail(answered);
+      await screen.findByText(EMPTY_COMMENTS);
+      await settle();
+      const answeredReads = readsOf(answered, 'sys_activity');
+      expect(answeredReads).toBeGreaterThan(0);
+      cleanup();
+
+      const refused = makeDataSource({
+        sys_comment: () => Promise.resolve({ data: [] }),
+        sys_activity: () => Promise.reject(rejection(403, 'PERMISSION_DENIED')),
+      });
+      renderDetail(refused);
+      await screen.findByTestId('activity-access-denied');
+      await settle();
+
+      expect(readsOf(refused, 'sys_activity')).toBe(answeredReads);
+    });
+
+    it('a 401 is a refused read too', async () => {
+      const dataSource = makeDataSource({
+        sys_comment: () => Promise.resolve({ data: [] }),
+        sys_activity: () => Promise.reject(rejection(401, 'UNAUTHORIZED')),
+      });
+
+      renderDetail(dataSource);
+
+      const notice = await screen.findByTestId('activity-access-denied');
+      expect(notice.textContent).toContain(ACTIVITY_DENIED);
+      expect(screen.queryByText(EMPTY_COMMENTS)).toBeNull();
+    });
+
+    it('control: a 200 with zero rows shows the empty state, unchanged', async () => {
+      const dataSource = makeDataSource({
+        sys_comment: () => Promise.resolve({ data: [] }),
+        sys_activity: () => Promise.resolve({ data: [] }),
+      });
+
+      renderDetail(dataSource);
+
+      expect(await screen.findByText(EMPTY_COMMENTS)).toBeTruthy();
+      expect(screen.queryByTestId('activity-access-denied')).toBeNull();
+      expect(screen.queryByText(ACTIVITY_DENIED)).toBeNull();
+    });
+
+    it('a 404 is not a refusal: the empty state stays', async () => {
+      const dataSource = makeDataSource({
+        sys_comment: () => Promise.resolve({ data: [] }),
+        sys_activity: () => Promise.reject(rejection(404, 'OBJECT_NOT_FOUND')),
+      });
+
+      renderDetail(dataSource);
+
+      expect(await screen.findByText(EMPTY_COMMENTS)).toBeTruthy();
+      expect(screen.queryByTestId('activity-access-denied')).toBeNull();
+    });
+
+    it('a 500 is not "no permission"', async () => {
+      const dataSource = makeDataSource({
+        sys_comment: () => Promise.resolve({ data: [] }),
+        sys_activity: () => Promise.reject(rejection(500, 'INTERNAL_ERROR')),
+      });
+
+      renderDetail(dataSource);
+
+      // objectstack#29188: a failure that is not a refusal shows the panel's
+      // load-failure notice, never the empty state and never "no permission".
+      const notice = await screen.findByTestId('activity-load-failed');
+      expect(notice.querySelector('[data-failed-source="activity"]')).not.toBeNull();
+      expect(screen.queryByText(EMPTY_COMMENTS)).toBeNull();
+      expect(screen.queryByTestId('activity-access-denied')).toBeNull();
+      expect(screen.queryByText(ACTIVITY_DENIED)).toBeNull();
+    });
+  });
+
+  describe('RecordDetailView: a refused sys_comment read beside an answered sys_activity read (objectui#11195)', () => {
+    it('keeps the activity rows and says the comments are withheld', async () => {
+      const dataSource = makeDataSource({
+        sys_comment: () => Promise.reject(rejection(403, 'PERMISSION_DENIED')),
+        sys_activity: () =>
+          Promise.resolve({
+            data: [
+              {
+                id: 'act-1',
+                type: 'updated',
+                summary: 'Stage moved to qualified',
+                timestamp: '2026-01-02T00:00:00.000Z',
+                actor_name: 'Grace',
+              },
+            ],
+          }),
+      });
+
+      renderDetail(dataSource);
+
+      expect(await screen.findByText('Stage moved to qualified')).toBeTruthy();
+      const notice = await screen.findByTestId('activity-access-denied');
+      expect(notice.textContent).toContain(COMMENTS_DENIED);
+      expect(notice.textContent).not.toContain(ACTIVITY_DENIED);
+      expect(notice.querySelector('[data-denied-source="comments"]')).not.toBeNull();
+      expect(notice.querySelector('[data-denied-source="activity"]')).toBeNull();
+    });
+  });
+});
+
+// ── RecordDetailView.relatedListsOrder-27241 ────────────────────────────────
+
+/**
+ * objectstack#27069 / objectstack#27241 — the record page's default related
+ * order reads the object's declared `relatedLists`: a reader who never
+ * arranged the related panels sees the cards in that order, the rest after
+ * them in the derived order (owned `master_detail` children first, then
+ * lookups). Measured from a real `RecordDetailView` mount at 1440 px, details
+ * beside the right column (the `recordPageTiers-26678` harness: the root's
+ * measured width is the one input varied).
+ */
+
+describe('RecordDetailView.relatedListsOrder-27241', () => {
+  restoreAfterBlock();
+
+  const PARENT = 'showcase_project';
+  const RECORD_ID = 'p-1';
+  const BASE_FIELDS = { id: { type: 'text', label: 'Id' }, name: { type: 'text', label: 'Name' } };
+
+  const objectsWith = (relatedLists?: string[]) => [
+    {
+      name: PARENT,
+      label: 'Project',
+      pluralLabel: 'Projects',
+      managedBy: 'platform',
+      ...(relatedLists ? { relatedLists } : {}),
+      fields: BASE_FIELDS,
+    },
+    {
+      name: 'showcase_task',
+      label: 'Task',
+      pluralLabel: 'Tasks',
+      managedBy: 'platform',
+      fields: { ...BASE_FIELDS, project: { type: 'master_detail', reference: PARENT, label: 'Project' } },
+    },
+    {
+      name: 'showcase_note',
+      label: 'Note',
+      pluralLabel: 'Notes',
+      managedBy: 'platform',
+      fields: { ...BASE_FIELDS, project: { type: 'lookup', reference: PARENT, label: 'Project' } },
+    },
+    {
+      name: 'showcase_call',
+      label: 'Call',
+      pluralLabel: 'Calls',
+      managedBy: 'platform',
+      fields: { ...BASE_FIELDS, project: { type: 'lookup', reference: PARENT, label: 'Project' } },
+    },
+  ];
+
+  function renderPage(objects: ReturnType<typeof objectsWith>) {
+    const metadata = {
+      objects,
+      pages: [],
+      loading: false,
+      error: null,
+      refresh: async () => {},
+      invalidate: () => {},
+      ensureType: async () => [],
+      getItem: async () => null,
+      getItemsByType: () => [],
+    } as never;
+    const dataSource = {
+      find: vi.fn(async () => ({ data: [], total: 0 })),
+      create: vi.fn(async (_o: string, row: unknown) => row),
+      findOne: vi.fn(async (_o: string, recordId: string) => ({ id: recordId, name: `Project ${recordId}` })),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+    };
+    return render(
+      <MemoryRouter initialEntries={[`/app/demo/${PARENT}/${RECORD_ID}`]}>
+        <MetadataCtx.Provider value={metadata}>
+          <RecordDetailView
+            dataSource={dataSource as never}
+            objects={objects}
+            onEdit={() => {}}
+            objectNameOverride={PARENT}
+            recordIdOverride={RECORD_ID}
+          />
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+  }
+
+  const cardOrder = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll('[data-record-column="right"] [data-related-card-id]')).map((el) =>
+      el.getAttribute('data-related-card-id'),
+    );
+
+  beforeEach(() => {
+    cleanup();
+    window.localStorage.clear();
+    RelatedCountStore._reset();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'content-type': 'application/json' } }),
+      ),
+    );
+    const measure = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (!this.hasAttribute('data-record-page-root')) return measure.call(this);
+      return { x: 0, y: 0, top: 0, left: 0, right: 1440, bottom: 800, width: 1440, height: 800, toJSON: () => ({}) } as DOMRect;
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  describe('RecordDetailView — the related cards follow the object\'s relatedLists (objectstack#27069)', () => {
+    it('without relatedLists: the derived order — the owned child first, then the lookups in declaration order', async () => {
+      const { container } = renderPage(objectsWith());
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(3), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_task.project', 'showcase_note.project', 'showcase_call.project']);
+    });
+
+    it('with relatedLists: the declared lists first in that order, the rest after them in the derived order', async () => {
+      const { container } = renderPage(objectsWith(['showcase_call', 'showcase_note.project']));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(3), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_call.project', 'showcase_note.project', 'showcase_task.project']);
+    });
+  });
+});
+
+// ── RecordDetailView.bodyTablePredicate-27478 ───────────────────────────────
+
+/**
+ * objectstack#27478 (ruling B on objectstack#27055) — which related lists the
+ * record page draws as BODY TABLES is `@objectstack/spec`'s
+ * `isBodyTableRelationship`, the predicate the spec's refusal of a field group
+ * naming a side card reads too: `relatedList: 'primary'`, or a `master_detail`
+ * FK that sets `inlineEdit` and declares no `relatedList`.
+ *
+ * Behaviour change pinned here: an inline-edited `master_detail` FK that
+ * declares `relatedList: true` is a SIDE CARD, as the key's description says
+ * ("write true to keep it a side card"). The page used to draw it as a body
+ * table, because its own copy of the rule ignored `relatedList`.
+ *
+ * Measured from a real `RecordDetailView` mount at 1440 px, details beside
+ * the right column (the `relatedListsOrder-27241` harness).
+ */
+
+describe('RecordDetailView.bodyTablePredicate-27478', () => {
+  restoreAfterBlock();
+
+  const PARENT = 'showcase_quote';
+  const RECORD_ID = 'q-1';
+  const BASE_FIELDS = { id: { type: 'text', label: 'Id' }, name: { type: 'text', label: 'Name' } };
+
+  const objectsWith = (taskFk: Record<string, unknown>) => [
+    {
+      name: PARENT,
+      label: 'Quote',
+      pluralLabel: 'Quotes',
+      managedBy: 'platform',
+      fields: { ...BASE_FIELDS, name: { type: 'text', label: 'Name', group: 'basic' } },
+      fieldGroups: [
+        { key: 'basic', label: 'Basic' },
+        { key: 'lines', label: 'Lines', relatedList: 'showcase_line' },
+      ],
+    },
+    {
+      name: 'showcase_line',
+      label: 'Line',
+      pluralLabel: 'Lines',
+      managedBy: 'platform',
+      fields: { ...BASE_FIELDS, quote: { type: 'master_detail', reference: PARENT, label: 'Quote', inlineEdit: 'grid' } },
+    },
+    {
+      name: 'showcase_task',
+      label: 'Task',
+      pluralLabel: 'Tasks',
+      managedBy: 'platform',
+      fields: { ...BASE_FIELDS, quote: { type: 'master_detail', reference: PARENT, label: 'Quote', inlineEdit: 'grid', ...taskFk } },
+    },
+    {
+      name: 'showcase_note',
+      label: 'Note',
+      pluralLabel: 'Notes',
+      managedBy: 'platform',
+      fields: { ...BASE_FIELDS, quote: { type: 'lookup', reference: PARENT, label: 'Quote' } },
+    },
+  ];
+
+  function renderPage(objects: ReturnType<typeof objectsWith>) {
+    const metadata = {
+      objects,
+      pages: [],
+      loading: false,
+      error: null,
+      refresh: async () => {},
+      invalidate: () => {},
+      ensureType: async () => [],
+      getItem: async () => null,
+      getItemsByType: () => [],
+    } as never;
+    const dataSource = {
+      find: vi.fn(async () => ({ data: [], total: 0 })),
+      create: vi.fn(async (_o: string, row: unknown) => row),
+      findOne: vi.fn(async (_o: string, recordId: string) => ({ id: recordId, name: `Quote ${recordId}` })),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+    };
+    return render(
+      <MemoryRouter initialEntries={[`/app/demo/${PARENT}/${RECORD_ID}`]}>
+        <MetadataCtx.Provider value={metadata}>
+          <RecordDetailView
+            dataSource={dataSource as never}
+            objects={objects}
+            onEdit={() => {}}
+            objectNameOverride={PARENT}
+            recordIdOverride={RECORD_ID}
+          />
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+  }
+
+  const cardOrder = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll('[data-record-column="right"] [data-related-card-id]')).map((el) =>
+      el.getAttribute('data-related-card-id'),
+    );
+
+  beforeEach(() => {
+    cleanup();
+    window.localStorage.clear();
+    RelatedCountStore._reset();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'content-type': 'application/json' } }),
+      ),
+    );
+    const measure = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (!this.hasAttribute('data-record-page-root')) return measure.call(this);
+      return { x: 0, y: 0, top: 0, left: 0, right: 1440, bottom: 800, width: 1440, height: 800, toJSON: () => ({}) } as DOMRect;
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const detailsText = (container: HTMLElement) =>
+    container.querySelector('[data-record-column="details"]')?.textContent ?? '';
+
+  describe('RecordDetailView — body tables are the spec predicate\'s verdict (objectstack#27478)', () => {
+    it('an inline-edited master_detail with no relatedList is a body table; one with relatedList: true is a side card', async () => {
+      const { container } = renderPage(objectsWith({ relatedList: true }));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(2), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_task.quote', 'showcase_note.quote']);
+      expect(detailsText(container)).toContain('Lines');
+      expect(detailsText(container)).not.toContain('Tasks');
+    });
+
+    it('control: the same FK with no relatedList is a body table, not a card', async () => {
+      const { container } = renderPage(objectsWith({}));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(1), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_note.quote']);
+      await waitFor(() => expect(detailsText(container)).toContain('Tasks'), { timeout: 5000 });
+      expect(detailsText(container)).toContain('Lines');
+    });
+  });
+});
+
+// ── RecordDetailView.relatedCountsFirst-27056 ───────────────────────────────
+
+/**
+ * objectstack#27056 — the record page's related panels load counts first,
+ * then the first rows of only the cards in view, and never blocks the details.
+ *
+ * The REAL page, at a desktop width (the column tiers), over a data source
+ * that holds every related read until the test answers it. The record has six
+ * related lists. Measured:
+ *
+ *  - the details draw from the record read alone, while every related read is
+ *    still out, and the right column shows one placeholder per card;
+ *  - the six counts go out as ONE request set, before any of them answers;
+ *  - once they answer, rows are read for the two counted cards in view only,
+ *    three rows each — never for a card counted at 0 (in view too), never for
+ *    the cards below the fold.
+ */
+
+describe('RecordDetailView.relatedCountsFirst-27056', () => {
+  restoreAfterBlock();
+
+  const PARENT = 'os_27056_account';
+  const RECORD_ID = 'acc-1';
+  const CHILDREN = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'].map((n) => `os_27056_${n}`);
+  const [C1, C2, C3] = CHILDREN;
+  /** What each child's count answers: the second is empty. */
+  const TOTALS: Record<string, number> = Object.fromEntries(CHILDREN.map((c, i) => [c, [5, 0, 2, 4, 4, 4][i]]));
+  /** The cards on screen at open: the first three; the rest are below the fold. */
+  const IN_VIEW = new Set([C1, C2, C3].map((c) => `${c}.account`));
+
+  const OBJECTS = [
+    {
+      name: PARENT,
+      label: 'Account',
+      pluralLabel: 'Accounts',
+      managedBy: 'platform',
+      fields: {
+        id: { type: 'text', label: 'Id' },
+        name: { type: 'text', label: 'Name' },
+        industry: { type: 'text', label: 'Industry' },
+      },
+    },
+    ...CHILDREN.map((name, i) => ({
+      name,
+      label: `Child ${i + 1}`,
+      pluralLabel: `Children ${i + 1}`,
+      managedBy: 'platform',
+      fields: {
+        id: { type: 'text', label: 'Id' },
+        name: { type: 'text', label: 'Name' },
+        status: { type: 'select', label: 'Status', options: [{ value: 'open', label: 'Open' }] },
+        account: { type: 'lookup', reference: PARENT, label: 'Account' },
+      },
+    })),
+  ];
+
+  interface HeldRead {
+    object: string;
+    query: Record<string, any>;
+    answered: boolean;
+    answer: () => void;
+  }
+
+  let reads: HeldRead[] = [];
+  let dataSource: Record<string, any>;
+
+  function makeDataSource() {
+    return {
+      find: vi.fn((object: string, query: Record<string, any> = {}) => {
+        if (!CHILDREN.includes(object)) return Promise.resolve({ data: [], total: 0 });
+        return new Promise((resolve) => {
+          const read: HeldRead = {
+            object,
+            query,
+            answered: false,
+            answer: () => {
+              read.answered = true;
+              const total = TOTALS[object];
+              const top = typeof query.$top === 'number' ? query.$top : total;
+              const rows = Array.from({ length: Math.min(top, total) }, (_, i) => ({
+                id: `${object}-${i}`,
+                name: `${object} row ${i}`,
+                status: 'open',
+              }));
+              resolve({ data: rows, total });
+            },
+          };
+          reads.push(read);
+        });
+      }),
+      findOne: vi.fn(async (_o: string, id: string) => ({ id, name: 'Acme', industry: 'Retail' })),
+      getObjectSchema: vi.fn(async (name: string) => OBJECTS.find((o) => o.name === name) ?? null),
+      create: vi.fn(async (_o: string, row: unknown) => row),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+    };
+  }
+
+  /** The viewport: a card's root intersects when its relationship is on screen. */
+  class ViewportObserver {
+    constructor(private readonly cb: (entries: Array<{ isIntersecting: boolean }>) => void) {}
+    observe(el: Element) {
+      const id = el.getAttribute('data-related-card-id');
+      if (id && IN_VIEW.has(id)) queueMicrotask(() => this.cb([{ isIntersecting: true }]));
+    }
+    unobserve() {}
+    disconnect() {}
+  }
+
+  function renderPage() {
+    dataSource = makeDataSource();
+    const metadata = {
+      objects: OBJECTS,
+      pages: [],
+      loading: false,
+      error: null,
+      refresh: async () => {},
+      invalidate: () => {},
+      ensureType: async () => [],
+      getItem: async () => null,
+      getItemsByType: () => [],
+    } as never;
+    return render(
+      <MemoryRouter initialEntries={[`/app/demo/${PARENT}/${RECORD_ID}`]}>
+        <MetadataCtx.Provider value={metadata}>
+          <RecordDetailView
+            dataSource={dataSource as never}
+            objects={OBJECTS}
+            onEdit={() => {}}
+            objectNameOverride={PARENT}
+            recordIdOverride={RECORD_ID}
+          />
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+  }
+
+  async function idle() {
+    await act(async () => {
+      for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0));
+    });
+  }
+
+  const isCount = (r: HeldRead) => r.query.$count === true && r.query.$skip === undefined;
+  const isRows = (r: HeldRead) => r.query.$skip !== undefined;
+  const column = (container: HTMLElement, name: string) =>
+    container.querySelector(`[data-record-column="${name}"]`) as HTMLElement | null;
+
+  beforeEach(() => {
+    cleanup();
+    reads = [];
+    RelatedCountStore._reset();
+    window.localStorage.clear();
+    vi.stubGlobal('IntersectionObserver', ViewportObserver);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'content-type': 'application/json' } }),
+      ),
+    );
+    const measure = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (!this.hasAttribute('data-record-page-root')) return measure.call(this);
+      return { x: 0, y: 0, top: 0, left: 0, right: 1440, bottom: 900, width: 1440, height: 900, toJSON: () => ({}) } as DOMRect;
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  describe('RecordDetailView — the related column loads counts first (objectstack#27056)', () => {
+    it('draws the details before any related read answers, with one placeholder per card', async () => {
+      const { container } = renderPage();
+      await idle();
+      expect(reads.length).toBeGreaterThan(0);
+      expect(reads.every((r) => !r.answered)).toBe(true);
+      // The record's own values — its name, its highlight, its details — are on
+      // screen from the record read alone.
+      expect(container.textContent).toContain('Acme');
+      expect(container.textContent).toContain('Retail');
+      expect(column(container, 'details')?.textContent).toContain(RECORD_ID);
+      const related = column(container, 'right')!;
+      expect(related.querySelectorAll('[data-related-card-pending]')).toHaveLength(CHILDREN.length);
+      expect(related.querySelector('[data-related-card-row]')).toBeNull();
+    });
+
+    it('asks the six counts as one request set, then the rows of the two counted cards in view only', async () => {
+      const { container } = renderPage();
+      await idle();
+      // One request set: every list's count, all out before any answered, and
+      // nothing else of theirs.
+      expect(reads.filter(isCount).map((r) => r.object).sort()).toEqual([...CHILDREN].sort());
+      expect(reads.filter(isRows)).toEqual([]);
+      expect(reads.filter(isCount).every((r) => r.query.$top === 1)).toBe(true);
+
+      await act(async () => {
+        for (const r of reads.filter((read) => !read.answered)) r.answer();
+      });
+      await idle();
+      const rowReads = reads.filter(isRows);
+      // The counted cards in view: the first and the third. The second is in
+      // view but counted at 0; the last three are below the fold.
+      expect(rowReads.map((r) => r.object).sort()).toEqual([C1, C3].sort());
+      for (const r of rowReads) {
+        expect(r.query.$top).toBe(3);
+        expect(r.query.$select).toEqual(['id', 'name', 'status']);
+      }
+      // Two round trips in all: the counts, then the rows.
+      expect(reads).toHaveLength(CHILDREN.length + 2);
+
+      await act(async () => {
+        for (const r of reads.filter((read) => !read.answered)) r.answer();
+      });
+      await idle();
+      const related = column(container, 'right')!;
+      expect(related.querySelector(`[data-related-card-id="${C1}.account"]`)?.querySelectorAll('[data-related-card-row]')).toHaveLength(3);
+      expect(related.querySelector(`[data-related-card-id="${C3}.account"]`)?.querySelectorAll('[data-related-card-row]')).toHaveLength(2);
+      expect(related.querySelector('[data-related-card-pending]')).toBeNull();
+      // Still nothing for the empty card, nor for the cards out of view.
+      expect(reads.filter(isRows).map((r) => r.object).sort()).toEqual([C1, C3].sort());
+      expect(reads.some((r) => r.object === C2 && isRows(r))).toBe(false);
+    });
+  });
+});
+
+// ── RecordDetailView.recordTabRowUrl-27524 ──────────────────────────────────
+
+/**
+ * objectstack#27524, Targets 8 and 9 — the record's tab row drives the
+ * address, through a real `RecordDetailView` mount and the browser's own
+ * history:
+ *
+ *  - leaving 「概览」 for a tab PUSHES one entry, `?related=object.field`
+ *    (`?related=timeline` for 动态);
+ *  - moving from tab to tab REPLACES that entry, so the history grows by one
+ *    however many tabs the reader visits;
+ *  - 「概览」, Esc and the browser's Back each return to the page in one step,
+ *    and the header with its tab row stays drawn on every face.
+ */
+
+describe('RecordDetailView.recordTabRowUrl-27524', () => {
+  restoreAfterBlock();
+
+  const PARENT = 'showcase_project';
+  const RECORD_ID = 'p-1';
+
+  const BASE_FIELDS = {
+    id: { type: 'text', label: 'Id' },
+    name: { type: 'text', label: 'Name' },
+  };
+
+  /**
+   * The project's own text fields, each with a value: more than the header's
+   * highlights take, so the details section holds enough of them (more than
+   * five) for the wide tier's three-column grid.
+   */
+  const PROJECT_TEXT = ['code', 'region', 'sponsor', 'phase', 'cost_center', 'tier', 'site', 'channel', 'segment', 'program', 'quarter', 'team'];
+
+  const OBJECTS = [
+    {
+      name: PARENT,
+      label: 'Project',
+      pluralLabel: 'Projects',
+      managedBy: 'platform',
+      // History is on for this object, so the synthesized page carries it.
+      enable: { trackHistory: true },
+      // A worked object — its status options declare lifecycle kinds. Since
+      // objectstack#27524 that no longer changes the page: every object's page
+      // has the same two columns.
+      fields: {
+        ...BASE_FIELDS,
+        ...Object.fromEntries(PROJECT_TEXT.map((name) => [name, { type: 'text', label: name }])),
+        status: {
+          type: 'select',
+          label: 'Status',
+          options: [
+            { value: 'active', label: 'Active', kind: 'open' },
+            { value: 'done', label: 'Done', kind: 'won' },
+          ],
+        },
+      },
+    },
+    {
+      name: 'showcase_task',
+      label: 'Task',
+      pluralLabel: 'Tasks',
+      managedBy: 'platform',
+      fields: { ...BASE_FIELDS, project: { type: 'master_detail', reference: PARENT, label: 'Project' } },
+    },
+    {
+      name: 'showcase_note',
+      label: 'Note',
+      pluralLabel: 'Notes',
+      managedBy: 'platform',
+      fields: { ...BASE_FIELDS, project: { type: 'lookup', reference: PARENT, label: 'Project' } },
+    },
+    { name: 'sys_audit_log', label: 'Audit log', managedBy: 'platform', fields: BASE_FIELDS },
+  ];
+
+  /** The width this view's root measures; every other element measures as the environment does. */
+  let rootWidth = 0;
+  let dataSource: { find: ReturnType<typeof vi.fn> } & Record<string, unknown>;
+
+  /**
+   * The related lists' totals: both have records, so their tabs sit on the tab
+   * row, which keeps empty lists' tabs in its dropdown (objectstack#28469).
+   */
+  const RELATED_TOTALS: Record<string, number> = { showcase_task: 2, showcase_note: 1 };
+
+  function makeDataSource() {
+    return {
+      find: vi.fn(async (objectName: string) => ({ data: [], total: RELATED_TOTALS[objectName] ?? 0 })),
+      create: vi.fn(async (_o: string, row: unknown) => row),
+      findOne: vi.fn(async (_o: string, recordId: string) => ({
+        id: recordId,
+        name: `Project ${recordId}`,
+        ...Object.fromEntries(PROJECT_TEXT.map((name) => [name, `${name} value`])),
+        status: 'active',
+      })),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+    };
+  }
+
+  function renderPage({ width, embedded = false, search = '' }: { width: number; embedded?: boolean; search?: string }) {
+    rootWidth = width;
+    // The real browser history: the view reads the address bar it writes.
+    window.history.replaceState(null, '', `/app/demo/${PARENT}/${RECORD_ID}${search}`);
+    dataSource = makeDataSource();
+    const metadata = {
+      objects: OBJECTS,
+      pages: [],
+      loading: false,
+      error: null,
+      refresh: async () => {},
+      invalidate: () => {},
+      ensureType: async () => [],
+      getItem: async () => null,
+      getItemsByType: () => [],
+    } as never;
+    return render(
+      <BrowserRouter>
+        <MetadataCtx.Provider value={metadata}>
+          <RecordDetailView
+            dataSource={dataSource as never}
+            objects={OBJECTS}
+            onEdit={() => {}}
+            objectNameOverride={PARENT}
+            recordIdOverride={RECORD_ID}
+            embedded={embedded}
+          />
+        </MetadataCtx.Provider>
+      </BrowserRouter>,
+    );
+  }
+
+  const tierOf = (container: HTMLElement) =>
+    container.querySelector('[data-record-page-tier]')?.getAttribute('data-record-page-tier') ?? null;
+  const column = (container: HTMLElement, name: string) =>
+    container.querySelector(`[data-record-column="${name}"]`) as HTMLElement | null;
+  const auditReads = () => dataSource.find.mock.calls.filter((call) => call[0] === 'sys_audit_log').length;
+
+  beforeEach(() => {
+    cleanup();
+    RelatedCountStore._reset();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(JSON.stringify({ data: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
+    const measure = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (!this.hasAttribute('data-record-page-root')) return measure.call(this);
+      return { x: 0, y: 0, top: 0, left: 0, right: rootWidth, bottom: 800, width: rootWidth, height: 800, toJSON: () => ({}) } as DOMRect;
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const search = () => new URLSearchParams(window.location.search).get('related');
+  const tab = (id: string) => document.querySelector(`[role="tab"][data-record-tab="${id}"]`) as HTMLElement;
+  /** A tab once it is on the row: the panels' tabs join it when their counts land (objectstack#28469). */
+  const drawnTab = (id: string) =>
+    waitFor(() => {
+      const el = tab(id);
+      expect(el).toBeTruthy();
+      return el;
+    });
+  const activeTab = () => document.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute('data-record-tab') ?? null;
+  const face = () => document.querySelector('[data-related-enlarged]');
+
+  describe('RecordDetailView — the tab row drives the address (objectstack#27524, Targets 8 and 9)', () => {
+    it('a tab pushes one entry, the next tab replaces it, 「概览」 returns in one step', async () => {
+      renderPage({ width: 1440 });
+      await screen.findAllByText('Tasks', undefined, { timeout: 5000 });
+      const start = window.history.length;
+      expect(activeTab()).toBe('overview');
+
+      fireEvent.click(await drawnTab('showcase_task.project'));
+      await waitFor(() => expect(face()?.getAttribute('data-related-enlarged')).toBe('showcase_task.project'));
+      expect(search()).toBe('showcase_task.project');
+      expect(window.history.length).toBe(start + 1);
+      expect(activeTab()).toBe('showcase_task.project');
+      // The header is drawn once, above the row, on the enlarged face too.
+      expect(document.querySelectorAll('h1')).toHaveLength(1);
+
+      fireEvent.click(tab('timeline'));
+      await waitFor(() => expect(face()?.getAttribute('data-related-enlarged')).toBe('timeline'));
+      expect(search()).toBe('timeline');
+      fireEvent.click(tab('showcase_note.project'));
+      await waitFor(() => expect(face()?.getAttribute('data-related-enlarged')).toBe('showcase_note.project'));
+      expect(search()).toBe('showcase_note.project');
+      // Three tabs visited, one entry.
+      expect(window.history.length).toBe(start + 1);
+
+      fireEvent.click(tab('overview'));
+      await waitFor(() => expect(face()).toBeNull());
+      await waitFor(() => expect(search()).toBeNull());
+      expect(activeTab()).toBe('overview');
+      expect(document.querySelector('[data-record-columns]')).not.toBeNull();
+    });
+
+    it('Esc on a tab returns to 「概览」, and so does the browser\'s Back', async () => {
+      renderPage({ width: 720 });
+      await screen.findAllByText('Tasks', undefined, { timeout: 5000 });
+      fireEvent.click(await drawnTab('showcase_task.project'));
+      fireEvent.click(await waitFor(() => tab('showcase_note.project')));
+      await waitFor(() => expect(search()).toBe('showcase_note.project'));
+      fireEvent.keyDown(face()!, { key: 'Escape' });
+      await waitFor(() => expect(search()).toBeNull());
+      await waitFor(() => expect(face()).toBeNull());
+
+      fireEvent.click(tab('timeline'));
+      await waitFor(() => expect(search()).toBe('timeline'));
+      act(() => window.history.back());
+      await waitFor(() => expect(search()).toBeNull());
+      await waitFor(() => expect(face()).toBeNull());
+      expect(activeTab()).toBe('overview');
+    });
+
+    it('a link to a tab opens it as the active tab; 「概览」 then replaces the address, with nothing to pop', async () => {
+      renderPage({ width: 1440, search: '?related=showcase_task.project' });
+      await waitFor(() => expect(face()?.getAttribute('data-related-enlarged')).toBe('showcase_task.project'), { timeout: 5000 });
+      expect(activeTab()).toBe('showcase_task.project');
+      const start = window.history.length;
+      fireEvent.click(tab('overview'));
+      await waitFor(() => expect(search()).toBeNull());
+      expect(window.history.length).toBe(start);
+      expect(window.location.pathname).toBe(`/app/demo/${PARENT}/${RECORD_ID}`);
     });
   });
 });
