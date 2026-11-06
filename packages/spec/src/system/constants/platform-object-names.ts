@@ -60,6 +60,7 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
     'sys_job_queue',
     'sys_job_run',
     'sys_jwks',
+    'sys_lifecycle_state',
     'sys_member',
     'sys_metadata_activation',
     'sys_migration',

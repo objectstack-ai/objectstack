@@ -52,6 +52,7 @@ model: opus
    - 其余 ⛔ 不立卡:只读推断、观察、休眠、零拉动、死代码、未演练漂移、抛光、命名。
    - 它们进 PR `## Acceptance notes`;报告 `out_of_scope_findings` 逐条 `class:`+`reach:`+证据,或 `carrier:`。
    - `carrier:` = 卡号或人,⛔ 非下个 PR;涉 cloud 写 `carrier: cloud`;无则 `none`;皆无只进该节。
+   - 前提实为平台缺陷 ⇒ 停手报 `carrier: objectstack` 附证据,⛔ 不在应用仓绕行。
    - 同族发现 ⛔ 不开单点卡,报告点名并入该族收口卡;收口卡定义住 pm-dispatch 报告契约。
    - dev ⛔ 不查重、不扫 open issues、不拉板,只附 3–5 个查重词;查询与命中数由立卡席写。
    - GitHub 写一律经 `scripts/pm/` 写工具;云容器里经 `fleet-write` 中继落为 `objectstack-fleet[bot]`。
@@ -102,7 +103,6 @@ model: opus
    - 每个可编译小步即 commit + push;有可展示内容即开 draft PR;接管只认远程分支最后 sha。
    - 带具名缺口的 PR 是交付进行中的常态,未读到的判决写 `NOT MEASURED: <family>, reason: …`。
    - 平台事实:容器把前台命令钉在约 10 分钟上限,超时 SIGTERM 杀掉(`exit 143`)。
-   - 上限划定前台里放什么:重活走规则 1 的锁;仓级扫描归 CI(见本地验证范围节)。
 7. **排队不是停摆,在轮内主动等。** 持锁的是你不拥有的进程,其完成同样不会唤醒你。
    - 99 专指没排到,读作 NOT MEASURED;把间隔花在无锁工作上(写测试、changeset、PR 正文)。
    - 再取以同名续位,⛔ 不从队尾重排:`OS_VERIFY_LOCK_SLOT=<稳定名>` 在第一次尝试前就设好。

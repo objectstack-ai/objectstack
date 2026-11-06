@@ -256,3 +256,37 @@ describe('the is-empty filter chips are translated (objectui#11547)', () => {
     expect(packLabelOf('zh', EMPTY_FILTER.labelKey)).not.toBe(packLabelOf('zh', NULL_FILTER.labelKey));
   });
 });
+
+/**
+ * objectstack#30743 — a membership or negation chip draws its operator through
+ * the filter builder's label and its comparand verbatim, on the real page and
+ * the real packs: the label half translated, the comparand half not.
+ */
+describe('the membership and negation chips (objectstack#30743)', () => {
+  const packLabelOf = (language: string, key: string): unknown =>
+    key.split('.').reduce<unknown>(
+      (node, part) => (node as Record<string, unknown> | undefined)?.[part],
+      (builtInLocales as Record<string, unknown>)[language],
+    );
+
+  it.each([
+    ['in', 'filterBuilder.operators.in'],
+    ['nin', 'filterBuilder.operators.not_in'],
+  ])('`[%s]` renders the zh label of `%s` beside the members, joined', (suffix, key) => {
+    renderAt('zh', `filter[${FIELD}][${suffix}]=alice&filter[${FIELD}][${suffix}]=bob`);
+    expect(chipOperatorText()).toBe(`${packLabelOf('zh', key)} alice, bob`);
+  });
+
+  it('`[ne]` renders the zh "does not equal" label beside the comparand', () => {
+    renderAt('zh', `filter[${FIELD}][ne]=alice`);
+    const rendered = chipOperatorText();
+    expect(rendered).toBe(`${packLabelOf('zh', 'filterBuilder.operators.not_equals')} alice`);
+    expect(rendered).not.toContain('filterBuilder.operators');
+  });
+
+  it('CONTROL: the en pack differs, so the label half really went through `t`', () => {
+    renderAt('en', `filter[${FIELD}][in]=alice`);
+    expect(chipOperatorText()).toBe(`${packLabelOf('en', 'filterBuilder.operators.in')} alice`);
+    expect(packLabelOf('zh', 'filterBuilder.operators.in')).not.toBe(packLabelOf('en', 'filterBuilder.operators.in'));
+  });
+});

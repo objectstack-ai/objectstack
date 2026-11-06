@@ -33,14 +33,25 @@ import type { SourceHashes } from '@objectstack/platform-objects/apps';
 
 type PageTranslations = NonNullable<TranslationData['pages']>;
 
-/** The shipped locales, the four the generated bundles carry. */
-export type SharingLocale = 'en' | 'zh-CN' | 'ja-JP' | 'es-ES';
+/**
+ * The shipped locales, the eleven the generated bundles carry. Each value is
+ * the locale's own `sys_queue` object label, so the page and the object it
+ * shows read the same.
+ */
+export type SharingLocale = 'en' | 'zh-CN' | 'ja-JP' | 'es-ES' | 'zh-Hant' | 'ar' | 'fr' | 'pt-BR' | 'ru' | 'de' | 'ko';
 
 export const sharingPageTranslations: Readonly<Record<SharingLocale, PageTranslations>> = {
   en: { sys_queue_detail: { label: 'Queue' } },
   'zh-CN': { sys_queue_detail: { label: '队列' } },
   'ja-JP': { sys_queue_detail: { label: 'キュー' } },
   'es-ES': { sys_queue_detail: { label: 'Cola' } },
+  'zh-Hant': { sys_queue_detail: { label: '佇列' } },
+  ar: { sys_queue_detail: { label: 'قائمة الانتظار' } },
+  fr: { sys_queue_detail: { label: 'File d’attente' } },
+  'pt-BR': { sys_queue_detail: { label: 'Fila' } },
+  ru: { sys_queue_detail: { label: 'Очередь' } },
+  de: { sys_queue_detail: { label: 'Warteschlange' } },
+  ko: { sys_queue_detail: { label: '대기열' } },
 };
 
 /**
@@ -51,4 +62,11 @@ export const sharingPageSourceHashes: Readonly<Record<Exclude<SharingLocale, 'en
   'zh-CN': { 'pages.sys_queue_detail.label': '87d4b808a85ea103' },
   'ja-JP': { 'pages.sys_queue_detail.label': '87d4b808a85ea103' },
   'es-ES': { 'pages.sys_queue_detail.label': '87d4b808a85ea103' },
+  'zh-Hant': { 'pages.sys_queue_detail.label': '87d4b808a85ea103' },
+  ar: { 'pages.sys_queue_detail.label': '87d4b808a85ea103' },
+  fr: { 'pages.sys_queue_detail.label': '87d4b808a85ea103' },
+  'pt-BR': { 'pages.sys_queue_detail.label': '87d4b808a85ea103' },
+  ru: { 'pages.sys_queue_detail.label': '87d4b808a85ea103' },
+  de: { 'pages.sys_queue_detail.label': '87d4b808a85ea103' },
+  ko: { 'pages.sys_queue_detail.label': '87d4b808a85ea103' },
 };

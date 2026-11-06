@@ -171,7 +171,9 @@ dataset measure's own `currency` wins over a `'dynamic'` field; over a `'fixed'`
 or a derived sum/difference over one `'fixed'` code, it may only restate that code,
 else `DATASET_INVALID`: delete it, and the column takes the code (objectstack-ui →
 Dashboards). A `'fixed'` code is not judged against the tenant's. Switched a
-stored field to `'record'`? Backfill: `os migrate record-currency-codes`.
+stored field to `'record'`? Backfill: `os migrate record-currency-codes --org <id>`
+(or `--all-organizations` for every one); a multi-organization database refuses
+a run with neither.
 
 `homeAmount` (`'record'` only, all three required): the engine stores the
 home-currency amount in `field` (a `'dynamic'` `currency`) at the `rateDate`
@@ -225,7 +227,7 @@ The `format` is literal text interleaved with `{...}` tokens:
 **Rules — get these wrong and records mis-number silently or fail to save:**
 
 1. **Every `{field}` you interpolate must be `required: true`** and set before the record is created. An empty interpolated field makes the record number generation *throw* (the compile lint flags a non-existent field as an error, an optional one as a warning).
-2. **Put a delimiter between adjacent variable tokens** — `{section}-{zone}{000}`, not `{section}{zone}{000}`. Without one, `('AB','C')` and `('A','BC')` both render prefix `ABC` and share a counter (to keep numbers unique). The literal separator keeps distinct groups apart.
+2. **Put a delimiter between adjacent variable tokens** — `{section}-{zone}{000}`, not `{section}{zone}{000}`. Without one, `('AB','C')` and `('A','BC')` both render prefix `ABC` and share a counter (to keep numbers unique).
 3. **Pad width is a MINIMUM, not a cap.** `{000}` → `001`…`999`, then `1000` (it grows, never wraps). Size it for readability, not as a ceiling.
 4. **Only known tokens are interpolated.** Date tokens are **case-sensitive** — `{yyyy}` parses as a `{field}` reference and renders **empty** (rule 1 applies). Only a spelling no field could have — `{ YYYY }`, `{YYYY-MM}` — is emitted **literally**.
 

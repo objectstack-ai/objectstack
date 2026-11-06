@@ -26,13 +26,13 @@
   "predicate": "resolveTenantFieldName(registered schema) !== null, where the registered schema is the authored schema plus the columns resolveInjectedSystemColumns says the registration injects (the applySystemFields pass). Both functions are loaded from source and executed; neither is re-spelled here.",
   "population": "every object registered by a tracked packages/**/*.object.ts module whose name carries a platform prefix (sys_ / cloud_ / ai_). The cloud repository's own cloud_ objects are not in this tree and so not in this census.",
   "totals": {
-    "registered": 94,
+    "registered": 95,
     "inReach": 48,
-    "outOfReach": 46
+    "outOfReach": 47
   },
   "reasonTotals": {
     "managedBy: 'better-auth'": 25,
-    "systemFields.tenant: false": 20,
+    "systemFields.tenant: false": 21,
     "tenancy.enabled: false": 3
   },
   "unexplained": [],
@@ -307,6 +307,15 @@
       "tenantField": null,
       "reasons": [
         "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_lifecycle_state",
+      "file": "packages/platform-objects/src/system/sys-lifecycle-state.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "systemFields.tenant: false"
       ]
     },
     {

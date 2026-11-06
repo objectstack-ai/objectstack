@@ -182,7 +182,8 @@ describe('useOpenRecordList — the drilled URL carries the RESOLVED scope (obje
  * list route can say the drill filter EXACTLY.
  *
  * A drill filter is the bucket AND the widget's filter AND the measure's drill
- * scope. The route's grammar holds one value per param and has no `$in`, so
+ * scope. The route's grammar holds one value per param and had no `$in` until
+ * objectstack#30743, so
  * writing such a filter through the bare encoder kept the later of two
  * conditions on one field (or skipped the `$in`) and opened a WIDER list than
  * the drawer: the app-showcase "Paid Rate by Status" Sent bar's Paid Invoices
@@ -218,9 +219,31 @@ describe('useRecordListDrillNavigation — only an exact list destination is off
     expect(result.current.url).toBe(START);
   });
 
-  it('an $in scope offers no destination', () => {
+  it('an $in scope opens exactly that set since objectstack#30743, one repeated param per member', () => {
     const { result } = harness();
     const drill = composeDrillFilter({ status: { $in: ['paid', 'sent'] } }, { region: 'west' });
+
+    expect(result.current.canOpenRecordList('invoice', drill)).toBe(true);
+    act(() => result.current.openRecordList('invoice', drill));
+    expect(result.current.url).toBe(
+      '/apps/crm/invoice/data?filter%5Bstatus%5D%5Bin%5D=paid&filter%5Bstatus%5D%5Bin%5D=sent&filter%5Bregion%5D=west',
+    );
+  });
+
+  it('a bucket on a yes/no field opens the list with a BOOLEAN comparand (objectstack#30743)', () => {
+    const { result } = harness();
+    const drill = composeDrillFilter({ status: 'paid' }, { is_overdue: false });
+
+    expect(result.current.canOpenRecordList('invoice', drill)).toBe(true);
+    act(() => result.current.openRecordList('invoice', drill));
+    expect(result.current.url).toBe(
+      '/apps/crm/invoice/data?filter%5Bstatus%5D=paid&filter%5Bis_overdue%5D%5Bbool%5D=false',
+    );
+  });
+
+  it('a `$ne` on a boolean still offers no destination: the route would read it back as text', () => {
+    const { result } = harness();
+    const drill = composeDrillFilter({ is_overdue: { $ne: true } }, { region: 'west' });
 
     expect(result.current.canOpenRecordList('invoice', drill)).toBe(false);
     act(() => result.current.openRecordList('invoice', drill));

@@ -16,7 +16,7 @@ export const entry: SemanticMigration = {
   surface: 'object.fields.*.currencyConfig.precision — the decimal-places key of a currency '
     + 'field\'s configuration, and its never-accepted `decimals` / `scale` spellings',
   replacement: '(removed — nothing replaces it.) A currency amount\'s decimal places are its '
-    + 'currency\'s ISO 4217 minor unit (2 for USD, 0 for JPY, 3 for KWD), derived from the '
+    + 'currency\'s CLDR fraction digits (2 for USD, 0 for JPY, 3 for KWD), derived from the '
     + 'currency itself and declared nowhere. Delete the key. Do not move the number to the '
     + 'field-level `precision`: that key is the amount\'s total digit count, not its decimal '
     + 'places, and it is unchanged.',
@@ -26,8 +26,8 @@ export const entry: SemanticMigration = {
     + 'output without anyone authoring it — and the delete is lossless: no renderer or runtime '
     + 'ever read the key. Every display face derives the width from the currency. Two judgments '
     + 'remain, and neither is a rewrite. First, a width that never applied: the old contradiction '
-    + 'check judged an authored value only on a `fixed` field whose code has a known ISO 4217 '
-    + 'minor unit, so on a `dynamic` field, and on a `fixed` field whose code has none (a crypto '
+    + 'check judged an authored value only on a `fixed` field whose code has a known CLDR '
+    + 'fraction-digit count, so on a `dynamic` field, and on a `fixed` field whose code has none (a crypto '
     + 'or custom code), an author could declare a width other than the one the field displays — '
     + 'and read amounts as if it applied. Whether the displayed width is acceptable for that '
     + 'field is the author\'s call. Second, code the chain cannot reach: a plugin, integration or '

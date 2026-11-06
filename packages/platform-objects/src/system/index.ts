@@ -23,6 +23,8 @@ export { SysSettingAudit } from './sys-setting-audit.object.js';
 export { SysPlatformSettingAudit } from './sys-platform-setting-audit.object.js';
 export { SysMigration } from './sys-migration.object.js';
 export { SysMigrationJournal } from './sys-migration-journal.object.js';
+// [ADR-0057] The lifecycle sweeper's clock state, tenant-less.
+export { SysLifecycleState } from './sys-lifecycle-state.object.js';
 // [ADR-0148, #30237] The recycle bin: one entry per delete operation.
 export { SysRecycleBin } from './sys-recycle-bin.object.js';
 // Multi-currency M1-1 (epic #8345): the dated rate table the write-time

@@ -8,11 +8,23 @@
 
 import { useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { resolveFilterPlaceholders, toFilterNodeSafely, type FilterTokenScope } from '@object-ui/core';
+import {
+  convertFiltersToAST,
+  resolveFilterPlaceholders,
+  toFilterNodeSafely,
+  type FilterTokenScope,
+} from '@object-ui/core';
 import { useFilterScope } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { parseFilterAST } from '@objectstack/spec/data';
-import { parseUrlFilterTriples, RANGE_OP_PARAM, serializeDrillFilterParams } from './drillUrlFilters.js';
+import {
+  COMPARE_OP_PARAM,
+  LIST_OP_PARAM,
+  parseUrlFilterTriples,
+  RANGE_OP_PARAM,
+  serializeDrillFilterParams,
+  type FilterTriple,
+} from './drillUrlFilters.js';
 
 /**
  * The router path of an object's ADR-0055 bare data surface, scoped by
@@ -60,22 +72,34 @@ export function recordListPath(
  * route's grammar and nothing else:
  *
  *   - equality to a non-empty string or a finite number, `filter[FIELD]=VALUE`;
+ *   - equality to a boolean, `filter[FIELD][bool]=true|false` (objectstack#30743);
  *   - the four range bounds `$gte` / `$lte` / `$gt` / `$lt`, same comparands;
+ *   - `$ne`, same comparands, and the text operators `$contains` /
+ *     `$notContains` / `$startsWith` / `$endsWith` / `$icontains` with a
+ *     non-empty string (objectstack#30743);
+ *   - `$in` / `$nin` with a non-empty list of those comparands, one repeated
+ *     param per member (objectstack#30743);
  *   - the is-null pair (`$null`, or `$exists` inverted) and `$empty`, each
  *     with a boolean;
  *   - conjunction, which the route spells by writing several params.
  *
- * Everything else answers `null`: `$or` and every other combinator, `$in`,
- * `$ne`, the text operators, a boolean, `null` or `Date` comparand (the route
- * carries text, and those round-trips are not the list's own comparison), an
- * empty string (the read side skips an empty param), two different comparands
- * in one param (one key holds one value), a filter the lowering refuses, and a
- * condition on a field `canRead` denies (`ObjectDataPage` drops a condition on
- * an unreadable field and would open the list without it).
+ * Everything else answers `null`: `$or` and every other combinator,
+ * `$between`, a `null` or `Date` comparand and a boolean under any operator
+ * but equality (the route carries text, and those round-trips are not the
+ * list's own comparison), an empty string or an empty list (the read side
+ * skips an empty param, and no param says "none of these"), two different
+ * comparands in one param (one key holds one value, one list), a filter the
+ * lowering refuses, and a condition on a field `canRead` denies
+ * (`ObjectDataPage` drops a condition on an unreadable field and would open
+ * the list without it).
  *
  * Every condition is also proved by its own round trip before it is accepted:
  * written alone, it must read back through `parseUrlFilterTriples` (what
- * `ObjectDataPage` parses) as exactly one triple.
+ * `ObjectDataPage` parses) as exactly one triple, and that triple must be the
+ * node `convertFiltersToAST` lowers the condition to (what the drill drawer
+ * queries), operator and comparand type included. The one difference allowed
+ * is a finite number reading back as its own text, which the equality and
+ * range spellings have always carried.
  */
 export function exactRecordListFilter(
   sources: readonly unknown[],
@@ -88,12 +112,19 @@ export function exactRecordListFilter(
   const isComparand = (v: unknown): v is string | number =>
     (typeof v === 'string' && v !== '') || (typeof v === 'number' && Number.isFinite(v));
 
+  const isText = (v: unknown): v is string => typeof v === 'string' && v !== '';
+
   const add = (field: string, condition: Record<string, unknown>): boolean => {
     if (!canRead(field)) return false;
     const params = serializeDrillFilterParams(condition);
     const entries = Array.from(params.entries());
-    if (entries.length !== 1 || parseUrlFilterTriples(params).length !== 1) return false;
-    const [name, value] = entries[0];
+    // One param name: a membership condition repeats it, once per member.
+    const names = new Set(entries.map(([name]) => name));
+    const triples = parseUrlFilterTriples(params);
+    if (names.size !== 1 || triples.length !== 1) return false;
+    if (!isSameComparison(triples[0], convertFiltersToAST(condition))) return false;
+    const [name] = names;
+    const value = JSON.stringify(entries.map(([, v]) => v));
     const prior = written.get(name);
     if (prior !== undefined) return prior === value;
     written.set(name, value);
@@ -109,15 +140,18 @@ export function exactRecordListFilter(
         continue;
       }
       if (key.startsWith('$')) return false;
-      if (isComparand(value)) {
+      if (isComparand(value) || typeof value === 'boolean') {
         if (!add(key, { [key]: value })) return false;
         continue;
       }
       if (!isPlainObject(value)) return false;
       for (const [op, operand] of Object.entries(value)) {
         let ok: boolean;
-        if (op === '$eq' && isComparand(operand)) ok = add(key, { [key]: operand });
+        if (op === '$eq' && (isComparand(operand) || typeof operand === 'boolean')) ok = add(key, { [key]: operand });
         else if (Object.prototype.hasOwnProperty.call(RANGE_OP_PARAM, op) && isComparand(operand)) ok = add(key, { [key]: { [op]: operand } });
+        else if (op === '$ne' && isComparand(operand)) ok = add(key, { [key]: { [op]: operand } });
+        else if (op !== '$ne' && Object.prototype.hasOwnProperty.call(COMPARE_OP_PARAM, op) && isText(operand)) ok = add(key, { [key]: { [op]: operand } });
+        else if (Object.prototype.hasOwnProperty.call(LIST_OP_PARAM, op) && Array.isArray(operand) && operand.length > 0 && operand.every(isComparand)) ok = add(key, { [key]: { [op]: operand } });
         else if ((op === '$null' || op === '$empty') && typeof operand === 'boolean') ok = add(key, { [key]: { [op]: operand } });
         else if (op === '$exists' && typeof operand === 'boolean') ok = add(key, { [key]: { $null: !operand } });
         else ok = false;
@@ -145,6 +179,30 @@ export function exactRecordListFilter(
   return { $and: conditions };
 }
 
+/**
+ * Whether the triple the list route read back is the comparison the drill
+ * lowers to: same field, same operator, same comparand. The one difference
+ * allowed is a finite number reading back as its own text (`10` as `'10'`),
+ * what the route has always carried for equality and the range bounds; a
+ * boolean reading back as `'true'` is a different comparison and fails here.
+ */
+function isSameComparison(read: FilterTriple, lowered: unknown): boolean {
+  if (!Array.isArray(lowered) || lowered.length !== 3) return false;
+  const [field, op, comparand] = lowered as unknown[];
+  if (read[0] !== field || read[1] !== op) return false;
+  const same = (a: unknown, b: unknown) =>
+    a === b || (typeof b === 'number' && Number.isFinite(b) && a === String(b));
+  if (Array.isArray(comparand)) {
+    const members = read[2];
+    return (
+      Array.isArray(members) &&
+      members.length === comparand.length &&
+      members.every((m, i) => same(m, comparand[i]))
+    );
+  }
+  return same(read[2], comparand);
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   const proto = Object.getPrototypeOf(value);
@@ -159,7 +217,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * promises the list behind the number the user clicked: the bucket AND the
  * widget's filter AND the measure's drill scope, all composed into `filter`.
  * `serializeDrillFilterParams` alone keeps the later of two conditions on one
- * param and skips an `$in` / `$nin` comparand, which writes a WIDER list than
+ * param and skips what it cannot spell, which writes a WIDER list than
  * the drawer shows (a `status = sent` bucket under a `status = paid` measure
  * scope lists every sent invoice instead of none). So the destination is
  * offered only through {@link exactRecordListFilter}, the rule a related list's

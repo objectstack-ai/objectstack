@@ -310,6 +310,14 @@ const SKIP_OBJECTS = new Set<string>([
   // security; a purge by a person is an event-specific writer's to record.
   'sys_recycle_bin',             // deleted-record snapshots (reaped by TTL)
   'ai_traces',                   // LLM trace telemetry
+  // [ADR-0057 §3.3] The lifecycle sweeper's own clock state (one row per
+  // datastore, `managedBy: 'engine-owned'`), written ONLY by objectql's
+  // `LifecycleService` under SYSTEM_CTX after every completed sweep. Audited,
+  // each sweep would feed `sys_audit_log` and `sys_activity` the very rows the
+  // next sweep archives or reaps: cleanup re-feeding the tables it drains.
+  // Not an act anyone performed; the ruling that created the object forbids
+  // an audit row per sweep.
+  'sys_lifecycle_state',         // sweep watermark (1 write per sweep)
 ]);
 
 /**

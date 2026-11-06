@@ -320,6 +320,13 @@ describe('what the door does not judge', () => {
         () => null,
         (e: Refusal) => ({ code: e.code, status: e.status, member: e.member }),
       );
+      if (type === 'formula') {
+        // [#29304] Not this door's: the native strategy declines a grouped
+        // virtual field to the engine path, which this native-only harness
+        // does not configure — no refusal of this door's (no `member`).
+        expect(verdict, type).toEqual({ code: undefined, status: undefined, member: undefined });
+        continue;
+      }
       expect(verdict, type).toEqual(
         STRUCTURED_JSON_TYPES.has(type) || isMultiValueField({ type })
           ? { code: 'INVALID_FIELD', status: 400, member: `f_${type}` }

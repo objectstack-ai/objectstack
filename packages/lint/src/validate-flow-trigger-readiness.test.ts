@@ -6,6 +6,8 @@ import {
   validateFlowTriggerReadiness as validateFlowTriggerReadinessUnrecorded,
   FLOW_TRIGGER_UNKNOWN_OBJECT,
   FLOW_INPUT_UNKNOWN_OBJECT,
+  FLOW_INPUT_OBJECT_LESS,
+  FLOW_INPUT_RECORD_READ_AS_LIST,
   FLOW_DRAFT_STATUS_AMBIGUOUS,
   FLOW_TRIGGER_UNKNOWN_EVENT,
   FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
@@ -1618,6 +1620,49 @@ describe('validateFlowTriggerReadiness', () => {
           flows: [recordFlow()],
         },
       ],
+      // A declared start input that can never work as written: advisory.
+      [
+        FLOW_INPUT_OBJECT_LESS,
+        'warning',
+        {
+          objects: [candidateObject],
+          flows: [
+            {
+              name: 'object_less_input',
+              type: 'screen',
+              status: 'active',
+              variables: [{ name: 'recordId', type: 'text', isInput: true, objectName: 'global' }],
+              nodes: [{ id: 'start', type: 'start' }],
+            },
+          ],
+        },
+      ],
+      [
+        FLOW_INPUT_RECORD_READ_AS_LIST,
+        'warning',
+        {
+          objects: [candidateObject],
+          flows: [
+            {
+              name: 'one_id_read_as_list',
+              type: 'screen',
+              status: 'active',
+              variables: [{ name: 'candidateIds', type: 'text', isInput: true, objectName: 'app_candidate' }],
+              nodes: [
+                { id: 'start', type: 'start' },
+                {
+                  id: 'load',
+                  type: 'get_record',
+                  config: {
+                    objectName: 'app_candidate',
+                    filter: { id: { $in: { dialect: 'cel', source: 'candidateIds' } } },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
     ];
 
     for (const [rule, severity, stack] of provoke) {
@@ -1992,6 +2037,128 @@ describe('[#30009] api trigger readiness reads the hook\'s one verifier (config.
     for (const fact of ['config.signature', 'config.secretRef', 'REPLACES', 'never falls back', '401 INVALID_SIGNATURE', '300-second']) {
       expect(text, fact).toContain(fact);
     }
+  });
+});
+
+describe('a start input whose record declaration can never work as written', () => {
+  const cel = (source: string) => ({ dialect: 'cel', source });
+  const getRow = (filter: Record<string, unknown>, label = 'Load candidates') => ({
+    id: 'load',
+    type: 'get_record',
+    label,
+    config: { objectName: 'app_candidate', filter },
+  });
+  const inputFlow = (variables: unknown[], nodes: unknown[] = []) => ({
+    name: 'review_candidates',
+    type: 'screen',
+    status: 'active',
+    variables,
+    nodes: [{ id: 'start', type: 'start' }, ...nodes],
+  });
+  const lint = (flow: Record<string, unknown>, objects: unknown[] = [candidateObject]) =>
+    validateFlowTriggerReadiness({ objects, flows: [flow] });
+
+  describe(`${FLOW_INPUT_OBJECT_LESS} — objectName names the object-less placeholder`, () => {
+    it("warns on 'global', at the entry the author wrote, beside the unknown-object verdict it already had", () => {
+      const findings = lint(inputFlow([
+        { name: 'note', type: 'text', isInput: true },
+        { name: 'recordId', type: 'text', isInput: true, objectName: 'global' },
+      ]));
+      expect(findings.map((f) => [f.rule, f.severity, f.where, f.path])).toEqual([
+        [FLOW_INPUT_UNKNOWN_OBJECT, 'warning', 'flow "review_candidates" › input "recordId"', 'flows[0].variables[1].objectName'],
+        [FLOW_INPUT_OBJECT_LESS, 'warning', 'flow "review_candidates" › input "recordId"', 'flows[0].variables[1].objectName'],
+      ]);
+      const objectLess = findings[1];
+      expect(objectLess.message).toBe(
+        "declares input 'recordId' a record of 'global', the object-less placeholder, so no start loads it " +
+          'from any object and its value reaches the run unjudged',
+      );
+      expect(objectLess.hint).not.toContain('\n');
+    });
+
+    it("warns even where the stack defines an object named 'global': the load skips the key, not the object", () => {
+      const findings = lint(
+        inputFlow([{ name: 'recordId', type: 'text', isInput: true, objectName: 'global' }]),
+        [candidateObject, { name: 'global', label: 'Global', fields: {} }],
+      );
+      expect(findings.map((f) => [f.rule, f.path])).toEqual([[FLOW_INPUT_OBJECT_LESS, 'flows[0].variables[0].objectName']]);
+    });
+
+    it("warns on the other object-less key, '*', which only a pre-parse stack can carry", () => {
+      const findings = lint(inputFlow([{ name: 'recordId', type: 'text', isInput: true, objectName: '*' }]));
+      expect(findings.filter((f) => f.rule === FLOW_INPUT_OBJECT_LESS).map((f) => f.path)).toEqual([
+        'flows[0].variables[0].objectName',
+      ]);
+    });
+
+    it('is silent on a declared object the stack defines', () => {
+      expect(lint(inputFlow([{ name: 'recordId', type: 'text', isInput: true, objectName: 'app_candidate' }]))).toEqual([]);
+    });
+  });
+
+  describe(`${FLOW_INPUT_RECORD_READ_AS_LIST} — one declared id the flow reads as a list`, () => {
+    const declared = { name: 'candidateIds', type: 'text', isInput: true, objectName: 'app_candidate' };
+
+    it('warns at the $in read, naming the input, the node and both objects', () => {
+      const findings = lint(inputFlow([declared], [getRow({ id: { $in: cel('candidateIds') } })]));
+      expect(findings.map((f) => [f.rule, f.severity, f.where, f.path])).toEqual([
+        [
+          FLOW_INPUT_RECORD_READ_AS_LIST,
+          'warning',
+          'flow "review_candidates" › input "candidateIds"',
+          'flows[0].nodes[1].config.filter.id.$in',
+        ],
+      ]);
+      expect(findings[0].message).toBe(
+        "declares input 'candidateIds' one record id of 'app_candidate', and get_record \"Load candidates\" " +
+          "reads it as a list of 'app_candidate' ids (filter.id.$in), so no value is both and every start " +
+          'that supplies the input is refused',
+      );
+      expect(findings[0].hint).not.toContain('\n');
+    });
+
+    it('reads a `vars.` hand-off and a node nested in a region, located at the nested node', () => {
+      const findings = lint(inputFlow([declared], [
+        {
+          id: 'guard',
+          type: 'try_catch',
+          config: {
+            try: { nodes: [{ id: 'drop', type: 'delete_record', config: { objectName: 'app_candidate', filter: { id: { $in: cel('vars.candidateIds') } } } }] },
+            catch: { nodes: [] },
+          },
+        },
+      ]));
+      expect(findings.map((f) => [f.rule, f.path])).toEqual([
+        [FLOW_INPUT_RECORD_READ_AS_LIST, 'flows[0].nodes[1].config.try.nodes[0].config.filter.id.$in'],
+      ]);
+      expect(findings[0].message).toContain('delete_record "drop"');
+    });
+
+    it('is silent where admission reads one id, or does not read the declared input at all', () => {
+      const silent: Array<[string, Record<string, unknown>]> = [
+        ['filter.id is the input', inputFlow([declared], [getRow({ id: cel('candidateIds') })])],
+        ['filter.id.$eq is the input', inputFlow([declared], [getRow({ id: { $eq: cel('candidateIds') } })])],
+        ['the $in reads an input with no declaration', inputFlow(
+          [{ name: 'candidateIds', type: 'text', isInput: true }],
+          [getRow({ id: { $in: cel('candidateIds') } })],
+        )],
+        ['the declared variable is not an input', inputFlow(
+          [{ ...declared, isInput: false }],
+          [getRow({ id: { $in: cel('candidateIds') } })],
+        )],
+        ['the $in source is computed from the input', inputFlow([declared], [getRow({ id: { $in: cel('[candidateIds]') } })])],
+        ['a loop rebinds the name before the read', inputFlow([declared], [
+          { id: 'each', type: 'loop', config: { collection: cel('rows'), iteratorVariable: 'candidateIds', body: { nodes: [] } } },
+          getRow({ id: { $in: cel('candidateIds') } }),
+        ])],
+        ['the node is not a row-addressing CRUD node', inputFlow([declared], [
+          { id: 'mk', type: 'create_record', config: { objectName: 'app_candidate', filter: { id: { $in: cel('candidateIds') } } } },
+        ])],
+      ];
+      for (const [label, flow] of silent) {
+        expect(lint(flow).filter((f) => f.rule === FLOW_INPUT_RECORD_READ_AS_LIST), label).toEqual([]);
+      }
+    });
   });
 });
 

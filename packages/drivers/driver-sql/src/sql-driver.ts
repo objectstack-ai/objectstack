@@ -4894,6 +4894,12 @@ export class SqlDriver implements IDataDriver {
    * produced an `add_columns` entry `apply` reported as performed without doing
    * anything and the next `plan` reported again: a finding no invocation could
    * ever clear, making a freshly-applied database look un-migrated.
+   *
+   * [#30636] One existing shape is not planned additively, because the sync
+   * does not adopt it additively: a table keyed by `_id` with no `id` column.
+   * It is planned as `initObjects` treats it — `rebuild_table` while empty,
+   * `refuse_table` (with the refusal's text and the row count) while it holds
+   * rows — never `add_columns`.
    */
   previewDeferredSchemaWork(): Promise<PendingSchemaWork[]> {
     // [#25521 cut 18] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
@@ -4989,6 +4995,11 @@ export class SqlDriver implements IDataDriver {
    * Run the deferred sync and disarm the deferral. Returns the work that was
    * outstanding (captured before the DDL ran, so the caller can report what it
    * just did). A no-op when nothing was deferred.
+   *
+   * [#30636] A `refuse_table` entry in that list is a table the sync refused
+   * and left exactly as it was; it is not performed work, and the caller must
+   * report it as refused. Its refusal stops nothing else: every other deferred
+   * object still gets its DDL.
    */
   flushDeferredSchemaDdl(): Promise<PendingSchemaWork[]> {
     // [#29520 codemod] The body moved to `sql-driver-deferred-ddl.ts` (see `DeferredDdlHost`).

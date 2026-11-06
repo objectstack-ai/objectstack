@@ -159,3 +159,10 @@ meet this floor:
    path. Then pin the card's hand-worked truths, per persona too, in its own
    `packages/qa/scenarios/test/<id>.test.ts` (model: `travel-expense.test.ts`). The three control
    cards keep theirs in `test/library.test.ts`.
+
+## Running the cards
+
+`pnpm --filter @objectstack/scenarios run-scenarios` builds, runs and iterates every card here with a local
+Claude Code session, and writes one run record per card. Grading uses `@objectstack/scenarios/score`; no
+API-billed model is used. The runner reads a card's object names relative to the built package's namespace
+(`account` → `<namespace>_account`). Flags and modes: [the package README](../../../packages/qa/scenarios/README.md#running-the-cards--objectstackscenariosrunner).
