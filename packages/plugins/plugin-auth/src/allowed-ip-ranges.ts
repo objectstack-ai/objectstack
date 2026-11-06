@@ -4,16 +4,18 @@
  * ADR-0069 D5 — the `auth.allowed_ip_ranges` setting outside the gate itself
  * (#30203).
  *
- *  - {@link parseAllowedIpRanges} is THE reading of the setting's textarea, for
- *    the settings binding (`bindAuthSettings`) and for the save predicate below,
- *    so the list a save is judged by is the list the gate then enforces.
- *  - {@link allowedIpRangesWritePredicate} refuses a save of a list holding an
- *    entry that names no range (`parseIpRange` in `auth-manager.ts`, the
- *    gate's own reading: such an entry matches no address there). It also
- *    refuses a save, through the settings console, of a list that leaves out
- *    the address the saving request itself comes from. Saved, such a list
- *    refuses the administrator's own next sign-in, and nothing at the save
- *    said so.
+ *  - {@link readAllowedIpRanges} is THE reading of the setting's value, for the
+ *    settings binding (`bindAuthSettings`) and for the save predicate below,
+ *    so the list a save is judged by is the list the gate then enforces. The
+ *    setting is a textarea: its value is text, and a value that is not text
+ *    names no list.
+ *  - {@link allowedIpRangesWritePredicate} refuses a save of a value that is
+ *    not text, and of a list holding an entry that names no range
+ *    (`parseIpRange` in `auth-manager.ts`, the gate's own reading: such an
+ *    entry matches no address there). It also refuses a save, through the
+ *    settings console, of a list that leaves out the address the saving
+ *    request itself comes from. Saved, such a list refuses the
+ *    administrator's own next sign-in, and nothing at the save said so.
  *  - {@link judgedClientAddress} is THE reading of a request's address for this
  *    setting, called by that save check and by the read that shows an
  *    administrator the address before they save (`GET /admin/client-address`,
@@ -28,9 +30,9 @@
  * is refused at the gate whenever a list is set, so a non-empty list is refused
  * at the save for it too.
  *
- * The entries are judged on every write, an in-process one (boot, seed, a
- * migration) included: an entry the gate cannot read admits nobody it was
- * written for, whoever writes it. The address is judged only on a write that
+ * The value and its entries are judged on every write, an in-process one
+ * (boot, seed, a migration) included: a value or an entry the gate cannot read
+ * admits nobody it was written for, whoever writes it. The address is judged only on a write that
  * arrives over HTTP. An in-process write carries no request, so there is no
  * caller connection to lock out, and its address is not judged.
  *
@@ -48,8 +50,9 @@ import { FORWARDED_CLIENT_ADDRESS_HEADERS } from './client-address-forwarding.js
 export const ALLOWED_IP_RANGES_ENV = 'OS_AUTH_ALLOWED_IP_RANGES';
 
 /**
- * The setting's textarea as a list: entries separated by newlines or commas,
- * trimmed, blanks dropped. Anything that is not a string reads as no list.
+ * The setting's textarea text as a list: entries separated by newlines or
+ * commas, trimmed, blanks dropped. Anything that is not a string reads as no
+ * entries; {@link readAllowedIpRanges} is the reading of a whole value.
  */
 export function parseAllowedIpRanges(raw: unknown): string[] {
   if (typeof raw !== 'string') return [];
@@ -57,6 +60,39 @@ export function parseAllowedIpRanges(raw: unknown): string[] {
     .split(/[\n,]+/)
     .map((r) => r.trim())
     .filter(Boolean);
+}
+
+/**
+ * The entry {@link readAllowedIpRanges} hands the gate for a value that is not
+ * text. It names no range (it is not an address, and it holds blanks), so it
+ * matches no address, and the gate, which judges any non-empty list, admits
+ * nobody while that value is in force.
+ */
+const NOT_TEXT_ENTRY = 'auth.allowed_ip_ranges is not text';
+
+/** {@link readAllowedIpRanges}'s answer. */
+export interface AllowedIpRangesReading {
+  /** The list the gate is handed. */
+  ranges: string[];
+  /**
+   * Set when the value is neither text nor absent: what it is instead
+   * (`list`, `number`, `boolean`, `object`). Such a value names no list, so
+   * {@link ranges} is then one entry that matches no address.
+   */
+  notText?: string;
+}
+
+/**
+ * THE reading of an `auth.allowed_ip_ranges` value. Text is read as its
+ * entries ({@link parseAllowedIpRanges}); no value (`null`, `undefined`) as no
+ * list. Any other value is not the text the setting declares and names no
+ * list: the save refuses it, and where it is already stored the gate admits
+ * nobody through it.
+ */
+export function readAllowedIpRanges(raw: unknown): AllowedIpRangesReading {
+  if (raw === null || raw === undefined) return { ranges: [] };
+  if (typeof raw === 'string') return { ranges: parseAllowedIpRanges(raw) };
+  return { ranges: [NOT_TEXT_ENTRY], notText: Array.isArray(raw) ? 'list' : typeof raw };
 }
 
 /**
@@ -111,16 +147,19 @@ export interface AllowedIpRangesWriteInput {
 }
 
 /**
- * A refusal, in the settings write predicate's shape: the entries that name no
- * range (`invalidEntries`, as written), or the judged address the list leaves
- * out (`clientAddress`, `null` when the server cannot establish one).
+ * A refusal, in the settings write predicate's shape: a value that is not text
+ * (`type`, the specifier type the setting declares: `textarea`), the entries
+ * that name no range (`invalidEntries`, as written), or the judged address the
+ * list leaves out (`clientAddress`, `null` when the server cannot establish
+ * one).
  */
 export interface AllowedIpRangesWriteRefusal {
   message: string;
-  constraint: { invalidEntries: string[] } | { clientAddress: string | null };
+  constraint: { type: 'textarea' } | { invalidEntries: string[] } | { clientAddress: string | null };
 }
 
 interface RefusalCopy {
+  notText: string;
   unreadable(entries: string): string;
   outside(address: string): string;
   undetermined: string;
@@ -130,6 +169,9 @@ interface RefusalCopy {
 /** One entry per locale the settings bundle ships. */
 const COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', RefusalCopy> = {
   en: {
+    notText:
+      'The value is not text. This setting holds its entries as text, one per line or comma-separated '
+      + '(203.0.113.0/24, 2001:db8::/32, 192.0.2.7). A value that is not text names no list, so it is not saved.',
     unreadable: (entries) =>
       `Not an IP address or a CIDR range: ${entries}. Each entry is an address (192.0.2.7, 2001:db8::1), or an `
       + 'address, "/" and a prefix length in decimal digits: 0 to 32 for IPv4, 0 to 128 for IPv6 (203.0.113.0/24, '
@@ -144,6 +186,9 @@ const COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', RefusalCopy> = {
     recovery: ` If you are locked out, start the server with ${ALLOWED_IP_RANGES_ENV} set to an empty value.`,
   },
   'zh-CN': {
+    notText:
+      '取值不是文本。此设置以文本保存条目，每行一项或用逗号分隔（如 203.0.113.0/24、2001:db8::/32、192.0.2.7）。'
+      + '不是文本的取值不构成任何列表，因此未保存。',
     unreadable: (entries) =>
       `以下条目不是 IP 地址或 CIDR 网段：${entries}。每一项应为一个地址（如 192.0.2.7、2001:db8::1），`
       + '或地址加 "/" 再加用十进制数字写的前缀长度：IPv4 为 0 到 32，IPv6 为 0 到 128（如 203.0.113.0/24、2001:db8::/32）。'
@@ -157,6 +202,9 @@ const COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', RefusalCopy> = {
     recovery: `如果已被锁在外面，可将环境变量 ${ALLOWED_IP_RANGES_ENV} 设为空值后重启服务器。`,
   },
   'ja-JP': {
+    notText:
+      '値がテキストではありません。この設定は項目をテキストで保持します。1 行に 1 項目、またはカンマ区切りで記述してください'
+      + '（例：203.0.113.0/24、2001:db8::/32、192.0.2.7）。テキストでない値はリストを表さないため、保存されません。',
     unreadable: (entries) =>
       `次の項目は IP アドレスでも CIDR 範囲でもありません：${entries}。各項目はアドレス（例：192.0.2.7、2001:db8::1）、`
       + 'またはアドレスに "/" と 10 進数字のプレフィックス長を続けたもの（IPv4 は 0〜32、IPv6 は 0〜128。例：203.0.113.0/24、'
@@ -170,6 +218,10 @@ const COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', RefusalCopy> = {
     recovery: `締め出された場合は、環境変数 ${ALLOWED_IP_RANGES_ENV} を空の値にしてサーバーを再起動してください。`,
   },
   'es-ES': {
+    notText:
+      'El valor no es texto. Este ajuste guarda sus entradas como texto, una por línea o separadas por comas '
+      + '(203.0.113.0/24, 2001:db8::/32, 192.0.2.7). Un valor que no es texto no forma ninguna lista, así que no se '
+      + 'guarda.',
     unreadable: (entries) =>
       `No es una dirección IP ni un rango CIDR: ${entries}. Cada entrada es una dirección (192.0.2.7, 2001:db8::1) o `
       + 'una dirección seguida de "/" y una longitud de prefijo en dígitos decimales: de 0 a 32 para IPv4 y de 0 a 128 '
@@ -195,10 +247,11 @@ function copyFor(locale: string | undefined): RefusalCopy {
 }
 
 /**
- * `auth.allowed_ip_ranges`'s settings write predicate. A list holding an entry
- * that names no range is refused first, on every write, naming the entries;
- * then a list that leaves out the judged address of an HTTP write. `manager` is
- * read per write, so the address rule is the one in force when the save happens.
+ * `auth.allowed_ip_ranges`'s settings write predicate. A value that is not text
+ * is refused first, then a list holding an entry that names no range, naming
+ * the entries, both on every write; then a list that leaves out the judged
+ * address of an HTTP write. `manager` is read per write, so the address rule is
+ * the one in force when the save happens.
  */
 export function allowedIpRangesWritePredicate(
   manager: () => Pick<AuthManager, 'resolveClientAddress'> | null | undefined,
@@ -206,7 +259,11 @@ export function allowedIpRangesWritePredicate(
   return (input) => {
     // The settings write predicate's input (`SettingsWritePredicateInput`), read structurally.
     const { next, transport, locale } = (input ?? {}) as AllowedIpRangesWriteInput;
-    const ranges = parseAllowedIpRanges(next);
+    const reading = readAllowedIpRanges(next);
+    if (reading.notText) {
+      return { message: copyFor(locale).notText, constraint: { type: 'textarea' } };
+    }
+    const { ranges } = reading;
     if (ranges.length === 0) return undefined;
     const unreadable = unreadableIpRangeEntries(ranges);
     if (unreadable.length > 0) {

@@ -2179,6 +2179,16 @@ export class AuthManager {
    * better-auth itself is created lazily, so changing config before the first
    * request is enough. If an instance already exists, reset it so the next
    * request rebuilds with the new policy.
+   *
+   * An `allowedIpRanges` entry that names no range ({@link parseIpRange}) is
+   * applied as given, not refused as the constructor refuses it: a refusal here
+   * would keep the standing list in force, and that list can admit addresses
+   * the new one does not. The entry matches no address at the gate
+   * ({@link isClientIpAllowed}), so the list admits only what its other
+   * entries admit, and none at all when it has none. This method logs nothing
+   * for it: the settings binding, which applies the stored list through here,
+   * names such an entry at `error`, and a host that patches the list itself is
+   * the one that has to say so.
    */
   applyConfigPatch(
     patch: Partial<AuthManagerOptions>,

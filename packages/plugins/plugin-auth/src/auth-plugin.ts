@@ -131,7 +131,12 @@ import {
 } from './demo-staff.js';
 import { cloudManagedRefusal } from './cloud-managed.js';
 import { registerCopyInvitationLinkAction } from './invitation-link-action.js';
-import { ALLOWED_IP_RANGES_ENV, allowedIpRangesWritePredicate, parseAllowedIpRanges } from './allowed-ip-ranges.js';
+import {
+  ALLOWED_IP_RANGES_ENV,
+  allowedIpRangesWritePredicate,
+  readAllowedIpRanges,
+  type AllowedIpRangesReading,
+} from './allowed-ip-ranges.js';
 import {
   AUTH_SETTING_RESTORE,
   captureDeclaredAuthOptions,
@@ -561,7 +566,7 @@ export class AuthPlugin implements Plugin {
    */
   private allowListUndeterminedWarned = false;
   private allowListUntrustedHeaderWarned = false;
-  /** The applied allow-list whose unreadable entries were last reported, so one list is reported once. */
+  /** The applied allow-list value whose unreadable value or entries were last reported, so one is reported once. */
   private allowListUnreadableReportedFor: string | undefined;
   /**
    * [#30203, #30312] What the deployment itself declared (plugin options and
@@ -2422,9 +2427,9 @@ export class AuthPlugin implements Plugin {
         // [#30203] A cleared value hands the gate back to the deployment's own
         // declaration at once (the restore arms below).
         if (isExplicit('allowed_ip_ranges')) {
-          const ranges = parseAllowedIpRanges(values.allowed_ip_ranges);
-          patch.allowedIpRanges = ranges;
-          this.reportUnreadableAllowListEntries(ctx, ranges, sources.allowed_ip_ranges === 'env');
+          const reading = readAllowedIpRanges(values.allowed_ip_ranges);
+          patch.allowedIpRanges = reading.ranges;
+          this.reportUnreadableAllowList(ctx, reading, values.allowed_ip_ranges, sources.allowed_ip_ranges === 'env');
         }
 
         // Anti-abuse (ADR-0069 D2) — account lockout (custom, per-identity)
@@ -3242,15 +3247,42 @@ export class AuthPlugin implements Plugin {
   }
 
   /**
-   * ADR-0069 D5 — name the entries of an applied `allowed_ip_ranges` list that
-   * name no range (`unreadableIpRangeEntries`, the gate's own reading). The
-   * save check refuses such a list, so this is a list it never judged: one
-   * stored by an earlier release, or pinned by `OS_AUTH_ALLOWED_IP_RANGES`.
-   * Each such entry matches no address at the gate, while the settings console
-   * shows the list as in force, so `error` (AGENTS.md, degradation log levels),
-   * once per distinct list, with the fix in the same line.
+   * ADR-0069 D5 — name what the gate cannot read in an applied
+   * `allowed_ip_ranges` value: a value that is not text (`readAllowedIpRanges`,
+   * which hands the gate a list that admits nobody for it), or the entries of a
+   * list that name no range (`unreadableIpRangeEntries`, the gate's own
+   * reading). The save check refuses both, so this is a value it never judged:
+   * one stored by an earlier release, or pinned by `OS_AUTH_ALLOWED_IP_RANGES`.
+   * Such a value or entry matches no address at the gate while the setting
+   * reads as set, so `error` (AGENTS.md, degradation log levels), once per
+   * distinct value, with the fix in the same line.
    */
-  private reportUnreadableAllowListEntries(ctx: PluginContext, ranges: readonly string[], fromEnv: boolean): void {
+  private reportUnreadableAllowList(
+    ctx: PluginContext,
+    reading: AllowedIpRangesReading,
+    raw: unknown,
+    fromEnv: boolean,
+  ): void {
+    if (reading.notText) {
+      let spelled: string;
+      try {
+        spelled = JSON.stringify(raw);
+      } catch {
+        spelled = String(raw);
+      }
+      const notTextKey = `not text: ${spelled}`;
+      if (notTextKey === this.allowListUnreadableReportedFor) return;
+      this.allowListUnreadableReportedFor = notTextKey;
+      const kind = reading.notText === 'object' ? 'an object' : `a ${reading.notText}`;
+      ctx.logger.error(
+        `[auth] allowed_ip_ranges (ADR-0069 D5) holds a value that is not text (${kind}), so it names no list, ` +
+          'and sign-in is admitted from no address while it is in force. Fix: save the list in the settings ' +
+          'console as text, one entry per line or comma-separated, or clear it; locked out, start the server ' +
+          `with ${ALLOWED_IP_RANGES_ENV} set to an empty value.`,
+      );
+      return;
+    }
+    const { ranges } = reading;
     const unreadable = unreadableIpRangeEntries(ranges);
     const key = unreadable.length > 0 ? JSON.stringify(ranges) : undefined;
     if (key === this.allowListUnreadableReportedFor) return;
