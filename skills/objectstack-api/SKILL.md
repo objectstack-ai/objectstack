@@ -69,7 +69,7 @@ GET /api/v1/meta/:type/:name      # Read a single metadata item
 ```
 
 The list reads a closed query set — `package`, `preview` (`draft`), `object`,
-`include` (`content`), `id`, `names`, `locale` — and refuses any other key with
+`include` (`content`, `grants`), `id`, `names`, `locale` — and refuses any other key with
 `400 VALIDATION_ERROR` instead of ignoring it. `?names=a,b,c` (one
 comma-separated value) narrows the list to the named items the caller may see:
 an unknown name is simply absent, an empty value is refused `400`, and the
@@ -409,8 +409,8 @@ keys mean the run produced none — never invent an empty.
    `CONCURRENT_UPDATE`**; the quoted-empty entity-tag (`""`) is refused **400
    `VALIDATION_FAILED`**, not treated as omitted.
 2. **Assuming `DELETE` is recoverable.** ObjectStack `DELETE` is a hard
-   delete — there is no recycle bin (the dead `enable.trash` flag was removed
-   in 16.x). For recoverability, use per-field `trackHistory` (audit
+   delete — there is no recycle bin.
+   For recoverability, use per-field `trackHistory` (audit
    trail) or a `lifecycle` archive policy instead of custom soft-delete logic.
 
 ---
