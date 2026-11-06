@@ -63,6 +63,13 @@ import { lintConfig } from '../src/commands/lint';
 const RULE = 'naming/namespace-prefix';
 const prefixIssues = (config: unknown) =>
   lintConfig(config as any).filter((i) => i.rule === RULE);
+// The rule's two findings, told apart by the subject each sentence opens with.
+// Since the namespace contract (ruling C on #30798) a bare name warns on its
+// own, so the duplicate axis this file pins is read through `dupIssues`.
+const dupIssues = (config: unknown) =>
+  prefixIssues(config).filter((i) => i.message.includes('is declared more than once'));
+const bareIssues = (config: unknown) =>
+  prefixIssues(config).filter((i) => i.message.includes('does not carry the package namespace'));
 
 // ─── Fixture vocabulary ─────────────────────────────────────────────────────
 // Package entries are PARSED before any rule runs (`authoringRuleUnionStack` →
@@ -117,21 +124,27 @@ const SHAPES = [
 describe('#17821 — the duplicate-name advisory is evaluated per package', () => {
   describe.each(SHAPES)('%s stack', (_label, shape) => {
     it("THE CARD'S REPRO — two packages each declaring `home` is not a duplicate", () => {
-      // The two declarations occupy distinct composite registry keys and
-      // nothing shadows anything, which is what the warning's own last sentence
-      // already said. 1 warning before this change, 0 after.
-      const issues = prefixIssues(shape([
+      // The two declarations occupy distinct composite registry keys inside
+      // their own packages, so neither is a duplicate. 1 duplicate warning
+      // before #17821, 0 after.
+      const config = shape([
         { ...A, apps: [app('home', 'Home A')], objects: [obj()] },
         { ...B, apps: [app('home', 'Home B')] },
-      ]));
-      expect(issues).toEqual([]);
+      ]);
+      expect(dupIssues(config)).toEqual([]);
+      // Both names are bare, so each package is told to prefix its OWN item
+      // with its OWN namespace — the contract that makes the pair unambiguous.
+      expect(bareIssues(config).map((i) => [i.path, i.fix])).toEqual([
+        ['packages[0].manifest.apps[0].name', 'alpha_home'],
+        ['packages[1].manifest.apps[0].name', 'beta_home'],
+      ]);
     });
 
     it('THE TRUE POSITIVE — the SAME two names inside ONE package still warn', () => {
       // ⛔ Without this direction the assertion above is satisfied by an
       // advisory that was simply switched off. Same items, same shape, one
       // package: exactly one finding.
-      const issues = prefixIssues(shape([
+      const issues = dupIssues(shape([
         { ...A, apps: [app('portal', 'Portal One')], objects: [obj()] },
         { ...B, apps: [app('home', 'Home B'), app('home', 'Home B2')] },
       ]));
@@ -146,19 +159,21 @@ describe('#17821 — the duplicate-name advisory is evaluated per package', () =
 
     it('THE SUGGESTION comes from the OWNING package, never from a sibling', () => {
       // The card's sharpest symptom: the prescribed rename carried `alpha_`,
-      // the namespace of the package that does NOT own the reported item.
-      const issues = prefixIssues(shape([
+      // the namespace of the package that does NOT own the reported item. The
+      // rename now rides the bare-name finding, and must keep that property.
+      const issues = bareIssues(shape([
         { ...A, apps: [app('portal', 'Portal')], objects: [obj()] },
         { ...B, apps: [app('home', 'Home B'), app('home', 'Home B2')] },
       ]));
-      expect(issues).toHaveLength(1);
-      expect(issues[0].fix).toBe('beta_home');
-      expect(issues[0].message).toContain('"beta_home"');
-      expect(issues[0].message).not.toContain('alpha_');
+      expect(issues.map((i) => i.fix)).toEqual(['alpha_portal', 'beta_home', 'beta_home']);
+      for (const issue of issues.filter((i) => i.path.startsWith('packages[1].'))) {
+        expect(issue.message).toContain('"beta_home"');
+        expect(issue.message).not.toContain('alpha_');
+      }
     });
 
     it('a duplicate in EVERY package is reported once per package, in that package\'s coordinates', () => {
-      const issues = prefixIssues(shape([
+      const issues = dupIssues(shape([
         { ...A, apps: [app('home', 'H1'), app('home', 'H2')], objects: [obj()] },
         { ...B, apps: [app('home', 'H3'), app('home', 'H4')] },
       ]));
@@ -174,7 +189,7 @@ describe('#17821 — the duplicate-name advisory is evaluated per package', () =
     // RESOLUTION CONTEXT (#16611). It changes what a rule can RESOLVE, never
     // what it JUDGES — so a sibling's `home` must not enter this package's
     // dedup, and the finding count stays at the one real duplicate.
-    const issues = prefixIssues(additive([
+    const issues = dupIssues(additive([
       { ...A, apps: [app('home', 'Home A')], objects: [obj()] },
       { ...B, apps: [app('home', 'Home B'), app('home', 'Home B2')] },
     ]));
@@ -188,7 +203,7 @@ describe('#17821 — the package axis does not swallow the `registryKey` composi
   const CRM_OBJECTS = ['crm_lead', 'crm_contact', 'crm_account', 'crm_opportunity', 'crm_case'];
 
   it('ACTIONS CROSS-PACKAGE — one `objectName:name` per package is not a duplicate', () => {
-    const issues = prefixIssues(additive([
+    const issues = dupIssues(additive([
       { ...A, objects: [obj()], actions: [action('log_call', 'ob_order')] },
       { ...B, actions: [action('log_call', 'ob_order')] },
     ]));
@@ -196,7 +211,7 @@ describe('#17821 — the package axis does not swallow the `registryKey` composi
   });
 
   it('ACTIONS SAME-PACKAGE — two actions on one `objectName` in one package still warn', () => {
-    const issues = prefixIssues(additive([
+    const issues = dupIssues(additive([
       { ...A, objects: [obj()] },
       { ...B, actions: [action('log_call', 'ob_order'), action('log_call', 'ob_order')] },
     ]));
@@ -216,7 +231,7 @@ describe('#17821 — the package axis does not swallow the `registryKey` composi
     const actions = CRM_OBJECTS.flatMap((objectName) =>
       ACTIVITY.map((name) => action(name, objectName)));
     expect(actions).toHaveLength(15);
-    expect(prefixIssues(additive([
+    expect(dupIssues(additive([
       { ...A, objects: [obj()] },
       { ...B, actions },
     ]))).toEqual([]);
@@ -226,14 +241,14 @@ describe('#17821 — the package axis does not swallow the `registryKey` composi
     // An action on an object literally named `global` and an object-less one
     // collide for real in the engine's exact-string map (#3913) — inside one
     // package they must still be reported, and across packages they must not.
-    const same = prefixIssues(additive([
+    const same = dupIssues(additive([
       { ...A, objects: [obj()] },
       { ...B, actions: [action('sync', 'global'), action('sync')] },
     ]));
     expect(same).toHaveLength(1);
     expect(same[0].path).toBe('packages[1].manifest.actions[1].name');
 
-    const across = prefixIssues(additive([
+    const across = dupIssues(additive([
       { ...A, objects: [obj()], actions: [action('sync', 'global')] },
       { ...B, actions: [action('sync')] },
     ]));
@@ -250,9 +265,11 @@ describe('#17821 — a single-package project is judged exactly as it was', () =
   const oneBody = () => ({ ...A, apps: [app('home', 'H1'), app('home', 'H2')], objects: [obj()] });
 
   it('one `packages[]` entry is judged identically to no `packages[]` at all', () => {
+    // Both findings, compared whole: two bare names and the one duplicate, in
+    // the top-level coordinates the rest of `lintConfig` reports in.
     const bare = prefixIssues({ manifest: { ...TOP }, ...{ apps: oneBody().apps, objects: oneBody().objects } });
-    expect(bare).toHaveLength(1);
-    expect(bare[0].path).toBe('apps[1].name');
+    expect(bare.map((i) => i.path)).toEqual(['apps[0].name', 'apps[1].name', 'apps[1].name']);
+    expect(dupIssues({ manifest: { ...TOP }, apps: oneBody().apps, objects: oneBody().objects })).toHaveLength(1);
 
     for (const [, shape] of SHAPES) {
       expect(prefixIssues(shape([oneBody()]))).toEqual(bare);
@@ -260,7 +277,7 @@ describe('#17821 — a single-package project is judged exactly as it was', () =
   });
 
   it('a clean single-package project stays clean in every shape', () => {
-    const body = { ...A, apps: [app('home', 'H1'), app('portal', 'P1')], objects: [obj()] };
+    const body = { ...A, apps: [app('alpha_home', 'H1'), app('alpha_portal', 'P1')], objects: [obj()] };
     expect(prefixIssues({ manifest: { ...TOP }, apps: body.apps, objects: body.objects })).toEqual([]);
     for (const [, shape] of SHAPES) expect(prefixIssues(shape([body]))).toEqual([]);
   });
