@@ -75,9 +75,9 @@ describe('dogfood: a dataset dimension over a formula field is refused at author
         selection: { dimensions, measures: ['cnt'] },
       });
       expect(res.status, JSON.stringify(res.body)).toBe(400);
-      const error = res.body.error ?? res.body;
-      expect(error.code, JSON.stringify(res.body)).toBe('DATASET_INVALID');
-      const message = String(error.message);
+      // This door builds its envelope by hand: `{ code, message }` at the top.
+      expect(res.body.code, JSON.stringify(res.body)).toBe('DATASET_INVALID');
+      const message = String(res.body.message);
       expect(message).toContain(
         'dataset "os30773_inline" dimension "remaining" (dimensions.1) groups by field "budget_remaining", ' +
           `which object "${OBJECT}" declares as \`formula\``,
