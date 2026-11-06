@@ -256,4 +256,85 @@ describe('#4940: what an admin identity operation leaves in sys_audit_log', () =
     expect(metadata).toMatchObject({ total: 1, created: 1, updated: 0, skipped: 0, errors: 0 });
     expect(metadata.delivery).toMatchObject({ temporary: 1 });
   }, 120_000);
+
+  // ── W5 (#30958): the SCIM credential door, on the composed runtime ──────
+  //
+  // The platform admin mints a SCIM connection bearer, an identity provider
+  // provisions with it, the admin revokes it and the next provisioning call is
+  // refused. Then the secret is looked for everywhere this stack keeps or
+  // serves: the bearer must appear ONLY in the mint's own answer, and its
+  // keyed digest only in its own column at rest — never in a `sys_audit_log`
+  // row (the door's explicit rows AND plugin-audit's generic ones for the
+  // credential writes), never in `sys_activity`, never in the data API's list
+  // or export of the credential object.
+
+  it('POST /admin/scim/mint-credential + revoke-credential: the bearer provisions, is refused once revoked, and is shown nowhere else', async () => {
+    const minted = await stack.apiAs(adminToken, 'POST', '/auth/admin/scim/mint-credential', {
+      connectionId: 'okta-dogfood-30958',
+    });
+    expect(minted.status, await minted.clone().text()).toBe(200);
+    expect(minted.headers.get('cache-control')).toBe('no-store');
+    const { token, credentialId } = (await minted.json()).data as { token: string; credentialId: string };
+
+    const provision = (localPart: string) =>
+      stack.api('/auth/scim/v2/Users', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/scim+json' },
+        body: JSON.stringify({
+          schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'],
+          userName: `${localPart}@example.com`,
+          name: { givenName: localPart, familyName: 'Dogfood' },
+          emails: [{ value: `${localPart}@example.com`, primary: true, type: 'work' }],
+          active: true,
+        }),
+      });
+    const created = await provision('scim-provisioned-30958');
+    expect(created.status, await created.clone().text()).toBe(201);
+
+    const revoked = await stack.apiAs(adminToken, 'POST', '/auth/admin/scim/revoke-credential', { credentialId });
+    expect(revoked.status, await revoked.clone().text()).toBe(200);
+    const refused = await provision('scim-after-revoke-30958');
+    expect(refused.status, await refused.clone().text()).toBe(401);
+
+    // The digest as stored, read below the engine (the engine never serves it).
+    const driver = ql.getDriver?.('sys_scim_connection_credential');
+    expect(driver, 'no driver read for the credential object').toBeTruthy();
+    const atRest = (await driver.find('sys_scim_connection_credential', { where: { id: credentialId } })) as any[];
+    const digest = String(atRest[0]?.token_digest ?? '');
+    expect(digest.length, 'the credential row holds no digest at rest').toBeGreaterThan(20);
+    expect(JSON.stringify(atRest[0])).not.toContain(token);
+
+    // The door's explicit rows: one per mint and per revoke, naming the admin and the connection.
+    const explicit = await waitForRows(
+      async () => (await findRows(ql, 'sys_audit_log', { object_name: 'sys_scim_connection_credential', record_id: credentialId }))
+        .filter((r) => !isGeneric(r)),
+      (rows) => rows.length === 2,
+      'the mint and revoke rows',
+    );
+    expect(explicit.map((r) => JSON.parse(String(r.metadata)).event).sort())
+      .toEqual(['scim_credential_minted', 'scim_credential_revoked']);
+    for (const row of explicit) {
+      expect(row.user_id).toBe(adminUserId);
+      expect(JSON.parse(String(row.metadata)).connectionId).toBe('okta-dogfood-30958');
+    }
+
+    // Nowhere else: every ledger row, the activity feed, and the data API's reads.
+    const ledgers = JSON.stringify([
+      await findRows(ql, 'sys_audit_log', {}, 5000),
+      ...(ql.getSchema?.('sys_activity') ? [await findRows(ql, 'sys_activity', {}, 5000)] : []),
+    ]);
+    expect(ledgers).not.toContain(token);
+    expect(ledgers).not.toContain(digest);
+    const list = await stack.apiAs(adminToken, 'GET', '/data/sys_scim_connection_credential');
+    const listed = await list.text();
+    expect(list.status, listed).toBe(200);
+    expect(listed).toContain(credentialId);
+    const exported = await stack.apiAs(adminToken, 'GET', '/data/sys_scim_connection_credential/export');
+    const exportedText = await exported.text();
+    expect(exported.status, exportedText.slice(0, 300)).toBe(200);
+    for (const served of [listed, exportedText]) {
+      expect(served).not.toContain(token);
+      expect(served).not.toContain(digest);
+    }
+  }, 120_000);
 });
